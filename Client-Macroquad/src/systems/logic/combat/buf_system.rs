@@ -24,17 +24,17 @@ impl BufSystem {
         Self::default()
     }
 
-    /// 更新 BuffList 中的 Buff 计时，返回已过期的 Buff 类型标识
+    /// 更新 BuffList 中的 Buff 计时，返回已过期的 Buff server ID 列表
     fn update_buff_list(buff_list: &mut BuffList, delta_ms: u64) -> Vec<u32> {
-        let mut expired_types: Vec<u32> = Vec::new();
+        let mut expired_ids: Vec<u32> = Vec::new();
         buff_list.active_buffs.retain_mut(|buff| {
             let expired = buff.update(delta_ms);
             if expired {
-                expired_types.push(buff.buff_type as u32);
+                expired_ids.push(buff.server_buff_id);
             }
             !expired
         });
-        expired_types
+        expired_ids
     }
 }
 
@@ -53,7 +53,7 @@ impl LogicSystem for BufSystem {
         }
 
         // 本地玩家的 Buff 计时更新
-        let mut expired_buff_types: Vec<u32> = Vec::new();
+        let mut expired_buff_ids: Vec<u32> = Vec::new();
         let mut local_player_buffs_changed = false;
         for (buff_list, _local) in ctx
             .world
@@ -64,7 +64,7 @@ impl LogicSystem for BufSystem {
             let expired = Self::update_buff_list(buff_list, delta_ms);
             if !expired.is_empty() || buff_list.active_buffs.len() != before_count {
                 local_player_buffs_changed = true;
-                expired_buff_types.extend(expired);
+                expired_buff_ids.extend(expired);
             }
         }
 
@@ -79,11 +79,11 @@ impl LogicSystem for BufSystem {
         // 通知 UI：本地玩家 Buff 变化时同步到 BuffDialog
         if local_player_buffs_changed {
             // 先移除已过期 Buff
-            if !expired_buff_types.is_empty() {
+            if !expired_buff_ids.is_empty() {
                 if let Some(ui) = ctx.world.query::<&UiState>().iter().next() {
                     let mut state = ui.borrow_mut();
-                    for buff_type in &expired_buff_types {
-                        state.pending_commands.push(UiCommand::RemoveBuff { buff_type: *buff_type });
+                    for buff_id in &expired_buff_ids {
+                        state.pending_commands.push(UiCommand::RemoveBuff { buff_type: *buff_id });
                     }
                 }
             }
@@ -97,11 +97,11 @@ impl LogicSystem for BufSystem {
                     for buff in &buff_list.active_buffs {
                         state.pending_commands.push(UiCommand::AddBuff {
                             buff: crate::scenes::dialogs::game::buff_dialog::BuffEntry {
-                                buff_type: buff.buff_type as u32,
+                                buff_type: buff.server_buff_id,
                                 icon_index: 0,
                                 name: format!("{:?}", buff.buff_type),
                                 remaining_secs: buff.remaining_duration as f32 / 1000.0,
-                                is_paused: false,
+                                is_paused: buff.paused,
                                 caster: String::new(),
                             },
                         });

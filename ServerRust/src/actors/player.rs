@@ -7,7 +7,7 @@ use kameo::message::Message;
 use kameo::prelude::Context;
 use tracing::{debug, info, warn};
 
-use crate::actors::inventory::PlayerInventory;
+use crate::actors::inventory::{PlayerInventory, EquipmentSlot};
 use crate::actors::friend::FriendList;
 use crate::actors::mail::Mailbox;
 use crate::actors::guild::GuildRank;
@@ -24,11 +24,13 @@ pub struct PlayerMagic {
     pub spell: i32,
     pub level: u8,
     pub experience: u16,
+    pub key: u8,
+    pub toggled: bool,
 }
 
 impl PlayerMagic {
     pub fn new(spell: i32) -> Self {
-        Self { spell, level: 0, experience: 0 }
+        Self { spell, level: 0, experience: 0, key: 0, toggled: false }
     }
 }
 
@@ -119,6 +121,16 @@ pub struct PlayerState {
     pub creature_log: CreatureLog,
     /// 英雄索引（0 = 无英雄）
     pub hero_index: u8,
+    /// 英雄行为模式 (0=Attack, 1=Follow, etc.)
+    pub hero_behaviour: u8,
+    /// 自动药水 HP 阈值
+    pub auto_pot_hp: u32,
+    /// 自动药水 MP 阈值
+    pub auto_pot_mp: u32,
+    /// 自动药水 HP 物品索引
+    pub auto_pot_hp_item: i32,
+    /// 自动药水 MP 物品索引
+    pub auto_pot_mp_item: i32,
     /// 英雄背包
     pub hero_inventory: crate::actors::inventory::PlayerInventory,
     /// 精炼日志
@@ -254,6 +266,11 @@ impl PlayerActor {
                 mentor_name: None,
                 creature_log: CreatureLog::new(),
                 hero_index: 0,
+                hero_behaviour: 0,
+                auto_pot_hp: 0,
+                auto_pot_mp: 0,
+                auto_pot_hp_item: 0,
+                auto_pot_mp_item: 0,
                 hero_inventory: PlayerInventory::new(),
                 refine_log: RefineLog::new(),
                 is_fishing: false,
@@ -1256,6 +1273,26 @@ impl Message<ResetItemAddedStats> for PlayerActor {
     }
 }
 
+/// 设置物品觉醒状态
+pub struct SetItemAwake {
+    pub unique_id: u64,
+    pub awake: mir2_shared::data::item::Awake,
+}
+
+impl Message<SetItemAwake> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: SetItemAwake, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        if let Some(item) = self.state.inventory.get_item_mut(msg.unique_id) {
+            item.awake = msg.awake;
+            self.send_inventory_changed();
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// 镶嵌宝石：将背包中的宝石插入目标装备的空槽位
 pub struct SocketGem {
     pub from_grid: u8,
@@ -1272,6 +1309,37 @@ impl Message<SocketGem> for PlayerActor {
             self.send_inventory_changed();
         }
         result
+    }
+}
+
+/// 按 item_index 计算背包中物品数量
+pub struct CountItemsByIndex {
+    pub item_index: i32,
+}
+
+impl Message<CountItemsByIndex> for PlayerActor {
+    type Reply = u16;
+
+    async fn handle(&mut self, msg: CountItemsByIndex, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.inventory.count_item_by_index(msg.item_index)
+    }
+}
+
+/// 按 item_index 从背包中消耗指定数量物品
+pub struct ConsumeItemsByIndex {
+    pub item_index: i32,
+    pub count: u16,
+}
+
+impl Message<ConsumeItemsByIndex> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: ConsumeItemsByIndex, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let success = self.state.inventory.remove_item_by_index(msg.item_index, msg.count);
+        if success {
+            self.send_inventory_changed();
+        }
+        success
     }
 }
 
@@ -1325,6 +1393,19 @@ impl Message<DeductGold> for PlayerActor {
         } else {
             false
         }
+    }
+}
+
+/// 检查金币是否足够
+pub struct HasGold {
+    pub amount: u64,
+}
+
+impl Message<HasGold> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: HasGold, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.inventory.gold >= msg.amount
     }
 }
 
@@ -1894,6 +1975,52 @@ impl Message<SetPetMode> for PlayerActor {
     }
 }
 
+/// 设置技能快捷键
+pub struct SetSpellKey {
+    pub spell: i32,
+    pub key: u8,
+    pub old_key: u8,
+}
+
+impl Message<SetSpellKey> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetSpellKey, _ctx: &mut Context<Self, Self::Reply>) {
+        let mut target_found = false;
+        for magic in &mut self.state.magics {
+            if magic.spell == msg.spell {
+                magic.key = msg.key;
+                target_found = true;
+            } else if msg.key > 0 && magic.key == msg.key {
+                magic.key = 0;
+            }
+        }
+        if target_found {
+            debug!("Player {} spell {} key -> {}", self.state.name, msg.spell, msg.key);
+        }
+    }
+}
+
+/// 技能开关切换
+pub struct ToggleSpell {
+    pub spell: i32,
+    pub toggled: bool,
+}
+
+impl Message<ToggleSpell> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: ToggleSpell, _ctx: &mut Context<Self, Self::Reply>) {
+        for magic in &mut self.state.magics {
+            if magic.spell == msg.spell {
+                magic.toggled = msg.toggled;
+                debug!("Player {} spell {} toggled -> {}", self.state.name, msg.spell, msg.toggled);
+                break;
+            }
+        }
+    }
+}
+
 /// 设置英雄索引
 pub struct SetHeroIndex {
     pub hero_index: u8,
@@ -1904,6 +2031,145 @@ impl Message<SetHeroIndex> for PlayerActor {
 
     async fn handle(&mut self, msg: SetHeroIndex, _ctx: &mut Context<Self, Self::Reply>) {
         self.state.hero_index = msg.hero_index;
+    }
+}
+
+/// 设置英雄行为模式
+pub struct SetHeroBehaviour {
+    pub behaviour: u8,
+}
+
+impl Message<SetHeroBehaviour> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetHeroBehaviour, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.hero_behaviour = msg.behaviour;
+        debug!("Player {} hero behaviour -> {}", self.state.name, msg.behaviour);
+    }
+}
+
+/// 设置自动药水阈值
+pub struct SetAutoPotValue {
+    pub stat: u8,
+    pub value: u32,
+}
+
+// C# Stat enum values: HP=12, MP=13
+const STAT_HP: u8 = 12;
+const STAT_MP: u8 = 13;
+
+impl Message<SetAutoPotValue> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetAutoPotValue, _ctx: &mut Context<Self, Self::Reply>) {
+        match msg.stat {
+            STAT_HP => { self.state.auto_pot_hp = msg.value; debug!("Player {} auto_pot_hp -> {}", self.state.name, msg.value); }
+            STAT_MP => { self.state.auto_pot_mp = msg.value; debug!("Player {} auto_pot_mp -> {}", self.state.name, msg.value); }
+            _ => {}
+        }
+    }
+}
+
+/// 设置自动药水物品
+pub struct SetAutoPotItem {
+    pub grid: u8,
+    pub item_index: i32,
+}
+
+// C# MirGridType values: HeroHPItem=23, HeroMPItem=24
+const GRID_HERO_HP_ITEM: u8 = 23;
+const GRID_HERO_MP_ITEM: u8 = 24;
+
+impl Message<SetAutoPotItem> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetAutoPotItem, _ctx: &mut Context<Self, Self::Reply>) {
+        match msg.grid {
+            GRID_HERO_HP_ITEM => { self.state.auto_pot_hp_item = msg.item_index; debug!("Player {} auto_pot_hp_item -> {}", self.state.name, msg.item_index); }
+            GRID_HERO_MP_ITEM => { self.state.auto_pot_mp_item = msg.item_index; debug!("Player {} auto_pot_mp_item -> {}", self.state.name, msg.item_index); }
+            _ => {}
+        }
+    }
+}
+
+/// 从装备插槽中移除物品（RemoveSlotItem）
+pub struct RemoveSlotItemMsg {
+    pub grid: u8,
+    pub grid_to: u8,
+    pub unique_id: u64,
+    pub to: i32,
+    pub from_unique_id: u64,
+}
+
+// MirGridType values
+const GRID_MOUNT: u8 = 11;
+const GRID_FISHING: u8 = 12;
+const GRID_SOCKET: u8 = 14;
+const GRID_INVENTORY: u8 = 1;
+const GRID_STORAGE: u8 = 4;
+
+impl Message<RemoveSlotItemMsg> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: RemoveSlotItemMsg, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        // Find the parent equipment item based on grid type
+        let equip_index = match msg.grid {
+            GRID_MOUNT => Some(EquipmentSlot::Mount as usize),
+            GRID_FISHING => Some(EquipmentSlot::Weapon as usize),
+            GRID_SOCKET => {
+                self.state.inventory.equipment.iter()
+                    .position(|e| e.as_ref().map_or(false, |i| i.unique_id == msg.from_unique_id))
+            }
+            _ => None,
+        };
+
+        let equip_idx = match equip_index {
+            Some(i) => i,
+            None => return false,
+        };
+
+        // Find and extract the slotted item from parent's slots array
+        let removed = if msg.grid == GRID_SOCKET {
+            // For Socket, parent might be in equipment or backpack
+            if let Some(Some(item)) = self.state.inventory.equipment.get_mut(equip_idx) {
+                let pos = item.slots.iter().position(|s| s.as_ref().map_or(false, |i| i.unique_id == msg.unique_id));
+                pos.and_then(|p| item.slots.get_mut(p).and_then(|s| s.take()))
+            } else if let Some(Some(slot)) = self.state.inventory.backpack.get_mut(equip_idx) {
+                let pos = slot.item.slots.iter().position(|s| s.as_ref().map_or(false, |i| i.unique_id == msg.unique_id));
+                pos.and_then(|p| slot.item.slots.get_mut(p).and_then(|s| s.take()))
+            } else {
+                None
+            }
+        } else {
+            match self.state.inventory.equipment.get_mut(equip_idx) {
+                Some(Some(item)) => {
+                    let pos = item.slots.iter().position(|s| s.as_ref().map_or(false, |i| i.unique_id == msg.unique_id));
+                    pos.and_then(|p| item.slots.get_mut(p).and_then(|s| s.take()))
+                }
+                _ => None,
+            }
+        };
+
+        let removed_item = match removed {
+            Some(item) => item,
+            None => return false,
+        };
+
+        // Place into destination grid
+        let success = match msg.grid_to {
+            GRID_INVENTORY | GRID_STORAGE => {
+                let to_idx = msg.to as usize;
+                self.state.inventory.try_place_item_at(removed_item, to_idx)
+            }
+            _ => false,
+        };
+
+        if success {
+            self.send_inventory_changed();
+            self.send_equipment_changed();
+            debug!("Player {} removed slot item uid={} -> grid_to={} to={}", self.state.name, msg.unique_id, msg.grid_to, msg.to);
+        }
+        success
     }
 }
 
@@ -2123,8 +2389,18 @@ impl Message<ReviveAtHalfHp> for PlayerActor {
     type Reply = ();
 
     async fn handle(&mut self, _msg: ReviveAtHalfHp, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.is_dead = false;
         self.state.hp = (self.state.max_hp / 2).max(1);
-        debug!("ReviveAtHalfHp: {} hp={}/{} (visual effect omitted)", self.state.name, self.state.hp, self.state.max_hp);
+
+        let mut body = Vec::new();
+        body.extend_from_slice(&self.state.hp.to_le_bytes());
+        body.extend_from_slice(&self.state.mp.to_le_bytes());
+        let _ = self.gate_ref.ask(SendToClient {
+            session_id: self.state.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
+        });
+
+        debug!("ReviveAtHalfHp: {} hp={}/{}", self.state.name, self.state.hp, self.state.max_hp);
     }
 }
 
@@ -2156,23 +2432,27 @@ impl PlayerActor {
         body.extend_from_slice(&self.state.object_id.to_le_bytes());   // object_id
         body.extend_from_slice(&1u32.to_le_bytes());                    // real_id
         write_dotnet_string(&mut body, &self.state.name);               // name
-        write_dotnet_string(&mut body, "");                             // guild_name
-        write_dotnet_string(&mut body, "");                             // guild_rank
+        write_dotnet_string(&mut body, self.state.guild_name.as_deref().unwrap_or("")); // guild_name
+        write_dotnet_string(&mut body, match self.state.guild_rank {
+            crate::actors::guild::GuildRank::Leader => "掌门",
+            crate::actors::guild::GuildRank::Officer => "副掌门",
+            crate::actors::guild::GuildRank::Member => "成员",
+        }); // guild_rank
         body.extend_from_slice(&0i32.to_le_bytes());                    // name_colour
-        body.push(0u8);                                                 // class=Warrior
-        body.push(0u8);                                                 // gender=Male
+        body.push(self.state.class as u8);                              // class
+        body.push(self.state.gender as u8);                             // gender
         body.extend_from_slice(&self.state.level.to_le_bytes());        // level
         body.extend_from_slice(&self.state.x.to_le_bytes());            // location_x
         body.extend_from_slice(&self.state.y.to_le_bytes());            // location_y
         body.push(self.state.direction);                                // direction
-        body.push(0u8);                                                 // hair
+        body.push(self.state.hair);                                     // hair
         body.extend_from_slice(&self.state.hp.to_le_bytes());  // hp
         body.extend_from_slice(&self.state.mp.to_le_bytes());  // mp
         body.extend_from_slice(&self.state.experience.to_le_bytes()); // experience
         body.extend_from_slice(&self.state.max_experience.to_le_bytes()); // max_experience
         body.extend_from_slice(&0u16.to_le_bytes());                    // level_effects
-        body.push(0u8);                                                 // has_hero=false
-        body.push(0u8);                                                 // hero_behaviour=None
+        body.push(if self.state.hero_index > 0 { 1u8 } else { 0u8 });  // has_hero
+        body.push(self.state.hero_behaviour);                           // hero_behaviour
 
         // 背包/装备数据（简化版：不发送完整物品，客户端通过 ItemChanged 等增量包更新）
         body.push(0u8);                                                 // has_inventory=false

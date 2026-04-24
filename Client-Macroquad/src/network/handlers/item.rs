@@ -20,15 +20,15 @@ impl PacketHandler for ItemHandler {
             // NewItemInfo
             x if x == ServerPacketIds::NewItemInfo as u16 => {
                 if let Ok(packet) = server::NewItemInfo::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NewItemInfoReceived);
-                    tracing::debug!("📦 New item info: idx={}", packet.info.index);
+                    events.push(NetworkEvent::NewItemInfoReceived { item_index: packet.info.index, item_name: packet.info.name.clone() });
+                    tracing::debug!("📦 New item info: idx={} name={}", packet.info.index, packet.info.name);
                 }
             }
 
             // NewHeroInfo
             x if x == ServerPacketIds::NewHeroInfo as u16 => {
                 if let Ok(packet) = server::NewHeroInfo::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NewHeroInfoReceived);
+                    events.push(NetworkEvent::NewHeroInfoReceived { info: packet.info.clone() });
                     tracing::debug!("🦸 New hero item info: {}", packet.info);
                 }
             }
@@ -36,7 +36,7 @@ impl PacketHandler for ItemHandler {
             // NewChatItem
             x if x == ServerPacketIds::NewChatItem as u16 => {
                 if let Ok(packet) = server::NewChatItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NewItemInfoReceived);
+                    events.push(NetworkEvent::NewChatItemReceived { item_id: packet.item_id });
                     tracing::debug!("💬 Chat item: id={}", packet.item_id);
                 }
             }
@@ -49,8 +49,10 @@ impl PacketHandler for ItemHandler {
             x if x == ServerPacketIds::MoveItem as u16 => {
                 if let Ok(packet) = server::MoveItem::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemMoved {
+                        grid: packet.grid,
                         from: packet.from as u32,
                         to: packet.to as u32,
+                        success: packet.success,
                     });
                     tracing::debug!("🔄 Item moved: {} -> {} (grid={:?}, success={})",
                         packet.from, packet.to, packet.grid, packet.success);
@@ -61,6 +63,7 @@ impl PacketHandler for ItemHandler {
             x if x == ServerPacketIds::EquipItem as u16 => {
                 if let Ok(packet) = server::EquipItem::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemEquipped {
+                        grid: packet.grid,
                         unique_id: packet.unique_id,
                         slot: packet.to as u8,
                         success: packet.success,
@@ -74,6 +77,8 @@ impl PacketHandler for ItemHandler {
             x if x == ServerPacketIds::MergeItem as u16 => {
                 if let Ok(packet) = server::MergeItem::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemMerged {
+                        grid_from: packet.grid_from,
+                        grid_to: packet.grid_to,
                         id_from: packet.id_from,
                         id_to: packet.id_to,
                         success: packet.success,
@@ -87,9 +92,12 @@ impl PacketHandler for ItemHandler {
             x if x == ServerPacketIds::RemoveItem as u16 => {
                 if let Ok(packet) = server::RemoveItem::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemRemoved {
+                        grid: packet.grid,
                         unique_id: packet.unique_id,
+                        to: packet.to,
+                        success: packet.success,
                     });
-                    tracing::debug!("🗑️ Item removed: uid={} (slot={}, success={})",
+                    tracing::debug!("🗑️ Item removed: uid={} to={} success={}",
                         packet.unique_id, packet.to, packet.success);
                 }
             }
@@ -98,9 +106,13 @@ impl PacketHandler for ItemHandler {
             x if x == ServerPacketIds::RemoveSlotItem as u16 => {
                 if let Ok(packet) = server::RemoveSlotItem::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemSlotRemoved {
+                        grid: packet.grid,
+                        grid_to: packet.grid_to,
                         slot: packet.to as u32,
+                        unique_id: packet.unique_id,
+                        success: packet.success,
                     });
-                    tracing::debug!("🗑️ Slot item removed: uid={} (slot={}, success={})",
+                    tracing::debug!("🗑️ Slot item removed: uid={} to={} success={}",
                         packet.unique_id, packet.to, packet.success);
                 }
             }
@@ -135,6 +147,7 @@ impl PacketHandler for ItemHandler {
             x if x == ServerPacketIds::SplitItem as u16 => {
                 if let Ok(packet) = server::SplitItem::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemSplit {
+                        grid: packet.grid,
                         unique_id: packet.unique_id,
                         count: packet.count as u32,
                     });
@@ -146,6 +159,7 @@ impl PacketHandler for ItemHandler {
             x if x == ServerPacketIds::SplitItem1 as u16 => {
                 if let Ok(packet) = server::SplitItem1::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemSplit {
+                        grid: packet.grid,
                         unique_id: packet.unique_id,
                         count: packet.count as u32,
                     });
@@ -157,6 +171,7 @@ impl PacketHandler for ItemHandler {
             x if x == ServerPacketIds::CombineItem as u16 => {
                 if let Ok(packet) = server::CombineItem::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemCombined {
+                        grid: packet.grid,
                         id_from: packet.id_from,
                         id_to: packet.id_to,
                         success: packet.success,
@@ -173,32 +188,32 @@ impl PacketHandler for ItemHandler {
 
             // DepositRefineItem
             x if x == ServerPacketIds::DepositRefineItem as u16 => {
-                if let Ok(_packet) = server::DepositRefineItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::RefineItemDeposited);
-                    tracing::debug!("🔨 Refine item deposited");
+                if let Ok(packet) = server::DepositRefineItem::read_body(&mut cursor) {
+                    events.push(NetworkEvent::RefineItemDeposited { from: packet.from, to: packet.to, success: packet.success });
+                    tracing::debug!("🔨 Refine item deposited: from={} to={} success={}", packet.from, packet.to, packet.success);
                 }
             }
 
             // RetrieveRefineItem
             x if x == ServerPacketIds::RetrieveRefineItem as u16 => {
-                if let Ok(_packet) = server::RetrieveRefineItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::RefineItemRetrieved);
-                    tracing::debug!("🔨 Refine item retrieved");
+                if let Ok(packet) = server::RetrieveRefineItem::read_body(&mut cursor) {
+                    events.push(NetworkEvent::RefineItemRetrieved { from: packet.from, to: packet.to, success: packet.success });
+                    tracing::debug!("🔨 Refine item retrieved: from={} to={} success={}", packet.from, packet.to, packet.success);
                 }
             }
 
             // RefineCancel
             x if x == ServerPacketIds::RefineCancel as u16 => {
-                if let Ok(_packet) = server::RefineCancel::read_body(&mut cursor) {
-                    events.push(NetworkEvent::RefineCancelled);
-                    tracing::debug!("🔨 Refine cancelled");
+                if let Ok(packet) = server::RefineCancel::read_body(&mut cursor) {
+                    events.push(NetworkEvent::RefineCancelled { unlock: packet.unlock });
+                    tracing::debug!("🔨 Refine cancelled: unlock={}", packet.unlock);
                 }
             }
 
             // RefineItem
             x if x == ServerPacketIds::RefineItem as u16 => {
                 if let Ok(packet) = server::RefineItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::RefineItemCompleted);
+                    events.push(NetworkEvent::RefineItemCompleted { unique_id: packet.unique_id });
                     tracing::debug!("🔨 Refine item completed: uid={}", packet.unique_id);
                 }
             }
@@ -209,17 +224,23 @@ impl PacketHandler for ItemHandler {
 
             // DepositTradeItem
             x if x == ServerPacketIds::DepositTradeItem as u16 => {
-                if let Ok(_packet) = server::DepositTradeItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::TradeItemDeposited);
-                    tracing::debug!("🤝 Trade item deposited");
+                if let Ok(packet) = server::DepositTradeItem::read_body(&mut cursor) {
+                    events.push(NetworkEvent::TradeItemDeposited {
+                        from_slot: packet.from_slot,
+                        success: packet.success,
+                    });
+                    tracing::debug!("🤝 Trade item deposited: from={} success={}", packet.from_slot, packet.success);
                 }
             }
 
             // RetrieveTradeItem
             x if x == ServerPacketIds::RetrieveTradeItem as u16 => {
-                if let Ok(_packet) = server::RetrieveTradeItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::TradeItemRetrieved);
-                    tracing::debug!("🤝 Trade item retrieved");
+                if let Ok(packet) = server::RetrieveTradeItem::read_body(&mut cursor) {
+                    events.push(NetworkEvent::TradeItemRetrieved {
+                        from_slot: packet.from_slot,
+                        success: packet.success,
+                    });
+                    tracing::debug!("🤝 Trade item retrieved: from={} success={}", packet.from_slot, packet.success);
                 }
             }
 
@@ -242,8 +263,10 @@ impl PacketHandler for ItemHandler {
                 if let Ok(packet) = server::DropItem::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemDropped {
                         unique_id: packet.unique_id,
+                        count: packet.count,
+                        success: packet.success,
                     });
-                    tracing::debug!("📉 Item dropped: uid={}, count={} (success={})",
+                    tracing::debug!("📉 Item dropped: uid={}, count={}, success={}",
                         packet.unique_id, packet.count, packet.success);
                 }
             }
@@ -254,17 +277,17 @@ impl PacketHandler for ItemHandler {
 
             // TakeBackHeroItem
             x if x == ServerPacketIds::TakeBackHeroItem as u16 => {
-                if let Ok(_packet) = server::TakeBackHeroItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::HeroItemTakenBack);
-                    tracing::debug!("🦸 Hero item taken back");
+                if let Ok(packet) = server::TakeBackHeroItem::read_body(&mut cursor) {
+                    events.push(NetworkEvent::HeroItemTakenBack { from: packet.from, to: packet.to, success: packet.success });
+                    tracing::debug!("🦸 Hero item taken back: from={} to={} success={}", packet.from, packet.to, packet.success);
                 }
             }
 
             // TransferHeroItem
             x if x == ServerPacketIds::TransferHeroItem as u16 => {
-                if let Ok(_packet) = server::TransferHeroItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::HeroItemTransferred);
-                    tracing::debug!("🦸 Hero item transferred");
+                if let Ok(packet) = server::TransferHeroItem::read_body(&mut cursor) {
+                    events.push(NetworkEvent::HeroItemTransferred { from: packet.from, to: packet.to, success: packet.success });
+                    tracing::debug!("🦸 Hero item transferred: from={} to={} success={}", packet.from, packet.to, packet.success);
                 }
             }
 
@@ -353,6 +376,7 @@ impl PacketHandler for ItemHandler {
                 if let Ok(packet) = server::DeleteItem::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemLost {
                         unique_id: packet.unique_id,
+                        count: packet.count,
                     });
                     tracing::debug!("📦 Item deleted: uid={}, count={}", packet.unique_id, packet.count);
                 }
@@ -367,9 +391,12 @@ impl PacketHandler for ItemHandler {
                 if let Ok(packet) = server::ObjectHarvest::read_body(&mut cursor) {
                     events.push(NetworkEvent::ObjectHarvested {
                         object_id: packet.object_id,
+                        location_x: packet.location_x,
+                        location_y: packet.location_y,
+                        direction: packet.direction,
                     });
-                    tracing::debug!("🌾 Object harvest started: id=({}, {})",
-                        packet.location_x, packet.location_y);
+                    tracing::debug!("🌾 Object harvest started: id={} loc=({},{})",
+                        packet.object_id, packet.location_x, packet.location_y);
                 }
             }
 
@@ -378,8 +405,12 @@ impl PacketHandler for ItemHandler {
                 if let Ok(packet) = server::ObjectHarvested::read_body(&mut cursor) {
                     events.push(NetworkEvent::ObjectHarvested {
                         object_id: packet.object_id,
+                        location_x: packet.location_x,
+                        location_y: packet.location_y,
+                        direction: packet.direction,
                     });
-                    tracing::debug!("🌾 Object harvest completed: id={}", packet.object_id);
+                    tracing::debug!("🌾 Object harvest completed: id={} loc=({},{})",
+                        packet.object_id, packet.location_x, packet.location_y);
                 }
             }
 
@@ -404,6 +435,7 @@ impl PacketHandler for ItemHandler {
                 if let Ok(packet) = server::ItemSealChanged::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemSealed {
                         unique_id: packet.unique_id,
+                        expiry_date: packet.expiry_date,
                     });
                     tracing::debug!("🔒 Item seal changed: uid={}, expiry={}",
                         packet.unique_id, packet.expiry_date);
@@ -414,6 +446,8 @@ impl PacketHandler for ItemHandler {
             x if x == ServerPacketIds::EquipSlotItem as u16 => {
                 if let Ok(packet) = server::EquipSlotItem::read_body(&mut cursor) {
                     events.push(NetworkEvent::ItemSlotEquipped {
+                        grid: packet.grid,
+                        grid_to: packet.grid_to,
                         slot: packet.to as u32,
                         unique_id: packet.unique_id,
                         success: packet.success,
@@ -469,8 +503,9 @@ impl PacketHandler for ItemHandler {
 
             // NewRecipeInfo
             x if x == ServerPacketIds::NewRecipeInfo as u16 => {
-                if let Ok(_packet) = server::NewRecipeInfo::read_body(&mut cursor) {
-                    tracing::debug!("📜 NewRecipeInfo received");
+                if let Ok(packet) = server::NewRecipeInfo::read_body(&mut cursor) {
+                    events.push(NetworkEvent::NewRecipeInfoReceived { recipe_id: packet.recipe_id });
+                    tracing::debug!("📜 NewRecipeInfo received: recipe_id={}", packet.recipe_id);
                 }
             }
 
@@ -483,8 +518,9 @@ impl PacketHandler for ItemHandler {
                 if let Ok(packet) = server::Opendoor::read_body(&mut cursor) {
                     events.push(NetworkEvent::DoorOpened {
                         door_id: packet.door_index as u32,
+                        close: packet.close,
                     });
-                    tracing::debug!("🚪 DoorOpened: index={}", packet.door_index);
+                    tracing::debug!("🚪 Door: index={} close={}", packet.door_index, packet.close);
                 }
             }
 
@@ -494,9 +530,10 @@ impl PacketHandler for ItemHandler {
 
             // GetRentedItems
             x if x == ServerPacketIds::GetRentedItems as u16 => {
-                if let Ok(_packet) = server::GetRentedItems::read_body(&mut cursor) {
-                    events.push(NetworkEvent::RentalItemsReceived);
-                    tracing::debug!("📋 RentalItemsReceived");
+                if let Ok(packet) = server::GetRentedItems::read_body(&mut cursor) {
+                    let count = packet.items.len();
+                    events.push(NetworkEvent::RentalItemsReceived { items: packet.items });
+                    tracing::debug!("📋 RentalItemsReceived: {} items", count);
                 }
             }
 
@@ -530,65 +567,74 @@ impl PacketHandler for ItemHandler {
 
             // DepositRentalItem
             x if x == ServerPacketIds::DepositRentalItem as u16 => {
-                if let Ok(_packet) = server::DepositRentalItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::RentalItemDeposited);
-                    tracing::debug!("📥 RentalItemDeposited");
+                if let Ok(packet) = server::DepositRentalItem::read_body(&mut cursor) {
+                    events.push(NetworkEvent::RentalItemDeposited {
+                        unique_id: packet.unique_id,
+                        success: packet.success,
+                    });
+                    tracing::debug!("📥 RentalItemDeposited: uid={} success={}", packet.unique_id, packet.success);
                 }
             }
 
             // RetrieveRentalItem
             x if x == ServerPacketIds::RetrieveRentalItem as u16 => {
-                if let Ok(_packet) = server::RetrieveRentalItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::RentalItemRetrieved);
-                    tracing::debug!("📤 RentalItemRetrieved");
+                if let Ok(packet) = server::RetrieveRentalItem::read_body(&mut cursor) {
+                    events.push(NetworkEvent::RentalItemRetrieved {
+                        unique_id: packet.unique_id,
+                        success: packet.success,
+                    });
+                    tracing::debug!("📤 RentalItemRetrieved: uid={} success={}", packet.unique_id, packet.success);
                 }
             }
 
             // UpdateRentalItem
             x if x == ServerPacketIds::UpdateRentalItem as u16 => {
-                if let Ok(_packet) = server::UpdateRentalItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::RentalItemUpdated);
-                    tracing::debug!("🔄 RentalItemUpdated");
+                if let Ok(packet) = server::UpdateRentalItem::read_body(&mut cursor) {
+                    events.push(NetworkEvent::RentalItemUpdated {
+                        fee: packet.rental_fee,
+                        period: packet.rental_period,
+                    });
+                    tracing::debug!("🔄 RentalItemUpdated: fee={} period={}", packet.rental_fee, packet.rental_period);
                 }
             }
 
             // CancelItemRental
             x if x == ServerPacketIds::CancelItemRental as u16 => {
-                if let Ok(_packet) = server::CancelItemRental::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ItemRentalCancelled);
-                    tracing::debug!("❌ ItemRentalCancelled");
+                if let Ok(packet) = server::CancelItemRental::read_body(&mut cursor) {
+                    events.push(NetworkEvent::ItemRentalCancelled { success: packet.success });
+                    tracing::debug!("❌ ItemRentalCancelled: success={}", packet.success);
                 }
             }
 
             // ItemRentalLock
             x if x == ServerPacketIds::ItemRentalLock as u16 => {
-                if let Ok(_packet) = server::ItemRentalLock::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ItemRentalLocked);
-                    tracing::debug!("🔒 ItemRentalLocked");
+                if let Ok(packet) = server::ItemRentalLock::read_body(&mut cursor) {
+                    events.push(NetworkEvent::ItemRentalLocked { locked: packet.locked });
+                    tracing::debug!("🔒 ItemRentalLocked: locked={}", packet.locked);
                 }
             }
 
             // ItemRentalPartnerLock
             x if x == ServerPacketIds::ItemRentalPartnerLock as u16 => {
-                if let Ok(_packet) = server::ItemRentalPartnerLock::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ItemRentalPartnerLocked);
-                    tracing::debug!("🔒 ItemRentalPartnerLocked");
+                if let Ok(packet) = server::ItemRentalPartnerLock::read_body(&mut cursor) {
+                    events.push(NetworkEvent::ItemRentalPartnerLocked { locked: packet.locked });
+                    tracing::debug!("🔒 ItemRentalPartnerLocked: locked={}", packet.locked);
                 }
             }
 
             // CanConfirmItemRental
             x if x == ServerPacketIds::CanConfirmItemRental as u16 => {
-                if let Ok(_packet) = server::CanConfirmItemRental::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ItemRentalConfirmable);
-                    tracing::debug!("✅ ItemRentalConfirmable");
+                if let Ok(packet) = server::CanConfirmItemRental::read_body(&mut cursor) {
+                    events.push(NetworkEvent::ItemRentalConfirmable { can_confirm: packet.can_confirm });
+                    tracing::debug!("✅ ItemRentalConfirmable: can_confirm={}", packet.can_confirm);
                 }
             }
 
             // ConfirmItemRental
             x if x == ServerPacketIds::ConfirmItemRental as u16 => {
-                if let Ok(_packet) = server::ConfirmItemRental::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ItemRentalConfirmed);
-                    tracing::debug!("✅ ItemRentalConfirmed");
+                if let Ok(packet) = server::ConfirmItemRental::read_body(&mut cursor) {
+                    events.push(NetworkEvent::ItemRentalConfirmed { success: packet.success });
+                    tracing::debug!("✅ ItemRentalConfirmed: success={}", packet.success);
                 }
             }
 

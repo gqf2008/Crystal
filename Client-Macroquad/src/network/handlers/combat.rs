@@ -16,8 +16,16 @@ impl PacketHandler for CombatHandler {
             // ObjectAttack - another object attacks
             x if x == ServerPacketIds::ObjectAttack as u16 => {
                 if let Ok(packet) = server::ObjectAttack::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ObjectAttack { packet });
-                    tracing::trace!("⚔️ ObjectAttack received");
+                    events.push(NetworkEvent::ObjectAttack {
+                        object_id: packet.object_id,
+                        location_x: packet.location_x,
+                        location_y: packet.location_y,
+                        direction: packet.direction,
+                        spell: packet.spell,
+                        level: packet.level,
+                        attack_type: packet.attack_type,
+                    });
+                    tracing::trace!("⚔️ ObjectAttack received: id={} spell={} type={}", packet.object_id, packet.spell, packet.attack_type);
                 }
             }
 
@@ -34,9 +42,13 @@ impl PacketHandler for CombatHandler {
             
             // Death - player died
             x if x == ServerPacketIds::Death as u16 => {
-                if let Ok(_packet) = server::Death::read_body(&mut cursor) {
-                    events.push(NetworkEvent::PlayerDied);
-                    tracing::warn!("💀 Player died");
+                if let Ok(packet) = server::Death::read_body(&mut cursor) {
+                    events.push(NetworkEvent::PlayerDied {
+                        x: packet.location_x,
+                        y: packet.location_y,
+                        direction: packet.direction,
+                    });
+                    tracing::warn!("💀 Player died at ({}, {})", packet.location_x, packet.location_y);
                 }
             }
             
@@ -46,10 +58,13 @@ impl PacketHandler for CombatHandler {
                     events.push(NetworkEvent::ObjectStruck {
                         object_id: packet.object_id,
                         attacker_id: packet.attacker_id,
-                        damage: 0,  // ObjectStruck包没有damage字段
+                        damage: 0,
+                        location_x: packet.location_x,
+                        location_y: packet.location_y,
+                        direction: packet.direction,
                     });
-                    tracing::trace!("⚔️ Object {} struck by {}", 
-                        packet.object_id, packet.attacker_id);
+                    tracing::trace!("⚔️ Object {} struck by {} at ({},{})",
+                        packet.object_id, packet.attacker_id, packet.location_x, packet.location_y);
                 }
             }
 
@@ -75,8 +90,12 @@ impl PacketHandler for CombatHandler {
                 if let Ok(packet) = server::ObjectDied::read_body(&mut cursor) {
                     events.push(NetworkEvent::ObjectDied {
                         object_id: packet.object_id,
+                        location_x: packet.location_x,
+                        location_y: packet.location_y,
+                        direction: packet.direction,
+                        death_type: packet.death_type,
                     });
-                    tracing::trace!("💀 Object {} died", packet.object_id);
+                    tracing::trace!("💀 Object {} died at ({},{}) dir={} type={}", packet.object_id, packet.location_x, packet.location_y, packet.direction, packet.death_type);
                 }
             }
 
@@ -186,9 +205,13 @@ impl PacketHandler for CombatHandler {
             x if x == ServerPacketIds::RangeAttack as u16 => {
                 if let Ok(packet) = server::RangeAttack::read_body(&mut cursor) {
                     events.push(NetworkEvent::RangeAttacked {
-                        object_id: packet.target_id,
+                        target_id: packet.target_id,
+                        target_x: packet.target_x,
+                        target_y: packet.target_y,
+                        spell: packet.spell,
+                        spell_level: packet.spell_level,
                     });
-                    tracing::trace!("🏹 RangeAttack: target={}", packet.target_id);
+                    tracing::trace!("🏹 RangeAttack: target={} spell={}", packet.target_id, packet.spell);
                 }
             }
 
@@ -197,8 +220,16 @@ impl PacketHandler for CombatHandler {
                 if let Ok(packet) = server::ObjectRangeAttack::read_body(&mut cursor) {
                     events.push(NetworkEvent::ObjectRangeAttacked {
                         object_id: packet.object_id,
+                        location_x: packet.location_x,
+                        location_y: packet.location_y,
+                        direction: packet.direction,
+                        target_id: packet.target_id,
+                        target_x: packet.target_x,
+                        target_y: packet.target_y,
+                        spell: packet.spell,
+                        spell_level: packet.spell_level,
                     });
-                    tracing::trace!("🏹 Object {} range attacked target={}", packet.object_id, packet.target_id);
+                    tracing::trace!("🏹 Object {} range attacked target={} spell={}", packet.object_id, packet.target_id, packet.spell);
                 }
             }
 
@@ -209,8 +240,9 @@ impl PacketHandler for CombatHandler {
                         object_id: 0,
                         x: packet.location_x as i32,
                         y: packet.location_y as i32,
+                        direction: packet.direction,
                     });
-                    tracing::trace!("🫸 Player pushed to ({}, {})", packet.location_x, packet.location_y);
+                    tracing::trace!("🫸 Player pushed to ({}, {}) dir={}", packet.location_x, packet.location_y, packet.direction);
                 }
             }
 
@@ -221,16 +253,21 @@ impl PacketHandler for CombatHandler {
                         object_id: packet.object_id,
                         x: packet.location_x as i32,
                         y: packet.location_y as i32,
+                        direction: packet.direction,
                     });
-                    tracing::trace!("🫸 Object {} pushed to ({}, {})", packet.object_id, packet.location_x, packet.location_y);
+                    tracing::trace!("🫸 Object {} pushed to ({}, {}) dir={}", packet.object_id, packet.location_x, packet.location_y, packet.direction);
                 }
             }
 
             // UserDashAttack - local player dash attack
             x if x == ServerPacketIds::UserDashAttack as u16 => {
-                if let Ok(_packet) = server::UserDashAttack::read_body(&mut cursor) {
-                    events.push(NetworkEvent::UserDashAttacked);
-                    tracing::trace!("⚡ User dash attack");
+                if let Ok(packet) = server::UserDashAttack::read_body(&mut cursor) {
+                    events.push(NetworkEvent::UserDashAttacked {
+                        x: packet.location_x,
+                        y: packet.location_y,
+                        direction: packet.direction as u8,
+                    });
+                    tracing::trace!("⚡ User dash attack to ({}, {})", packet.location_x, packet.location_y);
                 }
             }
 
@@ -239,8 +276,12 @@ impl PacketHandler for CombatHandler {
                 if let Ok(packet) = server::ObjectDashAttack::read_body(&mut cursor) {
                     events.push(NetworkEvent::ObjectDashAttacked {
                         object_id: packet.object_id,
+                        location_x: packet.location_x,
+                        location_y: packet.location_y,
+                        direction: packet.direction,
+                        distance: packet.distance,
                     });
-                    tracing::trace!("⚡ Object {} dash attack", packet.object_id);
+                    tracing::trace!("⚡ Object {} dash attack to ({},{}) dir={:?} dist={}", packet.object_id, packet.location_x, packet.location_y, packet.direction, packet.distance);
                 }
             }
 
@@ -268,8 +309,9 @@ impl PacketHandler for CombatHandler {
                 if let Ok(packet) = server::ObjectRevived::read_body(&mut cursor) {
                     events.push(NetworkEvent::ObjectRevivedEvent {
                         object_id: packet.object_id,
+                        effect: packet.effect,
                     });
-                    tracing::trace!("🔄 Object {} revived", packet.object_id);
+                    tracing::trace!("🔄 Object {} revived (effect={})", packet.object_id, packet.effect);
                 }
             }
 
@@ -278,6 +320,7 @@ impl PacketHandler for CombatHandler {
                 if let Ok(packet) = server::ObjectLeveled::read_body(&mut cursor) {
                     events.push(NetworkEvent::ObjectLeveled {
                         object_id: packet.object_id,
+                        level: packet.level,
                     });
                     tracing::trace!("🎉 Object {} leveled up to {}", packet.object_id, packet.level);
                 }
@@ -326,17 +369,16 @@ impl PacketHandler for CombatHandler {
             x if x == ServerPacketIds::NewMagic as u16 => {
                 if let Ok(packet) = server::NewMagic::read_body(&mut cursor) {
                     events.push(NetworkEvent::MagicLearned {
-                        spell: packet.magic.spell,
-                        level: packet.magic.level,
+                        magic: packet.magic,
+                        hero: packet.hero,
                     });
-                    tracing::debug!("✨ NewMagic learned: {:?} level={} (hero={})", packet.magic.spell, packet.magic.level, packet.hero);
                 }
             }
 
             // RemoveMagic - spell removed from player
             x if x == ServerPacketIds::RemoveMagic as u16 => {
                 if let Ok(packet) = server::RemoveMagic::read_body(&mut cursor) {
-                    events.push(NetworkEvent::MagicRemoved { spell: packet.spell });
+                    events.push(NetworkEvent::MagicRemoved { spell: packet.spell, hero: packet.hero });
                     tracing::debug!("📜 Magic removed: {:?} (hero={})", packet.spell, packet.hero);
                 }
             }
@@ -347,6 +389,7 @@ impl PacketHandler for CombatHandler {
                     events.push(NetworkEvent::MagicLeveledUp {
                         spell: packet.spell,
                         level: packet.level,
+                        hero: packet.hero,
                     });
                     tracing::debug!("📈 Magic leveled up: {:?} level={} (hero={})", packet.spell, packet.level, packet.hero);
                 }
@@ -355,8 +398,15 @@ impl PacketHandler for CombatHandler {
             // Magic - magic list / spell cast notification
             x if x == ServerPacketIds::Magic as u16 => {
                 if let Ok(packet) = server::Magic::read_body(&mut cursor) {
-                    events.push(NetworkEvent::MagicListReceived);
-                    tracing::trace!("🔮 Magic: spell={:?} target={} cast={}", packet.spell, packet.target_id, packet.cast);
+                    events.push(NetworkEvent::MagicListReceived {
+                        spell: packet.spell,
+                        target_id: packet.target_id,
+                        target_x: packet.target_x,
+                        target_y: packet.target_y,
+                        cast: packet.cast,
+                        level: packet.level,
+                    });
+                    tracing::trace!("🔮 Magic: spell={:?} target={} cast={} level={}", packet.spell, packet.target_id, packet.cast, packet.level);
                 }
             }
 
@@ -385,10 +435,17 @@ impl PacketHandler for CombatHandler {
                 if let Ok(packet) = server::ObjectMagic::read_body(&mut cursor) {
                     events.push(NetworkEvent::ObjectMagicCast {
                         object_id: packet.object_id,
+                        location_x: packet.location_x,
+                        location_y: packet.location_y,
+                        direction: packet.direction,
                         spell: packet.spell,
                         target_id: packet.target_id,
+                        target_x: packet.target_x,
+                        target_y: packet.target_y,
+                        cast: packet.cast,
+                        level: packet.level,
                     });
-                    tracing::trace!("🔮 Object {} magic: {:?} target={}", packet.object_id, packet.spell, packet.target_id);
+                    tracing::trace!("🔮 Object {} magic: {:?} target={} at ({},{}) cast={} level={}", packet.object_id, packet.spell, packet.target_id, packet.location_x, packet.location_y, packet.cast, packet.level);
                 }
             }
 
@@ -399,6 +456,8 @@ impl PacketHandler for CombatHandler {
                         object_id: packet.object_id,
                         effect: packet.effect as u16,
                         effect_type: packet.effect_type as u8,
+                        delay_time: packet.delay_time,
+                        time: packet.time,
                     });
                     tracing::trace!(
                         "✨ ObjectEffect: object={} effect={:?} type={} delay={} duration={}",
@@ -428,6 +487,7 @@ impl PacketHandler for CombatHandler {
                     events.push(NetworkEvent::SpellToggled {
                         spell: packet.spell,
                         can_use: packet.can_use,
+                        hero: packet.hero,
                     });
                     tracing::trace!("🔄 SpellToggle: {:?} can_use={} (hero={})", packet.spell, packet.can_use, packet.hero);
                 }
@@ -443,6 +503,10 @@ impl PacketHandler for CombatHandler {
                     events.push(NetworkEvent::BuffAdded {
                         object_id: packet.buff.object_id,
                         buff_id: packet.buff.buff_type as u32,
+                        visible: packet.buff.visible,
+                        expire_time: packet.buff.expire_time,
+                        infinite: packet.buff.infinite,
+                        paused: packet.buff.paused,
                     });
                     tracing::trace!(
                         "➕ BuffAdded: object={} buff={:?} visible={} expire={} infinite={} paused={}",
@@ -486,9 +550,11 @@ impl PacketHandler for CombatHandler {
             x if x == ServerPacketIds::SetConcentration as u16 => {
                 if let Ok(packet) = server::SetConcentration::read_body(&mut cursor) {
                     events.push(NetworkEvent::ConcentrationSet {
+                        object_id: packet.object_id,
                         enabled: packet.enabled,
+                        interrupted: packet.interrupted,
                     });
-                    tracing::debug!("🎯 ConcentrationSet: enabled={}", packet.enabled);
+                    tracing::debug!("🎯 ConcentrationSet: object={} enabled={} interrupted={}", packet.object_id, packet.enabled, packet.interrupted);
                 }
             }
 
@@ -496,17 +562,21 @@ impl PacketHandler for CombatHandler {
             x if x == ServerPacketIds::SetElemental as u16 => {
                 if let Ok(packet) = server::SetElemental::read_body(&mut cursor) {
                     events.push(NetworkEvent::ElementalSet {
+                        object_id: packet.object_id,
+                        enabled: packet.enabled,
+                        value: packet.value,
                         element: packet.element,
+                        expire_time: packet.expire_time,
                     });
-                    tracing::debug!("🔥 ElementalSet: element={}", packet.element);
+                    tracing::debug!("🔥 ElementalSet: object={} enabled={} element={} value={}", packet.object_id, packet.enabled, packet.element, packet.value);
                 }
             }
 
             // RemoveDelayedExplosion
             x if x == ServerPacketIds::RemoveDelayedExplosion as u16 => {
-                if let Ok(_packet) = server::RemoveDelayedExplosion::read_body(&mut cursor) {
-                    events.push(NetworkEvent::DelayedExplosionRemoved);
-                    tracing::debug!("💣 DelayedExplosionRemoved");
+                if let Ok(packet) = server::RemoveDelayedExplosion::read_body(&mut cursor) {
+                    events.push(NetworkEvent::DelayedExplosionRemoved { object_id: packet.object_id });
+                    tracing::debug!("💣 DelayedExplosionRemoved: object_id={}", packet.object_id);
                 }
             }
 
@@ -515,8 +585,10 @@ impl PacketHandler for CombatHandler {
                 if let Ok(packet) = server::ObjectDeco::read_body(&mut cursor) {
                     events.push(NetworkEvent::ObjectDecoReceived {
                         object_id: packet.object_id,
+                        deco: packet.deco,
+                        remove: packet.remove,
                     });
-                    tracing::debug!("🎭 ObjectDecoReceived: object={}", packet.object_id);
+                    tracing::debug!("🎭 ObjectDecoReceived: object={} deco={} remove={}", packet.object_id, packet.deco, packet.remove);
                 }
             }
 
@@ -525,8 +597,9 @@ impl PacketHandler for CombatHandler {
                 if let Ok(packet) = server::ObjectSneaking::read_body(&mut cursor) {
                     events.push(NetworkEvent::ObjectSneakingReceived {
                         object_id: packet.object_id,
+                        sneaking: packet.sneaking,
                     });
-                    tracing::debug!("🥷 ObjectSneakingReceived: object={}", packet.object_id);
+                    tracing::debug!("🥷 ObjectSneakingReceived: object={} sneaking={}", packet.object_id, packet.sneaking);
                 }
             }
 
@@ -535,8 +608,9 @@ impl PacketHandler for CombatHandler {
                 if let Ok(packet) = server::ObjectLevelEffects::read_body(&mut cursor) {
                     events.push(NetworkEvent::ObjectLevelEffectsReceived {
                         object_id: packet.object_id,
+                        level_effects: packet.level_effects,
                     });
-                    tracing::debug!("✨ ObjectLevelEffectsReceived: object={}", packet.object_id);
+                    tracing::debug!("✨ ObjectLevelEffectsReceived: object={} effects={}", packet.object_id, packet.level_effects);
                 }
             }
 
@@ -555,8 +629,9 @@ impl PacketHandler for CombatHandler {
                 if let Ok(packet) = server::SendOutputMessage::read_body(&mut cursor) {
                     events.push(NetworkEvent::OutputMessageReceived {
                         message: packet.message.clone(),
+                        message_type: packet.message_type,
                     });
-                    tracing::debug!("📢 OutputMessageReceived: {}", packet.message);
+                    tracing::debug!("📢 OutputMessageReceived: type={} msg={}", packet.message_type, packet.message);
                 }
             }
 
@@ -570,9 +645,10 @@ impl PacketHandler for CombatHandler {
 
             // BaseStatsInfo
             x if x == ServerPacketIds::BaseStatsInfo as u16 => {
-                if let Ok(_packet) = server::BaseStatsInfo::read_body(&mut cursor) {
-                    events.push(NetworkEvent::BaseStatsReceived);
-                    tracing::debug!("📊 BaseStatsReceived");
+                if let Ok(packet) = server::BaseStatsInfo::read_body(&mut cursor) {
+                    let count = packet.stats.len();
+                    events.push(NetworkEvent::BaseStatsReceived { stats: packet.stats });
+                    tracing::debug!("📊 BaseStatsReceived: {} values", count);
                 }
             }
 
@@ -592,8 +668,11 @@ impl PacketHandler for CombatHandler {
                 if let Ok(packet) = server::ObjectSpell::read_body(&mut cursor) {
                     events.push(NetworkEvent::ObjectSpellReceived {
                         object_id: packet.object_id,
+                        location_x: packet.location_x,
+                        location_y: packet.location_y,
+                        spell: packet.spell,
                     });
-                    tracing::debug!("🔮 ObjectSpellReceived: object={} spell={:?}", packet.object_id, packet.spell);
+                    tracing::debug!("🔮 ObjectSpellReceived: object={} spell={:?} loc=({},{})", packet.object_id, packet.spell, packet.location_x, packet.location_y);
                 }
             }
 
@@ -602,8 +681,11 @@ impl PacketHandler for CombatHandler {
                 if let Ok(packet) = server::MapEffect::read_body(&mut cursor) {
                     events.push(NetworkEvent::MapEffectReceived {
                         effect: packet.effect as u8,
+                        location_x: packet.location.x,
+                        location_y: packet.location.y,
+                        value: packet.value,
                     });
-                    tracing::debug!("🌟 MapEffectReceived: effect={:?}", packet.effect);
+                    tracing::debug!("🌟 MapEffectReceived: effect={:?} loc=({},{}) value={}", packet.effect, packet.location.x, packet.location.y, packet.value);
                 }
             }
 

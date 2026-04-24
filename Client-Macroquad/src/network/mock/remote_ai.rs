@@ -434,15 +434,13 @@ impl MockNetwork {
             });
 
             let _ = ctx.response_tx.send(NetworkEvent::ObjectAttack {
-                packet: mir2_shared::packets::server::ObjectAttack {
-                    object_id: ctx.rp.id,
-                    location_x: rx as u32,
-                    location_y: ry as u32,
-                    direction: ctx.rp.direction as u8,
-                    spell: 0,
-                    level: 0,
-                    attack_type: 0,
-                },
+                object_id: ctx.rp.id,
+                location_x: rx as u32,
+                location_y: ry as u32,
+                direction: ctx.rp.direction as u8,
+                spell: 0,
+                level: 0,
+                attack_type: 0,
             });
 
             // 命中/闪避
@@ -462,16 +460,17 @@ impl MockNetwork {
                 object_id: tid,
                 attacker_id: ctx.rp.id,
                 damage,
+                location_x: 0,
+                location_y: 0,
+                direction: 0,
             });
 
             let dead = ctx.monsters.get(&tid).map(|mm| mm.hp <= 0).unwrap_or(false);
             if dead {
                 let xp = ctx.monsters.get(&tid).map(|mm| mm.xp_reward).unwrap_or(10);
 
-                let _ = ctx.response_tx.send(NetworkEvent::ObjectDied { object_id: tid });
-                let _ = ctx.response_tx.send(NetworkEvent::ObjectRemove {
-                    packet: mir2_shared::packets::server::ObjectRemove { object_id: tid },
-                });
+                let _ = ctx.response_tx.send(NetworkEvent::ObjectDied { object_id: tid, location_x: 0, location_y: 0, direction: 0, death_type: 0 });
+                let _ = ctx.response_tx.send(NetworkEvent::ObjectRemove { object_id: tid });
                 ctx.monsters.remove(&tid);
                 ctx.rp.target_monster_id = None;
                 ctx.rp.mode = RemoteAiMode::Seek;

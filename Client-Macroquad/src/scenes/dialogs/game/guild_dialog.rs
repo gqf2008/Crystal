@@ -28,12 +28,19 @@ pub struct GuildMember {
 #[derive(Debug, Clone, Default)]
 pub struct GuildInfo {
     pub name: String,
+    pub rank_name: String,
+    pub level: u8,
+    pub experience: i64,
+    pub max_experience: i64,
+    pub gold: u32,
+    pub spare_points: u8,
     pub notice: String,
     pub members: Vec<GuildMember>,
     pub member_count: u32,
     pub max_members: u32,
     pub storage_gold: u32,
     pub storage_items: Vec<GuildStorageItem>,
+    pub my_rank_id: i32,
 }
 
 /// 行会仓库物品

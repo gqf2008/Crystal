@@ -27,16 +27,13 @@ pub struct Inventory {
     /// 背包物品列表（索引对应格子位置）
     /// None 表示空格子
     pub items: Vec<Option<mir2_shared::data::item::UserItem>>,
-    
+
     /// 背包容量（默认40格）
     pub capacity: usize,
-    
-    /// 金币数量
-    pub gold: u32,
-    
+
     /// 当前负重
     pub current_weight: u16,
-    
+
     /// 最大负重
     pub max_weight: u16,
 }
@@ -52,9 +49,8 @@ impl Inventory {
         Self {
             items: vec![None; capacity],
             capacity,
-            gold: 0,
             current_weight: 0,
-            max_weight: 100, // 默认最大负重100
+            max_weight: 100,
         }
     }
     
@@ -78,7 +74,7 @@ impl Inventory {
             None
         }
     }
-    
+
     /// 获取指定格子的物品引用
     pub fn get_item(&self, slot_index: usize) -> Option<&mir2_shared::data::item::UserItem> {
         if slot_index < self.items.len() {
@@ -87,25 +83,43 @@ impl Inventory {
             None
         }
     }
-    
-    /// 设置金币数量
-    pub fn set_gold(&mut self, gold: u32) {
-        self.gold = gold;
+
+    /// 按 unique_id 查找并返回可变引用
+    pub fn find_mut_by_id(
+        &mut self,
+        unique_id: u64,
+    ) -> Option<&mut mir2_shared::data::item::UserItem> {
+        self.items.iter_mut().flatten().find(|item| item.unique_id == unique_id)
     }
-    
-    /// 添加金币
-    pub fn add_gold(&mut self, amount: u32) {
-        self.gold = self.gold.saturating_add(amount);
-    }
-    
-    /// 减少金币
-    pub fn remove_gold(&mut self, amount: u32) -> bool {
-        if self.gold >= amount {
-            self.gold -= amount;
-            true
-        } else {
-            false
+
+    /// 按 unique_id 查找并扣减/移除物品
+    ///
+    /// - `count == 0` 表示移除全部
+    /// - 返回 `true` 表示找到了对应物品
+    pub fn remove_by_unique_id(&mut self, unique_id: u64, count: u32) -> bool {
+        for slot in self.items.iter_mut() {
+            if let Some(ref mut item) = slot {
+                if item.unique_id == unique_id {
+                    if count == 0 || count >= item.count as u32 {
+                        *slot = None;
+                    } else {
+                        item.count -= count as u16;
+                    }
+                    return true;
+                }
+            }
         }
+        false
+    }
+
+    /// 按 unique_id 查找并取出完整物品
+    ///
+    /// 用于装备/移动等需要拿到完整物品数据的场景。
+    pub fn take_by_unique_id(&mut self, unique_id: u64) -> Option<mir2_shared::data::item::UserItem> {
+        let pos = self.items.iter().position(|slot| {
+            slot.as_ref().is_some_and(|item| item.unique_id == unique_id)
+        })?;
+        self.items[pos].take()
     }
 }
 
@@ -197,8 +211,49 @@ impl Equipment {
             13 => &mut self.mount,
             _ => return None,
         };
-        
+
         slot_ref.take()
+    }
+
+    fn slots_mut(&mut self) -> [&mut Option<mir2_shared::data::item::UserItem>; 14] {
+        [
+            &mut self.weapon, &mut self.armour, &mut self.helmet, &mut self.necklace,
+            &mut self.bracelet_l, &mut self.bracelet_r, &mut self.ring_l, &mut self.ring_r,
+            &mut self.amulet, &mut self.belt, &mut self.boots, &mut self.stone,
+            &mut self.torch, &mut self.mount,
+        ]
+    }
+
+    /// 遍历所有装备槽位，对每个存在的物品执行回调
+    pub fn for_each_mut(&mut self,
+        mut f: impl FnMut(&mut mir2_shared::data::item::UserItem),
+    ) {
+        for item in self.slots_mut().into_iter().flatten() {
+            f(item);
+        }
+    }
+
+    /// 按 unique_id 查找并修改装备
+    pub fn find_mut_by_id(
+        &mut self,
+        unique_id: u64,
+    ) -> Option<&mut mir2_shared::data::item::UserItem> {
+        self.slots_mut().into_iter().flatten().find(|item| item.unique_id == unique_id)
+    }
+
+    /// 按 unique_id 卸下装备（移除并返回）
+    pub fn remove_by_id(
+        &mut self,
+        unique_id: u64,
+    ) -> Option<mir2_shared::data::item::UserItem> {
+        for slot in self.slots_mut().into_iter() {
+            if let Some(ref item) = *slot {
+                if item.unique_id == unique_id {
+                    return slot.take();
+                }
+            }
+        }
+        None
     }
 }
 

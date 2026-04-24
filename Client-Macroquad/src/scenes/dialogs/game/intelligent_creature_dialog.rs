@@ -68,6 +68,9 @@ pub struct IntelligentCreatureDialogHybrid {
     fullness_bg_texture: Option<Texture2D>,
     fullness_fg_texture: Option<Texture2D>,
     pearl_texture: Option<Texture2D>,
+    // Server-driven state
+    can_rename: bool,
+    auto_pickup: bool,
 }
 
 impl Default for IntelligentCreatureDialogHybrid {
@@ -106,6 +109,8 @@ impl IntelligentCreatureDialogHybrid {
             fullness_bg_texture: None,
             fullness_fg_texture: None,
             pearl_texture: None,
+            can_rename: false,
+            auto_pickup: false,
         }
     }
 
@@ -159,6 +164,14 @@ impl IntelligentCreatureDialogHybrid {
     /// 获取待处理动作
     pub fn take_action(&mut self) -> CreatureDialogAction {
         std::mem::replace(&mut self.pending_action, CreatureDialogAction::None)
+    }
+
+    pub fn set_can_rename(&mut self, can_rename: bool) {
+        self.can_rename = can_rename;
+    }
+
+    pub fn set_auto_pickup(&mut self, enabled: bool) {
+        self.auto_pickup = enabled;
     }
 
     /// 加载纹理

@@ -51,6 +51,12 @@ pub struct UIRenderSystem {
     /// 暂存的装备请求（由 draw 阶段 Inventory→Character 拖拽产出，由 update 阶段发包）
     pending_equip_request: Option<u64>,
 
+    /// 待显示的邀请确认弹窗
+    pending_invite: Option<(crate::ui::ui_state::InviteKind, String, String)>,
+
+    /// 暂存的邀请确认结果（由 draw 阶段产出，由 update 阶段发包）
+    pending_invite_reply: Option<(crate::ui::ui_state::InviteKind, bool)>,
+
     /// 暂存的卸下装备请求（由 draw 阶段 Character→Inventory 拖拽产出，由 update 阶段发包）
     pending_unequip_request: Option<u64>,
 
@@ -108,6 +114,8 @@ impl UIRenderSystem {
             pending_ranking_refresh_tab: None,
             pending_equip_request: None,
             pending_unequip_request: None,
+            pending_invite: None,
+            pending_invite_reply: None,
             cached_quest_info: std::collections::HashMap::new(),
         }
     }
@@ -146,6 +154,52 @@ impl UIRenderSystem {
         self.npc_goods_dialog.hide();
         self.npc_sub_goods_dialog.hide();
         self.amount_box.hide();
+    }
+
+
+    fn draw_invite_confirm(&mut self, kind: &crate::ui::ui_state::InviteKind, _inviter: &str, detail: &str) {
+        use macroquad::prelude::{draw_rectangle, draw_rectangle_lines, screen_height, screen_width, is_mouse_button_pressed, mouse_position, MouseButton, WHITE};
+
+        let sw = screen_width();
+        let sh = screen_height();
+        let (mx, my) = mouse_position();
+
+        let w = 320.0;
+        let h = 100.0;
+        let x = (sw - w) / 2.0;
+        let y = (sh - h) / 2.0;
+
+        draw_rectangle(x, y, w, h, Color::from_rgba(25, 25, 40, 240));
+        draw_rectangle_lines(x, y, w, h, 1.0, Color::from_rgba(100, 100, 120, 200));
+
+        crate::ui::text_renderer::draw_text_cn(detail, x + 15.0, y + 25.0, 14.0, WHITE);
+
+        let btn_w = 100.0;
+        let btn_h = 28.0;
+        let btn_y = y + h - 40.0;
+        let accept_x = x + w / 2.0 - btn_w - 10.0;
+        let decline_x = x + w / 2.0 + 10.0;
+
+        let accept_hover = mx >= accept_x && mx <= accept_x + btn_w && my >= btn_y && my <= btn_y + btn_h;
+        let decline_hover = mx >= decline_x && mx <= decline_x + btn_w && my >= btn_y && my <= btn_y + btn_h;
+
+        draw_rectangle(accept_x, btn_y, btn_w, btn_h,
+            if accept_hover { Color::from_rgba(80, 160, 80, 255) } else { Color::from_rgba(60, 120, 60, 255) });
+        crate::ui::text_renderer::draw_text_cn("接受", accept_x + 30.0, btn_y + 18.0, 14.0, WHITE);
+
+        draw_rectangle(decline_x, btn_y, btn_w, btn_h,
+            if decline_hover { Color::from_rgba(160, 60, 60, 255) } else { Color::from_rgba(120, 40, 40, 255) });
+        crate::ui::text_renderer::draw_text_cn("拒绝", decline_x + 30.0, btn_y + 18.0, 14.0, WHITE);
+
+        if is_mouse_button_pressed(MouseButton::Left) {
+            if accept_hover {
+                self.pending_invite_reply = Some((*kind, true));
+                self.pending_invite = None;
+            } else if decline_hover {
+                self.pending_invite_reply = Some((*kind, false));
+                self.pending_invite = None;
+            }
+        }
     }
 }
 
@@ -186,6 +240,7 @@ impl RenderSystem for UIRenderSystem {
                     panel_type,
                     hide_added_stats,
                     is_sub,
+                    use_pearls,
                 } => {
                     if is_sub {
                         self.npc_sub_goods_dialog.new_goods(
@@ -193,11 +248,12 @@ impl RenderSystem for UIRenderSystem {
                             rate,
                             panel_type,
                             hide_added_stats,
+                            use_pearls,
                         );
                         self.bring_npc_layer_to_front(NpcUiLayer::SubGoods);
                     } else {
                         self.npc_goods_dialog
-                            .new_goods(items, rate, panel_type, hide_added_stats);
+                            .new_goods(items, rate, panel_type, hide_added_stats, use_pearls);
                         self.bring_npc_layer_to_front(NpcUiLayer::Goods);
                     }
                     self.main_dialog.open_inventory();
@@ -244,6 +300,18 @@ impl RenderSystem for UIRenderSystem {
                 UiCommand::PushHeroSystemChat(msg) => {
                     self.main_dialog.push_system_chat_line(msg);
                 }
+                UiCommand::UpdateHeroHealth { hp, mp } => {
+                    self.main_dialog.hero_dialog_mut().update_health(hp, mp);
+                }
+                UiCommand::UpdateHeroSpawnState { state } => {
+                    self.main_dialog.hero_dialog_mut().set_spawn_state(state);
+                }
+                UiCommand::HeroChanged => {
+                    self.main_dialog.push_system_chat_line("英雄已切换");
+                }
+                UiCommand::PlayerLevelUp { new_level } => {
+                    self.main_dialog.push_system_chat_line(format!("🎉 升级到 Lv.{}！", new_level));
+                }
                 UiCommand::UpdateFishingState { state, chance, progress } => {
                     self.main_dialog.fishing_dialog_mut().update_fishing_state(state, chance, progress);
                 }
@@ -280,14 +348,36 @@ impl RenderSystem for UIRenderSystem {
                 UiCommand::UpdateGroupMemberMap { player_name, player_map } => {
                     self.main_dialog.group_dialog_mut().update_member_map(&player_name, player_map);
                 }
+                UiCommand::UpdateGroupMemberLocation { player_name, x, y } => {
+                    self.main_dialog.group_dialog_mut().update_member_location(&player_name, x, y);
+                }
+                UiCommand::AddGroupMember { name } => {
+                    self.main_dialog.group_dialog_mut().add_member(
+                        crate::scenes::dialogs::game::group_dialog::GroupMember {
+                            name: name.clone(),
+                            hp_percent: 1.0,
+                            online: true,
+                            is_leader: false,
+                            map_name: String::new(),
+                            x: 0,
+                            y: 0,
+                        },
+                    );
+                }
+                UiCommand::RemoveGroupMember { name } => {
+                    self.main_dialog.group_dialog_mut().remove_member(&name);
+                }
+                UiCommand::ClearGroupMembers => {
+                    self.main_dialog.group_dialog_mut().update_members(Vec::new());
+                }
                 UiCommand::SetHeroAutoPotUnlocked => {
-                    tracing::debug!("Hero auto-pot unlocked");
+                    self.main_dialog.hero_dialog_mut().set_auto_pot_unlocked(true);
                 }
                 UiCommand::SetHeroAutoPotValue { pot_type, value } => {
-                    tracing::debug!("Hero auto-pot value set: type={} value={}", pot_type, value);
+                    self.main_dialog.hero_dialog_mut().set_auto_pot_value(pot_type, value);
                 }
-                UiCommand::SetHeroAutoPotItem { item_id } => {
-                    tracing::debug!("Hero auto-pot item set: {}", item_id);
+                UiCommand::SetHeroAutoPotItem { slot, item_id } => {
+                    self.main_dialog.hero_dialog_mut().set_auto_pot_item(slot, item_id);
                 }
                 UiCommand::SetBuffPaused { buff_id, paused } => {
                     self.main_dialog.buff_dialog_mut().set_buff_paused(buff_id, paused);
@@ -302,14 +392,27 @@ impl RenderSystem for UIRenderSystem {
                 UiCommand::TradeGoldAdded { amount } => {
                     self.main_dialog.trade_dialog_mut().add_their_gold(amount);
                 }
-                UiCommand::TradeItemAdded => {
-                    // 由 TradeDialog 内部通过 take_action 同步，此处仅作日志
-                    tracing::debug!("Trade item added (server-side sync)");
+                UiCommand::TradeItemAdded { items } => {
+                    let count = items.iter().filter(|i| i.is_some()).count();
+                    tracing::debug!("Trade item added: {} items from partner", count);
+                }
+                UiCommand::TradeItemDeposited { from_slot, success } => {
+                    if !success {
+                        self.main_dialog.push_system_chat_line(format!("存入交易物品失败 (槽位{})", from_slot));
+                    }
+                }
+                UiCommand::TradeItemRetrieved { from_slot, success } => {
+                    if !success {
+                        self.main_dialog.push_system_chat_line(format!("取回交易物品失败 (槽位{})", from_slot));
+                    }
                 }
                 UiCommand::TradeConfirmed { locked } => {
                     self.main_dialog.trade_dialog_mut().set_partner_confirmed(locked);
                 }
-                UiCommand::TradeCancelled => {
+                UiCommand::TradeCancelled { unlock: _ } => {
+                    self.main_dialog.trade_dialog_mut().reset_confirmations();
+                }
+                UiCommand::TradeCompleted => {
                     self.main_dialog.trade_dialog_mut().reset_confirmations();
                 }
                 UiCommand::QuestAccepted { quest_id, name, description } => {
@@ -361,8 +464,8 @@ impl RenderSystem for UIRenderSystem {
                 UiCommand::GuildExpGained { amount } => {
                     self.main_dialog.push_system_chat_line(format!("行会经验 +{}", amount));
                 }
-                UiCommand::GuildWarRequested => {
-                    self.main_dialog.push_system_chat_line("行会战请求！".to_string());
+                UiCommand::GuildWarRequested { guild_name } => {
+                    self.main_dialog.push_system_chat_line(format!("行会战请求！「{}」向你方宣战", guild_name));
                 }
                 UiCommand::SetGuildName { name } => {
                     self.main_dialog.guild_dialog_mut().update_guild_info(crate::scenes::dialogs::game::guild_dialog::GuildInfo {
@@ -370,6 +473,21 @@ impl RenderSystem for UIRenderSystem {
                         ..Default::default()
                     });
                     tracing::debug!("🏰 行会名称: {}", name);
+                }
+                UiCommand::UpdateGuildStatus { rank_name, level, experience, max_experience, gold, spare_points, member_count, max_members, my_rank_id } => {
+                    let dialog = self.main_dialog.guild_dialog_mut();
+                    dialog.update_guild_info(crate::scenes::dialogs::game::guild_dialog::GuildInfo {
+                        rank_name: rank_name.clone(),
+                        level,
+                        experience,
+                        max_experience,
+                        gold,
+                        spare_points,
+                        member_count: member_count as u32,
+                        max_members: max_members as u32,
+                        my_rank_id,
+                        ..Default::default()
+                    });
                 }
                 UiCommand::UpdateGuildStorageGold { gold } => {
                     self.main_dialog.guild_dialog_mut().update_storage_gold(gold);
@@ -379,8 +497,14 @@ impl RenderSystem for UIRenderSystem {
                         self.main_dialog.guild_dialog_mut().update_storage_item(item.name.clone(), item.quantity, item.slot);
                     }
                 }
+                UiCommand::UpdateGuildStorageItem { slot, name, quantity } => {
+                    self.main_dialog.guild_dialog_mut().update_storage_item(name, quantity, slot);
+                }
                 UiCommand::ClearGuildStorageItems => {
                     self.main_dialog.guild_dialog_mut().clear_storage_items();
+                }
+                UiCommand::UpdateGuildBuffs { buff_ids } => {
+                    tracing::debug!("🏛️ Guild buffs updated: {:?}", buff_ids);
                 }
                 UiCommand::OpenMailDialog => {
                     tracing::debug!("📮 打开邮件对话框");
@@ -441,6 +565,12 @@ impl RenderSystem for UIRenderSystem {
                 UiCommand::HideTextInput => {
                     self.main_dialog.reset_pending_text_input_kind();
                     self.main_dialog.text_input_dialog_mut().hide();
+                }
+                UiCommand::ShowInviteConfirm { kind, inviter, detail } => {
+                    self.pending_invite = Some((kind, inviter.clone(), detail.clone()));
+                }
+                UiCommand::HideInviteConfirm => {
+                    self.pending_invite = None;
                 }
                 UiCommand::UpdateRankings { tab, entries } => {
                     tracing::debug!("🏆 更新排行榜: tab={}, {} entries", tab, entries.len());
@@ -534,6 +664,9 @@ impl RenderSystem for UIRenderSystem {
                 UiCommand::CloseItemRental => {
                     self.item_rental_dialog.close();
                 }
+                UiCommand::UpdateRentalItemList { items } => {
+                    tracing::debug!("📋 Rental item list updated: {} items", items.len());
+                }
                 UiCommand::OpenTrustMerchant => {
                     self.trust_merchant_dialog.show();
                 }
@@ -552,6 +685,101 @@ impl RenderSystem for UIRenderSystem {
                     if let Some(net) = ctx.net.as_ref() {
                         let _ = net.send(NetworkEvent::ItemRentalConfirm);
                     }
+                }
+                UiCommand::RequestSceneTransition { target } => {
+                    UiState::with_in_world(&ctx.world, |s| s.request_scene_transition = Some(target));
+                }
+                UiCommand::HeroLevelUp { new_level } => {
+                    self.main_dialog.hero_dialog_mut().update_hero_level(new_level);
+                }
+                UiCommand::UpdateHeroManageList { heroes } => {
+                    self.main_dialog.hero_dialog_mut().update_manage_list(heroes);
+                }
+                UiCommand::HeroInfoReceived { hero_id } => {
+                    self.main_dialog.hero_dialog_mut().set_hero_id(hero_id);
+                }
+                UiCommand::ItemDuraChanged { unique_id, current_dura } => {
+                    self.dura_status_dialog.update_item_dura(unique_id, current_dura);
+                }
+                UiCommand::RemoveDuraEntry { unique_id } => {
+                    self.dura_status_dialog.remove_dura_entry(unique_id);
+                }
+                UiCommand::SetInventorySize { size } => {
+                    UiState::with_in_world(&ctx.world, |s| s.inventory_size = size);
+                }
+                UiCommand::SetStorageSize { size } => {
+                    UiState::with_in_world(&ctx.world, |s| s.storage_size = size);
+                }
+                UiCommand::SetTimeOfDay { time } => {
+                    UiState::with_in_world(&ctx.world, |s| s.time_of_day = time);
+                }
+                UiCommand::SetBindingShot { enabled } => {
+                    UiState::with_in_world(&ctx.world, |s| s.binding_shot_enabled = enabled);
+                }
+                UiCommand::SetConcentration { enabled } => {
+                    UiState::with_in_world(&ctx.world, |s| s.concentration_enabled = enabled);
+                }
+                UiCommand::SetElement { element } => {
+                    UiState::with_in_world(&ctx.world, |s| s.element_type = element);
+                }
+                UiCommand::SetObserveAllowed { allowed } => {
+                    UiState::with_in_world(&ctx.world, |s| s.observe_allowed = allowed);
+                }
+                UiCommand::SetHeroBaseStats { stats } => {
+                    self.main_dialog.hero_dialog_mut().set_base_stats(stats);
+                }
+                UiCommand::UpdateBigMapInfo { map_index: _, title, width, height } => {
+                    self.main_dialog.big_map_dialog_mut().set_map_info(title.clone(), width as f32, height as f32);
+                }
+                UiCommand::UpdateWorldMapIcons { icons } => {
+                    tracing::debug!("🌍 世界地图图标更新: {} icons", icons.len());
+                }
+                UiCommand::NavigateToMapLocation { map_index: _, x, y } => {
+                    self.main_dialog.big_map_dialog_mut().set_player_position(x as f32, y as f32);
+                    self.main_dialog.big_map_dialog_mut().show();
+                }
+                UiCommand::MagicLearned { spell, name, level, icon, hero } => {
+                    self.main_dialog.skill_dialog_mut(hero).learn_skill(spell, name, level, icon);
+                }
+                UiCommand::MagicLeveledUp { spell, level, hero } => {
+                    self.main_dialog.skill_dialog_mut(hero).level_up_skill(spell, level);
+                }
+                UiCommand::MagicRemoved { spell, hero } => {
+                    self.main_dialog.skill_dialog_mut(hero).remove_skill(spell);
+                }
+                UiCommand::SpellToggled { spell, can_use, hero } => {
+                    self.main_dialog.skill_dialog_mut(hero).toggle_skill(spell, can_use);
+                }
+                UiCommand::ExperienceGained { amount } => {
+                    self.main_dialog.push_system_chat_line(format!("+{} 经验", amount));
+                }
+                UiCommand::HeroExperienceGained { amount } => {
+                    self.main_dialog.push_system_chat_line(format!("英雄 +{} 经验", amount));
+                }
+                UiCommand::SetTransformForm { form } => {
+                    UiState::with_in_world(&ctx.world, |s| s.transform_form = form);
+                }
+                UiCommand::TriggerMapEffect { effect } => {
+                    UiState::with_in_world(&ctx.world, |s| s.pending_map_effect = effect);
+                }
+                UiCommand::SetBaseStats { stats } => {
+                    if stats.len() >= 10 {
+                        let cd = self.main_dialog.character_dialog_mut();
+                        cd.stats.ac = (stats[0] as u32, stats[1] as u32);
+                        cd.stats.mac = (stats[2] as u32, stats[3] as u32);
+                        cd.stats.dc = (stats[4] as u32, stats[5] as u32);
+                        cd.stats.mc = (stats[6] as u32, stats[7] as u32);
+                        cd.stats.sc = (stats[8] as u32, stats[9] as u32);
+                    }
+                }
+                UiCommand::SetCreatureCanRename { can_rename } => {
+                    self.main_dialog.intelligent_creature_dialog_mut().set_can_rename(can_rename);
+                }
+                UiCommand::SetCreatureAutoPickup { enabled } => {
+                    self.main_dialog.intelligent_creature_dialog_mut().set_auto_pickup(enabled);
+                }
+                UiCommand::OpenDoor { door_id } => {
+                    UiState::with_in_world(&ctx.world, |s| { s.open_doors.insert(door_id); });
                 }
             }
         }
@@ -691,7 +919,7 @@ impl RenderSystem for UIRenderSystem {
 
                 // 同步背包 InventoryDialog
                 if let Ok(inv) = ctx.world.get::<&Inventory>(e) {
-                    self.main_dialog.sync_inventory(&inv);
+                    self.main_dialog.sync_inventory(&inv, currency);
                 }
             }
         }
@@ -1265,6 +1493,18 @@ impl RenderSystem for UIRenderSystem {
                 TextInputKind::None => {
                     tracing::warn!("⚠️ 收到文本输入结果但 kind 为 None");
                 }
+                TextInputKind::NPCInput { npc_id } => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::NPCConfirmInput { npc_id, input: text.clone() });
+                    }
+                    tracing::debug!("📝 NPC 输入确认: npc_id={} input={}", npc_id, text);
+                }
+                TextInputKind::GuildName => {
+                    if let Some(net) = ctx.net.as_ref() {
+                        let _ = net.send(NetEv::GuildNameReturn { name: text.clone() });
+                    }
+                    tracing::debug!("🏛️ 公会名称输入: {}", text);
+                }
             }
         }
 
@@ -1293,6 +1533,30 @@ impl RenderSystem for UIRenderSystem {
                 let _ = net.send(NetEv::RemoveItemRequest { unique_id });
             }
             tracing::debug!("🎒 卸下装备: unique_id={}", unique_id);
+        }
+
+        // 邀请确认回复（由 draw 阶段邀请弹窗产出，在此发包）
+        if let Some((kind, accept)) = self.pending_invite_reply.take() {
+            use crate::network::handlers::NetworkEvent as NetEv;
+            if let Some(net) = ctx.net.as_ref() {
+                match kind {
+                    crate::ui::ui_state::InviteKind::Group => {
+                        let _ = net.send(if accept { NetEv::GroupAcceptRequest } else { NetEv::GroupDeclineRequest });
+                    }
+                    crate::ui::ui_state::InviteKind::Guild => {
+                        let _ = net.send(if accept { NetEv::GuildAcceptRequest } else { NetEv::GuildDeclineRequest });
+                    }
+                    crate::ui::ui_state::InviteKind::Trade => {
+                        let _ = net.send(NetEv::TradeReplyRequest { accept });
+                    }
+                    crate::ui::ui_state::InviteKind::Mentor => {
+                        let _ = net.send(NetEv::MentorReply { accept });
+                    }
+                    crate::ui::ui_state::InviteKind::Divorce => {
+                        let _ = net.send(NetEv::DivorceReply { accept });
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -1685,6 +1949,12 @@ impl RenderSystem for UIRenderSystem {
             14.0,
             Color::from_rgba(200, 200, 200, 180),
         );
+
+        // 邀请确认弹窗（clone needed: draw_invite_confirm borrows &mut self）
+        if let Some((kind, inviter, detail)) = self.pending_invite.clone() {
+            self.draw_invite_confirm(&kind, &inviter, &detail);
+        }
+
         Ok(())
     }
 }

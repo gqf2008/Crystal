@@ -24,13 +24,31 @@ impl PacketHandler for GuildHandler {
                 }
             }
 
-            // GuildStatus (joined)
+            // GuildStatus (joined or left)
             x if x == ServerPacketIds::GuildStatus as u16 => {
                 if let Ok(packet) = server::GuildStatus::read_body(&mut cursor) {
-                    events.push(NetworkEvent::GuildJoined {
-                        guild_name: packet.guild_name.clone(),
-                    });
-                    tracing::info!("🏛️ Guild status updated: {} ({}) level={} members={}/{}", packet.guild_name, packet.rank_name, packet.level, packet.member_count, packet.max_members);
+                    if packet.guild_name.is_empty() {
+                        events.push(NetworkEvent::GuildLeft);
+                        tracing::info!("🏛️ Guild left (empty GuildStatus)");
+                    } else {
+                        events.push(NetworkEvent::GuildJoined {
+                            guild_name: packet.guild_name.clone(),
+                            rank_name: packet.rank_name.clone(),
+                            level: packet.level,
+                            experience: packet.experience,
+                            max_experience: packet.max_experience,
+                            gold: packet.gold,
+                            spare_points: packet.spare_points,
+                            member_count: packet.member_count,
+                            max_members: packet.max_members,
+                            voting: packet.voting,
+                            item_count: packet.item_count,
+                            buff_count: packet.buff_count,
+                            my_options: packet.my_options,
+                            my_rank_id: packet.my_rank_id,
+                        });
+                        tracing::info!("🏛️ Guild status updated: {} ({}) level={} members={}/{}", packet.guild_name, packet.rank_name, packet.level, packet.member_count, packet.max_members);
+                    }
                 }
             }
 
@@ -81,6 +99,7 @@ impl PacketHandler for GuildHandler {
                 if let Ok(packet) = server::GuildStorageGoldChange::read_body(&mut cursor) {
                     events.push(NetworkEvent::GuildStorageGoldChanged {
                         delta: packet.change as i64,
+                        total: packet.total,
                     });
                     tracing::info!("🏛️ Guild storage gold changed: {}", packet.change);
                 }
@@ -99,8 +118,8 @@ impl PacketHandler for GuildHandler {
 
             // GuildStorageList
             x if x == ServerPacketIds::GuildStorageList as u16 => {
-                if let Ok(_packet) = server::GuildStorageList::read_body(&mut cursor) {
-                    events.push(NetworkEvent::GuildStorageListReceived);
+                if let Ok(packet) = server::GuildStorageList::read_body(&mut cursor) {
+                    events.push(NetworkEvent::GuildStorageListReceived { items: packet.items });
                     tracing::info!("🏛️ Guild storage list received");
                 }
             }
@@ -109,7 +128,7 @@ impl PacketHandler for GuildHandler {
             x if x == ServerPacketIds::GuildRequestWar as u16 => {
                 if let Ok(packet) = server::GuildRequestWar::read_body(&mut cursor) {
                     tracing::warn!("🏛️ Guild war requested by: {}", packet.guild_name);
-                    events.push(NetworkEvent::GuildWarRequested);
+                    events.push(NetworkEvent::GuildWarRequested { guild_name: packet.guild_name.clone() });
                 }
             }
 
@@ -123,9 +142,10 @@ impl PacketHandler for GuildHandler {
 
             // GuildTerritoryPage
             x if x == ServerPacketIds::GuildTerritoryPage as u16 => {
-                if let Ok(_packet) = server::GuildTerritoryPage::read_body(&mut cursor) {
-                    events.push(NetworkEvent::GuildTerritoryPageReceived);
-                    tracing::info!("🏛️ Guild territory page received");
+                if let Ok(packet) = server::GuildTerritoryPage::read_body(&mut cursor) {
+                    let count = packet.territories.len();
+                    events.push(NetworkEvent::GuildTerritoryPageReceived { territories: packet.territories });
+                    tracing::info!("🏛️ Guild territory page received: {} territories", count);
                 }
             }
 
@@ -133,7 +153,7 @@ impl PacketHandler for GuildHandler {
             x if x == ServerPacketIds::PurchaseGuildTerritory as u16 => {
                 if let Ok(packet) = server::PurchaseGuildTerritory::read_body(&mut cursor) {
                     tracing::info!("🏛️ Guild territory purchase: {}", if packet.success { "success" } else { "failed" });
-                    events.push(NetworkEvent::GuildTerritoryPurchased);
+                    events.push(NetworkEvent::GuildTerritoryPurchased { success: packet.success });
                 }
             }
 

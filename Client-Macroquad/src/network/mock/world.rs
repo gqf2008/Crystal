@@ -121,9 +121,7 @@ impl MockNetwork {
         if !state.monsters.is_empty() {
             let ids: Vec<u32> = state.monsters.keys().copied().collect();
             for object_id in ids {
-                let _ = response_tx.send(NetworkEvent::ObjectRemove {
-                    packet: mir2_shared::packets::server::ObjectRemove { object_id },
-                });
+                let _ = response_tx.send(NetworkEvent::ObjectRemove { object_id });
             }
             state.monsters.clear();
         }

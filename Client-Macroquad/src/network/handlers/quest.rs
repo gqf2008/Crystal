@@ -80,9 +80,9 @@ impl PacketHandler for QuestHandler {
 
             // GainedQuestItem - 获得任务物品
             x if x == ServerPacketIds::GainedQuestItem as u16 => {
-                if let Ok(_packet) = server::GainedQuestItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::QuestItemGained);
-                    tracing::debug!("📜 Gained quest item: {}", _packet.item_id);
+                if let Ok(packet) = server::GainedQuestItem::read_body(&mut cursor) {
+                    events.push(NetworkEvent::QuestItemGained { item_id: packet.item_id });
+                    tracing::debug!("📜 Gained quest item: {}", packet.item_id);
                 }
             }
 

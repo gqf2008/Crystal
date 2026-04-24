@@ -305,6 +305,13 @@ impl Default for Visibility {
     }
 }
 
+/// 陷阱岩状态（来自 TrapRockEntered）
+/// 当玩家处于陷阱岩中时，移动被完全阻止
+#[derive(Debug, Clone, Copy, Default)]
+pub struct InTrapRock {
+    pub trapped: bool,
+}
+
 /// 公会成员组件
 #[derive(Debug, Clone)]
 pub struct GuildMembership {
@@ -327,10 +334,47 @@ impl GuildMembership {
 }
 
 /// 角色公会信息（服务器下发字符串）
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct GuildInfo {
     pub name: String,
     pub rank: String,
+    pub level: u16,
+    pub experience: i64,
+    pub max_experience: i64,
+    pub gold: u32,
+    pub spare_points: u32,
+    pub member_count: u16,
+    pub max_members: u16,
+    pub my_rank_id: u8,
+}
+
+/// 婚姻/恋人状态（服务器下发）
+#[derive(Debug, Clone, Default)]
+pub struct LoverState {
+    pub name: String,
+    pub date: i64,
+}
+
+/// 师徒状态（服务器下发）
+#[derive(Debug, Clone, Default)]
+pub struct MentorState {
+    pub name: String,
+    pub level: i32,
+    pub online: bool,
+}
+
+/// 组队状态（服务器下发）
+#[derive(Debug, Clone, Default)]
+pub struct GroupState {
+    pub allow_join: bool,
+    pub members: Vec<String>,
+}
+
+/// 交易状态（服务器下发）
+#[derive(Debug, Clone, Default)]
+pub struct TradeState {
+    pub active: bool,
+    pub partner: String,
 }
 
 /// 名字颜色（服务器下发）
@@ -353,13 +397,44 @@ pub struct ObserveState {
 pub struct HeroState {
     pub has_hero: bool,
     pub behaviour: mir2_shared::enums::HeroBehaviour,
+    pub level: u16,
+    pub experience: i64,
+    pub hero_object_id: u32,
 }
+
+/// 英雄实体标记（ObjectHeroSpawned 落地时插入）
+#[derive(Debug, Clone, Copy)]
+pub struct Hero;
 
 /// 召唤物状态（P0 仅落地）
 #[derive(Debug, Clone, Copy)]
 pub struct SummonedCreatureState {
     pub creature_type: u8,
     pub summoned: bool,
+}
+
+/// 攻击模式组件
+#[derive(Debug, Clone, Copy)]
+pub struct AttackMode {
+    pub mode: u8,
+}
+
+impl AttackMode {
+    pub fn new(mode: u8) -> Self {
+        Self { mode }
+    }
+}
+
+/// 宠物模式组件
+#[derive(Debug, Clone, Copy)]
+pub struct PetMode {
+    pub mode: u8,
+}
+
+impl PetMode {
+    pub fn new(mode: u8) -> Self {
+        Self { mode }
+    }
 }
 
 // ============================================================================

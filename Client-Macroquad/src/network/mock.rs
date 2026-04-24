@@ -1126,15 +1126,13 @@ impl MockNetwork {
                 }
 
                 let _ = response_tx.send(NetworkEvent::ObjectAttack {
-                    packet: mir2_shared::packets::server::ObjectAttack {
-                        object_id: state.player_object_id,
-                        location_x: state.player_grid.0.max(0) as u32,
-                        location_y: state.player_grid.1.max(0) as u32,
-                        direction: direction as u8,
-                        spell: 0,
-                        level: 0,
-                        attack_type: 0,
-                    },
+                    object_id: state.player_object_id,
+                    location_x: state.player_grid.0.max(0) as u32,
+                    location_y: state.player_grid.1.max(0) as u32,
+                    direction: direction as u8,
+                    spell: 0,
+                    level: 0,
+                    attack_type: 0,
                 });
 
                 let Some(mid) = target else {
@@ -1149,16 +1147,17 @@ impl MockNetwork {
                     object_id: mid,
                     attacker_id: state.player_object_id,
                     damage,
+                    location_x: 0,
+                    location_y: 0,
+                    direction: 0,
                 });
 
                 let dead = state.monsters.get(&mid).map(|m| m.hp <= 0).unwrap_or(false);
                 if dead {
                     let xp = state.monsters.get(&mid).map(|m| m.xp_reward).unwrap_or(10);
                     state.monsters.remove(&mid);
-                    let _ = response_tx.send(NetworkEvent::ObjectDied { object_id: mid });
-                    let _ = response_tx.send(NetworkEvent::ObjectRemove {
-                        packet: mir2_shared::packets::server::ObjectRemove { object_id: mid },
-                    });
+                    let _ = response_tx.send(NetworkEvent::ObjectDied { object_id: mid, location_x: 0, location_y: 0, direction: 0, death_type: 0 });
+                    let _ = response_tx.send(NetworkEvent::ObjectRemove { object_id: mid });
 
                     state.player_experience += xp;
                     let _ = response_tx.send(NetworkEvent::ExperienceGained { amount: xp });
@@ -1284,7 +1283,7 @@ impl MockNetwork {
                 }
 
                 // 物品消耗：直接移除（count=1 的简化模型）
-                let _ = response_tx.send(NetworkEvent::ItemLost { unique_id });
+                let _ = response_tx.send(NetworkEvent::ItemLost { unique_id, count: 1 });
             }
 
             // ===== 仓库操作（Mock 模式） =====
@@ -1302,7 +1301,7 @@ impl MockNetwork {
                         // 找仓库空位
                         if let Some(storage_slot) = state.player_storage.iter_mut().find(|s| s.is_none()) {
                             *storage_slot = Some(item.clone());
-                            let _ = response_tx.send(NetworkEvent::ItemLost { unique_id }); // 从背包移除
+                            let _ = response_tx.send(NetworkEvent::ItemLost { unique_id, count: 1 }); // 从背包移除
                             let _ = response_tx.send(NetworkEvent::ItemGained { item: item.clone() }); // 重新通知（服务器权威）
                             tracing::debug!("[MOCK] StoreItemRequest: unique_id={} stored", unique_id);
                         } else {
@@ -1323,7 +1322,7 @@ impl MockNetwork {
                         // 找背包空位
                         if let Some(inventory_slot) = state.player_inventory.iter_mut().find(|s| s.is_none()) {
                             *inventory_slot = Some(item.clone());
-                            let _ = response_tx.send(NetworkEvent::ItemLost { unique_id }); // 从仓库移除
+                            let _ = response_tx.send(NetworkEvent::ItemLost { unique_id, count: 1 }); // 从仓库移除
                             let _ = response_tx.send(NetworkEvent::ItemGained { item: item.clone() }); // 重新通知
                             tracing::debug!("[MOCK] TakeBackItemRequest: unique_id={} retrieved", unique_id);
                         } else {
@@ -1347,7 +1346,7 @@ impl MockNetwork {
                             item.count -= count;
                         }
                     }
-                    let _ = response_tx.send(NetworkEvent::ItemLost { unique_id });
+                    let _ = response_tx.send(NetworkEvent::ItemLost { unique_id, count: 1 });
                     tracing::debug!("[MOCK] DropItemRequest: unique_id={} count={}", unique_id, count);
                 }
             }
@@ -1387,11 +1386,13 @@ impl MockNetwork {
                         let total_gold = sell_price * count;
                         state.player_inventory[slot_idx] = None;
                         state.player_gold += total_gold;
-                        let _ = response_tx.send(NetworkEvent::ItemLost { unique_id });
+                        let _ = response_tx.send(NetworkEvent::ItemLost { unique_id, count: 1 });
                         let _ = response_tx.send(NetworkEvent::GoldChanged {
                             delta: total_gold as i32,
                         });
-                        let _ = response_tx.send(NetworkEvent::SellItemReceived);
+                        let _ = response_tx.send(NetworkEvent::SellItemReceived {
+                            unique_id, count: count as u16, success: true,
+                        });
                         tracing::debug!("[MOCK] SellItemRequest: unique_id={} count={} gold={}", unique_id, count, total_gold);
                     }
                 }
@@ -1403,7 +1404,7 @@ impl MockNetwork {
                     if let Some(ref mut item) = state.player_inventory[slot_idx] {
                         let max_dura = item.info.as_ref().map(|i| i.durability).unwrap_or(0);
                         item.current_dura = max_dura;
-                        let _ = response_tx.send(NetworkEvent::RepairItemReceived);
+                        let _ = response_tx.send(NetworkEvent::RepairItemReceived { unique_id });
                         tracing::debug!("[MOCK] RepairItemRequest: unique_id={} dura={}/{}", unique_id, max_dura, max_dura);
                     }
                 }
@@ -1415,7 +1416,7 @@ impl MockNetwork {
                     if let Some(ref mut item) = state.player_inventory[slot_idx] {
                         let max_dura = item.info.as_ref().map(|i| i.durability).unwrap_or(0);
                         item.current_dura = max_dura;
-                        let _ = response_tx.send(NetworkEvent::RepairItemReceived);
+                        let _ = response_tx.send(NetworkEvent::RepairItemReceived { unique_id });
                         tracing::debug!("[MOCK] SRepairItemRequest: unique_id={}", unique_id);
                     }
                 }
@@ -1488,7 +1489,7 @@ impl MockNetwork {
                 });
             }
             NetworkEvent::DivorceRequestSend => {
-                let _ = response_tx.send(NetworkEvent::DivorceRequested2);
+                let _ = response_tx.send(NetworkEvent::DivorceRequested2 { lover_name: "未知".to_string() });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 离婚请求已处理".to_string(),
                 });
@@ -1602,7 +1603,7 @@ impl MockNetwork {
                 });
             }
             NetworkEvent::CollectParcelRequest { mail_id } => {
-                let _ = response_tx.send(NetworkEvent::ParcelCollectedEvent);
+                let _ = response_tx.send(NetworkEvent::ParcelCollectedEvent { success: true });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!("[MOCK] 邮件 #{} 的包裹已领取", mail_id),
                 });
@@ -1613,7 +1614,7 @@ impl MockNetwork {
                 });
             }
             NetworkEvent::SendMailRequest { ref to, ref subject, .. } => {
-                let _ = response_tx.send(NetworkEvent::MailSentEvent);
+                let _ = response_tx.send(NetworkEvent::MailSentEvent { result: 1 });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!("[MOCK] 邮件已发送给 {}（主题：{}）", to, subject),
                 });
@@ -1728,7 +1729,7 @@ impl MockNetwork {
                 });
             }
             NetworkEvent::TradeCancelRequest => {
-                let _ = response_tx.send(NetworkEvent::TradeCancelled);
+                let _ = response_tx.send(NetworkEvent::TradeCancelledEvent { unlock: true });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 交易已取消".to_string(),
                 });
@@ -1748,7 +1749,7 @@ impl MockNetwork {
 
             // ===== 物品操作补充（Mock 模式） =====
             NetworkEvent::LockMailRequest { mail_id } => {
-                let _ = response_tx.send(NetworkEvent::MailLockedItemReceived);
+                let _ = response_tx.send(NetworkEvent::MailLockedItemReceived { unique_id: mail_id, locked: true });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!("[MOCK] 邮件 #{} 的物品已锁定", mail_id),
                 });
@@ -1775,7 +1776,7 @@ impl MockNetwork {
                                         to_item.count += fc;
                                     }
                                     state.player_inventory[from_idx] = None;
-                                    let _ = response_tx.send(NetworkEvent::ItemLost { unique_id: from });
+                                    let _ = response_tx.send(NetworkEvent::ItemLost { unique_id: from, count: 1 });
                                     tracing::debug!("[MOCK] MergeItemRequest: from={} to={}", from, to);
                                 }
                             }
@@ -1816,7 +1817,7 @@ impl MockNetwork {
                             item.count -= count as u16;
                         }
                     }
-                    let _ = response_tx.send(NetworkEvent::ItemLost { unique_id });
+                    let _ = response_tx.send(NetworkEvent::ItemLost { unique_id, count: 1 });
                     tracing::debug!("[MOCK] DropItemStackRequest: unique_id={} count={}", unique_id, count);
                 }
             }
@@ -1923,7 +1924,7 @@ impl MockNetwork {
             }
 
             NetworkEvent::ReplaceWedRingRequest => {
-                let _ = response_tx.send(NetworkEvent::NPCReplaceWedRingReceived);
+                let _ = response_tx.send(NetworkEvent::NPCReplaceWedRingReceived { rate: 1.0 });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 替换结婚戒指".to_string(),
                 });
@@ -2101,7 +2102,7 @@ impl MockNetwork {
                 });
             }
 
-            NetworkEvent::GuildNameReturn => {
+            NetworkEvent::GuildNameReturn { .. } => {
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 行会名称返回".to_string(),
                 });

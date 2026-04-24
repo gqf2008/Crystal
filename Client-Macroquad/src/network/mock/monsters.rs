@@ -106,15 +106,13 @@ impl MockNetwork {
                     },
                 });
                 let _ = response_tx.send(NetworkEvent::ObjectAttack {
-                    packet: mir2_shared::packets::server::ObjectAttack {
-                        object_id: mid,
-                        location_x: (mx.max(0) as u32),
-                        location_y: (my.max(0) as u32),
-                        direction: dir as u8,
-                        spell: 0,
-                        level: 0,
-                        attack_type: 0,
-                    },
+                    object_id: mid,
+                    location_x: (mx.max(0) as u32),
+                    location_y: (my.max(0) as u32),
+                    direction: dir as u8,
+                    spell: 0,
+                    level: 0,
+                    attack_type: 0,
                 });
 
                 let damage = if zone_is_boss {
@@ -135,6 +133,9 @@ impl MockNetwork {
                     object_id: player_id,
                     attacker_id: mid,
                     damage,
+                    location_x: 0,
+                    location_y: 0,
+                    direction: 0,
                 });
                 let _ = response_tx.send(NetworkEvent::HealthChanged {
                     current: state.player_hp_current.max(0) as u32,
@@ -144,7 +145,7 @@ impl MockNetwork {
                 if state.player_hp_current <= 0 {
                     // 同一 tick 可能多只怪同时攻击；用 player_dead_since 去重，避免重复死亡事件/音效。
                     if state.player_dead_since.is_none() {
-                        let _ = response_tx.send(NetworkEvent::ObjectDied { object_id: player_id });
+                        let _ = response_tx.send(NetworkEvent::ObjectDied { object_id: player_id, location_x: 0, location_y: 0, direction: 0, death_type: 0 });
                         let _ = response_tx.send(NetworkEvent::PlaySound {
                             sound_id: SFX_PLAYER_DIED,
                         });

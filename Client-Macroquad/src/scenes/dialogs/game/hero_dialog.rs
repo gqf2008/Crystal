@@ -19,6 +19,7 @@ use macroquad::prelude::*;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
 use super::native_ui_utils::DragHelper;
+use super::character_dialog::SkillInfo;
 
 /// 英雄行为模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +70,19 @@ pub enum HeroDialogAction {
     SetAutoMpPot { value: u32 },
 }
 
+/// 英雄管理列表条目 (from ManageHeroes packet)
+#[derive(Debug, Clone)]
+pub struct ManageHeroEntry {
+    pub index: i32,
+    pub name: String,
+    pub level: u16,
+    pub class: u8,
+    pub gender: u8,
+}
+
+const HERO_SPAWN_UNSUMMONED: u8 = 1;
+const HERO_SPAWN_DEAD: u8 = 3;
+
 pub struct HeroDialogHybrid {
     position: Vec2,
     visible: bool,
@@ -83,6 +97,20 @@ pub struct HeroDialogHybrid {
     name_bg_texture: Option<Texture2D>,
     // Behaviour button textures
     behaviour_bg_textures: [Option<Texture2D>; 4],
+    // Auto-pot state
+    auto_pot_unlocked: bool,
+    auto_hp_pot_value: u32,
+    auto_mp_pot_value: u32,
+    auto_hp_pot_item_id: u32,
+    auto_mp_pot_item_id: u32,
+    // Hero manage list (from ManageHeroes packet)
+    manage_heroes: Vec<ManageHeroEntry>,
+    // Current hero ID
+    hero_id: u32,
+    // Base stats (from HeroBaseStatsInfo packet)
+    base_stats: Vec<i32>,
+    // 技能列表（来自 MagicLearned / MagicLeveledUp / MagicRemoved）
+    skills: Vec<SkillInfo>,
 }
 
 impl Default for HeroDialogHybrid {
@@ -108,6 +136,15 @@ impl HeroDialogHybrid {
             info_bg_texture: None,
             name_bg_texture: None,
             behaviour_bg_textures: [None, None, None, None],
+            auto_pot_unlocked: false,
+            auto_hp_pot_value: 0,
+            auto_mp_pot_value: 0,
+            auto_hp_pot_item_id: 0,
+            auto_mp_pot_item_id: 0,
+            manage_heroes: Vec::new(),
+            hero_id: 0,
+            base_stats: Vec::new(),
+            skills: Vec::new(),
         }
     }
 
@@ -152,9 +189,122 @@ impl HeroDialogHybrid {
         self.current_behaviour = behaviour;
     }
 
+    /// 更新英雄等级
+    pub fn update_hero_level(&mut self, new_level: u16) {
+        if let Some(info) = &mut self.hero_info {
+            info.level = new_level;
+        }
+    }
+
+    /// 更新英雄 HP/MP
+    pub fn update_health(&mut self, hp: i32, mp: i32) {
+        if let Some(info) = &mut self.hero_info {
+            info.current_hp = hp;
+            info.current_mp = mp;
+            info.is_dangerous = info.max_hp > 0 && (hp as f32 / info.max_hp as f32) < 0.2;
+            info.is_alive = hp > 0;
+        } else {
+            self.hero_info = Some(HeroInfo {
+                name: "英雄".to_string(),
+                level: 1,
+                class: 0,
+                gender: 0,
+                current_hp: hp,
+                max_hp: hp.max(1),
+                current_mp: mp,
+                max_mp: mp.max(1),
+                current_exp: 0,
+                max_exp: 0,
+                is_alive: hp > 0,
+                is_dangerous: false,
+            });
+        }
+    }
+
+    /// 更新英雄召唤状态
+    pub fn set_spawn_state(&mut self, state: u8) {
+        match state {
+            HERO_SPAWN_UNSUMMONED => self.hero_info = None,
+            HERO_SPAWN_DEAD => {
+                if let Some(info) = &mut self.hero_info {
+                    info.is_alive = false;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// 自动喝药解锁
+    pub fn set_auto_pot_unlocked(&mut self, unlocked: bool) {
+        self.auto_pot_unlocked = unlocked;
+    }
+
+    /// 设置自动喝药阈值
+    pub fn set_auto_pot_value(&mut self, pot_type: u8, value: u32) {
+        if pot_type == 0 {
+            self.auto_hp_pot_value = value;
+        } else {
+            self.auto_mp_pot_value = value;
+        }
+    }
+
+    /// 设置自动喝药物品
+    pub fn set_auto_pot_item(&mut self, slot: i32, item_id: u32) {
+        if slot == 0 {
+            self.auto_hp_pot_item_id = item_id;
+        } else {
+            self.auto_mp_pot_item_id = item_id;
+        }
+    }
+
     /// 清除英雄信息（英雄被移除）
     pub fn clear_hero_info(&mut self) {
         self.hero_info = None;
+    }
+
+    /// 更新英雄管理列表 (from ManageHeroes packet)
+    pub fn update_manage_list(&mut self, heroes: Vec<ManageHeroEntry>) {
+        self.manage_heroes = heroes;
+    }
+
+    /// 设置当前英雄ID
+    pub fn set_hero_id(&mut self, hero_id: u32) {
+        self.hero_id = hero_id;
+    }
+
+    /// 设置英雄基础属性 (from HeroBaseStatsInfo)
+    pub fn set_base_stats(&mut self, stats: Vec<i32>) {
+        self.base_stats = stats;
+    }
+
+    /// 英雄学会/更新技能
+    pub fn learn_skill(&mut self, spell_id: u8, name: String, level: u8, icon: u8) {
+        if let Some(existing) = self.skills.iter_mut().find(|s| s.spell_id == spell_id) {
+            existing.level = level;
+            existing.name = name;
+            existing.icon_index = icon as usize;
+            return;
+        }
+        self.skills.push(SkillInfo { spell_id, name, level, icon_index: icon as usize, can_use: true });
+    }
+
+    /// 英雄技能升级
+    pub fn level_up_skill(&mut self, spell_id: u8, level: u8) {
+        if let Some(skill) = self.skills.iter_mut().find(|s| s.spell_id == spell_id) {
+            skill.level = level;
+        }
+    }
+
+    /// 英雄移除技能
+    pub fn remove_skill(&mut self, spell_id: u8) {
+        self.skills.retain(|s| s.spell_id != spell_id);
+    }
+
+    /// 切换英雄技能可用状态
+    pub fn toggle_skill(&mut self, spell_id: u8, can_use: bool) {
+        if let Some(skill) = self.skills.iter_mut().find(|s| s.spell_id == spell_id) {
+            skill.can_use = can_use;
+        }
     }
 
     /// 获取待处理动作

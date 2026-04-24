@@ -116,7 +116,7 @@ impl NetContext {
 
                 // 战斗相关
                 NetworkEvent::PlayerStruck { .. }
-                | NetworkEvent::PlayerDied
+                | NetworkEvent::PlayerDied { .. }
                 | NetworkEvent::ObjectStruck { .. }
                 | NetworkEvent::ObjectDied { .. } => {
                     result.combat.push(event);
@@ -190,7 +190,7 @@ impl NetContext {
                 matches!(
                     e,
                     NetworkEvent::PlayerStruck { .. }
-                        | NetworkEvent::PlayerDied
+                        | NetworkEvent::PlayerDied { .. }
                         | NetworkEvent::ObjectStruck { .. }
                         | NetworkEvent::ObjectDied { .. }
                 )

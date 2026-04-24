@@ -45,25 +45,28 @@ impl PacketHandler for TradeHandler {
 
             // TradeItem - 交易中添加的物品
             x if x == ServerPacketIds::TradeItem as u16 => {
-                if let Ok(_packet) = server::TradeItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::TradeItemAdded);
-                    tracing::debug!("💱 Trade item added");
+                if let Ok(packet) = server::TradeItem::read_body(&mut cursor) {
+                    let count = packet.trade_items.iter().filter(|i| i.is_some()).count();
+                    events.push(NetworkEvent::TradeItemAdded {
+                        items: packet.trade_items,
+                    });
+                    tracing::debug!("💱 Trade item added: {} items", count);
                 }
             }
 
-            // TradeConfirm - 对方确认交易
+            // TradeConfirm - 对方确认交易（锁定交易窗口）
             x if x == ServerPacketIds::TradeConfirm as u16 => {
                 if let Ok(_packet) = server::TradeConfirm::read_body(&mut cursor) {
-                    events.push(NetworkEvent::TradeConfirmedEvent { locked: false });
-                    tracing::debug!("💱 Trade confirmed");
+                    events.push(NetworkEvent::TradeConfirmedEvent { locked: true });
+                    tracing::debug!("💱 Trade confirmed (locked)");
                 }
             }
 
             // TradeCancel - 对方取消交易/解锁
             x if x == ServerPacketIds::TradeCancel as u16 => {
-                if let Ok(_packet) = server::TradeCancel::read_body(&mut cursor) {
-                    events.push(NetworkEvent::TradeCancelledEvent);
-                    tracing::debug!("💱 Trade cancelled/unlocked");
+                if let Ok(packet) = server::TradeCancel::read_body(&mut cursor) {
+                    events.push(NetworkEvent::TradeCancelledEvent { unlock: packet.unlock });
+                    tracing::debug!("💱 Trade cancelled (unlock={})", packet.unlock);
                 }
             }
 

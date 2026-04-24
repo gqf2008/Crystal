@@ -24,6 +24,8 @@ pub struct GroupMember {
     pub online: bool,
     pub is_leader: bool,
     pub map_name: String,   // 成员所在地图名称
+    pub x: i32,             // 地图坐标X
+    pub y: i32,             // 地图坐标Y
 }
 
 /// 组队对话框动作
@@ -139,6 +141,14 @@ impl GroupDialogHybrid {
     pub fn update_member_map(&mut self, name: &str, map_name: String) {
         if let Some(member) = self.members.iter_mut().find(|m| m.name == name) {
             member.map_name = map_name;
+        }
+    }
+
+    /// 更新成员地图坐标
+    pub fn update_member_location(&mut self, name: &str, x: i32, y: i32) {
+        if let Some(member) = self.members.iter_mut().find(|m| m.name == name) {
+            member.x = x;
+            member.y = y;
         }
     }
 

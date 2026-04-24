@@ -241,15 +241,13 @@ impl MockNetwork {
                                 });
 
                                 let _ = response_tx.send(NetworkEvent::ObjectAttack {
-                                    packet: mir2_shared::packets::server::ObjectAttack {
-                                        object_id: attacker.id,
-                                        location_x: attacker.grid.0 as u32,
-                                        location_y: attacker.grid.1 as u32,
-                                        direction: attacker.direction as u8,
-                                        spell: 0,
-                                        level: 0,
-                                        attack_type: 0,
-                                    },
+                                    object_id: attacker.id,
+                                    location_x: attacker.grid.0 as u32,
+                                    location_y: attacker.grid.1 as u32,
+                                    direction: attacker.direction as u8,
+                                    spell: 0,
+                                    level: 0,
+                                    attack_type: 0,
                                 });
 
                                 let base = 4 + (attacker.level as i32 / 2);
@@ -261,6 +259,9 @@ impl MockNetwork {
                                     object_id: target.id,
                                     attacker_id: attacker.id,
                                     damage: dmg,
+                                    location_x: 0,
+                                    location_y: 0,
+                                    direction: 0,
                                 });
 
                                 if target.hp_current <= 0 {
@@ -271,12 +272,12 @@ impl MockNetwork {
 
                                     let _ = response_tx.send(NetworkEvent::ObjectDied {
                                         object_id: target.id,
+                                        location_x: 0,
+                                        location_y: 0,
+                                        direction: 0,
+                                        death_type: 0,
                                     });
-                                    let _ = response_tx.send(NetworkEvent::ObjectRemove {
-                                        packet: mir2_shared::packets::server::ObjectRemove {
-                                            object_id: target.id,
-                                        },
-                                    });
+                                    let _ = response_tx.send(NetworkEvent::ObjectRemove { object_id: target.id });
                                 }
                             }
                         }

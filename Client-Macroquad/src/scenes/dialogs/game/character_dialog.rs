@@ -124,14 +124,16 @@ enum DragCommand {
 /// 技能数据
 #[derive(Debug, Clone)]
 pub struct SkillInfo {
+    pub spell_id: u8,
     pub name: String,
     pub level: u8,
     pub icon_index: usize,
+    pub can_use: bool,
 }
 
 impl SkillInfo {
     pub fn new(name: &str, level: u8, icon_index: usize) -> Self {
-        Self { name: name.to_string(), level, icon_index }
+        Self { spell_id: 0, name: name.to_string(), level, icon_index, can_use: true }
     }
 }
 
@@ -352,6 +354,36 @@ impl CharacterDialogHybrid {
     /// 检查当前是否在技能标签页
     pub fn is_skills_tab(&self) -> bool {
         self.current_tab == CharacterTabHybrid::Skills
+    }
+
+    /// 添加学到的技能
+    pub fn learn_skill(&mut self, spell_id: u8, name: String, level: u8, icon: u8) {
+        if let Some(existing) = self.skills.iter_mut().find(|s| s.spell_id == spell_id) {
+            existing.level = level;
+            existing.name = name;
+            existing.icon_index = icon as usize;
+            return;
+        }
+        self.skills.push(SkillInfo { spell_id, name, level, icon_index: icon as usize, can_use: true });
+    }
+
+    /// 技能升级
+    pub fn level_up_skill(&mut self, spell_id: u8, level: u8) {
+        if let Some(skill) = self.skills.iter_mut().find(|s| s.spell_id == spell_id) {
+            skill.level = level;
+        }
+    }
+
+    /// 移除技能
+    pub fn remove_skill(&mut self, spell_id: u8) {
+        self.skills.retain(|s| s.spell_id != spell_id);
+    }
+
+    /// 切换技能可用状态
+    pub fn toggle_skill(&mut self, spell_id: u8, can_use: bool) {
+        if let Some(skill) = self.skills.iter_mut().find(|s| s.spell_id == spell_id) {
+            skill.can_use = can_use;
+        }
     }
     
     pub fn switch_tab(&mut self, tab: CharacterTabHybrid) {
@@ -643,14 +675,26 @@ impl CharacterDialogHybrid {
             let row = i / 2;
             let x = start_x + col as f32 * col_width;
             let y = start_y + row as f32 * row_height;
-            
-            // 技能名称
-            let color = if skill.level > 0 { WHITE } else { GRAY };
+
+            // 技能名称（禁用态：红色灰化）
+            let color = if !skill.can_use {
+                Color::from_rgba(180, 80, 80, 255)
+            } else if skill.level > 0 {
+                WHITE
+            } else {
+                GRAY
+            };
             draw_text_cn(&skill.name, x, y, 12.0, color);
-            
+
             // 技能等级
             let level_text = format!("Lv.{}", skill.level);
-            let level_color = if skill.level > 0 { GOLD } else { DARKGRAY };
+            let level_color = if !skill.can_use {
+                Color::from_rgba(150, 60, 60, 255)
+            } else if skill.level > 0 {
+                GOLD
+            } else {
+                DARKGRAY
+            };
             draw_text_cn(&level_text, x + 70.0, y, 11.0, level_color);
         }
     }

@@ -317,6 +317,7 @@ pub struct LearnedMagic {
     pub level: u8,        // 技能等级 (0-3)
     pub experience: u32,  // 技能经验
     pub key_slot: Option<u8>, // 绑定的快捷键槽位 (F1-F8)
+    pub can_use: bool,    // 是否可用（SpellToggle）
 }
 
 impl LearnedMagic {
@@ -326,6 +327,7 @@ impl LearnedMagic {
             level: 0,
             experience: 0,
             key_slot: None,
+            can_use: true,
         }
     }
 }

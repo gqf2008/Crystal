@@ -170,10 +170,10 @@ pub enum NetworkEvent {
     
     // 服务器 → 客户端
     PlayerStruck { attacker_id: u32, damage: i32 },
-    PlayerDied,
-    ObjectStruck { object_id: u32, attacker_id: u32, damage: i32 },
-    ObjectDied { object_id: u32 },
-    ObjectAttack { packet: mir2_shared::packets::server::ObjectAttack },
+    PlayerDied { x: u32, y: u32, direction: u8 },
+    ObjectStruck { object_id: u32, attacker_id: u32, damage: i32, location_x: u32, location_y: u32, direction: u8 },
+    ObjectDied { object_id: u32, location_x: u32, location_y: u32, direction: u8, death_type: u8 },
+    ObjectAttack { object_id: u32, location_x: u32, location_y: u32, direction: u8, spell: u8, level: u16, attack_type: u8 },
 
     /// 伤害数值提示（真实协议：DamageIndicator）
     ///
@@ -215,7 +215,7 @@ pub enum NetworkEvent {
     ObjectPlayer { packet: mir2_shared::packets::server::ObjectPlayer },
     ObjectMonster { packet: mir2_shared::packets::server::ObjectMonster },
     ObjectNpc { packet: mir2_shared::packets::server::ObjectNpc },
-    ObjectRemove { packet: mir2_shared::packets::server::ObjectRemove },
+    ObjectRemove { object_id: u32 },
     ObjectTurn { packet: mir2_shared::packets::server::ObjectTurn },
     ObjectWalk { packet: mir2_shared::packets::server::ObjectWalk },
     ObjectRun { packet: mir2_shared::packets::server::ObjectRun },
@@ -243,35 +243,36 @@ pub enum NetworkEvent {
     
     // 服务器 → 客户端
     ItemGained { item: mir2_shared::UserItem },
-    ItemLost { unique_id: u64 },
-    ItemMoved { from: u32, to: u32 },
-    ItemEquipped { unique_id: u64, slot: u8, success: bool },
-    ItemMerged { id_from: u64, id_to: u64, success: bool },
-    ItemRemoved { unique_id: u64 },
-    ItemSlotRemoved { slot: u32 },
+    ItemLost { unique_id: u64, count: u32 },
+    ItemMoved { grid: mir2_shared::enums::MirGridType, from: u32, to: u32, success: bool },
+    ItemEquipped { grid: mir2_shared::enums::MirGridType, unique_id: u64, slot: u8, success: bool },
+    ItemMerged { grid_from: mir2_shared::enums::MirGridType, grid_to: mir2_shared::enums::MirGridType, id_from: u64, id_to: u64, success: bool },
+    ItemRemoved { grid: mir2_shared::enums::MirGridType, unique_id: u64, to: i32, success: bool },
+    ItemSlotRemoved { grid: mir2_shared::enums::MirGridType, grid_to: mir2_shared::enums::MirGridType, slot: u32, unique_id: u64, success: bool },
     ItemTakenBack { from: i32, to: i32, success: bool },
     ItemStored { from: i32, to: i32, success: bool },
-    ItemSplit { unique_id: u64, count: u32 },
+    ItemSplit { grid: mir2_shared::enums::MirGridType, unique_id: u64, count: u32 },
     ItemUsed { unique_id: u64 },
-    ItemDropped { unique_id: u64 },
+    ItemDropped { unique_id: u64, count: u32, success: bool },
     ItemRefreshed { item: mir2_shared::UserItem },
     ItemSlotSizeChanged { slot: u32, size: u32 },
-    ItemSealed { unique_id: u64 },
-    ItemSlotEquipped { slot: u32, unique_id: u64, success: bool },
-    ItemCombined { id_from: u64, id_to: u64, success: bool, destroy: bool },
+    ItemSealed { unique_id: u64, expiry_date: i64 },
+    ItemSlotEquipped { grid: mir2_shared::enums::MirGridType, grid_to: mir2_shared::enums::MirGridType, slot: u32, unique_id: u64, success: bool },
+    ItemCombined { grid: mir2_shared::enums::MirGridType, id_from: u64, id_to: u64, success: bool, destroy: bool },
     ItemUpgraded { item: mir2_shared::UserItem },
     GroundItem { packet: mir2_shared::packets::server::ObjectItem },
     CreditChanged { delta: i32 },
-    ObjectHarvested { object_id: u32 },
-    RefineItemDeposited,
-    RefineItemRetrieved,
-    RefineCancelled,
-    RefineItemCompleted,
-    TradeItemDeposited,
-    TradeItemRetrieved,
-    HeroItemTakenBack,
-    HeroItemTransferred,
-    NewItemInfoReceived,
+    ObjectHarvested { object_id: u32, location_x: i32, location_y: i32, direction: mir2_shared::enums::MirDirection },
+    RefineItemDeposited { from: i32, to: i32, success: bool },
+    RefineItemRetrieved { from: i32, to: i32, success: bool },
+    RefineCancelled { unlock: bool },
+    RefineItemCompleted { unique_id: u64 },
+    TradeItemDeposited { from_slot: i32, success: bool },
+    TradeItemRetrieved { from_slot: i32, success: bool },
+    HeroItemTakenBack { from: i32, to: i32, success: bool },
+    HeroItemTransferred { from: i32, to: i32, success: bool },
+    NewItemInfoReceived { item_index: i32, item_name: String },
+    NewChatItemReceived { item_id: i32 },
     /// 地面金币（ObjectGold）
     ObjectGoldReceived { packet: mir2_shared::packets::server::ObjectGold },
 
@@ -320,7 +321,22 @@ pub enum NetworkEvent {
     
     // 服务器 → 客户端
     GuildInvite { inviter: String, guild_name: String },
-    GuildJoined { guild_name: String },
+    GuildJoined {
+        guild_name: String,
+        rank_name: String,
+        level: u8,
+        experience: i64,
+        max_experience: i64,
+        gold: u32,
+        spare_points: u8,
+        member_count: i32,
+        max_members: i32,
+        voting: bool,
+        item_count: u8,
+        buff_count: u8,
+        my_options: u8,
+        my_rank_id: i32,
+    },
     GuildLeft,
     
     // ========================================================================
@@ -338,7 +354,6 @@ pub enum NetworkEvent {
     TradeRequested { requester: String },
     TradeStarted { partner: String },
     TradeCompleted,
-    TradeCancelled,
     
     // ========================================================================
     // 任务事件（Quest Events）
@@ -399,16 +414,16 @@ pub enum NetworkEvent {
     // ========================================================================
 
     // 服务器 -> 客户端
-    MagicListReceived,
-    MagicLearned { spell: mir2_shared::enums::Spell, level: u8 },
-    MagicRemoved { spell: mir2_shared::enums::Spell },
-    MagicLeveledUp { spell: mir2_shared::enums::Spell, level: u8 },
+    MagicListReceived { spell: mir2_shared::enums::Spell, target_id: u32, target_x: i32, target_y: i32, cast: bool, level: u8 },
+    MagicLearned { magic: mir2_shared::data::client_data::ClientMagic, hero: bool },
+    MagicRemoved { spell: mir2_shared::enums::Spell, hero: bool },
+    MagicLeveledUp { spell: mir2_shared::enums::Spell, level: u8, hero: bool },
     MagicDelayReceived { object_id: u32, spell: mir2_shared::enums::Spell, delay: u32 },
     MagicCastEvent { spell: mir2_shared::enums::Spell },
-    ObjectMagicCast { object_id: u32, spell: mir2_shared::enums::Spell, target_id: u32 },
-    ObjectEffectReceived { object_id: u32, effect: u16, effect_type: u8 },
+    ObjectMagicCast { object_id: u32, location_x: i32, location_y: i32, direction: mir2_shared::enums::MirDirection, spell: mir2_shared::enums::Spell, target_id: u32, target_x: i32, target_y: i32, cast: bool, level: u8 },
+    ObjectEffectReceived { object_id: u32, effect: u16, effect_type: u8, delay_time: u32, time: u32 },
     ObjectProjectileReceived { spell: mir2_shared::enums::Spell, source: u32, destination: u32 },
-    SpellToggled { spell: mir2_shared::enums::Spell, can_use: bool },
+    SpellToggled { spell: mir2_shared::enums::Spell, can_use: bool, hero: bool },
 
     // 客户端 -> 服务器
     MagicKeySet,
@@ -418,7 +433,7 @@ pub enum NetworkEvent {
     // ========================================================================
 
     // 服务器 -> 客户端
-    BuffAdded { object_id: u32, buff_id: u32 },
+    BuffAdded { object_id: u32, buff_id: u32, visible: bool, expire_time: i64, infinite: bool, paused: bool },
     BuffRemoved { object_id: u32, buff_id: u32 },
     BuffPaused { object_id: u32, buff_id: u32, paused: bool },
 
@@ -427,22 +442,22 @@ pub enum NetworkEvent {
     // ========================================================================
 
     // 服务器 -> 客户端
-    ObjectHeroSpawned,
+    ObjectHeroSpawned { packet: mir2_shared::packets::server::ObjectHero },
     ObjectHidden { object_id: u32, hidden: bool },
     ObjectShown { object_id: u32 },
-    ObjectTeleportingOut { object_id: u32 },
-    ObjectTeleportingIn,
+    ObjectTeleportingOut { object_id: u32, teleport_type: u8 },
+    ObjectTeleportingIn { object_id: u32, teleport_type: u8 },
     PlayerTeleportedIn,
-    ObjectBackStepped,
+    ObjectBackStepped { object_id: u32, location_x: i32, location_y: i32, direction: mir2_shared::enums::MirDirection, distance: i32 },
     PlayerBackStepped { x: i32, y: i32 },
-    ObjectDashing,
+    ObjectDashing { object_id: u32, location_x: u32, location_y: u32, direction: u8 },
     PlayerDashing { x: i32, y: i32 },
-    ObjectDashFailed { object_id: u32 },
-    PlayerDashFailed,
-    ObjectSatDown { object_id: u32 },
-    NewMapInfoReceived,
-    WorldMapSetupReceived,
-    SearchMapResultReceived,
+    ObjectDashFailed { object_id: u32, location_x: u32, location_y: u32, direction: u8 },
+    PlayerDashFailed { location_x: u32, location_y: u32, direction: u8 },
+    ObjectSatDown { object_id: u32, direction: u8, location: (i32, i32) },
+    NewMapInfoReceived { packet: mir2_shared::packets::server::NewMapInfo },
+    WorldMapSetupReceived { icons: Vec<mir2_shared::packets::server::WorldMapIcon> },
+    SearchMapResultReceived { map_index: i32, location_x: u32, location_y: u32 },
     TimeOfDayChanged { time_of_day: u8 },
 
     // ========================================================================
@@ -450,7 +465,7 @@ pub enum NetworkEvent {
     // ========================================================================
 
     // 服务器 -> 客户端
-    PlayerUpdated,
+    PlayerUpdated { object_id: u32, light: u8, weapon: i16, weapon_effect: i16, armor: i16, wings_effect: u8 },
     AttackModeChanged { mode: u8 },
     PetModeChanged { mode: u8 },
     PlayerColourChanged { colour: u32 },
@@ -467,9 +482,9 @@ pub enum NetworkEvent {
 
     // 服务器 -> 客户端
     TradeGoldAdded { amount: u32 },
-    TradeItemAdded,
+    TradeItemAdded { items: Vec<Option<mir2_shared::data::item::UserItem>> },
     TradeConfirmedEvent { locked: bool },
-    TradeCancelledEvent,
+    TradeCancelledEvent { unlock: bool },
 
     // ========================================================================
     // 任务扩展事件（Quest Extended Events）
@@ -477,7 +492,7 @@ pub enum NetworkEvent {
 
     // 服务器 -> 客户端
     QuestListUpdated,
-    QuestItemGained,
+    QuestItemGained { item_id: i32 },
     QuestItemLost { unique_id: u64 },
     QuestShared { quest_id: u32 },
     QuestProgressUpdated { quest_id: u32, progress: String },
@@ -513,18 +528,18 @@ pub enum NetworkEvent {
     GuildMemberUpdated { name: String, rank: u8, online: bool },
     GuildExpGained { amount: i64 },
     GuildNameReceived { name: String },
-    GuildStorageGoldChanged { delta: i64 },
+    GuildStorageGoldChanged { delta: i64, total: u32 },
     GuildStorageItemChanged { change_type: u8, slot: i32 },
-    GuildStorageListReceived,
-    GuildWarRequested,
+    GuildStorageListReceived { items: Vec<Option<mir2_shared::data::client_data::GuildStorageItem>> },
+    GuildWarRequested { guild_name: String },
     GuildBuffListReceived { buff_ids: Vec<i32> },
-    GuildTerritoryPageReceived,
-    GuildTerritoryPurchased,
+    GuildTerritoryPageReceived { territories: Vec<mir2_shared::packets::server::special_systems::TerritoryInfo> },
+    GuildTerritoryPurchased { success: bool },
 
     // 客户端 -> 服务器
     EditGuildMember { member_name: String, rank: u8 },
     EditGuildNotice { notice: String },
-    GuildNameReturn,
+    GuildNameReturn { name: String },
     RequestGuildInfo,
     GuildStorageGoldChange { amount: i64 },
     GuildStorageItemChangeRequest,
@@ -586,36 +601,31 @@ pub enum NetworkEvent {
 
     // 服务器 -> 客户端
     NPCSellReceived,
-    NPCRepairReceived,
-    NPCSRepairReceived,
-    NPCRefineReceived,
+    NPCRepairReceived { rate: f32 },
+    NPCSRepairReceived { rate: f32 },
+    NPCRefineReceived { rate: f32, refining: bool },
     NPCCheckRefineReceived,
-    NPCCollectRefineReceived,
-    NPCReplaceWedRingReceived,
+    NPCCollectRefineReceived { success: bool },
+    NPCReplaceWedRingReceived { rate: f32 },
     NPCStorageReceived,
     NPCConsignReceived,
-    NPCMarketEvent,
-    NPCMarketPageEvent,
-    ConsignItemReceived,
-    MarketFailedEvent { reason: String },
-    MarketSuccessEvent,
-    SellItemReceived,
-    CraftItemReceived,
-    NewRecipeInfoReceived,
-    RepairItemReceived,
-    ItemRepairedEvent,
+    SellItemReceived { unique_id: u64, count: u16, success: bool },
+    CraftItemReceived { unique_id: u64, count: u16, success: bool },
+    NewRecipeInfoReceived { recipe_id: i32 },
+    RepairItemReceived { unique_id: u64 },
+    ItemRepairedEvent { unique_id: u64, max_dura: u16, current_dura: u16 },
     DefaultNPCReceived { npc_id: u32, message: String },
-    NPCUpdated,
-    NPCImageUpdated,
+    NPCUpdated { npc_id: u32 },
+    NPCImageUpdated { npc_id: u32, image: u16 },
     NPCAwakeningReceived,
     NPCDisassembleReceived,
     NPCDowngradeReceived,
     NPCResetReceived,
-    AwakeningNeedMaterialsReceived,
-    AwakeningLockedItemReceived,
-    AwakeningReceived,
-    NPCPearlGoodsReceived,
-    NPCRequestInputReceived { npc_id: u32, prompt: String },
+    AwakeningNeedMaterialsReceived { item_id: i32, materials: Vec<(i32, i32)> },
+    AwakeningLockedItemReceived { unique_id: u64, locked: bool },
+    AwakeningReceived { result: i32, remove_id: i64 },
+    NPCPearlGoodsReceived { rate: i32, item_list: Vec<i32> },
+    NPCRequestInputReceived { npc_id: u32, prompt: String, max_length: u8 },
 
     // 客户端 -> 服务器
     LogOutRequest,
@@ -631,18 +641,18 @@ pub enum NetworkEvent {
     // ========================================================================
 
     // 服务器 -> 客户端
-    HeroCreateRequested,
-    NewHeroCreated,
+    HeroCreateRequested { can_create_class: Vec<bool> },
+    NewHeroCreated { hero_info: String },
     HeroInfoReceived { hero_id: u32 },
     HeroSpawnStateUpdated { state: u8 },
-    HeroAutoPotUnlocked,
+    HeroAutoPotUnlocked { unlocked: bool },
     HeroAutoPotSet { pot_type: u8, value: u32 },
-    HeroAutoPotItemSet { item_id: u32 },
-    HeroBehaviourSet { behaviour: u8 },
-    HeroManageReceived,
-    HeroChanged,
-    HeroBaseStatsReceived,
-    NewHeroInfoReceived,
+    HeroAutoPotItemSet { slot: i32, item_id: u32 },
+    HeroBehaviourSet { behaviour: u8, pet_mode: u8 },
+    HeroManageReceived { heroes: Vec<mir2_shared::data::client_data::ClientHeroInformation> },
+    HeroChanged { success: bool },
+    HeroBaseStatsReceived { stats: Vec<i32> },
+    NewHeroInfoReceived { info: String },
     HeroExperienceGained { amount: i64 },
     HeroLevelUp { new_level: u16 },
 
@@ -659,10 +669,10 @@ pub enum NetworkEvent {
 
     // 服务器 -> 客户端
     MailReceived { mails: Vec<mir2_shared::packets::server::MailInfo> },
-    MailLockedItemReceived,
-    MailSendRequestReceived,
-    MailSentEvent,
-    ParcelCollectedEvent,
+    MailLockedItemReceived { unique_id: u64, locked: bool },
+    MailSendRequestReceived { mail_id: u64 },
+    MailSentEvent { result: i8 },
+    ParcelCollectedEvent { success: bool },
     MailCostReceived { cost: u32 },
 
     // 客户端 -> 服务器
@@ -678,11 +688,11 @@ pub enum NetworkEvent {
 
     // 服务器 -> 客户端
     NPCConsignEvent,
-    NPCMarketEvent2,
-    NPCMarketPageEvent2,
-    ConsignItemEvent,
+    NPCMarketEvent2 { pages: Vec<String> },
+    NPCMarketPageEvent2 { listings: Vec<mir2_shared::packets::server::MarketListing> },
+    ConsignItemEvent { unique_id: u64, success: bool },
     MarketFailedEvent2 { reason: String },
-    MarketSuccessEvent2,
+    MarketSuccessEvent2 { message: String },
 
     // 客户端 -> 服务器
     ConsignItemRequest { item_id: u64, price: u64 },
@@ -698,10 +708,10 @@ pub enum NetworkEvent {
     // ========================================================================
 
     // 服务器 -> 客户端
-    NewIntelligentCreatureReceived,
-    IntelligentCreatureListUpdated,
-    IntelligentCreatureRenameEnabled,
-    IntelligentCreaturePickupReceived,
+    NewIntelligentCreatureReceived { creature_type: u8 },
+    IntelligentCreatureListUpdated { creatures: Vec<mir2_shared::packets::server::special_systems::IntelligentCreatureInfo> },
+    IntelligentCreatureRenameEnabled { can_rename: bool },
+    IntelligentCreaturePickupReceived { enabled: bool },
 
     // 客户端 -> 服务器
     UpdateIntelligentCreatureRequest,
@@ -714,8 +724,8 @@ pub enum NetworkEvent {
 
     // 服务器 -> 客户端
     MarriageRequested2 { requester: String },
-    DivorceRequested2,
-    MentorRequested2,
+    DivorceRequested2 { lover_name: String },
+    MentorRequested2 { mentor_name: String },
     LoverUpdated { lover_name: String, date: i64 },
     MentorUpdated { mentor_name: String, mentor_level: i32, mentor_online: bool },
 
@@ -735,18 +745,18 @@ pub enum NetworkEvent {
     // ========================================================================
 
     // 服务器 -> 客户端
-    RentalItemsReceived,
+    RentalItemsReceived { items: Vec<mir2_shared::packets::server::rental_system::RentalItemInfo> },
     ItemRentalRequested,
     ItemRentalFeeReceived { fee: u32 },
     ItemRentalPeriodReceived { period: u32 },
-    RentalItemDeposited,
-    RentalItemRetrieved,
-    RentalItemUpdated,
-    ItemRentalCancelled,
-    ItemRentalLocked,
-    ItemRentalPartnerLocked,
-    ItemRentalConfirmable,
-    ItemRentalConfirmed,
+    RentalItemDeposited { unique_id: u64, success: bool },
+    RentalItemRetrieved { unique_id: u64, success: bool },
+    RentalItemUpdated { fee: u32, period: i32 },
+    ItemRentalCancelled { success: bool },
+    ItemRentalLocked { locked: bool },
+    ItemRentalPartnerLocked { locked: bool },
+    ItemRentalConfirmable { can_confirm: bool },
+    ItemRentalConfirmed { success: bool },
 
     // 客户端 -> 服务器
     GetRentedItemsRequest,
@@ -761,7 +771,7 @@ pub enum NetworkEvent {
     // ========================================================================
 
     // 服务器 -> 客户端
-    FishingStatusUpdated { state: u8 },
+    FishingStatusUpdated { state: u8, success: bool },
 
     // 客户端 -> 服务器
     FishingCastRequest,
@@ -775,7 +785,7 @@ pub enum NetworkEvent {
     ReincarnationRequested,
     ReincarnationCancelled,
     HeroHealthChanged { hp: i32, mp: i32 },
-    LogOutSuccess,
+    LogOutSuccess { characters: Vec<mir2_shared::SelectInfo> },
     LogOutFailed,
     ReturnToLogin,
 
@@ -788,7 +798,7 @@ pub enum NetworkEvent {
     // ========================================================================
 
     // 服务器 -> 客户端
-    RankingsReceived,
+    RankingsReceived { rankings: Vec<mir2_shared::packets::server::special_systems::RankInfo> },
     /// 排行榜数据（Mock 模式用，携带实际排行数据）
     RankingsReceivedWithEntries {
         tab: u8, // 0=Level, 1=Gold, 2=Reputation
@@ -819,7 +829,7 @@ pub enum NetworkEvent {
     // ========================================================================
 
     // 服务器 -> 客户端 / 客户端 -> 服务器
-    DoorOpened { door_id: u32 },
+    DoorOpened { door_id: u32, close: bool },
 
     // 客户端 -> 服务器
     OpenDoorRequest { door_id: u32 },
@@ -836,34 +846,34 @@ pub enum NetworkEvent {
     DuraChanged { unique_id: u64, durability: i32 },
     PlayerPoisoned { object_id: u32, poison_type: u8 },
     ObjectPoisonedEvent { object_id: u32, poison_type: u8 },
-    RangeAttacked { object_id: u32 },
-    ObjectRangeAttacked { object_id: u32 },
-    PushedEvent { object_id: u32, x: i32, y: i32 },
-    ObjectPushedEvent { object_id: u32, x: i32, y: i32 },
-    UserDashAttacked,
-    ObjectDashAttacked { object_id: u32 },
+    RangeAttacked { target_id: u32, target_x: u32, target_y: u32, spell: u16, spell_level: u16 },
+    ObjectRangeAttacked { object_id: u32, location_x: u32, location_y: u32, direction: u8, target_id: u32, target_x: u32, target_y: u32, spell: u16, spell_level: u16 },
+    PushedEvent { object_id: u32, x: i32, y: i32, direction: u8 },
+    ObjectPushedEvent { object_id: u32, x: i32, y: i32, direction: u8 },
+    UserDashAttacked { x: i32, y: i32, direction: u8 },
+    ObjectDashAttacked { object_id: u32, location_x: i32, location_y: i32, direction: mir2_shared::enums::MirDirection, distance: i32 },
     UserAttackMoved { x: i32, y: i32 },
     PlayerRevived,
-    ObjectRevivedEvent { object_id: u32 },
-    ObjectLeveled { object_id: u32 },
+    ObjectRevivedEvent { object_id: u32, effect: u8 },
+    ObjectLeveled { object_id: u32, level: u16 },
     TrapRockEntered { in_trap: bool },
-    BaseStatsReceived,
+    BaseStatsReceived { stats: Vec<i32> },
     InventoryResized { new_size: u32 },
     StorageResized { new_size: u32 },
     TransformUpdated { form: u8 },
-    MapEffectReceived { effect: u8 },
+    MapEffectReceived { effect: u8, location_x: i32, location_y: i32, value: i32 },
     ObserveAllowed { allowed: bool },
-    ObjectSpellReceived { object_id: u32 },
-    ObjectDecoReceived { object_id: u32 },
-    ObjectSneakingReceived { object_id: u32 },
-    ObjectLevelEffectsReceived { object_id: u32 },
+    ObjectSpellReceived { object_id: u32, location_x: i32, location_y: i32, spell: mir2_shared::enums::Spell },
+    ObjectDecoReceived { object_id: u32, deco: u16, remove: bool },
+    ObjectSneakingReceived { object_id: u32, sneaking: bool },
+    ObjectLevelEffectsReceived { object_id: u32, level_effects: u16 },
     BindingShotSet { enabled: bool },
-    OutputMessageReceived { message: String },
+    OutputMessageReceived { message: String, message_type: u8 },
     UserStorageReceived { items: Vec<mir2_shared::data::item::UserItem> },
-    ChatItemStatsReceived,
-    ConcentrationSet { enabled: bool },
-    ElementalSet { element: u8 },
-    DelayedExplosionRemoved,
+    ChatItemStatsReceived { unique_id: u64, stats: String },
+    ConcentrationSet { object_id: u32, enabled: bool, interrupted: bool },
+    ElementalSet { object_id: u32, enabled: bool, value: u32, element: u8, expire_time: i64 },
+    DelayedExplosionRemoved { object_id: u32 },
 
     // 未处理的数据包（用于调试）
     UnhandledPacket { opcode: i16 },

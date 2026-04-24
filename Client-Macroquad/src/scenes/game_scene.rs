@@ -70,6 +70,16 @@ impl GameScene {
             .unwrap_or(true)
     }
 
+    fn take_scene_transition_request(&self) -> Option<SceneTransition> {
+        for ui_state in self.ecs_ctx.world.query::<&crate::ui::ui_state::UiState>().iter() {
+            let mut data = ui_state.borrow_mut();
+            if data.request_scene_transition.is_some() {
+                return data.request_scene_transition.take();
+            }
+        }
+        None
+    }
+
     pub fn new() -> Self {
         // Camera2D 初始值（真实参数会在地图加载后更新）
         let map_camera = Camera2D {
@@ -203,6 +213,7 @@ impl GameScene {
             ResourceInitState::default(),
             SceneExitBlock::default(),
             crate::components::WeatherState::default(),
+            crate::components::TimeOfDay::default(),
         ));
 
         Self {
@@ -476,6 +487,11 @@ impl Scene for GameScene {
 
             self.ecs_ctx.delta_time = _dt;
             self.ecs_scheduler.update(&mut self.ecs_ctx, _dt)?;
+        }
+
+        // 服务器请求的场景切换（LogOutSuccess / ReturnToLogin）
+        if let Some(transition) = self.take_scene_transition_request() {
+            return Ok(transition);
         }
 
         // 快捷键交由 UIRenderSystem 统一处理（避免 GameScene 直连 UI 组件）

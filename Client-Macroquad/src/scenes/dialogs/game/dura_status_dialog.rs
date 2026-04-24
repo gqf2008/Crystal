@@ -25,6 +25,8 @@ pub struct DuraEntry {
 pub struct DuraStatusDialogHybrid {
     pub visible: bool,
     pub items: Vec<DuraEntry>,
+    /// 物品耐久度追踪 (unique_id -> current_dura)
+    dura_map: std::collections::HashMap<u64, u32>,
 }
 
 impl DuraStatusDialogHybrid {
@@ -40,6 +42,20 @@ impl DuraStatusDialogHybrid {
         if has_low {
             self.visible = true;
         }
+    }
+
+    /// 更新单个物品耐久度 (from DuraChanged packet)
+    pub fn update_item_dura(&mut self, unique_id: u64, current_dura: i32) {
+        if current_dura >= 0 {
+            self.dura_map.insert(unique_id, current_dura as u32);
+        } else {
+            self.dura_map.remove(&unique_id);
+        }
+    }
+
+    /// 物品已移除/丢失/掉落，清理耐久度追踪
+    pub fn remove_dura_entry(&mut self, unique_id: u64) {
+        self.dura_map.remove(&unique_id);
     }
 
     /// 切换显示/隐藏

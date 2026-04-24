@@ -20,16 +20,6 @@ impl MinimapSystem {
         Self {}
     }
 
-    fn with_ui_state_mut<R>(
-        ctx: &mut GameContext,
-        f: impl FnOnce(&mut crate::ui::ui_state::UiStateData) -> R,
-    ) -> Option<R> {
-        let mut q = ctx.world.query::<&UiState>();
-        let s = q.iter().next()?;
-        let mut data = s.borrow_mut();
-        Some(f(&mut data))
-    }
-
     fn mir_direction_to_radians(dir: MirDirection) -> f32 {
         use std::f32::consts::{FRAC_PI_2, PI};
         match dir {
@@ -49,7 +39,7 @@ impl LogicSystem for MinimapSystem {
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
         // 1) UI -> ECS：点击小地图产生的自动寻路目标
         if let Some((wx, wy, run)) =
-            Self::with_ui_state_mut(ctx, |ui| ui.pending_auto_path_target.take()).flatten()
+            UiState::with_mut_in_world(&mut ctx.world, |ui| ui.pending_auto_path_target.take()).flatten()
         {
             // 模式互斥：挂机/AT/BT 控制开启时，忽略小地图的手动寻路命令。
             if ctx.session.local_player_ai_enabled {
@@ -86,7 +76,7 @@ impl LogicSystem for MinimapSystem {
 
         if let Some((x, y, dir)) = player_snapshot {
             let dir_rad = Self::mir_direction_to_radians(dir);
-            let _ = Self::with_ui_state_mut(ctx, |ui| {
+            let _ = UiState::with_mut_in_world(&mut ctx.world, |ui| {
                 ui.minimap_player_pos = Some(macroquad::prelude::vec2(x, y));
                 ui.minimap_player_dir_radians = dir_rad;
             });

@@ -25,17 +25,21 @@ impl PacketHandler for SocialHandler {
 
             // DivorceRequest
             x if x == ServerPacketIds::DivorceRequest as u16 => {
-                if let Ok(_packet) = server::DivorceRequest::read_body(&mut cursor) {
-                    events.push(NetworkEvent::DivorceRequested2);
-                    tracing::debug!("💔 Divorce requested");
+                if let Ok(packet) = server::DivorceRequest::read_body(&mut cursor) {
+                    events.push(NetworkEvent::DivorceRequested2 {
+                        lover_name: packet.lover_name.clone(),
+                    });
+                    tracing::debug!("💔 Divorce requested by: {}", packet.lover_name);
                 }
             }
 
             // MentorRequest
             x if x == ServerPacketIds::MentorRequest as u16 => {
-                if let Ok(_packet) = server::MentorRequest::read_body(&mut cursor) {
-                    events.push(NetworkEvent::MentorRequested2);
-                    tracing::debug!("🎓 Mentor requested");
+                if let Ok(packet) = server::MentorRequest::read_body(&mut cursor) {
+                    events.push(NetworkEvent::MentorRequested2 {
+                        mentor_name: packet.mentor_name.clone(),
+                    });
+                    tracing::debug!("🎓 Mentor requested by: {}", packet.mentor_name);
                 }
             }
 

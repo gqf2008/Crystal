@@ -155,11 +155,20 @@ impl Packet for AwakeningLockedItem {
     }
 }
 
-/// Awakening - 觉醒 (228)
+/// Awakening result codes
+pub const AWAKE_RESULT_SUCCESS: i32 = 1;
+pub const AWAKE_RESULT_FAIL: i32 = -1;
+pub const AWAKE_RESULT_DESTROYED: i32 = 0;
+pub const AWAKE_RESULT_MAX_LEVEL: i32 = -2;
+pub const AWAKE_RESULT_NO_GOLD: i32 = -3;
+pub const AWAKE_RESULT_NO_MATERIALS: i32 = -4;
+
+/// Awakening - 觉醒结果 (228)
+/// result: 1=success, 0=item destroyed (remove_id set), -1=fail, -2=max level, -3=no gold, -4=no materials
 #[derive(Debug, Clone)]
 pub struct Awakening {
-    pub unique_id: u64,             // 物品唯一ID
-    pub success: bool,              // 是否成功
+    pub result: i32,
+    pub remove_id: i64,
 }
 
 impl Packet for Awakening {
@@ -167,16 +176,14 @@ impl Packet for Awakening {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
-        writer.write_u64::<LittleEndian>(self.unique_id)?;
-        writer.write_u8(if self.success { 1 } else { 0 })?;
-        
+        writer.write_i32::<LittleEndian>(self.result)?;
+        writer.write_i64::<LittleEndian>(self.remove_id)?;
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let unique_id = reader.read_u64::<LittleEndian>()?;
-        let success = reader.read_u8()? != 0;
-        Ok(Self { unique_id, success })
+        let result = reader.read_i32::<LittleEndian>()?;
+        let remove_id = reader.read_i64::<LittleEndian>()?;
+        Ok(Self { result, remove_id })
     }
 }

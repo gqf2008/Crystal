@@ -20,6 +20,16 @@ pub struct FriendEntry {
     pub online: bool,
 }
 
+/// 邀请类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InviteKind {
+    Group,
+    Guild,
+    Trade,
+    Mentor,
+    Divorce,
+}
+
 #[derive(Debug, Clone)]
 pub enum UiAction {
     NpcDialog(NpcDialogAction),
@@ -48,6 +58,7 @@ pub enum UiCommand {
         panel_type: PanelType,
         hide_added_stats: bool,
         is_sub: bool,
+        use_pearls: bool,
     },
 
     ShowAmountBox {
@@ -72,6 +83,17 @@ pub enum UiCommand {
     /// 系统提示：英雄相关
     PushHeroSystemChat(String),
 
+    /// 更新英雄 HP/MP
+    UpdateHeroHealth { hp: i32, mp: i32 },
+
+    UpdateHeroSpawnState { state: u8 },
+
+    /// 英雄已切换
+    HeroChanged,
+
+    /// 玩家升级
+    PlayerLevelUp { new_level: u16 },
+
     /// 更新钓鱼状态
     UpdateFishingState { state: u8, chance: f32, progress: f32 },
 
@@ -91,7 +113,7 @@ pub enum UiCommand {
     /// 英雄自动喝药
     SetHeroAutoPotUnlocked,
     SetHeroAutoPotValue { pot_type: u8, value: u32 },
-    SetHeroAutoPotItem { item_id: u32 },
+    SetHeroAutoPotItem { slot: i32, item_id: u32 },
 
     /// Buff 暂停/恢复
     SetBuffPaused { buff_id: u32, paused: bool },
@@ -102,9 +124,12 @@ pub enum UiCommand {
     /// 交易相关：打开/更新交易对话框
     OpenTradeDialog { partner: String },
     TradeGoldAdded { amount: u32 },
-    TradeItemAdded,
+    TradeItemAdded { items: Vec<Option<mir2_shared::data::item::UserItem>> },
+    TradeItemDeposited { from_slot: i32, success: bool },
+    TradeItemRetrieved { from_slot: i32, success: bool },
     TradeConfirmed { locked: bool },
-    TradeCancelled,
+    TradeCancelled { unlock: bool },
+    TradeCompleted,
 
     /// 任务相关
     QuestAccepted { quest_id: u32, name: String, description: String },
@@ -124,20 +149,38 @@ pub enum UiCommand {
     GuildMemberUpdated { name: String, rank: String, online: bool },
     GuildNoticeUpdated { notice: String },
     GuildExpGained { amount: i64 },
-    GuildWarRequested,
+    GuildWarRequested { guild_name: String },
     SetGuildName { name: String },
+    UpdateGuildStatus {
+        rank_name: String,
+        level: u8,
+        experience: i64,
+        max_experience: i64,
+        gold: u32,
+        spare_points: u8,
+        member_count: i32,
+        max_members: i32,
+        my_rank_id: i32,
+    },
     /// 更新行会仓库金币
     UpdateGuildStorageGold { gold: u32 },
     /// 更新行会仓库物品列表
     UpdateGuildStorageItems { items: Vec<crate::scenes::dialogs::game::guild_dialog::GuildStorageItem> },
+    /// 更新行会仓库单个物品
+    UpdateGuildStorageItem { slot: i32, name: String, quantity: i32 },
     /// 清空行会仓库物品
     ClearGuildStorageItems,
+    UpdateGuildBuffs { buff_ids: Vec<i32> },
 
     /// 组队成员列表更新
     UpdateGroupMembers { members: Vec<crate::scenes::dialogs::game::group_dialog::GroupMember> },
     /// 组队成员地图信息更新
     UpdateGroupMemberMap { player_name: String, player_map: String },
+    UpdateGroupMemberLocation { player_name: String, x: i32, y: i32 },
     SetGroupAllowJoin { allow: bool },
+    AddGroupMember { name: String },
+    RemoveGroupMember { name: String },
+    ClearGroupMembers,
 
     /// 小地图：邮件按钮
     OpenMailDialog,
@@ -158,6 +201,10 @@ pub enum UiCommand {
     ClearMarriageRequester,
     UpdateLover { name: String, date: i64 },
     UpdateMentor { name: String, level: i32, online: bool },
+
+    /// 邀请确认弹窗
+    ShowInviteConfirm { kind: InviteKind, inviter: String, detail: String },
+    HideInviteConfirm,
 
     /// 通用文本输入对话框（组队邀请/添加好友/拜师）
     ShowTextInput {
@@ -229,6 +276,7 @@ pub enum UiCommand {
     SetRentalLocked { locked: bool },
     SetRentalPartnerLocked { locked: bool },
     CloseItemRental,
+    UpdateRentalItemList { items: Vec<mir2_shared::packets::server::rental_system::RentalItemInfo> },
 
     /// 寄售行
     OpenTrustMerchant,
@@ -240,6 +288,71 @@ pub enum UiCommand {
 
     /// 物品租赁：确认交易
     ConfirmItemRental,
+
+    /// 场景切换请求（服务器 LogOutSuccess / ReturnToLogin）
+    RequestSceneTransition { target: crate::scenes::SceneTransition },
+
+    /// 英雄升级
+    HeroLevelUp { new_level: u16 },
+
+    /// 英雄管理列表更新 (from ManageHeroes packet)
+    UpdateHeroManageList { heroes: Vec<crate::scenes::dialogs::game::hero_dialog::ManageHeroEntry> },
+
+    /// 英雄信息接收 (hero_id)
+    HeroInfoReceived { hero_id: u32 },
+
+    /// 装备耐久度变化
+    ItemDuraChanged { unique_id: u64, current_dura: i32 },
+    /// 物品已从背包移除，清理耐久度追踪
+    RemoveDuraEntry { unique_id: u64 },
+
+    /// 背包大小调整
+    SetInventorySize { size: u32 },
+    /// 仓库大小调整
+    SetStorageSize { size: u32 },
+
+    /// 时段变更
+    SetTimeOfDay { time: u8 },
+
+    /// 技能状态切换
+    SetBindingShot { enabled: bool },
+    SetConcentration { enabled: bool },
+    SetElement { element: u8 },
+    SetObserveAllowed { allowed: bool },
+
+    // Hero stats
+    SetHeroBaseStats { stats: Vec<i32> },
+
+    // Big map / world map
+    UpdateBigMapInfo { map_index: i32, title: String, width: i32, height: i32 },
+    UpdateWorldMapIcons { icons: Vec<mir2_shared::packets::server::WorldMapIcon> },
+    NavigateToMapLocation { map_index: i32, x: u32, y: u32 },
+
+    // Magic/Spells
+    MagicLearned { spell: u8, name: String, level: u8, icon: u8, hero: bool },
+    MagicLeveledUp { spell: u8, level: u8, hero: bool },
+    MagicRemoved { spell: u8, hero: bool },
+    SpellToggled { spell: u8, can_use: bool, hero: bool },
+
+    // Experience
+    ExperienceGained { amount: i64 },
+    HeroExperienceGained { amount: i64 },
+
+    // Transform
+    SetTransformForm { form: u8 },
+
+    // Sound & effects
+    TriggerMapEffect { effect: u8 },
+
+    // Character stats
+    SetBaseStats { stats: Vec<i32> },
+
+    // Creature/Pet
+    SetCreatureCanRename { can_rename: bool },
+    SetCreatureAutoPickup { enabled: bool },
+
+    // Doors
+    OpenDoor { door_id: u32 },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -285,6 +398,32 @@ pub struct UiStateData {
     pub shop_items: Vec<mir2_shared::packets::server::GameShopItem>,
     pub shop_credit: u32,
     pub shop_gold: u32,
+
+    /// 请求的场景切换（服务器 LogOutSuccess / ReturnToLogin 触发）。
+    pub request_scene_transition: Option<crate::scenes::SceneTransition>,
+
+    /// 背包容量（由 InventoryResized 更新）
+    pub inventory_size: u32,
+    /// 仓库容量（由 StorageResized 更新）
+    pub storage_size: u32,
+
+    /// 当前时段 (0=白天, 1=黄昏, etc.)
+    pub time_of_day: u8,
+
+    /// 技能/效果状态
+    pub binding_shot_enabled: bool,
+    pub concentration_enabled: bool,
+    pub element_type: u8,
+    pub observe_allowed: bool,
+
+    /// 变身形态 (0=normal)
+    pub transform_form: u8,
+
+    /// 最近触发的地图特效 (0=none)
+    pub pending_map_effect: u8,
+
+    /// 已打开的门 (door_id set)
+    pub open_doors: std::collections::HashSet<u32>,
 }
 
 /// 邮件条目（从服务器 MailReceived 转换而来）
@@ -329,5 +468,23 @@ impl UiState {
 
     pub fn borrow_mut(&self) -> RwLockWriteGuard<'_, UiStateData> {
         self.0.write().expect("UiState RwLock poisoned")
+    }
+
+    /// 在 World 中查找 UiState 并执行可变回调（无则返回 None）。
+    pub fn with_mut_in_world<R>(
+        world: &mut hecs::World,
+        f: impl FnOnce(&mut UiStateData) -> R,
+    ) -> Option<R> {
+        let mut q = world.query::<&UiState>();
+        let s = q.iter().next()?;
+        let mut data = s.borrow_mut();
+        Some(f(&mut data))
+    }
+
+    /// 在 World 中查找 UiState 并执行回调（无则静默跳过）。
+    pub fn with_in_world(world: &hecs::World, f: impl FnOnce(&mut UiStateData)) {
+        if let Some(s) = world.query::<&UiState>().iter().next() {
+            f(&mut s.borrow_mut());
+        }
     }
 }

@@ -29,7 +29,7 @@ use mir2_shared::enums::{ServerPacketIds, ItemSet};
 
 pub struct SwitchGroupRequest {
     pub session_id: u64,
-    pub target_id: u64,
+    pub allow_group: bool,
 }
 
 pub struct GroupInviteRequest {
@@ -83,6 +83,18 @@ pub struct TradeAddItem {
 pub struct TradeRemoveItem {
     pub session_id: u64,
     pub unique_id: u64,
+}
+
+pub struct DepositTradeItemBySlot {
+    pub session_id: u64,
+    pub from_slot: i32,
+    pub to_slot: i32,
+}
+
+pub struct RetrieveTradeItemBySlot {
+    pub session_id: u64,
+    pub from_slot: i32,
+    pub to_slot: i32,
 }
 
 // --- Friend ---
@@ -1105,14 +1117,14 @@ impl Message<SwitchGroupRequest> for SocialActor {
             _ => return,
         };
 
-        if msg.target_id == 0 {
-            // 离开当前组队
+        if !msg.allow_group {
+            // 禁止组队 → 离开当前组队
             if let Some(group_id) = state.group_id {
                 self.leave_group(group_id, msg.session_id, &state.name).await;
             }
+            send_system_message(&self.gate_ref, msg.session_id, "已关闭组队");
         } else {
-            // 加入目标玩家的组队或创建新组队
-            self.join_or_create_group(msg.session_id, msg.target_id, &state.name).await;
+            send_system_message(&self.gate_ref, msg.session_id, "已开启组队");
         }
     }
 }
@@ -1513,6 +1525,143 @@ impl Message<TradeRemoveItem> for SocialActor {
         if let Some(other) = trade.other_session(msg.session_id) {
             send_trade_item_update_packet(&self.gate_ref, other, msg.unique_id, 0, 0, false);
         }
+    }
+}
+
+impl Message<DepositTradeItemBySlot> for SocialActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: DepositTradeItemBySlot, _ctx: &mut Context<Self, Self::Reply>) {
+        // Resolve from_slot → unique_id from player inventory
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(), None => return,
+        };
+        let state = match record.ask(GetPlayerState).await {
+            Ok(Some(s)) => s, _ => return,
+        };
+
+        let slot = msg.from_slot as usize;
+        let slot_data = state.inventory.backpack.get(slot).and_then(|s| s.as_ref());
+        let uid = match slot_data {
+            Some(s) => s.item.unique_id,
+            None => {
+                send_deposit_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                return;
+            }
+        };
+
+        // Check trade exists and not locked
+        {
+            let trade = match self.find_trade_mut(msg.session_id) {
+                Some(t) => t, None => {
+                    send_deposit_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                    return;
+                }
+            };
+            let side = match trade.side_of_mut(msg.session_id) {
+                Some(s) => s, None => return,
+            };
+            if side.locked {
+                send_deposit_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                return;
+            }
+        }
+
+        // Remove item from player inventory
+        let removed = record.ask(RemoveItemFromInventory { unique_id: uid }).await.ok().flatten();
+        let item_data = removed.clone();
+
+        // Add to trade side
+        let other_session = {
+            let trade = match self.find_trade_mut(msg.session_id) {
+                Some(t) => t, None => {
+                    // Rollback: return item to player
+                    if let Some(item) = removed {
+                        let _ = record.ask(AddItemToInventory { item }).await;
+                    }
+                    send_deposit_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                    return;
+                }
+            };
+            let side = match trade.side_of_mut(msg.session_id) {
+                Some(s) => s, None => {
+                    if let Some(item) = removed {
+                        let _ = record.ask(AddItemToInventory { item }).await;
+                    }
+                    return;
+                }
+            };
+            side.add_item(uid, msg.to_slot as u8, 1, item_data);
+            side.unlock();
+            trade.other_session(msg.session_id)
+        };
+
+        if let Some(other) = other_session {
+            send_trade_item_update_packet(&self.gate_ref, other, uid, msg.to_slot as u8, 1, true);
+        }
+        send_deposit_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, true);
+    }
+}
+
+impl Message<RetrieveTradeItemBySlot> for SocialActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: RetrieveTradeItemBySlot, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(), None => return,
+        };
+
+        // Find trade item by grid slot and extract
+        let removed_trade_item = {
+            let trade = match self.find_trade_mut(msg.session_id) {
+                Some(t) => t, None => {
+                    send_retrieve_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                    return;
+                }
+            };
+            let side = match trade.side_of_mut(msg.session_id) {
+                Some(s) => s, None => {
+                    send_retrieve_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                    return;
+                }
+            };
+            if side.locked {
+                send_retrieve_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                return;
+            }
+            let uid = side.items.iter()
+                .find(|i| i.grid == msg.from_slot as u8)
+                .map(|i| i.uid);
+            match uid {
+                Some(uid) => {
+                    let removed = side.remove_item(uid);
+                    side.unlock();
+                    removed
+                }
+                None => {
+                    send_retrieve_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, false);
+                    return;
+                }
+            }
+        };
+
+        // Add item back to player inventory
+        if let Some(trade_item) = &removed_trade_item {
+            if let Some(item_data) = &trade_item.item_data {
+                let _ = record.ask(AddItemToInventory { item: item_data.clone() }).await;
+            }
+        }
+
+        // Notify other party
+        if let Some(trade_item) = &removed_trade_item {
+            let trade = match self.find_trade(msg.session_id) {
+                Some(t) => t, None => { return; }
+            };
+            if let Some(other) = trade.other_session(msg.session_id) {
+                send_trade_item_update_packet(&self.gate_ref, other, trade_item.uid, 0, 0, false);
+            }
+        }
+        send_retrieve_trade_item_packet(&self.gate_ref, msg.session_id, msg.from_slot, true);
     }
 }
 

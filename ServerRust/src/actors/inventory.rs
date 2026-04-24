@@ -138,6 +138,17 @@ impl PlayerInventory {
         None // 背包已满
     }
 
+    /// 尝试将物品放入指定背包格子，如果该格为空则成功
+    pub fn try_place_item_at(&mut self, item: UserItem, idx: usize) -> bool {
+        if idx >= BACKPACK_SIZE { return false; }
+        if self.backpack[idx].is_some() { return false; }
+        self.backpack[idx] = Some(InventorySlot {
+            grid: idx as u8,
+            item,
+        });
+        true
+    }
+
     /// 根据 unique_id 移除物品
     /// 返回移除的物品或 None
     pub fn remove_item_by_uid(&mut self, uid: u64) -> Option<UserItem> {

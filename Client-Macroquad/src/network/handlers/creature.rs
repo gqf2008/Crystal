@@ -15,33 +15,36 @@ impl PacketHandler for CreatureHandler {
         match header.opcode as u16 {
             // NewIntelligentCreature
             x if x == ServerPacketIds::NewIntelligentCreature as u16 => {
-                if let Ok(_packet) = server::NewIntelligentCreature::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NewIntelligentCreatureReceived);
-                    tracing::debug!("🐾 New intelligent creature received");
+                if let Ok(packet) = server::NewIntelligentCreature::read_body(&mut cursor) {
+                    events.push(NetworkEvent::NewIntelligentCreatureReceived {
+                        creature_type: packet.creature_type as u8,
+                    });
+                    tracing::debug!("🐾 New intelligent creature received: {:?}", packet.creature_type);
                 }
             }
 
             // UpdateIntelligentCreatureList
             x if x == ServerPacketIds::UpdateIntelligentCreatureList as u16 => {
-                if let Ok(_packet) = server::UpdateIntelligentCreatureList::read_body(&mut cursor) {
-                    events.push(NetworkEvent::IntelligentCreatureListUpdated);
-                    tracing::debug!("🐾 Intelligent creature list updated");
+                if let Ok(packet) = server::UpdateIntelligentCreatureList::read_body(&mut cursor) {
+                    let count = packet.creatures.len();
+                    events.push(NetworkEvent::IntelligentCreatureListUpdated { creatures: packet.creatures });
+                    tracing::debug!("🐾 Intelligent creature list updated: {} creatures", count);
                 }
             }
 
             // IntelligentCreatureEnableRename
             x if x == ServerPacketIds::IntelligentCreatureEnableRename as u16 => {
-                if let Ok(_packet) = server::IntelligentCreatureEnableRename::read_body(&mut cursor) {
-                    events.push(NetworkEvent::IntelligentCreatureRenameEnabled);
-                    tracing::debug!("🐾 Intelligent creature rename enabled");
+                if let Ok(packet) = server::IntelligentCreatureEnableRename::read_body(&mut cursor) {
+                    events.push(NetworkEvent::IntelligentCreatureRenameEnabled { can_rename: packet.can_rename });
+                    tracing::debug!("🐾 Intelligent creature rename enabled: {}", packet.can_rename);
                 }
             }
 
             // IntelligentCreaturePickup
             x if x == ServerPacketIds::IntelligentCreaturePickup as u16 => {
-                if let Ok(_packet) = server::IntelligentCreaturePickup::read_body(&mut cursor) {
-                    events.push(NetworkEvent::IntelligentCreaturePickupReceived);
-                    tracing::debug!("🐾 Intelligent creature pickup received");
+                if let Ok(packet) = server::IntelligentCreaturePickup::read_body(&mut cursor) {
+                    events.push(NetworkEvent::IntelligentCreaturePickupReceived { enabled: packet.enabled });
+                    tracing::debug!("🐾 Intelligent creature pickup: {}", packet.enabled);
                 }
             }
 

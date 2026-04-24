@@ -157,3 +157,9 @@ pub struct WeatherState {
     /// 当前天气对应的粒子发射器实体（如果有）
     pub emitter_entity: Option<hecs::Entity>,
 }
+
+/// 当前时间（全局资源组件，来自服务器 TimeOfDayChanged）
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TimeOfDay {
+    pub hour: u8,
+}

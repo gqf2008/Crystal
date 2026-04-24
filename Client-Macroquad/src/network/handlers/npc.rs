@@ -50,7 +50,7 @@ impl PacketHandler for NpcHandler {
             // NPCRepair
             x if x == ServerPacketIds::NPCRepair as u16 => {
                 if let Ok(packet) = server::NPCRepair::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NPCRepairReceived);
+                    events.push(NetworkEvent::NPCRepairReceived { rate: packet.rate });
                     tracing::debug!("🔧 NPC repair dialog opened (rate={})", packet.rate);
                 }
             }
@@ -58,7 +58,7 @@ impl PacketHandler for NpcHandler {
             // NPCSRepair
             x if x == ServerPacketIds::NPCSRepair as u16 => {
                 if let Ok(packet) = server::NPCSRepair::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NPCSRepairReceived);
+                    events.push(NetworkEvent::NPCSRepairReceived { rate: packet.rate });
                     tracing::debug!("🔧 NPC special repair dialog opened (rate={})", packet.rate);
                 }
             }
@@ -66,7 +66,7 @@ impl PacketHandler for NpcHandler {
             // NPCRefine
             x if x == ServerPacketIds::NPCRefine as u16 => {
                 if let Ok(packet) = server::NPCRefine::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NPCRefineReceived);
+                    events.push(NetworkEvent::NPCRefineReceived { rate: packet.rate, refining: packet.refining });
                     tracing::debug!("⚒️ NPC refine dialog opened (rate={}, refining={})", packet.rate, packet.refining);
                 }
             }
@@ -82,7 +82,7 @@ impl PacketHandler for NpcHandler {
             // NPCCollectRefine
             x if x == ServerPacketIds::NPCCollectRefine as u16 => {
                 if let Ok(packet) = server::NPCCollectRefine::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NPCCollectRefineReceived);
+                    events.push(NetworkEvent::NPCCollectRefineReceived { success: packet.success });
                     tracing::debug!("⚒️ NPC collect refine: success={}", packet.success);
                 }
             }
@@ -90,7 +90,7 @@ impl PacketHandler for NpcHandler {
             // NPCReplaceWedRing
             x if x == ServerPacketIds::NPCReplaceWedRing as u16 => {
                 if let Ok(packet) = server::NPCReplaceWedRing::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NPCReplaceWedRingReceived);
+                    events.push(NetworkEvent::NPCReplaceWedRingReceived { rate: packet.rate });
                     tracing::debug!("💍 NPC replace wedding ring (rate={})", packet.rate);
                 }
             }
@@ -106,7 +106,11 @@ impl PacketHandler for NpcHandler {
             // SellItem
             x if x == ServerPacketIds::SellItem as u16 => {
                 if let Ok(packet) = server::SellItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::SellItemReceived);
+                    events.push(NetworkEvent::SellItemReceived {
+                        unique_id: packet.unique_id,
+                        count: packet.count,
+                        success: packet.success,
+                    });
                     tracing::debug!("💰 Sell item: id={}, count={}, success={}", packet.unique_id, packet.count, packet.success);
                 }
             }
@@ -114,7 +118,11 @@ impl PacketHandler for NpcHandler {
             // CraftItem
             x if x == ServerPacketIds::CraftItem as u16 => {
                 if let Ok(packet) = server::CraftItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::CraftItemReceived);
+                    events.push(NetworkEvent::CraftItemReceived {
+                        unique_id: packet.unique_id,
+                        count: packet.count,
+                        success: packet.success,
+                    });
                     tracing::debug!("⚒️ Craft item: id={}, count={}, success={}", packet.unique_id, packet.count, packet.success);
                 }
             }
@@ -122,7 +130,9 @@ impl PacketHandler for NpcHandler {
             // RepairItem
             x if x == ServerPacketIds::RepairItem as u16 => {
                 if let Ok(packet) = server::RepairItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::RepairItemReceived);
+                    events.push(NetworkEvent::RepairItemReceived {
+                        unique_id: packet.unique_id,
+                    });
                     tracing::debug!("🔧 Repair item: id={}", packet.unique_id);
                 }
             }
@@ -130,7 +140,11 @@ impl PacketHandler for NpcHandler {
             // ItemRepaired
             x if x == ServerPacketIds::ItemRepaired as u16 => {
                 if let Ok(packet) = server::ItemRepaired::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ItemRepairedEvent);
+                    events.push(NetworkEvent::ItemRepairedEvent {
+                        unique_id: packet.unique_id,
+                        max_dura: packet.max_dura,
+                        current_dura: packet.current_dura,
+                    });
                     tracing::debug!("🔧 Item repaired: id={}, max_dura={}, cur_dura={}", packet.unique_id, packet.max_dura, packet.current_dura);
                 }
             }
@@ -149,17 +163,17 @@ impl PacketHandler for NpcHandler {
 
             // NPCUpdate
             x if x == ServerPacketIds::NPCUpdate as u16 => {
-                if let Ok(_packet) = server::NPCUpdate::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NPCUpdated);
-                    tracing::debug!("🗨️ NPC updated");
+                if let Ok(packet) = server::NPCUpdate::read_body(&mut cursor) {
+                    events.push(NetworkEvent::NPCUpdated { npc_id: packet.npc_id });
+                    tracing::debug!("🗨️ NPC updated: id={}", packet.npc_id);
                 }
             }
 
             // NPCImageUpdate
             x if x == ServerPacketIds::NPCImageUpdate as u16 => {
-                if let Ok(_packet) = server::NPCImageUpdate::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NPCImageUpdated);
-                    tracing::debug!("🖼️ NPC image updated");
+                if let Ok(packet) = server::NPCImageUpdate::read_body(&mut cursor) {
+                    events.push(NetworkEvent::NPCImageUpdated { npc_id: packet.npc_id, image: packet.image });
+                    tracing::debug!("🖼️ NPC image updated: id={} image={}", packet.npc_id, packet.image);
                 }
             }
 
@@ -198,7 +212,13 @@ impl PacketHandler for NpcHandler {
             // AwakeningNeedMaterials
             x if x == ServerPacketIds::AwakeningNeedMaterials as u16 => {
                 if let Ok(packet) = server::AwakeningNeedMaterials::read_body(&mut cursor) {
-                    events.push(NetworkEvent::AwakeningNeedMaterialsReceived);
+                    let materials: Vec<(i32, i32)> = packet.materials.iter()
+                        .map(|m| (m.item_id, m.count))
+                        .collect();
+                    events.push(NetworkEvent::AwakeningNeedMaterialsReceived {
+                        item_id: packet.item_id,
+                        materials,
+                    });
                     tracing::debug!("✨ Awakening needs materials: item_id={}, {} materials", packet.item_id, packet.materials.len());
                 }
             }
@@ -206,7 +226,10 @@ impl PacketHandler for NpcHandler {
             // AwakeningLockedItem
             x if x == ServerPacketIds::AwakeningLockedItem as u16 => {
                 if let Ok(packet) = server::AwakeningLockedItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::AwakeningLockedItemReceived);
+                    events.push(NetworkEvent::AwakeningLockedItemReceived {
+                        unique_id: packet.unique_id,
+                        locked: packet.locked,
+                    });
                     tracing::debug!("✨ Awakening locked item: id={}, locked={}", packet.unique_id, packet.locked);
                 }
             }
@@ -214,16 +237,23 @@ impl PacketHandler for NpcHandler {
             // Awakening
             x if x == ServerPacketIds::Awakening as u16 => {
                 if let Ok(packet) = server::Awakening::read_body(&mut cursor) {
-                    events.push(NetworkEvent::AwakeningReceived);
-                    tracing::debug!("✨ Awakening: id={}, success={}", packet.unique_id, packet.success);
+                    events.push(NetworkEvent::AwakeningReceived {
+                        result: packet.result,
+                        remove_id: packet.remove_id,
+                    });
+                    tracing::debug!("✨ Awakening: result={}, remove_id={}", packet.result, packet.remove_id);
                 }
             }
 
             // NPCPearlGoods
             x if x == ServerPacketIds::NPCPearlGoods as u16 => {
                 if let Ok(packet) = server::NPCPearlGoods::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NPCPearlGoodsReceived);
-                    tracing::debug!("💎 NPC pearl goods: rate={}, {} items", packet.rate, packet.item_list.len());
+                    let count = packet.item_list.len();
+                    events.push(NetworkEvent::NPCPearlGoodsReceived {
+                        rate: packet.rate,
+                        item_list: packet.item_list,
+                    });
+                    tracing::debug!("💎 NPC pearl goods: rate={}, {} items", packet.rate, count);
                 }
             }
 
@@ -233,6 +263,7 @@ impl PacketHandler for NpcHandler {
                     events.push(NetworkEvent::NPCRequestInputReceived {
                         npc_id: 0, // 协议不携带 object_id
                         prompt: packet.message.clone(),
+                        max_length: packet.max_length,
                     });
                     tracing::debug!("📝 NPC request input: {} (max_length={})", packet.message, packet.max_length);
                 }

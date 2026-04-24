@@ -97,7 +97,7 @@ impl PacketHandler for MovementHandler {
             // ===== Object lifecycle =====
             x if x == ServerPacketIds::ObjectRemove as u16 => {
                 if let Ok(packet) = server::ObjectRemove::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ObjectRemove { packet });
+                    events.push(NetworkEvent::ObjectRemove { object_id: packet.object_id });
                 }
             }
 
@@ -129,7 +129,7 @@ impl PacketHandler for MovementHandler {
                         packet.player.location_x,
                         packet.player.location_y
                     );
-                    events.push(NetworkEvent::ObjectHeroSpawned);
+                    events.push(NetworkEvent::ObjectHeroSpawned { packet });
                 }
             }
 
@@ -154,7 +154,7 @@ impl PacketHandler for MovementHandler {
                         "✨ ObjectTeleportingOut: id={} type={}",
                         packet.object_id, packet.teleport_type
                     );
-                    events.push(NetworkEvent::ObjectTeleportingOut { object_id: packet.object_id });
+                    events.push(NetworkEvent::ObjectTeleportingOut { object_id: packet.object_id, teleport_type: packet.teleport_type });
                 }
             }
             x if x == ServerPacketIds::ObjectTeleportIn as u16 => {
@@ -163,7 +163,10 @@ impl PacketHandler for MovementHandler {
                         "✨ ObjectTeleportingIn: id={} type={}",
                         packet.object_id, packet.teleport_type
                     );
-                    events.push(NetworkEvent::ObjectTeleportingIn);
+                    events.push(NetworkEvent::ObjectTeleportingIn {
+                        object_id: packet.object_id,
+                        teleport_type: packet.teleport_type,
+                    });
                 }
             }
             x if x == ServerPacketIds::TeleportIn as u16 => {
@@ -189,7 +192,13 @@ impl PacketHandler for MovementHandler {
                         "🔙 ObjectBackStepped: id={} loc=({}, {}) dist={}",
                         packet.object_id, packet.location_x, packet.location_y, packet.distance
                     );
-                    events.push(NetworkEvent::ObjectBackStepped);
+                    events.push(NetworkEvent::ObjectBackStepped {
+                        object_id: packet.object_id,
+                        location_x: packet.location_x,
+                        location_y: packet.location_y,
+                        direction: packet.direction,
+                        distance: packet.distance,
+                    });
                 }
             }
 
@@ -209,7 +218,12 @@ impl PacketHandler for MovementHandler {
                         "💨 ObjectDashing: id={} loc=({}, {})",
                         packet.object_id, packet.location_x, packet.location_y
                     );
-                    events.push(NetworkEvent::ObjectDashing);
+                    events.push(NetworkEvent::ObjectDashing {
+                        object_id: packet.object_id,
+                        location_x: packet.location_x,
+                        location_y: packet.location_y,
+                        direction: packet.direction,
+                    });
                 }
             }
             x if x == ServerPacketIds::UserDashFail as u16 => {
@@ -218,7 +232,11 @@ impl PacketHandler for MovementHandler {
                         "❌ PlayerDashFailed: loc=({}, {})",
                         packet.location_x, packet.location_y
                     );
-                    events.push(NetworkEvent::PlayerDashFailed);
+                    events.push(NetworkEvent::PlayerDashFailed {
+                        location_x: packet.location_x,
+                        location_y: packet.location_y,
+                        direction: packet.direction,
+                    });
                 }
             }
             x if x == ServerPacketIds::ObjectDashFail as u16 => {
@@ -227,7 +245,12 @@ impl PacketHandler for MovementHandler {
                         "❌ ObjectDashFailed: id={} loc=({}, {})",
                         packet.object_id, packet.location_x, packet.location_y
                     );
-                    events.push(NetworkEvent::ObjectDashFailed { object_id: packet.object_id });
+                    events.push(NetworkEvent::ObjectDashFailed {
+                        object_id: packet.object_id,
+                        location_x: packet.location_x,
+                        location_y: packet.location_y,
+                        direction: packet.direction,
+                    });
                 }
             }
 
@@ -238,7 +261,11 @@ impl PacketHandler for MovementHandler {
                         "🪑 ObjectSatDown: id={} loc=({:?}) dir={}",
                         packet.object_id, packet.location, packet.direction
                     );
-                    events.push(NetworkEvent::ObjectSatDown { object_id: packet.object_id });
+                    events.push(NetworkEvent::ObjectSatDown {
+                        object_id: packet.object_id,
+                        direction: packet.direction,
+                        location: packet.location,
+                    });
                 }
             }
 
@@ -250,7 +277,7 @@ impl PacketHandler for MovementHandler {
                         packet.map_index, packet.title, packet.width, packet.height,
                         packet.movements.len(), packet.npcs.len()
                     );
-                    events.push(NetworkEvent::NewMapInfoReceived);
+                    events.push(NetworkEvent::NewMapInfoReceived { packet });
                 }
             }
             x if x == ServerPacketIds::WorldMapSetup as u16 => {
@@ -259,7 +286,7 @@ impl PacketHandler for MovementHandler {
                         "🌍 WorldMapSetupReceived: {} map icons",
                         packet.world_maps.len()
                     );
-                    events.push(NetworkEvent::WorldMapSetupReceived);
+                    events.push(NetworkEvent::WorldMapSetupReceived { icons: packet.world_maps });
                 }
             }
             x if x == ServerPacketIds::SearchMapResult as u16 => {
@@ -268,7 +295,11 @@ impl PacketHandler for MovementHandler {
                         "🔍 SearchMapResultReceived: map={} loc=({}, {})",
                         packet.map_index, packet.location_x, packet.location_y
                     );
-                    events.push(NetworkEvent::SearchMapResultReceived);
+                    events.push(NetworkEvent::SearchMapResultReceived {
+                        map_index: packet.map_index,
+                        location_x: packet.location_x,
+                        location_y: packet.location_y,
+                    });
                 }
             }
             x if x == ServerPacketIds::TimeOfDay as u16 => {

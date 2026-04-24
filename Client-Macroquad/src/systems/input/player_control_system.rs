@@ -807,6 +807,10 @@ impl LogicSystem for PlayerControlSystem {
 
         // There is only one local player. Find it and process.
         if let Some(entity) = ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity())) {
+            let in_trap_rock = ctx.world.get::<&crate::components::InTrapRock>(entity)
+                .map(|t| t.trapped)
+                .unwrap_or(false);
+
             if !attacking_entities.contains(&entity) {
                 if let Ok((player_input, player, pos, _path, velocity)) =
                     ctx.world.query_one_mut::<(&mut PlayerInput, &mut Player, &Position, &mut crate::components::movement::Path, &MovementVelocity)>(entity)
@@ -1098,12 +1102,25 @@ impl LogicSystem for PlayerControlSystem {
             } // end if-else (has_double_click / else)
             } // end if !has_single_click
 
-            // ===== local move -> server sync: 同步“已发生的格子位移” =====
+            if in_trap_rock && (player_input.move_to.is_some()
+                || player_input.movement_mode != crate::components::MovementMode::None
+                || _path.is_valid
+                || !matches!(player.action, crate::components::PlayerAction::Stand))
+            {
+                player_input.move_to = None;
+                player_input.movement_mode = crate::components::MovementMode::None;
+                _path.clear();
+                if !player.action.is_attack() {
+                    player.action = crate::components::PlayerAction::Stand;
+                }
+            }
+
+            // ===== local move -> server sync: 同步”已发生的格子位移” =====
             // 关键点：
             // - 本地移动是连续像素移动；MockServer 的 Move/Walk/RunRequest 语义是“推进一格”。
             // - 如果按固定时间间隔发送，会导致 Mock 端走得比本地快，累计偏差后触发客户端的大偏差纠偏（表现为瞬移）。
             // - 这里改为：只有当本地玩家“跨入新格子”时，才给服务器发送一步，从而保持双方格子同步。
-            if sync_move_to_server {
+            if sync_move_to_server && !in_trap_rock {
                 let now = Instant::now();
                 let (pgx, pgy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
 

@@ -1264,12 +1264,12 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             tracing::debug!("📤 EditGuildNotice");
         }
 
-        NetworkEvent::GuildNameReturn => {
+        NetworkEvent::GuildNameReturn { name } => {
             let packet = client::guild::GuildNameReturn {
-                name: String::new(),
+                name: name.clone(),
             };
             serialize_packet(stream, &packet)?;
-            tracing::debug!("📤 GuildNameReturn");
+            tracing::debug!("📤 GuildNameReturn: {}", name);
         }
 
         NetworkEvent::RequestGuildInfo => {

@@ -23,25 +23,30 @@ impl PacketHandler for MarketHandler {
 
             // NPCMarket
             x if x == ServerPacketIds::NPCMarket as u16 => {
-                if let Ok(_packet) = server::NPCMarket::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NPCMarketEvent2);
-                    tracing::debug!("🏪 NPC market event");
+                if let Ok(packet) = server::NPCMarket::read_body(&mut cursor) {
+                    let page_count = packet.pages.len();
+                    events.push(NetworkEvent::NPCMarketEvent2 { pages: packet.pages });
+                    tracing::debug!("🏪 NPC market: {} pages", page_count);
                 }
             }
 
             // NPCMarketPage
             x if x == ServerPacketIds::NPCMarketPage as u16 => {
-                if let Ok(_packet) = server::NPCMarketPage::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NPCMarketPageEvent2);
-                    tracing::debug!("🏪 NPC market page event");
+                if let Ok(packet) = server::NPCMarketPage::read_body(&mut cursor) {
+                    let count = packet.listings.len();
+                    events.push(NetworkEvent::NPCMarketPageEvent2 { listings: packet.listings });
+                    tracing::debug!("🏪 NPC market page: {} listings", count);
                 }
             }
 
             // ConsignItem
             x if x == ServerPacketIds::ConsignItem as u16 => {
-                if let Ok(_packet) = server::ConsignItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ConsignItemEvent);
-                    tracing::debug!("📋 Consign item event");
+                if let Ok(packet) = server::ConsignItem::read_body(&mut cursor) {
+                    events.push(NetworkEvent::ConsignItemEvent {
+                        unique_id: packet.unique_id,
+                        success: packet.success,
+                    });
+                    tracing::debug!("📋 Consign item: uid={} success={}", packet.unique_id, packet.success);
                 }
             }
 
@@ -58,7 +63,9 @@ impl PacketHandler for MarketHandler {
             // MarketSuccess
             x if x == ServerPacketIds::MarketSuccess as u16 => {
                 if let Ok(packet) = server::MarketSuccess::read_body(&mut cursor) {
-                    events.push(NetworkEvent::MarketSuccessEvent2);
+                    events.push(NetworkEvent::MarketSuccessEvent2 {
+                        message: packet.message.clone(),
+                    });
                     tracing::info!("🏪 Market success: {}", packet.message);
                 }
             }

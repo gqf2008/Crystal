@@ -230,9 +230,16 @@ impl PacketHandler for CharacterHandler {
 
             // PlayerUpdate
             x if x == ServerPacketIds::PlayerUpdate as u16 => {
-                if let Ok(_packet) = server::PlayerUpdate::read_body(&mut cursor) {
-                    events.push(NetworkEvent::PlayerUpdated);
-                    tracing::debug!("🔄 PlayerUpdate received");
+                if let Ok(packet) = server::PlayerUpdate::read_body(&mut cursor) {
+                    events.push(NetworkEvent::PlayerUpdated {
+                        object_id: packet.object_id,
+                        light: packet.light,
+                        weapon: packet.weapon,
+                        weapon_effect: packet.weapon_effect,
+                        armor: packet.armor,
+                        wings_effect: packet.wings_effect,
+                    });
+                    tracing::debug!("🔄 PlayerUpdate: obj={} weapon={} armor={}", packet.object_id, packet.weapon, packet.armor);
                 }
             }
 
@@ -306,9 +313,12 @@ impl PacketHandler for CharacterHandler {
 
             // ChatItemStats
             x if x == ServerPacketIds::ChatItemStats as u16 => {
-                if let Ok(_packet) = server::ChatItemStats::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ChatItemStatsReceived);
-                    tracing::debug!("📊 ChatItemStatsReceived");
+                if let Ok(packet) = server::ChatItemStats::read_body(&mut cursor) {
+                    events.push(NetworkEvent::ChatItemStatsReceived {
+                        unique_id: packet.unique_id,
+                        stats: packet.stats.clone(),
+                    });
+                    tracing::debug!("📊 ChatItemStatsReceived: uid={}", packet.unique_id);
                 }
             }
 
@@ -318,9 +328,10 @@ impl PacketHandler for CharacterHandler {
 
             // LogOutSuccess
             x if x == ServerPacketIds::LogOutSuccess as u16 => {
-                if let Ok(_packet) = server::LogOutSuccess::read_body(&mut cursor) {
-                    events.push(NetworkEvent::LogOutSuccess);
-                    tracing::info!("🚪 LogOutSuccess");
+                if let Ok(packet) = server::LogOutSuccess::read_body(&mut cursor) {
+                    let count = packet.characters.len();
+                    events.push(NetworkEvent::LogOutSuccess { characters: packet.characters });
+                    tracing::info!("🚪 LogOutSuccess: {} characters", count);
                 }
             }
 

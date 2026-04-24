@@ -41,7 +41,9 @@ impl BuffType {
 /// Buff实例
 #[derive(Debug, Clone)]
 pub struct Buff {
-    /// Buff类型
+    /// 服务器 Buff 类型 ID（用于唯一识别和与服务器同步）
+    pub server_buff_id: u32,
+    /// Buff类型（客户端简化分类，用于游戏逻辑）
     pub buff_type: BuffType,
     /// 剩余持续时间(毫秒)
     pub remaining_duration: u64,
@@ -51,16 +53,20 @@ pub struct Buff {
     pub strength: Option<i32>,
     /// 开始时间
     pub start_time: Instant,
+    /// 是否暂停（服务器 BuffPaused 推送时设置）
+    pub paused: bool,
 }
 
 impl Buff {
-    pub fn new(buff_type: BuffType) -> Self {
+    pub fn new(buff_type: BuffType, server_buff_id: u32) -> Self {
         Self {
+            server_buff_id,
             buff_type,
             remaining_duration: buff_type.default_duration(),
             stack_count: 1,
             strength: None,
             start_time: Instant::now(),
+            paused: false,
         }
     }
 
@@ -76,6 +82,9 @@ impl Buff {
 
     /// 更新Buff(返回是否已过期)
     pub fn update(&mut self, delta_ms: u64) -> bool {
+        if self.paused {
+            return false;
+        }
         if self.remaining_duration > delta_ms {
             self.remaining_duration -= delta_ms;
             false
@@ -100,26 +109,32 @@ impl BuffList {
         }
     }
 
-    /// 添加Buff
+    /// 添加Buff（按 server_buff_id 去重）
     pub fn add_buff(&mut self, buff: Buff) {
-        // 检查是否已存在相同类型的Buff
-        if let Some(existing) = self.active_buffs.iter_mut().find(|b| b.buff_type == buff.buff_type) {
-            // 刷新持续时间并增加层数
+        if let Some(existing) = self.active_buffs.iter_mut().find(|b| b.server_buff_id == buff.server_buff_id) {
             existing.remaining_duration = buff.remaining_duration;
             existing.stack_count = (existing.stack_count + 1).min(99);
+            existing.paused = buff.paused;
         } else {
             self.active_buffs.push(buff);
         }
     }
 
-    /// 移除Buff
-    pub fn remove_buff(&mut self, buff_type: BuffType) {
-        self.active_buffs.retain(|b| b.buff_type != buff_type);
+    /// 移除Buff（按 server_buff_id）
+    pub fn remove_buff(&mut self, server_buff_id: u32) {
+        self.active_buffs.retain(|b| b.server_buff_id != server_buff_id);
     }
 
-    /// 检查是否有某个Buff
+    /// 检查是否有某个类型的Buff
     pub fn has_buff(&self, buff_type: BuffType) -> bool {
         self.active_buffs.iter().any(|b| b.buff_type == buff_type)
+    }
+
+    /// 设置指定Buff的暂停状态（按 server_buff_id）
+    pub fn set_buff_paused(&mut self, server_buff_id: u32, paused: bool) {
+        if let Some(existing) = self.active_buffs.iter_mut().find(|b| b.server_buff_id == server_buff_id) {
+            existing.paused = paused;
+        }
     }
 
     /// 清理过期的Buff
@@ -277,6 +292,17 @@ pub struct CombatStats {
     pub magic_defense: i32,
     pub accuracy: u8,
     pub agility: u8,
+    // 基础属性 (来自 BaseStatsReceived)
+    pub ac_min: i32,      // 物理防御下限
+    pub ac_max: i32,      // 物理防御上限
+    pub mac_min: i32,     // 魔法防御下限
+    pub mac_max: i32,     // 魔法防御上限
+    pub dc_min: i32,      // 物理攻击下限
+    pub dc_max: i32,      // 物理攻击上限
+    pub mc_min: i32,      // 魔法攻击下限
+    pub mc_max: i32,      // 魔法攻击上限
+    pub sc_min: i32,      // 道术攻击下限
+    pub sc_max: i32,      // 道术攻击上限
 }
 
 impl Default for CombatStats {
@@ -289,6 +315,16 @@ impl Default for CombatStats {
             magic_defense: 0,
             accuracy: 0,
             agility: 0,
+            ac_min: 0,
+            ac_max: 0,
+            mac_min: 0,
+            mac_max: 0,
+            dc_min: 0,
+            dc_max: 0,
+            mc_min: 0,
+            mc_max: 0,
+            sc_min: 0,
+            sc_max: 0,
         }
     }
 }
@@ -367,6 +403,27 @@ impl Currency {
     
     pub fn add_gold(&mut self, amount: u32) {
         self.gold = self.gold.saturating_add(amount);
+    }
+
+    pub fn add_credit(&mut self, amount: u32) {
+        self.credit = self.credit.saturating_add(amount);
+    }
+
+    pub fn spend_credit(&mut self, amount: u32) -> bool {
+        if self.credit >= amount {
+            self.credit -= amount;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn apply_credit_delta(&mut self, delta: i32) {
+        if delta >= 0 {
+            self.credit = self.credit.saturating_add(delta as u32);
+        } else {
+            self.credit = self.credit.saturating_sub((-delta) as u32);
+        }
     }
 }
 
@@ -552,5 +609,40 @@ impl AttackHitbox {
 impl Default for AttackHitbox {
     fn default() -> Self {
         Self::new(1)
+    }
+}
+
+/// 元素状态组件
+///
+/// 存储实体的元素附魔状态（来自 ElementalSet 协议）。
+/// - `enabled`: 是否激活元素效果
+/// - `element`: 元素类型（0=无, 1=火, 2=冰, etc.）
+/// - `value`: 元素强度/等级
+/// - `expire_time`: 过期时间戳（Unix 毫秒；0 表示无过期）
+#[derive(Debug, Clone, Copy)]
+pub struct ElementalState {
+    pub enabled: bool,
+    pub element: u8,
+    pub value: u32,
+    pub expire_time: i64,
+}
+
+impl ElementalState {
+    pub fn new(element: u8, value: u32, expire_time: i64) -> Self {
+        Self {
+            enabled: true,
+            element,
+            value,
+            expire_time,
+        }
+    }
+
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            element: 0,
+            value: 0,
+            expire_time: 0,
+        }
     }
 }

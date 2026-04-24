@@ -48,6 +48,8 @@ pub enum TextInputKind {
     AddMentor,
     GuildNotice,
     WhisperChat { target: String },
+    NPCInput { npc_id: u32 },
+    GuildName,
 }
 
 /// 对话框类型枚举，用于 z-order 管理
@@ -81,6 +83,44 @@ pub enum DialogType {
     Ranking,
     Help,
     Inspect,
+}
+
+/// 技能对话框公共接口（用于英雄/角色对话框统一调度）。
+pub trait SkillDialog {
+    fn learn_skill(&mut self, spell_id: u8, name: String, level: u8, icon: u8);
+    fn level_up_skill(&mut self, spell_id: u8, level: u8);
+    fn remove_skill(&mut self, spell_id: u8);
+    fn toggle_skill(&mut self, spell_id: u8, can_use: bool);
+}
+
+impl SkillDialog for CharacterDialogHybrid {
+    fn learn_skill(&mut self, spell_id: u8, name: String, level: u8, icon: u8) {
+        CharacterDialogHybrid::learn_skill(self, spell_id, name, level, icon);
+    }
+    fn level_up_skill(&mut self, spell_id: u8, level: u8) {
+        CharacterDialogHybrid::level_up_skill(self, spell_id, level);
+    }
+    fn remove_skill(&mut self, spell_id: u8) {
+        CharacterDialogHybrid::remove_skill(self, spell_id);
+    }
+    fn toggle_skill(&mut self, spell_id: u8, can_use: bool) {
+        CharacterDialogHybrid::toggle_skill(self, spell_id, can_use);
+    }
+}
+
+impl SkillDialog for crate::scenes::dialogs::game::hero_dialog::HeroDialogHybrid {
+    fn learn_skill(&mut self, spell_id: u8, name: String, level: u8, icon: u8) {
+        crate::scenes::dialogs::game::hero_dialog::HeroDialogHybrid::learn_skill(self, spell_id, name, level, icon);
+    }
+    fn level_up_skill(&mut self, spell_id: u8, level: u8) {
+        crate::scenes::dialogs::game::hero_dialog::HeroDialogHybrid::level_up_skill(self, spell_id, level);
+    }
+    fn remove_skill(&mut self, spell_id: u8) {
+        crate::scenes::dialogs::game::hero_dialog::HeroDialogHybrid::remove_skill(self, spell_id);
+    }
+    fn toggle_skill(&mut self, spell_id: u8, can_use: bool) {
+        crate::scenes::dialogs::game::hero_dialog::HeroDialogHybrid::toggle_skill(self, spell_id, can_use);
+    }
 }
 
 /// 主界面底部工具栏
@@ -507,8 +547,8 @@ impl MainDialog {
     }
 
     /// 同步背包数据到 InventoryDialog
-    pub fn sync_inventory(&mut self, inv: &crate::components::Inventory) {
-        self.inventory_dialog.sync_from_ecs_inventory(inv);
+    pub fn sync_inventory(&mut self, inv: &crate::components::Inventory, gold: u32) {
+        self.inventory_dialog.sync_from_ecs_inventory(inv, gold);
     }
 
     /// 同步小地图上的玩家点（世界坐标像素 + 朝向弧度）
@@ -2304,6 +2344,19 @@ impl MainDialog {
     /// 获取英雄对话框的可变引用
     pub fn hero_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::hero_dialog::HeroDialogHybrid {
         &mut self.hero_dialog
+    }
+
+    pub fn character_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::character_dialog::CharacterDialogHybrid {
+        &mut self.character_dialog
+    }
+
+    /// 根据 hero 标志获取对应的技能对话框可变引用。
+    pub fn skill_dialog_mut(&mut self, hero: bool) -> &mut dyn SkillDialog {
+        if hero {
+            &mut self.hero_dialog
+        } else {
+            &mut self.character_dialog
+        }
     }
 
     /// 获取增益对话框的可变引用

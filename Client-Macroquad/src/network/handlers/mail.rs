@@ -25,31 +25,37 @@ impl PacketHandler for MailHandler {
 
             // MailLockedItem
             x if x == ServerPacketIds::MailLockedItem as u16 => {
-                if let Ok(_packet) = server::MailLockedItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::MailLockedItemReceived);
-                    tracing::debug!("🔒 Mail locked item received");
+                if let Ok(packet) = server::MailLockedItem::read_body(&mut cursor) {
+                    events.push(NetworkEvent::MailLockedItemReceived {
+                        unique_id: packet.unique_id,
+                        locked: packet.locked,
+                    });
+                    tracing::debug!("🔒 Mail locked item: unique_id={} locked={}", packet.unique_id, packet.locked);
                 }
             }
 
             // MailSendRequest
             x if x == ServerPacketIds::MailSendRequest as u16 => {
-                let _ = server::MailSendRequest::read_body(&mut cursor);
-                events.push(NetworkEvent::MailSendRequestReceived);
-                tracing::debug!("📤 Mail send request received");
+                if let Ok(packet) = server::MailSendRequest::read_body(&mut cursor) {
+                    events.push(NetworkEvent::MailSendRequestReceived { mail_id: packet.mail_id });
+                    tracing::debug!("📤 Mail send request received: mail_id={}", packet.mail_id);
+                }
             }
 
             // MailSent
             x if x == ServerPacketIds::MailSent as u16 => {
-                let _ = server::MailSent::read_body(&mut cursor);
-                events.push(NetworkEvent::MailSentEvent);
-                tracing::debug!("📬 Mail sent event");
+                if let Ok(packet) = server::MailSent::read_body(&mut cursor) {
+                    events.push(NetworkEvent::MailSentEvent { result: packet.result });
+                    tracing::debug!("📬 Mail sent result: {}", packet.result);
+                }
             }
 
             // ParcelCollected
             x if x == ServerPacketIds::ParcelCollected as u16 => {
-                let _ = server::ParcelCollected::read_body(&mut cursor);
-                events.push(NetworkEvent::ParcelCollectedEvent);
-                tracing::debug!("📦 Parcel collected event");
+                if let Ok(packet) = server::ParcelCollected::read_body(&mut cursor) {
+                    events.push(NetworkEvent::ParcelCollectedEvent { success: packet.success });
+                    tracing::debug!("📦 Parcel collected: success={}", packet.success);
+                }
             }
 
             // MailCost

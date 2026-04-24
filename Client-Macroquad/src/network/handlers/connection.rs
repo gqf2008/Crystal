@@ -48,9 +48,9 @@ impl PacketHandler for ConnectionHandler {
             }
             
             x if x == ServerPacketIds::KeepAlive as u16 => {
-                if let Ok(_packet) = server::KeepAlive::read_body(&mut cursor) {
-                    events.push(NetworkEvent::KeepAliveReceived { time: 0 });
-                    tracing::trace!("💓 KeepAlive received");
+                if let Ok(packet) = server::KeepAlive::read_body(&mut cursor) {
+                    events.push(NetworkEvent::KeepAliveReceived { time: packet.time });
+                    tracing::trace!("💓 KeepAlive received: time={}", packet.time);
                 }
             }
             

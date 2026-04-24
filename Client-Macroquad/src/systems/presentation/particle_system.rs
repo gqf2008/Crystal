@@ -35,6 +35,51 @@ impl LogicSystem for ParticleSystem {
         // 使用 macroquad 的时间源（秒），避免 SystemTime 在极端情况下的 before-epoch unwrap。
         let current_time = get_time() as f32;
 
+        // 0. 消费表现层事件（先收集粒子，再 spawn 避免 E0502）
+        let mut particles_to_spawn: Vec<Particle> = Vec::new();
+        for event in ctx.events().presentation_events() {
+            match event {
+                crate::event_bus::PresentationEvent::SpawnParticle { particle_type, position, velocity, duration } => {
+                    let ptype = match particle_type {
+                        crate::event_bus::ParticleType::Fire => ParticleType::RedFogEmber,
+                        crate::event_bus::ParticleType::Smoke => ParticleType::Fog,
+                        crate::event_bus::ParticleType::Blood => ParticleType::RedFog,
+                        crate::event_bus::ParticleType::Magic => ParticleType::BlueFog,
+                        crate::event_bus::ParticleType::Heal => ParticleType::WhiteEmber,
+                        crate::event_bus::ParticleType::Poison => ParticleType::YellowFog,
+                    };
+                    if let Some(mut p) = self.spawn_particle_at(position.0, position.1, ptype) {
+                        if let Some((vx, vy)) = velocity {
+                            p.velocity.x = *vx;
+                            p.velocity.y = *vy;
+                        }
+                        p.alive_until = current_time + *duration;
+                        particles_to_spawn.push(p);
+                    }
+                }
+                crate::event_bus::PresentationEvent::ProjectileEffect { projectile_type, from, to, speed } => {
+                    let dx = to.0 - from.0;
+                    let dy = to.1 - from.1;
+                    let dist = (dx * dx + dy * dy).sqrt().max(0.001);
+                    let lifetime = dist / *speed;
+                    let (r, g, b) = match projectile_type {
+                        crate::event_bus::ProjectileType::Fireball => (255, 100, 30),
+                        crate::event_bus::ProjectileType::Lightning => (255, 255, 80),
+                        crate::event_bus::ProjectileType::IceBolt => (100, 200, 255),
+                        crate::event_bus::ProjectileType::Arrow => (180, 140, 100),
+                    };
+                    let mut p = Particle::new(from.0, from.1, dx / dist * *speed, dy / dist * *speed, lifetime);
+                    p.color = ParticleColor { r, g, b, a: 220 };
+                    p.size = 4.0;
+                    particles_to_spawn.push(p);
+                }
+                _ => {}
+            }
+        }
+        for p in particles_to_spawn {
+            ctx.world.spawn((p,));
+        }
+
         // 1. 更新粒子位置和速度
         for (particle, emitter) in ctx.world.query_mut::<(&mut Particle, Option<&ParticleEmitter>)>() {
             // 更新位置: Position += Velocity

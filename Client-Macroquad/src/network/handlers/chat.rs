@@ -1,7 +1,7 @@
 // Chat Handler - 聊天相关数据包处理
 
 use mir2_shared::packets::{PacketHeader, Packet, server};
-use mir2_shared::enums::{ServerPacketIds, ChatType};
+use mir2_shared::enums::ServerPacketIds;
 use crate::network::handlers::{NetworkEvent, PacketHandler};
 use std::io::Cursor;
 
@@ -17,11 +17,11 @@ impl PacketHandler for ChatHandler {
             x if x == ServerPacketIds::Chat as u16 => {
                 if let Ok(packet) = server::Chat::read_body(&mut cursor) {
                     events.push(NetworkEvent::ChatMessage {
-                        sender: String::new(), // Server chat has no sender
+                        sender: String::new(),
                         message: packet.message.clone(),
-                        chat_type: ChatType::System,
+                        chat_type: packet.chat_type,
                     });
-                    tracing::trace!("💬 Chat: {}", packet.message);
+                    tracing::trace!("💬 Chat: {:?} {}", packet.chat_type, packet.message);
                 }
             }
             

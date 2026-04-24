@@ -218,3 +218,12 @@ impl Default for VisibleArea {
         }
     }
 }
+
+/// 对象装饰组件（来自 ObjectDecoReceived）
+///
+/// 存储实体当前激活的视觉装饰 ID（如结婚戒指光效、特殊特效等）。
+/// 渲染系统可读取此组件来绘制对应的装饰效果。
+#[derive(Debug, Clone, Copy)]
+pub struct ObjectDeco {
+    pub deco_id: u16,
+}

@@ -287,8 +287,8 @@ impl InventoryDialogHybrid {
     pub fn is_visible(&self) -> bool { self.visible }
 
     /// 从 ECS Inventory 组件同步物品数据
-    pub fn sync_from_ecs_inventory(&mut self, inv: &crate::components::Inventory) {
-        self.gold = inv.gold;
+    pub fn sync_from_ecs_inventory(&mut self, inv: &crate::components::Inventory, gold: u32) {
+        self.gold = gold;
 
         let mut equip_slots: Vec<ItemSlotHybrid> = Vec::with_capacity(46);
         let mut item_slots: Vec<ItemSlotHybrid> = Vec::with_capacity(46);

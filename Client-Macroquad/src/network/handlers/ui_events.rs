@@ -128,6 +128,7 @@ impl PacketHandler for UiEventsHandler {
                 if let Ok(packet) = server::FishingUpdate::read_body(&mut cursor) {
                     events.push(NetworkEvent::FishingStatusUpdated {
                         state: packet.fishing_progress as u8,
+                        success: packet.fishing_success,
                     });
                     tracing::debug!("🎣 FishingStatusUpdated: progress={}", packet.fishing_progress);
                 } else {
@@ -137,9 +138,10 @@ impl PacketHandler for UiEventsHandler {
 
             // Rankings
             x if x == ServerPacketIds::Rankings as u16 => {
-                if let Ok(_packet) = server::Rankings::read_body(&mut cursor) {
-                    events.push(NetworkEvent::RankingsReceived);
-                    tracing::debug!("🏆 RankingsReceived");
+                if let Ok(packet) = server::Rankings::read_body(&mut cursor) {
+                    let count = packet.rankings.len();
+                    events.push(NetworkEvent::RankingsReceived { rankings: packet.rankings });
+                    tracing::debug!("🏆 RankingsReceived: {} entries", count);
                 } else {
                     events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
                 }

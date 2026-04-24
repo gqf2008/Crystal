@@ -299,11 +299,12 @@ impl NpcGoodsDialogHybrid {
         self.visible && self.rect().contains(mouse_pos)
     }
 
-    pub fn new_goods(&mut self, list: Vec<UserItem>, rate: f32, panel_type: PanelType, hide_added_stats: bool) {
+    pub fn new_goods(&mut self, list: Vec<UserItem>, rate: f32, panel_type: PanelType, hide_added_stats: bool, use_pearls: bool) {
         self.dialog_mode = NpcGoodsMode::Buy;
         self.ptype = panel_type;
         self.npc_rate = rate;
         self.hide_added_stats = hide_added_stats;
+        self.use_pearls = use_pearls;
 
         self.goods.clear();
         self.display_goods.clear();

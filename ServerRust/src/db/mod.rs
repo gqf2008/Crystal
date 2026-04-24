@@ -476,6 +476,19 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             lines_json TEXT NOT NULL DEFAULT '[]',
             PRIMARY KEY (npc_index, page_name)
         );
+        CREATE TABLE IF NOT EXISTS auctions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            auction_id INTEGER NOT NULL UNIQUE,
+            seller_name TEXT NOT NULL,
+            item_json TEXT NOT NULL,
+            price INTEGER NOT NULL DEFAULT 0,
+            consignment_date INTEGER NOT NULL DEFAULT 0,
+            sold INTEGER NOT NULL DEFAULT 0,
+            buyer_name TEXT,
+            item_type INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_auctions_sold ON auctions(sold);
+        CREATE INDEX IF NOT EXISTS idx_auctions_seller ON auctions(seller_name);
         "#
     ).execute(&pool).await?;
 
@@ -486,6 +499,24 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
         .execute(&pool).await;
     // Migration: add GM flag to accounts (safe to re-run)
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN admin_account INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    // Migration: add key column to player_magics (safe to re-run)
+    let _ = sqlx::query("ALTER TABLE player_magics ADD COLUMN key INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    // Migration: add toggled column to player_magics (safe to re-run)
+    let _ = sqlx::query("ALTER TABLE player_magics ADD COLUMN toggled INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    // Migration: add hero_behaviour column to characters (safe to re-run)
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN hero_behaviour INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    // Migration: add auto_pot columns to characters (safe to re-run)
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN auto_pot_hp INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN auto_pot_mp INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN auto_pot_hp_item INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN auto_pot_mp_item INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
 
     info!("SQLite database initialized: {}", db_path.display());
@@ -613,9 +644,10 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
             attack_mode, pet_mode, level, experience, max_experience,
             hp, max_hp, mp, max_mp, min_attack, max_attack, defence,
             gold, group_id, guild_name, guild_rank,
-            spouse_name, allow_mentor, mentor_name, hero_index,
+            spouse_name, allow_mentor, mentor_name, hero_index, hero_behaviour,
+            auto_pot_hp, auto_pot_mp, auto_pot_hp_item, auto_pot_mp_item,
             is_fishing, fishing_autocast, is_dead, pk_points, pk_kill_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(&state.name)
     .bind(account_username)
@@ -647,6 +679,11 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     .bind(if state.allow_mentor { 1 } else { 0 })
     .bind(&state.mentor_name)
     .bind(state.hero_index as i32)
+    .bind(state.hero_behaviour as i32)
+    .bind(state.auto_pot_hp as i64)
+    .bind(state.auto_pot_mp as i64)
+    .bind(state.auto_pot_hp_item)
+    .bind(state.auto_pot_mp_item)
     .bind(if state.is_fishing { 1 } else { 0 })
     .bind(if state.fishing_autocast { 1 } else { 0 })
     .bind(if state.is_dead { 1 } else { 0 })
@@ -758,6 +795,11 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         mentor_name: row.get::<Option<String>, _>("mentor_name"),
         creature_log,
         hero_index: row.get::<i32, _>("hero_index") as u8,
+        hero_behaviour: row.try_get::<i32, _>("hero_behaviour").unwrap_or(0) as u8,
+        auto_pot_hp: row.try_get::<i64, _>("auto_pot_hp").unwrap_or(0) as u32,
+        auto_pot_mp: row.try_get::<i64, _>("auto_pot_mp").unwrap_or(0) as u32,
+        auto_pot_hp_item: row.try_get::<i32, _>("auto_pot_hp_item").unwrap_or(0),
+        auto_pot_mp_item: row.try_get::<i32, _>("auto_pot_mp_item").unwrap_or(0),
         hero_inventory,
         refine_log,
         is_fishing: row.get::<i32, _>("is_fishing") != 0,
@@ -1441,19 +1483,21 @@ async fn save_magics(pool: &DbPool, character_name: &str, magics: &[crate::actor
     // Insert current magics
     for magic in magics {
         sqlx::query(
-            "INSERT INTO player_magics (character_name, spell, level, experience) VALUES (?, ?, ?, ?)"
+            "INSERT INTO player_magics (character_name, spell, level, experience, key, toggled) VALUES (?, ?, ?, ?, ?, ?)"
         )
         .bind(character_name)
         .bind(magic.spell)
         .bind(magic.level as i32)
         .bind(magic.experience as i32)
+        .bind(magic.key as i32)
+        .bind(if magic.toggled { 1i32 } else { 0i32 })
         .execute(pool).await?;
     }
     Ok(())
 }
 
 async fn load_magics(pool: &DbPool, character_name: &str) -> anyhow::Result<Vec<crate::actors::player::PlayerMagic>> {
-    let rows = sqlx::query("SELECT spell, level, experience FROM player_magics WHERE character_name = ?")
+    let rows = sqlx::query("SELECT spell, level, experience, key, toggled FROM player_magics WHERE character_name = ?")
         .bind(character_name)
         .fetch_all(pool).await?;
     let mut magics = Vec::new();
@@ -1462,6 +1506,8 @@ async fn load_magics(pool: &DbPool, character_name: &str) -> anyhow::Result<Vec<
             spell: r.get("spell"),
             level: r.get::<i32, _>("level") as u8,
             experience: r.get::<i32, _>("experience") as u16,
+            key: r.try_get::<i32, _>("key").unwrap_or(0) as u8,
+            toggled: r.try_get::<i32, _>("toggled").unwrap_or(0) != 0,
         });
     }
     Ok(magics)
@@ -2374,6 +2420,80 @@ pub async fn load_dragon_info(
         }
         None => Ok(None),
     }
+}
+
+// ============================================================
+// Auction save/load
+// ============================================================
+
+pub async fn save_auction(
+    pool: &DbPool,
+    auction_id: i64,
+    seller_name: &str,
+    item_json: &str,
+    price: i64,
+    consignment_date: i64,
+    item_type: i32,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"INSERT INTO auctions (auction_id, seller_name, item_json, price, consignment_date, sold, item_type)
+           VALUES (?, ?, ?, ?, ?, 0, ?)"#
+    )
+    .bind(auction_id)
+    .bind(seller_name)
+    .bind(item_json)
+    .bind(price)
+    .bind(consignment_date)
+    .bind(item_type)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn load_all_auctions(
+    pool: &DbPool,
+) -> anyhow::Result<Vec<(i64, String, String, i64, i64, i64, i64, Option<String>)>> {
+    let rows = sqlx::query("SELECT auction_id, seller_name, item_json, price, consignment_date, sold, item_type, buyer_name FROM auctions ORDER BY consignment_date DESC")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().map(|r| {
+        (
+            r.get::<i64, _>("auction_id"),
+            r.get::<String, _>("seller_name"),
+            r.get::<String, _>("item_json"),
+            r.get::<i64, _>("price"),
+            r.get::<i64, _>("consignment_date"),
+            r.get::<i64, _>("sold"),
+            r.get::<i64, _>("item_type"),
+            r.get::<Option<String>, _>("buyer_name"),
+        )
+    }).collect())
+}
+
+pub async fn mark_auction_sold(
+    pool: &DbPool,
+    auction_id: i64,
+    buyer_name: &str,
+) -> anyhow::Result<bool> {
+    let result = sqlx::query(
+        "UPDATE auctions SET sold = 1, buyer_name = ? WHERE auction_id = ? AND sold = 0"
+    )
+    .bind(buyer_name)
+    .bind(auction_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn delete_auction(
+    pool: &DbPool,
+    auction_id: i64,
+) -> anyhow::Result<bool> {
+    let result = sqlx::query("DELETE FROM auctions WHERE auction_id = ?")
+        .bind(auction_id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 #[cfg(test)]

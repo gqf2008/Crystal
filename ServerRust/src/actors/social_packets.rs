@@ -144,6 +144,28 @@ pub fn send_trade_item_update_packet(gate_ref: &ActorRef<GateActor>, session_id:
     });
 }
 
+/// Send DepositTradeItem response to a client.
+pub fn send_deposit_trade_item_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, from_slot: i32, success: bool) {
+    let mut body = Vec::new();
+    body.extend_from_slice(&from_slot.to_le_bytes());
+    body.push(if success { 1u8 } else { 0u8 });
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DepositTradeItem as i16, &body),
+    });
+}
+
+/// Send RetrieveTradeItem response to a client.
+pub fn send_retrieve_trade_item_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, from_slot: i32, success: bool) {
+    let mut body = Vec::new();
+    body.extend_from_slice(&from_slot.to_le_bytes());
+    body.push(if success { 1u8 } else { 0u8 });
+    let _ = gate_ref.ask(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RetrieveTradeItem as i16, &body),
+    });
+}
+
 /// Find a trade session by session_id (immutable).
 pub fn find_trade(active_trades: &HashMap<u64, TradeSession>, session_id: u64) -> Option<&TradeSession> {
     active_trades.values().find(|t| {
@@ -367,12 +389,15 @@ pub fn send_mentor_invite_packet(gate_ref: &ActorRef<GateActor>, session_id: u64
     });
 }
 
-/// Send mentor cancel to a client.
-// Note: MentorCancel packet ID not yet in shared enum; uses MentorRequest as placeholder.
+/// Send mentor cancel to a client (sends empty MentorUpdate to clear mentor state).
 pub fn send_mentor_cancel_packet(gate_ref: &ActorRef<GateActor>, session_id: u64) {
+    let mut body = Vec::new();
+    write_dotnet_string(&mut body, "");       // empty mentor name = no mentor
+    body.extend_from_slice(&0i32.to_le_bytes()); // level 0
+    body.push(0u8);                            // offline
     let _ = gate_ref.ask(SendToClient {
         session_id,
-        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MentorRequest as i16, &[]),
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MentorUpdate as i16, &body),
     });
 }
 

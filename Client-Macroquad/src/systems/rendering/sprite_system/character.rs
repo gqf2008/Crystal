@@ -748,6 +748,9 @@ impl SpriteRenderSystem {
                 let Some(appearance) = eref.get::<&PlayerAppearance>() else { continue };
                 let Some(anim_frame) = eref.get::<&AnimationFrame>() else { continue };
                 let entity = eref.entity();
+                if eref.get::<&crate::components::Visibility>().map(|v| !v.is_visible()).unwrap_or(false) {
+                    continue;
+                }
                 if !in_view(&pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
                     continue;
                 }
@@ -767,6 +770,9 @@ impl SpriteRenderSystem {
                 let Some(appearance) = eref.get::<&PlayerAppearance>() else { continue };
                 let Some(anim_frame) = eref.get::<&AnimationFrame>() else { continue };
                 let entity = eref.entity();
+                if eref.get::<&crate::components::Visibility>().map(|v| !v.is_visible()).unwrap_or(false) {
+                    continue;
+                }
                 if !in_view(&pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
                     continue;
                 }
@@ -790,6 +796,9 @@ impl SpriteRenderSystem {
                 Some((e.entity(), (sync, spr, pos)))
             }) {
                 if sync.object_type != NetworkObjectType::NPC && sync.object_type != NetworkObjectType::Monster {
+                    continue;
+                }
+                if world.get::<&crate::components::Visibility>(entity).ok().map(|v| !v.is_visible()).unwrap_or(false) {
                     continue;
                 }
                 if !matches!(spr.blend_mode, SpriteBlendMode::Alpha) {
