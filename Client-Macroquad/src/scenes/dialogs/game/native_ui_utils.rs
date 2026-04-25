@@ -13,6 +13,7 @@
 
 use crate::ui::text_renderer::draw_text_cn;
 use macroquad::prelude::*;
+use macroquad::ui::{root_ui, Skin};
 use crate::resources::LibraryName;
 use std::collections::HashMap;
 
@@ -620,5 +621,96 @@ impl CloseButton {
     pub fn draw(&self, window_pos: Vec2, window_size: Vec2, mouse_pos: Vec2) -> bool {
         let rect = self.get_rect(window_pos, window_size);
         self.textures.draw_button(rect, mouse_pos)
+    }
+}
+
+// ============================================================================
+// 共享拖放命令
+// ============================================================================
+
+/// 拖放命令（延迟执行，避免借用问题）
+#[derive(Debug)]
+pub enum DragCommand {
+    /// 使用物品（双击）
+    Use { slot: usize },
+    /// 交换物品位置
+    Swap { from: usize, to: usize },
+    /// 交换装备位置（如左右戒指）
+    SwapEquip { from: usize, to: usize },
+}
+
+// ============================================================================
+// 共享透明 Skin
+// ============================================================================
+
+/// 创建完全透明的 macroquad Skin（用于 Group 拖放，避免绘制默认背景/文字）
+pub fn create_transparent_skin() -> Skin {
+    let transparent_pixel = Image {
+        bytes: vec![0, 0, 0, 0],
+        width: 1,
+        height: 1,
+    };
+    let style = root_ui()
+        .style_builder()
+        .background(transparent_pixel.clone())
+        .background_hovered(transparent_pixel.clone())
+        .background_clicked(transparent_pixel.clone())
+        .color(Color::new(0.0, 0.0, 0.0, 0.0))
+        .color_hovered(Color::new(0.0, 0.0, 0.0, 0.0))
+        .color_clicked(Color::new(0.0, 0.0, 0.0, 0.0))
+        .build();
+    Skin {
+        group_style: style.clone(),
+        button_style: style.clone(),
+        label_style: style,
+        ..root_ui().default_skin()
+    }
+}
+
+// ============================================================================
+// DialogWidget trait — 统一对话框 open/close/draw/consume 模式
+// ============================================================================
+
+/// 对话框组件 trait，让 MainDialog::sync_and_draw_* 可泛型化
+pub trait DialogWidget {
+    fn dw_open(&mut self);
+    fn dw_close(&mut self);
+    fn dw_is_visible(&self) -> bool;
+    fn dw_contains(&self, pos: Vec2) -> bool;
+    fn dw_update_and_draw(&mut self);
+}
+
+/// 为实现了 open/close/is_visible/contains/update_and_draw 的对话框一键实现 DialogWidget
+#[macro_export]
+macro_rules! impl_dialog_widget {
+    ($ty:ty) => {
+        impl $crate::scenes::dialogs::game::native_ui_utils::DialogWidget for $ty {
+            fn dw_open(&mut self) { self.open(); }
+            fn dw_close(&mut self) { self.close(); }
+            fn dw_is_visible(&self) -> bool { self.is_visible() }
+            fn dw_contains(&self, pos: Vec2) -> bool { self.contains(pos) }
+            fn dw_update_and_draw(&mut self) { self.update_and_draw(); }
+        }
+    };
+}
+
+/// 泛型 sync_and_draw：替代 MainDialog 中 18 个相同模式的 sync_and_draw_* 方法
+pub fn sync_and_draw_dialog<D: DialogWidget>(
+    open_flag: &mut bool,
+    dialog: &mut D,
+    consumed: &mut bool,
+    mouse_pos: Vec2,
+) {
+    if *open_flag {
+        dialog.dw_open();
+    } else {
+        dialog.dw_close();
+    }
+    dialog.dw_update_and_draw();
+    if !dialog.dw_is_visible() {
+        *open_flag = false;
+    }
+    if *open_flag && dialog.dw_contains(mouse_pos) {
+        *consumed = true;
     }
 }

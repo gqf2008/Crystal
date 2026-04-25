@@ -35,9 +35,21 @@ use super::{
     HelpDialogHybrid,
     InspectDialogHybrid,
 };
+use super::native_ui_utils::sync_and_draw_dialog;
+use crate::impl_dialog_widget;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
 use std::time::{Duration, Instant};
+
+/// 底部工具栏按钮动作（替代字符串匹配，编译期检查穷举）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ButtonAction {
+    Character,
+    Inventory,
+    Skills,
+    QuestLog,
+    Option,
+}
 
 /// 文本输入请求类型（用于区分不同来源的 TextInputDialog 输入）
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -301,6 +313,34 @@ impl Default for MainDialog {
     }
 }
 
+// ============================================================================
+// impl DialogWidget for all simple dialogs
+// ============================================================================
+impl_dialog_widget!(BeltDialogHybrid);
+impl_dialog_widget!(ChatDialogHybrid);
+impl_dialog_widget!(ChatControlBarHybrid);
+impl_dialog_widget!(ChatOptionDialogHybrid);
+impl_dialog_widget!(InventoryDialogHybrid);
+impl_dialog_widget!(CharacterDialogHybrid);
+impl_dialog_widget!(QuestLogDialogHybrid);
+impl_dialog_widget!(GameShopDialog);
+impl_dialog_widget!(MiniMapDialogHybrid);
+impl_dialog_widget!(OptionDialogHybrid);
+impl_dialog_widget!(RankingDialogHybrid);
+impl_dialog_widget!(HelpDialogHybrid);
+impl_dialog_widget!(crate::scenes::dialogs::game::group_dialog::GroupDialogHybrid);
+impl_dialog_widget!(crate::scenes::dialogs::game::friend_dialog::FriendDialogHybrid);
+impl_dialog_widget!(crate::scenes::dialogs::game::guild_dialog::GuildDialogHybrid);
+impl_dialog_widget!(crate::scenes::dialogs::game::mentor_dialog::MentorDialogHybrid);
+impl_dialog_widget!(crate::scenes::dialogs::game::relationship_dialog::RelationshipDialogHybrid);
+impl_dialog_widget!(crate::scenes::dialogs::game::trade_dialog::TradeDialogHybrid);
+impl_dialog_widget!(crate::scenes::dialogs::game::mount_dialog::MountDialogHybrid);
+impl_dialog_widget!(crate::scenes::dialogs::game::hero_dialog::HeroDialogHybrid);
+impl_dialog_widget!(crate::scenes::dialogs::game::fishing_dialog::FishingDialogHybrid);
+impl_dialog_widget!(crate::scenes::dialogs::game::intelligent_creature_dialog::IntelligentCreatureDialogHybrid);
+impl_dialog_widget!(crate::scenes::dialogs::game::compass_dialog::CompassDialogHybrid);
+impl_dialog_widget!(crate::scenes::dialogs::game::socket_dialog::SocketDialogHybrid);
+impl_dialog_widget!(crate::scenes::dialogs::game::mail_dialog::MailDialogHybrid);
 impl MainDialog {
     pub fn new() -> Self {
         // 根据屏幕宽度决定分辨率索引
@@ -651,47 +691,10 @@ impl MainDialog {
         self.minimap_dialog.load_textures();
     }
 
-    /// 异步加载纹理
+    /// 异步加载纹理并设置快捷栏初始位置
     pub fn load_native_textures(&mut self) {
         self.ensure_textures_loaded();
-        // 加载主背景纹理
-        if let Some(texture) = LibraryName::Prguse.get_texture(self.resolution_index) {
-            self.bg_size = vec2(texture.width as f32, texture.height as f32);
-            if let Some(tex) = texture.image {
-                self.bg_texture = Some(tex);
-            }
-        }
-
-        // 加载所有子对话框纹理
-        self.belt_dialog.load_textures();
-        self.chat_dialog.load_textures();
-        self.chat_control_bar.load_textures();
-        self.chat_option_dialog.load_textures();
-        self.inventory_dialog.load_textures();
-        self.character_dialog.load_textures();
-        self.quest_log_dialog.load_textures();
-        self.group_dialog.load_textures();
-        self.friend_dialog.load_textures();
-        self.guild_dialog.load_textures();
-        self.mentor_dialog.load_textures();
-        self.relationship_dialog.load_textures();
-        self.trade_dialog.load_textures();
-        self.mount_dialog.load_textures();
-        self.hero_dialog.load_textures();
-        self.buff_dialog.load_textures();
-        self.fishing_dialog.load_textures();
-        self.intelligent_creature_dialog.load_textures();
-        self.compass_dialog.load_textures();
-        self.socket_dialog.load_textures();
-        self.mail_dialog.load_textures();
-        self.ranking_dialog.load_textures();
-        self.help_dialog.load_textures();
-        self.inspect_dialog.load_textures();
-        self.option_dialog.load_textures();
-        self.game_shop_dialog.load_textures();
-        self.menu_dialog.load_textures();
-        self.minimap_dialog.load_textures();
-        // 设置快捷栏初始位置
+        // 设置快捷栏初始位置（每分辨率切换时重新计算）
         let screen_h = screen_height() / screen_dpi_scale();
         let screen_w = screen_width() / screen_dpi_scale();
         let bg_info = LibraryName::Prguse.get_size(self.resolution_index).unwrap_or((1024, 150));
@@ -758,11 +761,14 @@ impl MainDialog {
             || self.chat_option_dialog_open
     }
 
-    /// 关闭所有“弹窗类”对话框（用于 ESC 一键收起）
+    /// 关闭所有”弹窗类”对话框（用于 ESC 一键收起）
     pub fn close_all_popups(&mut self) {
         self.inventory_dialog_open = false;
+        self.inventory_dialog.close();
         self.character_dialog_open = false;
+        self.character_dialog.close();
         self.quest_log_dialog_open = false;
+        self.quest_log_dialog.close();
         self.group_dialog_open = false;
         self.group_dialog.close();
         self.friend_dialog_open = false;
@@ -792,9 +798,13 @@ impl MainDialog {
         self.mail_dialog_open = false;
         self.mail_dialog.close();
         self.option_dialog_open = false;
+        self.option_dialog.close();
         self.game_shop_dialog_open = false;
+        self.game_shop_dialog.close();
         self.menu_dialog_open = false;
+        self.menu_dialog.close();
         self.chat_option_dialog_open = false;
+        self.chat_option_dialog.close();
     }
 
     /// 打开背包对话框（用于对齐原版：打开 NPC 商店时自动弹出背包）
@@ -1074,7 +1084,8 @@ impl MainDialog {
         }
 
         // 按 z-order 顺序绘制所有对话框（从后到前）
-        for dialog_type in self.dialog_z_order.clone().iter() {
+        for i in 0..self.dialog_z_order.len() {
+            let dialog_type = &self.dialog_z_order[i];
             match dialog_type {
                 DialogType::Belt => self.sync_and_draw_belt(&mut consumed, mouse_pos),
                 DialogType::Chat => self.sync_and_draw_chat(&mut consumed, mouse_pos),
@@ -1431,34 +1442,32 @@ impl MainDialog {
         // C#: SkillButton = Size.Width - 73
         // C#: QuestButton = Size.Width - 50
         // C#: OptionButton = Size.Width - 27
-        // 纹理索引：(正常, 悬停, 按下, 提示, X偏移)
-        let buttons: [(usize, usize, usize, &str, f32); 5] = [
-            (1900, 1901, 1902, "角色", self.bg_size.x - 119.0),
-            (1903, 1904, 1905, "背包", self.bg_size.x - 96.0),
-            (1906, 1907, 1908, "技能", self.bg_size.x - 73.0),
-            (1909, 1910, 1911, "任务", self.bg_size.x - 50.0),
-            (1912, 1913, 1914, "选项", self.bg_size.x - 27.0),
+        // 纹理索引：(正常, 悬停, 按下, 动作, X偏移)
+        let buttons: [(usize, usize, usize, ButtonAction, f32); 5] = [
+            (1900, 1901, 1902, ButtonAction::Character, self.bg_size.x - 119.0),
+            (1903, 1904, 1905, ButtonAction::Inventory, self.bg_size.x - 96.0),
+            (1906, 1907, 1908, ButtonAction::Skills, self.bg_size.x - 73.0),
+            (1909, 1910, 1911, ButtonAction::QuestLog, self.bg_size.x - 50.0),
+            (1912, 1913, 1914, ButtonAction::Option, self.bg_size.x - 27.0),
         ];
 
-        for (normal_idx, hover_idx, pressed_idx, hint, x_offset) in buttons {
+        for (normal_idx, hover_idx, pressed_idx, action, x_offset) in buttons {
             let btn_x = self.position.x + x_offset;
             if self.draw_button(mouse_pos, btn_x, button_y, normal_idx, hover_idx, pressed_idx) {
-                println!("🖱️ 点击了 {} 按钮", hint);
-                match hint {
-                    "背包" => {
+                match action {
+                    ButtonAction::Inventory => {
                         self.inventory_dialog_open = !self.inventory_dialog_open;
                         if self.inventory_dialog_open {
                             self.bring_to_front(DialogType::Inventory);
                         }
                     }
-                    "角色" => {
+                    ButtonAction::Character => {
                         self.character_dialog_open = !self.character_dialog_open;
                         if self.character_dialog_open {
                             self.bring_to_front(DialogType::Character);
                         }
                     }
-                    "技能" => {
-                        // 如果角色对话框已打开且在技能页，则关闭；否则打开并切换到技能页
+                    ButtonAction::Skills => {
                         if self.character_dialog_open && self.character_dialog.is_skills_tab() {
                             self.character_dialog_open = false;
                         } else {
@@ -1467,19 +1476,18 @@ impl MainDialog {
                             self.bring_to_front(DialogType::Character);
                         }
                     }
-                    "任务" => {
+                    ButtonAction::QuestLog => {
                         self.quest_log_dialog_open = !self.quest_log_dialog_open;
                         if self.quest_log_dialog_open {
                             self.bring_to_front(DialogType::QuestLog);
                         }
                     }
-                    "选项" => {
+                    ButtonAction::Option => {
                         self.option_dialog_open = !self.option_dialog_open;
                         if self.option_dialog_open {
                             self.bring_to_front(DialogType::Option);
                         }
                     }
-                    _ => {}
                 }
             }
         }
@@ -1488,7 +1496,6 @@ impl MainDialog {
         let menu_x = self.position.x + self.bg_size.x - 55.0;
         let menu_y = self.position.y + 35.0;
         if self.draw_button(mouse_pos, menu_x, menu_y, 1960, 1961, 1962) {
-            println!("🖱️ 点击了菜单按钮");
             self.menu_dialog_open = !self.menu_dialog_open;
             if self.menu_dialog_open {
                 self.bring_to_front(DialogType::Menu);
@@ -1499,7 +1506,6 @@ impl MainDialog {
         let shop_x = self.position.x + self.bg_size.x - 105.0;
         let shop_y = self.position.y + 35.0;
         if self.draw_button(mouse_pos, shop_x, shop_y, 826, 827, 828) {
-            println!("🖱️ 点击了商城按钮");
             self.game_shop_dialog_open = !self.game_shop_dialog_open;
             if self.game_shop_dialog_open {
                 self.bring_to_front(DialogType::GameShop);
@@ -1722,18 +1728,7 @@ impl MainDialog {
     }
 
     fn sync_and_draw_inventory(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.inventory_dialog_open {
-            self.inventory_dialog.open();
-        } else {
-            self.inventory_dialog.close();
-        }
-        self.inventory_dialog.update_and_draw();
-        if !self.inventory_dialog.is_visible() {
-            self.inventory_dialog_open = false;
-        }
-        if self.inventory_dialog_open && self.inventory_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.inventory_dialog_open, &mut self.inventory_dialog, consumed, mouse_pos);
     }
 
     fn process_inventory_belt_interop(&mut self) {
@@ -1855,7 +1850,6 @@ impl MainDialog {
                         if equip.unique_id > 0 {
                             self.pending_unequip_request = Some(equip.unique_id);
                         }
-                        println!("🎒 卸下装备: {} (槽位{}) → 背包", equip.name, slot);
                     }
                 }
             }
@@ -1864,33 +1858,11 @@ impl MainDialog {
     }
 
     fn sync_and_draw_character(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.character_dialog_open {
-            self.character_dialog.open();
-        } else {
-            self.character_dialog.close();
-        }
-        self.character_dialog.update_and_draw();
-        if !self.character_dialog.is_visible() {
-            self.character_dialog_open = false;
-        }
-        if self.character_dialog_open && self.character_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.character_dialog_open, &mut self.character_dialog, consumed, mouse_pos);
     }
 
     fn sync_and_draw_shop(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.game_shop_dialog_open {
-            self.game_shop_dialog.open();
-        } else {
-            self.game_shop_dialog.close();
-        }
-        self.game_shop_dialog.update_and_draw();
-        if !self.game_shop_dialog.is_visible() {
-            self.game_shop_dialog_open = false;
-        }
-        if self.game_shop_dialog_open && self.game_shop_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.game_shop_dialog_open, &mut self.game_shop_dialog, consumed, mouse_pos);
     }
 
     fn sync_and_draw_menu(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
@@ -1939,7 +1911,6 @@ impl MainDialog {
                 self.bring_to_front(DialogType::Relationship);
             }
             MenuAction::Exit => {
-                println!("❌ 退出游戏");
                 std::process::exit(0);
             }
             MenuAction::Logout => {
@@ -1951,7 +1922,6 @@ impl MainDialog {
                 self.bring_to_front(DialogType::Help);
             }
             MenuAction::Keyboard => {
-                println!("⌨️ 键盘设置");
             }
             MenuAction::Ranking => {
                 self.ranking_dialog_open = true;
@@ -1969,33 +1939,11 @@ impl MainDialog {
     }
 
     fn sync_and_draw_minimap(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.minimap_dialog_open {
-            self.minimap_dialog.open();
-        } else {
-            self.minimap_dialog.close();
-        }
-        self.minimap_dialog.update_and_draw();
-        if !self.minimap_dialog.is_visible() {
-            self.minimap_dialog_open = false;
-        }
-        if self.minimap_dialog_open && self.minimap_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.minimap_dialog_open, &mut self.minimap_dialog, consumed, mouse_pos);
     }
 
     fn sync_and_draw_option(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.option_dialog_open {
-            self.option_dialog.open();
-        } else {
-            self.option_dialog.close();
-        }
-        self.option_dialog.update_and_draw();
-        if !self.option_dialog.is_visible() {
-            self.option_dialog_open = false;
-        }
-        if self.option_dialog_open && self.option_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.option_dialog_open, &mut self.option_dialog, consumed, mouse_pos);
     }
 
     fn sync_and_draw_chat(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
@@ -2123,18 +2071,7 @@ impl MainDialog {
     }
 
     fn sync_and_draw_quest_log(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.quest_log_dialog_open {
-            self.quest_log_dialog.open();
-        } else {
-            self.quest_log_dialog.close();
-        }
-        self.quest_log_dialog.update_and_draw();
-        if !self.quest_log_dialog.is_visible() {
-            self.quest_log_dialog_open = false;
-        }
-        if self.quest_log_dialog_open && self.quest_log_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.quest_log_dialog_open, &mut self.quest_log_dialog, consumed, mouse_pos);
     }
 
     /// 绘制任务追踪面板（游戏屏幕右侧）
@@ -2156,18 +2093,7 @@ impl MainDialog {
     }
 
     fn sync_and_draw_group(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.group_dialog_open {
-            self.group_dialog.open();
-        } else {
-            self.group_dialog.close();
-        }
-        self.group_dialog.update_and_draw();
-        if !self.group_dialog.is_visible() {
-            self.group_dialog_open = false;
-        }
-        if self.group_dialog_open && self.group_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.group_dialog_open, &mut self.group_dialog, consumed, mouse_pos);
     }
 
     /// 获取组队对话框的可变引用
@@ -2176,18 +2102,7 @@ impl MainDialog {
     }
 
     fn sync_and_draw_friend(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.friend_dialog_open {
-            self.friend_dialog.open();
-        } else {
-            self.friend_dialog.close();
-        }
-        self.friend_dialog.update_and_draw();
-        if !self.friend_dialog.is_visible() {
-            self.friend_dialog_open = false;
-        }
-        if self.friend_dialog_open && self.friend_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.friend_dialog_open, &mut self.friend_dialog, consumed, mouse_pos);
     }
 
     /// 获取好友对话框的可变引用
@@ -2196,18 +2111,7 @@ impl MainDialog {
     }
 
     fn sync_and_draw_guild(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.guild_dialog_open {
-            self.guild_dialog.open();
-        } else {
-            self.guild_dialog.close();
-        }
-        self.guild_dialog.update_and_draw();
-        if !self.guild_dialog.is_visible() {
-            self.guild_dialog_open = false;
-        }
-        if self.guild_dialog_open && self.guild_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.guild_dialog_open, &mut self.guild_dialog, consumed, mouse_pos);
     }
 
     /// 获取行会对话框的可变引用
@@ -2216,18 +2120,7 @@ impl MainDialog {
     }
 
     fn sync_and_draw_mentor(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.mentor_dialog_open {
-            self.mentor_dialog.open();
-        } else {
-            self.mentor_dialog.close();
-        }
-        self.mentor_dialog.update_and_draw();
-        if !self.mentor_dialog.is_visible() {
-            self.mentor_dialog_open = false;
-        }
-        if self.mentor_dialog_open && self.mentor_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.mentor_dialog_open, &mut self.mentor_dialog, consumed, mouse_pos);
     }
 
     /// 获取师徒对话框的可变引用
@@ -2236,18 +2129,7 @@ impl MainDialog {
     }
 
     fn sync_and_draw_relationship(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.relationship_dialog_open {
-            self.relationship_dialog.open();
-        } else {
-            self.relationship_dialog.close();
-        }
-        self.relationship_dialog.update_and_draw();
-        if !self.relationship_dialog.is_visible() {
-            self.relationship_dialog_open = false;
-        }
-        if self.relationship_dialog_open && self.relationship_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.relationship_dialog_open, &mut self.relationship_dialog, consumed, mouse_pos);
     }
 
     /// 获取婚姻对话框的可变引用
@@ -2307,18 +2189,7 @@ impl MainDialog {
     }
 
     fn sync_and_draw_mount(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.mount_dialog_open {
-            self.mount_dialog.open();
-        } else {
-            self.mount_dialog.close();
-        }
-        self.mount_dialog.update_and_draw();
-        if !self.mount_dialog.is_visible() {
-            self.mount_dialog_open = false;
-        }
-        if self.mount_dialog_open && self.mount_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.mount_dialog_open, &mut self.mount_dialog, consumed, mouse_pos);
     }
 
     /// 获取坐骑对话框的可变引用
@@ -2327,18 +2198,7 @@ impl MainDialog {
     }
 
     fn sync_and_draw_hero(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.hero_dialog_open {
-            self.hero_dialog.open();
-        } else {
-            self.hero_dialog.close();
-        }
-        self.hero_dialog.update_and_draw();
-        if !self.hero_dialog.is_visible() {
-            self.hero_dialog_open = false;
-        }
-        if self.hero_dialog_open && self.hero_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.hero_dialog_open, &mut self.hero_dialog, consumed, mouse_pos);
     }
 
     /// 获取英雄对话框的可变引用
@@ -2374,18 +2234,7 @@ impl MainDialog {
     }
 
     fn sync_and_draw_fishing(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.fishing_dialog_open {
-            self.fishing_dialog.open();
-        } else {
-            self.fishing_dialog.close();
-        }
-        self.fishing_dialog.update_and_draw();
-        if !self.fishing_dialog.is_visible() {
-            self.fishing_dialog_open = false;
-        }
-        if self.fishing_dialog_open && self.fishing_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.fishing_dialog_open, &mut self.fishing_dialog, consumed, mouse_pos);
     }
 
     /// 获取钓鱼对话框的可变引用
@@ -2394,18 +2243,7 @@ impl MainDialog {
     }
 
     fn sync_and_draw_intelligent_creature(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.intelligent_creature_dialog_open {
-            self.intelligent_creature_dialog.open();
-        } else {
-            self.intelligent_creature_dialog.close();
-        }
-        self.intelligent_creature_dialog.update_and_draw();
-        if !self.intelligent_creature_dialog.is_visible() {
-            self.intelligent_creature_dialog_open = false;
-        }
-        if self.intelligent_creature_dialog_open && self.intelligent_creature_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.intelligent_creature_dialog_open, &mut self.intelligent_creature_dialog, consumed, mouse_pos);
     }
 
     /// 获取智能宠物对话框的可变引用
@@ -2414,18 +2252,7 @@ impl MainDialog {
     }
 
     fn sync_and_draw_compass(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.compass_dialog_open {
-            self.compass_dialog.open();
-        } else {
-            self.compass_dialog.close();
-        }
-        self.compass_dialog.update_and_draw();
-        if !self.compass_dialog.is_visible() {
-            self.compass_dialog_open = false;
-        }
-        if self.compass_dialog_open && self.compass_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.compass_dialog_open, &mut self.compass_dialog, consumed, mouse_pos);
     }
 
     /// 获取罗盘对话框的可变引用
@@ -2434,18 +2261,7 @@ impl MainDialog {
     }
 
     fn sync_and_draw_socket(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.socket_dialog_open {
-            self.socket_dialog.open();
-        } else {
-            self.socket_dialog.close();
-        }
-        self.socket_dialog.update_and_draw();
-        if !self.socket_dialog.is_visible() {
-            self.socket_dialog_open = false;
-        }
-        if self.socket_dialog_open && self.socket_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.socket_dialog_open, &mut self.socket_dialog, consumed, mouse_pos);
     }
 
     /// 获取宝石镶嵌对话框的可变引用
@@ -2454,18 +2270,7 @@ impl MainDialog {
     }
 
     fn sync_and_draw_mail(&mut self, consumed: &mut bool, mouse_pos: Vec2) {
-        if self.mail_dialog_open {
-            self.mail_dialog.open();
-        } else {
-            self.mail_dialog.close();
-        }
-        self.mail_dialog.update_and_draw();
-        if !self.mail_dialog.is_visible() {
-            self.mail_dialog_open = false;
-        }
-        if self.mail_dialog_open && self.mail_dialog.contains(mouse_pos) {
-            *consumed = true;
-        }
+        sync_and_draw_dialog(&mut self.mail_dialog_open, &mut self.mail_dialog, consumed, mouse_pos);
     }
 
     /// 获取邮件对话框的可变引用
@@ -2476,6 +2281,11 @@ impl MainDialog {
     /// 获取小地图对话框的可变引用
     pub fn minimap_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::minimap_dialog::MiniMapDialogHybrid {
         &mut self.minimap_dialog
+    }
+
+    /// 获取大地图对话框的只读引用
+    pub fn big_map_dialog(&self) -> &crate::scenes::dialogs::game::big_map_dialog::BigMapDialogHybrid {
+        &self.big_map_dialog
     }
 
     /// 获取大地图对话框的可变引用

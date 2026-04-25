@@ -273,8 +273,6 @@ impl LoginScene {
             return;
         }
 
-        println!("🔐 Login: account={}", self.account);
-
         // 保存配置
         self.save_config();
 
@@ -351,7 +349,6 @@ impl LoginScene {
 
         if let Ok(mut file) = fs::File::create(path) {
             let _ = file.write_all(merged.as_bytes());
-            println!("✅ 配置已保存");
         }
     }
 
@@ -365,7 +362,6 @@ impl LoginScene {
             for line in content.lines() {
                 if let Some(account) = line.strip_prefix("Account=") {
                     self.account = account.to_string();
-                    println!("✅ 已加载账号: {}", account);
                 }
             }
         }
@@ -437,12 +433,10 @@ impl Scene for LoginScene {
         self.version_ok = false;
         self.animation_playing = false;
         self.background_frame = 0;
-        println!("🎬 进入登录界面");
         Ok(())
     }
 
     fn on_exit(&mut self) -> GameResult {
-        println!("🎬 离开登录界面");
         Ok(())
     }
 
@@ -462,7 +456,6 @@ impl Scene for LoginScene {
                 self.background_frame += 1;
 
                 if self.background_frame >= 19 {
-                    println!("✓ Login animation finished, switching to character select...");
                     return Ok(SceneTransition::CharacterSelect);
                 }
             }
@@ -625,7 +618,7 @@ impl Scene for LoginScene {
                 334,
                 true,
             ) {
-                println!("🔎 查看密钥");
+                // View key action
             }
 
             // CloseButton Title[329-331] at (166,189)

@@ -147,40 +147,8 @@ impl Message<WorldAttackRequest> for WorldActor {
                     }).await.unwrap_or(false);
                     if broke {
                         debug!("Player {} weapon broke!", result.object_id);
-                        if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                            let (b_min, b_max, b_def, b_hp, b_mp) = calculate_equipment_bonuses(
-                                &state.inventory.equipment, &self.item_infos,
-                            );
-                            let _ = record.actor_ref.ask(crate::actors::player::SetStatBonuses {
-                                bonus_min_attack: b_min,
-                                bonus_max_attack: b_max,
-                                bonus_defence: b_def,
-                                bonus_max_hp: b_hp,
-                                bonus_max_mp: b_mp,
-                            }).await;
-                            let weapon_shape = state.inventory.get_equipment(EquipmentSlot::Weapon)
-                                .and_then(|item| self.item_infos.get(&item.item_index))
-                                .map(|info| info.shape as i16).unwrap_or(-1);
-                            let armor_shape = state.inventory.get_equipment(EquipmentSlot::Armour)
-                                .and_then(|item| self.item_infos.get(&item.item_index))
-                                .map(|info| info.shape as i16).unwrap_or(0);
-                            let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
-                                .and_then(|item| self.item_infos.get(&item.item_index))
-                                .map(|info| info.effect as i16).unwrap_or(0);
-                            let light: u8 = state.inventory.get_equipment(EquipmentSlot::Weapon)
-                                .and_then(|item| self.item_infos.get(&item.item_index))
-                                .map(|info| info.light as u8)
-                                .unwrap_or(0)
-                                .max(state.inventory.get_equipment(EquipmentSlot::Armour)
-                                    .and_then(|item| self.item_infos.get(&item.item_index))
-                                    .map(|info| info.light as u8)
-                                    .unwrap_or(0));
-                            for other in self.other_players(msg.session_id) {
-                                send_player_update(
-                                    &self.gate_ref, other.session_id, state.object_id,
-                                    light, weapon_shape, weapon_effect, armor_shape, 0,
-                                );
-                            }
+                        if let Some(state) = self.recalculate_and_set_stat_bonuses(msg.session_id).await {
+                            self.broadcast_equipment_visuals(msg.session_id, &state);
                         }
                     }
                 }
@@ -229,14 +197,8 @@ impl Message<WorldAttackRequest> for WorldActor {
                                 attacker_session: msg.session_id,
                                 damage,
                             }).await.unwrap_or(false) {
-                                let mut died_body = Vec::new();
-                                died_body.extend_from_slice(&other_state.object_id.to_le_bytes());
-                                died_body.extend_from_slice(&(other_state.x as u32).to_le_bytes());
-                                died_body.extend_from_slice(&(other_state.y as u32).to_le_bytes());
-                                died_body.push(other_state.direction);
-                                died_body.push(0u8);
-                                let died_packet = build_packet_bytes(
-                                    mir2_shared::enums::ServerPacketIds::ObjectDied as i16, &died_body);
+                                let died_packet = Self::build_object_died_packet(
+                                    other_state.object_id, other_state.x, other_state.y, other_state.direction);
                                 for (sid, _) in &self.players {
                                     let _ = self.gate_ref.ask(SendToClient {
                                         session_id: *sid,
@@ -285,10 +247,6 @@ impl Message<WorldAttackRequest> for WorldActor {
 // 采集系统（Harvest：挖矿/采集）
 // ============================================================
 
-/// 方向到坐标偏移（8 方向）
-const HARVEST_DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
-const HARVEST_DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
-
 impl Message<HarvestRequest> for WorldActor {
     type Reply = ();
 
@@ -309,8 +267,8 @@ impl Message<HarvestRequest> for WorldActor {
         if state.is_dead { return; }
 
         let dir = msg.direction as usize % 8;
-        let target_x = state.x + HARVEST_DIR_DX[dir];
-        let target_y = state.y + HARVEST_DIR_DY[dir];
+        let target_x = state.x + MON_DIR_DX[dir];
+        let target_y = state.y + MON_DIR_DY[dir];
 
         debug!(
             "Harvest: {} session={} dir={} target=({}, {})",
@@ -617,14 +575,8 @@ impl Message<RangeAttackRequest> for WorldActor {
                             damage,
                         }).await.unwrap_or(false) {
                             // 目标死亡处理
-                            let mut died_body = Vec::new();
-                            died_body.extend_from_slice(&other_state.object_id.to_le_bytes());
-                            died_body.extend_from_slice(&(other_state.x as u32).to_le_bytes());
-                            died_body.extend_from_slice(&(other_state.y as u32).to_le_bytes());
-                            died_body.push(other_state.direction);
-                            died_body.push(0u8);
-                            let died_packet = build_packet_bytes(
-                                mir2_shared::enums::ServerPacketIds::ObjectDied as i16, &died_body);
+                            let died_packet = Self::build_object_died_packet(
+                                other_state.object_id, other_state.x, other_state.y, other_state.direction);
                             for (sid, _) in &self.players {
                                 let _ = self.gate_ref.ask(SendToClient {
                                     session_id: *sid,

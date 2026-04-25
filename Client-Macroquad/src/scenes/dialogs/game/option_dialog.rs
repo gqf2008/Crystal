@@ -166,7 +166,6 @@ impl OptionDialogHybrid {
             self.size = vec2(texture.width as f32, texture.height as f32);
             if let Some(tex) = texture.image {
                 self.bg_texture = Some(tex);
-                println!("⚙️ 选项对话框背景 Title[411]: {}x{}", texture.width, texture.height);
             }
         }
         
@@ -192,8 +191,6 @@ impl OptionDialogHybrid {
                 self.volume_indicator_texture = Some(tex);
             }
         }
-        
-        println!("⚙️ 选项对话框纹理加载完成");
     }
 
     /// 更新和绘制（返回是否应用了设置）

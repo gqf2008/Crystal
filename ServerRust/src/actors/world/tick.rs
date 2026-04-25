@@ -295,10 +295,7 @@ impl WorldActor {
             if !expired.is_empty() {
                 self.ground_items.retain(|gi| self.tick_count < gi.drop_tick + GROUND_ITEM_LIFETIME_TICKS);
                 for (oid, map_idx) in &expired {
-                    let mut remove_body = Vec::new();
-                    remove_body.extend_from_slice(&oid.to_le_bytes());
-                    let remove_packet = build_packet_bytes(
-                        mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &remove_body);
+                    let remove_packet = Self::build_object_remove_packet(*oid);
                     for (sid, rec) in &self.players {
                         if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
                             if s.map_index == *map_idx {
@@ -406,9 +403,7 @@ impl WorldActor {
         for oid in boss_despawns {
             self.world_boss_queue.remove(&oid);
             if let Some(monster) = self.monsters.remove(&oid) {
-                let body = oid.to_le_bytes().to_vec();
-                let packet = build_packet_bytes(
-                    mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &body);
+                let packet = Self::build_object_remove_packet(oid);
                 for session_id in self.players.keys() {
                     let _ = self.gate_ref.ask(SendToClient {
                         session_id: *session_id,
@@ -498,9 +493,7 @@ impl WorldActor {
             let gi = self.ground_items.remove(gi_idx);
 
             // 广播移除
-            let remove_body = gi.object_id.to_le_bytes().to_vec();
-            let remove_packet = build_packet_bytes(
-                mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &remove_body);
+            let remove_packet = Self::build_object_remove_packet(gi.object_id);
             for sid in self.players.keys() {
                 let _ = self.gate_ref.ask(SendToClient {
                     session_id: *sid,
@@ -1093,14 +1086,8 @@ impl Message<Tick> for WorldActor {
 
                                 if died {
                                     if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
-                                        let mut died_body = Vec::new();
-                                        died_body.extend_from_slice(&victim.object_id.to_le_bytes());
-                                        died_body.extend_from_slice(&(victim.x as u32).to_le_bytes());
-                                        died_body.extend_from_slice(&(victim.y as u32).to_le_bytes());
-                                        died_body.push(victim.direction);
-                                        died_body.push(0u8);
-                                        let died_packet = build_packet_bytes(
-                                            mir2_shared::enums::ServerPacketIds::ObjectDied as i16, &died_body);
+                                        let died_packet = Self::build_object_died_packet(
+                                            victim.object_id, victim.x, victim.y, victim.direction);
                                         for (sid, _) in &self.players {
                                             let _ = self.gate_ref.ask(SendToClient {
                                                 session_id: *sid,
@@ -1243,35 +1230,9 @@ impl Message<Tick> for WorldActor {
 
             // 处理破损装备广播（避免在怪物循环内借用 self）
             for (target_session, slot) in &broken_armor {
-                if let Some(record) = self.players.get(target_session) {
-                    if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                        let (b_min, b_max, b_def, b_hp, b_mp) = calculate_equipment_bonuses(
-                            &state.inventory.equipment, &self.item_infos,
-                        );
-                        let _ = record.actor_ref.ask(crate::actors::player::SetStatBonuses {
-                            bonus_min_attack: b_min,
-                            bonus_max_attack: b_max,
-                            bonus_defence: b_def,
-                            bonus_max_hp: b_hp,
-                            bonus_max_mp: b_mp,
-                        }).await;
-                        if *slot == EquipmentSlot::Weapon || *slot == EquipmentSlot::Armour {
-                            let weapon_shape = state.inventory.get_equipment(EquipmentSlot::Weapon)
-                                .and_then(|item| self.item_infos.get(&item.item_index))
-                                .map(|info| info.shape as i16).unwrap_or(-1);
-                            let armor_shape = state.inventory.get_equipment(EquipmentSlot::Armour)
-                                .and_then(|item| self.item_infos.get(&item.item_index))
-                                .map(|info| info.shape as i16).unwrap_or(0);
-                            let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
-                                .and_then(|item| self.item_infos.get(&item.item_index))
-                                .map(|info| info.effect as i16).unwrap_or(0);
-                            for other in self.other_players(*target_session) {
-                                send_player_update(
-                                    &self.gate_ref, other.session_id, state.object_id,
-                                    0, weapon_shape, weapon_effect, armor_shape, 0,
-                                );
-                            }
-                        }
+                if let Some(state) = self.recalculate_and_set_stat_bonuses(*target_session).await {
+                    if *slot == EquipmentSlot::Weapon || *slot == EquipmentSlot::Armour {
+                        self.broadcast_equipment_visuals(*target_session, &state);
                     }
                 }
             }
@@ -1281,18 +1242,10 @@ impl Message<Tick> for WorldActor {
                 if let Some(monster) = self.monsters.remove(oid) {
                     debug!("Monster '{}' (#{}) died", monster.name, oid);
                     // 发送 ObjectDied（死亡动画）
-                    let mut died_body = Vec::new();
-                    died_body.extend_from_slice(&oid.to_le_bytes());
-                    died_body.extend_from_slice(&(monster.x as u32).to_le_bytes());
-                    died_body.extend_from_slice(&(monster.y as u32).to_le_bytes());
-                    died_body.push(monster.direction);
-                    died_body.push(0u8); // death_type = normal
-                    let died_packet = build_packet_bytes(
-                        mir2_shared::enums::ServerPacketIds::ObjectDied as i16, &died_body);
+                    let died_packet = Self::build_object_died_packet(
+                        *oid, monster.x, monster.y, monster.direction);
                     // 发送 ObjectRemove（清理实体）
-                    let remove_body = oid.to_le_bytes().to_vec();
-                    let remove_packet = build_packet_bytes(
-                        mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &remove_body);
+                    let remove_packet = Self::build_object_remove_packet(*oid);
                     for session_id in self.players.keys() {
                         let _ = self.gate_ref.ask(SendToClient {
                             session_id: *session_id,

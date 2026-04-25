@@ -50,15 +50,6 @@ impl BeltItemHybrid {
     }
 }
 
-/// 拖放命令（延迟执行，避免借用问题）
-#[derive(Debug)]
-enum DragCommand {
-    /// 使用物品（双击）
-    Use { slot: usize },
-    /// 交换物品
-    Swap { from: usize, to: usize },
-}
-
 /// 快捷栏对话框（混合版本）
 pub struct BeltDialogHybrid {
     /// 是否可见
@@ -163,8 +154,6 @@ impl BeltDialogHybrid {
     
     /// 异步加载纹理
     pub  fn load_textures(&mut self) {
-        println!("🎒 BeltDialogHybrid: 加载纹理...");
-        
         // 水平背景（主 + 覆盖层）
         self.bg_horizontal = BackgroundTexture::load(LibraryName::Prguse, 1932, Some(1933));
         
@@ -183,39 +172,10 @@ impl BeltDialogHybrid {
         self.item_cache.preload(LibraryName::Items, 0, 20);
         
         // 创建透明 Skin（用于 Group 拖放，不显示任何背景）
-        self.create_transparent_skin();
-        
-        println!("  ✅ 混合版快捷栏纹理加载成功");
+        self.transparent_skin = Some(create_transparent_skin());
+
     }
-    
-    /// 创建透明 Skin
-    fn create_transparent_skin(&mut self) {
-        // 创建 1x1 透明像素
-        let transparent_pixel = Image {
-            bytes: vec![0, 0, 0, 0],
-            width: 1,
-            height: 1,
-        };
-        
-        // 完全透明的样式，包括边框
-        let transparent_style = root_ui()
-            .style_builder()
-            .background(transparent_pixel.clone())
-            .background_hovered(transparent_pixel.clone())
-            .background_clicked(transparent_pixel.clone())
-            .color(Color::new(0.0, 0.0, 0.0, 0.0))
-            .color_hovered(Color::new(0.0, 0.0, 0.0, 0.0))
-            .color_clicked(Color::new(0.0, 0.0, 0.0, 0.0))
-            .build();
-        
-        self.transparent_skin = Some(Skin {
-            group_style: transparent_style.clone(),
-            button_style: transparent_style.clone(),
-            label_style: transparent_style,
-            ..root_ui().default_skin()
-        });
-    }
-    
+
     /// 获取当前背景
     fn current_bg(&self) -> &BackgroundTexture {
         match self.layout {
@@ -249,7 +209,6 @@ impl BeltDialogHybrid {
     pub fn open(&mut self) {
         if !self.visible {
             self.visible = true;
-            println!("🎒 快捷栏: 打开");
         }
     }
     
@@ -258,7 +217,6 @@ impl BeltDialogHybrid {
             self.visible = false;
             self.item_dragging = false;
             self.dragging_from = None;
-            println!("🎒 快捷栏: 关闭");
         }
     }
     
@@ -276,12 +234,10 @@ impl BeltDialogHybrid {
             BeltLayoutHybrid::Horizontal => {
                 self.horizontal_position = self.position;
                 self.position = vec2(0.0, 200.0);
-                println!("🔄 快捷栏: 切换到垂直布局");
                 BeltLayoutHybrid::Vertical
             }
             BeltLayoutHybrid::Vertical => {
                 self.position = self.horizontal_position;
-                println!("🔄 快捷栏: 切换到水平布局");
                 BeltLayoutHybrid::Horizontal
             }
         };
@@ -410,7 +366,6 @@ impl BeltDialogHybrid {
         }) {
             if let Some(existing) = slot.as_mut() {
                 existing.count = existing.count.saturating_add(count);
-                println!("🎒 快捷栏: 堆叠 {} x{} -> {}", name, count, existing.count);
                 return true;
             }
         }
@@ -418,11 +373,9 @@ impl BeltDialogHybrid {
         // 放入空格子
         if let Some(slot) = self.cells.iter_mut().find(|s| s.is_none()) {
             *slot = Some(BeltItemHybrid::with_name(icon_index, name.to_string(), count));
-            println!("🎒 快捷栏: 放入 {} x{}", name, count);
             return true;
         }
 
-        println!("🎒 快捷栏: 已满，无法放入 {}", name);
         false
     }
     
@@ -479,22 +432,21 @@ impl BeltDialogHybrid {
         self.current_bg().draw(self.position);
         
         // ========== 5. 收集数据用于 mqui 拖放 ==========
-        let cells_snapshot: [Option<BeltItemHybrid>; 6] = std::array::from_fn(|i| self.cells[i].clone());
         let item_dragging = self.item_dragging;
-        
+
         // ========== 6. mqui Group 拖放处理 ==========
         let mut drag_command: Option<DragCommand> = None;
         let mut new_item_dragging = false;
         let mut new_dragging_from: Option<usize> = None;
-        
+
         // 应用透明 Skin
         if let Some(ref skin) = self.transparent_skin {
             root_ui().push_skin(skin);
         }
-        
-        for (i, _cell) in cells_snapshot.iter().enumerate().take(6) {
+
+        for i in 0..6 {
             let rect = self.get_cell_rect(i);
-            let has_item = cells_snapshot[i].is_some();
+            let has_item = self.cells[i].is_some();
             let slot_id = hash!("belt_hybrid_slot", i);
             
                     // 使用 Group 实现拖放
@@ -596,10 +548,9 @@ impl BeltDialogHybrid {
                 self.use_item(slot);
             }
             Some(DragCommand::Swap { from, to }) => {
-                println!("🔄 交换物品: 格子{} <-> 格子{}", from + 1, to + 1);
                 self.cells.swap(from, to);
             }
-            None => {}
+            _ => {}
         }
 
         // ========== 12. Tooltip ==========
@@ -697,7 +648,6 @@ impl BeltDialogHybrid {
             if let Some(item) = &mut self.cells[slot] {
                 if item.count > 0 {
                     item.count -= 1;
-                    println!("🧪 使用物品: 格子{}, 剩余{}", slot + 1, item.count);
                     if item.count == 0 {
                         self.cells[slot] = None;
                     }

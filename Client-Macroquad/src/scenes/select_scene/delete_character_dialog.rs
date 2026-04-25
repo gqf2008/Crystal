@@ -85,9 +85,7 @@ impl SelectScene {
                 .iter()
                 .position(|c| c.index == self.delete_char_index)
             {
-                let name = self.characters[pos].name.clone();
                 self.characters.remove(pos);
-                println!("✅ (offline) 角色已删除: {}", name);
 
                 if self.characters.is_empty() {
                     self.selected_index = None;

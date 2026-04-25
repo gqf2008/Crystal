@@ -66,32 +66,28 @@ impl GameCamera2D {
         self.dragging = true;
         self.last_mouse_pos = mouse_pos;
         self.first_drag = true;
-        println!("🖱️ 开始拖拽 at ({:.1}, {:.1})", mouse_pos.x, mouse_pos.y);
     }
-    
+
     /// 停止拖拽
     pub fn stop_drag(&mut self) {
         self.dragging = false;
-        println!("🖱️ 停止拖拽");
     }
-    
+
     /// 更新拖拽
     pub fn update_drag(&mut self, current_mouse_pos: Vec2) {
         if !self.dragging {
             return;
         }
-        
+
         let delta = current_mouse_pos - self.last_mouse_pos;
         let delta_magnitude = delta.length();
-        
+
         // 首次拖拽保护：忽略过大的 delta
         if self.first_drag {
             if delta_magnitude > 100.0 {
-                println!("⚠️ 忽略首次异常拖拽 delta: {:.1}", delta_magnitude);
                 self.last_mouse_pos = current_mouse_pos;
                 return;
             } else if delta_magnitude > 0.1 {
-                println!("✅ 首次拖拽有效 delta: {:.1}", delta_magnitude);
                 self.first_drag = false;
             }
         }

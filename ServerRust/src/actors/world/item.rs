@@ -204,10 +204,7 @@ impl Message<PickUpRequest> for WorldActor {
 
             // 拾取成功：广播 ObjectRemove 给同地图玩家
             if picked_up {
-                let mut remove_body = Vec::new();
-                remove_body.extend_from_slice(&picked_oid.to_le_bytes());
-                let remove_packet = build_packet_bytes(
-                    mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &remove_body);
+                let remove_packet = Self::build_object_remove_packet(picked_oid);
                 for (sid, rec) in &self.players {
                     if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
                         if s.map_index == state.map_index {
@@ -442,46 +439,9 @@ impl Message<EquipItemRequest> for WorldActor {
                 debug!("Player session={} equipped item uid={} to slot {}", msg.session_id, msg.unique_id, msg.slot);
                 send_equip_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, msg.slot, true);
 
-                // 重新计算装备加成
-                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                    let (b_min, b_max, b_def, b_hp, b_mp) = calculate_equipment_bonuses(
-                        &state.inventory.equipment, &self.item_infos,
-                    );
-                    let _ = record.actor_ref.ask(crate::actors::player::SetStatBonuses {
-                        bonus_min_attack: b_min,
-                        bonus_max_attack: b_max,
-                        bonus_defence: b_def,
-                        bonus_max_hp: b_hp,
-                        bonus_max_mp: b_mp,
-                    }).await;
-
-                    // 广播装备视觉变化
-                    let weapon_shape = state.inventory.get_equipment(EquipmentSlot::Weapon)
-                        .and_then(|item| self.item_infos.get(&item.item_index))
-                        .map(|info| info.shape as i16)
-                        .unwrap_or(-1);
-                    let armor_shape = state.inventory.get_equipment(EquipmentSlot::Armour)
-                        .and_then(|item| self.item_infos.get(&item.item_index))
-                        .map(|info| info.shape as i16)
-                        .unwrap_or(0);
-                    let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
-                        .and_then(|item| self.item_infos.get(&item.item_index))
-                        .map(|info| info.effect as i16)
-                        .unwrap_or(0);
-                    let light: u8 = state.inventory.get_equipment(EquipmentSlot::Weapon)
-                        .and_then(|item| self.item_infos.get(&item.item_index))
-                        .map(|info| info.light as u8)
-                        .unwrap_or(0)
-                        .max(state.inventory.get_equipment(EquipmentSlot::Armour)
-                            .and_then(|item| self.item_infos.get(&item.item_index))
-                            .map(|info| info.light as u8)
-                            .unwrap_or(0));
-                    for other in self.other_players(msg.session_id) {
-                        send_player_update(
-                            &self.gate_ref, other.session_id, state.object_id,
-                            light, weapon_shape, weapon_effect, armor_shape, 0,
-                        );
-                    }
+                // 重新计算装备加成 + 广播视觉变化
+                if let Some(state) = self.recalculate_and_set_stat_bonuses(msg.session_id).await {
+                    self.broadcast_equipment_visuals(msg.session_id, &state);
                 }
             }
             None => {
@@ -521,46 +481,9 @@ impl Message<RemoveItemRequest> for WorldActor {
                 debug!("Player session={} unequipped item uid={} from slot {:?}", msg.session_id, msg.unique_id, slot);
                 send_remove_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, true);
 
-                // 重新计算装备加成
-                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                    let (b_min, b_max, b_def, b_hp, b_mp) = calculate_equipment_bonuses(
-                        &state.inventory.equipment, &self.item_infos,
-                    );
-                    let _ = record.actor_ref.ask(crate::actors::player::SetStatBonuses {
-                        bonus_min_attack: b_min,
-                        bonus_max_attack: b_max,
-                        bonus_defence: b_def,
-                        bonus_max_hp: b_hp,
-                        bonus_max_mp: b_mp,
-                    }).await;
-
-                    // 广播装备视觉变化
-                    let weapon_shape = state.inventory.get_equipment(EquipmentSlot::Weapon)
-                        .and_then(|item| self.item_infos.get(&item.item_index))
-                        .map(|info| info.shape as i16)
-                        .unwrap_or(-1);
-                    let armor_shape = state.inventory.get_equipment(EquipmentSlot::Armour)
-                        .and_then(|item| self.item_infos.get(&item.item_index))
-                        .map(|info| info.shape as i16)
-                        .unwrap_or(0);
-                    let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
-                        .and_then(|item| self.item_infos.get(&item.item_index))
-                        .map(|info| info.effect as i16)
-                        .unwrap_or(0);
-                    let light: u8 = state.inventory.get_equipment(EquipmentSlot::Weapon)
-                        .and_then(|item| self.item_infos.get(&item.item_index))
-                        .map(|info| info.light as u8)
-                        .unwrap_or(0)
-                        .max(state.inventory.get_equipment(EquipmentSlot::Armour)
-                            .and_then(|item| self.item_infos.get(&item.item_index))
-                            .map(|info| info.light as u8)
-                            .unwrap_or(0));
-                    for other in self.other_players(msg.session_id) {
-                        send_player_update(
-                            &self.gate_ref, other.session_id, state.object_id,
-                            light, weapon_shape, weapon_effect, armor_shape, 0,
-                        );
-                    }
+                // 重新计算装备加成 + 广播视觉变化
+                if let Some(state) = self.recalculate_and_set_stat_bonuses(msg.session_id).await {
+                    self.broadcast_equipment_visuals(msg.session_id, &state);
                 }
             }
             _ => {

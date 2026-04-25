@@ -216,7 +216,6 @@ impl SelectScene {
                 last_access: "刚刚".to_string(),
             };
             self.characters.push(new_char);
-            println!("🎭 (offline) 创建角色成功: {}", self.new_char_name);
 
             self.show_new_character = false;
             self.show_message("Your character was created successfully.");

@@ -70,13 +70,6 @@ impl InventoryTabHybrid {
     }
 }
 
-/// 拖放命令
-#[derive(Debug)]
-enum DragCommand {
-    Use { slot: usize },
-    Swap { from: usize, to: usize },
-}
-
 /// 背包对话框（混合版本）
 pub struct InventoryDialogHybrid {
     // 窗口状态
@@ -199,8 +192,6 @@ impl InventoryDialogHybrid {
     }
     
     pub  fn load_textures(&mut self) {
-        println!("📦 InventoryDialogHybrid: 加载纹理...");
-        
         // 背景
         if let Some(info) = LibraryName::Title.get_texture(196) {
             self.size = vec2(info.width as f32, info.height as f32);
@@ -231,41 +222,14 @@ impl InventoryDialogHybrid {
         // item_cache 使用 lazy get 模式，见下方渲染处
         
         // 透明 Skin
-        self.create_transparent_skin();
-        
-        println!("  ✅ 混合版背包纹理加载成功");
+        self.transparent_skin = Some(create_transparent_skin());
     }
-    
-    fn create_transparent_skin(&mut self) {
-        let transparent_pixel = Image {
-            bytes: vec![0, 0, 0, 0],
-            width: 1,
-            height: 1,
-        };
-        // 完全透明的样式，包括边框
-        let style = root_ui()
-            .style_builder()
-            .background(transparent_pixel.clone())
-            .background_hovered(transparent_pixel.clone())
-            .background_clicked(transparent_pixel.clone())
-            .color(Color::new(0.0, 0.0, 0.0, 0.0))           // 文字透明
-            .color_hovered(Color::new(0.0, 0.0, 0.0, 0.0))   // 悬停时文字透明
-            .color_clicked(Color::new(0.0, 0.0, 0.0, 0.0))   // 点击时文字透明
-            .build();
-        self.transparent_skin = Some(Skin {
-            group_style: style.clone(),
-            button_style: style.clone(),
-            label_style: style,
-            ..root_ui().default_skin()
-        });
-    }
-    
+
     // === 基本操作 ===
     
     pub fn open(&mut self) {
         if !self.visible {
             self.visible = true;
-            println!("📦 背包: 打开");
         }
     }
     
@@ -276,7 +240,6 @@ impl InventoryDialogHybrid {
             self.dragging_from = None;
             self.splitting = false;
             self.splitting_from = None;
-            println!("📦 背包: 关闭");
         }
     }
     
@@ -355,7 +318,6 @@ impl InventoryDialogHybrid {
             self.dragging_from = None;
             self.splitting = false;
             self.splitting_from = None;
-            println!("📑 切换标签: {}", tab.name());
         }
     }
     
@@ -570,7 +532,6 @@ impl InventoryDialogHybrid {
                     }
                 }
                 if !placed {
-                    println!("✂️ 拆分取消（点击了非空格子）");
                 }
                 // 右键也用于退出拆分模式
                 self.splitting = false;
@@ -584,7 +545,6 @@ impl InventoryDialogHybrid {
                     // 右键点击可堆叠物品 -> 进入拆分模式
                     self.splitting = true;
                     self.splitting_from = Some(slot_idx);
-                    println!("✂️ 进入拆分模式，点击空格子放置一半");
                 } else if self
                     .current_items()
                     .get(slot_idx)
@@ -621,21 +581,21 @@ impl InventoryDialogHybrid {
         }
         
         // ========== mqui 拖放处理 ==========
-        let items_snapshot: Vec<_> = self.current_items().to_vec();
         let item_dragging = self.item_dragging;
         let mut drag_command: Option<DragCommand> = None;
         let mut new_dragging = false;
         let mut new_from: Option<usize> = None;
-        
+
         if let Some(ref skin) = self.transparent_skin {
             root_ui().push_skin(skin);
         }
-        
-        for (i, slot) in items_snapshot.iter().enumerate() {
+
+        let items_len = self.current_items().len();
+        for i in 0..items_len {
             if !self.is_slot_visible(i) { continue; }
-            
+
             let rect = self.get_slot_rect(i);
-            let has_item = slot.icon_index.is_some();
+            let has_item = self.current_items()[i].icon_index.is_some();
             let slot_id = hash!("inv_hybrid_slot", self.current_tab as usize, i);
             
             let drag = Group::new(slot_id, vec2(rect.w, rect.h))
@@ -651,7 +611,7 @@ impl InventoryDialogHybrid {
                 }
                 Drag::Dropped(_, Some(target_id)) if has_item => {
                     // 查找目标格子
-                    for j in 0..items_snapshot.len() {
+                    for j in 0..items_len {
                         if hash!("inv_hybrid_slot", self.current_tab as usize, j) == target_id && j != i {
                             drag_command = Some(DragCommand::Swap { from: i, to: j });
                             break;
@@ -759,7 +719,6 @@ impl InventoryDialogHybrid {
         // ========== 执行命令 ==========
         match drag_command {
             Some(DragCommand::Use { slot }) => {
-                println!("🧪 使用物品: 格子{}", slot);
                 if let Some(item) = self.current_items_mut().get_mut(slot) {
                     if item.count > 1 {
                         item.count -= 1;
@@ -769,10 +728,9 @@ impl InventoryDialogHybrid {
                 }
             }
             Some(DragCommand::Swap { from, to }) => {
-                println!("🔄 交换: 格子{} <-> 格子{}", from, to);
                 self.current_items_mut().swap(from, to);
             }
-            None => {}
+            _ => {}
         }
     }
     
@@ -797,18 +755,21 @@ impl InventoryDialogHybrid {
     }
     
     fn draw_slots(&mut self, mouse: Vec2) {
-        // Clone items to avoid borrow conflict with item_cache.get()
-        let items_snapshot: Vec<ItemSlotHybrid> = self.current_items().to_vec();
-
-        for (i, slot) in items_snapshot.iter().enumerate() {
+        let items_len = self.current_items().len();
+        for i in 0..items_len {
             if !self.is_slot_visible(i) { continue; }
 
             let rect = self.get_slot_rect(i);
+            // 拷贝字段到局部变量，避免持有 &self 引用与后续 &mut self.item_cache 冲突
+            let (slot_icon_index, slot_count) = {
+                let slot = &self.current_items()[i];
+                (slot.icon_index, slot.count)
+            };
 
             // 只在高亮时绘制边框（背景纹理已有网格）
             let highlight = if self.splitting && self.splitting_from == Some(i) {
                 CellHighlight::Selected
-            } else if self.splitting && rect.contains(mouse) && (slot.icon_index.is_none() || slot.count == 0) {
+            } else if self.splitting && rect.contains(mouse) && (slot_icon_index.is_none() || slot_count == 0) {
                 CellHighlight::DragTarget
             } else if self.item_dragging && self.dragging_from == Some(i) {
                 CellHighlight::Selected
@@ -832,13 +793,13 @@ impl InventoryDialogHybrid {
             }
 
             // 物品图标（按需加载）
-            if let Some(icon_idx) = slot.icon_index {
+            if let Some(icon_idx) = slot_icon_index {
                 let alpha = if self.item_dragging && self.dragging_from == Some(i) { 0.4 } else { 1.0 };
                 if let Some(tex) = self.item_cache.get(LibraryName::Items, icon_idx) {
                     draw_item_icon(rect, tex, alpha);
                 }
                 if !(self.item_dragging && self.dragging_from == Some(i)) {
-                    draw_item_count(rect, slot.count, false);
+                    draw_item_count(rect, slot_count, false);
                 }
             }
         }

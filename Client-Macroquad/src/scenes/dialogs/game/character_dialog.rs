@@ -114,13 +114,6 @@ impl Default for CharacterStatsHybrid {
     }
 }
 
-/// 拖放命令
-#[derive(Debug)]
-enum DragCommand {
-    /// 交换装备位置（如左右戒指）
-    SwapEquip { from: usize, to: usize },
-}
-
 /// 技能数据
 #[derive(Debug, Clone)]
 pub struct SkillInfo {
@@ -261,8 +254,6 @@ impl CharacterDialogHybrid {
     }
     
     pub fn load_textures(&mut self) {
-        println!("👤 CharacterDialogHybrid: 加载纹理...");
-        
         // 主背景 Title[504]
         if let Some(info) = LibraryName::Title.get_texture(504) {
             self.size = vec2(info.width as f32, info.height as f32);
@@ -303,26 +294,7 @@ impl CharacterDialogHybrid {
         self.state_cache.preload(LibraryName::StateItems, 0, 50);
         
         // 透明 Skin
-        self.create_transparent_skin();
-        
-        println!("  ✅ 角色对话框纹理加载成功");
-    }
-    
-    fn create_transparent_skin(&mut self) {
-        let transparent = Image { bytes: vec![0, 0, 0, 0], width: 1, height: 1 };
-        let style = root_ui()
-            .style_builder()
-            .background(transparent.clone())
-            .background_hovered(transparent.clone())
-            .background_clicked(transparent.clone())
-            .color(Color::new(0.0, 0.0, 0.0, 0.0))
-            .color_hovered(Color::new(0.0, 0.0, 0.0, 0.0))
-            .color_clicked(Color::new(0.0, 0.0, 0.0, 0.0))
-            .build();
-        self.transparent_skin = Some(Skin {
-            group_style: style,
-            ..root_ui().default_skin()
-        });
+        self.transparent_skin = Some(create_transparent_skin());
     }
     
     // === 基本操作 ===
@@ -330,7 +302,6 @@ impl CharacterDialogHybrid {
     pub fn open(&mut self) {
         if !self.visible {
             self.visible = true;
-            println!("👤 角色对话框: 打开");
         }
     }
     
@@ -339,7 +310,6 @@ impl CharacterDialogHybrid {
             self.visible = false;
             self.item_dragging = false;
             self.dragging_from = None;
-            println!("👤 角色对话框: 关闭");
         }
     }
     
@@ -389,7 +359,6 @@ impl CharacterDialogHybrid {
     pub fn switch_tab(&mut self, tab: CharacterTabHybrid) {
         if self.current_tab != tab {
             self.current_tab = tab;
-            println!("📑 切换标签: {}", tab.name());
         }
     }
     
@@ -526,19 +495,18 @@ impl CharacterDialogHybrid {
         self.draw_character_model();
         
         // === mqui 装备拖放 ===
-        let equip_snapshot: [Option<EquipmentItemHybrid>; 14] = std::array::from_fn(|i| self.equipment[i].clone());
         let item_dragging = self.item_dragging;
         let mut drag_command: Option<DragCommand> = None;
         let mut new_dragging = false;
         let mut new_from: Option<usize> = None;
-        
+
         if let Some(ref skin) = self.transparent_skin {
             root_ui().push_skin(skin);
         }
-        
-        for (i, _slot) in equip_snapshot.iter().enumerate().take(14) {
+
+        for i in 0..14 {
             let rect = self.get_equip_slot_rect(i);
-            let has_item = equip_snapshot[i].is_some();
+            let has_item = self.equipment[i].is_some();
             let slot_id = hash!("char_equip_slot", i);
             
             let drag = Group::new(slot_id, vec2(rect.w, rect.h))
@@ -626,10 +594,9 @@ impl CharacterDialogHybrid {
         // 执行命令
         match drag_command {
             Some(DragCommand::SwapEquip { from, to }) => {
-                println!("🔄 交换装备: 槽位{} <-> 槽位{}", from, to);
                 self.equipment.swap(from, to);
             }
-            None => {}
+            _ => {}
         }
     }
     

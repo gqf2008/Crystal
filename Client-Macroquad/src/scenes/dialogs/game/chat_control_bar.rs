@@ -254,21 +254,16 @@ impl ChatControlBarHybrid {
                     self.show_guild_chat = !self.show_guild_chat;
                 }
                 self.active_filter = filter;
-                println!("📻 切换聊天频道: {:?} (前缀: '{}')", filter, filter.prefix());
             }
         }
 
         // TradeButton - 位置固定 (166, 1)
-        if self.draw_button(mouse_pos, 166.0, 1.0, 2004, false) {
-            println!("💱 打开交易窗口");
-        }
+        self.draw_button(mouse_pos, 166.0, 1.0, 2004, false);
 
         // ReportButton - 对齐 C#：默认 Visible=false
         if self.report_visible {
             let report_x = if self.resolution_index != 0 { 552.0 } else { 328.0 };
-            if self.draw_button(mouse_pos, report_x, 1.0, 2063, false) {
-                println!("🚩 打开举报窗口");
-            }
+            self.draw_button(mouse_pos, report_x, 1.0, 2063, false);
         }
     }
 

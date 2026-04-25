@@ -154,7 +154,6 @@ impl GameShopDialogHybrid {
                 mouse_pos,
             ) {
                 self.preview_direction = if self.preview_direction == 1 { 8 } else { self.preview_direction - 1 };
-                println!("🔄 预览方向: {}", self.preview_direction);
             }
 
             if draw_library_button_with_offset(
@@ -164,7 +163,6 @@ impl GameShopDialogHybrid {
                 mouse_pos,
             ) {
                 self.preview_direction = if self.preview_direction == 8 { 1 } else { self.preview_direction + 1 };
-                println!("🔄 预览方向: {}", self.preview_direction);
             }
             
             // 方向显示
@@ -242,7 +240,6 @@ impl GameShopDialogHybrid {
             mouse_pos,
         ) {
             self.close();
-            println!("❌ 关闭商城");
         }
     }
     

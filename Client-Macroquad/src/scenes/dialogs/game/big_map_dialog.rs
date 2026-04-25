@@ -99,6 +99,9 @@ impl BigMapDialogHybrid {
         self.world_size = vec2(width as f32, height as f32);
     }
 
+    pub fn map_width(&self) -> i32 { self.map_width }
+    pub fn map_height(&self) -> i32 { self.map_height }
+
     /// 更新并绘制，返回是否消耗了输入
     pub fn update_and_draw(&mut self) -> bool {
         if !self.visible {

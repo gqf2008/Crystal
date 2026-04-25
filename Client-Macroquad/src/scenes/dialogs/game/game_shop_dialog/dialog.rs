@@ -13,8 +13,9 @@
 // ============================================================================
 
 use macroquad::prelude::*;
-use macroquad::ui::{self, Skin};
+use macroquad::ui::Skin;
 use crate::resources::LibraryName;
+use super::super::native_ui_utils::create_transparent_skin;
 
 use super::types::{ShopSectionHybrid, ShopClassHybrid, ShopCategoryHybrid, ShopItemHybrid};
 use super::sample_items::create_sample_items;
@@ -268,24 +269,18 @@ impl GameShopDialogHybrid {
     
     /// 加载纹理
     pub fn load_textures(&mut self) {
-        println!("🛒 GameShopDialogHybrid: 加载纹理...");
-        
         // 主要纹理
         if let Some(info) = LibraryName::Title.get_texture(749) {
             self.background_texture = info.image;
-            println!("  ✅ Title[749] 主背景: {}x{}", info.width, info.height);
         }
         if let Some(info) = LibraryName::Title.get_texture(750) {
             self.cell_texture = info.image;
-            println!("  ✅ Title[750] 商品格子");
         }
         if let Some(info) = LibraryName::Title.get_texture(769) {
             self.filter_bg_texture = info.image;
-            println!("  ✅ Title[769] 分类列表背景");
         }
         if let Some(info) = LibraryName::Title.get_texture(785) {
             self.viewer_bg_texture = info.image;
-            println!("  ✅ Title[785] 预览窗口背景");
         }
         
         // Section Tabs 纹理 (All: 770/771, Deals: 772/773, New: 774/775, TopItems: 776/777)
@@ -295,7 +290,6 @@ impl GameShopDialogHybrid {
             let selected_tex = LibraryName::Title.get_texture(*selected).and_then(|i| i.image);
             self.section_tab_textures.push((normal_tex, selected_tex));
         }
-        println!("  ✅ Section tabs 纹理加载: {} 组", self.section_tab_textures.len());
         
         // Class Tabs 纹理 (每个职业3个状态: normal/hover/pressed)
         let class_indices = [
@@ -312,7 +306,6 @@ impl GameShopDialogHybrid {
             let pressed_tex = LibraryName::Title.get_texture(*pressed).and_then(|i| i.image);
             self.class_tab_textures.push((normal_tex, hover_tex, pressed_tex));
         }
-        println!("  ✅ Class tabs 纹理加载: {} 组", self.class_tab_textures.len());
         
         // 按钮纹理
         self.buy_btn_textures = (
@@ -325,7 +318,6 @@ impl GameShopDialogHybrid {
             LibraryName::Title.get_texture(782).and_then(|i| i.image),
             LibraryName::Title.get_texture(783).and_then(|i| i.image),
         );
-        println!("  ✅ Buy/Preview 按钮纹理");
         
         // 关闭按钮 (Prguse2[360-362])
         self.close_btn_textures = (
@@ -333,7 +325,6 @@ impl GameShopDialogHybrid {
             LibraryName::Prguse2.get_texture(361).and_then(|i| i.image),
             LibraryName::Prguse2.get_texture(362).and_then(|i| i.image),
         );
-        println!("  ✅ 关闭按钮纹理");
         
         // 滚动条纹理
         self.scroll_up_textures = (
@@ -350,7 +341,6 @@ impl GameShopDialogHybrid {
             LibraryName::Prguse2.get_texture(205).and_then(|i| i.image),
             LibraryName::Prguse2.get_texture(206).and_then(|i| i.image),
         );
-        println!("  ✅ 滚动条纹理");
         
         // 方向按钮纹理
         self.left_btn_textures = (
@@ -363,51 +353,18 @@ impl GameShopDialogHybrid {
             LibraryName::Prguse2.get_texture(244).and_then(|i| i.image),
             LibraryName::Prguse2.get_texture(245).and_then(|i| i.image),
         );
-        println!("  ✅ 方向按钮纹理");
         
         // 标题图标 Title[26]
         self.title_label_texture = LibraryName::Title.get_texture(26).and_then(|i| i.image);
-        println!("  ✅ 标题图标纹理");
         
         // 支付方式复选框 Prguse[2086-2087]
         self.checkbox_textures = (
             LibraryName::Prguse.get_texture(2086).and_then(|i| i.image),
             LibraryName::Prguse.get_texture(2087).and_then(|i| i.image),
         );
-        println!("  ✅ 复选框纹理");
         
         // 创建透明皮肤
-        self.create_transparent_skin();
-        
-        println!("  ✅ 商城对话框纹理加载完成");
-    }
-    
-    /// 创建透明皮肤
-    fn create_transparent_skin(&mut self) {
-        // 创建 1x1 透明像素
-        let transparent_pixel = Image {
-            bytes: vec![0, 0, 0, 0],
-            width: 1,
-            height: 1,
-        };
-        
-        // 完全透明的样式
-        let transparent_style = ui::root_ui()
-            .style_builder()
-            .background(transparent_pixel.clone())
-            .background_hovered(transparent_pixel.clone())
-            .background_clicked(transparent_pixel.clone())
-            .color(Color::new(0.0, 0.0, 0.0, 0.0))
-            .color_hovered(Color::new(0.0, 0.0, 0.0, 0.0))
-            .color_clicked(Color::new(0.0, 0.0, 0.0, 0.0))
-            .build();
-        
-        self.transparent_skin = Some(Skin {
-            group_style: transparent_style.clone(),
-            button_style: transparent_style.clone(),
-            label_style: transparent_style,
-            ..ui::root_ui().default_skin()
-        });
+        self.transparent_skin = Some(create_transparent_skin());
     }
     
     /// 过滤商品

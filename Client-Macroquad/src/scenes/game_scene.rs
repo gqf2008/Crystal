@@ -367,16 +367,13 @@ impl GameScene {
 
     /// 初始化资源路径与地图库（UI 纹理由 UIRenderSystem 负责）
     pub fn load_textures(&mut self) {
-        println!("🎮 GameScene: 初始化资源...");
-
         // 资源根目录：使用绝对路径，避免从不同工作目录启动时找不到 Data/
         // 例如：从仓库根目录 `cargo run -p client-macroquad --bin test_game_scene`
         // 或从 `Client-Macroquad/` 目录启动都应能正常加载。
         let data_dir = format!("{}/Data", env!("CARGO_MANIFEST_DIR"));
         crate::resources::resource_manager::set_data_path(&data_dir);
         // 初始化 Libraries（包含 UI/特效/物品/角色/武器/坐骑 + MapLibs）
-        // 否则会出现“地图能画，但人物/装备/坐骑贴图为空”的现象。
-        println!("📚 GameScene: 初始化游戏资源库...");
+        // 否则会出现”地图能画，但人物/装备/坐骑贴图为空”的现象。
         let libs_ok = initialize_all_libraries(&data_dir).is_ok();
 
         if let Some(pass_entity) = self.ecs_render_pass_entity {
@@ -391,8 +388,6 @@ impl GameScene {
 
         // 地图加载完成后，立即完成 ECS 最小引导（MapData/Camera/LocalPlayer）
         self.ensure_ecs_bootstrap();
-
-        println!("✅ GameScene: 资源初始化完成");
     }
 
     // 地图的视觉加载/切换由 ECS MapRenderSystem 接管。
@@ -410,8 +405,6 @@ impl Scene for GameScene {
     }
 
     fn on_enter(&mut self) -> GameResult {
-        println!("🎬 进入游戏场景");
-
         // 场景间移交网络连接：SelectScene 已把 NetContext 放入全局，这里接管到 ECS。
         if let Some(net) = crate::network::take_global_net() {
             self.ecs_ctx.set_net(net);
@@ -467,8 +460,6 @@ impl Scene for GameScene {
     }
 
     fn on_exit(&mut self) -> GameResult {
-        println!("🎬 离开游戏场景");
-
         // 退出时把连接放回全局，便于返回角色选择/复用。
         if let Some(net) = self.ecs_ctx.net.take() {
             crate::network::set_global_net(net);

@@ -18,11 +18,6 @@ pub async fn init_chinese_font() {
         load_ttf_font("C:\\Windows\\Fonts\\msyh.ttc").await.ok()
     };
     
-    if font.is_some() {
-        println!("✅ 文本渲染器：已加载中文字体");
-    } else {
-        println!("⚠️  文本渲染器：无法加载中文字体，将使用默认字体");
-    }
     
     CHINESE_FONT.set(font).ok();
 }

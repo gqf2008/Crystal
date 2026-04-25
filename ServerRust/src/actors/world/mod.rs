@@ -2488,6 +2488,83 @@ impl WorldActor {
         }
         None
     }
+
+    /// 重新计算装备属性加成并设置到 PlayerActor
+    /// 返回最新的 PlayerState（如果成功）
+    pub(crate) async fn recalculate_and_set_stat_bonuses(&self, session_id: u64) -> Option<PlayerState> {
+        let record = self.players.get(&session_id)?;
+        let state = record.actor_ref.ask(GetPlayerState).await.ok()??;
+        let (b_min, b_max, b_def, b_hp, b_mp) = calculate_equipment_bonuses(
+            &state.inventory.equipment, &self.item_infos,
+        );
+        let _ = record.actor_ref.ask(crate::actors::player::SetStatBonuses {
+            bonus_min_attack: b_min,
+            bonus_max_attack: b_max,
+            bonus_defence: b_def,
+            bonus_max_hp: b_hp,
+            bonus_max_mp: b_mp,
+        }).await;
+        Some(state)
+    }
+
+    /// 广播装备视觉变化给同地图其他玩家
+    pub(crate) fn broadcast_equipment_visuals(&self, session_id: u64, state: &PlayerState) {
+        let weapon_shape = state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.shape as i16)
+            .unwrap_or(-1);
+        let armor_shape = state.inventory.get_equipment(EquipmentSlot::Armour)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.shape as i16)
+            .unwrap_or(0);
+        let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.effect as i16)
+            .unwrap_or(0);
+        let light: u8 = state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.light as u8)
+            .unwrap_or(0)
+            .max(state.inventory.get_equipment(EquipmentSlot::Armour)
+                .and_then(|item| self.item_infos.get(&item.item_index))
+                .map(|info| info.light as u8)
+                .unwrap_or(0));
+        for other in self.other_players(session_id) {
+            send_player_update(
+                &self.gate_ref, other.session_id, state.object_id,
+                light, weapon_shape, weapon_effect, armor_shape, 0,
+            );
+        }
+    }
+
+    /// 通过 object_id 查找玩家
+    pub(crate) async fn find_player_by_object_id(&self, target_id: u32) -> Option<PlayerState> {
+        for r in self.players.values() {
+            if let Ok(Some(s)) = r.actor_ref.ask(GetPlayerState).await {
+                if s.object_id == target_id {
+                    return Some(s);
+                }
+            }
+        }
+        None
+    }
+
+    /// 构建 ObjectDied 数据包
+    pub(crate) fn build_object_died_packet(object_id: u32, x: i32, y: i32, direction: u8) -> Vec<u8> {
+        let mut body = Vec::with_capacity(14);
+        body.extend_from_slice(&object_id.to_le_bytes());
+        body.extend_from_slice(&(x as u32).to_le_bytes());
+        body.extend_from_slice(&(y as u32).to_le_bytes());
+        body.push(direction);
+        body.push(0u8);
+        build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectDied as i16, &body)
+    }
+
+    /// 构建 ObjectRemove 数据包
+    pub(crate) fn build_object_remove_packet(object_id: u32) -> Vec<u8> {
+        let body = object_id.to_le_bytes().to_vec();
+        build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &body)
+    }
 }
 
 /// 硬编码合成配方表（后续可从 DB 加载）

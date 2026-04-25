@@ -286,8 +286,6 @@ impl Scene for SelectScene {
     }
 
     fn on_enter(&mut self) -> GameResult {
-        println!("🎬 进入角色选择界面");
-
         // 优先接管场景间移交的连接
         if self.net.is_none() {
             if let Some(net) = crate::network::take_global_net() {
@@ -299,7 +297,6 @@ impl Scene for SelectScene {
     }
     
     fn on_exit(&mut self) -> GameResult {
-        println!("🎬 离开角色选择界面");
         Ok(())
     }
     

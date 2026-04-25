@@ -75,6 +75,8 @@ pub struct QuestLogDialogHybrid {
     scroll_offset: f32,
     /// 展开的任务分组（为空表示全部展开，行为对齐 C# ExpandedGroups）
     expanded_groups: Vec<String>,
+    /// 缓存的任务分组（避免每帧重算）
+    cached_groups: Vec<(String, Vec<usize>)>,
     /// 背景纹理 - Prguse[961]
     bg_texture: Option<Texture2D>,
     /// 标题纹理 - Title[15]
@@ -107,6 +109,7 @@ impl QuestLogDialogHybrid {
             selected_quest: None,
             scroll_offset: 0.0,
             expanded_groups: Vec::new(),
+            cached_groups: Vec::new(),
             bg_texture: None,
             title_texture: None,
             close_button_textures: [None, None, None],
@@ -162,7 +165,6 @@ impl QuestLogDialogHybrid {
             self.size = vec2(texture.width as f32, texture.height as f32);
             if let Some(tex) = texture.image {
                 self.bg_texture = Some(tex);
-                println!("📋 任务日志背景 Prguse[961]: {}x{}", texture.width, texture.height);
             }
         }
         
@@ -170,7 +172,6 @@ impl QuestLogDialogHybrid {
         if let Some(texture) = LibraryName::Title.get_texture(15) {
             if let Some(tex) = texture.image {
                 self.title_texture = Some(tex);
-                println!("📋 任务日志标题 Title[15] 加载成功");
             }
         }
         
@@ -191,8 +192,6 @@ impl QuestLogDialogHybrid {
                 }
             }
         }
-        
-        println!("📋 任务日志对话框纹理加载完成");
     }
 
     /// 更新和绘制
@@ -257,10 +256,21 @@ impl QuestLogDialogHybrid {
     /// 从文本更新任务进度（网络消息：progress 是分号分隔的任务列表）
     pub fn update_quest_progress_from_text(&mut self, quest_id: u32, progress_text: &str) {
         if let Some(quest) = self.quests.iter_mut().find(|q| q.id == quest_id) {
-            // 计算完成的子任务数量
             let tasks: Vec<&str> = progress_text.split(';').filter(|s| !s.trim().is_empty()).collect();
             quest.max_progress = tasks.len().max(1) as u32;
-            quest.progress = tasks.len() as u32;
+
+            // 统计已完成的任务：解析每个任务描述中的 "X/Y" 进度指示
+            let completed = tasks.iter().filter(|task| {
+                for word in task.split(|c: char| !c.is_ascii_digit() && c != '/') {
+                    if let Some((cur, tgt)) = word.split_once('/') {
+                        if let (Ok(c), Ok(t)) = (cur.parse::<u32>(), tgt.parse::<u32>()) {
+                            return t > 0 && c >= t;
+                        }
+                    }
+                }
+                false
+            }).count() as u32;
+            quest.progress = completed;
             quest.description = progress_text.to_string();
             tracing::debug!("任务进度更新: {} - {}", quest.name, progress_text);
         }
@@ -269,17 +279,20 @@ impl QuestLogDialogHybrid {
     /// 添加新任务
     pub fn add_quest(&mut self, quest: QuestInfo) {
         self.quests.push(quest);
+        self.cached_groups.clear();
     }
 
     /// 清空所有任务（用于切换到真实服务器数据前清除模拟数据）
     pub fn clear_quests(&mut self) {
         self.quests.clear();
         self.selected_quest = None;
+        self.cached_groups.clear();
     }
 
     /// 移除任务
     pub fn remove_quest(&mut self, quest_id: u32) {
         self.quests.retain(|q| q.id != quest_id);
+        self.cached_groups.clear();
         if let Some(selected) = self.selected_quest {
             if selected >= self.quests.len() {
                 self.selected_quest = self.quests.last().map(|_| self.quests.len() - 1);
@@ -344,15 +357,19 @@ impl QuestLogDialogHybrid {
             }
         }
 
-        // 按出现顺序分组（对齐 C# GroupBy 的直觉表现）
-        let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
-        for (idx, quest) in self.quests.iter().enumerate() {
-            if let Some((_, indices)) = groups.iter_mut().find(|(g, _)| g == &quest.group) {
-                indices.push(idx);
-            } else {
-                groups.push((quest.group.clone(), vec![idx]));
+        // 按出现顺序分组（对齐 C# GroupBy 的直觉表现）—— 缓存避免每帧重算
+        if self.cached_groups.is_empty() {
+            let mut groups: Vec<(String, Vec<usize>)> = Vec::new();
+            for (idx, quest) in self.quests.iter().enumerate() {
+                if let Some((_, indices)) = groups.iter_mut().find(|(g, _)| g == &quest.group) {
+                    indices.push(idx);
+                } else {
+                    groups.push((quest.group.clone(), vec![idx]));
+                }
             }
+            self.cached_groups = groups;
         }
+        let groups = &self.cached_groups;
 
         let group_header_h = 20.0;
         let quest_item_h = 18.0;

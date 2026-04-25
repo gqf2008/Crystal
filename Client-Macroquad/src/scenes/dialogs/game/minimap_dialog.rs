@@ -222,10 +222,6 @@ impl MiniMapDialogHybrid {
 
         // 维持右侧对齐（更接近 C# 右上角固定的视觉效果）
         self.position.x = right - self.current_size.x;
-        println!(
-            "🗺️ 小地图模式: {}",
-            if self.big_mode { "大模式" } else { "小模式" }
-        );
     }
 
     /// 是否为大模式
@@ -311,12 +307,14 @@ impl MiniMapDialogHybrid {
 
         let mouse_pos = vec2(mouse_position().0, mouse_position().1);
 
-        // 获取背景纹理尺寸
-        let texture_index = if self.big_mode { 2090 } else { 2091 };
-        if let Some(texture) = LibraryName::Prguse.get_texture(texture_index) {
-            self.current_size = vec2(texture.width as f32, texture.height as f32);
-            if let Some(tex) = texture.image {
-                self.bg_texture = Some(tex);
+        // 首次绘制时加载背景纹理（toggle_size 已处理后续切换）
+        if self.bg_texture.is_none() {
+            let texture_index = if self.big_mode { 2090 } else { 2091 };
+            if let Some(texture) = LibraryName::Prguse.get_texture(texture_index) {
+                self.current_size = vec2(texture.width as f32, texture.height as f32);
+                if let Some(tex) = texture.image {
+                    self.bg_texture = Some(tex);
+                }
             }
         }
 
@@ -423,7 +421,6 @@ impl MiniMapDialogHybrid {
             vec2(self.position.x + 4.0, self.position.y + bottom_y),
             mouse_pos,
         ) {
-            println!("📮 MiniMap: MailButton clicked");
             self.pending_action = MiniMapAction::OpenMail;
         }
 
@@ -444,7 +441,6 @@ impl MiniMapDialogHybrid {
             vec2(self.position.x + 25.0, self.position.y + bottom_y),
             mouse_pos,
         ) {
-            println!("🗺️ MiniMap: BigMapButton clicked");
             self.pending_action = MiniMapAction::OpenBigMap;
         }
 

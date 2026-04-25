@@ -65,8 +65,6 @@ impl InventoryData {
         
         // 写入文件
         fs::write(path, json)?;
-        
-        println!("💾 背包数据已保存到: {:?}", path);
         Ok(())
     }
     
@@ -80,10 +78,8 @@ impl InventoryData {
         
         // 版本检查（未来可以处理版本迁移）
         if data.version != Self::CURRENT_VERSION {
-            println!("⚠️ 数据版本不匹配: {} vs {}", data.version, Self::CURRENT_VERSION);
+            // Version mismatch - could handle migration in the future
         }
-        
-        println!("📂 背包数据已加载自: {:?}", path);
         Ok(data)
     }
     
@@ -95,7 +91,5 @@ impl InventoryData {
         dialog.gold = self.gold;
         dialog.weight = self.weight;
         dialog.active_tab = self.active_tab;
-        
-        println!("✅ 背包数据已应用: {} 个物品格子, {} 金币", self.max_capacity, self.gold);
     }
 }

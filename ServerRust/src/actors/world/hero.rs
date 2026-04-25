@@ -205,10 +205,7 @@ impl Message<IntelligentCreaturePickup> for WorldActor {
             }
             if picked_up {
                 // 广播 ObjectRemove
-                let mut remove_body = Vec::new();
-                remove_body.extend_from_slice(&picked_oid.to_le_bytes());
-                let remove_packet = build_packet_bytes(
-                    mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &remove_body);
+                let remove_packet = Self::build_object_remove_packet(picked_oid);
                 for (sid, rec) in &self.players {
                     if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
                         if s.map_index == state.map_index {

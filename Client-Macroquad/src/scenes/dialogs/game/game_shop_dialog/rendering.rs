@@ -124,7 +124,6 @@ impl GameShopDialogHybrid {
                     ) && !self.dragging {
                         self.current_section = *section;
                         self.refresh_categories_and_items();
-                        println!("🏷️ 切换分类: {}", section.name());
                     }
                     continue;
                 }
@@ -135,7 +134,6 @@ impl GameShopDialogHybrid {
             if hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
                 self.current_section = *section;
                 self.refresh_categories_and_items();
-                println!("🏷️ 切换分类: {}", section.name());
             }
         }
     }
@@ -200,7 +198,6 @@ impl GameShopDialogHybrid {
                     ) && !self.dragging {
                         self.current_class = *class;
                         self.refresh_categories_and_items();
-                        println!("🏷️ 切换职业: {:?}", class);
                     }
                     continue;
                 }
@@ -211,7 +208,6 @@ impl GameShopDialogHybrid {
             if hovered && is_mouse_button_pressed(MouseButton::Left) && !self.dragging {
                 self.current_class = *class;
                 self.refresh_categories_and_items();
-                println!("🏷️ 切换职业: {:?}", class);
             }
         }
     }
@@ -297,7 +293,6 @@ impl GameShopDialogHybrid {
                 self.preview_item = None;
                 self.quantities = [1; 8];
                 self.filter_items();
-                println!("📁 选择分类: {}", self.categories[idx]);
             }
         }
         
@@ -572,7 +567,6 @@ impl GameShopDialogHybrid {
                 mouse_pos,
             ) && !self.dragging {
                 self.preview_item = Some(item_idx);
-                println!("👁️ 预览: {}", item.name);
             }
         }
         
@@ -586,7 +580,7 @@ impl GameShopDialogHybrid {
             vec2(buy_x, buy_y),
             mouse_pos,
         ) && !self.dragging {
-            println!("💰 购买: {}", item.name);
+            // TODO: handle buy action
         }
     }
     
@@ -627,7 +621,6 @@ impl GameShopDialogHybrid {
             self.current_page -= 1;
             self.preview_item = None;
             self.quantities = [1; 8];  // 重置购买数量
-            println!("📄 上一页: {}", self.current_page + 1);
         }
         
         // 下一页按钮 Prguse2[243-245] (原版: 660, 448)
@@ -643,7 +636,6 @@ impl GameShopDialogHybrid {
             self.current_page += 1;
             self.preview_item = None;
             self.quantities = [1; 8];  // 重置购买数量
-            println!("📄 下一页: {}", self.current_page + 1);
         }
         
         // 页码显示 (原版: 597, 446, 尺寸83x17, 居中对齐)
