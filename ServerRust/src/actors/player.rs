@@ -26,11 +26,13 @@ pub struct PlayerMagic {
     pub experience: u16,
     pub key: u8,
     pub toggled: bool,
+    /// 上次施法时间（毫秒时间戳，用于 CD 检查）
+    pub cast_time: i64,
 }
 
 impl PlayerMagic {
     pub fn new(spell: i32) -> Self {
-        Self { spell, level: 0, experience: 0, key: 0, toggled: false }
+        Self { spell, level: 0, experience: 0, key: 0, toggled: false, cast_time: 0 }
     }
 }
 
@@ -87,6 +89,14 @@ pub struct PlayerState {
     pub max_attack: i32,
     /// 防御力（基础+装备加成后的总值）
     pub defence: i32,
+    /// 最小魔法攻击力（基础+装备加成后的总值）
+    pub min_mc: i32,
+    /// 最大魔法攻击力（基础+装备加成后的总值）
+    pub max_mc: i32,
+    /// 最小道术攻击力（基础+装备加成后的总值）
+    pub min_sc: i32,
+    /// 最大道术攻击力（基础+装备加成后的总值）
+    pub max_sc: i32,
     /// 装备加成：最小攻击力
     pub bonus_min_attack: i32,
     /// 装备加成：最大攻击力
@@ -97,6 +107,26 @@ pub struct PlayerState {
     pub bonus_max_hp: i32,
     /// 装备加成：最大 MP
     pub bonus_max_mp: i32,
+    /// 装备加成：最小魔法攻击力
+    pub bonus_min_mc: i32,
+    /// 装备加成：最大魔法攻击力
+    pub bonus_max_mc: i32,
+    /// 装备加成：最小道术攻击力
+    pub bonus_min_sc: i32,
+    /// 装备加成：最大道术攻击力
+    pub bonus_max_sc: i32,
+    /// 冰冻属性
+    pub freezing: i32,
+    /// 毒物攻击
+    pub poison_attack: i32,
+    /// 毒物恢复
+    pub poison_recovery: i32,
+    /// 神圣属性
+    pub holy: i32,
+    /// 准确
+    pub accuracy: i32,
+    /// 敏捷
+    pub agility: i32,
     /// 背包 + 装备 + 金币
     pub inventory: PlayerInventory,
     /// 所属组队 ID（None = 无组队）
@@ -196,6 +226,26 @@ impl PlayerState {
         (base + buff_bonus).max(self.effective_min_attack())
     }
 
+    pub fn effective_min_mc(&self) -> i32 {
+        let base = self.min_mc + self.bonus_min_mc;
+        (base).max(0)
+    }
+
+    pub fn effective_max_mc(&self) -> i32 {
+        let base = self.max_mc + self.bonus_max_mc;
+        (base).max(self.effective_min_mc())
+    }
+
+    pub fn effective_min_sc(&self) -> i32 {
+        let base = self.min_sc + self.bonus_min_sc;
+        (base).max(0)
+    }
+
+    pub fn effective_max_sc(&self) -> i32 {
+        let base = self.max_sc + self.bonus_max_sc;
+        (base).max(self.effective_min_sc())
+    }
+
     /// 计算包含装备+Buff加成的防御力
     pub fn effective_defence(&self) -> i32 {
         let base = self.defence + self.bonus_defence;
@@ -249,11 +299,25 @@ impl PlayerActor {
                 min_attack: 5,
                 max_attack: 10,
                 defence: 2,
+                min_mc: 0,
+                max_mc: 0,
+                min_sc: 0,
+                max_sc: 0,
                 bonus_min_attack: 0,
                 bonus_max_attack: 0,
                 bonus_defence: 0,
                 bonus_max_hp: 0,
                 bonus_max_mp: 0,
+                bonus_min_mc: 0,
+                bonus_max_mc: 0,
+                bonus_min_sc: 0,
+                bonus_max_sc: 0,
+                freezing: 0,
+                poison_attack: 0,
+                poison_recovery: 0,
+                holy: 0,
+                accuracy: 0,
+                agility: 0,
                 inventory: PlayerInventory::new(),
                 group_id: None,
                 friend_list: FriendList::new(),
@@ -932,6 +996,10 @@ pub struct SetStatBonuses {
     pub bonus_defence: i32,
     pub bonus_max_hp: i32,
     pub bonus_max_mp: i32,
+    pub bonus_min_mc: i32,
+    pub bonus_max_mc: i32,
+    pub bonus_min_sc: i32,
+    pub bonus_max_sc: i32,
 }
 
 impl Message<SetStatBonuses> for PlayerActor {
@@ -947,15 +1015,26 @@ impl Message<SetStatBonuses> for PlayerActor {
         let d_def = msg.bonus_defence - self.state.bonus_defence;
         let d_hp = msg.bonus_max_hp - self.state.bonus_max_hp;
         let d_mp = msg.bonus_max_mp - self.state.bonus_max_mp;
+        let d_min_mc = msg.bonus_min_mc - self.state.bonus_min_mc;
+        let d_max_mc = msg.bonus_max_mc - self.state.bonus_max_mc;
+        let d_min_sc = msg.bonus_min_sc - self.state.bonus_min_sc;
+        let d_max_sc = msg.bonus_max_sc - self.state.bonus_max_sc;
 
-        if d_min != 0 || d_max != 0 || d_def != 0 || d_hp != 0 || d_mp != 0 {
+        let changed = d_min != 0 || d_max != 0 || d_def != 0 || d_hp != 0 || d_mp != 0
+            || d_min_mc != 0 || d_max_mc != 0 || d_min_sc != 0 || d_max_sc != 0;
+
+        if changed {
             self.state.min_attack += d_min;
             self.state.max_attack += d_max;
             self.state.defence += d_def;
             self.state.max_hp += d_hp;
             self.state.max_mp += d_mp;
+            self.state.min_mc += d_min_mc;
+            self.state.max_mc += d_max_mc;
+            self.state.min_sc += d_min_sc;
+            self.state.max_sc += d_max_sc;
 
-            //  Clamp HP/MP within new max
+            // Clamp HP/MP within new max
             self.state.hp = self.state.hp.min(self.state.max_hp);
             self.state.mp = self.state.mp.min(self.state.max_mp);
 
@@ -964,6 +1043,10 @@ impl Message<SetStatBonuses> for PlayerActor {
             self.state.bonus_defence = msg.bonus_defence;
             self.state.bonus_max_hp = msg.bonus_max_hp;
             self.state.bonus_max_mp = msg.bonus_max_mp;
+            self.state.bonus_min_mc = msg.bonus_min_mc;
+            self.state.bonus_max_mc = msg.bonus_max_mc;
+            self.state.bonus_min_sc = msg.bonus_min_sc;
+            self.state.bonus_max_sc = msg.bonus_max_sc;
 
             self.send_user_information_refresh();
         }
@@ -2021,6 +2104,45 @@ impl Message<ToggleSpell> for PlayerActor {
     }
 }
 
+/// 获得法术经验 + 更新施法冷却时间
+pub struct GainSpellExp {
+    pub spell: u8,
+    pub amount: u16,
+    pub cast_time: i64,
+}
+
+impl Message<GainSpellExp> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: GainSpellExp, _ctx: &mut Context<Self, Self::Reply>) {
+        for magic in &mut self.state.magics {
+            if magic.spell == msg.spell as i32 {
+                magic.cast_time = msg.cast_time;
+                if magic.level < 3 {
+                    magic.experience = magic.experience.saturating_add(msg.amount);
+                    // Level up check: each level needs ~1000 XP
+                    let xp_needed = (magic.level as u16 + 1) * 1000u16;
+                    if magic.experience >= xp_needed && magic.level < 3 {
+                        magic.level += 1;
+                        magic.experience = 0;
+                        // Send MagicLeveled packet
+                        let mut body = Vec::new();
+                        body.extend_from_slice(&(magic.spell as i32).to_le_bytes());
+                        body.push(magic.level);
+                        let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
+                            session_id: self.state.session_id,
+                            data: crate::util::wire::build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::MagicLeveled as i16, &body,
+                            ),
+                        });
+                    }
+                }
+                break;
+            }
+        }
+    }
+}
+
 /// 设置英雄索引
 pub struct SetHeroIndex {
     pub hero_index: u8,
@@ -2504,11 +2626,25 @@ mod tests {
             min_attack: 5,
             max_attack: 10,
             defence: 2,
+            min_mc: 0,
+            max_mc: 0,
+            min_sc: 0,
+            max_sc: 0,
             bonus_min_attack: 0,
             bonus_max_attack: 0,
             bonus_defence: 0,
             bonus_max_hp: 0,
             bonus_max_mp: 0,
+            bonus_min_mc: 0,
+            bonus_max_mc: 0,
+            bonus_min_sc: 0,
+            bonus_max_sc: 0,
+            freezing: 0,
+            poison_attack: 0,
+            poison_recovery: 0,
+            holy: 0,
+            accuracy: 0,
+            agility: 0,
             inventory: PlayerInventory::new(),
             group_id: None,
             friend_list: FriendList::new(),

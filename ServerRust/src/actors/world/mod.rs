@@ -4,6 +4,10 @@
 // 子模块（已集成）
 mod awakening;
 mod combat;
+#[allow(dead_code)]
+mod conquest;
+#[allow(dead_code)]
+mod dragon;
 mod guild;
 mod hero;
 mod item;
@@ -11,7 +15,11 @@ mod mail;
 mod market;
 mod npc;
 mod quest;
+mod report;
+#[allow(dead_code)]
+mod robot;
 mod session;
+pub mod spell;
 mod tick;
 
 // Re-export submodule structs for external access
@@ -72,7 +80,7 @@ pub struct WorldActorArgs {
 
 /// 世界中的玩家记录
 #[derive(Clone)]
-struct PlayerRecord {
+pub(crate) struct PlayerRecord {
     /// PlayerActor 引用
     actor_ref: ActorRef<PlayerActor>,
     /// Session ID（用于路由到 GateActor）
@@ -270,7 +278,7 @@ fn default_xp() -> i32 { 10 }
 
 /// AI 行为类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MonsterAiType {
+pub(crate) enum MonsterAiType {
     /// 被动：不会主动攻击，只有被攻击才反击
     Passive,
     /// 主动：发现玩家就追击并攻击（默认）
@@ -310,7 +318,7 @@ impl MonsterAiType {
 
 /// AI 运行时参数（从 MonsterInfo 构建）
 #[derive(Debug, Clone)]
-struct MonsterAiProfile {
+pub(crate) struct MonsterAiProfile {
     pub ai_type: MonsterAiType,
     /// 视野/仇恨范围
     pub aggro_range: i32,
@@ -353,7 +361,7 @@ impl MonsterAiProfile {
 
 /// AI 运行时状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MonsterAiState {
+pub(crate) enum MonsterAiState {
     ///  idle / 巡逻
     Idle,
     /// 追击目标
@@ -368,7 +376,7 @@ enum MonsterAiState {
 
 /// 运行时怪物状态
 #[derive(Clone)]
-struct MonsterState {
+pub(crate) struct MonsterState {
     pub object_id: u32,
     pub name: String,
     pub image: u16,
@@ -413,7 +421,7 @@ fn dist_to_spawn(monster: &MonsterState) -> i32 {
 /// 运行时 NPC 状态
 #[derive(Clone)]
 #[allow(dead_code)]
-struct NpcState {
+pub(crate) struct NpcState {
     pub object_id: u32,
     pub name: String,
     pub x: i32,
@@ -440,6 +448,11 @@ const SPELL_SOUL_SHIELD: u8 = 69;
 const SPELL_BLESSED_ARMOUR: u8 = 71;
 const SPELL_TELEPORT: u8 = 37;
 const SPELL_FIREBALL: u8 = 31; // 法师怪物默认法术
+const SPELL_FIREWALL: u8 = 34;
+const SPELL_BLIZZARD: u8 = 44;
+const SPELL_METEOR_STRIKE: u8 = 45;
+const SPELL_POISON_CLOUD: u8 = 83;
+const SPELL_EXPLOSIVE_TRAP: u8 = 123;
 
 impl MonsterState {
     /// 朝目标方向走一步，返回新位置和方向
@@ -566,6 +579,19 @@ pub struct WorldActor {
     pub(crate) rental_sessions: HashMap<u64, RentalSession>,
     /// 已生效的租赁记录 (renter_name -> list of RentedItem)
     pub(crate) player_rentals: HashMap<String, Vec<RentedItem>>,
+    /// 持久法术对象（火墙、暴风雪等），按 object_id 索引
+    pub(crate) spell_objects: HashMap<u32, spell::SpellObject>,
+    /// 定时机器人任务
+    pub(crate) robot_tasks: Vec<robot::RobotTask>,
+    /// 机器人上次检查的分钟值
+    pub(crate) robot_last_check_minute: u32,
+    /// 龙系统状态
+    pub(crate) dragon_state: Option<dragon::DragonState>,
+    /// 征服区域列表
+    pub(crate) conquest_instances: Vec<conquest::ConquestInstance>,
+    /// 城门/城墙/攻城武器
+    #[allow(dead_code)]
+    pub(crate) siege_structures: HashMap<u32, conquest::SiegeStructure>,
     /// 行会战争声明 (guild_name -> set of enemy guild names)
     pub(crate) guild_wars: HashMap<String, std::collections::HashSet<String>>,
 }
@@ -573,7 +599,7 @@ pub struct WorldActor {
 /// 租赁会话状态
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-struct RentalSession {
+pub(crate) struct RentalSession {
     partner_session: u64,
     partner_name: String,
     fee: u32,
@@ -586,7 +612,7 @@ struct RentalSession {
 /// 已生效的租赁记录
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-struct RentedItem {
+pub(crate) struct RentedItem {
     item: mir2_shared::data::item::UserItem,
     owner_name: String,
     renter_name: String,
@@ -652,6 +678,12 @@ impl WorldActor {
             market_search_cache: HashMap::new(),
             rental_sessions: HashMap::new(),
             player_rentals: HashMap::new(),
+            spell_objects: HashMap::new(),
+            robot_tasks: Vec::new(),
+            robot_last_check_minute: 0,
+            dragon_state: None,
+            conquest_instances: Vec::new(),
+            siege_structures: HashMap::new(),
             guild_wars: HashMap::new(),
         }
     }
@@ -2422,6 +2454,12 @@ impl Actor for WorldActor {
             market_search_cache: HashMap::new(),
             rental_sessions: HashMap::new(),
             player_rentals: HashMap::new(),
+            spell_objects: HashMap::new(),
+            robot_tasks: Vec::new(),
+            robot_last_check_minute: 0,
+            dragon_state: None,
+            conquest_instances: Vec::new(),
+            siege_structures: HashMap::new(),
             guild_wars: HashMap::new(),
         })
     }
@@ -2446,7 +2484,7 @@ pub struct CraftRecipe {
 
 /// 市场搜索缓存
 #[derive(Debug, Clone)]
-struct MarketSearchCache {
+pub(crate) struct MarketSearchCache {
     results: Vec<usize>, // indices into self.auctions
 }
 
@@ -2494,7 +2532,7 @@ impl WorldActor {
     pub(crate) async fn recalculate_and_set_stat_bonuses(&self, session_id: u64) -> Option<PlayerState> {
         let record = self.players.get(&session_id)?;
         let state = record.actor_ref.ask(GetPlayerState).await.ok()??;
-        let (b_min, b_max, b_def, b_hp, b_mp) = calculate_equipment_bonuses(
+        let (b_min, b_max, b_def, b_hp, b_mp, b_min_mc, b_max_mc, b_min_sc, b_max_sc) = calculate_equipment_bonuses(
             &state.inventory.equipment, &self.item_infos,
         );
         let _ = record.actor_ref.ask(crate::actors::player::SetStatBonuses {
@@ -2503,12 +2541,16 @@ impl WorldActor {
             bonus_defence: b_def,
             bonus_max_hp: b_hp,
             bonus_max_mp: b_mp,
+            bonus_min_mc: b_min_mc,
+            bonus_max_mc: b_max_mc,
+            bonus_min_sc: b_min_sc,
+            bonus_max_sc: b_max_sc,
         }).await;
         Some(state)
     }
 
     /// 广播装备视觉变化给同地图其他玩家
-    pub(crate) fn broadcast_equipment_visuals(&self, session_id: u64, state: &PlayerState) {
+    pub(crate) async fn broadcast_equipment_visuals(&self, session_id: u64, state: &PlayerState) {
         let weapon_shape = state.inventory.get_equipment(EquipmentSlot::Weapon)
             .and_then(|item| self.item_infos.get(&item.item_index))
             .map(|info| info.shape as i16)
@@ -2533,11 +2575,12 @@ impl WorldActor {
             send_player_update(
                 &self.gate_ref, other.session_id, state.object_id,
                 light, weapon_shape, weapon_effect, armor_shape, 0,
-            );
+            ).await;
         }
     }
 
     /// 通过 object_id 查找玩家
+    #[allow(dead_code)]
     pub(crate) async fn find_player_by_object_id(&self, target_id: u32) -> Option<PlayerState> {
         for r in self.players.values() {
             if let Ok(Some(s)) = r.actor_ref.ask(GetPlayerState).await {
@@ -2630,9 +2673,10 @@ fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: u64, message:
     let mut body = Vec::new();
     crate::util::wire::write_dotnet_string(&mut body, message);
     body.push(0u8); // ChatType::System
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: build_packet_bytes(ServerPacketIds::Chat as i16, &body),
+    let packet = build_packet_bytes(ServerPacketIds::Chat as i16, &body);
+    let gate_ref = gate_ref.clone();
+    tokio::spawn(async move {
+        let _ = gate_ref.tell(SendToClient { session_id, data: packet }).await;
     });
 }
 
@@ -2677,12 +2721,16 @@ fn broadcast_system_message(gate_ref: &ActorRef<GateActor>, players: &HashMap<u6
     crate::util::wire::write_dotnet_string(&mut body, message);
     body.push(mir2_shared::enums::ChatType::System as u8);
     let packet = build_packet_bytes(ServerPacketIds::Chat as i16, &body);
-    for session_id in players.keys() {
-        let _ = gate_ref.ask(SendToClient {
-            session_id: *session_id,
-            data: packet.clone(),
-        });
-    }
+    let gate_ref = gate_ref.clone();
+    let session_ids: Vec<u64> = players.keys().copied().collect();
+    tokio::spawn(async move {
+        for session_id in session_ids {
+            let _ = gate_ref.tell(SendToClient {
+                session_id,
+                data: packet.clone(),
+            }).await;
+        }
+    });
 }
 
 /// 从 DB 任务配置创建任务实例
@@ -2722,14 +2770,14 @@ fn make_quest_instance(qi: &db::QuestInfo, start_time: u64) -> QuestInstance {
 }
 
 /// Send Opendoor response to a single player
-fn send_opendoor(gate_ref: &ActorRef<GateActor>, session_id: u64, door_index: u8, close: bool) {
+async fn send_opendoor(gate_ref: &ActorRef<GateActor>, session_id: u64, door_index: u8, close: bool) {
     let mut body = Vec::new();
     body.push(door_index);
     body.push(if close { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Opendoor as i16, &body),
-    });
+    }).await;
 }
 
 /// Broadcast Opendoor to all players on a map (excluding the initiator)
@@ -2776,13 +2824,17 @@ fn send_use_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, uid: 
 fn calculate_equipment_bonuses(
     equipment: &[Option<mir2_shared::data::item::UserItem>],
     item_infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
-) -> (i32, i32, i32, i32, i32) {
+) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32) {
     use mir2_shared::enums::Stat;
     let mut min_atk = 0i32;
     let mut max_atk = 0i32;
     let mut def = 0i32;
     let mut hp = 0i32;
     let mut mp = 0i32;
+    let mut min_mc = 0i32;
+    let mut max_mc = 0i32;
+    let mut min_sc = 0i32;
+    let mut max_sc = 0i32;
 
     for eq in equipment.iter().flatten() {
         if let Some(info) = item_infos.get(&eq.item_index) {
@@ -2791,10 +2843,14 @@ fn calculate_equipment_bonuses(
             def += info.stats.get(&(Stat::MaxAC as u8)).copied().unwrap_or(0);
             hp += info.stats.get(&(Stat::HP as u8)).copied().unwrap_or(0);
             mp += info.stats.get(&(Stat::MP as u8)).copied().unwrap_or(0);
+            min_mc += info.stats.get(&(Stat::MinMC as u8)).copied().unwrap_or(0);
+            max_mc += info.stats.get(&(Stat::MaxMC as u8)).copied().unwrap_or(0);
+            min_sc += info.stats.get(&(Stat::MinSC as u8)).copied().unwrap_or(0);
+            max_sc += info.stats.get(&(Stat::MaxSC as u8)).copied().unwrap_or(0);
         }
     }
 
-    (min_atk, max_atk, def, hp, mp)
+    (min_atk, max_atk, def, hp, mp, min_mc, max_mc, min_sc, max_sc)
 }
 
 fn send_equip_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, grid: u8, uid: u64, slot: i32, success: bool) {
@@ -3025,7 +3081,7 @@ fn send_creature_list_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, cr
 // ============================================================
 
 /// 发送完整的游戏进入序列到客户端
-fn send_game_entry_sequence(
+async fn send_game_entry_sequence(
     gate_ref: ActorRef<GateActor>,
     session_id: u64,
     state: &PlayerState,
@@ -3041,43 +3097,43 @@ fn send_game_entry_sequence(
     let mut start_game_body = Vec::new();
     start_game_body.push(4u8);
     start_game_body.extend_from_slice(&0i32.to_le_bytes());
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id: sid,
         data: build_packet_bytes(ServerPacketIds::StartGame as i16, &start_game_body),
-    });
+    }).await;
 
     // 2. MapChanged
     let map_changed = build_map_changed_packet(state.map_index, map_file, map_title, state.x, state.y, is_big_map);
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id: sid,
         data: map_changed,
-    });
+    }).await;
 
     // 3. UserInformation
     let user_info = build_user_information_packet(state);
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id: sid,
         data: user_info,
-    });
+    }).await;
 
     // 4. HealthChanged
     let mut health_body = Vec::new();
     health_body.extend_from_slice(&(state.hp as u32).to_le_bytes());
     health_body.extend_from_slice(&(state.mp as u32).to_le_bytes());
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id: sid,
         data: build_packet_bytes(ServerPacketIds::HealthChanged as i16, &health_body),
-    });
+    }).await;
 
     // 5. UserLocation
     let mut location_body = Vec::new();
     location_body.extend_from_slice(&state.x.to_le_bytes());
     location_body.extend_from_slice(&state.y.to_le_bytes());
     location_body.push(state.direction);
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id: sid,
         data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &location_body),
-    });
+    }).await;
 
     info!("Game entry sequence sent to session {}", sid);
 }
@@ -3244,7 +3300,7 @@ fn build_object_player_packet(
 }
 
 /// 发送 PlayerUpdate 数据包（装备视觉变化）
-fn send_player_update(
+async fn send_player_update(
     gate_ref: &ActorRef<GateActor>,
     session_id: u64,
     object_id: u32,
@@ -3262,10 +3318,10 @@ fn send_player_update(
     body.extend_from_slice(&weapon_effect.to_le_bytes());
     body.extend_from_slice(&armor.to_le_bytes());
     body.push(wings_effect);
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(ServerPacketIds::PlayerUpdate as i16, &body),
-    });
+    }).await;
 }
 
 /// 构建 ObjectColourChanged 数据包
@@ -3324,7 +3380,7 @@ fn build_object_monster_packet(monster: &MonsterSpawn, object_id: u32, name: &st
 }
 
 /// 发送地图上的 NPC 和怪物给新玩家，返回 NPC 和怪物列表
-fn spawn_npcs_and_monsters(
+async fn spawn_npcs_and_monsters(
     gate_ref: ActorRef<GateActor>,
     spawn_dir: &Option<PathBuf>,
     map_file: &str,
@@ -3351,10 +3407,10 @@ fn spawn_npcs_and_monsters(
         let object_id = *next_object_id;
         *next_object_id += 1;
         let packet = build_object_npc_packet(npc, object_id);
-        let _ = gate_ref.ask(SendToClient {
+        let _ = gate_ref.tell(SendToClient {
             session_id,
             data: packet,
-        });
+        }).await;
 
         npcs.push(NpcState {
             object_id,
@@ -3389,10 +3445,10 @@ fn spawn_npcs_and_monsters(
         };
 
         let packet = build_object_monster_packet(monster, object_id, &name);
-        let _ = gate_ref.ask(SendToClient {
+        let _ = gate_ref.tell(SendToClient {
             session_id,
             data: packet,
-        });
+        }).await;
 
         let ai_profile = ctx.monster_infos
             .get(&monster.monster_index)
@@ -3455,7 +3511,7 @@ fn spawn_npcs_and_monsters(
                         object_id,
                         &dragon.monster_name,
                     );
-                    let _ = gate_ref.ask(SendToClient { session_id, data: packet });
+                    let _ = gate_ref.tell(SendToClient { session_id, data: packet }).await;
                     let ai_profile = MonsterAiProfile::from_info(monster_db);
                     monsters.push(MonsterState {
                         object_id,
@@ -3636,3 +3692,6 @@ mod tests {
         assert!(awake.is_max_level());
     }
 }
+
+#[cfg(test)]
+mod e2e;

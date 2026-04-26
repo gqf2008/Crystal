@@ -2,5 +2,4 @@
 
 pub mod attack;
 pub mod buff;
-// magic.rs 暂未实现
-// pub mod magic;
+pub mod magic;

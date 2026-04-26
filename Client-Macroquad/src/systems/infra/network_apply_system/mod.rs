@@ -93,6 +93,17 @@ impl Default for NetworkApplySystem {
     }
 }
 
+// Test builds can't call macroquad::get_time() (asserts it's on main thread).
+#[cfg(not(test))]
+fn current_time_secs() -> f64 {
+    macroquad::prelude::get_time()
+}
+
+#[cfg(test)]
+fn current_time_secs() -> f64 {
+    0.0
+}
+
 /// Walk/Run 共享的移动配置
 struct RemoteMoveConfig {
     player_action: crate::components::PlayerAction,
@@ -120,7 +131,7 @@ fn apply_remote_movement(
 
     let is_local = ctx.world.get::<&LocalPlayer>(e).is_ok();
     let (wx, wy) = crate::coord::Coord::grid_to_world_center(location_x, location_y);
-    let now_secs = macroquad::prelude::get_time();
+    let now_secs = current_time_secs();
 
     if is_local {
         let has_pos = ctx.world.get::<&Position>(e).is_ok();
@@ -1585,5 +1596,432 @@ mod update;
 impl LogicSystem for NetworkApplySystem {
     fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
         update::update(ctx, _delay_time)
+    }
+}
+
+#[cfg(test)]
+mod e2e_tests {
+    use super::*;
+    use crate::components::{
+        Currency, Equipment, Experience, Health, Inventory, LocalPlayer,
+        Mana, PlayerData, Position, PositionInterpolation,
+    };
+    use crate::network::handlers::NetworkEvent;
+    use mir2_shared::enums::{HeroBehaviour, MirClass, MirDirection, MirGender};
+
+    fn setup() -> (GameContext, NetworkApplySystem) {
+        (GameContext::new(), NetworkApplySystem::default())
+    }
+
+    fn find_local_entity(ctx: &GameContext) -> hecs::Entity {
+        ctx.world
+            .iter()
+            .find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity()))
+            .unwrap()
+    }
+
+    fn make_user_info(object_id: u32, name: &str, hp: i32, mp: i32) -> mir2_shared::packets::server::UserInformation {
+        mir2_shared::packets::server::UserInformation {
+            object_id,
+            real_id: object_id,
+            name: name.to_string(),
+            guild_name: String::new(),
+            guild_rank: String::new(),
+            name_colour: 0,
+            class: MirClass::Warrior,
+            gender: MirGender::Male,
+            level: 1,
+            location_x: 50,
+            location_y: 60,
+            direction: MirDirection::Down,
+            hair: 0,
+            hp,
+            mp,
+            experience: 0,
+            max_experience: 100,
+            level_effects: mir2_shared::LevelEffects::empty(),
+            has_hero: false,
+            hero_behaviour: HeroBehaviour::Attack,
+            inventory: None,
+            equipment: None,
+            quest_inventory: None,
+            gold: 0,
+            credit: 0,
+            has_expanded_storage: false,
+            expanded_storage_expiry_time: 0,
+            magics: Vec::new(),
+            summoned_creature_type: 0,
+            creature_summoned: false,
+            allow_observe: false,
+            observer: false,
+        }
+    }
+
+    #[test]
+    fn test_login_flow_user_information() {
+        let (mut ctx, mut sys) = setup();
+
+        let packet = make_user_info(1001, "TestHero", 500, 300);
+        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        let local_entity = find_local_entity(&ctx);
+
+        let health = ctx.world.get::<&Health>(local_entity).unwrap();
+        assert_eq!(health.current, 500);
+        assert_eq!(health.max, 500);
+
+        let mana = ctx.world.get::<&Mana>(local_entity).unwrap();
+        assert_eq!(mana.current, 300);
+        assert_eq!(mana.max, 300);
+
+        let pos = ctx.world.get::<&Position>(local_entity).unwrap();
+        assert!(pos.x > 0.0 && pos.y > 0.0);
+
+        let pd = ctx.world.get::<&PlayerData>(local_entity).unwrap();
+        assert_eq!(pd.object_id, 1001);
+        assert_eq!(pd.name, "TestHero");
+        assert_eq!(pd.class, MirClass::Warrior);
+    }
+
+    #[test]
+    fn test_health_changed_updates_component() {
+        let (mut ctx, mut sys) = setup();
+
+        let packet = make_user_info(1001, "TestHero", 500, 300);
+        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        let local_entity = find_local_entity(&ctx);
+
+
+        ctx.events_mut().send_network(NetworkEvent::HealthChanged { current: 250, max: 600 });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        let health = ctx.world.get::<&Health>(local_entity).unwrap();
+        assert_eq!(health.current, 250);
+        assert_eq!(health.max, 600);
+    }
+
+    #[test]
+    fn test_remote_player_walk_creates_interpolation() {
+        let (mut ctx, mut sys) = setup();
+
+        let player = mir2_shared::packets::server::ObjectPlayer {
+            object_id: 2001,
+            name: "RemotePlayer".to_string(),
+            guild_name: String::new(),
+            guild_rank_name: String::new(),
+            name_colour: 0,
+            class: MirClass::Wizard,
+            gender: MirGender::Female,
+            level: 10,
+            location_x: 10,
+            location_y: 20,
+            direction: MirDirection::Right,
+            hair: 0,
+            light: 0,
+            weapon: 0,
+            weapon_effect: 0,
+            armour: 0,
+            poison: mir2_shared::enums::PoisonType::empty(),
+            dead: false,
+            hidden: false,
+            effect: mir2_shared::enums::SpellEffect::None,
+            wing_effect: 0,
+            extra: false,
+            mount_type: 0,
+            riding_mount: false,
+            fishing: false,
+            transform_type: 0,
+            element_orb_effect: 0,
+            element_orb_lvl: 0,
+            element_orb_max: 0,
+            buffs: Vec::new(),
+            level_effects: mir2_shared::LevelEffects::empty(),
+        };
+        ctx.events_mut().send_network(NetworkEvent::ObjectPlayer { packet: player });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        let walk = mir2_shared::packets::server::ObjectWalk {
+            object_id: 2001,
+            location_x: 11,
+            location_y: 21,
+            direction: MirDirection::Right,
+        };
+        ctx.events_mut().send_network(NetworkEvent::ObjectWalk { packet: walk });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        let entity = ctx
+            .world
+            .iter()
+            .find_map(|e| {
+                if let Some(rp) = e.get::<&crate::components::RemotePlayer>() {
+                    if rp.id == 2001 {
+                        return Some(e.entity());
+                    }
+                }
+                None
+            })
+            .expect("远程玩家实体应存在");
+
+        assert!(
+            ctx.world.get::<&PositionInterpolation>(entity).is_ok(),
+            "远程玩家收到 ObjectWalk 后应产生 PositionInterpolation"
+        );
+    }
+
+    #[test]
+    fn test_item_gained_adds_to_inventory() {
+        let (mut ctx, mut sys) = setup();
+
+        let mut packet = make_user_info(1001, "TestHero", 100, 50);
+        packet.inventory = Some(vec![None; 40]);
+        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        let local_entity = find_local_entity(&ctx);
+
+        let item = mir2_shared::UserItem {
+            unique_id: 999,
+            item_index: 3001,
+            count: 5,
+            ..Default::default()
+        };
+        ctx.events_mut().send_network(NetworkEvent::ItemGained { item });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        let inv = ctx.world.get::<&Inventory>(local_entity).unwrap();
+        // Assert
+        let found = inv.items.iter().any(|slot| {
+            slot.as_ref().map(|it| it.unique_id == 999 && it.count == 5).unwrap_or(false)
+        });
+        assert!(found, "背包中应存在刚获得的物品");
+    }
+
+    #[test]
+    fn test_monster_spawn_and_remove() {
+        let (mut ctx, mut sys) = setup();
+
+        let packet = make_user_info(1001, "TestHero", 500, 300);
+        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        let monster = mir2_shared::packets::server::ObjectMonster {
+            object_id: 3001,
+            name: "BigRat".to_string(),
+            name_colour: 0,
+            location_x: 60,
+            location_y: 70,
+            image: 450,
+            direction: MirDirection::Down,
+            effect: 0,
+            ai: 0,
+            light: 0,
+            dead: false,
+            skeleton: false,
+            poison: mir2_shared::enums::PoisonType::empty(),
+            hidden: false,
+            shock_time: 0,
+            binding_shot_center: false,
+            extra: false,
+            extra_byte: 0,
+            buffs: vec![],
+        };
+        ctx.events_mut().send_network(NetworkEvent::ObjectMonster { packet: monster });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        let monster_entity = ctx
+            .world
+            .iter()
+            .find_map(|e| {
+                if let Some(sync) = e.get::<&crate::components::network::NetworkSync>() {
+                    if sync.object_id == 3001 {
+                        return Some(e.entity());
+                    }
+                }
+                None
+            })
+            .expect("怪物实体应存在");
+
+        assert!(ctx.world.get::<&crate::components::Position>(monster_entity).is_ok());
+
+        ctx.events_mut().send_network(NetworkEvent::ObjectHealthPercent {
+            object_id: 3001,
+            percent: 50,
+            expire: 0,
+        });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        // ObjectHealthPercent should create a Health component
+        if let Ok(health) = ctx.world.get::<&Health>(monster_entity) {
+            assert!(health.current > 0, "怪物血量应 > 0");
+        }
+
+        ctx.events_mut().send_network(NetworkEvent::ObjectRemove { object_id: 3001 });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        let still_alive = ctx
+            .world
+            .iter()
+            .any(|e| {
+                if let Some(sync) = e.get::<&crate::components::network::NetworkSync>() {
+                    return sync.object_id == 3001;
+                }
+                false
+            });
+        assert!(!still_alive, "怪物实体应被移除");
+    }
+
+    #[test]
+    fn test_experience_and_level_up() {
+        let (mut ctx, mut sys) = setup();
+
+        let packet = make_user_info(1001, "TestHero", 500, 300);
+        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        let local_entity = find_local_entity(&ctx);
+
+        ctx.events_mut().send_network(NetworkEvent::ExperienceGained { amount: 50 });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        {
+            let exp = ctx.world.get::<&Experience>(local_entity).unwrap();
+            assert_eq!(exp.current, 50, "经验应增长到 50");
+        }
+
+        ctx.events_mut().send_network(NetworkEvent::LevelUp { new_level: 2 });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        {
+            let pd = ctx.world.get::<&PlayerData>(local_entity).unwrap();
+            assert_eq!(pd.level, 2, "等级应升至 2");
+        }
+    }
+
+    #[test]
+    fn test_mana_changed() {
+        let (mut ctx, mut sys) = setup();
+
+        let packet = make_user_info(1001, "TestHero", 500, 300);
+        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        let local_entity = find_local_entity(&ctx);
+
+        ctx.events_mut().send_network(NetworkEvent::ManaChanged { current: 200, max: 350 });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        {
+            let mana = ctx.world.get::<&Mana>(local_entity).unwrap();
+            assert_eq!(mana.current, 200, "蓝量应为 200");
+            assert_eq!(mana.max, 350, "蓝量上限应为 350");
+        }
+    }
+
+    #[test]
+    fn test_gold_changed() {
+        let (mut ctx, mut sys) = setup();
+
+        let mut packet = make_user_info(1001, "TestHero", 500, 300);
+        packet.gold = 100;
+        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        let local_entity = find_local_entity(&ctx);
+
+        ctx.events_mut().send_network(NetworkEvent::GoldChanged { delta: 50 });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        {
+            let currency = ctx.world.get::<&Currency>(local_entity).unwrap();
+            assert!(currency.gold > 0, "金币应增加");
+        }
+    }
+
+    #[test]
+    fn test_ground_item_spawn() {
+        let (mut ctx, mut sys) = setup();
+
+        let packet = make_user_info(1001, "TestHero", 500, 300);
+        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        // 地面掉落物品
+        let item = mir2_shared::UserItem {
+            unique_id: 777,
+            item_index: 4001,
+            count: 1,
+            ..Default::default()
+        };
+        let ground = mir2_shared::packets::server::ObjectItem {
+            object_id: 9001,
+            item,
+            location_x: 55,
+            location_y: 65,
+        };
+        ctx.events_mut().send_network(NetworkEvent::GroundItem { packet: ground });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        // 验证地面物品实体存在
+        let found = ctx
+            .world
+            .iter()
+            .any(|e| {
+                if let Some(gi) = e.get::<&crate::components::GroundItem>() {
+                    return gi.object_id == 9001;
+                }
+                false
+            });
+        assert!(found, "地面物品实体应存在");
+    }
+
+    #[test]
+    fn test_item_equipped_flow() {
+        let (mut ctx, mut sys) = setup();
+
+        // 创建玩家（带空背包和装备栏）
+        let mut packet = make_user_info(1001, "TestHero", 100, 50);
+        packet.inventory = Some(vec![None; 40]);
+        packet.equipment = Some(vec![None; 14]);
+        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        let local_entity = find_local_entity(&ctx);
+
+        // 获得物品然后装备
+        let item = mir2_shared::UserItem {
+            unique_id: 100,
+            item_index: 2001,
+            count: 1,
+            ..Default::default()
+        };
+        ctx.events_mut().send_network(NetworkEvent::ItemGained { item });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        // 验证物品已在背包中
+        {
+            let inv = ctx.world.get::<&Inventory>(local_entity).unwrap();
+            assert!(
+                inv.items.iter().any(|s| s.as_ref().map(|it| it.unique_id == 100).unwrap_or(false)),
+                "物品应在背包中"
+            );
+        }
+
+        // 装备物品到武器槽 (slot=0)
+        ctx.events_mut().send_network(NetworkEvent::ItemEquipped {
+            grid: mir2_shared::enums::MirGridType::Inventory,
+            unique_id: 100,
+            slot: 0,
+            success: true,
+        });
+        sys.update(&mut ctx, 0.016).unwrap();
+
+        // 验证装备栏有物品
+        {
+            let eq = ctx.world.get::<&Equipment>(local_entity).unwrap();
+            assert!(eq.weapon.is_some(), "武器槽应有装备");
+        }
     }
 }

@@ -406,6 +406,32 @@ impl Message<UseItemRequest> for WorldActor {
                         }
                     }
                 }
+                // LotteryTicket (item_type=12, per C# PlayerObject)
+                12 => {
+                    let effect = db.effect.max(1) as usize;
+                    let prizes: [(&str, i64); 6] = [
+                        ("一等奖！获得 1,000,000 金币", 1_000_000),
+                        ("二等奖！获得 200,000 金币", 200_000),
+                        ("三等奖！获得 100,000 金币", 100_000),
+                        ("四等奖！获得 10,000 金币", 10_000),
+                        ("五等奖！获得 1,000 金币", 1_000),
+                        ("六等奖！获得 500 金币", 500),
+                    ];
+                    let mut won = false;
+                    for (i, (msg_text, gold)) in prizes.iter().enumerate() {
+                        if fastrand::usize(..effect * (i + 1)) == 0 {
+                            let _ = record.actor_ref.ask(crate::actors::player::AddGold {
+                                amount: *gold as u64,
+                            }).await;
+                            send_system_message(&self.gate_ref, msg.session_id, msg_text);
+                            won = true;
+                            break;
+                        }
+                    }
+                    if !won {
+                        send_system_message(&self.gate_ref, msg.session_id, "很遗憾，你没有中奖。");
+                    }
+                }
                 _ => {}
             }
         }
@@ -441,7 +467,7 @@ impl Message<EquipItemRequest> for WorldActor {
 
                 // 重新计算装备加成 + 广播视觉变化
                 if let Some(state) = self.recalculate_and_set_stat_bonuses(msg.session_id).await {
-                    self.broadcast_equipment_visuals(msg.session_id, &state);
+                    self.broadcast_equipment_visuals(msg.session_id, &state).await;
                 }
             }
             None => {
@@ -483,7 +509,7 @@ impl Message<RemoveItemRequest> for WorldActor {
 
                 // 重新计算装备加成 + 广播视觉变化
                 if let Some(state) = self.recalculate_and_set_stat_bonuses(msg.session_id).await {
-                    self.broadcast_equipment_visuals(msg.session_id, &state);
+                    self.broadcast_equipment_visuals(msg.session_id, &state).await;
                 }
             }
             _ => {

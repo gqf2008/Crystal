@@ -276,14 +276,20 @@ pub struct GuildTerritoryPageRequest {
 impl Message<GuildTerritoryPageRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: GuildTerritoryPageRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("GuildTerritoryPage: session={} page={}", msg.session_id, msg.page);
-        // Send empty territory list (no territories defined)
+        let count = self.conquest_instances.len() as i32;
         let mut body = Vec::new();
-        body.extend_from_slice(&0i32.to_le_bytes());
-        let _ = self.gate_ref.ask(SendToClient {
+        body.extend_from_slice(&count.to_le_bytes());
+        for instance in &self.conquest_instances {
+            body.extend_from_slice(&instance.id.to_le_bytes());
+            body.extend_from_slice(&instance.map_index.to_le_bytes());
+            let owner = instance.owner_guild.as_deref().unwrap_or("");
+            crate::util::wire::write_dotnet_string(&mut body, owner);
+            body.push(instance.state.clone() as u8);
+        }
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildTerritoryPage as i16, &body),
-        });
+        }).await;
     }
 }
 
@@ -310,6 +316,30 @@ impl Message<PurchaseGuildTerritoryRequest> for WorldActor {
             return;
         }
 
-        send_system_message(&self.gate_ref, msg.session_id, "当前没有可购买的行会领地");
+        // Check if territory exists and is purchasable
+        let instance = self.conquest_instances.iter_mut()
+            .find(|i| i.id == msg.territory_id as i32);
+        match instance {
+            Some(inst) if inst.owner_guild.is_none() => {
+                let cost = 1000000; // 1M gold base cost
+                let guild = state.guild_name.clone().unwrap();
+                // Deduct gold from guild storage via PlayerActor
+                if record.actor_ref.ask(crate::actors::player::DeductGold { amount: cost }).await.unwrap_or(false) {
+                    inst.owner_guild = Some(guild.clone());
+                    send_system_message(&self.gate_ref, msg.session_id,
+                        &format!("行会 {} 成功购买了领地 #{}！", guild, msg.territory_id));
+                } else {
+                    send_system_message(&self.gate_ref, msg.session_id, "金币不足，购买领地需要 1,000,000 金币");
+                }
+            }
+            Some(inst) => {
+                let owner = inst.owner_guild.as_deref().unwrap_or("未知");
+                send_system_message(&self.gate_ref, msg.session_id,
+                    &format!("该领地已被 {} 占领", owner));
+            }
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "领地不存在");
+            }
+        }
     }
 }

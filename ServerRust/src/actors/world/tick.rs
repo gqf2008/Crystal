@@ -782,6 +782,149 @@ impl WorldActor {
             }
         }
     }
+
+    pub(crate) async fn tick_dragon(&mut self) {
+        if let Some(ref mut dragon) = self.dragon_state {
+            crate::actors::world::dragon::tick_dragon_delevel(
+                dragon, self.tick_count, &self.gate_ref,
+            ).await;
+        }
+    }
+
+    pub(crate) async fn tick_conquest(&mut self) {
+        for instance in &mut self.conquest_instances {
+            let now = chrono::Local::now().naive_local();
+            if instance.should_start_war(&now) {
+                instance.start_war("攻击方");
+                let msg = format!("攻城战开始了！目标：区域 #{}", instance.id);
+                broadcast_system_message(&self.gate_ref, &self.players, &msg);
+            }
+            // Check if war should end
+            if instance.state == conquest::WarState::InProgress {
+                let elapsed = chrono::Utc::now().timestamp() - instance.war_start_time;
+                if elapsed >= instance.war_duration_secs {
+                    if let Some(winner) = instance.end_war() {
+                        let msg = format!("攻城战结束！{} 取得了区域 #{} 的控制权！", winner, instance.id);
+                        broadcast_system_message(&self.gate_ref, &self.players, &msg);
+                    }
+                }
+            }
+            // KingOfHill scoring: every 60 ticks (~6 seconds), award points to players in king zone
+            if instance.state == conquest::WarState::InProgress
+                && instance.game == conquest::ConquestGame::KingOfHill
+                && self.tick_count % 60 == 0
+            {
+                for (_, record) in &self.players {
+                    if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                        if instance.is_in_king_zone(state.x, state.y) {
+                            if let Some(ref guild) = state.guild_name {
+                                instance.add_score(guild, 1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) async fn tick_robots(&mut self) {
+        let now = chrono::Local::now().naive_local();
+        let current_minute = now.minute();
+        if self.robot_tasks.is_empty() || current_minute == self.robot_last_check_minute {
+            return;
+        }
+        self.robot_last_check_minute = current_minute;
+        let mut task_indices: Vec<usize> = vec![];
+        for (i, task) in self.robot_tasks.iter().enumerate() {
+            if task.should_fire(&now) {
+                task_indices.push(i);
+            }
+        }
+        for idx in &task_indices {
+            let page = self.robot_tasks[*idx].page.clone();
+            self.robot_tasks[*idx].mark_fired(&now);
+            let msg = format!("[机器人] 定时事件触发: {}", page);
+            broadcast_system_message(&self.gate_ref, &self.players, &msg);
+        }
+    }
+
+    pub(crate) async fn tick_spells(&mut self) {
+        use mir2_shared::enums::Spell;
+        use crate::actors::player::{GetPlayerState, Heal};
+
+        let now = std::time::Instant::now();
+        let mut expired_ids = Vec::new();
+        let mut affected_monsters: Vec<(u32, i32)> = Vec::new();
+        let mut heal_targets: Vec<u64> = Vec::new();
+        let mut heal_amounts: Vec<i32> = Vec::new();
+
+        for (obj_id, spell_obj) in &mut self.spell_objects {
+            let elapsed = now.duration_since(spell_obj.created_at).as_millis() as u64;
+            if spell_obj.is_expired(elapsed) {
+                expired_ids.push(*obj_id);
+                continue;
+            }
+            let since_last = now.duration_since(spell_obj.last_tick).as_millis() as u64;
+            if since_last < spell_obj.tick_interval_ms {
+                continue;
+            }
+            spell_obj.last_tick = now;
+
+            match spell_obj.spell {
+                Spell::FireWall | Spell::Blizzard | Spell::MeteorStrike | Spell::PoisonCloud => {
+                    for (mid, monster) in &self.monsters {
+                        let dist = (monster.x - spell_obj.x).abs() + (monster.y - spell_obj.y).abs();
+                        if dist <= 1 && monster.hp > 0 {
+                            affected_monsters.push((*mid, spell_obj.tick_value.max(1)));
+                        }
+                    }
+                }
+                Spell::HealingCircle => {
+                    if let Some(record) = self.players.get(&spell_obj.caster_session) {
+                        if let Ok(Some(_cs)) = record.actor_ref.ask(GetPlayerState).await {
+                            for (sid, other) in &self.players {
+                                if let Ok(Some(s)) = other.actor_ref.ask(GetPlayerState).await {
+                                    let dist = (s.x - spell_obj.x).abs() + (s.y - spell_obj.y).abs();
+                                    if dist <= 2 && !heal_targets.contains(sid) {
+                                        heal_targets.push(*sid);
+                                        heal_amounts.push(spell_obj.tick_value.max(25));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Spell::ExplosiveTrap => {
+                    if !spell_obj.detonated {
+                        spell_obj.detonated = true;
+                        for (mid, monster) in &self.monsters {
+                            let dist = (monster.x - spell_obj.x).abs() + (monster.y - spell_obj.y).abs();
+                            if dist <= 1 && monster.hp > 0 {
+                                affected_monsters.push((*mid, spell_obj.tick_value.max(1)));
+                            }
+                        }
+                        expired_ids.push(*obj_id);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        for (monster_id, damage) in &affected_monsters {
+            if let Some(monster) = self.monsters.get_mut(monster_id) {
+                monster.hp = monster.hp.saturating_sub(*damage);
+                monster.provoked = true;
+            }
+        }
+        for (sid, amount) in heal_targets.iter().zip(heal_amounts.iter()) {
+            if let Some(record) = self.players.get(sid) {
+                let _ = record.actor_ref.ask(Heal { amount: *amount }).await;
+            }
+        }
+        for id in &expired_ids {
+            self.spell_objects.remove(id);
+        }
+    }
 }
 
 // ============================================================
@@ -1232,7 +1375,7 @@ impl Message<Tick> for WorldActor {
             for (target_session, slot) in &broken_armor {
                 if let Some(state) = self.recalculate_and_set_stat_bonuses(*target_session).await {
                     if *slot == EquipmentSlot::Weapon || *slot == EquipmentSlot::Armour {
-                        self.broadcast_equipment_visuals(*target_session, &state);
+                        self.broadcast_equipment_visuals(*target_session, &state).await;
                     }
                 }
             }
@@ -1504,5 +1647,13 @@ impl Message<Tick> for WorldActor {
         self.tick_auction_expiry().await;
 
         self.tick_rental_expiry().await;
+
+        self.tick_spells().await;
+
+        self.tick_robots().await;
+
+        self.tick_dragon().await;
+
+        self.tick_conquest().await;
     }
 }

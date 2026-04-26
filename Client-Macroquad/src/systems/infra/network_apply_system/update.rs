@@ -2149,7 +2149,7 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
             }
 
             // 飘字实体（独立 entity，避免污染目标组件）
-            let now = macroquad::prelude::get_time();
+            let now = current_time_secs();
             let text = format!("-{}", damage);
             ctx.world.spawn((
                 crate::components::Position::new(spawn_x, spawn_y - 72.0),
@@ -2310,7 +2310,7 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
         // ===== 新协议落地逻辑 =====
 
         // Buff 添加
-        let now_ms = (macroquad::time::get_time() * 1000.0) as i64;
+        let now_ms = (current_time_secs() * 1000.0) as i64;
         for (object_id, buff_id, expire_time, infinite, paused) in buff_adds {
             tracing::trace!("🔮 Buff added: object_id={}, buff_id={}", object_id, buff_id);
             if let Some(&e) = entity_index.get(&object_id) {
@@ -2823,7 +2823,7 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
             };
 
             // 飘字特效
-            let now = macroquad::prelude::get_time();
+            let now = current_time_secs();
             ctx.world.spawn((
                 crate::components::Position::new(spawn_x, spawn_y - 90.0),
                 crate::components::FloatingText {
@@ -2847,7 +2847,7 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
 
             let (px, py) = NetworkApplySystem::object_position(&ctx.world, &entity_index, object_id).unwrap_or((0.0, 0.0));
 
-            let now = macroquad::prelude::get_time();
+            let now = current_time_secs();
 
             match effect {
                 x if x == SpellEffect::Critical as u8 => {

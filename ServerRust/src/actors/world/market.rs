@@ -975,9 +975,25 @@ impl Message<ConfirmItemRentalMsg> for WorldActor {
         send_system_message(&self.gate_ref, initiator, &format!("租赁成功！支付 {} 金币，获得物品 {}", fee, item.item_index));
         send_system_message(&self.gate_ref, session.partner_session, &format!("租赁成功！获得 {} 金币，物品 {} 已出租", fee, item.item_index));
 
-        // Record the rental for expiry tracking
+        // Persist to DB
         let period_hours = session.period_hours.max(1);
         let expiry = chrono::Local::now().timestamp() + (period_hours as i64 * 3600);
+        let now = chrono::Local::now().timestamp();
+        let _ = sqlx::query(
+            "INSERT INTO rentals (item_unique_id, item_index, owner_name, renter_name, fee, period_days, started_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(item.unique_id as i64)
+        .bind(item.item_index)
+        .bind(owner_record.name.clone())
+        .bind(renter_record.name.clone())
+        .bind(fee as i64)
+        .bind(period_hours as i64 / 24)
+        .bind(now)
+        .bind(expiry)
+        .execute(&self.db_pool)
+        .await;
+
+        // Record the rental for expiry tracking
         self.player_rentals.entry(renter_record.name.clone())
             .or_default()
             .push(RentedItem {

@@ -232,11 +232,13 @@ impl Message<LoginRequest> for AccountActor {
         info!("Login result for '{}': {}", msg.username, success);
 
         // 将结果发回 GateActor，由 GateActor 发送协议包给客户端
-        let _ = self.gate_ref.ask(LoginResult {
-            session_id: msg.session_id,
-            success,
-            username: msg.username.clone(),
-        }).await;
+        let _ = self.gate_ref
+            .tell(LoginResult {
+                session_id: msg.session_id,
+                success,
+                username: msg.username.clone(),
+            })
+            .await;
     }
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use sqlx::Row;
 
 /// NPC 对话请求（从 GateActor 转发）
 pub struct NPCCallRequest {
@@ -448,11 +449,25 @@ impl Message<NewCharacterRequest> for WorldActor {
             min_attack: 5,
             max_attack: 10,
             defence: 2,
+            min_mc: 0,
+            max_mc: 0,
+            min_sc: 0,
+            max_sc: 0,
             bonus_min_attack: 0,
             bonus_max_attack: 0,
             bonus_defence: 0,
             bonus_max_hp: 0,
             bonus_max_mp: 0,
+            bonus_min_mc: 0,
+            bonus_max_mc: 0,
+            bonus_min_sc: 0,
+            bonus_max_sc: 0,
+            freezing: 0,
+            poison_attack: 0,
+            poison_recovery: 0,
+            holy: 0,
+            accuracy: 0,
+            agility: 0,
             inventory: PlayerInventory::new(),
             group_id: None,
             friend_list: FriendList::new(),
@@ -586,6 +601,19 @@ impl Message<FishingCastRequest> for WorldActor {
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
         if state.is_dead { return; }
 
+        // Check for fishing rod in weapon slot
+        let has_rod = state.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| {
+                let n = info.name.to_lowercase();
+                n.contains("rod") || n.contains("fishing") || n.contains("竿") || n.contains("鱼")
+            })
+            .unwrap_or(false);
+        if !has_rod {
+            send_system_message(&self.gate_ref, msg.session_id, "你需要装备鱼竿才能钓鱼");
+            return;
+        }
+
         let _ = record.actor_ref.ask(SetFishing { is_fishing: true, autocast: false });
 
         // Send FishingUpdate: progress=1 (waiting), success=false
@@ -653,7 +681,7 @@ impl Message<OpendoorRequest> for WorldActor {
         self.open_doors.insert((map_key, msg.door_index));
 
         // Send Opendoor response to the player
-        send_opendoor(&self.gate_ref, msg.session_id, msg.door_index, false);
+        send_opendoor(&self.gate_ref, msg.session_id, msg.door_index, false).await;
 
         // Broadcast to all other players on the same map
         broadcast_opendoor_async(&self.gate_ref, &self.players, map_key, msg.door_index, false, msg.session_id).await;
@@ -933,7 +961,13 @@ pub struct ReportIssueRequest {
 impl Message<ReportIssueRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: ReportIssueRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("ReportIssue: session={} type={}", msg.session_id, msg.issue_type);
+        if let Some(record) = self.players.get(&msg.session_id) {
+            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                let _ = crate::actors::world::report::save_report(
+                    &self.db_pool, &state.name, msg.issue_type, &msg.description,
+                ).await;
+            }
+        }
         send_system_message(&self.gate_ref, msg.session_id, "举报信息已提交，感谢您的反馈");
     }
 }
@@ -948,7 +982,7 @@ impl Message<GetRankingRequest> for WorldActor {
     async fn handle(&mut self, msg: GetRankingRequest, _ctx: &mut Context<Self, Self::Reply>) {
         debug!("GetRanking: session={} type={}", msg.session_id, msg.rank_type);
 
-        // 收集在线玩家信息
+        // Collect online players
         let mut entries: Vec<(String, u8, i32, i64)> = Vec::new();
         for (_, record) in &self.players {
             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
@@ -958,6 +992,25 @@ impl Message<GetRankingRequest> for WorldActor {
                     state.level as i32,
                     state.experience,
                 ));
+            }
+        }
+        // Supplement with DB-backed top players for more complete rankings
+        if let Ok(db_rows) = sqlx::query(
+            "SELECT name, class, level, experience FROM characters ORDER BY level DESC, experience DESC LIMIT 50"
+        )
+        .fetch_all(&self.db_pool)
+        .await
+        {
+            for row in db_rows {
+                let name: String = row.get("name");
+                let class_val: i32 = row.get("class");
+                let class = mir2_shared::enums::MirClass::try_from(class_val as u8)
+                    .unwrap_or(mir2_shared::enums::MirClass::Warrior) as u8;
+                let level: i32 = row.get("level");
+                let experience: i64 = row.get("experience");
+                if !entries.iter().any(|(n, _, _, _)| n == &name) {
+                    entries.push((name, class, level, experience));
+                }
             }
         }
 

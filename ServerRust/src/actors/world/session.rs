@@ -109,20 +109,21 @@ impl Message<StartGameRequest> for WorldActor {
         // 尝试从数据库加载角色
         let mut state: Option<PlayerState> = None;
         match db::list_characters_by_account(&self.db_pool, &msg.account_username).await {
-            Ok(chars) if !chars.is_empty() => {
-                let idx = msg.character_index.max(0) as usize;
-                if idx < chars.len() {
-                    let (char_name, _map_idx, _x, _y) = &chars[idx];
-                    info!("Loading character '{}' for account '{}'", char_name, msg.account_username);
-                    if let Ok(Some(loaded)) = db::load_character(&self.db_pool, char_name).await {
-                        state = Some(loaded);
-                    } else {
-                        warn!("Failed to load character '{}' from DB", char_name);
+            Ok(chars) => {
+                if !chars.is_empty() {
+                    let idx = msg.character_index.max(0) as usize;
+                    if idx < chars.len() {
+                        let (char_name, _map_idx, _x, _y) = &chars[idx];
+                        info!("Loading character '{}' for account '{}'", char_name, msg.account_username);
+                        if let Ok(Some(loaded)) = db::load_character(&self.db_pool, char_name).await {
+                            state = Some(loaded);
+                        } else {
+                            warn!("Failed to load character '{}' from DB", char_name);
+                        }
                     }
+                } else {
+                    info!("No characters found for account '{}'", msg.account_username);
                 }
-            }
-            Ok(_) => {
-                info!("No characters found for account '{}'", msg.account_username);
             }
             Err(e) => {
                 warn!("Failed to list characters for account '{}': {}", msg.account_username, e);
@@ -130,77 +131,12 @@ impl Message<StartGameRequest> for WorldActor {
         }
 
         // 如果加载失败，创建默认角色
-        let state = state.unwrap_or_else(|| {
+        let state = if let Some(s) = state {
+            s
+        } else {
             info!("Creating default character for account '{}'", msg.account_username);
-            PlayerState {
-                object_id: 0,
-                name: format!("Player_{}", self.alloc_object_id()),
-                map_index: 0,
-                x: 330,
-                y: 330,
-                direction: 4,
-                attack_mode: mir2_shared::enums::AttackMode::Peace,
-                pet_mode: mir2_shared::enums::PetMode::Both,
-                hidden: false,
-                session_id: msg.session_id,
-                class: mir2_shared::enums::MirClass::Warrior,
-                gender: mir2_shared::enums::MirGender::Male,
-                hair: 0,
-                level: 1,
-                experience: 0,
-                max_experience: 100,
-                hp: 120,
-                max_hp: 120,
-                mp: 60,
-                max_mp: 60,
-                min_attack: 5,
-                max_attack: 10,
-                defence: 2,
-                bonus_min_attack: 0,
-                bonus_max_attack: 0,
-                bonus_defence: 0,
-                bonus_max_hp: 0,
-                bonus_max_mp: 0,
-                inventory: PlayerInventory::new(),
-                group_id: None,
-                friend_list: FriendList::new(),
-                mailbox: Mailbox::new(),
-                guild_name: None,
-                guild_rank: GuildRank::Member,
-                quest_log: QuestLog::new(),
-                spouse_name: None,
-                allow_mentor: false,
-                mentor_name: None,
-                creature_log: CreatureLog::new(),
-                hero_index: 0,
-                hero_behaviour: 0,
-                auto_pot_hp: 0,
-                auto_pot_mp: 0,
-                auto_pot_hp_item: 0,
-                auto_pot_mp_item: 0,
-                hero_inventory: PlayerInventory::new(),
-                refine_log: RefineLog::new(),
-                is_fishing: false,
-                fishing_autocast: false,
-                reincarnation_host: None,
-                reincarnation_ready: false,
-                reincarnation_expire_time: 0,
-                enable_group_recall: false,
-                last_recall_time: 0,
-                is_dead: false,
-                is_mounted: false,
-                mount_type: 0,
-                allow_lover_recall: false,
-                is_gm: false,
-                pk_points: 0,
-                pk_kill_count: 0,
-                buffs: Vec::new(),
-                magics: Vec::new(),
-                flags: std::collections::HashMap::new(),
-                exp_multiplier: 1.0,
-                exp_multiplier_end_tick: 0,
-            }
-        });
+            create_default_player_state(msg.session_id, self.alloc_object_id())
+        };
 
         let object_id = self.alloc_object_id();
         let player_name = state.name.clone();
@@ -246,7 +182,7 @@ impl Message<StartGameRequest> for WorldActor {
         }
 
         // 初始化装备属性加成（从已装备物品计算）
-        let (b_min, b_max, b_def, b_hp, b_mp) = calculate_equipment_bonuses(
+        let (b_min, b_max, b_def, b_hp, b_mp, b_min_mc, b_max_mc, b_min_sc, b_max_sc) = calculate_equipment_bonuses(
             &loaded_state.inventory.equipment, &self.item_infos,
         );
         loaded_state.bonus_min_attack = b_min;
@@ -254,6 +190,10 @@ impl Message<StartGameRequest> for WorldActor {
         loaded_state.bonus_defence = b_def;
         loaded_state.bonus_max_hp = b_hp;
         loaded_state.bonus_max_mp = b_mp;
+        loaded_state.bonus_min_mc = b_min_mc;
+        loaded_state.bonus_max_mc = b_max_mc;
+        loaded_state.bonus_min_sc = b_min_sc;
+        loaded_state.bonus_max_sc = b_max_sc;
 
         let _ = player_ref.ask(SetPlayerState { state: loaded_state.clone() });
 
@@ -300,10 +240,10 @@ impl Message<StartGameRequest> for WorldActor {
                     ep_weapon, ep_weapon_effect, ep_armor,
                     ep_state.mount_type, ep_state.is_mounted,
                 );
-                let _ = self.gate_ref.ask(SendToClient {
+                let _ = self.gate_ref.tell(SendToClient {
                     session_id: msg.session_id,
                     data: packet,
-                });
+                }).await;
             }
         }
 
@@ -331,16 +271,16 @@ impl Message<StartGameRequest> for WorldActor {
                 loaded_state.mount_type, loaded_state.is_mounted,
             );
             for existing in &existing_players {
-                let _ = self.gate_ref.ask(SendToClient {
+                let _ = self.gate_ref.tell(SendToClient {
                     session_id: existing.session_id,
                     data: new_player_packet.clone(),
-                });
+                }).await;
             }
         }
 
         // 发送游戏进入序列（使用真实状态数据）
         let is_big_map = self.map_infos.get(&map_info_idx).map(|m| m.big_map).unwrap_or(false);
-        send_game_entry_sequence(self.gate_ref.clone(), msg.session_id, &loaded_state, &map_file, &map_title, is_big_map);
+        send_game_entry_sequence(self.gate_ref.clone(), msg.session_id, &loaded_state, &map_file, &map_title, is_big_map).await;
 
         // 发送地图上的 NPC 和怪物
         let spawn_dir = self.spawn_dir.clone();
@@ -358,7 +298,7 @@ impl Message<StartGameRequest> for WorldActor {
             msg.session_id,
             &mut self.next_object_id,
             &spawn_ctx,
-        );
+        ).await;
         for npc in new_npcs {
             self.npcs.insert(npc.object_id, npc);
         }
@@ -392,7 +332,7 @@ impl Message<StartGameRequest> for WorldActor {
                 let mut buf = Vec::new();
                 if mir2_shared::packets::base::serialize_packet(
                     &mut std::io::Cursor::new(&mut buf), &object_gold).is_ok() {
-                    let _ = self.gate_ref.ask(SendToClient { session_id: msg.session_id, data: buf });
+                    let _ = self.gate_ref.tell(SendToClient { session_id: msg.session_id, data: buf }).await;
                 }
             } else {
                 let object_item = mir2_shared::packets::server::ObjectItem {
@@ -404,7 +344,7 @@ impl Message<StartGameRequest> for WorldActor {
                 let mut buf = Vec::new();
                 if mir2_shared::packets::base::serialize_packet(
                     &mut std::io::Cursor::new(&mut buf), &object_item).is_ok() {
-                    let _ = self.gate_ref.ask(SendToClient { session_id: msg.session_id, data: buf });
+                    let _ = self.gate_ref.tell(SendToClient { session_id: msg.session_id, data: buf }).await;
                 }
             }
         }
@@ -415,7 +355,7 @@ impl Message<StartGameRequest> for WorldActor {
             .map(|(_, door_idx)| *door_idx)
             .collect();
         for door_idx in open_doors_sync {
-            send_opendoor(&self.gate_ref, msg.session_id, door_idx, false);
+            send_opendoor(&self.gate_ref, msg.session_id, door_idx, false).await;
         }
 
         // 发送已学习的技能列表给客户端
@@ -443,10 +383,10 @@ impl Message<StartGameRequest> for WorldActor {
                 let new_magic = mir2_shared::packets::server::magic::NewMagic { magic: client_magic, hero: false };
                 let mut body = Vec::new();
                 if new_magic.write_body(&mut body).is_ok() {
-                    let _ = self.gate_ref.ask(SendToClient {
+                    let _ = self.gate_ref.tell(SendToClient {
                         session_id: msg.session_id,
                         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewMagic as i16, &body),
-                    });
+                    }).await;
                 }
                 // Send SpellToggle for toggled-on spells
                 if magic.toggled {
@@ -454,10 +394,10 @@ impl Message<StartGameRequest> for WorldActor {
                     toggle_body.extend_from_slice(&loaded_state.object_id.to_le_bytes());
                     toggle_body.push(magic.spell as u8);
                     toggle_body.push(1u8); // canUse = true
-                    let _ = self.gate_ref.ask(SendToClient {
+                    let _ = self.gate_ref.tell(SendToClient {
                         session_id: msg.session_id,
                         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SpellToggle as i16, &toggle_body),
-                    });
+                    }).await;
                 }
             }
         }
@@ -470,19 +410,19 @@ impl Message<StartGameRequest> for WorldActor {
             let mut body = Vec::new();
             body.push(12u8); // Stat = HP (C# Stat.HP = 12)
             body.extend_from_slice(&loaded_state.auto_pot_hp.to_le_bytes());
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SetAutoPotValue as i16, &body),
-            });
+            }).await;
         }
         if loaded_state.auto_pot_mp > 0 {
             let mut body = Vec::new();
             body.push(13u8); // Stat = MP (C# Stat.MP = 13)
             body.extend_from_slice(&loaded_state.auto_pot_mp.to_le_bytes());
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SetAutoPotValue as i16, &body),
-            });
+            }).await;
         }
 
         // 发送欢迎消息
@@ -550,7 +490,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                         direction: state.direction,
                         move_type,
                         exclude_session: msg.session_id,
-                    });
+                    }).await;
                 }
             }
 
@@ -602,13 +542,13 @@ impl Message<WorldMoveRequest> for WorldActor {
                             direction: state.direction,
                             map_index: Some(dest_map_index as u16),
                             is_mounted: None,
-                        });
+                        }).await;
 
                         // Send MapChanged packet
-                        let _ = self.gate_ref.ask(SendToClient {
+                        let _ = self.gate_ref.tell(SendToClient {
                             session_id: msg.session_id,
                             data: build_map_changed_packet(dest_map_index as u16, &dest_file, &dest_title, dest_x, dest_y, is_big_map),
-                        });
+                        }).await;
 
                         // Send UserLocation to confirm new position
                         if let Ok(Some(new_state)) = player_ref.ask(GetPlayerState).await {
@@ -616,10 +556,10 @@ impl Message<WorldMoveRequest> for WorldActor {
                             loc_body.extend_from_slice(&(new_state.x as u32).to_le_bytes());
                             loc_body.extend_from_slice(&(new_state.y as u32).to_le_bytes());
                             loc_body.push(new_state.direction);
-                            let _ = self.gate_ref.ask(SendToClient {
+                            let _ = self.gate_ref.tell(SendToClient {
                                 session_id: msg.session_id,
                                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &loc_body),
-                            });
+                            }).await;
                         }
 
                         // 清理旧地图视野：发送 ObjectRemove 给该玩家（移除旧地图上的怪物/玩家/地面物品）
@@ -628,10 +568,10 @@ impl Message<WorldMoveRequest> for WorldActor {
                             if monster.map_index == old_map {
                                 let mut rb = Vec::new();
                                 rb.extend_from_slice(&oid.to_le_bytes());
-                                let _ = self.gate_ref.ask(SendToClient {
+                                let _ = self.gate_ref.tell(SendToClient {
                                     session_id: msg.session_id,
                                     data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &rb),
-                                });
+                                }).await;
                             }
                         }
                         for (sid, rec) in &self.players {
@@ -640,10 +580,10 @@ impl Message<WorldMoveRequest> for WorldActor {
                                     if s.map_index == old_map {
                                         let mut rb = Vec::new();
                                         rb.extend_from_slice(&s.object_id.to_le_bytes());
-                                        let _ = self.gate_ref.ask(SendToClient {
+                                        let _ = self.gate_ref.tell(SendToClient {
                                             session_id: msg.session_id,
                                             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &rb),
-                                        });
+                                        }).await;
                                     }
                                 }
                             }
@@ -652,10 +592,10 @@ impl Message<WorldMoveRequest> for WorldActor {
                             if gi.map_index == old_map {
                                 let mut rb = Vec::new();
                                 rb.extend_from_slice(&gi.object_id.to_le_bytes());
-                                let _ = self.gate_ref.ask(SendToClient {
+                                let _ = self.gate_ref.tell(SendToClient {
                                     session_id: msg.session_id,
                                     data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &rb),
-                                });
+                                }).await;
                             }
                         }
 
@@ -675,7 +615,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                             msg.session_id,
                             &mut self.next_object_id,
                             &spawn_ctx,
-                        );
+                        ).await;
                         for npc in new_npcs {
                             self.npcs.insert(npc.object_id, npc);
                         }
@@ -707,7 +647,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                                 let mut buf = Vec::new();
                                 if mir2_shared::packets::base::serialize_packet(
                                     &mut std::io::Cursor::new(&mut buf), &object_gold).is_ok() {
-                                    let _ = self.gate_ref.ask(SendToClient { session_id: msg.session_id, data: buf });
+                                    let _ = self.gate_ref.tell(SendToClient { session_id: msg.session_id, data: buf }).await;
                                 }
                             } else {
                                 let object_item = mir2_shared::packets::server::ObjectItem {
@@ -719,7 +659,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                                 let mut buf = Vec::new();
                                 if mir2_shared::packets::base::serialize_packet(
                                     &mut std::io::Cursor::new(&mut buf), &object_item).is_ok() {
-                                    let _ = self.gate_ref.ask(SendToClient { session_id: msg.session_id, data: buf });
+                                    let _ = self.gate_ref.tell(SendToClient { session_id: msg.session_id, data: buf }).await;
                                 }
                             }
                         }
@@ -727,7 +667,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                         // 同步新地图上已打开的门
                         for (map_idx, door_idx) in &self.open_doors {
                             if *map_idx == dest_map_u16 {
-                                send_opendoor(&self.gate_ref, msg.session_id, *door_idx, false);
+                                send_opendoor(&self.gate_ref, msg.session_id, *door_idx, false).await;
                             }
                         }
                     }
@@ -773,7 +713,7 @@ impl Message<WorldTurnRequest> for WorldActor {
                     direction: state.direction,
                     move_type: MoveType::Turn,
                     exclude_session: msg.session_id,
-                });
+                }).await;
             }
         }
     }
@@ -822,10 +762,10 @@ impl Message<PlayerDisconnected> for WorldActor {
             let packet = build_packet_bytes(opcode, &body);
 
             for (_, other_session) in others {
-                let _ = self.gate_ref.ask(SendToClient {
+                let _ = self.gate_ref.tell(SendToClient {
                     session_id: other_session,
                     data: packet.clone(),
-                });
+                }).await;
             }
         }
     }
@@ -886,10 +826,10 @@ impl Message<PlayerLogOut> for WorldActor {
             // 发送 LogOutSuccess 给客户端
             let mut body = Vec::new();
             body.extend_from_slice(&0i32.to_le_bytes()); // character count = 0
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LogOutSuccess as i16, &body),
-            });
+            }).await;
 
             // 通知其他玩家该玩家已离开
             let others: Vec<_> = self.other_players(msg.session_id)
@@ -903,10 +843,10 @@ impl Message<PlayerLogOut> for WorldActor {
             let packet = build_packet_bytes(opcode, &remove_body);
 
             for (_, other_session) in others {
-                let _ = self.gate_ref.ask(SendToClient {
+                let _ = self.gate_ref.tell(SendToClient {
                     session_id: other_session,
                     data: packet.clone(),
-                });
+                }).await;
             }
         }
         // 玩家已从 self.players 移除，无需再发 PlayerDisconnected
@@ -980,18 +920,18 @@ impl Message<ChatRequest> for WorldActor {
                             let mut in_body = Vec::new();
                             write_dotnet_string(&mut in_body, &format!("{}: {}", player_name, whisper_msg));
                             in_body.push(mir2_shared::enums::ChatType::WhisperIn as u8);
-                            let _ = self.gate_ref.ask(SendToClient {
+                            let _ = self.gate_ref.tell(SendToClient {
                                 session_id: *sid,
                                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &in_body),
-                            });
+                            }).await;
                             // 发给自己: WhisperOut
                             let mut out_body = Vec::new();
                             write_dotnet_string(&mut out_body, &format!("-> {}: {}", target_name, whisper_msg));
                             out_body.push(mir2_shared::enums::ChatType::WhisperOut as u8);
-                            let _ = self.gate_ref.ask(SendToClient {
+                            let _ = self.gate_ref.tell(SendToClient {
                                 session_id: msg.session_id,
                                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &out_body),
-                            });
+                            }).await;
                             debug!("Whisper: {} -> {}: {}", player_name, target_name, whisper_msg);
                             break;
                         }
@@ -1018,10 +958,10 @@ impl Message<ChatRequest> for WorldActor {
                                 let mut body = Vec::new();
                                 write_dotnet_string(&mut body, &format!("[组队] {}: {}", player_name, gmsg));
                                 body.push(mir2_shared::enums::ChatType::Group as u8);
-                                let _ = self.gate_ref.ask(SendToClient {
+                                let _ = self.gate_ref.tell(SendToClient {
                                     session_id: *sid,
                                     data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body),
-                                });
+                                }).await;
                                 sent = true;
                             }
                         }
@@ -1051,10 +991,10 @@ impl Message<ChatRequest> for WorldActor {
                                 let mut body = Vec::new();
                                 write_dotnet_string(&mut body, &format!("[公会] {}: {}", player_name, gmsg));
                                 body.push(mir2_shared::enums::ChatType::Guild as u8);
-                                let _ = self.gate_ref.ask(SendToClient {
+                                let _ = self.gate_ref.tell(SendToClient {
                                     session_id: *sid,
                                     data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body),
-                                });
+                                }).await;
                                 sent = true;
                             }
                         }
@@ -1086,10 +1026,10 @@ impl Message<ChatRequest> for WorldActor {
                             let mut body = Vec::new();
                             write_dotnet_string(&mut body, &format!("[喊话] {}: {}", player_name, smsg));
                             body.push(mir2_shared::enums::ChatType::Shout as u8);
-                            let _ = self.gate_ref.ask(SendToClient {
+                            let _ = self.gate_ref.tell(SendToClient {
                                 session_id: *sid,
                                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body),
-                            });
+                            }).await;
                             sent += 1;
                         }
                     }
@@ -1183,10 +1123,10 @@ impl Message<ChatRequest> for WorldActor {
             if *session_id == msg.session_id {
                 continue;
             }
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: *session_id,
                 data: packet.clone(),
-            });
+            }).await;
         }
     }
 }
@@ -1210,10 +1150,10 @@ impl Message<ChangeAModeRequest> for WorldActor {
         // 发送 ChangeAMode 确认包给客户端
         let body = vec![msg.mode as u8];
         let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChangeAMode as i16, &body);
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: packet,
-        });
+        }).await;
         debug!("ChangeAMode: session={} mode={:?}", msg.session_id, msg.mode);
     }
 }
@@ -1237,10 +1177,10 @@ impl Message<ChangePModeRequest> for WorldActor {
         // 发送 ChangePMode 确认包给客户端
         let body = vec![msg.mode as u8];
         let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChangePMode as i16, &body);
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: packet,
-        });
+        }).await;
         debug!("ChangePMode: session={} mode={:?}", msg.session_id, msg.mode);
     }
 }
@@ -1290,10 +1230,10 @@ impl Message<SpellToggleRequest> for WorldActor {
         body.extend_from_slice(&object_id.to_le_bytes());
         body.push(msg.spell as u8);
         body.push(if toggled { 1u8 } else { 0u8 });
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SpellToggle as i16, &body),
-        });
+        }).await;
     }
 }
 
@@ -1312,10 +1252,10 @@ impl Message<SetHeroBehaviourRequest> for WorldActor {
         let _ = record.actor_ref.ask(SetHeroBehaviour { behaviour: msg.behaviour }).await;
         // Send HeroBehaviour confirmation to client
         let body = vec![msg.behaviour];
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SetHeroBehaviour as i16, &body),
-        });
+        }).await;
     }
 }
 
@@ -1336,10 +1276,10 @@ impl Message<SetAutoPotValueRequest> for WorldActor {
         let mut body = Vec::new();
         body.push(msg.stat);
         body.extend_from_slice(&msg.value.to_le_bytes());
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SetAutoPotValue as i16, &body),
-        });
+        }).await;
     }
 }
 
@@ -1360,10 +1300,10 @@ impl Message<SetAutoPotItemRequest> for WorldActor {
         let mut body = Vec::new();
         body.push(msg.grid);
         body.extend_from_slice(&msg.item_index.to_le_bytes());
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SetAutoPotItem as i16, &body),
-        });
+        }).await;
     }
 }
 
@@ -1393,9 +1333,103 @@ impl Message<RemoveSlotItemRequest> for WorldActor {
         body.extend_from_slice(&msg.unique_id.to_le_bytes());
         body.extend_from_slice(&msg.to.to_le_bytes());
         body.push(if success { 1u8 } else { 0u8 });
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveSlotItem as i16, &body),
-        });
+        }).await;
+    }
+}
+
+fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors::player::PlayerState {
+    use crate::actors::player::PlayerState;
+    use crate::actors::inventory::PlayerInventory;
+    use crate::actors::friend::FriendList;
+    use crate::actors::mail::Mailbox;
+    use crate::actors::quest::QuestLog;
+    use crate::actors::creature::CreatureLog;
+    use crate::actors::refine::RefineLog;
+    use crate::actors::guild::GuildRank;
+
+    PlayerState {
+        object_id: 0,
+        name: format!("Player_{}", object_id),
+        map_index: 0,
+        x: 330,
+        y: 330,
+        direction: 4,
+        attack_mode: mir2_shared::enums::AttackMode::Peace,
+        pet_mode: mir2_shared::enums::PetMode::Both,
+        hidden: false,
+        session_id,
+        class: mir2_shared::enums::MirClass::Warrior,
+        gender: mir2_shared::enums::MirGender::Male,
+        hair: 0,
+        level: 1,
+        experience: 0,
+        max_experience: 100,
+        hp: 120,
+        max_hp: 120,
+        mp: 60,
+        max_mp: 60,
+        min_attack: 5,
+        max_attack: 10,
+        defence: 2,
+        min_mc: 0,
+        max_mc: 0,
+        min_sc: 0,
+        max_sc: 0,
+        bonus_min_attack: 0,
+        bonus_max_attack: 0,
+        bonus_defence: 0,
+        bonus_max_hp: 0,
+        bonus_max_mp: 0,
+        bonus_min_mc: 0,
+        bonus_max_mc: 0,
+        bonus_min_sc: 0,
+        bonus_max_sc: 0,
+        freezing: 0,
+        poison_attack: 0,
+        poison_recovery: 0,
+        holy: 0,
+        accuracy: 0,
+        agility: 0,
+        inventory: PlayerInventory::new(),
+        group_id: None,
+        friend_list: FriendList::new(),
+        mailbox: Mailbox::new(),
+        guild_name: None,
+        guild_rank: GuildRank::Member,
+        quest_log: QuestLog::new(),
+        spouse_name: None,
+        allow_mentor: false,
+        mentor_name: None,
+        creature_log: CreatureLog::new(),
+        hero_index: 0,
+        hero_behaviour: 0,
+        auto_pot_hp: 0,
+        auto_pot_mp: 0,
+        auto_pot_hp_item: 0,
+        auto_pot_mp_item: 0,
+        hero_inventory: PlayerInventory::new(),
+        refine_log: RefineLog::new(),
+        is_fishing: false,
+        fishing_autocast: false,
+        reincarnation_host: None,
+        reincarnation_ready: false,
+        reincarnation_expire_time: 0,
+        enable_group_recall: false,
+        last_recall_time: 0,
+        is_dead: false,
+        is_mounted: false,
+        mount_type: 0,
+        allow_lover_recall: false,
+        is_gm: false,
+        pk_points: 0,
+        pk_kill_count: 0,
+        buffs: Vec::new(),
+        magics: Vec::new(),
+        flags: std::collections::HashMap::new(),
+        exp_multiplier: 1.0,
+        exp_multiplier_end_tick: 0,
     }
 }

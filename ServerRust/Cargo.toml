@@ -21,6 +21,10 @@ path = "src/bin/seed_test.rs"
 name = "migrate_mirdb"
 path = "src/bin/migrate_mirdb.rs"
 
+[[bin]]
+name = "db_fix"
+path = "src/bin/db_fix.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }

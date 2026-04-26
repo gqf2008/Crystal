@@ -18,10 +18,9 @@ use crate::actors::refine::{RefineLog, RefiningItem, RefineStatus};
 
 pub type DbPool = SqlitePool;
 
-/// Initialize the SQLite database and run migrations
-pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
-    let db_url = format!("sqlite://{}", db_path.display());
-    let pool = SqlitePool::connect(&db_url).await?;
+/// Initialize the SQLite database from a URL and run migrations
+pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
+    let pool = SqlitePool::connect(db_url).await?;
 
     // Create tables if not exists
     sqlx::query(
@@ -197,7 +196,7 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
         );
         -- Game config tables (migrated from Server.MirDB)
         CREATE TABLE IF NOT EXISTS map_infos (
-            index INTEGER PRIMARY KEY,
+            idx INTEGER PRIMARY KEY,
             file_name TEXT NOT NULL,
             title TEXT NOT NULL,
             mini_map INTEGER NOT NULL DEFAULT 0,
@@ -234,7 +233,7 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             size INTEGER NOT NULL DEFAULT 0,
             start_point INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (map_index, x, y),
-            FOREIGN KEY (map_index) REFERENCES map_infos(index)
+            FOREIGN KEY (map_index) REFERENCES map_infos(idx)
         );
         CREATE TABLE IF NOT EXISTS map_respawns (
             map_index INTEGER NOT NULL,
@@ -250,7 +249,7 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             respawn_index INTEGER NOT NULL DEFAULT 0,
             save_respawn_time INTEGER NOT NULL DEFAULT 0,
             respawn_ticks INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (map_index) REFERENCES map_infos(index)
+            FOREIGN KEY (map_index) REFERENCES map_infos(idx)
         );
         CREATE TABLE IF NOT EXISTS map_movements (
             map_index INTEGER NOT NULL,
@@ -263,7 +262,7 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             conquest_index INTEGER NOT NULL DEFAULT 0,
             show_on_big_map INTEGER NOT NULL DEFAULT 0,
             icon INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (map_index) REFERENCES map_infos(index)
+            FOREIGN KEY (map_index) REFERENCES map_infos(idx)
         );
         CREATE TABLE IF NOT EXISTS mine_zones (
             map_index INTEGER NOT NULL,
@@ -271,10 +270,10 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             y INTEGER NOT NULL,
             size INTEGER NOT NULL DEFAULT 0,
             mine INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (map_index) REFERENCES map_infos(index)
+            FOREIGN KEY (map_index) REFERENCES map_infos(idx)
         );
         CREATE TABLE IF NOT EXISTS item_infos (
-            index INTEGER PRIMARY KEY,
+            idx INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
             type INTEGER NOT NULL DEFAULT 0,
             grade INTEGER NOT NULL DEFAULT 0,
@@ -304,7 +303,7 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             tool_tip TEXT
         );
         CREATE TABLE IF NOT EXISTS monster_infos (
-            index INTEGER PRIMARY KEY,
+            idx INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
             image INTEGER NOT NULL DEFAULT 0,
             ai INTEGER NOT NULL DEFAULT 0,
@@ -324,7 +323,7 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             drop_path TEXT
         );
         CREATE TABLE IF NOT EXISTS npc_infos (
-            index INTEGER PRIMARY KEY,
+            idx INTEGER PRIMARY KEY,
             map_index INTEGER NOT NULL,
             file_name TEXT NOT NULL,
             name TEXT NOT NULL,
@@ -351,7 +350,7 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             finish_quest_indexes TEXT NOT NULL DEFAULT '[]'
         );
         CREATE TABLE IF NOT EXISTS quest_infos (
-            index INTEGER PRIMARY KEY,
+            idx INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
             group_name TEXT NOT NULL,
             file_name TEXT NOT NULL,
@@ -421,7 +420,7 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             can_buy_gold INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS conquest_infos (
-            index INTEGER PRIMARY KEY,
+            idx INTEGER PRIMARY KEY,
             full_map INTEGER NOT NULL DEFAULT 0,
             location_x INTEGER NOT NULL,
             location_y INTEGER NOT NULL,
@@ -458,7 +457,7 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             min_count INTEGER NOT NULL DEFAULT 1,
             max_count INTEGER NOT NULL DEFAULT 1,
             chance REAL NOT NULL DEFAULT 1.0,
-            FOREIGN KEY (monster_index) REFERENCES monster_infos(index)
+            FOREIGN KEY (monster_index) REFERENCES monster_infos(idx)
         );
         CREATE INDEX IF NOT EXISTS idx_monster_drops_monster ON monster_drops(monster_index);
         CREATE TABLE IF NOT EXISTS npc_goods (
@@ -467,7 +466,7 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
             item_index INTEGER NOT NULL,
             count INTEGER NOT NULL DEFAULT 1,
             price INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (npc_index) REFERENCES npc_infos(index)
+            FOREIGN KEY (npc_index) REFERENCES npc_infos(idx)
         );
         CREATE INDEX IF NOT EXISTS idx_npc_goods_npc ON npc_goods(npc_index);
         CREATE TABLE IF NOT EXISTS npc_scripts (
@@ -518,9 +517,75 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN auto_pot_mp_item INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    // Migration: add magic stats to characters
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN min_mc INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN max_mc INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN min_sc INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN max_sc INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN freezing INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN poison_attack INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN poison_recovery INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN holy INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN accuracy INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN agility INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    // Migration: add weather_particles to old map_infos (from migrate_mirdb)
+    let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN weather_particles INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    // Fix potentially broken gt column (TEXT→INTEGER from old migration)
+    let _ = sqlx::query("ALTER TABLE map_infos DROP COLUMN gt").execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN gt INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN gt_index INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE item_infos ADD COLUMN tool_tip TEXT NOT NULL DEFAULT ''")
+        .execute(&pool).await;
 
-    info!("SQLite database initialized: {}", db_path.display());
+    // Report logs
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS report_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reporter_name TEXT NOT NULL,
+            issue_type INTEGER NOT NULL DEFAULT 0,
+            description TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL DEFAULT 0
+        )"#
+    ).execute(&pool).await?;
+
+    // Rental persistence
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS rentals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_unique_id INTEGER NOT NULL,
+            item_index INTEGER NOT NULL,
+            owner_name TEXT NOT NULL,
+            renter_name TEXT NOT NULL,
+            fee INTEGER NOT NULL DEFAULT 0,
+            period_days INTEGER NOT NULL DEFAULT 7,
+            started_at INTEGER NOT NULL DEFAULT 0,
+            expires_at INTEGER NOT NULL DEFAULT 0,
+            returned INTEGER NOT NULL DEFAULT 0
+        )"#
+    ).execute(&pool).await?;
+
+    info!("SQLite database initialized: {}", db_url);
     Ok(pool)
+}
+
+/// Initialize the SQLite database from a file path and run migrations
+pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
+    let path_str = db_path.display().to_string().replace('\\', "/");
+    let db_url = format!("sqlite:{}", path_str);
+    init_db_pool(&db_url).await
 }
 
 // ============================================================
@@ -643,11 +708,13 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
             map_index, x, y, direction,
             attack_mode, pet_mode, level, experience, max_experience,
             hp, max_hp, mp, max_mp, min_attack, max_attack, defence,
+            min_mc, max_mc, min_sc, max_sc,
+            freezing, poison_attack, poison_recovery, holy, accuracy, agility,
             gold, group_id, guild_name, guild_rank,
             spouse_name, allow_mentor, mentor_name, hero_index, hero_behaviour,
             auto_pot_hp, auto_pot_mp, auto_pot_hp_item, auto_pot_mp_item,
             is_fishing, fishing_autocast, is_dead, pk_points, pk_kill_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(&state.name)
     .bind(account_username)
@@ -671,6 +738,16 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     .bind(state.min_attack)
     .bind(state.max_attack)
     .bind(state.defence)
+    .bind(state.min_mc)
+    .bind(state.max_mc)
+    .bind(state.min_sc)
+    .bind(state.max_sc)
+    .bind(state.freezing)
+    .bind(state.poison_attack)
+    .bind(state.poison_recovery)
+    .bind(state.holy)
+    .bind(state.accuracy)
+    .bind(state.agility)
     .bind(state.inventory.gold as i64)
     .bind(state.group_id.map(|v| v as i64))
     .bind(&state.guild_name)
@@ -778,11 +855,25 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         min_attack: row.get("min_attack"),
         max_attack: row.get("max_attack"),
         defence: row.get("defence"),
+        min_mc: row.try_get("min_mc").unwrap_or(0),
+        max_mc: row.try_get("max_mc").unwrap_or(0),
+        min_sc: row.try_get("min_sc").unwrap_or(0),
+        max_sc: row.try_get("max_sc").unwrap_or(0),
         bonus_min_attack: 0,
         bonus_max_attack: 0,
         bonus_defence: 0,
         bonus_max_hp: 0,
         bonus_max_mp: 0,
+        bonus_min_mc: 0,
+        bonus_max_mc: 0,
+        bonus_min_sc: 0,
+        bonus_max_sc: 0,
+        freezing: row.try_get("freezing").unwrap_or(0),
+        poison_attack: row.try_get("poison_attack").unwrap_or(0),
+        poison_recovery: row.try_get("poison_recovery").unwrap_or(0),
+        holy: row.try_get("holy").unwrap_or(0),
+        accuracy: row.try_get("accuracy").unwrap_or(0),
+        agility: row.try_get("agility").unwrap_or(0),
         inventory,
         group_id: row.get::<Option<i64>, _>("group_id").map(|v| v as u64),
         friend_list,
@@ -1508,6 +1599,7 @@ async fn load_magics(pool: &DbPool, character_name: &str) -> anyhow::Result<Vec<
             experience: r.get::<i32, _>("experience") as u16,
             key: r.try_get::<i32, _>("key").unwrap_or(0) as u8,
             toggled: r.try_get::<i32, _>("toggled").unwrap_or(0) != 0,
+            cast_time: 0,
         });
     }
     Ok(magics)
@@ -1928,7 +2020,7 @@ pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
 
     let mut maps = Vec::with_capacity(rows.len());
     for row in rows {
-        let index: i32 = row.get("index");
+        let index: i32 = row.get("idx");
         maps.push(MapInfo {
             index,
             file_name: row.get("file_name"),
@@ -1961,9 +2053,9 @@ pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
             music: row.get::<i32, _>("music") != 0,
             no_town_teleport: row.get::<Option<i32>, _>("no_town_teleport").unwrap_or(0) != 0,
             no_reincarnation: row.get::<Option<i32>, _>("no_reincarnation").unwrap_or(0) != 0,
-            weather_particles: row.get::<Option<i32>, _>("weather_particles").unwrap_or(0) != 0,
-            gt: row.get::<Option<i32>, _>("gt").unwrap_or(0) != 0,
-            gt_index: row.get::<Option<i32>, _>("gt_index").unwrap_or(0),
+            weather_particles: row.try_get::<i32, _>("weather_particles").unwrap_or(0) != 0,
+            gt: row.try_get::<String, _>("gt").map(|s| s == "1").unwrap_or(false),
+            gt_index: row.try_get::<i32, _>("gt_index").unwrap_or(0),
             safe_zones: sz_by_map.remove(&index).unwrap_or_default(),
             respawns: rs_by_map.remove(&index).unwrap_or_default(),
             movements: mv_by_map.remove(&index).unwrap_or_default(),
@@ -1975,16 +2067,16 @@ pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
 
 /// Load all item infos from DB
 pub async fn load_item_infos(pool: &DbPool) -> anyhow::Result<Vec<ItemInfo>> {
-    let rows = sqlx::query("SELECT * FROM item_infos ORDER BY index").fetch_all(pool).await?;
+    let rows = sqlx::query("SELECT * FROM item_infos ORDER BY idx").fetch_all(pool).await?;
     Ok(rows.into_iter().map(|r| {
         let stats_json: String = r.get("stats_json");
         let stats: HashMap<u8, i32> = serde_json::from_str(&stats_json)
             .unwrap_or_else(|e| {
-                tracing::warn!("Failed to parse item stats JSON for index {}: {}", r.get::<i32, _>("index"), e);
+                tracing::warn!("Failed to parse item stats JSON for index {}: {}", r.get::<i32, _>("idx"), e);
                 HashMap::new()
             });
         ItemInfo {
-            index: r.get("index"),
+            index: r.get("idx"),
             name: r.get("name"),
             item_type: r.get("type"),
             grade: r.get("grade"),
@@ -2019,16 +2111,16 @@ pub async fn load_item_infos(pool: &DbPool) -> anyhow::Result<Vec<ItemInfo>> {
 
 /// Load all monster infos from DB
 pub async fn load_monster_infos(pool: &DbPool) -> anyhow::Result<Vec<MonsterInfo>> {
-    let rows = sqlx::query("SELECT * FROM monster_infos ORDER BY index").fetch_all(pool).await?;
+    let rows = sqlx::query("SELECT * FROM monster_infos ORDER BY idx").fetch_all(pool).await?;
     Ok(rows.into_iter().map(|r| {
         let stats_json: String = r.get("stats_json");
         let stats: HashMap<u8, i32> = serde_json::from_str(&stats_json)
             .unwrap_or_else(|e| {
-                tracing::warn!("Failed to parse monster stats JSON for index {}: {}", r.get::<i32, _>("index"), e);
+                tracing::warn!("Failed to parse monster stats JSON for index {}: {}", r.get::<i32, _>("idx"), e);
                 HashMap::new()
             });
         MonsterInfo {
-            index: r.get("index"),
+            index: r.get("idx"),
             name: r.get("name"),
             image: r.get("image"),
             ai: r.get("ai"),
@@ -2107,7 +2199,7 @@ pub async fn load_npc_scripts(pool: &DbPool) -> anyhow::Result<HashMap<(i32, Str
 
 /// Load all NPC infos from DB
 pub async fn load_npc_infos(pool: &DbPool) -> anyhow::Result<Vec<NPCInfo>> {
-    let rows = sqlx::query("SELECT * FROM npc_infos ORDER BY index").fetch_all(pool).await?;
+    let rows = sqlx::query("SELECT * FROM npc_infos ORDER BY idx").fetch_all(pool).await?;
     Ok(rows.into_iter().map(|r| {
         let collect_quest_indexes: Vec<i32> =
             serde_json::from_str(&r.get::<String, _>("collect_quest_indexes")).unwrap_or_default();
@@ -2115,7 +2207,7 @@ pub async fn load_npc_infos(pool: &DbPool) -> anyhow::Result<Vec<NPCInfo>> {
             serde_json::from_str(&r.get::<String, _>("finish_quest_indexes")).unwrap_or_default();
 
         NPCInfo {
-            index: r.get("index"),
+            index: r.get("idx"),
             map_index: r.get("map_index"),
             file_name: r.get("file_name"),
             name: r.get("name"),
@@ -2146,9 +2238,9 @@ pub async fn load_npc_infos(pool: &DbPool) -> anyhow::Result<Vec<NPCInfo>> {
 
 /// Load all quest infos from DB
 pub async fn load_quest_infos(pool: &DbPool) -> anyhow::Result<Vec<QuestInfo>> {
-    let rows = sqlx::query("SELECT * FROM quest_infos ORDER BY index").fetch_all(pool).await?;
+    let rows = sqlx::query("SELECT * FROM quest_infos ORDER BY idx").fetch_all(pool).await?;
     Ok(rows.into_iter().map(|r| QuestInfo {
-        index: r.get("index"),
+        index: r.get("idx"),
         name: r.get("name"),
         group_name: r.get("group_name"),
         file_name: r.get("file_name"),

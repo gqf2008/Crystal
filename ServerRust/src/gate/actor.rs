@@ -213,10 +213,12 @@ impl Message<SessionCreated> for GateActor {
         // 发送 Connected 包给客户端（客户端收到后会自动发送 ClientVersion）
         let connected_data = build_packet_bytes(ServerPacketIds::Connected as i16, &[]);
         let gate_ref = _ctx.actor_ref().clone();
-        let _ = gate_ref.ask(SendToClient {
-            session_id: msg.session_id,
-            data: connected_data,
-        });
+        let _ = gate_ref
+            .tell(SendToClient {
+                session_id: msg.session_id,
+                data: connected_data,
+            })
+            .await;
     }
 }
 
@@ -259,11 +261,11 @@ impl Message<ClientData> for GateActor {
         match opcode {
             x if x == ClientPacketIds::ClientVersion as i16 => {
                 // ClientVersion - 验证 payload 后回复 accepted
-                handle_client_version(&gate_ref, msg.session_id, payload);
+                handle_client_version(&gate_ref, msg.session_id, payload).await;
             }
             x if x == ClientPacketIds::NewAccount as i16 => {
                 // NewAccount - Phase 1: 自动成功
-                handle_new_account(&gate_ref, msg.session_id);
+                handle_new_account(&gate_ref, msg.session_id).await;
             }
             x if x == ClientPacketIds::Login as i16 => {
                 // Login - 转发到 AccountActor
@@ -356,7 +358,7 @@ impl Message<ClientData> for GateActor {
             }
             x if x == ClientPacketIds::KeepAlive as i16 => {
                 // KeepAlive - 回复心跳
-                handle_keep_alive(&gate_ref, msg.session_id);
+                handle_keep_alive(&gate_ref, msg.session_id).await;
             }
             x if x == ClientPacketIds::LogOut as i16 => {
                 // LogOut - 通知 WorldActor 清理并断开
@@ -765,7 +767,7 @@ impl Message<ClientData> for GateActor {
                 forward_mail_locked_item(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::MailCost as i16 => {
-                handle_mail_cost(&gate_ref, msg.session_id, payload);
+                handle_mail_cost(&gate_ref, msg.session_id, payload).await;
             }
             // 轮回
             x if x == ClientPacketIds::ShareQuest as i16 => {
@@ -900,18 +902,22 @@ impl Message<LoginResult> for GateActor {
             let response_data = build_packet_bytes(ServerPacketIds::LoginSuccess as i16, &body);
 
             let gate_ref = ctx.actor_ref().clone();
-            let _ = gate_ref.ask(SendToClient {
-                session_id: msg.session_id,
-                data: response_data,
-            }).await;
+            let _ = gate_ref
+                .tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: response_data,
+                })
+                .await;
         } else {
             // Login failure
             let response_data = build_packet_bytes(ServerPacketIds::Login as i16, &[4u8]);
             let gate_ref = ctx.actor_ref().clone();
-            let _ = gate_ref.ask(SendToClient {
-                session_id: msg.session_id,
-                data: response_data,
-            }).await;
+            let _ = gate_ref
+                .tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: response_data,
+                })
+                .await;
         }
     }
 }
@@ -947,7 +953,7 @@ impl Message<SetWorldRef> for GateActor {
 // ============================================================
 
 /// 处理客户端版本：验证 payload 后回复 accepted
-fn handle_client_version(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+async fn handle_client_version(gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
     use std::io::Cursor;
     use byteorder::{LittleEndian, ReadBytesExt};
 
@@ -967,21 +973,25 @@ fn handle_client_version(gate_ref: &ActorRef<GateActor>, session_id: SessionId, 
 
     debug!("ClientVersion from session {}", session_id);
     let response = build_packet_bytes(ServerPacketIds::ClientVersion as i16, &[1u8]); // accepted
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: response,
-    });
+    let _ = gate_ref
+        .tell(SendToClient {
+            session_id,
+            data: response,
+        })
+        .await;
 }
 
 /// 处理新账号注册
-fn handle_new_account(gate_ref: &ActorRef<GateActor>, session_id: SessionId) {
+async fn handle_new_account(gate_ref: &ActorRef<GateActor>, session_id: SessionId) {
     debug!("NewAccount request from session {}", session_id);
     // Phase 1: auto-register, respond success (result=8)
     let response = build_packet_bytes(ServerPacketIds::NewAccount as i16, &[8u8]);
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: response,
-    });
+    let _ = gate_ref
+        .tell(SendToClient {
+            session_id,
+            data: response,
+        })
+        .await;
 }
 
 /// 解析登录包：account_id (DotNetString) + password (DotNetString)
@@ -997,12 +1007,14 @@ fn parse_login_payload(payload: &[u8]) -> Option<(String, String)> {
 }
 
 /// 处理心跳：回复 KeepAlive
-fn handle_keep_alive(gate_ref: &ActorRef<GateActor>, session_id: SessionId) {
+async fn handle_keep_alive(gate_ref: &ActorRef<GateActor>, session_id: SessionId) {
     let response = build_packet_bytes(ServerPacketIds::KeepAlive as i16, &[]);
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: response,
-    });
+    let _ = gate_ref
+        .tell(SendToClient {
+            session_id,
+            data: response,
+        })
+        .await;
 }
 
 /// 解析 DotNetString: [length: i32 LE][bytes...]
@@ -2531,15 +2543,17 @@ fn forward_mail_locked_item(world_ref: &Option<ActorRef<crate::actors::world::Wo
 }
 
 /// MailCost: [items_count: u32][gold: u32]
-fn handle_mail_cost(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
+async fn handle_mail_cost(gate_ref: &ActorRef<GateActor>, session_id: SessionId, _payload: &[u8]) {
     debug!("MailCost: session={}", session_id);
     // 返回计算结果（免费）
     let mut body = Vec::new();
     body.extend_from_slice(&0u32.to_le_bytes());
-    let _ = gate_ref.ask(SendToClient {
-        session_id,
-        data: build_packet_bytes(ServerPacketIds::MailCost as i16, &body),
-    });
+    let _ = gate_ref
+        .tell(SendToClient {
+            session_id,
+            data: build_packet_bytes(ServerPacketIds::MailCost as i16, &body),
+        })
+        .await;
 }
 
 /// ShareQuest: [quest_id: u32]

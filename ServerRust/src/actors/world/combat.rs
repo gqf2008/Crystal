@@ -148,7 +148,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                     if broke {
                         debug!("Player {} weapon broke!", result.object_id);
                         if let Some(state) = self.recalculate_and_set_stat_bonuses(msg.session_id).await {
-                            self.broadcast_equipment_visuals(msg.session_id, &state);
+                            self.broadcast_equipment_visuals(msg.session_id, &state).await;
                         }
                     }
                 }
@@ -338,12 +338,24 @@ impl Message<HarvestRequest> for WorldActor {
                 data: packet,
             });
 
-            // 掉落判定
+            // Drop table by mine type
             let roll = (msg.session_id.wrapping_add(tokio::time::Instant::now().elapsed().as_millis() as u64) % 100) as u8;
             let (drop_item_index, drop_count, drop_name) = match mine_index {
-                1 if roll < 70 => (500, 1 + (roll % 2) as u16, "铁矿石"),
-                2 if roll < 50 => (501, 1, "金矿石"),
-                3 if roll < 30 => (502, 1, "宝石"),
+                // Iron mine: iron ore (70%), copper ore (30%), silver ore (5%), black iron (1%)
+                1 if roll < 40 => (500, 1 + (roll % 3) as u16, "铁矿石"),
+                1 if roll < 65 => (503, 1, "铜矿石"),
+                1 if roll < 70 => (504, 1, "银矿石"),
+                1 if roll < 71 => (505, 1, "黑铁矿石"),
+                // Gold mine: gold ore (40%), silver (20%), platinum (10%), ruby (5%)
+                2 if roll < 40 => (501, 1, "金矿石"),
+                2 if roll < 60 => (504, 1 + (roll % 2) as u16, "银矿石"),
+                2 if roll < 70 => (506, 1, "铂金矿石"),
+                2 if roll < 75 => (507, 1, "红宝石原石"),
+                // Gem mine: nephrite (20%), amethyst (15%), diamond (5%), sapphire (3%)
+                3 if roll < 20 => (508, 1, "软玉原石"),
+                3 if roll < 35 => (509, 1, "紫水晶原石"),
+                3 if roll < 40 => (510, 1, "钻石原石"),
+                3 if roll < 43 => (511, 1, "蓝宝石原石"),
                 _ => (0, 0, ""),
             };
             if drop_item_index > 0 {
@@ -647,6 +659,12 @@ impl Message<MagicRequest> for WorldActor {
             self.reveal_player_to_others(msg.session_id, &state).await;
         }
 
+        // Pre-allocate object ID for persistent spells (before spell_db borrow)
+        let needs_spell_obj = matches!(msg.spell,
+            SPELL_FIREWALL | SPELL_BLIZZARD | SPELL_METEOR_STRIKE | SPELL_POISON_CLOUD | SPELL_HEALING_CIRCLE | SPELL_EXPLOSIVE_TRAP
+        );
+        let spell_oid = if needs_spell_obj { Some(self.alloc_object_id()) } else { None };
+
         // Validate spell exists in DB
         let spell_db = self.magic_infos.get(&(msg.spell as u32));
 
@@ -657,8 +675,41 @@ impl Message<MagicRequest> for WorldActor {
             return;
         }
         let spell_range = spell_db.map(|m| m.range as i32).unwrap_or(2);
-        let power = spell_db.map(|m| m.power_base).unwrap_or(10);
-        let mp_cost = spell_db.map(|m| m.base_cost).unwrap_or(5);
+        let power = spell_db.map(|m| m.power_base).unwrap_or(10); // for buff/heal scaling
+        // Use spell level from PlayerMagic if learned
+        let spell_level = state.magics.iter()
+            .find(|m| m.spell == msg.spell as i32)
+            .map(|m| m.level)
+            .unwrap_or(0);
+
+        // Global timestamp for CD + XP
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+
+        // Cooldown check
+        if let Some(spell_info) = spell_db {
+            let delay_ms = crate::combat::magic::magic_delay(spell_info, spell_level);
+            let last_cast = state.magics.iter()
+                .find(|m| m.spell == msg.spell as i32)
+                .map(|m| m.cast_time)
+                .unwrap_or(0);
+            if last_cast > 0 && (now_ms - last_cast) < delay_ms as i64 {
+                let remaining = delay_ms as i64 - (now_ms - last_cast);
+                send_system_message(&self.gate_ref, msg.session_id, &format!("技能冷却中，还需 {} 秒", remaining / 1000));
+                return;
+            }
+        }
+
+        let mp_cost = spell_db.map(|m| crate::combat::magic::magic_cost(m, spell_level)).unwrap_or(5);
+
+        // Decide which stat feeds this spell
+        let magic_stat = match state.class {
+            mir2_shared::enums::MirClass::Wizard => state.effective_max_mc(),
+            mir2_shared::enums::MirClass::Taoist => state.effective_max_sc(),
+            _ => state.effective_max_attack(), // Warriors/Assassins/Archers use Attack
+        };
 
         // 检查并扣除 MP
         if state.mp < mp_cost {
@@ -702,7 +753,7 @@ impl Message<MagicRequest> for WorldActor {
             target_x,
             target_y,
             cast: true,
-            level: 0,
+            level: spell_level,
             self_broadcast: false,
             secondary_target_ids: Vec::new(),
         };
@@ -714,6 +765,51 @@ impl Message<MagicRequest> for WorldActor {
                     data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectMagic as i16, &om_body),
                 });
             }
+        }
+
+        // 创建持久法术对象（火墙、暴风雪等）
+        let spell_enum = mir2_shared::enums::Spell::try_from(msg.spell)
+            .unwrap_or(mir2_shared::enums::Spell::None);
+        let is_persistent = matches!(spell_enum,
+            mir2_shared::enums::Spell::FireWall | mir2_shared::enums::Spell::Blizzard
+            | mir2_shared::enums::Spell::MeteorStrike | mir2_shared::enums::Spell::PoisonCloud
+            | mir2_shared::enums::Spell::HealingCircle | mir2_shared::enums::Spell::ExplosiveTrap
+            | mir2_shared::enums::Spell::Portal
+        );
+        let persistent_spell = if is_persistent {
+            spell_oid.map(|oid| spell::create_persistent_spell(
+                oid, object_id, msg.session_id,
+                target_x, target_y, spell_level, magic_stat, spell_enum,
+            ))
+        } else {
+            None
+        };
+        if let Some(spell_obj) = persistent_spell {
+            let spell_type = mir2_shared::enums::Spell::try_from(msg.spell)
+                .unwrap_or(mir2_shared::enums::Spell::None);
+            let object_spell = mir2_shared::packets::server::magic_combat::ObjectSpell {
+                object_id: spell_obj.object_id,
+                location_x: spell_obj.x,
+                location_y: spell_obj.y,
+                spell: spell_type,
+            };
+            let mut os_body = Vec::new();
+            if object_spell.write_body(&mut os_body).is_ok() {
+                let spell_packet = build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::ObjectSpell as i16, &os_body,
+                );
+                // Send to self + nearby players
+                let session_ids: Vec<u64> = std::iter::once(msg.session_id)
+                    .chain(self.other_players(msg.session_id).iter().map(|p| p.session_id))
+                    .collect();
+                for sid in &session_ids {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: *sid,
+                        data: spell_packet.clone(),
+                    }).await;
+                }
+            }
+            self.spell_objects.insert(spell_obj.object_id, spell_obj);
         }
 
         // 根据魔法类型执行不同效果
@@ -783,7 +879,6 @@ impl Message<MagicRequest> for WorldActor {
             }
             // --- 默认：伤害类 ---
             _ => {
-                // 技能命中范围内的怪物
                 let hit_monster_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(_, m)| {
                         let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
@@ -792,21 +887,30 @@ impl Message<MagicRequest> for WorldActor {
                     .map(|(id, _)| *id)
                     .collect();
 
-                // 魔法伤害 = spell power + 玩家魔法加成
-                let power_min = spell_db.map(|m| m.power_base).unwrap_or(10).max(1);
-                let power_max = spell_db.map(|m| (m.power_base + m.power_bonus).max(power_min)).unwrap_or(power_min + 5);
-                let magic_bonus = state.min_attack / 4; // 简化：攻击力的一部分转化为魔法伤害
                 for monster_id in hit_monster_ids {
                     if let Some(monster) = self.monsters.get_mut(&monster_id) {
-                        let base_damage = fastrand::i32(power_min..=power_max);
-                        let damage = (base_damage + magic_bonus).max(1);
+                        let damage = if let Some(info) = spell_db {
+                            crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
+                        } else {
+                            fastrand::i32(5..=15)
+                        };
+                        let damage = damage.max(1);
                         monster.hp = monster.hp.saturating_sub(damage);
                         monster.provoked = true;
                         monster.target_session = Some(msg.session_id);
-                        debug!("Magic: {} spell={} -> monster {} for {} damage (base={} bonus={})", state.name, msg.spell, monster_id, damage, base_damage, magic_bonus);
+                        debug!("Magic: {} spell={} lv={} -> monster {} for {} damage", state.name, msg.spell, spell_level, monster_id, damage);
                     }
                 }
             }
+        }
+
+        // Spell XP gain and cast_time update
+        if !basic_spells.contains(&msg.spell) {
+            let _ = record.actor_ref.ask(crate::actors::player::GainSpellExp {
+                spell: msg.spell,
+                amount: 1,
+                cast_time: now_ms,
+            }).await;
         }
     }
 }
