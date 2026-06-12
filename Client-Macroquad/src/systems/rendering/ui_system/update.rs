@@ -1193,13 +1193,28 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
     {
         use crate::network::handlers::NetworkEvent as NetEv;
         use crate::scenes::dialogs::game::socket_dialog::SocketAction;
+        use mir2_shared::enums::AwakeType;
         let sd = sys.main_dialog.socket_dialog_mut();
         let action = sd.take_action();
         match action {
-            SocketAction::InsertGem { item_unique_id, position_idx } => {
-                // 当前 UI 未实现宝石选择器，AwakeType 无法确定
-                // 待实现背包宝石选择后再发包
-                tracing::debug!("💎 插入宝石: 待实现宝石选择器 (uid={}, pos={})", item_unique_id, position_idx);
+            SocketAction::InsertGem { item_unique_id, position_idx, awake_type } => {
+                // AwakeType 由用户通过嵌入式 gem picker 选择(见 SocketDialogHybrid::draw_gem_picker)
+                // 服务端需要的 op 协议: `Awakening { unique_id, awake_type, position_idx }`
+                // (PR #1126 之前是 `Awakening` 单个位置选择;现在带 awake_type)
+                if awake_type == AwakeType::None {
+                    tracing::warn!("💎 InsertGem refused: AwakeType::None is not selectable");
+                } else if let Some(net) = ctx.net.as_ref() {
+                    let pos_u32: u32 = position_idx.try_into().unwrap_or(0);
+                    let _ = net.send(NetEv::AwakeningRequest {
+                        unique_id: item_unique_id,
+                        awake_type,
+                        position_idx: pos_u32,
+                    });
+                    tracing::info!(
+                        "💎 插入宝石: uid={} pos={} awake_type={:?}",
+                        item_unique_id, position_idx, awake_type
+                    );
+                }
             }
             SocketAction::RemoveGem { item_unique_id, position_idx } => {
                 if let Some(net) = ctx.net.as_ref() {

@@ -133,11 +133,14 @@ impl CompassDialogHybrid {
     }
 
     /// 加载纹理
+    ///
+    /// 资源来源(对齐 C# `Client/MirScenes/Dialogs/CompassDialog.cs`):
+    /// - 库: `Prguse2`
+    /// - 起始索引: 1470 (静态底图)
+    /// - 帧数: 40 帧一圈 (9 度/帧)
     pub fn load_textures(&mut self) {
-        // 罗盘背景: Title[?] (使用通用圆形背景)
-        // 罗盘指针: Title[?]
-        // 由于不确定具体索引，先用占位
-        if let Some(texture) = LibraryName::Title.get_texture(468) {
+        // 罗盘静态底图: Prguse2[1470]
+        if let Some(texture) = LibraryName::Prguse2.get_texture(1470) {
             if let Some(tex) = texture.image {
                 self.bg_texture = Some(tex);
             }

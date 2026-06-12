@@ -13,6 +13,7 @@ use macroquad::prelude::*;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
 use super::native_ui_utils::DragHelper;
+use mir2_shared::enums::AwakeType;
 
 /// 宝石孔位
 #[derive(Debug, Clone)]
@@ -27,9 +28,38 @@ pub struct SocketSlot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SocketAction {
     None,
-    InsertGem { item_unique_id: u64, position_idx: usize },
+    InsertGem { item_unique_id: u64, position_idx: usize, awake_type: AwakeType },
     RemoveGem { item_unique_id: u64, position_idx: usize },
     Close,
+}
+
+/// 宝石选择子面板的状态。
+///
+/// 嵌入在 SocketDialog 中。当用户点击空孔位时,弹出此面板
+/// 列出可用的 AwakeType 选项(Dc/Mc/Sc/Ac/Mac/HpMp)。
+/// 选择后产生 `SocketAction::InsertGem` 带正确的 awake_type 发包。
+#[derive(Debug, Clone)]
+struct GemPickerState {
+    /// 当前等待用户选择 AwakeType 的孔位索引
+    pending_slot: Option<usize>,
+}
+
+impl GemPickerState {
+    fn new() -> Self {
+        Self { pending_slot: None }
+    }
+
+    fn open(&mut self, slot: usize) {
+        self.pending_slot = Some(slot);
+    }
+
+    fn close(&mut self) {
+        self.pending_slot = None;
+    }
+
+    fn is_open(&self) -> bool {
+        self.pending_slot.is_some()
+    }
 }
 
 pub struct SocketDialogHybrid {
@@ -42,6 +72,8 @@ pub struct SocketDialogHybrid {
     item_unique_id: Option<u64>,
     drag_helper: DragHelper,
     pending_action: SocketAction,
+    /// 宝石选择子面板状态(用户点击空孔位时弹出)
+    gem_picker: GemPickerState,
     // 纹理
     bg_texture: Option<Texture2D>,
     close_texture: Option<Texture2D>,
@@ -71,6 +103,7 @@ impl SocketDialogHybrid {
             item_unique_id: None,
             drag_helper: DragHelper::new(),
             pending_action: SocketAction::None,
+            gem_picker: GemPickerState::new(),
             bg_texture: None,
             close_texture: None,
             gem_texture: None,
@@ -85,6 +118,7 @@ impl SocketDialogHybrid {
     pub fn close(&mut self) {
         self.visible = false;
         self.pending_action = SocketAction::None;
+        self.gem_picker.close();
     }
 
     pub fn toggle(&mut self) {
@@ -157,6 +191,11 @@ impl SocketDialogHybrid {
         self.draw_background();
         self.draw_title(mouse_pos);
         self.draw_socket_slots(mouse_pos);
+
+        // 宝石选择器覆盖在主对话框之上
+        if self.gem_picker.is_open() {
+            self.draw_gem_picker(mouse_pos);
+        }
     }
 
     fn draw_background(&self) {
@@ -262,9 +301,110 @@ impl SocketDialogHybrid {
             }
         }
         if let Some(idx) = clicked_insert {
-            // 插入宝石需要玩家从背包选择宝石，当前 UI 未实现宝石选择步骤
-            // 此处仅记录，暂不发包
-            tracing::debug!("💎 插入宝石: 需要宝石选择器 (uid={:?}, pos={})", self.item_unique_id, idx);
+            // 弹出宝石类型选择器,等待用户选择 AwakeType (Dc/Mc/Sc/Ac/Mac/HpMp)
+            self.gem_picker.open(idx);
+        }
+    }
+
+    /// 绘制宝石选择子面板。
+    ///
+    /// 列出可用的 AwakeType 按钮,每行一个(共 6 项 + 取消)。
+    /// 玩家点击后产生 `SocketAction::InsertGem { .., awake_type }`。
+    /// 修复 `[[memory:feedback_socket_gem.md]]` 提到的:之前直接发包缺 AwakeType 字段。
+    fn draw_gem_picker(&mut self, mouse_pos: Vec2) {
+        let slot = match self.gem_picker.pending_slot {
+            Some(s) => s,
+            None => return,
+        };
+
+        // 子面板居中覆盖在主对话框上
+        let picker_w = 200.0;
+        let picker_h = 260.0;
+        let picker_x = self.position.x + (self.size.x - picker_w) / 2.0;
+        let picker_y = self.position.y + (self.size.y - picker_h) / 2.0;
+
+        // 半透明遮罩
+        let sw = screen_width();
+        let sh = screen_height();
+        draw_rectangle(0.0, 0.0, sw, sh, Color::from_rgba(0, 0, 0, 120));
+
+        // 面板背景
+        draw_rectangle(picker_x, picker_y, picker_w, picker_h, Color::from_rgba(20, 20, 30, 240));
+        draw_rectangle_lines(picker_x, picker_y, picker_w, picker_h, 2.0, Color::from_rgba(120, 120, 140, 255));
+
+        // 标题
+        draw_text_cn(
+            &format!("选择宝石类型 (孔位 {})", slot + 1),
+            picker_x + 10.0,
+            picker_y + 22.0,
+            12.0,
+            Color::from_rgba(220, 220, 100, 255),
+        );
+
+        // AwakeType 选项 (跳过 None = 0)
+        let options: [(AwakeType, &str); 6] = [
+            (AwakeType::Dc,   "DC - 物理攻击"),
+            (AwakeType::Mc,   "MC - 魔法攻击"),
+            (AwakeType::Sc,   "SC - 道术攻击"),
+            (AwakeType::Ac,   "AC - 物理防御"),
+            (AwakeType::Mac,  "MAC - 魔法防御"),
+            (AwakeType::HpMp, "HP/MP - 生命/魔法"),
+        ];
+
+        let btn_h = 28.0;
+        let btn_w = picker_w - 20.0;
+        let btn_x = picker_x + 10.0;
+        let mut clicked: Option<AwakeType> = None;
+
+        for (i, (aw, label)) in options.iter().enumerate() {
+            let by = picker_y + 40.0 + i as f32 * (btn_h + 4.0);
+            let rect = Rect::new(btn_x, by, btn_w, btn_h);
+            let hover = rect.contains(mouse_pos);
+            draw_rectangle(
+                btn_x, by, btn_w, btn_h,
+                if hover {
+                    Color::from_rgba(70, 70, 110, 240)
+                } else {
+                    Color::from_rgba(50, 50, 80, 220)
+                },
+            );
+            draw_rectangle_lines(btn_x, by, btn_w, btn_h, 1.0, Color::from_rgba(100, 100, 130, 255));
+            draw_text_cn(label, btn_x + 10.0, by + 8.0, 11.0, WHITE);
+
+            if hover && is_mouse_button_pressed(MouseButton::Left) {
+                clicked = Some(*aw);
+            }
+        }
+
+        // 取消按钮
+        let cancel_y = picker_y + 40.0 + options.len() as f32 * (btn_h + 4.0);
+        let cancel_rect = Rect::new(btn_x, cancel_y, btn_w, btn_h);
+        let cancel_hover = cancel_rect.contains(mouse_pos);
+        draw_rectangle(
+            btn_x, cancel_y, btn_w, btn_h,
+            if cancel_hover {
+                Color::from_rgba(120, 40, 40, 240)
+            } else {
+                Color::from_rgba(80, 30, 30, 220)
+            },
+        );
+        draw_text_cn("取消", btn_x + 80.0, cancel_y + 8.0, 11.0, WHITE);
+
+        if cancel_hover && is_mouse_button_pressed(MouseButton::Left) {
+            self.gem_picker.close();
+            return;
+        }
+
+        // 处理 AwakeType 选择 — 产生带 awake_type 的 InsertGem action
+        if let Some(aw) = clicked {
+            if let Some(uid) = self.item_unique_id {
+                self.pending_action = SocketAction::InsertGem {
+                    item_unique_id: uid,
+                    position_idx: slot,
+                    awake_type: aw,
+                };
+            }
+            self.gem_picker.close();
         }
     }
 }
