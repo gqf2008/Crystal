@@ -93,3 +93,18 @@ pub struct ShopItemHybrid {
     pub stock: u32,
     pub count: u32,
 }
+
+/// 商城购买动作。
+///
+/// 由 `GameShopDialogHybrid` 内部产生,经 `take_action()` 移交给 main_dialog,
+/// 最终在 `systems/presentation/dialog_system/update.rs` 中发往服务器。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameShopBuyAction {
+    /// 玩家点击 Buy 按钮
+    Buy {
+        /// 服务器端商品索引 (即 `item_index` 字段)
+        item_index: u32,
+        /// 购买数量 (从 grid 的 quantities 取出)
+        quantity: u8,
+    },
+}

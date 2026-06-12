@@ -17,7 +17,7 @@ use macroquad::ui::Skin;
 use crate::resources::LibraryName;
 use super::super::native_ui_utils::create_transparent_skin;
 
-use super::types::{ShopSectionHybrid, ShopClassHybrid, ShopCategoryHybrid, ShopItemHybrid};
+use super::types::{ShopSectionHybrid, ShopClassHybrid, ShopCategoryHybrid, ShopItemHybrid, GameShopBuyAction};
 use super::sample_items::create_sample_items;
 
 /// 商城对话框（混合版本）
@@ -96,9 +96,12 @@ pub struct GameShopDialogHybrid {
     
     // 支付方式
     pub(super) pay_with_gold: bool,
-    
+
     // 购买数量 (每个格子的数量)
     pub(super) quantities: [u8; 8],
+
+    /// 待处理的购买动作 (从 rendering.rs 设置, 由 main_dialog 拿走)
+    pub pending_action: Option<GameShopBuyAction>,
 }
 
 impl GameShopDialogHybrid {
@@ -262,6 +265,7 @@ impl GameShopDialogHybrid {
             search_active: false,
             pay_with_gold: true,
             quantities: [1; 8],
+            pending_action: None,
         };
         dialog.refresh_categories_and_items();
         dialog
@@ -462,6 +466,11 @@ impl GameShopDialogHybrid {
             item.in_stock = stock > 0;
             self.refresh_categories_and_items();
         }
+    }
+
+    /// 拿走当前 pending_action(由 main_dialog 在 update 帧调用)。
+    pub fn take_action(&mut self) -> Option<GameShopBuyAction> {
+        self.pending_action.take()
     }
 }
 

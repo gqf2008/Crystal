@@ -192,6 +192,8 @@ pub struct MainDialog {
     intelligent_creature_dialog: crate::scenes::dialogs::game::intelligent_creature_dialog::IntelligentCreatureDialogHybrid,
     compass_dialog: crate::scenes::dialogs::game::compass_dialog::CompassDialogHybrid,
     socket_dialog: crate::scenes::dialogs::game::socket_dialog::SocketDialogHybrid,
+    /// 行会领地对话框
+    guild_territory_dialog: crate::scenes::dialogs::game::guild_territory_dialog::GuildTerritoryDialogHybrid,
     /// 邮件对话框
     mail_dialog: crate::scenes::dialogs::game::mail_dialog::MailDialogHybrid,
     /// 设置对话框
@@ -404,6 +406,7 @@ impl MainDialog {
             intelligent_creature_dialog: crate::scenes::dialogs::game::intelligent_creature_dialog::IntelligentCreatureDialogHybrid::new(),
             compass_dialog: crate::scenes::dialogs::game::compass_dialog::CompassDialogHybrid::new(),
             socket_dialog: crate::scenes::dialogs::game::socket_dialog::SocketDialogHybrid::new(),
+            guild_territory_dialog: crate::scenes::dialogs::game::guild_territory_dialog::GuildTerritoryDialogHybrid::new(),
             mail_dialog: crate::scenes::dialogs::game::mail_dialog::MailDialogHybrid::new(),
             option_dialog: OptionDialogHybrid::new(),
             game_shop_dialog: GameShopDialog::new(),
@@ -2350,6 +2353,11 @@ impl MainDialog {
     /// 获取商城对话框的可变引用
     pub fn game_shop_dialog_mut(&mut self) -> &mut GameShopDialog {
         &mut self.game_shop_dialog
+    }
+
+    /// 获取行会领地对话框的可变引用
+    pub fn guild_territory_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::guild_territory_dialog::GuildTerritoryDialogHybrid {
+        &mut self.guild_territory_dialog
     }
 
     fn sync_and_draw_help(&mut self, _consumed: &mut bool, _mouse_pos: Vec2) {

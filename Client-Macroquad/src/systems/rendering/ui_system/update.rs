@@ -1270,6 +1270,33 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
         }
     }
 
+    // 商城购买动作（由 GameShopDialogHybrid::draw_cell 阶段产出, 在此发包）
+    if let Some(action) = sys.main_dialog.game_shop_dialog_mut().take_action() {
+        use crate::network::handlers::NetworkEvent as NetEv;
+        use crate::scenes::dialogs::game::game_shop_dialog::GameShopBuyAction;
+        match action {
+            GameShopBuyAction::Buy { item_index, quantity } => {
+                if let Some(net) = ctx.net.as_ref() {
+                    // Server-side: server::GameShopPurchase 接受 (item_index, count)
+                    // 在 protocol 层映射为 client::GameshopBuy
+                    let _ = net.send(NetEv::GameShopBuyRequest { item_id: item_index, count: quantity as u32 });
+                    tracing::info!("🛒 商城购买: item_index={} count={}", item_index, quantity);
+                }
+            }
+        }
+    }
+
+    // 行会领地购买动作(由 GuildTerritoryDialogHybrid::draw 阶段产出)
+    if let Some(action) = sys.main_dialog.guild_territory_dialog_mut().take_action() {
+        use crate::network::handlers::NetworkEvent as NetEv;
+        use crate::scenes::dialogs::game::guild_territory_dialog::GuildTerritoryAction;
+        let GuildTerritoryAction::Purchase { owner } = action;
+        if let Some(net) = ctx.net.as_ref() {
+            let _ = net.send(NetEv::PurchaseGuildTerritoryRequest { owner: owner.clone() });
+            tracing::info!("🏰 行会领地购买: owner={}", owner);
+        }
+    }
+
     // 文本输入结果（由 draw 阶段产出，在此发包）
     if let Some((kind, text)) = sys.pending_text_input.take() {
         use crate::network::handlers::NetworkEvent as NetEv;

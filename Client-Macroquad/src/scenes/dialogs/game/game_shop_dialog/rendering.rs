@@ -8,7 +8,7 @@
 use macroquad::prelude::*;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
-use super::types::{ShopSectionHybrid, ShopClassHybrid, ShopCategoryHybrid};
+use super::types::{ShopSectionHybrid, ShopClassHybrid, ShopCategoryHybrid, GameShopBuyAction};
 use super::dialog::GameShopDialogHybrid;
 use super::super::native_ui_utils::{
     draw_library_button_with_offset,
@@ -580,7 +580,11 @@ impl GameShopDialogHybrid {
             vec2(buy_x, buy_y),
             mouse_pos,
         ) && !self.dragging {
-            // TODO: handle buy action
+            // 触发购买动作(由 main_dialog.rs → update.rs 发包)
+            self.pending_action = Some(GameShopBuyAction::Buy {
+                item_index: item.id,
+                quantity: self.quantities[grid_idx],
+            });
         }
     }
     

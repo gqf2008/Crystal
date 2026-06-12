@@ -510,7 +510,14 @@ pub fn pump_network_messages_to_ui(ctx: &mut GameContext) {
             NetworkEvent::GuildStorageItemChanged { change_type, slot } => {
                 let action = if *change_type == 0 { "存入" } else { "取出" };
                 sys_chat(&mut cmds, format!("行会仓库物品{}: 槽位{}", action, slot));
-                // TODO: map to UpdateGuildStorageItems once server sends item details
+                // 服务器当前不发送 item details(只 slot + change_type)。
+                // UI 端的 `UpdateGuildStorageItem` 需要 slot+name+quantity,
+                // 但服务器不提供 name/quantity。workaround 是:
+                //   1) 玩家需重新打开行会仓库触发 GuildStorageListReceived
+                //   2) 一旦服务器协议扩展(在 GuildStorageItemChanged 中携带 item 数据),
+                //      这里可改为直接调用 `cmds.push(UiCommand::UpdateGuildStorageItem { slot, ... })`。
+                // 当前只记录日志,等用户重新打开仓库时再刷新 UI。
+                tracing::debug!("🔄 行会仓库变更: 等用户重开仓库刷新 (slot={}, type={})", slot, change_type);
             }
             NetworkEvent::GuildStorageListReceived { items } => {
                 cmds.push(UiCommand::ClearGuildStorageItems);

@@ -12,6 +12,13 @@
 use macroquad::prelude::*;
 use crate::ui::text_renderer::draw_text_cn;
 
+/// 行会领地购买动作
+#[derive(Debug, Clone)]
+pub enum GuildTerritoryAction {
+    /// 玩家点击某个未占领领地的"购买"按钮
+    Purchase { owner: String },
+}
+
 /// 领地条目
 #[derive(Debug, Clone)]
 pub struct TerritoryEntry {
@@ -29,6 +36,8 @@ pub struct GuildTerritoryDialogHybrid {
     pub current_page: i32,
     pub total_pages: i32,
     scroll_offset: f32,
+    /// 待处理的动作 (由 main_dialog.rs → update.rs 拿走并发包)
+    pub pending_action: Option<GuildTerritoryAction>,
 }
 
 impl Default for GuildTerritoryDialogHybrid {
@@ -39,6 +48,7 @@ impl Default for GuildTerritoryDialogHybrid {
             current_page: 1,
             total_pages: 1,
             scroll_offset: 0.0,
+            pending_action: None,
         }
     }
 }
@@ -46,6 +56,11 @@ impl Default for GuildTerritoryDialogHybrid {
 impl GuildTerritoryDialogHybrid {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// 拿走当前 pending_action
+    pub fn take_action(&mut self) -> Option<GuildTerritoryAction> {
+        self.pending_action.take()
     }
 
     /// 更新领地列表
@@ -120,6 +135,31 @@ impl GuildTerritoryDialogHybrid {
                 else { Color::from_rgba(200, 200, 200, 255) });
             draw_text_cn(&line2, dialog_x + 15.0, y + 20.0, 11.0,
                 Color::from_rgba(150, 150, 150, 255));
+
+            // 未占领的领地在右侧显示"购买"按钮
+            if !entry.is_purchased {
+                let buy_btn_x = dialog_x + dialog_w - 75.0;
+                let buy_btn_y = y + 5.0;
+                let buy_btn_w = 60.0;
+                let buy_btn_h = 25.0;
+                let mouse_over_buy = mouse_pos.x >= buy_btn_x
+                    && mouse_pos.x <= buy_btn_x + buy_btn_w
+                    && mouse_pos.y >= buy_btn_y
+                    && mouse_pos.y <= buy_btn_y + buy_btn_h;
+                let buy_color = if mouse_over_buy {
+                    Color::from_rgba(60, 140, 60, 255)
+                } else {
+                    Color::from_rgba(40, 100, 40, 255)
+                };
+                draw_rectangle(buy_btn_x, buy_btn_y, buy_btn_w, buy_btn_h, buy_color);
+                draw_text_cn("购买", buy_btn_x + 14.0, buy_btn_y + 6.0, 13.0, WHITE);
+
+                if left_clicked && mouse_over_buy {
+                    self.pending_action = Some(GuildTerritoryAction::Purchase {
+                        owner: entry.owner.clone(),
+                    });
+                }
+            }
         }
 
         // 分页栏
