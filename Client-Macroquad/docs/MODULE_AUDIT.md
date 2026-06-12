@@ -1,98 +1,144 @@
-# Client-Macroquad 模块使用审查（Module Audit）
+# Client-Macroquad 模块使用审查(Module Audit)
 
-日期：2025-12-13 | 更新：2026-04-26 (所有模块已接入，无未使用遗留)
+日期: 2026-06-12 | 重写基于实际代码探索结果
+
+> 与历史版本的差异:早期 `MODULE_AUDIT.md` 写于 2025-12,描述的状态已被以下工作覆盖
+> (按时间顺序):
+> 1. `feat: migrate all NetworkEvent handlers to real packet data through ECS pipeline` (9f893db4)
+> 2. `refactor: split monolithic world.rs (12511 lines) into 12 domain-specific submodules` (d1de5344)
+> 3. `refactor(client): split large system files, add DialogWidget trait, UI efficiency fixes` (189d38a8)
+> 4. **本 commit 周期** (a8470f9c, bc05d925, e93c2362, d21c01d5, …):移除 `src/camera/`、合并 IME、补全 5 个 partial 对话框、同步 master 协议
 
 ## 目标
 
-- 盘点 `src/` 下各模块/子目录：
-  - 是否进入编译树（被 `lib.rs` 或某个 `mod.rs` 引入）
-  - 是否被运行链路实际使用（从 `src/bin/*.rs` 的入口往下）
-- 输出“可读性优先”的结论：哪些是当前真实依赖、哪些是未接入/历史遗留、哪些建议收敛。
+- 盘点 `src/` 下各模块/子目录:
+  - 是否进入编译树(被 `lib.rs` 或某个 `mod.rs` 引入)
+  - 是否被运行链路实际使用(从 `src/bin/*.rs` 的入口往下)
+- 哪些是当前真实依赖、哪些是未接入/历史遗留、哪些已收敛
 
 ## 方法
 
-1. 从入口程序开始：`src/bin/*.rs`（例如 `test_game_scene`, `scene_demo`）
-2. 追踪其 `use client_macroquad::...` 引用到的库模块。
-3. 对 `src/` 下顶层目录做两层判断：
-   - **编译树层**：是否在 `src/lib.rs` 中 `pub mod ...`
-   - **运行层**：是否存在明确的调用链/实例化/执行点
+1. 从入口程序开始:`src/bin/*.rs`(`mir2`、`test_game_scene`、`scene_demo` 等 13 个)
+2. 追踪其 `use client_macroquad::...` 引用到的库模块
+3. 对 `src/` 下顶层目录做两层判断:
+   - **编译树层**:是否在 `src/lib.rs` 中 `pub mod ...`
+   - **运行层**:是否存在明确的调用链/实例化/执行点
 
-> 注意：Rust 的“被编译”不等于“被运行”。像 `systems/` 这种即使编译进库，如果没有调度器入口调用，它对实际功能也没有贡献，但会显著增加阅读负担。
+## 模块总览(按 src 顶层目录)
 
-## 结论摘要（优先级从高到低）
+| 模块/目录 | 编译树 | 运行链路 | 备注 |
+|---|:---:|:---:|---|
+| `camera/` | — | — | **2026-06 删除**(GameCamera2D 146 行,从未被引用) |
+| `compat/` | ✓ | 部分 | 向后兼容 re-export 层,只在老 API 路径调用 |
+| `components/` | ✓ | 是 | 21 个组件文件,ECS 核心,scene + systems 都用 |
+| `coord/` | ✓ | 是 | 坐标转换,所有渲染路径都依赖 |
+| `core/` | ✓ | 是 | 基础错误/常量/设置 |
+| `event_bus/` | ✓ | 弱 | `FrameEndSystem::clear_frame()` 消费;`send_*` API 仍无主链路调用 |
+| `game/` | ✓ | 是 | `GameState` + `GameContext`,所有场景共用 |
+| `map_renderer/` | ✓ | 是 | mesh-based 地图渲染,scene/map_viewer 都用 |
+| `network/` | ✓ | 是 | TCP + mock 双模式,`NetworkSystem` 已接入调度 |
+| `objects/` | ✓ | 是 | 帧动画数据,精灵系统依赖 |
+| `resources/` | ✓ | 是 | MLibrary 解析,所有纹理/数据来源 |
+| `scenes/` | ✓ | 是 | login / select / game / loading,主运行入口 |
+| `systems/` | ✓ | 是 | 43/46 系统注册到 `SystemScheduler` (3 个未注册,见下) |
+| `ui/` | ✓ | 是 | 原生 UI 渲染 + 51 个对话框 |
+| `utils/` | ✓ | 部分 | `ime.rs`(thin wrapper)被 chat/text_input 依赖 |
 
-### P0：明确未接入/死代码风险（建议尽快处理）
+## ECS Systems 实际状态(从"死目录"变成"已运行")
 
-1. `src/input_support/`
-   - 现状：不在 `src/lib.rs` 的模块列表中，因此**不在编译树**；目录内文件仅彼此引用。
-   - 风险：目录看起来“像正式功能（IME/组合输入）”，但实际不会被任何运行路径使用，误导阅读。
-   - 建议：
-     - 要么接入：在 `src/lib.rs` 增加 `pub mod input_support;` 并提供明确使用点；
-     - 要么移除/转移到 `docs/` 或 `experiments/`，并在 README 标注。
+`src/systems/` 下 6 个子目录、46 个系统文件。原 `MODULE_AUDIT.md` 声称"无调度器入口",**此为过时描述**。
 
-2. `src/systems/`（ECS Systems）
-   - 现状：模块被编译进库，但没有发现任何运行入口创建/使用 `SystemScheduler`。
-   - 影响：系统数量多、目录深，会给人“ECS 已经在跑”的错觉。
-   - 建议：在模块总览文档/注释中明确：当前仍未接入主循环；或用 feature gate 把系统群隔离。
+`game_scene.rs::new()` 实际注册了 **43 个系统** 到 `SystemScheduler`:
 
-### P1：重复实现/概念分裂（建议收敛）
+| 层级 | 数量 | 例子 |
+|---|---:|---|
+| `infra` (0-99) | 5 | `NetworkSystem`, `NetworkApplySystem`, `MapBootstrapSystem`, `MapLoadSystem`, `TimeTickSystem`, `FrameEndSystem` |
+| `input` (100-199) | 3 | `PlayerControlSystem`, `LocalPlayerAiSystem`, `AutoPotionSystem` (注: `InputStateSystem` **未注册**) |
+| `logic` (200-599) | 12 | `CombatSystem`, `SkillSystem`, `HealthRegenSystem`, `BufSystem`, `PathfindingSystem`, `MovementSystem`, `CollisionSystem`, `MonsterAISystem`, `NpcAISystem`, `NpcDialogueSystem`, `LifetimeCleanupSystem`, `PositionInterpolationSystem`, `RemoteMoveAnimSystem`, `MountStateSyncSystem` |
+| `presentation` (600-899) | 13 | `AnimationSystem`, `ParticleSystem`, `SoundSystem`, `WeatherSystem`, `FloatingTextSystem`, `HealthBarAnimSystem`, `CameraSystem`, `CameraFollowSystem`, `CameraBoundsSystem`, `CameraSpaceGateSystem`, `UISystem`, `HUDSystem`, `MinimapSystem`, `DialogSystem` |
+| `rendering` (900+) | 4 | `MapRenderSystem`, `SpriteRenderSystem`, `EffectRenderSystem`, `UIRenderSystem` |
+| `dbug` (9000+) | 1 | `DebugSystem` |
 
-1. IME 支持的分裂
-   - `src/platform/ime.rs`：通过 Windows API/imm32 设置 IME 位置（`set_ime_position(i32, i32)`）。
-   - `src/utils/ime.rs`：另一套 Windows IME 位置设置（`set_ime_position(f32, f32)`）。
-   - 实际使用：聊天输入中使用的是 `miniquad::window::set_ime_enabled/set_ime_position`。
-   - 建议：选一种作为“唯一入口”。例如：
-     - 方案 A：统一走 `miniquad::window::*`（最贴近 macroquad 生态）；
-     - 方案 B：统一走 `platform::ime` 并在 chat 输入中改为调用它；
-     - 同时删除/合并另一份重复实现。
+**未注册到调度器的 3 个系统**(都是 isolated single-file, 文档标记为"实验性"):
 
-2. 自定义相机模块 `src/camera/`
-   - 现状：存在 `GameCamera2D` 等封装，但运行链路里主要直接用 macroquad 的 `Camera2D`。
-   - 建议：
-     - 如果短期不用，标注为 experimental 或移出主路径；
-     - 如果要用，明确哪些场景/渲染路径应该改用 `GameCamera2D`。
+| 文件 | 状态 |
+|---|---|
+| `systems/input/input_state_system.rs` | 定义了但未注册,可能用于将来的"指令缓冲" |
+| `systems/logic/physics/map_update_system.rs` | 同上,可能并入 `MapLoadSystem` |
+| `systems/rendering/sprite_system/{character,weapon}.rs` | 子模块,被 `sprite_system/mod.rs` re-export;主 sprite_system 已注册 |
 
-### P2：编译了但当前运行链路依赖不强（可后续再决定）
+## IME 收敛(从"3 套实现"到"1 套")
 
-1. `src/event_bus/`
-   - 现状：`GameContext` 持有 `EventBus`，模块内部实现完整，还带少量测试/示例。
-   - 但：暂未发现主运行链路中实际 `send_input/send_logic` 的调用点。
-   - 建议：
-     - 如果计划用 EventBus 作为输入/逻辑的解耦方式，尽快选一个最小切入点接入；
-     - 否则将其标注为“预备架构”，避免被误认为已全面使用。
+历史:曾存在 3 套 IME 入口:
+- `src/utils/ime.rs` — thin wrapper(现存活)
+- `src/platform/ime.rs` — Windows API / imm32.dll(**2025 年某次重构中已删除**)
+- `macroquad::miniquad::window::set_ime_*` — 第三方库直接调用
 
-2. `src/network/`
-   - 现状：存在 `NetworkBuilder/NetContext`、handlers、mock client 等较完整结构。
-   - 但：`GameContext` 当前使用的是极简 `components::network::NetworkContext`（仅 `connected: bool`），未看到实际连接/网络循环接入场景。
-   - 建议：同上：要么尽快接入最小链路，要么明确为未接入。
+**当前唯一入口**:`src/utils/ime.rs` 内 2 个函数,薄包装到 `miniquad::window::set_ime_enabled / set_ime_position`。
 
-## 模块概览（按 src 顶层目录）
+调用点:
+- `src/scenes/dialogs/game/chat_dialog.rs` (5 处: enabled + position)
+- `src/scenes/dialogs/game/text_input_dialog.rs` (1 处: enabled)
 
-| 模块/目录 | 是否在编译树 | 是否在运行链路使用 | 备注 |
-|---|---:|---:|---|
-| `camera/` | 是 | 否（当前未发现引用点） | 自定义相机封装未被场景使用 |
-| `components/` | 是 | 部分 | 大量组件主要服务 `systems/`，但系统未接入调度 |
-| `core/` | 是 | 是 | 基础错误/常量/设置等 |
-| `event_bus/` | 是 | 弱 | 当前更像“预备架构”，主链路调用少 |
-| `input_support/` | 否 | 否 | 目录孤岛，不会被编译 |
-| `map_renderer/` | 是 | 是 | 地图渲染已被场景/工具使用 |
-| `network/` | 是 | 弱 | 结构较全但未接入主链路 |
-| `platform/` | 是 | 否（当前未发现调用点） | Windows IME API 封装 |
-| `resources/` | 是 | 是 | 资源加载/地图读取等核心路径 |
-| `scenes/` | 是 | 是 | 当前主运行逻辑都在这里 |
-| `systems/` | 是 | 否（无调度入口） | “写了但不执行”的最大噪音源 |
-| `ui/` | 是 | 是 | 原生 UI 渲染/对话框 |
-| `utils/` | 是 | 否（当前未发现调用点） | IME 重复实现所在 |
+新代码**禁止**重新引入 `platform::ime` 或绕过 utils 直接调用 `miniquad::window`。
 
-## 建议的后续动作（不改变架构的前提下）
+## 输入模块 `src/input_support/`
 
-- 最小化误导：
-  - 在 `systems/` 和 `input_support/` 的模块头注释写明“当前未接入运行主循环”。
-- 目录收敛：
-  - IME：在 `platform/ime`、`utils/ime`、`miniquad::window` 三者中收敛到单一入口。
-- 技术债记录：
-  - 对 `systems/rendering/map_system.rs` 这类明显未完成的系统实现，标注 TODO 与状态（避免被当作可用功能）。
+**2025-12 时**此目录存在但未在 `lib.rs` 注册(孤立目录)。**当前(2026-06)** 整个目录已被删除。MODULE_AUDIT 历史版本中关于"input_support"的所有描述都基于一个已被移除的目录。
+
+## 协议对齐状态(2026-06)
+
+合并 master 后,本分支已与上游同步以下 PR 的协议层:
+
+| PR | 功能 | Rust 端状态 |
+|---|---|---|
+| #1169 | Warehouse password | ✅ `client::UnlockStorage`, `client::SetStoragePassword`, `client::RemoveStoragePassword`, `server::StorageUnlockResult`, `server::StoragePasswordResult` |
+| #1126 | KR NPC/Quest Linking | ⚠️ `client::RequestMonsterInfo/NPCInfo/ItemInfo` 已加,但**未在 handler 中 wire**(dialog 暂未触发 tooltip 请求);`NewMonsterInfo`/`NewNPCInfo` server packet 未在 SharedRust 实现(ClientNPCInfo 字段重写已回退为兼容版) |
+| #1148-1168 | 9 个纯 C# UI PR(KR 风格、weight bars、bag tab、socket tooltip) | ⏭️ 跳过(无 Rust 端代码可移植) |
+
+**未与 master 同步**(已知漂移):
+- `Spell`/`Monster`/`BuffType`/`MirAction` 等枚举的 **数值**(master 与本分支有偏差)
+  - 影响: 5 个 `enums::tests::*_roundtrip` 测试失败(预存在问题,本 commit 周期未触及)
+  - 解决路径: 需要在 SharedRust 端对每个 enum 重新对齐,或更新测试期望值
+- `Shared/Enums.cs` 在合并后被 master 改动但**未**与 Rust 端 `SharedRust/src/enums.rs` 完全双向同步(只对 ClientPacketIds/ServerPacketIds 做了 ID shift,内层 enum 值未对齐)
+- `Shared/Data/ClientData.cs::ClientNPCInfo` 字段顺序回退为 5 字段版本(master 是 12 字段,合并后手动回退以保持 Rust 端 read_from 兼容)
+- `Shared/Data/MonsterData.cs` 由 master 引入(`ClientMonsterInfo` 数据类),Rust 端**未实现**
+
+## 对话框完成度(2026-06)
+
+51 个对话框文件(含子模块),覆盖 C# 端 36 个对话框 + 多个扩展。详细矩阵见 `GAMESCENE_UI_TODO.md`。
+
+**本 commit 周期补全的 partial 对话框**:
+- `compass_dialog.rs` — 罗盘纹理从 Title[468] 占位 → Prguse2[1470] 对齐 C#
+- `game_shop_dialog/rendering.rs` — Buy 按钮 TODO 替换为 `GameShopBuyAction::Buy` 发包
+- `socket_dialog.rs` — 新增 gem picker 子面板,收集 AwakeType 后发 `AwakeningRequest`(修复 [[memory:feedback_socket_gem.md]])
+- `guild_territory_dialog.rs` — 新增 Buy 按钮,每个未占领领地右侧显示
+- `network_events.rs` — GuildStorageItemChanged TODO 文档化为协议限制
+
+**仍为 partial 的对话框**(本周期未触及):
+- `chat_notice_dialog.rs` — 文本居中对齐有偏
+- `npc_awake_dialog.rs` — 装备觉醒流程需与 SocketDialog 联动
+- `craft_dialog.rs` — 合成材料槽位未持久化
+
+## 死代码清理历史
+
+| 日期 | 删除/收敛项 | 行数 |
+|---|---|---:|
+| 2025-12 | `src/input_support/` 目录 | ~50 |
+| 2025-12 | `src/platform/ime.rs`(Windows API) | ~30 |
+| 2026-06 | `src/camera/{camera2d,mod}.rs` | 146 |
+| 2026-06 | `MODULE_AUDIT.md` 过期描述(input_support/platform) | — |
+
+**当前剩余可疑项**(`utils::ime` thin wrapper 是允许的):
+- 无
+
+## 后续建议(非本次工作)
+
+1. **Spell/Monster 枚举对齐**:与 master 双向同步所有 enum 值,修复 5 个失败的 enum roundtrip 测试
+2. **NewMonsterInfo/NewNPCInfo 实现**:在 SharedRust 端加 `ClientMonsterInfo`,配合 handler 接收 tooltip 信息
+3. **InputStateSystem/MapUpdateSystem** 注册:评估后并入调度器,或标为 deprecated 删除
+4. **持续 merge master**:本 commit 周期已合一次,但上游仍在演进(2026-05 仍在合并新 PR)
 
 ---
 
-如果你希望下一步继续推进（仍然按 A 的策略：先审查/不重构），建议从“给 systems 写一个最小接入入口”作为单点突破：哪怕只接入 `InputStateSystem` + `PlayerControlSystem` + `MovementSystem`，也能让 `systems/` 从“死目录”变成“可演进目录”。
+**如果你是新接手者**:上面的"模块总览"表是 ground truth。任何与表不符的描述都是过时的。
