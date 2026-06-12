@@ -614,7 +614,13 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
             || x == SP::ResizeStorage as u16
             || x == SP::TransformUpdate as u16
             || x == SP::NewRecipeInfo as u16
-            || x == SP::Opendoor as u16 =>
+            || x == SP::Opendoor as u16
+            // PR #1169: Warehouse password
+            || x == SP::StorageUnlockResult as u16
+            || x == SP::StoragePasswordResult as u16
+            // PR #1126: KR NPC/Quest Linking
+            || x == SP::NewMonsterInfo as u16
+            || x == SP::NewNPCInfo as u16 =>
         {
             ItemHandler.handle(header, payload)
         }
@@ -1787,6 +1793,45 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             let packet = client::guild::PurchaseGuildTerritory { owner: owner.clone() };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 PurchaseGuildTerritory: owner={}", owner);
+        }
+
+        // ===== PR #1169: Warehouse password (client -> server) =====
+        NetworkEvent::UnlockStorageRequest { password } => {
+            let packet = client::storage::UnlockStorage { password: password.clone() };
+            serialize_packet(stream, &packet)?;
+            tracing::info!("🔐 UnlockStorage: password=****");
+        }
+        NetworkEvent::SetStoragePasswordRequest { current_password, new_password } => {
+            let packet = client::storage::SetStoragePassword {
+                current_password: current_password.clone(),
+                new_password: new_password.clone(),
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::info!("🔐 SetStoragePassword: current=**** new=****");
+        }
+        NetworkEvent::RemoveStoragePasswordRequest { current_password } => {
+            let packet = client::storage::RemoveStoragePassword {
+                current_password: current_password.clone(),
+            };
+            serialize_packet(stream, &packet)?;
+            tracing::info!("🔐 RemoveStoragePassword: current=****");
+        }
+
+        // ===== PR #1126: Detailed info request (client -> server) =====
+        NetworkEvent::RequestMonsterInfoEvent { monster_index } => {
+            let packet = client::info::RequestMonsterInfo { monster_index };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 RequestMonsterInfo: idx={}", monster_index);
+        }
+        NetworkEvent::RequestNPCInfoEvent { npc_index } => {
+            let packet = client::info::RequestNPCInfo { npc_index };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 RequestNPCInfo: idx={}", npc_index);
+        }
+        NetworkEvent::RequestItemInfoEvent { item_index } => {
+            let packet = client::info::RequestItemInfo { item_index };
+            serialize_packet(stream, &packet)?;
+            tracing::debug!("📤 RequestItemInfo: idx={}", item_index);
         }
 
         // ===== 攻击/玩家模式 =====

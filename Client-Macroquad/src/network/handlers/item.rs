@@ -638,6 +638,59 @@ impl PacketHandler for ItemHandler {
                 }
             }
 
+            // ====================================================================
+            // Warehouse password (PR #1169)
+            // ====================================================================
+
+            // StorageUnlockResult (server -> client)
+            x if x == ServerPacketIds::StorageUnlockResult as u16 => {
+                if let Ok(packet) = server::StorageUnlockResult::read_body(&mut cursor) {
+                    events.push(NetworkEvent::StorageUnlockResultReceived {
+                        result: packet.result,
+                        has_password: packet.has_password,
+                    });
+                    tracing::debug!("🔐 StorageUnlockResult: result={} has_password={}",
+                        packet.result, packet.has_password);
+                }
+            }
+
+            // StoragePasswordResult (server -> client)
+            x if x == ServerPacketIds::StoragePasswordResult as u16 => {
+                if let Ok(packet) = server::StoragePasswordResult::read_body(&mut cursor) {
+                    events.push(NetworkEvent::StoragePasswordResultReceived {
+                        result: packet.result,
+                        removing: packet.removing,
+                        has_password: packet.has_password,
+                        last_set_time: packet.last_set_time,
+                    });
+                    tracing::debug!("🔐 StoragePasswordResult: result={} removing={}",
+                        packet.result, packet.removing);
+                }
+            }
+
+            // ====================================================================
+            // Detailed info reply (PR #1126 KR NPC/Quest Linking)
+            // ====================================================================
+
+            // NewMonsterInfo
+            x if x == ServerPacketIds::NewMonsterInfo as u16 => {
+                if let Ok(packet) = server::NewMonsterInfo::read_body(&mut cursor) {
+                    let info = packet.info;
+                    tracing::debug!("👹 NewMonsterInfo: idx={} name={} level={}",
+                        info.index, info.name, info.level);
+                    events.push(NetworkEvent::NewMonsterInfoReceived { info });
+                }
+            }
+
+            // NewNPCInfo
+            x if x == ServerPacketIds::NewNPCInfo as u16 => {
+                if let Ok(packet) = server::NewNPCInfo::read_body(&mut cursor) {
+                    let info = packet.info;
+                    tracing::debug!("🧙 NewNPCInfo: oid={} name={}", info.object_id, info.name);
+                    events.push(NetworkEvent::NewNPCInfoReceived { info });
+                }
+            }
+
             _ => {
                 tracing::debug!("⚠️ ItemHandler: Unknown opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });

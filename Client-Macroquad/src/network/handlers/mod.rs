@@ -548,6 +548,33 @@ pub enum NetworkEvent {
     GuildTerritoryPageRequest { page: i32 },
     PurchaseGuildTerritoryRequest { owner: String },
 
+    // --- Warehouse password (PR #1169) — 客户端发起 ---
+    UnlockStorageRequest { password: String },
+    SetStoragePasswordRequest { current_password: String, new_password: String },
+    RemoveStoragePasswordRequest { current_password: String },
+
+    // --- Warehouse password (PR #1169) — 服务器回应 ---
+    StorageUnlockResultReceived { result: u8, has_password: bool },
+    StoragePasswordResultReceived {
+        result: u8,
+        removing: bool,
+        has_password: bool,
+        last_set_time: i64,
+    },
+
+    // --- Detailed info request (PR #1126) — 客户端发起 ---
+    RequestMonsterInfoEvent { monster_index: i32 },
+    RequestNPCInfoEvent { npc_index: i32 },
+    RequestItemInfoEvent { item_index: i32 },
+
+    // --- Detailed info reply (PR #1126) — 服务器回应 ---
+    NewMonsterInfoReceived {
+        info: mir2_shared::data::client_data::ClientMonsterInfo,
+    },
+    NewNPCInfoReceived {
+        info: mir2_shared::data::client_data::ClientNPCInfo,
+    },
+
     // 攻击/玩家模式
     ChangeAModeRequest { mode: mir2_shared::enums::AttackMode },
     ChangePModeRequest { mode: mir2_shared::enums::PetMode },
