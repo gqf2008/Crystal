@@ -13,7 +13,6 @@
 // 全局玩家实体只有一个，用 for 循环代替 .next() 是为了保持与 ECS 查询的一致性
 #![allow(clippy::never_loop)]
 
-pub mod camera;
 pub mod compat;
 pub mod components;
 pub mod coord;
