@@ -231,6 +231,27 @@ pub fn process_ui_actions(ctx: &mut GameContext) {
                         let _ = net.send(NetworkEvent::NPCCallRequest { npc_object_id, key });
                     }
                 }
+                // ===== PR #1169: Warehouse password UI triggers =====
+                crate::scenes::dialogs::game::npc_dialog::NpcDialogAction::StorageUnlock => {
+                    let _ = UiState::with_mut_in_world(&mut ctx.world, |ui| {
+                        ui.pending_commands.push(UiCommand::ShowTextInput {
+                            kind: crate::scenes::dialogs::game::main_dialog::TextInputKind::UnlockStorage,
+                            title: "解锁仓库".to_string(),
+                            placeholder: "输入仓库密码".to_string(),
+                            max_length: 32,
+                        });
+                    });
+                }
+                crate::scenes::dialogs::game::npc_dialog::NpcDialogAction::StorageRemovePassword => {
+                    let _ = UiState::with_mut_in_world(&mut ctx.world, |ui| {
+                        ui.pending_commands.push(UiCommand::ShowTextInput {
+                            kind: crate::scenes::dialogs::game::main_dialog::TextInputKind::RemoveStoragePassword,
+                            title: "删除仓库密码".to_string(),
+                            placeholder: "输入当前密码以确认".to_string(),
+                            max_length: 32,
+                        });
+                    });
+                }
             },
             UiAction::NpcGoods(a) | UiAction::NpcSubGoods(a) => {
                 handle_npc_goods_action(ctx, a);

@@ -27,6 +27,13 @@ pub enum NpcDialogAction {
     ClickAction { action: String },
     /// 链接：对齐 C# 的 ((text/url))
     OpenLink { url: String },
+    // ===== PR #1169: Warehouse password actions =====
+    /// 玩家在 NPC 对话框里点击了"输入仓库密码"按钮。
+    /// 上层需要弹出 ShowTextInput(TextInputKind::UnlockStorage)。
+    StorageUnlock,
+    /// 玩家在 NPC 对话框里点击了"删除仓库密码"按钮。
+    /// 上层需要弹出 ShowTextInput(TextInputKind::RemoveStoragePassword)。
+    StorageRemovePassword,
 }
 
 #[derive(Debug, Clone)]
@@ -894,6 +901,17 @@ impl NpcDialogHybrid {
             if action == "@Exit" {
                 self.hide();
                 return NpcDialogAction::Close;
+            }
+            // PR #1169: Warehouse password action intercepts.
+            // 触发规则:在 NPC 脚本里写 `@StorageUnlock` 或 `@StorageRemovePassword`
+            // (用现有 <<text/@Action>> 标签),本层拦截并转为专用 NpcDialogAction,
+            // 由 actions.rs 弹 ShowTextInput。不发给服务器。
+            // (SetStoragePassword 需要 current + new 两段 input,
+            //  留待后续 PR — 当前 TextInputKind 是单字段)
+            match action.as_str() {
+                "@StorageUnlock" => return NpcDialogAction::StorageUnlock,
+                "@StorageRemovePassword" => return NpcDialogAction::StorageRemovePassword,
+                _ => {}
             }
             return NpcDialogAction::ClickAction { action };
         }
