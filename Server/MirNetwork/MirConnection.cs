@@ -59,6 +59,8 @@ namespace Server.MirNetwork
         public MirConnection Observing;
 
         public List<ItemInfo> SentItemInfo = new List<ItemInfo>();
+        public List<MonsterInfo> SentMonsterInfo = new List<MonsterInfo>();
+        public List<NPCInfo> SentNPCInfo = new List<NPCInfo>();
         public List<QuestInfo> SentQuestInfo = new List<QuestInfo>();
         public List<RecipeInfo> SentRecipeInfo = new List<RecipeInfo>();
         public List<UserItem> SentChatItem = new List<UserItem>(); //TODO - Add Expiry time
@@ -80,7 +82,7 @@ namespace Server.MirNetwork
 
             Envir.UpdateIPBlock(IPAddress, TimeSpan.FromSeconds(Settings.IPBlockSeconds));
 
-            MessageQueue.Enqueue(IPAddress + ", Connected.");
+            MessageQueue.Enqueue(GameLanguage.ServerTextMap.GetLocalization((ServerTextKeys.IPAddressConnected), IPAddress));
 
             _client = client;
             _client.NoDelay = true;
@@ -177,7 +179,7 @@ namespace Server.MirNetwork
                         : TimeSpan.FromHours(24)
                 );
 
-                MessageQueue.Enqueue($"{IPAddress} Disconnected, Invalid packet.");
+                MessageQueue.Enqueue(GameLanguage.ServerTextMap.GetLocalization((ServerTextKeys.IPAddressDisconnectedInvalidPacket), IPAddress));
 
                 Disconnecting = true;
                 return;
@@ -203,7 +205,7 @@ namespace Server.MirNetwork
                     packetList.Add(cPacket.ToString());
                 }
 
-                MessageQueue.Enqueue($"{IPAddress} Disconnected, Large amount of Packets. LastPackets: {String.Join(",", packetList.Distinct())}.");
+                MessageQueue.Enqueue(GameLanguage.ServerTextMap.GetLocalization((ServerTextKeys.IPAddressDisconnectedLargePackets), IPAddress, String.Join(",", packetList.Distinct())));
 
                 Disconnecting = true;
                 return;
@@ -312,6 +314,15 @@ namespace Server.MirNetwork
                 case (short)ClientPacketIds.ChangePassword:
                     ChangePassword((C.ChangePassword) p);
                     break;
+                case (short)ClientPacketIds.UnlockStorage:
+                    UnlockStorage((C.UnlockStorage)p);
+                    break;
+                case (short)ClientPacketIds.SetStoragePassword:
+                    SetStoragePassword((C.SetStoragePassword)p);
+                    break;
+                case (short)ClientPacketIds.RemoveStoragePassword:
+                    RemoveStoragePassword((C.RemoveStoragePassword)p);
+                    break;
                 case (short)ClientPacketIds.Login:
                     Login((C.Login) p);
                     break;
@@ -407,6 +418,15 @@ namespace Server.MirNetwork
                     break;
                 case (short)ClientPacketIds.RequestMapInfo:
                     RequestMapInfo((C.RequestMapInfo)p);
+                    break;
+                case (short)ClientPacketIds.RequestMonsterInfo:
+                    RequestMonsterInfo((C.RequestMonsterInfo)p);
+                    break;
+                case (short)ClientPacketIds.RequestNPCInfo:
+                    RequestNPCInfo((C.RequestNPCInfo)p);
+                    break;
+                case (short)ClientPacketIds.RequestItemInfo:
+                    RequestItemInfo((C.RequestItemInfo)p);
                     break;
                 case (short)ClientPacketIds.TeleportToNPC:
                     TeleportToNPC((C.TeleportToNPC)p);
@@ -738,8 +758,11 @@ namespace Server.MirNetwork
                 case (short)ClientPacketIds.PurchaseGuildTerritory:
                     PurchaseGuildTerritory((C.PurchaseGuildTerritory)p);
                     return;
+                case (short)ClientPacketIds.DeleteItem:
+                    DeleteItem((C.DeleteItem)p);
+                    break;
                 default:
-                    MessageQueue.Enqueue(string.Format("Invalid packet received. Index : {0}", p.Index));
+                    MessageQueue.Enqueue(GameLanguage.ServerTextMap.GetLocalization((ServerTextKeys.InvalidPacketReceived), p.Index));
                     break;
             }
         }
@@ -847,12 +870,12 @@ namespace Server.MirNetwork
 
                     BeginSend(data);
                     SoftDisconnect(10);
-                    MessageQueue.Enqueue(SessionID + ", Disconnnected - Wrong Client Version.");
+                    MessageQueue.Enqueue(GameLanguage.ServerTextMap.GetLocalization((ServerTextKeys.PlayerDisconnectedWrongClientVersion), SessionID));
                     return;
                 }
             }
 
-            MessageQueue.Enqueue(SessionID + ", " + IPAddress + ", Client version matched.");
+            MessageQueue.Enqueue(GameLanguage.ServerTextMap.GetLocalization((ServerTextKeys.ClientVersionMatched), SessionID, IPAddress));
             Enqueue(new S.ClientVersion { Result = 1 });
 
             Stage = GameStage.Login;
@@ -868,21 +891,151 @@ namespace Server.MirNetwork
         {
             if (Stage != GameStage.Login) return;
 
-            MessageQueue.Enqueue(SessionID + ", " + IPAddress + ", New account being created.");
+            MessageQueue.Enqueue(GameLanguage.ServerTextMap.GetLocalization((ServerTextKeys.NewAccountBeingCreated), SessionID, IPAddress));
             Envir.NewAccount(p, this);
         }
         private void ChangePassword(C.ChangePassword p)
         {
             if (Stage != GameStage.Login) return;
 
-            MessageQueue.Enqueue(SessionID + ", " + IPAddress + ", Password being changed.");
+            MessageQueue.Enqueue(GameLanguage.ServerTextMap.GetLocalization((ServerTextKeys.PasswordBeingChanged), SessionID, IPAddress));
             Envir.ChangePassword(p, this);
+        }
+        private void UnlockStorage(C.UnlockStorage p)
+        {
+            if (Stage != GameStage.Game || Player == null || Account == null)
+            {
+                Enqueue(new S.StorageUnlockResult { Result = 3, HasPassword = Account != null && Account.HasStoragePassword });
+                return;
+            }
+
+            if (!CanAccessStorageNpc())
+            {
+                Enqueue(new S.StorageUnlockResult { Result = 3, HasPassword = Account.HasStoragePassword });
+                return;
+            }
+
+            if (!Account.HasStoragePassword)
+            {
+                Player.SetStorageUnlocked(true);
+                Enqueue(new S.StorageUnlockResult { Result = 4, HasPassword = false });
+                return;
+            }
+
+            if (!Envir.IsPasswordValid(p.Password))
+            {
+                Enqueue(new S.StorageUnlockResult { Result = 1, HasPassword = true });
+                return;
+            }
+
+            if (!Account.ValidateStoragePassword(p.Password))
+            {
+                Enqueue(new S.StorageUnlockResult { Result = 2, HasPassword = true });
+                return;
+            }
+
+            Player.SetStorageUnlocked(true);
+            Enqueue(new S.StorageUnlockResult { Result = 0, HasPassword = true });
+            Player.SendStorage();
+        }
+        private void SetStoragePassword(C.SetStoragePassword p)
+        {
+            if (Stage != GameStage.Game || Player == null || Account == null)
+            {
+                Enqueue(new S.StoragePasswordResult { Result = 0, Removing = false, HasPassword = Account != null && Account.HasStoragePassword, LastSetTime = Account?.StoragePasswordLastSet ?? DateTime.MinValue });
+                return;
+            }
+
+            if (!CanAccessStorageNpc())
+            {
+                Enqueue(new S.StoragePasswordResult { Result = 0, Removing = false, HasPassword = Account.HasStoragePassword, LastSetTime = Account.StoragePasswordLastSet });
+                return;
+            }
+
+            if (!Envir.IsPasswordValid(p.NewPassword))
+            {
+                Enqueue(new S.StoragePasswordResult { Result = 3, Removing = false, HasPassword = Account.HasStoragePassword, LastSetTime = Account.StoragePasswordLastSet });
+                return;
+            }
+
+            if (Account.HasStoragePassword)
+            {
+                if (!Envir.IsPasswordValid(p.CurrentPassword))
+                {
+                    Enqueue(new S.StoragePasswordResult { Result = 1, Removing = false, HasPassword = true, LastSetTime = Account.StoragePasswordLastSet });
+                    return;
+                }
+
+                if (!Account.ValidateStoragePassword(p.CurrentPassword))
+                {
+                    Enqueue(new S.StoragePasswordResult { Result = 2, Removing = false, HasPassword = true, LastSetTime = Account.StoragePasswordLastSet });
+                    return;
+                }
+            }
+
+            Account.StoragePassword = p.NewPassword;
+            Account.StoragePasswordLastSet = Envir.Now;
+            Player.SetStorageUnlocked(true);
+            Enqueue(new S.StoragePasswordResult { Result = 4, Removing = false, HasPassword = true, LastSetTime = Account.StoragePasswordLastSet });
+        }
+        private void RemoveStoragePassword(C.RemoveStoragePassword p)
+        {
+            if (Stage != GameStage.Game || Player == null || Account == null)
+            {
+                Enqueue(new S.StoragePasswordResult { Result = 0, Removing = true, HasPassword = Account != null && Account.HasStoragePassword, LastSetTime = Account?.StoragePasswordLastSet ?? DateTime.MinValue });
+                return;
+            }
+
+            if (!CanAccessStorageNpc())
+            {
+                Enqueue(new S.StoragePasswordResult { Result = 0, Removing = true, HasPassword = Account.HasStoragePassword, LastSetTime = Account.StoragePasswordLastSet });
+                return;
+            }
+
+            if (!Account.HasStoragePassword)
+            {
+                Enqueue(new S.StoragePasswordResult { Result = 5, Removing = true, HasPassword = false, LastSetTime = DateTime.MinValue });
+                return;
+            }
+
+            if (!Envir.IsPasswordValid(p.CurrentPassword))
+            {
+                Enqueue(new S.StoragePasswordResult { Result = 1, Removing = true, HasPassword = true, LastSetTime = Account.StoragePasswordLastSet });
+                return;
+            }
+
+            if (!Account.ValidateStoragePassword(p.CurrentPassword))
+            {
+                Enqueue(new S.StoragePasswordResult { Result = 2, Removing = true, HasPassword = true, LastSetTime = Account.StoragePasswordLastSet });
+                return;
+            }
+
+            Account.ClearStoragePassword();
+            Player.SetStorageUnlocked(true);
+            Enqueue(new S.StoragePasswordResult { Result = 4, Removing = true, HasPassword = false, LastSetTime = DateTime.MinValue });
+        }
+        private bool CanAccessStorageNpc()
+        {
+            if (Player == null) return false;
+
+            if (Player.NPCPage == null || !String.Equals(Player.NPCPage.Key, NPCScript.StorageKey, StringComparison.CurrentCultureIgnoreCase))
+                return false;
+
+            NPCObject ob = null;
+            for (int i = 0; i < Player.CurrentMap.NPCs.Count; i++)
+            {
+                if (Player.CurrentMap.NPCs[i].ObjectID != Player.NPCObjectID) continue;
+                ob = Player.CurrentMap.NPCs[i];
+                break;
+            }
+
+            return ob != null && Functions.InRange(ob.CurrentLocation, Player.CurrentLocation, Globals.DataRange);
         }
         private void Login(C.Login p)
         {
             if (Stage != GameStage.Login) return;
 
-            MessageQueue.Enqueue(SessionID + ", " + IPAddress + ", User logging in.");
+            MessageQueue.Enqueue(GameLanguage.ServerTextMap.GetLocalization((ServerTextKeys.UserLoggingIn), SessionID, IPAddress));
             Envir.Login(p, this);
         }
         private void NewCharacter(C.NewCharacter p)
@@ -1227,6 +1380,27 @@ namespace Server.MirNetwork
             if (Stage != GameStage.Game) return;
 
             Player.RequestMapInfo(p.MapIndex);
+        }
+
+        private void RequestMonsterInfo(C.RequestMonsterInfo p)
+        {
+            if (Stage != GameStage.Game) return;
+
+            Player.RequestMonsterInfo(p.MonsterIndex);
+        }
+
+        private void RequestNPCInfo(C.RequestNPCInfo p)
+        {
+            if (Stage != GameStage.Game) return;
+
+            Player.RequestNPCInfo(p.NPCIndex);
+        }
+
+        private void RequestItemInfo(C.RequestItemInfo p)
+        {
+            if (Stage != GameStage.Game) return;
+
+            Player.RequestItemInfo(p.ItemIndex);
         }
 
         private void TeleportToNPC(C.TeleportToNPC p)
@@ -1634,17 +1808,17 @@ namespace Server.MirNetwork
             {
                 Player.AllowMarriage = !Player.AllowMarriage;
                 if (Player.AllowMarriage)
-                    Player.ReceiveChat("You're now allowing marriage requests.", ChatType.Hint);
+                    Player.ReceiveChat(GameLanguage.ServerTextMap.GetLocalization(ServerTextKeys.YouAllowMarriageRequests), ChatType.Hint);
                 else
-                    Player.ReceiveChat("You're now blocking marriage requests.", ChatType.Hint);
+                    Player.ReceiveChat(GameLanguage.ServerTextMap.GetLocalization(ServerTextKeys.YouBlockMarriageRequests), ChatType.Hint);
             }
             else
             {
                 Player.AllowLoverRecall = !Player.AllowLoverRecall;
                 if (Player.AllowLoverRecall)
-                    Player.ReceiveChat("You're now allowing recall from lover.", ChatType.Hint);
+                    Player.ReceiveChat(GameLanguage.ServerTextMap.GetLocalization(ServerTextKeys.YouAllowRecallFromLover), ChatType.Hint);
                 else
-                    Player.ReceiveChat("You're now blocking recall from lover.", ChatType.Hint);
+                    Player.ReceiveChat(GameLanguage.ServerTextMap.GetLocalization(ServerTextKeys.YouBlockRecallFromLover), ChatType.Hint);
             }
         }
 
@@ -1682,9 +1856,9 @@ namespace Server.MirNetwork
 
                 Player.AllowMentor = !Player.AllowMentor;
                 if (Player.AllowMentor)
-                    Player.ReceiveChat(GameLanguage.AllowingMentorRequests, ChatType.Hint);
+                Player.ReceiveChat(GameLanguage.ServerTextMap.GetLocalization(ServerTextKeys.AllowingMentorRequests), ChatType.Hint);
                 else
-                    Player.ReceiveChat(GameLanguage.BlockingMentorRequests, ChatType.Hint);
+                    Player.ReceiveChat(GameLanguage.ServerTextMap.GetLocalization(ServerTextKeys.BlockingMentorRequests), ChatType.Hint);
         }
 
         private void CancelMentor(C.CancelMentor p)
@@ -1784,7 +1958,7 @@ namespace Server.MirNetwork
                 return;
             }
 
-            Player.ReceiveChat("Reincarnation failed", ChatType.System);
+            Player.ReceiveChat(GameLanguage.ServerTextMap.GetLocalization(ServerTextKeys.ReincarnationFailed), ChatType.System);
         }
 
         private void CancelReincarnation()
@@ -2125,6 +2299,42 @@ namespace Server.MirNetwork
             Enqueue(new S.NewItemInfo { Info = info });
             SentItemInfo.Add(info);
         }
+
+        public void CheckMonsterInfo(int monsterIndex)
+        {
+            CheckMonsterInfo(Envir.GetMonsterInfo(monsterIndex));
+        }
+
+        public void CheckMonsterInfo(MonsterInfo info)
+        {
+            if (info == null) return;
+
+            foreach (MirConnection observer in Observers)
+                observer.CheckMonsterInfo(info);
+
+            if (SentMonsterInfo.Contains(info)) return;
+
+            Enqueue(new S.NewMonsterInfo { Info = info.ClientInformation });
+            SentMonsterInfo.Add(info);
+        }
+
+        public void CheckNPCInfo(int npcIndex)
+        {
+            CheckNPCInfo(Envir.GetNPCInfo(npcIndex));
+        }
+
+        public void CheckNPCInfo(NPCInfo info)
+        {
+            if (info == null) return;
+
+            foreach (MirConnection observer in Observers)
+                observer.CheckNPCInfo(info);
+
+            if (SentNPCInfo.Contains(info)) return;
+
+            Enqueue(new S.NewNPCInfo { Info = info.ClientInformation });
+            SentNPCInfo.Add(info);
+        }
         public void CheckItem(UserItem item)
         {
             CheckItemInfo(item.Info);
@@ -2148,6 +2358,13 @@ namespace Server.MirNetwork
 
             Enqueue(new S.NewHeroInfo { Info = heroInfo.ClientInformation });
             SentHeroInfo.Add(item.UniqueID);
+        }
+
+        private void DeleteItem(C.DeleteItem p)
+        {
+            if (Stage != GameStage.Game) return;
+
+            Player.DeleteItem(p.UniqueID, p.Count);
         }
     }
 

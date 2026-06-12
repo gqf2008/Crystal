@@ -15,464 +15,263 @@ using Client.MirGraphics.Particles;
 
 namespace Client.MirScenes
 {
-    /// <summary>
-    /// 游戏主场景 - 负责管理游戏内所有UI对话框、地图渲染、对象交互等核心功能
-    /// 继承自 MirScene，是玩家进入游戏后的主要交互界面
-    /// </summary>
     public sealed class GameScene : MirScene
     {
-        /// <summary>游戏场景单例 - 全局唯一的游戏场景实例</summary>
         public static GameScene Scene;
-        
-        /// <summary>是否处于观察者模式 - 用于观战或GM模式</summary>
         public static bool Observing;
-        
-        /// <summary>是否允许观察 - 服务器权限控制</summary>
         public static bool AllowObserve;
 
-        /// <summary>
-        /// 当前玩家对象 - 代理到 MapObject.User
-        /// 包含玩家的所有属性、装备、技能、背包等信息
-        /// </summary>
         public static UserObject User
         {
             get { return MapObject.User; }
             set { MapObject.User = value; }
         }
 
-        /// <summary>
-        /// 英雄对象 - 玩家召唤的英雄伙伴
-        /// 包含英雄的装备、技能、AI行为等
-        /// </summary>
         public static UserHeroObject Hero
         {
             get { return MapObject.Hero; }
             set { MapObject.Hero = value; }
         }
-        
-        /// <summary>
-        /// 英雄对象实例 - 地图上的英雄实体对象
-        /// 用于渲染和交互
-        /// </summary>
         public static HeroObject HeroObject
         {
             get { return MapObject.HeroObject; }
             set { MapObject.HeroObject = value; }
         }
 
-        /// <summary>移动时间戳 - 上次移动操作的时间</summary>
-        /// <summary>攻击时间戳 - 上次攻击操作的时间</summary>
-        /// <summary>下次可跑步时间 - 跑步冷却时间</summary>
-        /// <summary>日志时间戳 - 日志输出控制</summary>
-        /// <summary>上次跑步时间 - 记录跑步状态</summary>
-        /// <summary>切换宠物模式时间 - PMode切换冷却</summary>
-        /// <summary>切换攻击模式时间 - AMode切换冷却</summary>
-        /// <summary>英雄施法时间 - 英雄技能冷却</summary>
-        /// <summary>智能生物拾取时间 - 宠物拾取冷却</summary>
         public static long MoveTime, AttackTime, NextRunTime, LogTime, LastRunTime, ChangePModeTime, ChangeAModeTime, HeroSpellTime, IntelligentCreaturePickupTime;
-        
-        /// <summary>是否可以移动 - 控制玩家移动权限</summary>
-        /// <summary>是否可以跑步 - 控制跑步权限</summary>
         public static bool CanMove, CanRun;
 
-        /// <summary>英雄拥有状态 - 私有字段</summary>
         private bool hasHero;
-        
-        /// <summary>
-        /// 是否拥有英雄 - 控制英雄召唤按钮的显示
-        /// 当值变化时自动更新UI
-        /// </summary>
         public bool HasHero
         {
             get { return hasHero; }
             set
             {
                 if (hasHero == value) return;
-                hasHero = value;               
+
+                hasHero = value;
                 MainDialog.HeroSummonButton.Visible = value;
             }
         }
-        
-        /// <summary>英雄生成状态 - 用于跟踪英雄的召唤/解散状态</summary>
         public HeroSpawnState HeroSpawnState;
-        
-        /// <summary>粒子引擎列表 - 管理所有粒子特效(天气、魔法效果等)</summary>
         public List<ParticleEngine> ParticleEngines = new List<ParticleEngine>();
-        
-        // ==================== 核心控制组件 ====================
-        /// <summary>地图控制器 - 负责地图渲染、对象管理、鼠标交互等核心功能</summary>
         public MapControl MapControl;
-        
-        // ==================== 主要UI对话框 ====================
-        /// <summary>主界面对话框 - 显示生命/魔法条、技能栏、快捷键等</summary>
         public MainDialog MainDialog;
-        
-        /// <summary>聊天对话框 - 显示聊天消息</summary>
         public ChatDialog ChatDialog;
-        
-        /// <summary>聊天控制栏 - 聊天输入框和频道切换</summary>
         public ChatControlBar ChatControl;
-        
-        /// <summary>背包对话框 - 显示玩家背包物品</summary>
         public InventoryDialog InventoryDialog;
-        
-        /// <summary>角色对话框 - 显示玩家属性和装备</summary>
         public CharacterDialog CharacterDialog;
-        
-        /// <summary>英雄对话框 - 显示英雄属性和装备</summary>
         public CharacterDialog HeroDialog;
-        
-        /// <summary>英雄背包对话框 - 英雄的物品栏</summary>
         public HeroInventoryDialog HeroInventoryDialog;
-        
-        /// <summary>英雄管理对话框 - 英雄的管理和设置</summary>
         public HeroManageDialog HeroManageDialog;
-        
-        /// <summary>制作对话框 - 物品制作和合成</summary>
         public CraftDialog CraftDialog;
-        
-        /// <summary>仓库对话框 - 个人仓库</summary>
         public StorageDialog StorageDialog;
-        
-        /// <summary>腰带对话框 - 快捷道具栏</summary>
         public BeltDialog BeltDialog;
-        
-        /// <summary>小地图对话框 - 显示当前地图的缩略图</summary>
         public MiniMapDialog MiniMapDialog;
-        
-        /// <summary>查看对话框 - 查看其他玩家的装备和属性</summary>
         public InspectDialog InspectDialog;
-        
-        /// <summary>选项对话框 - 游戏设置</summary>
         public OptionDialog OptionDialog;
-        
-        /// <summary>菜单对话框 - 主菜单</summary>
         public MenuDialog MenuDialog;
-        
-        // ==================== NPC 相关对话框 ====================
-        /// <summary>NPC对话框 - 显示NPC对话内容</summary>
         public NPCDialog NPCDialog;
-        
-        /// <summary>NPC商店对话框 - 购买物品</summary>
         public NPCGoodsDialog NPCGoodsDialog;
-        
-        /// <summary>NPC二级商店对话框 - 购买物品(子菜单)</summary>
         public NPCGoodsDialog NPCSubGoodsDialog;
-        
-        /// <summary>NPC制作商店对话框 - 制作类NPC商店</summary>
         public NPCGoodsDialog NPCCraftGoodsDialog;
-        
-        /// <summary>NPC掉落对话框 - 出售物品给NPC</summary>
         public NPCDropDialog NPCDropDialog;
-        
-        /// <summary>NPC觉醒对话框 - 装备觉醒系统</summary>
         public NPCAwakeDialog NPCAwakeDialog;
-        
-        // ==================== 功能性对话框 ====================
-        /// <summary>帮助对话框 - 游戏帮助和说明</summary>
         public HelpDialog HelpDialog;
-        
-        /// <summary>坐骑对话框 - 坐骑管理</summary>
         public MountDialog MountDialog;
-        
-        /// <summary>钓鱼对话框 - 钓鱼功能</summary>
         public FishingDialog FishingDialog;
-        
-        /// <summary>钓鱼状态对话框 - 显示钓鱼进度</summary>
         public FishingStatusDialog FishingStatusDialog;
-        
-        /// <summary>精炼对话框 - 装备精炼和强化</summary>
         public RefineDialog RefineDialog;
 
-        // ==================== 社交系统对话框 ====================
-        /// <summary>组队对话框 - 队伍管理</summary>
         public GroupDialog GroupDialog;
-        
-        /// <summary>行会对话框 - 公会管理</summary>
         public GuildDialog GuildDialog;
-        
-        /// <summary>行会领地对话框 - 公会领地信息</summary>
         public GuildTerritoryDialog GuildTerritoryDialog;
-        
-        /// <summary>创建英雄对话框 - 新建英雄</summary>
         public NewCharacterDialog NewHeroDialog;
-        
-        /// <summary>英雄腰带对话框 - 英雄的快捷道具栏</summary>
         public HeroBeltDialog HeroBeltDialog;
 
-        // ==================== 地图和交易系统 ====================
-        /// <summary>大地图对话框 - 世界地图</summary>
         public BigMapDialog BigMapDialog;
-        
-        /// <summary>信任商人对话框 - 玩家商店系统</summary>
         public TrustMerchantDialog TrustMerchantDialog;
-        
-        /// <summary>角色装备耐久面板 - 显示装备耐久度</summary>
         public CharacterDuraPanel CharacterDuraPanel;
-        
-        /// <summary>耐久状态对话框 - 详细耐久度信息</summary>
         public DuraStatusDialog DuraStatusPanel;
-        
-        /// <summary>交易对话框 - 玩家交易界面</summary>
         public TradeDialog TradeDialog;
-        
-        /// <summary>访客交易对话框 - 交易对方的界面</summary>
         public GuestTradeDialog GuestTradeDialog;
 
-        // ==================== 英雄控制面板 ====================
-        /// <summary>英雄菜单面板 - 英雄快捷菜单</summary>
         public HeroMenuPanel HeroMenuPanel;
-        
-        /// <summary>英雄行为面板 - 英雄AI行为设置</summary>
         public HeroBehaviourPanel HeroBehaviourPanel;
-        
-        /// <summary>宝石镶嵌对话框 - 装备宝石系统</summary>
         public SocketDialog SocketDialog;
 
-        // ==================== 技能和聊天系统 ====================
-        /// <summary>技能栏对话框列表 - 多个技能快捷栏</summary>
         public List<SkillBarDialog> SkillBarDialogs = new List<SkillBarDialog>();
-        
-        /// <summary>聊天选项对话框 - 聊天设置</summary>
         public ChatOptionDialog ChatOptionDialog;
-        
-        /// <summary>聊天通知对话框 - 系统通知</summary>
         public ChatNoticeDialog ChatNoticeDialog;
 
-        // ==================== 任务系统 ====================
-        /// <summary>任务列表对话框 - 显示所有任务</summary>
         public QuestListDialog QuestListDialog;
-        
-        /// <summary>任务详情对话框 - 显示任务详细信息</summary>
         public QuestDetailDialog QuestDetailDialog;
-        
-        /// <summary>任务日志对话框 - 已完成任务记录</summary>
         public QuestDiaryDialog QuestLogDialog;
-        
-        /// <summary>任务追踪对话框 - 追踪当前任务</summary>
         public QuestTrackingDialog QuestTrackingDialog;
 
-        // ==================== 排行榜系统 ====================
-        /// <summary>排行榜对话框 - 显示各种排行榜</summary>
         public RankingDialog RankingDialog;
 
-        // ==================== 邮件系统 ====================
-        /// <summary>邮件列表对话框 - 显示收件箱</summary>
         public MailListDialog MailListDialog;
-        
-        /// <summary>写信对话框 - 发送文字邮件</summary>
         public MailComposeLetterDialog MailComposeLetterDialog;
-        
-        /// <summary>寄包裹对话框 - 发送物品邮件</summary>
         public MailComposeParcelDialog MailComposeParcelDialog;
-        
-        /// <summary>读信对话框 - 阅读文字邮件</summary>
         public MailReadLetterDialog MailReadLetterDialog;
-        
-        /// <summary>收包裹对话框 - 接收物品邮件</summary>
         public MailReadParcelDialog MailReadParcelDialog;
 
-        // ==================== 智能生物系统 ====================
-        /// <summary>智能生物对话框 - 宠物管理</summary>
         public IntelligentCreatureDialog IntelligentCreatureDialog;
-        
-        /// <summary>智能生物选项对话框 - 宠物设置</summary>
         public IntelligentCreatureOptionsDialog IntelligentCreatureOptionsDialog;
-        
-        /// <summary>智能生物等级对话框 - 宠物升级</summary>
         public IntelligentCreatureOptionsGradeDialog IntelligentCreatureOptionsGradeDialog;
 
-        // ==================== 好友和师徒系统 ====================
-        /// <summary>好友对话框 - 好友列表</summary>
         public FriendDialog FriendDialog;
-        
-        /// <summary>留言对话框 - 留言板</summary>
         public MemoDialog MemoDialog;
-        
-        /// <summary>关系对话框 - 夫妻/情侣系统</summary>
         public RelationshipDialog RelationshipDialog;
-        
-        /// <summary>师徒对话框 - 师徒系统</summary>
         public MentorDialog MentorDialog;
-        
-        /// <summary>游戏商城对话框 - 充值商城</summary>
         public GameShopDialog GameShopDialog;
 
-        // ==================== 举报系统 ====================
-        /// <summary>举报对话框 - 举报玩家</summary>
         public ReportDialog ReportDialog;
 
-        // ==================== 租赁系统 ====================
-        /// <summary>物品出租对话框 - 出租物品</summary>
         public ItemRentingDialog ItemRentingDialog;
-        
-        /// <summary>物品租用对话框 - 租用物品</summary>
         public ItemRentDialog ItemRentDialog;
-        
-        /// <summary>访客出租对话框 - 租用方界面</summary>
         public GuestItemRentingDialog GuestItemRentingDialog;
-        
-        /// <summary>访客租用对话框 - 出租方界面</summary>
         public GuestItemRentDialog GuestItemRentDialog;
-        
-        /// <summary>租赁记录对话框 - 租赁历史</summary>
         public ItemRentalDialog ItemRentalDialog;
 
-        // ==================== Buff系统 ====================
-        /// <summary>Buff对话框 - 显示玩家的Buff状态</summary>
         public BuffDialog BuffsDialog;
-        
-        /// <summary>英雄Buff对话框 - 显示英雄的Buff状态</summary>
         public BuffDialog HeroBuffsDialog;
 
-        // ==================== 辅助工具对话框 ====================
-        /// <summary>键盘布局对话框 - 显示快捷键设置</summary>
         public KeyboardLayoutDialog KeyboardLayoutDialog;
-        
-        /// <summary>公告对话框 - 显示系统公告</summary>
         public NoticeDialog NoticeDialog;
 
-        // ==================== 小工具控件 ====================
-        /// <summary>计时器控件 - 显示游戏内计时</summary>
         public TimerDialog TimerControl;
-        
-        /// <summary>指南针控件 - 显示方向</summary>
         public CompassDialog CompassControl;
-        
-        /// <summary>Roll点控件 - 物品分配系统</summary>
         public RollDialog RollControl;
 
-        // ==================== 游戏数据列表 ====================
-        /// <summary>物品信息列表 - 缓存所有物品的模板数据(名称、属性、图标等)</summary>
+
         public static List<ItemInfo> ItemInfoList = new List<ItemInfo>();
-        
-        /// <summary>用户ID列表 - 缓存所有玩家的ID和名称映射</summary>
         public static List<UserId> UserIdList = new List<UserId>();
-        
-        /// <summary>聊天物品列表 - 聊天中链接的物品(Ctrl+点击查看)</summary>
         public static List<UserItem> ChatItemList = new List<UserItem>();
-        
-        /// <summary>任务信息列表 - 所有任务的模板数据</summary>
         public static List<ClientQuestInfo> QuestInfoList = new List<ClientQuestInfo>();
-        
-        /// <summary>商城物品列表 - 商城中可购买的物品</summary>
         public static List<GameShopItem> GameShopInfoList = new List<GameShopItem>();
-        
-        /// <summary>配方信息列表 - 制作系统的配方数据</summary>
         public static List<ClientRecipeInfo> RecipeInfoList = new List<ClientRecipeInfo>();
-        
-        /// <summary>地图信息字典 - 地图ID到地图记录的映射(用于大地图显示)</summary>
         public static Dictionary<int, BigMapRecord> MapInfoList = new Dictionary<int, BigMapRecord>();
-        
-        /// <summary>英雄信息列表 - 玩家拥有的所有英雄信息</summary>
         public static List<ClientHeroInformation> HeroInfoList = new List<ClientHeroInformation>();
-        
-        /// <summary>英雄仓库 - 最多存储8个英雄</summary>
         public static ClientHeroInformation[] HeroStorage = new ClientHeroInformation[8];
-        
-        /// <summary>排行榜字典 - 玩家ID到排行榜信息的映射</summary>
         public static Dictionary<long, RankCharacterInfo> RankingList = new Dictionary<long, RankCharacterInfo>();
-        
-        /// <summary>传送到NPC的费用 - 快速传送消耗的金币</summary>
         public static int TeleportToNPCCost;
-        
-        /// <summary>最大英雄数量 - 玩家可拥有的最大英雄数</summary>
         public static int MaximumHeroCount;
 
-        // ==================== 仓库和物品相关 ====================
-        /// <summary>个人仓库 - 80格仓库空间</summary>
+        public static List<ClientMonsterInfo> MonsterInfoList = new List<ClientMonsterInfo>();
+        public static List<ClientNPCInfo> NPCInfoList = new List<ClientNPCInfo>();
+        private static readonly HashSet<int> RequestedItemInfo = new HashSet<int>();
+        private static readonly HashSet<int> RequestedMonsterInfo = new HashSet<int>();
+        private static readonly HashSet<int> RequestedNPCInfo = new HashSet<int>();
+
+        public static void RequestItemInfo(int index)
+        {
+            if (index <= 0 || HasItemInfo(index) || !RequestedItemInfo.Add(index)) return;
+            if (!Network.Connected) return;
+
+            Network.Enqueue(new C.RequestItemInfo { ItemIndex = index });
+        }
+
+        public static void RequestMonsterInfo(int index)
+        {
+            if (index <= 0 || HasMonsterInfo(index) || !RequestedMonsterInfo.Add(index)) return;
+            if (!Network.Connected) return;
+
+            Network.Enqueue(new C.RequestMonsterInfo { MonsterIndex = index });
+        }
+
+        public static void RequestNPCInfo(int index)
+        {
+            if (index <= 0 || HasNPCInfo(index) || !RequestedNPCInfo.Add(index)) return;
+            if (!Network.Connected) return;
+
+            Network.Enqueue(new C.RequestNPCInfo { NPCIndex = index });
+        }
+
+        public static void OnItemInfoReceived(int index)
+        {
+            RequestedItemInfo.Remove(index);
+        }
+
+        public static void OnMonsterInfoReceived(int index)
+        {
+            RequestedMonsterInfo.Remove(index);
+        }
+
+        public static void OnNPCInfoReceived(int index)
+        {
+            RequestedNPCInfo.Remove(index);
+        }
+
+        private static bool HasItemInfo(int index)
+        {
+            for (int i = 0; i < ItemInfoList.Count; i++)
+            {
+                if (ItemInfoList[i].Index == index)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool HasMonsterInfo(int index)
+        {
+            for (int i = 0; i < MonsterInfoList.Count; i++)
+            {
+                if (MonsterInfoList[i].Index == index)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool HasNPCInfo(int index)
+        {
+            for (int i = 0; i < NPCInfoList.Count; i++)
+            {
+                if (NPCInfoList[i].Index == index)
+                    return true;
+            }
+
+            return false;
+        }
+
         public static UserItem[] Storage = new UserItem[80];
-        
-        /// <summary>公会仓库 - 112格公会仓库空间</summary>
         public static UserItem[] GuildStorage = new UserItem[112];
-        
-        /// <summary>精炼栏 - 16格精炼界面</summary>
         public static UserItem[] Refine = new UserItem[16];
-        
-        /// <summary>鼠标悬停物品 - 当前鼠标指向的物品</summary>
-        /// <summary>选中物品 - 当前拖动或选中的物品</summary>
         public static UserItem HoverItem, SelectedItem;
-        
-        /// <summary>选中格子 - 当前选中的物品格子UI</summary>
         public static MirItemCell SelectedCell;
 
-        // ==================== 游戏状态和时间控制 ====================
-        /// <summary>是否拾取了金币 - 用于防止重复拾取</summary>
         public static bool PickedUpGold;
-        
-        /// <summary>物品标签 - 显示地面物品名称</summary>
-        /// <summary>邮件标签 - 新邮件提示</summary>
-        /// <summary>留言标签 - 新留言提示</summary>
-        /// <summary>公会Buff标签 - 公会增益显示</summary>
         public MirControl ItemLabel, MailLabel, MemoLabel, GuildBuffLabel;
-        
-        /// <summary>使用物品时间 - 物品使用冷却</summary>
-        /// <summary>拾取物品时间 - 拾取冷却</summary>
-        /// <summary>掉落查看时间 - 查看地面物品冷却</summary>
-        /// <summary>目标死亡时间 - 记录目标死亡时刻</summary>
         public static long UseItemTime, PickUpTime, DropViewTime, TargetDeadTime;
-        
-        /// <summary>金币数量 - 玩家当前金币</summary>
-        /// <summary>点券数量 - 玩家当前点券(商城货币)</summary>
         public static uint Gold, Credit;
-        
-        /// <summary>查看时间 - 查看其他玩家装备的冷却</summary>
         public static long InspectTime;
-        
-        /// <summary>是否显示复活消息 - 控制死亡复活提示</summary>
         public bool ShowReviveMessage;
 
-        // ==================== 邮件系统 ====================
-        /// <summary>是否有新邮件 - 新邮件标记</summary>
+
         public bool NewMail;
-        
-        /// <summary>新邮件计数器 - 未读邮件数量</summary>
         public int NewMailCounter = 0;
 
-        // ==================== 游戏模式设置 ====================
-        /// <summary>攻击模式 - 和平/组队/公会/全体等攻击模式</summary>
+
         public AttackMode AMode;
-        
-        /// <summary>宠物模式 - 宠物的攻击和跟随行为</summary>
         public PetMode PMode;
-        
-        /// <summary>光照设置 - 白天/黑夜/黄昏等光照模式</summary>
         public LightSetting Lights;
 
-        // ==================== NPC 交互相关 ====================
-        /// <summary>NPC交互时间 - NPC对话框打开时间</summary>
         public static long NPCTime;
-        
-        /// <summary>NPC对象ID - 当前交互的NPC ID</summary>
         public static uint NPCID;
-        
-        /// <summary>NPC费率 - NPC商店的价格倍率(打折或溢价)</summary>
         public static float NPCRate;
-        
-        /// <summary>NPC面板类型 - 当前打开的NPC功能类型(买/卖/修理/制作等)</summary>
         public static PanelType NPCPanelType;
-        
-        /// <summary>默认NPC ID - 默认交互的NPC(如复活点NPC)</summary>
         public static uint DefaultNPCID;
-        
-        /// <summary>是否隐藏商店附加属性 - 商店物品是否显示额外属性</summary>
         public static bool HideAddedStoreStats;
 
-        // ==================== 技能和输出控制 ====================
-        /// <summary>切换时间 - 技能栏切换冷却</summary>
         public long ToggleTime;
-        
-        /// <summary>施法时间 - 技能施放冷却</summary>
         public static long SpellTime;
 
-        // ==================== 消息输出系统 ====================
-        /// <summary>输出行数组 - 屏幕中央显示的10行消息(经验获得、物品拾取等)</summary>
         public MirLabel[] OutputLines = new MirLabel[10];
-        
-        /// <summary>输出消息列表 - 消息队列缓冲</summary>
         public List<OutPutMessage> OutputMessages = new List<OutPutMessage>();
 
-        /// <summary>输出延迟 - 消息显示的时间间隔</summary>
         public long OutputDelay;
 
         public GameScene()
@@ -481,6 +280,9 @@ namespace Client.MirScenes
             MapControl.AutoHit = false;
 
             Scene = this;
+            RequestedItemInfo.Clear();
+            RequestedMonsterInfo.Clear();
+            RequestedNPCInfo.Clear();
             BackColour = Color.Transparent;
             MoveTime = CMain.Time;
 
@@ -489,7 +291,7 @@ namespace Client.MirScenes
             MainDialog = new MainDialog { Parent = this };
             ChatDialog = new ChatDialog { Parent = this };
             ChatControl = new ChatControlBar { Parent = this };
-            InventoryDialog = new InventoryDialog { Parent = this };            
+            InventoryDialog = new InventoryDialog { Parent = this };
             BeltDialog = new BeltDialog { Parent = this };
             StorageDialog = new StorageDialog { Parent = this, Visible = false };
             CraftDialog = new CraftDialog { Parent = this, Visible = false };
@@ -537,7 +339,7 @@ namespace Client.MirScenes
             CharacterDuraPanel = new CharacterDuraPanel { Parent = this, Visible = false };
             DuraStatusPanel = new DuraStatusDialog { Parent = this, Visible = true };
             TradeDialog = new TradeDialog { Parent = this, Visible = false };
-            GuestTradeDialog = new GuestTradeDialog { Parent = this, Visible = false };            
+            GuestTradeDialog = new GuestTradeDialog { Parent = this, Visible = false };
 
             SocketDialog = new SocketDialog { Parent = this, Visible = false };
 
@@ -579,12 +381,13 @@ namespace Client.MirScenes
             GuestItemRentDialog = new GuestItemRentDialog { Parent = this, Visible = false };
             ItemRentalDialog = new ItemRentalDialog { Parent = this, Visible = false };
 
-            BuffsDialog = new BuffDialog { 
-                Parent = this, 
+            BuffsDialog = new BuffDialog
+            {
+                Parent = this,
                 Visible = true,
                 GetExpandedParameter = () => { return Settings.ExpandedBuffWindow; },
                 SetExpandedParameter = (value) => { Settings.ExpandedBuffWindow = value; }
-            };            
+            };
 
             KeyboardLayoutDialog = new KeyboardLayoutDialog { Parent = this, Visible = false };
 
@@ -607,146 +410,97 @@ namespace Client.MirScenes
                 RecreateBigMapButtons();
         }
 
-        /// <summary>
-        /// 更新鼠标光标 - 根据鼠标指向的对象改变光标样式
-        /// 光标类型:
-        /// - Default: 默认箭头
-        /// - Upgrade: 宝石镶嵌光标 (悬停物品+选中宝石+按Ctrl)
-        /// - Attack: 攻击光标 (指向怪物)
-        /// - AttackRed: 红色攻击光标 (指向玩家+按Shift)
-        /// - NPCTalk: 对话光标 (指向NPC)
-        /// </summary>
         private void UpdateMouseCursor()
         {
-            // 如果未启用自定义光标，直接返回
             if (!Settings.UseMouseCursors) return;
 
-            // ==================== 悬停在物品上 ====================
             if (GameScene.HoverItem != null)
             {
-                // 特殊情况: 选中宝石并按住Ctrl键 → 显示镶嵌光标
-                if (GameScene.SelectedCell != null && 
-                    GameScene.SelectedCell.Item != null && 
-                    GameScene.SelectedCell.Item.Info.Type == ItemType.Gem && 
-                    CMain.Ctrl)
+                if (GameScene.SelectedCell != null && GameScene.SelectedCell.Item != null && GameScene.SelectedCell.Item.Info.Type == ItemType.Gem && CMain.Ctrl)
                 {
-                    CMain.SetMouseCursor(MouseCursor.Upgrade); // 宝石镶嵌光标
+                    CMain.SetMouseCursor(MouseCursor.Upgrade);
                 }
                 else
                 {
-                    CMain.SetMouseCursor(MouseCursor.Default); // 默认光标
+                    CMain.SetMouseCursor(MouseCursor.Default);
                 }
             }
-            // ==================== 悬停在地图对象上 ====================
             else if (MapObject.MouseObject != null)
             {
                 switch (MapObject.MouseObject.Race)
                 {
-                    case ObjectType.Monster: // 指向怪物
-                        CMain.SetMouseCursor(MouseCursor.Attack); // 攻击光标
+                    case ObjectType.Monster:
+                        CMain.SetMouseCursor(MouseCursor.Attack);
                         break;
-                        
-                    case ObjectType.Merchant: // 指向NPC
-                        CMain.SetMouseCursor(MouseCursor.NPCTalk); // 对话光标
+                    case ObjectType.Merchant:
+                        CMain.SetMouseCursor(MouseCursor.NPCTalk);
                         break;
-                        
-                    case ObjectType.Player: // 指向玩家
-                        if (CMain.Shift) // 按住Shift键 = 强制攻击模式
+                    case ObjectType.Player:
+                        if (CMain.Shift)
                         {
-                            CMain.SetMouseCursor(MouseCursor.AttackRed); // 红色攻击光标
+                            CMain.SetMouseCursor(MouseCursor.AttackRed);
                         }
                         else
                         {
-                            CMain.SetMouseCursor(MouseCursor.Default); // 默认光标
+                            CMain.SetMouseCursor(MouseCursor.Default);
                         }
                         break;
-                        
-                    default: // 其他对象
-                        CMain.SetMouseCursor(MouseCursor.Default); // 默认光标
+                    default:
+                        CMain.SetMouseCursor(MouseCursor.Default);
                         break;
                 }
             }
-            // ==================== 悬停在空地上 ====================
             else
             {
-                CMain.SetMouseCursor(MouseCursor.Default); // 默认光标
+                CMain.SetMouseCursor(MouseCursor.Default);
             }
+
         }
 
-        /// <summary>
-        /// 输出消息 - 在屏幕中央显示消息
-        /// 消息会在5秒后自动消失
-        /// </summary>
-        /// <param name="message">消息文本</param>
-        /// <param name="type">消息类型(影响颜色)</param>
         public void OutputMessage(string message, OutputMessageType type = OutputMessageType.Normal)
         {
-            // 添加新消息到队列，设置5秒过期时间
             OutputMessages.Add(new OutPutMessage { Message = message, ExpireTime = CMain.Time + 5000, Type = type });
-            
-            // 限制消息队列最大长度为10条，移除最早的消息
             if (OutputMessages.Count > 10)
                 OutputMessages.RemoveAt(0);
         }
 
-        /// <summary>
-        /// 处理输出消息 - 更新屏幕中央的消息显示
-        /// 显示经验获得、物品拾取、任务进度等系统消息
-        /// 消息会在一段时间后自动消失
-        /// </summary>
         private void ProcessOuput()
         {
-            // ==================== 移除过期消息 ====================
-            // 检查并移除已超时的消息
             for (int i = 0; i < OutputMessages.Count; i++)
             {
                 if (CMain.Time >= OutputMessages[i].ExpireTime)
                     OutputMessages.RemoveAt(i);
             }
 
-            // ==================== 更新消息显示 ====================
-            // 将消息队列中的消息显示到屏幕上(最多10行)
             for (int i = 0; i < OutputLines.Length; i++)
             {
                 if (OutputMessages.Count > i)
                 {
-                    // 根据消息类型设置颜色
                     Color color;
                     switch (OutputMessages[i].Type)
                     {
-                        case OutputMessageType.Quest: // 任务消息
-                            color = Color.Gold; // 金色
+                        case OutputMessageType.Quest:
+                            color = Color.Gold;
                             break;
-                        case OutputMessageType.Guild: // 公会消息
-                            color = Color.DeepPink; // 深粉色
+                        case OutputMessageType.Guild:
+                            color = Color.DeepPink;
                             break;
-                        default: // 普通消息(经验/拾取等)
-                            color = Color.LimeGreen; // 亮绿色
+                        default:
+                            color = Color.LimeGreen;
                             break;
                     }
 
-                    // 设置消息文本和颜色
                     OutputLines[i].Text = OutputMessages[i].Message;
                     OutputLines[i].ForeColour = color;
                     OutputLines[i].Visible = true;
                 }
                 else
                 {
-                    // 没有消息时隐藏标签
                     OutputLines[i].Text = string.Empty;
                     OutputLines[i].Visible = false;
                 }
             }
         }
-        
-        /// <summary>
-        /// 键盘按键处理 - 处理游戏中的所有快捷键
-        /// 包括:
-        /// - 技能栏快捷键 (Bar1/Bar2/Hero技能)
-        /// - UI对话框快捷键 (背包/角色/技能等)
-        /// - 功能快捷键 (截图/退出/设置等)
-        /// 支持组合键: Alt, Shift, Ctrl, Tilde(~)
-        /// </summary>
         private void GameScene_KeyDown(object sender, KeyEventArgs e)
         {
             if (GameScene.Scene.KeyboardLayoutDialog.WaitingForBind != null)
@@ -761,6 +515,11 @@ namespace Client.MirScenes
                     continue;
                 if (KeyCheck.Key != e.KeyCode)
                     continue;
+                if (KeyCheck.Key == Keys.Insert && e.KeyCode == Keys.Insert && e.Modifiers == Keys.Control)
+                {
+                    //When Ctrl is held down, KeyData=Insert | Control, the system may mistakenly recognize it as Keys.Insert, requiring special judgment to be added.
+                    continue;
+                }
                 if ((KeyCheck.RequireAlt != 2) && (KeyCheck.RequireAlt != (CMain.Alt ? 1 : 0)))
                     continue;
                 if ((KeyCheck.RequireShift != 2) && (KeyCheck.RequireShift != (CMain.Shift ? 1 : 0)))
@@ -1133,13 +892,13 @@ namespace Client.MirScenes
             if (Settings.SkillMode || ctrl == true)
             {
                 Settings.SkillMode = false;
-                GameScene.Scene.ChatDialog.ReceiveChat("[SkillMode Ctrl]", ChatType.Hint);
+                GameScene.Scene.ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.SkillModeCtrl), ChatType.Hint);
                 GameScene.Scene.OptionDialog.ToggleSkillButtons(true);
             }
             else if (!Settings.SkillMode || ctrl == false)
             {
                 Settings.SkillMode = true;
-                GameScene.Scene.ChatDialog.ReceiveChat("[SkillMode ~]", ChatType.Hint);
+                GameScene.Scene.ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.SkillModeTilde), ChatType.Hint);
                 GameScene.Scene.OptionDialog.ToggleSkillButtons(false);
             }
         }
@@ -1216,7 +975,7 @@ namespace Client.MirScenes
 
             if (!actor.HasClassWeapon && actor.Weapon >= 0)
             {
-                ChatDialog.ReceiveChat("You must be wearing a suitable weapon to perform this skill", ChatType.System);
+                ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.MustWearSuitableWeapon), ChatType.System);
                 return;
             }
 
@@ -1241,7 +1000,8 @@ namespace Client.MirScenes
                         if (CMain.Time >= OutputDelay)
                         {
                             OutputDelay = CMain.Time + 1000;
-                            Scene.OutputMessage(string.Format("You cannot cast {0} for another {1} seconds.", magic.Spell.ToString(), ((magic.CastTime + magic.Delay) - CMain.Time - 1) / 1000 + 1));
+                            Scene.OutputMessage(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.CannotCastForSeconds), magic.Name,
+                                ((magic.CastTime + magic.Delay) - CMain.Time - 1) / 1000 + 1));
                         }
 
                         return;
@@ -1251,7 +1011,7 @@ namespace Client.MirScenes
             }
 
             int cost;
-            string prefix = actor == Hero ? "(Hero) " : string.Empty;
+            string prefix = actor == Hero ? GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.Hero) : string.Empty;
             switch (magic.Spell)
             {
                 case Spell.Fencing:
@@ -1266,28 +1026,36 @@ namespace Client.MirScenes
                 case Spell.Thrusting:
                     if (CMain.Time < ToggleTime) return;
                     actor.Thrusting = !actor.Thrusting;
-                    ChatDialog.ReceiveChat(prefix + (actor.Thrusting ? "Use Thrusting." : "Do not use Thrusting."), ChatType.Hint);
+                    ChatDialog.ReceiveChat(
+                        prefix + (actor.Thrusting ? GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.UseThrusting) : GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.DoNotUseThrusting)),
+                        ChatType.Hint);
                     ToggleTime = CMain.Time + 1000;
-                    SendSpellToggle(actor, magic.Spell, actor.Thrusting);                    
+                    SendSpellToggle(actor, magic.Spell, actor.Thrusting);
                     break;
                 case Spell.HalfMoon:
                     if (CMain.Time < ToggleTime) return;
                     actor.HalfMoon = !actor.HalfMoon;
-                    ChatDialog.ReceiveChat(prefix + (actor.HalfMoon ? "Use Half Moon." : "Do not use Half Moon."), ChatType.Hint);
+                    ChatDialog.ReceiveChat(
+                        prefix + (actor.HalfMoon ? GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.UseHalfMoon) : GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.DoNotUseHalfMoon)),
+                        ChatType.Hint);
                     ToggleTime = CMain.Time + 1000;
                     SendSpellToggle(actor, magic.Spell, actor.HalfMoon);
                     break;
                 case Spell.CrossHalfMoon:
                     if (CMain.Time < ToggleTime) return;
                     actor.CrossHalfMoon = !actor.CrossHalfMoon;
-                    ChatDialog.ReceiveChat(prefix + (actor.CrossHalfMoon ? "Use Cross Half Moon." : "Do not use Cross Half Moon."), ChatType.Hint);
+                    ChatDialog.ReceiveChat(
+                        prefix + (actor.CrossHalfMoon ? GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.UseCrossHalfMoon) : GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.DoNotUseCrossHalfMoon)),
+                        ChatType.Hint);
                     ToggleTime = CMain.Time + 1000;
                     SendSpellToggle(actor, magic.Spell, actor.CrossHalfMoon);
                     break;
                 case Spell.DoubleSlash:
                     if (CMain.Time < ToggleTime) return;
                     actor.DoubleSlash = !actor.DoubleSlash;
-                    ChatDialog.ReceiveChat(prefix + (actor.DoubleSlash ? "Use Double Slash." : "Do not use Double Slash."), ChatType.Hint);
+                    ChatDialog.ReceiveChat(
+                        prefix + (actor.DoubleSlash ? GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.UseDoubleSlash) : GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.DoNotUseDoubleSlash)),
+                        ChatType.Hint);
                     ToggleTime = CMain.Time + 1000;
                     SendSpellToggle(actor, magic.Spell, actor.DoubleSlash);
                     break;
@@ -1298,7 +1066,7 @@ namespace Client.MirScenes
                     cost = magic.Level * magic.LevelCost + magic.BaseCost;
                     if (cost > actor.MP)
                     {
-                        Scene.OutputMessage(GameLanguage.LowMana);
+                        Scene.OutputMessage(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.LowMana));
                         return;
                     }
                     actor.TwinDrakeBlade = true;
@@ -1315,7 +1083,7 @@ namespace Client.MirScenes
                     cost = magic.Level * magic.LevelCost + magic.BaseCost;
                     if (cost > actor.MP)
                     {
-                        Scene.OutputMessage(GameLanguage.LowMana);
+                        Scene.OutputMessage(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.LowMana));
                         return;
                     }
                     SendSpellToggle(actor, magic.Spell, true);
@@ -1324,7 +1092,7 @@ namespace Client.MirScenes
                     cost = magic.Level * magic.LevelCost + magic.BaseCost;
                     if (cost > actor.MP)
                     {
-                        Scene.OutputMessage(GameLanguage.LowMana);
+                        Scene.OutputMessage(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.LowMana));
                         return;
                     }
 
@@ -1359,13 +1127,13 @@ namespace Client.MirScenes
             if (CMain.Time >= LogTime)
             {
                 //If Last Combat < 10 CANCEL
-                MirMessageBox messageBox = new MirMessageBox(GameLanguage.ExitTip, MirMessageBoxButtons.YesNo);
+                MirMessageBox messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ExitTip), MirMessageBoxButtons.YesNo);
                 messageBox.YesButton.Click += (o, e) => Program.Form.Close();
                 messageBox.Show();
             }
             else
             {
-                ChatDialog.ReceiveChat(string.Format(GameLanguage.CannotLeaveGame, (LogTime - CMain.Time) / 1000), ChatType.System);
+                ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.CannotLeaveGame), (LogTime - CMain.Time) / 1000), ChatType.System);
             }
         }
         public void LogOut()
@@ -1373,7 +1141,7 @@ namespace Client.MirScenes
             if (CMain.Time >= LogTime)
             {
                 //If Last Combat < 10 CANCEL
-                MirMessageBox messageBox = new MirMessageBox(GameLanguage.LogOutTip, MirMessageBoxButtons.YesNo);
+                MirMessageBox messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.LogOutTip), MirMessageBoxButtons.YesNo);
                 messageBox.YesButton.Click += (o, e) =>
                 {
                     Network.Enqueue(new C.LogOut());
@@ -1383,131 +1151,82 @@ namespace Client.MirScenes
             }
             else
             {
-                ChatDialog.ReceiveChat(string.Format(GameLanguage.CannotLeaveGame, (LogTime - CMain.Time) / 1000), ChatType.System);
+                ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.CannotLeaveGame), (LogTime - CMain.Time) / 1000), ChatType.System);
             }
         }
 
-        /// <summary>
-        /// 绘制控件 - 游戏场景的主渲染方法
-        /// 渲染顺序:
-        /// 1. MapControl - 地图、对象、特效
-        /// 2. base.DrawControl() - UI对话框和控件
-        /// 3. 鼠标拖动的物品图标
-        /// 4. 屏幕中央的输出消息(经验、拾取等)
-        /// </summary>
         protected internal override void DrawControl()
         {
-            // 1. 绘制地图控制器(地图瓦片、对象、特效等)
             if (MapControl != null && !MapControl.IsDisposed)
                 MapControl.DrawControl();
-            
-            // 2. 绘制所有UI对话框和子控件
             base.DrawControl();
 
-            // 3. 绘制鼠标拖动的物品图标
-            // 跟随鼠标移动，显示在最上层
+
             if (PickedUpGold || (SelectedCell != null && SelectedCell.Item != null))
             {
-                // 确定图标: 金币(116) 或 物品图标
                 int image = PickedUpGold ? 116 : SelectedCell.Item.Image;
                 Size imgSize = Libraries.Items.GetTrueSize(image);
-                
-                // 计算图标位置: 鼠标中心对齐
                 Point p = CMain.MPoint.Add(-imgSize.Width / 2, -imgSize.Height / 2);
 
-                // 边界检测: 防止图标超出屏幕右边缘
                 if (p.X + imgSize.Width >= Settings.ScreenWidth)
                     p.X = Settings.ScreenWidth - imgSize.Width;
 
-                // 边界检测: 防止图标超出屏幕下边缘
                 if (p.Y + imgSize.Height >= Settings.ScreenHeight)
                     p.Y = Settings.ScreenHeight - imgSize.Height;
 
-                // 绘制物品图标
                 Libraries.Items.Draw(image, p.X, p.Y);
             }
 
-            // 4. 绘制屏幕中央的输出消息
-            // 显示经验获得、物品拾取、系统提示等消息(最多10行)
             for (int i = 0; i < OutputLines.Length; i++)
                 OutputLines[i].Draw();
         }
-        
-        /// <summary>
-        /// 处理游戏逻辑 - 每帧调用，更新游戏状态
-        /// 主要职责:
-        /// - 移动时间控制(100ms间隔)
-        /// - 心跳包发送(60秒间隔)
-        /// - UI对话框更新
-        /// - 鼠标提示更新
-        /// - 对象动画更新
-        /// - 粒子特效更新
-        /// </summary>
         public override void Process()
         {
-            // 前置检查: 确保地图和玩家对象已初始化
             if (MapControl == null || User == null)
                 return;
 
-            // ==================== 移动时间控制 ====================
-            // 每100ms更新一次移动状态和动画帧
             if (CMain.Time >= MoveTime)
             {
-                MoveTime = CMain.Time + 100; // 移动速度: 100ms间隔
-                CanMove = true; // 允许移动
-                MapControl.AnimationCount++; // 动画帧计数器+1
-                MapControl.TextureValid = false; // 标记地板纹理需要重绘
+                MoveTime = CMain.Time + 100; //Move Speed
+                CanMove = true;
+                MapControl.AnimationCount++;
+                MapControl.TextureValid = false;
             }
             else
-                CanMove = false; // 禁止移动(冷却中)
+                CanMove = false;
 
-            // ==================== 心跳包发送 ====================
-            // 每60秒发送一次心跳包，保持连接
             if (CMain.Time >= CMain.NextPing)
             {
-                CMain.NextPing = CMain.Time + 60000; // 60秒间隔
+                CMain.NextPing = CMain.Time + 60000;
                 Network.Enqueue(new C.KeepAlive() { Time = CMain.Time });
             }
 
-            // ==================== 小工具更新 ====================
-            TimerControl.Process(); // 计时器控件
-            CompassControl.Process(); // 指南针控件
-            RankingDialog.Process(); // 排行榜对话框
+            TimerControl.Process();
+            CompassControl.Process();
+            RankingDialog.Process();
 
-            // ==================== 物品提示标签更新 ====================
-            // 检测鼠标是否悬停在物品格子上
             MirItemCell cell = MouseControl as MirItemCell;
 
-            // 如果悬停物品变化，重新创建提示标签
             if (cell != null && HoverItem != cell.Item && HoverItem != cell.ShadowItem)
             {
-                DisposeItemLabel(); // 销毁旧标签
+                DisposeItemLabel();
                 HoverItem = null;
-                CreateItemLabel(cell.Item); // 创建新标签
+                CreateItemLabel(cell.Item);
             }
 
-            // ==================== 物品标签位置更新 ====================
-            // 物品提示标签跟随鼠标，但不超出屏幕边界
             if (ItemLabel != null && !ItemLabel.IsDisposed)
             {
-                ItemLabel.BringToFront(); // 置于最前
+                ItemLabel.BringToFront();
 
-                // 计算标签位置: 鼠标右下方15像素偏移
-                int x = CMain.MPoint.X + 15, y = CMain.MPoint.Y;
-                
-                // 边界检测: 防止超出屏幕右边缘
+                int x = CMain.MPoint.X + 28, y = CMain.MPoint.Y + 28;
                 if (x + ItemLabel.Size.Width > Settings.ScreenWidth)
                     x = Settings.ScreenWidth - ItemLabel.Size.Width;
 
-                // 边界检测: 防止超出屏幕下边缘
                 if (y + ItemLabel.Size.Height > Settings.ScreenHeight)
                     y = Settings.ScreenHeight - ItemLabel.Size.Height;
-                    
                 ItemLabel.Location = new Point(x, y);
             }
 
-            // ==================== 邮件标签位置更新 ====================
-            // 邮件提示标签跟随鼠标
             if (MailLabel != null && !MailLabel.IsDisposed)
             {
                 MailLabel.BringToFront();
@@ -1521,8 +1240,6 @@ namespace Client.MirScenes
                 MailLabel.Location = new Point(x, y);
             }
 
-            // ==================== 留言标签位置更新 ====================
-            // 留言提示标签跟随鼠标
             if (MemoLabel != null && !MemoLabel.IsDisposed)
             {
                 MemoLabel.BringToFront();
@@ -1536,8 +1253,6 @@ namespace Client.MirScenes
                 MemoLabel.Location = new Point(x, y);
             }
 
-            // ==================== 公会Buff标签位置更新 ====================
-            // 公会增益提示标签跟随鼠标
             if (GuildBuffLabel != null && !GuildBuffLabel.IsDisposed)
             {
                 GuildBuffLabel.BringToFront();
@@ -1551,23 +1266,18 @@ namespace Client.MirScenes
                 GuildBuffLabel.Location = new Point(x, y);
             }
 
-            // ==================== 复活提示检测 ====================
-            // 玩家复活后重置标记
             if (!User.Dead) ShowReviveMessage = false;
 
-            // 显示复活确认对话框
             if (ShowReviveMessage && CMain.Time > User.DeadTime && User.CurrentAction == MirAction.Dead)
             {
                 ShowReviveMessage = false;
-                MirMessageBox messageBox = new MirMessageBox(GameLanguage.DiedTip, MirMessageBoxButtons.YesNo, false);
+                MirMessageBox messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.DiedTip), MirMessageBoxButtons.YesNo, false);
 
-                // 点击"是"按钮: 回城复活
                 messageBox.YesButton.Click += (o, e) =>
                 {
                     if (User.Dead) Network.Enqueue(new C.TownRevive());
                 };
 
-                // 绘制后检测: 如果玩家已复活则自动关闭对话框
                 messageBox.AfterDraw += (o, e) =>
                 {
                     if (!User.Dead) messageBox.Dispose();
@@ -1576,49 +1286,33 @@ namespace Client.MirScenes
                 messageBox.Show();
             }
 
-            // ==================== Buff对话框更新 ====================
-            BuffsDialog.Process(); // 玩家Buff
-            HeroBuffsDialog?.Process(); // 英雄Buff
+            BuffsDialog.Process();
+            HeroBuffsDialog?.Process();
 
-            // ==================== 核心对话框更新 ====================
-            MapControl.Process(); // 地图控制器(对象移动/动画/交互)
-            MainDialog.Process(); // 主界面(生命/魔法/技能)
-            InventoryDialog.Process(); // 背包
-            GameShopDialog.Process(); // 商城
-            MiniMapDialog.Process(); // 小地图
+            MapControl.Process();
+            MainDialog.Process();
+            InventoryDialog.Process();
+            GameShopDialog.Process();
+            MiniMapDialog.Process();
 
-            // ==================== 技能栏更新 ====================
-            // 更新所有技能栏对话框(可能有多个)
             foreach (SkillBarDialog Bar in Scene.SkillBarDialogs)
                 Bar.Process();
 
-            // ==================== 粒子特效更新 ====================
-            // 更新所有粒子引擎(天气/魔法效果等)
             foreach (ParticleEngine pe in ParticleEngines)
                 pe.Process();
 
-            // ==================== 对话框显示/隐藏控制 ====================
             DialogProcess();
 
-            // ==================== 屏幕消息输出 ====================
             ProcessOuput();
 
-            // ==================== 鼠标光标更新 ====================
             UpdateMouseCursor();
 
-            // ==================== 延迟音效处理 ====================
             SoundManager.ProcessDelayedSounds();
         }
 
-        /// <summary>
-        /// 对话框处理 - 控制对话框的显示/隐藏和位置
-        /// 根据设置显示或隐藏技能栏、耐久面板等
-        /// </summary>
         public void DialogProcess()
         {
-            // ==================== 技能栏显示控制 ====================
-            // 根据设置显示或隐藏所有技能栏
-            if(Settings.SkillBar)
+            if (Settings.SkillBar)
             {
                 foreach (SkillBarDialog Bar in Scene.SkillBarDialogs)
                     Bar.Show();
@@ -1629,41 +1323,20 @@ namespace Client.MirScenes
                     Bar.Hide();
             }
 
-            // ==================== 技能栏位置恢复 ====================
-            // 从设置中恢复每个技能栏的位置
             for (int i = 0; i < Scene.SkillBarDialogs.Count; i++)
             {
-                // 边界检查: 防止数组越界
                 if (i * 2 > Settings.SkillbarLocation.Length) break;
-                
-                // 边界验证: 防止技能栏超出屏幕范围
-                // X坐标: 不能超过屏幕宽度-100
-                // Y坐标: 不能超过700 (理论上应该基于分辨率验证，但客户端只支持更宽的屏幕而非更高)
-                if ((Settings.SkillbarLocation[i, 0] > Settings.Resolution - 100) || (Settings.SkillbarLocation[i, 1] > 700)) 
-                    continue;
-                
-                // 恢复技能栏位置
+                if ((Settings.SkillbarLocation[i, 0] > Settings.Resolution - 100) || (Settings.SkillbarLocation[i, 1] > 700))
+                    continue; //in theory you'd want the y coord to be validated based on resolution, but since client only allows for wider screens and not higher :(
                 Scene.SkillBarDialogs[i].Location = new Point(Settings.SkillbarLocation[i, 0], Settings.SkillbarLocation[i, 1]);
             }
 
-            // ==================== 耐久度面板显示控制 ====================
-            // 根据设置显示或隐藏装备耐久度面板
             if (Settings.DuraView)
                 CharacterDuraPanel.Show();
             else
                 CharacterDuraPanel.Hide();
         }
 
-        /// <summary>
-        /// 处理服务器数据包 - 根据包ID分发到对应的处理方法
-        /// 包括:
-        /// - 地图信息
-        /// - 对象移动/攻击/技能
-        /// - 物品操作
-        /// - 聊天消息
-        /// - 交易/组队/公会等
-        /// </summary>
-        /// <param name="p">服务器数据包</param>
         public override void ProcessPacket(Packet p)
         {
             switch (p.Index)
@@ -1937,6 +1610,12 @@ namespace Client.MirScenes
                     break;
                 case (short)ServerPacketIds.NPCStorage:
                     NPCStorage();
+                    break;
+                case (short)ServerPacketIds.StorageUnlockResult:
+                    StorageUnlockResult((S.StorageUnlockResult)p);
+                    break;
+                case (short)ServerPacketIds.StoragePasswordResult:
+                    StoragePasswordResult((S.StoragePasswordResult)p);
                     break;
                 case (short)ServerPacketIds.NPCRequestInput:
                     NPCRequestInput((S.NPCRequestInput)p);
@@ -2373,7 +2052,7 @@ namespace Client.MirScenes
                     Opendoor((S.Opendoor)p);
                     break;
                 case (short)ServerPacketIds.GetRentedItems:
-                    RentedItems((S.GetRentedItems) p);
+                    RentedItems((S.GetRentedItems)p);
                     break;
                 case (short)ServerPacketIds.ItemRentalRequest:
                     ItemRentalRequest((S.ItemRentalRequest)p);
@@ -2408,7 +2087,7 @@ namespace Client.MirScenes
                 case (short)ServerPacketIds.ConfirmItemRental:
                     ConfirmItemRental((S.ConfirmItemRental)p);
                     break;
-                case (short)ServerPacketIds.OpenBrowser:                  
+                case (short)ServerPacketIds.OpenBrowser:
                     OpenBrowser((S.OpenBrowser)p);
                     break;
                 case (short)ServerPacketIds.PlaySound:
@@ -2432,119 +2111,88 @@ namespace Client.MirScenes
                 case (short)ServerPacketIds.GuildTerritoryPage:
                     GuildTerritoryPage((S.GuildTerritoryPage)p);
                     break;
+                case (short)ServerPacketIds.NewMonsterInfo:
+                    NewMonsterInfo((S.NewMonsterInfo)p);
+                    break;
+                case (short)ServerPacketIds.NewNPCInfo:
+                    NewNPCInfo((S.NewNPCInfo)p);
+                    break;
                 default:
                     base.ProcessPacket(p);
                     break;
             }
         }
 
-        /// <summary>
-        /// 保持连接 - 处理服务器心跳包
-        /// 用于计算网络延迟(Ping值)
-        /// </summary>
-        /// <param name="p">心跳包数据</param>
         private void KeepAlive(S.KeepAlive p)
         {
             if (p.Time == 0) return;
-            // 计算Ping值 = 当前时间 - 发送时间
             CMain.PingTime = (CMain.Time - p.Time);
         }
-
-        /// <summary>
-        /// 地图信息 - 处理进入新地图的数据包
-        /// 加载地图文件、小地图、天气特效、光照等
-        /// </summary>
-        /// <param name="p">地图信息数据包</param>
         private void MapInformation(S.MapInformation p)
         {
-            // 释放旧地图控件
             if (MapControl != null && !MapControl.IsDisposed)
                 MapControl.Dispose();
-
-            // 创建新地图控件
-            MapControl = new MapControl { 
-                Index = p.MapIndex,                                          // 地图索引
-                FileName = Path.Combine(Settings.MapPath, p.FileName + ".map"), // 地图文件路径
-                Title = p.Title,                                             // 地图名称
-                MiniMap = p.MiniMap,                                         // 小地图索引
-                BigMap = p.BigMap,                                           // 大地图索引
-                Lights = p.Lights,                                           // 光照设置
-                Lightning = p.Lightning,                                     // 闪电效果
-                Fire = p.Fire,                                               // 火焰效果
-                MapDarkLight = p.MapDarkLight,                               // 地图暗光值
-                Music = p.Music                                              // 背景音乐
+            MapControl = new MapControl
+            {
+                Index = p.MapIndex,
+                FileName = Path.Combine(Settings.MapPath, p.FileName + ".map"),
+                Title = p.Title,
+                MiniMap = p.MiniMap,
+                BigMap = p.BigMap,
+                Lights = p.Lights,
+                Lightning = p.Lightning,
+                Fire = p.Fire,
+                MapDarkLight = p.MapDarkLight,
+                Music = p.Music
             };
-            MapControl.Weather = p.WeatherParticles;                         // 天气粒子效果
-            MapControl.LoadMap();                                            // 加载地图数据
-            InsertControl(0, MapControl);                                    // 插入到场景最底层
+            MapControl.Weather = p.WeatherParticles;
+            MapControl.LoadMap();
+            InsertControl(0, MapControl);
         }
 
-        /// <summary>
-        /// 世界地图设置 - 初始化大地图传送系统
-        /// </summary>
-        /// <param name="info">世界地图配置信息</param>
         private void WorldMapSetup(S.WorldMapSetupInfo info)
         {
-            BigMapDialog.WorldMapSetup(info.Setup);   // 设置大地图布局
-            TeleportToNPCCost = info.TeleportToNPCCost; // 设置传送到NPC的费用
-        }        
-
-        /// <summary>
-        /// 新地图信息 - 添加新地图到地图列表
-        /// 创建地图上的传送点和NPC按钮
-        /// </summary>
-        /// <param name="info">新地图数据</param>
-        private void NewMapInfo(S.NewMapInfo info)
-        {
-            // 创建地图记录
-            BigMapRecord newRecord = new BigMapRecord() { 
-                Index = info.MapIndex, 
-                MapInfo = info.Info 
-            };
-            CreateBigMapButtons(newRecord);            // 创建地图按钮(传送点/NPC)
-            MapInfoList.Add(info.MapIndex, newRecord); // 添加到地图列表
+            BigMapDialog.WorldMapSetup(info.Setup);
+            TeleportToNPCCost = info.TeleportToNPCCost;
         }
 
-        /// <summary>
-        /// 创建大地图按钮 - 为地图创建传送点和NPC按钮
-        /// </summary>
-        /// <param name="record">地图记录</param>
+        private void NewMapInfo(S.NewMapInfo info)
+        {
+            BigMapRecord newRecord = new BigMapRecord() { Index = info.MapIndex, MapInfo = info.Info };
+            CreateBigMapButtons(newRecord);
+            MapInfoList.Add(info.MapIndex, newRecord);
+        }
+
         private void CreateBigMapButtons(BigMapRecord record)
         {
-            record.MovementButtons.Clear(); // 清空传送点按钮
-            record.NPCButtons.Clear();      // 清空NPC按钮
+            record.MovementButtons.Clear();
+            record.NPCButtons.Clear();
 
-            // ==================== 创建传送点按钮 ====================
             foreach (ClientMovementInfo mInfo in record.MapInfo.Movements)
             {
                 MirButton button = new MirButton()
                 {
-                    Library = Libraries.MapLinkIcon,    // 使用传送点图标库
-                    Index = mInfo.Icon,                 // 图标索引
-                    PressedIndex = mInfo.Icon,          // 按下时的图标
-                    Sound = SoundList.ButtonA,          // 点击音效
-                    Parent = BigMapDialog.ViewPort,     // 父控件为大地图视口
-                    Location = new Point(20, 38),       // 按钮位置
-                    Hint = mInfo.Title,                 // 鼠标悬停提示
-                    Visible = false                     // 初始不可见
+                    Library = Libraries.MapLinkIcon,
+                    Index = mInfo.Icon,
+                    PressedIndex = mInfo.Icon,
+                    Sound = SoundList.ButtonA,
+                    Parent = BigMapDialog.ViewPort,
+                    Location = new Point(20, 38),
+                    Hint = mInfo.Title,
+                    Visible = false
                 };
-
-                // 鼠标悬停事件 - 显示传送点位置
                 button.MouseEnter += (o, e) =>
                 {
                     BigMapDialog.MouseLocation = mInfo.Location;
                 };
 
-                // 点击事件 - 设置目标地图
                 button.Click += (o, e) =>
                 {
                     BigMapDialog.SetTargetMap(mInfo.Destination);
                 };
-
                 record.MovementButtons.Add(mInfo, button);
             }
 
-            // ==================== 创建NPC按钮 ====================
             foreach (ClientNPCInfo npcInfo in record.MapInfo.NPCs)
             {
                 BigMapNPCRow row = new BigMapNPCRow(npcInfo) { Parent = BigMapDialog };
@@ -2552,261 +2200,158 @@ namespace Client.MirScenes
             }
         }
 
-        /// <summary>
-        /// 重新创建大地图按钮 - 刷新所有地图的按钮
-        /// </summary>
         private void RecreateBigMapButtons()
         {
             foreach (var record in MapInfoList.Values)
                 CreateBigMapButtons(record);
         }
 
-        /// <summary>
-        /// 搜索地图结果 - 处理地图搜索结果
-        /// 显示搜索到的地图或NPC位置
-        /// </summary>
-        /// <param name="info">搜索结果数据</param>
         private void SearchMapResult(S.SearchMapResult info)
         {
-            // 未找到结果
             if (info.MapIndex == -1 && info.NPCIndex == 0)
             {
-                MirMessageBox messageBox = new MirMessageBox("Nothing Found.", MirMessageBoxButtons.OK);
-                messageBox.OKButton.Click += (o, a) =>
-                {
-                    BigMapDialog.SearchTextBox.SetFocus(); // 重新聚焦搜索框
-                };
+                MirMessageBox messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.NothingFound), MirMessageBoxButtons.OK);
+                messageBox.OKButton.Click += (o, a) => { BigMapDialog.SearchTextBox.SetFocus(); };
                 messageBox.Show();
                 return;
             }
 
-            // 显示搜索到的地图和NPC
             BigMapDialog.SetTargetMap(info.MapIndex);
             BigMapDialog.SetTargetNPC(info.NPCIndex);
         }
-        /// <summary>
-        /// 用户信息 - 处理玩家角色数据(登录后首次接收)
-        /// 初始化用户对象、装备、背包、技能栏等
-        /// </summary>
-        /// <param name="p">用户信息数据包</param>
         private void UserInformation(S.UserInformation p)
         {
-            // 创建用户对象
             User = new UserObject(p.ObjectID);
             User.Load(p);
-
-            // 根据职业显示宠物模式标签(法师和道士有宠物)
             MainDialog.PModeLabel.Visible = User.Class == MirClass.Wizard || User.Class == MirClass.Taoist;
-
-            // 设置英雄相关
             HasHero = p.HasHero;
             HeroBehaviourPanel.UpdateBehaviour(p.HeroBehaviour);
-
-            // 设置金币和点券
             Gold = p.Gold;
             Credit = p.Credit;
 
-            // 初始化角色装备对话框
             CharacterDialog = new CharacterDialog(MirGridType.Equipment, User) { Parent = this, Visible = false };
-            InventoryDialog.RefreshInventory(); // 刷新背包显示
-
-            // 更新所有技能栏
+            InventoryDialog.RefreshInventory();
             foreach (SkillBarDialog Bar in SkillBarDialogs)
                 Bar.Update();
-
-            // 观察模式设置
             AllowObserve = p.AllowObserve;
             Observing = p.Observer;
         }
-
-        /// <summary>
-        /// 用户插槽刷新 - 更新装备栏位信息
-        /// 用于动态调整装备栏大小(如时装栏扩展)
-        /// </summary>
-        /// <param name="p">插槽刷新数据</param>
         private void UserSlotsRefresh(S.UserSlotsRefresh p)
         {
             User.SetSlots(p);
         }
 
-        /// <summary>
-        /// 用户位置 - 强制设置玩家位置(服务器纠正客户端位置)
-        /// 用于传送、拉怪、防外挂等场景
-        /// </summary>
-        /// <param name="p">位置数据包</param>
         private void UserLocation(S.UserLocation p)
         {
             MapControl.NextAction = 0;
-            
-            // 位置和方向都相同则不处理
             if (User.CurrentLocation == p.Location && User.Direction == p.Direction) return;
 
-            // 移除旧位置的玩家对象
             MapControl.RemoveObject(User);
-
-            // 更新玩家位置
             User.CurrentLocation = p.Location;
             User.MapLocation = p.Location;
-
-            // 添加到新位置
             MapControl.AddObject(User);
 
-            // 标记地面需要重新计算
             MapControl.FloorValid = false;
-            MapControl.InputDelay = CMain.Time + 400; // 400ms输入延迟防止操作冲突
+            MapControl.InputDelay = CMain.Time + 400;
 
-            if (User.Dead) return; // 死亡状态不处理动作
+            if (User.Dead) return;
 
-            // 清理施法状态和队列动作
             User.ClearMagic();
             User.QueuedAction = null;
 
-            // 清理动作队列(保留被推动的动作)
             for (int i = User.ActionFeed.Count - 1; i >= 0; i--)
             {
                 if (User.ActionFeed[i].Action == MirAction.Pushed) continue;
                 User.ActionFeed.RemoveAt(i);
             }
 
-            User.SetAction(); // 重新设置当前动作
+            User.SetAction();
         }
-        /// <summary>
-        /// 接收聊天 - 处理聊天消息
-        /// </summary>
-        /// <param name="p">聊天消息数据</param>
         private void ReceiveChat(S.Chat p)
         {
             ChatDialog.ReceiveChat(p.Message, p.Type);
         }
-
-        /// <summary>
-        /// 对象玩家 - 创建其他玩家对象(进入视野)
-        /// </summary>
-        /// <param name="p">玩家对象数据</param>
         private void ObjectPlayer(S.ObjectPlayer p)
         {
             PlayerObject player = new PlayerObject(p.ObjectID);
-            player.Load(p); // 加载玩家外观、装备、位置等
+            player.Load(p);
         }
 
-        /// <summary>
-        /// 对象英雄 - 创建英雄对象(进入视野)
-        /// </summary>
-        /// <param name="p">英雄对象数据</param>
         private void ObjectHero(S.ObjectHero p)
         {
             HeroObject hero = new HeroObject(p.ObjectID);
             hero.Load(p);
 
-            // 如果是自己的英雄，更新HeroObject引用
             if (p.ObjectID == Hero?.ObjectID)
                 HeroObject = hero;
         }
 
-        /// <summary>
-        /// 对象移除 - 从地图移除对象(离开视野/传送/死亡)
-        /// </summary>
-        /// <param name="p">移除对象数据</param>
         private void ObjectRemove(S.ObjectRemove p)
         {
-            // 不移除玩家自己
             if (p.ObjectID == User.ObjectID) return;
 
-            // 找到对象并调用移除方法
             if (MapControl.Objects.TryGetValue(p.ObjectID, out MapObject ob))
                 ob.Remove();
         }
-
-        /// <summary>
-        /// 对象转向 - 处理对象转向动作
-        /// </summary>
-        /// <param name="p">转向数据</param>
         private void ObjectTurn(S.ObjectTurn p)
         {
-            // 非观察模式下不处理自己的动作(客户端已预测)
             if (p.ObjectID == User.ObjectID && !Observing) return;
 
-            // 添加转向动作到对象的动作队列
             if (MapControl.Objects.TryGetValue(p.ObjectID, out MapObject ob))
-                ob.ActionFeed.Add(new QueuedAction { 
-                    Action = MirAction.Standing, 
-                    Direction = p.Direction, 
-                    Location = p.Location 
-                });
+                ob.ActionFeed.Add(new QueuedAction { Action = MirAction.Standing, Direction = p.Direction, Location = p.Location });
         }
 
-        /// <summary>
-        /// 对象行走 - 处理对象行走动作
-        /// </summary>
-        /// <param name="p">行走数据</param>
         private void ObjectWalk(S.ObjectWalk p)
         {
-            // 非观察模式下不处理自己的动作
             if (p.ObjectID == User.ObjectID && !Observing) return;
 
-            // 更新英雄位置
             if (p.ObjectID == Hero?.ObjectID)
                 Hero.CurrentLocation = p.Location;
 
-            // 添加行走动作到队列
             if (MapControl.Objects.TryGetValue(p.ObjectID, out MapObject ob))
-                ob.ActionFeed.Add(new QueuedAction { 
-                    Action = MirAction.Walking, 
-                    Direction = p.Direction, 
-                    Location = p.Location 
-                });
+                ob.ActionFeed.Add(new QueuedAction { Action = MirAction.Walking, Direction = p.Direction, Location = p.Location });
         }
 
-        /// <summary>
-        /// 对象奔跑 - 处理对象奔跑动作
-        /// </summary>
-        /// <param name="p">奔跑数据</param>
         private void ObjectRun(S.ObjectRun p)
         {
-            // 非观察模式下不处理自己的动作
             if (p.ObjectID == User.ObjectID && !Observing) return;
 
-            // 更新英雄位置
             if (p.ObjectID == Hero?.ObjectID)
                 Hero.CurrentLocation = p.Location;
 
-            // 添加奔跑动作到队列
             if (MapControl.Objects.TryGetValue(p.ObjectID, out MapObject ob))
-                ob.ActionFeed.Add(new QueuedAction { 
-                    Action = MirAction.Running, 
-                    Direction = p.Direction, 
-                    Location = p.Location 
-                });
+                ob.ActionFeed.Add(new QueuedAction { Action = MirAction.Running, Direction = p.Direction, Location = p.Location });
         }
 
-        /// <summary>
-        /// 对象聊天 - 处理对象说话(头顶气泡)
-        /// </summary>
-        /// <param name="p">聊天数据</param>
         private void ObjectChat(S.ObjectChat p)
         {
-            // 显示在聊天窗口
             ChatDialog.ReceiveChat(p.Text, p.Type);
 
-            // 在对象头顶显示聊天气泡
             if (MapControl.Objects.TryGetValue(p.ObjectID, out MapObject ob))
                 ob.Chat(RegexFunctions.CleanChatString(p.Text));
         }
 
-        /// <summary>
-        /// 移动物品 - 处理物品在同一容器内的移动或交换
-        /// 支持背包、仓库、交易栏、精炼栏、英雄背包
-        /// </summary>
-        /// <param name="p">移动物品数据</param>
+        private void NewMonsterInfo(S.NewMonsterInfo info)
+        {
+            GameScene.MonsterInfoList.RemoveAll(x => x.Index == info.Info.Index);
+            GameScene.MonsterInfoList.Add(info.Info);
+            GameScene.OnMonsterInfoReceived(info.Info.Index);
+        }
+
+        private void NewNPCInfo(S.NewNPCInfo info)
+        {
+            GameScene.NPCInfoList.RemoveAll(x => x.Index == info.Info.Index);
+            GameScene.NPCInfoList.Add(info.Info);
+            GameScene.OnNPCInfoReceived(info.Info.Index);
+        }
+
         private void MoveItem(S.MoveItem p)
         {
             MirItemCell toCell, fromCell;
 
-            // ==================== 获取源格子 ====================
             switch (p.Grid)
             {
                 case MirGridType.Inventory:
-                    // 背包或腰带(前6格是腰带)
                     fromCell = p.From < User.BeltIdx ? BeltDialog.Grid[p.From] : InventoryDialog.Grid[p.From - User.BeltIdx];
                     break;
                 case MirGridType.Storage:
@@ -2819,14 +2364,12 @@ namespace Client.MirScenes
                     fromCell = RefineDialog.Grid[p.From];
                     break;
                 case MirGridType.HeroInventory:
-                    // 英雄背包或英雄腰带
                     fromCell = p.From < User.HeroBeltIdx ? HeroBeltDialog.Grid[p.From] : HeroInventoryDialog.Grid[p.From - User.HeroBeltIdx];
                     break;
                 default:
                     return;
             }
 
-            // ==================== 获取目标格子 ====================
             switch (p.Grid)
             {
                 case MirGridType.Inventory:
@@ -2850,58 +2393,44 @@ namespace Client.MirScenes
 
             if (toCell == null || fromCell == null) return;
 
-            // 解锁格子
             toCell.Locked = false;
             fromCell.Locked = false;
 
-            // 交易栏解锁
             if (p.Grid == MirGridType.Trade)
                 TradeDialog.ChangeLockState(false);
 
-            if (!p.Success) return; // 服务器验证失败则不执行
+            if (!p.Success) return;
 
-            // 交换物品
             UserItem i = fromCell.Item;
             fromCell.Item = toCell.Item;
             toCell.Item = i;
 
-            // 刷新属性和耐久度显示
             User.RefreshStats();
             CharacterDuraPanel.GetCharacterDura();
         }
-        /// <summary>
-        /// 装备物品 - 处理装备穿戴/卸下
-        /// 支持玩家装备和英雄装备
-        /// </summary>
-        /// <param name="p">装备物品数据</param>
         private void EquipItem(S.EquipItem p)
         {
             MirItemCell fromCell, toCell;
 
-            // ==================== 获取目标装备栏 ====================
             switch (p.Grid)
             {
                 case MirGridType.HeroInventory:
-                    toCell = HeroDialog.Grid[p.To]; // 英雄装备栏
+                    toCell = HeroDialog.Grid[p.To];
                     break;
                 default:
-                    toCell = CharacterDialog.Grid[p.To]; // 玩家装备栏
+                    toCell = CharacterDialog.Grid[p.To];
                     break;
             }
 
-            // ==================== 获取源格子(通过UniqueID查找) ====================
             switch (p.Grid)
             {
                 case MirGridType.Inventory:
-                    // 在背包或腰带中查找
                     fromCell = InventoryDialog.GetCell(p.UniqueID) ?? BeltDialog.GetCell(p.UniqueID);
                     break;
                 case MirGridType.Storage:
-                    // 在仓库或腰带中查找
                     fromCell = StorageDialog.GetCell(p.UniqueID) ?? BeltDialog.GetCell(p.UniqueID);
                     break;
                 case MirGridType.HeroInventory:
-                    // 在英雄背包或英雄腰带中查找
                     fromCell = HeroInventoryDialog.GetCell(p.UniqueID) ?? HeroBeltDialog.GetCell(p.UniqueID);
                     break;
                 default:
@@ -2910,52 +2439,40 @@ namespace Client.MirScenes
 
             if (toCell == null || fromCell == null) return;
 
-            // 解锁格子
             toCell.Locked = false;
             fromCell.Locked = false;
 
-            if (!p.Success) return; // 服务器验证失败
+            if (!p.Success) return;
 
-            // 交换物品(穿上新装备，卸下旧装备)
             UserItem i = fromCell.Item;
             fromCell.Item = toCell.Item;
             toCell.Item = i;
-
-            // 更新耐久度显示
             CharacterDuraPanel.UpdateCharacterDura(i);
-
-            // 刷新属性(英雄或玩家)
             if (p.Grid == MirGridType.HeroInventory)
                 Hero.RefreshStats();
             else
                 User.RefreshStats();
         }
-        /// <summary>
-        /// 装备特殊槽位物品 - 处理镶嵌槽、坐骑槽、钓鱼槽的物品装备
-        /// </summary>
-        /// <param name="p">装备槽位物品数据</param>
         private void EquipSlotItem(S.EquipSlotItem p)
         {
             MirItemCell fromCell;
             MirItemCell toCell;
 
-            // ==================== 获取目标特殊槽位 ====================
             switch (p.GridTo)
             {
                 case MirGridType.Socket:
-                    toCell = SocketDialog.Grid[p.To]; // 宝石镶嵌槽
+                    toCell = SocketDialog.Grid[p.To];
                     break;
                 case MirGridType.Mount:
-                    toCell = MountDialog.Grid[p.To]; // 坐骑装备槽
+                    toCell = MountDialog.Grid[p.To];
                     break;
                 case MirGridType.Fishing:
-                    toCell = FishingDialog.Grid[p.To]; // 钓鱼装备槽
+                    toCell = FishingDialog.Grid[p.To];
                     break;
                 default:
                     return;
             }
 
-            // ==================== 获取源格子 ====================
             switch (p.Grid)
             {
                 case MirGridType.Inventory:
@@ -2970,61 +2487,47 @@ namespace Client.MirScenes
 
             //if (toCell == null || fromCell == null) return;
 
-            // 解锁格子
             toCell.Locked = false;
             fromCell.Locked = false;
 
-            if (!p.Success) return; // 服务器验证失败
+            if (!p.Success) return;
 
-            // 移动物品到特殊槽位(不交换，只移动)
             UserItem i = fromCell.Item;
             fromCell.Item = null;
             toCell.Item = i;
-
-            User.RefreshStats(); // 刷新属性
+            User.RefreshStats();
         }
 
-        /// <summary>
-        /// 合成物品 - 处理物品合成(如宝石镶嵌、装备强化)
-        /// 消耗材料物品，可能销毁目标物品
-        /// </summary>
-        /// <param name="p">合成物品数据</param>
         private void CombineItem(S.CombineItem p)
         {
             MirItemCell fromCell = null;
             MirItemCell toCell = null;
-
-            // ==================== 根据容器类型获取格子 ====================
             switch (p.Grid)
             {
                 case MirGridType.Inventory:
-                    fromCell = InventoryDialog.GetCell(p.IDFrom) ?? BeltDialog.GetCell(p.IDFrom); // 材料格子
-                    toCell = InventoryDialog.GetCell(p.IDTo) ?? BeltDialog.GetCell(p.IDTo);       // 目标格子
+                    fromCell = InventoryDialog.GetCell(p.IDFrom) ?? BeltDialog.GetCell(p.IDFrom);
+                    toCell = InventoryDialog.GetCell(p.IDTo) ?? BeltDialog.GetCell(p.IDTo);
                     break;
                 case MirGridType.HeroInventory:
                     fromCell = HeroInventoryDialog.GetCell(p.IDFrom) ?? HeroBeltDialog.GetCell(p.IDFrom);
                     toCell = HeroInventoryDialog.GetCell(p.IDTo) ?? HeroBeltDialog.GetCell(p.IDTo);
                     break;
-            }            
+            }
 
             if (toCell == null || fromCell == null) return;
 
-            // 解锁格子
             toCell.Locked = false;
             fromCell.Locked = false;
 
-            // 如果失败需要销毁目标物品(如强化失败装备碎裂)
             if (p.Destroy) toCell.Item = null;
 
-            if (!p.Success) return; // 服务器验证失败
+            if (!p.Success) return;
 
-            // 消耗材料物品(减少数量或删除)
             if (fromCell.Item.Count > 1)
                 fromCell.Item.Count--;
             else
                 fromCell.Item = null;
 
-            // 刷新属性
             switch (p.Grid)
             {
                 case MirGridType.Inventory:
@@ -3139,7 +2642,7 @@ namespace Client.MirScenes
                     fromCell = HeroDialog.Grid[index];
                     break;
                 }
-            }          
+            }
 
             switch (p.Grid)
             {
@@ -3282,7 +2785,7 @@ namespace Client.MirScenes
 
         private void RefineCancel(S.RefineCancel p)
         {
-            RefineDialog.RefineReset();  
+            RefineDialog.RefineReset();
         }
 
         private void RefineItem(S.RefineItem p)
@@ -3417,7 +2920,7 @@ namespace Client.MirScenes
         {
             MirItemCell cell = null;
             bool hero = false;
-            
+
             switch (p.Grid)
             {
                 case MirGridType.Inventory:
@@ -3427,7 +2930,7 @@ namespace Client.MirScenes
                     cell = HeroInventoryDialog.GetCell(p.UniqueID) ?? HeroBeltDialog.GetCell(p.UniqueID);
                     hero = true;
                     break;
-            }            
+            }
 
             if (cell == null) return;
 
@@ -3452,7 +2955,7 @@ namespace Client.MirScenes
             {
                 cell = InventoryDialog.GetCell(p.UniqueID) ?? BeltDialog.GetCell(p.UniqueID);
             }
-            
+
 
             if (cell == null) return;
 
@@ -3473,7 +2976,7 @@ namespace Client.MirScenes
             {
                 User.RefreshStats();
             }
-            
+
         }
 
         private void TakeBackHeroItem(S.TakeBackHeroItem p)
@@ -3566,10 +3069,10 @@ namespace Client.MirScenes
         private void ShareQuest(S.ShareQuest p)
         {
             ClientQuestInfo quest = GameScene.QuestInfoList.FirstOrDefault(e => e.Index == p.QuestIndex);
-            
+
             if (quest == null) return;
 
-            MirMessageBox messageBox = new MirMessageBox(string.Format("{0} would like to share a quest with you. Do you accept?", p.SharerName), MirMessageBoxButtons.YesNo);
+            MirMessageBox messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.PlayerShareQuestRequest), p.SharerName), MirMessageBoxButtons.YesNo);
 
             messageBox.YesButton.Click += (o, e) => Network.Enqueue(new C.AcceptQuest { NPCIndex = 0, QuestIndex = quest.Index });
 
@@ -3578,7 +3081,7 @@ namespace Client.MirScenes
 
         private void ChangeQuest(S.ChangeQuest p)
         {
-            switch(p.QuestState)
+            switch (p.QuestState)
             {
                 case QuestState.Add:
                     User.CurrentQuests.Add(p.Quest);
@@ -3686,7 +3189,7 @@ namespace Client.MirScenes
 
             ActiveScene = new LoginScene();
             Dispose();
-            MirMessageBox.Show("The person you was observing has logged off.");
+            MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ObservedPlayerLoggedOff));
         }
 
         private void TimeOfDay(S.TimeOfDay p)
@@ -3716,22 +3219,22 @@ namespace Client.MirScenes
             switch (p.Mode)
             {
                 case AttackMode.Peace:
-                    ChatDialog.ReceiveChat(GameLanguage.AttackMode_Peace, ChatType.Hint);
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AttackMode_Peace), ChatType.Hint);
                     break;
                 case AttackMode.Group:
-                    ChatDialog.ReceiveChat(GameLanguage.AttackMode_Group, ChatType.Hint);
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AttackMode_Group), ChatType.Hint);
                     break;
                 case AttackMode.Guild:
-                    ChatDialog.ReceiveChat(GameLanguage.AttackMode_Guild, ChatType.Hint);
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AttackMode_Guild), ChatType.Hint);
                     break;
                 case AttackMode.EnemyGuild:
-                    ChatDialog.ReceiveChat(GameLanguage.AttackMode_EnemyGuild, ChatType.Hint);
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AttackMode_EnemyGuild), ChatType.Hint);
                     break;
                 case AttackMode.RedBrown:
-                    ChatDialog.ReceiveChat(GameLanguage.AttackMode_RedBrown, ChatType.Hint);
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AttackMode_RedBrown), ChatType.Hint);
                     break;
                 case AttackMode.All:
-                    ChatDialog.ReceiveChat(GameLanguage.AttackMode_All, ChatType.Hint);
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AttackMode_All), ChatType.Hint);
                     break;
             }
         }
@@ -3741,19 +3244,19 @@ namespace Client.MirScenes
             switch (p.Mode)
             {
                 case PetMode.Both:
-                    ChatDialog.ReceiveChat(GameLanguage.PetMode_Both, ChatType.Hint);
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.PetMode_Both), ChatType.Hint);
                     break;
                 case PetMode.MoveOnly:
-                    ChatDialog.ReceiveChat(GameLanguage.PetMode_MoveOnly, ChatType.Hint);
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.PetMode_MoveOnly), ChatType.Hint);
                     break;
                 case PetMode.AttackOnly:
-                    ChatDialog.ReceiveChat(GameLanguage.PetMode_AttackOnly, ChatType.Hint);
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.PetMode_AttackOnly), ChatType.Hint);
                     break;
                 case PetMode.None:
-                    ChatDialog.ReceiveChat(GameLanguage.PetMode_None, ChatType.Hint);
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.PetMode_None), ChatType.Hint);
                     break;
                 case PetMode.FocusMasterTarget:
-                    ChatDialog.ReceiveChat(GameLanguage.PetMode_FocusMasterTarget, ChatType.Hint);
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.PetMode_FocusMasterTarget), ChatType.Hint);
                     break;
             }
         }
@@ -3781,7 +3284,7 @@ namespace Client.MirScenes
             AddItem(p.Item);
             User.RefreshStats();
 
-            OutputMessage(string.Format(GameLanguage.YouGained, p.Item.FriendlyName));
+            OutputMessage(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.YouGainedItem), p.Item.FriendlyName));
         }
         private void GainedQuestItem(S.GainedQuestItem p)
         {
@@ -3795,7 +3298,7 @@ namespace Client.MirScenes
 
             Gold += p.Gold;
             SoundManager.PlaySound(SoundList.Gold);
-            OutputMessage(string.Format(GameLanguage.YouGained2, p.Gold, GameLanguage.Gold));
+            OutputMessage(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.YouGainedGold), p.Gold, GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.Gold)));
         }
         private void LoseGold(S.LoseGold p)
         {
@@ -3808,7 +3311,7 @@ namespace Client.MirScenes
 
             Credit += p.Credit;
             SoundManager.PlaySound(SoundList.Gold);
-            OutputMessage(string.Format(GameLanguage.YouGained2, p.Credit, GameLanguage.Credit));
+            OutputMessage(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.YouGainedGold), p.Credit, GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.Credit)));
         }
         private void LoseCredit(S.LoseCredit p)
         {
@@ -3883,7 +3386,7 @@ namespace Client.MirScenes
             User.BlizzardStopTime = 0;
             User.ClearMagic();
             if (User.ReincarnationStopTime > CMain.Time)
-                Network.Enqueue(new C.CancelReincarnation {});
+                Network.Enqueue(new C.CancelReincarnation { });
 
             MirDirection dir = User.Direction;
             Point location = User.CurrentLocation;
@@ -3912,7 +3415,7 @@ namespace Client.MirScenes
 
                         User.Effects.Add(effect = new BuffEffect(Libraries.Magic2, 1890, 6, 600, User, true, BuffType.EnergyShield) { Repeat = false });
                         SoundManager.PlaySound(20000 + (ushort)Spell.EnergyShield * 10 + 1);
-                        
+
                         effect.Complete += (o, e) =>
                         {
                             User.Effects.Add(new BuffEffect(Libraries.Magic2, 1900, 2, 800, User, true, BuffType.EnergyShield) { Repeat = true });
@@ -4019,10 +3522,11 @@ namespace Client.MirScenes
                             obj.Damages.Add(new Damage(p.Damage.ToString("#,##0"), 1000, obj.Race == ObjectType.Player ? Color.Red : Color.White, 50));
                             break;
                         case DamageType.Miss:
-                            obj.Damages.Add(new Damage("Miss", 1200, obj.Race == ObjectType.Player ? Color.LightCoral : Color.LightGray, 50));
+                            obj.Damages.Add(new Damage(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.Miss), 1200, obj.Race == ObjectType.Player ? Color.LightCoral : Color.LightGray, 50));
                             break;
                         case DamageType.Critical:
-                            obj.Damages.Add(new Damage("Crit", 1000, obj.Race == ObjectType.Player ? Color.DarkRed : Color.DarkRed, 50) { Offset = 15 });
+                            obj.Damages.Add(
+                                new Damage(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.Crit), 1000, obj.Race == ObjectType.Player ? Color.DarkRed : Color.DarkRed, 50) { Offset = 15 });
                             break;
                     }
                 }
@@ -4073,13 +3577,13 @@ namespace Client.MirScenes
                 switch (item.Info.Type)
                 {
                     case ItemType.Mount:
-                        ChatDialog.ReceiveChat(string.Format("{0} is no longer loyal to you.", item.Info.FriendlyName), ChatType.System);
+                        ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.FriendlyNoLongerLoyal), item.Info.FriendlyName), ChatType.System);
                         break;
                     default:
-                        ChatDialog.ReceiveChat(string.Format("{0}'s dura has dropped to 0.", item.Info.FriendlyName), ChatType.System);
+                        ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.FriendlyDuraDroppedToZero), item.Info.FriendlyName), ChatType.System);
                         break;
                 }
-                
+
             }
 
             if (HoverItem == item)
@@ -4119,7 +3623,7 @@ namespace Client.MirScenes
                 else
                     item.Count -= p.Count;
                 break;
-            } 
+            }
         }
 
         private void DeleteItem(S.DeleteItem p)
@@ -4191,7 +3695,7 @@ namespace Client.MirScenes
             }
 
             if (Hero != null && actor == null)
-            {                
+            {
                 for (int i = 0; i < Hero.Inventory.Length; i++)
                 {
                     if (actor != null) break;
@@ -4289,7 +3793,7 @@ namespace Client.MirScenes
 
             if (MapControl.Objects.TryGetValue(p.ObjectID, out var ob))
             {
-                switch(p.Type)
+                switch (p.Type)
                 {
                     default:
                         ob.ActionFeed.Add(new QueuedAction { Action = MirAction.Die, Direction = p.Direction, Location = p.Location });
@@ -4329,13 +3833,13 @@ namespace Client.MirScenes
 
         private void GainExperience(S.GainExperience p)
         {
-            OutputMessage(string.Format(GameLanguage.ExperienceGained, p.Amount));
+            OutputMessage(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.ExperienceGained), p.Amount));
             MapObject.User.Experience += p.Amount;
         }
 
         private void GainHeroExperience(S.GainHeroExperience p)
         {
-            OutputMessage(string.Format(GameLanguage.HeroExperienceGained, p.Amount));
+            OutputMessage(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.HeroExperienceGained), p.Amount));
             MapObject.Hero.Experience += p.Amount;
         }
         private void LevelChanged(S.LevelChanged p)
@@ -4344,10 +3848,10 @@ namespace Client.MirScenes
             User.Experience = p.Experience;
             User.MaxExperience = p.MaxExperience;
             User.RefreshStats();
-            OutputMessage(GameLanguage.LevelUp);
+            OutputMessage(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.LevelUp));
             User.Effects.Add(new Effect(Libraries.Magic2, 1200, 20, 2000, User));
             SoundManager.PlaySound(SoundList.LevelUp);
-            ChatDialog.ReceiveChat(GameLanguage.LevelUp, ChatType.LevelUp); 
+            ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.LevelUp), ChatType.LevelUp);
         }
         private void HeroLevelChanged(S.HeroLevelChanged p)
         {
@@ -4751,9 +4255,17 @@ namespace Client.MirScenes
             if (NPCDialog.Visible)
                 StorageDialog.Show();
         }
+        private void StorageUnlockResult(S.StorageUnlockResult p)
+        {
+            StorageDialog?.HandleStorageUnlockResult(p);
+        }
+        private void StoragePasswordResult(S.StoragePasswordResult p)
+        {
+            StorageDialog?.HandleStoragePasswordResult(p);
+        }
         private void NPCRequestInput(S.NPCRequestInput p)
         {
-            MirInputBox inputBox = new MirInputBox("Please enter the required information.");
+            MirInputBox inputBox = new MirInputBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.PleaseEnterRequiredInformation));
 
             inputBox.OKButton.Click += (o1, e1) =>
             {
@@ -5053,7 +4565,7 @@ namespace Client.MirScenes
 
             item.MaxDura = p.Item.MaxDura;
             item.RefineAdded = p.Item.RefineAdded;
-            
+
             switch (grid)
             {
                 case MirGridType.Inventory:
@@ -5063,7 +4575,7 @@ namespace Client.MirScenes
                     HeroInventoryDialog.DisplayItemGridEffect(item.UniqueID, 0);
                     break;
             }
-           
+
 
             if (HoverItem == item)
             {
@@ -5442,7 +4954,7 @@ namespace Client.MirScenes
 
         private void UserStorage(S.UserStorage p)
         {
-            if(Storage.Length != p.Storage.Length)
+            if (Storage.Length != p.Storage.Length)
             {
                 Array.Resize(ref Storage, p.Storage.Length);
             }
@@ -5468,7 +4980,7 @@ namespace Client.MirScenes
             GroupDialog.GroupList.Clear();
             GroupDialog.GroupMembersMap.Clear();
             BigMapViewPort.PlayerLocations.Clear();
-            ChatDialog.ReceiveChat("You have left the group.", ChatType.Group);
+            ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.YouHaveLeftGroup), ChatType.Group);
         }
 
         private void DeleteMember(S.DeleteMember p)
@@ -5476,25 +4988,25 @@ namespace Client.MirScenes
             GroupDialog.GroupList.Remove(p.Name);
             GroupDialog.GroupMembersMap.Remove(p.Name);
             BigMapViewPort.PlayerLocations.Remove(p.Name);
-            ChatDialog.ReceiveChat(string.Format("-{0} has left the group.", p.Name), ChatType.Group);
+            ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.PlayerHasLeftGroup), p.Name), ChatType.Group);
         }
 
         private void GroupInvite(S.GroupInvite p)
         {
-            MirMessageBox messageBox = new MirMessageBox(string.Format("Do you want to group with {0}?", p.Name), MirMessageBoxButtons.YesNo);
+            MirMessageBox messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.DoYouWantGroupWithPlayer), p.Name), MirMessageBoxButtons.YesNo);
 
             messageBox.YesButton.Click += (o, e) =>
             {
                 Network.Enqueue(new C.GroupInvite { AcceptInvite = true });
                 GroupDialog.Show();
-            }; 
+            };
             messageBox.NoButton.Click += (o, e) => Network.Enqueue(new C.GroupInvite { AcceptInvite = false });
             messageBox.Show();
         }
         private void AddMember(S.AddMember p)
         {
             GroupDialog.GroupList.Add(p.Name);
-            ChatDialog.ReceiveChat(string.Format("-{0} has joined the group.", p.Name), ChatType.Group);
+            ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.PlayerHasJoinedGroup), p.Name), ChatType.Group);
         }
         private void GroupMembersMap(S.GroupMembersMap p)
         {
@@ -5545,7 +5057,7 @@ namespace Client.MirScenes
             if (p.ObjectID == Hero?.ObjectID)
             {
                 actor = Hero;
-                prefix = "(Hero) ";
+                prefix = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.Hero);
             }
 
             switch (p.Spell)
@@ -5556,26 +5068,34 @@ namespace Client.MirScenes
                     break;
                 case Spell.Thrusting:
                     actor.Thrusting = p.CanUse;
-                    ChatDialog.ReceiveChat(prefix + (actor.Thrusting ? "Use Thrusting." : "Do not use Thrusting."), ChatType.Hint);
+                    ChatDialog.ReceiveChat(
+                        prefix + (actor.Thrusting ? GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.UseThrusting) : GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.DoNotUseThrusting)),
+                        ChatType.Hint);
                     break;
                 case Spell.HalfMoon:
                     actor.HalfMoon = p.CanUse;
-                    ChatDialog.ReceiveChat(prefix + (actor.HalfMoon ? "Use HalfMoon." : "Do not use HalfMoon."), ChatType.Hint);
+                    ChatDialog.ReceiveChat(
+                        prefix + (actor.HalfMoon ? GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.UseHalfMoon) : GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.DoNotUseHalfMoon)),
+                        ChatType.Hint);
                     break;
                 case Spell.CrossHalfMoon:
                     actor.CrossHalfMoon = p.CanUse;
-                    ChatDialog.ReceiveChat(prefix + (actor.CrossHalfMoon ? "Use CrossHalfMoon." : "Do not use CrossHalfMoon."), ChatType.Hint);
+                    ChatDialog.ReceiveChat(
+                        prefix + (actor.CrossHalfMoon ? GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.UseCrossHalfMoon) : GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.DoNotUseCrossHalfMoon)),
+                        ChatType.Hint);
                     break;
                 case Spell.DoubleSlash:
                     actor.DoubleSlash = p.CanUse;
-                    ChatDialog.ReceiveChat(prefix + (actor.DoubleSlash ? "Use DoubleSlash." : "Do not use DoubleSlash."), ChatType.Hint);
+                    ChatDialog.ReceiveChat(
+                        prefix + (actor.DoubleSlash ? GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.UseDoubleSlash) : GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.DoNotUseDoubleSlash)),
+                        ChatType.Hint);
                     break;
                 case Spell.FlamingSword:
                     actor.FlamingSword = p.CanUse;
                     if (actor.FlamingSword)
-                        ChatDialog.ReceiveChat(prefix + GameLanguage.WeaponSpiritFire, ChatType.Hint);
+                        ChatDialog.ReceiveChat(prefix + GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.WeaponSpiritFire), ChatType.Hint);
                     else
-                        ChatDialog.ReceiveChat(prefix + GameLanguage.SpiritsFireDisappeared, ChatType.System);
+                        ChatDialog.ReceiveChat(prefix + GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.SpiritsFireDisappeared), ChatType.System);
                     break;
             }
         }
@@ -5675,7 +5195,7 @@ namespace Client.MirScenes
                 BuffsDialog.Buffs.Add(buff);
                 BuffsDialog.CreateBuff(buff);
 
-                User.RefreshStats();     
+                User.RefreshStats();
             }
 
             if (Hero != null && buff.ObjectID == Hero.ObjectID)
@@ -6152,37 +5672,37 @@ namespace Client.MirScenes
             switch (p.Reason)
             {
                 case 0:
-                    MirMessageBox.Show("You cannot use the TrustMerchant when dead.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.YouCannotUseTrustMerchantWhenDead));
                     break;
                 case 1:
-                    MirMessageBox.Show("You cannot buy from the TrustMerchant without using.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.YouCannotBuyFromTrustMerchantWithoutUsing));
                     break;
                 case 2:
-                    MirMessageBox.Show("This item has already been sold.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemHasBeenSold));
                     break;
                 case 3:
-                    MirMessageBox.Show("This item has Expired and cannot be brought.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemExpiredCannotBeBought));
                     break;
                 case 4:
-                    MirMessageBox.Show(GameLanguage.LowGold);
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.LowGold));
                     break;
                 case 5:
-                    MirMessageBox.Show("You do not have enough weight or space spare to buy this item.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.NotEnoughWeightOrSpaceToBuyItem));
                     break;
                 case 6:
-                    MirMessageBox.Show("You cannot buy your own items.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CannotBuyOwnItems));
                     break;
                 case 7:
-                    MirMessageBox.Show("You are too far away from the Trust Merchant.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.TooFarFromTrustMerchant));
                     break;
                 case 8:
-                    MirMessageBox.Show("You cannot hold enough gold to get your sale.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CannotHoldGoldForSale));
                     break;
                 case 9:
-                    MirMessageBox.Show("This item has not met the minimum bid yet.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemNotMetMinimumBid));
                     break;
                 case 10:
-                    MirMessageBox.Show("Auction has already ended for this item.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AuctionAlreadyEndedForItem));
                     break;
             }
 
@@ -6241,7 +5761,7 @@ namespace Client.MirScenes
 
         private void GuildInvite(S.GuildInvite p)
         {
-            MirMessageBox messageBox = new MirMessageBox(string.Format("Do you want to join the {0} guild?", p.Name), MirMessageBoxButtons.YesNo);
+            MirMessageBox messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.JoinGuildPrompt), p.Name), MirMessageBoxButtons.YesNo);
 
             messageBox.YesButton.Click += (o, e) => Network.Enqueue(new C.GuildInvite { AcceptInvite = true });
             messageBox.NoButton.Click += (o, e) => Network.Enqueue(new C.GuildInvite { AcceptInvite = false });
@@ -6251,7 +5771,7 @@ namespace Client.MirScenes
 
         private void GuildNameRequest(S.GuildNameRequest p)
         {
-            MirInputBox inputBox = new MirInputBox("Please enter a guild name, length must be 3~20 characters.");
+            MirInputBox inputBox = new MirInputBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.EnterGuildNameLengthLimit));
             inputBox.InputTextBox.TextBox.KeyPress += (o, e) =>
             {
                 string Allowed = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -6262,7 +5782,7 @@ namespace Client.MirScenes
             {
                 if (inputBox.InputTextBox.Text.Contains('\\'))
                 {
-                    ChatDialog.ReceiveChat("You cannot use the \\ sign in a guildname!", ChatType.System);
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CannotUseBackslashInGuildName), ChatType.System);
                     inputBox.InputTextBox.Text = "";
                 }
                 Network.Enqueue(new C.GuildNameReturn { Name = inputBox.InputTextBox.Text });
@@ -6273,7 +5793,7 @@ namespace Client.MirScenes
 
         private void GuildRequestWar(S.GuildRequestWar p)
         {
-            MirInputBox inputBox = new MirInputBox("Please enter the guild you would like to go to war with.");
+            MirInputBox inputBox = new MirInputBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.EnterGuildToWarWith));
 
             inputBox.OKButton.Click += (o, e) =>
             {
@@ -6298,20 +5818,22 @@ namespace Client.MirScenes
                     GuildDialog.MemberStatusChange(p.Name, false);
                     break;
                 case 1: // logged on
-                    ChatDialog.ReceiveChat(String.Format("{0} logged on.", p.Name), ChatType.Guild);
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.PlayerLoggedOn), p.Name), ChatType.Guild);
                     GuildDialog.MemberStatusChange(p.Name, true);
                     break;
-                case 2://new member
-                    ChatDialog.ReceiveChat(String.Format("{0} joined guild.", p.Name), ChatType.Guild);
+                case 2: //new member
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.PlayerJoinedGuild), p.Name), ChatType.Guild);
                     GuildDialog.MemberCount++;
                     GuildDialog.MembersChanged = true;
                     break;
-                case 3://kicked member
-                    ChatDialog.ReceiveChat(String.Format("{0} got removed from the guild.", p.Name), ChatType.Guild);
+                case 3: //kicked member
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.PlayerRemovedFromGuild), p.Name), ChatType.Guild);
+                    GuildDialog.MemberCount = Math.Max(0, GuildDialog.MemberCount - 1);
                     GuildDialog.MembersChanged = true;
                     break;
-                case 4://member left
-                    ChatDialog.ReceiveChat(String.Format("{0} left the guild.", p.Name), ChatType.Guild);
+                case 4: //member left
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.PlayerLeftGuild), p.Name), ChatType.Guild);
+                    GuildDialog.MemberCount = Math.Max(0, GuildDialog.MemberCount - 1);
                     GuildDialog.MembersChanged = true;
                     break;
                 case 5://rank change (name or different rank)
@@ -6388,11 +5910,11 @@ namespace Client.MirScenes
             switch (p.Type)
             {
                 case 0:
-                    ChatDialog.ReceiveChat(String.Format("{0} donated {1} gold to guild funds.", p.Name, p.Amount), ChatType.Guild);
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.PlayerDonatedGoldToGuildFunds), p.Name, p.Amount), ChatType.Guild);
                     GuildDialog.Gold += p.Amount;
                     break;
                 case 1:
-                    ChatDialog.ReceiveChat(String.Format("{0} retrieved {1} gold from guild funds.", p.Name, p.Amount), ChatType.Guild);
+                    ChatDialog.ReceiveChat(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.PlayerRetrievedGoldFromGuildFunds), p.Name, p.Amount), ChatType.Guild);
                     if (GuildDialog.Gold > p.Amount)
                         GuildDialog.Gold -= p.Amount;
                     else
@@ -6459,9 +5981,9 @@ namespace Client.MirScenes
                     fromCell.Locked = false;
                     fromCell.Item = toCell.Item;
                     toCell.Item = p.Item.Item;
-                    
+
                     Bind(toCell.Item);
-                    if (fromCell.Item != null) 
+                    if (fromCell.Item != null)
                         Bind(fromCell.Item);
                     break;
                 case 3://failstore
@@ -6520,14 +6042,14 @@ namespace Client.MirScenes
         }
 
         private void HeroCreateRequest(S.HeroCreateRequest p)
-        {            
+        {
             NewHeroDialog.WarriorButton.Visible = p.CanCreateClass[(int)MirClass.Warrior];
             NewHeroDialog.WizardButton.Visible = p.CanCreateClass[(int)MirClass.Wizard];
             NewHeroDialog.TaoistButton.Visible = p.CanCreateClass[(int)MirClass.Taoist];
             NewHeroDialog.AssassinButton.Visible = p.CanCreateClass[(int)MirClass.Assassin];
             NewHeroDialog.ArcherButton.Visible = p.CanCreateClass[(int)MirClass.Archer];
 
-            NewHeroDialog.Show();            
+            NewHeroDialog.Show();
         }
 
         private void ManageHeroes(S.ManageHeroes p)
@@ -6596,33 +6118,33 @@ namespace Client.MirScenes
             switch (p.Result)
             {
                 case 0:
-                    MirMessageBox.Show("Creating new heroes is currently disabled.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CreatingNewHeroesDisabled));
                     NewHeroDialog.Hide();
                     break;
                 case 1:
-                    MirMessageBox.Show("Your Hero Name is not acceptable.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.YourHeroNameNotAcceptable));
                     NewHeroDialog.NameTextBox.SetFocus();
                     break;
                 case 2:
-                    MirMessageBox.Show("The gender you selected does not exist.\n Contact a GM for assistance.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.SelectedGenderNotExist));
                     break;
                 case 3:
-                    MirMessageBox.Show("The class you selected does not exist.\n Contact a GM for assistance.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.SelectedClassNotExist));
                     break;
                 case 4:
-                    MirMessageBox.Show("You cannot make anymore Heroes.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CannotMakeMoreHeroes));
                     NewHeroDialog.Hide();
                     break;
                 case 5:
-                    MirMessageBox.Show("A Character with this name already exists.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CharacterNameAlreadyExists));
                     NewHeroDialog.NameTextBox.SetFocus();
                     break;
                 case 6:
-                    MirMessageBox.Show("No bag space.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.NoBagSpace));
                     NewHeroDialog.Hide();
                     break;
                 case 10:
-                    MirMessageBox.Show("Hero created successfully.");
+                    MirMessageBox.Show(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.HeroCreatedSuccessfully));
                     NewHeroDialog.Hide();
                     break;
             }
@@ -6665,7 +6187,7 @@ namespace Client.MirScenes
             HasHero = p.State > HeroSpawnState.None;
             MainDialog.HeroInfoPanel.Visible = p.State > HeroSpawnState.Unsummoned;
             MainDialog.HeroMenuButton.Visible = p.State > HeroSpawnState.Unsummoned;
-            HeroBehaviourPanel.Visible = p.State > HeroSpawnState.Unsummoned;            
+            HeroBehaviourPanel.Visible = p.State > HeroSpawnState.Unsummoned;
             HeroMenuPanel.Visible = HeroMenuPanel.Visible && MainDialog.HeroMenuButton.Visible;
 
             if (p.State < HeroSpawnState.Summoned)
@@ -6679,7 +6201,7 @@ namespace Client.MirScenes
 
         private void MarriageRequest(S.MarriageRequest p)
         {
-            MirMessageBox messageBox = new MirMessageBox(string.Format("{0} has asked for your hand in marriage.", p.Name), MirMessageBoxButtons.YesNo);
+            MirMessageBox messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.PlayerAskedForMarriage), p.Name), MirMessageBoxButtons.YesNo);
 
             messageBox.YesButton.Click += (o, e) => Network.Enqueue(new C.MarriageReply { AcceptInvite = true });
             messageBox.NoButton.Click += (o, e) => { Network.Enqueue(new C.MarriageReply { AcceptInvite = false }); messageBox.Dispose(); };
@@ -6689,7 +6211,7 @@ namespace Client.MirScenes
 
         private void DivorceRequest(S.DivorceRequest p)
         {
-            MirMessageBox messageBox = new MirMessageBox(string.Format("{0} has requested a divorce", p.Name), MirMessageBoxButtons.YesNo);
+            MirMessageBox messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.PlayerRequestedDivorce), p.Name), MirMessageBoxButtons.YesNo);
 
             messageBox.YesButton.Click += (o, e) => Network.Enqueue(new C.DivorceReply { AcceptInvite = true });
             messageBox.NoButton.Click += (o, e) => { Network.Enqueue(new C.DivorceReply { AcceptInvite = false }); messageBox.Dispose(); };
@@ -6699,7 +6221,8 @@ namespace Client.MirScenes
 
         private void MentorRequest(S.MentorRequest p)
         {
-            MirMessageBox messageBox = new MirMessageBox(string.Format("{0} (Level {1}) has requested you teach him the ways of the {2}.", p.Name, p.Level, GameScene.User.Class.ToString()), MirMessageBoxButtons.YesNo);
+            MirMessageBox messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.PlayerRequestedTeachClass), p.Name, p.Level, GameScene.User.Class.ToString()),
+                MirMessageBoxButtons.YesNo);
 
             messageBox.YesButton.Click += (o, e) => Network.Enqueue(new C.MentorReply { AcceptInvite = true });
             messageBox.NoButton.Click += (o, e) => { Network.Enqueue(new C.MentorReply { AcceptInvite = false }); messageBox.Dispose(); };
@@ -6761,7 +6284,7 @@ namespace Client.MirScenes
             {
                 if (buff == null)
                 {
-                    buff = new ClientBuff { Type = BuffType.Guild, ObjectID = User.ObjectID, Caster = "Guild", Infinite = true, Values = new int[0] };
+                    buff = new ClientBuff { Type = BuffType.Guild, ObjectID = User.ObjectID, Caster = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.Guild), Infinite = true, Values = new int[0] };
 
                     BuffsDialog.Buffs.Add(buff);
                     BuffsDialog.CreateBuff(buff);
@@ -6779,7 +6302,7 @@ namespace Client.MirScenes
 
         private void TradeRequest(S.TradeRequest p)
         {
-            MirMessageBox messageBox = new MirMessageBox(string.Format("Player {0} has requested to trade with you.", p.Name), MirMessageBoxButtons.YesNo);
+            MirMessageBox messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.PlayerRequestedTrade), p.Name), MirMessageBoxButtons.YesNo);
 
             messageBox.YesButton.Click += (o, e) => Network.Enqueue(new C.TradeReply { AcceptInvite = true });
             messageBox.NoButton.Click += (o, e) => { Network.Enqueue(new C.TradeReply { AcceptInvite = false }); messageBox.Dispose(); };
@@ -6817,7 +6340,7 @@ namespace Client.MirScenes
             {
                 TradeDialog.TradeReset();
 
-                MirMessageBox messageBox = new MirMessageBox("Deal cancelled.\r\nTo deal correctly you must face the other party.", MirMessageBoxButtons.OK);
+                MirMessageBox messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.DealCancelledMustFace), MirMessageBoxButtons.OK);
                 messageBox.Show();
             }
         }
@@ -6893,19 +6416,19 @@ namespace Client.MirScenes
             switch (p.result)
             {
                 case -4:
-                    messageBox = new MirMessageBox("You have not supplied enough materials.", MirMessageBoxButtons.OK);
+                    messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.NotEnoughMaterials), MirMessageBoxButtons.OK);
                     MapControl.AwakeningAction = false;
                     break;
                 case -3:
-                    messageBox = new MirMessageBox(GameLanguage.LowGold, MirMessageBoxButtons.OK);
+                    messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.LowGold), MirMessageBoxButtons.OK);
                     MapControl.AwakeningAction = false;
                     break;
                 case -2:
-                    messageBox = new MirMessageBox("Awakening already at maximum level.", MirMessageBoxButtons.OK);
+                    messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AwakeningMaxLevel), MirMessageBoxButtons.OK);
                     MapControl.AwakeningAction = false;
                     break;
                 case -1:
-                    messageBox = new MirMessageBox("Cannot awaken this item.", MirMessageBoxButtons.OK);
+                    messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CannotAwakenItem), MirMessageBoxButtons.OK);
                     MapControl.AwakeningAction = false;
                     break;
                 case 0:
@@ -6928,9 +6451,9 @@ namespace Client.MirScenes
 
             User.Mail = p.Mail.OrderByDescending(e => !e.Locked).ThenByDescending(e => e.DateSent).ToList();
 
-            foreach(ClientMail mail in User.Mail)
+            foreach (ClientMail mail in User.Mail)
             {
-                foreach(UserItem itm in mail.Items)
+                foreach (UserItem itm in mail.Items)
                 {
                     Bind(itm);
                 }
@@ -6954,7 +6477,7 @@ namespace Client.MirScenes
 
         private void MailSendRequest(S.MailSendRequest p)
         {
-            MirInputBox inputBox = new MirInputBox("Please enter the name of the person you would like to mail.");
+            MirInputBox inputBox = new MirInputBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.EnterMailRecipientName));
 
             inputBox.OKButton.Click += (o1, e1) =>
             {
@@ -6991,14 +6514,14 @@ namespace Client.MirScenes
 
         private void ParcelCollected(S.ParcelCollected p)
         {
-            switch(p.Result)
+            switch (p.Result)
             {
                 case -1:
-                    MirMessageBox messageBox = new MirMessageBox(string.Format("No parcels to collect."), MirMessageBoxButtons.OK);
+                    MirMessageBox messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.NoParcelsToCollect), MirMessageBoxButtons.OK);
                     messageBox.Show();
                     break;
                 case 0:
-                    messageBox = new MirMessageBox(string.Format("All parcels have been collected."), MirMessageBoxButtons.OK);
+                    messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AllParcelsCollected), MirMessageBoxButtons.OK);
                     messageBox.Show();
                     break;
                 case 1:
@@ -7024,7 +6547,7 @@ namespace Client.MirScenes
 
         private void MailCost(S.MailCost p)
         {
-            if(GameScene.Scene.MailComposeParcelDialog.Visible)
+            if (GameScene.Scene.MailComposeParcelDialog.Visible)
             {
                 if (p.Cost > 0)
                     SoundManager.PlaySound(SoundList.Gold);
@@ -7066,7 +6589,7 @@ namespace Client.MirScenes
         {
             if (CMain.Time > User.DeadTime && User.CurrentAction == MirAction.Dead)
             {
-                MirMessageBox messageBox = new MirMessageBox("Would you like to be revived?", MirMessageBoxButtons.YesNo);
+                MirMessageBox messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.WouldYouLikeToBeRevived), MirMessageBoxButtons.YesNo);
 
                 messageBox.YesButton.Click += (o, e) => Network.Enqueue(new C.AcceptReincarnation());
 
@@ -7078,8 +6601,8 @@ namespace Client.MirScenes
         {
             User.IntelligentCreatures.Add(p.Creature);
 
-            MirInputBox inputBox = new MirInputBox("Please give your creature a name.");
-            inputBox.InputTextBox.Text = GameScene.User.IntelligentCreatures[User.IntelligentCreatures.Count-1].CustomName;
+            MirInputBox inputBox = new MirInputBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.PleaseGiveYourCreatureName));
+            inputBox.InputTextBox.Text = GameScene.User.IntelligentCreatures[User.IntelligentCreatures.Count - 1].CustomName;
             inputBox.OKButton.Click += (o1, e1) =>
             {
                 if (IntelligentCreatureDialog.Visible) IntelligentCreatureDialog.Update();//refresh changes
@@ -7165,12 +6688,12 @@ namespace Client.MirScenes
             for (int i = 0; i < GameShopInfoList.Count; i++)
             {
                 if (GameShopInfoList[i].GIndex == p.GIndex)
-                    {
+                {
                     if (p.StockLevel == 0) GameShopInfoList.Remove(GameShopInfoList[i]);
                     else GameShopInfoList[i].Stock = p.StockLevel;
 
                     if (GameShopDialog.Visible) GameShopDialog.UpdateShop();
-                    }
+                }
             }
         }
         public void AddItem(UserItem item)
@@ -7319,22 +6842,22 @@ namespace Client.MirScenes
             string GradeString = "";
             switch (HoverItem.Info.Grade)
             {
-                case ItemGrade.None:                   
+                case ItemGrade.None:
                     break;
                 case ItemGrade.Common:
-                    GradeString = GameLanguage.ItemGradeCommon;
+                    GradeString = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemGradeCommon);
                     break;
                 case ItemGrade.Rare:
-                    GradeString = GameLanguage.ItemGradeRare;
+                    GradeString = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemGradeRare);
                     break;
                 case ItemGrade.Legendary:
-                    GradeString = GameLanguage.ItemGradeLegendary;
+                    GradeString = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemGradeLegendary);
                     break;
                 case ItemGrade.Mythical:
-                    GradeString = GameLanguage.ItemGradeMythical;
+                    GradeString = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemGradeMythical);
                     break;
                 case ItemGrade.Heroic:
-                    GradeString = GameLanguage.ItemGradeHeroic;
+                    GradeString = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemGradeHeroic);
                     break;
             }
             MirLabel nameLabel = new MirLabel
@@ -7360,19 +6883,24 @@ namespace Client.MirScenes
                 switch (HoverItem.Info.Type)
                 {
                     case ItemType.Amulet:
-                        text += string.Format(" Usage {0}/{1}", HoverItem.CurrentDura, HoverItem.MaxDura);
+                        if (HoverItem.CurrentDura > 0 || HoverItem.MaxDura > 0)
+                            text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.UsageCurrentMax, HoverItem.CurrentDura, HoverItem.MaxDura);
                         break;
                     case ItemType.Ore:
-                        text += string.Format(" Purity {0}", Math.Floor(HoverItem.CurrentDura / 1000M));
+                        if (HoverItem.CurrentDura > 0)
+                            text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.PurityValue, Math.Floor(HoverItem.CurrentDura / 1000M));
                         break;
                     case ItemType.Meat:
-                        text += string.Format(" Quality {0}", Math.Floor(HoverItem.CurrentDura / 1000M));
+                        if (HoverItem.CurrentDura > 0)
+                            text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.QualityValue, Math.Floor(HoverItem.CurrentDura / 1000M));
                         break;
                     case ItemType.Mount:
-                        text += string.Format(" Loyalty {0} / {1}", HoverItem.CurrentDura, HoverItem.MaxDura);
+                        if (HoverItem.CurrentDura > 0 || HoverItem.MaxDura > 0)
+                            text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.LoyaltyValues, HoverItem.CurrentDura, HoverItem.MaxDura);
                         break;
                     case ItemType.Food:
-                        text += string.Format(" Nutrition {0}", HoverItem.CurrentDura);
+                        if (HoverItem.CurrentDura > 0)
+                            text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.NutritionValue, HoverItem.CurrentDura);
                         break;
                     case ItemType.Gem:
                     case ItemType.Potion:
@@ -7380,149 +6908,163 @@ namespace Client.MirScenes
                     case ItemType.SealedHero:
                         break;
                     case ItemType.Pets:
-                        if (HoverItem.Info.Shape == 26 || HoverItem.Info.Shape == 28)//WonderDrug, Knapsack
+                        if ((HoverItem.Info.Shape == 26 || HoverItem.Info.Shape == 28) && HoverItem.CurrentDura > 0)//WonderDrug, Knapsack
                         {
                             string strTime = Functions.PrintTimeSpanFromSeconds((HoverItem.CurrentDura * 3600), false);
-                            text += string.Format(" Duration {0}", strTime);
+                            text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.DurationValue, strTime);
                         }
                         break;
                     default:
-                        text += string.Format(" {0} {1}/{2}", GameLanguage.Durability, Math.Floor(HoverItem.CurrentDura / 1000M),
-                                                   Math.Floor(HoverItem.MaxDura / 1000M));
+                        int current = (int)Math.Floor(HoverItem.CurrentDura / 1000M);
+                        int maximum = (int)Math.Floor(HoverItem.MaxDura / 1000M);
+                        if (current > 0 || maximum > 0)
+                            text = string.Format("{0} {1}/{2}", GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.Durability), current, maximum);
                         break;
                 }
             }
 
-            string baseText = "";
+            string baseText = string.Empty;
             switch (HoverItem.Info.Type)
             {
                 case ItemType.Nothing:
                     break;
                 case ItemType.Weapon:
-                    baseText = GameLanguage.ItemTypeWeapon;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeWeapon);
                     break;
                 case ItemType.Armour:
-                    baseText = GameLanguage.ItemTypeArmour;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeArmour);
                     break;
                 case ItemType.Helmet:
-                    baseText = GameLanguage.ItemTypeHelmet;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeHelmet);
                     break;
                 case ItemType.Necklace:
-                    baseText = GameLanguage.ItemTypeNecklace;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeNecklace);
                     break;
                 case ItemType.Bracelet:
-                    baseText = GameLanguage.ItemTypeBracelet;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeBracelet);
                     break;
                 case ItemType.Ring:
-                    baseText = GameLanguage.ItemTypeRing;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeRing);
                     break;
                 case ItemType.Amulet:
-                    baseText = GameLanguage.ItemTypeAmulet;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeAmulet);
                     break;
                 case ItemType.Belt:
-                    baseText = GameLanguage.ItemTypeBelt;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeBelt);
                     break;
                 case ItemType.Boots:
-                    baseText = GameLanguage.ItemTypeBoots;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeBoots);
                     break;
                 case ItemType.Stone:
-                    baseText = GameLanguage.ItemTypeStone;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeStone);
                     break;
                 case ItemType.Torch:
-                    baseText = GameLanguage.ItemTypeTorch;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeTorch);
                     break;
                 case ItemType.Potion:
-                    baseText = GameLanguage.ItemTypePotion;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypePotion);
                     break;
                 case ItemType.Ore:
-                    baseText = GameLanguage.ItemTypeOre;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeOre);
                     break;
                 case ItemType.Meat:
-                    baseText = GameLanguage.ItemTypeMeat;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeMeat);
                     break;
                 case ItemType.CraftingMaterial:
-                    baseText = GameLanguage.ItemTypeCraftingMaterial;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeCraftingMaterial);
                     break;
                 case ItemType.Scroll:
-                    baseText = GameLanguage.ItemTypeScroll;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeScroll);
                     break;
                 case ItemType.Gem:
-                    baseText = GameLanguage.ItemTypeGem;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeGem);
                     break;
                 case ItemType.Mount:
-                    baseText = GameLanguage.ItemTypeMount;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeMount);
                     break;
                 case ItemType.Book:
-                    baseText = GameLanguage.ItemTypeBook;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeBook);
                     break;
                 case ItemType.Script:
-                    baseText = GameLanguage.ItemTypeScript;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeScript);
                     break;
                 case ItemType.Reins:
-                    baseText = GameLanguage.ItemTypeReins;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeReins);
                     break;
                 case ItemType.Bells:
-                    baseText = GameLanguage.ItemTypeBells;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeBells);
                     break;
                 case ItemType.Saddle:
-                    baseText = GameLanguage.ItemTypeSaddle;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeSaddle);
                     break;
                 case ItemType.Ribbon:
-                    baseText = GameLanguage.ItemTypeRibbon;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeRibbon);
                     break;
                 case ItemType.Mask:
-                    baseText = GameLanguage.ItemTypeMask;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeMask);
                     break;
                 case ItemType.Food:
-                    baseText = GameLanguage.ItemTypeFood;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeFood);
                     break;
                 case ItemType.Hook:
-                    baseText = GameLanguage.ItemTypeHook;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeHook);
                     break;
                 case ItemType.Float:
-                    baseText = GameLanguage.ItemTypeFloat;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeFloat);
                     break;
                 case ItemType.Bait:
-                    baseText = GameLanguage.ItemTypeBait;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeBait);
                     break;
                 case ItemType.Finder:
-                    baseText = GameLanguage.ItemTypeFinder;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeFinder);
                     break;
                 case ItemType.Reel:
-                    baseText = GameLanguage.ItemTypeReel;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeReel);
                     break;
                 case ItemType.Fish:
-                    baseText = GameLanguage.ItemTypeFish;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeFish);
                     break;
                 case ItemType.Quest:
-                    baseText = GameLanguage.ItemTypeQuest;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeQuest);
                     break;
                 case ItemType.Awakening:
-                    baseText = GameLanguage.ItemTypeAwakening;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeAwakening);
                     break;
                 case ItemType.Pets:
-                    baseText = GameLanguage.ItemTypePets;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypePets);
                     break;
                 case ItemType.Transform:
-                    baseText = GameLanguage.ItemTypeTransform;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeTransform);
                     break;
                 case ItemType.Deco:
-                    baseText = GameLanguage.ItemTypeDeco;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeDeco);
                     break;
                 case ItemType.MonsterSpawn:
-                    baseText = GameLanguage.ItemTypeMonsterSpawn;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeMonsterSpawn);
                     break;
                 case ItemType.SealedHero:
-                    baseText = GameLanguage.ItemTypeSealedHero;
+                    baseText = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemTypeSealedHero);
                     break;
             }
 
             if (HoverItem.WeddingRing != -1)
             {
-                baseText = GameLanguage.WeddingRing;
+                baseText += GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.WeddingRing);
             }
 
-            baseText = string.Format(GameLanguage.ItemTextFormat, baseText, string.IsNullOrEmpty(baseText) ? "" : "\n", GameLanguage.Weight, HoverItem.Weight + text);
+            List<string> tailParts = new List<string>();
+            if (HoverItem.Weight > 0)
+                tailParts.Add(string.Format("{0} {1}", GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.Weight), HoverItem.Weight));
+            if (!string.IsNullOrEmpty(text))
+                tailParts.Add(text);
+
+            if (tailParts.Count > 0)
+            {
+                string tailText = string.Join("  ", tailParts.ToArray());
+                baseText = string.IsNullOrEmpty(baseText)
+                    ? tailText
+                    : string.Format("{0}\n{1}", baseText, tailText);
+            }
 
             MirLabel etcLabel = new MirLabel
             {
@@ -7553,12 +7095,39 @@ namespace Client.MirScenes
 
             return outLine;
         }
+
+        private Stats GetTotalAddedStats(UserItem item, ushort level, MirClass job)
+        {
+            Stats total = new Stats();
+
+            if (item == null) return total;
+
+            total.Add(item.AddedStats);
+
+            if (item.Slots == null || item.Slots.Length == 0) return total;
+
+            for (int i = 0; i < item.Slots.Length; i++)
+            {
+                UserItem socketItem = item.Slots[i];
+                if (socketItem == null) continue;
+
+                ItemInfo socketInfo = Functions.GetRealItem(socketItem.Info, level, job, ItemInfoList);
+
+                if (socketItem.CurrentDura == 0 && socketInfo.Durability > 0) continue;
+
+                total.Add(socketInfo.Stats);
+                total.Add(socketItem.AddedStats);
+            }
+
+            return total;
+        }
         public MirControl AttackInfoLabel(UserItem item, bool Inspect = false, bool hideAdded = false)
         {
             ushort level = Inspect ? InspectDialog.Level : MapObject.User.Level;
             MirClass job = Inspect ? InspectDialog.Class : MapObject.User.Class;
             HoverItem = item;
             ItemInfo realItem = Functions.GetRealItem(item.Info, level, job, ItemInfoList);
+            Stats addedStats = GetTotalAddedStats(item, level, job);
 
             ItemLabel.Size = new Size(ItemLabel.Size.Width, ItemLabel.Size.Height + 4);
 
@@ -7596,10 +7165,10 @@ namespace Client.MirScenes
                 switch (realItem.Shape)
                 {
                     default:
-                        text = string.Format("Adds +{0} Durability", minValue / 1000);
+                        text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AddsDurability, minValue / 1000);
                         break;
                     case 8:
-                        text = string.Format("Seals for {0}", Functions.PrintTimeSpanFromSeconds(minValue * 60));
+                        text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.SealsFor, Functions.PrintTimeSpanFromSeconds(minValue * 60));
                         break;
                 }
 
@@ -7623,15 +7192,15 @@ namespace Client.MirScenes
             #region DC
             minValue = realItem.Stats[Stat.MinDC];
             maxValue = realItem.Stats[Stat.MaxDC];
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.MaxDC] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.MaxDC] : 0;
 
             if (minValue > 0 || maxValue > 0 || addValue > 0)
             {
                 count++;
                 if (HoverItem.Info.Type != ItemType.Gem)
-                    text = string.Format(addValue > 0 ? GameLanguage.DC : GameLanguage.DC2, minValue, maxValue + addValue, addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.DC, minValue, maxValue + addValue) + (addValue > 0 ? $" (+{addValue})" : string.Empty);
                 else
-                    text = string.Format("Adds +{0} DC", minValue + maxValue + addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AddsDC, minValue + maxValue + addValue);
                 MirLabel DCLabel = new MirLabel
                 {
                     AutoSize = true,
@@ -7652,15 +7221,15 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.MinMC];
             maxValue = realItem.Stats[Stat.MaxMC];
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.MaxMC] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.MaxMC] : 0;
 
             if (minValue > 0 || maxValue > 0 || addValue > 0)
             {
                 count++;
                 if (HoverItem.Info.Type != ItemType.Gem)
-                    text = string.Format(addValue > 0 ? GameLanguage.MC : GameLanguage.MC2, minValue, maxValue + addValue, addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.MC, minValue, maxValue + addValue) + (addValue > 0 ? $" (+{addValue})" : string.Empty);
                 else
-                    text = string.Format("Adds +{0} MC", minValue + maxValue + addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AddsMC, minValue + maxValue + addValue);
                 MirLabel MCLabel = new MirLabel
                 {
                     AutoSize = true,
@@ -7681,15 +7250,15 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.MinSC];
             maxValue = realItem.Stats[Stat.MaxSC];
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.MaxSC] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.MaxSC] : 0;
 
             if (minValue > 0 || maxValue > 0 || addValue > 0)
             {
                 count++;
                 if (HoverItem.Info.Type != ItemType.Gem)
-                    text = string.Format(addValue > 0 ? GameLanguage.SC : GameLanguage.SC2, minValue, maxValue + addValue, addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.SC, minValue, maxValue + addValue) + (addValue > 0 ? $" (+{addValue})" : string.Empty);
                 else
-                    text = string.Format("Adds +{0} SC", minValue + maxValue + addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AddsSC, minValue + maxValue + addValue);
                 MirLabel SCLabel = new MirLabel
                 {
                     AutoSize = true,
@@ -7711,27 +7280,28 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.Luck];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.Luck] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.Luck] : 0;
 
             if (minValue != 0 || addValue != 0)
             {
                 count++;
 
-                if(realItem.Type == ItemType.Pets && realItem.Shape == 28)
+                if (realItem.Type == ItemType.Pets && realItem.Shape == 28)
                 {
-                    text = string.Format("BagWeight + {0}% ", minValue + addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.BagWeightPercent, minValue + addValue);
                 }
                 else if (realItem.Type == ItemType.Potion && realItem.Shape == 4)
                 {
-                    text = string.Format("Exp + {0}% ", minValue + addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ExpPercent, minValue + addValue);
                 }
                 else if (realItem.Type == ItemType.Potion && realItem.Shape == 5)
                 {
-                    text = string.Format("Drop + {0}% ", minValue + addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.DropPercent, minValue + addValue);
                 }
                 else
                 {
-                    text = string.Format(minValue + addValue > 0 ? GameLanguage.Luck: "Curse + {0}", Math.Abs(minValue + addValue));
+                    text = string.Format(minValue + addValue > 0 ? GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.Luck) : GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CursePlusValue),
+                        Math.Abs(minValue + addValue));
                 }
 
                 MirLabel LUCKLabel = new MirLabel
@@ -7756,15 +7326,15 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.Accuracy];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.Accuracy] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.Accuracy] : 0;
 
             if (minValue > 0 || maxValue > 0 || addValue > 0)
             {
                 count++;
                 if (HoverItem.Info.Type != ItemType.Gem)
-                    text = string.Format(addValue > 0 ? GameLanguage.Accuracy : GameLanguage.Accuracy2, minValue + addValue, addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.Accuracy, minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : string.Empty);
                 else
-                    text = string.Format("Adds +{0} Accuracy", minValue + maxValue + addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AddsAccuracyValue, minValue + maxValue + addValue);
                 MirLabel ACCLabel = new MirLabel
                 {
                     AutoSize = true,
@@ -7799,7 +7369,7 @@ namespace Client.MirScenes
                     OutLine = true,
                     Parent = ItemLabel,
                     //Text = string.Format("Holy + {0}", minValue + addValue)
-                    Text = string.Format(addValue > 0 ? GameLanguage.Holy : GameLanguage.Holy2, minValue + addValue, addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.Holy, minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : string.Empty)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, HOLYLabel.DisplayRectangle.Right + 4),
@@ -7812,22 +7382,25 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.AttackSpeed];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.AttackSpeed] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.AttackSpeed] : 0;
 
             if (minValue != 0 || maxValue != 0 || addValue != 0)
             {
-                string plus = (addValue + minValue < 0) ? "" : "+";
+                string plus = (addValue + minValue < 0) ? String.Empty : "+";
 
                 count++;
                 if (HoverItem.Info.Type != ItemType.Gem)
                 {
                     string negative = "+";
-                    if (addValue < 0) negative = "";
-                    text = string.Format(addValue != 0 ? "A.Speed: " + plus + "{0} ({2}{1})" : "A.Speed: " + plus + "{0}", minValue + addValue, addValue, negative);
+                    if (addValue < 0) negative = String.Empty;
+
+                    text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.AttackSpeedValue), plus, minValue + addValue) + (addValue != 0 ? $" ({negative}{addValue})" : string.Empty);
+                    //text = string.Format(addValue != 0 ? "A.Speed: " + plus + "{0} ({2}{1})" : "A.Speed: " + plus + "{0}", minValue + addValue, addValue, negative);
                     //text = string.Format(addValue > 0 ? "A.Speed: + {0} (+{1})" : "A.Speed: + {0}", minValue + addValue, addValue);
                 }
                 else
-                    text = string.Format("Adds +{0} A.Speed", minValue + maxValue + addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.AddAttackSpeed), minValue + maxValue + addValue);
+
                 MirLabel ASPEEDLabel = new MirLabel
                 {
                     AutoSize = true,
@@ -7849,15 +7422,17 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.Freezing];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.Freezing] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.Freezing] : 0;
 
             if (minValue > 0 || maxValue > 0 || addValue > 0)
             {
                 count++;
                 if (HoverItem.Info.Type != ItemType.Gem)
-                    text = string.Format(addValue > 0 ? "Freezing: + {0} (+{1})" : "Freezing: + {0}", minValue + addValue, addValue);
-                else
-                    text = string.Format("Adds +{0} Freezing", minValue + maxValue + addValue);
+                {
+                    text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.FreezingPlus), minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : string.Empty);
+                }
+                else text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.AddsFreezingPlus), minValue + maxValue + addValue);
+
                 MirLabel FREEZINGLabel = new MirLabel
                 {
                     AutoSize = true,
@@ -7879,15 +7454,18 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.PoisonAttack];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.PoisonAttack] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.PoisonAttack] : 0;
 
             if (minValue > 0 || maxValue > 0 || addValue > 0)
             {
                 count++;
                 if (HoverItem.Info.Type != ItemType.Gem)
-                    text = string.Format(addValue > 0 ? "Poison: + {0} (+{1})" : "Poison: + {0}", minValue + addValue, addValue);
+                {
+                    text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.PoisonPlus), minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : string.Empty);
+                }
                 else
-                    text = string.Format("Adds +{0} Poison", minValue + maxValue + addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.AddsPoisonPlus), minValue + maxValue + addValue);
+
                 MirLabel POISONLabel = new MirLabel
                 {
                     AutoSize = true,
@@ -7909,11 +7487,11 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.CriticalRate];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.CriticalRate] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.CriticalRate] : 0;
 
             if ((minValue > 0 || maxValue > 0 || addValue > 0) && (realItem.Type != ItemType.Gem))
             {
-                count++;                    
+                count++;
                 MirLabel CRITICALRATELabel = new MirLabel
                 {
                     AutoSize = true,
@@ -7922,12 +7500,13 @@ namespace Client.MirScenes
                     OutLine = true,
                     Parent = ItemLabel,
                     //Text = string.Format("Critical Chance + {0}", minValue + addValue)
-                    Text = string.Format(addValue > 0 ? "Critical Chance: + {0} (+{1})" : "Critical Chance: + {0}", minValue + addValue, addValue)
+                    //Text = string.Format(addValue > 0 ? "Critical Chance: + {0} (+{1})" : "Critical Chance: + {0}", minValue + addValue, addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.CriticalChancePlus), minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : string.Empty)
                 };
 
-                if(fishingItem)
+                if (fishingItem)
                 {
-                    CRITICALRATELabel.Text = string.Format(addValue > 0 ? "Flexibility: + {0} (+{1})" : "Flexibility: + {0}", minValue + addValue, addValue);
+                    CRITICALRATELabel.Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.FlexibilityPlus), minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : string.Empty);
                 }
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, CRITICALRATELabel.DisplayRectangle.Right + 4),
@@ -7940,7 +7519,7 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.CriticalDamage];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.CriticalDamage] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.CriticalDamage] : 0;
 
             if ((minValue > 0 || maxValue > 0 || addValue > 0) && (realItem.Type != ItemType.Gem))
             {
@@ -7953,7 +7532,7 @@ namespace Client.MirScenes
                     OutLine = true,
                     Parent = ItemLabel,
                     //Text = string.Format("Critical Damage + {0}", minValue + addValue)
-                    Text = string.Format(addValue > 0 ? "Critical Damage: + {0} (+{1})" : "Critical Damage: + {0}", minValue + addValue, addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.CriticalDamagePlus), minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : string.Empty)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, CRITICALDAMAGELabel.DisplayRectangle.Right + 4),
@@ -7978,7 +7557,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Reflect chance: {0}", minValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.ReflectChance), minValue)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, ReflectLabel.DisplayRectangle.Right + 4),
@@ -8003,7 +7582,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("HP Drain Rate: {0}%", minValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.HPDrainRate), minValue)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, HPdrainLabel.DisplayRectangle.Right + 4),
@@ -8016,16 +7595,16 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.ExpRatePercent];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.ExpRatePercent] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.ExpRatePercent] : 0;
 
             if (minValue != 0 || maxValue != 0 || addValue != 0)
             {
-                string plus = (addValue + minValue < 0) ? "" : "+";
+                string plus = (addValue + minValue < 0) ? string.Empty : "+";
 
                 count++;
                 string negative = "+";
-                if (addValue < 0) negative = "";
-                text = string.Format(addValue != 0 ? "Exp Rate: " + plus + "{0}% ({2}{1}%)" : "Exp Rate: " + plus + "{0}%", minValue + addValue, addValue, negative);
+                if (addValue < 0) negative = String.Empty;
+                text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.ExpRate), plus, minValue + addValue) + (addValue != 0 ? $" ({negative}{addValue}%)" : String.Empty);
 
                 MirLabel expRateLabel = new MirLabel
                 {
@@ -8047,16 +7626,16 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.ItemDropRatePercent];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.ItemDropRatePercent] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.ItemDropRatePercent] : 0;
 
             if (minValue != 0 || maxValue != 0 || addValue != 0)
             {
-                string plus = (addValue + minValue < 0) ? "" : "+";
+                string plus = (addValue + minValue < 0) ? String.Empty : "+";
 
                 count++;
                 string negative = "+";
-                if (addValue < 0) negative = "";
-                text = string.Format(addValue != 0 ? "Drop Rate: " + plus + "{0}% ({2}{1}%)" : "Drop Rate: " + plus + "{0}%", minValue + addValue, addValue, negative);
+                if (addValue < 0) negative = String.Empty;
+                text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.DropRate), plus, minValue + addValue) + (addValue != 0 ? $" ({negative}{addValue}%)" : string.Empty);
 
                 MirLabel dropRateLabel = new MirLabel
                 {
@@ -8078,16 +7657,16 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.GoldDropRatePercent];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.GoldDropRatePercent] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.GoldDropRatePercent] : 0;
 
             if (minValue != 0 || maxValue != 0 || addValue != 0)
             {
-                string plus = (addValue + minValue < 0) ? "" : "+";
+                string plus = (addValue + minValue < 0) ? String.Empty : "+";
 
                 count++;
                 string negative = "+";
                 if (addValue < 0) negative = "";
-                text = string.Format(addValue != 0 ? "Gold Rate: " + plus + "{0}% ({2}{1}%)" : "Gold Rate: " + plus + "{0}%", minValue + addValue, addValue, negative);
+                text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.GoldRate), plus, minValue + addValue) + (addValue != 0 ? $" ({negative}{addValue}%)" : String.Empty);
 
                 MirLabel goldRateLabel = new MirLabel
                 {
@@ -8107,9 +7686,9 @@ namespace Client.MirScenes
 
             #region Hero
 
-            if (HoverItem.AddedStats[Stat.Hero] > 0)
+            if (addedStats[Stat.Hero] > 0)
             {
-                ClientHeroInformation heroInfo = HeroInfoList.FirstOrDefault(x => x.Index == HoverItem.AddedStats[Stat.Hero]);
+                ClientHeroInformation heroInfo = HeroInfoList.FirstOrDefault(x => x.Index == addedStats[Stat.Hero]);
                 if (heroInfo != null)
                 {
                     count++;
@@ -8164,6 +7743,7 @@ namespace Client.MirScenes
             MirClass job = Inspect ? InspectDialog.Class : MapObject.User.Class;
             HoverItem = item;
             ItemInfo realItem = Functions.GetRealItem(item.Info, level, job, ItemInfoList);
+            Stats addedStats = GetTotalAddedStats(item, level, job);
 
             ItemLabel.Size = new Size(ItemLabel.Size.Width, ItemLabel.Size.Height + 4);
 
@@ -8197,15 +7777,15 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.MinAC];
             maxValue = realItem.Stats[Stat.MaxAC];
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.MaxAC] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.MaxAC] : 0;
 
             if (minValue > 0 || maxValue > 0 || addValue > 0)
             {
                 count++;
                 if (HoverItem.Info.Type != ItemType.Gem)
-                    text = string.Format(addValue > 0 ? GameLanguage.AC : GameLanguage.AC2, minValue, maxValue + addValue, addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.AC), minValue, maxValue + addValue) + (addValue > 0 ? $" (+{addValue})" : string.Empty);
                 else
-                    text = string.Format("Adds +{0} AC", minValue + maxValue + addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.AddsAC), minValue + maxValue + addValue);
                 MirLabel ACLabel = new MirLabel
                 {
                     AutoSize = true,
@@ -8221,15 +7801,17 @@ namespace Client.MirScenes
                 {
                     if (HoverItem.Info.Type == ItemType.Float)
                     {
-                        ACLabel.Text = string.Format("Nibble Chance + " + (addValue > 0 ? "{0}~{1}% (+{2})" : "{0}~{1}%"), minValue, maxValue + addValue);
+                        ACLabel.Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.NibbleChance), minValue, maxValue + addValue) +
+                                       (addValue > 0 ? $" (+{addValue})" : String.Empty);
                     }
                     else if (HoverItem.Info.Type == ItemType.Finder)
                     {
-                        ACLabel.Text = string.Format("Finder Increase + " + (addValue > 0 ? "{0}~{1}% (+{2})" : "{0}~{1}%"), minValue, maxValue + addValue);
+                        ACLabel.Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.FinderIncrease), minValue, maxValue + addValue) +
+                                       (addValue > 0 ? $" (+{addValue})" : String.Empty);
                     }
                     else
                     {
-                        ACLabel.Text = string.Format("Success Chance + " + (addValue > 0 ? "{0}% (+{1})" : "{0}%"), maxValue, maxValue + addValue);
+                        ACLabel.Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.SuccessChance), maxValue + addValue) + (addValue > 0 ? $" (+{addValue})" : String.Empty);
                     }
                 }
 
@@ -8243,15 +7825,15 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.MinMAC];
             maxValue = realItem.Stats[Stat.MaxMAC];
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.MaxMAC] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.MaxMAC] : 0;
 
             if (minValue > 0 || maxValue > 0 || addValue > 0)
             {
                 count++;
                 if (HoverItem.Info.Type != ItemType.Gem)
-                    text = string.Format(addValue > 0 ? GameLanguage.MAC : GameLanguage.MAC2, minValue, maxValue + addValue, addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.MAC), minValue, maxValue + addValue) + (addValue > 0 ? $" (+{addValue})" : string.Empty);
                 else
-                    text = string.Format("Adds +{0} MAC", minValue + maxValue + addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.AddsMAC), minValue + maxValue + addValue);
                 MirLabel MACLabel = new MirLabel
                 {
                     AutoSize = true,
@@ -8265,7 +7847,7 @@ namespace Client.MirScenes
 
                 if (fishingItem)
                 {
-                    MACLabel.Text = string.Format("AutoReel Chance + {0}%", maxValue + addValue);
+                    MACLabel.Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.AutoReelChance), maxValue + addValue);
                 }
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, MACLabel.DisplayRectangle.Right + 4),
@@ -8280,7 +7862,7 @@ namespace Client.MirScenes
             {
                 minValue = realItem.Stats[Stat.HP];
                 maxValue = 0;
-                addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.HP] : 0;
+                addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.HP] : 0;
 
                 if (minValue > 0 || maxValue > 0 || addValue > 0)
                 {
@@ -8293,7 +7875,7 @@ namespace Client.MirScenes
                         OutLine = true,
                         Parent = ItemLabel,
                         //Text = string.Format(realItem.Type == ItemType.Potion ? "HP + {0} Recovery" : "MAXHP + {0}", minValue + addValue)
-                        Text = string.Format(addValue > 0 ? "Max HP + {0} (+{1})" : "Max HP + {0}", minValue + addValue, addValue)
+                        Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.MaxHpPlus), minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : String.Empty)
                     };
 
                     ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, MAXHPLabel.DisplayRectangle.Right + 4),
@@ -8307,7 +7889,7 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.MP];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.MP] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.MP] : 0;
 
             if (minValue > 0 || maxValue > 0 || addValue > 0)
             {
@@ -8320,7 +7902,7 @@ namespace Client.MirScenes
                     OutLine = true,
                     Parent = ItemLabel,
                     //Text = string.Format(realItem.Type == ItemType.Potion ? "MP + {0} Recovery" : "MAXMP + {0}", minValue + addValue)
-                    Text = string.Format(addValue > 0 ? "Max MP + {0} (+{1})" : "Max MP + {0}", minValue + addValue, addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.MaxMpPlus), minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : String.Empty)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, MAXMPLabel.DisplayRectangle.Right + 4),
@@ -8345,7 +7927,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Max HP + {0}%", minValue + addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.MaxHpPlusPercent), minValue + addValue)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, MAXHPRATELabel.DisplayRectangle.Right + 4),
@@ -8370,7 +7952,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Max MP + {0}%", minValue + addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.MaxMpPlusPercent), minValue + addValue)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, MAXMPRATELabel.DisplayRectangle.Right + 4),
@@ -8395,7 +7977,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Max AC + {0}%", minValue + addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.MaxAcPlusPercent), minValue + addValue)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, MAXACRATE.DisplayRectangle.Right + 4),
@@ -8420,7 +8002,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Max MAC + {0}%", minValue + addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.MaxMacPlusPercent), minValue + addValue)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, MAXMACRATELabel.DisplayRectangle.Right + 4),
@@ -8433,7 +8015,7 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.HealthRecovery];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.HealthRecovery] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.HealthRecovery] : 0;
 
             if (minValue > 0 || maxValue > 0 || addValue > 0)
             {
@@ -8445,7 +8027,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format(addValue > 0 ? "Health Recovery + {0} (+{1})" : "Health Recovery + {0}", minValue + addValue, addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.HealthRecoveryPlus), minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : String.Empty)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, HEALTH_RECOVERYLabel.DisplayRectangle.Right + 4),
@@ -8458,7 +8040,7 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.SpellRecovery];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.SpellRecovery] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.SpellRecovery] : 0;
 
             if (minValue > 0 || maxValue > 0 || addValue > 0)
             {
@@ -8471,7 +8053,7 @@ namespace Client.MirScenes
                     OutLine = true,
                     Parent = ItemLabel,
                     //Text = string.Format("ManaRecovery + {0}", minValue + addValue)
-                    Text = string.Format(addValue > 0 ? "Mana Recovery + {0} (+{1})" : "Mana Recovery + {0}", minValue + addValue, addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.ManaRecoveryPlus), minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : String.Empty)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, MANA_RECOVERYLabel.DisplayRectangle.Right + 4),
@@ -8484,7 +8066,7 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.PoisonRecovery];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.PoisonRecovery] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.PoisonRecovery] : 0;
 
             if (minValue > 0 || maxValue > 0 || addValue > 0)
             {
@@ -8497,7 +8079,7 @@ namespace Client.MirScenes
                     OutLine = true,
                     Parent = ItemLabel,
                     //Text = string.Format("Poison Recovery + {0}", minValue + addValue)
-                    Text = string.Format(addValue > 0 ? "Poison Recovery + {0} (+{1})" : "Poison Recovery + {0}", minValue + addValue, addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.PoisonRecoveryPlus), minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : String.Empty)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, POISON_RECOVERYabel.DisplayRectangle.Right + 4),
@@ -8510,15 +8092,15 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.Agility];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.Agility] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.Agility] : 0;
 
             if (minValue > 0 || maxValue > 0 || addValue > 0)
             {
                 count++;
                 if (HoverItem.Info.Type != ItemType.Gem)
-                    text = string.Format(addValue > 0 ? GameLanguage.Agility : GameLanguage.Agility2, minValue + addValue, addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.Agility), minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : string.Empty);
                 else
-                    text = string.Format("Adds +{0} Agility", minValue + maxValue + addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.AddsAgilityPlus), minValue + maxValue + addValue);
 
                 MirLabel AGILITYLabel = new MirLabel
                 {
@@ -8540,7 +8122,7 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.Strong];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.Strong] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.Strong] : 0;
 
             if (minValue > 0 || maxValue > 0 || addValue > 0)
             {
@@ -8553,7 +8135,7 @@ namespace Client.MirScenes
                     OutLine = true,
                     Parent = ItemLabel,
                     //Text = string.Format("Strong + {0}", minValue + addValue)
-                    Text = string.Format(addValue > 0 ? "Strong + {0} (+{1})" : "Strong + {0}", minValue + addValue, addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.StrongPlus), minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : String.Empty)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, STRONGLabel.DisplayRectangle.Right + 4),
@@ -8566,15 +8148,15 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.PoisonResist];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.PoisonResist] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.PoisonResist] : 0;
 
             if (minValue > 0 || maxValue > 0 || addValue > 0)
             {
                 count++;
                 if (HoverItem.Info.Type != ItemType.Gem)
-                    text = string.Format(addValue > 0 ? "Poison Resist + {0} (+{1})" : "Poison Resist + {0}", minValue + addValue, addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.PoisonResistPlus), minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : String.Empty);
                 else
-                    text = string.Format("Adds +{0} Poison Resist", minValue + maxValue + addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.AddPoisonResistPlus), minValue + maxValue + addValue);
                 MirLabel POISON_RESISTLabel = new MirLabel
                 {
                     AutoSize = true,
@@ -8595,15 +8177,15 @@ namespace Client.MirScenes
 
             minValue = realItem.Stats[Stat.MagicResist];
             maxValue = 0;
-            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? HoverItem.AddedStats[Stat.MagicResist] : 0;
+            addValue = (!hideAdded && (!HoverItem.Info.NeedIdentify || HoverItem.Identified)) ? addedStats[Stat.MagicResist] : 0;
 
             if (minValue > 0 || maxValue > 0 || addValue > 0)
             {
                 count++;
                 if (HoverItem.Info.Type != ItemType.Gem)
-                    text = string.Format(addValue > 0 ? "Magic Resist + {0} (+{1})" : "Magic Resist + {0}", minValue + addValue, addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.MagicResistPlus), minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : String.Empty);
                 else
-                    text = string.Format("Adds +{0} Magic Resist", minValue + maxValue + addValue);
+                    text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.AddMagicResistPlus), minValue + maxValue + addValue);
                 MirLabel MAGIC_RESISTLabel = new MirLabel
                 {
                     AutoSize = true,
@@ -8637,7 +8219,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Max DC + {0}%", minValue + addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.MaxDcPlusPercent), minValue + addValue)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, MAXDCRATE.DisplayRectangle.Right + 4),
@@ -8661,7 +8243,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Max MC + {0}%", minValue + addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.MaxMcPlusPercent), minValue + addValue)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, MAXMCRATE.DisplayRectangle.Right + 4),
@@ -8685,7 +8267,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Max SC + {0}%", minValue + addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.MaxScPlusPercent), minValue + addValue)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, MAXSCRATE.DisplayRectangle.Right + 4),
@@ -8709,7 +8291,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("All Damage Reduction + {0}%", minValue + addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.AllDamageReductionPlusPercent), minValue + addValue)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, DAMAGEREDUC.DisplayRectangle.Right + 4),
@@ -8719,7 +8301,7 @@ namespace Client.MirScenes
             if (count > 0)
             {
                 ItemLabel.Size = new Size(ItemLabel.Size.Width, ItemLabel.Size.Height + 4);
-                
+
                 #region OUTLINE
                 MirControl outLine = new MirControl
                 {
@@ -8750,12 +8332,12 @@ namespace Client.MirScenes
             ItemInfo realItem = Functions.GetRealItem(item.Info, level, job, ItemInfoList);
 
             ItemLabel.Size = new Size(ItemLabel.Size.Width, ItemLabel.Size.Height + 4);
-            
+
             int count = 0;
             int minValue = 0;
             int maxValue = 0;
             int addValue = 0;
-            
+
             #region HANDWEIGHT
 
             minValue = realItem.Stats[Stat.HandWeight];
@@ -8773,7 +8355,7 @@ namespace Client.MirScenes
                     OutLine = true,
                     Parent = ItemLabel,
                     //Text = string.Format("Hand Weight + {0}", minValue + addValue)
-                    Text = string.Format(addValue > 0 ? "Hand Weight + {0} (+{1})" : "Hand Weight + {0}", minValue + addValue, addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.HandWeightPlus), minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : String.Empty)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, HANDWEIGHTLabel.DisplayRectangle.Right + 4),
@@ -8799,7 +8381,7 @@ namespace Client.MirScenes
                     OutLine = true,
                     Parent = ItemLabel,
                     //Text = string.Format("Wear Weight + {0}", minValue + addValue)
-                    Text = string.Format(addValue > 0 ? "Wear Weight + {0} (+{1})" : "Wear Weight + {0}", minValue + addValue, addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.WearWeightPlus), minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : String.Empty)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, WEARWEIGHTLabel.DisplayRectangle.Right + 4),
@@ -8825,7 +8407,7 @@ namespace Client.MirScenes
                     OutLine = true,
                     Parent = ItemLabel,
                     //Text = string.Format("Bag Weight + {0}", minValue + addValue)
-                    Text = string.Format(addValue > 0 ? "Bag Weight + {0} (+{1})" : "Bag Weight + {0}", minValue + addValue, addValue)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.BagWeightPlus), minValue + addValue) + (addValue > 0 ? $" (+{addValue})" : String.Empty)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, BAGWEIGHTLabel.DisplayRectangle.Right + 4),
@@ -8835,7 +8417,8 @@ namespace Client.MirScenes
             #endregion
 
             #region FASTRUN
-            minValue = realItem.CanFastRun==true?1:0;
+
+            minValue = realItem.CanFastRun == true ? 1 : 0;
             maxValue = 0;
             addValue = 0;
 
@@ -8849,7 +8432,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Instant Run")
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.InstantRun)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, BAGWEIGHTLabel.DisplayRectangle.Right + 4),
@@ -8873,7 +8456,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Time : {0}", Functions.PrintTimeSpanFromSeconds(HoverItem.Info.Durability * 60))
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.TimeValue), Functions.PrintTimeSpanFromSeconds(HoverItem.Info.Durability * 60))
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, TNRLabel.DisplayRectangle.Right + 4),
@@ -8890,7 +8473,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Time : {0}", Functions.PrintTimeSpanFromSeconds(HoverItem.Info.Durability, false))
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.TimeValue), Functions.PrintTimeSpanFromSeconds(HoverItem.Info.Durability, false))
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, TNRLabel.DisplayRectangle.Right + 4),
@@ -8947,7 +8530,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("{0} Awakening({1})", HoverItem.Awake.Type.ToString(), HoverItem.Awake.GetAwakeLevel())
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.AwakeningWithValue), HoverItem.Awake.Type.ToLocalizedString(), HoverItem.Awake.GetAwakeLevel())
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, AWAKENAMELabel.DisplayRectangle.Right + 4),
@@ -8967,7 +8550,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format(realItem.Type != ItemType.Armour ? "{0} + {1}~{2}" : "MAX {0} + {1}", HoverItem.Awake.Type.ToString(), HoverItem.Awake.GetAwakeValue(), HoverItem.Awake.GetAwakeValue())
+                    Text = string.Format(realItem.Type != ItemType.Armour ? "{0} + {1}~{2}" : "MAX {0} + {1}", HoverItem.Awake.Type.ToLocalizedString(), HoverItem.Awake.GetAwakeValue(), HoverItem.Awake.GetAwakeValue())
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, AWAKE_TOTAL_VALUELabel.DisplayRectangle.Right + 4),
@@ -8989,7 +8572,7 @@ namespace Client.MirScenes
                         Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                         OutLine = true,
                         Parent = ItemLabel,
-                        Text = string.Format(realItem.Type != ItemType.Armour ? "Level {0} : {1} + {2}~{3}" : "Level {0} : MAX {1} + {2}~{3}", i + 1, HoverItem.Awake.Type.ToString(), HoverItem.Awake.GetAwakeLevelValue(i), HoverItem.Awake.GetAwakeLevelValue(i))
+                        Text = string.Format(realItem.Type != ItemType.Armour ? "Level {0} : {1} + {2}~{3}" : "Level {0} : MAX {1} + {2}~{3}", i + 1, HoverItem.Awake.Type.ToLocalizedString(), HoverItem.Awake.GetAwakeLevelValue(i), HoverItem.Awake.GetAwakeLevelValue(i))
                     };
 
                     ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, AWAKE_LEVEL_VALUELabel.DisplayRectangle.Right + 4),
@@ -9049,7 +8632,8 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Socket : {0}", item.Slots[i] == null ? "Empty" : item.Slots[i].FriendlyName)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.SocketWithValue),
+                        item.Slots[i] == null ? GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.Empty) : item.Slots[i].FriendlyName)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, SOCKETLabel.DisplayRectangle.Right + 4),
@@ -9070,7 +8654,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = "Ctrl + Right Click To Open Sockets"
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.OpenSocketsTips)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, SOCKETLabel.DisplayRectangle.Right + 4),
@@ -9122,67 +8706,67 @@ namespace Client.MirScenes
                 switch (realItem.RequiredType)
                 {
                     case RequiredType.Level:
-                        text = string.Format(GameLanguage.RequiredLevel, realItem.RequiredAmount);
+                        text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.RequiredLevel), realItem.RequiredAmount);
                         if (MapObject.User.Level < realItem.RequiredAmount)
                             colour = Color.Red;
                         break;
                     case RequiredType.MaxAC:
-                        text = string.Format("Required AC : {0}", realItem.RequiredAmount);
+                        text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.RequiredAC), realItem.RequiredAmount);
                         if (MapObject.User.Stats[Stat.MaxAC] < realItem.RequiredAmount)
                             colour = Color.Red;
                         break;
                     case RequiredType.MaxMAC:
-                        text = string.Format("Required MAC : {0}", realItem.RequiredAmount);
+                        text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.RequiredMAC), realItem.RequiredAmount);
                         if (MapObject.User.Stats[Stat.MaxMAC] < realItem.RequiredAmount)
                             colour = Color.Red;
                         break;
                     case RequiredType.MaxDC:
-                        text = string.Format(GameLanguage.RequiredDC, realItem.RequiredAmount);
+                        text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.RequiredDC), realItem.RequiredAmount);
                         if (MapObject.User.Stats[Stat.MaxDC] < realItem.RequiredAmount)
                             colour = Color.Red;
                         break;
                     case RequiredType.MaxMC:
-                        text = string.Format(GameLanguage.RequiredMC, realItem.RequiredAmount);
+                        text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.RequiredMC), realItem.RequiredAmount);
                         if (MapObject.User.Stats[Stat.MaxMC] < realItem.RequiredAmount)
                             colour = Color.Red;
                         break;
                     case RequiredType.MaxSC:
-                        text = string.Format(GameLanguage.RequiredSC, realItem.RequiredAmount);
+                        text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.RequiredSC), realItem.RequiredAmount);
                         if (MapObject.User.Stats[Stat.MaxSC] < realItem.RequiredAmount)
                             colour = Color.Red;
                         break;
                     case RequiredType.MaxLevel:
-                        text = string.Format("Maximum Level : {0}", realItem.RequiredAmount);
+                        text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.MaximumLevel), realItem.RequiredAmount);
                         if (MapObject.User.Level > realItem.RequiredAmount)
                             colour = Color.Red;
                         break;
                     case RequiredType.MinAC:
-                        text = string.Format("Required Base AC : {0}", realItem.RequiredAmount);
+                        text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.RequiredBaseAC), realItem.RequiredAmount);
                         if (MapObject.User.Stats[Stat.MinAC] < realItem.RequiredAmount)
                             colour = Color.Red;
                         break;
                     case RequiredType.MinMAC:
-                        text = string.Format("Required Base MAC : {0}", realItem.RequiredAmount);
+                        text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.RequiredBaseMAC), realItem.RequiredAmount);
                         if (MapObject.User.Stats[Stat.MinMAC] < realItem.RequiredAmount)
                             colour = Color.Red;
                         break;
                     case RequiredType.MinDC:
-                        text = string.Format("Required Base DC : {0}", realItem.RequiredAmount);
+                        text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.RequiredBaseDC), realItem.RequiredAmount);
                         if (MapObject.User.Stats[Stat.MinDC] < realItem.RequiredAmount)
                             colour = Color.Red;
                         break;
                     case RequiredType.MinMC:
-                        text = string.Format("Required Base MC : {0}", realItem.RequiredAmount);
+                        text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.RequiredBaseMC), realItem.RequiredAmount);
                         if (MapObject.User.Stats[Stat.MinMC] < realItem.RequiredAmount)
                             colour = Color.Red;
                         break;
                     case RequiredType.MinSC:
-                        text = string.Format("Required Base SC : {0}", realItem.RequiredAmount);
+                        text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.RequiredBaseSC), realItem.RequiredAmount);
                         if (MapObject.User.Stats[Stat.MinSC] < realItem.RequiredAmount)
                             colour = Color.Red;
                         break;
                     default:
-                        text = "Unknown Type Required";
+                        text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.UnknownTypeRequired);
                         break;
                 }
 
@@ -9239,7 +8823,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format(GameLanguage.ClassRequired, realItem.RequiredClass)
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.ClassRequired), realItem.RequiredClass.ToLocalizedString())
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, CLASSLabel.DisplayRectangle.Right + 4),
@@ -9255,7 +8839,7 @@ namespace Client.MirScenes
                 string text;
                 var colour = Color.White;
 
-                text = $"Selling Price : {((long)(item.Price() / 2)).ToString("###,###,##0")} Gold";
+                text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.SellingPriceGold), ((long)(item.Price() / 2)).ToString("###,###,##0"));
 
                 var costLabel = new MirLabel
                 {
@@ -9323,7 +8907,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Can't drop on death")
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CantDropOnDeath)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, DONT_DEATH_DROPLabel.DisplayRectangle.Right + 4),
@@ -9344,7 +8928,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Can't drop")
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CantDrop)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, DONT_DROPLabel.DisplayRectangle.Right + 4),
@@ -9365,7 +8949,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Can't upgrade")
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CantUpgrade)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, DONT_UPGRADELabel.DisplayRectangle.Right + 4),
@@ -9386,7 +8970,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Can't sell")
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CantSell)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, DONT_SELLLabel.DisplayRectangle.Right + 4),
@@ -9407,7 +8991,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Can't trade")
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CantTrade)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, DONT_TRADELabel.DisplayRectangle.Right + 4),
@@ -9428,7 +9012,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Can't store")
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CantStore)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, DONT_STORELabel.DisplayRectangle.Right + 4),
@@ -9449,7 +9033,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Can't repair")
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CantRepair)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, DONT_REPAIRLabel.DisplayRectangle.Right + 4),
@@ -9470,7 +9054,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Can't special repair")
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CantSpecialRepair)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, DONT_REPAIRLabel.DisplayRectangle.Right + 4),
@@ -9491,7 +9075,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Breaks on death")
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.BreaksOnDeath)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, DONT_REPAIRLabel.DisplayRectangle.Right + 4),
@@ -9512,7 +9096,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Destroyed when dropped")
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.DestroyedWhenDropped)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, DONT_DODLabel.DisplayRectangle.Right + 4),
@@ -9533,7 +9117,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Cannot be a Wedding Ring")
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CannotBeWeddingRing)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, No_WedLabel.DisplayRectangle.Right + 4),
@@ -9554,7 +9138,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Cannot be used by Hero")
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CannotBeUsedByHero)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, No_HeroLabel.DisplayRectangle.Right + 4),
@@ -9575,7 +9159,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("SoulBinds on equip")
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.SoulBindsOnEquip)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, BOELabel.DisplayRectangle.Right + 4),
@@ -9591,7 +9175,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = "Soulbound to: " + GetUserName((uint)HoverItem.SoulBoundId)
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.SoulboundTo) + GetUserName((uint)HoverItem.SoulBoundId)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, BOELabel.DisplayRectangle.Right + 4),
@@ -9612,7 +9196,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format("Cursed")
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.Cursed)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, CURSEDLabel.DisplayRectangle.Right + 4),
@@ -9630,11 +9214,11 @@ namespace Client.MirScenes
                 string Text = "";
                 if (HoverItem.Info.Unique == SpecialItemMode.None)
                 {
-                    Text = "Cannot be used on any item.";
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CannotBeUsedOnAnyItem);
                 }
                 else
                 {
-                    Text = "Can be used on: ";
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CanBeUsedOn);
                 }
                 MirLabel GemUseOn = new MirLabel
                 {
@@ -9660,7 +9244,7 @@ namespace Client.MirScenes
                         Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                         OutLine = true,
                         Parent = ItemLabel,
-                        Text = "-Weapon"
+                        Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AfterWeapon)
                     };
 
                     ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, GemWeapon.DisplayRectangle.Right + 4),
@@ -9678,7 +9262,7 @@ namespace Client.MirScenes
                         Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                         OutLine = true,
                         Parent = ItemLabel,
-                        Text = "-Armour"
+                        Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AfterArmour)
                     };
 
                     ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, GemArmour.DisplayRectangle.Right + 4),
@@ -9696,7 +9280,7 @@ namespace Client.MirScenes
                         Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                         OutLine = true,
                         Parent = ItemLabel,
-                        Text = "-Helmet"
+                        Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AfterHelmet)
                     };
 
                     ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, Gemhelmet.DisplayRectangle.Right + 4),
@@ -9714,7 +9298,7 @@ namespace Client.MirScenes
                         Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                         OutLine = true,
                         Parent = ItemLabel,
-                        Text = "-Necklace"
+                        Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AfterNecklace)
                     };
 
                     ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, Gemnecklace.DisplayRectangle.Right + 4),
@@ -9732,7 +9316,7 @@ namespace Client.MirScenes
                         Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                         OutLine = true,
                         Parent = ItemLabel,
-                        Text = "-Bracelet"
+                        Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AfterBracelet)
                     };
 
                     ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, GemBracelet.DisplayRectangle.Right + 4),
@@ -9750,7 +9334,7 @@ namespace Client.MirScenes
                         Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                         OutLine = true,
                         Parent = ItemLabel,
-                        Text = "-Ring"
+                        Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AfterRing)
                     };
 
                     ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, GemRing.DisplayRectangle.Right + 4),
@@ -9768,7 +9352,7 @@ namespace Client.MirScenes
                         Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                         OutLine = true,
                         Parent = ItemLabel,
-                        Text = "-Amulet"
+                        Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AfterAmulet)
                     };
 
                     ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, Gemamulet.DisplayRectangle.Right + 4),
@@ -9786,7 +9370,7 @@ namespace Client.MirScenes
                         Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                         OutLine = true,
                         Parent = ItemLabel,
-                        Text = "-Belt"
+                        Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AfterBelt)
                     };
 
                     ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, Gembelt.DisplayRectangle.Right + 4),
@@ -9804,7 +9388,7 @@ namespace Client.MirScenes
                         Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                         OutLine = true,
                         Parent = ItemLabel,
-                        Text = "-Boots"
+                        Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AfterBoots)
                     };
 
                     ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, Gemboots.DisplayRectangle.Right + 4),
@@ -9822,7 +9406,7 @@ namespace Client.MirScenes
                         Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                         OutLine = true,
                         Parent = ItemLabel,
-                        Text = "-Stone"
+                        Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.Stone)
                     };
 
                     ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, Gemstone.DisplayRectangle.Right + 4),
@@ -9840,7 +9424,7 @@ namespace Client.MirScenes
                         Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                         OutLine = true,
                         Parent = ItemLabel,
-                        Text = "-Candle"
+                        Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AfterCandle)
                     };
 
                     ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, Gemtorch.DisplayRectangle.Right + 4),
@@ -9886,7 +9470,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = remainingSeconds > 0 ? string.Format("Expires in {0}", Functions.PrintTimeSpanFromSeconds(remainingSeconds)) : "Expired"
+                    Text = remainingSeconds > 0 ? GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.ExpiresIn), Functions.PrintTimeSpanFromSeconds(remainingSeconds)) : GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.Expired)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, EXPIRELabel.DisplayRectangle.Right + 4),
@@ -9911,7 +9495,7 @@ namespace Client.MirScenes
                         Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                         OutLine = true,
                         Parent = ItemLabel,
-                        Text = remainingSeconds > 0 ? string.Format("Sealed for {0}", Functions.PrintTimeSpanFromSeconds(remainingSeconds)) : ""
+                        Text = remainingSeconds > 0 ? GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.SealedFor), Functions.PrintTimeSpanFromSeconds(remainingSeconds)) : string.Empty
                     };
 
                     ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, SEALEDLabel.DisplayRectangle.Right + 4),
@@ -9931,7 +9515,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = "Item rented from: " + HoverItem.RentalInformation.OwnerName
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemRentedFrom) + HoverItem.RentalInformation.OwnerName
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, OWNERLabel.DisplayRectangle.Right + 4),
@@ -9947,7 +9531,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = remainingTime > 0 ? string.Format("Rental expires in: {0}", Functions.PrintTimeSpanFromSeconds(remainingTime)) : "Rental expired"
+                    Text = remainingTime > 0 ? GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.RentalExpiresIn), Functions.PrintTimeSpanFromSeconds(remainingTime)) : "Rental expired"
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, RENTALLabel.DisplayRectangle.Right + 4),
@@ -9964,7 +9548,9 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = remainingTime > 0 ? string.Format("Rental lock expires in: {0}", Functions.PrintTimeSpanFromSeconds(remainingTime)) : "Rental lock expired"
+                    Text = remainingTime > 0
+                        ? GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.RentalLockExpiresIn), Functions.PrintTimeSpanFromSeconds(remainingTime))
+                        : "Rental lock expired"
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, RentalLockLabel.DisplayRectangle.Right + 4),
@@ -10018,25 +9604,25 @@ namespace Client.MirScenes
                 switch (realItem.Shape)
                 {
                     case 1:
-                        text = "Hold CTRL and left click to partially repair\nweapons and accessory items.";
+                        text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.HoldCtrlPartialRepairWeaponsAccessories);
                         break;
                     case 2:
-                        text = "Hold CTRL and left click to partially repair\narmour and drapery items.";
+                        text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.HoldCtrlPartialRepairArmourDrapery);
                         break;
                     case 3:
-                        text = "Hold CTRL and left click to combine with an item.\nHas chance to destroy combining item.";
+                        text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.HoldCtrlCombineDestroyChance);
                         break;
                     case 4:
-                        text = "Hold CTRL and left click to combine with an item.\nWill NOT destroy combining item.";
+                        text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.HoldCtrlCombineNoDestroy);
                         break;
                     case 5:
-                        text = "Hold CTRL and left click to completely repair\nweapons and accessory items.";
+                        text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.HoldCtrlFullRepairWeaponsAccessories);
                         break;
                     case 6:
-                        text = "Hold CTRL and left click to completely repair\narmour and drapery items.";
+                        text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.HoldCtrlFullRepairArmourDrapery);
                         break;
                     case 8:
-                        text = "Hold CTRL and left click to seal an item.";
+                        text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.HoldCtrlSealItem);
                         break;
                 }
                 count++;
@@ -10068,7 +9654,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = string.Format(GameLanguage.MaxCombine, realItem.StackSize, "\n")
+                    Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.MaxCombine), realItem.StackSize, "\n")
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, SPLITUPLabel.DisplayRectangle.Right + 4),
@@ -10118,7 +9704,7 @@ namespace Client.MirScenes
 
             if (realItem.Type == ItemType.Scroll && realItem.Shape == 7)//Credit Scroll
             {
-                HoverItem.Info.ToolTip = string.Format("Adds {0} Credits to your Account.", HoverItem.Info.Price);
+                HoverItem.Info.ToolTip = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.AddsCreditsToAccount), HoverItem.Info.Price);
             }
 
             if (!string.IsNullOrEmpty(HoverItem.Info.ToolTip))
@@ -10132,7 +9718,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = GameLanguage.ItemDescription
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemDescription)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, IDLabel.DisplayRectangle.Right + 4),
@@ -10153,7 +9739,7 @@ namespace Client.MirScenes
             }
 
             #endregion
-     
+
             if (count > 0)
             {
                 ItemLabel.Size = new Size(ItemLabel.Size.Width, ItemLabel.Size.Height + 4);
@@ -10196,7 +9782,7 @@ namespace Client.MirScenes
                     Location = new Point(4, ItemLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = ItemLabel,
-                    Text = "Created by Game Master"
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.CreatedByGameMaster)
                 };
 
                 ItemLabel.Size = new Size(Math.Max(ItemLabel.Size.Width, GMLabel.DisplayRectangle.Right + 4),
@@ -10243,7 +9829,7 @@ namespace Client.MirScenes
             HoverItem = item;
             ItemInfo realItem = Functions.GetRealItem(item.Info, level, job, ItemInfoList);
 
-             ItemLabel = new MirControl
+            ItemLabel = new MirControl
             {
                 BackColour = Color.FromArgb(255, 0, 0, 0),
                 Border = true,
@@ -10329,7 +9915,7 @@ namespace Client.MirScenes
                 Location = new Point(4, MailLabel.DisplayRectangle.Bottom),
                 OutLine = true,
                 Parent = MailLabel,
-                Text = string.Format(GameLanguage.DateSent, mail.DateSent.ToString("dd/MM/yy H:mm:ss"))
+                Text = GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.DateSent), mail.DateSent.ToString("dd/MM/yy H:mm:ss"))
             };
 
             MailLabel.Size = new Size(Math.Max(MailLabel.Size.Width, dateLabel.DisplayRectangle.Right + 4),
@@ -10344,7 +9930,7 @@ namespace Client.MirScenes
                     Location = new Point(4, MailLabel.DisplayRectangle.Bottom),
                     OutLine = true,
                     Parent = MailLabel,
-                    Text = "Gold: " + mail.Gold
+                    Text = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.MailGoldLabel) + mail.Gold
                 };
 
                 MailLabel.Size = new Size(Math.Max(MailLabel.Size.Width, goldLabel.DisplayRectangle.Right + 4),
@@ -10358,7 +9944,7 @@ namespace Client.MirScenes
                 Location = new Point(4, MailLabel.DisplayRectangle.Bottom),
                 OutLine = true,
                 Parent = MailLabel,
-                Text = mail.Opened ? "[Old]" : "[New]"
+                Text = mail.Opened ? GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.MailHeaderOld) : GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.MailHeaderNew)
             };
 
             MailLabel.Size = new Size(Math.Max(MailLabel.Size.Width, openedLabel.DisplayRectangle.Right + 4),
@@ -10408,14 +9994,14 @@ namespace Client.MirScenes
                     return who.UserName;
             }
             Network.Enqueue(new C.RequestUserName { UserID = id });
-            UserIdList.Add(new UserId() { Id = id, UserName = "Unknown" });
-            return "";
+            UserIdList.Add(new UserId() { Id = id, UserName = GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.UserNameUnknown) });
+            return String.Empty;
         }
 
         public class UserId
         {
             public long Id = 0;
-            public string UserName = "";
+            public string UserName = String.Empty;
         }
 
         public class OutPutMessage
@@ -10486,10 +10072,10 @@ namespace Client.MirScenes
 
             if (toCell == null || fromCell == null)
                 return;
- 
+
             toCell.Locked = false;
             fromCell.Locked = false;
-         
+
             if (!p.Success)
                 return;
 
@@ -10534,8 +10120,7 @@ namespace Client.MirScenes
             ItemRentingDialog.Reset();
             ItemRentDialog.Reset();
 
-            var messageBox = new MirMessageBox("Item rental cancelled.\r\n" +
-                                               "To complete item rental please face the other party throughout the transaction.");
+            var messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.ItemRentalCancelledFaceOtherParty));
             messageBox.Show();
         }
 
@@ -10543,7 +10128,7 @@ namespace Client.MirScenes
         {
             if (!p.Success)
                 return;
-            
+
             User.RentalGoldLocked = p.GoldLocked;
             User.RentalItemLocked = p.ItemLocked;
 
@@ -10575,7 +10160,8 @@ namespace Client.MirScenes
             ItemRentDialog.Reset();
         }
 
-        private void OpenBrowser(S.OpenBrowser p) {
+        private void OpenBrowser(S.OpenBrowser p)
+        {
             BrowserHelper.OpenDefaultBrowser(p.Url);
         }
 
@@ -10686,119 +10272,33 @@ namespace Client.MirScenes
 
     }
 
-    /// <summary>
-    /// MapControl - 地图渲染与交互控制类
-    /// 
-    /// 职责:
-    /// 1. 地图瓦片渲染 (DrawFloor: Back/Middle/Front 三层)
-    /// 2. 地图对象管理 (Objects, ObjectsList)
-    /// 3. 用户输入处理 (鼠标点击、移动、寻路)
-    /// 4. 视野计算与摄像机控制
-    /// 5. 光照与天气效果渲染
-    /// 
-    /// 渲染管线 (CreateTexture):
-    /// 1. DrawFloor()      - 地板瓦片 (Back/Middle/Front 三层)
-    /// 2. DrawBackground() - 远景背景 (山脉/沙漠/长城等)
-    /// 3. DrawObjects()    - 动态对象 (玩家/怪物/NPC/特效)
-    /// 4. DrawLights()     - 光照遮罩 (夜晚/黑暗效果)
-    /// 5. DrawNames()      - 名字/血条/聊天气泡
-    /// 
-    /// 坐标系统:
-    /// - 地图坐标: (x, y) 格子坐标，每格 48x32 像素
-    /// - 屏幕坐标: (drawX, drawY) = (x - User.Movement.X + OffSetX) * CellWidth
-    /// - Movement: 当前渲染位置 (移动中平滑变化)
-    /// - CurrentLocation: 目标位置 (移动完成后的最终位置)
-    /// 
-    /// 性能优化:
-    /// - FloorValid: 地板层缓存标记，避免每帧重绘静态瓦片
-    /// - FloorTexture: 缓存的地板渲染纹理
-    /// - ViewRangeX/Y: 视野裁剪，只渲染可见区域
-    /// </summary>
     public sealed class MapControl : MirControl
     {
-        /// <summary>
-        /// 当前玩家对象 (User)
-        /// 用于计算摄像机位置和渲染相对坐标
-        /// </summary>
         public static UserObject User
         {
             get { return MapObject.User; }
             set { MapObject.User = value; }
         }
 
-        /// <summary>
-        /// 英雄对象 (Hero/宠物)
-        /// </summary>
         public static UserHeroObject Hero
         {
             get { return MapObject.Hero; }
             set { MapObject.Hero = value; }
         }
 
-        /// <summary>
-        /// 所有地图对象字典 (ObjectID -> MapObject)
-        /// 包含: 玩家、怪物、NPC、掉落物品等
-        /// </summary>
         public static Dictionary<uint, MapObject> Objects = new Dictionary<uint, MapObject>();
-        
-        /// <summary>
-        /// 对象列表 (用于按顺序遍历和渲染)
-        /// </summary>
         public static List<MapObject> ObjectsList = new List<MapObject>();
 
-        /// <summary>
-        /// 地图格子宽度 (像素)
-        /// 每个地图格子占 48 像素宽
-        /// </summary>
         public const int CellWidth = 48;
-        
-        /// <summary>
-        /// 地图格子高度 (像素)
-        /// 每个地图格子占 32 像素高 (等距视角)
-        /// </summary>
         public const int CellHeight = 32;
 
-        /// <summary>
-        /// 视野中心偏移 X (格子数)
-        /// 计算方式: ScreenWidth / 2 / CellWidth
-        /// 1024x768 窗口 → 1024/2/48 = 10
-        /// 表示玩家在屏幕横向中心偏左 10 格处
-        /// </summary>
         public static int OffSetX;
-        
-        /// <summary>
-        /// 视野中心偏移 Y (格子数)
-        /// 计算方式: ScreenHeight / 2 / CellHeight - 1
-        /// 1024x768 窗口 → 768/2/32 - 1 = 11
-        /// 表示玩家在屏幕纵向中心偏上 11 格处
-        /// </summary>
         public static int OffSetY;
 
-        /// <summary>
-        /// 视野范围 X (格子数)
-        /// 计算方式: OffSetX + 6 = 16
-        /// 从玩家位置向左右各延伸 16 格
-        /// </summary>
         public static int ViewRangeX;
-        
-        /// <summary>
-        /// 视野范围 Y (格子数)
-        /// 计算方式: OffSetY + 6 = 17
-        /// 从玩家位置向上下各延伸 17 格
-        /// </summary>
         public static int ViewRangeY;
 
-        /// <summary>
-        /// 自动寻路标志 (私有字段)
-        /// </summary>
         private bool _autoPath;
-
-        /// <summary>
-        /// 自动寻路开关
-        /// true: 启用自动寻路 (右键点击地面自动走过去)
-        /// false: 禁用自动寻路
-        /// 设置为 false 时会清空当前路径
-        /// </summary>
         public bool AutoPath
         {
             get
@@ -10810,314 +10310,68 @@ namespace Client.MirScenes
                 if (_autoPath == value) return;
                 _autoPath = value;
 
-                // 关闭自动寻路时清空路径
                 if (!_autoPath)
                     CurrentPath = null;
             }
         }
 
-        /// <summary>
-        /// A* 寻路算法实例
-        /// 用于计算从起点到终点的最优路径
-        /// 考虑障碍物、安全区域等因素
-        /// </summary>
         public PathFinder PathFinder;
-        
-        /// <summary>
-        /// 当前自动寻路路径 (Node 列表)
-        /// 每个 Node 包含地图坐标 (X, Y)
-        /// Process() 方法中逐步执行路径上的移动
-        /// </summary>
         public List<Node> CurrentPath = null;
 
-        /// <summary>
-        /// 鼠标指向的地图坐标
-        /// 
-        /// 计算公式 (屏幕坐标 → 地图坐标):
-        /// mapX = (screenX / CellWidth) - OffSetX + User.CurrentLocation.X
-        /// mapY = (screenY / CellHeight) - OffSetY + User.CurrentLocation.Y
-        /// 
-        /// 示例 (1024x768 窗口, 玩家在 100,100):
-        /// 鼠标在屏幕中心 (512, 384)
-        /// mapX = 512/48 - 10 + 100 = 100
-        /// mapY = 384/32 - 11 + 100 = 101
-        /// 
-        /// 用途: 点击地面移动、选择目标、放置物品等
-        /// </summary>
         public static Point MapLocation
         {
             get { return GameScene.User == null ? Point.Empty : new Point(MouseLocation.X / CellWidth - OffSetX, MouseLocation.Y / CellHeight - OffSetY).Add(GameScene.User.CurrentLocation); }
         }
 
-        /// <summary>
-        /// 地图坐标转屏幕坐标
-        /// 
-        /// 核心公式 (地图坐标 → 屏幕坐标):
-        /// drawX = (p.X - User.Movement.X + OffSetX) * CellWidth + User.OffSetMove.X
-        /// drawY = (p.Y - User.Movement.Y + OffSetY) * CellHeight + User.OffSetMove.Y
-        /// 
-        /// 关键字段说明:
-        /// - User.Movement: 玩家当前渲染位置 (移动时平滑变化，非整数格子)
-        /// - User.OffSetMove: 像素级移动偏移 (0-47px, 0-31px)
-        /// - OffSetX/Y: 视野中心偏移 (10, 11 格)
-        /// 
-        /// 示例 (玩家在 100,100，正在向右移动):
-        /// 目标点 (102, 100)
-        /// User.Movement = (100.5, 100) // 正在移动中
-        /// User.OffSetMove = (24, 0)     // 移动了半个格子的像素
-        /// drawX = (102 - 100.5 + 10) * 48 + 24 = 576px
-        /// 
-        /// 用途: 绘制对象、特效、名字、伤害数字等
-        /// </summary>
         public static Point ToMouseLocation(Point p)
         {
             return new Point((p.X - MapObject.User.Movement.X + OffSetX) * CellWidth, (p.Y - MapObject.User.Movement.Y + OffSetY) * CellHeight).Add(MapObject.User.OffSetMove);
         }
 
-        /// <summary>
-        /// 当前按下的鼠标按钮状态
-        /// None: 无按键
-        /// Left: 左键按下 (攻击/拾取/移动)
-        /// Right: 右键按下 (跑步/自动寻路)
-        /// Middle: 中键按下 (切换自动跑步)
-        /// </summary>
         public static MouseButtons MapButtons;
-
-        /// <summary>
-        /// 鼠标在地图控件上的屏幕坐标 (像素)
-        /// 范围: (0, 0) 到 (ScreenWidth, ScreenHeight)
-        /// 实时更新，用于计算 MapLocation 和鼠标悬停检测
-        /// </summary>
         public static Point MouseLocation;
-
-        /// <summary>
-        /// 输入延迟时间戳
-        /// 用于防止操作过于频繁 (如传送后 400ms 内禁止操作)
-        /// CheckInput() 方法中检查: if (CMain.Time < InputDelay) return;
-        /// </summary>
         public static long InputDelay;
 
-        /// <summary>
-        /// 下次动作时间戳 (私有字段)
-        /// </summary>
         private static long nextAction;
-
-        /// <summary>
-        /// 下次动作时间戳
-        /// 用于控制动作间隔 (如攻击冷却、移动间隔)
-        /// 观察模式下无法设置 (只读)
-        /// </summary>
         public static long NextAction
         {
             get { return nextAction; }
             set
             {
-                if (GameScene.Observing) return; // 观察模式下不能执行动作
+                if (GameScene.Observing) return;
                 nextAction = value;
             }
         }
 
-        /// <summary>
-        /// 地图格子信息二维数组 [X, Y]
-        /// 每个 CellInfo 包含:
-        /// - BackImage/MiddleImage/FrontImage: 三层瓦片图像索引
-        /// - BackIndex/MiddleIndex/FrontIndex: 图像库索引
-        /// - DoorIndex/DoorOffset: 门动画信息
-        /// - TileAnimationImage/FrameAnimationImage: 动画瓦片
-        /// - CellObjects: 该格子上的对象列表
-        /// - FishingAttribute: 钓鱼属性
-        /// 
-        /// 尺寸: [Width, Height]
-        /// </summary>
         public CellInfo[,] M2CellInfo;
-
-        /// <summary>
-        /// 地图上所有门的列表
-        /// Door 包含: Index (门ID)、Location (位置)、State (开/关状态)
-        /// 用于门的开关动画和碰撞检测
-        /// </summary>
         public List<Door> Doors = new List<Door>();
+        public int Width, Height;
 
-        /// <summary>
-        /// 地图宽度 (格子数)
-        /// </summary>
-        public int Width;
-
-        /// <summary>
-        /// 地图高度 (格子数)
-        /// </summary>
-        public int Height;
-
-        /// <summary>
-        /// 地图索引 (地图ID)
-        /// 用于区分不同地图
-        /// </summary>
         public int Index;
-
-        /// <summary>
-        /// 地图文件名 (包含完整路径)
-        /// 例如: "C:\Mir2\Map\0.map"
-        /// 用于加载地图数据
-        /// </summary>
         public string FileName = String.Empty;
-
-        /// <summary>
-        /// 地图标题/名称
-        /// 例如: "比奇城", "盟重土城", "祖玛寺庙"
-        /// 显示在屏幕上或小地图上
-        /// </summary>
         public string Title = String.Empty;
-
-        /// <summary>
-        /// 小地图索引
-        /// 对应 MiniMap 图像库中的图像
-        /// 0 表示无小地图
-        /// </summary>
-        public ushort MiniMap;
-
-        /// <summary>
-        /// 大地图索引
-        /// 用于世界地图系统
-        /// 0 表示不在大地图上显示
-        /// </summary>
-        public ushort BigMap;
-
-        /// <summary>
-        /// 地图背景音乐索引
-        /// 对应音乐文件编号
-        /// 切换地图时播放对应音乐
-        /// </summary>
-        public ushort Music;
-
-        /// <summary>
-        /// 已设置的音乐索引
-        /// 用于防止重复播放相同音乐
-        /// 只有当 SetMusic != Music 时才切换音乐
-        /// </summary>
-        public ushort SetMusic;
-
-        /// <summary>
-        /// 光照设置
-        /// - Day: 白天 (全亮)
-        /// - Normal: 正常 (跟随游戏时间)
-        /// - Dawn: 黎明 (微暗)
-        /// - Evening: 黄昏 (较暗)
-        /// - Night: 夜晚 (很暗)
-        /// - DawnStart: 黎明开始
-        /// - DayLight: 日光
-        /// </summary>
+        public ushort MiniMap, BigMap, Music, SetMusic;
         public LightSetting Lights;
-
-        /// <summary>
-        /// 是否显示闪电效果
-        /// true: 随机播放闪电动画和音效
-        /// 通过 LightningTime 控制间隔
-        /// </summary>
-        public bool Lightning;
-
-        /// <summary>
-        /// 是否显示火焰效果
-        /// true: 地图边缘显示火焰动画
-        /// 用于火山、地狱等场景
-        /// </summary>
-        public bool Fire;
-
-        /// <summary>
-        /// 地图黑暗等级 (0-4)
-        /// 0: 纯黑 (深渊)
-        /// 1: 极暗 (洞穴)
-        /// 2: 中等黑暗 (森林夜晚)
-        /// 3: 蓝色夜晚 (月光)
-        /// 4: 金黄夜晚 (篝火区域)
-        /// 影响夜晚模式下的基础光照颜色
-        /// </summary>
+        public bool Lightning, Fire;
         public byte MapDarkLight;
-
-        /// <summary>
-        /// 闪电效果时间戳
-        /// 控制闪电效果的触发间隔
-        /// 当 CMain.Time >= LightningTime 时触发闪电
-        /// </summary>
-        public long LightningTime;
-
-        /// <summary>
-        /// 火焰效果时间戳
-        /// 控制火焰动画的播放
-        /// </summary>
-        public long FireTime;
-
-        /// <summary>
-        /// 天气设置
-        /// - None: 无天气
-        /// - Snow: 下雪
-        /// - Rain: 下雨
-        /// - HeavyRain: 大雨
-        /// - Sandstorm: 沙尘暴
-        /// 通过粒子引擎 (ParticleEngine) 实现
-        /// </summary>
+        public long LightningTime, FireTime;
         public WeatherSetting Weather = WeatherSetting.None;
+        public bool FloorValid, LightsValid;
 
-        /// <summary>
-        /// 地板纹理有效标志
-        /// true: FloorTexture 缓存有效，可直接使用
-        /// false: 需要重新渲染地板 (调用 DrawFloor)
-        /// 地图变化、玩家移动时标记为 false
-        /// </summary>
-        public bool FloorValid;
-
-        /// <summary>
-        /// 光照纹理有效标志
-        /// true: LightTexture 缓存有效
-        /// false: 需要重新渲染光照遮罩
-        /// </summary>
-        public bool LightsValid;
-
-        /// <summary>
-        /// 输出延迟时间戳
-        /// 用于控制屏幕消息输出频率
-        /// 例如: "目标太远" 消息不会频繁显示
-        /// </summary>
         public long OutputDelay;
 
-        /// <summary>
-        /// 觉醒动作标志 (私有字段)
-        /// </summary>
         private static bool _awakeningAction;
-
-        /// <summary>
-        /// 觉醒动作模式
-        /// true: 正在执行觉醒相关操作 (装备觉醒、升级等)
-        /// 此模式下禁止其他操作 (移动、攻击等)
-        /// </summary>
         public static bool AwakeningAction
         {
             get { return _awakeningAction; }
             set
             {
                 if (_awakeningAction == value) return;
-                _awakeningAction = value; 
+                _awakeningAction = value;
             }
         }
 
-        /// <summary>
-        /// 自动跑步标志 (私有字段)
-        /// </summary>
         private static bool _autoRun;
-
-        /// <summary>
-        /// 自动跑步模式
-        /// true: 启用自动跑步 (按住右键或中键切换)
-        /// false: 禁用自动跑步
-        /// 
-        /// 触发方式:
-        /// - 中键点击切换
-        /// - 右键按住持续跑步
-        /// 
-        /// 限制条件:
-        /// - HP >= 10 (低血量无法跑步)
-        /// - 非潜行状态或有冲刺技能
-        /// - 符合跑步间隔 (NextRunTime)
-        /// </summary>
         public static bool AutoRun
         {
             get { return _autoRun; }
@@ -11125,119 +10379,54 @@ namespace Client.MirScenes
             {
                 if (_autoRun == value) return;
                 _autoRun = value;
-                // 在聊天窗口显示状态变化
                 if (GameScene.Scene != null)
-                    GameScene.Scene.ChatDialog.ReceiveChat(value ? "[AutoRun: On]" : "[AutoRun: Off]", ChatType.Hint);
+                    GameScene.Scene.ChatDialog.ReceiveChat(value ? GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AutoRunOn) : GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.AutoRunOff),
+                        ChatType.Hint);
             }
 
         }
-
-        /// <summary>
-        /// 自动挖矿标志
-        /// true: 自动持续挖矿 (装备镐子时)
-        /// false: 停止挖矿
-        /// 左键点击墙壁开始挖矿，松开停止
-        /// </summary>
         public static bool AutoHit;
 
-        /// <summary>
-        /// 动画帧计数器
-        /// 用于控制瓦片动画、门动画等
-        /// 循环递增，不同动画根据此值计算当前帧
-        /// </summary>
         public int AnimationCount;
-        
-        /// <summary>
-        /// 特效列表
-        /// 包含所有地图上的视觉特效:
-        /// - 技能特效 (火球、闪电)
-        /// - 爆炸特效
-        /// - 光环特效
-        /// - 场景装饰特效 (火把、篝火)
-        /// 
-        /// 每帧调用 Effect.Process() 更新特效状态
-        /// 过期特效自动从列表移除
-        /// </summary>
+
         public static List<Effect> Effects = new List<Effect>();
 
-        /// <summary>
-        /// MapControl 构造函数
-        /// 
-        /// 初始化流程:
-        /// 1. 计算视野偏移和范围
-        /// 2. 设置控件尺寸和样式
-        /// 3. 注册鼠标事件处理
-        /// 
-        /// 计算示例 (1024x768 窗口):
-        /// OffSetX = 1024 / 2 / 48 = 10 格
-        /// OffSetY = 768 / 2 / 32 - 1 = 11 格
-        /// ViewRangeX = 10 + 6 = 16 格 (左右各 16 格视野)
-        /// ViewRangeY = 11 + 6 = 17 格 (上下各 17 格视野)
-        /// 
-        /// 总可见区域: 32x34 格 ≈ 1536x1088 像素
-        /// </summary>
         public MapControl()
         {
-            // 初始化鼠标按钮状态
             MapButtons = MouseButtons.None;
 
-            // ==================== 计算视野参数 ====================
-            // 视野中心偏移 (玩家在屏幕上的位置)
-            OffSetX = Settings.ScreenWidth / 2 / CellWidth;      // 横向中心偏移
-            OffSetY = Settings.ScreenHeight / 2 / CellHeight - 1; // 纵向中心偏移 (向上1格)
+            OffSetX = Settings.ScreenWidth / 2 / CellWidth;
+            OffSetY = Settings.ScreenHeight / 2 / CellHeight - 1;
 
-            // 视野范围 (从玩家向外延伸的格子数)
-            ViewRangeX = OffSetX + 6; // 额外延伸 6 格避免边缘裁剪
+            ViewRangeX = OffSetX + 6;
             ViewRangeY = OffSetY + 6;
 
-            // ==================== 控件基础设置 ====================
-            Size = new Size(Settings.ScreenWidth, Settings.ScreenHeight); // 全屏大小
-            DrawControlTexture = true; // 启用纹理渲染
-            BackColour = Color.Black;  // 黑色背景
+            Size = new Size(Settings.ScreenWidth, Settings.ScreenHeight);
+            DrawControlTexture = true;
+            BackColour = Color.Black;
 
-            // ==================== 注册鼠标事件 ====================
-            MouseDown += OnMouseDown;                           // 鼠标按下 (攻击/拾取/丢弃)
-            MouseMove += (o, e) => MouseLocation = e.Location;  // 鼠标移动 (更新位置)
-            Click += OnMouseClick;                              // 鼠标点击 (NPC对话/自动寻路)
+            MouseDown += OnMouseDown;
+            MouseMove += (o, e) => MouseLocation = e.Location;
+            Click += OnMouseClick;
         }
 
-        /// <summary>
-        /// 重置地图 - 清空所有地图数据和对象
-        /// 
-        /// 清理内容:
-        /// - 隐藏 NPC 对话框
-        /// - 清空鼠标/目标/魔法对象 ID
-        /// - 移除所有地图对象 (除玩家外)
-        /// - 清空对象列表、特效列表、门列表
-        /// - 重新添加玩家到对象列表
-        /// 
-        /// 调用时机:
-        /// - 切换地图前
-        /// - 重新加载地图前
-        /// - 游戏初始化时
-        /// </summary>
         public void ResetMap()
         {
-            // 隐藏 NPC 对话框
             GameScene.Scene.NPCDialog.Hide();
 
-            // 清空对象 ID 引用
-            MapObject.MouseObjectID = 0;   // 鼠标悬停对象
-            MapObject.TargetObjectID = 0;  // 攻击目标对象
-            MapObject.MagicObjectID = 0;   // 魔法目标对象
+            MapObject.MouseObjectID = 0;
+            MapObject.TargetObjectID = 0;
+            MapObject.MagicObjectID = 0;
 
-            // 移除所有对象 (调用每个对象的 Remove 方法)
             if (M2CellInfo != null)
                 for (var i = ObjectsList.Count - 1; i >= 0; i--)
                     ObjectsList[i]?.Remove();
 
-            // 清空所有列表
-            Objects.Clear();      // 对象字典
-            ObjectsList.Clear();  // 对象列表
-            Effects.Clear();      // 特效列表
-            Doors.Clear();        // 门列表
+            Objects.Clear();
+            ObjectsList.Clear();
+            Effects.Clear();
+            Doors.Clear();
 
-            // 重新添加玩家到对象系统
             if (User != null)
             {
                 Objects[User.ObjectID] = User;
@@ -11245,64 +10434,38 @@ namespace Client.MirScenes
             }
         }
 
-        /// <summary>
-        /// 加载地图 - 从文件加载地图数据
-        /// 
-        /// 加载流程:
-        /// 1. ResetMap() - 清空旧地图数据
-        /// 2. 读取地图文件 (MapReader)
-        /// 3. 初始化格子信息数组 (M2CellInfo)
-        /// 4. 创建寻路算法实例 (PathFinder)
-        /// 5. 播放地图背景音乐
-        /// 6. 更新天气效果
-        /// 
-        /// 地图文件格式:
-        /// - Type 0-7: 标准地图格式
-        /// - Type 100: Shanda 扩展格式 (支持瓦片动画)
-        /// 
-        /// 音乐处理:
-        /// - 只有音乐索引变化时才重新播放
-        /// - 防止重复播放相同音乐造成卡顿
-        /// </summary>
         public void LoadMap()
         {
-            // ==================== 步骤 1: 重置地图 ====================
             ResetMap();
 
-            // 清空对象 ID 引用
             MapObject.MouseObjectID = 0;
             MapObject.TargetObjectID = 0;
             MapObject.MagicObjectID = 0;
 
-            // ==================== 步骤 2: 读取地图文件 ====================
             MapReader Map = new MapReader(FileName);
-            M2CellInfo = Map.MapCells; // 格子信息数组
-            Width = Map.Width;         // 地图宽度
-            Height = Map.Height;       // 地图高度
+            M2CellInfo = Map.MapCells;
+            Width = Map.Width;
+            Height = Map.Height;
 
-            // ==================== 步骤 3: 初始化寻路系统 ====================
             PathFinder = new PathFinder(this);
 
-            // ==================== 步骤 4: 播放背景音乐 ====================
             try
             {
-                // 只有音乐索引变化时才切换音乐
                 if (SetMusic != Music)
                 {
-                    SoundManager.Music?.Dispose();      // 释放旧音乐
-                    SoundManager.PlayMusic(Music, true); // 播放新音乐 (循环)
+                    SoundManager.Music?.Dispose();
+                    SoundManager.PlayMusic(Music, true);
                 }
             }
             catch (Exception)
             {
-                // 音乐索引无效或文件不存在，忽略错误
+                // Do nothing. index was not valid.
             }
 
-            SetMusic = Music;          // 记录已播放的音乐
-            SoundList.Music = Music;   // 更新音乐列表
+            SetMusic = Music;
+            SoundList.Music = Music;
 
-            // ==================== 步骤 5: 更新天气效果 ====================
-            UpdateWeather(); // 根据 Weather 设置创建粒子引擎
+            UpdateWeather();
         }
 
 
@@ -11378,132 +10541,72 @@ namespace Client.MirScenes
             return ob;
         }
 
-        /// <summary>
-        /// 绘制方法 (留空)
-        /// 实际渲染在 CreateTexture() 中完成
-        /// </summary>
         public override void Draw()
         {
             //Do nothing.
         }
 
-        /// <summary>
-        /// 创建地图纹理 - 将整个地图场景渲染到离屏纹理
-        /// 
-        /// 渲染管线 (8个步骤):
-        /// ┌─────────────────────────────────────────┐
-        /// │ 1. 准备阶段: 检查玩家、地板、纹理大小  │
-        /// ├─────────────────────────────────────────┤
-        /// │ 2. 创建渲染目标纹理 (ControlTexture)   │
-        /// ├─────────────────────────────────────────┤
-        /// │ 3. 清空画布为黑色                       │
-        /// ├─────────────────────────────────────────┤
-        /// │ 4. DrawBackground() - 远景背景          │
-        /// ├─────────────────────────────────────────┤
-        /// │ 5. FloorTexture - 缓存的地板纹理        │
-        /// │    (Back/Middle/Front 三层瓦片)         │
-        /// ├─────────────────────────────────────────┤
-        /// │ 6. DrawObjects() - 动态对象和特效       │
-        /// │    · 尸体/对象/动画瓦片/门              │
-        /// │    · 玩家半透明预览                     │
-        /// │    · 目标高亮边框                       │
-        /// │    · 名字/血条/聊天/伤害数字            │
-        /// ├─────────────────────────────────────────┤
-        /// │ 7. ParticleEngine - 粒子特效(雨雪)      │
-        /// ├─────────────────────────────────────────┤
-        /// │ 8. DrawLights() - 光照遮罩(夜晚)        │
-        /// └─────────────────────────────────────────┘
-        /// 
-        /// 额外渲染 (在对象绘制后):
-        /// · DropView: 显示所有地面物品名字
-        /// · MouseObject: 鼠标悬停对象名字
-        /// · DisplayBodyName: 怪物名字 (鼠标悬停)
-        /// · ItemObject: 地面物品名字堆叠显示
-        /// 
-        /// 性能优化:
-        /// - FloorTexture 缓存静态地板 (只在地图变化时重绘)
-        /// - ControlTexture 每帧重绘动态内容
-        /// - 渲染到离屏纹理，最后一次性贴到屏幕
-        /// </summary>
         protected override void CreateTexture()
         {
-            // ==================== 步骤 1: 准备阶段 ====================
-            if (User == null) return; // 玩家未加载
+            if (User == null) return;
 
-            // 地板纹理失效，重新绘制地板
             if (!FloorValid)
                 DrawFloor();
 
-            // 窗口大小变化，释放旧纹理
+
             if (Size != TextureSize)
                 DisposeTexture();
 
-            // ==================== 步骤 2: 创建渲染目标纹理 ====================
             if (ControlTexture == null || ControlTexture.Disposed)
             {
-                DXManager.ControlList.Add(this); // 添加到控件列表便于清理
-                // 创建离屏渲染纹理 (屏幕大小, ARGB8888 格式)
+                DXManager.ControlList.Add(this);
                 ControlTexture = new Texture(DXManager.Device, Size.Width, Size.Height, 1, Usage.RenderTarget, Format.A8R8G8B8, Pool.Default);
                 TextureSize = Size;
             }
 
-            // 切换渲染目标到离屏纹理
             Surface oldSurface = DXManager.CurrentSurface;
             Surface surface = ControlTexture.GetSurfaceLevel(0);
             DXManager.SetSurface(surface);
+            DXManager.Device.Clear(ClearFlags.Target, BackColour, 0, 0);
 
-            // ==================== 步骤 3: 清空画布 ====================
-            DXManager.Device.Clear(ClearFlags.Target, BackColour, 0, 0); // 黑色背景
+            DrawBackground();
 
-            // ==================== 步骤 4: 绘制远景背景 ====================
-            DrawBackground(); // 山脉/沙漠/长城等背景图
-
-            // ==================== 步骤 5: 绘制缓存的地板纹理 ====================
             if (FloorValid)
             {
-                // 直接贴上预渲染的地板纹理 (Back/Middle/Front 三层瓦片)
                 DXManager.Draw(DXManager.FloorTexture, new Rectangle(0, 0, Settings.ScreenWidth, Settings.ScreenHeight), Vector3.Zero, Color.White);
             }
 
-            // ==================== 步骤 6: 绘制动态对象和特效 ====================
-            DrawObjects(); // 玩家/怪物/NPC/掉落物/动画/特效/名字/血条
+            DrawObjects();
 
-            // ==================== 步骤 7: 绘制粒子特效 (天气) ====================
-            // 渲染雨雪风沙等粒子系统
+            //render weather
             foreach (ParticleEngine engine in GameScene.Scene.ParticleEngines)
             {
                 engine.Draw();
             }
 
-            // ==================== 步骤 8: 绘制光照遮罩 ====================
-            // 判断是否需要绘制光照 (夜晚/黄昏/失明状态)
+            //Render Death, 
+
             LightSetting setting = Lights == LightSetting.Normal ? GameScene.Scene.Lights : Lights;
 
             if (setting != LightSetting.Day || GameScene.User.Poison.HasFlag(PoisonType.Blindness))
             {
-                DrawLights(setting); // 绘制黑暗遮罩和光源
+                DrawLights(setting);
             }
 
-            // ==================== 额外渲染: 地面物品名字 ====================
-            // DropView 开启或按 Alt 键时显示所有掉落物品名字
             if (Settings.DropView || GameScene.DropViewTime > CMain.Time)
             {
                 foreach (var ob in Objects.Values.OfType<ItemObject>())
                 {
-                    // 不显示鼠标悬停的物品 (单独处理)
                     if (!ob.MouseOver(MouseLocation))
                         ob.DrawName();
                 }
             }
 
-            // ==================== 鼠标悬停对象名字 ====================
-            // 显示鼠标指向的对象名字 (非物品)
             if (MapObject.MouseObject != null && !(MapObject.MouseObject is ItemObject))
                 MapObject.MouseObject.DrawName();
 
-            // ==================== 怪物名字 (鼠标悬停) ====================
-            int offSet = 0; // 名字堆叠偏移量
-            
+            int offSet = 0;
+
             if (Settings.DisplayBodyName)
             {
                 foreach (var ob in Objects.Values.OfType<MonsterObject>())
@@ -11513,107 +10616,45 @@ namespace Client.MirScenes
                 }
             }
 
-            // ==================== 地面物品名字堆叠显示 ====================
-            // 鼠标悬停时显示多个重叠物品的名字
-            // 使用 offSet 向上堆叠避免重叠
             foreach (var ob in Objects.Values.OfType<ItemObject>())
             {
                 if (ob.MouseOver(MouseLocation))
                 {
                     ob.DrawName(offSet);
-                    // 向上偏移: 高度 + 边框(1像素)
                     offSet -= ob.NameLabel.Size.Height + (ob.NameLabel.Border ? 1 : 0);
                 }
             }
 
-            // ==================== 玩家自己的名字 ====================
             if (MapObject.User.MouseOver(MouseLocation))
                 MapObject.User.DrawName();
 
-            // ==================== 恢复渲染目标 ====================
-            DXManager.SetSurface(oldSurface); // 切回屏幕
-            surface.Dispose();                 // 释放临时 Surface
-            TextureValid = true;               // 标记纹理有效
+            DXManager.SetSurface(oldSurface);
+            surface.Dispose();
+            TextureValid = true;
 
         }
-
-        /// <summary>
-        /// 绘制控件 - 将渲染好的地图纹理贴到屏幕
-        /// 
-        /// 工作流程:
-        /// 1. 检查是否需要绘制
-        /// 2. 如果纹理无效则调用 CreateTexture() 重新渲染
-        /// 3. 应用特殊效果 (死亡灰度)
-        /// 4. 将 ControlTexture 贴到屏幕
-        /// 
-        /// 特殊效果:
-        /// - 玩家死亡: 应用灰度滤镜 (黑白画面)
-        /// </summary>
         protected internal override void DrawControl()
         {
-            // 不需要绘制则直接返回
             if (!DrawControlTexture)
                 return;
 
-            // 纹理无效则重新渲染
             if (!TextureValid)
                 CreateTexture();
 
-            // 纹理丢失则跳过
             if (ControlTexture == null || ControlTexture.Disposed)
                 return;
 
             float oldOpacity = DXManager.Opacity;
 
-            // ==================== 死亡效果: 灰度滤镜 ====================
-            if (MapObject.User.Dead) 
-                DXManager.SetGrayscale(true); // 启用灰度模式 (黑白画面)
+            if (MapObject.User.Dead) DXManager.SetGrayscale(true);
 
-            // 将离屏纹理绘制到屏幕 (全屏)
             DXManager.DrawOpaque(ControlTexture, new Rectangle(0, 0, Settings.ScreenWidth, Settings.ScreenHeight), Vector3.Zero, Color.White, Opacity);
 
-            // 恢复正常颜色模式
-            if (MapObject.User.Dead) 
-                DXManager.SetGrayscale(false);
+            if (MapObject.User.Dead) DXManager.SetGrayscale(false);
 
-            // 设置清理时间 (用于纹理缓存管理)
             CleanTime = CMain.Time + Settings.CleanDelay;
         }
 
-        /// <summary>
-        /// 渲染地板 (Back/Middle/Front 三层瓦片)
-        /// 
-        /// 渲染流程:
-        /// 1. Back Layer (地表层)
-        ///    - 只渲染偶数行列 (y % 2 == 0 && x % 2 == 0)
-        ///    - 大地表瓦片 (草地/沙地/石板等)
-        ///    - 视野范围: User.Movement.Y ± ViewRangeY
-        /// 
-        /// 2. Middle Layer (建筑层)
-        ///    - 渲染所有格子
-        ///    - 建筑物/树木/山体等中层物体
-        ///    - 视野范围: User.Movement.Y ± (ViewRangeY + 5) - 向下多渲染5格
-        ///    - 尺寸过滤: 只渲染 48x32 或 96x64 的瓦片
-        /// 
-        /// 3. Front Layer (前景层)
-        ///    - 渲染所有格子
-        ///    - 建筑顶部/树冠/悬崖等前景物体
-        ///    - 支持门动画 (DoorIndex, DoorOffset)
-        ///    - Y偏移: drawY = baseY - 32 (向上偏移一格)
-        /// 
-        /// 坐标计算核心公式:
-        /// drawX = (x - User.Movement.X + OffSetX) * CellWidth - OffSetX + User.OffSetMove.X
-        /// drawY = (y - User.Movement.Y + OffSetY) * CellHeight + User.OffSetMove.Y
-        /// 
-        /// 关键字段:
-        /// - User.Movement: 玩家当前渲染位置 (移动时实时变化)
-        /// - User.OffSetMove: 像素级移动偏移 (0-47, 0-31)
-        /// - OffSetX/Y: 视野中心偏移 (10, 11)
-        /// 
-        /// 性能优化:
-        /// - 缓存到 FloorTexture，只在地图变化时重绘
-        /// - FloorValid 标记控制是否需要重绘
-        /// </summary>
         private void DrawFloor()
         {
             if (DXManager.FloorTexture == null || DXManager.FloorTexture.Disposed)
@@ -11622,159 +10663,114 @@ namespace Client.MirScenes
                 DXManager.FloorSurface = DXManager.FloorTexture.GetSurfaceLevel(0);
             }
 
-
             Surface oldSurface = DXManager.CurrentSurface;
-
-            // 切换渲染目标到地板纹理 (缓存静态瓦片)
             DXManager.SetSurface(DXManager.FloorSurface);
-            DXManager.Device.Clear(ClearFlags.Target, Color.Empty, 0, 0); //Color.Black
+            DXManager.Device.Clear(ClearFlags.Target, Color.Empty, 0, 0);
 
-            int index;
-            int drawY, drawX;
 
-            // ========================================
-            // BACK LAYER (地表层)
-            // ========================================
-            // 只渲染偶数行列，减少绘制量
-            // 视野范围: User.Movement.Y ± ViewRangeY
-            for (int y = User.Movement.Y - ViewRangeY; y <= User.Movement.Y + ViewRangeY; y++)
-            {
-                if (y <= 0 || y % 2 == 1) continue; // 跳过奇数行
-                if (y >= Height) break;
-                drawY = (y - User.Movement.Y + OffSetY) * CellHeight + User.OffSetMove.Y; // 计算屏幕Y坐标
+            int startX = User.Movement.X - ViewRangeX;
+            int endX = User.Movement.X + ViewRangeX;
+            int startY = User.Movement.Y - ViewRangeY;
+            int endY = User.Movement.Y + ViewRangeY;
+            int endYExtended = endY + 5;
 
-                for (int x = User.Movement.X - ViewRangeX; x <= User.Movement.X + ViewRangeX; x++)
-                {
-                    if (x <= 0 || x % 2 == 1) continue; // 跳过奇数列
-                    if (x >= Width) break;
-                    
-                    // 核心坐标转换公式
-                    // drawX = (地图相对X + 视野偏移) * 格子宽度 - 视野偏移像素 + 移动偏移
-                    drawX = (x - User.Movement.X + OffSetX) * CellWidth - OffSetX + User.OffSetMove.X;
-                    
-                    if ((M2CellInfo[x, y].BackImage == 0) || (M2CellInfo[x, y].BackIndex == -1)) continue;
-                    
-                    // BackImage 高3位用于特殊标记，需要屏蔽
-                    index = (M2CellInfo[x, y].BackImage & 0x1FFFFFFF) - 1;
-                    Libraries.MapLibs[M2CellInfo[x, y].BackIndex].Draw(index, drawX, drawY);
-                }
-            }
 
-            // ========================================
-            // MIDDLE LAYER (建筑层)
-            // ========================================
-            // 渲染所有格子 (不限奇偶)
-            // 视野范围: User.Movement.Y ± (ViewRangeY + 5) - 向下多渲染5格避免裁剪
-            for (int y = User.Movement.Y - ViewRangeY; y <= User.Movement.Y + ViewRangeY + 5; y++)
+            int[] drawXCache = new int[endX - startX + 1];
+            for (int xi = startX; xi <= endX; xi++)
+                drawXCache[xi - startX] = (xi - User.Movement.X + OffSetX) * CellWidth - OffSetX + User.OffSetMove.X;
+
+            int[] drawYCache = new int[endYExtended - startY + 1];
+            for (int yi = startY; yi <= endYExtended; yi++)
+                drawYCache[yi - startY] = (yi - User.Movement.Y + OffSetY) * CellHeight + User.OffSetMove.Y;
+
+
+            for (int y = startY; y <= endYExtended; y++)
             {
                 if (y <= 0) continue;
                 if (y >= Height) break;
-                drawY = (y - User.Movement.Y + OffSetY) * CellHeight + User.OffSetMove.Y;
 
-                for (int x = User.Movement.X - ViewRangeX; x <= User.Movement.X + ViewRangeX; x++)
+                int drawY = drawYCache[y - startY];
+
+                for (int x = startX; x <= endX; x++)
                 {
                     if (x < 0) continue;
                     if (x >= Width) break;
-                    drawX = (x - User.Movement.X + OffSetX) * CellWidth - OffSetX + User.OffSetMove.X;
 
-                    index = M2CellInfo[x, y].MiddleImage - 1;
+                    int drawX = drawXCache[x - startX];
+                    var cell = M2CellInfo[x, y];
 
-                    if ((index < 0) || (M2CellInfo[x, y].MiddleIndex == -1)) continue;
-                    
-                    // Middle层尺寸过滤：只渲染 48x32 或 96x64 的瓦片
-                    // 防止绘制条状错误瓦片 (tile strips)
-                    if (M2CellInfo[x, y].MiddleIndex >= 0)
+                    // Back
+                    if (y % 2 == 0 && x % 2 == 0 && y <= endY)
                     {
-                        Size s = Libraries.MapLibs[M2CellInfo[x, y].MiddleIndex].GetSize(index);
-
-                        // 只允许单格 (48x32) 或双格 (96x64) 尺寸
-                        if ((s.Width != CellWidth || s.Height != CellHeight) &&
-                            ((s.Width != CellWidth * 2) || (s.Height != CellHeight * 2))) continue;
-                    }
-                    Libraries.MapLibs[M2CellInfo[x, y].MiddleIndex].Draw(index, drawX, drawY);
-                }
-            }
-            
-            // ========================================
-            // FRONT LAYER (前景层)
-            // ========================================
-            // 渲染建筑顶部、树冠等前景物体
-            // 支持门动画 (开关门效果)
-            for (int y = User.Movement.Y - ViewRangeY; y <= User.Movement.Y + ViewRangeY + 5; y++)
-            {
-                if (y <= 0) continue;
-                if (y >= Height) break;
-                drawY = (y - User.Movement.Y + OffSetY) * CellHeight + User.OffSetMove.Y;
-
-                for (int x = User.Movement.X - ViewRangeX; x <= User.Movement.X + ViewRangeX; x++)
-                {
-                    if (x < 0) continue;
-                    if (x >= Width) break;
-                    drawX = (x - User.Movement.X + OffSetX) * CellWidth - OffSetX + User.OffSetMove.X;
-
-                    // FrontImage 高位用于特殊标记，需要屏蔽 (& 0x7FFF)
-                    index = (M2CellInfo[x, y].FrontImage & 0x7FFF) - 1;
-                    if (index == -1) continue;
-                    int fileIndex = M2CellInfo[x, y].FrontIndex;
-                    if (fileIndex == -1) continue;
-                    Size s = Libraries.MapLibs[fileIndex].GetSize(index);
-                    if (fileIndex == 200) continue; // 修复旧版 4.map 的随机坏点
-                    
-                    // 门动画处理
-                    if (M2CellInfo[x, y].DoorIndex > 0)
-                    {
-                        // 查找或创建门对象
-                        Door DoorInfo = GetDoor(M2CellInfo[x, y].DoorIndex);
-                        if (DoorInfo == null)
+                        if (cell.BackImage != 0 && cell.BackIndex != -1)
                         {
-                            // 首次遇到门，创建门对象
-                            DoorInfo = new Door() { index = M2CellInfo[x, y].DoorIndex, DoorState = 0, ImageIndex = 0, LastTick = CMain.Time };
-                            Doors.Add(DoorInfo);
+                            int index = (cell.BackImage & 0x1FFFFFFF) - 1;
+                            var lib = Libraries.MapLibs[cell.BackIndex];
+                            lib.Draw(index, drawX, drawY);
                         }
-                        else
+                    }
+
+                    // Middle
+                    int midIndex = cell.MiddleImage - 1;
+                    if (midIndex >= 0 && cell.MiddleIndex != -1)
+                    {
+                        var lib = Libraries.MapLibs[cell.MiddleIndex];
+                        Size s = lib.GetSize(midIndex);
+                        if ((s.Width == CellWidth && s.Height == CellHeight) ||
+                            (s.Width == CellWidth * 2 && s.Height == CellHeight * 2))
                         {
-                            // 门已开启，使用开门动画帧
-                            if (DoorInfo.DoorState != 0)
+                            lib.Draw(midIndex, drawX, drawY);
+                        }
+                    }
+
+                    // Front
+                    int frontIndex = (cell.FrontImage & 0x7FFF) - 1;
+                    if (frontIndex != -1)
+                    {
+                        int fileIndex = cell.FrontIndex;
+                        if (fileIndex != -1 && fileIndex != 200)
+                        {
+                            var lib = Libraries.MapLibs[fileIndex];
+                            Size s = lib.GetSize(frontIndex);
+
+                            // door
+                            if (cell.DoorIndex > 0)
                             {
-                                // 门动画索引计算：基础索引 + (动画帧 + 1) * 偏移量
-                                index += (DoorInfo.ImageIndex + 1) * M2CellInfo[x, y].DoorOffset;
+                                Door doorInfo = GetDoor(cell.DoorIndex);
+                                if (doorInfo == null)
+                                {
+                                    doorInfo = new Door() { index = cell.DoorIndex, DoorState = 0, ImageIndex = 0, LastTick = CMain.Time };
+                                    Doors.Add(doorInfo);
+                                }
+                                else if (doorInfo.DoorState != 0)
+                                {
+                                    frontIndex += (doorInfo.ImageIndex + 1) * cell.DoorOffset;
+                                }
+                            }
+
+                            if (frontIndex >= 0 &&
+                                ((s.Width == CellWidth && s.Height == CellHeight) ||
+                                 (s.Width == CellWidth * 2 && s.Height == CellHeight * 2)))
+                            {
+                                lib.Draw(frontIndex, drawX, drawY);
                             }
                         }
                     }
-
-                    // 尺寸验证：只渲染 48x32 或 96x64 的瓦片
-                    if (index < 0 || ((s.Width != CellWidth || s.Height != CellHeight) && ((s.Width != CellWidth * 2) || (s.Height != CellHeight * 2)))) continue;
-                    Libraries.MapLibs[fileIndex].Draw(index, drawX, drawY);
                 }
             }
 
-            // 恢复原渲染目标
             DXManager.SetSurface(oldSurface);
-
-            // 标记地板已渲染，下次直接使用缓存
             FloorValid = true;
         }
-
-        /// <summary>
-        /// 绘制远景背景
-        /// 
-        /// 根据地图文件名选择对应的背景图:
-        /// - ID1/ID2: 山脉背景 (index 10)
-        /// - ID3_013: 沙漠背景 (index 22)
-        /// - ID3_015: 长城背景 (index 23)
-        /// - ID3_023/025: 村庄入口 (index 21)
-        /// 
-        /// 背景图直接绘制在屏幕 (0, 0)，不随地图滚动
-        /// </summary>
         private void DrawBackground()
         {
             string cleanFilename = FileName.Replace(Settings.MapPath, "");
 
-            if(cleanFilename.StartsWith("ID1") || cleanFilename.StartsWith("ID2"))
+            if (cleanFilename.StartsWith("ID1") || cleanFilename.StartsWith("ID2"))
             {
                 Libraries.Background.Draw(10, 0, 0); //mountains
             }
-            else if(cleanFilename.StartsWith("ID3_013"))
+            else if (cleanFilename.StartsWith("ID3_013"))
             {
                 Libraries.Background.Draw(22, 0, 0); //desert
             }
@@ -11788,45 +10784,17 @@ namespace Client.MirScenes
             }
         }
 
-        /// <summary>
-        /// 绘制动态对象和特效
-        /// 
-        /// 渲染顺序 (9个步骤):
-        /// 1. 背景特效 (Effects DrawBehind = true)
-        /// 2. 尸体对象 (DeadObjects)
-        /// 3. Shanda 瓦片动画层 (TileAnimationImage)
-        /// 4. Middle 动态层 (MiddleLayer with animation)
-        /// 5. Front 动态层 (FrontLayer with animation/doors)
-        /// 6. 对象本体 (M2CellInfo[x,y].DrawObjects - 玩家/怪物/NPC)
-        /// 7. User 高亮边框 (HighlightTarget)
-        /// 8. 前景特效 (Effects DrawBehind = false)
-        /// 9. 名字/血条/聊天/伤害文字
-        /// 
-        /// 关键机制:
-        /// - 按 Y 坐标从上到下绘制，实现正确的遮挡关系
-        /// - 动画帧通过 AnimationCount 循环
-        /// - 混合模式 (Blend) 用于半透明和光效
-        /// 
-        /// 视野范围: User.Movement.Y ± (ViewRangeY + 25)
-        /// 额外向下渲染 25 格，确保高大对象 (建筑/树木) 不被裁剪
-        /// </summary>
         private void DrawObjects()
         {
-            // ========================================
-            // 步骤 1: 背景特效 (如地面火焰、毒圈等)
-            // ========================================
             if (Settings.Effect)
             {
                 for (int i = Effects.Count - 1; i >= 0; i--)
                 {
-                    if (!Effects[i].DrawBehind) continue; // 只绘制背景特效
+                    if (!Effects[i].DrawBehind) continue;
                     Effects[i].Draw();
                 }
             }
 
-            // ========================================
-            // 步骤 2: 尸体对象 (先绘制以确保被活物遮挡)
-            // ========================================
             for (int y = User.Movement.Y - ViewRangeY; y <= User.Movement.Y + ViewRangeY + 25; y++)
             {
                 if (y <= 0) continue;
@@ -11839,9 +10807,6 @@ namespace Client.MirScenes
                 }
             }
 
-            // ========================================
-            // 步骤 3-6: 按行遍历绘制动态瓦片和对象
-            // ========================================
             for (int y = User.Movement.Y - ViewRangeY; y <= User.Movement.Y + ViewRangeY + 25; y++)
             {
                 if (y <= 0) continue;
@@ -11857,22 +10822,14 @@ namespace Client.MirScenes
                     byte animation;
                     bool blend;
                     Size s;
-                    #region 步骤 3: Shanda 瓦片动画层
-                    // 动态地表动画 (如流水、岩浆等)
-                    // 固定使用 MapLibs[190] (Shanda 动画库)
+                    #region Draw shanda's tile animation layer
                     index = M2CellInfo[x, y].TileAnimationImage;
                     animation = M2CellInfo[x, y].TileAnimationFrames;
                     if ((index > 0) & (animation > 0))
                     {
-                        index--; // 索引从1开始，需要减1
-                        
-                        // 动画偏移异或 0x2000 用于动画方向/速度控制
+                        index--;
                         int animationoffset = M2CellInfo[x, y].TileAnimationOffset ^ 0x2000;
-                        
-                        // 循环动画：基础索引 + (偏移 * (当前帧 % 总帧数))
                         index += animationoffset * (AnimationCount % animation);
-                        
-                        // DrawUp: 从底部向上绘制 (用于地面特效)
                         Libraries.MapLibs[190].DrawUp(index, drawX, drawY);
                     }
 
@@ -11934,14 +10891,14 @@ namespace Client.MirScenes
                     else
                         blend = false;
 
-                    
+
                     if (animation > 0)
                     {
                         byte animationTick = M2CellInfo[x, y].FrontAnimationTick;
                         index += (AnimationCount % (animation + (animation * animationTick))) / (1 + animationTick);
                     }
 
-                    
+
                     if (M2CellInfo[x, y].DoorIndex > 0)
                     {
                         Door DoorInfo = GetDoor(M2CellInfo[x, y].DoorIndex);
@@ -11988,83 +10945,62 @@ namespace Client.MirScenes
                 }
             }
 
-            // 刷新精灵批次 (提交之前所有绘制命令)
             DXManager.Sprite.Flush();
-            
-            // ========================================
-            // 步骤 6: 玩家对象特殊渲染 (半透明预览)
-            // ========================================
             float oldOpacity = DXManager.Opacity;
-            DXManager.SetOpacity(0.4F); // 40% 透明度
+            DXManager.SetOpacity(0.4F);
 
-            //MapObject.User.DrawMount(); // 坐骑 (如果有)
+            //MapObject.User.DrawMount();
 
-            MapObject.User.DrawBody(); // 身体
+            MapObject.User.DrawBody();
 
-            // 根据朝向决定头部和翅膀的绘制顺序 (遮挡关系)
             if ((MapObject.User.Direction == MirDirection.Up) ||
                 (MapObject.User.Direction == MirDirection.UpLeft) ||
                 (MapObject.User.Direction == MirDirection.UpRight) ||
                 (MapObject.User.Direction == MirDirection.Right) ||
                 (MapObject.User.Direction == MirDirection.Left))
             {
-                // 朝上/左右: 先画头再画翅膀 (翅膀在前)
                 MapObject.User.DrawHead();
                 MapObject.User.DrawWings();
             }
             else
             {
-                // 朝下: 先画翅膀再画头 (头在前)
                 MapObject.User.DrawWings();
                 MapObject.User.DrawHead();
             }
 
             DXManager.SetOpacity(oldOpacity);
 
-            // ========================================
-            // 步骤 7: 目标高亮边框
-            // ========================================
             if (Settings.HighlightTarget)
             {
-                // 鼠标悬停对象高亮 (非目标且可混合)
                 if (MapObject.MouseObject != null && !MapObject.MouseObject.Dead && MapObject.MouseObject != MapObject.TargetObject && MapObject.MouseObject.Blend)
                     MapObject.MouseObject.DrawBlend();
 
-                // 当前目标高亮
                 if (MapObject.TargetObject != null)
                     MapObject.TargetObject.DrawBlend();
             }
 
-            // ========================================
-            // 步骤 8: 前景特效 (如火球、闪电等)
-            // ========================================
             if (Settings.Effect)
             {
                 for (int i = Effects.Count - 1; i >= 0; i--)
                 {
-                    if (Effects[i].DrawBehind) continue; // 只绘制前景特效
+                    if (Effects[i].DrawBehind) continue;
                     Effects[i].Draw();
                 }
             }
 
-            // ========================================
-            // 步骤 9: UI 元素 (名字/血条/聊天/伤害数字)
-            // ========================================
             foreach (var ob in Objects.Values)
             {
-                ob.DrawEffects(Settings.Effect);  // 对象特效 (Buff 图标等)
+                ob.DrawEffects(Settings.Effect);
 
-                // 名字标签 (非掉落物品且未死亡)
                 if (Settings.NameView && !(ob is ItemObject) && !ob.Dead)
                     ob.DrawName();
 
-                ob.DrawChat();      // 聊天气泡
-                //ob.DrawHealth();  // 血条 (在下面单独绘制)
-                ob.DrawPoison();    // 中毒状态图标
-                ob.DrawDamages();   // 伤害数字飘字
+                ob.DrawChat();
+                //ob.DrawHealth();
+                ob.DrawPoison();
+                ob.DrawDamages();
             }
 
-            // 血条单独绘制 (确保在最上层)
             foreach (var ob in Objects.Values)
             {
                 ob.DrawHealth();
@@ -12085,33 +11021,10 @@ namespace Client.MirScenes
             return light;
         }
 
-        /// <summary>
-        /// 绘制光照遮罩 (夜晚/黑暗效果)
-        /// 
-        /// 工作原理:
-        /// 1. 创建全黑遮罩作为基底 (darkness 颜色)
-        /// 2. 在遮罩上绘制光源 (玩家/怪物/NPC/地图光源)
-        /// 3. 使用加法混合模式 (SourceAlpha + One) 叠加光源
-        /// 4. 最后用乘法混合 (Zero + SourceColor) 将遮罩应用到场景
-        /// 
-        /// 光照类型:
-        /// - 对象光照: 玩家/怪物/NPC 携带的光源 (火把/魔法)
-        /// - 地图光照: 地图瓦片自带的光源 (路灯/火盆)
-        /// - 特效光照: 技能特效的光照 (火球/闪电)
-        /// 
-        /// 亮度等级 (Light):
-        /// - 0-14: 无光到最大光 (15 级)
-        /// - 玩家: Light / 15 决定光源类型 (0=无, 1=微弱, 2=蜡烛, 3=火把, 4=商人火把)
-        /// 
-        /// 特殊效果:
-        /// - 失明状态 (Blindness): 逐渐变暗 (BlindCount * 10)
-        /// - 不同地图黑暗等级 (MapDarkLight): 1=极暗, 2=中等, 3=天蓝, 4=金黄
-        /// </summary>
         private void DrawLights(LightSetting setting)
         {
             if (DXManager.Lights == null || DXManager.Lights.Count == 0) return;
 
-            // 创建光照遮罩纹理
             if (DXManager.LightTexture == null || DXManager.LightTexture.Disposed)
             {
                 DXManager.LightTexture = new Texture(DXManager.Device, Settings.ScreenWidth, Settings.ScreenHeight, 1, Usage.RenderTarget, Format.A8R8G8B8, Pool.Default);
@@ -12121,45 +11034,43 @@ namespace Client.MirScenes
             Surface oldSurface = DXManager.CurrentSurface;
             DXManager.SetSurface(DXManager.LightSurface);
 
-            #region 计算黑暗基础色 (遮罩底色)
+            #region Night Lights
             Color darkness;
 
             switch (setting)
             {
-                case LightSetting.Night: // 夜晚
+                case LightSetting.Night:
                     {
-                        // 根据地图黑暗等级决定夜晚颜色
                         switch (MapDarkLight)
                         {
-                            case 1: // 极暗 (洞穴)
+                            case 1:
                                 darkness = Color.FromArgb(255, 20, 20, 20);
                                 break;
-                            case 2: // 中等黑暗 (森林夜晚)
+                            case 2:
                                 darkness = Color.LightSlateGray;
                                 break;
-                            case 3: // 蓝色夜晚 (月光)
+                            case 3:
                                 darkness = Color.SkyBlue;
                                 break;
-                            case 4: // 金黄夜晚 (篝火区域)
+                            case 4:
                                 darkness = Color.Goldenrod;
                                 break;
-                            default: // 纯黑 (深渊)
+                            default:
                                 darkness = Color.Black;
                                 break;
                         }
                     }
                     break;
-                case LightSetting.Evening: // 黄昏
-                case LightSetting.Dawn:    // 黎明
-                    darkness = Color.FromArgb(255, 50, 50, 50); // 灰暗
+                case LightSetting.Evening:
+                case LightSetting.Dawn:
+                    darkness = Color.FromArgb(255, 50, 50, 50);
                     break;
                 default:
-                case LightSetting.Day: // 白天
-                    darkness = Color.FromArgb(255, 255, 255, 255); // 全亮 (无遮罩)
+                case LightSetting.Day:
+                    darkness = Color.FromArgb(255, 255, 255, 255);
                     break;
             }
 
-            // 失明状态特殊处理 (逐渐变暗)
             if (MapObject.User.Poison.HasFlag(PoisonType.Blindness))
             {
                 darkness = GetBlindLight(darkness);
@@ -12223,7 +11134,7 @@ namespace Client.MirScenes
 
                     if (DXManager.Lights[lightRange] != null && !DXManager.Lights[lightRange].Disposed)
                     {
-                        p.Offset(-(DXManager.LightSizes[lightRange].X / 2) - (CellWidth / 2), -(DXManager.LightSizes[lightRange].Y / 2) - (CellHeight / 2) -5);
+                        p.Offset(-(DXManager.LightSizes[lightRange].X / 2) - (CellWidth / 2), -(DXManager.LightSizes[lightRange].Y / 2) - (CellHeight / 2) - 5);
                         DXManager.Draw(DXManager.Lights[lightRange], null, new Vector3((float)p.X, (float)p.Y, 0.0F), lightColour);
                     }
                 }
@@ -12236,7 +11147,7 @@ namespace Client.MirScenes
                     if (!effect.Blend || CMain.Time < effect.Start || (!(effect is Missile) && effect.Light < ob.Light)) continue;
 
                     light = effect.Light;
-                    
+
                     p = effect.DrawLocation;
 
                     var lightColour = effect.LightColour;
@@ -12377,7 +11288,7 @@ namespace Client.MirScenes
                         NPCObject npc = MapObject.MouseObject as NPCObject;
                         if (npc != null)
                         {
-                            if (npc.ObjectID == GameScene.NPCID && 
+                            if (npc.ObjectID == GameScene.NPCID &&
                                 (CMain.Time <= GameScene.NPCTime || GameScene.Scene.NPCDialog.Visible))
                             {
                                 return;
@@ -12466,30 +11377,31 @@ namespace Client.MirScenes
                 MirItemCell cell = GameScene.SelectedCell;
                 if (cell.Item.Info.Bind.HasFlag(BindMode.DontDrop))
                 {
-                    MirMessageBox messageBox = new MirMessageBox(string.Format("You cannot drop {0}", cell.Item.FriendlyName), MirMessageBoxButtons.OK);
+                    MirMessageBox messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.YouCannotDrop), cell.Item.FriendlyName), MirMessageBoxButtons.OK);
                     messageBox.Show();
                     GameScene.SelectedCell = null;
                     return;
                 }
                 if (cell.Item.Count == 1)
                 {
-                    MirMessageBox messageBox = new MirMessageBox(string.Format(GameLanguage.DropTip, cell.Item.FriendlyName), MirMessageBoxButtons.YesNo);
+                    MirMessageBox messageBox = new MirMessageBox(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.DropTip), cell.Item.FriendlyName), MirMessageBoxButtons.YesNo);
 
                     messageBox.YesButton.Click += (o, a) =>
                     {
-                        Network.Enqueue(new C.DropItem 
-                        {   UniqueID = cell.Item.UniqueID, 
+                        Network.Enqueue(new C.DropItem
+                        {
+                            UniqueID = cell.Item.UniqueID,
                             Count = 1,
                             HeroInventory = cell.GridType == MirGridType.HeroInventory
                         });
-                        
+
                         cell.Locked = true;
                     };
                     messageBox.Show();
                 }
                 else
                 {
-                    MirAmountBox amountBox = new MirAmountBox(GameLanguage.DropAmount, cell.Item.Info.Image, cell.Item.Count);
+                    MirAmountBox amountBox = new MirAmountBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.DropAmount), cell.Item.Info.Image, cell.Item.Count);
 
                     amountBox.OKButton.Click += (o, a) =>
                     {
@@ -12513,7 +11425,7 @@ namespace Client.MirScenes
 
             if (GameScene.PickedUpGold)
             {
-                MirAmountBox amountBox = new MirAmountBox(GameLanguage.DropAmount, 116, GameScene.Gold);
+                MirAmountBox amountBox = new MirAmountBox(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.DropAmount), 116, GameScene.Gold);
 
                 amountBox.OKButton.Click += (o, a) =>
                 {
@@ -12545,16 +11457,16 @@ namespace Client.MirScenes
 
             if ((MouseControl == this) && (MapButtons != MouseButtons.None)) AutoHit = false;//mouse actions stop mining even when frozen!
             if (!CanRideAttack()) AutoHit = false;
-            
+
             if (CMain.Time < InputDelay || User.Poison.HasFlag(PoisonType.Paralysis) || User.Poison.HasFlag(PoisonType.LRParalysis) || User.Poison.HasFlag(PoisonType.Frozen) || User.Fishing) return;
-            
+
             if (User.NextMagic != null && !User.RidingMount)
             {
                 UseMagic(User.NextMagic, User);
                 return;
             }
 
-            if (CMain.Time < User.BlizzardStopTime || CMain.Time < User.ReincarnationStopTime) return; 
+            if (CMain.Time < User.BlizzardStopTime || CMain.Time < User.ReincarnationStopTime) return;
 
             if (MapObject.TargetObject != null && !MapObject.TargetObject.Dead)
             {
@@ -12581,7 +11493,7 @@ namespace Client.MirScenes
                             if (CMain.Time >= OutputDelay)
                             {
                                 OutputDelay = CMain.Time + 1000;
-                                GameScene.Scene.OutputMessage("Target is too far.");
+                                GameScene.Scene.OutputMessage(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.TargetTooFar));
                             }
                         }
                         //  return;
@@ -12606,7 +11518,7 @@ namespace Client.MirScenes
                 }
             }
 
-            
+
             MirDirection direction;
             if (MouseControl == this)
             {
@@ -12617,7 +11529,7 @@ namespace Client.MirScenes
                     {
                         int distance = User.RidingMount || User.Sprint && !User.Sneaking ? 3 : 2;
                         bool fail = false;
-                        for (int i = 1; i <= distance; i++ )
+                        for (int i = 1; i <= distance; i++)
                         {
                             if (!CheckDoorOpen(Functions.PointMove(User.CurrentLocation, direction, i)))
                                 fail = true;
@@ -12646,7 +11558,7 @@ namespace Client.MirScenes
                     case MouseButtons.Left:
                         if (MapObject.MouseObject is NPCObject || (MapObject.MouseObject is PlayerObject && MapObject.MouseObject != User)) break;
                         if (MapObject.MouseObject is MonsterObject && MapObject.MouseObject.AI == 70) break;
- 
+
                         if (CMain.Alt && !User.RidingMount)
                         {
                             User.QueuedAction = new QueuedAction { Action = MirAction.Harvest, Direction = direction, Location = User.CurrentLocation };
@@ -12669,7 +11581,7 @@ namespace Client.MirScenes
                                             if (CMain.Time >= OutputDelay)
                                             {
                                                 OutputDelay = CMain.Time + 1000;
-                                                GameScene.Scene.OutputMessage("Target is too far.");
+                                                GameScene.Scene.OutputMessage(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.TargetTooFar));
                                             }
                                             return;
                                         }
@@ -12680,7 +11592,7 @@ namespace Client.MirScenes
                                     User.QueuedAction.Params.Add(Functions.PointMove(User.CurrentLocation, MouseDirection(), 9));
                                     return;
                                 }
-                                
+
                                 //stops double slash from being used without empty hand or assassin weapon (otherwise bugs on second swing)
                                 if (GameScene.User.DoubleSlash && (!User.HasClassWeapon && User.Weapon > -1)) return;
                                 if (User.Poison.HasFlag(PoisonType.Dazed)) return;
@@ -12706,7 +11618,7 @@ namespace Client.MirScenes
                                 if (CMain.Time >= OutputDelay)
                                 {
                                     OutputDelay = CMain.Time + 1000;
-                                    GameScene.Scene.OutputMessage("Target is too far.");
+                                    GameScene.Scene.OutputMessage(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.TargetTooFar));
                                 }
                             }
                             return;
@@ -12775,7 +11687,7 @@ namespace Client.MirScenes
                         {
                             int distance = User.RidingMount || User.Sprint && !User.Sneaking ? 3 : 2;
                             bool fail = false;
-                            for (int i = 0; i <= distance; i++ )
+                            for (int i = 0; i <= distance; i++)
                             {
                                 if (!CheckDoorOpen(Functions.PointMove(User.CurrentLocation, direction, i)))
                                     fail = true;
@@ -12874,7 +11786,8 @@ namespace Client.MirScenes
                 if (CMain.Time >= OutputDelay)
                 {
                     OutputDelay = CMain.Time + 1000;
-                    GameScene.Scene.OutputMessage(string.Format("You cannot cast {0} for another {1} seconds.", magic.Spell.ToString(), ((magic.CastTime + magic.Delay) - CMain.Time - 1) / 1000 + 1));
+                    GameScene.Scene.OutputMessage(GameLanguage.ClientTextMap.GetLocalization((ClientTextKeys.CannotCastSpellSeconds), magic.Name,
+                        ((magic.CastTime + magic.Delay) - CMain.Time - 1) / 1000 + 1));
                 }
 
                 actor.ClearMagic();
@@ -12901,7 +11814,7 @@ namespace Client.MirScenes
                 if (CMain.Time >= OutputDelay)
                 {
                     OutputDelay = CMain.Time + 1000;
-                    GameScene.Scene.OutputMessage(GameLanguage.LowMana);
+                    GameScene.Scene.OutputMessage(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.LowMana));
                 }
                 actor.ClearMagic();
                 return;
@@ -12954,7 +11867,7 @@ namespace Client.MirScenes
                 case Spell.SummonSnakes:
                     if (!actor.HasClassWeapon)
                     {
-                        GameScene.Scene.OutputMessage("You must be wearing a bow to perform this skill.");
+                        GameScene.Scene.OutputMessage(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.MustWearBowForSkill));
                         actor.ClearMagic();
                         return;
                     }
@@ -12971,7 +11884,7 @@ namespace Client.MirScenes
                 case Spell.Stonetrap:
                     if (!User.HasClassWeapon)
                     {
-                        GameScene.Scene.OutputMessage("You must be wearing a bow to perform this skill.");
+                        GameScene.Scene.OutputMessage(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.MustWearBowForSkill));
                         User.ClearMagic();
                         return;
                     }
@@ -13003,7 +11916,7 @@ namespace Client.MirScenes
                 case Spell.PetEnhancer:
                     if (actor.NextMagicObject != null)
                     {
-                        if (!actor.NextMagicObject.Dead && actor.NextMagicObject.Race != ObjectType.Item && actor.NextMagicObject.Race != ObjectType.Merchant)
+                        if (!actor.NextMagicObject.Dead && actor.NextMagicObject.Race != ObjectType.Item && actor.NextMagicObject.Race != ObjectType.Merchant && !(actor.NextMagicObject is MonsterObject monster && monster.MasterObjectId == 0))
                             target = actor.NextMagicObject;
                     }
 
@@ -13062,7 +11975,7 @@ namespace Client.MirScenes
                     break;
                 default:
                     //isTargetSpell = false;
-                        break;
+                    break;
             }
 
             MirDirection dir = (target == null || target == User) ? actor.NextMagicDirection : Functions.DirectionFromPoint(actor.CurrentLocation, target.CurrentLocation);
@@ -13079,7 +11992,7 @@ namespace Client.MirScenes
                 if (CMain.Time >= OutputDelay)
                 {
                     OutputDelay = CMain.Time + 1000;
-                    GameScene.Scene.OutputMessage("Target is too far.");
+                    GameScene.Scene.OutputMessage(GameLanguage.ClientTextMap.GetLocalization(ClientTextKeys.TargetTooFar));
                 }
                 actor.ClearMagic();
                 return;
@@ -13179,8 +12092,8 @@ namespace Client.MirScenes
         private bool CanWalk(MirDirection dir, out MirDirection outDir)
         {
             outDir = dir;
-            if (User.InTrapRock) return false;            
-            
+            if (User.InTrapRock) return false;
+
             if (EmptyCell(Functions.PointMove(User.CurrentLocation, dir, 1)))
                 return true;
 
@@ -13375,8 +12288,8 @@ namespace Client.MirScenes
                 if ((Weather & itemWeather) != itemWeather)
                     continue;
 
-            //foreach (WeatherSetting itemWeather in Weather)
-            //{
+                //foreach (WeatherSetting itemWeather in Weather)
+                //{
                 switch (itemWeather)
                 {
                     case WeatherSetting.Leaves:
@@ -13531,7 +12444,7 @@ namespace Client.MirScenes
                 }
 
             }
-            
+
         }
 
         public void RemoveObject(MapObject ob)

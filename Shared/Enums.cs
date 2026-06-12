@@ -58,6 +58,13 @@ public enum MarketPanelType : byte
     GameShop
 }
 
+public enum MarketPriceFilter : byte
+{
+    Normal,
+    High,
+    Low
+}
+
 public enum BlendMode : sbyte
 {
     NONE = -1,
@@ -76,6 +83,14 @@ public enum DamageType : byte
     Hit = 0,
     Miss = 1,
     Critical = 2
+}
+
+public enum MonsterType : byte
+{
+    Normal = 0,
+    Uncommon = 1,
+    Rare = 2,
+    Elite = 3
 }
 
 [Flags]
@@ -389,7 +404,7 @@ public enum Monster : ushort
     SiegeRepairman = 175, //SPECIAL TODO
     BlueSanta = 176,
     BattleStandard = 177,
-    Blank1 = 178,
+    WingedBullLord = 178,
     RedYimoogi = 179,
     LionRiderMale = 180, //Not Monster - Skin / Transform
     LionRiderFemale = 181, //Not Monster - Skin / Transform
@@ -1451,6 +1466,8 @@ public enum ServerPacketIds : short
     Chat,
     ObjectChat,
     NewItemInfo,
+    NewMonsterInfo,
+    NewNPCInfo,
     NewHeroInfo,
     NewChatItem,
     MoveItem,
@@ -1693,6 +1710,8 @@ public enum ServerPacketIds : short
     GroupMembersMap,
     SendMemberLocation,
     GuildTerritoryPage,
+    StorageUnlockResult,
+    StoragePasswordResult,
 }
 
 public enum ClientPacketIds : short
@@ -1734,6 +1753,9 @@ public enum ClientPacketIds : short
     DropGold,
     PickUp,
     RequestMapInfo,
+    RequestMonsterInfo,
+    RequestNPCInfo,
+    RequestItemInfo,
     TeleportToNPC,
     SearchMap,
     Inspect,
@@ -1850,6 +1872,10 @@ public enum ClientPacketIds : short
     ConfirmItemRental,
     GuildTerritoryPage,
     PurchaseGuildTerritory,
+    DeleteItem,
+    UnlockStorage,
+    SetStoragePassword,
+    RemoveStoragePassword,
 }
 
 public enum ConquestType : byte

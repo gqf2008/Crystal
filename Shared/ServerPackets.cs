@@ -166,6 +166,71 @@ namespace ServerPackets
             writer.Write(ExpiryDate.ToBinary());
         }
     }
+    public sealed class StorageUnlockResult : Packet
+    {
+        public override short Index
+        {
+            get { return (short)ServerPacketIds.StorageUnlockResult; }
+        }
+
+        public byte Result;
+        public bool HasPassword;
+        /*
+         * 0: Success
+         * 1: Bad Password
+         * 2: Wrong Password
+         * 3: Not Available
+         * 4: No Password Set
+         */
+
+        protected override void ReadPacket(BinaryReader reader)
+        {
+            Result = reader.ReadByte();
+            HasPassword = reader.ReadBoolean();
+        }
+
+        protected override void WritePacket(BinaryWriter writer)
+        {
+            writer.Write(Result);
+            writer.Write(HasPassword);
+        }
+    }
+    public sealed class StoragePasswordResult : Packet
+    {
+        public override short Index
+        {
+            get { return (short)ServerPacketIds.StoragePasswordResult; }
+        }
+
+        public byte Result;
+        public bool Removing;
+        public bool HasPassword;
+        public DateTime LastSetTime;
+        /*
+         * 0: Not Available
+         * 1: Bad Current Password
+         * 2: Wrong Current Password
+         * 3: Bad New Password
+         * 4: Success
+         * 5: No Password Set
+         */
+
+        protected override void ReadPacket(BinaryReader reader)
+        {
+            Result = reader.ReadByte();
+            Removing = reader.ReadBoolean();
+            HasPassword = reader.ReadBoolean();
+            LastSetTime = DateTime.FromBinary(reader.ReadInt64());
+        }
+
+        protected override void WritePacket(BinaryWriter writer)
+        {
+            writer.Write(Result);
+            writer.Write(Removing);
+            writer.Write(HasPassword);
+            writer.Write(LastSetTime.ToBinary());
+        }
+    }
     public sealed class Login : Packet
     {
         public override short Index
@@ -549,6 +614,9 @@ namespace ServerPackets
         public uint Gold, Credit;
 
         public bool HasExpandedStorage;
+        public bool HasStoragePassword;
+        public bool RequireStoragePassword;
+        public DateTime StoragePasswordLastSet;
         public DateTime ExpandedStorageExpiryTime;
 
         public List<ClientMagic> Magics = new List<ClientMagic>();
@@ -619,6 +687,9 @@ namespace ServerPackets
             Credit = reader.ReadUInt32();
 
             HasExpandedStorage = reader.ReadBoolean();
+            HasStoragePassword = reader.ReadBoolean();
+            RequireStoragePassword = reader.ReadBoolean();
+            StoragePasswordLastSet = DateTime.FromBinary(reader.ReadInt64());
             ExpandedStorageExpiryTime = DateTime.FromBinary(reader.ReadInt64());
 
             int count = reader.ReadInt32();
@@ -708,6 +779,9 @@ namespace ServerPackets
             writer.Write(Credit);
 
             writer.Write(HasExpandedStorage);
+            writer.Write(HasStoragePassword);
+            writer.Write(RequireStoragePassword);
+            writer.Write(StoragePasswordLastSet.ToBinary());
             writer.Write(ExpandedStorageExpiryTime.ToBinary());
 
             writer.Write(Magics.Count);
@@ -2230,6 +2304,8 @@ namespace ServerPackets
         public byte ExtraByte;
         public long ShockTime;
         public bool BindingShotCenter;
+        public uint MasterObjectId;
+        public MonsterType Rarity;
 
         public List<BuffType> Buffs = new List<BuffType>();
 
@@ -2252,6 +2328,8 @@ namespace ServerPackets
             BindingShotCenter = reader.ReadBoolean();
             Extra = reader.ReadBoolean();
             ExtraByte = reader.ReadByte();
+            MasterObjectId= reader.ReadUInt32();
+            Rarity= (MonsterType)reader.ReadByte();
 
             int count = reader.ReadInt32();
             for (int i = 0; i < count; i++)
@@ -2280,6 +2358,8 @@ namespace ServerPackets
             writer.Write(BindingShotCenter);
             writer.Write(Extra);
             writer.Write((byte)ExtraByte);
+            writer.Write(MasterObjectId);
+            writer.Write((byte)Rarity);
 
             writer.Write(Buffs.Count);
             for (int i = 0; i < Buffs.Count; i++)
@@ -6703,6 +6783,49 @@ namespace ServerPackets
         {
             writer.Write(Location.X);
             writer.Write(Location.Y);
+        }
+    }
+
+    public sealed class NewMonsterInfo : Packet
+    {
+        public override short Index
+        {
+            get { return (short)ServerPacketIds.NewMonsterInfo; }
+        }
+
+        public override bool Observable => false;
+
+        public ClientMonsterInfo Info;
+
+        protected override void ReadPacket(BinaryReader reader)
+        {
+            Info = new ClientMonsterInfo(reader);
+        }
+
+        protected override void WritePacket(BinaryWriter writer)
+        {
+            Info.Save(writer);
+        }
+    }
+    public sealed class NewNPCInfo : Packet
+    {
+        public override short Index
+        {
+            get { return (short)ServerPacketIds.NewNPCInfo; }
+        }
+
+        public override bool Observable => false;
+
+        public ClientNPCInfo Info;
+
+        protected override void ReadPacket(BinaryReader reader)
+        {
+            Info = new ClientNPCInfo(reader);
+        }
+
+        protected override void WritePacket(BinaryWriter writer)
+        {
+            Info.Save(writer);
         }
     }
 }

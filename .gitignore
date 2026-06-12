@@ -12,7 +12,7 @@
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
-ServerRust/Daneo1989/
+
 # Mono auto generated files
 mono_crash.*
 
@@ -28,8 +28,6 @@ x86/
 [Aa][Rr][Mm]64/
 bld/
 [Bb]in/
-# Exception: Don't ignore Rust source code in src/bin/
-!**/src/bin/
 [Oo]bj/
 [Oo]ut/
 [Ll]og/
@@ -364,24 +362,5 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 /Build
-/SharedRust/target
-/SharedRust/target
-/ClientRust/target
-/ClientRust/Data
-/target
-/ClientRust/target
-ClientRust/map_viewer.exe
-ClientRust/map_viewer_ecs.exe
-ClientRust/mir2x.exe
-*.txt
-/Client-Macroquad/target
-/Client-Macroquad/ecs_macros/target
-/SharedRust/target
-/Client-Macroquad/Data
-/Client-Macroquad/Map
-/Client-Macroquad/target
-/Client-Macroquad/target
-ClientRust/map_viewer_v3.exe
-*.c
-*.exe
-/Client-Macroquad/miniquad
+/.idea/.idea.Legend of Mir/.idea
+/.idea/config
