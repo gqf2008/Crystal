@@ -264,54 +264,43 @@ public class ClientMovementInfo
 
 public class ClientNPCInfo
 {
+    // ===== Wire format (must match SharedRust/src/data/client_data.rs ClientNPCInfo) =====
     public uint ObjectID;
+    public string Name = string.Empty;
+    public Point Location;
     public int Icon;
-    // For NPC tooltips and linking
+    public bool CanTeleportTo;
+
+    // ===== KR NPC Linking fields (PR #1126, unused by current Rust client) =====
     public int Index;
     public string FileName = string.Empty;
-    public string Name = string.Empty;
     public int MapIndex;
-    public Point Location;
     public ushort Rate;
     public ushort Image;
     public bool ShowOnBigMap;
     public int BigMapIcon;
-    public bool CanTeleportTo;
 
     public ClientNPCInfo() { }
 
     public ClientNPCInfo(BinaryReader reader)
     {
-        Index = reader.ReadInt32();
-        FileName = reader.ReadString();
-        Name = reader.ReadString();
-        MapIndex = reader.ReadInt32();
-        Location = new Point(reader.ReadInt32(), reader.ReadInt32());
-        Image = reader.ReadUInt16();
-        Rate = reader.ReadUInt16();
-        ShowOnBigMap = reader.ReadBoolean();
-        BigMapIcon = reader.ReadInt32();
+        // Wire order must match Rust read_from: ObjectID, Name, Location, Icon, CanTeleportTo
         ObjectID = reader.ReadUInt32();
+        Name = reader.ReadString();
+        Location = new Point(reader.ReadInt32(), reader.ReadInt32());
         Icon = reader.ReadInt32();
         CanTeleportTo = reader.ReadBoolean();
 
-        if (Icon == 0 && BigMapIcon != 0)
-            Icon = BigMapIcon;
+        // KR fields populated by master server (NewNPCInfo packet), stored in a separate struct.
+        // Kept here for forward-compat but not read on the wire by this client.
     }
 
     public void Save(BinaryWriter writer)
     {
-        writer.Write(Index);
-        writer.Write(FileName ?? string.Empty);
+        writer.Write(ObjectID);
         writer.Write(Name ?? string.Empty);
-        writer.Write(MapIndex);
         writer.Write(Location.X);
         writer.Write(Location.Y);
-        writer.Write(Image);
-        writer.Write(Rate);
-        writer.Write(ShowOnBigMap);
-        writer.Write(BigMapIcon);
-        writer.Write(ObjectID);
         writer.Write(Icon);
         writer.Write(CanTeleportTo);
     }
