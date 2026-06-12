@@ -645,6 +645,17 @@ impl Message<ClientData> for GateActor {
             x if x == ClientPacketIds::RequestMapInfo as i16 => {
                 forward_request_map_info(&self.world_ref, msg.session_id, payload);
             }
+
+            // ===== PR #1126: KR NPC/Quest Linking — info requests =====
+            x if x == ClientPacketIds::RequestMonsterInfo as i16 => {
+                forward_request_monster_info(&self.world_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::RequestNPCInfo as i16 => {
+                forward_request_npc_info(&self.world_ref, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::RequestItemInfo as i16 => {
+                forward_request_item_info(&self.world_ref, msg.session_id, payload);
+            }
             x if x == ClientPacketIds::SearchMap as i16 => {
                 forward_search_map(&self.world_ref, msg.session_id, payload);
             }
@@ -2257,6 +2268,55 @@ fn forward_request_map_info(
     let map_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
     debug!("RequestMapInfo: session={} map={}", session_id, map_id);
     let _ = world_ref.ask(crate::actors::world::RequestMapInfoRequest { session_id, map_id });
+}
+
+/// PR #1126: Client requests detailed monster info (for tooltip).
+/// Wire format: [monster_index: i32 LE]
+fn forward_request_monster_info(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.len() < 4 { return; }
+    let world_ref = match world_ref { Some(w) => w, None => { return; } };
+    let monster_index = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    debug!("RequestMonsterInfo: session={} idx={}", session_id, monster_index);
+    let _ = world_ref.ask(crate::actors::world::RequestMonsterInfoRequest {
+        session_id, monster_index,
+    });
+}
+
+/// PR #1126: Client requests detailed NPC info (for tooltip).
+/// Wire format: [npc_index: i32 LE]
+fn forward_request_npc_info(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.len() < 4 { return; }
+    let world_ref = match world_ref { Some(w) => w, None => { return; } };
+    let npc_index = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    debug!("RequestNPCInfo: session={} idx={}", session_id, npc_index);
+    let _ = world_ref.ask(crate::actors::world::RequestNPCInfoRequest {
+        session_id, npc_index,
+    });
+}
+
+/// PR #1126: Client requests detailed item info (for tooltip).
+/// Wire format: [item_index: i32 LE]
+/// (Returns nothing for now — ItemInfo stream will be wired in a later PR.)
+fn forward_request_item_info(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.len() < 4 { return; }
+    let world_ref = match world_ref { Some(w) => w, None => { return; } };
+    let item_index = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    debug!("RequestItemInfo: session={} idx={}", session_id, item_index);
+    let _ = world_ref.ask(crate::actors::world::RequestItemInfoRequest {
+        session_id, item_index,
+    });
 }
 
 /// SearchMap: [keyword: DotNetString]

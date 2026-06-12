@@ -1045,3 +1045,151 @@ impl Message<GetRankingRequest> for WorldActor {
         }
     }
 }
+
+// =============================================================================
+// PR #1126: KR NPC/Quest Linking — info request handlers
+// =============================================================================
+
+/// PR #1126: Client requests detailed monster info (tooltip on hover).
+pub struct RequestMonsterInfoRequest {
+    pub session_id: u64,
+    pub monster_index: i32,
+}
+
+impl Message<RequestMonsterInfoRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: RequestMonsterInfoRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let mi = match self.monster_infos.get(&msg.monster_index) {
+            Some(m) => m,
+            None => {
+                warn!("RequestMonsterInfo: monster_index={} not found", msg.monster_index);
+                return;
+            }
+        };
+
+        // Build a ClientMonsterInfo matching master wire order.
+        // Fields not present in our DB schema (game_name, can_recall) are filled
+        // with safe defaults — master has them in extra columns we don't have.
+        let info = mir2_shared::data::client_data::ClientMonsterInfo {
+            index: mi.index,
+            name: mi.name.clone(),
+            game_name: String::new(), // not stored in our DB
+            image: {
+                // mi.image is i32 (Monster enum index); ClientMonsterInfo expects
+                // mir2_shared::enums::Monster. try_from will fail for unknown
+                // values; default to Monster::Guard in that case.
+                let raw = mi.image as u16;
+                mir2_shared::enums::Monster::try_from(raw)
+                    .unwrap_or(mir2_shared::enums::Monster::Guard)
+            },
+            ai: mi.ai as u8,
+            effect: mi.effect as u8,
+            level: mi.level as u16,
+            view_range: mi.view_range as u8,
+            cool_eye: mi.cool_eye as u8,
+            light: mi.light as u8,
+            attack_speed: mi.attack_speed as u16,
+            move_speed: mi.move_speed as u16,
+            experience: mi.experience as u32,
+            can_push: mi.can_push,
+            can_tame: mi.can_tame,
+            auto_rev: mi.auto_rev,
+            undead: mi.undead,
+            can_recall: false, // not stored
+            stats: {
+                let mut s = mir2_shared::data::stats::Stats::new();
+                for (k, v) in mi.stats.iter() {
+                    let stat = mir2_shared::enums::Stat::try_from(*k)
+                        .unwrap_or(mir2_shared::enums::Stat::MinAC);
+                    s.set(stat, *v);
+                }
+                s
+            },
+        };
+
+        let packet = mir2_shared::packets::server::NewMonsterInfo { info };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.ask(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::NewMonsterInfo as i16,
+                    &body,
+                ),
+            });
+        }
+    }
+}
+
+/// PR #1126: Client requests detailed NPC info (tooltip on hover).
+pub struct RequestNPCInfoRequest {
+    pub session_id: u64,
+    pub npc_index: i32,
+}
+
+impl Message<RequestNPCInfoRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: RequestNPCInfoRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let ni = match self.npc_infos.get(&msg.npc_index) {
+            Some(n) => n,
+            None => {
+                warn!("RequestNPCInfo: npc_index={} not found", msg.npc_index);
+                return;
+            }
+        };
+
+        // ClientNPCInfo (5-field version preserved for wire compat with Rust client).
+        // object_id = 0 (not a live object, just a template lookup).
+        let info = mir2_shared::data::client_data::ClientNPCInfo {
+            object_id: 0,
+            name: ni.name.clone(),
+            location: mir2_shared::map::Point { x: ni.x, y: ni.y },
+            icon: ni.image,
+            can_teleport_to: false, // not stored; UI defaults to false
+        };
+
+        let packet = mir2_shared::packets::server::NewNPCInfo { info };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.ask(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::NewNPCInfo as i16,
+                    &body,
+                ),
+            });
+        }
+    }
+}
+
+/// PR #1126: Client requests detailed item info (tooltip on hover).
+/// Note: ItemInfo schema in ServerRust does not yet carry the fields needed
+/// for a full ClientItemInfo payload. This handler is wired but currently
+/// only logs the request. Full implementation will be a follow-up commit.
+pub struct RequestItemInfoRequest {
+    pub session_id: u64,
+    pub item_index: i32,
+}
+
+impl Message<RequestItemInfoRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: RequestItemInfoRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        debug!("RequestItemInfo: session={} idx={} (no-op until ItemInfo schema is extended)",
+            msg.session_id, msg.item_index);
+    }
+}
