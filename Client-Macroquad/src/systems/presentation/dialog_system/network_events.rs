@@ -1094,6 +1094,54 @@ pub fn pump_network_messages_to_ui(ctx: &mut GameContext) {
                     sys_chat(&mut cmds, format!("受到 {} 点伤害 (来自 ObjectID={})", damage, attacker_id));
                 }
             }
+
+            // ===== PR #1169: Warehouse password responses =====
+            NetworkEvent::StorageUnlockResultReceived { result, has_password } => {
+                let msg = match *result {
+                    0 => {
+                        if *has_password {
+                            "仓库解锁成功。".to_string()
+                        } else {
+                            "仓库未设置密码,直接打开。".to_string()
+                        }
+                    }
+                    1 => "密码格式错误。".to_string(),
+                    2 => "密码错误。".to_string(),
+                    3 => "仓库功能暂不可用。".to_string(),
+                    4 => "未设置密码。".to_string(),
+                    _ => format!("仓库解锁结果: code={}", result),
+                };
+                sys_chat(&mut cmds, msg);
+            }
+            NetworkEvent::StoragePasswordResultReceived { result, removing, .. } => {
+                let msg = match *result {
+                    0 => "仓库密码功能不可用。".to_string(),
+                    1 => "当前密码格式错误。".to_string(),
+                    2 => "当前密码错误。".to_string(),
+                    3 => "新密码格式错误。".to_string(),
+                    4 => {
+                        if *removing {
+                            "仓库密码已删除。".to_string()
+                        } else {
+                            "仓库密码已设置/修改。".to_string()
+                        }
+                    }
+                    5 => "仓库未设置密码。".to_string(),
+                    _ => format!("仓库密码操作结果: code={}", result),
+                };
+                sys_chat(&mut cmds, msg);
+            }
+
+            // ===== PR #1126: Detailed info replies =====
+            // 暂存到 UiState 供后续 tooltip 渲染使用,本次只记日志。
+            NetworkEvent::NewMonsterInfoReceived { info } => {
+                tracing::debug!("👹 收到怪物详情: idx={} name={} level={} exp={}",
+                    info.index, info.name, info.level, info.experience);
+            }
+            NetworkEvent::NewNPCInfoReceived { info } => {
+                tracing::debug!("🧙 收到 NPC 详情: oid={} name={}", info.object_id, info.name);
+            }
+
             _ => {}
         }
     }

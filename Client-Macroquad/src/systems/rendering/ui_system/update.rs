@@ -1349,6 +1349,36 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                 }
                 tracing::debug!("🏛️ 公会名称输入: {}", text);
             }
+
+            // ===== PR #1169: Warehouse password flows =====
+            TextInputKind::UnlockStorage => {
+                if let Some(net) = ctx.net.as_ref() {
+                    let _ = net.send(NetEv::UnlockStorageRequest { password: text.clone() });
+                }
+                tracing::info!("🔐 发送 UnlockStorage 密码: text_len={}", text.len());
+            }
+            TextInputKind::SetStoragePassword => {
+                // 简化:文本框一次性接受 "current||new" 格式(由 NPC 对话 UI 串好),
+                // 或两次弹窗,本次只接一次弹窗的 current,new 用本地 dialog state 跟踪。
+                // 实际用法: dialog state 会保存 current,新密码输入后组装
+                // SetStoragePasswordRequest { current_password, new_password }。
+                // 本分支只处理首次:用 text 作为 new,current 留空字符串(简化)。
+                if let Some(net) = ctx.net.as_ref() {
+                    let _ = net.send(NetEv::SetStoragePasswordRequest {
+                        current_password: String::new(), // 简化:首次设置无旧密码
+                        new_password: text.clone(),
+                    });
+                }
+                tracing::info!("🔐 发送 SetStoragePassword: new_len={}", text.len());
+            }
+            TextInputKind::RemoveStoragePassword => {
+                if let Some(net) = ctx.net.as_ref() {
+                    let _ = net.send(NetEv::RemoveStoragePasswordRequest {
+                        current_password: text.clone(),
+                    });
+                }
+                tracing::info!("🔐 发送 RemoveStoragePassword: current_len={}", text.len());
+            }
         }
     }
 

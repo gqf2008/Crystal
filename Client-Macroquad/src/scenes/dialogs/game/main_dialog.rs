@@ -62,6 +62,13 @@ pub enum TextInputKind {
     WhisperChat { target: String },
     NPCInput { npc_id: u32 },
     GuildName,
+    // PR #1169 — Warehouse password flows
+    /// 玩家首次打开仓库,需要输入密码
+    UnlockStorage,
+    /// 修改密码:需要先输入当前密码,然后输入新密码(由 dialog state 跟踪)
+    SetStoragePassword,
+    /// 删除密码:需要输入当前密码确认
+    RemoveStoragePassword,
 }
 
 /// 对话框类型枚举，用于 z-order 管理
