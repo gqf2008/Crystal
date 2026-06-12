@@ -6,8 +6,8 @@ use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::binary::{read_bool, read_dotnet_string, write_bool, write_dotnet_string};
-use crate::enums::{IntelligentCreaturePickupMode, IntelligentCreatureType, ItemGrade, MirClass, MirGender, Spell};
-use crate::data::stats::{SharedError, SharedResult};
+use crate::enums::{IntelligentCreaturePickupMode, IntelligentCreatureType, ItemGrade, MirClass, MirGender, Monster, Spell};
+use crate::data::stats::{SharedError, SharedResult, Stats};
 
 /// Character selection information
 /// Used in login/logout for character list
@@ -775,6 +775,135 @@ impl ClientNPCInfo {
         writer.write_i32::<LittleEndian>(self.location.y)?;
         writer.write_i32::<LittleEndian>(self.icon)?;
         write_bool(writer, self.can_teleport_to)?;
+        Ok(())
+    }
+}
+
+/// Client monster information (for PR #1126 KR tooltip enhancement).
+///
+/// Wire format mirrors master `Shared/Data/MonsterData.cs::ClientMonsterInfo`.
+/// This struct is sent by the server in `NewMonsterInfo` packet in response to
+/// `client::info::RequestMonsterInfo`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClientMonsterInfo {
+    pub index: i32,
+    pub name: String,
+    pub game_name: String,
+    pub image: Monster,
+    pub ai: u8,
+    pub effect: u8,
+    pub level: u16,
+    pub view_range: u8,
+    pub cool_eye: u8,
+    pub light: u8,
+    pub attack_speed: u16,
+    pub move_speed: u16,
+    pub experience: u32,
+    pub can_push: bool,
+    pub can_tame: bool,
+    pub auto_rev: bool,
+    pub undead: bool,
+    pub can_recall: bool,
+    /// Detailed stats for tooltip (level/health/exp/physical/magic attack & defense).
+    pub stats: Stats,
+}
+
+impl Default for ClientMonsterInfo {
+    fn default() -> Self {
+        Self {
+            index: 0,
+            name: String::new(),
+            game_name: String::new(),
+            image: Monster::Guard,
+            ai: 0,
+            effect: 0,
+            level: 0,
+            view_range: 0,
+            cool_eye: 0,
+            light: 0,
+            attack_speed: 0,
+            move_speed: 0,
+            experience: 0,
+            can_push: false,
+            can_tame: false,
+            auto_rev: false,
+            undead: false,
+            can_recall: false,
+            stats: Stats::new(),
+        }
+    }
+}
+
+impl ClientMonsterInfo {
+    pub fn read_from<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        // Wire order MUST match master `ClientMonsterInfo(BinaryReader)`:
+        //   Index, Name, GameName, Image(u16), AI, Effect, Level(u16),
+        //   ViewRange, CoolEye, Light, AttackSpeed(u16), MoveSpeed(u16),
+        //   Experience(u32), CanPush, CanTame, AutoRev, Undead, CanRecall, Stats
+        let index = reader.read_i32::<LittleEndian>()?;
+        let name = read_dotnet_string(reader)?;
+        let game_name = read_dotnet_string(reader)?;
+        let image_raw = reader.read_u16::<LittleEndian>()?;
+        let image = Monster::try_from(image_raw).unwrap_or(Monster::Guard);
+        let ai = reader.read_u8()?;
+        let effect = reader.read_u8()?;
+        let level = reader.read_u16::<LittleEndian>()?;
+        let view_range = reader.read_u8()?;
+        let cool_eye = reader.read_u8()?;
+        let light = reader.read_u8()?;
+        let attack_speed = reader.read_u16::<LittleEndian>()?;
+        let move_speed = reader.read_u16::<LittleEndian>()?;
+        let experience = reader.read_u32::<LittleEndian>()?;
+        let can_push = read_bool(reader)?;
+        let can_tame = read_bool(reader)?;
+        let auto_rev = read_bool(reader)?;
+        let undead = read_bool(reader)?;
+        let can_recall = read_bool(reader)?;
+        let stats = Stats::read_from(reader)?;
+
+        Ok(ClientMonsterInfo {
+            index,
+            name,
+            game_name,
+            image,
+            ai,
+            effect,
+            level,
+            view_range,
+            cool_eye,
+            light,
+            attack_speed,
+            move_speed,
+            experience,
+            can_push,
+            can_tame,
+            auto_rev,
+            undead,
+            can_recall,
+            stats,
+        })
+    }
+
+    pub fn write_to<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.index)?;
+        write_dotnet_string(writer, &self.name)?;
+        write_dotnet_string(writer, &self.game_name)?;
+        writer.write_u16::<LittleEndian>(self.image as u16)?;
+        writer.write_u8(self.ai)?;
+        writer.write_u8(self.effect)?;
+        writer.write_u16::<LittleEndian>(self.level)?;
+        writer.write_u8(self.view_range)?;
+        writer.write_u8(self.cool_eye)?;
+        writer.write_u8(self.light)?;
+        writer.write_u16::<LittleEndian>(self.attack_speed)?;
+        writer.write_u16::<LittleEndian>(self.move_speed)?;
+        writer.write_u32::<LittleEndian>(self.experience)?;
+        write_bool(writer, self.can_push)?;
+        write_bool(writer, self.can_tame)?;
+        write_bool(writer, self.auto_rev)?;
+        write_bool(writer, self.undead)?;
+        write_bool(writer, self.can_recall)?;
+        self.stats.write_to(writer)?;
         Ok(())
     }
 }
