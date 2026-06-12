@@ -504,6 +504,17 @@ impl Message<ClientData> for GateActor {
             x if x == ClientPacketIds::DeleteCharacter as i16 => {
                 forward_delete_character(&self.world_ref, &self.session_usernames, msg.session_id, payload);
             }
+
+            // ===== PR #1169: Warehouse password (client -> server) =====
+            x if x == ClientPacketIds::UnlockStorage as i16 => {
+                forward_unlock_storage(&self.account_ref, &self.session_usernames, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::SetStoragePassword as i16 => {
+                forward_set_storage_password(&self.account_ref, &self.session_usernames, msg.session_id, payload);
+            }
+            x if x == ClientPacketIds::RemoveStoragePassword as i16 => {
+                forward_remove_storage_password(&self.account_ref, &self.session_usernames, msg.session_id, payload);
+            }
             // 社交/组队
             x if x == ClientPacketIds::SwitchGroup as i16 => {
                 forward_switch_group(&self.social_ref, msg.session_id, payload);
@@ -1497,6 +1508,93 @@ fn forward_change_password(
         }
     } else {
         warn!("ChangePassword: no username mapping for session={}", session_id);
+    }
+}
+
+// ============================================================================
+// PR #1169: Warehouse password forwards
+// ============================================================================
+
+/// UnlockStorage: [password: DotNetString]
+fn forward_unlock_storage(
+    account_ref: &Option<ActorRef<crate::actors::account::AccountActor>>,
+    session_usernames: &HashMap<SessionId, String>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    let password = parse_dotnet_string(payload);
+    if let Some(username) = session_usernames.get(&session_id) {
+        if let Some(account_ref) = account_ref {
+            debug!("UnlockStorage: session={} user={} pwd_len={}", session_id, username, password.len());
+            let _ = account_ref.ask(crate::actors::account::ValidateStoragePasswordRequest {
+                session_id,
+                username: username.clone(),
+                raw_password: password,
+            });
+        } else {
+            warn!("UnlockStorage: account_ref not available for session={}", session_id);
+        }
+    } else {
+        warn!("UnlockStorage: no username mapping for session={}", session_id);
+    }
+}
+
+/// SetStoragePassword: [current: DotNetString][new: DotNetString]
+fn forward_set_storage_password(
+    account_ref: &Option<ActorRef<crate::actors::account::AccountActor>>,
+    session_usernames: &HashMap<SessionId, String>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.is_empty() { return; }
+    // Parse first DotNetString (current), then second (new)
+    let (current, rest) = {
+        use std::io::Cursor;
+        use mir2_shared::binary::read_dotnet_string;
+        let mut c = Cursor::new(payload);
+        let s = read_dotnet_string(&mut c).unwrap_or_default();
+        let pos = c.position() as usize;
+        (s, &payload[pos..])
+    };
+    let new = parse_dotnet_string(rest);
+    if let Some(username) = session_usernames.get(&session_id) {
+        if let Some(account_ref) = account_ref {
+            debug!("SetStoragePassword: session={} user={} new_len={}", session_id, username, new.len());
+            let _ = account_ref.ask(crate::actors::account::SetStoragePasswordRequest {
+                session_id,
+                username: username.clone(),
+                current_raw: current,
+                new_raw: new,
+            });
+        } else {
+            warn!("SetStoragePassword: account_ref not available for session={}", session_id);
+        }
+    } else {
+        warn!("SetStoragePassword: no username mapping for session={}", session_id);
+    }
+}
+
+/// RemoveStoragePassword: [current: DotNetString]
+fn forward_remove_storage_password(
+    account_ref: &Option<ActorRef<crate::actors::account::AccountActor>>,
+    session_usernames: &HashMap<SessionId, String>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    let current = parse_dotnet_string(payload);
+    if let Some(username) = session_usernames.get(&session_id) {
+        if let Some(account_ref) = account_ref {
+            debug!("RemoveStoragePassword: session={} user={}", session_id, username);
+            let _ = account_ref.ask(crate::actors::account::ClearStoragePasswordRequest {
+                session_id,
+                username: username.clone(),
+                current_raw: current,
+            });
+        } else {
+            warn!("RemoveStoragePassword: account_ref not available for session={}", session_id);
+        }
+    } else {
+        warn!("RemoveStoragePassword: no username mapping for session={}", session_id);
     }
 }
 

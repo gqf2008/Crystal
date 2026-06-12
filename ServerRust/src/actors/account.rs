@@ -14,6 +14,7 @@ use pbkdf2::pbkdf2_hmac;
 use rand_core::OsRng;
 use sha1::Sha1;
 use tracing::{info, warn};
+use mir2_shared::packets::Packet;
 
 use crate::db::{self, DbPool};
 use crate::gate::actor::LoginResult;
@@ -64,6 +65,17 @@ pub struct AccountInfo {
     pub username: String,
     pub password_hash: String,
     pub is_online: bool,
+    // PR #1169: Warehouse password fields
+    /// Argon2 hash of the warehouse password. `None` means no password set.
+    pub storage_password_hash: Option<String>,
+    /// Unix timestamp (seconds) of when the password was last changed.
+    pub storage_password_last_set: i64,
+}
+
+impl AccountInfo {
+    pub fn has_storage_password(&self) -> bool {
+        self.storage_password_hash.is_some()
+    }
 }
 
 /// AccountActor 状态
@@ -97,6 +109,8 @@ impl AccountActor {
                 username: username.to_string(),
                 password_hash: hash_password(password),
                 is_online: false,
+                storage_password_hash: None,
+                storage_password_last_set: 0,
             },
         );
 
@@ -116,6 +130,8 @@ impl AccountActor {
                 username: username.to_string(),
                 password_hash: password_hash.to_string(),
                 is_online: false,
+                storage_password_hash: None,
+                storage_password_last_set: 0,
             },
         );
 
@@ -189,6 +205,80 @@ impl Actor for AccountActor {
 }
 
 
+// =============================================================================
+// PR #1169: Warehouse password methods (AccountActor core)
+// =============================================================================
+
+/// 验证仓库密码。返回 `(result_code, has_password)`。
+/// `result_code` 见 master `Shared/ServerPackets.cs::StorageUnlockResult` 注释:
+/// 0=Success 1=BadPassword 2=WrongPassword 3=NotAvailable 4=NoPasswordSet
+/// `has_password` 反映 account 当前是否设了密码(用于客户端判断走哪条 UI 分支)。
+pub fn validate_storage_password(actor: &AccountActor, username: &str, raw_password: &str) -> (u8, bool) {
+    let account = match actor.accounts.get(username) {
+        Some(a) => a,
+        None => return (3, false), // NotAvailable
+    };
+    let stored_hash = match &account.storage_password_hash {
+        Some(h) => h,
+        None => return (4, false), // NoPasswordSet — directly unlock
+    };
+    // Use the same Argon2 verify used for account password.
+    // Returns (verified, needs_argon2_migration) — we ignore migration here.
+    let (verified, _) = verify_password(raw_password, stored_hash);
+    if verified {
+        (0, true)
+    } else {
+        (2, true) // WrongPassword
+    }
+}
+
+/// 设置或修改仓库密码。返回 result code (0-4, 见 master Shared/ServerPackets.cs)。
+pub fn set_storage_password(
+    actor: &mut AccountActor,
+    username: &str,
+    current_raw: &str,
+    new_raw: &str,
+) -> u8 {
+    let account = match actor.accounts.get_mut(username) {
+        Some(a) => a,
+        None => return 0, // NotAvailable
+    };
+    // If old password is set, verify current_raw matches
+    if let Some(stored_hash) = &account.storage_password_hash {
+        let (verified, _) = verify_password(current_raw, stored_hash);
+        if !verified {
+            return 2; // WrongCurrentPassword
+        }
+    }
+    // (C# also validates new password format with regex; we skip that for now.)
+    account.storage_password_hash = Some(hash_password(new_raw));
+    account.storage_password_last_set = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    4 // Success
+}
+
+/// 删除仓库密码。需要当前密码确认。
+pub fn clear_storage_password(actor: &mut AccountActor, username: &str, current_raw: &str) -> u8 {
+    let account = match actor.accounts.get_mut(username) {
+        Some(a) => a,
+        None => return 5, // NoPasswordSet (also used for invalid account)
+    };
+    let stored_hash = match &account.storage_password_hash {
+        Some(h) => h.clone(),
+        None => return 5, // NoPasswordSet
+    };
+    let (verified, _) = verify_password(current_raw, &stored_hash);
+    if !verified {
+        return 2; // WrongCurrentPassword
+    }
+    account.storage_password_hash = None;
+    account.storage_password_last_set = 0;
+    4 // Success
+}
+
+
 // ============================================================
 // 消息定义
 // ============================================================
@@ -255,6 +345,141 @@ impl Message<LogoutRequest> for AccountActor {
         // 同步到数据库（标记离线）
         if let Err(e) = db::set_account_offline(&self.db_pool, &msg.username).await {
             warn!("Failed to set account '{}' offline: {}", msg.username, e);
+        }
+    }
+}
+
+// =============================================================================
+// PR #1169: Warehouse password request messages
+// =============================================================================
+
+/// 验证仓库密码 (从 GateActor 转发)
+pub struct ValidateStoragePasswordRequest {
+    pub session_id: u64,
+    pub username: String,
+    pub raw_password: String,
+}
+
+impl Message<ValidateStoragePasswordRequest> for AccountActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: ValidateStoragePasswordRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let (result, has_password) = validate_storage_password(self, &msg.username, &msg.raw_password);
+        // Send StorageUnlockResult back to client
+        let packet = mir2_shared::packets::server::StorageUnlockResult {
+            result, has_password,
+        };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
+                session_id: msg.session_id,
+                data: crate::util::wire::build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::StorageUnlockResult as i16,
+                    &body,
+                ),
+            }).await;
+        }
+    }
+}
+
+/// 设置/修改仓库密码 (从 GateActor 转发)
+pub struct SetStoragePasswordRequest {
+    pub session_id: u64,
+    pub username: String,
+    pub current_raw: String,
+    pub new_raw: String,
+}
+
+impl Message<SetStoragePasswordRequest> for AccountActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetStoragePasswordRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let result = set_storage_password(
+            self,
+            &msg.username,
+            &msg.current_raw,
+            &msg.new_raw,
+        );
+        // Persist
+        if result == 4 {
+            if let Some(acc) = self.accounts.get(&msg.username) {
+                if let Err(e) = db::save_account(&self.db_pool, acc).await {
+                    warn!("Failed to save storage password: {}", e);
+                }
+            }
+        }
+        // Compute LastSetTime (use the freshly-set value, or 0 if removing)
+        let last_set = self.accounts.get(&msg.username)
+            .map(|a| a.storage_password_last_set)
+            .unwrap_or(0);
+        let has_password = self.accounts.get(&msg.username)
+            .map(|a| a.has_storage_password())
+            .unwrap_or(false);
+        let packet = mir2_shared::packets::server::StoragePasswordResult {
+            result,
+            removing: false, // TODO: distinguish from ClearStoragePassword via op
+            has_password,
+            last_set_time: last_set,
+        };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
+                session_id: msg.session_id,
+                data: crate::util::wire::build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::StoragePasswordResult as i16,
+                    &body,
+                ),
+            }).await;
+        }
+    }
+}
+
+/// 删除仓库密码 (从 GateActor 转发)
+pub struct ClearStoragePasswordRequest {
+    pub session_id: u64,
+    pub username: String,
+    pub current_raw: String,
+}
+
+impl Message<ClearStoragePasswordRequest> for AccountActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: ClearStoragePasswordRequest,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let result = clear_storage_password(self, &msg.username, &msg.current_raw);
+        if result == 4 {
+            if let Some(acc) = self.accounts.get(&msg.username) {
+                if let Err(e) = db::save_account(&self.db_pool, acc).await {
+                    warn!("Failed to save storage password clear: {}", e);
+                }
+            }
+        }
+        let packet = mir2_shared::packets::server::StoragePasswordResult {
+            result,
+            removing: true,
+            has_password: false,
+            last_set_time: 0,
+        };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
+                session_id: msg.session_id,
+                data: crate::util::wire::build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::StoragePasswordResult as i16,
+                    &body,
+                ),
+            }).await;
         }
     }
 }

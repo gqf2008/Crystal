@@ -30,6 +30,8 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             password_hash TEXT NOT NULL,
             is_online INTEGER NOT NULL DEFAULT 0
         );
+        -- PR #1169: Warehouse password columns (nullable; NULL = no password set)
+        -- (The CREATE TABLE above already supports ALTER-based migration below)
         CREATE TABLE IF NOT EXISTS characters (
             name TEXT PRIMARY KEY,
             account_username TEXT NOT NULL,
@@ -499,6 +501,11 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     // Migration: add GM flag to accounts (safe to re-run)
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN admin_account INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    // PR #1169: Warehouse password columns (safe to re-run; NULL = no password set)
+    let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN storage_password_hash TEXT")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN storage_password_last_set INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     // Migration: add key column to player_magics (safe to re-run)
     let _ = sqlx::query("ALTER TABLE player_magics ADD COLUMN key INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
@@ -594,12 +601,15 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
 
 pub async fn save_account(pool: &DbPool, account: &AccountInfo) -> anyhow::Result<()> {
     sqlx::query(
-        r#"INSERT OR REPLACE INTO accounts (username, password_hash, is_online)
-           VALUES (?, ?, ?)"#
+        r#"INSERT OR REPLACE INTO accounts
+           (username, password_hash, is_online, storage_password_hash, storage_password_last_set)
+           VALUES (?, ?, ?, ?, ?)"#
     )
     .bind(&account.username)
     .bind(&account.password_hash)
     .bind(if account.is_online { 1 } else { 0 })
+    .bind(account.storage_password_hash.as_deref())
+    .bind(account.storage_password_last_set)
     .execute(pool)
     .await?;
     Ok(())
@@ -623,7 +633,9 @@ pub async fn list_characters_by_account(pool: &DbPool, account_username: &str) -
 
 pub async fn load_account(pool: &DbPool, username: &str) -> anyhow::Result<Option<AccountInfo>> {
     let row = sqlx::query(
-        "SELECT username, password_hash, is_online FROM accounts WHERE username = ?"
+        "SELECT username, password_hash, is_online,
+                storage_password_hash, storage_password_last_set
+         FROM accounts WHERE username = ?"
     )
     .bind(username)
     .fetch_optional(pool)
@@ -633,18 +645,26 @@ pub async fn load_account(pool: &DbPool, username: &str) -> anyhow::Result<Optio
         username: r.get::<String, _>("username"),
         password_hash: r.get::<String, _>("password_hash"),
         is_online: r.get::<i32, _>("is_online") != 0,
+        storage_password_hash: r.try_get::<Option<String>, _>("storage_password_hash").ok().flatten(),
+        storage_password_last_set: r.try_get::<i64, _>("storage_password_last_set").unwrap_or(0),
     }))
 }
 
 pub async fn load_all_accounts(pool: &DbPool) -> anyhow::Result<Vec<AccountInfo>> {
-    let rows = sqlx::query("SELECT username, password_hash, is_online FROM accounts")
-        .fetch_all(pool)
-        .await?;
+    let rows = sqlx::query(
+        "SELECT username, password_hash, is_online,
+                storage_password_hash, storage_password_last_set
+         FROM accounts"
+    )
+    .fetch_all(pool)
+    .await?;
 
     Ok(rows.into_iter().map(|r| AccountInfo {
         username: r.get::<String, _>("username"),
         password_hash: r.get::<String, _>("password_hash"),
         is_online: r.get::<i32, _>("is_online") != 0,
+        storage_password_hash: r.try_get::<Option<String>, _>("storage_password_hash").ok().flatten(),
+        storage_password_last_set: r.try_get::<i64, _>("storage_password_last_set").unwrap_or(0),
     }).collect())
 }
 
