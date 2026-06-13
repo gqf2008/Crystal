@@ -1436,7 +1436,7 @@ impl Message<DropGold> for PlayerActor {
 
     async fn handle(&mut self, msg: DropGold, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
         if self.state.inventory.gold >= msg.amount {
-            self.state.inventory.gold -= msg.amount;
+            self.state.inventory.gold = self.state.inventory.gold.saturating_sub(msg.amount);
             self.send_gold_changed();
             true
         } else {
@@ -1470,7 +1470,7 @@ impl Message<DeductGold> for PlayerActor {
 
     async fn handle(&mut self, msg: DeductGold, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
         if self.state.inventory.gold >= msg.amount {
-            self.state.inventory.gold -= msg.amount;
+            self.state.inventory.gold = self.state.inventory.gold.saturating_sub(msg.amount);
             self.send_gold_changed();
             true
         } else {

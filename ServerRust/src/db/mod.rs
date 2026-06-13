@@ -22,6 +22,15 @@ pub type DbPool = SqlitePool;
 pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     let pool = SqlitePool::connect(db_url).await?;
 
+    // Phase 1.2: SQLite WAL 模式 + 同步策略调优(生产级持久化)
+    //   WAL = Write-Ahead Logging,允许并发读不阻塞写,显著提升高负载性能
+    //   synchronous=NORMAL = 在 WAL 模式下是安全的,比 FULL 快 2-10 倍
+    //   busy_timeout = 写锁竞争时等 5 秒而不是立刻报错
+    sqlx::query("PRAGMA journal_mode=WAL").execute(&pool).await?;
+    sqlx::query("PRAGMA synchronous=NORMAL").execute(&pool).await?;
+    sqlx::query("PRAGMA busy_timeout=5000").execute(&pool).await?;
+    sqlx::query("PRAGMA foreign_keys=ON").execute(&pool).await?;
+
     // Create tables if not exists
     sqlx::query(
         r#"
