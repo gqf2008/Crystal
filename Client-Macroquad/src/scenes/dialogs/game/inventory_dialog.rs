@@ -364,6 +364,52 @@ impl InventoryDialogHybrid {
             self.splitting_from = None;
         }
     }
+
+    /// PR #1153: Ctrl+click a bag tab → move the currently selected
+    /// item to that tab's first empty slot, without switching tabs.
+    /// 简化:实际"selected"借用 mouse hover 状态;如果 hover 的是
+    /// 槽位 i(非空),移动 item i 到目标 tab 的第一个空 slot。
+    pub fn try_move_selected_to_tab(&mut self, target_tab: InventoryTabHybrid) {
+        // 用 hovered_slot 作为 "selected" — 简化版,
+        // 实际 master C# 用 GameScene.SelectedCell (全局状态)
+        let from_idx = match self.hovered_slot {
+            Some(i) => i,
+            None => return,
+        };
+        let current_tab = self.current_tab;
+        // 不要移动到当前 tab
+        if target_tab == current_tab {
+            return;
+        }
+        // 找目标 tab 的第一个空 slot
+        let target_size = self.tab_items[target_tab as usize].len();
+        let to_idx = match (0..target_size).find(|&i| {
+            self.tab_items[target_tab as usize][i].icon_index.is_none()
+        }) {
+            Some(i) => i,
+            None => {
+                // 目标 tab 满
+                tracing::warn!("📦 标签 {:?} 已满,无法移动物品", target_tab);
+                return;
+            }
+        };
+        // 实际 move:本地 swap + 通知网络层
+        let current_items = self.current_items_mut();
+        let item_to_move = current_items[from_idx].clone();
+        if item_to_move.icon_index.is_none() {
+            return;
+        }
+        current_items[from_idx] = ItemSlotHybrid::empty();
+        self.tab_items[target_tab as usize][to_idx] = item_to_move;
+
+        // TODO: net.send(NetworkEvent::MoveItemRequest { grid, from, to });
+        //       当前 InventoryDialog 是 sample-data only,无 net 引用
+        //       server 数据接入后接入。
+        tracing::info!(
+            "📦 Ctrl+tab: 移动物品 slot={} from tab={:?} to tab={:?} idx={}",
+            from_idx, current_tab, target_tab, to_idx
+        );
+    }
     
     // === 辅助方法 ===
     
@@ -541,7 +587,13 @@ impl InventoryDialogHybrid {
         // 标签页点击
         if is_mouse_button_pressed(MouseButton::Left) {
             if let Some(tab) = self.hovered_tab {
-                self.switch_tab(InventoryTabHybrid::from_index(tab));
+                // PR #1153: Ctrl+click a tab moves the selected item to
+                // that tab's bag without switching the active tab.
+                if is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl) {
+                    self.try_move_selected_to_tab(InventoryTabHybrid::from_index(tab));
+                } else {
+                    self.switch_tab(InventoryTabHybrid::from_index(tab));
+                }
             } else if close_hovered {
                 self.close();
                 return;
