@@ -3,6 +3,9 @@ use super::*;
 pub fn pump_network_messages_to_ui(ctx: &mut GameContext) {
     // 注意：ctx.events() 会对 ctx 产生不可变借用；因此先收集命令，循环结束后再写 UiState。
     let mut cmds: Vec<UiCommand> = Vec::new();
+    // PR #1126: 同样为 cache 写入推后到循环外 (避免与 network_events 的不可变借用冲突)
+    let mut pending_monster_info: Vec<mir2_shared::data::client_data::ClientMonsterInfo> = Vec::new();
+    let mut pending_npc_info: Vec<mir2_shared::data::client_data::ClientNPCInfo> = Vec::new();
 
     // 获取本地玩家的 object_id 用于过滤 buff 等事件
     let local_object_id: Option<u32> = ctx.world.iter()
@@ -1133,22 +1136,31 @@ pub fn pump_network_messages_to_ui(ctx: &mut GameContext) {
             }
 
             // ===== PR #1126: Detailed info replies =====
-            // 暂存到 UiState 供后续 tooltip 渲染使用,本次只记日志。
+            // 收集到本地 Vec,循环外统一写 cache (避免与 network_events 不可变借用冲突)
             NetworkEvent::NewMonsterInfoReceived { info } => {
                 tracing::debug!("👹 收到怪物详情: idx={} name={} level={} exp={}",
                     info.index, info.name, info.level, info.experience);
+                pending_monster_info.push(info.clone());
             }
             NetworkEvent::NewNPCInfoReceived { info } => {
                 tracing::debug!("🧙 收到 NPC 详情: oid={} name={}", info.object_id, info.name);
+                pending_npc_info.push(info.clone());
             }
 
             _ => {}
         }
     }
 
-    if !cmds.is_empty() {
+    if !cmds.is_empty() || !pending_monster_info.is_empty() || !pending_npc_info.is_empty() {
         let _ = UiState::with_mut_in_world(&mut ctx.world, |ui| {
             ui.pending_commands.extend(cmds);
+            // PR #1126: 把循环内收集的 cache 写入一次性刷入
+            for info in pending_monster_info.drain(..) {
+                ui.monster_info_cache.insert(info.index, info);
+            }
+            for info in pending_npc_info.drain(..) {
+                ui.npc_info_cache.insert(info.object_id, info);
+            }
         });
     }
 }

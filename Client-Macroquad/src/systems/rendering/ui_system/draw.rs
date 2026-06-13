@@ -94,7 +94,7 @@ pub fn draw(sys: &mut UIRenderSystem, _world: &hecs::World) -> GameResult {
                     NpcUiLayer::Dialog => {
                         if sys.npc_dialog.is_visible() {
                             npc_dialog_consumed = true;
-                            let action = sys.npc_dialog.update_and_draw_with_input(false);
+                            let action = sys.npc_dialog.update_and_draw_with_input(false, _world);
                             if !matches!(
                                 action,
                                 crate::scenes::dialogs::game::npc_dialog::NpcDialogAction::None
@@ -140,7 +140,7 @@ pub fn draw(sys: &mut UIRenderSystem, _world: &hecs::World) -> GameResult {
                             npc_dialog_consumed = true;
                             let action = sys
                                 .npc_dialog
-                                .update_and_draw_with_input(npc_dialog_input_enabled);
+                                .update_and_draw_with_input(npc_dialog_input_enabled, _world);
                             if !matches!(
                                 action,
                                 crate::scenes::dialogs::game::npc_dialog::NpcDialogAction::None

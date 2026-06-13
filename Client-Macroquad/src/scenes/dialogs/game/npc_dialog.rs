@@ -14,10 +14,13 @@
 // - 点击 @Exit 关闭；其他 action 交给上层发送 CallNPC key
 
 use macroquad::prelude::*;
+use hecs::World;
 
 use crate::resources::LibraryName;
 use crate::scenes::dialogs::game::native_ui_utils::{ButtonState, ButtonTextures};
 use crate::ui::text_renderer::{draw_text_cn, measure_text_cn};
+use crate::ui::ui_state::UiState;
+use mir2_shared::data::client_data::{ClientMonsterInfo, ClientNPCInfo};
 
 #[derive(Debug, Clone)]
 pub enum NpcDialogAction {
@@ -121,6 +124,20 @@ impl Default for NpcDialogHybrid {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// PR #1126: 从 UiState cache 读怪物详情
+pub fn read_monster_info_from_cache(world: &World, idx: i32) -> Option<ClientMonsterInfo> {
+    UiState::peek_in_world(world, |ui| ui.monster_info_cache.get(&idx).cloned()).flatten()
+}
+
+/// PR #1126: 从 UiState cache 读 NPC 详情 (key 是 npc.object_id)
+pub fn read_npc_info_from_cache(world: &World, idx: i32) -> Option<ClientNPCInfo> {
+    // 注: server 发的 NewNPCInfo 用 object_id (u32) 做 key。
+    // npc link parser 当前用 monster/NPC index,如果 idx < 0 我们直接
+    // 当 object_id 用;否则尝试 i32 key (兼容未来可能存 index 路径)。
+    let key: u32 = if idx < 0 { 0 } else { idx as u32 };
+    UiState::peek_in_world(world, |ui| ui.npc_info_cache.get(&key).cloned()).flatten()
 }
 
 impl NpcDialogHybrid {
@@ -618,14 +635,15 @@ impl NpcDialogHybrid {
         }
     }
 
-    pub fn update_and_draw(&mut self) -> NpcDialogAction {
-        self.update_and_draw_with_input(true)
+    pub fn update_and_draw(&mut self, world: &World) -> NpcDialogAction {
+        self.update_and_draw_with_input(true, world)
     }
 
     /// `input_enabled=false` 时：仍绘制窗口，但不响应点击/滚轮/ESC/拖拽。
     ///
     /// 用途：当窗口被其他 dialog 覆盖时，避免“看起来在下面但仍能吃输入”。
-    pub fn update_and_draw_with_input(&mut self, input_enabled: bool) -> NpcDialogAction {
+    /// `world` 参数供 tooltip 从 UiState cache 读 NewMonsterInfo / NewNPCInfo 数据。
+    pub fn update_and_draw_with_input(&mut self, input_enabled: bool, _world: &World) -> NpcDialogAction {
         if !self.visible {
             return NpcDialogAction::None;
         }
@@ -1009,26 +1027,51 @@ impl NpcDialogHybrid {
         }
 
         // PR #1126: 渲染 KR NPC link tooltip (master C# AttackInfoLabel 等价)
-        if let Some((link_type, index, display_name)) = kr_link_hovered {
-            let tip = match link_type {
+        // 现在从 UiState cache 读 NewMonsterInfo / NewNPCInfo 真实数据。
+        if let Some((link_type, index, display_name)) = kr_link_hovered.clone() {
+            let mut tip_lines: Vec<String> = Vec::new();
+            match link_type {
                 KrLinkType::Monster => {
-                    // 简单版:显示 name + index;NewMonsterInfo 数据后续由
-                    // 工具提示系统读 ui_state.tooltip_cache。
-                    format!("怪物: {} (#{})", display_name, index)
+                    tip_lines.push(format!("怪物: {} (#{})", display_name, index));
+                    // 从 cache 读 — cache key 是 monster_index
+                    if let Some(info) = read_monster_info_from_cache(_world, index) {
+                        tip_lines.push(format!("  等级: {}", info.level));
+                        tip_lines.push(format!("  HP: ?  经验: {}", info.experience));
+                        tip_lines.push(format!("  AI:{} 攻击:{} 移动:{}",
+                            info.ai, info.attack_speed, info.move_speed));
+                    } else {
+                        tip_lines.push("  加载中...".to_string());
+                    }
                 }
                 KrLinkType::Npc => {
-                    format!("NPC: {} (#{})", display_name, index)
+                    tip_lines.push(format!("NPC: {} (#{})", display_name, index));
+                    // cache key 是 npc.object_id
+                    if let Some(info) = read_npc_info_from_cache(_world, index) {
+                        tip_lines.push(format!("  位置: ({}, {})",
+                            info.location.x, info.location.y));
+                        tip_lines.push(format!("  图标: {}  可传送: {}",
+                            info.icon, info.can_teleport_to));
+                    } else {
+                        tip_lines.push("  加载中...".to_string());
+                    }
                 }
                 KrLinkType::Item => {
-                    format!("物品: {} (#{})", display_name, index)
+                    // 物品详情需要 ClientItemInfo schema(尚未实现)
+                    tip_lines.push(format!("物品: {} (#{})", display_name, index));
+                    tip_lines.push("  详情待 InventoryItem schema 实现".to_string());
                 }
-            };
+            }
             let tip_x = mouse_pos.x + 16.0;
             let tip_y = mouse_pos.y + 16.0;
-            let w = tip.chars().count() as f32 * 8.0 + 8.0;
-            let h = 20.0;
-            draw_rectangle(tip_x, tip_y, w, h, Color::from_rgba(0, 0, 0, 200));
-            draw_text_cn(&tip, tip_x + 4.0, tip_y + 4.0, 12.0, Color::from_rgba(255, 200, 100, 255));
+            let w = tip_lines.iter()
+                .map(|l| l.chars().count() as f32 * 8.0 + 8.0)
+                .fold(0.0_f32, f32::max);
+            let h = (tip_lines.len() as f32) * 16.0 + 8.0;
+            draw_rectangle(tip_x, tip_y, w, h, Color::from_rgba(0, 0, 0, 220));
+            for (i, line) in tip_lines.iter().enumerate() {
+                draw_text_cn(line, tip_x + 4.0, tip_y + 4.0 + (i as f32) * 16.0, 12.0,
+                    Color::from_rgba(255, 220, 140, 255));
+            }
         }
 
         NpcDialogAction::None

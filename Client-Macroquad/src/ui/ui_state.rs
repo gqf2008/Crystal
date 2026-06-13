@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use macroquad::prelude::Vec2;
@@ -8,6 +9,7 @@ use crate::scenes::dialogs::game::{
     npc_goods_dialog::NpcGoodsDialogAction,
 };
 
+use mir2_shared::data::client_data::{ClientMonsterInfo, ClientNPCInfo};
 use mir2_shared::data::item::UserItem;
 use mir2_shared::enums::PanelType;
 
@@ -385,6 +387,16 @@ pub struct UiStateData {
     /// 大地图：当前地图名称
     pub big_map_map_name: Option<String>,
 
+    /// PR #1126: KR NPC link tooltip 缓存
+    /// server 发 NewMonsterInfo / NewNPCInfo 时写入;
+    /// npc_dialog hover link 时读取以渲染丰富 tooltip。
+    /// 缺失的 idx 走"加载中"占位符文本(PR #1126 master 行为)。
+    pub monster_info_cache: HashMap<i32, ClientMonsterInfo>,
+    /// npc_info_cache 用 object_id (u32) 做 key — server 发的 NewNPCInfo
+    /// payload 用 object_id 而非 index。idx 路径 (i32) 在 read helper 内
+    /// 先尝试 cast 失败再 fall back to direct lookup。
+    pub npc_info_cache: HashMap<u32, ClientNPCInfo>,
+
     /// 邮件：待显示的邮件列表
     pub mail_entries: Vec<MailEntry>,
 
@@ -486,5 +498,11 @@ impl UiState {
         if let Some(s) = world.query::<&UiState>().iter().next() {
             f(&mut s.borrow_mut());
         }
+    }
+
+    /// 在 World 中查找 UiState 并执行只读回调 (返回 Option,None 表示 UiState 不存在)
+    /// 用于只读访问如 npc_dialog tooltip cache lookup。
+    pub fn peek_in_world<R>(world: &hecs::World, f: impl FnOnce(&UiStateData) -> R) -> Option<R> {
+        world.query::<&UiState>().iter().next().map(|s| f(&s.borrow()))
     }
 }
