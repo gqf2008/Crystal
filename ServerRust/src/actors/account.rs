@@ -425,7 +425,9 @@ impl Message<SetStoragePasswordRequest> for AccountActor {
             .unwrap_or(false);
         let packet = mir2_shared::packets::server::StoragePasswordResult {
             result,
-            removing: false, // TODO: distinguish from ClearStoragePassword via op
+            // 这个 handler 处理 SetStoragePasswordRequest;ClearStoragePasswordRequest
+            // 由独立 handler 单独发包。removing 字段总是 false 表示本次是 set 而非 remove。
+            removing: false,
             has_password,
             last_set_time: last_set,
         };
