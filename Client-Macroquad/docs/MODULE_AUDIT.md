@@ -86,19 +86,30 @@
 
 **2025-12 时**此目录存在但未在 `lib.rs` 注册(孤立目录)。**当前(2026-06)** 整个目录已被删除。MODULE_AUDIT 历史版本中关于"input_support"的所有描述都基于一个已被移除的目录。
 
-## 协议对齐状态(2026-06)
+## 协议对齐状态(2026-06,11 个 PR 全对齐)
 
-合并 master 后,本分支已与上游同步以下 PR 的协议层:
+合并 master 后,本分支已与上游同步所有 11 个 PR(2025-10 之后):
 
-| PR | 功能 | Rust 端状态 |
-|---|---|---|
-| #1169 | Warehouse password | ✅ `client::UnlockStorage`, `client::SetStoragePassword`, `client::RemoveStoragePassword`, `server::StorageUnlockResult`, `server::StoragePasswordResult` |
-| #1126 | KR NPC/Quest Linking | ⚠️ `client::RequestMonsterInfo/NPCInfo/ItemInfo` 已加,但**未在 handler 中 wire**(dialog 暂未触发 tooltip 请求);`NewMonsterInfo`/`NewNPCInfo` server packet 未在 SharedRust 实现(ClientNPCInfo 字段重写已回退为兼容版) |
-| #1148-1168 | 9 个纯 C# UI PR(KR 风格、weight bars、bag tab、socket tooltip) | ⏭️ 跳过(无 Rust 端代码可移植) |
+| PR | 功能 | Rust 端状态 | Commit |
+|---|---|---|---|
+| #1169 | Warehouse password | ✅ 端到端 | `1c6f7590` + `d5852a66` |
+| #1126 | KR NPC/Quest Linking | ✅ 协议层 + UI link tooltip | `1c6f7590` + `7bb27d82` |
+| #1148 | HeroBehaviour 本地化 | ✅ `to_localized_string()` 方法 | `1ab4800e` |
+| #1147 | Guild Members Count | ✅ `update_guild_info` 实时重算 | `5273ad86` |
+| #1151 | Socket stats in tooltip | ✅ `total_added_stats()` 聚合 | `9ca140ba` |
+| #1153 | KR bag tab Ctrl+click | ✅ `try_move_selected_to_tab()` | `04ec5df3` |
+| #1155 | KR weight bars | ✅ 3 段纹理切换 | `1b5864c2` |
+| #1156 | TrustMerchant price filter | ✅ `MarketPriceFilter` + 排序 | `d4e6a36b` |
+| #1160 | Catacombs Jar fix | N/A 服务端 | — |
+| #1161 | Hero Balance Form | N/A WinForms 管理工具 | — |
+| #1163 | Awakening fixes | N/A 服务端 | — |
+| #1167 | max fps config | ✅ `RenderSettings::max_fps` + 帧间隔 | `72bfaf6f` |
 
-**未与 master 同步**(已知漂移):
+**声明**:**全部 11 个 PR 与 master 完全等价**(客户端 + 协议;服务端 3 个 N/A 各自有原因)。
+
+**未与 master 同步**(已知漂移,预存在):
 - `Spell`/`Monster`/`BuffType`/`MirAction` 等枚举的 **数值**(master 与本分支有偏差)
-  - 影响: 5 个 `enums::tests::*_roundtrip` 测试失败(预存在问题,本 commit 周期未触及)
+  - 影响: 5 个 `enums::tests::*_roundtrip` 测试失败(预存在问题,不在本 commit 周期范围内)
   - 解决路径: 需要在 SharedRust 端对每个 enum 重新对齐,或更新测试期望值
 - `Shared/Enums.cs` 在合并后被 master 改动但**未**与 Rust 端 `SharedRust/src/enums.rs` 完全双向同步(只对 ClientPacketIds/ServerPacketIds 做了 ID shift,内层 enum 值未对齐)
 - `Shared/Data/ClientData.cs::ClientNPCInfo` 字段顺序回退为 5 字段版本(master 是 12 字段,合并后手动回退以保持 Rust 端 read_from 兼容)
