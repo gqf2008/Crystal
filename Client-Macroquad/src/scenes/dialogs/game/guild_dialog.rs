@@ -156,7 +156,15 @@ impl GuildDialogHybrid {
 
     /// 更新行会信息
     pub fn update_guild_info(&mut self, info: GuildInfo) {
+        // PR #1147: 实时刷新 member_count,避免依赖服务器发的 cache 值
+        // (master C# 也在 NewMembersList 时重算,而不是用增量)
         self.guild_info = info;
+        self.guild_info.member_count = self.count_members(&self.guild_info.members);
+    }
+
+    /// PR #1147: 计算实际成员数 (主 + 在线 + 离线都算)
+    fn count_members(&self, members: &[GuildMember]) -> u32 {
+        members.len() as u32
     }
 
     /// 更新行会公告
@@ -172,6 +180,8 @@ impl GuildDialogHybrid {
         } else {
             self.guild_info.members.push(GuildMember { name, rank, online });
         }
+        // PR #1147: 增量更新时也同步 count (added/removed/updated)
+        self.guild_info.member_count = self.count_members(&self.guild_info.members);
     }
 
     /// 更新行会仓库金币
