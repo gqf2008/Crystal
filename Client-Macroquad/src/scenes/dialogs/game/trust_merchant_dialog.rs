@@ -31,6 +31,33 @@ pub enum MerchantTab {
     MyListings,
 }
 
+/// PR #1156: 价格过滤 (Normal/High/Low)
+/// 对齐 master C# `Shared/Enums.cs::MarketPriceFilter`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketPriceFilter {
+    Normal = 0,
+    High = 1,
+    Low = 2,
+}
+
+impl MarketPriceFilter {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Normal => Self::High,
+            Self::High => Self::Low,
+            Self::Low => Self::Normal,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Normal => "正常",
+            Self::High => "高价",
+            Self::Low => "低价",
+        }
+    }
+}
+
 /// 寄售行对话框
 pub struct TrustMerchantDialogHybrid {
     pub visible: bool,
@@ -39,6 +66,8 @@ pub struct TrustMerchantDialogHybrid {
     pub current_page: i32,
     pub total_pages: i32,
     scroll_offset: f32,
+    /// PR #1156: 当前价格过滤
+    pub price_filter: MarketPriceFilter,
 }
 
 impl Default for TrustMerchantDialogHybrid {
@@ -50,6 +79,7 @@ impl Default for TrustMerchantDialogHybrid {
             current_page: 1,
             total_pages: 1,
             scroll_offset: 0.0,
+            price_filter: MarketPriceFilter::Normal,
         }
     }
 }
@@ -77,12 +107,35 @@ impl TrustMerchantDialogHybrid {
         self.current_page = page.max(1);
         self.total_pages = total.max(1);
         self.scroll_offset = 0.0;
+        // PR #1156: 重新计算过滤后的顺序
+        self.apply_price_filter();
     }
 
     /// 设置页签
     pub fn set_tab(&mut self, tab: MerchantTab) {
         self.current_tab = tab;
         self.scroll_offset = 0.0;
+    }
+
+    /// PR #1156: 循环切换价格过滤 (Normal → High → Low → Normal)
+    pub fn cycle_price_filter(&mut self) {
+        self.price_filter = self.price_filter.next();
+        self.apply_price_filter();
+    }
+
+    /// PR #1156: 客户端排序 (master C# 用 LINQ OrderBy;我们用 sort_by)
+    fn apply_price_filter(&mut self) {
+        match self.price_filter {
+            MarketPriceFilter::Normal => {
+                // 保持原顺序 (server 发的顺序)
+            }
+            MarketPriceFilter::High => {
+                self.items.sort_by(|a, b| b.price.cmp(&a.price));
+            }
+            MarketPriceFilter::Low => {
+                self.items.sort_by(|a, b| a.price.cmp(&b.price));
+            }
+        }
     }
 
     /// 绘制
@@ -167,6 +220,23 @@ impl TrustMerchantDialogHybrid {
         draw_text_cn(&format!("第 {}/{} 页  共 {} 件商品",
             self.current_page, self.total_pages, self.items.len()),
             dialog_x + 15.0, page_y + 5.0, 12.0, WHITE);
+
+        // PR #1156: 价格 filter label (clickable,cycles Normal→High→Low)
+        // 放在分页栏右侧
+        let filter_x = dialog_x + dialog_w - 130.0;
+        let filter_w = 110.0;
+        let mouse_over_filter = mouse_pos.x >= filter_x
+            && mouse_pos.x <= filter_x + filter_w
+            && mouse_pos.y >= page_y && mouse_pos.y <= page_y + page_h;
+        let filter_label = self.price_filter.label();
+        draw_text_cn(&format!("价格: {}", filter_label),
+            filter_x, page_y + 5.0, 12.0,
+            if mouse_over_filter { Color::from_rgba(255, 220, 100, 255) }
+            else { Color::from_rgba(180, 180, 180, 255) });
+        if left_clicked && mouse_over_filter {
+            self.cycle_price_filter();
+            tracing::info!("💰 TrustMerchant: price filter -> {:?}", self.price_filter);
+        }
 
         // 关闭按钮
         let close_x = dialog_x + dialog_w - 70.0;
