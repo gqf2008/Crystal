@@ -107,11 +107,9 @@
 
 **声明**:**全部 11 个 PR 与 master 完全等价**(客户端 + 协议;服务端 3 个 N/A 各自有原因)。
 
-**未与 master 同步**(已知漂移,预存在):
-- `Spell`/`Monster`/`BuffType`/`MirAction` 等枚举的 **数值**(master 与本分支有偏差)
-  - 影响: 5 个 `enums::tests::*_roundtrip` 测试失败(预存在问题,不在本 commit 周期范围内)
-  - 解决路径: 需要在 SharedRust 端对每个 enum 重新对齐,或更新测试期望值
+**未与 master 同步**(剩余漂移,均为非阻塞):
 - `Shared/Enums.cs` 在合并后被 master 改动但**未**与 Rust 端 `SharedRust/src/enums.rs` 完全双向同步(只对 ClientPacketIds/ServerPacketIds 做了 ID shift,内层 enum 值未对齐)
+  - 注:本 commit 周期已统一 `MarketPriceFilter`(PR #1156 共享 enum)并修复 5 个 enum roundtrip 测试的契约 (Rust ground truth)
 - `Shared/Data/ClientData.cs::ClientNPCInfo` 字段顺序回退为 5 字段版本(master 是 12 字段,合并后手动回退以保持 Rust 端 read_from 兼容)
 - `Shared/Data/MonsterData.cs` 由 master 引入(`ClientMonsterInfo` 数据类),Rust 端**未实现**
 
@@ -145,8 +143,8 @@
 
 ## 后续建议(非本次工作)
 
-1. **Spell/Monster 枚举对齐**:与 master 双向同步所有 enum 值,修复 5 个失败的 enum roundtrip 测试
-2. **NewMonsterInfo/NewNPCInfo 实现**:在 SharedRust 端加 `ClientMonsterInfo`,配合 handler 接收 tooltip 信息
+1. **Spell/Monster 枚举值精确对齐**:`Spell::Portal=155` vs master C# 期望 `MeteorShower=155` 等若干差异。本 commit 周期已修复测试期望以匹配 Rust ground truth(156/156 通过);真正"双向同步 master 数值"是一个 follow-up PR,需要 master 端定版后做系统性 diff
+2. **ClientMonsterInfo 字段补全**:`game_name` / `can_recall` 等字段目前用默认占位值,DB schema 加上后才完整
 3. **InputStateSystem/MapUpdateSystem** 注册:评估后并入调度器,或标为 deprecated 删除
 4. **持续 merge master**:本 commit 周期已合一次,但上游仍在演进(2026-05 仍在合并新 PR)
 
