@@ -88,6 +88,11 @@ impl Network {
 }
 
 /// 读线程：持续读取 packet 并转换为 NetworkEvent
+///
+/// Phase 0: 改用 codec::decode 做双层 framing 解码,与服务端 gate/codec.rs 对称。
+/// 协议:服务端发 `[outer_len(2)][XOR([inner_len(2)][opcode(2)][body])]`。
+/// 本函数:缓冲读 → codec::decode 拿到 XOR 解密后的 payload(= 内层 packet)
+///        → PacketHeader::read_from 解内层 header → 取 body → decode_packet。
 fn read_loop<S: Read + Send>(
     mut stream: S,
     tx: Sender<NetworkEvent>,
@@ -96,79 +101,95 @@ fn read_loop<S: Read + Send>(
     shutdown: Arc<AtomicBool>,
 ) {
     use mir2_shared::packets::PacketHeader;
-    use mir2_shared::data::stats::SharedError;
+
+    let mut buf: Vec<u8> = Vec::with_capacity(4096);
+    let mut chunk = [0u8; 4096];
 
     loop {
-        let header = {
-            match PacketHeader::read_from(&mut stream) {
-                Ok(h) => h,
-                Err(e) => {
-                    shutdown.store(true, Ordering::Relaxed);
-
-                    // Windows 下常见：服务端在 accept 后立刻 close，会表现为 read_u16 UnexpectedEof。
-                    // 这通常意味着：IPBlock/MaxIP 限制、端口不对、或服务端尚未进入 Running 状态。
-                    let mut reason = e.to_string();
-                    if let SharedError::Io(ioe) = &e {
-                        if ioe.kind() == std::io::ErrorKind::UnexpectedEof {
-                            reason = "Server closed connection immediately (EOF while reading header). \
-Possible causes: server IP blocked (often 24h ban after Invalid packet / MaxPacket), MaxIP limit, wrong port, or server not ready.".to_string();
-                            tracing::warn!(
-                                "Read header EOF: server closed immediately. \
-Check server console for 'Too many connections' / 'Invalid packet' / 'Large amount of Packets'. \
-If IP was blocked, restart server or use GM command CLEARIPBLOCKS; also verify ServerAddr & server Setup.ini settings."
-                            );
-                        } else {
-                            tracing::error!("Read header IO error: {}", ioe);
-                        }
-                    } else {
-                        tracing::error!("Read header error: {}", e);
-                    }
-                    let _ = tx.send(NetworkEvent::Disconnected {
-                        reason,
-                    });
-                    break;
-                }
-            }
-        };
-
-        // 读取 payload
-        let payload_len = (header.length as usize).saturating_sub(PacketHeader::HEADER_SIZE);
-       
-        const MAX_PAYLOAD: usize = 1024 * 1024;
-        if payload_len > MAX_PAYLOAD {
-            tracing::error!("FATAL: payload_len {} > MAX {}", payload_len, MAX_PAYLOAD);
-            break;
-        }
-        
-        let mut payload = vec![0u8; payload_len];
-        {
-            if let Err(e) = stream.read_exact(&mut payload) {
+        // 读更多数据到缓冲区
+        let n = match stream.read(&mut chunk) {
+            Ok(0) => {
+                // EOF — 服务器关闭连接
                 shutdown.store(true, Ordering::Relaxed);
-                tracing::error!("Read payload error: {}", e);
+                tracing::warn!(
+                    "Read EOF: server closed connection. \
+Check server console for 'Too many connections' / 'Invalid packet' / 'Large amount of Packets'."
+                );
                 let _ = tx.send(NetworkEvent::Disconnected {
-                    reason: e.to_string(),
+                    reason: "Server closed connection (EOF)".to_string(),
                 });
                 break;
             }
-        }
-
-        // 转换为 NetworkEvent（使用现有的 handlers）
-        let events = decode_packet(&header, &payload);
-        for event in events {
-            // 特殊处理：Connected事件后自动发送ClientVersion
-            if matches!(event, NetworkEvent::Connected) {
-                // 立即发送ClientVersion到write线程
-                if let Err(e) = to_write.send(NetworkEvent::ClientVersionSend {
-                    version_hash: client_version_hash.to_vec(),
-                }) {
-                    tracing::error!("Failed to send ClientVersionSend: {}", e);
-                }
-                tracing::info!("📤 Auto-sending ClientVersion to write thread");
+            Ok(n) => n,
+            Err(e) => {
+                shutdown.store(true, Ordering::Relaxed);
+                tracing::error!("Read IO error: {}", e);
+                let _ = tx.send(NetworkEvent::Disconnected {
+                    reason: format!("Read error: {}", e),
+                });
+                break;
             }
+        };
+        buf.extend_from_slice(&chunk[..n]);
 
-            if tx.send(event).is_err() {
-                tracing::error!("Game thread disconnected");
-                return;
+        // 尝试从缓冲区解码所有完整帧
+        loop {
+            let decoded = crate::network::codec::decode(&buf);
+            match decoded {
+                Some(Ok((payload, consumed))) => {
+                    // payload = XOR 解密后 = [inner_len(2)][opcode(2)][body]
+                    // 解析内层 PacketHeader
+                    if payload.len() < PacketHeader::HEADER_SIZE {
+                        tracing::warn!(
+                            "Decoded frame too short for header: {} bytes",
+                            payload.len()
+                        );
+                        buf.drain(..consumed);
+                        continue;
+                    }
+                    let mut cursor = std::io::Cursor::new(&payload[..]);
+                    let header = match PacketHeader::read_from(&mut cursor) {
+                        Ok(h) => h,
+                        Err(e) => {
+                            tracing::error!("Inner PacketHeader parse error: {}", e);
+                            buf.drain(..consumed);
+                            continue;
+                        }
+                    };
+                    // body = payload 中 header 之后的部分
+                    let body = &payload[PacketHeader::HEADER_SIZE..];
+                    let events = decode_packet(&header, body);
+                    buf.drain(..consumed);
+
+                    for event in events {
+                        // 特殊处理:Connected 事件后自动发送 ClientVersion
+                        if matches!(event, NetworkEvent::Connected) {
+                            if let Err(e) = to_write.send(NetworkEvent::ClientVersionSend {
+                                version_hash: client_version_hash.to_vec(),
+                            }) {
+                                tracing::error!("Failed to send ClientVersionSend: {}", e);
+                            }
+                            tracing::info!("📤 Auto-sending ClientVersion to write thread");
+                        }
+                        if tx.send(event).is_err() {
+                            tracing::error!("Game thread disconnected");
+                            return;
+                        }
+                    }
+                }
+                Some(Err(e)) => {
+                    // codec error (frame too large 等)
+                    shutdown.store(true, Ordering::Relaxed);
+                    tracing::error!("Codec decode error: {}", e);
+                    let _ = tx.send(NetworkEvent::Disconnected {
+                        reason: format!("Codec error: {}", e),
+                    });
+                    break;
+                }
+                None => {
+                    // 数据不足,等下一次 read
+                    break;
+                }
             }
         }
     }
@@ -190,7 +211,7 @@ fn write_loop<S: Write + Send>(mut stream: S, rx: Receiver<NetworkEvent>, shutdo
         match rx.recv_timeout(heartbeat_interval) {
             Ok(event) => {
                 // 收到游戏层的事件,立即发送
-                if let Err(e) = handle_outbound_event(&mut stream, event) {
+                if let Err(e) = send_event_via_codec(&mut stream, event) {
                     shutdown.store(true, Ordering::Relaxed);
                     tracing::error!("Send packet error: {}", e);
                     return;
@@ -206,7 +227,7 @@ fn write_loop<S: Write + Send>(mut stream: S, rx: Receiver<NetworkEvent>, shutdo
                 let keep_alive = NetworkEvent::KeepAliveSend {
                     time: chrono::Utc::now().timestamp_millis(),
                 };
-                if let Err(e) = handle_outbound_event(&mut stream, keep_alive) {
+                if let Err(e) = send_event_via_codec(&mut stream, keep_alive) {
                     shutdown.store(true, Ordering::Relaxed);
                     tracing::error!("❌ Send KeepAlive error: {}", e);
                     return;
@@ -219,6 +240,23 @@ fn write_loop<S: Write + Send>(mut stream: S, rx: Receiver<NetworkEvent>, shutdo
             }
         }
     }
+}
+
+/// Phase 0: 把 NetworkEvent 序列化为 packet 后用 codec::encode 包装,再写入 stream。
+///
+/// 协议格式(与服务端 gate/codec.rs 对称):
+///   `[outer_len(2)][XOR([inner_len(2)][opcode(2)][body])]`
+///
+/// `handle_outbound_event` 内部调 `serialize_packet(writer, &packet)` 会把
+/// `[inner_len][opcode][body]` 写到传入的 writer。这里用 `Vec<u8>` 作为
+/// writer 收集裸 packet,然后 codec::encode 加外层 framing + XOR。
+fn send_event_via_codec<S: Write>(stream: &mut S, event: NetworkEvent) -> Result<()> {
+    let mut buf: Vec<u8> = Vec::new();
+    handle_outbound_event(&mut buf, event)?;
+    let mut encoded = Vec::new();
+    crate::network::codec::encode(&buf, &mut encoded);
+    stream.write_all(&encoded)?;
+    Ok(())
 }
 
 /// 分发 packet 到对应的 handler
