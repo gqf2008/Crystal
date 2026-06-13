@@ -1366,18 +1366,34 @@ impl MainDialog {
 
         let weight_percent = (self.weight as f32 / self.max_weight as f32).clamp(0.0, 1.0);
 
-        if let Some(texture) = LibraryName::Prguse.get_texture(76) {
+        // PR #1155: KR style weight bar — 3 段纹理按 fill 程度切换
+        // (master C# 用了 UI_32bit 库 + 多个索引;我们 fallback 到 Prguse 库)
+        //   <=50%   → Prguse[76] (空载,绿色)
+        //   50-75%  → UI_32bit[473] (半载) — fallback Prguse[76] 着色
+        //   >75%    → UI_32bit[472] (重载) — fallback Prguse[76] 红色
+        let (texture_lib, texture_idx) = if weight_percent <= 0.5 {
+            (LibraryName::Prguse, 76u32)
+        } else if weight_percent <= 0.75 {
+            (LibraryName::UI_32bit, 473u32)
+        } else {
+            (LibraryName::UI_32bit, 472u32)
+        };
+
+        if let Some(texture) = texture_lib.get_texture(texture_idx as usize) {
             if let Some(ref tex) = texture.image {
                 let bar_width = texture.width as f32 - 2.0;
                 let fill_width = bar_width * weight_percent;
 
-                // 根据负重比例选择颜色
-                let color = if weight_percent < 0.8 {
+                // 根据负重比例选择颜色 (与 master KR 视觉对齐:
+                // <=50% 白/绿,50-75% 黄,>75% 橙红)
+                let color = if weight_percent < 0.5 {
                     WHITE
-                } else if weight_percent < 1.0 {
+                } else if weight_percent < 0.75 {
                     YELLOW
+                } else if weight_percent < 1.0 {
+                    Color::from_rgba(255, 165, 0, 255) // 橙色
                 } else {
-                    Color::from_rgba(255, 100, 100, 255)
+                    Color::from_rgba(255, 80, 80, 255) // 红色超重
                 };
 
                 draw_texture_ex(
@@ -1392,11 +1408,35 @@ impl MainDialog {
                 );
             }
         } else {
-            // 降级绘制
-            let bar_width = 80.0;
-            draw_rectangle(bar_x, bar_y, bar_width, 5.0, Color::from_rgba(40, 40, 40, 255));
-            let color = if weight_percent < 0.8 { GREEN } else if weight_percent < 1.0 { YELLOW } else { RED };
-            draw_rectangle(bar_x, bar_y, bar_width * weight_percent, 5.0, color);
+            // 降级绘制:单纹理 (Prguse[76]) + 颜色
+            if let Some(texture) = LibraryName::Prguse.get_texture(76) {
+                if let Some(ref tex) = texture.image {
+                    let bar_width = texture.width as f32 - 2.0;
+                    let fill_width = bar_width * weight_percent;
+                    let color = if weight_percent < 0.8 {
+                        WHITE
+                    } else if weight_percent < 1.0 {
+                        YELLOW
+                    } else {
+                        Color::from_rgba(255, 100, 100, 255)
+                    };
+                    draw_texture_ex(
+                        tex,
+                        bar_x,
+                        bar_y,
+                        color,
+                        DrawTextureParams {
+                            source: Some(Rect::new(0.0, 0.0, fill_width, texture.height as f32)),
+                            ..Default::default()
+                        },
+                    );
+                }
+            } else {
+                // 终极降级:纯色矩形
+                let bar_width = 80.0;
+                let color = if weight_percent < 0.8 { GREEN } else if weight_percent < 1.0 { YELLOW } else { RED };
+                draw_rectangle(bar_x, bar_y, bar_width * weight_percent, 5.0, color);
+            }
         }
 
         // 负重文字
@@ -1405,7 +1445,7 @@ impl MainDialog {
         let weight_label_y = self.position.y + 101.0;
         let weight_text = format!("{}/{}", self.weight, self.max_weight);
         draw_text_cn(&weight_text, bar_x, weight_label_y + 10.0, 9.0, WHITE);
-        
+
         // 背包空格 - 显示在右侧
         let space_x = self.position.x + self.bg_size.x - 30.0;
         let space_text = format!("{}", self.bag_space);

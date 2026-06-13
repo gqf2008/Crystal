@@ -38,6 +38,11 @@ pub enum LibraryName {
     Prguse,      // 主要 UI 资源
     Prguse2,     // 次要 UI 资源
     Prguse3,     // 额外 UI 资源
+    /// PR #1155: KR-style 32-bit UI library, used for KR weight bar art.
+    /// Not present in our Data/ directory; texture lookups for this
+    /// library return None and the rendering falls back to Prguse.
+    #[allow(non_camel_case_types)]
+    UI_32bit,
     BuffIcon,    // Buff 图标
     Help,        // 帮助界面
     MiniMap,     // 小地图
@@ -141,6 +146,10 @@ impl LibraryName {
             LibraryName::Prguse => "Prguse".to_string(),
             LibraryName::Prguse2 => "Prguse2".to_string(),
             LibraryName::Prguse3 => "Prguse3".to_string(),
+            // PR #1155: UI_32bit not bundled in our Data/; default_path
+            // points to the same directory as Prguse3, but texture
+            // lookups return None when the file is missing.
+            LibraryName::UI_32bit => "UI_32bit".to_string(),
             LibraryName::BuffIcon => "BuffIcon".to_string(),
             LibraryName::Help => "Help".to_string(),
             LibraryName::MiniMap => "MMap".to_string(),
@@ -194,6 +203,7 @@ impl LibraryName {
             "Prguse" => Some(LibraryName::Prguse),
             "Prguse2" => Some(LibraryName::Prguse2),
             "Prguse3" => Some(LibraryName::Prguse3),
+            "UI_32bit" => Some(LibraryName::UI_32bit),
             "BuffIcon" => Some(LibraryName::BuffIcon),
             "Help" => Some(LibraryName::Help),
             "MMap" | "MiniMap" => Some(LibraryName::MiniMap),
@@ -274,6 +284,7 @@ impl LibraryName {
                 | LibraryName::Prguse
                 | LibraryName::Prguse2
                 | LibraryName::Prguse3
+                | LibraryName::UI_32bit
                 | LibraryName::BuffIcon
                 | LibraryName::Help
                 | LibraryName::MiniMap
@@ -1423,6 +1434,7 @@ pub fn load_all_libraries() -> std::io::Result<()> {
             LibraryName::Prguse,
             LibraryName::Prguse2,
             LibraryName::Prguse3,
+            LibraryName::UI_32bit,
             LibraryName::BuffIcon,
             LibraryName::Help,
             LibraryName::MiniMap,
