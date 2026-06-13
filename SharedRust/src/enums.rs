@@ -2160,6 +2160,25 @@ pub enum ConquestGame {
     ControlPoints = 7,
 }
 
+/// PR #1156: TrustMerchant 价格过滤 (对齐 master C# Shared/Enums.cs)
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Serialize_repr,
+    Deserialize_repr,
+    IntoPrimitive,
+    TryFromPrimitive,
+)]
+#[repr(u8)]
+pub enum MarketPriceFilter {
+    Normal = 0,
+    High = 1,
+    Low = 2,
+}
+
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     #[repr(transparent)]

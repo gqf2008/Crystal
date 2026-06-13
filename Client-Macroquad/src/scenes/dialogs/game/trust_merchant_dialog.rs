@@ -13,6 +13,7 @@
 use macroquad::prelude::*;
 use crate::ui::text_renderer::draw_text_cn;
 use mir2_shared::data::item::UserItem;
+use mir2_shared::enums::MarketPriceFilter;
 
 /// 拍卖行商品条目
 #[derive(Debug, Clone)]
@@ -31,30 +32,23 @@ pub enum MerchantTab {
     MyListings,
 }
 
-/// PR #1156: 价格过滤 (Normal/High/Low)
-/// 对齐 master C# `Shared/Enums.cs::MarketPriceFilter`。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MarketPriceFilter {
-    Normal = 0,
-    High = 1,
-    Low = 2,
+// impl MarketPriceFilter removed — enum is now in mir2_shared::enums (PR #1156 unification).
+
+/// PR #1156: 切换到下一个 filter
+pub fn next_price_filter(f: MarketPriceFilter) -> MarketPriceFilter {
+    match f {
+        MarketPriceFilter::Normal => MarketPriceFilter::High,
+        MarketPriceFilter::High => MarketPriceFilter::Low,
+        MarketPriceFilter::Low => MarketPriceFilter::Normal,
+    }
 }
 
-impl MarketPriceFilter {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Normal => Self::High,
-            Self::High => Self::Low,
-            Self::Low => Self::Normal,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Normal => "正常",
-            Self::High => "高价",
-            Self::Low => "低价",
-        }
+/// PR #1156: filter 显示标签
+pub fn price_filter_label(f: MarketPriceFilter) -> &'static str {
+    match f {
+        MarketPriceFilter::Normal => "正常",
+        MarketPriceFilter::High => "高价",
+        MarketPriceFilter::Low => "低价",
     }
 }
 
@@ -119,7 +113,7 @@ impl TrustMerchantDialogHybrid {
 
     /// PR #1156: 循环切换价格过滤 (Normal → High → Low → Normal)
     pub fn cycle_price_filter(&mut self) {
-        self.price_filter = self.price_filter.next();
+        self.price_filter = next_price_filter(self.price_filter);
         self.apply_price_filter();
     }
 
@@ -228,7 +222,7 @@ impl TrustMerchantDialogHybrid {
         let mouse_over_filter = mouse_pos.x >= filter_x
             && mouse_pos.x <= filter_x + filter_w
             && mouse_pos.y >= page_y && mouse_pos.y <= page_y + page_h;
-        let filter_label = self.price_filter.label();
+        let filter_label = price_filter_label(self.price_filter);
         draw_text_cn(&format!("价格: {}", filter_label),
             filter_x, page_y + 5.0, 12.0,
             if mouse_over_filter { Color::from_rgba(255, 220, 100, 255) }
