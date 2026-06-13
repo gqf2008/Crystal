@@ -1850,9 +1850,10 @@ impl Message<CreateGuildRequest> for SocialActor {
 
         // 创建行会（扣除费用，对应 C# Settings.Guild_CreationCost / GuildCreationCost）
         // 调查发现:master C# 端 **没有** Guild_CreationCostList 字段(2026-06
-        // 搜索 Server/Settings.cs 和 Server/MirEnvir/ 0 匹配);该 TODO
-        // 原本基于对 master 的误解。本分支只支持金币扣除,这是 master
-        // 端实际的等价行为。如果未来 master 加混合消耗,可在此扩展。
+        // 搜索 Server/Settings.cs 和 Server/MirEnvir/ 0 匹配);旧代码的
+        // "支持物品+金币混合消耗" 注释原本基于对 master 的误解。本分支只
+        // 支持金币扣除,这是 master 端实际的等价行为。如果未来 master 加
+        // 混合消耗,可在此扩展。
         if state.inventory.gold < self.config.guild_creation_cost_gold as u64 {
             send_system_message(&self.gate_ref, msg.session_id, &format!("金币不足，创建行会需要 {} 金币", self.config.guild_creation_cost_gold));
             return;
