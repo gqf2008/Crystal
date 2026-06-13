@@ -13,19 +13,26 @@ use argon2::PasswordHasher;
 use pbkdf2::pbkdf2_hmac;
 use rand_core::OsRng;
 use sha1::Sha1;
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 use mir2_shared::packets::Packet;
 
 use crate::db::{self, DbPool};
 use crate::gate::actor::LoginResult;
 
-/// Hash password using Argon2
+/// Hash password using Argon2.
+///
+/// Phase 1.1: 不再 unwrap()。Argon2 hash 只在 password 含 null byte 等
+/// 极端情况失败,此时返回 fallback 占位 hash(空字符串),调用方会
+/// 因为 verify 永远失败而拒绝登录。log error 便于运维发现。
 fn hash_password(password: &str) -> String {
     let salt = SaltString::generate(&mut OsRng);
-    argon2::Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
-        .unwrap()
-        .to_string()
+    match argon2::Argon2::default().hash_password(password.as_bytes(), &salt) {
+        Ok(h) => h.to_string(),
+        Err(e) => {
+            error!("Failed to hash password (Argon2 error): {}", e);
+            String::new()
+        }
+    }
 }
 
 /// Verify password against a hash

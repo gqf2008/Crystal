@@ -16,7 +16,10 @@ pub struct HttpState {
     pub name_list_writer: Option<Box<dyn Fn(String, String) + Send + Sync>>,
 }
 
-/// 启动 HTTP 服务
+/// 启动 HTTP 服务。
+///
+/// Phase 1.1: 不再 unwrap()。bind/serve 失败时 log error 并返回,
+/// 让调用方决定是否致命(而不是 panic 整个进程)。
 pub async fn start_http_server(state: SharedState, port: u16) {
     let app = Router::new()
         .route("/", get(root_handler))
@@ -26,9 +29,17 @@ pub async fn start_http_server(state: SharedState, port: u16) {
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", port);
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("HTTP admin server failed to bind {}: {}", addr, e);
+            return;
+        }
+    };
     tracing::info!("HTTP admin server listening on {}", addr);
-    axum::serve(listener, app).await.unwrap();
+    if let Err(e) = axum::serve(listener, app).await {
+        tracing::error!("HTTP admin server error: {}", e);
+    }
 }
 
 // Handlers

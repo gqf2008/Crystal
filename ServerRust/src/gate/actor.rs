@@ -35,6 +35,8 @@ pub struct GateActor {
     world_ref: Option<ActorRef<crate::actors::world::WorldActor>>,
     /// SocialActor 引用
     social_ref: Option<ActorRef<crate::actors::social::SocialActor>>,
+    /// 最大并发连接数(Phase 1.1:防止资源耗尽;从 cfg.network.max_connections 设置)
+    max_connections: usize,
 }
 
 impl GateActor {
@@ -45,6 +47,7 @@ impl GateActor {
             account_ref: None,
             world_ref: None,
             social_ref: None,
+            max_connections: 1024,
         }
     }
 
@@ -161,6 +164,9 @@ pub struct SessionCreated {
     pub sender: SendChannel,
 }
 
+/// Phase 1.1: 设置最大并发连接数(由 main.rs 从 cfg 传入)
+pub struct SetMaxConnections(pub usize);
+
 /// 收到客户端数据
 pub struct ClientData {
     pub session_id: SessionId,
@@ -207,8 +213,17 @@ impl Message<SessionCreated> for GateActor {
         msg: SessionCreated,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        // Phase 1.1: 连接数限制 — 超过 max_connections 拒绝新连接
+        if self.sessions.len() >= self.max_connections {
+            warn!(
+                "Connection rejected: session {} would exceed max_connections {} (current={})",
+                msg.session_id, self.max_connections, self.sessions.len()
+            );
+            // 不 insert session,不发 Connected — 客户端会因为收不到响应而超时断开
+            return;
+        }
         self.sessions.insert(msg.session_id, msg.sender);
-        debug!("Session {} created", msg.session_id);
+        debug!("Session {} created (active={})", msg.session_id, self.sessions.len());
 
         // 发送 Connected 包给客户端（客户端收到后会自动发送 ClientVersion）
         let connected_data = build_packet_bytes(ServerPacketIds::Connected as i16, &[]);
@@ -219,6 +234,16 @@ impl Message<SessionCreated> for GateActor {
                 data: connected_data,
             })
             .await;
+    }
+}
+
+/// Phase 1.1: 设置最大并发连接数
+impl Message<SetMaxConnections> for GateActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetMaxConnections, _ctx: &mut Context<Self, Self::Reply>) {
+        self.max_connections = msg.0;
+        info!("GateActor max_connections set to {}", self.max_connections);
     }
 }
 

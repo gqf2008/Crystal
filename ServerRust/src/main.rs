@@ -13,7 +13,7 @@ use tracing::{info, error, warn};
 use crystal_server::actors::account::AccountActor;
 use crystal_server::actors::world::{WorldActor, WorldActorArgs};
 use crystal_server::actors::social::{SocialActor, SocialActorArgs, SocialActorConfig};
-use crystal_server::gate::actor::{GateActor, SetAccountRef, SetWorldRef};
+use crystal_server::gate::actor::{GateActor, SetAccountRef, SetWorldRef, SetMaxConnections};
 use crystal_server::util::config;
 use crystal_server::db;
 
@@ -59,6 +59,10 @@ async fn async_main() -> anyhow::Result<()> {
     // GateActor 先启动
     let gate_ref = GateActor::spawn(());
     info!("GateActor spawned");
+
+    // Phase 1.1: 把 cfg.network.max_connections 传给 GateActor(防止资源耗尽)
+    let _ = gate_ref.ask(SetMaxConnections(cfg.network.max_connections)).await;
+    info!("Configured max_connections={}", cfg.network.max_connections);
 
     let map_dir = PathBuf::from(&cfg.server.map_data_dir);
     let spawn_dir = PathBuf::from("Data/spawn");
