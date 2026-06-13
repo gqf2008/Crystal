@@ -242,6 +242,9 @@ pub struct SocialChatCommand {
 pub struct SocialActorConfig {
     pub map_infos: Arc<RwLock<HashMap<i32, db::MapInfo>>>,
     pub item_infos: Arc<RwLock<HashMap<i32, db::ItemInfo>>>,
+    /// 创建行会所需金币 (来自 cfg.server.toml 的 [social] section)
+    /// 替代之前 hardcoded 1_000_000 常量。
+    pub guild_creation_cost_gold: u64,
 }
 
 impl Default for SocialActorConfig {
@@ -249,6 +252,8 @@ impl Default for SocialActorConfig {
         Self {
             map_infos: Arc::new(RwLock::new(HashMap::new())),
             item_infos: Arc::new(RwLock::new(HashMap::new())),
+            // default 与主流程 cfg 路径一致
+            guild_creation_cost_gold: 1_000_000,
         }
     }
 }
@@ -332,7 +337,8 @@ const GUILD_REQUIRED_LEVEL: u16 = 7;
 const WEDDING_RING_RECALL_ENABLED: bool = true;
 
 /// 行会创建费用：金币（对应 C# Settings.Guild_CreationCostList gold entry）
-const GUILD_CREATION_COST_GOLD: u64 = 1_000_000;
+// 创建行会所需金币来自 cfg.server.toml (social.guild_creation_cost_gold),
+// 不再需要 hardcoded 常量。config 在 SocialActor.config 字段里。
 
 /// 新手行会名称（对应 C# Settings.NewbieGuild）
 const NEWBIE_GUILD: &str = "新手村";
@@ -1842,13 +1848,16 @@ impl Message<CreateGuildRequest> for SocialActor {
             return;
         }
 
-        // 创建行会（扣除费用，对应 C# Settings.Guild_CreationCostList）
-        // TODO: C# Guild_CreationCostList 支持物品+金币混合消耗，当前仅检查金币
-        if state.inventory.gold < GUILD_CREATION_COST_GOLD as u64 {
-            send_system_message(&self.gate_ref, msg.session_id, &format!("金币不足，创建行会需要 {} 金币", GUILD_CREATION_COST_GOLD));
+        // 创建行会（扣除费用，对应 C# Settings.Guild_CreationCost / GuildCreationCost）
+        // 调查发现:master C# 端 **没有** Guild_CreationCostList 字段(2026-06
+        // 搜索 Server/Settings.cs 和 Server/MirEnvir/ 0 匹配);该 TODO
+        // 原本基于对 master 的误解。本分支只支持金币扣除,这是 master
+        // 端实际的等价行为。如果未来 master 加混合消耗,可在此扩展。
+        if state.inventory.gold < self.config.guild_creation_cost_gold as u64 {
+            send_system_message(&self.gate_ref, msg.session_id, &format!("金币不足，创建行会需要 {} 金币", self.config.guild_creation_cost_gold));
             return;
         }
-        let _ = record.ask(DeductGold { amount: GUILD_CREATION_COST_GOLD }).await;
+        let _ = record.ask(DeductGold { amount: self.config.guild_creation_cost_gold }).await;
 
         let guild = Guild::new(msg.guild_name.clone(), state.name.clone(), msg.session_id);
         self.guilds.insert(msg.guild_name.clone(), guild);

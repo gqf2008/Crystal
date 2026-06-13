@@ -5,6 +5,30 @@ pub struct ServerConfig {
     pub network: NetworkConfig,
     pub database: DatabaseConfig,
     pub server: ServerWorldConfig,
+    /// Social / 行会 / 任务系统配置 (PR 收尾工作:把散落的硬编码常量集中到 cfg)
+    #[serde(default)]
+    pub social: SocialConfig,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct SocialConfig {
+    /// 创建行会所需金币 (master C# Guild_CreationCost = GUILD_CREATION_COST_GOLD)
+    /// 之前是 social.rs 里的硬编码常量 1_000_000,现在从 cfg 读取。
+    /// cfg 字段名 guild_creation_cost_gold (snake_case),TOML 示例见 server.toml。
+    #[serde(default = "default_guild_creation_cost")]
+    pub guild_creation_cost_gold: u64,
+}
+
+fn default_guild_creation_cost() -> u64 {
+    1_000_000
+}
+
+impl Default for SocialConfig {
+    fn default() -> Self {
+        Self {
+            guild_creation_cost_gold: default_guild_creation_cost(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -46,6 +70,7 @@ impl Default for ServerConfig {
                 tick_ms: 100,
                 map_data_dir: "Data".to_string(),
             },
+            social: SocialConfig::default(),
         }
     }
 }

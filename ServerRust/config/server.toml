@@ -11,3 +11,9 @@ path = "data/server.db"
 [server]
 tick_ms = 100
 map_data_dir = "Data"
+
+# Social / 行会 / 任务系统配置
+# guild_creation_cost_gold = 创建行会所需金币 (master C# Guild_CreationCost)
+# 默认 1_000_000,如果 [social] 段省略则用 default。
+[social]
+guild_creation_cost_gold = 1000000

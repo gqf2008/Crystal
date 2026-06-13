@@ -776,8 +776,15 @@ fn read_quest_info<R: Read>(reader: &mut BinaryReader<R>, version: i32) -> std::
         index, name, group_name, file_name,
         required_min_level, required_max_level, required_quest,
         required_class, quest_type,
-        // TODO: quest rewards are not stored in Server.MirDB binary; they are in NPC script files
-        // Parse from .txt scripts when NPC parser is implemented
+        // quest rewards (exp/gold) 不在 Server.MirDB binary;这些在 master
+        // C# 端也是从 quest .txt 文件 [@FIXEDREWARDS] / 完成的 NPC script
+        // (GIVEEXP/GIVEGOLD 命令) 里取。
+        // 我们的实现 (db::resolve_quest_tasks in mod.rs:2301) 解析
+        //  的 [@KILLTASKS] / [@ITEMTASKS]
+        // / [@FLAGTASKS] / [@FIXEDREWARDS] / [@SELECTREWARDS] section;
+        // 然后 QuestProgress.exp_reward / gold_reward 字段在 runtime 由
+        // quest_complete_actor::complete_quest() 触发 GIVEEXP/GIVEGOLD。
+        // 所以这 2 个字段在 ParsedQuestInfo 上**未用**(留给向后兼容)
         exp_reward: 0,
         gold_reward: 0,
         goto_message, kill_message, item_message, flag_message,

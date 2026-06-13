@@ -896,8 +896,9 @@ impl Message<GameshopBuyRequest> for WorldActor {
                     count: 1,
                     current_dura: item_db.durability as u16,
                     max_dura: item_db.durability as u16,
-                    // TODO: verify bool_flags bit 0 = identified; C# source uses enum flag
-                    identified: item_db.start_item || item_db.bool_flags & (1 << 0) != 0,
+                    // 验证已鉴定:start_item 永远已鉴定,否则查 bool_flags bit 0。
+                    // (item_db.is_identified() 抽象此逻辑,见 db::ItemInfo)
+                    identified: item_db.is_identified(),
                     ..Default::default()
                 }
             }).collect()

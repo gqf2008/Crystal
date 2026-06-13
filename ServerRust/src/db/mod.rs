@@ -1777,6 +1777,18 @@ pub struct ItemInfo {
     pub tool_tip: Option<String>,
 }
 
+impl ItemInfo {
+    /// 物品是否默认已鉴定。
+    ///
+    /// 对齐 master C# 端 ItemInfo 设置逻辑:
+    /// - start_item 永远已鉴定(任务物品/新手物品)
+    /// - bool_flags bit 0 (0x01) 表示从 DB 加载时已鉴定
+    /// - 其他情况需玩家用鉴定卷轴后才显示真实属性
+    pub fn is_identified(&self) -> bool {
+        self.start_item || (self.bool_flags & 0x01) != 0
+    }
+}
+
 /// Monster info (flat from DB, stats parsed from JSON)
 #[derive(Debug, Clone)]
 pub struct MonsterInfo {

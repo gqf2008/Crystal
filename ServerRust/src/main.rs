@@ -3,13 +3,16 @@
 
 use std::env;
 use std::path::PathBuf;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use kameo::actor::Spawn;
 use tracing::{info, error, warn};
 
 use crystal_server::actors::account::AccountActor;
 use crystal_server::actors::world::{WorldActor, WorldActorArgs};
-use crystal_server::actors::social::{SocialActor, SocialActorArgs};
+use crystal_server::actors::social::{SocialActor, SocialActorArgs, SocialActorConfig};
 use crystal_server::gate::actor::{GateActor, SetAccountRef, SetWorldRef};
 use crystal_server::util::config;
 use crystal_server::db;
@@ -78,11 +81,19 @@ async fn async_main() -> anyhow::Result<()> {
     };
 
     // WorldActor 启动，携带 GateActor 引用 + 地图目录 + 刷怪目录 + 数据库
-    // SocialActor 先启动，WorldActor 依赖它
+    // SocialActor 先启动，WorldActor 依赖它。
+    // 共享 cfg:social 字段(guild_creation_cost_gold)透传到 SocialActorConfig
+    // 的 GUILD_CREATION_COST_GOLD 常量(之前是 hardcoded 1_000_000,现从 cfg 读)。
+    let social_config = SocialActorConfig {
+        map_infos: Arc::new(RwLock::new(HashMap::<i32, db::MapInfo>::new())),
+        item_infos: Arc::new(RwLock::new(HashMap::<i32, db::ItemInfo>::new())),
+        guild_creation_cost_gold: cfg.social.guild_creation_cost_gold,
+    };
+    info!("Social config: guild_creation_cost_gold = {}", social_config.guild_creation_cost_gold);
     let social_ref = SocialActor::spawn(SocialActorArgs {
         gate_ref: gate_ref.clone(),
         db_pool: db_pool.clone(),
-        config: Default::default(), // TODO: wire shared config later
+        config: social_config,
     });
     info!("SocialActor spawned");
 
