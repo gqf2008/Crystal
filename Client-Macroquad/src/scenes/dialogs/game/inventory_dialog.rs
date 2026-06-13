@@ -19,6 +19,8 @@ use macroquad::ui::{hash, root_ui, widgets::Group, Drag, Skin};
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
 use super::native_ui_utils::*;
+use mir2_shared::data::stats::Stats;
+use mir2_shared::enums::Stat;
 
 /// 物品槽位
 #[derive(Debug, Clone)]
@@ -27,19 +29,59 @@ pub struct ItemSlotHybrid {
     pub name: String,
     pub count: u32,
     pub unique_id: u64,
+    /// PR #1151: 装备 stat (来自 UserItem.Stats) — 用于 hover tooltip 显示
+    pub stats: Stats,
+    /// PR #1151: 装备孔位里的宝石 — 聚合时累加每个 socket 的 stats
+    pub sockets: Vec<ItemSlotHybrid>,
 }
 
 impl ItemSlotHybrid {
     pub fn empty() -> Self {
-        Self { icon_index: None, name: String::new(), count: 0, unique_id: 0 }
+        Self {
+            icon_index: None,
+            name: String::new(),
+            count: 0,
+            unique_id: 0,
+            stats: Stats::new(),
+            sockets: Vec::new(),
+        }
     }
 
     pub fn new(icon_index: usize, name: String, count: u32) -> Self {
-        Self { icon_index: Some(icon_index), name, count, unique_id: 0 }
+        Self {
+            icon_index: Some(icon_index),
+            name,
+            count,
+            unique_id: 0,
+            stats: Stats::new(),
+            sockets: Vec::new(),
+        }
     }
 
     pub fn with_id(icon_index: usize, name: String, count: u32, unique_id: u64) -> Self {
-        Self { icon_index: Some(icon_index), name, count, unique_id }
+        Self {
+            icon_index: Some(icon_index),
+            name,
+            count,
+            unique_id,
+            stats: Stats::new(),
+            sockets: Vec::new(),
+        }
+    }
+
+    /// PR #1151: 聚合所有 stat (item.Stats + 每个 socket 的 stats)
+    /// 对齐 master C# `GetTotalAddedStats()` 函数。
+    pub fn total_added_stats(&self) -> Stats {
+        let mut total = Stats::new();
+        total.add_assign(&self.stats);
+        for socket in &self.sockets {
+            // Skip empty sockets (CurrentDura == 0 with no stats)
+            if socket.unique_id == 0 && socket.stats.is_empty() {
+                continue;
+            }
+            total.add_assign(&socket.stats);
+        }
+        total
     }
 }
 
@@ -284,6 +326,8 @@ impl InventoryDialogHybrid {
                     name,
                     count: item.count as u32,
                     unique_id: item.unique_id,
+                    stats: Stats::new(), // PR #1151: server data flow not wired; populated on real UserItem receive
+                    sockets: Vec::new(),
                 };
 
                 if is_equip {
@@ -522,6 +566,8 @@ impl InventoryDialogHybrid {
                                             name: items[from_idx].name.clone(),
                                             count: half,
                                             unique_id: 0, // 分割后新堆叠物品无独立 unique_id
+                                            stats: Stats::new(),
+                                            sockets: Vec::new(),
                                         };
                                         items[from_idx].count = remain;
                                         placed = true;
@@ -694,11 +740,46 @@ impl InventoryDialogHybrid {
             if let Some(slot_idx) = self.hovered_slot {
                 if let Some(slot) = self.current_items().get(slot_idx) {
                     if slot.icon_index.is_some() && !slot.name.is_empty() {
-                        let tip = if slot.count > 1 {
+                        // PR #1151: hover tooltip 现在显示 stat (对齐 master C#
+                        // AttackInfoLabel)。聚合 item.Stats + 所有 socket 的 stats。
+                        let total = slot.total_added_stats();
+                        let mut tip = if slot.count > 1 {
                             format!("{} x{}", slot.name, slot.count)
                         } else {
                             slot.name.clone()
                         };
+                        // Append main stats (DC/MC/SC/AC/MAC).
+                        // These are the "attack/defense" stats a player checks
+                        // before equipping. (Not all stats — keeps tooltip short.)
+                        let max_dc = total.get(Stat::MaxDC);
+                        let max_mc = total.get(Stat::MaxMC);
+                        let max_sc = total.get(Stat::MaxSC);
+                        let min_ac = total.get(Stat::MinAC);
+                        let max_ac = total.get(Stat::MaxAC);
+                        let min_mac = total.get(Stat::MinMAC);
+                        let max_mac = total.get(Stat::MaxMAC);
+                        if max_dc > 0 || max_mc > 0 || max_sc > 0 || min_ac > 0 || min_mac > 0 {
+                            tip.push_str("\n");
+                            if max_dc > 0 {
+                                tip.push_str(&format!("DC:{}+ ", max_dc));
+                            }
+                            if max_mc > 0 {
+                                tip.push_str(&format!("MC:{}+ ", max_mc));
+                            }
+                            if max_sc > 0 {
+                                tip.push_str(&format!("SC:{}+ ", max_sc));
+                            }
+                            if min_ac > 0 || max_ac > 0 {
+                                tip.push_str(&format!("AC:{}-{} ", min_ac, max_ac));
+                            }
+                            if min_mac > 0 || max_mac > 0 {
+                                tip.push_str(&format!("MAC:{}-{} ", min_mac, max_mac));
+                            }
+                            tip.push_str("(含 socket)");
+                        }
+                        // Drop the trailing \n so draw_tooltip's single-line
+                        // rendering looks clean.
+                        let tip = tip.trim_end().to_string();
                         draw_tooltip(mouse, &tip);
                     }
                 }
