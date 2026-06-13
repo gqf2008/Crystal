@@ -35,6 +35,21 @@ pub struct ItemSlotHybrid {
     pub sockets: Vec<ItemSlotHybrid>,
 }
 
+/// PR #1153: 标签页间移动动作(由 Ctrl+click tab 产出)
+/// 携带源 tab / 目标 tab / 源 idx / 目标 idx,
+/// update.rs 消费后调 net.send(MoveItemRequest)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InventoryMoveAction {
+    /// Ctrl+click a tab: move the hovered item from current tab
+    /// to the first empty slot in `target_tab`.
+    MoveToTab {
+        from_tab: InventoryTabHybrid,
+        to_tab: InventoryTabHybrid,
+        from_idx: usize,
+        to_idx: usize,
+    },
+}
+
 impl ItemSlotHybrid {
     pub fn empty() -> Self {
         Self {
@@ -159,6 +174,8 @@ pub struct InventoryDialogHybrid {
     tab_textures: [[Option<Texture2D>; 2]; 3],
     tab_items2_disabled_texture: Option<Texture2D>,
     item_cache: ItemTextureCache,
+    /// PR #1153: 待处理的移动动作 (由 Ctrl+click 产出,update.rs 消费并发包)
+    pub pending_action: Option<InventoryMoveAction>,
 }
 
 impl InventoryDialogHybrid {
@@ -230,9 +247,15 @@ impl InventoryDialogHybrid {
             tab_textures: [[None, None], [None, None], [None, None]],
             tab_items2_disabled_texture: None,
             item_cache: ItemTextureCache::new(),
+            pending_action: None,
         }
     }
-    
+
+    /// PR #1153: 拿走当前 pending_action
+    pub fn take_action(&mut self) -> Option<InventoryMoveAction> {
+        self.pending_action.take()
+    }
+
     pub  fn load_textures(&mut self) {
         // 背景
         if let Some(info) = LibraryName::Title.get_texture(196) {
@@ -402,9 +425,13 @@ impl InventoryDialogHybrid {
         current_items[from_idx] = ItemSlotHybrid::empty();
         self.tab_items[target_tab as usize][to_idx] = item_to_move;
 
-        // TODO: net.send(NetworkEvent::MoveItemRequest { grid, from, to });
-        //       当前 InventoryDialog 是 sample-data only,无 net 引用
-        //       server 数据接入后接入。
+        // PR #1153: 产生 pending_action;update.rs 消费并 net.send。
+        self.pending_action = Some(InventoryMoveAction::MoveToTab {
+            from_tab: current_tab,
+            to_tab: target_tab,
+            from_idx,
+            to_idx,
+        });
         tracing::info!(
             "📦 Ctrl+tab: 移动物品 slot={} from tab={:?} to tab={:?} idx={}",
             from_idx, current_tab, target_tab, to_idx

@@ -1297,6 +1297,34 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
         }
     }
 
+    // PR #1153: 背包 Ctrl+click 移动 (由 InventoryDialogHybrid::try_move_selected_to_tab 产出)
+    if let Some(action) = sys.main_dialog.inventory_dialog_mut().take_action() {
+        use crate::network::handlers::NetworkEvent as NetEv;
+        use crate::scenes::dialogs::game::inventory_dialog::InventoryMoveAction;
+        let InventoryMoveAction::MoveToTab { from_tab, to_tab, from_idx, to_idx } = action;
+        // PR #1153: Master C# TryMoveSelectedInventoryItem 走 MoveItem packet;
+        // tab 间移动需要服务器知道源/目标 tab 编码(装备=0, 物品=1, 任务=2)。
+        // 这里给一个简化的固定 grid 编码 (Equipment=0, Items=1, Quest=2)
+        // 等待 server 实际 handler (目前服务端 TrustMerchant/Inventory
+        // 都未上线多 tab 模式,所以即便发包也是 no-op,等真实数据流)。
+        let grid = match from_tab {
+            crate::scenes::dialogs::game::inventory_dialog::InventoryTabHybrid::Equipment => 0u8,
+            crate::scenes::dialogs::game::inventory_dialog::InventoryTabHybrid::Items => 1u8,
+            crate::scenes::dialogs::game::inventory_dialog::InventoryTabHybrid::Quest => 2u8,
+        };
+        if let Some(net) = ctx.net.as_ref() {
+            let _ = net.send(NetEv::MoveItemRequest {
+                grid,
+                from: from_idx as u32,
+                to: to_idx as u32,
+            });
+            tracing::info!(
+                "📦 Ctrl+tab: net.send MoveItem grid={} from={} to={} (from_tab={:?} to_tab={:?})",
+                grid, from_idx, to_idx, from_tab, to_tab
+            );
+        }
+    }
+
     // 文本输入结果（由 draw 阶段产出，在此发包）
     if let Some((kind, text)) = sys.pending_text_input.take() {
         use crate::network::handlers::NetworkEvent as NetEv;

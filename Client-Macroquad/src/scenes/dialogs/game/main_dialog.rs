@@ -2402,6 +2402,11 @@ impl MainDialog {
         &mut self.game_shop_dialog
     }
 
+    /// 获取背包对话框的可变引用
+    pub fn inventory_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::inventory_dialog::InventoryDialogHybrid {
+        &mut self.inventory_dialog
+    }
+
     /// 获取行会领地对话框的可变引用
     pub fn guild_territory_dialog_mut(&mut self) -> &mut crate::scenes::dialogs::game::guild_territory_dialog::GuildTerritoryDialogHybrid {
         &mut self.guild_territory_dialog
