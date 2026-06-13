@@ -42,6 +42,32 @@ enum Segment {
     Action { text: String, action: String },
     Colored { text: String, color_name: String },
     Link { text: String, url: String },
+    // PR #1126: KR-style NPC link (master C# 解析 `[MONSTER:idx|Name]`,
+    // `[NPC:idx|Name]`, `[ITEM:idx|Name]` 格式 — 服务器 LinkFormatter 把
+    // `<$MONSTER:5>` 转成 `[MONSTER:5|Beetle]` 后客户端显示)
+    KrLink {
+        link_type: KrLinkType,
+        index: i32,
+        display_name: String,
+    },
+}
+
+/// PR #1126: KR NPC link 类型 (对齐 master LinkFormatter)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KrLinkType {
+    Monster,
+    Npc,
+    Item,
+}
+
+impl KrLinkType {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Monster => "怪物",
+            Self::Npc => "NPC",
+            Self::Item => "物品",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -467,6 +493,28 @@ impl NpcDialogHybrid {
                 }
             }
 
+            // PR #1126: 处理 [...]  KR NPC link (master C# LinkFormatter 输出)
+            if chars[i] == '[' {
+                let mut j = i + 1;
+                while j < chars.len() {
+                    if chars[j] == ']' {
+                        break;
+                    }
+                    j += 1;
+                }
+                if j < chars.len() && chars[j] == ']' {
+                    flush_plain(&mut out, &mut plain);
+                    let inner: String = chars[i + 1..j].iter().collect();
+                    if let Some(seg) = Self::parse_kr_link_inner(&inner) {
+                        out.push(seg);
+                    } else {
+                        out.push(Segment::Plain(format!("[{}]", inner)));
+                    }
+                    i = j + 1;
+                    continue;
+                }
+            }
+
             // 处理 {...}
             if chars[i] == '{' {
                 let mut j = i + 1;
@@ -506,6 +554,30 @@ impl NpcDialogHybrid {
             return None;
         }
         Some(Segment::Action { text, action })
+    }
+
+    /// PR #1126: 解析 `[TYPE:idx|Name]` 格式
+    /// 例:`[MONSTER:5|Beetle]` → KrLink { link_type: Monster, index: 5, display_name: "Beetle" }
+    fn parse_kr_link_inner(inner: &str) -> Option<Segment> {
+        // inner: "TYPE:idx|Name" (master C# 走 Regex;我们用 split)
+        let mut parts = inner.splitn(2, '|');
+        let left = parts.next()?;
+        let name = parts.next()?.to_string();
+        let mut type_and_idx = left.splitn(2, ':');
+        let type_str = type_and_idx.next()?;
+        let idx_str = type_and_idx.next()?;
+        let index: i32 = idx_str.parse().ok()?;
+        let link_type = match type_str {
+            "MONSTER" => KrLinkType::Monster,
+            "NPC" => KrLinkType::Npc,
+            "ITEM" => KrLinkType::Item,
+            _ => return None,
+        };
+        Some(Segment::KrLink {
+            link_type,
+            index,
+            display_name: name,
+        })
     }
 
     fn parse_color_inner(inner: &str) -> Option<Segment> {
@@ -716,6 +788,8 @@ impl NpcDialogHybrid {
         let last_line = (self.index + self.maximum_lines).min(self.lines.len());
         let mut action_clicked: Option<String> = None;
         let mut link_clicked: Option<String> = None;
+        // PR #1126: 当前 hover 的 KR NPC link (用于 tooltip 渲染)
+        let mut kr_link_hovered: Option<(KrLinkType, i32, String)> = None;
 
         for (row, i) in (self.index..last_line).enumerate() {
             let y = rect.y + Self::TEXT_Y + (row as f32) * Self::LINE_STEP_Y;
@@ -759,6 +833,20 @@ impl NpcDialogHybrid {
                         draw_text_cn(&text, x, y + 14.0, Self::FONT_SIZE, color);
                         if input_enabled && hovered && is_mouse_button_pressed(MouseButton::Left) {
                             link_clicked = Some(url);
+                        }
+                        x += dims.width;
+                    }
+                    // PR #1126: KR NPC link 渲染 (黄色/红色 hover 颜色 + tooltip)
+                    Segment::KrLink { link_type, index, display_name } => {
+                        let label = format!("[{}:{}]", link_type.label(), display_name);
+                        let dims = measure_text_cn(&label, Self::FONT_SIZE);
+                        let span_rect = Rect::new(x, y, dims.width, dims.height.max(Self::LINE_STEP_Y));
+                        let hovered = span_rect.contains(mouse_pos);
+                        let color = if hovered { RED } else { Color::from_rgba(255, 200, 100, 255) };
+                        draw_text_cn(&label, x, y + 14.0, Self::FONT_SIZE, color);
+                        // Track hovered link for tooltip rendering
+                        if hovered {
+                            kr_link_hovered = Some((link_type, index, display_name.clone()));
                         }
                         x += dims.width;
                     }
@@ -918,6 +1006,29 @@ impl NpcDialogHybrid {
 
         if let Some(url) = link_clicked {
             return NpcDialogAction::OpenLink { url };
+        }
+
+        // PR #1126: 渲染 KR NPC link tooltip (master C# AttackInfoLabel 等价)
+        if let Some((link_type, index, display_name)) = kr_link_hovered {
+            let tip = match link_type {
+                KrLinkType::Monster => {
+                    // 简单版:显示 name + index;NewMonsterInfo 数据后续由
+                    // 工具提示系统读 ui_state.tooltip_cache。
+                    format!("怪物: {} (#{})", display_name, index)
+                }
+                KrLinkType::Npc => {
+                    format!("NPC: {} (#{})", display_name, index)
+                }
+                KrLinkType::Item => {
+                    format!("物品: {} (#{})", display_name, index)
+                }
+            };
+            let tip_x = mouse_pos.x + 16.0;
+            let tip_y = mouse_pos.y + 16.0;
+            let w = tip.chars().count() as f32 * 8.0 + 8.0;
+            let h = 20.0;
+            draw_rectangle(tip_x, tip_y, w, h, Color::from_rgba(0, 0, 0, 200));
+            draw_text_cn(&tip, tip_x + 4.0, tip_y + 4.0, 12.0, Color::from_rgba(255, 200, 100, 255));
         }
 
         NpcDialogAction::None
