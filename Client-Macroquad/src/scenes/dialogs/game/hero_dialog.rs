@@ -30,6 +30,21 @@ pub enum HeroBehaviour {
     Custom = 3,
 }
 
+impl HeroBehaviour {
+    /// PR #1148: 本地化字符串(对齐 master C# `ToLocalizedString` +
+    /// `ClientTextKeys.HeroBehaviourFormat = "Hero Behaviour: {0}"`).
+    /// Rust 端先返回与 C# 一致的英文模板,后续可由 L10n 系统替换。
+    pub fn to_localized_string(&self) -> String {
+        let name = match self {
+            Self::Attack => "Attack",
+            Self::CounterAttack => "CounterAttack",
+            Self::Follow => "Follow",
+            Self::Custom => "Custom",
+        };
+        format!("Hero Behaviour: {}", name)
+    }
+}
+
 impl TryFrom<u8> for HeroBehaviour {
     type Error = ();
     fn try_from(v: u8) -> Result<Self, Self::Error> {
@@ -511,8 +526,10 @@ impl HeroDialogHybrid {
     fn draw_behaviour_buttons(&mut self, mouse_pos: Vec2) {
         let btn_y = self.position.y + Self::BEHAVIOUR_BTN_Y;
         let btn_spacing = 40.0;
-        let labels = ["攻击", "反击", "跟随", "自定义"];
+        // PR #1148: labels 现在由 HeroBehaviour::to_localized_string() 动态生成,
+        // (master C# 走 `Hint = GameLanguage.ClientTextMap.GetLocalization(HeroBehaviourFormat, hb.ToLocalizedString())`)
         let behaviours = [HeroBehaviour::Attack, HeroBehaviour::CounterAttack, HeroBehaviour::Follow, HeroBehaviour::Custom];
+        let labels: Vec<String> = behaviours.iter().map(|b| b.to_localized_string()).collect();
 
         let mut clicked: Option<HeroBehaviour> = None;
 
@@ -535,7 +552,7 @@ impl HeroDialogHybrid {
             draw_rectangle(btn_x, btn_y, 36.0, 20.0, bg_color);
             draw_rectangle_lines(btn_x, btn_y, 36.0, 20.0, 1.0, Color::from_rgba(100, 100, 120, 200));
 
-            draw_text_cn(labels[i], btn_x + 6.0, btn_y + 13.0, 10.0, WHITE);
+            draw_text_cn(&labels[i], btn_x + 6.0, btn_y + 13.0, 10.0, WHITE);
 
             if is_hovered && is_mouse_button_pressed(MouseButton::Left) {
                 clicked = Some(behaviours[i]);
