@@ -405,13 +405,17 @@ impl Message<ClientData> for GateActor {
                 self.session_usernames.remove(&msg.session_id);
             }
             x if x == ClientPacketIds::Chat as i16 => {
-                // Chat - 解析并广播
+                // Chat - 解析并广播 (Phase 1.3: 输入验证)
                 if let Some(world_ref) = &self.world_ref {
                     if let Some(message) = parse_chat_payload(payload) {
-                        let _ = world_ref.ask(crate::actors::world::ChatRequest {
-                            session_id: msg.session_id,
-                            message,
-                        }).await;
+                        if !crate::util::validation::validate_chat(&message) {
+                            warn!("Session {} chat rejected: len={}", msg.session_id, message.len());
+                        } else {
+                            let _ = world_ref.ask(crate::actors::world::ChatRequest {
+                                session_id: msg.session_id,
+                                message,
+                            }).await;
+                        }
                     }
                 }
             }
