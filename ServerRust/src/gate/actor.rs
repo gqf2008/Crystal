@@ -293,15 +293,21 @@ impl Message<ClientData> for GateActor {
                 handle_new_account(&gate_ref, msg.session_id).await;
             }
             x if x == ClientPacketIds::Login as i16 => {
-                // Login - 转发到 AccountActor
+                // Login - 转发到 AccountActor (Phase 1.3: 输入验证)
                 if let Some(account_ref) = &self.account_ref {
                     if let Some((username, password)) = parse_login_payload(payload) {
-                        debug!("Login request: username={}", username);
-                        let _ = account_ref.ask(crate::actors::account::LoginRequest {
-                            session_id: msg.session_id,
-                            username,
-                            password,
-                        }).await;
+                        if !crate::util::validation::validate_username(&username) {
+                            warn!("Login rejected: invalid username '{}' from session {}", username, msg.session_id);
+                        } else if !crate::util::validation::validate_password(&password) {
+                            warn!("Login rejected: invalid password length from session {} user={}", msg.session_id, username);
+                        } else {
+                            debug!("Login request: username={}", username);
+                            let _ = account_ref.ask(crate::actors::account::LoginRequest {
+                                session_id: msg.session_id,
+                                username,
+                                password,
+                            }).await;
+                        }
                     }
                 } else {
                     warn!("AccountActor not linked");
@@ -1642,6 +1648,12 @@ fn forward_new_character(
     let class = payload[2 + name_len];
     let gender = payload[2 + name_len + 1];
     let hair = u16::from_le_bytes(payload[2 + name_len + 2..2 + name_len + 4].try_into().unwrap_or([0; 2]));
+
+    // Phase 1.3: 角色名输入验证
+    if !crate::util::validation::validate_character_name(&name) {
+        warn!("NewCharacter rejected: invalid name '{}' from session {}", name, session_id);
+        return;
+    }
     debug!("NewCharacter: session={} name={} class={} gender={} hair={}", session_id, name, class, gender, hair);
     let account_username = session_usernames.get(&session_id).cloned().unwrap_or_else(|| name.clone());
     let _ = world_ref.ask(crate::actors::world::NewCharacterRequest { session_id, name, class, gender, hair, account_username });
