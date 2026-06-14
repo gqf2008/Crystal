@@ -13,7 +13,7 @@ use tracing::{info, error, warn};
 use crystal_server::actors::account::AccountActor;
 use crystal_server::actors::world::{WorldActor, WorldActorArgs};
 use crystal_server::actors::social::{SocialActor, SocialActorArgs, SocialActorConfig};
-use crystal_server::gate::actor::{GateActor, SetAccountRef, SetWorldRef, SetMaxConnections};
+use crystal_server::gate::actor::{GateActor, SetAccountRef, SetWorldRef, SetMaxConnections, ShutdownAll};
 use crystal_server::util::config;
 use crystal_server::db;
 
@@ -140,7 +140,15 @@ async fn async_main() -> anyhow::Result<()> {
 
     // 保持运行
     tokio::signal::ctrl_c().await?;
-    info!("Shutdown signal received");
+    info!("Shutdown signal received, initiating graceful shutdown...");
+
+    // Phase 2.2: 优雅关机 — 断开所有 session 触发自动保存
+    if let Ok(count) = gate_ref.ask(ShutdownAll).await {
+        info!("Disconnect packets sent to {} sessions, waiting 5s for saves...", count);
+    }
+    // 给 actor 5 秒处理断连 + 保存
+    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+    info!("Graceful shutdown complete. Goodbye.");
 
     Ok(())
 }

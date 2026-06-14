@@ -164,6 +164,9 @@ pub struct SessionCreated {
     pub sender: SendChannel,
 }
 
+/// Phase 2.2: 优雅关机 — 断开所有 session,触发自动保存。
+pub struct ShutdownAll;
+
 /// Phase 1.1: 设置最大并发连接数(由 main.rs 从 cfg 传入)
 pub struct SetMaxConnections(pub usize);
 
@@ -244,6 +247,28 @@ impl Message<SetMaxConnections> for GateActor {
     async fn handle(&mut self, msg: SetMaxConnections, _ctx: &mut Context<Self, Self::Reply>) {
         self.max_connections = msg.0;
         info!("GateActor max_connections set to {}", self.max_connections);
+    }
+}
+
+/// Phase 2.2: 优雅关机 — 断开所有活跃 session,触发 PlayerDisconnected 保存。
+impl Message<ShutdownAll> for GateActor {
+    type Reply = usize;
+
+    async fn handle(&mut self, _msg: ShutdownAll, ctx: &mut Context<Self, Self::Reply>) -> usize {
+        let count = self.sessions.len();
+        info!("ShutdownAll: disconnecting {} active sessions", count);
+        let session_ids: Vec<u64> = self.sessions.keys().cloned().collect();
+        for sid in &session_ids {
+            let disconnect_data = crate::util::wire::build_packet_bytes(
+                mir2_shared::enums::ServerPacketIds::Disconnect as i16,
+                &[],
+            );
+            let _ = ctx.actor_ref().tell(SendToClient {
+                session_id: *sid,
+                data: disconnect_data,
+            }).await;
+        }
+        count
     }
 }
 
