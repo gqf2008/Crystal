@@ -16,7 +16,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use kameo::actor::Spawn;
 
-use crystal_server::gate::actor::{GateActor, run_gate_listener, SetAccountRef, SetWorldRef, SetMaxConnections};
+use crystal_server::gate::actor::{
+    GateActor, run_gate_listener,
+    SetAccountRef, SetWorldRef, SetMaxConnections,
+};
+use crystal_server::actors::account::AccountActor;
+use crystal_server::db;
 use crystal_server::gate::codec;
 
 const XOR_KEY: u8 = 0xAA;
@@ -63,30 +68,40 @@ async fn recv_packet(stream: &mut TcpStream) -> (i16, Vec<u8>) {
 
 /// 启动服务器并返回端口。
 async fn start_server() -> u16 {
+    let port = find_free_port();
     let gate_ref = GateActor::spawn(());
     let _ = gate_ref.ask(SetMaxConnections(1024)).await;
 
-    // 启动 TCP listener 在随机端口
-    let gate_ref_clone = gate_ref.clone();
-    let (port_tx, port_rx) = std::sync::mpsc::channel();
-
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move {
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let port = listener.local_addr().unwrap().port();
-            let addr = format!("127.0.0.1:{}", port);
-            port_tx.send(port).unwrap();
-            drop(listener); // 释放端口让 run_gate_listener 重新绑定
-
-            // 用 run_gate_listener 重新绑定(它内部自己 bind)
-            let _ = run_gate_listener(addr, gate_ref_clone).await;
-        });
+    tokio::spawn(async move {
+        let _ = run_gate_listener(format!("127.0.0.1:{}", port), gate_ref).await;
     });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    port
+}
 
-    // 等待端口就绪
-    let port = port_rx.recv_timeout(Duration::from_secs(5)).expect("server start timeout");
-    tokio::time::sleep(Duration::from_millis(100)).await; // 等 listener 就绪
+/// 启动带 AccountActor 的服务器(支持 Login 流程)。
+async fn start_server_with_login() -> u16 {
+    let port = find_free_port();
+    let gate_ref = GateActor::spawn(());
+    let _ = gate_ref.ask(SetMaxConnections(1024)).await;
+
+    // AccountActor + in-memory DB
+    let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
+    let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool));
+    let _ = gate_ref.ask(SetAccountRef { account_ref }).await;
+
+    tokio::spawn(async move {
+        let _ = run_gate_listener(format!("127.0.0.1:{}", port), gate_ref).await;
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    port
+}
+
+/// 找一个空闲端口(bind 一次然后释放)。
+fn find_free_port() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
     port
 }
 
@@ -155,4 +170,58 @@ async fn test_keepalive_roundtrip() {
     assert_eq!(resp_opcode, 3, "Expected ServerPacketIds::KeepAlive (opcode=3)");
     // 服务端 KeepAlive 响应 body 为空 (build_packet_bytes(KeepAlive, &[]))
     assert!(resp_body.is_empty(), "Server KeepAlive response has empty body");
+}
+
+#[tokio::test]
+async fn test_login_full_flow() {
+    let port = start_server_with_login().await;
+    let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port))
+        .await
+        .expect("connect");
+
+    // 1. 收到 Connected
+    let (opcode, _) = recv_packet(&mut stream).await;
+    assert_eq!(opcode, 0, "Expected Connected");
+
+    // 2. 发送 ClientVersion
+    let hash = b"test_hash_12345!";
+    let mut cv_body = Vec::new();
+    cv_body.extend_from_slice(&(hash.len() as i32).to_le_bytes());
+    cv_body.extend_from_slice(hash);
+    stream.write_all(&make_packet(0, &cv_body)).await.expect("send CV");
+
+    // 消费 ClientVersion 响应
+    let _ = recv_packet(&mut stream).await;
+
+    // 3. 发送 NewAccount (opcode=3) — 服务端 auto-register
+    stream.write_all(&make_packet(3, &[])).await.expect("send NewAccount");
+
+    // 消费 NewAccount 响应
+    let _ = recv_packet(&mut stream).await;
+
+    // 4. 发送 Login (opcode=5): [username: DotNetString][password: DotNetString]
+    let mut login_body = Vec::new();
+    mir2_shared::binary::write_dotnet_string(&mut login_body, "testuser").unwrap();
+    mir2_shared::binary::write_dotnet_string(&mut login_body, "testpass").unwrap();
+    stream.write_all(&make_packet(5, &login_body)).await.expect("send Login");
+
+    // 5. 接收 Login 响应
+    //    成功 → ServerPacketIds::LoginSuccess (opcode=9), body=[count=0i32]
+    //    失败 → ServerPacketIds::Login (opcode=7), body=[4u8]
+    let (resp_opcode, resp_body) = tokio::time::timeout(
+        Duration::from_secs(5),
+        recv_packet(&mut stream),
+    ).await.expect("Login response timeout");
+
+    if resp_opcode == 9 {
+        // LoginSuccess: body starts with character count (i32)
+        assert!(resp_body.len() >= 4, "LoginSuccess body should have count field");
+        let count = i32::from_le_bytes(resp_body[0..4].try_into().unwrap_or([0; 4]));
+        assert_eq!(count, 0, "New account should have 0 characters");
+        tracing::info!("✅ LoginSuccess: 0 characters");
+    } else if resp_opcode == 7 {
+        panic!("Login failed (opcode=7): {}", resp_body.first().unwrap_or(&0));
+    } else {
+        panic!("Unexpected login response opcode={}, expected 9 (LoginSuccess) or 7 (Login fail)", resp_opcode);
+    }
 }
