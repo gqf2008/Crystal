@@ -32,7 +32,8 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     sqlx::query("PRAGMA foreign_keys=ON").execute(&pool).await?;
 
     // Create tables if not exists
-    sqlx::query(
+    // Phase A fix: sqlx::query() 不支持多语句;改用 raw_sql() 执行整个 schema 批次
+    sqlx::raw_sql(
         r#"
         CREATE TABLE IF NOT EXISTS accounts (
             username TEXT PRIMARY KEY,
