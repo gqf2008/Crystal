@@ -458,6 +458,22 @@ impl Message<WorldMoveRequest> for WorldActor {
             if state.is_dead { return; }
         }
 
+        // Phase 1.4: 反作弊 — 速度 hack 检测
+        // 正常移动间隔: Walk ~200ms, Run ~150ms。
+        // 阈值 50ms 容忍网络抖动,但拒绝明显的瞬移/速度 hack。
+        const MIN_MOVE_INTERVAL_MS: u64 = 50;
+        if let Some(last) = self.last_move_time.get(&msg.session_id) {
+            let elapsed = last.elapsed();
+            if elapsed < std::time::Duration::from_millis(MIN_MOVE_INTERVAL_MS) {
+                warn!(
+                    "Speed hack detected: session {} moved after {:?} (min={:?})",
+                    msg.session_id, elapsed, MIN_MOVE_INTERVAL_MS
+                );
+                return; // 拒绝移动
+            }
+        }
+        self.last_move_time.insert(msg.session_id, std::time::Instant::now());
+
         let move_type = if msg.is_run { MoveType::Run } else { MoveType::Walk };
 
         // 发送移动请求到 PlayerActor

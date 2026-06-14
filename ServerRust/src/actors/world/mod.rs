@@ -567,6 +567,8 @@ pub struct WorldActor {
     pub(crate) global_event_name: Option<String>,
     /// 隐身中的玩家 session 集合（用于视野管理）
     pub(crate) invisible_sessions: std::collections::HashSet<u64>,
+    /// Phase 1.4: 反作弊 — 每个玩家上次移动时间戳(用于速度 hack 检测)
+    pub(crate) last_move_time: std::collections::HashMap<u64, std::time::Instant>,
     /// 当前光照设置（0=Normal, 1=Dawn, 2=Day, 3=Evening, 4=Night）
     pub(crate) current_light: mir2_shared::enums::LightSetting,
     /// 寄售/拍卖列表
@@ -672,6 +674,7 @@ impl WorldActor {
             global_exp_event_end_tick: 0,
             global_event_name: None,
             invisible_sessions: HashSet::new(),
+            last_move_time: std::collections::HashMap::new(),
             current_light: Self::light_for_hour(chrono::Local::now().hour()),
             auctions: Vec::new(),
             next_auction_id: 1,
@@ -2448,6 +2451,7 @@ impl Actor for WorldActor {
             global_exp_event_end_tick: 0,
             global_event_name: None,
             invisible_sessions: HashSet::new(),
+            last_move_time: std::collections::HashMap::new(),
             current_light: Self::light_for_hour(chrono::Local::now().hour()),
             auctions,
             next_auction_id,
