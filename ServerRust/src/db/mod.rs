@@ -730,6 +730,11 @@ pub async fn delete_character(pool: &DbPool, character_name: &str) -> anyhow::Re
 // ============================================================
 
 pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username: &str) -> anyhow::Result<()> {
+    // Phase 1.2: 全量事务 — characters + inventory + friends + mail + quests
+    // + creatures + refine + magics + flags 原子写入。
+    // 如果任何步骤失败,整个事务回滚,不会出现半保存状态。
+    let mut tx = pool.begin().await?;
+
     // Save character
     sqlx::query(
         r#"INSERT OR REPLACE INTO characters (
@@ -795,36 +800,38 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     .bind(if state.is_dead { 1 } else { 0 })
     .bind(state.pk_points)
     .bind(state.pk_kill_count as i32)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
 
     // Save backpack
-    save_inventory(pool, &state.name, &state.inventory).await?;
+    save_inventory(&mut *tx, &state.name, &state.inventory).await?;
 
     // Save hero inventory
-    save_hero_inventory(pool, &state.name, &state.hero_inventory).await?;
+    save_hero_inventory(&mut *tx, &state.name, &state.hero_inventory).await?;
 
     // Save friends
-    save_friends(pool, &state.name, &state.friend_list).await?;
+    save_friends(&mut *tx, &state.name, &state.friend_list).await?;
 
     // Save mail
-    save_mail(pool, &state.name, &state.mailbox).await?;
+    save_mail(&mut *tx, &state.name, &state.mailbox).await?;
 
     // Save quests
-    save_quests(pool, &state.name, &state.quest_log).await?;
+    save_quests(&mut *tx, &state.name, &state.quest_log).await?;
 
     // Save creatures
-    save_creatures(pool, &state.name, &state.creature_log).await?;
+    save_creatures(&mut *tx, &state.name, &state.creature_log).await?;
 
     // Save refine
-    save_refine(pool, &state.name, &state.refine_log).await?;
+    save_refine(&mut *tx, &state.name, &state.refine_log).await?;
 
     // Save magics
-    save_magics(pool, &state.name, &state.magics).await?;
+    save_magics(&mut *tx, &state.name, &state.magics).await?;
 
     // Save flags
-    save_flags(pool, &state.name, &state.flags).await?;
+    save_flags(&mut *tx, &state.name, &state.flags).await?;
 
+    // 提交事务 — 所有写入原子生效
+    tx.commit().await?;
     Ok(())
 }
 
@@ -971,14 +978,14 @@ fn parse_pet_mode(s: &str) -> mir2_shared::enums::PetMode {
 // Inventory save/load
 // ============================================================
 
-async fn save_inventory(pool: &DbPool, character_name: &str, inv: &PlayerInventory) -> anyhow::Result<()> {
+async fn save_inventory(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, inv: &PlayerInventory) -> anyhow::Result<()> {
     // Clear existing
     sqlx::query("DELETE FROM inventory_backpack WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name).execute(&mut *conn).await?;
     sqlx::query("DELETE FROM inventory_equipment WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name).execute(&mut *conn).await?;
     sqlx::query("DELETE FROM inventory_storage WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name).execute(&mut *conn).await?;
 
     // Backpack
     for (grid, slot) in inv.backpack.iter().enumerate() {
@@ -986,7 +993,7 @@ async fn save_inventory(pool: &DbPool, character_name: &str, inv: &PlayerInvento
             let item_json = serde_json::to_string(&s.item)?;
             sqlx::query("INSERT INTO inventory_backpack (character_name, grid, item_json) VALUES (?, ?, ?)")
                 .bind(character_name).bind(grid as i32).bind(&item_json)
-                .execute(pool).await?;
+                .execute(&mut *conn).await?;
         }
     }
 
@@ -996,7 +1003,7 @@ async fn save_inventory(pool: &DbPool, character_name: &str, inv: &PlayerInvento
             let item_json = serde_json::to_string(item)?;
             sqlx::query("INSERT INTO inventory_equipment (character_name, slot, item_json) VALUES (?, ?, ?)")
                 .bind(character_name).bind(slot as i32).bind(&item_json)
-                .execute(pool).await?;
+                .execute(&mut *conn).await?;
         }
     }
 
@@ -1006,7 +1013,7 @@ async fn save_inventory(pool: &DbPool, character_name: &str, inv: &PlayerInvento
             let item_json = serde_json::to_string(&s.item)?;
             sqlx::query("INSERT INTO inventory_storage (character_name, grid, item_json) VALUES (?, ?, ?)")
                 .bind(character_name).bind(grid as i32).bind(&item_json)
-                .execute(pool).await?;
+                .execute(&mut *conn).await?;
         }
     }
 
@@ -1077,16 +1084,16 @@ async fn load_inventory(pool: &DbPool, character_name: &str) -> anyhow::Result<P
 // Hero inventory save/load
 // ============================================================
 
-async fn save_hero_inventory(pool: &DbPool, character_name: &str, inv: &PlayerInventory) -> anyhow::Result<()> {
+async fn save_hero_inventory(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, inv: &PlayerInventory) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM hero_inventory_backpack WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name).execute(&mut *conn).await?;
 
     for (grid, slot) in inv.backpack.iter().enumerate() {
         if let Some(s) = slot {
             let item_json = serde_json::to_string(&s.item)?;
             sqlx::query("INSERT INTO hero_inventory_backpack (character_name, grid, item_json) VALUES (?, ?, ?)")
                 .bind(character_name).bind(grid as i32).bind(&item_json)
-                .execute(pool).await?;
+                .execute(&mut *conn).await?;
         }
     }
 
@@ -1121,18 +1128,18 @@ async fn load_hero_inventory(pool: &DbPool, character_name: &str) -> anyhow::Res
 // Friends save/load
 // ============================================================
 
-async fn save_friends(pool: &DbPool, character_name: &str, list: &FriendList) -> anyhow::Result<()> {
+async fn save_friends(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, list: &FriendList) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM friends WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name).execute(&mut *conn).await?;
     sqlx::query("DELETE FROM blocked_list WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name).execute(&mut *conn).await?;
 
     for f in &list.friends {
         sqlx::query(
             "INSERT INTO friends (character_name, friend_object_id, friend_name, memo) VALUES (?, ?, ?, ?)"
         )
         .bind(character_name).bind(f.object_id as i64).bind(&f.name).bind(&f.memo)
-        .execute(pool).await?;
+        .execute(&mut *conn).await?;
     }
 
     for b in &list.blocked {
@@ -1140,7 +1147,7 @@ async fn save_friends(pool: &DbPool, character_name: &str, list: &FriendList) ->
             "INSERT INTO blocked_list (character_name, blocked_object_id, blocked_name) VALUES (?, ?, ?)"
         )
         .bind(character_name).bind(b.object_id as i64).bind(&b.name)
-        .execute(pool).await?;
+        .execute(&mut *conn).await?;
     }
 
     Ok(())
@@ -1185,9 +1192,9 @@ async fn load_friends(pool: &DbPool, character_name: &str) -> anyhow::Result<Fri
 // Mail save/load
 // ============================================================
 
-async fn save_mail(pool: &DbPool, character_name: &str, mailbox: &Mailbox) -> anyhow::Result<()> {
+async fn save_mail(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, mailbox: &Mailbox) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM mail WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name).execute(&mut *conn).await?;
 
     for m in &mailbox.inbox {
         let items_json = serde_json::to_string(&m.items)?;
@@ -1207,7 +1214,7 @@ async fn save_mail(pool: &DbPool, character_name: &str, mailbox: &Mailbox) -> an
         .bind(if m.locked { 1 } else { 0 })
         .bind(m.gold as i64)
         .bind(&items_json)
-        .execute(pool).await?;
+        .execute(&mut *conn).await?;
     }
 
     Ok(())
@@ -1274,11 +1281,11 @@ pub async fn insert_mail(pool: &DbPool, character_name: &str, mail: &MailMessage
 // Quests save/load
 // ============================================================
 
-async fn save_quests(pool: &DbPool, character_name: &str, log: &QuestLog) -> anyhow::Result<()> {
+async fn save_quests(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, log: &QuestLog) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM quests WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name).execute(&mut *conn).await?;
     sqlx::query("DELETE FROM completed_quests WHERE character_name = ?")
-        .bind(character_name).execute(pool).await?;
+        .bind(character_name).execute(&mut *conn).await?;
 
     for q in &log.quests {
         let progress_json = serde_json::to_string(&q.progress)?;
@@ -1301,13 +1308,13 @@ async fn save_quests(pool: &DbPool, character_name: &str, log: &QuestLog) -> any
         .bind(q.gold_reward as i64)
         .bind(q.start_time as i64)
         .bind(q.time_limit_seconds)
-        .execute(pool).await?;
+        .execute(&mut *conn).await?;
     }
 
     for qi in &log.completed_indices {
         sqlx::query("INSERT INTO completed_quests (character_name, quest_index) VALUES (?, ?)")
             .bind(character_name).bind(qi)
-            .execute(pool).await?;
+            .execute(&mut *conn).await?;
     }
 
     Ok(())
@@ -1435,7 +1442,7 @@ pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>
 // Creatures save/load
 // ============================================================
 
-async fn save_creatures(pool: &DbPool, character_name: &str, log: &CreatureLog) -> anyhow::Result<()> {
+async fn save_creatures(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, log: &CreatureLog) -> anyhow::Result<()> {
     let owned_json = serde_json::to_string(&log.owned_creatures)?;
 
     let (active_type, active_custom_name, active_pickup_mode, active_hunger, active_enabled) =
@@ -1459,7 +1466,7 @@ async fn save_creatures(pool: &DbPool, character_name: &str, log: &CreatureLog) 
     .bind(active_enabled)
     .bind(&owned_json)
     .bind(if log.request_updates { 1 } else { 0 })
-    .execute(pool).await?;
+    .execute(&mut *conn).await?;
 
     Ok(())
 }
@@ -1508,7 +1515,7 @@ async fn load_creatures(pool: &DbPool, character_name: &str) -> anyhow::Result<C
 // Refine save/load
 // ============================================================
 
-async fn save_refine(pool: &DbPool, character_name: &str, log: &RefineLog) -> anyhow::Result<()> {
+async fn save_refine(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, log: &RefineLog) -> anyhow::Result<()> {
     let (uid, item_index, start_time, finish_time, status, success_chance) =
         if let Some(item) = &log.active_refine {
             (
@@ -1539,7 +1546,7 @@ async fn save_refine(pool: &DbPool, character_name: &str, log: &RefineLog) -> an
     .bind(success_chance)
     .bind(log.total_refines as i32)
     .bind(log.successful_refines as i32)
-    .execute(pool).await?;
+    .execute(&mut *conn).await?;
 
     Ok(())
 }
@@ -1595,11 +1602,11 @@ impl RefineStatus {
     }
 }
 
-async fn save_magics(pool: &DbPool, character_name: &str, magics: &[crate::actors::player::PlayerMagic]) -> anyhow::Result<()> {
+async fn save_magics(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, magics: &[crate::actors::player::PlayerMagic]) -> anyhow::Result<()> {
     // Delete existing magics for this character
     sqlx::query("DELETE FROM player_magics WHERE character_name = ?")
         .bind(character_name)
-        .execute(pool).await?;
+        .execute(&mut *conn).await?;
     // Insert current magics
     for magic in magics {
         sqlx::query(
@@ -1611,7 +1618,7 @@ async fn save_magics(pool: &DbPool, character_name: &str, magics: &[crate::actor
         .bind(magic.experience as i32)
         .bind(magic.key as i32)
         .bind(if magic.toggled { 1i32 } else { 0i32 })
-        .execute(pool).await?;
+        .execute(&mut *conn).await?;
     }
     Ok(())
 }
@@ -1634,16 +1641,16 @@ async fn load_magics(pool: &DbPool, character_name: &str) -> anyhow::Result<Vec<
     Ok(magics)
 }
 
-async fn save_flags(pool: &DbPool, character_name: &str, flags: &std::collections::HashMap<String, i32>) -> anyhow::Result<()> {
+async fn save_flags(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, flags: &std::collections::HashMap<String, i32>) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM player_flags WHERE character_name = ?")
         .bind(character_name)
-        .execute(pool).await?;
+        .execute(&mut *conn).await?;
     for (key, value) in flags {
         sqlx::query("INSERT INTO player_flags (character_name, flag_key, flag_value) VALUES (?, ?, ?)")
             .bind(character_name)
             .bind(key)
             .bind(*value)
-            .execute(pool).await?;
+            .execute(&mut *conn).await?;
     }
     Ok(())
 }
@@ -2654,7 +2661,7 @@ mod tests {
         flags.insert("quest_started".to_string(), 1);
         flags.insert("npc_talk_count".to_string(), 5);
 
-        save_flags(&pool, "Hero", &flags).await.unwrap();
+        let mut conn = pool.acquire().await.unwrap(); save_flags(&mut *conn, "Hero", &flags).await.unwrap();
         let loaded = load_flags(&pool, "Hero").await.unwrap();
 
         assert_eq!(loaded.len(), 2);
@@ -2667,12 +2674,12 @@ mod tests {
         let pool = temp_pool().await;
         let mut flags = HashMap::new();
         flags.insert("key".to_string(), 10);
-        save_flags(&pool, "Hero", &flags).await.unwrap();
+        let mut conn = pool.acquire().await.unwrap(); save_flags(&mut *conn, "Hero", &flags).await.unwrap();
 
         let mut flags2 = HashMap::new();
         flags2.insert("key".to_string(), 20);
         flags2.insert("new_key".to_string(), 30);
-        save_flags(&pool, "Hero", &flags2).await.unwrap();
+        let mut conn = pool.acquire().await.unwrap(); save_flags(&mut *conn, "Hero", &flags2).await.unwrap();
 
         let loaded = load_flags(&pool, "Hero").await.unwrap();
         assert_eq!(loaded.len(), 2);
