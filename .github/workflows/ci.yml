@@ -1,0 +1,86 @@
+# Crystal CI — Phase 2.1: 自动化构建 + 测试 + lint
+# 三个 crate:SharedRust / ServerRust / Client-Macroquad
+
+name: CI
+
+on:
+  push:
+    branches: [master, marcoquad-native-ui]
+  pull_request:
+    branches: [master]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  shared:
+    name: SharedRust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: SharedRust
+      - name: fmt check
+        working-directory: SharedRust
+        run: cargo fmt -- --check
+      - name: clippy
+        working-directory: SharedRust
+        run: cargo clippy --lib -- -D warnings
+      - name: test
+        working-directory: SharedRust
+        run: cargo test --lib
+
+  server:
+    name: ServerRust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ServerRust
+      - name: Install SQLite dev
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev pkg-config
+      - name: fmt check
+        working-directory: ServerRust
+        run: cargo fmt -- --check
+      - name: clippy
+        working-directory: ServerRust
+        run: cargo clippy --lib -- -D warnings
+      - name: test
+        working-directory: ServerRust
+        run: cargo test --lib
+      - name: build release
+        working-directory: ServerRust
+        run: cargo build --release --bin mir2_server
+
+  client:
+    name: Client-Macroquad
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Install system deps (macroquad needs)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libasound2-dev libfreetype6-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: Client-Macroquad
+      - name: clippy
+        working-directory: Client-Macroquad
+        run: cargo clippy --lib -- -D warnings
+      - name: test
+        working-directory: Client-Macroquad
+        run: cargo test --lib

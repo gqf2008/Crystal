@@ -1,0 +1,11 @@
+# Docker ignore — 减少构建上下文体积
+target/
+data/
+Data/
+Daneo1989/
+*.db
+*.db-wal
+*.db-shm
+*.exe
+*.pdb
+.git/
