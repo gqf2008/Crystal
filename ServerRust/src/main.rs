@@ -136,6 +136,18 @@ async fn async_main() -> anyhow::Result<()> {
         }
     });
 
+    // Phase 3.1: 启动 admin health check 服务器
+    let admin_stats = Arc::new(crystal_server::util::admin::AdminStats::default());
+    let admin_stats_clone = admin_stats.clone();
+    let admin_port = 7001; // 固定端口(后续可从 cfg 读)
+    tokio::spawn(async move {
+        crystal_server::util::admin::run_admin_server(
+            admin_stats_clone,
+            format!("0.0.0.0:{}", admin_port),
+        ).await;
+    });
+    info!("Admin health check on port {}", admin_port);
+
     info!("Server is ready! Press Ctrl+C to stop.");
 
     // 保持运行

@@ -36,8 +36,8 @@ COPY --from=builder /build/ServerRust/target/release/mir2_server /app/mir2_serve
 # 拷贝配置 + 数据目录(容器启动后需要挂载 Data/ 和 Daneo1989/)
 COPY ServerRust/config/ /app/config/
 
-# 暴露游戏端口 + admin 端口(可选)
-EXPOSE 7000
+# 暴露游戏端口 + admin health check 端口
+EXPOSE 7000 7001
 
 # 环境变量
 ENV RUST_LOG=info
