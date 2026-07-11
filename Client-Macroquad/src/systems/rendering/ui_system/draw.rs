@@ -221,7 +221,15 @@ pub fn draw(sys: &mut UIRenderSystem, _world: &hecs::World) -> GameResult {
     sys.npc_awake_dialog.draw(screen_width(), screen_height(), mouse_pos,
         is_mouse_button_pressed(MouseButton::Left));
 
-    // 合成
+    // 合成（先注入玩家金币用于 Gold 校验）
+    {
+        use crate::components::{Currency, LocalPlayer};
+        let player_gold = _world.iter().find_map(|e| {
+            e.get::<&LocalPlayer>()?;
+            _world.get::<&Currency>(e.entity()).ok().map(|c| c.gold)
+        }).unwrap_or(0);
+        sys.craft_dialog.set_player_gold(player_gold);
+    }
     if let Some(craft_data) = sys.craft_dialog.draw(screen_width(), screen_height(), mouse_pos,
         wheel_y, is_mouse_button_pressed(MouseButton::Left)) {
         if let Some(s) = _world.query::<&UiState>().iter().next() {
@@ -230,6 +238,11 @@ pub fn draw(sys: &mut UIRenderSystem, _world: &hecs::World) -> GameResult {
                 count: craft_data.count,
                 slots: craft_data.slots,
             });
+        }
+    }
+    if let Some(warn) = sys.craft_dialog.take_gold_warn() {
+        if let Some(s) = _world.query::<&UiState>().iter().next() {
+            s.borrow_mut().pending_commands.push(UiCommand::PushSystemChatLine(warn));
         }
     }
 
@@ -250,6 +263,13 @@ pub fn draw(sys: &mut UIRenderSystem, _world: &hecs::World) -> GameResult {
     // 寄售行
     sys.trust_merchant_dialog.draw(screen_width(), screen_height(), mouse_pos,
         wheel_y, is_mouse_button_pressed(MouseButton::Left));
+
+    // 举报 / Bug 反馈对话框
+    if sys.report_dialog.is_visible() {
+        if let Some(issue) = sys.report_dialog.draw(mouse_pos, left_clicked) {
+            sys.pending_report_issue = Some(issue);
+        }
+    }
 
     // UI -> ECS：小地图点击自动寻路（在 show_dialogs 后取，保证同帧可用）
     if let Some(target) = sys.main_dialog.take_pending_auto_path_target() {

@@ -37,6 +37,17 @@ impl WorldActor {
                     let _ = record.actor_ref.ask(crate::actors::player::Revive).await;
                 }
             }
+
+            // 怪物 Poison tick（与玩家同步，每 5 ticks 推进 1 秒）
+            for (_, monster) in &mut self.monsters {
+                if monster.poison_list.is_empty() {
+                    continue;
+                }
+                let dmg = crate::combat::poison::tick_poisons(&mut monster.poison_list, 1);
+                if dmg > 0 {
+                    monster.hp = monster.hp.saturating_sub(dmg);
+                }
+            }
         }
     }
 
@@ -380,6 +391,23 @@ impl WorldActor {
                 provoked: false,
                 is_elite,
                 is_boss: false,
+                min_ac: 0,
+                max_ac: 0,
+                min_mac: 0,
+                max_mac: 0,
+                agility: 0,
+                accuracy: 0,
+                armour_rate: 1.0,
+                damage_rate: 1.0,
+                magic_resist: 0,
+                critical_rate: 0,
+                critical_damage: 0,
+                luck: 0,
+                reflect: 0,
+                damage_reduction_percent: 0,
+                poison_list: Vec::new(),
+            undead: false,
+                behavior: crate::actors::world::ai::make_behavior(&name),
             });
             if is_elite {
                 let map_name = self.map_infos.get(&(spawn.map_index as i32)).map(|m| m.title.clone()).unwrap_or_else(|| "未知地图".to_string());
@@ -849,15 +877,18 @@ impl WorldActor {
     }
 
     pub(crate) async fn tick_spells(&mut self) {
-        use mir2_shared::enums::Spell;
+        use mir2_shared::enums::{Spell, PoisonType};
         use crate::actors::player::{GetPlayerState, Heal};
+        use crate::combat::{attack, poison};
 
         let now = std::time::Instant::now();
         let mut expired_ids = Vec::new();
-        let mut affected_monsters: Vec<(u32, i32)> = Vec::new();
+        // 收集需要结算的 spell tick：(caster_session, spell, x, y, tick_value, 命中怪物 ids)
+        let mut spell_hits: Vec<(u64, Spell, i32, i32, i32, Vec<u32>)> = Vec::new();
         let mut heal_targets: Vec<u64> = Vec::new();
         let mut heal_amounts: Vec<i32> = Vec::new();
 
+        // 第一阶段：遍历 spell_objects，更新 tick 时间，收集命中怪物 id
         for (obj_id, spell_obj) in &mut self.spell_objects {
             let elapsed = now.duration_since(spell_obj.created_at).as_millis() as u64;
             if spell_obj.is_expired(elapsed) {
@@ -872,11 +903,23 @@ impl WorldActor {
 
             match spell_obj.spell {
                 Spell::FireWall | Spell::Blizzard | Spell::MeteorStrike | Spell::PoisonCloud => {
-                    for (mid, monster) in &self.monsters {
-                        let dist = (monster.x - spell_obj.x).abs() + (monster.y - spell_obj.y).abs();
-                        if dist <= 1 && monster.hp > 0 {
-                            affected_monsters.push((*mid, spell_obj.tick_value.max(1)));
-                        }
+                    // 持久伤害法术：命中 spell 位置 ±1 的怪物（C# SpellObject.ProcessSpell 按单格）
+                    let hit_ids: Vec<u32> = self.monsters.iter()
+                        .filter(|(_, m)| {
+                            let dist = (m.x - spell_obj.x).abs() + (m.y - spell_obj.y).abs();
+                            dist <= 1 && m.hp > 0
+                        })
+                        .map(|(id, _)| *id)
+                        .collect();
+                    if !hit_ids.is_empty() {
+                        spell_hits.push((
+                            spell_obj.caster_session,
+                            spell_obj.spell,
+                            spell_obj.x,
+                            spell_obj.y,
+                            spell_obj.tick_value,
+                            hit_ids,
+                        ));
                     }
                 }
                 Spell::HealingCircle => {
@@ -897,11 +940,18 @@ impl WorldActor {
                 Spell::ExplosiveTrap => {
                     if !spell_obj.detonated {
                         spell_obj.detonated = true;
-                        for (mid, monster) in &self.monsters {
-                            let dist = (monster.x - spell_obj.x).abs() + (monster.y - spell_obj.y).abs();
-                            if dist <= 1 && monster.hp > 0 {
-                                affected_monsters.push((*mid, spell_obj.tick_value.max(1)));
-                            }
+                        let hit_ids: Vec<u32> = self.monsters.iter()
+                            .filter(|(_, m)| {
+                                let dist = (m.x - spell_obj.x).abs() + (m.y - spell_obj.y).abs();
+                                dist <= 1 && m.hp > 0
+                            })
+                            .map(|(id, _)| *id)
+                            .collect();
+                        if !hit_ids.is_empty() {
+                            spell_hits.push((
+                                spell_obj.caster_session, spell_obj.spell,
+                                spell_obj.x, spell_obj.y, spell_obj.tick_value, hit_ids,
+                            ));
                         }
                         expired_ids.push(*obj_id);
                     }
@@ -910,12 +960,68 @@ impl WorldActor {
             }
         }
 
-        for (monster_id, damage) in &affected_monsters {
-            if let Some(monster) = self.monsters.get_mut(monster_id) {
-                monster.hp = monster.hp.saturating_sub(*damage);
-                monster.provoked = true;
+        // 第二阶段：对每个命中的怪物走战斗公式（MAC 防御 + 暴击 + 附加状态）
+        // 按施法者分组缓存 CombatStats，减少 GetPlayerState 调用
+        let mut caster_cache: std::collections::HashMap<u64, crate::combat::attack::CombatStats> = std::collections::HashMap::new();
+        for (caster_session, spell, _sx, _sy, tick_value, hit_ids) in spell_hits {
+            // 获取施法者 CombatStats
+            let attacker_stats = if let Some(cs) = caster_cache.get(&caster_session) {
+                *cs
+            } else {
+                let stats = match self.players.get(&caster_session) {
+                    Some(r) => match r.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(s)) if !s.is_dead => s.to_combat_stats(),
+                        _ => continue, // 施法者离线/死亡，跳过本次 tick
+                    },
+                    None => continue,
+                };
+                caster_cache.insert(caster_session, stats);
+                stats
+            };
+
+            for mid in hit_ids {
+                if let Some(monster) = self.monsters.get_mut(&mid) {
+                    let defender_stats = monster.to_combat_stats();
+                    let level_offset = 10u16; // 怪物等级暂按 0（level_offset = min(10, attacker_level)）
+                    let raw_damage = tick_value.max(1);
+                    let r = attack::resolve_attack(
+                        &attacker_stats, &defender_stats, raw_damage,
+                        mir2_shared::enums::DefenceType::Mac, level_offset,
+                    );
+                    if r.is_hit && r.damage > 0 {
+                        monster.hp = monster.hp.saturating_sub(r.damage);
+                        monster.provoked = true;
+                        monster.target_session = Some(caster_session);
+
+                        // 各法术附加状态（对齐 C# SpellObject.ProcessSpell）
+                        match spell {
+                            // Blizzard：1/8 概率 Slow（C# SpellObject.cs:175）
+                            Spell::Blizzard => {
+                                if fastrand::i32(0..8) == 0 {
+                                    let dur = (5 + fastrand::i32(0..attacker_stats.freezing.max(1))) as u32;
+                                    poison::apply_poison(&mut monster.poison_list,
+                                        poison::Poison::new(PoisonType::SLOW, dur, 0, 2000));
+                                }
+                            }
+                            // PoisonCloud：绿毒（C# SpellObject.cs:157，道术但已在持久列表）
+                            Spell::PoisonCloud => {
+                                let sc = attacker_stats.max_atk; // 暂用 atk 近似 SC（道术字段待补）
+                                let poison_value = (sc / 2).min(10);
+                                poison::apply_poison(&mut monster.poison_list,
+                                    poison::Poison::new(PoisonType::GREEN, 12, poison_value, 1000));
+                            }
+                            // FireWall / MeteorStrike：纯伤害无附加
+                            _ => {}
+                        }
+                        // 战斗触发的 Poison（攻击者 freezing/poison_attack）
+                        for p in &r.applied_poisons {
+                            poison::apply_poison(&mut monster.poison_list, *p);
+                        }
+                    }
+                }
             }
         }
+
         for (sid, amount) in heal_targets.iter().zip(heal_amounts.iter()) {
             if let Some(record) = self.players.get(sid) {
                 let _ = record.actor_ref.ask(Heal { amount: *amount }).await;
@@ -923,6 +1029,253 @@ impl WorldActor {
         }
         for id in &expired_ids {
             self.spell_objects.remove(id);
+        }
+    }
+
+    /// 弹道法术延迟结算（对齐 C# HumanObject.CompleteMagic）
+    ///
+    /// 每 tick 检查 pending_spell_completions 中到期的项，按 spell 分支结算：
+    /// - FireBall/GreatFireBall/ThunderBolt：单目标 MAC 伤害（ThunderBolt 亡灵 +50%）
+    /// - FrostCrunch：MAC 伤害 + 概率 Slow/Frozen
+    /// - Vampirism：MAC 伤害 + 吸血
+    pub(crate) async fn tick_spell_completions(&mut self) {
+        use mir2_shared::enums::{DefenceType, Spell, PoisonType};
+        use crate::combat::{attack, poison};
+
+        if self.pending_spell_completions.is_empty() {
+            return;
+        }
+
+        // 取出到期的项
+        let now = self.tick_count;
+        let mut ready: Vec<PendingSpellCompletion> = Vec::new();
+        self.pending_spell_completions.retain(|p| {
+            if p.fire_at_tick <= now {
+                ready.push(p.clone());
+                false
+            } else {
+                true
+            }
+        });
+
+        if ready.is_empty() {
+            return;
+        }
+
+        // 按施法者分组，减少 GetPlayerState 调用
+        for pending in ready {
+            // 获取施法者状态
+            let record = match self.players.get(&pending.session_id) {
+                Some(r) => r.clone(),
+                None => continue,
+            };
+            let caster_state = match record.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(s)) => s,
+                _ => continue,
+            };
+            if caster_state.is_dead {
+                continue;
+            }
+            let attacker_stats = caster_state.to_combat_stats();
+            let level_offset = caster_state.level.min(10) as u16;
+            let spell_enum = Spell::try_from(pending.spell).unwrap_or(Spell::None);
+
+            // 弹道类法术目标可能是怪物或玩家
+            // 先查怪物（按 object_id），再查玩家
+            // C# 用 InRange(target.CurrentLocation, targetLocation, 2) 防移动 miss
+
+            match spell_enum {
+                Spell::FireBall | Spell::GreatFireBall | Spell::ThunderBolt | Spell::FrostCrunch
+                | Spell::Vampirism
+                // 弓箭手弹道物理系（命中后按 AC 防御结算，BindingShot/NapalmShot 附加效果）
+                | Spell::StraightShot | Spell::DoubleShot
+                | Spell::BindingShot | Spell::NapalmShot => {
+                    Self::complete_projectile_spell(
+                        self, pending, &caster_state, &attacker_stats, level_offset, spell_enum,
+                    ).await;
+                }
+                _ => {
+                    debug!("tick_spell_completions: unhandled spell {:?}", spell_enum);
+                }
+            }
+        }
+
+        // 处理 Vampirism 吸血回血（循环外统一发，避免借用冲突）
+        let heals = std::mem::take(&mut self.vamp_heals);
+        for (session_id, amount) in heals {
+            if let Some(record) = self.players.get(&session_id) {
+                let _ = record.actor_ref.ask(crate::actors::player::Heal { amount }).await;
+            }
+        }
+    }
+
+    /// 弹道法术结算（单目标伤害 + 各法术附加效果）
+    ///
+    /// 防御类型：法师弹道（FireBall/ThunderBolt/...）用 MAC；弓箭手弹道
+    /// （StraightShot/DoubleShot/BindingShot/NapalmShot）用 AC（物理）。
+    async fn complete_projectile_spell(
+        &mut self,
+        pending: PendingSpellCompletion,
+        caster_state: &crate::actors::player::PlayerState,
+        attacker_stats: &crate::combat::attack::CombatStats,
+        level_offset: u16,
+        spell: mir2_shared::enums::Spell,
+    ) {
+        use mir2_shared::enums::{DefenceType, Spell, PoisonType};
+        use crate::combat::{attack, poison};
+
+        let target_id = pending.target_id;
+        let raw_damage = pending.damage;
+
+        // 弓箭手弹道走 AC 防御（物理），法师弹道走 MAC（魔法）
+        let is_archer = matches!(spell,
+            Spell::StraightShot | Spell::DoubleShot | Spell::BindingShot | Spell::NapalmShot);
+        let defence = if is_archer { DefenceType::Ac } else { DefenceType::Mac };
+
+        // 查找目标怪物
+        let monster_hit = {
+            let monster = self.monsters.iter().find(|(_, m)| m.object_id == target_id);
+            if let Some((_, m)) = monster {
+                // 防移动 miss：目标当前位置 vs 弹道快照位置，InRange(2)
+                let dist = (m.x - pending.target_x).abs() + (m.y - pending.target_y).abs();
+                if dist > 2 {
+                    debug!("Projectile spell {:?} missed target {} (moved {} tiles)", spell, target_id, dist);
+                    return;
+                }
+                // ThunderBolt 亡灵 +50%（C# HumanObject.cs:4126）
+                // 注意：Rust MonsterState 暂无 undead 标记字段，跳过该加成（TODO）
+                Some((m.x, m.y, m.to_combat_stats()))
+            } else {
+                None
+            }
+        };
+
+        if let Some((mx, my, defender_stats)) = monster_hit {
+            // 法术特化伤害
+            let final_damage = match spell {
+                // ThunderBolt 对亡灵 +50%（C# HumanObject.cs:4126）
+                Spell::ThunderBolt => {
+                    if let Some(m) = self.monsters.get(&target_id) {
+                        if m.undead { (raw_damage as f32 * 1.5) as i32 } else { raw_damage }
+                    } else { raw_damage }
+                }
+                _ => raw_damage,
+            };
+
+            let result = attack::resolve_attack(
+                attacker_stats, &defender_stats, final_damage,
+                defence, level_offset,
+            );
+
+            if result.is_hit && result.damage > 0 {
+                if let Some(monster) = self.monsters.get_mut(&target_id) {
+                    monster.hp = monster.hp.saturating_sub(result.damage);
+                    monster.provoked = true;
+                    monster.target_session = Some(pending.session_id);
+
+                    // FrostCrunch：概率 Slow/Frozen（C# HumanObject.cs:5962）
+                    if spell == Spell::FrostCrunch {
+                        let magic_level = pending.spell_level;
+                        // Slow：Random(100) <= magic.Level（玩家目标）或 Random(20) <= level（怪物）
+                        if fastrand::i32(0..20) <= magic_level as i32 {
+                            let duration = (5 + fastrand::i32(0..5)) as u32;
+                            poison::apply_poison(&mut monster.poison_list,
+                                poison::Poison::new(PoisonType::SLOW, duration, 0, 1000));
+                        }
+                        // Frozen：Random(40) <= level
+                        if fastrand::i32(0..40) <= magic_level as i32 {
+                            let duration = (5 + fastrand::i32(0..caster_state.freezing.max(1))) as u32;
+                            poison::apply_poison(&mut monster.poison_list,
+                                poison::Poison::new(PoisonType::FROZEN, duration, 0, 1000));
+                        }
+                    }
+
+                    // BindingShot：命中后施加 Paralysis（定身 3s）
+                    if spell == Spell::BindingShot {
+                        poison::apply_poison(&mut monster.poison_list,
+                            poison::Poison::new(PoisonType::PARALYSIS, 3, 0, 1000));
+                    }
+
+                    // Vampirism：吸血 = 实伤 × (level+1) × 0.25（C# HumanObject.cs:6011）
+                    if spell == Spell::Vampirism {
+                        let vamp = (result.damage as f32 * (pending.spell_level as f32 + 1.0) * 0.25) as i32;
+                        if vamp > 0 {
+                            // 收集回血请求，循环外统一发（避免借用冲突）
+                            self.vamp_heals.push((pending.session_id, vamp));
+                        }
+                    }
+
+                    // 施加战斗触发的 Poison（冰冻攻击/毒物攻击，来自攻击者 Stats）
+                    for p in &result.applied_poisons {
+                        poison::apply_poison(&mut monster.poison_list, *p);
+                    }
+
+                    debug!("Projectile {:?} hit monster {} for {} dmg (crit={})",
+                        spell, target_id, result.damage, result.is_critical);
+                }
+            } else {
+                debug!("Projectile {:?} missed/blocked target {}", spell, target_id);
+            }
+
+            // NapalmShot：命中后 3×3 AOE（爆炸溅射，排除已被直击的主目标）
+            if spell == Spell::NapalmShot {
+                let splash_ids: Vec<u32> = self.monsters.iter()
+                    .filter(|(id, m)| {
+                        **id != target_id
+                            && (m.x - mx).abs() <= 1
+                            && (m.y - my).abs() <= 1
+                            && m.hp > 0
+                    })
+                    .map(|(id, _)| *id)
+                    .collect();
+                for sid in splash_ids {
+                    if let Some(monster) = self.monsters.get_mut(&sid) {
+                        let ds = monster.to_combat_stats();
+                        let r = attack::resolve_attack(
+                            attacker_stats, &ds, raw_damage, DefenceType::Ac, level_offset,
+                        );
+                        if r.is_hit && r.damage > 0 {
+                            monster.hp = monster.hp.saturating_sub(r.damage);
+                            monster.provoked = true;
+                            monster.target_session = Some(pending.session_id);
+                            for p in &r.applied_poisons {
+                                poison::apply_poison(&mut monster.poison_list, *p);
+                            }
+                        }
+                    }
+                }
+                debug!("NapalmShot exploded at ({},{}) 3x3 splash", mx, my);
+            }
+            return;
+        }
+
+        // 目标不是怪物，查玩家（PvP 弹道，如 SoulFireBall 打玩家）
+        for (other_session, other_record) in &self.players {
+            if let Ok(Some(other_state)) = other_record.actor_ref.ask(GetPlayerState).await {
+                if other_state.object_id != target_id {
+                    continue;
+                }
+                let dist = (other_state.x - pending.target_x).abs() + (other_state.y - pending.target_y).abs();
+                if dist > 2 {
+                    continue;
+                }
+                let defender_stats = other_state.to_combat_stats();
+                let result = attack::resolve_attack(
+                    attacker_stats, &defender_stats, raw_damage,
+                    defence, level_offset,
+                );
+                if result.is_hit && result.damage > 0 {
+                    let actor_ref = other_record.actor_ref.clone();
+                    let damage = result.damage;
+                    let _ = actor_ref.ask(TakeDamage {
+                        attacker_id: caster_state.object_id,
+                        attacker_session: pending.session_id,
+                        damage,
+                    }).await;
+                    debug!("Projectile {:?} hit player {} for {} dmg", spell, target_id, damage);
+                }
+                break;
+            }
         }
     }
 }
@@ -983,8 +1336,49 @@ impl Message<Tick> for WorldActor {
             // Healer 治疗动作和 Summoner 召唤动作（在循环后应用）
             let mut heal_actions: Vec<(u32, i32)> = Vec::new();
             let mut summon_spawns: Vec<MonsterSpawn> = Vec::new();
+            // Boss AI 输出队列（在循环后应用）
+            let mut boss_moves: Vec<(u32, i32, i32, u8)> = Vec::new();
+            let mut boss_attacks: Vec<ai::AttackAction> = Vec::new();
+            let mut boss_spell_fields: Vec<ai::SpellFieldSpawn> = Vec::new();
+            let mut boss_summons: Vec<ai::BossSummon> = Vec::new();
+            let mut boss_heals: Vec<(u32, i32)> = Vec::new();
+            let mut boss_poisons: Vec<ai::PoisonPlayer> = Vec::new();
 
             for (oid, monster) in &mut self.monsters {
+                // ===== Boss AI 分发 =====
+                // 已注册 Boss 走 behavior.process_tick，普通怪走原有内联逻辑
+                if ai::is_registered_boss(&monster.name) {
+                    let monster_oid = monster.object_id;
+                    let monster_index = monster.monster_index;
+                    let monster_map = monster.map_index;
+                    let monster_name = monster.name.clone();
+                    let player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
+                        .map(|(s, x, y, _, _)| ai::PlayerSnap {
+                            session_id: *s, x: *x, y: *y, hp: 0, map_index: monster_map, object_id: 0,
+                        }).collect();
+                    let monster_snaps: Vec<ai::MonsterSnap> = Vec::new();
+                    let mut ctx = ai::AiCtx {
+                        tick_count: self.tick_count,
+                        monster_oid, monster_index,
+                        players: &player_snaps,
+                        monsters: &monster_snaps,
+                        out_moves: &mut boss_moves,
+                        out_attacks: &mut boss_attacks,
+                        out_spell_fields: &mut boss_spell_fields,
+                        out_summons: &mut boss_summons,
+                        out_heals: &mut boss_heals,
+                        out_poisons: &mut boss_poisons,
+                    };
+                    // 临时取出 behavior 避免 &mut monster + &mut behavior 双重借用
+                    let mut behavior = std::mem::replace(
+                        &mut monster.behavior,
+                        Box::new(crate::actors::world::ai::DefaultBehavior::new()),
+                    );
+                    behavior.process_tick(monster, &mut ctx);
+                    monster.behavior = behavior;
+                    debug!("Boss '{}' AI tick processed", monster_name);
+                    continue;
+                }
                 let profile = &monster.ai_profile;
 
                 // 找最近玩家（在视野范围内）
@@ -1343,8 +1737,170 @@ impl Message<Tick> for WorldActor {
                     provoked: false,
                     is_elite: false,
                     is_boss: false,
+                    min_ac: 0,
+                    max_ac: 0,
+                    min_mac: 0,
+                    max_mac: 0,
+                    agility: 0,
+                    accuracy: 0,
+                    armour_rate: 1.0,
+                    damage_rate: 1.0,
+                    magic_resist: 0,
+                    critical_rate: 0,
+                    critical_damage: 0,
+                    luck: 0,
+                    reflect: 0,
+                    damage_reduction_percent: 0,
+                    poison_list: Vec::new(),
+            undead: false,
+                    behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                 });
                 debug!("Summoned monster '{}' as #{} at ({},{})", spawn.name, new_oid, spawn.x, spawn.y);
+            }
+
+            // ===== 应用 Boss AI 输出队列 =====
+            // Boss 移动（合并到 moved_monsters 复用广播逻辑）
+            for (oid, nx, ny, dir) in boss_moves.drain(..) {
+                moved_monsters.push((oid, nx, ny, dir));
+            }
+            // Boss 攻击：广播 ObjectAttack + 对命中的玩家造成伤害
+            for atk in &boss_attacks {
+                let (attacker_oid, targets, damage, spell_id, attack_type, atk_x, atk_y, atk_dir) = match atk {
+                    ai::AttackAction::Melee { attacker_oid, target_session, damage, spell_id, attack_type } => {
+                        (*attacker_oid, vec![*target_session], *damage, *spell_id, *attack_type, 0i32, 0i32, 0u8)
+                    }
+                    ai::AttackAction::Range { attacker_oid, target_session, damage, spell_id, .. } => {
+                        (*attacker_oid, vec![*target_session], *damage, *spell_id, 0u8, 0i32, 0i32, 0u8)
+                    }
+                    ai::AttackAction::Aoe { attacker_oid, center_x, center_y, radius, damage, .. } => {
+                        let tgts: Vec<u64> = player_positions.iter()
+                            .filter(|(_, px, py, _, _)| {
+                                let dx = (px - center_x).abs();
+                                let dy = (py - center_y).abs();
+                                dx.max(dy) <= *radius
+                            })
+                            .map(|(s, _, _, _, _)| *s)
+                            .collect();
+                        (*attacker_oid, tgts, *damage, 0u8, 0u8, *center_x, *center_y, 0u8)
+                    }
+                };
+                // 获取 Boss 位置用于广播
+                let (boss_x, boss_y, boss_dir) = self.monsters.get(&attacker_oid)
+                    .map(|m| (m.x, m.y, m.direction))
+                    .unwrap_or((atk_x, atk_y, atk_dir));
+                // 广播 ObjectAttack 给所有玩家（Boss 攻击动画）
+                let mut attack_body = Vec::new();
+                attack_body.extend_from_slice(&attacker_oid.to_le_bytes());
+                attack_body.extend_from_slice(&(boss_x as u32).to_le_bytes());
+                attack_body.extend_from_slice(&(boss_y as u32).to_le_bytes());
+                attack_body.push(boss_dir);
+                attack_body.push(spell_id);
+                attack_body.extend_from_slice(&0u16.to_le_bytes());
+                attack_body.push(attack_type);
+                let attack_packet = build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
+                for sid in self.players.keys() {
+                    let _ = self.gate_ref.ask(SendToClient {
+                        session_id: *sid,
+                        data: attack_packet.clone(),
+                    });
+                }
+                // 对命中玩家造成伤害
+                for sid in &targets {
+                    if let Some(record) = self.players.get(sid) {
+                        let _ = record.actor_ref.ask(TakeDamage {
+                            attacker_id: attacker_oid,
+                            attacker_session: *sid,
+                            damage,
+                        }).await;
+                    }
+                }
+            }
+            // Boss 地面法术场：转为 SpellObject
+            for sf in &boss_spell_fields {
+                let oid = self.alloc_object_id();
+                let spell_obj = spell::SpellObject::new(
+                    oid, sf.spell, sf.caster_oid, sf.caster_session,
+                    sf.x, sf.y, sf.duration_ms, sf.value, sf.tick_ms, 1, sf.value,
+                );
+                self.spell_objects.insert(oid, spell_obj);
+            }
+            // Boss 召唤：按名称查 MonsterInfo 后生成（对齐 C# Envir.GetMonsterInfo(name)）
+            for bs in &boss_summons {
+                let mon_index = self.monster_name_index.get(&bs.monster_name.to_lowercase()).copied();
+                if let Some(idx) = mon_index {
+                    // 先 clone MonsterInfo 避免 &self.monster_infos 与 &mut self.alloc_object_id 借用冲突
+                    let info_opt = self.monster_infos.get(&idx).cloned();
+                    if let Some(info) = info_opt {
+                        let new_oid = self.alloc_object_id();
+                        let hp = info.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(50);
+                        let min_dmg = info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(5);
+                        let max_dmg = info.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(10);
+                        let map_index = self.monsters.values().next().map(|m| m.map_index).unwrap_or(0);
+                        // 广播新怪物生成
+                        let spawn = MonsterSpawn {
+                            name: info.name.clone(),
+                            image: info.image as u16,
+                            monster_index: idx,
+                            x: bs.x,
+                            y: bs.y,
+                            direction: 0,
+                            hp,
+                            min_dmg,
+                            max_dmg,
+                            xp: info.experience,
+                            map_index,
+                        };
+                        let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
+                        for session_id in self.players.keys() {
+                            let _ = self.gate_ref.ask(SendToClient {
+                                session_id: *session_id,
+                                data: packet.clone(),
+                            });
+                        }
+                        let ai_profile = MonsterAiProfile::from_info(&info);
+                        self.monsters.insert(new_oid, MonsterState {
+                            object_id: new_oid,
+                            name: spawn.name.clone(),
+                            image: spawn.image,
+                            monster_index: idx,
+                            x: bs.x, y: bs.y, direction: 0,
+                            hp, max_hp: hp, min_dmg, max_dmg, xp: spawn.xp,
+                            spawn_x: bs.x, spawn_y: bs.y, map_index,
+                            next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
+                            ai_profile, ai_state: MonsterAiState::Idle,
+                            target_session: None, provoked: false,
+                            is_elite: false, is_boss: false,
+                            min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
+                            agility: 0, accuracy: 0,
+                            armour_rate: 1.0, damage_rate: 1.0,
+                            magic_resist: 0, critical_rate: 0, critical_damage: 0,
+                            luck: 0, reflect: 0, damage_reduction_percent: 0,
+                            poison_list: Vec::new(),
+            undead: false,
+                            behavior: crate::actors::world::ai::make_behavior(&spawn.name),
+                        });
+                        debug!("Boss summoned '{}' as #{} at ({},{}) slave={}", spawn.name, new_oid, bs.x, bs.y, bs.is_slave);
+                    } else {
+                        debug!("Boss summon '{}' found index {} but no MonsterInfo", bs.monster_name, idx);
+                    }
+                } else {
+                    debug!("Boss summon '{}' not in monster_name_index (DB may lack this mob)", bs.monster_name);
+                }
+            }
+            // Boss 对玩家的 poison
+            for pp in &boss_poisons {
+                if let Some(record) = self.players.get(&pp.session_id) {
+                    let _ = record.actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
+                        poisons: vec![pp.poison],
+                    }).await;
+                }
+            }
+            // Boss 怪物互疗
+            for (target_oid, amount) in &boss_heals {
+                if let Some(m) = self.monsters.get_mut(target_oid) {
+                    m.hp = (m.hp + *amount).min(m.max_hp);
+                }
             }
 
             // 应用移动并广播
@@ -1649,6 +2205,8 @@ impl Message<Tick> for WorldActor {
         self.tick_rental_expiry().await;
 
         self.tick_spells().await;
+
+        self.tick_spell_completions().await;
 
         self.tick_robots().await;
 

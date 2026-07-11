@@ -149,14 +149,6 @@ impl PacketHandler for GuildHandler {
                 }
             }
 
-            // PurchaseGuildTerritory
-            x if x == ServerPacketIds::PurchaseGuildTerritory as u16 => {
-                if let Ok(packet) = server::PurchaseGuildTerritory::read_body(&mut cursor) {
-                    tracing::info!("🏛️ Guild territory purchase: {}", if packet.success { "success" } else { "failed" });
-                    events.push(NetworkEvent::GuildTerritoryPurchased { success: packet.success });
-                }
-            }
-
             _ => {
                 tracing::debug!("⚠️ GuildHandler: Unknown opcode {:04X}", header.opcode);
                 events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });

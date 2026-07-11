@@ -12,6 +12,7 @@
 //!   3. KeepAlive 往返(opcode=2→3)
 
 use std::time::Duration;
+use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use kameo::actor::Spawn;
@@ -21,6 +22,8 @@ use crystal_server::gate::actor::{
     SetAccountRef, SetWorldRef, SetMaxConnections,
 };
 use crystal_server::actors::account::AccountActor;
+use crystal_server::actors::social::{SocialActor, SocialActorArgs, SocialActorConfig};
+use crystal_server::actors::world::{WorldActor, WorldActorArgs};
 use crystal_server::db;
 use crystal_server::gate::codec;
 
@@ -94,6 +97,46 @@ async fn start_server_with_login() -> u16 {
         let _ = run_gate_listener(format!("127.0.0.1:{}", port), gate_ref).await;
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
+    port
+}
+
+/// 启动带 WorldActor 的完整服务器(支持 StartGame 流程)。
+/// 需要 Daneo1989/ 目录(地图 + 任务文件)。
+async fn start_server_with_world() -> u16 {
+    let port = find_free_port();
+    let gate_ref = GateActor::spawn(());
+    let _ = gate_ref.ask(SetMaxConnections(1024)).await;
+
+    let db_pool = db::init_db_pool("sqlite:data/crystal.db").await.expect("init_db");
+
+    // AccountActor
+    let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool.clone()));
+    let _ = gate_ref.ask(SetAccountRef { account_ref }).await;
+
+    // SocialActor
+    let social_config = SocialActorConfig::default();
+    let social_ref = SocialActor::spawn(SocialActorArgs {
+        gate_ref: gate_ref.clone(),
+        db_pool: db_pool.clone(),
+        config: social_config,
+    });
+
+    // WorldActor
+    let world_ref = WorldActor::spawn(WorldActorArgs {
+        tick_interval_ms: 100,
+        gate_ref: gate_ref.clone(),
+        map_dir: PathBuf::from("Daneo1989"),
+        spawn_dir: Some(PathBuf::from("Data/spawn")),
+        quest_dir: PathBuf::from("Daneo1989/Envir/Quests"),
+        db_pool: db_pool.clone(),
+        social_ref: social_ref.clone(),
+    });
+    let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
+
+    tokio::spawn(async move {
+        let _ = run_gate_listener(format!("127.0.0.1:{}", port), gate_ref).await;
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
     port
 }
 
@@ -224,4 +267,83 @@ async fn test_login_full_flow() {
     } else {
         panic!("Unexpected login response opcode={}, expected 9 (LoginSuccess) or 7 (Login fail)", resp_opcode);
     }
+}
+
+#[tokio::test]
+async fn test_startgame_full_flow() {
+    let port = start_server_with_world().await;
+    let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port))
+        .await
+        .expect("connect");
+
+    // 1. Connected
+    let _ = recv_packet(&mut stream).await;
+
+    // 2. ClientVersion
+    let hash = b"test_hash_12345!";
+    let mut cv_body = Vec::new();
+    cv_body.extend_from_slice(&(hash.len() as i32).to_le_bytes());
+    cv_body.extend_from_slice(hash);
+    stream.write_all(&make_packet(0, &cv_body)).await.unwrap();
+    let _ = recv_packet(&mut stream).await; // consume CV response
+
+    // 3. NewAccount (auto-register)
+    stream.write_all(&make_packet(3, &[])).await.unwrap();
+    let _ = recv_packet(&mut stream).await;
+
+    // 4. Login
+    let mut login_body = Vec::new();
+    mir2_shared::binary::write_dotnet_string(&mut login_body, "e2euser").unwrap();
+    mir2_shared::binary::write_dotnet_string(&mut login_body, "e2epass").unwrap();
+    stream.write_all(&make_packet(5, &login_body)).await.unwrap();
+
+    // Wait for LoginSuccess (opcode=9)
+    loop {
+        let (op, _) = tokio::time::timeout(Duration::from_secs(10), recv_packet(&mut stream))
+            .await
+            .expect("login response timeout");
+        if op == 9 { break; } // LoginSuccess
+    }
+
+    // 5. StartGame (opcode=8, body = character_index: i32 = 0)
+    //    ServerPacketIds has StartGame=9 in client ids but ClientPacketIds::StartGame=8
+    let sg_body = 0i32.to_le_bytes();
+    stream.write_all(&make_packet(8, &sg_body)).await.unwrap();
+
+    // 6. Receive StartGame response sequence:
+    //    - StartGame (opcode=9 in ServerPacketIds, body: result + resolution)
+    //    - MapChanged (opcode=12)
+    //    - UserInformation (opcode varies)
+    //    - UserLocation (opcode varies)
+    //
+    //    We look for opcode=9 (StartGame) with result field in body.
+    //    Give 15s timeout for WorldActor actor round-trips.
+    let mut got_startgame = false;
+    let mut got_map_changed = false;
+    for _ in 0..10 {
+        let result = tokio::time::timeout(
+            Duration::from_secs(15),
+            recv_packet(&mut stream),
+        ).await;
+
+        match result {
+            Ok((op, body)) => {
+                tracing::info!("StartGame flow: received opcode={} body_len={}", op, body.len());
+                if op == 9 && !got_startgame {
+                    // ServerPacketIds::StartGame response
+                    got_startgame = true;
+                    if !body.is_empty() {
+                        let result_code = body[0];
+                        tracing::info!("  StartGame result={}", result_code);
+                    }
+                }
+                if got_startgame && got_map_changed {
+                    break;
+                }
+            }
+            Err(_) => break, // timeout
+        }
+    }
+
+    assert!(got_startgame, "Expected StartGame response from server");
 }

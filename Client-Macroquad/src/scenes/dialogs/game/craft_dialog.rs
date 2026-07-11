@@ -33,6 +33,8 @@ pub struct CraftRecipe {
     pub recipe_unique_id: u64,
     /// 材料需求列表（来自服务器）
     pub materials: Vec<UserItem>,
+    /// 合成所需的金币（C# AwakeningPrice/Gold 成本）
+    pub gold: u32,
 }
 
 /// 合成结果（供上层发包）
@@ -55,6 +57,12 @@ pub struct CraftDialogHybrid {
     selecting_slot: Option<usize>,
     /// 背包快照（用于一键填充）
     inventory_snapshot: Vec<(i32, UserItem)>,
+    /// 玩家当前金币（用于合成前校验，由上层 set_player_gold 注入）
+    player_gold: u32,
+    /// 最近一次 Gold 不足提示时间（毫秒），用于避免重复刷屏
+    last_gold_warn_ms: u128,
+    /// 待发送的 Gold 不足系统提示（上层 take_gold_warn 取出后发 PushSystemChatLine）
+    pending_gold_warn: Option<String>,
 }
 
 impl Default for CraftDialogHybrid {
@@ -69,6 +77,9 @@ impl Default for CraftDialogHybrid {
             }),
             selecting_slot: None,
             inventory_snapshot: Vec::new(),
+            player_gold: 0,
+            last_gold_warn_ms: 0,
+            pending_gold_warn: None,
         }
     }
 }
@@ -97,9 +108,17 @@ impl CraftDialogHybrid {
         self.inventory_snapshot = inventory;
     }
 
+    /// 设置玩家当前金币（用于合成前 Gold 校验，由上层每帧或背包刷新时注入）
+    pub fn set_player_gold(&mut self, gold: u32) {
+        self.player_gold = gold;
+    }
+
+    /// 关闭对话框。C# 的 Slots/ShadowItems 是 static，关闭后已填材料保留；
+    /// 这里对齐 C# 行为：仅隐藏，不清空槽位（CraftDialogHybrid 在 UIRenderSystem
+    /// 作为单字段持有，不会重建）。
     pub fn close(&mut self) {
         self.visible = false;
-        self.reset_cells();
+        self.selecting_slot = None;
     }
 
     fn reset_cells(&mut self) {
@@ -204,6 +223,11 @@ impl CraftDialogHybrid {
     /// 从背包选择物品填入槽位
     pub fn fill_slot_from_inventory(&mut self, inv_slot: i32, item: UserItem) {
         if let Some(slot_idx) = self.selecting_slot.take() {
+            // 防重用：检查该背包格是否已被其他合成槽占用（对齐 C# cell.Locked）
+            if self.slots.iter().enumerate()
+                .any(|(i, s)| i != slot_idx && s.inventory_slot == Some(inv_slot)) {
+                return;
+            }
             let shadow = &self.slots[slot_idx].shadow_item;
             // 验证物品是否匹配
             if let (Some(shadow_item), Some(item_info), Some(shadow_info)) =
@@ -256,10 +280,20 @@ impl CraftDialogHybrid {
         draw_text_cn("合成", dialog_x + 15.0, dialog_y + 10.0, 16.0,
             Color::from_rgba(255, 220, 100, 255));
 
-        // 配方名称
+        // 配方名称 + Gold 成本（对齐 C# GoldLabel）
         let recipe_name = self.recipe.as_ref().map(|r| r.name.as_str()).unwrap_or("未选择配方");
         draw_text_cn(recipe_name, dialog_x + 15.0, dialog_y + title_h + 10.0, 14.0,
             Color::from_rgba(200, 200, 200, 255));
+        let gold_cost = self.recipe.as_ref().map(|r| r.gold).unwrap_or(0);
+        if gold_cost > 0 {
+            let gold_color = if self.player_gold >= gold_cost {
+                Color::from_rgba(220, 200, 100, 255)   // 够：金色
+            } else {
+                Color::from_rgba(255, 100, 100, 255)   // 不够：红色
+            };
+            draw_text_cn(&format!("金币: {}", gold_cost),
+                dialog_x + dialog_w - 100.0, dialog_y + title_h + 10.0, 13.0, gold_color);
+        }
 
         // 材料槽位网格
         let grid_start_x = dialog_x + (dialog_w - grid_w) / 2.0;
@@ -304,9 +338,11 @@ impl CraftDialogHybrid {
             self.auto_fill(&snapshot);
         }
 
-        // 合成按钮
+        // 合成按钮（Gold 不足时禁用并对齐 C# 聊天提示）
         let craft_x = autofill_x + btn_w + 10.0;
-        let can_craft = self.all_slots_filled();
+        let slots_filled = self.all_slots_filled();
+        let gold_ok = self.player_gold >= gold_cost;
+        let can_craft = slots_filled && gold_ok;
         let craft_hover = mouse_pos.x >= craft_x && mouse_pos.x <= craft_x + btn_w
             && mouse_pos.y >= btn_y && mouse_pos.y <= btn_y + btn_h;
         draw_rectangle(craft_x, btn_y, btn_w, btn_h,
@@ -331,13 +367,30 @@ impl CraftDialogHybrid {
             self.close();
         }
 
-        // 合成按钮点击
+        // 合成按钮点击（Gold 不足时弹系统提示，对齐 C# 聊天栏系统提示）
         let mut craft_result = None;
-        if left_clicked && can_craft && craft_hover {
-            craft_result = self.get_craft_data();
+        if left_clicked && craft_hover {
+            if slots_filled && !gold_ok && gold_cost > 0 {
+                // 节流：同一秒内不重复触发
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0);
+                if now_ms.wrapping_sub(self.last_gold_warn_ms) > 1000 {
+                    self.last_gold_warn_ms = now_ms;
+                    self.pending_gold_warn = Some(format!("金币不足，合成需要 {} 金币", gold_cost));
+                }
+            } else if can_craft {
+                craft_result = self.get_craft_data();
+            }
         }
 
         craft_result
+    }
+
+    /// 取出待发送的 Gold 不足提示（上层 draw 循环每帧调用，取出后转 UiCommand::PushSystemChatLine）
+    pub fn take_gold_warn(&mut self) -> Option<String> {
+        self.pending_gold_warn.take()
     }
 
     fn draw_slot(&mut self, idx: usize, x: f32, y: f32, size: f32,

@@ -52,8 +52,8 @@ shared_rust::
 
 ## 🔥 Key Features
 
-✅ **Full Protocol Compatibility** - 100% binary compatible with C# version  
-✅ **.NET Serialization Compatible** - Supports BinaryReader/Writer format  
+✅ **Serialization Format Compatible** - `.NET` BinaryReader/Writer 7-bit encoded string / LE byte order, used to read legacy C# `Server.MirDB` data  
+✅ **Self-Consistent Rust Protocol** - SharedRust + ServerRust + Client-Macroquad form a closed Rust protocol stack. **Not wire-compatible with the original C# client/server**: enum discriminants (Spell/Stat/MirAction/Monster/BuffType …) and the gate XOR-framing layer have diverged from C# master by design (Rust self-consistent is the source of truth)  
 ✅ **Type Safety** - Rust's strong type system guarantees  
 ✅ **Zero-Copy Optimization** - High-performance network processing  
 ✅ **Complete Error Handling** - Result type error propagation  

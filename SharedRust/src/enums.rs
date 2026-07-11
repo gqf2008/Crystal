@@ -2595,9 +2595,8 @@ pub enum ServerPacketIds {
     GroupMembersMap = 274,
     SendMemberLocation = 275,
     GuildTerritoryPage = 276,
-    PurchaseGuildTerritory = 277,
-    StorageUnlockResult = 278,
-    StoragePasswordResult = 279,
+    StorageUnlockResult = 277,
+    StoragePasswordResult = 278,
 }
 
 #[cfg(test)]

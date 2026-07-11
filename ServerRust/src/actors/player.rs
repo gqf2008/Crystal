@@ -127,6 +127,45 @@ pub struct PlayerState {
     pub accuracy: i32,
     /// 敏捷
     pub agility: i32,
+    // ===== 战斗公式扩展字段（对齐 C# Stats，平铺模型）=====
+    /// 最小物理防御 (AC)
+    pub min_ac: i32,
+    /// 最大物理防御 (AC)
+    pub max_ac: i32,
+    /// 最小魔法防御 (MAC)
+    pub min_mac: i32,
+    /// 最大魔法防御 (MAC)
+    pub max_mac: i32,
+    /// 装备加成：最小物理防御
+    pub bonus_min_ac: i32,
+    /// 装备加成：最大物理防御
+    pub bonus_max_ac: i32,
+    /// 装备加成：最小魔法防御
+    pub bonus_min_mac: i32,
+    /// 装备加成：最大魔法防御
+    pub bonus_max_mac: i32,
+    /// 幸运/诅咒（正=幸运倾向最大攻击，负=诅咒倾向最小攻击）
+    pub luck: i32,
+    /// 暴击率（C# CriticalRate，配合 CriticalRateWeight=5）
+    pub critical_rate: i32,
+    /// 暴击伤害（C# CriticalDamage，配合 CriticalDamageWeight=50）
+    pub critical_damage: i32,
+    /// 魔法抵抗（C# MagicResist，对抗 MAC 类攻击，权重 MagicResistWeight=10）
+    pub magic_resist: i32,
+    /// 反伤概率 %（C# Reflect，命中则反弹全额伤害）
+    pub reflect: i32,
+    /// 减伤 %（C# DamageReductionPercent，MagicShield/ElementalBarrier）
+    pub damage_reduction_percent: i32,
+    /// 攻击加成（C# AttackBonus，固定值加到伤害）
+    pub attack_bonus: i32,
+    /// 吸血 %（C# HPDrainRatePercent）
+    pub hp_drain_rate_percent: i32,
+    /// EnergyShield 触发概率 %
+    pub energy_shield_percent: i32,
+    /// EnergyShield 触发时回血量
+    pub energy_shield_hp_gain: i32,
+    /// 运行时中毒/负面状态列表（非持久化，每次上线清空）
+    pub poison_list: Vec<crate::combat::poison::Poison>,
     /// 背包 + 装备 + 金币
     pub inventory: PlayerInventory,
     /// 所属组队 ID（None = 无组队）
@@ -255,6 +294,53 @@ impl PlayerState {
         );
         (base + buff_bonus).max(0)
     }
+
+    // ===== 战斗公式扩展：AC/MAC 防御 =====
+
+    pub fn effective_min_ac(&self) -> i32 {
+        (self.min_ac + self.bonus_min_ac).max(0)
+    }
+
+    pub fn effective_max_ac(&self) -> i32 {
+        (self.max_ac + self.bonus_max_ac).max(self.effective_min_ac())
+    }
+
+    pub fn effective_min_mac(&self) -> i32 {
+        (self.min_mac + self.bonus_min_mac).max(0)
+    }
+
+    pub fn effective_max_mac(&self) -> i32 {
+        (self.max_mac + self.bonus_max_mac).max(self.effective_min_mac())
+    }
+
+    /// 构建战斗公式用的属性快照（对齐 C# Stats 投影到 CombatStats）
+    pub fn to_combat_stats(&self) -> crate::combat::attack::CombatStats {
+        use crate::combat::attack::CombatStats;
+        CombatStats {
+            min_atk: self.effective_min_attack(),
+            max_atk: self.effective_max_attack(),
+            min_ac: self.effective_min_ac(),
+            max_ac: self.effective_max_ac(),
+            min_mac: self.effective_min_mac(),
+            max_mac: self.effective_max_mac(),
+            agility: self.agility,
+            accuracy: self.accuracy,
+            luck: self.luck,
+            critical_rate: self.critical_rate,
+            critical_damage: self.critical_damage,
+            magic_resist: self.magic_resist,
+            reflect: self.reflect,
+            damage_reduction_percent: self.damage_reduction_percent,
+            attack_bonus: self.attack_bonus,
+            hp_drain_rate_percent: self.hp_drain_rate_percent,
+            energy_shield_percent: self.energy_shield_percent,
+            energy_shield_hp_gain: self.energy_shield_hp_gain,
+            armour_rate: 1.0,
+            damage_rate: 1.0,
+            freezing: self.freezing,
+            poison_attack: self.poison_attack,
+        }
+    }
 }
 
 /// PlayerActor 状态
@@ -318,6 +404,25 @@ impl PlayerActor {
                 holy: 0,
                 accuracy: 0,
                 agility: 0,
+                min_ac: 0,
+                max_ac: 0,
+                min_mac: 0,
+                max_mac: 0,
+                bonus_min_ac: 0,
+                bonus_max_ac: 0,
+                bonus_min_mac: 0,
+                bonus_max_mac: 0,
+                luck: 0,
+                critical_rate: 0,
+                critical_damage: 0,
+                magic_resist: 0,
+                reflect: 0,
+                damage_reduction_percent: 0,
+                attack_bonus: 0,
+                hp_drain_rate_percent: 0,
+                energy_shield_percent: 0,
+                energy_shield_hp_gain: 0,
+                poison_list: Vec::new(),
                 inventory: PlayerInventory::new(),
                 group_id: None,
                 friend_list: FriendList::new(),
@@ -515,6 +620,30 @@ impl Message<SetPlayerState> for PlayerActor {
 }
 
 /// 复活玩家：重置 HP/MP 到最大值，设置位置
+/// 转职（NPC 脚本 ChangeClass 用）
+pub struct ChangeClass {
+    pub class: mir2_shared::enums::MirClass,
+}
+
+impl Message<ChangeClass> for PlayerActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: ChangeClass, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.class = msg.class;
+    }
+}
+
+/// 改发型（NPC 脚本 ChangeHair 用）
+pub struct SetHair {
+    pub hair: u8,
+}
+
+impl Message<SetHair> for PlayerActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: SetHair, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.hair = msg.hair;
+    }
+}
+
 pub struct RevivePlayer {
     pub x: i32,
     pub y: i32,
@@ -928,6 +1057,65 @@ impl Message<ApplyBuff> for PlayerActor {
     }
 }
 
+/// 战斗触发的 Poison 施加（冰冻/毒攻等负面效果）
+pub struct ApplyCombatPoisons {
+    pub poisons: Vec<crate::combat::poison::Poison>,
+}
+
+impl Message<ApplyCombatPoisons> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: ApplyCombatPoisons,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        for p in msg.poisons {
+            crate::combat::poison::apply_poison(&mut self.state.poison_list, p);
+        }
+    }
+}
+
+/// 施加伤害减免（MagicShield/ElementalBarrier，C# Stat.DamageReductionPercent）
+/// 直接设 PlayerState.damage_reduction_percent，并加 DamageReduction buff 记录时长
+pub struct ApplyDamageReduction {
+    pub percent: i32,
+    pub duration_ticks: u32,
+}
+
+impl Message<ApplyDamageReduction> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: ApplyDamageReduction,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.damage_reduction_percent = msg.percent;
+        let buff = crate::combat::buff::BuffInstance::new(
+            crate::combat::buff::BuffType::DamageReduction { percent: msg.percent },
+            msg.duration_ticks,
+            1,
+        );
+        crate::combat::buff::apply_buff(&mut self.state.buffs, buff);
+    }
+}
+
+/// 解毒：清除自身所有 Poison（道士 Purification 用）
+pub struct PurifyPoisons;
+
+impl Message<PurifyPoisons> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        _msg: PurifyPoisons,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.poison_list.clear();
+    }
+}
+
 /// 移除指定类型的 Buff
 pub struct RemoveBuff {
     pub buff_type: crate::combat::buff::BuffType,
@@ -976,6 +1164,19 @@ impl Message<TickBuff> for PlayerActor {
         crate::combat::buff::expire_buffs(&mut self.state.buffs,
         );
 
+        // Poison tick（每 5 ticks 触发一次，推进 1 秒的 duration/伤害，略快于真实时间但可接受）
+        if !self.state.poison_list.is_empty() {
+            let poison_dmg = crate::combat::poison::tick_poisons(&mut self.state.poison_list, 1);
+            if poison_dmg > 0 {
+                self.state.hp = (self.state.hp - poison_dmg).max(0);
+                total_hp -= poison_dmg;
+                // 中毒致死
+                if self.state.hp == 0 && !self.state.is_dead {
+                    self.state.is_dead = true;
+                }
+            }
+        }
+
         // 如有变化，同步客户端
         if total_hp != 0 || total_mp != 0 {
             let mut body = Vec::new();
@@ -1000,6 +1201,22 @@ pub struct SetStatBonuses {
     pub bonus_max_mc: i32,
     pub bonus_min_sc: i32,
     pub bonus_max_sc: i32,
+    // 战斗公式扩展（装备提供的 AC/MAC/Luck/Crit 等）
+    pub bonus_min_ac: i32,
+    pub bonus_max_ac: i32,
+    pub bonus_min_mac: i32,
+    pub bonus_max_mac: i32,
+    pub luck: i32,
+    pub critical_rate: i32,
+    pub critical_damage: i32,
+    pub magic_resist: i32,
+    pub reflect: i32,
+    pub attack_bonus: i32,
+    pub hp_drain_rate_percent: i32,
+    pub agility: i32,
+    pub accuracy: i32,
+    pub freezing: i32,
+    pub poison_attack: i32,
 }
 
 impl Message<SetStatBonuses> for PlayerActor {
@@ -1050,6 +1267,23 @@ impl Message<SetStatBonuses> for PlayerActor {
 
             self.send_user_information_refresh();
         }
+
+        // 战斗公式扩展字段：直接覆盖（装备提供的绝对值，非增量）
+        self.state.bonus_min_ac = msg.bonus_min_ac;
+        self.state.bonus_max_ac = msg.bonus_max_ac;
+        self.state.bonus_min_mac = msg.bonus_min_mac;
+        self.state.bonus_max_mac = msg.bonus_max_mac;
+        self.state.luck = msg.luck;
+        self.state.critical_rate = msg.critical_rate;
+        self.state.critical_damage = msg.critical_damage;
+        self.state.magic_resist = msg.magic_resist;
+        self.state.reflect = msg.reflect;
+        self.state.attack_bonus = msg.attack_bonus;
+        self.state.hp_drain_rate_percent = msg.hp_drain_rate_percent;
+        self.state.agility += msg.agility - self.state.agility; // 装备敏捷覆盖基础值
+        self.state.accuracy += msg.accuracy - self.state.accuracy;
+        self.state.freezing = msg.freezing;
+        self.state.poison_attack = msg.poison_attack;
     }
 }
 
@@ -2645,6 +2879,25 @@ mod tests {
             holy: 0,
             accuracy: 0,
             agility: 0,
+            min_ac: 0,
+            max_ac: 0,
+            min_mac: 0,
+            max_mac: 0,
+            bonus_min_ac: 0,
+            bonus_max_ac: 0,
+            bonus_min_mac: 0,
+            bonus_max_mac: 0,
+            luck: 0,
+            critical_rate: 0,
+            critical_damage: 0,
+            magic_resist: 0,
+            reflect: 0,
+            damage_reduction_percent: 0,
+            attack_bonus: 0,
+            hp_drain_rate_percent: 0,
+            energy_shield_percent: 0,
+            energy_shield_hp_gain: 0,
+            poison_list: Vec::new(),
             inventory: PlayerInventory::new(),
             group_id: None,
             friend_list: FriendList::new(),

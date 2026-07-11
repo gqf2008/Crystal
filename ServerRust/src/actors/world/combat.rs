@@ -76,19 +76,56 @@ impl Message<WorldAttackRequest> for WorldActor {
             let target_y = result.y + MON_DIR_DY[atk_dir];
 
             let mut hit_monster = false;
+            // HalfMoon/CrossHalfMoon 溅射目标（循环外应用，避免借用冲突）
+            let mut halfmoon_splash: Vec<(u32, i32)> = Vec::new();
             for (oid, monster) in &mut self.monsters {
                 let dist = (monster.x - target_x).abs() + (monster.y - target_y).abs();
                 if dist <= 1 {
-                    // 命中怪物 - 使用战斗模块计算伤害（包含 Buff 加成）
+                    // 命中怪物 - 使用完整战斗公式（命中/护甲/暴击/反伤/吸血/负面）
+                    let attacker_stats = state.to_combat_stats();
+                    let defender_stats = monster.to_combat_stats();
+                    let raw_damage = combat_attack::get_attack_power(
+                        attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck,
+                    );
+                    // LevelOffset: 防御方等级高于攻击方时为 0，否则取等级差上限 10
+                    // 怪物暂无 level 字段（按 0 处理），玩家攻击怪物时 level_offset = min(10, player_level)
+                    let level_offset = state.level.min(10) as u16;
                     let attack_result = combat_attack::resolve_attack(
-                        state.effective_min_attack(), state.effective_max_attack(), 0
+                        &attacker_stats, &defender_stats, raw_damage,
+                        mir2_shared::enums::DefenceType::AcAgility, level_offset,
                     );
                     let damage = attack_result.damage;
                     monster.hp = monster.hp.saturating_sub(damage);
                     monster.provoked = true;
                     monster.target_session = Some(msg.session_id);
-                    debug!("Player {} hit monster '{}' (#{}) for {} dmg (crit={}) (hp={}/{})",
-                           result.object_id, monster.name, *oid, damage, attack_result.is_critical, monster.hp, monster.max_hp);
+                    // 施加战斗触发的 Poison（冰冻/毒攻）
+                    for p in &attack_result.applied_poisons {
+                        crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
+                    }
+
+                    // ===== 战士近战技能触发 =====
+                    // Slaying（攻杀）：学了且按等级概率触发，额外伤害（C# 攻杀 = 暴击型额外伤害）
+                    let mut slaying_bonus = 0i32;
+                    if let Some(lv) = state.magics.iter().find(|m| m.spell == SPELL_SLAYING as i32).map(|m| m.level) {
+                        // 概率：level/5（C# 攻杀触发率与等级相关）
+                        if fastrand::i32(0..5) < lv as i32 {
+                            slaying_bonus = (damage as f32 * (0.5 + lv as f32 * 0.3)) as i32;
+                            monster.hp = monster.hp.saturating_sub(slaying_bonus);
+                        }
+                    }
+                    // HalfMoon（半月）/ CrossHalfMoon（十字半月）：学了则溅射周围怪物
+                    let halfmoon_lv = state.magics.iter()
+                        .find(|m| m.spell == SPELL_HALFMOON as i32 || m.spell == SPELL_CROSS_HALFMOON as i32)
+                        .map(|m| m.level);
+                    if let Some(_lv) = halfmoon_lv {
+                        // HalfMoon 溅射：记录溅射参数，循环外应用（避免 &self.monsters 借用冲突）
+                        let splash_dmg = (damage / 2).max(1);
+                        halfmoon_splash.push((0, splash_dmg)); // 标记触发，object_id=0 表示待循环外填充
+                        let _ = target_x; // 循环外用 target_x/target_y 收集
+                    }
+                    let total_dmg = damage + slaying_bonus;
+                    debug!("Player {} hit monster '{}' (#{}) for {} dmg (crit={}, slaying={}) (hp={}/{})",
+                           result.object_id, monster.name, *oid, total_dmg, attack_result.is_critical, slaying_bonus, monster.hp, monster.max_hp);
 
                     // 发送 ObjectStruck（受击动画）
                     let mut struck_body = Vec::new();
@@ -135,6 +172,26 @@ impl Message<WorldAttackRequest> for WorldActor {
 
                     hit_monster = true;
                     break; // 一次只打一只
+                }
+            }
+
+            // 应用 HalfMoon/CrossHalfMoon 溅射（循环外，避免借用冲突）
+            if !halfmoon_splash.is_empty() {
+                let splash_dmg = halfmoon_splash[0].1; // 所有溅射伤害相同
+                let splash_targets: Vec<u32> = self.monsters.iter()
+                    .filter(|(_, m)| {
+                        m.hp > 0
+                            && (m.x - target_x).abs() <= 1
+                            && (m.y - target_y).abs() <= 1
+                    })
+                    .map(|(id, _)| *id)
+                    .collect();
+                for sid in splash_targets {
+                    if let Some(sm) = self.monsters.get_mut(&sid) {
+                        sm.hp = sm.hp.saturating_sub(splash_dmg);
+                        sm.provoked = true;
+                        sm.target_session = Some(msg.session_id);
+                    }
                 }
             }
 
@@ -187,11 +244,29 @@ impl Message<WorldAttackRequest> for WorldActor {
                                 continue;
                             }
 
-                            // 使用战斗模块计算伤害（包含 Buff 加成）
+                            // 使用完整战斗公式（玩家攻击玩家 PvP）
+                            let attacker_stats = state.to_combat_stats();
+                            let defender_stats = other_state.to_combat_stats();
+                            let raw_damage = combat_attack::get_attack_power(
+                                attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck,
+                            );
+                            // LevelOffset：防御方等级更高时为 0
+                            let level_offset = if other_state.level > state.level {
+                                0
+                            } else {
+                                (state.level - other_state.level).min(10) as u16
+                            };
                             let attack_result = combat_attack::resolve_attack(
-                                state.effective_min_attack(), state.effective_max_attack(), other_state.effective_defence()
+                                &attacker_stats, &defender_stats, raw_damage,
+                                mir2_shared::enums::DefenceType::AcAgility, level_offset,
                             );
                             let damage = attack_result.damage;
+                            // 施加战斗触发的 Poison 给目标玩家
+                            if !attack_result.applied_poisons.is_empty() {
+                                let _ = other_actor.ask(crate::actors::player::ApplyCombatPoisons {
+                                    poisons: attack_result.applied_poisons,
+                                }).await;
+                            }
                             if other_actor.ask(TakeDamage {
                                 attacker_id: result.object_id,
                                 attacker_session: msg.session_id,
@@ -541,14 +616,25 @@ impl Message<RangeAttackRequest> for WorldActor {
         let mut hit_monster = false;
         for monster_id in hit_monster_ids {
             if let Some(monster) = self.monsters.get_mut(&monster_id) {
+                let attacker_stats = state.to_combat_stats();
+                let defender_stats = monster.to_combat_stats();
+                let raw_damage = combat_attack::get_attack_power(
+                    attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck,
+                );
+                let level_offset = state.level.min(10) as u16;
                 let attack_result = combat_attack::resolve_attack(
-                    state.effective_min_attack(), state.effective_max_attack(), 0
+                    &attacker_stats, &defender_stats, raw_damage,
+                    // 远程物理攻击用 AC 防御（无 Agility 闪避，远程难躲）
+                    mir2_shared::enums::DefenceType::Ac, level_offset,
                 );
                 let damage = attack_result.damage;
                 monster.hp = monster.hp.saturating_sub(damage);
                 monster.provoked = true;
                 monster.target_session = Some(msg.session_id);
-                debug!("RangeAttack: {} -> monster {} for {} damage", state.name, monster_id, damage);
+                for p in &attack_result.applied_poisons {
+                    crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
+                }
+                debug!("RangeAttack: {} -> monster {} for {} damage (crit={})", state.name, monster_id, damage, attack_result.is_critical);
                 hit_monster = true;
                 if monster.hp <= 0 {
                     // 死亡由 Tick 循环处理（广播 ObjectDied + 重生）
@@ -577,10 +663,26 @@ impl Message<RangeAttackRequest> for WorldActor {
                             continue;
                         }
 
+                        let attacker_stats = state.to_combat_stats();
+                        let defender_stats = other_state.to_combat_stats();
+                        let raw_damage = combat_attack::get_attack_power(
+                            attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck,
+                        );
+                        let level_offset = if other_state.level > state.level {
+                            0
+                        } else {
+                            (state.level - other_state.level).min(10) as u16
+                        };
                         let attack_result = combat_attack::resolve_attack(
-                            state.effective_min_attack(), state.effective_max_attack(), other_state.effective_defence()
+                            &attacker_stats, &defender_stats, raw_damage,
+                            mir2_shared::enums::DefenceType::Ac, level_offset,
                         );
                         let damage = attack_result.damage;
+                        if !attack_result.applied_poisons.is_empty() {
+                            let _ = other.actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
+                                poisons: attack_result.applied_poisons,
+                            }).await;
+                        }
                         if other.actor_ref.ask(TakeDamage {
                             attacker_id: object_id,
                             attacker_session: msg.session_id,
@@ -622,6 +724,30 @@ impl Message<RangeAttackRequest> for WorldActor {
             }
         }
     }
+}
+
+/// 弹道法术的延迟结算项（对齐 C# DelayedAction(DelayedType.Magic, fireTime, ...)）
+///
+/// 法师弹道类法术（FireBall/ThunderBolt/FrostCrunch/Vampirism）施法时
+/// 不立即结算，而是按距离计算飞行时间后推入此队列，由主 tick 在到期时结算。
+#[derive(Debug, Clone)]
+pub struct PendingSpellCompletion {
+    /// 到期 tick（WorldActor.tick_count）
+    pub fire_at_tick: u64,
+    pub session_id: u64,
+    /// 法术原始值（u8，对应 Spell 枚举判别值）
+    pub spell: u8,
+    /// 目标 object_id（弹道类）
+    pub target_id: u32,
+    /// 目标快照位置（防移动 miss 校验用）
+    pub target_x: i32,
+    pub target_y: i32,
+    /// 预计算的原始伤害（magic.GetDamage(MC) 结果）
+    pub damage: i32,
+    /// 施法者魔法属性（MC），用于 Vampirism 吸血计算
+    pub magic_stat: i32,
+    /// 法术等级
+    pub spell_level: u8,
 }
 
 /// 技能释放请求
@@ -823,15 +949,20 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} casts Healing(spell={}) for {} HP", state.name, msg.spell, heal_amount);
             }
             // --- Buff 类 ---
+            // MagicShield：C# 用 Stat.DamageReductionPercent（百分比减伤），非 DefenseBoost
+            // 强度 = (level+2)*10%（Lv0=20/Lv1=30/Lv2=40），持续 = GetPower(MC+15) 秒
             SPELL_MAGIC_SHIELD => {
-                let buff = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::DefenseBoost { bonus: (power / 2).max(5) },
-                    300, // 30秒 @ 100ms tick
-                    5,
-                );
-                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
-                debug!("Magic: {} casts MagicShield (defense +{})", state.name, (power / 2).max(5));
+                let reduction_pct = ((spell_level as i32 + 2) * 10).min(80);
+                // 持续时间近似：power 已含 MC 加成，转成 ticks（100ms/tick）
+                let duration_ticks = ((power.max(15) as u32) * 10).min(6000); // 上限 10 分钟
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyDamageReduction {
+                    percent: reduction_pct,
+                    duration_ticks,
+                }).await;
+                debug!("Magic: {} casts MagicShield (damage -{}%)", state.name, reduction_pct);
             }
+            // SoulShield：MAC 魔法防御 buff（C# Stat.MaxMAC/MinMAC）
+            // 注意：Rust 当前 DefenseBoost 不区分 AC/MAC，暂用 DefenseBoost 近似（buff 系统扩展后细分）
             SPELL_SOUL_SHIELD => {
                 let buff = crate::combat::buff::BuffInstance::new(
                     crate::combat::buff::BuffType::DefenseBoost { bonus: (power / 3).max(3) },
@@ -839,19 +970,187 @@ impl Message<MagicRequest> for WorldActor {
                     5,
                 );
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
-                debug!("Magic: {} casts SoulShield (defense +{})", state.name, (power / 3).max(3));
+                debug!("Magic: {} casts SoulShield (MAC defense +{})", state.name, (power / 3).max(3));
             }
+            // BlessedArmour：AC 物理防御 buff（C# Stat.MaxAC/MinAC）
+            // 修复：原来错误实现为 AttackBoost，C# 实际是 AC 防御
             SPELL_BLESSED_ARMOUR => {
                 let buff = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::AttackBoost { bonus: (power / 2).max(5) },
+                    crate::combat::buff::BuffType::DefenseBoost { bonus: (power / 2).max(5) },
                     600,
                     5,
                 );
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
-                debug!("Magic: {} casts BlessedArmour (attack +{})", state.name, (power / 2).max(5));
+                debug!("Magic: {} casts BlessedArmour (AC defense +{})", state.name, (power / 2).max(5));
+            }
+            // --- 道士 Debuff/控制类 ---
+            // Poisoning：对目标怪物施毒（绿毒持续掉血/红毒降防御，C# Poisoning 消耗毒药物品）
+            SPELL_POISONING => {
+                let hit_ids: Vec<u32> = self.monsters.iter()
+                    .filter(|(_, m)| {
+                        let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
+                        dist <= spell_range.max(1) && m.hp > 0
+                    })
+                    .map(|(id, _)| *id)
+                    .collect();
+                // 绿毒（持续掉血），value 基于 SC
+                let poison_value = (magic_stat / 4).max(3).min(10);
+                for mid in hit_ids {
+                    if let Some(monster) = self.monsters.get_mut(&mid) {
+                        crate::combat::poison::apply_poison(&mut monster.poison_list,
+                            crate::combat::poison::Poison::new(mir2_shared::enums::PoisonType::GREEN, 10, poison_value, 2000));
+                        monster.provoked = true;
+                        monster.target_session = Some(msg.session_id);
+                    }
+                }
+                debug!("Magic: {} casts Poisoning (green poison {}dmg/tick)", state.name, poison_value);
+            }
+            // TrapHexagon：定身目标怪物（C# 限制移动，施加 Slow/Paralysis）
+            SPELL_TRAP_HEXAGON => {
+                let hit_ids: Vec<u32> = self.monsters.iter()
+                    .filter(|(_, m)| {
+                        let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
+                        dist <= 1 && m.hp > 0
+                    })
+                    .map(|(id, _)| *id)
+                    .collect();
+                let trapped_count = hit_ids.len();
+                for mid in hit_ids {
+                    if let Some(monster) = self.monsters.get_mut(&mid) {
+                        let duration = (3 + spell_level as u32 * 2).min(15);
+                        crate::combat::poison::apply_poison(&mut monster.poison_list,
+                            crate::combat::poison::Poison::new(mir2_shared::enums::PoisonType::PARALYSIS, duration, 0, 1000));
+                    }
+                }
+                debug!("Magic: {} casts TrapHexagon (trapped {} monsters)", state.name, trapped_count);
+            }
+            // --- 道士 Buff/辅助类 ---
+            // Hiding：自身隐身（怪物失去目标，C# BuffType.Hiding）
+            SPELL_HIDING => {
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::Invisibility,
+                    (30 + spell_level as u32 * 10) * 10, // 30-60s，100ms/tick
+                    5,
+                );
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                self.invisible_sessions.insert(msg.session_id);
+                debug!("Magic: {} casts Hiding (invisible)", state.name);
+            }
+            // MassHiding：组队隐身（简化：自身 + 附近组员）
+            SPELL_MASS_HIDING => {
+                // 先给自身
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::Invisibility,
+                    (20 + spell_level as u32 * 10) * 10,
+                    5,
+                );
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                self.invisible_sessions.insert(msg.session_id);
+                // 给附近组员（3 格内）
+                let group_id = state.group_id;
+                if let Some(gid) = group_id {
+                    for (sid, other) in &self.players {
+                        if *sid == msg.session_id { continue; }
+                        if let Ok(Some(s)) = other.actor_ref.ask(GetPlayerState).await {
+                            if s.group_id == Some(gid) {
+                                let dist = (s.x - state.x).abs() + (s.y - state.y).abs();
+                                if dist <= 3 {
+                                    let buff2 = crate::combat::buff::BuffInstance::new(
+                                        crate::combat::buff::BuffType::Invisibility,
+                                        (20 + spell_level as u32 * 10) * 10,
+                                        5,
+                                    );
+                                    let _ = other.actor_ref.ask(crate::actors::player::ApplyBuff { buff: buff2 }).await;
+                                    self.invisible_sessions.insert(*sid);
+                                }
+                            }
+                        }
+                    }
+                }
+                debug!("Magic: {} casts MassHiding", state.name);
+            }
+            // Purification：解毒（清除自身所有 Poison，C# 清除 debuff）
+            SPELL_PURIFICATION => {
+                let _ = record.actor_ref.ask(crate::actors::player::PurifyPoisons).await;
+                debug!("Magic: {} casts Purification (cleared poisons)", state.name);
+            }
+            // ShoulderDash：野蛮冲撞（向前冲刺 2 格，推开/伤害路径上的怪物）
+            SPELL_SHOULDER_DASH => {
+                let dir = msg.direction as usize % 8;
+                let mut new_x = state.x;
+                let mut new_y = state.y;
+                let mut pushed_damage = 0i32;
+                for step in 0..2 {
+                    let nx = new_x + MON_DIR_DX[dir];
+                    let ny = new_y + MON_DIR_DY[dir];
+                    let walkable = self.maps.get(&state.map_index)
+                        .map(|m| m.is_walkable(nx, ny))
+                        .unwrap_or(false);
+                    if !walkable { break; }
+                    // 伤害路径上的怪物（推开效果简化为伤害）
+                    let hit: Option<u32> = self.monsters.iter()
+                        .find(|(_, m)| m.x == nx && m.y == ny && m.hp > 0)
+                        .map(|(id, _)| *id);
+                    if let Some(mid) = hit {
+                        let dmg = (state.effective_max_attack() / 2).max(5);
+                        if let Some(m) = self.monsters.get_mut(&mid) {
+                            m.hp = m.hp.saturating_sub(dmg);
+                            m.provoked = true;
+                            m.target_session = Some(msg.session_id);
+                            pushed_damage += dmg;
+                        }
+                    }
+                    new_x = nx;
+                    new_y = ny;
+                    let _ = step;
+                }
+                if new_x != state.x || new_y != state.y {
+                    let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                        x: new_x, y: new_y, direction: msg.direction,
+                        map_index: None, is_mounted: None,
+                    }).await;
+                }
+                debug!("Magic: {} casts ShoulderDash (dashed to {},{}, dealt {} dmg)",
+                    state.name, new_x, new_y, pushed_damage);
+            }
+            // Thrusting：刺杀（直线穿透 2 格，打前方 2 个格子）
+            // 简化：作为直线 AoE 伤害前方 2 格的怪物
+            SPELL_THRUSTING => {
+                let dir = msg.direction as usize % 8;
+                let attacker_stats = state.to_combat_stats();
+                let level_offset = state.level.min(10) as u16;
+                let raw_damage = crate::combat::attack::get_attack_power(
+                    attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck,
+                );
+                let mut cx = state.x;
+                let mut cy = state.y;
+                for _ in 0..2 {
+                    cx += MON_DIR_DX[dir];
+                    cy += MON_DIR_DY[dir];
+                    let hit = self.monsters.iter()
+                        .find(|(_, m)| m.x == cx && m.y == cy && m.hp > 0)
+                        .map(|(id, _)| *id);
+                    if let Some(mid) = hit {
+                        if let Some(m) = self.monsters.get_mut(&mid) {
+                            let ds = m.to_combat_stats();
+                            let r = combat_attack::resolve_attack(
+                                &attacker_stats, &ds, raw_damage,
+                                mir2_shared::enums::DefenceType::AcAgility, level_offset,
+                            );
+                            if r.is_hit && r.damage > 0 {
+                                m.hp = m.hp.saturating_sub(r.damage);
+                                m.provoked = true;
+                                m.target_session = Some(msg.session_id);
+                            }
+                        }
+                    }
+                }
+                debug!("Magic: {} casts Thrusting (line pierce 2)", state.name);
             }
             // --- 传送类 ---
-            SPELL_TELEPORT => {
+            // Teleport：随机传送（C# MagicTeleport 选随机点）
+            // Blink：定点传送，距离上限=Range，成功率=(level+1)/4
+            SPELL_TELEPORT | SPELL_BLINK => {
                 if let Some(mi) = self.map_infos.get(&(state.map_index as i32)) {
                     if mi.no_teleport {
                         send_system_message(&self.gate_ref, msg.session_id, "该地图无法使用传送魔法");
@@ -862,10 +1161,25 @@ impl Message<MagicRequest> for WorldActor {
                         return;
                     }
                 }
-                // 限制在地图边界内
                 let (max_x, max_y) = self.maps.get(&state.map_index)
                     .map(|m| (m.width as i32, m.height as i32))
                     .unwrap_or((i32::MAX, i32::MAX));
+
+                // Blink 专属：距离校验 + 成功率
+                if msg.spell == SPELL_BLINK {
+                    let dist = ((state.x - target_x).abs() + (state.y - target_y).abs()) as i32;
+                    let range = spell_db.map(|m| m.range as i32).unwrap_or(10);
+                    if dist > range {
+                        send_system_message(&self.gate_ref, msg.session_id, "距离超出闪现范围");
+                        return;
+                    }
+                    // 成功率 (level+1)/4：Random(4) >= level+1 则失败
+                    if fastrand::i32(0..4) >= spell_level as i32 + 1 {
+                        debug!("Magic: {} Blink failed (random miss)", state.name);
+                        return;
+                    }
+                }
+
                 let tx = target_x.clamp(0, max_x - 1);
                 let ty = target_y.clamp(0, max_y - 1);
                 let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
@@ -875,30 +1189,559 @@ impl Message<MagicRequest> for WorldActor {
                     map_index: None,
                     is_mounted: None,
                 }).await;
-                debug!("Magic: {} teleports to ({}, {})", state.name, tx, ty);
+                debug!("Magic: {} teleports/blinks to ({}, {})", state.name, tx, ty);
             }
-            // --- 默认：伤害类 ---
+            // --- 弹道类法术（任务3）：FireBall/GreatFireBall/ThunderBolt/FrostCrunch/Vampirism ---
+            // 对齐 C# HumanObject Fireball()/ThunderBolt()/Vampirism()：创建 DelayedAction，延迟后结算
+            SPELL_FIREBALL | SPELL_GREAT_FIREBALL | SPELL_THUNDERBOLT
+            | SPELL_FROST_CRUNCH | SPELL_VAMPIRISM => {
+                let raw_damage = if let Some(info) = spell_db {
+                    crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
+                } else {
+                    fastrand::i32(5..=15)
+                }.max(1);
+
+                // 弹道延迟：FireBall 系 = 距离×50ms + 500ms；ThunderBolt/Vampirism = 固定 500ms
+                let target_dist = ((state.x - target_x).abs() + (state.y - target_y).abs()) as u64;
+                let delay_ms = match msg.spell {
+                    SPELL_FIREBALL | SPELL_GREAT_FIREBALL | SPELL_FROST_CRUNCH => {
+                        target_dist * 50 + 500
+                    }
+                    _ => 500, // ThunderBolt / Vampirism 固定 500ms
+                };
+                // tick_count 每 100ms +1，延迟按 100ms 取整（最少 1 tick）
+                let fire_at_tick = self.tick_count + (delay_ms / 100).max(1);
+
+                self.pending_spell_completions.push(PendingSpellCompletion {
+                    fire_at_tick,
+                    session_id: msg.session_id,
+                    spell: msg.spell,
+                    target_id: msg.target_id,
+                    target_x,
+                    target_y,
+                    damage: raw_damage,
+                    magic_stat,
+                    spell_level,
+                });
+                debug!("Magic: {} casts projectile spell={} dmg={} delay={}ms (fires @tick {})",
+                    state.name, msg.spell, raw_damage, delay_ms, fire_at_tick);
+            }
+            // --- 即时 AoE 类法术（任务4）---
+            // FireBang/IceStorm：3×3 AoE，MAC 伤害（C# Map.cs:952）
+            SPELL_FIREBANG | SPELL_ICE_STORM => {
+                let raw_damage = if let Some(info) = spell_db {
+                    crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
+                } else { fastrand::i32(5..=15) }.max(1);
+                let attacker_stats = state.to_combat_stats();
+                let level_offset = state.level.min(10) as u16;
+                // 3×3：target 周围 ±1 格
+                let hit_ids: Vec<u32> = self.monsters.iter()
+                    .filter(|(_, m)| {
+                        let dx = (m.x - target_x).abs();
+                        let dy = (m.y - target_y).abs();
+                        dx <= 1 && dy <= 1 && m.hp > 0
+                    })
+                    .map(|(id, _)| *id)
+                    .collect();
+                for mid in hit_ids {
+                    if let Some(monster) = self.monsters.get_mut(&mid) {
+                        let defender_stats = monster.to_combat_stats();
+                        let r = combat_attack::resolve_attack(
+                            &attacker_stats, &defender_stats, raw_damage,
+                            mir2_shared::enums::DefenceType::Mac, level_offset,
+                        );
+                        if r.is_hit && r.damage > 0 {
+                            monster.hp = monster.hp.saturating_sub(r.damage);
+                            monster.provoked = true;
+                            monster.target_session = Some(msg.session_id);
+                            for p in &r.applied_poisons {
+                                crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
+                            }
+                        }
+                    }
+                }
+                debug!("Magic: {} casts FireBang/IceStorm (3x3) dmg={}", state.name, raw_damage);
+            }
+            // Lightning：直线 6 格，每格首目标，MAC（C# Map.cs:1189）
+            SPELL_LIGHTNING => {
+                let raw_damage = if let Some(info) = spell_db {
+                    crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
+                } else { fastrand::i32(5..=15) }.max(1);
+                let attacker_stats = state.to_combat_stats();
+                let level_offset = state.level.min(10) as u16;
+                let dir = msg.direction as usize % 8;
+                let mut cx = state.x;
+                let mut cy = state.y;
+                for _ in 0..6 {
+                    cx += MON_DIR_DX[dir];
+                    cy += MON_DIR_DY[dir];
+                    // 找该格第一个怪物
+                    let hit = self.monsters.iter()
+                        .find(|(_, m)| m.x == cx && m.y == cy && m.hp > 0)
+                        .map(|(id, _)| *id);
+                    if let Some(mid) = hit {
+                        if let Some(monster) = self.monsters.get_mut(&mid) {
+                            let defender_stats = monster.to_combat_stats();
+                            let r = combat_attack::resolve_attack(
+                                &attacker_stats, &defender_stats, raw_damage,
+                                mir2_shared::enums::DefenceType::Mac, level_offset,
+                            );
+                            if r.is_hit && r.damage > 0 {
+                                monster.hp = monster.hp.saturating_sub(r.damage);
+                                monster.provoked = true;
+                                monster.target_session = Some(msg.session_id);
+                                for p in &r.applied_poisons {
+                                    crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
+                                }
+                            }
+                        }
+                        // C# 每格 break（只打第一个），但外层 i 继续 → 每格各打第一个
+                    }
+                }
+                debug!("Magic: {} casts Lightning (line 6) dmg={}", state.name, raw_damage);
+            }
+            // ThunderStorm/FlameField：5×5 自身周围，MAC（C# Map.cs:1303）
+            // ThunderStorm 对非亡灵伤害 ×1/10（Rust 暂无 undead 字段，全额伤害，TODO）
+            SPELL_THUNDERSTORM | SPELL_FLAME_FIELD => {
+                let raw_damage = if let Some(info) = spell_db {
+                    crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
+                } else { fastrand::i32(5..=15) }.max(1);
+                let attacker_stats = state.to_combat_stats();
+                let level_offset = state.level.min(10) as u16;
+                let hit_ids: Vec<u32> = self.monsters.iter()
+                    .filter(|(_, m)| {
+                        let dx = (m.x - state.x).abs();
+                        let dy = (m.y - state.y).abs();
+                        dx <= 2 && dy <= 2 && m.hp > 0
+                    })
+                    .map(|(id, _)| *id)
+                    .collect();
+                for mid in hit_ids {
+                    if let Some(monster) = self.monsters.get_mut(&mid) {
+                        let defender_stats = monster.to_combat_stats();
+                        // ThunderStorm 对非亡灵伤害 ×1/10（C# Map.cs:1332），FlameField 全额
+                        let is_thunderstorm = msg.spell == SPELL_THUNDERSTORM;
+                        let adjusted_dmg = if is_thunderstorm && !monster.undead {
+                            raw_damage / 10
+                        } else {
+                            raw_damage
+                        };
+                        let r = combat_attack::resolve_attack(
+                            &attacker_stats, &defender_stats, adjusted_dmg,
+                            mir2_shared::enums::DefenceType::Mac, level_offset,
+                        );
+                        if r.is_hit && r.damage > 0 {
+                            monster.hp = monster.hp.saturating_sub(r.damage);
+                            monster.provoked = true;
+                            monster.target_session = Some(msg.session_id);
+                            for p in &r.applied_poisons {
+                                crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
+                            }
+                        }
+                    }
+                }
+                debug!("Magic: {} casts ThunderStorm/FlameField (5x5) dmg={}", state.name, raw_damage);
+            }
+            // ===== 弓箭手（Archer）弹道物理系法术 =====
+            // StraightShot：单目标弹道，延迟 = 距离×50ms + 500ms，AC 防御（弓箭手物理）
+            // DoubleShot：对目标连发 2 次弹道（第二次延迟 +200ms）
+            // BindingShot：弹道 + 命中后 Paralysis（在 complete_projectile_spell 结算）
+            // NapalmShot：弹道 + 命中后 3×3 AOE（在 complete_projectile_spell 结算）
+            // 伤害基于 DC（物理攻击），用 magic_stat（弓箭手类 = effective_max_attack）
+            SPELL_STRAIGHT_SHOT | SPELL_DOUBLE_SHOT | SPELL_BINDING_SHOT | SPELL_NAPALM_SHOT => {
+                // 弓箭手弹道伤害：DC × 法术倍率（power_base 近似），最少 1
+                let raw_damage = (magic_stat + (power as i32) / 2).max(1);
+
+                // 弹道延迟：距离×50ms + 500ms
+                let target_dist = ((state.x - target_x).abs() + (state.y - target_y).abs()) as u64;
+                let base_delay_ms = target_dist * 50 + 500;
+                // tick_count 每 100ms +1，按 100ms 取整（最少 1 tick）
+                let fire_at_tick = self.tick_count + (base_delay_ms / 100).max(1);
+
+                self.pending_spell_completions.push(PendingSpellCompletion {
+                    fire_at_tick,
+                    session_id: msg.session_id,
+                    spell: msg.spell,
+                    target_id: msg.target_id,
+                    target_x,
+                    target_y,
+                    damage: raw_damage,
+                    magic_stat,
+                    spell_level,
+                });
+
+                // DoubleShot：额外发一发，延迟 +200ms（2 ticks）
+                if msg.spell == SPELL_DOUBLE_SHOT {
+                    self.pending_spell_completions.push(PendingSpellCompletion {
+                        fire_at_tick: fire_at_tick + 2,
+                        session_id: msg.session_id,
+                        spell: msg.spell,
+                        target_id: msg.target_id,
+                        target_x,
+                        target_y,
+                        damage: raw_damage,
+                        magic_stat,
+                        spell_level,
+                    });
+                }
+                debug!("Magic: {} casts Archer projectile spell={} dmg={} delay={}ms (DoubleShot={})",
+                    state.name, msg.spell, raw_damage, base_delay_ms, msg.spell == SPELL_DOUBLE_SHOT);
+            }
+            // Concentration：自身 MP 恢复 buff（MpRegenBoost），持续 60s
+            SPELL_CONCENTRATION => {
+                let bonus = 3 + spell_level as i32 * 2;
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::MpRegenBoost { bonus },
+                    600, // 60s = 600 ticks
+                    5,
+                );
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                debug!("Magic: {} casts Concentration (MP regen +{})", state.name, bonus);
+            }
+            // ElementalBarrier：自身减伤 buff（DamageReduction），持续 30s
+            // 与 MagicShield 同机制（用 ApplyDamageReduction 设 PlayerState.damage_reduction_percent）
+            SPELL_ELEMENTAL_BARRIER => {
+                let reduction_pct = ((spell_level as i32 + 1) * 10).min(80);
+                let duration_ticks = 300; // 30s = 300 ticks
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyDamageReduction {
+                    percent: reduction_pct,
+                    duration_ticks,
+                }).await;
+                debug!("Magic: {} casts ElementalBarrier (damage -{}%)", state.name, reduction_pct);
+            }
+            // Mirroring：自身反伤 buff（Reflect），持续 30s
+            SPELL_MIRRORING => {
+                let reflect_pct = 10 + spell_level as i32 * 5;
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::Reflect { percent: reflect_pct },
+                    300, // 30s = 300 ticks
+                    5,
+                );
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                debug!("Magic: {} casts Mirroring (reflect {}%)", state.name, reflect_pct);
+            }
+            // ===== 刺客法术（Assassin，buff 系 + 位移系 + 物理攻击系）=====
+            // Haste：攻击速度提升（降低攻击冷却，C# Stat.AttackSpeed）
+            SPELL_HASTE => {
+                let pct = 15 + spell_level as i32 * 10;
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::AttackSpeedBoost { percent: pct },
+                    600, // 60s
+                    5,
+                );
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                debug!("Magic: {} casts Haste (attack speed +{}%)", state.name, pct);
+            }
+            // LightBody：敏捷+移动速度（C# Agility + MoveSpeed）
+            SPELL_LIGHT_BODY => {
+                let agi_bonus = 5 + spell_level as i32 * 3;
+                let buff1 = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::AgilityBoost { bonus: agi_bonus }, 600, 5);
+                let buff2 = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::MoveSpeedBoost { percent: 10 }, 600, 5);
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: buff1 }).await;
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: buff2 }).await;
+                debug!("Magic: {} casts LightBody (agility +{}, speed +10%)", state.name, agi_bonus);
+            }
+            // Fury：攻击力提升（C# Stat.MinDC/MaxDC）
+            SPELL_FURY => {
+                let atk_bonus = (power / 3).max(5);
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::AttackBoost { bonus: atk_bonus }, 600, 5);
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                debug!("Magic: {} casts Fury (attack +{})", state.name, atk_bonus);
+            }
+            // Rage：暴击率提升（C# Stat.CriticalRate）
+            SPELL_RAGE => {
+                let crit_bonus = 3 + spell_level as i32 * 2;
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::CriticalRateBoost { bonus: crit_bonus }, 600, 5);
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                debug!("Magic: {} casts Rage (critical rate +{})", state.name, crit_bonus);
+            }
+            // SwiftFeet：移动速度大幅提升
+            SPELL_SWIFT_FEET => {
+                let spd_pct = 30 + spell_level as i32 * 10;
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::MoveSpeedBoost { percent: spd_pct }, 300, 5);
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                debug!("Magic: {} casts SwiftFeet (move speed +{}%)", state.name, spd_pct);
+            }
+            // MoonLight：隐身（刺客版，怪物失去目标）
+            SPELL_MOON_LIGHT => {
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::Invisibility,
+                    (30 + spell_level as u32 * 10) * 10, 5);
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                self.invisible_sessions.insert(msg.session_id);
+                debug!("Magic: {} casts MoonLight (invisible)", state.name);
+            }
+            // DarkBody：隐身 + 攻击力（刺客终极隐身）
+            SPELL_DARK_BODY => {
+                let atk_bonus = (power / 4).max(3);
+                let buff1 = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::Invisibility,
+                    (20 + spell_level as u32 * 10) * 10, 5);
+                let buff2 = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::AttackBoost { bonus: atk_bonus },
+                    (20 + spell_level as u32 * 10) * 10, 5);
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: buff1 }).await;
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: buff2 }).await;
+                self.invisible_sessions.insert(msg.session_id);
+                debug!("Magic: {} casts DarkBody (invisible + attack {})", state.name, atk_bonus);
+            }
+            // HeavenlySword：直线 3 格 AoE（物理 AC 防御，类似 Thrusting 但更长）
+            SPELL_HEAVENLY_SWORD => {
+                let dir = msg.direction as usize % 8;
+                let attacker_stats = state.to_combat_stats();
+                let level_offset = state.level.min(10) as u16;
+                let raw_damage = crate::combat::attack::get_attack_power(
+                    attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck);
+                let mut cx = state.x;
+                let mut cy = state.y;
+                let mut hit_ids: Vec<u32> = Vec::new();
+                for _ in 0..3 {
+                    cx += MON_DIR_DX[dir];
+                    cy += MON_DIR_DY[dir];
+                    if let Some((&mid, _)) = self.monsters.iter().find(|(_, m)| m.x == cx && m.y == cy && m.hp > 0) {
+                        hit_ids.push(mid);
+                    }
+                }
+                for mid in hit_ids {
+                    if let Some(m) = self.monsters.get_mut(&mid) {
+                        let ds = m.to_combat_stats();
+                        let r = combat_attack::resolve_attack(
+                            &attacker_stats, &ds, raw_damage,
+                            mir2_shared::enums::DefenceType::AcAgility, level_offset);
+                        if r.is_hit && r.damage > 0 {
+                            m.hp = m.hp.saturating_sub(r.damage);
+                            m.provoked = true;
+                            m.target_session = Some(msg.session_id);
+                            for p in &r.applied_poisons {
+                                crate::combat::poison::apply_poison(&mut m.poison_list, *p);
+                            }
+                        }
+                    }
+                }
+                debug!("Magic: {} casts HeavenlySword (line 3 AoE)", state.name);
+            }
+            // CrescentSlash：前方扇形 AoE（前+左前+右前 3 格）
+            SPELL_CRESCENT_SLASH => {
+                let dir = msg.direction as usize % 8;
+                let attacker_stats = state.to_combat_stats();
+                let level_offset = state.level.min(10) as u16;
+                let raw_damage = crate::combat::attack::get_attack_power(
+                    attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck);
+                // 扇形：前方 dir + 左前 (dir+7)%8 + 右前 (dir+1)%8
+                let fan_dirs = [dir, (dir + 7) % 8, (dir + 1) % 8];
+                let mut hit_ids: Vec<u32> = Vec::new();
+                for fd in fan_dirs {
+                    let tx = state.x + MON_DIR_DX[fd];
+                    let ty = state.y + MON_DIR_DY[fd];
+                    if let Some((&mid, _)) = self.monsters.iter().find(|(_, m)| m.x == tx && m.y == ty && m.hp > 0) {
+                        hit_ids.push(mid);
+                    }
+                }
+                for mid in hit_ids {
+                    if let Some(m) = self.monsters.get_mut(&mid) {
+                        let ds = m.to_combat_stats();
+                        let r = combat_attack::resolve_attack(
+                            &attacker_stats, &ds, raw_damage,
+                            mir2_shared::enums::DefenceType::AcAgility, level_offset);
+                        if r.is_hit && r.damage > 0 {
+                            m.hp = m.hp.saturating_sub(r.damage);
+                            m.provoked = true;
+                            m.target_session = Some(msg.session_id);
+                        }
+                    }
+                }
+                debug!("Magic: {} casts CrescentSlash (fan 3 AoE)", state.name);
+            }
+            // FlashDash：向前突进 4 格（纯位移，成功率 (level+1)/4）
+            SPELL_FLASH_DASH => {
+                if fastrand::i32(0..4) >= spell_level as i32 + 1 {
+                    debug!("Magic: {} FlashDash failed (random)", state.name);
+                    // 失败仍消耗 MP，不 return（继续走 XP 流程）
+                } else {
+                    let dir = msg.direction as usize % 8;
+                    let (max_x, max_y) = self.maps.get(&state.map_index)
+                        .map(|m| (m.width as i32, m.height as i32))
+                        .unwrap_or((i32::MAX, i32::MAX));
+                    let tx = (state.x + MON_DIR_DX[dir] * 4).clamp(0, max_x - 1);
+                    let ty = (state.y + MON_DIR_DY[dir] * 4).clamp(0, max_y - 1);
+                    let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                        x: tx, y: ty, direction: msg.direction,
+                        map_index: None, is_mounted: None,
+                    }).await;
+                    debug!("Magic: {} casts FlashDash to ({},{})", state.name, tx, ty);
+                }
+            }
+            // BackStep：向后跳跃 3 格（direction 相反方向）
+            SPELL_BACK_STEP => {
+                let dir = msg.direction as usize % 8;
+                let back_dir = (dir + 4) % 8; // 反方向
+                let (max_x, max_y) = self.maps.get(&state.map_index)
+                    .map(|m| (m.width as i32, m.height as i32))
+                    .unwrap_or((i32::MAX, i32::MAX));
+                let tx = (state.x + MON_DIR_DX[back_dir] * 3).clamp(0, max_x - 1);
+                let ty = (state.y + MON_DIR_DY[back_dir] * 3).clamp(0, max_y - 1);
+                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                    x: tx, y: ty, direction: back_dir as u8,
+                    map_index: None, is_mounted: None,
+                }).await;
+                debug!("Magic: {} casts BackStep to ({},{})", state.name, tx, ty);
+            }
+            // --- 召唤系法术（道士/法师/弓箭手）：在施法者前方 1 格 spawn 一只战斗召唤物 ---
+            SPELL_SUMMON_SKELETON | SPELL_SUMMON_SHINSU | SPELL_SUMMON_HOLY_DEVA
+            | SPELL_SUMMON_VAMPIRE | SPELL_SUMMON_TOAD | SPELL_SUMMON_SNAKES => {
+                // 召唤物名映射（对齐 C# HumanObject.SummonXxx，名需在 DB monster_infos 里）
+                let summon_name: &str = match msg.spell {
+                    SPELL_SUMMON_SKELETON => "Skeleton",
+                    SPELL_SUMMON_SHINSU => "Shinsu",
+                    SPELL_SUMMON_HOLY_DEVA => "HolyDeva",
+                    SPELL_SUMMON_VAMPIRE => "Vampire",
+                    SPELL_SUMMON_TOAD => "Toad",
+                    SPELL_SUMMON_SNAKES => "Snakes",
+                    _ => unreachable!(),
+                };
+                let (max_x, max_y) = self.maps.get(&state.map_index)
+                    .map(|m| (m.width as i32, m.height as i32))
+                    .unwrap_or((i32::MAX, i32::MAX));
+                let dir = msg.direction as usize % 8;
+                // 召唤物生成在施法者前方 1 格（对齐 C# target point）
+                let sx = (state.x + MON_DIR_DX[dir]).clamp(0, max_x - 1);
+                let sy = (state.y + MON_DIR_DY[dir]).clamp(0, max_y - 1);
+
+                // 限制同一主人同时拥有的召唤物数量（C# 默认 1，高级技能 2）
+                let max_slaves = if msg.spell == SPELL_SUMMON_SHINSU
+                    || msg.spell == SPELL_SUMMON_SNAKES { 2 } else { 1 };
+                let current_slaves = self.monsters.values()
+                    .filter(|m| m.target_session == Some(msg.session_id))
+                    .count();
+                if current_slaves >= max_slaves {
+                    // 已达上限：移除最早的召唤物（按 object_id 最小者）
+                    if let Some(victim_id) = self.monsters.iter()
+                        .filter(|(_, m)| m.target_session == Some(msg.session_id))
+                        .map(|(id, _)| *id)
+                        .min() {
+                        if self.monsters.remove(&victim_id).is_some() {
+                            let rm_pkt = Self::build_object_remove_packet(victim_id);
+                            for sid in self.players.keys() {
+                                let _ = self.gate_ref.ask(SendToClient {
+                                    session_id: *sid,
+                                    data: rm_pkt.clone(),
+                                });
+                            }
+                            debug!("Magic: {} reached slave cap, recalled monster {}",
+                                state.name, victim_id);
+                        }
+                    }
+                }
+
+                // 按 monster_name_index 查 MonsterInfo（lowercase key，对齐 tick.rs boss_summons）
+                let mon_index = self.monster_name_index.get(&summon_name.to_lowercase()).copied();
+                match mon_index {
+                    Some(idx) => {
+                        // 先 clone MonsterInfo 避免 &self.monster_infos 与 &mut self.alloc_object_id 借用冲突
+                        let info_opt = self.monster_infos.get(&idx).cloned();
+                        if let Some(info) = info_opt {
+                            let new_oid = self.alloc_object_id();
+                            let hp = info.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(50);
+                            let min_dmg = info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(5);
+                            let max_dmg = info.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(10);
+                            // 广播 ObjectMonster 给所有玩家（spawn 通知）
+                            let spawn = MonsterSpawn {
+                                name: info.name.clone(),
+                                image: info.image as u16,
+                                monster_index: idx,
+                                x: sx,
+                                y: sy,
+                                direction: dir as u8,
+                                hp,
+                                min_dmg,
+                                max_dmg,
+                                xp: info.experience,
+                                map_index: state.map_index,
+                            };
+                            let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
+                            for session_id in self.players.keys() {
+                                let _ = self.gate_ref.ask(SendToClient {
+                                    session_id: *session_id,
+                                    data: packet.clone(),
+                                });
+                            }
+                            let ai_profile = MonsterAiProfile::from_info(&info);
+                            // 召唤物：target_session=主人、provoked=true 主动攻击
+                            self.monsters.insert(new_oid, MonsterState {
+                                object_id: new_oid,
+                                name: spawn.name.clone(),
+                                image: spawn.image,
+                                monster_index: idx,
+                                x: sx, y: sy, direction: dir as u8,
+                                hp, max_hp: hp, min_dmg, max_dmg, xp: spawn.xp,
+                                spawn_x: sx, spawn_y: sy, map_index: state.map_index,
+                                next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
+                                ai_profile, ai_state: MonsterAiState::Idle,
+                                target_session: Some(msg.session_id), provoked: true,
+                                is_elite: false, is_boss: false,
+                                min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
+                                agility: 0, accuracy: 0,
+                                armour_rate: 1.0, damage_rate: 1.0,
+                                magic_resist: 0, critical_rate: 0, critical_damage: 0,
+                                luck: 0, reflect: 0, damage_reduction_percent: 0,
+                                poison_list: Vec::new(),
+                                undead: info.undead,
+                                behavior: crate::actors::world::ai::make_behavior(&spawn.name),
+                            });
+                            debug!("Magic: {} casts summon '{}' as #{} at ({},{}) (slave of {})",
+                                state.name, summon_name, new_oid, sx, sy, msg.session_id);
+                        } else {
+                            warn!("Summon '{}' found index {} but no MonsterInfo (DB missing mob)",
+                                summon_name, idx);
+                            send_system_message(&self.gate_ref, msg.session_id,
+                                "召唤失败：怪物资料缺失");
+                        }
+                    }
+                    None => {
+                        warn!("Summon '{}' not in monster_name_index (DB may lack this mob)", summon_name);
+                        send_system_message(&self.gate_ref, msg.session_id, "召唤失败：未知怪物");
+                    }
+                }
+            }
+            // --- 默认：其他伤害类（接入战斗公式 MAC）---
             _ => {
+                let raw_damage = if let Some(info) = spell_db {
+                    crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
+                } else {
+                    fastrand::i32(5..=15)
+                }.max(1);
+                let attacker_stats = state.to_combat_stats();
+                let level_offset = state.level.min(10) as u16;
                 let hit_monster_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(_, m)| {
                         let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
-                        dist <= spell_range
+                        dist <= spell_range && m.hp > 0
                     })
                     .map(|(id, _)| *id)
                     .collect();
 
                 for monster_id in hit_monster_ids {
                     if let Some(monster) = self.monsters.get_mut(&monster_id) {
-                        let damage = if let Some(info) = spell_db {
-                            crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
-                        } else {
-                            fastrand::i32(5..=15)
-                        };
-                        let damage = damage.max(1);
-                        monster.hp = monster.hp.saturating_sub(damage);
-                        monster.provoked = true;
-                        monster.target_session = Some(msg.session_id);
-                        debug!("Magic: {} spell={} lv={} -> monster {} for {} damage", state.name, msg.spell, spell_level, monster_id, damage);
+                        let defender_stats = monster.to_combat_stats();
+                        let r = combat_attack::resolve_attack(
+                            &attacker_stats, &defender_stats, raw_damage,
+                            mir2_shared::enums::DefenceType::Mac, level_offset,
+                        );
+                        if r.is_hit && r.damage > 0 {
+                            monster.hp = monster.hp.saturating_sub(r.damage);
+                            monster.provoked = true;
+                            monster.target_session = Some(msg.session_id);
+                            for p in &r.applied_poisons {
+                                crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
+                            }
+                        }
+                        debug!("Magic: {} spell={} lv={} -> monster {} for {} dmg (crit={})",
+                            state.name, msg.spell, spell_level, monster_id, r.damage, r.is_critical);
                     }
                 }
             }

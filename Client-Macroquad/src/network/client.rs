@@ -505,8 +505,7 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
             || x == SP::GuildStorageList as u16
             || x == SP::GuildRequestWar as u16
             || x == SP::GuildBuffList as u16
-            || x == SP::GuildTerritoryPage as u16
-            || x == SP::PurchaseGuildTerritory as u16 =>
+            || x == SP::GuildTerritoryPage as u16 =>
         {
             GuildHandler.handle(header, payload)
         }

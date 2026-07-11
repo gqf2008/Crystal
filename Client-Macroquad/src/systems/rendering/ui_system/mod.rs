@@ -37,6 +37,7 @@ pub struct UIRenderSystem {
     pub(crate) refine_dialog: crate::scenes::dialogs::game::refine_dialog::RefineDialogHybrid,
     pub(crate) item_rental_dialog: crate::scenes::dialogs::game::item_rental_dialog::ItemRentalDialogHybrid,
     pub(crate) trust_merchant_dialog: crate::scenes::dialogs::game::trust_merchant_dialog::TrustMerchantDialogHybrid,
+    pub(crate) report_dialog: crate::scenes::dialogs::game::report_dialog::ReportDialogHybrid,
 
     pub(crate) npc_z_order: Vec<NpcUiLayer>,
 
@@ -44,6 +45,9 @@ pub struct UIRenderSystem {
 
     /// 暂存的交易动作（由 draw 阶段产出，由 update 阶段发包）
     pub(crate) pending_trade_action: Option<crate::scenes::dialogs::game::trade_dialog::TradeAction>,
+
+    /// 暂存的举报/反馈提交（由 draw 阶段产出，由 update 阶段发包）
+    pub(crate) pending_report_issue: Option<String>,
 
     /// 暂存的文本输入结果（由 draw 阶段产出，由 update 阶段发包）
     pub(crate) pending_text_input: Option<(crate::scenes::dialogs::game::main_dialog::TextInputKind, String)>,
@@ -107,12 +111,14 @@ impl UIRenderSystem {
             refine_dialog: crate::scenes::dialogs::game::refine_dialog::RefineDialogHybrid::new(),
             item_rental_dialog: crate::scenes::dialogs::game::item_rental_dialog::ItemRentalDialogHybrid::new(),
             trust_merchant_dialog: crate::scenes::dialogs::game::trust_merchant_dialog::TrustMerchantDialogHybrid::new(),
+            report_dialog: crate::scenes::dialogs::game::report_dialog::ReportDialogHybrid::new(),
 
             // 默认：SubGoods 在最上层（如果打开）。
             npc_z_order: vec![NpcUiLayer::Dialog, NpcUiLayer::Goods, NpcUiLayer::SubGoods],
 
             ui_stack_top: UiStackTop::Main,
             pending_trade_action: None,
+            pending_report_issue: None,
             pending_text_input: None,
             pending_ranking_refresh_tab: None,
             pending_equip_request: None,

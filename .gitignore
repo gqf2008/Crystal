@@ -364,3 +364,11 @@ FodyWeavers.xsd
 /Build
 /.idea/.idea.Legend of Mir/.idea
 /.idea/config
+/Client-Macroquad/Data
+/Client-Macroquad/Map
+/ClientRust/Data
+/ClientRust/target
+/Server.MirForms/Envir
+/ServerRust/Daneo1989
+/SharedRust/target
+/ServerRust/tests

@@ -380,8 +380,7 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
             || x == SP::GuildStorageList as u16
             || x == SP::GuildRequestWar as u16
             || x == SP::GuildBuffList as u16
-            || x == SP::GuildTerritoryPage as u16
-            || x == SP::PurchaseGuildTerritory as u16 =>
+            || x == SP::GuildTerritoryPage as u16 =>
         {
             GuildHandler.handle(header, payload)
         }
@@ -650,7 +649,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: GameEvent) -> Result<(
             message,
             chat_type: _,
         } => {
-            let packet = client::Chat { message };
+            let packet = client::Chat { message, linked_items: Vec::new() };
             serialize_packet(stream, &packet)?;
             tracing::trace!("💬 Sent chat: {}", packet.message);
         }

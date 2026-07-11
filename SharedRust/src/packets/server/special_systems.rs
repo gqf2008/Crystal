@@ -504,25 +504,8 @@ impl Packet for GuildTerritoryPage {
     }
 }
 
-/// PurchaseGuildTerritory - 购买公会领地 (275)
-#[derive(Debug, Clone)]
-pub struct PurchaseGuildTerritory {
-    pub success: bool,              // 是否成功
-}
-
-impl Packet for PurchaseGuildTerritory {
-    const OPCODE: i16 = ServerPacketIds::PurchaseGuildTerritory as i16;
-
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
-        
-        writer.write_u8(if self.success { 1 } else { 0 })?;
-        
-        Ok(())
-    }
-
-    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let success = reader.read_u8()? != 0;
-        Ok(Self { success })
-    }
-}
+// 注：`PurchaseGuildTerritory` 在 C# 中仅作为 ClientPacket 存在（客户端→服务端请求），
+// 服务端从不回送此 opcode。Rust 端此前凭空定义了一个 server::PurchaseGuildTerritory
+// 并占用了 opcode 277，挤掉了本应是 277 的 StorageUnlockResult。现已移除该伪服务端包，
+// StorageUnlockResult/StoragePasswordResult 恢复为 277/278。
+// 客户端发起购买仍走 client::guild::PurchaseGuildTerritory（ClientPacketIds）。

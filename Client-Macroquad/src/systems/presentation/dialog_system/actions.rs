@@ -188,6 +188,7 @@ pub fn handle_npc_goods_action(ctx: &mut GameContext, action: crate::scenes::dia
                 name: item.info.as_ref().map(|i| i.name.clone()).unwrap_or_else(|| "未知配方".to_string()),
                 recipe_unique_id: item.unique_id,
                 materials: Vec::new(), // 协议不携带配方材料数据，由客户端仅展示结果物品
+                gold: item.info.as_ref().map(|i| i.price).unwrap_or(0), // 用商品价格作为合成 Gold 成本
             };
             let _ = UiState::with_mut_in_world(&mut ctx.world, |ui| {
                 ui.pending_commands.push(UiCommand::ShowCraft { recipes: vec![recipe] });

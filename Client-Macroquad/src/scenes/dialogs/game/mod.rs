@@ -115,6 +115,9 @@ pub use item_rental_dialog::{ItemRentalDialogHybrid, RentalItem};
 pub mod trust_merchant_dialog;
 pub use trust_merchant_dialog::{TrustMerchantDialogHybrid, MerchantItem, MerchantTab};
 
+pub mod report_dialog;
+pub use report_dialog::ReportDialogHybrid;
+
 // 为了兼容性，创建别名
 pub type BeltDialog = BeltDialogHybrid;
 pub type CharacterDialog = CharacterDialogHybrid;

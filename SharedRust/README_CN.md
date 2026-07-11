@@ -52,8 +52,8 @@ shared_rust::
 
 ## 🔥 核心特性
 
-✅ **完全协议兼容** - 与C#版本100%二进制兼容  
-✅ **.NET序列化兼容** - 支持BinaryReader/Writer格式  
+✅ **序列化格式兼容** - `.NET` BinaryReader/Writer 7-bit 编码字符串 / LE 字节序，用于读取旧版 C# `Server.MirDB` 数据  
+✅ **Rust 自洽协议栈** - SharedRust + ServerRust + Client-Macroquad 构成闭环 Rust 协议栈。**不与原版 C# 客户端/服务端线缆互通**：枚举判别值（Spell/Stat/MirAction/Monster/BuffType 等）与网关 XOR 帧层相对 C# master 有意偏离（以 Rust 自洽为真值）  
 ✅ **类型安全** - Rust强类型系统保证  
 ✅ **零拷贝优化** - 高性能网络处理  
 ✅ **完整错误处理** - Result类型错误传播  

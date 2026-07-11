@@ -76,6 +76,9 @@ pub enum UiCommand {
     HideNpcGoodsSub,
     HideNpcGoods,
 
+    /// 打开举报 / Bug 反馈对话框
+    ShowReport,
+
     /// 更新坐骑状态（mount_type, riding）
     UpdateMountState { mount_type: i16, riding: bool },
 

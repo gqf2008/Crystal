@@ -500,6 +500,35 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         );
         CREATE INDEX IF NOT EXISTS idx_auctions_sold ON auctions(sold);
         CREATE INDEX IF NOT EXISTS idx_auctions_seller ON auctions(seller_name);
+        -- Recipes (crafting). C# Server loads these from Envir/Recipe/*.txt files
+        -- (NOT from MirDB binary), so the Rust port persists them in SQLite instead.
+        -- recipe_id mirrors C# NextRecipeID (1-based). product_* is the crafted item.
+        -- Requirements (level/class/gender/flag/quest) mirror C# RecipeInfo criteria.
+        CREATE TABLE IF NOT EXISTS recipes (
+            recipe_id INTEGER PRIMARY KEY,
+            product_item_index INTEGER NOT NULL,
+            product_count INTEGER NOT NULL DEFAULT 1,
+            gold_cost INTEGER NOT NULL DEFAULT 0,
+            chance INTEGER NOT NULL DEFAULT 100,
+            required_level INTEGER,
+            required_gender INTEGER,
+            required_flags TEXT NOT NULL DEFAULT '[]',
+            required_quests TEXT NOT NULL DEFAULT '[]',
+            required_classes TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE IF NOT EXISTS recipe_ingredients (
+            recipe_id INTEGER NOT NULL,
+            item_index INTEGER NOT NULL,
+            count INTEGER NOT NULL DEFAULT 1,
+            FOREIGN KEY (recipe_id) REFERENCES recipes(recipe_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_recipe ON recipe_ingredients(recipe_id);
+        CREATE TABLE IF NOT EXISTS recipe_tools (
+            recipe_id INTEGER NOT NULL,
+            item_index INTEGER NOT NULL,
+            FOREIGN KEY (recipe_id) REFERENCES recipes(recipe_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_recipe_tools_recipe ON recipe_tools(recipe_id);
         "#
     ).execute(&pool).await?;
 
@@ -554,6 +583,35 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN accuracy INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN agility INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    // 战斗公式扩展字段（AC/MAC/Luck/Crit/MagicResist/Reflect/DamageReduction 等）
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN min_ac INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN max_ac INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN min_mac INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN max_mac INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN luck INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN critical_rate INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN critical_damage INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN magic_resist INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN reflect INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN damage_reduction_percent INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN attack_bonus INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN hp_drain_rate_percent INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN energy_shield_percent INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN energy_shield_hp_gain INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     // Migration: add weather_particles to old map_infos (from migrate_mirdb)
     let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN weather_particles INTEGER NOT NULL DEFAULT 0")
@@ -911,6 +969,25 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         holy: row.try_get("holy").unwrap_or(0),
         accuracy: row.try_get("accuracy").unwrap_or(0),
         agility: row.try_get("agility").unwrap_or(0),
+        min_ac: row.try_get("min_ac").unwrap_or(0),
+        max_ac: row.try_get("max_ac").unwrap_or(0),
+        min_mac: row.try_get("min_mac").unwrap_or(0),
+        max_mac: row.try_get("max_mac").unwrap_or(0),
+        bonus_min_ac: 0,
+        bonus_max_ac: 0,
+        bonus_min_mac: 0,
+        bonus_max_mac: 0,
+        luck: row.try_get("luck").unwrap_or(0),
+        critical_rate: row.try_get("critical_rate").unwrap_or(0),
+        critical_damage: row.try_get("critical_damage").unwrap_or(0),
+        magic_resist: row.try_get("magic_resist").unwrap_or(0),
+        reflect: row.try_get("reflect").unwrap_or(0),
+        damage_reduction_percent: row.try_get("damage_reduction_percent").unwrap_or(0),
+        attack_bonus: row.try_get("attack_bonus").unwrap_or(0),
+        hp_drain_rate_percent: row.try_get("hp_drain_rate_percent").unwrap_or(0),
+        energy_shield_percent: row.try_get("energy_shield_percent").unwrap_or(0),
+        energy_shield_hp_gain: row.try_get("energy_shield_hp_gain").unwrap_or(0),
+        poison_list: Vec::new(),
         inventory,
         group_id: row.get::<Option<i64>, _>("group_id").map(|v| v as u64),
         friend_list,
@@ -2009,6 +2086,43 @@ pub struct DragonInfo {
     pub exps: Vec<i64>,
 }
 
+/// A single crafting ingredient (item + quantity). Mirrors C# UserItem ingredient rows.
+#[derive(Debug, Clone)]
+pub struct RecipeIngredient {
+    pub item_index: i32,
+    pub count: u16,
+}
+
+/// Crafting recipe. Mirrors C# Server.MirDatabase.RecipeInfo.
+/// In C# these are loaded from Envir/Recipe/*.txt (not MirDB); the Rust port
+/// persists them in the SQLite `recipes` / `recipe_ingredients` / `recipe_tools` tables.
+#[derive(Debug, Clone)]
+pub struct RecipeInfo {
+    pub recipe_id: i32,
+    /// Index of the produced item (product UserItem.ItemIndex)
+    pub product_item_index: i32,
+    /// How many of the product are produced
+    pub product_count: u16,
+    /// Gold cost to craft
+    pub gold_cost: u32,
+    /// Success chance 0-100
+    pub chance: u8,
+    /// Ingredients consumed on a successful craft
+    pub ingredients: Vec<RecipeIngredient>,
+    /// Required tools (referenced but not consumed). Stored as item indices.
+    pub tools: Vec<i32>,
+    /// Optional level requirement (None = no requirement)
+    pub required_level: Option<u16>,
+    /// Optional gender requirement (None = no requirement)
+    pub required_gender: Option<u8>,
+    /// Required quest flags (must all be completed)
+    pub required_quests: Vec<i32>,
+    /// Required player flags (must all be set)
+    pub required_flags: Vec<i32>,
+    /// Required classes (empty = any class)
+    pub required_classes: Vec<u8>,
+}
+
 /// Load all map infos from DB with nested safe_zones, respawns, movements
 pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
     // 4 queries total instead of 1 + N*3
@@ -2561,6 +2675,60 @@ pub async fn load_dragon_info(
         }
         None => Ok(None),
     }
+}
+
+/// Load all craft recipes from DB, joining ingredients/tools.
+///
+/// NOTE on data source: C# `Server.MirDatabase.RecipeInfo` does NOT read from the
+/// Server.MirDB binary; it loads recipes from `Envir/Recipe/*.txt` files at runtime
+/// (see `Envir.cs` line ~3309 and `RecipeInfo.LoadIngredients`). Because the Rust
+/// migration tool only reads Server.MirDB, recipes are seeded into SQLite as default
+/// data (see `migrate_mirdb.rs` `seed_default_recipes`) and loaded here. If the
+/// `recipes` table is empty, the caller should fall back to hardcoded defaults.
+pub async fn load_recipe_infos(pool: &DbPool) -> anyhow::Result<Vec<RecipeInfo>> {
+    let rows = sqlx::query("SELECT * FROM recipes ORDER BY recipe_id")
+        .fetch_all(pool).await?;
+    let ing_rows = sqlx::query("SELECT * FROM recipe_ingredients").fetch_all(pool).await?;
+    let tool_rows = sqlx::query("SELECT * FROM recipe_tools").fetch_all(pool).await?;
+
+    // Index children by recipe_id
+    let mut ing_by_recipe: HashMap<i32, Vec<RecipeIngredient>> = HashMap::new();
+    for r in ing_rows {
+        let rid: i32 = r.get("recipe_id");
+        ing_by_recipe.entry(rid).or_default().push(RecipeIngredient {
+            item_index: r.get("item_index"),
+            count: r.get::<i32, _>("count") as u16,
+        });
+    }
+    let mut tools_by_recipe: HashMap<i32, Vec<i32>> = HashMap::new();
+    for r in tool_rows {
+        let rid: i32 = r.get("recipe_id");
+        tools_by_recipe.entry(rid).or_default().push(r.get("item_index"));
+    }
+
+    Ok(rows.into_iter().map(|r| {
+        let recipe_id: i32 = r.get("recipe_id");
+        let required_quests: Vec<i32> =
+            serde_json::from_str(&r.get::<String, _>("required_quests")).unwrap_or_default();
+        let required_flags: Vec<i32> =
+            serde_json::from_str(&r.get::<String, _>("required_flags")).unwrap_or_default();
+        let required_classes: Vec<u8> =
+            serde_json::from_str(&r.get::<String, _>("required_classes")).unwrap_or_default();
+        RecipeInfo {
+            recipe_id,
+            product_item_index: r.get("product_item_index"),
+            product_count: r.get::<i32, _>("product_count") as u16,
+            gold_cost: r.get::<i64, _>("gold_cost") as u32,
+            chance: r.get::<i32, _>("chance") as u8,
+            ingredients: ing_by_recipe.remove(&recipe_id).unwrap_or_default(),
+            tools: tools_by_recipe.remove(&recipe_id).unwrap_or_default(),
+            required_level: r.get::<Option<i64>, _>("required_level").map(|v| v as u16),
+            required_gender: r.get::<Option<i64>, _>("required_gender").map(|v| v as u8),
+            required_quests,
+            required_flags,
+            required_classes,
+        }
+    }).collect())
 }
 
 // ============================================================

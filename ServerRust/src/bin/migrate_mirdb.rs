@@ -336,6 +336,30 @@ struct ParsedGTMap {
     begin_time: i32,
 }
 
+/// Parsed recipe ingredient (item + quantity).
+struct ParsedRecipeIngredient {
+    item_index: i32,
+    count: u16,
+}
+
+/// Parsed recipe. Mirrors C# Server.MirDatabase.RecipeInfo fields.
+/// NOTE: in C# these are loaded from Envir/Recipe/*.txt files (NOT from MirDB),
+/// so read_recipe_info does not exist; recipes are seeded via seed_default_recipes.
+struct ParsedRecipeInfo {
+    recipe_id: i32,
+    product_item_index: i32,
+    product_count: u16,
+    gold_cost: u32,
+    chance: u8,
+    ingredients: Vec<ParsedRecipeIngredient>,
+    tools: Vec<i32>,
+    required_level: Option<u16>,
+    required_gender: Option<u8>,
+    required_flags: Vec<i32>,
+    required_quests: Vec<i32>,
+    required_classes: Vec<u8>,
+}
+
 // ============================================================
 // Stats dictionary parser
 // ============================================================
@@ -1300,6 +1324,36 @@ async fn create_tables(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
             days INTEGER NOT NULL DEFAULT 0,
             begin_time INTEGER NOT NULL DEFAULT 0
         );
+        -- Recipes (crafting). NOTE: C# Server does NOT store these in Server.MirDB;
+        -- it loads them from Envir/Recipe/*.txt files. Since this tool only reads
+        -- the MirDB binary, recipes are seeded with defaults here (see
+        -- seed_default_recipes) so the runtime craft system has data. To use the
+        -- real C# recipes, import the .txt files into these tables.
+        CREATE TABLE IF NOT EXISTS recipes (
+            recipe_id INTEGER PRIMARY KEY,
+            product_item_index INTEGER NOT NULL,
+            product_count INTEGER NOT NULL DEFAULT 1,
+            gold_cost INTEGER NOT NULL DEFAULT 0,
+            chance INTEGER NOT NULL DEFAULT 100,
+            required_level INTEGER,
+            required_gender INTEGER,
+            required_flags TEXT NOT NULL DEFAULT '[]',
+            required_quests TEXT NOT NULL DEFAULT '[]',
+            required_classes TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE IF NOT EXISTS recipe_ingredients (
+            recipe_id INTEGER NOT NULL,
+            item_index INTEGER NOT NULL,
+            count INTEGER NOT NULL DEFAULT 1,
+            FOREIGN KEY (recipe_id) REFERENCES recipes(recipe_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_recipe_ingredients_recipe ON recipe_ingredients(recipe_id);
+        CREATE TABLE IF NOT EXISTS recipe_tools (
+            recipe_id INTEGER NOT NULL,
+            item_index INTEGER NOT NULL,
+            FOREIGN KEY (recipe_id) REFERENCES recipes(recipe_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_recipe_tools_recipe ON recipe_tools(recipe_id);
         "#
     ).execute(pool).await?;
     Ok(())
@@ -1589,6 +1643,143 @@ async fn insert_gt_map(pool: &sqlx::SqlitePool, g: &ParsedGTMap) -> anyhow::Resu
     Ok(())
 }
 
+/// Insert a recipe and its ingredients/tools into SQLite.
+async fn insert_recipe_info(pool: &sqlx::SqlitePool, r: &ParsedRecipeInfo) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"INSERT OR REPLACE INTO recipes (
+            recipe_id, product_item_index, product_count, gold_cost, chance,
+            required_level, required_gender, required_flags, required_quests, required_classes
+        ) VALUES (?,?,?,?,?,?,?,?,?,?)"#
+    )
+    .bind(r.recipe_id)
+    .bind(r.product_item_index)
+    .bind(r.product_count as i32)
+    .bind(r.gold_cost as i64)
+    .bind(r.chance as i32)
+    .bind(r.required_level.map(|v| v as i64))
+    .bind(r.required_gender.map(|v| v as i64))
+    .bind(serde_json::to_string(&r.required_flags).unwrap_or_else(|_| "[]".into()))
+    .bind(serde_json::to_string(&r.required_quests).unwrap_or_else(|_| "[]".into()))
+    .bind(serde_json::to_string(&r.required_classes).unwrap_or_else(|_| "[]".into()))
+    .execute(pool).await?;
+
+    // Replace ingredients for this recipe
+    sqlx::query("DELETE FROM recipe_ingredients WHERE recipe_id = ?")
+        .bind(r.recipe_id).execute(pool).await?;
+    for ing in &r.ingredients {
+        sqlx::query(
+            "INSERT INTO recipe_ingredients (recipe_id, item_index, count) VALUES (?,?,?)"
+        )
+        .bind(r.recipe_id).bind(ing.item_index).bind(ing.count as i32)
+        .execute(pool).await?;
+    }
+
+    // Replace tools for this recipe
+    sqlx::query("DELETE FROM recipe_tools WHERE recipe_id = ?")
+        .bind(r.recipe_id).execute(pool).await?;
+    for tool_idx in &r.tools {
+        sqlx::query(
+            "INSERT INTO recipe_tools (recipe_id, item_index) VALUES (?,?)"
+        )
+        .bind(r.recipe_id).bind(tool_idx)
+        .execute(pool).await?;
+    }
+
+    Ok(())
+}
+
+/// Seed default craft recipes into SQLite.
+///
+/// WHY: C# `Server.MirDatabase.RecipeInfo` loads recipes from
+/// `Envir/Recipe/*.txt` files at runtime (see `Envir.cs` ~line 3309 and
+/// `RecipeInfo.LoadIngredients`), NOT from the Server.MirDB binary. Since this
+/// migration tool only reads the MirDB binary, recipes are seeded here as
+/// defaults so the runtime craft system has data out of the box. To use the
+/// real C# recipes, import the .txt files into the `recipes` tables instead.
+///
+/// The defaults mirror the existing runtime hardcoded recipes
+/// (`actors::world::get_craft_recipes`) and the C# `(HP)DrugLarge.txt` example
+/// (`Amount 10 / Chance 80 / Gold 100 / BlackThread 3 / LargeBone 1`).
+fn default_recipes() -> Vec<ParsedRecipeInfo> {
+    vec![
+        // recipe_id 1: 铁剑 = 木材 x3 + 铁矿石 x2, 80% (mirrors runtime recipe #1)
+        ParsedRecipeInfo {
+            recipe_id: 1,
+            product_item_index: 100,
+            product_count: 1,
+            gold_cost: 0,
+            chance: 80,
+            ingredients: vec![
+                ParsedRecipeIngredient { item_index: 1, count: 3 },
+                ParsedRecipeIngredient { item_index: 2, count: 2 },
+            ],
+            tools: vec![],
+            required_level: None,
+            required_gender: None,
+            required_flags: vec![],
+            required_quests: vec![],
+            required_classes: vec![],
+        },
+        // recipe_id 2: 治疗药水 = 草药 x2 + 清水 x1, 95% (mirrors runtime recipe #2)
+        ParsedRecipeInfo {
+            recipe_id: 2,
+            product_item_index: 101,
+            product_count: 1,
+            gold_cost: 0,
+            chance: 95,
+            ingredients: vec![
+                ParsedRecipeIngredient { item_index: 3, count: 2 },
+                ParsedRecipeIngredient { item_index: 4, count: 1 },
+            ],
+            tools: vec![],
+            required_level: None,
+            required_gender: None,
+            required_flags: vec![],
+            required_quests: vec![],
+            required_classes: vec![],
+        },
+        // recipe_id 3: 强化石 = 铁矿石 x5, 60% (mirrors runtime recipe #3)
+        ParsedRecipeInfo {
+            recipe_id: 3,
+            product_item_index: 102,
+            product_count: 1,
+            gold_cost: 0,
+            chance: 60,
+            ingredients: vec![
+                ParsedRecipeIngredient { item_index: 2, count: 5 },
+            ],
+            tools: vec![],
+            required_level: None,
+            required_gender: None,
+            required_flags: vec![],
+            required_quests: vec![],
+            required_classes: vec![],
+        },
+    ]
+}
+
+/// Seed the `recipes` tables with defaults if they are empty.
+async fn seed_default_recipes(pool: &sqlx::SqlitePool) -> anyhow::Result<usize> {
+    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM recipes")
+        .fetch_one(pool).await
+        .unwrap_or((0,));
+    if count.0 > 0 {
+        info!("Recipes table already populated ({} rows), skipping seed", count.0);
+        return Ok(0);
+    }
+
+    let recipes = default_recipes();
+    let mut ok = 0;
+    for r in &recipes {
+        if let Err(e) = insert_recipe_info(pool, r).await {
+            error!("  Recipe #{} seed failed: {}", r.recipe_id, e);
+        } else {
+            ok += 1;
+        }
+    }
+    Ok(ok)
+}
+
 // ============================================================
 // Main
 // ============================================================
@@ -1870,6 +2061,15 @@ async fn main() -> anyhow::Result<()> {
         0
     };
 
+    // === RecipeInfo (seed defaults) ===
+    // C# Server loads recipes from Envir/Recipe/*.txt, not from MirDB. Since this
+    // tool only reads the MirDB binary, we seed the recipes table with defaults.
+    info!("Seeding default recipes...");
+    match seed_default_recipes(&pool).await {
+        Ok(n) => info!("  Recipes seeded: {}", n),
+        Err(e) => error!("  Recipe seed error: {}", e),
+    }
+
     // === Summary ===
     info!("=== Migration Complete ===");
     info!("Maps: {}", map_ok);
@@ -1883,7 +2083,8 @@ async fn main() -> anyhow::Result<()> {
     // Verify counts
     let tables = ["map_infos", "safe_zones", "map_respawns", "map_movements", "mine_zones",
                    "item_infos", "monster_infos", "npc_infos", "quest_infos", "dragon_info",
-                   "magic_infos", "game_shop_items", "conquest_infos", "gt_maps"];
+                   "magic_infos", "game_shop_items", "conquest_infos", "gt_maps",
+                   "recipes", "recipe_ingredients", "recipe_tools"];
     for t in &tables {
         let count: (i64,) = sqlx::query_as(&format!("SELECT COUNT(*) FROM {}", t))
             .fetch_one(&pool).await.unwrap_or((0,));

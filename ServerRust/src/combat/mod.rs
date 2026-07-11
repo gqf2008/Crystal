@@ -3,3 +3,4 @@
 pub mod attack;
 pub mod buff;
 pub mod magic;
+pub mod poison;

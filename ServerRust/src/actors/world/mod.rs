@@ -4,6 +4,7 @@
 // 子模块（已集成）
 mod awakening;
 mod combat;
+pub mod ai;
 #[allow(dead_code)]
 mod conquest;
 #[allow(dead_code)]
@@ -375,7 +376,6 @@ pub(crate) enum MonsterAiState {
 }
 
 /// 运行时怪物状态
-#[derive(Clone)]
 pub(crate) struct MonsterState {
     pub object_id: u32,
     pub name: String,
@@ -412,6 +412,29 @@ pub(crate) struct MonsterState {
     pub is_elite: bool,
     /// 是否为世界Boss
     pub is_boss: bool,
+    // ===== 战斗公式扩展字段（对齐 C# MonsterObject 的 Stats）=====
+    pub min_ac: i32,
+    pub max_ac: i32,
+    pub min_mac: i32,
+    pub max_mac: i32,
+    pub agility: i32,
+    pub accuracy: i32,
+    /// 护甲倍率（C# ArmourRate，默认 1.0）
+    pub armour_rate: f32,
+    /// 伤害倍率（C# DamageRate，默认 1.0）
+    pub damage_rate: f32,
+    pub magic_resist: i32,
+    pub critical_rate: i32,
+    pub critical_damage: i32,
+    pub luck: i32,
+    pub reflect: i32,
+    pub damage_reduction_percent: i32,
+    /// 运行时中毒/负面状态列表
+    pub poison_list: Vec<crate::combat::poison::Poison>,
+    /// 是否为亡灵类型（ThunderBolt +50%、TurnUndead 秒杀用，C# MonsterInfo.Undead）
+    pub undead: bool,
+    /// AI 行为（Boss=专属 impl，普通怪=DefaultBehavior）
+    pub behavior: Box<dyn crate::actors::world::ai::MonsterBehavior + Send + Sync>,
 }
 
 fn dist_to_spawn(monster: &MonsterState) -> i32 {
@@ -439,20 +462,75 @@ const MON_DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
 const DEFAULT_SPAWN_X: i32 = 330;
 const DEFAULT_SPAWN_Y: i32 = 330;
 
-// 魔法 spell ID 常量（Mir2 原数值）
-const SPELL_HEALING: u8 = 61;
-const SPELL_MASS_HEALING: u8 = 75;
-const SPELL_HEALING_CIRCLE: u8 = 86;
-const SPELL_MAGIC_SHIELD: u8 = 43;
-const SPELL_SOUL_SHIELD: u8 = 69;
-const SPELL_BLESSED_ARMOUR: u8 = 71;
-const SPELL_TELEPORT: u8 = 37;
-const SPELL_FIREBALL: u8 = 31; // 法师怪物默认法术
-const SPELL_FIREWALL: u8 = 34;
-const SPELL_BLIZZARD: u8 = 44;
-const SPELL_METEOR_STRIKE: u8 = 45;
-const SPELL_POISON_CLOUD: u8 = 83;
-const SPELL_EXPLOSIVE_TRAP: u8 = 123;
+// 魔法 spell ID 常量。值必须与 SharedRust `Spell` 枚举一致（DB 存的是枚举值）。
+// 早期版本这里写的是 C# 原数值（系统性偏小），与 SharedRust 枚举/DB 不一致，
+// 导致持久法术判定、buff/heal 分支、怪物施法等全部错位。现统一取自 Spell 枚举。
+const SPELL_HEALING: u8 = mir2_shared::enums::Spell::Healing as u8;          // 64
+const SPELL_MASS_HEALING: u8 = mir2_shared::enums::Spell::MassHealing as u8; // 78
+const SPELL_HEALING_CIRCLE: u8 = mir2_shared::enums::Spell::HealingCircle as u8; // 89
+const SPELL_MAGIC_SHIELD: u8 = mir2_shared::enums::Spell::MagicShield as u8; // 46
+const SPELL_SOUL_SHIELD: u8 = mir2_shared::enums::Spell::SoulShield as u8;   // 72
+const SPELL_BLESSED_ARMOUR: u8 = mir2_shared::enums::Spell::BlessedArmour as u8; // 74
+const SPELL_TELEPORT: u8 = mir2_shared::enums::Spell::Teleport as u8;        // 40
+const SPELL_BLINK: u8 = mir2_shared::enums::Spell::Blink as u8;              // 57
+const SPELL_FIREBALL: u8 = mir2_shared::enums::Spell::FireBall as u8;        // 34，法师怪物默认法术
+const SPELL_FIREWALL: u8 = mir2_shared::enums::Spell::FireWall as u8;        // 42
+const SPELL_BLIZZARD: u8 = mir2_shared::enums::Spell::Blizzard as u8;        // 53
+const SPELL_METEOR_STRIKE: u8 = mir2_shared::enums::Spell::MeteorStrike as u8; // 55
+const SPELL_POISON_CLOUD: u8 = mir2_shared::enums::Spell::PoisonCloud as u8; // 86
+const SPELL_EXPLOSIVE_TRAP: u8 = mir2_shared::enums::Spell::ExplosiveTrap as u8; // 127
+// 弹道类法术（任务3）
+const SPELL_GREAT_FIREBALL: u8 = mir2_shared::enums::Spell::GreatFireBall as u8; // 37
+const SPELL_THUNDERBOLT: u8 = mir2_shared::enums::Spell::ThunderBolt as u8;    // 39
+const SPELL_FROST_CRUNCH: u8 = mir2_shared::enums::Spell::FrostCrunch as u8;   // 44
+const SPELL_VAMPIRISM: u8 = mir2_shared::enums::Spell::Vampirism as u8;        // 48
+// 即时 AoE 类法术（任务4）
+const SPELL_FIREBANG: u8 = mir2_shared::enums::Spell::FireBang as u8;          // 41
+const SPELL_ICE_STORM: u8 = mir2_shared::enums::Spell::IceStorm as u8;         // 49
+const SPELL_LIGHTNING: u8 = mir2_shared::enums::Spell::Lightning as u8;        // 43
+const SPELL_THUNDERSTORM: u8 = mir2_shared::enums::Spell::ThunderStorm as u8;  // 45
+const SPELL_FLAME_FIELD: u8 = mir2_shared::enums::Spell::FlameField as u8;     // 52
+// 道士法术
+const SPELL_POISONING: u8 = mir2_shared::enums::Spell::Poisoning as u8;        // 66
+const SPELL_HIDING: u8 = mir2_shared::enums::Spell::Hiding as u8;              // 70
+const SPELL_MASS_HIDING: u8 = mir2_shared::enums::Spell::MassHiding as u8;     // 71
+const SPELL_TRAP_HEXAGON: u8 = mir2_shared::enums::Spell::TrapHexagon as u8;   // 76
+const SPELL_PURIFICATION: u8 = mir2_shared::enums::Spell::Purification as u8;  // 77
+// 战士近战技能（被动触发于攻击时）
+const SPELL_SLAYING: u8 = mir2_shared::enums::Spell::Slaying as u8;            // 5 攻杀
+const SPELL_THRUSTING: u8 = mir2_shared::enums::Spell::Thrusting as u8;        // 6 刺杀（直线穿透）
+const SPELL_HALFMOON: u8 = mir2_shared::enums::Spell::HalfMoon as u8;          // 7 半月（范围）
+const SPELL_SHOULDER_DASH: u8 = mir2_shared::enums::Spell::ShoulderDash as u8; // 8 野蛮冲撞
+const SPELL_CROSS_HALFMOON: u8 = mir2_shared::enums::Spell::CrossHalfMoon as u8; // 13 十字半月
+const SPELL_BLADE_AVALANCHE: u8 = mir2_shared::enums::Spell::BladeAvalanche as u8; // 14 冰刀斩（范围）
+// 弓箭手法术（Archer，弹道物理系 + 自身 buff）
+const SPELL_STRAIGHT_SHOT: u8 = mir2_shared::enums::Spell::StraightShot as u8;   // 125 直线弹道
+const SPELL_DOUBLE_SHOT: u8 = mir2_shared::enums::Spell::DoubleShot as u8;       // 126 双发弹道
+const SPELL_CONCENTRATION: u8 = mir2_shared::enums::Spell::Concentration as u8;  // 132 魔力恢复 buff
+const SPELL_ELEMENTAL_BARRIER: u8 = mir2_shared::enums::Spell::ElementalBarrier as u8; // 134 元素护盾（减伤）
+const SPELL_BINDING_SHOT: u8 = mir2_shared::enums::Spell::BindingShot as u8;     // 143 定身射击（弹道+Paralysis）
+const SPELL_NAPALM_SHOT: u8 = mir2_shared::enums::Spell::NapalmShot as u8;       // 141 范围爆炸（弹道+AOE）
+const SPELL_MIRRORING: u8 = mir2_shared::enums::Spell::Mirroring as u8;          // 51 分身/反伤 buff
+// 刺客法术（Assassin，buff 系 + 位移系 + 物理攻击系）
+const SPELL_HASTE: u8 = mir2_shared::enums::Spell::Haste as u8;                  // 96 攻击速度+
+const SPELL_FLASH_DASH: u8 = mir2_shared::enums::Spell::FlashDash as u8;         // 97 突进
+const SPELL_LIGHT_BODY: u8 = mir2_shared::enums::Spell::LightBody as u8;         // 98 敏捷+
+const SPELL_HEAVENLY_SWORD: u8 = mir2_shared::enums::Spell::HeavenlySword as u8; // 99 直线AoE
+const SPELL_MOON_LIGHT: u8 = mir2_shared::enums::Spell::MoonLight as u8;         // 103 隐身
+const SPELL_SWIFT_FEET: u8 = mir2_shared::enums::Spell::SwiftFeet as u8;         // 105 移动速度+
+const SPELL_DARK_BODY: u8 = mir2_shared::enums::Spell::DarkBody as u8;           // 106 隐身+攻击
+const SPELL_CRESCENT_SLASH: u8 = mir2_shared::enums::Spell::CrescentSlash as u8; // 108 扇形AoE
+const SPELL_FURY: u8 = mir2_shared::enums::Spell::Fury as u8;                    // 19 攻击力+
+const SPELL_RAGE: u8 = mir2_shared::enums::Spell::Rage as u8;                    // 16 暴击+
+const SPELL_BACK_STEP: u8 = mir2_shared::enums::Spell::BackStep as u8;           // 130 后跳
+
+// 召唤系法术（在施法者附近 spawn 一只 MonsterState 作为战斗召唤物）
+const SPELL_SUMMON_SKELETON: u8 = mir2_shared::enums::Spell::SummonSkeleton as u8; // 68 道士·召唤骷髅
+const SPELL_SUMMON_SHINSU: u8 = mir2_shared::enums::Spell::SummonShinsu as u8;    // 81 道士·召唤神兽
+const SPELL_SUMMON_HOLY_DEVA: u8 = mir2_shared::enums::Spell::SummonHolyDeva as u8; // 83 法师·召唤圣兽
+const SPELL_SUMMON_VAMPIRE: u8 = mir2_shared::enums::Spell::SummonVampire as u8;  // 135 弓箭手·召唤血蝠
+const SPELL_SUMMON_TOAD: u8 = mir2_shared::enums::Spell::SummonToad as u8;        // 137 弓箭手·召唤蟾蜍
+const SPELL_SUMMON_SNAKES: u8 = mir2_shared::enums::Spell::SummonSnakes as u8;    // 140 弓箭手·召唤蛇
 
 impl MonsterState {
     /// 朝目标方向走一步，返回新位置和方向
@@ -483,6 +561,30 @@ impl MonsterState {
         let opposite_x = self.x - dx;
         let opposite_y = self.y - dy;
         self.step_toward(opposite_x, opposite_y)
+    }
+
+    /// 构建战斗公式用的属性快照
+    pub fn to_combat_stats(&self) -> crate::combat::attack::CombatStats {
+        use crate::combat::attack::CombatStats;
+        CombatStats {
+            min_atk: self.min_dmg,
+            max_atk: self.max_dmg,
+            min_ac: self.min_ac,
+            max_ac: self.max_ac,
+            min_mac: self.min_mac,
+            max_mac: self.max_mac,
+            agility: self.agility,
+            accuracy: self.accuracy,
+            luck: self.luck,
+            critical_rate: self.critical_rate,
+            critical_damage: self.critical_damage,
+            magic_resist: self.magic_resist,
+            reflect: self.reflect,
+            damage_reduction_percent: self.damage_reduction_percent,
+            armour_rate: self.armour_rate,
+            damage_rate: self.damage_rate,
+            ..Default::default()
+        }
     }
 }
 
@@ -535,6 +637,10 @@ pub struct WorldActor {
     pub(crate) item_infos: HashMap<i32, db::ItemInfo>,
     /// 游戏配置：怪物信息
     pub(crate) monster_infos: HashMap<i32, db::MonsterInfo>,
+    /// 怪物名称 → index 缓存（Boss 召唤按名查 MonsterInfo 用）
+    pub(crate) monster_name_index: HashMap<String, i32>,
+    /// 合成配方列表（NPC Craft 用）
+    pub(crate) recipe_infos: Vec<db::RecipeInfo>,
     /// 游戏配置：怪物掉落（monster_index -> drop list）
     pub(crate) monster_drops: HashMap<i32, Vec<db::MonsterDropInfo>>,
     /// 游戏配置：NPC 信息
@@ -583,6 +689,10 @@ pub struct WorldActor {
     pub(crate) player_rentals: HashMap<String, Vec<RentedItem>>,
     /// 持久法术对象（火墙、暴风雪等），按 object_id 索引
     pub(crate) spell_objects: HashMap<u32, spell::SpellObject>,
+    /// 弹道法术的延迟结算队列（对齐 C# DelayedAction）
+    pub(crate) pending_spell_completions: Vec<PendingSpellCompletion>,
+    /// tick_spell_completions 期间的吸血回血暂存（session_id, amount）
+    pub(crate) vamp_heals: Vec<(u64, i32)>,
     /// 定时机器人任务
     pub(crate) robot_tasks: Vec<robot::RobotTask>,
     /// 机器人上次检查的分钟值
@@ -658,6 +768,8 @@ impl WorldActor {
             map_infos: HashMap::new(),
             item_infos: HashMap::new(),
             monster_infos: HashMap::new(),
+            monster_name_index: HashMap::new(),
+            recipe_infos: Vec::new(),
             monster_drops: HashMap::new(),
             npc_infos: HashMap::new(),
             npc_goods: HashMap::new(),
@@ -682,6 +794,8 @@ impl WorldActor {
             rental_sessions: HashMap::new(),
             player_rentals: HashMap::new(),
             spell_objects: HashMap::new(),
+            pending_spell_completions: Vec::new(),
+            vamp_heals: Vec::new(),
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
@@ -2037,6 +2151,23 @@ impl WorldActor {
                                     provoked: true, // Boss is always aggressive
                                     is_elite: false,
                                     is_boss: true,
+                                    min_ac: 0,
+                                    max_ac: 0,
+                                    min_mac: 0,
+                                    max_mac: 0,
+                                    agility: 0,
+                                    accuracy: 0,
+                                    armour_rate: 1.0,
+                                    damage_rate: 1.0,
+                                    magic_resist: 0,
+                                    critical_rate: 0,
+                                    critical_damage: 0,
+                                    luck: 0,
+                                    reflect: 0,
+                                    damage_reduction_percent: 0,
+                                    poison_list: Vec::new(),
+            undead: false,
+                                    behavior: ai::make_behavior(&monster_info.name),
                                 };
                                 self.monsters.insert(boss_oid, boss);
                                 // 10 minutes = 6000 ticks (100ms each)
@@ -2261,6 +2392,119 @@ impl WorldActor {
                             }
                         }
                     }
+                    // ===== 补齐的高频 NPC 指令 =====
+                    // MONGEN：在 NPC 位置生成怪物（对齐 C# ActionType.Mongen）
+                    "MONGEN" => {
+                        let mob_name = parts.next().unwrap_or("").to_string();
+                        let count = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(1);
+                        if mob_name.is_empty() { continue; }
+                        for _ in 0..count {
+                            if let Some(&idx) = self.monster_name_index.get(&mob_name.to_lowercase()) {
+                                let info_opt = self.monster_infos.get(&idx).cloned();
+                                if let Some(info) = info_opt {
+                                    let new_oid = self.alloc_object_id();
+                                    let hp = info.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(50);
+                                    let min_dmg = info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(5);
+                                    let max_dmg = info.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(10);
+                                    let map_index = self.npc_infos.get(&npc.db_index).map(|i| i.map_index as u16).unwrap_or(0);
+                                    self.monsters.insert(new_oid, MonsterState {
+                                        object_id: new_oid,
+                                        name: info.name.clone(),
+                                        image: info.image as u16,
+                                        monster_index: idx,
+                                        x: npc.x, y: npc.y, direction: 0,
+                                        hp, max_hp: hp, min_dmg, max_dmg, xp: info.experience,
+                                        spawn_x: npc.x, spawn_y: npc.y, map_index,
+                                        next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
+                                        ai_profile: MonsterAiProfile::from_info(&info),
+                                        ai_state: MonsterAiState::Idle,
+                                        target_session: None, provoked: false,
+                                        is_elite: false, is_boss: false,
+                                        min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
+                                        agility: 0, accuracy: 0, armour_rate: 1.0, damage_rate: 1.0,
+                                        magic_resist: 0, critical_rate: 0, critical_damage: 0,
+                                        luck: 0, reflect: 0, damage_reduction_percent: 0,
+                                        poison_list: Vec::new(), undead: info.undead,
+                                        behavior: ai::make_behavior(&info.name),
+                                    });
+                                }
+                            }
+                        }
+                        debug!("NPC MONGEN: {} x{} at ({},{})", mob_name, count, npc.x, npc.y);
+                    }
+                    // CHANGECLASS：转职（对齐 C# ActionType.ChangeClass）
+                    "CHANGECLASS" => {
+                        let class_id = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+                        if let Ok(class) = mir2_shared::enums::MirClass::try_from(class_id) {
+                            if let Some(record) = self.players.get(&session_id) {
+                                let _ = record.actor_ref.ask(crate::actors::player::ChangeClass { class }).await;
+                                send_system_message(&self.gate_ref, session_id, &format!("转职成功！"));
+                            }
+                        }
+                    }
+                    // CHANGEHAIR：改发型
+                    "CHANGEHAIR" => {
+                        let hair = parts.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+                        if let Some(record) = self.players.get(&session_id) {
+                            let _ = record.actor_ref.ask(crate::actors::player::SetHair { hair }).await;
+                        }
+                    }
+                    // TIMERECALL：定时召回（简化：立即召回，TODO: 加定时）
+                    "TIMERECALL" => {
+                        let _seconds = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                                    x: npc.x, y: npc.y, direction: state.direction,
+                                    map_index: None, is_mounted: None,
+                                }).await;
+                            }
+                        }
+                    }
+                    // GROUPTELEPORT：组队传送（简化：传送玩家 + 同图组员到目标点）
+                    "GROUPTELEPORT" => {
+                        let tx = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(npc.x);
+                        let ty = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(npc.y);
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let gid = state.group_id;
+                                let map_idx = state.map_index;
+                                // 传送自身
+                                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                                    x: tx, y: ty, direction: state.direction,
+                                    map_index: None, is_mounted: None,
+                                }).await;
+                                // 传送组员
+                                if let Some(gid) = gid {
+                                    // 收集同地图的组员
+                                    let mut group_sessions = Vec::new();
+                                    for (sid, r) in &self.players {
+                                        if *sid == session_id { continue; }
+                                        if let Ok(Some(st)) = r.actor_ref.ask(GetPlayerState).await {
+                                            if st.group_id == Some(gid) && st.map_index == map_idx {
+                                                group_sessions.push(*sid);
+                                            }
+                                        }
+                                    }
+                                    for sid in group_sessions {
+                                        if let Some(r) = self.players.get(&sid) {
+                                            let _ = r.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                                                x: tx, y: ty, direction: state.direction,
+                                                map_index: None, is_mounted: None,
+                                            }).await;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        debug!("NPC GROUPTELEPORT to ({},{})", tx, ty);
+                    }
+                    // SENDMAIL：发邮件（简化：TODO，需邮件系统完整接入）
+                    "SENDMAIL" => {
+                        // 邮件系统已有 world/mail.rs，NPC 发邮件需要更复杂的参数解析
+                        // 暂记录日志，后续补全
+                        debug!("NPC SENDMAIL: session={} (TODO: full mail integration)", session_id);
+                    }
                     _ => {}
                 }
             } else if !skip {
@@ -2320,6 +2564,10 @@ impl Actor for WorldActor {
             Err(e) => { warn!("Failed to load monster_infos from DB: {}", e); Vec::new() }
         };
         let monster_infos: HashMap<i32, db::MonsterInfo> = monster_infos_list.into_iter().map(|m| (m.index, m)).collect();
+        // 建名称→index 缓存（Boss 召唤按名查用，对齐 C# Envir.GetMonsterInfo(name)）
+        let monster_name_index: HashMap<String, i32> = monster_infos.iter()
+            .map(|(idx, m)| (m.name.to_lowercase(), *idx))
+            .collect();
 
         let monster_drops = match db::load_monster_drops(&args.db_pool).await {
             Ok(d) => { info!("Loaded drop configs for {} monsters from database", d.len()); d }
@@ -2363,6 +2611,11 @@ impl Actor for WorldActor {
             Err(e) => { warn!("Failed to load magic_infos from DB: {}", e); Vec::new() }
         };
         let magic_infos: HashMap<u32, db::MagicInfo> = magic_infos_list.into_iter().map(|m| (m.spell as u32, m)).collect();
+
+        let recipe_infos = match db::load_recipe_infos(&args.db_pool).await {
+            Ok(r) => { info!("Loaded {} craft recipes from database", r.len()); r }
+            Err(e) => { warn!("Failed to load recipe_infos from DB: {}", e); Vec::new() }
+        };
 
         let dragon_info = match db::load_dragon_info(&args.db_pool, &monster_infos).await {
             Ok(d) => { if d.is_some() { info!("Loaded dragon config from database"); } d }
@@ -2435,6 +2688,8 @@ impl Actor for WorldActor {
             map_infos,
             item_infos,
             monster_infos,
+            monster_name_index,
+            recipe_infos,
             monster_drops,
             npc_infos,
             npc_goods,
@@ -2459,6 +2714,8 @@ impl Actor for WorldActor {
             rental_sessions: HashMap::new(),
             player_rentals: HashMap::new(),
             spell_objects: HashMap::new(),
+            pending_spell_completions: Vec::new(),
+            vamp_heals: Vec::new(),
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
@@ -2536,19 +2793,33 @@ impl WorldActor {
     pub(crate) async fn recalculate_and_set_stat_bonuses(&self, session_id: u64) -> Option<PlayerState> {
         let record = self.players.get(&session_id)?;
         let state = record.actor_ref.ask(GetPlayerState).await.ok()??;
-        let (b_min, b_max, b_def, b_hp, b_mp, b_min_mc, b_max_mc, b_min_sc, b_max_sc) = calculate_equipment_bonuses(
-            &state.inventory.equipment, &self.item_infos,
-        );
+        let b = calculate_equipment_bonuses(&state.inventory.equipment, &self.item_infos);
         let _ = record.actor_ref.ask(crate::actors::player::SetStatBonuses {
-            bonus_min_attack: b_min,
-            bonus_max_attack: b_max,
-            bonus_defence: b_def,
-            bonus_max_hp: b_hp,
-            bonus_max_mp: b_mp,
-            bonus_min_mc: b_min_mc,
-            bonus_max_mc: b_max_mc,
-            bonus_min_sc: b_min_sc,
-            bonus_max_sc: b_max_sc,
+            bonus_min_attack: b.min_atk,
+            bonus_max_attack: b.max_atk,
+            bonus_defence: b.max_ac, // 保留旧字段兼容（defence 用 AC）
+            bonus_max_hp: b.hp,
+            bonus_max_mp: b.mp,
+            bonus_min_mc: b.min_mc,
+            bonus_max_mc: b.max_mc,
+            bonus_min_sc: b.min_sc,
+            bonus_max_sc: b.max_sc,
+            // 战斗公式扩展字段
+            bonus_min_ac: b.min_ac,
+            bonus_max_ac: b.max_ac,
+            bonus_min_mac: b.min_mac,
+            bonus_max_mac: b.max_mac,
+            luck: b.luck,
+            critical_rate: b.critical_rate,
+            critical_damage: b.critical_damage,
+            magic_resist: b.magic_resist,
+            reflect: b.reflect,
+            attack_bonus: b.attack_bonus,
+            hp_drain_rate_percent: b.hp_drain_rate_percent,
+            agility: b.agility,
+            accuracy: b.accuracy,
+            freezing: b.freezing,
+            poison_attack: b.poison_attack,
         }).await;
         Some(state)
     }
@@ -2825,36 +3096,59 @@ fn send_use_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, uid: 
 }
 
 /// 计算装备属性加成总和
+/// 装备属性加成汇总（从 ItemInfo.stats 累加所有装备）
+#[derive(Debug, Default, Clone, Copy)]
+pub struct EquipmentBonuses {
+    pub min_atk: i32, pub max_atk: i32,
+    pub min_mc: i32, pub max_mc: i32,
+    pub min_sc: i32, pub max_sc: i32,
+    pub min_ac: i32, pub max_ac: i32,
+    pub min_mac: i32, pub max_mac: i32,
+    pub hp: i32, pub mp: i32,
+    pub luck: i32,
+    pub critical_rate: i32, pub critical_damage: i32,
+    pub magic_resist: i32, pub reflect: i32,
+    pub attack_bonus: i32, pub hp_drain_rate_percent: i32,
+    pub agility: i32, pub accuracy: i32,
+    pub freezing: i32, pub poison_attack: i32,
+}
+
 fn calculate_equipment_bonuses(
     equipment: &[Option<mir2_shared::data::item::UserItem>],
     item_infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
-) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32) {
+) -> EquipmentBonuses {
     use mir2_shared::enums::Stat;
-    let mut min_atk = 0i32;
-    let mut max_atk = 0i32;
-    let mut def = 0i32;
-    let mut hp = 0i32;
-    let mut mp = 0i32;
-    let mut min_mc = 0i32;
-    let mut max_mc = 0i32;
-    let mut min_sc = 0i32;
-    let mut max_sc = 0i32;
+    let mut b = EquipmentBonuses::default();
 
     for eq in equipment.iter().flatten() {
         if let Some(info) = item_infos.get(&eq.item_index) {
-            min_atk += info.stats.get(&(Stat::MinDC as u8)).copied().unwrap_or(0);
-            max_atk += info.stats.get(&(Stat::MaxDC as u8)).copied().unwrap_or(0);
-            def += info.stats.get(&(Stat::MaxAC as u8)).copied().unwrap_or(0);
-            hp += info.stats.get(&(Stat::HP as u8)).copied().unwrap_or(0);
-            mp += info.stats.get(&(Stat::MP as u8)).copied().unwrap_or(0);
-            min_mc += info.stats.get(&(Stat::MinMC as u8)).copied().unwrap_or(0);
-            max_mc += info.stats.get(&(Stat::MaxMC as u8)).copied().unwrap_or(0);
-            min_sc += info.stats.get(&(Stat::MinSC as u8)).copied().unwrap_or(0);
-            max_sc += info.stats.get(&(Stat::MaxSC as u8)).copied().unwrap_or(0);
+            let get = |s: Stat| info.stats.get(&(s as u8)).copied().unwrap_or(0);
+            b.min_atk += get(Stat::MinDC);
+            b.max_atk += get(Stat::MaxDC);
+            b.min_mc += get(Stat::MinMC);
+            b.max_mc += get(Stat::MaxMC);
+            b.min_sc += get(Stat::MinSC);
+            b.max_sc += get(Stat::MaxSC);
+            b.min_ac += get(Stat::MinAC);
+            b.max_ac += get(Stat::MaxAC);
+            b.min_mac += get(Stat::MinMAC);
+            b.max_mac += get(Stat::MaxMAC);
+            b.hp += get(Stat::HP);
+            b.mp += get(Stat::MP);
+            b.luck += get(Stat::Luck);
+            b.critical_rate += get(Stat::CriticalRate);
+            b.critical_damage += get(Stat::CriticalDamage);
+            b.magic_resist += get(Stat::MagicResist);
+            b.reflect += get(Stat::Reflect);
+            b.attack_bonus += get(Stat::AttackBonus);
+            b.hp_drain_rate_percent += get(Stat::HPDrainRatePercent);
+            b.agility += get(Stat::Agility);
+            b.accuracy += get(Stat::Accuracy);
+            b.freezing += get(Stat::Freezing);
+            b.poison_attack += get(Stat::PoisonAttack);
         }
     }
-
-    (min_atk, max_atk, def, hp, mp, min_mc, max_mc, min_sc, max_sc)
+    b
 }
 
 fn send_equip_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, grid: u8, uid: u64, slot: i32, success: bool) {
@@ -3490,6 +3784,23 @@ async fn spawn_npcs_and_monsters(
             provoked: false,
             is_elite,
             is_boss: false,
+            min_ac: 0,
+            max_ac: 0,
+            min_mac: 0,
+            max_mac: 0,
+            agility: 0,
+            accuracy: 0,
+            armour_rate: 1.0,
+            damage_rate: 1.0,
+            magic_resist: 0,
+            critical_rate: 0,
+            critical_damage: 0,
+            luck: 0,
+            reflect: 0,
+            damage_reduction_percent: 0,
+            poison_list: Vec::new(),
+            undead: ctx.monster_infos.get(&monster.monster_index).map(|i| i.undead).unwrap_or(false),
+            behavior: ai::make_behavior(&name),
         });
         if is_elite {
             debug!("Elite monster '{}' spawned as #{} at ({},{})", name, object_id, monster.x, monster.y);
@@ -3542,6 +3853,23 @@ async fn spawn_npcs_and_monsters(
                         provoked: false,
                         is_elite: false,
                         is_boss: false,
+                        min_ac: 0,
+                        max_ac: 0,
+                        min_mac: 0,
+                        max_mac: 0,
+                        agility: 0,
+                        accuracy: 0,
+                        armour_rate: 1.0,
+                        damage_rate: 1.0,
+                        magic_resist: 0,
+                        critical_rate: 0,
+                        critical_damage: 0,
+                        luck: 0,
+                        reflect: 0,
+                        damage_reduction_percent: 0,
+                        poison_list: Vec::new(),
+            undead: false,
+                        behavior: ai::make_behavior(&dragon.monster_name),
                     });
                     info!("Spawned dragon at ({}, {}) on map {}", dragon.location_x, dragon.location_y, map_file);
                 }
@@ -3634,6 +3962,23 @@ mod tests {
             provoked: false,
             is_elite: false,
             is_boss: true,
+            min_ac: 0,
+            max_ac: 0,
+            min_mac: 0,
+            max_mac: 0,
+            agility: 0,
+            accuracy: 0,
+            armour_rate: 1.0,
+            damage_rate: 1.0,
+            magic_resist: 0,
+            critical_rate: 0,
+            critical_damage: 0,
+            luck: 0,
+            reflect: 0,
+            damage_reduction_percent: 0,
+            poison_list: Vec::new(),
+            undead: false,
+            behavior: ai::make_behavior("TestBoss"),
         };
         assert!(boss.is_boss);
         assert!(!boss.is_elite);

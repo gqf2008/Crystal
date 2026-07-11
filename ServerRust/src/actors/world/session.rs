@@ -152,9 +152,15 @@ impl Message<StartGameRequest> for WorldActor {
         ));
 
         // 加载地图 — 优先用 DB 中的 map_infos 获取文件名
-        let (map_file, map_title, map_info_idx) = self.map_infos.get(&(map_index as i32))
-            .map(|m| (m.file_name.clone(), m.title.clone(), m.index))
-            .unwrap_or_else(|| ("n0".to_string(), "Unknown".to_string(), 0));
+        // Phase A fix: 如果 map_index 在 DB 里找不到(idx 从 1 开始),fallback 到第一张可用地图
+        let (map_file, map_title, map_info_idx) = if let Some(m) = self.map_infos.get(&(map_index as i32)) {
+            (m.file_name.clone(), m.title.clone(), m.index)
+        } else if let Some(first) = self.map_infos.values().next() {
+            info!("map_index {} not in DB, using first available: {} ({})", map_index, first.file_name, first.title);
+            (first.file_name.clone(), first.title.clone(), first.index)
+        } else {
+            ("0".to_string(), "Unknown".to_string(), 0) // "0" = first .map file
+        };
 
         if self.get_or_load_map(&map_file).is_some() {
             info!("Map '{}' loaded for player {}", map_file, player_name);
@@ -182,18 +188,30 @@ impl Message<StartGameRequest> for WorldActor {
         }
 
         // 初始化装备属性加成（从已装备物品计算）
-        let (b_min, b_max, b_def, b_hp, b_mp, b_min_mc, b_max_mc, b_min_sc, b_max_sc) = calculate_equipment_bonuses(
-            &loaded_state.inventory.equipment, &self.item_infos,
-        );
-        loaded_state.bonus_min_attack = b_min;
-        loaded_state.bonus_max_attack = b_max;
-        loaded_state.bonus_defence = b_def;
-        loaded_state.bonus_max_hp = b_hp;
-        loaded_state.bonus_max_mp = b_mp;
-        loaded_state.bonus_min_mc = b_min_mc;
-        loaded_state.bonus_max_mc = b_max_mc;
-        loaded_state.bonus_min_sc = b_min_sc;
-        loaded_state.bonus_max_sc = b_max_sc;
+        let b = calculate_equipment_bonuses(&loaded_state.inventory.equipment, &self.item_infos);
+        loaded_state.bonus_min_attack = b.min_atk;
+        loaded_state.bonus_max_attack = b.max_atk;
+        loaded_state.bonus_defence = b.max_ac;
+        loaded_state.bonus_max_hp = b.hp;
+        loaded_state.bonus_max_mp = b.mp;
+        loaded_state.bonus_min_mc = b.min_mc;
+        loaded_state.bonus_max_mc = b.max_mc;
+        loaded_state.bonus_min_sc = b.min_sc;
+        loaded_state.bonus_max_sc = b.max_sc;
+        // 战斗公式扩展字段
+        loaded_state.bonus_min_ac = b.min_ac;
+        loaded_state.bonus_max_ac = b.max_ac;
+        loaded_state.bonus_min_mac = b.min_mac;
+        loaded_state.bonus_max_mac = b.max_mac;
+        loaded_state.luck = b.luck;
+        loaded_state.critical_rate = b.critical_rate;
+        loaded_state.critical_damage = b.critical_damage;
+        loaded_state.magic_resist = b.magic_resist;
+        loaded_state.reflect = b.reflect;
+        loaded_state.attack_bonus = b.attack_bonus;
+        loaded_state.hp_drain_rate_percent = b.hp_drain_rate_percent;
+        loaded_state.freezing = b.freezing;
+        loaded_state.poison_attack = b.poison_attack;
 
         let _ = player_ref.ask(SetPlayerState { state: loaded_state.clone() });
 
@@ -302,17 +320,20 @@ impl Message<StartGameRequest> for WorldActor {
         for npc in new_npcs {
             self.npcs.insert(npc.object_id, npc);
         }
-        for monster in &new_monsters {
-            self.monsters.insert(monster.object_id, monster.clone());
+        // 先收集精英广播信息（move 前遍历）
+        let elite_broadcasts: Vec<String> = new_monsters.iter()
+            .filter(|m| m.is_elite)
+            .map(|m| m.name.clone())
+            .collect();
+        for monster in new_monsters {
+            self.monsters.insert(monster.object_id, monster);
         }
 
         // 初始生成精英广播
-        for monster in &new_monsters {
-            if monster.is_elite {
-                let map_name = self.map_infos.get(&(map_index as i32)).map(|m| m.title.clone()).unwrap_or_else(|| "未知地图".to_string());
-                broadcast_system_message(&self.gate_ref, &self.players,
-                    &format!("一只 [精英]{} 出现在 {}！勇士们，前往讨伐！", monster.name.strip_prefix("[精英] ").unwrap_or(&monster.name), map_name));
-            }
+        for name in &elite_broadcasts {
+            let map_name = self.map_infos.get(&(map_index as i32)).map(|m| m.title.clone()).unwrap_or_else(|| "未知地图".to_string());
+            broadcast_system_message(&self.gate_ref, &self.players,
+                &format!("一只 [精英]{} 出现在 {}！勇士们，前往讨伐！", name.strip_prefix("[精英] ").unwrap_or(name), map_name));
         }
 
         // 同步当前地图上的地面物品给新玩家
@@ -635,18 +656,18 @@ impl Message<WorldMoveRequest> for WorldActor {
                         for npc in new_npcs {
                             self.npcs.insert(npc.object_id, npc);
                         }
-                        for monster in &new_monsters {
-                            self.monsters.insert(monster.object_id, monster.clone());
+                        let elite_broadcasts: Vec<String> = new_monsters.iter()
+                            .filter(|m| m.is_elite).map(|m| m.name.clone()).collect();
+                        for monster in new_monsters {
+                            self.monsters.insert(monster.object_id, monster);
                         }
 
                         // 初始生成精英广播
-                        for monster in &new_monsters {
-                            if monster.is_elite {
-                                let map_name = self.map_infos.get(&(dest_map_index)).map(|m| m.title.clone()).unwrap_or_else(|| "未知地图".to_string());
-                                broadcast_system_message(
-                                    &self.gate_ref, &self.players,
-                                    &format!("一只 [精英]{} 出现在 {}！勇士们，前往讨伐！", monster.name.strip_prefix("[精英] ").unwrap_or(&monster.name), map_name));
-                            }
+                        for name in &elite_broadcasts {
+                            let map_name = self.map_infos.get(&(dest_map_index)).map(|m| m.title.clone()).unwrap_or_else(|| "未知地图".to_string());
+                            broadcast_system_message(
+                                &self.gate_ref, &self.players,
+                                &format!("一只 [精英]{} 出现在 {}！勇士们，前往讨伐！", name.strip_prefix("[精英] ").unwrap_or(name), map_name));
                         }
 
                         // 同步新地图上的地面物品
@@ -1409,6 +1430,25 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         holy: 0,
         accuracy: 0,
         agility: 0,
+        min_ac: 0,
+        max_ac: 0,
+        min_mac: 0,
+        max_mac: 0,
+        bonus_min_ac: 0,
+        bonus_max_ac: 0,
+        bonus_min_mac: 0,
+        bonus_max_mac: 0,
+        luck: 0,
+        critical_rate: 0,
+        critical_damage: 0,
+        magic_resist: 0,
+        reflect: 0,
+        damage_reduction_percent: 0,
+        attack_bonus: 0,
+        hp_drain_rate_percent: 0,
+        energy_shield_percent: 0,
+        energy_shield_hp_gain: 0,
+        poison_list: Vec::new(),
         inventory: PlayerInventory::new(),
         group_id: None,
         friend_list: FriendList::new(),

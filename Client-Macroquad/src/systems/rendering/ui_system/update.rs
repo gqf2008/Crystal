@@ -577,6 +577,9 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             UiCommand::OpenDoor { door_id } => {
                 UiState::with_in_world(&ctx.world, |s| { s.open_doors.insert(door_id); });
             }
+            UiCommand::ShowReport => {
+                sys.report_dialog.show();
+            }
         }
     }
 
@@ -1236,6 +1239,13 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             let _ = net.send(NetEv::LogOutRequest);
         }
         tracing::info!("🚪 安全下线请求已发送");
+    }
+
+    // 举报/反馈提交（由 draw 阶段产出，在此发包）
+    if let Some(issue) = sys.pending_report_issue.take() {
+        if let Some(net) = ctx.net.as_ref() {
+            let _ = net.send(NetworkEvent::ReportIssueRequest { issue });
+        }
     }
 
     // 交易对话框动作（由 draw 阶段产出，在此发包）
