@@ -812,45 +812,377 @@ impl WorldActor {
     }
 
     pub(crate) async fn tick_dragon(&mut self) {
+        use crate::actors::world::dragon::DragonState;
+
+        // 先决定是否需要降级检查（无借用冲突）
         if let Some(ref mut dragon) = self.dragon_state {
             crate::actors::world::dragon::tick_dragon_delevel(
                 dragon, self.tick_count, &self.gate_ref,
             ).await;
         }
+
+        // Dragon 系统：根据 dragon_info 配置在龙地图上有玩家时生成/维持 EvilMir 作为世界Boss。
+        // 简化：当 dragon_info 存在、玩家在龙地图上、且当前无活跃 EvilMir → 生成。
+        let dragon_info = match self.dragon_info.clone() {
+            Some(di) => di,
+            None => return,
+        };
+        // 确保 dragon_state 存在（懒初始化，body_object_id 占位）
+        if self.dragon_state.is_none() {
+            self.dragon_state = Some(DragonState::new(0));
+        }
+
+        // 解析龙地图索引（按 map_file_name 查 map_infos）
+        let dragon_map_index: Option<i32> = self.map_infos.values()
+            .find(|m| m.file_name.eq_ignore_ascii_case(&dragon_info.map_file_name))
+            .map(|m| m.index);
+
+        // 收集龙地图上的玩家 session_id
+        let mut dragon_map_sessions: Vec<u64> = Vec::new();
+        if let Some(map_idx) = dragon_map_index {
+            for (sid, record) in &self.players {
+                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    if state.map_index as i32 == map_idx && !state.is_dead {
+                        dragon_map_sessions.push(*sid);
+                    }
+                }
+            }
+        }
+
+        // 节流：每 10 ticks 检查一次（~1秒），避免每个 tick 都查
+        if self.tick_count % 10 != 0 {
+            return;
+        }
+
+        // 读取 dragon 状态快照（短作用域，避免长时间持有 dragon_state 的可变借用）
+        let (dragon_level, evil_mir_alive) = {
+            let dragon_state = self.dragon_state.as_mut().unwrap();
+            dragon_state.last_spawn_check = self.tick_count;
+            // 当前 EvilMir 是否还活着？查 monsters
+            let alive = dragon_state.evil_mir_oid
+                .map(|oid| self.monsters.contains_key(&oid))
+                .unwrap_or(false);
+            if !alive {
+                dragon_state.evil_mir_oid = None;
+            }
+            (dragon_state.level, alive)
+        };
+
+        // 有玩家在龙地图、且无活跃 EvilMir → 生成
+        if dragon_map_sessions.is_empty() { return; }
+        if evil_mir_alive { return; }
+
+        // 解析 monster_info：优先用预解析的 monster_index，否则按名称查
+        let monster_info = if let Some(i) = dragon_info.monster_index {
+            self.monster_infos.get(&i).cloned()
+        } else {
+            self.monster_infos.values()
+                .find(|m| m.name.eq_ignore_ascii_case(&dragon_info.monster_name))
+                .cloned()
+        };
+        let monster_info = match monster_info {
+            Some(mi) => mi,
+            None => return,
+        };
+        let monster_index = monster_info.index;
+
+        // 生成 EvilMir 作为世界Boss（使用 dragon_info 的 location）
+        let spawn_oid = self.alloc_object_id();
+        let level_mul = 1.0 + (dragon_level as f32 - 1.0) * 0.15; // 等级越高 Boss 越强
+        let base_hp = monster_info.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(5000);
+        let boss_hp = (base_hp as f32 * 10.0 * level_mul) as i32;
+        let base_min_dmg = monster_info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(20);
+        let base_max_dmg = monster_info.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(40);
+        let boss_min_dmg = (base_min_dmg as f32 * 3.0 * level_mul) as i32;
+        let boss_max_dmg = (base_max_dmg as f32 * 3.0 * level_mul) as i32;
+        let boss_xp = (monster_info.experience as f32 * 5.0 * level_mul) as i32;
+        let dragon_map_u16 = dragon_map_index.unwrap_or(0) as u16;
+
+        let boss = MonsterState {
+            object_id: spawn_oid,
+            name: format!("[龙] {}", monster_info.name),
+            image: monster_info.image as u16,
+            monster_index,
+            x: dragon_info.location_x,
+            y: dragon_info.location_y,
+            direction: 0,
+            hp: boss_hp,
+            max_hp: boss_hp,
+            min_dmg: boss_min_dmg,
+            max_dmg: boss_max_dmg,
+            xp: boss_xp,
+            spawn_x: dragon_info.location_x,
+            spawn_y: dragon_info.location_y,
+            map_index: dragon_map_u16,
+            next_attack_tick: 0,
+            next_move_tick: 0,
+            next_summon_tick: 0,
+            ai_profile: MonsterAiProfile::from_info(&monster_info),
+            ai_state: MonsterAiState::Idle,
+            target_session: None,
+            provoked: true,
+            is_elite: false,
+            is_boss: true,
+            min_ac: 0, max_ac: 0,
+            min_mac: 0, max_mac: 0,
+            agility: 0, accuracy: 0,
+            armour_rate: 1.0, damage_rate: 1.0,
+            magic_resist: 0,
+            critical_rate: 0, critical_damage: 0,
+            luck: 0, reflect: 0,
+            damage_reduction_percent: 0,
+            poison_list: Vec::new(),
+            undead: false,
+            behavior: ai::make_behavior(&monster_info.name),
+        };
+        self.monsters.insert(spawn_oid, boss);
+        // 标记为世界Boss超时（1小时 = 36000 ticks 无挑战则消失）
+        self.world_boss_queue.insert(spawn_oid, self.tick_count + 36000);
+        self.dragon_state.as_mut().unwrap().evil_mir_oid = Some(spawn_oid);
+
+        // 广播生成
+        let packet = build_object_monster_packet(
+            &MonsterSpawn {
+                name: format!("[龙] {}", monster_info.name),
+                image: monster_info.image as u16,
+                monster_index,
+                x: dragon_info.location_x,
+                y: dragon_info.location_y,
+                direction: 0,
+                hp: boss_hp,
+                min_dmg: boss_min_dmg,
+                max_dmg: boss_max_dmg,
+                xp: boss_xp,
+                map_index: dragon_map_u16,
+            }, spawn_oid, &format!("[龙] {}", monster_info.name),
+        );
+        for session_id in self.players.keys() {
+            let _ = self.gate_ref.ask(SendToClient {
+                session_id: *session_id,
+                data: packet.clone(),
+            });
+        }
+        let map_title = self.map_infos.get(&dragon_map_index.unwrap_or(0))
+            .map(|m| m.title.clone())
+            .unwrap_or_else(|| dragon_info.map_file_name.clone());
+        broadcast_system_message(&self.gate_ref, &self.players,
+            &format!("【龙系统】 EvilMir（{}级）降临 {}！龙之试炼开始！",
+                dragon_level, map_title));
+        info!("Dragon spawned EvilMir #{} (level={}, map={}) at ({},{})",
+            spawn_oid, dragon_level,
+            dragon_info.map_file_name, dragon_info.location_x, dragon_info.location_y);
     }
 
     pub(crate) async fn tick_conquest(&mut self) {
+        // 1) 战争调度：开始/结束（每 tick 检查时间）
+        //    先收集需要广播的消息，避免在借用 instance 时借用 gate_ref
+        let mut messages: Vec<String> = Vec::new();
+
         for instance in &mut self.conquest_instances {
             let now = chrono::Local::now().naive_local();
             if instance.should_start_war(&now) {
+                // 开战时重建 siege_structure_ids 关联（按 conquest_id 匹配）
+                instance.siege_structure_ids = self.siege_structures.values()
+                    .filter(|s| s.conquest_id == instance.id)
+                    .map(|s| s.object_id)
+                    .collect();
+                // 重置结构 HP
+                for oid in &instance.siege_structure_ids {
+                    if let Some(s) = self.siege_structures.get_mut(oid) {
+                        s.hp = s.max_hp;
+                        s.damage_level = 0;
+                    }
+                }
                 instance.start_war("攻击方");
-                let msg = format!("攻城战开始了！目标：区域 #{}", instance.id);
-                broadcast_system_message(&self.gate_ref, &self.players, &msg);
+                messages.push(format!("⚔️ 攻城战开始了！目标：区域 #{}", instance.id));
             }
-            // Check if war should end
             if instance.state == conquest::WarState::InProgress {
                 let elapsed = chrono::Utc::now().timestamp() - instance.war_start_time;
                 if elapsed >= instance.war_duration_secs {
-                    if let Some(winner) = instance.end_war() {
-                        let msg = format!("攻城战结束！{} 取得了区域 #{} 的控制权！", winner, instance.id);
-                        broadcast_system_message(&self.gate_ref, &self.players, &msg);
+                    // 战争结束：根据模式判定胜者
+                    let winner = match instance.game {
+                        conquest::ConquestGame::ControlPoints => {
+                            // 控制点最多者为胜
+                            let tally = instance.tally_control_points();
+                            tally.into_iter()
+                                .max_by_key(|(_, c)| *c)
+                                .and_then(|(g, c)| if c > 0 { Some(g) } else { None })
+                        }
+                        _ => instance.end_war(),
+                    };
+                    // 结束战争状态（end_war 已在 _ 分支调用；控制点分支需要手动重置）
+                    if instance.game == conquest::ConquestGame::ControlPoints {
+                        instance.state = conquest::WarState::Ended;
+                        if let Some(ref g) = winner {
+                            instance.owner_guild = Some(g.clone());
+                        }
+                        instance.attacker_guild = None;
+                    }
+                    if let Some(ref g) = winner {
+                        messages.push(format!("🏰 攻城战结束！{} 取得了区域 #{} 的控制权！", g, instance.id));
+                    } else {
+                        messages.push(format!("🏰 攻城战结束！区域 #{} 无人占领", instance.id));
                     }
                 }
             }
-            // KingOfHill scoring: every 60 ticks (~6 seconds), award points to players in king zone
-            if instance.state == conquest::WarState::InProgress
-                && instance.game == conquest::ConquestGame::KingOfHill
-                && self.tick_count % 60 == 0
-            {
-                for (_, record) in &self.players {
-                    if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                        if instance.is_in_king_zone(state.x, state.y) {
-                            if let Some(ref guild) = state.guild_name {
-                                instance.add_score(guild, 1);
-                            }
+        }
+        for msg in &messages {
+            broadcast_system_message(&self.gate_ref, &self.players, msg);
+        }
+
+        // 2) 攻城战斗：攻城器（Catapult）每 tick 对最近城墙/城门造成伤害。
+        //    收集伤害事件（攻城器 object_id, 目标 object_id），统一应用避免借用冲突。
+        //    只在战争进行中执行。
+        let active_conquest_ids: Vec<i32> = self.conquest_instances.iter()
+            .filter(|i| i.state == conquest::WarState::InProgress)
+            .map(|i| i.id)
+            .collect();
+        if active_conquest_ids.is_empty() {
+            return;
+        }
+
+        // 收集每个活跃区域的攻城器和它们的候选目标
+        // (catapult_oid, target_oid)
+        let mut siege_attacks: Vec<(u32, u32)> = Vec::new();
+        {
+            for cid in &active_conquest_ids {
+                // 收集本区域的攻城器和城墙/城门 id
+                let mut catapult_ids: Vec<u32> = Vec::new();
+                let mut wall_ids: Vec<u32> = Vec::new();
+                for (oid, s) in &self.siege_structures {
+                    if s.conquest_id != *cid { continue; }
+                    match s.structure_type {
+                        conquest::SiegeStructureType::Catapult => catapult_ids.push(*oid),
+                        conquest::SiegeStructureType::Wall | conquest::SiegeStructureType::CastleGate => {
+                            if !s.is_destroyed() { wall_ids.push(*oid); }
+                        }
+                        _ => {}
+                    }
+                }
+                if catapult_ids.is_empty() || wall_ids.is_empty() { continue; }
+                for cat_oid in &catapult_ids {
+                    let catapult = match self.siege_structures.get(cat_oid) {
+                        Some(s) => s,
+                        None => continue,
+                    };
+                    if catapult.is_destroyed() { continue; }
+                    // 攻击间隔节流：用 damage_level + object_id 模拟冷却。
+                    // 简化：每 CATAPULT_ATTACK_INTERVAL ticks 攻击一次。
+                    if (self.tick_count + (*cat_oid as u64)) % conquest::CATAPULT_ATTACK_INTERVAL != 0 {
+                        continue;
+                    }
+                    let target_oid = match conquest::find_nearest_target(
+                        catapult.x, catapult.y, *cid, &self.siege_structures, &wall_ids,
+                    ) {
+                        Some(t) => t,
+                        None => continue,
+                    };
+                    siege_attacks.push((*cat_oid, target_oid));
+                }
+            }
+        }
+
+        // 应用伤害 + 收集被摧毁事件
+        let mut destroyed_events: Vec<(u32, String)> = Vec::new(); // (object_id, type_name)
+        for (cat_oid, target_oid) in siege_attacks {
+            if let Some(target) = self.siege_structures.get_mut(&target_oid) {
+                let destroyed = target.take_damage(conquest::CATAPULT_DAMAGE_PER_HIT);
+                if destroyed {
+                    let type_name = match target.structure_type {
+                        conquest::SiegeStructureType::Wall => "城墙",
+                        conquest::SiegeStructureType::CastleGate => "城门",
+                        _ => "防御设施",
+                    };
+                    destroyed_events.push((target_oid, type_name.to_string()));
+                }
+            }
+            let _ = cat_oid; // 攻城器本身不损耗（简化）
+        }
+        for (oid, type_name) in &destroyed_events {
+            broadcast_system_message(&self.gate_ref, &self.players,
+                &format!("💥 区域内的{}（#{}）被攻城器摧毁！进攻方可以长驱直入！", type_name, oid));
+            debug!("Conquest siege structure #{} ({}) destroyed", oid, type_name);
+        }
+
+        // 3) 控制点占领判定（ControlPoints 模式）：每 60 ticks 检查玩家位置
+        if self.tick_count % 60 != 0 { return; }
+
+        // 预收集玩家 (session, x, y, guild_name, map_index)
+        let player_snaps: Vec<(u64, i32, i32, Option<String>, i32)> = {
+            let mut out = Vec::new();
+            for (_sid, record) in &self.players {
+                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    if !state.is_dead {
+                        out.push((state.session_id, state.x, state.y, state.guild_name.clone(), state.map_index as i32));
+                    }
+                }
+            }
+            out
+        };
+
+        // 确保每个 instance 的 control_point_owners 与 control_points 等长
+        for instance in &mut self.conquest_instances {
+            if instance.control_point_owners.len() != instance.control_points.len() {
+                instance.control_point_owners.resize(instance.control_points.len(), conquest::ControlPointState::default());
+            }
+        }
+
+        // 对每个活跃的控制点模式区域执行占领判定
+        for instance in &mut self.conquest_instances {
+            if instance.state != conquest::WarState::InProgress { continue; }
+            if instance.game != conquest::ConquestGame::ControlPoints { continue; }
+            if instance.control_points.is_empty() { continue; }
+
+            // 快照控制点坐标 + 地图索引，避免后续借用 instance
+            let cps: Vec<(i32, i32, i32)> = instance.control_points.clone();
+            let map_index = instance.map_index;
+
+            // 收集每个 idx 的占领结果，循环结束后统一应用 add_score
+            let mut newly_captured: Vec<String> = Vec::new();
+            for (idx, (cx, cy, r)) in cps.iter().enumerate() {
+                let cp_owner = &mut instance.control_point_owners[idx];
+                // 找在本区域地图上、站在该控制点范围内的公会
+                let mut guilds_here: Vec<String> = Vec::new();
+                for (_sid, px, py, guild, pmidx) in &player_snaps {
+                    if *pmidx != map_index { continue; }
+                    if let Some(ref g) = guild {
+                        let on_cp = (px - cx).abs() <= *r && (py - cy).abs() <= *r;
+                        if on_cp && !guilds_here.contains(g) {
+                            guilds_here.push(g.clone());
                         }
                     }
                 }
+
+                if guilds_here.is_empty() {
+                    // 无人站点：进度缓慢回落
+                    if cp_owner.progress > 0 { cp_owner.progress -= 1; }
+                    cp_owner.contesting_guild = None;
+                    continue;
+                }
+
+                // 仅一个公会站点 → 增加其占领进度
+                if guilds_here.len() == 1 {
+                    let g = &guilds_here[0];
+                    cp_owner.contesting_guild = Some(g.clone());
+                    if cp_owner.owner_guild.as_deref() == Some(g.as_str()) {
+                        // 已是拥有者，维持
+                    } else {
+                        cp_owner.progress += 1;
+                        if cp_owner.progress >= conquest::MAX_CONTROL_POINTS {
+                            cp_owner.owner_guild = Some(g.clone());
+                            cp_owner.progress = 0;
+                            newly_captured.push(g.clone());
+                        }
+                    }
+                } else {
+                    // 多公会争夺：进度互相抵消，无人增长
+                    cp_owner.contesting_guild = None;
+                    if cp_owner.progress > 0 { cp_owner.progress -= 1; }
+                }
+            }
+            // 统一应用积分（避免在借用 control_point_owners 时可变借用 scores）
+            for g in newly_captured {
+                instance.add_score(&g, 1);
             }
         }
     }
@@ -2207,6 +2539,8 @@ impl Message<Tick> for WorldActor {
         self.tick_spells().await;
 
         self.tick_spell_completions().await;
+
+        self.tick_heroes().await;
 
         self.tick_robots().await;
 

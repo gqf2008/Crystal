@@ -10,3 +10,15 @@ pub mod yimoogi;
 pub mod dark_oma_king;
 pub mod general_meow_meow;
 pub mod zuma_taurus;
+
+// ===== 额外 Boss（10 个，独特机制）=====
+pub mod evil_centipede;
+pub mod cannibal_plant;
+pub mod oma_king;
+pub mod wooma_taurus;
+pub mod flame_queen;
+pub mod snow_wolf_king;
+pub mod turtle_king;
+pub mod behemoth;
+pub mod left_guard;
+pub mod hell_keeper;

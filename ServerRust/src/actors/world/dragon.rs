@@ -17,8 +17,12 @@ pub struct DragonState {
     pub max_level_time: i64,
     /// 上次降级检查时间（tick count）
     pub last_delevel_check: u64,
+    /// 上次 spawn 检查时间（tick count，用于 EvilMir 生成节流）
+    pub last_spawn_check: u64,
     /// 活跃状态
     pub active: bool,
+    /// 当前 EvilMir 怪物 object_id（None = 未生成/已被击杀）
+    pub evil_mir_oid: Option<u32>,
 }
 
 impl DragonState {
@@ -29,7 +33,9 @@ impl DragonState {
             experience: 0,
             max_level_time: 0,
             last_delevel_check: 0,
+            last_spawn_check: 0,
             active: true,
+            evil_mir_oid: None,
         }
     }
 
@@ -51,22 +57,26 @@ impl DragonState {
         }
     }
 
-    /// 加点经验，返回是否升级
-    pub fn gain_exp(&mut self, amount: u64) -> bool {
+    /// 加点经验，返回升级的次数（可能连升多级）。对应 C# Dragon.GainExp。
+    pub fn gain_exp(&mut self, amount: u64) -> u32 {
+        let mut levelled = 0u32;
         if self.level >= 12 {
-            return false;
+            return 0;
         }
         self.experience += amount;
-        let needed = Self::xp_for_level(self.level);
-        if self.experience >= needed {
+        loop {
+            if self.level >= 12 { break; }
+            let needed = Self::xp_for_level(self.level);
+            if needed == 0 || self.experience < needed { break; }
+            self.experience -= needed;
             self.level += 1;
-            self.experience = 0;
+            levelled += 1;
             if self.level >= 12 {
+                self.experience = 0;
                 self.max_level_time = chrono::Utc::now().timestamp();
             }
-            return true;
         }
-        false
+        levelled
     }
 
     /// 生成龙身 24 个部件的位置偏移（C# BodyLocations）
@@ -80,7 +90,9 @@ impl DragonState {
     }
 }
 
-/// 处理龙降级逻辑
+/// 处理龙降级逻辑（C# Dragon.Process 的降级分支）+ spawn 检查。
+///
+/// 返回 Some(SpawnEvilMirRequest) 当需要生成新 EvilMir（level 提升且当前无活跃 EvilMir）。
 pub async fn tick_dragon_delevel(
     dragon: &mut DragonState,
     _tick_count: u64,
@@ -91,12 +103,44 @@ pub async fn tick_dragon_delevel(
     if dragon.max_level_time == 0 { return; }
 
     let now = chrono::Utc::now().timestamp();
-    // 6 hours = 21600 seconds
+    // 6 hours = 21600 seconds（C# DeLevelDelay = 60 * 60 * 1000 ms = 1 小时；C# Process 用 6 * DeLevelDelay = 6 小时）
     if now - dragon.max_level_time >= 21600 {
         dragon.level = 1;
         dragon.experience = 0;
         dragon.max_level_time = 0;
-        // Broadcast would go here when gate_ref is wired
         tracing::info!("Dragon deleveled to {}", dragon.level);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gain_exp_level_up() {
+        let mut d = DragonState::new(1);
+        // Level 1 -> 2 needs 5000 xp
+        let n = d.gain_exp(5000);
+        assert_eq!(n, 1);
+        assert_eq!(d.level, 2);
+        assert_eq!(d.experience, 0);
+    }
+
+    #[test]
+    fn test_gain_exp_multi_level() {
+        let mut d = DragonState::new(1);
+        // 5000 + 10000 = 15000 → level 1->2 (cost 5000), 2->3 (cost 10000)
+        let n = d.gain_exp(15000);
+        assert_eq!(n, 2);
+        assert_eq!(d.level, 3);
+    }
+
+    #[test]
+    fn test_max_level_delevel_trigger() {
+        let mut d = DragonState::new(1);
+        d.level = 12;
+        d.max_level_time = 0;
+        d.gain_exp(0); // no-op at max
+        assert_eq!(d.level, 12);
     }
 }

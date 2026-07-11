@@ -5,9 +5,7 @@
 mod awakening;
 mod combat;
 pub mod ai;
-#[allow(dead_code)]
 mod conquest;
-#[allow(dead_code)]
 mod dragon;
 mod guild;
 mod hero;
@@ -702,10 +700,11 @@ pub struct WorldActor {
     /// 征服区域列表
     pub(crate) conquest_instances: Vec<conquest::ConquestInstance>,
     /// 城门/城墙/攻城武器
-    #[allow(dead_code)]
     pub(crate) siege_structures: HashMap<u32, conquest::SiegeStructure>,
     /// 行会战争声明 (guild_name -> set of enemy guild names)
     pub(crate) guild_wars: HashMap<String, std::collections::HashSet<String>>,
+    /// 英雄战斗 AI 运行时状态（按主人 session_id 索引）
+    pub(crate) hero_ai_states: HashMap<u64, HeroCombatAI>,
 }
 
 /// 租赁会话状态
@@ -802,6 +801,7 @@ impl WorldActor {
             conquest_instances: Vec::new(),
             siege_structures: HashMap::new(),
             guild_wars: HashMap::new(),
+            hero_ai_states: HashMap::new(),
         }
     }
 
@@ -2722,6 +2722,7 @@ impl Actor for WorldActor {
             conquest_instances: Vec::new(),
             siege_structures: HashMap::new(),
             guild_wars: HashMap::new(),
+            hero_ai_states: HashMap::new(),
         })
     }
 }

@@ -21,10 +21,43 @@
 // 4. 从 CHumEffect 库加载精灵图
 // 5. 应用相机变换绘制到屏幕
 //
+// **架构说明（C# vs Rust 渲染分支差异）**:
+// C# 的 DrawBody 本身是"无分支"的统一绘制：BodyLibrary.Draw(DrawFrame, ...),
+// 其中 DrawFrame 由 Process() 中的 Frame.Start + OffSet*Dir + FrameIndex 计算。
+// Rust 沿用同样的分层：AnimationSystem 负责把 MirAction 解析成帧号写入
+// AnimationFrame.character_frame，本系统只读帧号并绘制——所以渲染层不需要
+// 按 MirAction 分支，这与 C# 完全一致。
+//
+// **已对齐项**:
+// [x] 帧号公式: DrawFrame = Frame.Start + Dir*OffSet + FrameIndex
+//     （animation_system.rs calculate_frames ↔ C# PlayerObject 第885行）
+// [x] 死亡动画: Die(倒地, 播一次) → Dead(单帧保持)
+//     （animation_system.rs DeathPhase ↔ C# PlayerObject 3565/3590行）
+// [x] 骑乘攻击: MountAttack 帧段（animation_system.rs 骑乘映射 ↔ C# SetAction 1481行）
+// [x] 骑乘受击: MountStruck（怪物侧 set_monster_anim 已覆盖）
+// [x] 受击/中毒着色: ApplyDrawColour() 红/暗红（本文件 compute_status_tint）
+//
+// **未对齐项（需更大改动，此处标注 TODO，不在本文件内重构）**:
+// [ ] 玩家受击(Struck): C# 在 SetAction 收到 Struck 时切到 Struck 帧段(360..)。
+//     Rust 的 PlayerAction 枚举只有 Stand/Walk/Run/Attack1-3，ObjectStruck 网络包
+//     目前只播音效不切玩家动作。补全需：扩展 PlayerAction 或新增 StruckState 组件，
+//     并在 AnimationSystem 增加受击动作覆盖（涉及 components/player.rs +
+//     systems/presentation/animation_system.rs + network_apply_system）。
+// [ ] 施法前摇(Spell): 帧表已有 Spell(296..)，但 PlayerAction 无 Spell。
+//     补全同上，需 ObjectSpell 网络包落地到玩家动作。
+// [ ] 钓鱼(FishingCast/Wait/Reel): 帧表已有 632/696/744 段，但 PlayerAction 无钓鱼。
+//     补全需钓鱼状态机组件 + AnimationSystem 映射。
+// [ ] 怪物 Frame.Blend 加色混合: HellBomb/CaveStatue 等需 DrawBlend。
+//     需 AnimationSystem 把 Frame.blend 同步到 LibrarySprite.blend_mode
+//     （见下方 monster 渲染路径的 TODO）。
+// [ ] PoisonType 完整色板: 当前只映射 Poison=红/Bleeding=暗红，C# 另有
+//     Green/Gray/Blue/Yellow/Purple 等；需持久化 Poison 位掩码（network_apply_system
+//     目前转成 Buff 丢失了细分类型）。
+//
 // ============================================================================
 
 use super::SpriteRenderSystem;
-use crate::components::{AnimationFrame, Camera, Health, LibrarySprite, LocalPlayer, Monster, MountState, OtherPlayer, Player, PlayerAppearance, Position, SpriteBlendMode, TimeTracker};
+use crate::components::{AnimationFrame, BuffList, BuffType, Camera, Health, LibrarySprite, LocalPlayer, Monster, MountState, OtherPlayer, Player, PlayerAppearance, Position, SpriteBlendMode, TimeTracker};
 use crate::game::GameResult;
 use crate::objects::frames::get_player_frame;
 use crate::resources::LibraryName;
@@ -47,6 +80,37 @@ impl SpriteRenderSystem {
     // 坐骑时翅膀的额外水平偏移：用于修正"翅膀偏左"。
     const MOUNT_WING_OFFSET_X_PX: f32 = 12.0;
 
+    /// 计算实体当前的"绘制颜色"（对齐 C# MapObject.ApplyDrawColour()）。
+    ///
+    /// C# 原版逻辑（PlayerObject/MonsterObject 的 Process() 中）：
+    /// 根据 Poison 位掩码把 DrawColour 设为对应颜色，DrawBody/DrawHead/DrawWeapon
+    /// 统一用这个颜色绘制。受击时的"红色闪烁"本质就是 Poison=Red / Bleeding(DarkRed)。
+    ///
+    /// Rust 侧 Poison 原始位掩码未直接持久化（network_apply_system 把它转成 Buff），
+    /// 这里用 BuffList 里现存的 BuffType 推导近似颜色：
+    /// - Poison  → 红色  (近似 C# PoisonType.Red=Color.Red)
+    /// - Bleeding→ 暗红  (近似 C# PoisonType.Bleeding=Color.DarkRed)
+    /// 其余 PoisonType（Green/Blue/Gray/Yellow/Purple）目前 Rust 无对应 Buff，
+    /// 暂不实现；待 Poison 原始位掩码持久化后再补全。
+    ///
+    /// 返回值：白色表示无着色（与 C# 默认 Color.White 一致）。
+    fn compute_status_tint(world: &hecs::World, entity: hecs::Entity) -> Color {
+        let Ok(buffs) = world.get::<&BuffList>(entity) else {
+            return Color::new(1.0, 1.0, 1.0, 1.0);
+        };
+        // 优先级对齐 C# switch（Bleeding 比 Red 优先级高，C# 中 Bleeding 排在 Red 之前）
+        if buffs.has_buff(BuffType::Bleeding) {
+            // Color.DarkRed ≈ (0.353, 0.0, 0.094)（System.Drawing），但游戏里通常更亮；
+            // 这里取一个可视的深红。alpha 在调用方与全局 alpha 复合，这里恒为 1.0。
+            return Color::new(0.55, 0.0, 0.0, 1.0);
+        }
+        if buffs.has_buff(BuffType::Poison) {
+            // Color.Red = (1.0, 0.0, 0.0)
+            return Color::new(1.0, 0.2, 0.2, 1.0);
+        }
+        Color::new(1.0, 1.0, 1.0, 1.0)
+    }
+
     /// 渲染单个角色
     /// 渲染单个角色（macroquad 版本）
     ///
@@ -63,6 +127,7 @@ impl SpriteRenderSystem {
         add_blend_material: &Material,
         mount_index: Option<usize>,
         is_local: bool,
+        status_tint: Color,
     ) -> GameResult {
         // 诊断：外观索引（LOCAL/REMOTE 各打印一次，避免只看到远程而看不到本地）
         static APPEARANCE_LOCAL_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
@@ -105,7 +170,17 @@ impl SpriteRenderSystem {
         let weapon_frame = anim_frame.weapon_frame;
         let effect_frame = anim_frame.effect_frame;
 
-        let tint = Color::new(1.0, 1.0, 1.0, alpha.clamp(0.0, 1.0));
+        // C# PlayerObject.DrawBody(): 所有图层（身体/头发/武器/翅膀/坐骑）
+        // 统一使用 drawColour = ApplyDrawColour()，其中 drawColour 取自 DrawColour 字段，
+        // 而 DrawColour 由 Poison 状态决定（红/绿/灰/蓝/黄/紫/暗红）。
+        // 这里把 status_tint（来自 BuffList 的中毒/流血状态）作为 RGB，alpha 作为透明度，
+        // 复合后得到与 C# 一致的 drawColour。status_tint 默认白色 == 无着色。
+        let tint = Color::new(
+            status_tint.r.clamp(0.0, 1.0),
+            status_tint.g.clamp(0.0, 1.0),
+            status_tint.b.clamp(0.0, 1.0),
+            alpha.clamp(0.0, 1.0),
+        );
 
         // 性别偏移（C# HairOffSet/ArmourOffSet/WeaponOffSet）
         let body_hair_offset = if appearance.gender == crate::components::MirGender::Male {
@@ -719,6 +794,7 @@ impl SpriteRenderSystem {
                 anim_frame: AnimationFrame,
             },
             LibrarySprite {
+                entity: hecs::Entity,
                 spr: LibrarySprite,
                 pos: Position,
                 kind_order: i32,
@@ -831,6 +907,7 @@ impl SpriteRenderSystem {
                     pos.y,
                     kind_order,
                     Renderable::LibrarySprite {
+                        entity,
                         spr: *spr,
                         pos: *pos,
                         kind_order,
@@ -875,6 +952,8 @@ impl SpriteRenderSystem {
                         .ok()
                         .and_then(|m| m.mount_index);
                     let is_local = world.get::<&LocalPlayer>(entity).is_ok();
+                    // C# ApplyDrawColour(): 受击/中毒着色（红/暗红等）
+                    let status_tint = Self::compute_status_tint(world, entity);
                     Self::render_character(
                         &player,
                         &pos,
@@ -885,10 +964,19 @@ impl SpriteRenderSystem {
                         add_blend_material,
                         mount_index,
                         is_local,
+                        status_tint,
                     )?;
                 }
-                Renderable::LibrarySprite { spr, pos, kind_order: _, name, hp_current, hp_max, has_interaction_hint } => {
-                    let tint = Color::new(1.0, 1.0, 1.0, alpha.clamp(0.0, 1.0));
+                Renderable::LibrarySprite { entity, spr, pos, kind_order: _, name, hp_current, hp_max, has_interaction_hint } => {
+                    // C# MonsterObject.Draw(): drawColour = ApplyDrawColour()（受击/中毒着色）。
+                    // 怪物/NPC 同样按 Poison 状态着色，与玩家保持一致。
+                    let status_tint = Self::compute_status_tint(world, entity);
+                    let tint = Color::new(
+                        status_tint.r.clamp(0.0, 1.0),
+                        status_tint.g.clamp(0.0, 1.0),
+                        status_tint.b.clamp(0.0, 1.0),
+                        alpha.clamp(0.0, 1.0),
+                    );
                     let Some(ref info) = spr.library.get_texture(spr.texture_index()) else {
                         continue;
                     };
@@ -898,6 +986,12 @@ impl SpriteRenderSystem {
 
                     let draw_x = pos.x + info.offset_x as f32;
                     let draw_y = pos.y + info.offset_y as f32;
+                    // TODO(Frame.Blend): C# MonsterObject.Draw() 在 Frame.Blend=true 时
+                    // 用 BodyLibrary.DrawBlend（加色混合），例如 HellBomb/CaveStatue 等。
+                    // 目前 AnimationSystem 未把 Frame.blend 同步到 LibrarySprite.blend_mode，
+                    // 补全需要修改 systems/presentation/animation_system.rs 的
+                    // update_library_sprite_animations（按 monster_type 查帧并设置 blend_mode），
+                    // 此处待该通道打通后改成分支绘制。
                     draw_texture_ex(tex, draw_x, draw_y, tint, DrawTextureParams { ..Default::default() });
 
                     // 名称、血条和交互提示

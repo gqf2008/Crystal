@@ -52,9 +52,29 @@ pub struct ConquestInstance {
     pub king_zone: Option<(i32, i32, i32, i32)>,
     /// 控制点列表 (x, y, radius)
     pub control_points: Vec<(i32, i32, i32)>,
+    /// 每个控制点的占领进度 (index -> (owner_guild, progress 0..MAX_CONTROL_POINTS))
+    pub control_point_owners: Vec<ControlPointState>,
     /// 最大分
     pub max_points: i32,
+    /// 属于本区域的攻城结构 object_id 列表（城墙/城门/攻城器）
+    pub siege_structure_ids: Vec<u32>,
 }
+
+/// 控制点占领状态（对应 C# ControlPoints dict 的 entry）
+#[derive(Debug, Clone, Default)]
+pub struct ControlPointState {
+    /// 当前占领该点的公会名
+    pub owner_guild: Option<String>,
+    /// 占领进度（0..MAX_CONTROL_POINTS，满值即占领）
+    pub progress: i32,
+    /// 当前争夺中的公会名（最近站上去的）
+    pub contesting_guild: Option<String>,
+}
+
+/// 控制点占领阈值（对应 C# MAX_CONTROL_POINTS = 6）
+pub const MAX_CONTROL_POINTS: i32 = 6;
+/// KingOfHill 胜利阈值（对应 C# MAX_KING_POINTS = 18）
+pub const MAX_KING_POINTS: i32 = 18;
 
 impl ConquestInstance {
     pub fn new(id: i32, map_index: i32, palace_map: i32, game: ConquestGame) -> Self {
@@ -73,7 +93,9 @@ impl ConquestInstance {
             scores: std::collections::HashMap::new(),
             king_zone: None,
             control_points: Vec::new(),
-            max_points: 100,
+            control_point_owners: Vec::new(),
+            max_points: MAX_KING_POINTS,
+            siege_structure_ids: Vec::new(),
         }
     }
 
@@ -91,6 +113,12 @@ impl ConquestInstance {
         self.attacker_guild = Some(attacker.to_string());
         self.war_start_time = chrono::Utc::now().timestamp();
         self.scores.clear();
+        // 重置控制点占领状态
+        for cp in &mut self.control_point_owners {
+            cp.owner_guild = None;
+            cp.progress = 0;
+            cp.contesting_guild = None;
+        }
     }
 
     /// 结束战争
@@ -130,6 +158,35 @@ impl ConquestInstance {
             dx <= *r && dy <= *r
         })
     }
+
+    /// 判断本区域是否已"破城"（所有城墙/城门均已破损）。
+    /// 用于决定进攻方能否进入内城。
+    pub fn is_breached(&self, structures: &std::collections::HashMap<u32, SiegeStructure>) -> bool {
+        let mut blocking_alive = 0u32;
+        for oid in &self.siege_structure_ids {
+            if let Some(s) = structures.get(oid) {
+                if (s.structure_type == SiegeStructureType::Wall
+                    || s.structure_type == SiegeStructureType::CastleGate)
+                    && s.hp > 0
+                {
+                    blocking_alive += 1;
+                }
+            }
+        }
+        // 如果本区域原本就没有城墙/城门，视为已破城
+        self.siege_structure_ids.is_empty() || blocking_alive == 0
+    }
+
+    /// 统计本区域的控制点占领数，返回各公会控制的点数。
+    pub fn tally_control_points(&self) -> std::collections::HashMap<String, i32> {
+        let mut out: std::collections::HashMap<String, i32> = std::collections::HashMap::new();
+        for cp in &self.control_point_owners {
+            if let Some(ref g) = cp.owner_guild {
+                *out.entry(g.clone()).or_insert(0) += 1;
+            }
+        }
+        out
+    }
 }
 
 /// 城门/城墙状态（对应 C# Gate/Wall/CastleGate）
@@ -142,6 +199,11 @@ pub struct SiegeStructure {
     pub damage_level: u8, // 0-4, higher = more damaged appearance
     pub is_open: bool,
     pub owner_guild: Option<String>,
+    /// 所在坐标（攻城器选择最近城墙用）
+    pub x: i32,
+    pub y: i32,
+    /// 所属征服区域 ID（多个城堡同时开战时区分）
+    pub conquest_id: i32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -149,7 +211,7 @@ pub enum SiegeStructureType {
     CastleGate,
     Wall,
     ArcherTower,
-    Catapult,
+    Catapult, // 攻城器（投石车），攻方用来打墙
 }
 
 impl SiegeStructure {
@@ -162,6 +224,9 @@ impl SiegeStructure {
             damage_level: 0,
             is_open: false,
             owner_guild: None,
+            x: 0,
+            y: 0,
+            conquest_id: 0,
         }
     }
 
@@ -174,15 +239,61 @@ impl SiegeStructure {
             damage_level: 0,
             is_open: false,
             owner_guild: None,
+            x: 0,
+            y: 0,
+            conquest_id: 0,
         }
     }
 
-    /// 受到伤害
+    /// 攻城器（投石车），攻方武器，本身有 HP
+    pub fn catapult(object_id: u32) -> Self {
+        Self {
+            object_id,
+            structure_type: SiegeStructureType::Catapult,
+            max_hp: 5000,
+            hp: 5000,
+            damage_level: 0,
+            is_open: false,
+            owner_guild: None,
+            x: 0,
+            y: 0,
+            conquest_id: 0,
+        }
+    }
+
+    /// 箭塔（守方自动射击，本简化版仅作为可被摧毁的目标）
+    pub fn archer_tower(object_id: u32) -> Self {
+        Self {
+            object_id,
+            structure_type: SiegeStructureType::ArcherTower,
+            max_hp: 10000,
+            hp: 10000,
+            damage_level: 0,
+            is_open: false,
+            owner_guild: None,
+            x: 0,
+            y: 0,
+            conquest_id: 0,
+        }
+    }
+
+    /// 是否为阻挡类结构（城墙/城门，HP 归零后通过）
+    pub fn is_blocking(&self) -> bool {
+        matches!(self.structure_type, SiegeStructureType::Wall | SiegeStructureType::CastleGate)
+    }
+
+    /// 是否已被摧毁（HP 归零，破损）
+    pub fn is_destroyed(&self) -> bool {
+        self.hp <= 0
+    }
+
+    /// 受到伤害，返回是否在本次打击中被摧毁
     pub fn take_damage(&mut self, damage: i32) -> bool {
+        let was_alive = self.hp > 0;
         self.hp = self.hp.saturating_sub(damage);
         let pct = self.hp as f32 / self.max_hp as f32;
         self.damage_level = ((1.0 - pct) * 5.0).min(4.0) as u8;
-        self.hp <= 0
+        was_alive && self.hp <= 0
     }
 
     /// 修理
@@ -190,5 +301,77 @@ impl SiegeStructure {
         self.hp = (self.hp + amount).min(self.max_hp);
         let pct = self.hp as f32 / self.max_hp as f32;
         self.damage_level = ((1.0 - pct) * 5.0).min(4.0) as u8;
+    }
+}
+
+/// 攻城器每次攻击对城墙造成的固定伤害（简化值，对齐 C# Siege 的 Strike 伤害量级）
+pub const CATAPULT_DAMAGE_PER_HIT: i32 = 800;
+/// 攻城器攻击间隔（ticks，10 ticks ≈ 1 秒）
+pub const CATAPULT_ATTACK_INTERVAL: u64 = 10;
+
+/// 选择离攻城器 (x,y) 最近的、未摧毁的城墙/城门 object_id。
+/// 攻城器只打本 conquest_id 区域内的目标。
+pub fn find_nearest_target(
+    catapult_x: i32,
+    catapult_y: i32,
+    conquest_id: i32,
+    structures: &std::collections::HashMap<u32, SiegeStructure>,
+    candidate_ids: &[u32],
+) -> Option<u32> {
+    let mut best: Option<(u32, i32)> = None;
+    for oid in candidate_ids {
+        let s = structures.get(oid)?;
+        if s.conquest_id != conquest_id { continue; }
+        if !s.is_blocking() || s.is_destroyed() { continue; }
+        let dist = (s.x - catapult_x).abs() + (s.y - catapult_y).abs();
+        if best.is_none_or(|(_, d)| dist < d) {
+            best = Some((*oid, dist));
+        }
+    }
+    best.map(|(oid, _)| oid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_take_damage_and_destroy() {
+        let mut wall = SiegeStructure::wall(1);
+        // 100 dmg on 30000 hp → barely scratched, damage_level still 0
+        assert!(!wall.take_damage(100));
+        assert_eq!(wall.damage_level, 0);
+        // Heavy damage (~50%) → damage_level should be ~2
+        assert!(!wall.take_damage(14000));
+        assert!(wall.damage_level >= 2);
+        let destroyed = wall.take_damage(wall.max_hp);
+        assert!(destroyed);
+        assert!(wall.is_destroyed());
+    }
+
+    #[test]
+    fn test_find_nearest_target() {
+        let mut map = std::collections::HashMap::new();
+        let mut w1 = SiegeStructure::wall(10);
+        w1.conquest_id = 1; w1.x = 5; w1.y = 5;
+        let mut w2 = SiegeStructure::wall(11);
+        w2.conquest_id = 1; w2.x = 20; w2.y = 20;
+        map.insert(10, w1); map.insert(11, w2);
+        let ids = vec![10u32, 11u32];
+        let target = find_nearest_target(0, 0, 1, &map, &ids);
+        assert_eq!(target, Some(10));
+    }
+
+    #[test]
+    fn test_is_breached() {
+        let mut inst = ConquestInstance::new(1, 0, 0, ConquestGame::Classic);
+        let mut structures = std::collections::HashMap::new();
+        let mut w = SiegeStructure::wall(1);
+        w.conquest_id = 1;
+        structures.insert(1, w);
+        inst.siege_structure_ids = vec![1];
+        assert!(!inst.is_breached(&structures));
+        structures.get_mut(&1).unwrap().hp = 0;
+        assert!(inst.is_breached(&structures));
     }
 }

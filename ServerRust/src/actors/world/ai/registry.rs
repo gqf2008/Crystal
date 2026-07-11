@@ -35,6 +35,37 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("zumataurus") || name.contains("zuma taurus") || name.contains("祖玛教主") || name.contains("祖玛金牛") {
         return Box::new(bosses::zuma_taurus::ZumaTaurusBehavior::new());
     }
+    // ===== 额外 Boss（10 个）=====
+    if name.contains("evilcentipede") || name.contains("evil centipede") || name.contains("地蜈蚣") || name.contains("触角恶魔") {
+        return Box::new(bosses::evil_centipede::EvilCentipedeBehavior::new());
+    }
+    if name.contains("cannibalplant") || name.contains("cannibal plant") || name.contains("食人花") {
+        return Box::new(bosses::cannibal_plant::CannibalPlantBehavior::new());
+    }
+    if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
+        return Box::new(bosses::oma_king::OmaKingBehavior::new());
+    }
+    if name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主") {
+        return Box::new(bosses::wooma_taurus::WoomaTaurusBehavior::new());
+    }
+    if name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王") {
+        return Box::new(bosses::flame_queen::FlameQueenBehavior::new());
+    }
+    if name.contains("snowwolfking") || name.contains("snow wolf king") || name.contains("雪狼王") {
+        return Box::new(bosses::snow_wolf_king::SnowWolfKingBehavior::new());
+    }
+    if name.contains("turtleking") || name.contains("turtle king") || name.contains("龟丞相") || name.contains("龟王") {
+        return Box::new(bosses::turtle_king::TurtleKingBehavior::new());
+    }
+    if name.contains("behemoth") || name.contains("巨兽") {
+        return Box::new(bosses::behemoth::BehemothBehavior::new());
+    }
+    if name.contains("leftguard") || name.contains("left guard") || name.contains("左护卫") {
+        return Box::new(bosses::left_guard::LeftGuardBehavior::new());
+    }
+    if name.contains("hellkeeper") || name.contains("hell keeper") || name.contains("地狱守门人") {
+        return Box::new(bosses::hell_keeper::HellKeeperBehavior::new());
+    }
     Box::new(DefaultBehavior::new())
 }
 
@@ -49,4 +80,14 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("darkomaking") || name.contains("dark oma king") || name.contains("暗黑奥玛") || name.contains("奥玛之王")
         || name.contains("generalmeowmeow") || name.contains("general meow meow") || name.contains("喵喵将军")
         || name.contains("zumataurus") || name.contains("zuma taurus") || name.contains("祖玛教主") || name.contains("祖玛金牛")
+        || name.contains("evilcentipede") || name.contains("evil centipede") || name.contains("地蜈蚣") || name.contains("触角恶魔")
+        || name.contains("cannibalplant") || name.contains("cannibal plant") || name.contains("食人花")
+        || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
+        || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
+        || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
+        || name.contains("snowwolfking") || name.contains("snow wolf king") || name.contains("雪狼王")
+        || name.contains("turtleking") || name.contains("turtle king") || name.contains("龟丞相") || name.contains("龟王")
+        || name.contains("behemoth") || name.contains("巨兽")
+        || name.contains("leftguard") || name.contains("left guard") || name.contains("左护卫")
+        || name.contains("hellkeeper") || name.contains("hell keeper") || name.contains("地狱守门人")
 }
