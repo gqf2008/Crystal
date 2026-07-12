@@ -14,6 +14,10 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if is_static_object(&name) || is_passive_object(&name) {
         return Box::new(DefaultBehavior::new());
     }
+    // 召唤物分身（名称带后缀）不匹配 Boss behavior，避免无限召唤
+    if name.contains("分身") || name.contains(" clone") || name.contains("summoned ") {
+        return Box::new(DefaultBehavior::new());
+    }
     // 去除可能的空格/后缀，匹配 Boss 名称
     // 注意：EvilMirBody 是龙系统静态身体（CanMove/CanAttack=false），不是 EvilMir Boss 本体
     if (name.contains("evilmir") || name.contains("evil mir") || name.contains("邪恶巨龙"))

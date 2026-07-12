@@ -171,11 +171,9 @@ pub fn check_critical(critical_rate: i32) -> bool {
 }
 
 /// 暴击伤害加成：damage += floor(damage * (CriticalDamage / CriticalDamageWeight) * 10)
-/// 即 damage *= (1 + CriticalDamage / 5)（CriticalDamageWeight=50）
+/// 完全按 C# 浮点顺序实现（HumanObject.cs:7159）
 pub fn apply_critical(damage: i32, critical_damage: i32) -> i32 {
-    // i64 防溢出，对齐 C# Math.Min(int.MaxValue, ...)
-    let bonus = (damage as i64 * critical_damage as i64 * 10 / CRITICAL_DAMAGE_WEIGHT as i64) / 1;
-    let bonus = (bonus as f64).floor() as i64;
+    let bonus = (damage as f64 * (critical_damage as f64 / CRITICAL_DAMAGE_WEIGHT as f64) * 10.0).floor() as i64;
     let total = damage as i64 + bonus;
     total.min(i32::MAX as i64) as i32
 }
@@ -202,8 +200,8 @@ pub fn apply_negative_effects(
 
     // Paralize：需 SpecialMode，暂跳过（TODO: 接入 SpecialMode 后补）
 
-    // Freezing → Slow
-    if attacker.freezing > 0 {
+    // Freezing → Slow（level_offset==0 时 C# Random(0) 抛异常被吞，等效不触发）
+    if attacker.freezing > 0 && level_offset > 0 {
         if rand_below(FREEZING_ATTACK_WEIGHT) < attacker.freezing && rand_below(level_offset as i32) == 0 {
             let duration = (3 + rand_below(attacker.freezing)).min(10) as u32;
             poisons.push(Poison::new(PoisonType::SLOW, duration, 0, 1000));
@@ -211,7 +209,7 @@ pub fn apply_negative_effects(
     }
 
     // PoisonAttack → Green
-    if attacker.poison_attack > 0 {
+    if attacker.poison_attack > 0 && level_offset > 0 {
         if rand_below(POISON_ATTACK_WEIGHT) < attacker.poison_attack && rand_below(level_offset as i32) == 0 {
             let value = (3 + rand_below(attacker.poison_attack)).min(10);
             poisons.push(Poison::new(PoisonType::GREEN, 5, value, 1000));
@@ -563,11 +561,11 @@ mod tests {
         let attacker = CombatStats { freezing: 100, ..Default::default() };
         let mut slow_count = 0;
         for _ in 0..100 {
-            let poisons = apply_negative_effects(&attacker, DefenceType::AcAgility, 0);
+            let poisons = apply_negative_effects(&attacker, DefenceType::AcAgility, 5);
             if poisons.iter().any(|p| p.p_type == PoisonType::SLOW) {
                 slow_count += 1;
             }
         }
-        assert!(slow_count > 90, "high freezing should slow often, got {}/100", slow_count);
+        assert!(slow_count > 5, "high freezing with level_offset=5 should slow ~20%, got {}/100", slow_count);
     }
 }

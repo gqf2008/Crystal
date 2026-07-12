@@ -316,6 +316,7 @@ impl PlayerState {
     /// 构建战斗公式用的属性快照（对齐 C# Stats 投影到 CombatStats）
     pub fn to_combat_stats(&self) -> crate::combat::attack::CombatStats {
         use crate::combat::attack::CombatStats;
+        use crate::combat::buff::{get_stat_bonus, BuffType};
         CombatStats {
             min_atk: self.effective_min_attack(),
             max_atk: self.effective_max_attack(),
@@ -323,13 +324,13 @@ impl PlayerState {
             max_ac: self.effective_max_ac(),
             min_mac: self.effective_min_mac(),
             max_mac: self.effective_max_mac(),
-            agility: self.agility,
+            agility: self.agility + get_stat_bonus(&self.buffs, &BuffType::AgilityBoost { bonus: 0 }),
             accuracy: self.accuracy,
             luck: self.luck,
-            critical_rate: self.critical_rate,
+            critical_rate: self.critical_rate + get_stat_bonus(&self.buffs, &BuffType::CriticalRateBoost { bonus: 0 }),
             critical_damage: self.critical_damage,
             magic_resist: self.magic_resist,
-            reflect: self.reflect,
+            reflect: self.reflect + get_stat_bonus(&self.buffs, &BuffType::Reflect { percent: 0 }),
             damage_reduction_percent: self.damage_reduction_percent,
             attack_bonus: self.attack_bonus,
             hp_drain_rate_percent: self.hp_drain_rate_percent,
@@ -1163,6 +1164,14 @@ impl Message<TickBuff> for PlayerActor {
         // 移除过期 buff
         crate::combat::buff::expire_buffs(&mut self.state.buffs,
         );
+
+        // DamageReduction buff 过期后重置 damage_reduction_percent
+        // （MagicShield/ElementalBarrier/ProtectionField 的减伤不应永久生效）
+        let has_dr = self.state.buffs.iter().any(|b|
+            matches!(b.buff_type, crate::combat::buff::BuffType::DamageReduction { .. }));
+        if !has_dr {
+            self.state.damage_reduction_percent = 0;
+        }
 
         // Poison tick（每 5 ticks 触发一次，推进 1 秒的 duration/伤害，略快于真实时间但可接受）
         if !self.state.poison_list.is_empty() {

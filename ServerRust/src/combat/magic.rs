@@ -2,19 +2,33 @@
 
 use crate::db::MagicInfo;
 
-/// 法术的魔法攻击力分量（C# MPower）
-fn magic_mpower(info: &MagicInfo, level: u8) -> f64 {
-    (info.mpower_base as f64) + (level as f64) * (info.mpower_bonus as f64)
+/// 法术的魔法攻击力分量（C# MPower()）。
+/// C# 语义：Bonus>0 时在 [Base, Base+Bonus) 间随机，否则取 Base。
+/// **与等级无关**——Level 只出现在 GetPower 的 (Level+1) 乘数里。
+fn magic_mpower(info: &MagicInfo) -> f64 {
+    if info.mpower_bonus > 0 {
+        let range = info.mpower_base + info.mpower_bonus;
+        fastrand::i32(info.mpower_base..range) as f64
+    } else {
+        info.mpower_base as f64
+    }
 }
 
-/// 法术的基础攻击力分量（C# DefPower）
-fn magic_def_power(info: &MagicInfo, level: u8) -> f64 {
-    (info.power_base as f64) + (level as f64) * (info.power_bonus as f64)
+/// 法术的基础攻击力分量（C# DefPower()）。
+/// C# 语义：Bonus>0 时在 [Base, Base+Bonus) 间随机，否则取 Base。
+fn magic_def_power(info: &MagicInfo) -> f64 {
+    if info.power_bonus > 0 {
+        let range = info.power_base + info.power_bonus;
+        fastrand::i32(info.power_base..range) as f64
+    } else {
+        info.power_base as f64
+    }
 }
 
-/// C# GetPower() — 法术威力
+/// C# GetPower() — 法术威力 = round(MPower()/4 * (Level+1) + DefPower())
 pub fn magic_power(info: &MagicInfo, level: u8) -> f64 {
-    (magic_mpower(info, level) / 4.0) * (level as f64 + 1.0) + magic_def_power(info, level)
+    let raw = (magic_mpower(info) / 4.0) * (level as f64 + 1.0) + magic_def_power(info);
+    raw.round()
 }
 
 /// C# GetMultiplier() — 法术倍率

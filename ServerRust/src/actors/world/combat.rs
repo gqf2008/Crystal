@@ -78,6 +78,7 @@ impl Message<WorldAttackRequest> for WorldActor {
             let mut hit_monster = false;
             // HalfMoon/CrossHalfMoon 溅射目标（循环外应用，避免借用冲突）
             let mut halfmoon_splash: Vec<(u32, i32)> = Vec::new();
+            let mut primary_target_oid: u32 = 0; // 主目标 oid（溅射排除用）
             for (oid, monster) in &mut self.monsters {
                 let dist = (monster.x - target_x).abs() + (monster.y - target_y).abs();
                 if dist <= 1 {
@@ -95,12 +96,12 @@ impl Message<WorldAttackRequest> for WorldActor {
                         mir2_shared::enums::DefenceType::AcAgility, level_offset,
                     );
                     let damage = attack_result.damage;
-                    monster.hp = monster.hp.saturating_sub(damage);
+                    monster.take_damage(damage);
                     monster.provoked = true;
                     monster.target_session = Some(msg.session_id);
-                    // 施加战斗触发的 Poison（冰冻/毒攻）
+                    // 施加战斗触发的 Poison（冰冻/毒攻），经 behavior.on_poison 过滤
                     for p in &attack_result.applied_poisons {
-                        crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
+                        monster.try_apply_poison(*p);
                     }
 
                     // ===== 战士近战技能触发 =====
@@ -110,7 +111,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                         // 概率：level/5（C# 攻杀触发率与等级相关）
                         if fastrand::i32(0..5) < lv as i32 {
                             slaying_bonus = (damage as f32 * (0.5 + lv as f32 * 0.3)) as i32;
-                            monster.hp = monster.hp.saturating_sub(slaying_bonus);
+                            monster.take_damage(slaying_bonus);
                         }
                     }
                     // HalfMoon（半月）/ CrossHalfMoon（十字半月）：学了则溅射周围怪物
@@ -170,6 +171,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                         });
                     }
 
+                    primary_target_oid = *oid;
                     hit_monster = true;
                     break; // 一次只打一只
                 }
@@ -179,8 +181,9 @@ impl Message<WorldAttackRequest> for WorldActor {
             if !halfmoon_splash.is_empty() {
                 let splash_dmg = halfmoon_splash[0].1; // 所有溅射伤害相同
                 let splash_targets: Vec<u32> = self.monsters.iter()
-                    .filter(|(_, m)| {
-                        m.hp > 0
+                    .filter(|(id, m)| {
+                        **id != primary_target_oid // 排除主目标（C# HalfMoon 不重复打主目标）
+                            && m.hp > 0
                             && (m.x - target_x).abs() <= 1
                             && (m.y - target_y).abs() <= 1
                     })
@@ -188,7 +191,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                     .collect();
                 for sid in splash_targets {
                     if let Some(sm) = self.monsters.get_mut(&sid) {
-                        sm.hp = sm.hp.saturating_sub(splash_dmg);
+                        sm.take_damage(splash_dmg);
                         sm.provoked = true;
                         sm.target_session = Some(msg.session_id);
                     }
@@ -628,7 +631,7 @@ impl Message<RangeAttackRequest> for WorldActor {
                     mir2_shared::enums::DefenceType::Ac, level_offset,
                 );
                 let damage = attack_result.damage;
-                monster.hp = monster.hp.saturating_sub(damage);
+                monster.take_damage(damage);
                 monster.provoked = true;
                 monster.target_session = Some(msg.session_id);
                 for p in &attack_result.applied_poisons {
@@ -1094,7 +1097,7 @@ impl Message<MagicRequest> for WorldActor {
                     if let Some(mid) = hit {
                         let dmg = (state.effective_max_attack() / 2).max(5);
                         if let Some(m) = self.monsters.get_mut(&mid) {
-                            m.hp = m.hp.saturating_sub(dmg);
+                            m.take_damage(dmg);
                             m.provoked = true;
                             m.target_session = Some(msg.session_id);
                             pushed_damage += dmg;
@@ -1138,7 +1141,7 @@ impl Message<MagicRequest> for WorldActor {
                                 mir2_shared::enums::DefenceType::AcAgility, level_offset,
                             );
                             if r.is_hit && r.damage > 0 {
-                                m.hp = m.hp.saturating_sub(r.damage);
+                                m.take_damage(r.damage);
                                 m.provoked = true;
                                 m.target_session = Some(msg.session_id);
                             }
@@ -1251,7 +1254,7 @@ impl Message<MagicRequest> for WorldActor {
                             mir2_shared::enums::DefenceType::Mac, level_offset,
                         );
                         if r.is_hit && r.damage > 0 {
-                            monster.hp = monster.hp.saturating_sub(r.damage);
+                            monster.take_damage(r.damage);
                             monster.provoked = true;
                             monster.target_session = Some(msg.session_id);
                             for p in &r.applied_poisons {
@@ -1287,7 +1290,7 @@ impl Message<MagicRequest> for WorldActor {
                                 mir2_shared::enums::DefenceType::Mac, level_offset,
                             );
                             if r.is_hit && r.damage > 0 {
-                                monster.hp = monster.hp.saturating_sub(r.damage);
+                                monster.take_damage(r.damage);
                                 monster.provoked = true;
                                 monster.target_session = Some(msg.session_id);
                                 for p in &r.applied_poisons {
@@ -1331,7 +1334,7 @@ impl Message<MagicRequest> for WorldActor {
                             mir2_shared::enums::DefenceType::Mac, level_offset,
                         );
                         if r.is_hit && r.damage > 0 {
-                            monster.hp = monster.hp.saturating_sub(r.damage);
+                            monster.take_damage(r.damage);
                             monster.provoked = true;
                             monster.target_session = Some(msg.session_id);
                             for p in &r.applied_poisons {
@@ -1514,7 +1517,7 @@ impl Message<MagicRequest> for WorldActor {
                             &attacker_stats, &ds, raw_damage,
                             mir2_shared::enums::DefenceType::AcAgility, level_offset);
                         if r.is_hit && r.damage > 0 {
-                            m.hp = m.hp.saturating_sub(r.damage);
+                            m.take_damage(r.damage);
                             m.provoked = true;
                             m.target_session = Some(msg.session_id);
                             for p in &r.applied_poisons {
@@ -1549,7 +1552,7 @@ impl Message<MagicRequest> for WorldActor {
                             &attacker_stats, &ds, raw_damage,
                             mir2_shared::enums::DefenceType::AcAgility, level_offset);
                         if r.is_hit && r.damage > 0 {
-                            m.hp = m.hp.saturating_sub(r.damage);
+                            m.take_damage(r.damage);
                             m.provoked = true;
                             m.target_session = Some(msg.session_id);
                         }
@@ -1616,12 +1619,12 @@ impl Message<MagicRequest> for WorldActor {
                 let max_slaves = if msg.spell == SPELL_SUMMON_SHINSU
                     || msg.spell == SPELL_SUMMON_SNAKES { 2 } else { 1 };
                 let current_slaves = self.monsters.values()
-                    .filter(|m| m.target_session == Some(msg.session_id))
+                    .filter(|m| m.master_session == Some(msg.session_id))
                     .count();
                 if current_slaves >= max_slaves {
                     // 已达上限：移除最早的召唤物（按 object_id 最小者）
                     if let Some(victim_id) = self.monsters.iter()
-                        .filter(|(_, m)| m.target_session == Some(msg.session_id))
+                        .filter(|(_, m)| m.master_session == Some(msg.session_id))
                         .map(|(id, _)| *id)
                         .min() {
                         if self.monsters.remove(&victim_id).is_some() {
@@ -2112,7 +2115,7 @@ impl Message<MagicRequest> for WorldActor {
                             mir2_shared::enums::DefenceType::Mac, level_offset,
                         );
                         if r.is_hit && r.damage > 0 {
-                            monster.hp = monster.hp.saturating_sub(r.damage);
+                            monster.take_damage(r.damage);
                             monster.provoked = true;
                             monster.target_session = Some(msg.session_id);
                             for p in &r.applied_poisons {

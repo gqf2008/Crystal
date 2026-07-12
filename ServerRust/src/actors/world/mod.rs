@@ -555,6 +555,47 @@ const SPELL_REINCARNATION: u8 = mir2_shared::enums::Spell::Reincarnation as u8; 
 const SPELL_POISON_SWORD: u8 = mir2_shared::enums::Spell::PoisonSword as u8;      // 99 刺客·武器涂毒 buff
 
 impl MonsterState {
+    /// 受击：经 behavior.on_attacked 过滤后扣血。
+    /// 返回实际扣除的血量（Boss 睡眠/免疫/无敌期返 0）。
+    pub fn take_damage(&mut self, damage: i32) -> i32 {
+        if damage <= 0 { return 0; }
+        let mut behavior = std::mem::replace(&mut self.behavior,
+            Box::new(crate::actors::world::ai::DefaultBehavior::new()));
+        let actual = behavior.on_attacked(damage);
+        self.behavior = behavior;
+        self.hp = self.hp.saturating_sub(actual);
+        actual
+    }
+
+    /// 从 MonsterInfo.stats 填充战斗属性（AC/MAC/Agility/Crit 等）
+    /// 在构造 MonsterState 时调用，替代硬编码 0。
+    pub fn fill_combat_stats(&mut self, info: &db::MonsterInfo) {
+        use mir2_shared::enums::Stat;
+        let get = |s: Stat| info.stats.get(&(s as u8)).copied().unwrap_or(0);
+        self.min_ac = get(Stat::MinAC);
+        self.max_ac = get(Stat::MaxAC);
+        self.min_mac = get(Stat::MinMAC);
+        self.max_mac = get(Stat::MaxMAC);
+        self.agility = get(Stat::Agility);
+        self.accuracy = get(Stat::Accuracy);
+        self.magic_resist = get(Stat::MagicResist);
+        self.critical_rate = get(Stat::CriticalRate);
+        self.critical_damage = get(Stat::CriticalDamage);
+        self.luck = get(Stat::Luck);
+        self.reflect = get(Stat::Reflect);
+        self.damage_reduction_percent = get(Stat::DamageReductionPercent);
+    }
+
+    /// 中毒：经 behavior.on_poison 过滤。
+    pub fn try_apply_poison(&mut self, poison: crate::combat::poison::Poison) {
+        let mut behavior = std::mem::replace(&mut self.behavior,
+            Box::new(crate::actors::world::ai::DefaultBehavior::new()));
+        if behavior.on_poison(poison) {
+            crate::combat::poison::apply_poison(&mut self.poison_list, poison);
+        }
+        self.behavior = behavior;
+    }
+
     /// 朝目标方向走一步，返回新位置和方向
     fn step_toward(&self, tx: i32, ty: i32) -> (i32, i32, u8) {
         let dx = tx - self.x;
@@ -3964,6 +4005,12 @@ async fn spawn_npcs_and_monsters(
             recall_at_tick: 0,
             behavior: ai::make_behavior(&name),
         });
+        // 从 MonsterInfo 填充战斗属性（AC/MAC/Agility/Crit 等）
+        if let Some(m) = monsters.last_mut() {
+            if let Some(info) = ctx.monster_infos.get(&monster.monster_index) {
+                m.fill_combat_stats(info);
+            }
+        }
         if is_elite {
             debug!("Elite monster '{}' spawned as #{} at ({},{})", name, object_id, monster.x, monster.y);
         }

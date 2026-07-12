@@ -45,7 +45,7 @@ impl WorldActor {
                 }
                 let dmg = crate::combat::poison::tick_poisons(&mut monster.poison_list, 1);
                 if dmg > 0 {
-                    monster.hp = monster.hp.saturating_sub(dmg);
+                    monster.take_damage(dmg);
                 }
             }
         }
@@ -1325,7 +1325,7 @@ impl WorldActor {
                         mir2_shared::enums::DefenceType::Mac, level_offset,
                     );
                     if r.is_hit && r.damage > 0 {
-                        monster.hp = monster.hp.saturating_sub(r.damage);
+                        monster.take_damage(r.damage);
                         monster.provoked = true;
                         monster.target_session = Some(caster_session);
 
@@ -1504,7 +1504,7 @@ impl WorldActor {
 
             if result.is_hit && result.damage > 0 {
                 if let Some(monster) = self.monsters.get_mut(&target_id) {
-                    monster.hp = monster.hp.saturating_sub(result.damage);
+                    monster.take_damage(result.damage);
                     monster.provoked = true;
                     monster.target_session = Some(pending.session_id);
 
@@ -1570,7 +1570,7 @@ impl WorldActor {
                             attacker_stats, &ds, raw_damage, DefenceType::Ac, level_offset,
                         );
                         if r.is_hit && r.damage > 0 {
-                            monster.hp = monster.hp.saturating_sub(r.damage);
+                            monster.take_damage(r.damage);
                             monster.provoked = true;
                             monster.target_session = Some(pending.session_id);
                             for p in &r.applied_poisons {
@@ -1633,7 +1633,7 @@ impl Message<Tick> for WorldActor {
         if !self.monsters.is_empty() && !self.players.is_empty() {
             // 收集所有玩家位置（避免在循环中借用 self）
             // 预收集玩家位置 + PK 值（用于 Guard AI 红名优先）
-            let player_positions: Vec<(u64, i32, i32, u32, i32)> = {
+            let player_positions: Vec<(u64, i32, i32, u32, i32, i32, u16)> = {
                 let mut results = Vec::new();
                 let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
                 for (session_id, record) in &self.players {
@@ -1647,7 +1647,8 @@ impl Message<Tick> for WorldActor {
                                 .map(|m| m.is_safe_zone(state.x, state.y))
                                 .unwrap_or(false);
                             if !in_safe {
-                                results.push((*session_id, state.x, state.y, state.object_id, state.pk_points));
+                                // (session, x, y, object_id, pk_points, hp, map_index)
+                                results.push((*session_id, state.x, state.y, state.object_id, state.pk_points, state.hp, state.map_index));
                             }
                         }
                     }
@@ -1695,10 +1696,15 @@ impl Message<Tick> for WorldActor {
                     let monster_map = monster.map_index;
                     let monster_name = monster.name.clone();
                     let player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
-                        .map(|(s, x, y, _, _)| ai::PlayerSnap {
-                            session_id: *s, x: *x, y: *y, hp: 0, map_index: monster_map, object_id: 0,
+                        .map(|(s, x, y, oid, _, hp, map)| ai::PlayerSnap {
+                            session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid,
                         }).collect();
-                    let monster_snaps: Vec<ai::MonsterSnap> = Vec::new();
+                    // monster_snaps 从循环外预收集的 monster_snapshot 构建（避免 &mut self.monsters 借用冲突）
+                    let monster_snaps: Vec<ai::MonsterSnap> = monster_snapshot.iter()
+                        .map(|(oid, x, y, hp, max_hp, map, idx, _, _, _)| ai::MonsterSnap {
+                            object_id: *oid, x: *x, y: *y, hp: *hp, max_hp: *max_hp,
+                            map_index: *map, monster_index: *idx,
+                        }).collect();
                     let mut ctx = ai::AiCtx {
                         tick_count: self.tick_count,
                         monster_oid, monster_index,
@@ -1741,7 +1747,7 @@ impl Message<Tick> for WorldActor {
                 if profile.ai_type == MonsterAiType::Guard {
                     // 先找范围内的红名玩家
                     let mut red_nearest: Option<(u64, i32, i32, i32)> = None;
-                    for (session, px, py, _, pk) in &player_positions {
+                    for (session, px, py, _, pk, _, _) in &player_positions {
                         let dist = (monster.x - px).abs() + (monster.y - py).abs();
                         if dist <= profile.aggro_range && *pk > 0 {
                             if red_nearest.is_none_or(|n| dist < n.3) {
@@ -1752,7 +1758,7 @@ impl Message<Tick> for WorldActor {
                     if red_nearest.is_some() {
                         nearest = red_nearest;
                     } else {
-                        for (session, px, py, _, _) in &player_positions {
+                        for (session, px, py, _, _, _, _) in &player_positions {
                             let dist = (monster.x - px).abs() + (monster.y - py).abs();
                             if dist <= profile.aggro_range {
                                 if nearest.is_none_or(|n| dist < n.3) {
@@ -1762,7 +1768,7 @@ impl Message<Tick> for WorldActor {
                         }
                     }
                 } else {
-                    for (session, px, py, _, _) in &player_positions {
+                    for (session, px, py, _, _, _, _) in &player_positions {
                         let dist = (monster.x - px).abs() + (monster.y - py).abs();
                         if dist <= profile.aggro_range {
                             if nearest.is_none_or(|n| dist < n.3) {
@@ -2029,8 +2035,8 @@ impl Message<Tick> for WorldActor {
                     // 简化版：有 master 且主人在线且距离>5 则 step_toward 主人位置
                     if can_move {
                         let master_pos = player_positions.iter()
-                            .find(|(sid, _, _, _, _)| *sid == master)
-                            .map(|(_, x, y, _, _)| (*x, *y));
+                            .find(|(sid, _, _, _, _, _, _)| *sid == master)
+                            .map(|(_, x, y, _, _, _, _)| (*x, *y));
                         if let Some((mx, my)) = master_pos {
                             let dist_master = (monster.x - mx).abs() + (monster.y - my).abs();
                             if dist_master > 5 {
@@ -2164,12 +2170,12 @@ impl Message<Tick> for WorldActor {
                     }
                     ai::AttackAction::Aoe { attacker_oid, center_x, center_y, radius, damage, .. } => {
                         let tgts: Vec<u64> = player_positions.iter()
-                            .filter(|(_, px, py, _, _)| {
+                            .filter(|(_, px, py, _, _, _, _)| {
                                 let dx = (px - center_x).abs();
                                 let dy = (py - center_y).abs();
                                 dx.max(dy) <= *radius
                             })
-                            .map(|(s, _, _, _, _)| *s)
+                            .map(|(s, _, _, _, _, _, _)| *s)
                             .collect();
                         (*attacker_oid, tgts, *damage, 0u8, 0u8, *center_x, *center_y, 0u8)
                     }
@@ -2272,6 +2278,10 @@ impl Message<Tick> for WorldActor {
                             recall_at_tick: 0,
                             behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                         });
+                        // 填充战斗属性
+                        if let Some(m) = self.monsters.get_mut(&new_oid) {
+                            m.fill_combat_stats(&info);
+                        }
                         debug!("Boss summoned '{}' as #{} at ({},{}) slave={}", spawn.name, new_oid, bs.x, bs.y, bs.is_slave);
                     } else {
                         debug!("Boss summon '{}' found index {} but no MonsterInfo", bs.monster_name, idx);
