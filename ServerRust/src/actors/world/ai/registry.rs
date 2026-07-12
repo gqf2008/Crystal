@@ -152,6 +152,58 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("iceguard") || name.contains("ice guard") || name.contains("冰守卫") {
         return Box::new(bosses::ice_guard::IceGuardBehavior::new());
     }
+    // ===== 第二批：17 个独特机制怪物 =====
+    if name.contains("hornedwarrior") || name.contains("horned warrior") || name.contains("角魔战士") {
+        return Box::new(bosses::horned_warrior::HornedWarriorBehavior::new());
+    }
+    if name.contains("manectricking") || name.contains("manectric king") || name.contains("雷电王") {
+        return Box::new(bosses::manectric_king::ManectricKingBehavior::new());
+    }
+    if name.contains("seedingsgeneral") || name.contains("seedings general") || name.contains("幼苗将军") {
+        return Box::new(bosses::seedings_general::SeedingsGeneralBehavior::new());
+    }
+    if name.contains("tucsongeneral") || name.contains("tucson general") || name.contains("图森将军") {
+        return Box::new(bosses::tucson_general::TucsonGeneralBehavior::new());
+    }
+    if name.contains("whitemammoth") || name.contains("white mammoth") || name.contains("白色猛犸") {
+        return Box::new(bosses::white_mammoth::WhiteMammothBehavior::new());
+    }
+    if name.contains("hornedarcher") || name.contains("horned archer") || name.contains("角魔弓手") {
+        return Box::new(bosses::horned_archer::HornedArcherBehavior::new());
+    }
+    if name == "khazard" || name.contains("khazard") || name.contains("卡扎德") {
+        return Box::new(bosses::khazard::KhazardBehavior::new());
+    }
+    if name.contains("kinghydrax") || name.contains("king hydrax") || name.contains("海德拉王") {
+        return Box::new(bosses::king_hydrax::KingHydraxBehavior::new());
+    }
+    if name.contains("crystalspider") || name.contains("crystal spider") || name.contains("水晶蜘蛛") {
+        return Box::new(bosses::crystal_spider::CrystalSpiderBehavior::new());
+    }
+    if name.contains("elementguard") || name.contains("element guard") || name.contains("元素守卫") {
+        return Box::new(bosses::element_guard::ElementGuardBehavior::new());
+    }
+    if name.contains("wingedtigerlord") || name.contains("winged tiger lord") || name.contains("飞虎王") {
+        return Box::new(bosses::winged_tiger_lord::WingedTigerLordBehavior::new());
+    }
+    if name.contains("greatfoxspirit") || name.contains("great fox spirit") || name.contains("巨狐之灵") {
+        return Box::new(bosses::great_fox_spirit::GreatFoxSpiritBehavior::new());
+    }
+    if name.contains("stonegolem") || name.contains("stone golem") || name.contains("石头傀儡") {
+        return Box::new(bosses::stone_golem::StoneGolemBehavior::new());
+    }
+    if name.contains("tucsonmage") || name.contains("tucson mage") || name.contains("图森法师") {
+        return Box::new(bosses::tucson_mage::TucsonMageBehavior::new());
+    }
+    if name.contains("omamage") || name.contains("oma mage") || name.contains("奥玛法师") {
+        return Box::new(bosses::oma_mage::OmaMageBehavior::new());
+    }
+    if name.contains("flamingmutant") || name.contains("flaming mutant") || name.contains("燃烧突变体") {
+        return Box::new(bosses::flaming_mutant::FlamingMutantBehavior::new());
+    }
+    if name.contains("darkcaptain") || name.contains("dark captain") || name.contains("黑暗队长") {
+        return Box::new(bosses::dark_captain::DarkCaptainBehavior::new());
+    }
     Box::new(DefaultBehavior::new())
 }
 
@@ -205,4 +257,22 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("crazymanworm") || name.contains("crazy manworm") || name.contains("狂化人面虫")
         || name.contains("flamingwooma") || name.contains("flaming wooma") || name.contains("烈焰沃玛")
         || name.contains("iceguard") || name.contains("ice guard") || name.contains("冰守卫")
+        // 第二批：17 个独特机制怪物
+        || name.contains("hornedwarrior") || name.contains("horned warrior") || name.contains("角魔战士")
+        || name.contains("manectricking") || name.contains("manectric king") || name.contains("雷电王")
+        || name.contains("seedingsgeneral") || name.contains("seedings general") || name.contains("幼苗将军")
+        || name.contains("tucsongeneral") || name.contains("tucson general") || name.contains("图森将军")
+        || name.contains("whitemammoth") || name.contains("white mammoth") || name.contains("白色猛犸")
+        || name.contains("hornedarcher") || name.contains("horned archer") || name.contains("角魔弓手")
+        || name == "khazard" || name.contains("卡扎德")
+        || name.contains("kinghydrax") || name.contains("king hydrax") || name.contains("海德拉王")
+        || name.contains("crystalspider") || name.contains("crystal spider") || name.contains("水晶蜘蛛")
+        || name.contains("elementguard") || name.contains("element guard") || name.contains("元素守卫")
+        || name.contains("wingedtigerlord") || name.contains("winged tiger lord") || name.contains("飞虎王")
+        || name.contains("greatfoxspirit") || name.contains("great fox spirit") || name.contains("巨狐之灵")
+        || name.contains("stonegolem") || name.contains("stone golem") || name.contains("石头傀儡")
+        || name.contains("tucsonmage") || name.contains("tucson mage") || name.contains("图森法师")
+        || name.contains("omamage") || name.contains("oma mage") || name.contains("奥玛法师")
+        || name.contains("flamingmutant") || name.contains("flaming mutant") || name.contains("燃烧突变体")
+        || name.contains("darkcaptain") || name.contains("dark captain") || name.contains("黑暗队长")
 }

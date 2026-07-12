@@ -47,9 +47,10 @@
 //     补全同上，需 ObjectSpell 网络包落地到玩家动作。
 // [ ] 钓鱼(FishingCast/Wait/Reel): 帧表已有 632/696/744 段，但 PlayerAction 无钓鱼。
 //     补全需钓鱼状态机组件 + AnimationSystem 映射。
-// [ ] 怪物 Frame.Blend 加色混合: HellBomb/CaveStatue 等需 DrawBlend。
-//     需 AnimationSystem 把 Frame.blend 同步到 LibrarySprite.blend_mode
-//     （见下方 monster 渲染路径的 TODO）。
+// [x] 怪物 Frame.Blend 加色混合: HellBomb 等在 Frame.Blend=true 时走加色混合。
+//     AnimationSystem.update_library_sprite_animations 已把 Frame.blend 同步到
+//     LibrarySprite.blend_mode；blend=true 的怪物在下方被跳过，交由
+//     EffectRenderSystem 用 ADD 材质（gl_use_material）绘制——等价于 C# DrawBlend。
 // [ ] PoisonType 完整色板: 当前只映射 Poison=红/Bleeding=暗红，C# 另有
 //     Green/Gray/Blue/Yellow/Purple 等；需持久化 Poison 位掩码（network_apply_system
 //     目前转成 Buff 丢失了细分类型）。
@@ -986,12 +987,12 @@ impl SpriteRenderSystem {
 
                     let draw_x = pos.x + info.offset_x as f32;
                     let draw_y = pos.y + info.offset_y as f32;
-                    // TODO(Frame.Blend): C# MonsterObject.Draw() 在 Frame.Blend=true 时
-                    // 用 BodyLibrary.DrawBlend（加色混合），例如 HellBomb/CaveStatue 等。
-                    // 目前 AnimationSystem 未把 Frame.blend 同步到 LibrarySprite.blend_mode，
-                    // 补全需要修改 systems/presentation/animation_system.rs 的
-                    // update_library_sprite_animations（按 monster_type 查帧并设置 blend_mode），
-                    // 此处待该通道打通后改成分支绘制。
+                    // Frame.Blend 已打通：AnimationSystem.update_library_sprite_animations
+                    // 会按 Frame.blend 设置 spr.blend_mode。blend=true 的怪物在上方
+                    // `matches!(spr.blend_mode, SpriteBlendMode::Alpha)` 检查处被跳过，
+                    // 由 EffectRenderSystem 用 ADD 材质（gl_use_material）完成加色混合绘制
+                    // （等价于 C# MonsterObject.Draw 里的 BodyLibrary.DrawBlend）。
+                    // 走到这里的一定是普通 Alpha 混合怪物。
                     draw_texture_ex(tex, draw_x, draw_y, tint, DrawTextureParams { ..Default::default() });
 
                     // 名称、血条和交互提示

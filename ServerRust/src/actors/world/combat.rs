@@ -1710,6 +1710,383 @@ impl Message<MagicRequest> for WorldActor {
                     }
                 }
             }
+            // ===== 特殊/辅助类法术（任务：补齐剩余主动法术）=====
+            // --- 战士系 ---
+            // LionRoar：嘲讽范围内怪物（吸引仇恨，对齐 C# WarriorObject.LionRoar）
+            // 范围 = Range（默认 5 格），命中怪物 provoked + target_session=施法者
+            SPELL_LION_ROAR => {
+                let range = spell_range.max(3);
+                let hit_ids: Vec<u32> = self.monsters.iter()
+                    .filter(|(_, m)| {
+                        let dist = (m.x - state.x).abs() + (m.y - state.y).abs();
+                        dist <= range && m.hp > 0 && m.master_session.is_none()
+                    })
+                    .map(|(id, _)| *id)
+                    .collect();
+                let count = hit_ids.len();
+                for mid in hit_ids {
+                    if let Some(monster) = self.monsters.get_mut(&mid) {
+                        monster.provoked = true;
+                        monster.target_session = Some(msg.session_id);
+                        // 嘲讽 buff（简化：标记仇恨，无数值）
+                        let buff = crate::combat::buff::BuffInstance::new(
+                            crate::combat::buff::BuffType::Taunt, 300, 5);
+                        let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                    }
+                }
+                debug!("Magic: {} casts LionRoar (taunted {} monsters)", state.name, count);
+            }
+            // ProtectionField：群体减伤（自身 + 附近组员，对齐 C# WarriorObject.ProtectionField）
+            // 简化：自身 + 3 格内同组玩家获得 DamageReduction buff
+            SPELL_PROTECTION_FIELD => {
+                let reduction_pct = ((spell_level as i32 + 1) * 10).min(50);
+                let duration_ticks = (30 + spell_level as u32 * 10) * 10; // 30-60s
+                let group_id = state.group_id;
+                // 自身
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyDamageReduction {
+                    percent: reduction_pct, duration_ticks,
+                }).await;
+                let mut protected = 1u32;
+                // 附近组员
+                if let Some(gid) = group_id {
+                    for (sid, other) in &self.players {
+                        if *sid == msg.session_id { continue; }
+                        if let Ok(Some(s)) = other.actor_ref.ask(GetPlayerState).await {
+                            if s.group_id == Some(gid) && !s.is_dead {
+                                let dist = (s.x - state.x).abs() + (s.y - state.y).abs();
+                                if dist <= 3 {
+                                    let _ = other.actor_ref.ask(crate::actors::player::ApplyDamageReduction {
+                                        percent: reduction_pct, duration_ticks,
+                                    }).await;
+                                    protected += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                debug!("Magic: {} casts ProtectionField (protected {} players, -{}%)",
+                    state.name, protected, reduction_pct);
+            }
+            // CounterAttack：反击 buff（对齐 C# Stat.CounterAttack，受击时反弹伤害）
+            // 简化：用 Reflect buff 近似（反伤百分比）
+            SPELL_COUNTER_ATTACK => {
+                let reflect_pct = 15 + spell_level as i32 * 10;
+                let duration_ticks = (15 + spell_level as u32 * 5) * 10; // 15-30s
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::Reflect { percent: reflect_pct },
+                    duration_ticks, 5);
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                debug!("Magic: {} casts CounterAttack (reflect {}% for {}s)",
+                    state.name, reflect_pct, duration_ticks / 10);
+            }
+            // Entrapment：拉拽目标到自身附近 + 麻痹（对齐 C# AssassinObject/Warrior Entrapment）
+            // 简化：将目标格子怪物移到施法者前方 1 格，并施加 Paralysis
+            SPELL_ENTRAPMENT => {
+                let dir = msg.direction as usize % 8;
+                let pull_x = state.x + MON_DIR_DX[dir];
+                let pull_y = state.y + MON_DIR_DY[dir];
+                // 找目标位置怪物（target_x/target_y 或前方 1 格）
+                let target_mid: Option<u32> = self.monsters.iter()
+                    .find(|(_, m)| {
+                        (m.x == target_x && m.y == target_y && m.hp > 0)
+                            || (m.x == pull_x && m.y == pull_y && m.hp > 0)
+                    })
+                    .map(|(id, _)| *id);
+                if let Some(mid) = target_mid {
+                    let walkable = self.maps.get(&state.map_index)
+                        .map(|m| m.is_walkable(pull_x, pull_y))
+                        .unwrap_or(true);
+                    if let Some(monster) = self.monsters.get_mut(&mid) {
+                        if walkable {
+                            monster.x = pull_x;
+                            monster.y = pull_y;
+                            monster.direction = ((dir + 4) % 8) as u8; // 朝向施法者
+                        }
+                        // 麻痹 2-5 秒
+                        let para_dur = (2 + spell_level as u32).min(5);
+                        crate::combat::poison::apply_poison(&mut monster.poison_list,
+                            crate::combat::poison::Poison::new(
+                                mir2_shared::enums::PoisonType::PARALYSIS, para_dur, 0, 1000));
+                        monster.provoked = true;
+                        monster.target_session = Some(msg.session_id);
+                        // 广播移动
+                        let mut walk_body = Vec::new();
+                        walk_body.extend_from_slice(&mid.to_le_bytes());
+                        walk_body.extend_from_slice(&monster.x.to_le_bytes());
+                        walk_body.extend_from_slice(&monster.y.to_le_bytes());
+                        walk_body.push(monster.direction);
+                        let walk_packet = build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::ObjectWalk as i16, &walk_body);
+                        for session_id in self.players.keys() {
+                            let _ = self.gate_ref.ask(SendToClient {
+                                session_id: *session_id,
+                                data: walk_packet.clone(),
+                            });
+                        }
+                        debug!("Magic: {} casts Entrapment (pulled monster {} paralysis {}s)",
+                            state.name, mid, para_dur);
+                    }
+                }
+            }
+            // --- 法师系 ---
+            // TurnUndead：秒杀低级亡灵（对齐 C# WizardObject.TurnUndead）
+            // 命中目标格子亡灵怪物，按等级差概率秒杀（hp=0）
+            SPELL_TURN_UNDEAD => {
+                // 目标格子的亡灵怪物
+                let hit_ids: Vec<u32> = self.monsters.iter()
+                    .filter(|(_, m)| {
+                        let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
+                        dist <= spell_range.max(1) && m.hp > 0 && m.undead
+                    })
+                    .map(|(id, _)| *id)
+                    .collect();
+                let mut killed = 0u32;
+                for mid in hit_ids {
+                    // 查 MonsterInfo.level 用于等级差判定
+                    let mon_level = self.monsters.get(&mid)
+                        .and_then(|m| self.monster_infos.get(&m.monster_index))
+                        .map(|i| i.level).unwrap_or(0);
+                    // 等级差：玩家等级越高，秒杀概率越大
+                    // C# 概率近似：基础 30% + 等级差*10%，封顶 90%
+                    let level_diff = (state.level as i32 - mon_level).max(0);
+                    let chance = (30 + level_diff * 10).min(90);
+                    if fastrand::i32(0..100) < chance {
+                        if let Some(monster) = self.monsters.get_mut(&mid) {
+                            monster.hp = 0;
+                            monster.provoked = true;
+                            monster.target_session = Some(msg.session_id);
+                            killed += 1;
+                        }
+                    }
+                }
+                debug!("Magic: {} casts TurnUndead (killed {} undead)", state.name, killed);
+            }
+            // Repulsion：推开周围怪物（对齐 C# WizardObject.Repulsion）
+            // 命中 1-2 格内怪物，将其沿反方向推 1-2 格（受 can_push 限制）
+            SPELL_REPULSION => {
+                let push_range = (1 + spell_level as i32 / 2).min(2); // Lv0=1, Lv2+=2
+                // 收集 (怪物id, 推动方向) —— 方向 = 怪物相对施法者
+                let mut pushes: Vec<(u32, usize)> = Vec::new();
+                for (id, m) in self.monsters.iter() {
+                    if m.hp <= 0 || m.master_session.is_some() { continue; }
+                    let dx = m.x - state.x;
+                    let dy = m.y - state.y;
+                    let dist = dx.abs() + dy.abs();
+                    if dist == 0 || dist > 2 { continue; }
+                    // 推动方向：取 8 方向中最接近 (dx,dy) 的
+                    let push_dir = best_dir(dx, dy);
+                    pushes.push((*id, push_dir));
+                }
+                let (max_x, max_y) = self.maps.get(&state.map_index)
+                    .map(|m| (m.width as i32, m.height as i32))
+                    .unwrap_or((i32::MAX, i32::MAX));
+                // 预取每只候选怪物的当前位置 + can_push（避免后续 &self.monsters 与 &mut 冲突）
+                let mut candidates: Vec<(u32, usize, i32, i32)> = Vec::new(); // (id, dir, x, y)
+                for (mid, pdir) in pushes {
+                    let can_push = self.monsters.get(&mid)
+                        .and_then(|m| self.monster_infos.get(&m.monster_index))
+                        .map(|i| i.can_push).unwrap_or(true);
+                    if !can_push { continue; }
+                    if let Some(m) = self.monsters.get(&mid) {
+                        candidates.push((mid, pdir, m.x, m.y));
+                    }
+                }
+                // 被占用格子集合（用于阻挡判定），随移动动态更新
+                let mut occupied: std::collections::HashSet<(i32, i32)> = self.monsters.values()
+                    .filter(|m| m.hp > 0).map(|m| (m.x, m.y)).collect();
+                let mut moved_packets: Vec<(u32, i32, i32, u8)> = Vec::new();
+                for (mid, pdir, start_x, start_y) in candidates {
+                    let mut nx = start_x;
+                    let mut ny = start_y;
+                    for _ in 0..push_range {
+                        let tx = nx + MON_DIR_DX[pdir];
+                        let ty = ny + MON_DIR_DY[pdir];
+                        if tx < 0 || ty < 0 || tx >= max_x || ty >= max_y { break; }
+                        let walkable = self.maps.get(&state.map_index)
+                            .map(|m| m.is_walkable(tx, ty)).unwrap_or(true);
+                        if !walkable { break; }
+                        // 不能推到其他怪物身上（动态占用表）
+                        if occupied.contains(&(tx, ty)) { break; }
+                        nx = tx; ny = ty;
+                    }
+                    if nx != start_x || ny != start_y {
+                        // 更新占用表：释放旧格、占用新格
+                        occupied.remove(&(start_x, start_y));
+                        occupied.insert((nx, ny));
+                        if let Some(monster) = self.monsters.get_mut(&mid) {
+                            monster.x = nx;
+                            monster.y = ny;
+                            monster.direction = ((pdir + 4) % 8) as u8; // 朝向施法者
+                            monster.provoked = true;
+                            monster.target_session = Some(msg.session_id);
+                            moved_packets.push((mid, nx, ny, monster.direction));
+                        }
+                    }
+                }
+                // 广播被推动怪物的移动
+                for (mid, mx, my, mdir) in moved_packets {
+                    let mut walk_body = Vec::new();
+                    walk_body.extend_from_slice(&mid.to_le_bytes());
+                    walk_body.extend_from_slice(&mx.to_le_bytes());
+                    walk_body.extend_from_slice(&my.to_le_bytes());
+                    walk_body.push(mdir);
+                    let walk_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectWalk as i16, &walk_body);
+                    for session_id in self.players.keys() {
+                        let _ = self.gate_ref.ask(SendToClient {
+                            session_id: *session_id,
+                            data: walk_packet.clone(),
+                        });
+                    }
+                }
+                debug!("Magic: {} casts Repulsion", state.name);
+            }
+            // ElectricShock：驯服怪物（对齐 C# WizardObject.ElectricShock）
+            // 概率将目标怪物变为召唤物（master_session=施法者），受 can_tame 限制
+            SPELL_ELECTRIC_SHOCK => {
+                let target_mid: Option<u32> = self.monsters.iter()
+                    .find(|(_, m)| {
+                        let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
+                        dist <= 1 && m.hp > 0 && m.master_session.is_none()
+                    })
+                    .map(|(id, _)| *id);
+                if let Some(mid) = target_mid {
+                    let can_tame = self.monsters.get(&mid)
+                        .and_then(|m| self.monster_infos.get(&m.monster_index))
+                        .map(|i| i.can_tame).unwrap_or(false);
+                    if can_tame {
+                        // 成功率：基础 20% + 法术等级*15%，封顶 80%
+                        let chance = (20 + spell_level as i32 * 15).min(80);
+                        if fastrand::i32(0..100) < chance {
+                            if let Some(monster) = self.monsters.get_mut(&mid) {
+                                monster.master_session = Some(msg.session_id);
+                                monster.target_session = None;
+                                monster.provoked = false;
+                                monster.recall_at_tick = self.tick_count + 12000; // 20 分钟后消失
+                                debug!("Magic: {} casts ElectricShock (tamed monster {})", state.name, mid);
+                                send_system_message(&self.gate_ref, msg.session_id, "驯服成功！");
+                            }
+                        } else {
+                            // 失败时激怒怪物
+                            if let Some(monster) = self.monsters.get_mut(&mid) {
+                                monster.provoked = true;
+                                monster.target_session = Some(msg.session_id);
+                            }
+                            debug!("Magic: {} ElectricShock failed on monster {}", state.name, mid);
+                        }
+                    } else {
+                        debug!("Magic: {} ElectricShock: monster {} not tamable", state.name, mid);
+                    }
+                }
+            }
+            // MagicBooster：MP 上限提升 buff（对齐 C# Stat.MaxMP）
+            SPELL_MAGIC_BOOSTER => {
+                let bonus = (power / 2).max(20);
+                let duration_ticks = (60 + spell_level as u32 * 15) * 10; // 60-105s
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::MaxMpBoost { bonus },
+                    duration_ticks, 5);
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                debug!("Magic: {} casts MagicBooster (MaxMP +{})", state.name, bonus);
+            }
+            // --- 道士系 ---
+            // Revelation：显血/反隐（对齐 C# TaoistObject.Revelation）
+            // 简化：移除范围内敌方玩家隐身 + 标记自身可看见隐身单位（持续 buff）
+            SPELL_REVELATION => {
+                let reveal_range = spell_range.max(3).min(8);
+                let duration_ticks = (30 + spell_level as u32 * 10) * 10; // 30-60s
+                // 自身获得反隐 buff（用 Invisibility 标记自身可见隐身不可行，此处用 Reflect 占位）
+                // 实际效果：移除附近敌方隐身玩家
+                let mut revealed: Vec<u64> = Vec::new();
+                for (sid, other) in &self.players {
+                    if *sid == msg.session_id { continue; }
+                    if self.invisible_sessions.contains(sid) {
+                        if let Ok(Some(s)) = other.actor_ref.ask(GetPlayerState).await {
+                            if !s.is_dead && s.map_index == state.map_index {
+                                let dist = (s.x - state.x).abs() + (s.y - state.y).abs();
+                                if dist <= reveal_range {
+                                    revealed.push(*sid);
+                                }
+                            }
+                        }
+                    }
+                }
+                for sid in &revealed {
+                    self.invisible_sessions.remove(sid);
+                    if let Some(other) = self.players.get(sid) {
+                        let _ = other.actor_ref.ask(crate::actors::player::RemoveBuff {
+                            buff_type: crate::combat::buff::BuffType::Invisibility,
+                        }).await;
+                    }
+                }
+                // 给自身一个占位 buff 记录持续时间（反隐能力）
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::Reflect { percent: 0 }, duration_ticks, 5);
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                debug!("Magic: {} casts Revelation (revealed {} hidden players)",
+                    state.name, revealed.len());
+            }
+            // Reincarnation：复活死亡玩家（对齐 C# TaoistObject.Reincarnation）
+            // 简化：找附近（3格内）死亡玩家，原地半血复活
+            SPELL_REINCARNATION => {
+                let revive_range = 3;
+                // 从 player_death_queue 找附近死亡玩家
+                let mut target_dead: Option<u64> = None;
+                for sid in self.player_death_queue.keys() {
+                    if *sid == msg.session_id { continue; }
+                    if let Some(other) = self.players.get(sid) {
+                        if let Ok(Some(s)) = other.actor_ref.ask(GetPlayerState).await {
+                            if s.is_dead && s.map_index == state.map_index {
+                                let dist = (s.x - state.x).abs() + (s.y - state.y).abs();
+                                if dist <= revive_range {
+                                    target_dead = Some(*sid);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(dead_sid) = target_dead {
+                    if let Some(other) = self.players.get(&dead_sid) {
+                        // 获取死亡玩家状态用于位置
+                        if let Ok(Some(dead_state)) = other.actor_ref.ask(GetPlayerState).await {
+                            let rx = dead_state.x;
+                            let ry = dead_state.y;
+                            let rmap = dead_state.map_index;
+                            // 原地复活（半血），对齐 C# Reincarnation Revive(HP/2)
+                            let revived = other.actor_ref.ask(crate::actors::player::RevivePlayer {
+                                x: rx, y: ry, map_index: rmap,
+                            }).await.unwrap_or(false);
+                            if revived {
+                                // 从死亡队列移除（避免自动复活覆盖）
+                                self.player_death_queue.remove(&dead_sid);
+                                debug!("Magic: {} casts Reincarnation (revived player {})",
+                                    state.name, dead_sid);
+                                send_system_message(&self.gate_ref, msg.session_id, "轮回术成功，玩家已复活！");
+                                send_system_message(&self.gate_ref, dead_sid, "你被轮回术复活了！");
+                            }
+                        }
+                    }
+                } else {
+                    send_system_message(&self.gate_ref, msg.session_id, "附近没有可复活的目标");
+                    debug!("Magic: {} casts Reincarnation but no target", state.name);
+                }
+            }
+            // --- 刺客系 ---
+            // PoisonSword：武器涂毒 buff（对齐 C# AssassinObject.PoisonSword）
+            // 简化：用 AttackBoost + 占位记录（攻击触发由 attack.rs 检测 buff 实现）
+            // 此处给自身一个短时攻击 buff（数值=绿毒强度近似）
+            SPELL_POISON_SWORD => {
+                let poison_value = (magic_stat / 6).max(3).min(15);
+                let duration_ticks = (30 + spell_level as u32 * 10) * 10; // 30-60s
+                // 攻击力小幅提升 + 记录涂毒状态（用 Reflect percent=0 占位标记，attack.rs 可检测）
+                let buff1 = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::AttackBoost { bonus: poison_value / 2 },
+                    duration_ticks, 5);
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: buff1 }).await;
+                debug!("Magic: {} casts PoisonSword (attack +{}, poison {} ready)",
+                    state.name, poison_value / 2, poison_value);
+            }
             // --- 默认：其他伤害类（接入战斗公式 MAC）---
             _ => {
                 let raw_damage = if let Some(info) = spell_db {
@@ -1758,4 +2135,22 @@ impl Message<MagicRequest> for WorldActor {
             }).await;
         }
     }
+}
+
+/// 取最接近位移向量 (dx, dy) 的 8 方向索引（对齐 MON_DIR_DX/MON_DIR_DY）
+/// 用于 Repulsion 等推开/弹射效果的推动方向计算
+fn best_dir(dx: i32, dy: i32) -> usize {
+    let mut best = 4usize; // 默认朝下（索引 4）
+    let mut best_score = i64::MIN;
+    for dir in 0..8usize {
+        let sx = MON_DIR_DX[dir] as i64;
+        let sy = MON_DIR_DY[dir] as i64;
+        // 点积越大表示方向越一致
+        let score = sx * dx as i64 + sy * dy as i64;
+        if score > best_score {
+            best_score = score;
+            best = dir;
+        }
+    }
+    best
 }

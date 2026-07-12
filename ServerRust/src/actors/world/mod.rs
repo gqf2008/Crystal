@@ -537,6 +537,23 @@ const SPELL_SUMMON_VAMPIRE: u8 = mir2_shared::enums::Spell::SummonVampire as u8;
 const SPELL_SUMMON_TOAD: u8 = mir2_shared::enums::Spell::SummonToad as u8;        // 137 弓箭手·召唤蟾蜍
 const SPELL_SUMMON_SNAKES: u8 = mir2_shared::enums::Spell::SummonSnakes as u8;    // 140 弓箭手·召唤蛇
 
+// ===== 特殊/辅助类法术（任务：补齐剩余主动法术）=====
+// 战士系
+const SPELL_LION_ROAR: u8 = mir2_shared::enums::Spell::LionRoar as u8;            // 9 战士·嘲讽（范围内怪物仇恨转移）
+const SPELL_PROTECTION_FIELD: u8 = mir2_shared::enums::Spell::ProtectionField as u8; // 12 战士·群体减伤
+const SPELL_COUNTER_ATTACK: u8 = mir2_shared::enums::Spell::CounterAttack as u8;  // 14 战士/刺客·反击 buff
+const SPELL_ENTRAPMENT: u8 = mir2_shared::enums::Spell::Entrapment as u8;         // 7 战士·拉拽+麻痹
+// 法师系
+const SPELL_TURN_UNDEAD: u8 = mir2_shared::enums::Spell::TurnUndead as u8;        // 44 法师·秒杀低级亡灵
+const SPELL_REPULSION: u8 = mir2_shared::enums::Spell::Repulsion as u8;           // 32 法师·推开周围怪物
+const SPELL_ELECTRIC_SHOCK: u8 = mir2_shared::enums::Spell::ElectricShock as u8;  // 33 法师·驯服怪物
+const SPELL_MAGIC_BOOSTER: u8 = mir2_shared::enums::Spell::MagicBooster as u8;    // 51 法师·MP 上限提升 buff
+// 道士系
+const SPELL_REVELATION: u8 = mir2_shared::enums::Spell::Revelation as u8;         // 70 道士·显血/反隐
+const SPELL_REINCARNATION: u8 = mir2_shared::enums::Spell::Reincarnation as u8;   // 79 道士·复活死亡玩家
+// 刺客系
+const SPELL_POISON_SWORD: u8 = mir2_shared::enums::Spell::PoisonSword as u8;      // 99 刺客·武器涂毒 buff
+
 impl MonsterState {
     /// 朝目标方向走一步，返回新位置和方向
     fn step_toward(&self, tx: i32, ty: i32) -> (i32, i32, u8) {

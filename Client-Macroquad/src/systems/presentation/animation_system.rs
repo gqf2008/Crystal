@@ -284,8 +284,14 @@ impl AnimationSystem {
     }
 
     /// 更新怪物/NPC 的 LibrarySprite 动画帧（最小集：怪物 DefaultMonster）
+    ///
+    /// 除帧号外，还把 `Frame.blend` 同步到 `LibrarySprite.blend_mode`（对齐 C#
+    /// `MonsterObject.Draw()` 在 `Frame.Blend=true` 时改用 `BodyLibrary.DrawBlend`）。
+    /// blend_mode 决定了渲染管线分支：
+    /// - `Alpha`    → SpriteRenderSystem 绘制（带名称/血条）
+    /// - `Additive` → SpriteRenderSystem 跳过，由 EffectRenderSystem 用 ADD 材质绘制
     pub fn update_library_sprite_animations(&mut self, ctx: &mut GameContext) -> GameResult {
-        use crate::components::{LibrarySprite, Monster, MonsterAnimState};
+        use crate::components::{LibrarySprite, Monster, MonsterAnimState, SpriteBlendMode};
 
         for (monster, state, spr) in ctx
             .world
@@ -318,6 +324,14 @@ impl AnimationSystem {
             // DrawFrame = Frame.Start + (Direction * Frame.OffSet) + FrameIndex
             spr.index = frame.start + (dir * frame.offset());
             spr.frame = frame_index;
+
+            // 对齐 C# MonsterObject.Draw(): Frame.Blend=true 时走 DrawBlend（加色混合）。
+            // 这里只同步混合模式标志，真正的 ADD 绘制由 EffectRenderSystem 用 ADD 材质完成。
+            spr.blend_mode = if frame.blend {
+                SpriteBlendMode::Additive
+            } else {
+                SpriteBlendMode::Alpha
+            };
 
             // quiet unused warning guard
             let _ = monster.monster_type;

@@ -9,13 +9,14 @@ use crate::combat::poison::Poison;
 use mir2_shared::enums::PoisonType;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
-use crate::actors::world::ai::helpers::*;
 
 /// 睡眠唤醒延迟（5 分钟，单位 tick；100ms/tick → 5min=3000 ticks）
+#[allow(dead_code)]
 const SLEEP_DURATION_TICKS: u64 = 3000;
 /// 攻击冷却（tick）
 const EVIL_MIR_ATTACK_COOLDOWN: u64 = 8;
 /// 行动间隔（tick）
+#[allow(dead_code)]
 const EVIL_MIR_ACTION_INTERVAL: u64 = 3;
 
 pub struct EvilMirBehavior {
