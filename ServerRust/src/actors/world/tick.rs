@@ -1721,6 +1721,18 @@ impl Message<Tick> for WorldActor {
                     debug!("Boss '{}' AI tick processed", monster_name);
                     continue;
                 }
+                // ===== 静态环境物体（CanMove=false && CanAttack=false，对齐 C# Tree/Wall 等）=====
+                // 不可移动、不攻击：跳过全部 AI 逻辑，仅保留死亡判定（循环末尾）。
+                if ai::is_static_object(&monster.name) {
+                    monster.ai_state = MonsterAiState::Idle;
+                    if monster.hp <= 0 {
+                        dead_monsters.push(*oid);
+                    }
+                    continue;
+                }
+                // ===== 被动环境物体（可移动但不主动攻击，对齐 C# Deer/Doe/Football）=====
+                // 跳过攻击与追击；仍允许返回出生点漫游（由下方 else-if 分支处理）。
+                let is_passive_obj = ai::is_passive_object(&monster.name);
                 let profile = &monster.ai_profile;
 
                 // 找最近玩家（在视野范围内）
@@ -1764,6 +1776,13 @@ impl Message<Tick> for WorldActor {
                 if let Some((sess, _, _, _)) = nearest {
                     monster.target_session = Some(sess);
                 } else {
+                    monster.target_session = None;
+                }
+
+                // 被动环境物体（Deer/Doe/Football 等）：不主动攻击/追击玩家，
+                // 清空 nearest 使其跳过下方攻击+追击分支，仅保留返回出生点的漫游。
+                if is_passive_obj {
+                    nearest = None;
                     monster.target_session = None;
                 }
 
