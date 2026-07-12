@@ -125,6 +125,8 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
         let mut item_repairs: Vec<(u64, u16, u16)> = Vec::new(); // (unique_id, current_dura, max_dura)
         // Trap rock state
         let mut trap_rock_state: Option<bool> = None;
+        // Fishing status (本地玩家钓鱼状态，post-loop 应用动画)
+        let mut fishing_status: Option<(u8, bool)> = None; // (state, success)
         // Base stats (BaseStatsReceived)
         let mut base_stats_received: Option<Vec<i32>> = None;
         // Elemental state updates
@@ -1040,7 +1042,10 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
                 NetworkEvent::ItemRentalPartnerLocked { locked } => { tracing::trace!("📦 Rental partner locked: {}", locked); }
                 NetworkEvent::ItemRentalConfirmable { can_confirm } => { tracing::trace!("📦 Item rental confirmable: {}", can_confirm); }
                 NetworkEvent::ItemRentalConfirmed { success } => { tracing::trace!("📦 Item rental confirmed: success={}", success); }
-                NetworkEvent::FishingStatusUpdated { state, success } => { tracing::trace!("🎣 Fishing status updated: {} success={}", state, success); }
+                NetworkEvent::FishingStatusUpdated { state, success } => {
+                    tracing::trace!("🎣 Fishing status updated: {} success={}", state, success);
+                    fishing_status = Some((*state, *success));
+                }
                 NetworkEvent::ReincarnationRequested => { tracing::trace!("🔄 Reincarnation requested"); }
                 NetworkEvent::ReincarnationCancelled => { tracing::trace!("🔄 Reincarnation cancelled"); }
                 NetworkEvent::RankingsReceived { rankings } => { tracing::trace!("🏆 Rankings received: {} entries", rankings.len()); }
@@ -2092,6 +2097,25 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
                             SoundTrigger::once(id.to_string(), SoundType::CharacterAction),
                         );
                     }
+
+                    // 受击动画：对玩家（本地/远程）切换到 Struck 动作。
+                    // 复用 AttackState 作为 one-shot 计时器：AnimationSystem 会按
+                    // Struck 帧表时长播完后自动回到 Stand。
+                    // - 死亡中的实体不切（避免覆盖 Die→Dead 衔接）
+                    // - 骑乘态下 animation_system 会自动把 Struck 映射到 MountStruck 帧表
+                    if ctx.world.get::<&crate::components::DeathState>(target).is_err() {
+                        if let Ok(mut p) = ctx.world.get::<&mut crate::components::Player>(target) {
+                            p.action = crate::components::PlayerAction::Struck;
+                        }
+                        let _ = ctx.world.insert_one(
+                            target,
+                            crate::components::AttackState {
+                                start_time: std::time::Instant::now(),
+                                attack_type: crate::components::PlayerAction::Struck,
+                                server_attack_type: 0,
+                            },
+                        );
+                    }
                 }
             }
 
@@ -2838,6 +2862,26 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
             // 施法者：设置施法动画
             NetworkApplySystem::set_monster_anim(&ctx.world, &entity_index, object_id, Some(crate::components::MirAction::Spell), None);
 
+            // 玩家施法者（本地/远程）：切到 SpellCast 前摇动作。
+            // 复用 AttackState 作为 one-shot 计时器，按 Spell 帧表时长播完自动回到 Stand。
+            if let Some(&caster) = entity_index.get(&object_id) {
+                if ctx.world.get::<&crate::components::DeathState>(caster).is_err()
+                    && ctx.world.get::<&crate::components::Player>(caster).is_ok()
+                {
+                    if let Ok(mut p) = ctx.world.get::<&mut crate::components::Player>(caster) {
+                        p.action = crate::components::PlayerAction::SpellCast;
+                    }
+                    let _ = ctx.world.insert_one(
+                        caster,
+                        crate::components::AttackState {
+                            start_time: std::time::Instant::now(),
+                            attack_type: crate::components::PlayerAction::SpellCast,
+                            server_attack_type: 0,
+                        },
+                    );
+                }
+            }
+
             tracing::trace!("🔮 Spell cast: {:?} from {} to {}", spell_enum, object_id, target_id);
         }
 
@@ -2939,6 +2983,56 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
                 if let Ok(mut cooldowns) = ctx.world.get::<&mut crate::components::spell::SpellCooldowns>(e) {
                     for (spell_id, delay_ms) in spell_delays {
                         cooldowns.set(spell_id, delay_ms);
+                    }
+                }
+            }
+        }
+
+        // ===== 钓鱼动画 =====
+        // FishingUpdate（仅本地玩家）：根据服务器下发的 progress/success 切换钓鱼动作。
+        // - success=true         → FishingReel（收竿，one-shot，播完回 Stand）
+        // - success=false 且 progress>0 → Fishing（抛竿/等待，持续状态，由服务器驱动退出）
+        // - success=false 且 progress=0 → 回到 Stand（收竿结束/停止钓鱼）
+        if let Some((state, success)) = fishing_status {
+            if let Some(e) = local_player_entity {
+                let dead = ctx
+                    .world
+                    .get::<&crate::components::DeathState>(e)
+                    .is_ok();
+                if !dead && ctx.world.get::<&crate::components::Player>(e).is_ok() {
+                    let new_action = if success {
+                        Some(crate::components::PlayerAction::FishingReel)
+                    } else if state > 0 {
+                        Some(crate::components::PlayerAction::Fishing)
+                    } else {
+                        None
+                    };
+
+                    if let Some(action) = new_action {
+                        if let Ok(mut p) = ctx.world.get::<&mut crate::components::Player>(e) {
+                            p.action = action;
+                        }
+                        // one-shot 动作（收竿）挂 AttackState 作为计时器，播完自动回 Stand；
+                        // Fishing（等待）是持续状态，不挂计时器。
+                        if action.is_one_shot() {
+                            let _ = ctx.world.insert_one(
+                                e,
+                                crate::components::AttackState {
+                                    start_time: std::time::Instant::now(),
+                                    attack_type: action,
+                                    server_attack_type: 0,
+                                },
+                            );
+                        } else {
+                            // 进入持续钓鱼态时清掉残留的一次性计时器，避免被动画系统提前打断
+                            let _ = ctx.world.remove_one::<crate::components::AttackState>(e);
+                        }
+                    } else {
+                        // progress=0 且未成功：退出钓鱼态
+                        if let Ok(mut p) = ctx.world.get::<&mut crate::components::Player>(e) {
+                            p.action = crate::components::PlayerAction::Stand;
+                        }
+                        let _ = ctx.world.remove_one::<crate::components::AttackState>(e);
                     }
                 }
             }

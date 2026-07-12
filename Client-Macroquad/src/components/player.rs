@@ -110,6 +110,10 @@ pub enum PlayerAction {
     Attack1 = 3,  // 普通攻击1
     Attack2 = 4,  // 普通攻击2
     Attack3 = 5,  // 普通攻击3
+    Struck = 6,      // 受击（对应 C# MirAction::Struck / MountStruck）
+    SpellCast = 7,   // 施法前摇（对应 C# MirAction::Spell）
+    Fishing = 8,     // 钓鱼（抛竿/等待，对应 C# MirAction::FishingCast / FishingWait）
+    FishingReel = 9, // 收竿（对应 C# MirAction::FishingReel）
 }
 
 /// 死亡动画状态（用于本地/远程玩家的 Die → Dead 动画衔接）
@@ -145,7 +149,7 @@ impl DeathState {
 
 impl PlayerAction {
     /// 转换为 MirAction (用于查询 Frame 配置)
-    /// 
+    ///
     /// 这个映射连接了 ECS 的 PlayerAction 和原版的 MirAction
     pub fn to_mir_action(&self) -> MirAction {
         match self {
@@ -155,12 +159,27 @@ impl PlayerAction {
             PlayerAction::Attack1 => MirAction::Attack1,
             PlayerAction::Attack2 => MirAction::Attack2,
             PlayerAction::Attack3 => MirAction::Attack3,
+            PlayerAction::Struck => MirAction::Struck,
+            PlayerAction::SpellCast => MirAction::Spell,
+            PlayerAction::Fishing => MirAction::FishingCast,
+            PlayerAction::FishingReel => MirAction::FishingReel,
         }
     }
-    
+
     /// 是否是攻击动作
     pub fn is_attack(&self) -> bool {
         matches!(self, PlayerAction::Attack1 | PlayerAction::Attack2 | PlayerAction::Attack3)
+    }
+
+    /// 是否是临时性动作（受击/施法/收竿等），播完后应回到 Stand。
+    ///
+    /// 攻击动作通过 AttackState 组件单独管理生命周期，因此这里不含 Attack*。
+    /// 钓鱼的"等待"状态由服务器驱动，不视为 one-shot。
+    pub fn is_one_shot(&self) -> bool {
+        matches!(
+            self,
+            PlayerAction::Struck | PlayerAction::SpellCast | PlayerAction::FishingReel
+        )
     }
     
     // ⚠️ 以下方法已废弃，改为从 objects/frames.rs 的 PLAYER_FRAMES 读取
@@ -175,9 +194,14 @@ impl PlayerAction {
             PlayerAction::Attack1 => 6,
             PlayerAction::Attack2 => 6,
             PlayerAction::Attack3 => 6,
+            // 对应 frames.rs 中 PLAYER_FRAMES 的 count
+            PlayerAction::Struck => 3,
+            PlayerAction::SpellCast => 6,
+            PlayerAction::Fishing => 8,
+            PlayerAction::FishingReel => 8,
         }
     }
-    
+
     #[deprecated(note = "使用 objects::frames::get_player_frame() 替代")]
     pub fn frame_interval(&self) -> i32 {
         match self {
@@ -187,9 +211,13 @@ impl PlayerAction {
             PlayerAction::Attack1 => 1,
             PlayerAction::Attack2 => 1,
             PlayerAction::Attack3 => 1,
+            PlayerAction::Struck => 1,
+            PlayerAction::SpellCast => 1,
+            PlayerAction::Fishing => 1,
+            PlayerAction::FishingReel => 1,
         }
     }
-    
+
     #[deprecated(note = "使用 objects::frames::get_player_frame() 替代")]
     pub fn duration_ms(&self) -> u64 {
         // 避免在兼容 API 内部调用其他 deprecated 方法，
@@ -201,10 +229,14 @@ impl PlayerAction {
             PlayerAction::Attack1 => (6, 1),
             PlayerAction::Attack2 => (6, 1),
             PlayerAction::Attack3 => (6, 1),
+            PlayerAction::Struck => (3, 1),
+            PlayerAction::SpellCast => (6, 1),
+            PlayerAction::Fishing => (8, 1),
+            PlayerAction::FishingReel => (8, 1),
         };
         (frames * interval * 100) as u64
     }
-    
+
     #[deprecated(note = "使用 objects::frames::get_player_frame() 替代")]
     pub fn frame_start(&self) -> i32 {
         match self {
@@ -214,6 +246,10 @@ impl PlayerAction {
             PlayerAction::Attack1 => 128,
             PlayerAction::Attack2 => 176,
             PlayerAction::Attack3 => 224,
+            PlayerAction::Struck => 360,
+            PlayerAction::SpellCast => 296,
+            PlayerAction::Fishing => 632,
+            PlayerAction::FishingReel => 744,
         }
     }
 }

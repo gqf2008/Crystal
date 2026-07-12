@@ -5,7 +5,9 @@
 mod awakening;
 mod combat;
 pub mod ai;
+#[allow(dead_code)]
 mod conquest;
+#[allow(dead_code)]
 mod dragon;
 mod guild;
 mod hero;
@@ -277,7 +279,7 @@ fn default_xp() -> i32 { 10 }
 
 /// AI 行为类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MonsterAiType {
+pub enum MonsterAiType {
     /// 被动：不会主动攻击，只有被攻击才反击
     Passive,
     /// 主动：发现玩家就追击并攻击（默认）
@@ -317,7 +319,7 @@ impl MonsterAiType {
 
 /// AI 运行时参数（从 MonsterInfo 构建）
 #[derive(Debug, Clone)]
-pub(crate) struct MonsterAiProfile {
+pub struct MonsterAiProfile {
     pub ai_type: MonsterAiType,
     /// 视野/仇恨范围
     pub aggro_range: i32,
@@ -360,7 +362,7 @@ impl MonsterAiProfile {
 
 /// AI 运行时状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MonsterAiState {
+pub enum MonsterAiState {
     ///  idle / 巡逻
     Idle,
     /// 追击目标
@@ -374,7 +376,7 @@ pub(crate) enum MonsterAiState {
 }
 
 /// 运行时怪物状态
-pub(crate) struct MonsterState {
+pub struct MonsterState {
     pub object_id: u32,
     pub name: String,
     pub image: u16,
@@ -431,6 +433,10 @@ pub(crate) struct MonsterState {
     pub poison_list: Vec<crate::combat::poison::Poison>,
     /// 是否为亡灵类型（ThunderBolt +50%、TurnUndead 秒杀用，C# MonsterInfo.Undead）
     pub undead: bool,
+    /// 主人 session（None=普通怪，Some=召唤物/奴仆）
+    pub master_session: Option<u64>,
+    /// 召唤物到期 tick（0=永不过期；>0 时到点自动消失，对齐 C# 召唤时限）
+    pub recall_at_tick: u64,
     /// AI 行为（Boss=专属 impl，普通怪=DefaultBehavior）
     pub behavior: Box<dyn crate::actors::world::ai::MonsterBehavior + Send + Sync>,
 }
@@ -500,6 +506,7 @@ const SPELL_THRUSTING: u8 = mir2_shared::enums::Spell::Thrusting as u8;        /
 const SPELL_HALFMOON: u8 = mir2_shared::enums::Spell::HalfMoon as u8;          // 7 半月（范围）
 const SPELL_SHOULDER_DASH: u8 = mir2_shared::enums::Spell::ShoulderDash as u8; // 8 野蛮冲撞
 const SPELL_CROSS_HALFMOON: u8 = mir2_shared::enums::Spell::CrossHalfMoon as u8; // 13 十字半月
+#[allow(dead_code)]
 const SPELL_BLADE_AVALANCHE: u8 = mir2_shared::enums::Spell::BladeAvalanche as u8; // 14 冰刀斩（范围）
 // 弓箭手法术（Archer，弹道物理系 + 自身 buff）
 const SPELL_STRAIGHT_SHOT: u8 = mir2_shared::enums::Spell::StraightShot as u8;   // 125 直线弹道
@@ -638,6 +645,7 @@ pub struct WorldActor {
     /// 怪物名称 → index 缓存（Boss 召唤按名查 MonsterInfo 用）
     pub(crate) monster_name_index: HashMap<String, i32>,
     /// 合成配方列表（NPC Craft 用）
+    #[allow(dead_code)]
     pub(crate) recipe_infos: Vec<db::RecipeInfo>,
     /// 游戏配置：怪物掉落（monster_index -> drop list）
     pub(crate) monster_drops: HashMap<i32, Vec<db::MonsterDropInfo>>,
@@ -1320,6 +1328,9 @@ impl WorldActor {
         let mut output = Vec::new();
         let mut skip = false;
         let mut goto_target: Option<String> = None;
+        // NPC 邮件暂存：COMPOSEMAIL 创建，ADDMAILGOLD/ADDMAILITEM 累积附件，SENDMAIL 发送
+        // 对齐 C# NPCSegment.cs 的 ActionType.ComposeMail/AddMailGold/AddMailItem/SendMail
+        let mut mail_info: Option<MailMessage> = None;
 
         for line in lines.iter_mut() {
             let t = line.trim();
@@ -2167,6 +2178,8 @@ impl WorldActor {
                                     damage_reduction_percent: 0,
                                     poison_list: Vec::new(),
             undead: false,
+                                    master_session: None,
+                                    recall_at_tick: 0,
                                     behavior: ai::make_behavior(&monster_info.name),
                                 };
                                 self.monsters.insert(boss_oid, boss);
@@ -2425,6 +2438,7 @@ impl WorldActor {
                                         magic_resist: 0, critical_rate: 0, critical_damage: 0,
                                         luck: 0, reflect: 0, damage_reduction_percent: 0,
                                         poison_list: Vec::new(), undead: info.undead,
+                                        master_session: None, recall_at_tick: 0,
                                         behavior: ai::make_behavior(&info.name),
                                     });
                                 }
@@ -2499,11 +2513,105 @@ impl WorldActor {
                         }
                         debug!("NPC GROUPTELEPORT to ({},{})", tx, ty);
                     }
-                    // SENDMAIL：发邮件（简化：TODO，需邮件系统完整接入）
+                    // ===== NPC 邮件指令（对齐 C# NPCSegment.cs ComposeMail/AddMailGold/AddMailItem/SendMail）=====
+                    // 流程：COMPOSEMAIL 创建邮件 → ADDMAILGOLD/ADDMAILITEM 累积附件 → SENDMAIL 发送给收件人
+                    // COMPOSEMAIL "正文" 发件人名
+                    "COMPOSEMAIL" => {
+                        // 正文可能含空格，从 inner 中提取引号内容；发件人取最后一个 token
+                        let msg = extract_quoted(inner).unwrap_or_default();
+                        let sender = inner.split_whitespace().last().map(|s| s.to_string())
+                            .unwrap_or_else(|| "系统".to_string());
+                        mail_info = Some(MailMessage {
+                            mail_id: generate_mail_id(),
+                            sender_name: sender,
+                            receiver_name: String::new(),
+                            subject: "系统邮件".to_string(),
+                            body: msg,
+                            timestamp: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs() as i64)
+                                .unwrap_or(0),
+                            read: false,
+                            collected: false,
+                            locked: false,
+                            gold: 0,
+                            items: Vec::new(),
+                        });
+                        debug!("NPC COMPOSEMAIL: staged mail_id from session={}", session_id);
+                    }
+                    // ADDMAILGOLD amount
+                    "ADDMAILGOLD" => {
+                        let amount = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                        if let Some(m) = mail_info.as_mut() {
+                            m.gold = m.gold.saturating_add(amount);
+                        }
+                    }
+                    // ADDMAILITEM item_name count
+                    "ADDMAILITEM" => {
+                        let item_name = parts.next().unwrap_or("").to_string();
+                        let count = parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(1);
+                        if item_name.is_empty() { continue; }
+                        let m = match mail_info.as_mut() { Some(m) => m, None => continue };
+                        if m.items.len() >= 5 { continue; } // 附件最多 5 个
+                        // 按名查 ItemInfo（线性扫描，item_infos 通常数千条以内）
+                        let info_opt = self.item_infos.values()
+                            .find(|i| i.name.eq_ignore_ascii_case(&item_name))
+                            .cloned();
+                        if let Some(info) = info_opt {
+                            // 对齐 C# Envir.CreateFreshItem：按 stack_size 拆分堆叠
+                            let mut remaining = count;
+                            let stack = info.stack_size.max(1) as u16;
+                            while remaining > 0 && m.items.len() < 5 {
+                                let take = remaining.min(stack);
+                                remaining -= take;
+                                m.items.push(mir2_shared::data::item::UserItem {
+                                    unique_id: generate_item_uid(),
+                                    item_index: info.index,
+                                    count: take,
+                                    current_dura: info.durability as u16,
+                                    max_dura: info.durability as u16,
+                                    identified: info.is_identified(),
+                                    ..Default::default()
+                                });
+                            }
+                        } else {
+                            warn!("NPC ADDMAILITEM: item not found: {}", item_name);
+                        }
+                    }
+                    // SENDMAIL recipient_name
                     "SENDMAIL" => {
-                        // 邮件系统已有 world/mail.rs，NPC 发邮件需要更复杂的参数解析
-                        // 暂记录日志，后续补全
-                        debug!("NPC SENDMAIL: session={} (TODO: full mail integration)", session_id);
+                        let recipient = parts.next().unwrap_or("").to_string();
+                        let mut mail = match mail_info.take() {
+                            Some(m) => m, None => {
+                                send_system_message(&self.gate_ref, session_id, "请先用 COMPOSEMAIL 撰写邮件");
+                                continue;
+                            }
+                        };
+                        if recipient.is_empty() {
+                            send_system_message(&self.gate_ref, session_id, "SENDMAIL 缺少收件人");
+                            continue;
+                        }
+                        mail.receiver_name = recipient.clone();
+                        // 查找在线收件人（按名，忽略大小写）
+                        let target_session = self.find_session_by_name_ignore_case(&recipient).await;
+                        if let Some(target) = target_session {
+                            // 在线：直接投递
+                            if let Some(target_record) = self.players.get(&target) {
+                                let _ = target_record.actor_ref.ask(crate::actors::player::AddMail { mail: mail.clone() }).await;
+                                send_mail_received_packet(&self.gate_ref, target, &mail);
+                                debug!("NPC SENDMAIL delivered online: -> {}", recipient);
+                                send_system_message(&self.gate_ref, session_id, "邮件已发送");
+                            }
+                        } else {
+                            // 离线：持久化到数据库（load_mail 在角色登录时读回）
+                            if let Err(e) = db::insert_mail(&self.db_pool, &recipient, &mail).await {
+                                warn!("NPC SENDMAIL: failed to save offline mail for {}: {}", recipient, e);
+                                send_system_message(&self.gate_ref, session_id, "邮件发送失败，请稍后重试");
+                            } else {
+                                debug!("NPC SENDMAIL saved offline: -> {}", recipient);
+                                send_system_message(&self.gate_ref, session_id, "邮件已发送（玩家离线，将在登录时收到）");
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -2789,6 +2897,19 @@ impl WorldActor {
         None
     }
 
+    /// 按名查找在线玩家 session（忽略大小写）。
+    /// 用于 NPC SENDMAIL 等需要宽松匹配收件人的场景。
+    async fn find_session_by_name_ignore_case(&self, name: &str) -> Option<u64> {
+        for (sid, record) in &self.players {
+            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                if state.name.eq_ignore_ascii_case(name) {
+                    return Some(*sid);
+                }
+            }
+        }
+        None
+    }
+
     /// 重新计算装备属性加成并设置到 PlayerActor
     /// 返回最新的 PlayerState（如果成功）
     pub(crate) async fn recalculate_and_set_stat_bonuses(&self, session_id: u64) -> Option<PlayerState> {
@@ -2942,6 +3063,27 @@ impl WorldActor {
         let idx = ((session_id + tick_count) as usize) % keys.len();
         keys[idx]
     }
+}
+
+/// 从 NPC 指令 inner 文本中提取第一段引号内容。
+/// 对齐 C# NPCSegment.cs 中 COMPOSEMAIL 用 regexQuote 匹配 "..." 的逻辑。
+/// 支持 "..." 与 '...'；未找到返回 None。
+fn extract_quoted(s: &str) -> Option<String> {
+    let bytes = s.as_bytes();
+    let mut start = None;
+    let quote = b'"';
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == quote {
+            if start.is_none() {
+                start = Some(i + 1);
+            } else {
+                // 闭合引号
+                let s_start = start.unwrap();
+                return Some(s[s_start..i].to_string());
+            }
+        }
+    }
+    None
 }
 
 fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: u64, message: &str) {
@@ -3801,6 +3943,8 @@ async fn spawn_npcs_and_monsters(
             damage_reduction_percent: 0,
             poison_list: Vec::new(),
             undead: ctx.monster_infos.get(&monster.monster_index).map(|i| i.undead).unwrap_or(false),
+            master_session: None,
+            recall_at_tick: 0,
             behavior: ai::make_behavior(&name),
         });
         if is_elite {
@@ -3870,6 +4014,8 @@ async fn spawn_npcs_and_monsters(
                         damage_reduction_percent: 0,
                         poison_list: Vec::new(),
             undead: false,
+                        master_session: None,
+                        recall_at_tick: 0,
                         behavior: ai::make_behavior(&dragon.monster_name),
                     });
                     info!("Spawned dragon at ({}, {}) on map {}", dragon.location_x, dragon.location_y, map_file);
@@ -3979,6 +4125,8 @@ mod tests {
             damage_reduction_percent: 0,
             poison_list: Vec::new(),
             undead: false,
+            master_session: None,
+            recall_at_tick: 0,
             behavior: ai::make_behavior("TestBoss"),
         };
         assert!(boss.is_boss);

@@ -1691,6 +1691,8 @@ impl Message<MagicRequest> for WorldActor {
                                 luck: 0, reflect: 0, damage_reduction_percent: 0,
                                 poison_list: Vec::new(),
                                 undead: info.undead,
+                                master_session: Some(msg.session_id),
+                                recall_at_tick: self.tick_count + 6000,
                                 behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                             });
                             debug!("Magic: {} casts summon '{}' as #{} at ({},{}) (slave of {})",

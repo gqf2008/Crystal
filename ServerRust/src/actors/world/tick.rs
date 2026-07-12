@@ -407,6 +407,8 @@ impl WorldActor {
                 damage_reduction_percent: 0,
                 poison_list: Vec::new(),
             undead: false,
+                master_session: None,
+                recall_at_tick: 0,
                 behavior: crate::actors::world::ai::make_behavior(&name),
             });
             if is_elite {
@@ -933,6 +935,8 @@ impl WorldActor {
             damage_reduction_percent: 0,
             poison_list: Vec::new(),
             undead: false,
+            master_session: None,
+            recall_at_tick: 0,
             behavior: ai::make_behavior(&monster_info.name),
         };
         self.monsters.insert(spawn_oid, boss);
@@ -1371,8 +1375,7 @@ impl WorldActor {
     /// - FrostCrunch：MAC 伤害 + 概率 Slow/Frozen
     /// - Vampirism：MAC 伤害 + 吸血
     pub(crate) async fn tick_spell_completions(&mut self) {
-        use mir2_shared::enums::{DefenceType, Spell, PoisonType};
-        use crate::combat::{attack, poison};
+        use mir2_shared::enums::Spell;
 
         if self.pending_spell_completions.is_empty() {
             return;
@@ -1582,7 +1585,7 @@ impl WorldActor {
         }
 
         // 目标不是怪物，查玩家（PvP 弹道，如 SoulFireBall 打玩家）
-        for (other_session, other_record) in &self.players {
+        for (_other_session, other_record) in &self.players {
             if let Ok(Some(other_state)) = other_record.actor_ref.ask(GetPlayerState).await {
                 if other_state.object_id != target_id {
                     continue;
@@ -1675,8 +1678,15 @@ impl Message<Tick> for WorldActor {
             let mut boss_summons: Vec<ai::BossSummon> = Vec::new();
             let mut boss_heals: Vec<(u32, i32)> = Vec::new();
             let mut boss_poisons: Vec<ai::PoisonPlayer> = Vec::new();
+            // 召唤物过期队列（到期 tick 已过 → 移除，不掉落）
+            let mut expired_monsters: Vec<u32> = Vec::new();
 
             for (oid, monster) in &mut self.monsters {
+                // ===== 召唤物时限检查（recall_at_tick > 0 表示为召唤物）=====
+                if monster.recall_at_tick > 0 && self.tick_count >= monster.recall_at_tick {
+                    expired_monsters.push(*oid);
+                    continue;
+                }
                 // ===== Boss AI 分发 =====
                 // 已注册 Boss 走 behavior.process_tick，普通怪走原有内联逻辑
                 if ai::is_registered_boss(&monster.name) {
@@ -1995,6 +2005,33 @@ impl Message<Tick> for WorldActor {
                         monster.next_move_tick = self.tick_count + profile.move_interval;
                         monster.ai_state = MonsterAiState::Chase;
                     }
+                } else if let Some(master) = monster.master_session {
+                    // ===== 召唤物无目标 → 跟随主人 =====
+                    // 简化版：有 master 且主人在线且距离>5 则 step_toward 主人位置
+                    if can_move {
+                        let master_pos = player_positions.iter()
+                            .find(|(sid, _, _, _, _)| *sid == master)
+                            .map(|(_, x, y, _, _)| (*x, *y));
+                        if let Some((mx, my)) = master_pos {
+                            let dist_master = (monster.x - mx).abs() + (monster.y - my).abs();
+                            if dist_master > 5 {
+                                let (nx, ny, dir) = monster.step_toward(mx, my);
+                                if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
+                                    && !monster_positions.contains(&(nx, ny))
+                                    && moved_targets.insert((nx, ny))
+                                {
+                                    moved_monsters.push((*oid, nx, ny, dir));
+                                }
+                                monster.next_move_tick = self.tick_count + profile.move_interval;
+                                monster.ai_state = MonsterAiState::Return;
+                            } else {
+                                monster.ai_state = MonsterAiState::Idle;
+                            }
+                        } else {
+                            // 主人离线：原地待命
+                            monster.ai_state = MonsterAiState::Idle;
+                        }
+                    }
                 } else if can_move && dist_to_spawn(monster) > 2 {
                     // 无目标 → 回出生点
                     let (nx, ny, dir) = monster.step_toward(monster.spawn_x, monster.spawn_y);
@@ -2085,6 +2122,8 @@ impl Message<Tick> for WorldActor {
                     damage_reduction_percent: 0,
                     poison_list: Vec::new(),
             undead: false,
+                    master_session: None,
+                    recall_at_tick: 0,
                     behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                 });
                 debug!("Summoned monster '{}' as #{} at ({},{})", spawn.name, new_oid, spawn.x, spawn.y);
@@ -2210,6 +2249,8 @@ impl Message<Tick> for WorldActor {
                             luck: 0, reflect: 0, damage_reduction_percent: 0,
                             poison_list: Vec::new(),
             undead: false,
+                            master_session: None,
+                            recall_at_tick: 0,
                             behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                         });
                         debug!("Boss summoned '{}' as #{} at ({},{}) slave={}", spawn.name, new_oid, bs.x, bs.y, bs.is_slave);
@@ -2265,6 +2306,20 @@ impl Message<Tick> for WorldActor {
                     if *slot == EquipmentSlot::Weapon || *slot == EquipmentSlot::Armour {
                         self.broadcast_equipment_visuals(*target_session, &state).await;
                     }
+                }
+            }
+
+            // 处理召唤物过期（无掉落，仅移除 + 广播 ObjectRemove）
+            for oid in &expired_monsters {
+                if let Some(monster) = self.monsters.remove(oid) {
+                    let remove_packet = Self::build_object_remove_packet(*oid);
+                    for session_id in self.players.keys() {
+                        let _ = self.gate_ref.ask(SendToClient {
+                            session_id: *session_id,
+                            data: remove_packet.clone(),
+                        });
+                    }
+                    debug!("Summon '{}' (#{}) expired (recall_at_tick reached)", monster.name, oid);
                 }
             }
 
