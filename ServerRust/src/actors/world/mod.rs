@@ -951,20 +951,22 @@ impl WorldActor {
     }
 
     /// 加载或获取已缓存的地图
-    pub(crate) fn get_or_load_map(&mut self, file_name: &str) -> Option<&MapData> {
-        if !self.maps.contains_key(&0) || self.maps.get(&0).map(|m| m.file_name != file_name).unwrap_or(true) {
+    /// 按地图索引加载地图数据（支持多地图并存）。
+    /// `map_index` 来自 MapInfo.index，`file_name` 是地图文件路径。
+    pub(crate) fn get_or_load_map(&mut self, file_name: &str, map_index: u16) -> Option<&MapData> {
+        let need_load = !self.maps.contains_key(&map_index)
+            || self.maps.get(&map_index).map(|m| m.file_name != file_name).unwrap_or(true);
+        if need_load {
             match loader::load_map(file_name, &self.map_dir) {
                 Ok(mut map) => {
-                    info!("Loaded map: {} ({}x{})", map.file_name, map.width, map.height);
-                    // 应用 DB 中的 no_fight（整图安全区）
+                    info!("Loaded map: {} ({}x{}) → slot {}", map.file_name, map.width, map.height, map_index);
                     if let Some(mi) = self.map_infos.values().find(|m| m.file_name == file_name) {
                         if mi.no_fight {
                             map.safe_zone_rects.push((0, 0, map.width as i32 - 1, map.height as i32 - 1));
                         }
                     }
-                    // 硬编码常见地图安全区（可后续迁移到配置）
                     Self::apply_hardcoded_safe_zones(file_name, &mut map);
-                    self.maps.insert(0, map);
+                    self.maps.insert(map_index, map);
                 }
                 Err(e) => {
                     warn!("Failed to load map '{}': {}", file_name, e);
@@ -972,7 +974,7 @@ impl WorldActor {
                 }
             }
         }
-        self.maps.get(&0)
+        self.maps.get(&map_index)
     }
 
     /// 为已知地图注入默认安全区（坐标为 Mir2 经典值）

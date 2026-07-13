@@ -300,8 +300,9 @@ impl Message<RequestMapInfoRequest> for WorldActor {
             .map(|s| (s.x, s.y))
             .unwrap_or((DEFAULT_SPAWN_X, DEFAULT_SPAWN_Y));
 
-        // Load dest map
-        if self.get_or_load_map(&dest_file).is_none() {
+        // Load dest map（按目标 map_index 加载，支持多图并存）
+        let dest_slot = dest_mi.index as u16;
+        if self.get_or_load_map(&dest_file, dest_slot).is_none() {
             send_system_message(&self.gate_ref, msg.session_id, "地图加载失败");
             return;
         }

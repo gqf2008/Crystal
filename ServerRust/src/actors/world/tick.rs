@@ -2608,8 +2608,9 @@ impl Message<Tick> for WorldActor {
                         }
                     }
 
-                    // 加入重生队列（3 秒后重生 = 30 ticks @ 100ms）
-                    let respawn_tick = self.tick_count + 30;
+                    // 加入重生队列（3 分钟后重生 = 1800 ticks @ 100ms，对齐 C# 默认 RespawnDelay）
+                    // TODO: 从 map_respawns 表读 per-spawn-point 延迟
+                    let respawn_tick = self.tick_count + 1800;
                     let spawn = MonsterSpawn {
                         name: monster.name.clone(),
                         image: monster.image,

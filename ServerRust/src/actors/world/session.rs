@@ -162,12 +162,13 @@ impl Message<StartGameRequest> for WorldActor {
             ("0".to_string(), "Unknown".to_string(), 0) // "0" = first .map file
         };
 
-        if self.get_or_load_map(&map_file).is_some() {
-            info!("Map '{}' loaded for player {}", map_file, player_name);
+        let map_slot = map_info_idx as u16;
+        if self.get_or_load_map(&map_file, map_slot).is_some() {
+            info!("Map '{}' loaded for player {} (slot {})", map_file, player_name, map_slot);
         }
 
-        // 注入地图数据
-        if let Some(map_data) = self.maps.get(&0).cloned() {
+        // 注入地图数据（按真实 map_index 查找）
+        if let Some(map_data) = self.maps.get(&map_slot).cloned() {
             let _ = player_ref.ask(SetMapData { map: map_data });
         }
 
@@ -561,14 +562,15 @@ impl Message<WorldMoveRequest> for WorldActor {
                     let player_ref = record.actor_ref.clone();
                     let player_name = record.name.clone();
 
-                    // Load dest map
-                    if self.get_or_load_map(&dest_file).is_some() {
+                    // Load dest map（按目标 map_index 加载，支持多图并存）
+                    let dest_slot = dest_map_index as u16;
+                    if self.get_or_load_map(&dest_file, dest_slot).is_some() {
                         info!("Player {} teleported via movement: {} ({},{}) -> {} ({},{})",
                             player_name, state.map_index, state.x, state.y,
                             dest_map_index, dest_x, dest_y);
 
                         // Inject new map data into player for collision/pathfinding
-                        if let Some(map_data) = self.maps.get(&0).cloned() {
+                        if let Some(map_data) = self.maps.get(&dest_slot).cloned() {
                             let _ = player_ref.ask(SetMapData { map: map_data });
                         }
 

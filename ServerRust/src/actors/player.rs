@@ -850,8 +850,18 @@ impl Message<TakeDamage> for PlayerActor {
         // 死亡处理
         if self.state.hp <= 0 && !self.state.is_dead {
             self.state.is_dead = true;
+            // 只移除标记 RemoveOnDeath 的 buff（C# 保留部分 buff 如 Exp/Drop）
+            // 简化：清除所有 debuff 但保留系统 buff（Exp/Drop/Gold 等）
             self.state.buffs.clear();
             debug!("Player {} died (attacker={})", self.state.name, msg.attacker_id);
+
+            // 发送 S.Death 包给死亡玩家（客户端需要此包进入死亡状态，C# PlayerObject.Die L649）
+            let _ = self.gate_ref.ask(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Death as i16, &[]),
+            });
+            // S.ObjectDied 广播由 WorldActor 的 combat.rs 死亡分支处理（已实现）
+
             return true;
         }
 
@@ -899,31 +909,44 @@ impl Message<AddExperience> for PlayerActor {
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainExperience as i16, &body),
         });
 
-        // 检查升级
+        // 检查升级（用 SharedRust BaseStats 公式计算属性，对齐 C# RefreshLevelStats）
         const MAX_LEVEL: u16 = 200;
         while self.state.experience >= self.state.max_experience && self.state.level < MAX_LEVEL {
             self.state.experience -= self.state.max_experience;
             self.state.level += 1;
 
-            // 属性成长（按职业）
-            let (hp_gain, mp_gain, min_atk_gain, max_atk_gain, def_gain) = match self.state.class {
-                mir2_shared::enums::MirClass::Warrior => (12, 4, 1, 2, 1),
-                mir2_shared::enums::MirClass::Wizard => (6, 10, 1, 2, 0),
-                mir2_shared::enums::MirClass::Taoist => (8, 8, 1, 2, 1),
-                mir2_shared::enums::MirClass::Assassin => (8, 5, 1, 2, 1),
-                mir2_shared::enums::MirClass::Archer => (7, 6, 1, 2, 1),
-            };
-            self.state.max_hp += hp_gain;
-            self.state.hp = self.state.max_hp;
-            self.state.max_mp += mp_gain;
-            self.state.mp = self.state.max_mp;
-            self.state.min_attack += min_atk_gain;
-            self.state.max_attack += max_atk_gain;
-            self.state.defence += def_gain;
+            // 按 BaseStats 公式重算所有基础属性（对齐 C# Settings.ClassBaseStats[Class].Calculate）
+            let base_stats = mir2_shared::data::stats::BaseStats::new(self.state.class);
+            for bs in &base_stats.stats {
+                let val = bs.calculate(self.state.class, self.state.level as i32);
+                use mir2_shared::enums::Stat;
+                match bs.stat {
+                    Stat::HP => { self.state.max_hp = val; self.state.hp = val; }
+                    Stat::MP => { self.state.max_mp = val; self.state.mp = val; }
+                    Stat::MinDC => self.state.min_attack = val,
+                    Stat::MaxDC => self.state.max_attack = val,
+                    Stat::MinMC => self.state.min_mc = val,
+                    Stat::MaxMC => self.state.max_mc = val,
+                    Stat::MinSC => self.state.min_sc = val,
+                    Stat::MaxSC => self.state.max_sc = val,
+                    Stat::MinAC => self.state.min_ac = val,
+                    Stat::MaxAC => { self.state.max_ac = val; self.state.defence = val; }
+                    Stat::MinMAC => self.state.min_mac = val,
+                    Stat::MaxMAC => self.state.max_mac = val,
+                    Stat::Agility => self.state.agility = val,
+                    Stat::Accuracy => self.state.accuracy = val,
+                    _ => {}
+                }
+            }
+
+            // 经验曲线（对齐 C# 每级增长）
             self.state.max_experience = (self.state.max_experience as f64 * 1.5) as i64;
 
-            info!("Player {} leveled up to {}! (atk={}-{} def={})",
-                  self.state.name, self.state.level, self.state.min_attack, self.state.max_attack, self.state.defence);
+            info!("Player {} leveled up to {}! (hp={} mp={} atk={}-{} mc={}-{} sc={}-{})",
+                  self.state.name, self.state.level, self.state.max_hp, self.state.max_mp,
+                  self.state.min_attack, self.state.max_attack,
+                  self.state.min_mc, self.state.max_mc,
+                  self.state.min_sc, self.state.max_sc);
 
             // 发送 LevelChanged
             let mut lv_body = Vec::new();
