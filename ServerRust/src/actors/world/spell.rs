@@ -14,6 +14,8 @@ pub struct SpellObject {
     pub caster_id: u32,
     /// 施法者 session_id
     pub caster_session: u64,
+    /// 所在地图索引（防跨图命中）
+    pub map_index: u16,
     /// 施法位置（格子坐标）
     pub x: i32,
     pub y: i32,
@@ -51,6 +53,7 @@ impl SpellObject {
         spell: mir2_shared::enums::Spell,
         caster_id: u32,
         caster_session: u64,
+        map_index: u16,
         x: i32,
         y: i32,
         expires_at_ms: u64,
@@ -65,6 +68,7 @@ impl SpellObject {
             spell,
             caster_id,
             caster_session,
+            map_index,
             x,
             y,
             direction: 0,
@@ -157,13 +161,13 @@ fn make_spell_config(
 
 /// 创建持久法术对象
 pub fn create_persistent_spell(
-    object_id: u32, caster_id: u32, caster_session: u64,
+    object_id: u32, caster_id: u32, caster_session: u64, map_index: u16,
     x: i32, y: i32, level: u8, stat: i32, spell: mir2_shared::enums::Spell,
 ) -> SpellObject {
     let cfg = make_spell_config(spell, level, stat);
     SpellObject::new(
         object_id, cfg.spell,
-        caster_id, caster_session, x, y,
+        caster_id, caster_session, map_index, x, y,
         cfg.duration_ms, cfg.tick_value, cfg.tick_interval_ms,
         level, stat,
     )

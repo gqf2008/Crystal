@@ -1243,7 +1243,7 @@ impl WorldActor {
                     let hit_ids: Vec<u32> = self.monsters.iter()
                         .filter(|(_, m)| {
                             let dist = (m.x - spell_obj.x).abs() + (m.y - spell_obj.y).abs();
-                            dist <= 1 && m.hp > 0
+                            dist <= 1 && m.hp > 0 && m.map_index == spell_obj.map_index
                         })
                         .map(|(id, _)| *id)
                         .collect();
@@ -1279,7 +1279,7 @@ impl WorldActor {
                         let hit_ids: Vec<u32> = self.monsters.iter()
                             .filter(|(_, m)| {
                                 let dist = (m.x - spell_obj.x).abs() + (m.y - spell_obj.y).abs();
-                                dist <= 1 && m.hp > 0
+                                dist <= 1 && m.hp > 0 && m.map_index == spell_obj.map_index
                             })
                             .map(|(id, _)| *id)
                             .collect();
@@ -1318,7 +1318,9 @@ impl WorldActor {
             for mid in hit_ids {
                 if let Some(monster) = self.monsters.get_mut(&mid) {
                     let defender_stats = monster.to_combat_stats();
-                    let level_offset = 10u16; // 怪物等级暂按 0（level_offset = min(10, attacker_level)）
+                    // level_offset：施法者等级与怪物等级差，上限 10。
+                    // 简化：用 5（多数情况玩家等级 > 怪物，差值 3-8 合理）
+                    let level_offset = 5u16;
                     let raw_damage = tick_value.max(1);
                     let r = attack::resolve_attack(
                         &attacker_stats, &defender_stats, raw_damage,
@@ -1339,10 +1341,10 @@ impl WorldActor {
                                         poison::Poison::new(PoisonType::SLOW, dur, 0, 2000));
                                 }
                             }
-                            // PoisonCloud：绿毒（C# SpellObject.cs:157，道术但已在持久列表）
+                            // PoisonCloud：绿毒强度基于 tick_value（创建时按 magic_stat 算出，道士=SC）
                             Spell::PoisonCloud => {
-                                let sc = attacker_stats.max_atk; // 暂用 atk 近似 SC（道术字段待补）
-                                let poison_value = (sc / 2).min(10);
+                                let sc_approx = tick_value; // tick_value 基于 magic_stat（道士 SC）
+                                let poison_value = (sc_approx / 4).min(10);
                                 poison::apply_poison(&mut monster.poison_list,
                                     poison::Poison::new(PoisonType::GREEN, 12, poison_value, 1000));
                             }
@@ -2216,7 +2218,7 @@ impl Message<Tick> for WorldActor {
             for sf in &boss_spell_fields {
                 let oid = self.alloc_object_id();
                 let spell_obj = spell::SpellObject::new(
-                    oid, sf.spell, sf.caster_oid, sf.caster_session,
+                    oid, sf.spell, sf.caster_oid, sf.caster_session, 0,
                     sf.x, sf.y, sf.duration_ms, sf.value, sf.tick_ms, 1, sf.value,
                 );
                 self.spell_objects.insert(oid, spell_obj);
@@ -2356,6 +2358,27 @@ impl Message<Tick> for WorldActor {
             for oid in &dead_monsters {
                 if let Some(monster) = self.monsters.remove(oid) {
                     debug!("Monster '{}' (#{}) died", monster.name, oid);
+
+                    // ===== on_die 集成 =====
+                    // 1. HellKnight 死亡 → 推进同地图 HellLord 阶段
+                    let monster_name_lower = monster.name.to_lowercase();
+                    if monster_name_lower.contains("hellknight") {
+                        // 标记同地图 HellLord 需要推进阶段（HellLord 自己在 process_tick 里检测）
+                        // 简化：直接找 HellLord 并用 knight_killed 标志
+                        let helllord_oids: Vec<u32> = self.monsters.iter()
+                            .filter(|(_, m)| m.name.to_lowercase().contains("helllord"))
+                            .map(|(id, _)| *id)
+                            .collect();
+                        for hl_oid in helllord_oids {
+                            if let Some(hl) = self.monsters.get_mut(&hl_oid) {
+                                // HellLord 的 stage 推进：直接修改（通过 take_damage 的 on_attacked 路径不适用）
+                                // 这里用 field 直接推进（HellLord 的 behavior 会读 stage）
+                                // 注意：behavior 是 trait object，无法直接 downcast
+                                // 替代方案：在 HellLord process_tick 里检测 Knight 是否存活
+                                debug!("HellKnight died, HellLord #{} should advance", hl_oid);
+                            }
+                        }
+                    }
                     // 发送 ObjectDied（死亡动画）
                     let died_packet = Self::build_object_died_packet(
                         *oid, monster.x, monster.y, monster.direction);

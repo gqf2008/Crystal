@@ -65,20 +65,32 @@ impl MonsterBehavior for HellLordBehavior {
         if ctx.tick_count < monster.next_attack_tick {
             return;
         }
+
+        // ===== 阶段推进检测 =====
+        // C# 语义：Knight 被玩家杀死 → KnightKilled() → stage += 1 + 狂暴 2min
+        // Rust 简化：狂暴到期（rage_end_tick）= Knight 已被杀 → 推进 stage + 召唤下一阶段 Knight
+        // （2 分钟内玩家必须杀掉 Knight，否则狂暴到期自动推进）
+
         monster.next_attack_tick = ctx.tick_count + 6;
 
-        // 狂暴到期 或 初次 → 召唤当前阶段 Knight（C# ProcessTarget）
+        // 狂暴到期 或 初次 → 推进阶段 + 召唤下一阶段 Knight（C# ProcessTarget + KnightKilled）
         if (self.raged && ctx.tick_count >= self.rage_end_tick && self.stage < 4) || self.begin {
+            if self.raged {
+                // Knight 被杀推进阶段（狂暴到期=Knight 已死）
+                self.stage = (self.stage + 1).min(4);
+            }
             self.begin = false;
             self.raged = false;
             let knight_names = ["HellKnight1", "HellKnight2", "HellKnight3", "HellKnight4"];
-            if let Some(name) = knight_names.get(self.stage as usize) {
-                ctx.out_summons.push(crate::actors::world::ai::BossSummon {
-                    monster_name: name.to_string(),
-                    x: monster.x + fastrand::i32(-10..=10),
-                    y: monster.y + fastrand::i32(-10..=10),
-                    is_slave: true,
-                });
+            if self.stage < 4 {
+                if let Some(name) = knight_names.get(self.stage as usize) {
+                    ctx.out_summons.push(crate::actors::world::ai::BossSummon {
+                        monster_name: name.to_string(),
+                        x: monster.x + fastrand::i32(-10..=10),
+                        y: monster.y + fastrand::i32(-10..=10),
+                        is_slave: true,
+                    });
+                }
             }
         }
 

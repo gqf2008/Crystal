@@ -907,7 +907,7 @@ impl Message<MagicRequest> for WorldActor {
         );
         let persistent_spell = if is_persistent {
             spell_oid.map(|oid| spell::create_persistent_spell(
-                oid, object_id, msg.session_id,
+                oid, object_id, msg.session_id, state.map_index,
                 target_x, target_y, spell_level, magic_stat, spell_enum,
             ))
         } else {
