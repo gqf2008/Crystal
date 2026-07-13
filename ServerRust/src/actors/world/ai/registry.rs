@@ -173,7 +173,7 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("ancientbringer") || name.contains("ancient bringer") || name.contains("远古召唤者") {
         return Box::new(bosses::ancient_bringer::AncientBringerBehavior::new());
     }
-    if name == "guard" || name.contains("guard") && !name.contains("town") && !name.contains("guardian") {
+    if name == "guard" || (name.starts_with("guard") && !name.contains("town") && !name.contains("guardian") && !name.contains("vanguard") && !name.contains("bodyguard")) {
         return Box::new(bosses::guard::GuardBehavior::new());
     }
     if name.contains("townarcher") || name.contains("town archer") || name.contains("城镇弓箭手") {

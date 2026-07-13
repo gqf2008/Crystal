@@ -143,17 +143,15 @@ impl MonsterBehavior for DarkOmaKingBehavior {
             } else {
                 // 1/4：FullmoonAttack 三连击 + DarkOmaKingNuke 法术场（Type=1）
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-                // Fullmoon 溅射：自身周围 AOE 三次（C# FullmoonAttack × 3，延迟 500/1700/2500ms）
-                for _ in 0..3 {
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                        attacker_oid: monster.object_id,
-                        center_x: monster.x,
-                        center_y: monster.y,
-                        radius: 2, // FullmoonAttack 溅射范围 1-2 格
-                        damage,
-                        spell_id: 0,
-                    });
-                }
+                // C# 是延迟 500/1700/2500ms 分 3 次结算，Rust 简化为单次 3×伤害（无延迟队列支持）
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                    attacker_oid: monster.object_id,
+                    center_x: monster.x,
+                    center_y: monster.y,
+                    radius: 2,
+                    damage: damage * 3, // 三连击合并为单次 3 倍伤害
+                    spell_id: 0,
+                });
                 // 前方 3 格投放 DarkOmaKingNuke 法术场（C# DarkOmaKing.cs:114-132）
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y) as usize;
                 let nuke_x = monster.x + DIR_DX[dir % 8] * 3;

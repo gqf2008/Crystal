@@ -1609,6 +1609,27 @@ impl WorldActor {
                         attacker_session: pending.session_id,
                         damage,
                     }).await;
+
+                    // 弹道附加状态对玩家也生效（FrostCrunch 冰冻/BindingShot 定身）
+                    let mut player_poisons = Vec::new();
+                    if spell == Spell::FrostCrunch {
+                        let ml = pending.spell_level;
+                        if fastrand::i32(0..100) <= ml as i32 {
+                            player_poisons.push(poison::Poison::new(PoisonType::SLOW, 4, 0, 1000));
+                        }
+                        if fastrand::i32(0..100) <= ml as i32 {
+                            player_poisons.push(poison::Poison::new(PoisonType::FROZEN, 2, 0, 1000));
+                        }
+                    }
+                    if spell == Spell::BindingShot {
+                        player_poisons.push(poison::Poison::new(PoisonType::PARALYSIS, 3, 0, 1000));
+                    }
+                    if !player_poisons.is_empty() {
+                        let _ = actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
+                            poisons: player_poisons,
+                        }).await;
+                    }
+
                     debug!("Projectile {:?} hit player {} for {} dmg", spell, target_id, damage);
                 }
                 break;
@@ -1695,7 +1716,7 @@ impl Message<Tick> for WorldActor {
                 if ai::is_registered_boss(&monster.name) {
                     let monster_oid = monster.object_id;
                     let monster_index = monster.monster_index;
-                    let monster_map = monster.map_index;
+                    let _monster_map = monster.map_index;
                     let monster_name = monster.name.clone();
                     let player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
                         .map(|(s, x, y, oid, _, hp, map)| ai::PlayerSnap {
@@ -2157,9 +2178,15 @@ impl Message<Tick> for WorldActor {
             }
 
             // ===== 应用 Boss AI 输出队列 =====
-            // Boss 移动（合并到 moved_monsters 复用广播逻辑）
+            // Boss 移动（合并到 moved_monsters 复用广播逻辑），校验 walkable 避免穿墙
             for (oid, nx, ny, dir) in boss_moves.drain(..) {
-                moved_monsters.push((oid, nx, ny, dir));
+                let map_idx = self.monsters.get(&oid).map(|m| m.map_index).unwrap_or(0);
+                let walkable = self.maps.get(&map_idx)
+                    .map(|m| m.is_walkable(nx, ny))
+                    .unwrap_or(true);
+                if walkable {
+                    moved_monsters.push((oid, nx, ny, dir));
+                }
             }
             // Boss 攻击：广播 ObjectAttack + 对命中的玩家造成伤害
             for atk in &boss_attacks {
@@ -2370,7 +2397,7 @@ impl Message<Tick> for WorldActor {
                             .map(|(id, _)| *id)
                             .collect();
                         for hl_oid in helllord_oids {
-                            if let Some(hl) = self.monsters.get_mut(&hl_oid) {
+                            if let Some(_hl) = self.monsters.get_mut(&hl_oid) {
                                 // HellLord 的 stage 推进：直接修改（通过 take_damage 的 on_attacked 路径不适用）
                                 // 这里用 field 直接推进（HellLord 的 behavior 会读 stage）
                                 // 注意：behavior 是 trait object，无法直接 downcast

@@ -965,10 +965,9 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} casts MagicShield (damage -{}%)", state.name, reduction_pct);
             }
             // SoulShield：MAC 魔法防御 buff（C# Stat.MaxMAC/MinMAC）
-            // 注意：Rust 当前 DefenseBoost 不区分 AC/MAC，暂用 DefenseBoost 近似（buff 系统扩展后细分）
             SPELL_SOUL_SHIELD => {
                 let buff = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::DefenseBoost { bonus: (power / 3).max(3) },
+                    crate::combat::buff::BuffType::MacDefenseBoost { bonus: (power / 3).max(3) },
                     600, // 60秒
                     5,
                 );
@@ -976,10 +975,9 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} casts SoulShield (MAC defense +{})", state.name, (power / 3).max(3));
             }
             // BlessedArmour：AC 物理防御 buff（C# Stat.MaxAC/MinAC）
-            // 修复：原来错误实现为 AttackBoost，C# 实际是 AC 防御
             SPELL_BLESSED_ARMOUR => {
                 let buff = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::DefenseBoost { bonus: (power / 2).max(5) },
+                    crate::combat::buff::BuffType::AcDefenseBoost { bonus: (power / 2).max(5) },
                     600,
                     5,
                 );

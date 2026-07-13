@@ -235,6 +235,8 @@ pub struct AttackResult {
     pub reflected: i32,
     /// 攻击者吸血量（>0 表示攻击者应回血此值）
     pub hp_drain: i32,
+    /// 防御者 EnergyShield 回血量（>0 表示防御者应回血此值）
+    pub defender_heal: i32,
     /// 应施加给防御者的 Poison 列表
     pub applied_poisons: Vec<Poison>,
 }
@@ -263,6 +265,7 @@ pub fn resolve_attack(
             is_critical: false,
             reflected: 0,
             hp_drain: 0,
+            defender_heal: 0,
             applied_poisons: Vec::new(),
         };
     }
@@ -282,6 +285,7 @@ pub fn resolve_attack(
             is_critical: false,
             reflected: damage,
             hp_drain: 0,
+            defender_heal: 0,
             applied_poisons: Vec::new(),
         };
     }
@@ -299,18 +303,22 @@ pub fn resolve_attack(
             is_critical: false,
             reflected: 0,
             hp_drain: 0,
+            defender_heal: 0,
             applied_poisons: Vec::new(),
         };
     }
 
     // [7] 破隐：由调用方处理（RemoveBuff MoonLight/DarkBody），此处不涉及
 
-    // [8] EnergyShield：概率回血（defender 自身回血，不影响 damage）
-    // 注意：EnergyShield 的回血由调用方根据返回值应用；此处只在 result 标注
-    // 为简化，EnergyShield 回血逻辑留给调用方读取 defender stats 自行处理
-    // （C# 在 Attacked 内直接 ChangeHP，Rust 端把 HP 变更权交给 PlayerActor）
+    // [8] EnergyShield：概率回血（C# HumanObject.cs:7144-7154）
+    let mut defender_heal = 0i32;
+    if defender.energy_shield_percent > 0 && rand_below(100) < defender.energy_shield_percent {
+        defender_heal = defender.energy_shield_hp_gain;
+    }
 
-    // [9] 暴击
+    // [9] 暴击（C# HumanObject.cs:7156）
+    // 注意：C# 怪打怪(MonsterObject.Attacked(MonsterObject))无暴击分支，
+    // Rust 简化为统一判定——怪物 critical_rate 默认 0 所以无实际影响
     let mut is_critical = false;
     if check_critical(attacker.critical_rate) {
         damage = apply_critical(damage, attacker.critical_damage);
@@ -318,15 +326,13 @@ pub fn resolve_attack(
     }
 
     // [10] MagicShield/ElementalBarrier 时长扣减：由调用方处理（需访问 buff 列表）
-    // 此处公式层不持有 buff，留给调用方
 
-    // [11] HPDrainRatePercent：攻击者吸血累积
+    // [11] HPDrainRatePercent：攻击者吸血（C# HumanObject.cs:7175-7183）
+    // C# 用 float 累积 HpDrain，>2 才回血。Rust 简化为逐次返回，调用方累积。
     let mut hp_drain = 0i32;
     if attacker.hp_drain_rate_percent > 0 {
         let net = (damage - armour).max(0);
-        // C# HpDrain += ((net / 100) * HPDrainRatePercent)，>2 时才回血
-        // 此处直接返回本次应回血量（调用方累积 >2 后回血）
-        hp_drain = ((net as f32 / 100.0) * attacker.hp_drain_rate_percent as f32) as i32;
+        hp_drain = ((net as f64 / 100.0 * attacker.hp_drain_rate_percent as f64).floor()) as i32;
     }
 
     // [12] ApplyNegativeEffects
@@ -341,6 +347,7 @@ pub fn resolve_attack(
         is_critical,
         reflected: 0,
         hp_drain,
+        defender_heal,
         applied_poisons,
     }
 }

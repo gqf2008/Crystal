@@ -616,10 +616,24 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     // Migration: add weather_particles to old map_infos (from migrate_mirdb)
     let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN weather_particles INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
-    // Fix potentially broken gt column (TEXT→INTEGER from old migration)
-    let _ = sqlx::query("ALTER TABLE map_infos DROP COLUMN gt").execute(&pool).await;
-    let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN gt INTEGER NOT NULL DEFAULT 0")
-        .execute(&pool).await;
+    // Fix potentially broken gt column (TEXT→INTEGER from old migration).
+    // 只在 gt 列类型为 TEXT 时才 DROP+ADD（避免每次重启丢数据）。
+    // SQLite 的 ALTER TABLE DROP COLUMN 在 3.35+ 支持。若版本旧或列已是 INTEGER，跳过。
+    let need_gt_fix = sqlx::query("SELECT typeof(gt) FROM map_infos LIMIT 1")
+        .fetch_optional(&pool).await
+        .ok().flatten()
+        .and_then(|row| row.try_get::<String, _>("typeof(gt)").ok())
+        .map(|t| t == "text")
+        .unwrap_or(false);
+    if need_gt_fix {
+        let _ = sqlx::query("ALTER TABLE map_infos DROP COLUMN gt").execute(&pool).await;
+        let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN gt INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool).await;
+    } else {
+        // 确保列存在（首次运行时可能没 gt 列）
+        let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN gt INTEGER NOT NULL DEFAULT 0")
+            .execute(&pool).await;
+    }
     let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN gt_index INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE item_infos ADD COLUMN tool_tip TEXT NOT NULL DEFAULT ''")

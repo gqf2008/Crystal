@@ -12,6 +12,10 @@ pub enum BuffType {
     AttackBoost { bonus: i32 },
     /// 防御力提升（SoulShield/BlessedArmour）
     DefenseBoost { bonus: i32 },
+    /// 物理防御提升（BlessedArmour，C# Stat.AC）
+    AcDefenseBoost { bonus: i32 },
+    /// 魔法防御提升（SoulShield，C# Stat.MAC）
+    MacDefenseBoost { bonus: i32 },
     /// 伤害百分比减免（MagicShield/ElementalBarrier，C# Stat.DamageReductionPercent）
     DamageReduction { percent: i32 },
     /// 中毒（持续掉血）

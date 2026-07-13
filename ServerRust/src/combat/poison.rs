@@ -66,17 +66,18 @@ pub fn is_slowed(poison_list: &[Poison]) -> bool {
     poison_list.iter().any(|p| p.is_slowing())
 }
 
-/// tick 推进：duration 递减，返回 (应扣血量, 是否有过期项被移除)
+/// tick 推进：duration 递减，返回应扣血量。
 ///
-/// `dt_s` 为本次 tick 推进的秒数。Green/Red/Bleeding 按 value 掉血；
-/// 其他类型只维持状态不造成数值。归零的 Poison 自动移除。
+/// `dt_s` 为本次 tick 推进的秒数。Green/Red/Bleeding 按 `value * dt_s` 掉血。
+/// **注意**：`value` 是每次 Poison tick 的固定伤害量（对齐 C# Poison.Value），
+/// `tick_ms` 字段仅供客户端显示/协议序列化，不影响服务端掉血节奏
+/// （服务端固定在 TickBuff/怪物 poison tick 中每 5 ticks ≈ 0.5s 调用一次，
+/// 传 dt_s=1，即每次推进 1 秒 duration + 扣 value 血）。
 pub fn tick_poisons(poison_list: &mut Vec<Poison>, dt_s: u32) -> i32 {
     let mut total_damage = 0i32;
-    // 先推进 duration 并累计伤害
     for p in poison_list.iter_mut() {
         p.duration_s = p.duration_s.saturating_sub(dt_s);
         if p.p_type.intersects(PoisonType::GREEN | PoisonType::RED | PoisonType::BLEEDING) {
-            // value 是每秒伤害量（对齐 C# Poison.Value 的掉血语义）
             total_damage = total_damage.saturating_add(p.value.max(0) * dt_s as i32);
         }
     }

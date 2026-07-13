@@ -134,7 +134,7 @@ impl<'a> AiCtx<'a> {
             .min_by_key(|p| {
                 let dx = (p.x - cx).abs();
                 let dy = (p.y - cy).abs();
-                dx + dy
+                dx.max(dy) // 切比雪夫距离（对齐 C# MaxDistance，与过滤一致）
             })
             .filter(|p| {
                 let dx = (p.x - cx).abs();
