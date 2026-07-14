@@ -256,6 +256,7 @@ fn send_event_via_codec<S: Write>(stream: &mut S, event: NetworkEvent) -> Result
     let mut encoded = Vec::new();
     crate::network::codec::encode(&buf, &mut encoded);
     stream.write_all(&encoded)?;
+    stream.flush()?;
     Ok(())
 }
 
