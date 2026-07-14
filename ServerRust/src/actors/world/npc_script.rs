@@ -290,13 +290,9 @@ impl ParsedScript {
                 (seg.else_actions.clone(), seg.else_say.clone())
             };
 
-            // 收集 say（变量替换）
+            // 收集 say（变量替换，用 segment 开头获取的 player_state，避免每行 actor 往返）
             for raw in &say_src {
-                let player_now = current_player_state(world, session_id).await;
-                let line = match player_now {
-                    Some(p) => replace_vars(raw, &p, &npc.name, custom_vars),
-                    None => raw.clone(),
-                };
+                let line = replace_vars(raw, &player_state, &npc.name, custom_vars);
                 result.say_lines.push(line);
             }
 
@@ -502,14 +498,20 @@ async fn eval_one_check(
                 has_item(world, session_id, idx, cnt).await
             }
         }
-        // CHECKCLASS <Warrior|Wizard|...|mask>
+        // CHECKCLASS <Warrior|Wizard|...|class_index>
+        // C# NPCSegment.cs:2222 用单类名匹配，不支持位掩码
         "CHECKCLASS" => {
             let a = arg0();
-            if let Ok(mask) = a.parse::<u8>() {
-                let bit = 1u8 << (player.class as u8);
-                bit & mask != 0
-            } else if let Some(cls) = parse_class(a) {
+            if let Some(cls) = parse_class(a) {
+                // 类名字符串（Warrior/Wizard/Taoist/Assassin/Archer）
                 player.class == cls
+            } else if let Ok(idx) = a.parse::<u8>() {
+                // 数字 → 类索引（C# 语义：0=Warrior,1=Wizard,2=Taoist,3=Assassin,4=Archer）
+                if let Ok(cls) = mir2_shared::enums::MirClass::try_from(idx) {
+                    player.class == cls
+                } else {
+                    false
+                }
             } else {
                 false
             }
@@ -799,23 +801,27 @@ async fn quest_state(world: &WorldActor, session_id: u64, quest_index: i32) -> u
 
 async fn give_item(world: &WorldActor, session_id: u64, item_index: i32, count: u16) {
     let Some(record) = world.players.get(&session_id) else { return };
-    let (max_dura, identified) = world
-        .item_infos
-        .get(&item_index)
-        .map(|info| (info.durability as u16, info.is_identified()))
-        .unwrap_or((0, false));
+    let info = world.item_infos.get(&item_index);
+    let max_dura = info.map(|i| i.durability as u16).unwrap_or(0);
+    let identified = info.map(|i| i.is_identified()).unwrap_or(false);
+    let stack_size = info.map(|i| i.stack_size).unwrap_or(1).max(1) as u16;
 
-    for _ in 0..count.max(1) {
+    let remaining = count.max(1);
+    // 按 stack_size 分批创建堆叠物品（对齐 C# GiveItem 遵守 StackSize）
+    let mut left = remaining;
+    while left > 0 {
+        let batch = left.min(stack_size);
         let item = mir2_shared::data::item::UserItem {
             unique_id: crate::actors::inventory::generate_item_uid(),
             item_index,
-            count: 1,
+            count: batch,
             current_dura: max_dura,
             max_dura: max_dura,
             identified,
             ..Default::default()
         };
         let _ = record.actor_ref.ask(AddItemToInventory { item }).await;
+        left -= batch;
     }
 }
 

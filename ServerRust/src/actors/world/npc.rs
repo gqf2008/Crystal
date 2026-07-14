@@ -118,7 +118,9 @@ impl Message<NPCCallRequest> for WorldActor {
 
         while goto_depth < MAX_GOTO_DEPTH {
             goto_depth += 1;
-            let script_key = (npc.db_index, current_key.clone());
+            // DB 存储的 page_name 是全大写（如 [@MAIN]），查找时归一化
+            let normalized_key = current_key.to_uppercase();
+            let script_key = (npc.db_index, normalized_key.clone());
             if let Some(lines) = self.npc_scripts.get(&script_key).cloned() {
                 // C# 格式（含 [@section]/#IF/#SAY 等指令）走新引擎
                 let joined = lines.join("\n");
@@ -138,7 +140,7 @@ impl Message<NPCCallRequest> for WorldActor {
                             .execute_section(section, self, msg.session_id, &npc, &mut custom_vars)
                             .await;
                         if let Some(target) = res.goto {
-                            current_key = format!("[@{}]", target);
+                            current_key = format!("[@{}]", target).to_uppercase();
                             // 重用已解析脚本里的目标段（单页内 GOTO）
                             if let Some(next_sec) = parsed.find(&target) {
                                 let r2 = parsed

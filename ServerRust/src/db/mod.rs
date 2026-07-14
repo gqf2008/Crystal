@@ -2373,6 +2373,8 @@ pub async fn import_drops_from_dir(
     let mut matched_monsters = 0usize;
 
     // 遍历 Drops/*.txt 文件，用文件名匹配怪物名
+    // 用事务批量插入（避免逐行 fsync）
+    let _ = sqlx::query("BEGIN").execute(pool).await;
     let entries = std::fs::read_dir(drop_dir)?;
     for entry in entries.flatten() {
         let file_name = entry.file_name().to_string_lossy().to_string();
@@ -2450,6 +2452,7 @@ pub async fn import_drops_from_dir(
             total += 1;
         }
     }
+    let _ = sqlx::query("COMMIT").execute(pool).await;
     tracing::info!("Imported {} drop entries for {} monsters from {}", total, matched_monsters, drop_dir.display());
     Ok(total)
 }
@@ -2510,6 +2513,7 @@ pub async fn import_npc_scripts_from_dir(
 
     let mut total = 0usize;
     let mut matched = 0usize;
+    let _ = sqlx::query("BEGIN").execute(pool).await;
 
     for info in npc_infos {
         if info.file_name.is_empty() { continue; }
@@ -2553,9 +2557,27 @@ pub async fn import_npc_scripts_from_dir(
                 continue;
             }
 
-            // 跳过 #INSERT（文件包含，需要预处理，暂存为注释）
+            // #INSERT：内联引用的文件内容（对齐 C# ParseInsert）
             if trimmed.starts_with("#INSERT") {
-                current_lines.push(format!("; {}", trimmed)); // 注释化
+                // 格式：#INSERT [相对路径\文件名.txt] @section
+                // 取方括号内的路径
+                if let (Some(open), Some(close)) = (trimmed.find('['), trimmed.find(']')) {
+                    if close > open {
+                        let rel_path = &trimmed[open+1..close];
+                        // 路径相对于 Envir/ 目录
+                        let insert_path = npc_dir.parent() // Envir/
+                            .map(|p| p.join(rel_path.replace('\\', "/")))
+                            .unwrap_or_else(|| std::path::PathBuf::from(rel_path));
+                        if let Ok(inserted) = std::fs::read_to_string(&insert_path) {
+                            // 把引用文件的内容追加到当前 lines（跳过它自己的 #INSERT 避免递归）
+                            for ins_line in inserted.lines() {
+                                let ins_trim = ins_line.trim();
+                                if ins_trim.starts_with("#INSERT") { continue; }
+                                current_lines.push(ins_line.to_string());
+                            }
+                        }
+                    }
+                }
                 continue;
             }
 
@@ -2579,6 +2601,7 @@ pub async fn import_npc_scripts_from_dir(
         matched += 1;
     }
 
+    let _ = sqlx::query("COMMIT").execute(pool).await;
     tracing::info!("Imported {} NPC script pages for {} NPCs from {}", total, matched, npc_dir.display());
     Ok(total)
 }
@@ -3095,41 +3118,28 @@ pub async fn import_npc_goods_from_scripts(
     }
 
     let mut total = 0usize;
-    // npc_scripts 的 key 是 (npc_index, page_name)，page_name 类似 "[@MAIN]"
-    // 但 [Trade] 是在脚本文本里，需要遍历所有页的 lines 找 [Trade] 段
-    let mut processed_npcs = std::collections::HashSet::new();
+    // npc_scripts 按 section 分段存储，[TRADE] 段的 page_name = "[TRADE]"
+    for ((npc_index, page), lines) in npc_scripts {
+        // 只处理 [TRADE] 页
+        if !page.eq_ignore_ascii_case("[TRADE]") { continue; }
 
-    for ((npc_index, _page), lines) in npc_scripts {
-        if processed_npcs.contains(npc_index) { continue; }
-
-        let mut in_trade = false;
         for line in lines {
-            let trimmed = line.trim().to_uppercase();
-            if trimmed.starts_with("[TRADE]") {
-                in_trade = true;
-                processed_npcs.insert(*npc_index);
-                continue;
-            }
-            if trimmed.starts_with('[') && in_trade {
-                in_trade = false; // 下一个 section
-                break;
-            }
-            if in_trade && !trimmed.is_empty() && !trimmed.starts_with(';') {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.is_empty() { continue; }
-                let item_name = parts[0].to_string();
-                let count: i32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
-                let idx = item_name_index.get(&item_name.to_lowercase())
-                    .or_else(|| item_name_index.get(&item_name.to_lowercase().replace(' ', "")))
-                    .copied().unwrap_or(0);
-                if idx > 0 {
-                    let _ = sqlx::query(
-                        "INSERT INTO npc_goods (npc_index, item_index, count, price) VALUES (?, ?, ?, 0)"
-                    )
-                    .bind(npc_index).bind(idx).bind(count)
-                    .execute(pool).await;
-                    total += 1;
-                }
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with(';') || trimmed.starts_with('[') { continue; }
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.is_empty() { continue; }
+            let item_name = parts[0].to_string();
+            let count: i32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
+            let idx = item_name_index.get(&item_name.to_lowercase())
+                .or_else(|| item_name_index.get(&item_name.to_lowercase().replace(' ', "")))
+                .copied().unwrap_or(0);
+            if idx > 0 {
+                let _ = sqlx::query(
+                    "INSERT INTO npc_goods (npc_index, item_index, count, price) VALUES (?, ?, ?, 0)"
+                )
+                .bind(npc_index).bind(idx).bind(count)
+                .execute(pool).await;
+                total += 1;
             }
         }
     }
