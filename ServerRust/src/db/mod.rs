@@ -2952,9 +2952,190 @@ pub async fn load_recipe_infos(pool: &DbPool) -> anyhow::Result<Vec<RecipeInfo>>
     }).collect())
 }
 
-// ============================================================
-// Auction save/load
-// ============================================================
+/// 从 C# Recipe/*.txt 导入合成配方到 DB。
+///
+/// 格式：
+/// ```text
+/// [Recipe]
+/// Amount 10          ; 产物数量
+/// Chance 80          ; 成功率
+/// Gold 100           ; 金币消耗
+///
+/// [Tools]
+/// ToolItemName       ; 工具（不消耗）
+///
+/// [Ingredients]
+/// BlackThread 3      ; 材料名 数量
+/// LargeBone 1
+/// ```
+/// 产物从文件名推断（去掉括号和 .txt）。
+pub async fn import_recipes_from_dir(
+    recipe_dir: &Path,
+    item_name_index: &HashMap<String, i32>,
+    pool: &DbPool,
+) -> anyhow::Result<usize> {
+    let existing: i32 = sqlx::query("SELECT COUNT(*) as cnt FROM recipes")
+        .fetch_one(pool).await?.get::<i32, _>("cnt");
+    if existing > 0 {
+        tracing::info!("recipes already has {} rows, skipping import", existing);
+        return Ok(existing as usize);
+    }
+
+    let mut total = 0usize;
+    let entries = std::fs::read_dir(recipe_dir)?;
+    for entry in entries.flatten() {
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        if !file_name.ends_with(".txt") { continue; }
+        let content = match std::fs::read_to_string(entry.path()) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        // 从文件名推断产物物品名
+        let product_name = file_name.trim_end_matches(".txt")
+            .trim_start_matches('(').trim_end_matches(')');
+        let product_index = item_name_index.get(&product_name.to_lowercase())
+            .or_else(|| item_name_index.get(&product_name.to_lowercase().replace(' ', "")))
+            .copied()
+            .unwrap_or(0);
+
+        let mut amount = 1u16;
+        let mut chance = 100u8;
+        let mut gold_cost = 0u32;
+        let mut ingredients: Vec<(String, u16)> = Vec::new();
+        let mut tools: Vec<String> = Vec::new();
+        let mut section = String::new();
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                section = trimmed.trim_matches(|c| c == '[' || c == ']').to_lowercase();
+                continue;
+            }
+            if trimmed.is_empty() || trimmed.starts_with(';') { continue; }
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            match section.as_str() {
+                "recipe" => {
+                    if parts.len() >= 2 {
+                        match parts[0].to_uppercase().as_str() {
+                            "AMOUNT" => amount = parts[1].parse().unwrap_or(1),
+                            "CHANCE" => chance = parts[1].parse().unwrap_or(100),
+                            "GOLD" => gold_cost = parts[1].parse().unwrap_or(0),
+                            _ => {}
+                        }
+                    }
+                }
+                "ingredients" => {
+                    if !parts.is_empty() {
+                        let name = parts[0].to_string();
+                        let count: u16 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
+                        ingredients.push((name, count));
+                    }
+                }
+                "tools" => {
+                    if !parts.is_empty() { tools.push(parts[0].to_string()); }
+                }
+                _ => {}
+            }
+        }
+
+        if product_index == 0 && ingredients.is_empty() { continue; }
+
+        // 插入 recipe
+        let recipe_id = product_index; // 用产物 index 作为 recipe_id
+        let _ = sqlx::query(
+            "INSERT OR REPLACE INTO recipes (recipe_id, product_item_index, product_count, gold_cost, chance) VALUES (?, ?, ?, ?, ?)"
+        )
+        .bind(recipe_id).bind(product_index).bind(amount as i32)
+        .bind(gold_cost as i64).bind(chance as i32)
+        .execute(pool).await;
+
+        // 插入 ingredients
+        for (name, count) in &ingredients {
+            let idx = item_name_index.get(&name.to_lowercase())
+                .or_else(|| item_name_index.get(&name.to_lowercase().replace(' ', "")))
+                .copied().unwrap_or(0);
+            if idx > 0 {
+                let _ = sqlx::query("INSERT INTO recipe_ingredients (recipe_id, item_index, count) VALUES (?, ?, ?)")
+                    .bind(recipe_id).bind(idx).bind(*count as i32)
+                    .execute(pool).await;
+            }
+        }
+        // 插入 tools
+        for name in &tools {
+            let idx = item_name_index.get(&name.to_lowercase())
+                .or_else(|| item_name_index.get(&name.to_lowercase().replace(' ', "")))
+                .copied().unwrap_or(0);
+            if idx > 0 {
+                let _ = sqlx::query("INSERT INTO recipe_tools (recipe_id, item_index) VALUES (?, ?)")
+                    .bind(recipe_id).bind(idx)
+                    .execute(pool).await;
+            }
+        }
+        total += 1;
+    }
+    tracing::info!("Imported {} recipes from {}", total, recipe_dir.display());
+    Ok(total)
+}
+
+/// 从 NPC 脚本的 [Trade] 段导入商品到 npc_goods 表。
+///
+/// 遍历已导入的 npc_scripts，如果某个 NPC 的 `[@MAIN]` 页包含 [Trade] 段，
+/// 解析其中的 `ItemName [count]` 行并插入 npc_goods。
+pub async fn import_npc_goods_from_scripts(
+    pool: &DbPool,
+    npc_scripts: &HashMap<(i32, String), Vec<String>>,
+    item_name_index: &HashMap<String, i32>,
+) -> anyhow::Result<usize> {
+    let existing: i32 = sqlx::query("SELECT COUNT(*) as cnt FROM npc_goods")
+        .fetch_one(pool).await?.get::<i32, _>("cnt");
+    if existing > 0 {
+        tracing::info!("npc_goods already has {} rows, skipping import", existing);
+        return Ok(existing as usize);
+    }
+
+    let mut total = 0usize;
+    // npc_scripts 的 key 是 (npc_index, page_name)，page_name 类似 "[@MAIN]"
+    // 但 [Trade] 是在脚本文本里，需要遍历所有页的 lines 找 [Trade] 段
+    let mut processed_npcs = std::collections::HashSet::new();
+
+    for ((npc_index, _page), lines) in npc_scripts {
+        if processed_npcs.contains(npc_index) { continue; }
+
+        let mut in_trade = false;
+        for line in lines {
+            let trimmed = line.trim().to_uppercase();
+            if trimmed.starts_with("[TRADE]") {
+                in_trade = true;
+                processed_npcs.insert(*npc_index);
+                continue;
+            }
+            if trimmed.starts_with('[') && in_trade {
+                in_trade = false; // 下一个 section
+                break;
+            }
+            if in_trade && !trimmed.is_empty() && !trimmed.starts_with(';') {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.is_empty() { continue; }
+                let item_name = parts[0].to_string();
+                let count: i32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
+                let idx = item_name_index.get(&item_name.to_lowercase())
+                    .or_else(|| item_name_index.get(&item_name.to_lowercase().replace(' ', "")))
+                    .copied().unwrap_or(0);
+                if idx > 0 {
+                    let _ = sqlx::query(
+                        "INSERT INTO npc_goods (npc_index, item_index, count, price) VALUES (?, ?, ?, 0)"
+                    )
+                    .bind(npc_index).bind(idx).bind(count)
+                    .execute(pool).await;
+                    total += 1;
+                }
+            }
+        }
+    }
+    tracing::info!("Imported {} NPC goods entries", total);
+    Ok(total)
+}
 
 pub async fn save_auction(
     pool: &DbPool,
