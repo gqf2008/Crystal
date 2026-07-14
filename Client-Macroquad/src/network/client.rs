@@ -251,11 +251,10 @@ fn write_loop<S: Write + Send>(mut stream: S, rx: Receiver<NetworkEvent>, shutdo
 /// `[inner_len][opcode][body]` 写到传入的 writer。这里用 `Vec<u8>` 作为
 /// writer 收集裸 packet,然后 codec::encode 加外层 framing + XOR。
 fn send_event_via_codec<S: Write>(stream: &mut S, event: NetworkEvent) -> Result<()> {
-    let mut buf: Vec<u8> = Vec::new();
-    handle_outbound_event(&mut buf, event)?;
-    let mut encoded = Vec::new();
-    crate::network::codec::encode(&buf, &mut encoded);
-    stream.write_all(&encoded)?;
+    // handle_outbound_event 把 packet 序列化为裸 [inner_len][opcode][body]，
+    // 然后 WriteEncoder::write 自动加 codec 外层帧 [outer_len][XOR(inner)]。
+    // 不要在这里再做 codec::encode（否则双重编码）。
+    handle_outbound_event(stream, event)?;
     stream.flush()?;
     Ok(())
 }
