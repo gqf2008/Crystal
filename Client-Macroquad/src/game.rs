@@ -316,11 +316,14 @@ impl GameState {
         let mut last_frame_time_ms: u64 = 0;
 
         loop {
+            // 每帧都清屏（包括 skip 帧），防止闪烁
+            macroquad::prelude::clear_background(BLACK);
+
             // 计算自上次帧以来的毫秒数
             let now_ms = macroquad::miniquad::date::now() as u64 * 1000;
             let elapsed_ms = now_ms.saturating_sub(last_frame_time_ms);
 
-            // Frame skipping: 如果未达到目标间隔,跳过本帧的 update
+            // Frame skipping: 如果未达到目标间隔,跳过本帧的 update/render
             if elapsed_ms < frame_interval_ms {
                 macroquad::prelude::next_frame().await;
                 continue;
