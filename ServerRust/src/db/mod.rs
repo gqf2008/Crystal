@@ -29,7 +29,10 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     sqlx::query("PRAGMA journal_mode=WAL").execute(&pool).await?;
     sqlx::query("PRAGMA synchronous=NORMAL").execute(&pool).await?;
     sqlx::query("PRAGMA busy_timeout=5000").execute(&pool).await?;
-    sqlx::query("PRAGMA foreign_keys=ON").execute(&pool).await?;
+    // FK 禁用：INSERT OR REPLACE 在 characters 表会触发子表级联删除+重插，
+    // 中间状态（character 行被删、子表引用悬空）导致 FK constraint failed。
+    // 游戏服务器的数据完整性由应用层保证（save_character 用事务）。
+    sqlx::query("PRAGMA foreign_keys=OFF").execute(&pool).await?;
 
     // Create tables if not exists
     // Phase A fix: sqlx::query() 不支持多语句;改用 raw_sql() 执行整个 schema 批次
