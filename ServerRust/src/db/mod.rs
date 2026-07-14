@@ -2359,7 +2359,7 @@ pub async fn import_drops_from_dir(
     let existing: i32 = sqlx::query("SELECT COUNT(*) as cnt FROM monster_drops")
         .fetch_one(pool).await?
         .get::<i32, _>("cnt");
-    if existing > 0 {
+    if existing > 100 {
         tracing::info!("monster_drops already has {} rows, skipping import", existing);
         return Ok(existing as usize);
     }
@@ -2374,7 +2374,6 @@ pub async fn import_drops_from_dir(
 
     // 遍历 Drops/*.txt 文件，用文件名匹配怪物名
     // 用事务批量插入（避免逐行 fsync）
-    let _ = sqlx::query("BEGIN").execute(pool).await;
     let entries = std::fs::read_dir(drop_dir)?;
     for entry in entries.flatten() {
         let file_name = entry.file_name().to_string_lossy().to_string();
@@ -2452,7 +2451,6 @@ pub async fn import_drops_from_dir(
             total += 1;
         }
     }
-    let _ = sqlx::query("COMMIT").execute(pool).await;
     tracing::info!("Imported {} drop entries for {} monsters from {}", total, matched_monsters, drop_dir.display());
     Ok(total)
 }
@@ -2463,8 +2461,8 @@ pub async fn load_npc_goods(pool: &DbPool) -> anyhow::Result<HashMap<i32, Vec<Np
     let mut map: HashMap<i32, Vec<NpcGoodsInfo>> = HashMap::new();
     for r in rows {
         let npc_index: i32 = r.get("npc_index");
-        let stock: i32 = r.get("stock");
-        let infinite: i32 = r.get("infinite_stock");
+        let stock: i32 = r.try_get("stock").unwrap_or(0);
+        let infinite: i32 = r.try_get("infinite_stock").unwrap_or(0);
         let entry = NpcGoodsInfo {
             npc_index,
             item_index: r.get("item_index"),
@@ -2506,14 +2504,13 @@ pub async fn import_npc_scripts_from_dir(
     let existing: i32 = sqlx::query("SELECT COUNT(*) as cnt FROM npc_scripts")
         .fetch_one(pool).await?
         .get::<i32, _>("cnt");
-    if existing > 0 {
+    if existing > 100 {
         tracing::info!("npc_scripts already has {} rows, skipping import", existing);
         return Ok(existing as usize);
     }
 
     let mut total = 0usize;
     let mut matched = 0usize;
-    let _ = sqlx::query("BEGIN").execute(pool).await;
 
     for info in npc_infos {
         if info.file_name.is_empty() { continue; }
@@ -2601,7 +2598,6 @@ pub async fn import_npc_scripts_from_dir(
         matched += 1;
     }
 
-    let _ = sqlx::query("COMMIT").execute(pool).await;
     tracing::info!("Imported {} NPC script pages for {} NPCs from {}", total, matched, npc_dir.display());
     Ok(total)
 }
@@ -2999,7 +2995,7 @@ pub async fn import_recipes_from_dir(
 ) -> anyhow::Result<usize> {
     let existing: i32 = sqlx::query("SELECT COUNT(*) as cnt FROM recipes")
         .fetch_one(pool).await?.get::<i32, _>("cnt");
-    if existing > 0 {
+    if existing > 100 {
         tracing::info!("recipes already has {} rows, skipping import", existing);
         return Ok(existing as usize);
     }
@@ -3112,7 +3108,7 @@ pub async fn import_npc_goods_from_scripts(
 ) -> anyhow::Result<usize> {
     let existing: i32 = sqlx::query("SELECT COUNT(*) as cnt FROM npc_goods")
         .fetch_one(pool).await?.get::<i32, _>("cnt");
-    if existing > 0 {
+    if existing > 100 {
         tracing::info!("npc_goods already has {} rows, skipping import", existing);
         return Ok(existing as usize);
     }
