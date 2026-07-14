@@ -309,27 +309,8 @@ impl GameState {
     /// 游戏主循环
     pub async fn run(mut self) -> GameResult {
         println!("🎮 游戏启动: {}", self.current_scene.name());
-
-        // PR #1167: 计算 frame interval (ms),等价 master C# `1000 / Settings.MaxFPS`
-        let max_fps = crate::core::settings::RenderSettings::default().max_fps;
-        let frame_interval_ms: u64 = (1000u64) / std::cmp::max(1u32, max_fps) as u64;
-        let mut last_frame_time_ms: u64 = 0;
-
+        
         loop {
-            // 每帧都清屏（包括 skip 帧），防止闪烁
-            macroquad::prelude::clear_background(BLACK);
-
-            // 计算自上次帧以来的毫秒数
-            let now_ms = macroquad::miniquad::date::now() as u64 * 1000;
-            let elapsed_ms = now_ms.saturating_sub(last_frame_time_ms);
-
-            // Frame skipping: 如果未达到目标间隔,跳过本帧的 update/render
-            if elapsed_ms < frame_interval_ms {
-                macroquad::prelude::next_frame().await;
-                continue;
-            }
-            last_frame_time_ms = now_ms;
-
             let dt = get_frame_time();
             
             // 处理输入
