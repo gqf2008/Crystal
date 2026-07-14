@@ -2736,6 +2736,17 @@ impl Actor for WorldActor {
         let monster_name_index: HashMap<String, i32> = monster_infos.iter()
             .map(|(idx, m)| (m.name.to_lowercase(), *idx))
             .collect();
+        let item_name_index: HashMap<String, i32> = item_infos.iter()
+            .map(|(idx, i)| (i.name.to_lowercase(), *idx))
+            .collect();
+
+        // 从 C# Drops/*.txt 导入掉落表（首次运行或 DB 为空时）
+        let drop_dir = args.map_dir.join("Envir").join("Drops");
+        if drop_dir.exists() {
+            if let Err(e) = db::import_drops_from_dir(&drop_dir, &monster_infos, &item_name_index, &args.db_pool).await {
+                warn!("Failed to import drops from {}: {}", drop_dir.display(), e);
+            }
+        }
 
         let monster_drops = match db::load_monster_drops(&args.db_pool).await {
             Ok(d) => { info!("Loaded drop configs for {} monsters from database", d.len()); d }

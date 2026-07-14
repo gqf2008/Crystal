@@ -2338,6 +2338,122 @@ pub async fn load_monster_drops(pool: &DbPool) -> anyhow::Result<HashMap<i32, Ve
     Ok(map)
 }
 
+/// 从 C# 格式的 Drops/*.txt 文本文件导入掉落表到 SQLite。
+///
+/// C# 格式（每行）：`几率/总数 物品名 [数量]`，如 `1/60 BronzeSword`
+/// 文件名 = 怪物名（去掉 .txt 后缀），特殊文件如 `00.txt`=通用掉落。
+///
+/// 参数：
+/// - `drop_dir`: Drops 目录路径
+/// - `monster_name_index`: 怪物名(小写) → monster_index 映射
+/// - `item_name_index`: 物品名(小写) → item_index 映射
+/// - `pool`: SQLite 连接池
+/// 返回导入的条目数。
+pub async fn import_drops_from_dir(
+    drop_dir: &Path,
+    monster_infos: &HashMap<i32, MonsterInfo>,
+    item_name_index: &HashMap<String, i32>,
+    pool: &DbPool,
+) -> anyhow::Result<usize> {
+    // 先检查是否已导入（避免重复）
+    let existing: i32 = sqlx::query("SELECT COUNT(*) as cnt FROM monster_drops")
+        .fetch_one(pool).await?
+        .get::<i32, _>("cnt");
+    if existing > 0 {
+        tracing::info!("monster_drops already has {} rows, skipping import", existing);
+        return Ok(existing as usize);
+    }
+
+    // 建怪物名(小写) → index 的反向索引
+    let monster_name_index: HashMap<String, i32> = monster_infos.iter()
+        .map(|(idx, m)| (m.name.to_lowercase(), *idx))
+        .collect();
+
+    let mut total = 0usize;
+    let mut matched_monsters = 0usize;
+
+    // 遍历 Drops/*.txt 文件，用文件名匹配怪物名
+    let entries = std::fs::read_dir(drop_dir)?;
+    for entry in entries.flatten() {
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        if !file_name.ends_with(".txt") { continue; }
+
+        // 文件名 → 怪物名候选（去 .txt + 去常见前缀/后缀）
+        let base = file_name.trim_end_matches(".txt");
+        let candidates = [
+            base.to_lowercase(),                                      // ancient_axeskeleton
+            base.strip_prefix("Ancient_").unwrap_or(base).to_lowercase(), // axeskeleton
+            base.trim_end_matches('0').trim_end_matches('_').to_lowercase(), // 去尾部 _0
+        ];
+
+        // 查找匹配的 monster_index
+        let m_idx = candidates.iter()
+            .find_map(|c| monster_name_index.get(c).copied())
+            .or_else(|| monster_name_index.get(&base.to_lowercase()).copied());
+
+        let m_idx = match m_idx {
+            Some(idx) => idx,
+            None => continue, // 文件名不匹配任何怪物
+        };
+
+        let content = match std::fs::read_to_string(entry.path()) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        matched_monsters += 1;
+
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with(';') || line.starts_with("//") { continue; }
+
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 2 { continue; }
+
+            // chance/total
+            let chance_str = parts[0];
+            let chance = if chance_str.contains('/') {
+                let frac: Vec<&str> = chance_str.split('/').collect();
+                if frac.len() == 2 {
+                    let n: f64 = frac[0].parse().unwrap_or(0.0);
+                    let d: f64 = frac[1].parse().unwrap_or(1.0);
+                    if d > 0.0 { n / d } else { 0.0 }
+                } else { 0.0 }
+            } else if chance_str.parse::<f64>().is_ok() {
+                chance_str.parse::<f64>().unwrap_or(0.0)
+            } else { 0.01 };
+
+            // 物品名（可能含空格，取最后一个数字为 count）
+            let item_name = if parts.len() >= 3 && parts[parts.len()-1].parse::<u16>().is_ok() {
+                parts[1..parts.len()-1].join(" ")
+            } else {
+                parts[1..].join(" ")
+            };
+            let count: u16 = if parts.len() >= 3 && parts[parts.len()-1].parse::<u16>().is_ok() {
+                parts[parts.len()-1].parse().unwrap_or(1)
+            } else { 1 };
+
+            // 物品名 → item_index（精确 + 去空格模糊）
+            let i_idx = item_name_index.get(&item_name.to_lowercase()).copied()
+                .or_else(|| item_name_index.get(&item_name.to_lowercase().replace(' ', "")).copied());
+            let i_idx = match i_idx {
+                Some(idx) => idx,
+                None => continue,
+            };
+
+            let _ = sqlx::query(
+                "INSERT INTO monster_drops (monster_index, item_index, min_count, max_count, chance) VALUES (?, ?, ?, ?, ?)"
+            )
+            .bind(m_idx).bind(i_idx)
+            .bind(count as i32).bind(count as i32)
+            .bind(chance)
+            .execute(pool).await;
+            total += 1;
+        }
+    }
+    tracing::info!("Imported {} drop entries for {} monsters from {}", total, matched_monsters, drop_dir.display());
+    Ok(total)
+}
+
 /// Load NPC goods grouped by npc_index
 pub async fn load_npc_goods(pool: &DbPool) -> anyhow::Result<HashMap<i32, Vec<NpcGoodsInfo>>> {
     let rows = sqlx::query("SELECT * FROM npc_goods ORDER BY npc_index").fetch_all(pool).await?;
