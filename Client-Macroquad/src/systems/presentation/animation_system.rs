@@ -158,6 +158,7 @@ impl AnimationSystem {
                 }
                 // 骑乘受击：C# 用 MountStruck（frames.rs 已有配置）
                 PlayerAction::Struck => mir2_shared::enums::MirAction::MountStruck,
+                PlayerAction::Stand => mir2_shared::enums::MirAction::MountStanding,
                 // 施法/钓鱼在骑乘态下原版也走对应动作（无单独骑乘帧表，退回普通帧）
                 _ => player.action.to_mir_action(),
             }
