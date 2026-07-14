@@ -2490,7 +2490,98 @@ pub async fn load_npc_scripts(pool: &DbPool) -> anyhow::Result<HashMap<(i32, Str
     Ok(map)
 }
 
-/// Load all NPC infos from DB
+/// 从 C# NPC 脚本目录导入脚本到 DB。
+///
+/// 遍历 npc_infos，按 file_name 读取对应 .txt 脚本文件，
+/// 按 `[@section]` 分段存储到 npc_scripts 表（每段一行 JSON 数组）。
+pub async fn import_npc_scripts_from_dir(
+    npc_dir: &Path,
+    npc_infos: &[NPCInfo],
+    pool: &DbPool,
+) -> anyhow::Result<usize> {
+    // 检查是否已导入
+    let existing: i32 = sqlx::query("SELECT COUNT(*) as cnt FROM npc_scripts")
+        .fetch_one(pool).await?
+        .get::<i32, _>("cnt");
+    if existing > 0 {
+        tracing::info!("npc_scripts already has {} rows, skipping import", existing);
+        return Ok(existing as usize);
+    }
+
+    let mut total = 0usize;
+    let mut matched = 0usize;
+
+    for info in npc_infos {
+        if info.file_name.is_empty() { continue; }
+
+        // C# file_name 是相对 NPCPath 的路径（如 BichonProvince\BichonWall\Blacksmith-0103）
+        // 转换为实际文件路径
+        let rel_path = info.file_name.replace('\\', "/");
+        let file_path = npc_dir.join(format!("{}.txt", rel_path));
+
+        let content = match std::fs::read_to_string(&file_path) {
+            Ok(c) => c,
+            Err(_) => continue, // 文件不存在，跳过
+        };
+
+        // 按 [section] 分段
+        let mut current_section: Option<String> = None;
+        let mut current_lines: Vec<String> = Vec::new();
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+
+            // 检测 section 开头：[@name] 或 [TRADE] 等大写标签
+            if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed.len() > 2 {
+                // 保存前一个 section
+                if let Some(ref section) = current_section {
+                    if !current_lines.is_empty() {
+                        let key = format!("[{}]", section.to_uppercase());
+                        let json = serde_json::to_string(&current_lines).unwrap_or_else(|_| "[]".to_string());
+                        let _ = sqlx::query(
+                            "INSERT OR REPLACE INTO npc_scripts (npc_index, page_name, lines_json) VALUES (?, ?, ?)"
+                        )
+                        .bind(info.index).bind(&key).bind(&json)
+                        .execute(pool).await;
+                        total += 1;
+                    }
+                }
+                // 开始新 section（提取 @name 或大写标签名）
+                let inner = &trimmed[1..trimmed.len()-1];
+                current_section = Some(inner.to_string());
+                current_lines = Vec::new();
+                continue;
+            }
+
+            // 跳过 #INSERT（文件包含，需要预处理，暂存为注释）
+            if trimmed.starts_with("#INSERT") {
+                current_lines.push(format!("; {}", trimmed)); // 注释化
+                continue;
+            }
+
+            // 收集所有行（包括注释、空行、#IF/#SAY 等）
+            current_lines.push(line.to_string());
+        }
+
+        // 保存最后一个 section
+        if let Some(ref section) = current_section {
+            if !current_lines.is_empty() {
+                let key = format!("[{}]", section.to_uppercase());
+                let json = serde_json::to_string(&current_lines).unwrap_or_else(|_| "[]".to_string());
+                let _ = sqlx::query(
+                    "INSERT OR REPLACE INTO npc_scripts (npc_index, page_name, lines_json) VALUES (?, ?, ?)"
+                )
+                .bind(info.index).bind(&key).bind(&json)
+                .execute(pool).await;
+                total += 1;
+            }
+        }
+        matched += 1;
+    }
+
+    tracing::info!("Imported {} NPC script pages for {} NPCs from {}", total, matched, npc_dir.display());
+    Ok(total)
+}
 pub async fn load_npc_infos(pool: &DbPool) -> anyhow::Result<Vec<NPCInfo>> {
     let rows = sqlx::query("SELECT * FROM npc_infos ORDER BY idx").fetch_all(pool).await?;
     Ok(rows.into_iter().map(|r| {

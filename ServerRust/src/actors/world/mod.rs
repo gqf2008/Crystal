@@ -15,6 +15,7 @@ mod item;
 mod mail;
 mod market;
 mod npc;
+mod npc_script;
 mod quest;
 mod report;
 #[allow(dead_code)]
@@ -2763,6 +2764,15 @@ impl Actor for WorldActor {
             Ok(g) => { info!("Loaded goods for {} NPCs from database", g.len()); g }
             Err(e) => { warn!("Failed to load npc_goods from DB: {}", e); HashMap::new() }
         };
+
+        // 从 C# NPCs/*.txt 导入 NPC 脚本（首次运行或 DB 为空时）
+        let npc_dir = args.map_dir.join("Envir").join("NPCs");
+        if npc_dir.exists() {
+            let npc_infos_vec: Vec<db::NPCInfo> = npc_infos.values().cloned().collect();
+            if let Err(e) = db::import_npc_scripts_from_dir(&npc_dir, &npc_infos_vec, &args.db_pool).await {
+                warn!("Failed to import NPC scripts from {}: {}", npc_dir.display(), e);
+            }
+        }
 
         let npc_scripts = match db::load_npc_scripts(&args.db_pool).await {
             Ok(s) => { info!("Loaded {} NPC script pages from database", s.len()); s }

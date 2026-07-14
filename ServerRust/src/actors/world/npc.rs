@@ -113,10 +113,56 @@ impl Message<NPCCallRequest> for WorldActor {
         let mut goto_depth = 0;
         const MAX_GOTO_DEPTH: usize = 10;
 
+        // 自定义变量暂存（C# 引擎跨 section 复用）
+        let mut custom_vars: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
         while goto_depth < MAX_GOTO_DEPTH {
             goto_depth += 1;
             let script_key = (npc.db_index, current_key.clone());
-            if let Some(mut lines) = self.npc_scripts.get(&script_key).cloned() {
+            if let Some(lines) = self.npc_scripts.get(&script_key).cloned() {
+                // C# 格式（含 [@section]/#IF/#SAY 等指令）走新引擎
+                let joined = lines.join("\n");
+                if npc_script::is_csharp_format(&joined) {
+                    let parsed = npc_script::ParsedScript::parse(&joined);
+                    // 目标 section：优先匹配 current_key 对应段名，否则 @main
+                    let want_name = current_key
+                        .trim_start_matches('[')
+                        .trim_start_matches('@')
+                        .trim_end_matches(']')
+                        .to_string();
+                    let target_section = parsed
+                        .find(&want_name)
+                        .or_else(|| parsed.main_section());
+                    if let Some(section) = target_section {
+                        let res = parsed
+                            .execute_section(section, self, msg.session_id, &npc, &mut custom_vars)
+                            .await;
+                        if let Some(target) = res.goto {
+                            current_key = format!("[@{}]", target);
+                            // 重用已解析脚本里的目标段（单页内 GOTO）
+                            if let Some(next_sec) = parsed.find(&target) {
+                                let r2 = parsed
+                                    .execute_section(next_sec, self, msg.session_id, &npc, &mut custom_vars)
+                                    .await;
+                                dialog_lines = r2.say_lines;
+                                break;
+                            }
+                            // 目标段不在本页：回到外层按 page key 查找
+                            continue;
+                        }
+                        dialog_lines = res.say_lines;
+                        break;
+                    } else {
+                        // 没有匹配段，回退到默认 Main 问候
+                        dialog_lines = vec![
+                            format!("{}：你想说什么？", npc.name),
+                        ];
+                        break;
+                    }
+                }
+
+                // 旧的 <CMD> 格式：沿用 eval_npc_script
+                let mut lines = lines;
                 for line in &mut lines {
                     *line = line.replace("$USERNAME", &player_state.name)
                                 .replace("$NPCNAME", &npc.name)
