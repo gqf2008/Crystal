@@ -549,6 +549,7 @@ pub struct GhostLayer {
 /// 本地玩家遮挡 ghost（对齐 macroquad PostFront 实现）：
 /// 被 front 瓦片（建筑/树）遮挡时，在 front 层之上再画一层半透明玩家残影。
 /// 建筑本身保持不透明，避免"周边建筑块全变半透明"。
+#[allow(clippy::type_complexity)]
 fn update_local_ghost(
     mut ghosts: Query<
         (&mut Sprite, &mut Transform, &mut Visibility, &GhostLayer),
