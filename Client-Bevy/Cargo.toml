@@ -1,0 +1,40 @@
+[package]
+name = "client_bevy"
+version = "0.1.0"
+edition = "2021"
+description = "Legend of Mir 2 (传奇2) 游戏客户端 — Bevy 移植版（由 Client-Macroquad 迁移）"
+
+[dependencies]
+# Bevy 游戏引擎 (0.16 系列，后续可升级 0.17+)
+bevy = "0.16"
+
+# 共享库 (游戏协议和数据结构)
+mir2_shared = { path = "../SharedRust", features = ["client-parse"] }
+
+# 数据解析
+byteorder = "1"
+flate2 = "1"
+
+# 图像处理（调试导出 PNG）
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+
+# 工具
+anyhow = "1"
+once_cell = "1"
+
+[profile.dev]
+opt-level = 1
+
+# 依赖包使用完整优化，避免调试构建太慢
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
