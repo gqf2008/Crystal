@@ -25,9 +25,12 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 # 工具
 anyhow = "1"
 once_cell = "1"
+bevy_egui = "0.41.1"
 
 [profile.dev]
 opt-level = 1
+# 调试信息只保留行号（完整 debug 信息导致 exe 2GB+ 超出 Windows 加载器限制）
+debug = 1
 
 # 依赖包使用完整优化，避免调试构建太慢
 [profile.dev.package."*"]

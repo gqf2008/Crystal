@@ -7,6 +7,9 @@
 #![allow(clippy::too_many_arguments)]
 
 pub mod actor;
+pub mod event_bus;
 pub mod map_renderer;
 pub mod objects;
 pub mod resources;
+pub mod scenes;
+pub mod ui;

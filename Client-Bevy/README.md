@@ -13,6 +13,13 @@
 - `map_renderer.rs` — 每 32x32 格合成一张块纹理（1536x1024），Back/Middle/Front 三层
 - Bevy `Image` 资产 + Sprite 渲染，相机控制（WASD/方向键平移，+/- 缩放）
 
+✅ 场景系统 + bevy_egui 登录界面 + 事件总线（里程碑 4）：
+- AppState 状态机：Login（登录界面）→ Game（游戏场景）
+- bevy_egui 0.41 登录界面（中文字体、账号/密码、进入游戏按钮）
+- 事件总线：Bevy 0.19 Observer + trigger 模式（GameEvent）
+- 地图/角色按状态加载：OnEnter(Game) 才加载，登录界面轻量
+- 用法：cargo run（登录界面）；--auto-enter 自动进游戏；--no-actors 纯地图
+
 ✅ Y 轴深度排序 + 前景遮挡（里程碑 3）：
 - Front 层改为逐瓦片精灵，z = depth_y(格子底边)，角色 z = depth_y(脚底)
 - 经典传奇遮挡：角色脚底 Y < 瓦片基准 → 被建筑/树遮挡；反之站在建筑前

@@ -39,9 +39,14 @@ impl Plugin for ActorPlugin {
                 update_local_ghost,
                 dump_depth_debug,
             )
-                .chain(),
+                .chain()
+                .run_if(in_state(crate::scenes::AppState::Game)),
         );
-        app.add_systems(Update, (demo_drive, sync_actor_depth, log_player_walk));
+        app.add_systems(
+            Update,
+            (demo_drive, sync_actor_depth, log_player_walk)
+                .run_if(in_state(crate::scenes::AppState::Game)),
+        );
     }
 }
 

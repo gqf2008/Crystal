@@ -93,8 +93,12 @@ pub struct MapRenderPlugin;
 impl Plugin for MapRenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GameData>();
-        app.add_systems(Startup, setup_world);
-        app.add_systems(Update, camera_control);
+        app.add_systems(Startup, spawn_camera);
+        app.add_systems(OnEnter(crate::scenes::AppState::Game), setup_world);
+        app.add_systems(
+            Update,
+            camera_control.run_if(in_state(crate::scenes::AppState::Game)),
+        );
     }
 }
 
@@ -121,6 +125,7 @@ fn setup_world(
     mut commands: Commands,
     mut assets: ResMut<Assets<Image>>,
     mut game_data: ResMut<GameData>,
+    mut camera: Query<&mut Transform, With<Camera2d>>,
 ) {
     // 1. 加载图像库（MapLibs）
     let data_path = resolve_data_path();
@@ -247,17 +252,12 @@ fn setup_world(
     }
     tracing::info!("🌳 Front 瓦片精灵生成完成: {} 个", front_spawned);
 
-    // 4. 相机（对准地图中心，默认看到约 18x13 格）
+    // 4. 相机对准地图中心（相机实体在 Startup 创建，这里只重定位）
     let center_x = map.width as f32 * TILE_WIDTH / 2.0;
     let center_y = -(map.height as f32 * TILE_HEIGHT / 2.0);
-    commands.spawn((
-        Camera2d,
-        Transform::from_xyz(center_x, center_y, 10.0),
-        Projection::Orthographic(OrthographicProjection {
-            scale: 1.0,
-            ..OrthographicProjection::default_2d()
-        }),
-    ));
+    if let Ok(mut cam_tf) = camera.single_mut() {
+        cam_tf.translation = Vec3::new(center_x, center_y, 10.0);
+    }
 
     commands.insert_resource(GameLibraries(libraries));
     game_data.map = Some(LoadedMap {
@@ -266,6 +266,18 @@ fn setup_world(
         height: map.height,
     });
 
+}
+
+/// Startup：创建唯一的 2D 相机（登录界面需要相机渲染 egui；进入游戏后重定位）
+fn spawn_camera(mut commands: Commands) {
+    commands.spawn((
+        Camera2d,
+        Transform::default(),
+        Projection::Orthographic(OrthographicProjection {
+            scale: 1.0,
+            ..OrthographicProjection::default_2d()
+        }),
+    ));
 }
 
 /// 把指定块的三层之一合成一张 RGBA 画布。块内无任何瓦片时返回 None。
