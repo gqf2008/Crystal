@@ -13,6 +13,11 @@
 - `map_renderer.rs` — 每 32x32 格合成一张块纹理（1536x1024），Back/Middle/Front 三层
 - Bevy `Image` 资产 + Sprite 渲染，相机控制（WASD/方向键平移，+/- 缩放）
 
+✅ Y 轴深度排序 + 前景遮挡（里程碑 3）：
+- Front 层改为逐瓦片精灵，z = depth_y(格子底边)，角色 z = depth_y(脚底)
+- 经典传奇遮挡：角色脚底 Y < 瓦片基准 → 被建筑/树遮挡；反之站在建筑前
+- 唯一贴图去重，back/middle 保持分块渲染
+
 ✅ 角色/NPC/怪物精灵渲染与帧动画（里程碑 2）：
 - `objects/frames.rs` — 帧表原样复用（PLAYER/MONSTER/NPC + 特殊怪物）
 - `actor.rs` — ActorPlugin：ActorAnim/ActorAppearance/SpriteLayer 组件

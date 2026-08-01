@@ -32,9 +32,15 @@ impl Plugin for ActorPlugin {
         app.init_resource::<ActorImageCache>();
         app.add_systems(
             Update,
-            (spawn_demo_actors_when_ready, advance_actor_animations, actor_sprite_render).chain(),
+            (
+                spawn_demo_actors_when_ready,
+                advance_actor_animations,
+                actor_sprite_render,
+                dump_depth_debug,
+            )
+                .chain(),
         );
-        app.add_systems(Update, demo_drive);
+        app.add_systems(Update, (demo_drive, sync_actor_depth));
     }
 }
 
@@ -292,9 +298,10 @@ fn spawn_demo_actors_when_ready(
     spawn_npc(&mut commands, 0, cx + 3.0 * TILE_WIDTH, cy + 3.0 * TILE_HEIGHT);
 }
 
-/// 世界 y（屏幕向下）→ Bevy 深度 z：越靠下（y 越大）越靠前
+/// 世界 y（屏幕向下）→ Bevy 深度 z（与 front 瓦片共用同一深度函数，
+/// 实现角色与建筑/树的经典交错遮挡）
 fn depth_z(world_y: f32) -> f32 {
-    0.5 + world_y * 0.00001
+    crate::map_renderer::depth_y(world_y)
 }
 
 fn spawn_player(commands: &mut Commands, x: f32, y: f32) {
@@ -421,6 +428,54 @@ fn spawn_npc(commands: &mut Commands, npc_index: u16, x: f32, y: f32) {
             },
         ));
     });
+}
+
+/// 调试：输出角色 z 与附近 front 瓦片 z 的一次性对比（验证遮挡排序）
+fn dump_depth_debug(
+    actors: Query<(&ActorAppearance, &Transform)>,
+    front: Query<(&Transform, &crate::map_renderer::FrontTile)>,
+    mut done: Local<bool>,
+) {
+    if *done {
+        return;
+    }
+    *done = true;
+    let mut lines = String::from("depth debug\n");
+    for (app, tf) in &actors {
+        let label = match app {
+            ActorAppearance::Player { .. } => "player",
+            ActorAppearance::Monster { .. } => "monster",
+            ActorAppearance::Npc { .. } => "npc",
+        };
+        lines.push_str(&format!(
+            "  actor {} at world_y={:.0} z={:.4}\n",
+            label,
+            -tf.translation.y,
+            tf.translation.z
+        ));
+    }
+    // 角色附近（中心 1280x800 视野内）的 front 瓦片 z
+    let mut fz: Vec<(f32, f32)> = front
+        .iter()
+        .filter(|(_, ft)| ft.base_y > 10800.0 && ft.base_y < 11600.0)
+        .map(|(tf, _)| (tf.translation.z, tf.translation.x))
+        .collect();
+    fz.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    lines.push_str(&format!(
+        "  front tiles in view(base_y 10800..11600): {}  z range {:.4}..{:.4}\n",
+        fz.len(),
+        fz.first().map(|x| x.0).unwrap_or(0.0),
+        fz.last().map(|x| x.0).unwrap_or(0.0)
+    ));
+    let _ = std::fs::write("E:/tmp/depth_debug.txt", lines);
+}
+
+/// 角色 z 与脚底世界 Y 保持同步（移动/转向时深度正确）
+fn sync_actor_depth(mut actors: Query<&mut Transform, With<ActorAppearance>>) {
+    for mut tf in &mut actors {
+        // translation.y = -世界Y（Bevy y 向上）
+        tf.translation.z = depth_z(-tf.translation.y);
+    }
 }
 
 /// 演示驱动：玩家绕方块行走；怪物/NPC 原地转向；部分怪物周期性攻击

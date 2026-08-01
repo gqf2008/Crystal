@@ -189,6 +189,34 @@ fn main() {
         }
     }
 
+    // 统计 front 层瓦片数量与唯一贴图数（决定渲染方案）
+    {
+        use std::collections::HashSet;
+        let mut tiles = 0usize;
+        let mut uniq: HashSet<(i16, i32)> = HashSet::new();
+        for x in 0..map.width {
+            for y in 0..map.height {
+                if let Some((li, ii)) = map.map_cells[x as usize][y as usize].front_tile() {
+                    tiles += 1;
+                    uniq.insert((li, ii));
+                }
+            }
+        }
+        println!("front: tiles={} unique_images={}", tiles, uniq.len());
+        // 也统计 middle 的
+        let mut mtiles = 0usize;
+        let mut muniq: HashSet<(i16, i32)> = HashSet::new();
+        for x in 0..map.width {
+            for y in 0..map.height {
+                if let Some((li, ii)) = map.map_cells[x as usize][y as usize].middle_tile() {
+                    mtiles += 1;
+                    muniq.insert((li, ii));
+                }
+            }
+        }
+        println!("middle: tiles={} unique_images={}", mtiles, muniq.len());
+    }
+
     // 验证 MapLibs 关键槽位
     for idx in [0i16, 1, 2, 100, 110, 120, 121, 190, 200] {
         let lib = libs.get_map_library(idx);

@@ -27,6 +27,19 @@ pub const CHUNK_TILES: u32 = 32;
 pub const CHUNK_PIXEL_W: u32 = CHUNK_TILES * TILE_WIDTH as u32; // 1536
 pub const CHUNK_PIXEL_H: u32 = CHUNK_TILES * TILE_HEIGHT as u32; // 1024
 
+/// Y 深度函数：所有角色与 front 瓦片共用，按世界 Y（屏幕向下）交错排序。
+/// front 瓦片基准 = 格子底边 (y+1)*32，角色基准 = 脚底位置。
+/// 基准越大（越靠下）z 越大（越靠前），实现经典传奇遮挡。
+pub fn depth_y(world_y_screen_down: f32) -> f32 {
+    0.2 + world_y_screen_down * 0.00001
+}
+
+/// Front 瓦片标记：记录基准 Y（格子底边），用于深度排序/后续动画
+#[derive(Component)]
+pub struct FrontTile {
+    pub base_y: f32,
+}
+
 /// 游戏数据资源：当前地图信息
 #[derive(Resource, Default)]
 pub struct GameData {
@@ -139,7 +152,8 @@ fn setup_world(
     let chunks_x = div_ceil_i32(map.width, CHUNK_TILES as i32);
     let chunks_y = div_ceil_i32(map.height, CHUNK_TILES as i32);
 
-    for layer in [Layer::Back, Layer::Middle, Layer::Front] {
+    // Front 层改为逐瓦片精灵（按基准 Y 与角色交错排序），不走块纹理
+    for layer in [Layer::Back, Layer::Middle] {
         for cy in 0..chunks_y {
             for cx in 0..chunks_x {
                 if let Some(handle) =
@@ -161,6 +175,64 @@ fn setup_world(
         }
     }
     tracing::info!("🧩 地图块生成完成: {} 个 Sprite", spawned);
+
+    // 3.5 Front 层：逐瓦片精灵，z 按基准 Y（格子底边）与角色交错排序。
+    // 经典传奇遮挡：角色脚底 Y < 瓦片基准 Y → 被建筑/树遮挡；反之在建筑前。
+    // 唯一贴图做去重（同一 (lib,img) 共享一个 Image 资产）。
+    let mut front_spawned = 0usize;
+    let mut front_images: std::collections::HashMap<(i16, i32), (Handle<Image>, i16, i16)> =
+        std::collections::HashMap::new();
+    for cy in 0..chunks_y {
+        for cx in 0..chunks_x {
+            let f_start_x = cx * CHUNK_TILES as i32;
+            let f_start_y = cy * CHUNK_TILES as i32;
+            let f_end_x = (f_start_x + CHUNK_TILES as i32).min(map.width);
+            let f_end_y = (f_start_y + CHUNK_TILES as i32).min(map.height);
+            for x in f_start_x..f_end_x {
+                for y in f_start_y..f_end_y {
+                    let cell = &map.map_cells[x as usize][y as usize];
+                    let Some((file_index, image_index)) = cell.front_tile() else {
+                        continue;
+                    };
+                    let key = (file_index, image_index);
+                    let cached = front_images.get(&key).cloned();
+                    let (handle, w, h) = match cached {
+                        Some(c) => c,
+                        None => {
+                            let Some(info) = libraries.get_map_image(file_index, image_index) else {
+                                continue;
+                            };
+                            if info.width <= 0 || info.height <= 0 {
+                                continue;
+                            }
+                            let Some(rgba) = info.rgba.clone() else {
+                                continue;
+                            };
+                            let (w, h) = (info.width, info.height);
+                            let mut img =
+                                make_image(rgba, w.max(0) as u32, h.max(0) as u32);
+                            img.sampler = ImageSampler::nearest();
+                            let handle = assets.add(img);
+                            front_images.insert(key, (handle.clone(), w, h));
+                            (handle, w, h)
+                        }
+                    };
+                    // 基准 Y = 格子底边 (y+1)*32（macroquad: offset_y = y*32 + 32 - h）
+                    let base_y = ((y + 1) * TILE_HEIGHT as i32) as f32;
+                    let center_x = (x as f32) * TILE_WIDTH + w as f32 / 2.0;
+                    let center_y = -(base_y - h as f32 / 2.0);
+                    commands.spawn((
+                        Sprite::from_image(handle),
+                        Transform::from_xyz(center_x, center_y, depth_y(base_y)),
+                        Visibility::default(),
+                        FrontTile { base_y },
+                    ));
+                    front_spawned += 1;
+                }
+            }
+        }
+    }
+    tracing::info!("🌳 Front 瓦片精灵生成完成: {} 个", front_spawned);
 
     // 4. 相机（对准地图中心，默认看到约 18x13 格）
     let center_x = map.width as f32 * TILE_WIDTH / 2.0;
