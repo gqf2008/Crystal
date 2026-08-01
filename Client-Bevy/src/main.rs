@@ -23,7 +23,7 @@ fn main() {
                 .set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Mir2 (Bevy) — 传奇2 客户端移植".to_string(),
-                resolution: (1280.0, 800.0).into(),
+                resolution: (1280u32, 800u32).into(),
                 ..default()
             }),
             ..default()

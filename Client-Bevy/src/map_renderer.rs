@@ -8,9 +8,9 @@
 // - 坐标约定与 macroquad 一致：世界 x 向右、y 向下（屏幕空间），
 //   sprite 位置做 y 取反以适配 Bevy 的 y 向上坐标系
 
+use bevy::asset::RenderAssetUsages;
+use bevy::camera::{OrthographicProjection, Projection};
 use bevy::prelude::*;
-use bevy::render::camera::{OrthographicProjection, Projection};
-use bevy::render::render_asset::RenderAssetUsages;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use crate::resources::libraries::{resolve_data_path, Libraries};

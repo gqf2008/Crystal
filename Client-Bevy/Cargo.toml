@@ -5,8 +5,8 @@ edition = "2021"
 description = "Legend of Mir 2 (传奇2) 游戏客户端 — Bevy 移植版（由 Client-Macroquad 迁移）"
 
 [dependencies]
-# Bevy 游戏引擎 (0.16 系列，后续可升级 0.17+)
-bevy = "0.16"
+# Bevy 游戏引擎 0.19（ECS/渲染大幅升级）
+bevy = "0.19"
 
 # 共享库 (游戏协议和数据结构)
 mir2_shared = { path = "../SharedRust", features = ["client-parse"] }

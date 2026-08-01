@@ -329,7 +329,7 @@ impl Libraries {
             .ok_or_else(|| format!("MapLibs[{}] not loaded", file_index))?;
         let count = slot.count();
         slot.get_or_load_image(idx)
-            .map(|info| info.clone())
+            .cloned()
             .map_err(|e| format!("MapLibs[{}] idx {} (count {}): {}", file_index, idx, count, e))
     }
 

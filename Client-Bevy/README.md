@@ -1,6 +1,6 @@
 # Client-Bevy — 传奇2 (Legend of Mir 2) 客户端 Bevy 移植版
 
-把 `Client-Macroquad`（macroquad + hecs 实现，~99% 完成）迁移到 **Bevy 0.16**。
+把 `Client-Macroquad`（macroquad + hecs 实现，~99% 完成）迁移到 **Bevy 0.19**。
 
 ## 当前状态（里程碑 1）
 
@@ -33,7 +33,8 @@ cargo run --bin client_bevy -- --map n0
 - 共享 `SharedRust`（协议）与游戏数据目录（`Client-Macroquad/Data`、`Client-Macroquad/Map`）
 - 数据解析逻辑保持与 `Client-Macroquad/src/resources/*` 一致，仅去掉渲染引擎耦合
 
-## 升级 Bevy
+## 版本
 
-当前锁定 `bevy = "0.16"`（API 最稳定的迁移目标）。升级 0.17+ 时主要涉及：
-`Image` 构造、`Sprite` 锚点、`OrthographicProjection` 等 API 变化，见各文件编译错误。
+当前锁定 `bevy = "0.19"`（ECS/渲染有大量新特性）。从 0.16 升级时仅需适配：
+`Projection`/`OrthographicProjection` 移到 `bevy::camera`、`RenderAssetUsages` 移到 `bevy::asset`、
+`WindowResolution` 接受 `(u32, u32)`。
