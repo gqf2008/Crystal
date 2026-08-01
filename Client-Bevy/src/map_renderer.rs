@@ -201,8 +201,25 @@ pub fn build_chunk_rgba(
     let end_x = (start_x + CHUNK_TILES as i32).min(map.width);
     let end_y = (start_y + CHUNK_TILES as i32).min(map.height);
 
-    for x in start_x..end_x {
-        for y in start_y..end_y {
+    // 关键：瓦片/物件的图像尺寸可能超出单格，跨块边界会被 canvas 裁剪，
+    // 造成块边界出现 32px 透明缝隙（macroquad 是视图空间整幅绘制，无此问题）。
+    // 这里按层多迭代边界外若干行/列，由 blit 自行裁剪，保证跨界瓦片完整衔接。
+    // - Back(96x64)：底部/右侧伸出 1 格，顶部/左侧由相邻块补齐
+    // - Middle：双向各留 1 格（覆盖稍高的中景瓦片）
+    // - Front：高物件从格子底部向上延伸，向上留 16 行、向右留 8 列
+    let (x_lo, x_hi, y_lo, y_hi) = match layer {
+        Layer::Back => ((start_x - 1).max(0), (end_x + 1).min(map.width), start_y, (end_y + 1).min(map.height)),
+        Layer::Middle => ((start_x - 1).max(0), (end_x + 1).min(map.width), (start_y - 1).max(0), (end_y + 1).min(map.height)),
+        Layer::Front => ((start_x - 1).max(0), (end_x + 8).min(map.width), (start_y - 1).max(0), (end_y + 16).min(map.height)),
+    };
+
+    for x in x_lo..x_hi {
+        for y in y_lo..y_hi {
+            // Back 层是 2x2 格子共享的（macroquad render_back_layer 只遍历偶数坐标）。
+            // 奇数格可能存着与偶数格不一致的图，画出来会造成与参考实现不同的叠放。
+            if layer == Layer::Back && (x % 2 != 0 || y % 2 != 0) {
+                continue;
+            }
             let cell = &map.map_cells[x as usize][y as usize];
             let Some((file_index, image_index)) = layer.tile(cell) else {
                 continue;

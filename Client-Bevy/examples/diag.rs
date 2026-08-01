@@ -87,6 +87,108 @@ fn main() {
         }
     }
 
+    // 验证 Back 层 2x2 共享假设：奇数格子的 back_tile 是否与偶数格子一致
+    {
+        let mut odd_only = 0usize;
+        let mut mismatch = 0usize;
+        let mut even_total = 0usize;
+        let mut odd_checked = 0usize;
+        let mut load_ok = 0usize;
+        let mut load_fail = 0usize;
+        let mut sample = 0usize;
+        for x in 0..map.width {
+            for y in 0..map.height {
+                let c = &map.map_cells[x as usize][y as usize];
+                if x % 2 == 0 && y % 2 == 0 {
+                    if c.back_tile().is_some() { even_total += 1; }
+                    continue;
+                }
+                // 奇数格子
+                let Some((li, ii)) = c.back_tile() else { continue };
+                odd_checked += 1;
+                let ex = x - (x % 2);
+                let ey = y - (y % 2);
+                let even_cell = &map.map_cells[ex as usize][ey as usize];
+                match even_cell.back_tile() {
+                    Some((eli, eii)) if eli == li && eii == ii => {}
+                    Some(_) => { mismatch += 1; }
+                    None => { odd_only += 1; }
+                }
+                if mismatch <= 6 && sample < 20 {
+                    let ec = even_cell.back_tile();
+                    println!(
+                        "  MISMATCH ({},{}): odd lib={} img={}, even({},{}) -> {:?}",
+                        x, y, li, ii, ex, ey,
+                        ec
+                    );
+                }
+                if sample < 8 {
+                    let got = libs.get_map_image_debug(li, ii);
+                    println!(
+                        "  odd cell ({},{}): lib={} img={} -> {}",
+                        x, y, li, ii,
+                        match got { Ok(info) => format!("OK {}x{}", info.width, info.height), Err(e) => e }
+                    );
+                    sample += 1;
+                }
+                if li == 0 || li == 100 || li == 101 || li == 102 {
+                    match libs.get_map_image_debug(li, ii) {
+                        Ok(_) => load_ok += 1,
+                        Err(_) => load_fail += 1,
+                    }
+                }
+            }
+        }
+        println!(
+            "Back 2x2 分析: even_total={} odd_checked={} odd_only(偶数格无瓦片)={} mismatch={} 关键库加载 ok={} fail={}",
+            even_total, odd_checked, odd_only, mismatch, load_ok, load_fail
+        );
+    }
+
+    // 检查地砖图像本身的 alpha 分布（96x64，底半是否透明）
+    {
+        for (lib, img) in [(104i16, 7952i32), (104, 7951), (104, 7950), (100, 0), (100, 1), (100, 2), (100, 3)] {
+            match libs.get_map_image_debug(lib, img) {
+                Ok(info) => {
+                    if let Some(rgba) = &info.rgba {
+                        let w = info.width as usize;
+                        let h = info.height as usize;
+                        let mut opaque_bottom = 0usize;
+                        let mut total_bottom = 0usize;
+                        for y in (h/2)..h {
+                            for x in 0..w {
+                                let a = rgba[(y * w + x) * 4 + 3];
+                                if a > 0 { opaque_bottom += 1; }
+                                total_bottom += 1;
+                            }
+                        }
+                        println!(
+                            "tile lib={} img={} {}x{} bottom-half opaque {:.1}%",
+                            lib, img, w, h,
+                            opaque_bottom as f64 * 100.0 / total_bottom as f64
+                        );
+                    }
+                }
+                Err(e) => println!("tile lib={} img={} ERR {}", lib, img, e),
+            }
+        }
+    }
+
+    // 检查 chunk(10,10) 底部边界附近的行（世界行 348-353）的 back 数据
+    {
+        for y in 348..=353 {
+            let mut desc = format!("world row {}:", y);
+            for x in 0..8 {
+                let c = &map.map_cells[x as usize][y as usize];
+                match c.back_tile() {
+                    Some((li, ii)) => desc.push_str(&format!(" ({},{})", li, ii)),
+                    None => desc.push_str(" (none)"),
+                }
+            }
+            println!("{}", desc);
+        }
+    }
+
     // 验证 MapLibs 关键槽位
     for idx in [0i16, 1, 2, 100, 110, 120, 121, 190, 200] {
         let lib = libs.get_map_library(idx);
