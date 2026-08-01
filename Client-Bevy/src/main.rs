@@ -44,7 +44,7 @@ fn main() {
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "Mir2 (Bevy) — 传奇2 客户端移植".to_string(),
-                    resolution: (1280u32, 800u32).into(),
+                    resolution: (1024u32, 768u32).into(),
                     // 无 vsync：避免会话中 vblank 缺失导致 present 永久阻塞（画面冻结）
                     present_mode: bevy::window::PresentMode::Immediate,
                     ..default()

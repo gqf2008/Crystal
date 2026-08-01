@@ -171,9 +171,9 @@ fn setup_select_ui(
     }
 
     // 底部按钮（三态帧，对齐原版 SelectScene）
-    let screen_w = 1280.0f32;
+    let screen_w = 1024.0f32;
     let x_point = (screen_w - 200.0) / 5.0;
-    let y = 800.0 - 32.0;
+    let y = 768.0 - 32.0;
     spawn_bottom_btn(&mut commands, &mut libs, &mut images, &mut cache, 340, 100.0 + x_point - x_point / 2.0 - 50.0, y, BottomBtn::Start);
     spawn_bottom_btn(&mut commands, &mut libs, &mut images, &mut cache, 343, 100.0 + x_point * 2.0 - x_point / 2.0 - 50.0, y, BottomBtn::NewChar);
     spawn_bottom_btn(&mut commands, &mut libs, &mut images, &mut cache, 346, 100.0 + x_point * 3.0 - x_point / 2.0 - 50.0, y, BottomBtn::Delete);

@@ -54,10 +54,10 @@ pub struct CursorBlink {
     pub visible: bool,
 }
 
-const SW: f32 = 1280.0;
-const SH: f32 = 800.0;
-const DX: f32 = 476.0;
-const DY: f32 = 290.0;
+const SW: f32 = 1024.0;
+const SH: f32 = 768.0;
+const DX: f32 = 348.0;
+const DY: f32 = 274.0;
 
 #[derive(Component)]
 pub struct UiInput {

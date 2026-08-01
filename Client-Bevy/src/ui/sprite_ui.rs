@@ -30,17 +30,17 @@ pub struct UiImageCache {
 #[derive(Component)]
 pub struct UiEntity;
 
-/// UI 相机（世界坐标 = 屏幕逻辑像素 0..1280 x 0..800，y 向下）
+/// UI 相机（世界坐标 = 屏幕逻辑像素 0..1024 x 0..768，y 向下）
 /// 带 UiEntity 标记，随场景退出清理，避免泄漏到游戏场景
 pub fn spawn_ui_camera(mut commands: Commands) {
     commands.spawn((
         UiEntity,
         Camera2d,
-        Transform::from_xyz(640.0, -400.0, 100.0),
+        Transform::from_xyz(512.0, -384.0, 100.0),
         Projection::Orthographic(OrthographicProjection {
             scaling_mode: ScalingMode::Fixed {
-                width: 1280.0,
-                height: 800.0,
+                width: 1024.0,
+                height: 768.0,
             },
             ..OrthographicProjection::default_2d()
         }),
