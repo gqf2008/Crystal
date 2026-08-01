@@ -14,7 +14,7 @@ use bevy::image::ImageSampler;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
-use crate::resources::libraries::{resolve_data_path, Libraries};
+use crate::resources::libraries::Libraries;
 use crate::resources::map_reader::{resolve_map_path, CellInfo, MapReader};
 use crate::resources::mlibrary::ImageInfo;
 
@@ -55,9 +55,16 @@ pub struct GameData {
     pub player_spawn: Option<(f32, f32, u8)>,
 }
 
-/// 图像库资源（地图库 + 数组库，供渲染系统使用）
+/// 图像库资源（地图库 + 数组库，供渲染系统使用；懒初始化）
 #[derive(Resource)]
 pub struct GameLibraries(pub Libraries);
+
+impl Default for GameLibraries {
+    fn default() -> Self {
+        // 路径由 ensure_initialized 在首次使用时修正
+        Self(Libraries::new("Data"))
+    }
+}
 
 /// 已加载地图
 pub struct LoadedMap {
@@ -97,6 +104,7 @@ pub struct MapRenderPlugin;
 impl Plugin for MapRenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GameData>();
+        app.init_resource::<GameLibraries>();
         app.add_systems(Startup, spawn_camera);
         app.add_systems(OnEnter(crate::scenes::AppState::Game), setup_world);
         app.add_systems(
@@ -129,18 +137,16 @@ fn setup_world(
     mut commands: Commands,
     mut assets: ResMut<Assets<Image>>,
     mut game_data: ResMut<GameData>,
+    mut game_libs: ResMut<GameLibraries>,
     mut camera: Query<&mut Transform, With<Camera2d>>,
 ) {
     // 1. 加载图像库（MapLibs）
-    let data_path = resolve_data_path();
-    tracing::info!("📁 数据目录: {}", data_path.display());
-    let mut libraries = Libraries::new(data_path.clone());
-    libraries.init_map_libraries();
-    let (single, map_libs) = libraries.stats();
+    game_libs.0.ensure_initialized();
+    let libraries = &mut game_libs.0;
     tracing::info!(
-        "📚 库加载完成: 单体 {} 个, MapLibs {} 个",
-        single,
-        map_libs
+        "📚 库状态: 单体 {} 个, MapLibs {} 个",
+        libraries.stats().0,
+        libraries.stats().1
     );
 
     // 2. 加载地图（网络 MapChanged 优先，其次命令行 --map）
@@ -174,7 +180,7 @@ fn setup_world(
         for cy in 0..chunks_y {
             for cx in 0..chunks_x {
                 if let Some(handle) =
-                    build_chunk(&mut libraries, &map, layer, cx, cy, &mut assets)
+                    build_chunk(libraries, &map, layer, cx, cy, &mut assets)
                 {
                     // 块中心（世界坐标，y 取反适配 Bevy）
                     let rect_x = (cx * CHUNK_TILES as i32) as f32 * TILE_WIDTH;
@@ -273,7 +279,6 @@ fn setup_world(
         cam_tf.translation = Vec3::new(cam_x, cam_y, 10.0);
     }
 
-    commands.insert_resource(GameLibraries(libraries));
     game_data.map = Some(LoadedMap {
         name: map_name.clone(),
         width: map.width,

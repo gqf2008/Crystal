@@ -6,7 +6,7 @@ use bevy::prelude::*;
 
 use crate::network::NetworkContext;
 use crate::scenes::AppState;
-use crate::ui::theme::{colors, CN_FONT};
+use crate::ui::theme::{colors, load_cn_font};
 
 pub struct SelectPlugin;
 
@@ -30,10 +30,10 @@ struct EnterButton;
 
 fn setup_select_ui(
     mut commands: Commands,
-    assets: Res<AssetServer>,
+    mut fonts: ResMut<Assets<Font>>,
     net: Res<NetworkContext>,
 ) {
-    let font = FontSource::Handle(assets.load(CN_FONT));
+    let font = FontSource::Handle(load_cn_font(&mut fonts));
     commands
         .spawn((
             SelectRoot,

@@ -3,7 +3,9 @@ use bevy::prelude::*;
 
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AppState {
+    /// 启动画面（logo）
     #[default]
+    Intro,
     Login,
     Select,
     Game,

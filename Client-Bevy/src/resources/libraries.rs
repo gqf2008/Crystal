@@ -162,6 +162,8 @@ pub struct Libraries {
     data_path: PathBuf,
     /// 已加载数量
     pub loaded: usize,
+    /// 是否已初始化（单例+地图库）
+    pub initialized: bool,
 }
 
 impl Libraries {
@@ -172,7 +174,19 @@ impl Libraries {
             array_libs: HashMap::new(),
             data_path: data_path.into(),
             loaded: 0,
+            initialized: false,
         }
+    }
+
+    /// 一次性初始化：解析数据目录 + 加载单体库 + 地图库
+    pub fn ensure_initialized(&mut self) {
+        if self.initialized {
+            return;
+        }
+        self.data_path = resolve_data_path();
+        self.init_single_libraries();
+        self.init_map_libraries();
+        self.initialized = true;
     }
 
     /// 加载所有单体库（UI/物品/特效等）。缺失的库跳过并记警告。

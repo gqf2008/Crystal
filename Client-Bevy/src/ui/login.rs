@@ -8,9 +8,11 @@ use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::MessageReader;
 use bevy::prelude::*;
 
+use crate::map_renderer::{make_image, GameLibraries};
 use crate::network::NetworkContext;
+use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::theme::{colors, spawn_text_button, CN_FONT};
+use crate::ui::theme::{colors, load_cn_font, spawn_text_button};
 
 pub struct LoginPlugin;
 
@@ -62,8 +64,14 @@ impl TextInputNode {
     }
 }
 
-fn setup_login_ui(mut commands: Commands, assets: Res<AssetServer>) {
-    let font = FontSource::Handle(assets.load(CN_FONT));
+fn setup_login_ui(
+    mut commands: Commands,
+    mut fonts: ResMut<Assets<Font>>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    libs.0.ensure_initialized();
+    let font = FontSource::Handle(load_cn_font(&mut fonts));
     commands
         .spawn((
             LoginRoot,
@@ -79,15 +87,58 @@ fn setup_login_ui(mut commands: Commands, assets: Res<AssetServer>) {
             BackgroundColor(Color::srgb(0.05, 0.06, 0.09)),
         ))
         .with_children(|root| {
-            root.spawn((
-                Text::new("传 奇 2"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: FontSize::Px(52.0),
-                    ..default()
-                },
-                TextColor(colors::TITLE_GOLD),
-            ));
+            // 真实登录背景（Prguse.Lib[1084]），绝对定位铺满
+            if let Some(info) = libs.0.get_image(LibraryName::Prguse, 1084) {
+                if let Some(rgba) = info.rgba.clone() {
+                    let w = info.width.max(0) as u32;
+                    let h = info.height.max(0) as u32;
+                    if w > 0 && h > 0 {
+                        let bg = images.add(make_image(rgba, w, h));
+                        root.spawn((
+                            ImageNode { image: bg, ..default() },
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(0.0),
+                                top: Val::Px(0.0),
+                                width: Val::Percent(100.0),
+                                height: Val::Percent(100.0),
+                                ..default()
+                            },
+                        ));
+                    }
+                }
+            }
+            // Logo 图（Title.Lib[30]），否则文字兜底
+            let mut logo_ok = false;
+            if let Some(info) = libs.0.get_image(LibraryName::Title, 30) {
+                if let Some(rgba) = info.rgba.clone() {
+                    let w = info.width.max(0) as u32;
+                    let h = info.height.max(0) as u32;
+                    if w > 0 && h > 0 {
+                        let logo = images.add(make_image(rgba, w, h));
+                        root.spawn((
+                            ImageNode { image: logo, ..default() },
+                            Node {
+                                width: Val::Px(w as f32),
+                                height: Val::Px(h as f32),
+                                ..default()
+                            },
+                        ));
+                        logo_ok = true;
+                    }
+                }
+            }
+            if !logo_ok {
+                root.spawn((
+                    Text::new("传 奇 2"),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: FontSize::Px(52.0),
+                        ..default()
+                    },
+                    TextColor(colors::TITLE_GOLD),
+                ));
+            }
             root.spawn((
                 Text::new("Legend of Mir 2 · Bevy 移植版"),
                 TextFont {

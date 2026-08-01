@@ -17,6 +17,7 @@ use client_bevy::event_bus::EventBusPlugin;
 use client_bevy::map_renderer::MapRenderPlugin;
 use client_bevy::network::NetworkPlugin;
 use client_bevy::scenes::AppState;
+use client_bevy::ui::intro::IntroPlugin;
 use client_bevy::ui::login::LoginPlugin;
 use client_bevy::ui::select::SelectPlugin;
 
@@ -36,6 +37,8 @@ fn main() {
                     // 游戏窗口强制 1 世界单位 = 1 像素（忽略系统 DPI 缩放）
                     resolution: WindowResolution::new(1280u32, 800u32)
                         .with_scale_factor_override(1.0),
+                    // 启动即聚焦（避免窗口被其他窗口遮挡导致看起来是黑屏）
+                    focused: true,
                     ..default()
                 }),
                 ..default()
@@ -43,8 +46,15 @@ fn main() {
     );
     app.insert_resource(ClearColor(Color::srgb(0.07, 0.08, 0.12)));
     app.init_state::<AppState>();
+    // --skip-login: 直接从登录界面进入游戏（诊断呈现问题用）
+    if std::env::args().any(|a| a == "--skip-login") {
+        app.add_systems(
+            Update,
+            |mut next: ResMut<NextState<AppState>>| next.set(AppState::Game),
+        );
+    }
     app.add_plugins(EventBusPlugin);
-    app.add_plugins((NetworkPlugin, LoginPlugin, SelectPlugin));
+    app.add_plugins((NetworkPlugin, IntroPlugin, LoginPlugin, SelectPlugin));
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -63,11 +73,11 @@ fn main() {
 fn auto_enter(
     mut net: ResMut<client_bevy::network::NetworkContext>,
     state: Res<State<AppState>>,
-    mut frames: Local<u32>,
+    mut login_sent: Local<bool>,
 ) {
     use mir2_shared::packets::client::account::{Login, StartGame};
-    *frames += 1;
-    if *frames == 5 {
+    if *state == AppState::Login && !*login_sent {
+        *login_sent = true;
         net.state = client_bevy::network::NetState::LoggingIn;
         net.send_packet(&Login {
             account_id: "test".to_string(),
