@@ -610,6 +610,7 @@ fn dump_depth_debug(
     front: Query<(&Transform, &crate::map_renderer::FrontTile)>,
     ghosts: Query<&Visibility, With<GhostLayer>>,
     local: Query<&Transform, (With<LocalPlayer>, Without<GhostLayer>)>,
+    q_layer: Query<&SpriteLayer>,
     mut frames: Local<u32>,
 ) {
     if std::env::var_os("CRYSTAL_DEPTH_DEBUG").is_none() {
@@ -646,6 +647,12 @@ fn dump_depth_debug(
         fz.first().map(|x| x.0).unwrap_or(0.0),
         fz.last().map(|x| x.0).unwrap_or(0.0)
     ));
+    // 角色纹理诊断：统计角色实体上 Sprite 图像是否有效
+    {
+        let layers = q_layer.iter().count();
+        lines.push_str(&format!("  sprite_layers={}\n", layers));
+    }
+
     // ghost 统计：玩家前方遮挡瓦片数（本地玩家）
     let player_y = actors
         .iter()

@@ -4,6 +4,9 @@
 
 use bevy::prelude::*;
 
+use crate::map_renderer::GameLibraries;
+use crate::resources::libraries::LibraryName;
+
 /// 编译期内嵌中文字体（Bevy 默认字体不支持中文）。
 /// 用 include_bytes 保证任何启动目录/资产路径下都能加载。
 pub fn load_cn_font(assets: &mut Assets<Font>) -> Handle<Font> {
@@ -58,4 +61,45 @@ pub fn spawn_text_button(
                 TextColor(colors::TEXT),
             ));
         });
+}
+
+/// 三帧图按钮（normal/hover/pressed），仿原版 Title.Lib 按钮帧
+#[derive(Component)]
+pub struct ImageButton {
+    pub normal: Handle<Image>,
+    pub hover: Handle<Image>,
+    pub pressed: Handle<Image>,
+}
+
+/// 把某个 .Lib 图像加载成 Bevy Image 句柄
+pub fn load_lib_image(
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    name: LibraryName,
+    index: usize,
+) -> Option<Handle<Image>> {
+    let info = libs.0.get_image(name, index)?;
+    let rgba = info.rgba.clone()?;
+    let w = info.width.max(0) as u32;
+    let h = info.height.max(0) as u32;
+    if w == 0 || h == 0 {
+        return None;
+    }
+    Some(images.add(crate::map_renderer::make_image(rgba, w, h)))
+}
+
+/// 图按钮交互系统：根据 Interaction 切换三帧
+pub fn image_button_system(
+    mut q: Query<(&Interaction, &ImageButton, &mut ImageNode)>,
+) {
+    for (interaction, btn, mut node) in &mut q {
+        let target = match interaction {
+            Interaction::Pressed => &btn.pressed,
+            Interaction::Hovered => &btn.hover,
+            Interaction::None => &btn.normal,
+        };
+        if node.image != *target {
+            node.image = target.clone();
+        }
+    }
 }

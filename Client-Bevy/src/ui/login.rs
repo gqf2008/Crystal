@@ -1,32 +1,47 @@
 // ============================================================================
-// LoginPlugin - 登录界面（bevy_ui 原生 UI）
+// LoginPlugin - 登录界面（对齐 macroquad LoginScene）
 // ============================================================================
-// 账号/密码输入 + 登录按钮 → 发 Login 包（mock 服务器回应 LoginSuccess → Select）
+// 布局：全屏 ChrSel[0] 背景 + 居中 328x220 对话框（Prguse[1084]），
+// 元素坐标与原版一致（Title[30] logo、Title[31/32] 标签、输入框、
+// Title[320-328] 三帧图按钮）。登录成功后播 ChrSel 0-18 帧动画 → 选角。
 
-use bevy::ecs::hierarchy::ChildSpawnerCommands;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::MessageReader;
 use bevy::prelude::*;
 
-use crate::map_renderer::{make_image, GameLibraries};
+use crate::map_renderer::GameLibraries;
 use crate::network::NetworkContext;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::theme::{colors, load_cn_font, spawn_text_button};
+use crate::ui::theme::{colors, load_cn_font, ImageButton};
 
 pub struct LoginPlugin;
 
 impl Plugin for LoginPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LoginState>();
+        app.init_resource::<LoginAnim>();
         app.add_systems(OnEnter(AppState::Login), setup_login_ui);
         app.add_systems(OnExit(AppState::Login), cleanup_login_ui);
         app.add_systems(
             Update,
-            process_text_input.run_if(in_state(AppState::Login)),
+            (
+                process_text_input,
+                login_anim_system,
+                crate::ui::theme::image_button_system,
+            )
+                .run_if(in_state(AppState::Login)),
         );
     }
 }
+
+/// 对话框尺寸（原版）
+const DIALOG_W: f32 = 328.0;
+const DIALOG_H: f32 = 220.0;
+/// 原版按钮帧
+const OK_FRAMES: [usize; 3] = [320, 321, 322];
+const ACCOUNT_FRAMES: [usize; 3] = [323, 324, 325];
+const PASS_FRAMES: [usize; 3] = [326, 327, 328];
 
 #[derive(Resource, Default)]
 pub struct LoginState {
@@ -34,19 +49,29 @@ pub struct LoginState {
     pub password: String,
 }
 
-// UI 组件标记
+/// ChrSel 背景动画状态
+#[derive(Resource, Default)]
+pub struct LoginAnim {
+    pub playing: bool,
+    pub frame: usize,
+    pub timer: f32,
+    pub handles: Vec<Handle<Image>>,
+}
+
+// UI 组件
 #[derive(Component)]
 struct LoginRoot;
+#[derive(Component)]
+struct LoginBg;
 #[derive(Component)]
 struct AccountInput;
 #[derive(Component)]
 struct PasswordInput;
 #[derive(Component)]
-struct LoginButton;
+struct LoginOkButton;
 #[derive(Component)]
 struct StatusText;
 
-/// 文本输入框状态
 #[derive(Component)]
 pub struct TextInputNode {
     pub value: String,
@@ -66,129 +91,225 @@ impl TextInputNode {
 
 fn setup_login_ui(
     mut commands: Commands,
-    mut fonts: ResMut<Assets<Font>>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
+    mut fonts: ResMut<Assets<Font>>,
+    mut anim: ResMut<LoginAnim>,
 ) {
     libs.0.ensure_initialized();
     let font = FontSource::Handle(load_cn_font(&mut fonts));
+
+    // 预加载 ChrSel 背景动画帧（0-18）
+    anim.handles.clear();
+    for i in 0..19usize {
+        if let Some(h) = crate::ui::theme::load_lib_image(
+            &mut libs,
+            &mut images,
+            LibraryName::ChrSel,
+            i,
+        ) {
+            anim.handles.push(h);
+        }
+    }
+
+    // 对话框图（背景 + 标题 + 标签）
+    let bg_dialog = crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Prguse, 1084);
+    let logo = crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Title, 30);
+    let label_acc = crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Title, 31);
+    let label_pwd = crate::ui::theme::load_lib_image(&mut libs, &mut images, LibraryName::Title, 32);
+
+    let ok_btn = load_button(&mut libs, &mut images, &OK_FRAMES);
+    let acc_btn = load_button(&mut libs, &mut images, &ACCOUNT_FRAMES);
+    let pwd_btn = load_button(&mut libs, &mut images, &PASS_FRAMES);
+
+    let dialog_x = 476.0; // (1280-328)/2
+    let dialog_y = 290.0; // (800-220)/2
+
     commands
         .spawn((
             LoginRoot,
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                row_gap: Val::Px(14.0),
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.05, 0.06, 0.09)),
+            BackgroundColor(Color::BLACK),
         ))
         .with_children(|root| {
-            // 真实登录背景（Prguse.Lib[1084]），绝对定位铺满
-            if let Some(info) = libs.0.get_image(LibraryName::Prguse, 1084) {
-                if let Some(rgba) = info.rgba.clone() {
-                    let w = info.width.max(0) as u32;
-                    let h = info.height.max(0) as u32;
-                    if w > 0 && h > 0 {
-                        let bg = images.add(make_image(rgba, w, h));
-                        root.spawn((
-                            ImageNode { image: bg, ..default() },
-                            Node {
-                                position_type: PositionType::Absolute,
-                                left: Val::Px(0.0),
-                                top: Val::Px(0.0),
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
-                                ..default()
-                            },
-                        ));
-                    }
-                }
-            }
-            // Logo 图（Title.Lib[30]），否则文字兜底
-            let mut logo_ok = false;
-            if let Some(info) = libs.0.get_image(LibraryName::Title, 30) {
-                if let Some(rgba) = info.rgba.clone() {
-                    let w = info.width.max(0) as u32;
-                    let h = info.height.max(0) as u32;
-                    if w > 0 && h > 0 {
-                        let logo = images.add(make_image(rgba, w, h));
-                        root.spawn((
-                            ImageNode { image: logo, ..default() },
-                            Node {
-                                width: Val::Px(w as f32),
-                                height: Val::Px(h as f32),
-                                ..default()
-                            },
-                        ));
-                        logo_ok = true;
-                    }
-                }
-            }
-            if !logo_ok {
+            // 全屏 ChrSel[0] 背景
+            if let Some(bg) = anim.handles.first().cloned() {
                 root.spawn((
-                    Text::new("传 奇 2"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: FontSize::Px(52.0),
+                    LoginBg,
+                    ImageNode { image: bg, ..default() },
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        top: Val::Px(0.0),
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
                         ..default()
                     },
-                    TextColor(colors::TITLE_GOLD),
                 ));
             }
-            root.spawn((
-                Text::new("Legend of Mir 2 · Bevy 移植版"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: FontSize::Px(14.0),
-                    ..default()
-                },
-                TextColor(colors::GRAY),
-            ));
+
+            // 对话框
             root.spawn((
                 Node {
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    padding: UiRect::all(Val::Px(28.0)),
-                    row_gap: Val::Px(10.0),
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(dialog_x),
+                    top: Val::Px(dialog_y),
+                    width: Val::Px(DIALOG_W),
+                    height: Val::Px(DIALOG_H),
                     ..default()
                 },
-                BackgroundColor(colors::PANEL_BG),
+                BackgroundColor(Color::NONE),
             ))
-            .with_children(|card| {
-                spawn_label(card, &font, "账号");
-                spawn_input(card, &font, AccountInput, TextInputNode::new(false));
-                spawn_label(card, &font, "密码");
-                spawn_input(card, &font, PasswordInput, TextInputNode::new(true));
-                // 状态提示（连接中/错误）
-                card.spawn((
+            .with_children(|d| {
+                // 对话框底图 Prguse[1084]
+                if let Some(bg) = bg_dialog.clone() {
+                    d.spawn((
+                        ImageNode { image: bg, ..default() },
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            top: Val::Px(0.0),
+                            width: Val::Px(DIALOG_W),
+                            height: Val::Px(DIALOG_H),
+                            ..default()
+                        },
+                    ));
+                }
+                // 标题 logo Title[30]
+                if let Some(lg) = logo.clone() {
+                    // 尺寸按图宽，水平居中、顶部 12px
+                    d.spawn((
+                        ImageNode { image: lg, ..default() },
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(10.0),
+                            top: Val::Px(12.0),
+                            ..default()
+                        },
+                    ));
+                }
+                // 账号标签 Title[31] @ (52,83)
+                if let Some(l) = label_acc.clone() {
+                    d.spawn((
+                        ImageNode { image: l, ..default() },
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(52.0),
+                            top: Val::Px(83.0),
+                            ..default()
+                        },
+                    ));
+                }
+                // 密码标签 Title[32] @ (43,105)
+                if let Some(l) = label_pwd.clone() {
+                    d.spawn((
+                        ImageNode { image: l, ..default() },
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(43.0),
+                            top: Val::Px(105.0),
+                            ..default()
+                        },
+                    ));
+                }
+                // 账号输入框 @ (85,85) 136x15
+                spawn_input(d, &font, AccountInput, TextInputNode::new(false), 85.0, 85.0);
+                // 密码输入框 @ (85,108)
+                spawn_input(d, &font, PasswordInput, TextInputNode::new(true), 85.0, 108.0);
+                // OK 按钮 @ (227,81) 42x42
+                if let Some(b) = ok_btn.clone() {
+                    d.spawn((
+                        LoginOkButton,
+                        Button,
+                        ImageButton {
+                            normal: b.0.clone(),
+                            hover: b.1.clone(),
+                            pressed: b.2.clone(),
+                        },
+                        ImageNode { image: b.0, ..default() },
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(227.0),
+                            top: Val::Px(81.0),
+                            width: Val::Px(42.0),
+                            height: Val::Px(42.0),
+                            ..default()
+                        },
+                    ));
+                }
+                // 新建账号按钮 @ (60,163)
+                if let Some(b) = acc_btn.clone() {
+                    d.spawn((
+                        ImageButton {
+                            normal: b.0.clone(),
+                            hover: b.1.clone(),
+                            pressed: b.2.clone(),
+                        },
+                        ImageNode { image: b.0, ..default() },
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(60.0),
+                            top: Val::Px(163.0),
+                            width: Val::Px(84.0),
+                            height: Val::Px(30.0),
+                            ..default()
+                        },
+                    ));
+                }
+                // 修改密码按钮 @ (166,163)
+                if let Some(b) = pwd_btn.clone() {
+                    d.spawn((
+                        ImageButton {
+                            normal: b.0.clone(),
+                            hover: b.1.clone(),
+                            pressed: b.2.clone(),
+                        },
+                        ImageNode { image: b.0, ..default() },
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(166.0),
+                            top: Val::Px(163.0),
+                            width: Val::Px(84.0),
+                            height: Val::Px(30.0),
+                            ..default()
+                        },
+                    ));
+                }
+                // 状态文字（连接中/错误）
+                d.spawn((
                     StatusText,
                     Text::new(""),
                     TextFont {
                         font: font.clone(),
-                        font_size: FontSize::Px(13.0),
+                        font_size: FontSize::Px(11.0),
                         ..default()
                     },
-                    TextColor(colors::GRAY),
+                    TextColor(Color::srgba(1.0, 0.3, 0.3, 1.0)),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(20.0),
+                        top: Val::Px(190.0),
+                        ..default()
+                    },
                 ));
-                spawn_text_button(card, &font, "登  录", 18.0, LoginButton);
             });
         });
 }
 
-fn spawn_label(parent: &mut ChildSpawnerCommands, font: &FontSource, text: &str) {
-    parent.spawn((
-        Text::new(text),
-        TextFont {
-            font: font.clone(),
-            font_size: FontSize::Px(14.0),
-            ..default()
-        },
-        TextColor(colors::TEXT),
-    ));
+/// 加载三帧按钮图
+fn load_button(
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    frames: &[usize; 3],
+) -> Option<(Handle<Image>, Handle<Image>, Handle<Image>)> {
+    let n = crate::ui::theme::load_lib_image(libs, images, LibraryName::Title, frames[0])?;
+    let h = crate::ui::theme::load_lib_image(libs, images, LibraryName::Title, frames[1])?;
+    let p = crate::ui::theme::load_lib_image(libs, images, LibraryName::Title, frames[2])?;
+    Some((n, h, p))
 }
 
 fn spawn_input(
@@ -196,19 +317,23 @@ fn spawn_input(
     font: &FontSource,
     marker: impl Bundle,
     input: TextInputNode,
+    x: f32,
+    y: f32,
 ) {
     parent
         .spawn((
             marker,
             input,
             Node {
-                width: Val::Px(240.0),
-                height: Val::Px(34.0),
+                position_type: PositionType::Absolute,
+                left: Val::Px(x),
+                top: Val::Px(y),
+                width: Val::Px(136.0),
+                height: Val::Px(15.0),
                 align_items: AlignItems::Center,
-                padding: UiRect::horizontal(Val::Px(8.0)),
+                padding: UiRect::horizontal(Val::Px(3.0)),
                 ..default()
             },
-            BackgroundColor(colors::INPUT_BG),
             Interaction::default(),
         ))
         .with_children(|input_node| {
@@ -216,7 +341,7 @@ fn spawn_input(
                 Text::new(""),
                 TextFont {
                     font: font.clone(),
-                    font_size: FontSize::Px(16.0),
+                    font_size: FontSize::Px(13.0),
                     ..default()
                 },
                 TextColor(colors::TEXT),
@@ -230,7 +355,43 @@ fn cleanup_login_ui(mut commands: Commands, root: Query<Entity, With<LoginRoot>>
     }
 }
 
-/// 处理文本输入焦点与按键，以及登录按钮
+/// ChrSel 背景动画：登录成功后播放 0-18 帧，播完进选角
+fn login_anim_system(
+    mut anim: ResMut<LoginAnim>,
+    mut net: ResMut<NetworkContext>,
+    mut next: ResMut<NextState<AppState>>,
+    time: Res<Time>,
+    mut bg: Query<&mut ImageNode, With<LoginBg>>,
+) {
+    if !anim.playing {
+        // 登录成功 → 开始播放
+        if net.login_success {
+            net.login_success = false;
+            anim.playing = true;
+            anim.frame = 0;
+            anim.timer = 0.0;
+        }
+        return;
+    }
+    anim.timer += time.delta_secs();
+    let frame_delay = 0.15;
+    if anim.timer >= frame_delay {
+        anim.timer = 0.0;
+        anim.frame += 1;
+        if anim.frame >= anim.handles.len() {
+            // 播放完成 → 进入选角
+            anim.playing = false;
+            next.set(AppState::Select);
+            return;
+        }
+        if let Ok(mut node) = bg.single_mut() {
+            if let Some(h) = anim.handles.get(anim.frame) {
+                node.image = h.clone();
+            }
+        }
+    }
+}
+
 #[allow(clippy::type_complexity)]
 fn process_text_input(
     mut keys: MessageReader<KeyboardInput>,
@@ -245,7 +406,7 @@ fn process_text_input(
         Option<&PasswordInput>,
     )>,
     mut texts: Query<&mut Text, Without<StatusText>>,
-    buttons: Query<(&Interaction, &LoginButton)>,
+    ok_btn: Query<&Interaction, (With<LoginOkButton>, Without<TextInputNode>)>,
     mut status: Query<&mut Text, (With<StatusText>, Without<TextInputNode>)>,
 ) {
     // 1) 点击聚焦
@@ -258,12 +419,12 @@ fn process_text_input(
     }
 
     // 2) 按键输入到聚焦框
-    let keys: Vec<KeyboardInput> = keys.read().cloned().collect();
+    let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
     for (_, _, mut input, _, acc, pwd) in inputs.iter_mut() {
         if !input.focused {
             continue;
         }
-        for key in &keys {
+        for key in &key_list {
             if key.state != bevy::input::ButtonState::Pressed {
                 continue;
             }
@@ -297,9 +458,9 @@ fn process_text_input(
         }
     }
 
-    // 4) 登录按钮（防重：连接中不重复发送）
+    // 4) OK 按钮 → 发送登录
     if net.state != crate::network::NetState::LoggingIn
-        && buttons.iter().any(|(i, _)| *i == Interaction::Pressed)
+        && ok_btn.iter().any(|i| *i == Interaction::Pressed)
     {
         net.state = crate::network::NetState::LoggingIn;
         net.send_packet(&mir2_shared::packets::client::account::Login {
@@ -315,7 +476,7 @@ fn process_text_input(
             _ => net
                 .login_error
                 .clone()
-                .unwrap_or_else(|| "输入账号密码后点击登录".to_string()),
+                .unwrap_or_default(),
         };
     }
 }

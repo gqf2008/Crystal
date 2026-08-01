@@ -11,7 +11,8 @@
 
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
-use bevy::window::WindowResolution;
+use bevy::render::RenderPlugin;
+use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
 use client_bevy::actor::ActorPlugin;
 use client_bevy::event_bus::EventBusPlugin;
 use client_bevy::map_renderer::MapRenderPlugin;
@@ -25,6 +26,14 @@ fn main() {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
+            // 使用 DX12 后端（Vulkan 的 swapchain present 在此机器上会冻结）
+            .set(RenderPlugin {
+                render_creation: RenderCreation::Automatic(Box::new(WgpuSettings {
+                    backends: Some(Backends::DX12),
+                    ..default()
+                })),
+                ..default()
+            })
             .set(LogPlugin {
                 filter:
                     "info,bevy_render=warn,bevy_asset=warn,bevy_log=warn,bevy_diagnostic=warn,wgpu_hal=warn,naga=warn"
@@ -34,11 +43,9 @@ fn main() {
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "Mir2 (Bevy) — 传奇2 客户端移植".to_string(),
-                    // 游戏窗口强制 1 世界单位 = 1 像素（忽略系统 DPI 缩放）
-                    resolution: WindowResolution::new(1280u32, 800u32)
-                        .with_scale_factor_override(1.0),
-                    // 启动即聚焦（避免窗口被其他窗口遮挡导致看起来是黑屏）
-                    focused: true,
+                    resolution: (1280u32, 800u32).into(),
+                    // 无 vsync：避免会话中 vblank 缺失导致 present 永久阻塞（画面冻结）
+                    present_mode: bevy::window::PresentMode::Immediate,
                     ..default()
                 }),
                 ..default()

@@ -13,6 +13,15 @@
 - `map_renderer.rs` — 每 32x32 格合成一张块纹理（1536x1024），Back/Middle/Front 三层
 - Bevy `Image` 资产 + Sprite 渲染，相机控制（WASD/方向键平移，+/- 缩放）
 
+✅ 登录/选角界面完整移植 + 呈现修复（里程碑 6b）：
+- 登录：全屏 ChrSel[0] 背景 + 居中 328x220 对话框（Prguse[1084]）
+  + Title[30] logo + Title[31/32] 标签 + Title[320-328] 三帧图按钮（坐标对齐原版）
+- 启动动画：登录成功后播 ChrSel 0-18 帧动画 → 进入选角
+- 选角：ChrSel 动画背景 + 角色预览（ChrSel[base_index+frame]，16帧/0.25s）
+- 关键修复：强制 DX12 渲染后端（Vulkan swapchain present 在此机器冻结
+  → 窗口只显示第一帧；DX12 实时呈现正常）
+- 中文字体内嵌（Font::from_bytes），不依赖 assets 路径
+
 ✅ UI 改用 Bevy 内置 bevy_ui（里程碑 6a）：
 - 移除 bevy_egui 依赖，登录/选角界面改为 bevy_ui（Node/Button/Text/Interaction）
 - 中文字体：FontSource::Handle 加载阿里普惠体（bevy_ui 的 TextFont）

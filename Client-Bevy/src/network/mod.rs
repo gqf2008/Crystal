@@ -38,6 +38,8 @@ pub struct NetworkContext {
     pub selected_index: Option<i32>,
     /// 登录错误信息
     pub login_error: Option<String>,
+    /// 登录成功标志（LoginScene 播放 ChrSel 动画后进选角）
+    pub login_success: bool,
 }
 
 impl NetworkContext {
@@ -168,7 +170,7 @@ fn handle_packet(
                 net.characters = p.characters;
                 net.state = NetState::Select;
                 net.login_error = None;
-                next.set(AppState::Select);
+                net.login_success = true;
             }
         }
         x if x == ServerPacketIds::StartGame as i16 => {
