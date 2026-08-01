@@ -13,6 +13,14 @@
 - `map_renderer.rs` — 每 32x32 格合成一张块纹理（1536x1024），Back/Middle/Front 三层
 - Bevy `Image` 资产 + Sprite 渲染，相机控制（WASD/方向键平移，+/- 缩放）
 
+✅ 网络层 mock 模式（里程碑 5）：
+- 协议管道：codec(长度前缀+XOR) → PacketHeader → 类型化包（mir2_shared）
+- Mock 服务器线程：Login → LoginSuccess(2角色) → StartGame → MapChanged+Object 包 → KeepAlive
+- NetworkSystem 分发：LoginSuccess→Select、MapChanged→加载地图、ObjectPlayer/Monster/Npc→生成角色
+- 角色选择界面（Select 场景）：角色列表 + 进入游戏
+- 本地玩家 ghost/遮挡/动画沿用；demo 角色改由 --demo 提供，默认走网络对象
+- 用法：登录界面点"登录"；--auto-enter 自动驱动 mock 流程；--demo 演示角色
+
 ✅ 场景系统 + bevy_egui 登录界面 + 事件总线（里程碑 4）：
 - AppState 状态机：Login（登录界面）→ Game（游戏场景）
 - bevy_egui 0.41 登录界面（中文字体、账号/密码、进入游戏按钮）

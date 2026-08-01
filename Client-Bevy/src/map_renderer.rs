@@ -49,6 +49,10 @@ pub struct FrontTile {
 #[derive(Resource, Default)]
 pub struct GameData {
     pub map: Option<LoadedMap>,
+    /// 网络 MapChanged 指定的地图名（优先于命令行 --map）
+    pub desired_map: Option<String>,
+    /// 玩家出生位置（瓦片坐标 + 朝向），来自 MapChanged
+    pub player_spawn: Option<(f32, f32, u8)>,
 }
 
 /// 图像库资源（地图库 + 数组库，供渲染系统使用）
@@ -139,8 +143,11 @@ fn setup_world(
         map_libs
     );
 
-    // 2. 加载地图
-    let map_name = map_arg();
+    // 2. 加载地图（网络 MapChanged 优先，其次命令行 --map）
+    let map_name = game_data
+        .desired_map
+        .clone()
+        .unwrap_or_else(map_arg);
     let map_path = resolve_map_path(&map_name);
     let map = match MapReader::new(&map_path) {
         Ok(m) => m,
@@ -252,11 +259,18 @@ fn setup_world(
     }
     tracing::info!("🌳 Front 瓦片精灵生成完成: {} 个", front_spawned);
 
-    // 4. 相机对准地图中心（相机实体在 Startup 创建，这里只重定位）
+    // 4. 相机定位（优先玩家出生点，否则地图中心）
     let center_x = map.width as f32 * TILE_WIDTH / 2.0;
     let center_y = -(map.height as f32 * TILE_HEIGHT / 2.0);
+    let (cam_x, cam_y) = match game_data.player_spawn {
+        Some((tx, ty, _)) => {
+            // 出生点是瓦片坐标：世界像素 = (tx*48 + 24, ty*32 + 32)
+            (tx * TILE_WIDTH + TILE_WIDTH / 2.0, -(ty * TILE_HEIGHT + TILE_HEIGHT))
+        }
+        None => (center_x, center_y),
+    };
     if let Ok(mut cam_tf) = camera.single_mut() {
-        cam_tf.translation = Vec3::new(center_x, center_y, 10.0);
+        cam_tf.translation = Vec3::new(cam_x, cam_y, 10.0);
     }
 
     commands.insert_resource(GameLibraries(libraries));

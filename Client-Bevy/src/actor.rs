@@ -20,6 +20,7 @@ use mir2_shared::{MirAction, MirClass, MirDirection, MirGender};
 use std::collections::HashMap;
 
 use crate::map_renderer::{make_image, GameData, GameLibraries, TILE_HEIGHT, TILE_WIDTH};
+use crate::network::{NetObject, NetObjects};
 use crate::objects::frames::{
     get_default_npc_frame, get_monster_frame, get_player_frame, Frame,
 };
@@ -34,6 +35,7 @@ impl Plugin for ActorPlugin {
             Update,
             (
                 spawn_demo_actors_when_ready,
+                spawn_net_objects_when_ready,
                 advance_actor_animations,
                 actor_sprite_render,
                 update_local_ghost,
@@ -289,12 +291,100 @@ fn actor_sprite_render(
 // 演示内容
 // ============================================================================
 
+/// 等待地图加载后生成网络对象（MapChanged 后 mock 发的 ObjectPlayer/Monster/Npc）
+fn spawn_net_objects_when_ready(
+    mut commands: Commands,
+    data: Res<GameData>,
+    mut net_objects: ResMut<NetObjects>,
+    mut done: Local<bool>,
+) {
+    if *done {
+        return;
+    }
+    if data.map.is_none() {
+        return;
+    }
+    *done = true;
+    let pending: Vec<NetObject> = net_objects.pending.drain(..).collect();
+    for obj in &pending {
+        spawn_net_object_entity(&mut commands, obj);
+    }
+    tracing::info!("🌐 网络对象生成完成: {} 个", pending.len());
+}
+
+/// 按网络对象生成实体
+fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject) {
+    // 瓦片坐标 → 世界像素（脚点）
+    let wx = |tx: i32| tx as f32 * TILE_WIDTH + TILE_WIDTH / 2.0;
+    let wy = |ty: i32| ty as f32 * TILE_HEIGHT + TILE_HEIGHT;
+
+    match obj {
+        NetObject::Player {
+            object_id: _,
+            name: _,
+            class,
+            gender,
+            location_x,
+            location_y,
+            direction: _,
+            hair,
+            weapon,
+            weapon_effect,
+            armour,
+            wing_effect,
+        } => {
+            spawn_player_with(
+                commands,
+                wx(*location_x),
+                wy(*location_y),
+                *class,
+                *gender,
+                *armour,
+                *hair,
+                *weapon,
+                *weapon_effect,
+                *wing_effect,
+            );
+        }
+        NetObject::Monster {
+            object_id: _,
+            name: _,
+            location_x,
+            location_y,
+            image,
+            direction,
+        } => {
+            spawn_monster(
+                commands,
+                *image,
+                wx(*location_x),
+                wy(*location_y),
+                *direction,
+            );
+        }
+        NetObject::Npc {
+            object_id: _,
+            name: _,
+            image,
+            location_x,
+            location_y,
+            direction,
+        } => {
+            spawn_npc(commands, *image, wx(*location_x), wy(*location_y), *direction);
+        }
+    }
+}
+
 /// 等待地图加载完成后生成演示角色（只跑一次）
 fn spawn_demo_actors_when_ready(
     mut commands: Commands,
     data: Res<GameData>,
     mut done: Local<bool>,
 ) {
+    // 演示角色只在 --demo 模式下生成（默认走网络 mock 对象）
+    if !std::env::args().any(|a| a == "--demo") {
+        return;
+    }
     if *done {
         return;
     }
@@ -307,10 +397,10 @@ fn spawn_demo_actors_when_ready(
     let cy = (map.height as f32 * TILE_HEIGHT) / 2.0;
 
     spawn_player(&mut commands, cx, cy - 4.0 * TILE_HEIGHT);
-    spawn_monster(&mut commands, 1, cx - 4.0 * TILE_WIDTH, cy + 2.0 * TILE_HEIGHT);
-    spawn_monster(&mut commands, 5, cx + 4.0 * TILE_WIDTH, cy - 3.0 * TILE_HEIGHT);
-    spawn_monster(&mut commands, 9, cx - 3.0 * TILE_WIDTH, cy + 4.0 * TILE_HEIGHT);
-    spawn_npc(&mut commands, 0, cx + 3.0 * TILE_WIDTH, cy + 3.0 * TILE_HEIGHT);
+    spawn_monster(&mut commands, 1, cx - 4.0 * TILE_WIDTH, cy + 2.0 * TILE_HEIGHT, 0);
+    spawn_monster(&mut commands, 5, cx + 4.0 * TILE_WIDTH, cy - 3.0 * TILE_HEIGHT, 0);
+    spawn_monster(&mut commands, 9, cx - 3.0 * TILE_WIDTH, cy + 4.0 * TILE_HEIGHT, 0);
+    spawn_npc(&mut commands, 0, cx + 3.0 * TILE_WIDTH, cy + 3.0 * TILE_HEIGHT, 0);
 }
 
 /// 世界 y（屏幕向下）→ Bevy 深度 z（与 front 瓦片共用同一深度函数，
@@ -320,18 +410,46 @@ fn depth_z(world_y: f32) -> f32 {
 }
 
 fn spawn_player(commands: &mut Commands, x: f32, y: f32) {
+    spawn_player_with(
+        commands,
+        x,
+        y,
+        MirClass::Warrior,
+        MirGender::Male,
+        0,
+        0,
+        0,
+        0,
+        0,
+    );
+}
+
+/// 按外观生成本地玩家实体
+#[allow(clippy::too_many_arguments)]
+fn spawn_player_with(
+    commands: &mut Commands,
+    x: f32,
+    y: f32,
+    class: MirClass,
+    gender: MirGender,
+    armour: i16,
+    hair: u8,
+    weapon: i16,
+    weapon_effect: i16,
+    wing_effect: u8,
+) {
     let z = depth_z(y);
     let root = commands
         .spawn((
             LocalPlayer,
             ActorAppearance::Player {
-                class: MirClass::Warrior,
-                gender: MirGender::Male,
-                armour: 0,
-                hair: 0,
-                weapon: 0,
-                weapon_effect: 0,
-                wing_effect: 0,
+                class,
+                gender,
+                armour: armour.max(0) as u16,
+                hair,
+                weapon,
+                weapon_effect,
+                wing_effect,
             },
             ActorAnim::default(),
             DemoBehavior::Walk {
@@ -355,7 +473,7 @@ fn spawn_player(commands: &mut Commands, x: f32, y: f32) {
             Transform::default(),
             SpriteLayer {
                 lib: ArrayLibType::CArmours,
-                slot: 0,
+                slot: armour.max(0) as u32,
                 frame: 0,
                 is_effect: false,
             },
@@ -365,7 +483,7 @@ fn spawn_player(commands: &mut Commands, x: f32, y: f32) {
             Transform::default(),
             SpriteLayer {
                 lib: ArrayLibType::CHair,
-                slot: 0,
+                slot: hair as u32,
                 frame: 0,
                 is_effect: false,
             },
@@ -375,7 +493,7 @@ fn spawn_player(commands: &mut Commands, x: f32, y: f32) {
             Transform::default(),
             SpriteLayer {
                 lib: ArrayLibType::CWeapons,
-                slot: 0,
+                slot: weapon.max(0) as u32,
                 frame: 0,
                 is_effect: false,
             },
@@ -396,7 +514,13 @@ fn spawn_player(commands: &mut Commands, x: f32, y: f32) {
     });
 }
 
-fn spawn_monster(commands: &mut Commands, monster_type: u16, x: f32, y: f32) {
+fn spawn_monster(
+    commands: &mut Commands,
+    monster_type: u16,
+    x: f32,
+    y: f32,
+    direction: u8,
+) {
     let z = depth_z(y);
     let root = commands
         .spawn((
@@ -404,7 +528,12 @@ fn spawn_monster(commands: &mut Commands, monster_type: u16, x: f32, y: f32) {
                 monster_type,
                 stage: 0,
             },
-            ActorAnim::default(),
+            ActorAnim {
+                action: MirAction::Standing,
+                direction,
+                frame_index: 0,
+                elapsed_ms: 0.0,
+            },
             if monster_type.is_multiple_of(3) {
                 DemoBehavior::Attack {
                     timer: 0.0,
@@ -436,12 +565,23 @@ fn spawn_monster(commands: &mut Commands, monster_type: u16, x: f32, y: f32) {
     });
 }
 
-fn spawn_npc(commands: &mut Commands, npc_index: u16, x: f32, y: f32) {
+fn spawn_npc(
+    commands: &mut Commands,
+    npc_index: u16,
+    x: f32,
+    y: f32,
+    direction: u8,
+) {
     let z = depth_z(y);
     let root = commands
         .spawn((
             ActorAppearance::Npc { npc_index },
-            ActorAnim::default(),
+            ActorAnim {
+                action: MirAction::Standing,
+                direction,
+                frame_index: 0,
+                elapsed_ms: 0.0,
+            },
             DemoBehavior::Idle {
                 timer: 0.0,
                 interval: 3.0,

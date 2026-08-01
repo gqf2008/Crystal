@@ -15,8 +15,10 @@ use bevy::window::WindowResolution;
 use client_bevy::actor::ActorPlugin;
 use client_bevy::event_bus::EventBusPlugin;
 use client_bevy::map_renderer::MapRenderPlugin;
+use client_bevy::network::NetworkPlugin;
 use client_bevy::scenes::AppState;
 use client_bevy::ui::login::LoginPlugin;
+use client_bevy::ui::select::SelectPlugin;
 
 fn main() {
     let mut app = App::new();
@@ -42,7 +44,7 @@ fn main() {
     app.insert_resource(ClearColor(Color::srgb(0.07, 0.08, 0.12)));
     app.init_state::<AppState>();
     app.add_plugins(EventBusPlugin);
-    app.add_plugins(LoginPlugin);
+    app.add_plugins((NetworkPlugin, LoginPlugin, SelectPlugin));
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         app.add_systems(
@@ -59,10 +61,28 @@ fn main() {
     app.run();
 }
 
-/// 登录后自动进入游戏（--auto-enter）
-fn auto_enter(mut next: ResMut<NextState<AppState>>, mut frames: Local<u32>) {
+/// --auto-enter：自动驱动 mock 登录流程（Login→Select→Game，验证网络管道）
+fn auto_enter(
+    mut net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<AppState>>,
+    mut frames: Local<u32>,
+) {
+    use mir2_shared::packets::client::account::{Login, StartGame};
     *frames += 1;
     if *frames == 5 {
-        next.set(AppState::Game);
+        net.state = client_bevy::network::NetState::LoggingIn;
+        net.send_packet(&Login {
+            account_id: "test".to_string(),
+            password: "123456".to_string(),
+        });
+    }
+    if *state == AppState::Select && net.selected_index.is_none() {
+        let first_index = net.characters.first().map(|c| c.index);
+        if let Some(idx) = first_index {
+            net.selected_index = Some(idx);
+            net.send_packet(&StartGame {
+                character_index: idx,
+            });
+        }
     }
 }

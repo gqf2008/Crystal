@@ -2089,6 +2089,8 @@ dependencies = [
  "bevy",
  "bevy_egui",
  "byteorder",
+ "chrono",
+ "crossbeam-channel",
  "flate2",
  "image",
  "mir2_shared",

@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 
-use crate::event_bus::GameEvent;
+use crate::network::NetworkContext;
 use crate::scenes::AppState;
 
 pub struct LoginPlugin;
@@ -33,8 +33,7 @@ pub struct LoginState {
 fn login_ui(
     mut contexts: EguiContexts,
     mut login: ResMut<LoginState>,
-    mut commands: Commands,
-    mut next: ResMut<NextState<AppState>>,
+    mut net: ResMut<NetworkContext>,
     mut fonts_done: Local<bool>,
 ) {
     let ctx = contexts.ctx_mut().expect("primary egui context");
@@ -118,23 +117,29 @@ fn login_ui(
                         });
                     ui.add_space(14.0);
                     ui.vertical_centered(|ui| {
+                        let connecting = net.state == crate::network::NetState::LoggingIn;
+                        let btn_text = if connecting {
+                            "连 接 中…"
+                        } else {
+                            "登 录"
+                        };
                         if ui
-                            .add_sized(
-                                [170.0, 36.0],
-                                egui::Button::new(
-                                    egui::RichText::new("进 入 游 戏").size(18.0),
-                                ),
+                            .add_enabled(
+                                !connecting,
+                                egui::Button::new(egui::RichText::new(btn_text).size(18.0))
+                                    .min_size(egui::vec2(170.0, 36.0)),
                             )
                             .clicked()
                         {
-                            // mock 登录：发事件 + 切到游戏场景
-                            commands.trigger(GameEvent::LoginSuccess {
-                                account: login.account.clone(),
+                            // 发送 Login（mock 服务器回应 LoginSuccess → Select 场景）
+                            net.state = crate::network::NetState::LoggingIn;
+                            net.send_packet(&mir2_shared::packets::client::account::Login {
+                                account_id: login.account.clone(),
+                                password: login.password.clone(),
                             });
-                            next.set(AppState::Game);
                         }
                     });
-                    if let Some(err) = &login.error {
+                    if let Some(err) = &net.login_error {
                         ui.add_space(6.0);
                         ui.colored_label(egui::Color32::RED, err);
                     }

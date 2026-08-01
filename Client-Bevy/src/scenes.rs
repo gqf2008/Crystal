@@ -5,5 +5,6 @@ use bevy::prelude::*;
 pub enum AppState {
     #[default]
     Login,
+    Select,
     Game,
 }

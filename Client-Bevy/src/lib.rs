@@ -9,6 +9,7 @@
 pub mod actor;
 pub mod event_bus;
 pub mod map_renderer;
+pub mod network;
 pub mod objects;
 pub mod resources;
 pub mod scenes;
