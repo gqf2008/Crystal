@@ -13,6 +13,12 @@
 - `map_renderer.rs` — 每 32x32 格合成一张块纹理（1536x1024），Back/Middle/Front 三层
 - Bevy `Image` 资产 + Sprite 渲染，相机控制（WASD/方向键平移，+/- 缩放）
 
+✅ UI 改用 Bevy 内置 bevy_ui（里程碑 6a）：
+- 移除 bevy_egui 依赖，登录/选角界面改为 bevy_ui（Node/Button/Text/Interaction）
+- 中文字体：FontSource::Handle 加载阿里普惠体（bevy_ui 的 TextFont）
+- 自定义文本输入框（TextInputNode + MessageReader<KeyboardInput>，支持中文/退格/密码打码）
+- 键盘输入用 Bevy 0.19 MessageReader（Event 已更名 Message）
+
 ✅ 网络层 mock 模式（里程碑 5）：
 - 协议管道：codec(长度前缀+XOR) → PacketHeader → 类型化包（mir2_shared）
 - Mock 服务器线程：Login → LoginSuccess(2角色) → StartGame → MapChanged+Object 包 → KeepAlive

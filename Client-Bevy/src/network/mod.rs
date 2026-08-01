@@ -13,7 +13,6 @@ use mir2_shared::SelectInfo;
 
 use crate::map_renderer::GameData;
 use crate::scenes::AppState;
-use crate::ui::login::LoginState;
 
 /// 网络状态
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -117,7 +116,6 @@ fn setup_mock_network(mut net: ResMut<NetworkContext>) {
 /// 网络系统：解码外帧 → 解析包 → 分发处理
 fn network_system(
     mut net: ResMut<NetworkContext>,
-    mut login: ResMut<LoginState>,
     mut game_data: ResMut<GameData>,
     mut net_objects: ResMut<NetObjects>,
     mut next: ResMut<NextState<AppState>>,
@@ -133,7 +131,7 @@ fn network_system(
             match codec::decode(&buf) {
                 Some(Ok((payload, consumed))) => {
                     buf.drain(..consumed);
-                    handle_packet(&mut net, &mut login, &mut game_data, &mut net_objects, &mut next, &payload);
+                    handle_packet(&mut net, &mut game_data, &mut net_objects, &mut next, &payload);
                     if buf.is_empty() {
                         break;
                     }
@@ -152,7 +150,6 @@ fn network_system(
 /// 处理单个内层包
 fn handle_packet(
     net: &mut NetworkContext,
-    login: &mut LoginState,
     game_data: &mut GameData,
     net_objects: &mut NetObjects,
     next: &mut NextState<AppState>,
@@ -170,7 +167,7 @@ fn handle_packet(
                 tracing::info!("✅ 登录成功，角色 {} 个", p.characters.len());
                 net.characters = p.characters;
                 net.state = NetState::Select;
-                login.error = None;
+                net.login_error = None;
                 next.set(AppState::Select);
             }
         }

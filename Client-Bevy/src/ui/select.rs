@@ -1,128 +1,190 @@
 // ============================================================================
-// SelectPlugin - 角色选择界面（bevy_egui）
+// SelectPlugin - 角色选择界面（bevy_ui 原生 UI）
 // ============================================================================
-// 对应 macroquad SelectScene：展示 LoginSuccess 返回的角色列表，选择后发 StartGame
 
 use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts};
 
 use crate::network::NetworkContext;
 use crate::scenes::AppState;
+use crate::ui::theme::{colors, CN_FONT};
 
 pub struct SelectPlugin;
 
 impl Plugin for SelectPlugin {
     fn build(&self, app: &mut App) {
+        app.add_systems(OnEnter(AppState::Select), setup_select_ui);
+        app.add_systems(OnExit(AppState::Select), cleanup_select_ui);
         app.add_systems(
-            bevy_egui::EguiPrimaryContextPass,
-            select_ui.run_if(in_state(AppState::Select)),
+            Update,
+            select_ui_system.run_if(in_state(AppState::Select)),
         );
     }
 }
 
-fn select_ui(
-    mut contexts: EguiContexts,
-    mut net: ResMut<NetworkContext>,
-    mut fonts_done: Local<bool>,
+#[derive(Component)]
+struct SelectRoot;
+#[derive(Component)]
+struct CharButton(i32);
+#[derive(Component)]
+struct EnterButton;
+
+fn setup_select_ui(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+    net: Res<NetworkContext>,
 ) {
-    let ctx = contexts.ctx_mut().expect("primary egui context");
-
-    if !*fonts_done {
-        *fonts_done = true;
-        let mut fonts = egui::FontDefinitions::default();
-        fonts.font_data.insert(
-            "cn".to_owned(),
-            egui::FontData::from_static(include_bytes!(
-                "../../assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf"
+    let font = FontSource::Handle(assets.load(CN_FONT));
+    commands
+        .spawn((
+            SelectRoot,
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.05, 0.06, 0.09)),
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::all(Val::Px(28.0)),
+                    row_gap: Val::Px(10.0),
+                    ..default()
+                },
+                BackgroundColor(colors::PANEL_BG),
             ))
-            .into(),
-        );
-        fonts
-            .families
-            .entry(egui::FontFamily::Proportional)
-            .or_default()
-            .insert(0, "cn".to_owned());
-        ctx.set_fonts(fonts);
-    }
+            .with_children(|card| {
+                card.spawn((
+                    Text::new("选 择 角 色"),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: FontSize::Px(26.0),
+                        ..default()
+                    },
+                    TextColor(colors::TITLE_GOLD),
+                ));
 
-    let screen = ctx.content_rect();
-    egui::Area::new(egui::Id::new("select_bg"))
-        .fixed_pos(egui::Pos2::ZERO)
-        .order(egui::Order::Background)
-        .show(ctx, |ui| {
-            ui.painter().rect_filled(screen, 0.0, egui::Color32::from_rgb(16, 18, 26));
-        });
-
-    egui::Area::new(egui::Id::new("select_card"))
-        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-        .show(ctx, |ui| {
-            egui::Frame::window(&ctx.style_of(egui::Theme::Dark))
-                .fill(egui::Color32::from_rgb(30, 34, 46))
-                .corner_radius(10)
-                .inner_margin(egui::Margin::same(24))
-                .show(ui, |ui| {
-                    ui.set_width(340.0);
-                    ui.vertical_centered(|ui| {
-                        ui.label(
-                            egui::RichText::new("选 择 角 色")
-                                .size(26.0)
-                                .strong()
-                                .color(egui::Color32::from_rgb(235, 205, 130)),
-                        );
-                    });
-                    ui.add_space(16.0);
-
-                    if net.characters.is_empty() {
-                        ui.label("暂无角色");
-                    } else {
-                        for c in net.characters.clone() {
-                            let class_name = match c.class {
-                                mir2_shared::MirClass::Warrior => "战士",
-                                mir2_shared::MirClass::Wizard => "法师",
-                                mir2_shared::MirClass::Taoist => "道士",
-                                mir2_shared::MirClass::Assassin => "刺客",
-                                mir2_shared::MirClass::Archer => "弓箭手",
-                            };
-                            let gender_name = match c.gender {
+                if net.characters.is_empty() {
+                    card.spawn((
+                        Text::new("暂无角色"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: FontSize::Px(14.0),
+                            ..default()
+                        },
+                        TextColor(colors::TEXT),
+                    ));
+                } else {
+                    for c in net.characters.iter() {
+                        let class_name = match c.class {
+                            mir2_shared::MirClass::Warrior => "战士",
+                            mir2_shared::MirClass::Wizard => "法师",
+                            mir2_shared::MirClass::Taoist => "道士",
+                            mir2_shared::MirClass::Assassin => "刺客",
+                            mir2_shared::MirClass::Archer => "弓箭手",
+                        };
+                        let label = format!(
+                            "{}  Lv.{}  {}{}",
+                            c.name,
+                            c.level,
+                            class_name,
+                            match c.gender {
                                 mir2_shared::MirGender::Male => "男",
                                 _ => "女",
-                            };
-                            let selected = net.selected_index == Some(c.index);
-                            if ui
-                                .selectable_label(
-                                    selected,
-                                    format!(
-                                        "{}  Lv.{}  {}{}",
-                                        c.name, c.level, class_name, gender_name
-                                    ),
-                                )
-                                .clicked()
-                            {
-                                net.selected_index = Some(c.index);
                             }
-                        }
+                        );
+                        card.spawn((
+                            CharButton(c.index),
+                            Button,
+                            Node {
+                                width: Val::Px(280.0),
+                                height: Val::Px(36.0),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            BackgroundColor(colors::BUTTON_BG),
+                        ))
+                        .with_children(|b| {
+                            b.spawn((
+                                Text::new(label),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: FontSize::Px(15.0),
+                                    ..default()
+                                },
+                                TextColor(colors::TEXT),
+                            ));
+                        });
                     }
+                }
 
-                    ui.add_space(16.0);
-                    ui.vertical_centered(|ui| {
-                        let ready = net.selected_index.is_some();
-                        if ui
-                            .add_enabled(
-                                ready,
-                                egui::Button::new(
-                                    egui::RichText::new("进 入 游 戏").size(18.0),
-                                )
-                                .min_size(egui::vec2(170.0, 36.0)),
-                            )
-                            .clicked()
-                        {
-                            if let Some(idx) = net.selected_index {
-                                net.send_packet(&mir2_shared::packets::client::account::StartGame {
-                                    character_index: idx,
-                                });
-                            }
-                        }
-                    });
+                // 进入游戏按钮
+                card.spawn((
+                    EnterButton,
+                    Button,
+                    Node {
+                        width: Val::Px(200.0),
+                        height: Val::Px(38.0),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(colors::BUTTON_BG),
+                ))
+                .with_children(|b| {
+                    b.spawn((
+                        Text::new("进 入 游 戏"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: FontSize::Px(18.0),
+                            ..default()
+                        },
+                        TextColor(colors::TEXT),
+                    ));
                 });
+            });
         });
+}
+
+fn cleanup_select_ui(mut commands: Commands, root: Query<Entity, With<SelectRoot>>) {
+    for e in root.iter() {
+        commands.entity(e).despawn();
+    }
+}
+
+fn select_ui_system(
+    mut net: ResMut<NetworkContext>,
+    chars: Query<(&Interaction, &CharButton)>,
+    mut char_bg: Query<(&CharButton, &mut BackgroundColor)>,
+    enter: Query<&Interaction, (With<EnterButton>, Without<CharButton>)>,
+) {
+    // 选择角色
+    for (interaction, char_btn) in chars.iter() {
+        if *interaction == Interaction::Pressed {
+            net.selected_index = Some(char_btn.0);
+        }
+    }
+    // 高亮选中角色
+    for (btn, mut bg) in char_bg.iter_mut() {
+        *bg = if net.selected_index == Some(btn.0) {
+            BackgroundColor(colors::BUTTON_PRESS)
+        } else {
+            BackgroundColor(colors::BUTTON_BG)
+        };
+    }
+    // 进入游戏
+    let pressed = enter.iter().any(|i| *i == Interaction::Pressed);
+    if pressed {
+        if let Some(idx) = net.selected_index {
+            net.send_packet(&mir2_shared::packets::client::account::StartGame {
+                character_index: idx,
+            });
+        }
+    }
 }

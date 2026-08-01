@@ -47,10 +47,8 @@ fn main() {
     app.add_plugins((NetworkPlugin, LoginPlugin, SelectPlugin));
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
-        app.add_systems(
-            Update,
-            auto_enter.run_if(in_state(AppState::Login)),
-        );
+        // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
+        app.add_systems(Update, auto_enter);
     }
     // --no-actors: 只渲染地图（用于纯地图截图验证）
     if std::env::args().any(|a| a == "--no-actors") {
