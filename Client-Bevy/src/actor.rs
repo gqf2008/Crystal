@@ -14,7 +14,6 @@
 // 渲染方式: 每个角色实体挂多层子实体（身体/发型/武器/特效），
 // 每帧按帧号从对应 .Lib 取图并缓存为 Bevy Image 资产。
 
-use bevy::color::Alpha;
 use bevy::prelude::*;
 use mir2_shared::{MirAction, MirClass, MirDirection, MirGender};
 
@@ -37,11 +36,12 @@ impl Plugin for ActorPlugin {
                 spawn_demo_actors_when_ready,
                 advance_actor_animations,
                 actor_sprite_render,
+                update_local_ghost,
                 dump_depth_debug,
             )
                 .chain(),
         );
-        app.add_systems(Update, (demo_drive, sync_actor_depth, local_player_ghost, log_player_walk));
+        app.add_systems(Update, (demo_drive, sync_actor_depth, log_player_walk));
     }
 }
 
@@ -375,6 +375,19 @@ fn spawn_player(commands: &mut Commands, x: f32, y: f32) {
                 is_effect: false,
             },
         ));
+        // ghost 残影层（遮挡时显示，镜像对应图层）
+        for lib in [
+            ArrayLibType::CArmours,
+            ArrayLibType::CHair,
+            ArrayLibType::CWeapons,
+        ] {
+            p.spawn((
+                Sprite::default(),
+                Transform::from_xyz(0.0, 0.0, 0.5),
+                Visibility::Hidden,
+                GhostLayer { lib },
+            ));
+        }
     });
 }
 
@@ -450,6 +463,8 @@ fn spawn_npc(commands: &mut Commands, npc_index: u16, x: f32, y: f32) {
 fn dump_depth_debug(
     actors: Query<(&ActorAppearance, &Transform)>,
     front: Query<(&Transform, &crate::map_renderer::FrontTile)>,
+    ghosts: Query<&Visibility, With<GhostLayer>>,
+    local: Query<&Transform, (With<LocalPlayer>, Without<GhostLayer>)>,
     mut frames: Local<u32>,
 ) {
     if std::env::var_os("CRYSTAL_DEPTH_DEBUG").is_none() {
@@ -503,39 +518,88 @@ fn dump_depth_debug(
             .count();
         lines.push_str(&format!("  player foot_y={:.0} occluding_front_tiles={}\n", foot_y, occluding));
     }
+    // ghost 状态：本地玩家是否被遮挡、残影是否可见
+    if let Ok(tf) = local.single() {
+        let foot_x = tf.translation.x;
+        let foot_y = -tf.translation.y;
+        let occluded = front.iter().any(|(_, ft)| {
+            ft.bottom > foot_y
+                && ft.left < foot_x + 22.0
+                && ft.right > foot_x - 22.0
+                && ft.top < foot_y + 2.0
+                && ft.bottom > foot_y - 92.0
+        });
+        let visible_count = ghosts.iter().filter(|v| **v == Visibility::Visible).count();
+        lines.push_str(&format!(
+            "  ghost: occluded={} visible_layers={}/{}\n",
+            occluded,
+            visible_count,
+            ghosts.iter().count()
+        ));
+    }
     let _ = std::fs::write("E:/tmp/depth_debug.txt", lines);
 }
 
-/// 本地玩家遮挡 ghost：被 front 瓦片（建筑/树）遮挡时，
-/// 把遮挡瓦片变半透明，让玩家透过建筑显示出来（macroquad focus_mask 等效）
-fn local_player_ghost(
-    mut front: Query<(&mut Sprite, &crate::map_renderer::FrontTile)>,
-    local: Query<&Transform, (With<LocalPlayer>, With<ActorAppearance>)>,
+/// Ghost 残影层标记：镜像本地玩家的对应图层（按库匹配）
+#[derive(Component, Clone, Copy)]
+pub struct GhostLayer {
+    pub lib: crate::resources::libraries::ArrayLibType,
+}
+
+/// 本地玩家遮挡 ghost（对齐 macroquad PostFront 实现）：
+/// 被 front 瓦片（建筑/树）遮挡时，在 front 层之上再画一层半透明玩家残影。
+/// 建筑本身保持不透明，避免"周边建筑块全变半透明"。
+fn update_local_ghost(
+    mut ghosts: Query<
+        (&mut Sprite, &mut Transform, &mut Visibility, &GhostLayer),
+        (Without<SpriteLayer>, Without<LocalPlayer>),
+    >,
+    local: Query<(&Transform, &Children), (With<LocalPlayer>, Without<GhostLayer>)>,
+    layers: Query<(&Sprite, &Transform, &SpriteLayer), Without<GhostLayer>>,
+    front: Query<&crate::map_renderer::FrontTile>,
 ) {
-    let Ok(tf) = local.single() else {
+    let Ok((root_tf, children)) = local.single() else {
         return;
     };
-    let foot_x = tf.translation.x;
-    let foot_y = -tf.translation.y; // 屏幕向下世界坐标
-    // 玩家大致包围盒（覆盖身体/武器/翅膀）
-    let (pl, pt, pr, pb) = (foot_x - 32.0, foot_y - 112.0, foot_x + 32.0, foot_y + 4.0);
-    const GHOST_ALPHA: f32 = 0.45;
+    let foot_x = root_tf.translation.x;
+    let foot_y = -root_tf.translation.y;
+    // 玩家身体包围盒（覆盖身体/武器/翅膀）
+    let (bl, bt, br, bb) = (foot_x - 22.0, foot_y - 92.0, foot_x + 22.0, foot_y + 2.0);
+    let occluded = front.iter().any(|ft| {
+        ft.bottom > foot_y
+            && ft.left < br
+            && ft.right > bl
+            && ft.top < bb
+            && ft.bottom > bt
+    });
+    const GHOST_ALPHA: f32 = 0.55; // 与 macroquad PLAYER_GHOST_ALPHA 一致
+    const GHOST_LOCAL_Z: f32 = 0.5; // 本地 z 偏移：保证世界 z 高于所有 front 瓦片
 
-    for (mut sprite, ft) in &mut front {
-        // 瓦片基准（底边）低于玩家脚底 → 该瓦片处于玩家前方、遮挡玩家
-        let occludes = ft.bottom > foot_y
-            && ft.left < pr
-            && ft.right > pl
-            && ft.top < pb
-            && ft.bottom > pt;
-        let target = if occludes { GHOST_ALPHA } else { 1.0 };
-        if (sprite.color.alpha() - target).abs() > 0.001 {
-            sprite.color = Color::srgba(1.0, 1.0, 1.0, target);
+    for (mut gs, mut gt, mut gv, gl) in &mut ghosts {
+        let mut matched = None;
+        for child in children.iter() {
+            if let Ok((ls, lt, ll)) = layers.get(child) {
+                if ll.lib == gl.lib {
+                    matched = Some((ls, lt));
+                    break;
+                }
+            }
+        }
+        match matched {
+            Some((ls, lt)) if occluded => {
+                gs.image = ls.image.clone();
+                gs.color = Color::srgba(1.0, 1.0, 1.0, GHOST_ALPHA);
+                gt.translation = Vec3::new(lt.translation.x, lt.translation.y, GHOST_LOCAL_Z);
+                *gv = Visibility::Visible;
+            }
+            _ => {
+                *gv = Visibility::Hidden;
+            }
         }
     }
 }
 
-/// 调试：记录玩家位置采样，验证移动平滑（每 6 帧一次，前 90 帧）
+/// 调试：记录玩家位置采样，验证移动平滑（每 6 帧一次，前 90 帧，CRYSTAL_DEPTH_DEBUG 开启）
 fn log_player_walk(
     local: Query<&Transform, With<LocalPlayer>>,
     mut frames: Local<u32>,

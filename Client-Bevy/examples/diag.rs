@@ -217,6 +217,25 @@ fn main() {
         println!("middle: tiles={} unique_images={}", mtiles, muniq.len());
     }
 
+    // 估算 front 瓦片条带化（32px/带）后的精灵数
+    {
+        let mut tiles = 0usize;
+        let mut bands = 0usize;
+        let mut tall = 0usize;
+        for x in 0..map.width {
+            for y in 0..map.height {
+                let Some((li, ii)) = map.map_cells[x as usize][y as usize].front_tile() else { continue };
+                tiles += 1;
+                if let Some(info) = libs.get_map_image(li, ii) {
+                    let h = info.height as usize;
+                    bands += (h + 31) / 32;
+                    if h > 48 { tall += 1; }
+                }
+            }
+        }
+        println!("front bands estimate: tiles={} bands={} tall(>48px)={}", tiles, bands, tall);
+    }
+
     // 验证 MapLibs 关键槽位
     for idx in [0i16, 1, 2, 100, 110, 120, 121, 190, 200] {
         let lib = libs.get_map_library(idx);
