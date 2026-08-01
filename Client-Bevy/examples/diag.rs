@@ -236,6 +236,38 @@ fn main() {
         println!("front bands estimate: tiles={} bands={} tall(>48px)={}", tiles, bands, tall);
     }
 
+    // 验证 UI 素材（登录/选角）
+    {
+        libs.ensure_initialized();
+        use client_bevy::resources::libraries::LibraryName;
+        for (name, idx) in [
+            (LibraryName::Prguse, 1084usize),
+            (LibraryName::Title, 30usize),
+            (LibraryName::Title, 31usize),
+            (LibraryName::Title, 32usize),
+            (LibraryName::Title, 320usize),
+            (LibraryName::Title, 323usize),
+            (LibraryName::Title, 326usize),
+            (LibraryName::Prguse, 63usize),
+            (LibraryName::Title, 200usize),
+            (LibraryName::Prguse, 50usize),
+            (LibraryName::Title, 107usize),
+            (LibraryName::Prguse, 65usize),
+            (LibraryName::Title, 40usize),
+            (LibraryName::Prguse, 44usize),
+            (LibraryName::Title, 660usize),
+            (LibraryName::Title, 665usize),
+            (LibraryName::Title, 340usize),
+            (LibraryName::Title, 343usize),
+            (LibraryName::Title, 346usize),
+        ] {
+            match libs.get_image(name, idx) {
+                Some(info) => println!("✓ {:?}[{}] {}x{}", name, idx, info.width, info.height),
+                None => println!("✗ {:?}[{}] 加载失败", name, idx),
+            }
+        }
+    }
+
     // 验证 MapLibs 关键槽位
     for idx in [0i16, 1, 2, 100, 110, 120, 121, 190, 200] {
         let lib = libs.get_map_library(idx);
