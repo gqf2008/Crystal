@@ -1,5 +1,5 @@
 // 诊断工具：验证地图解析 + 地图库图像加载（控制台程序，无 GUI）
-use client_bevy::resources::libraries::{resolve_data_path, Libraries};
+use client_bevy::resources::libraries::{resolve_data_path, ArrayLibType, Libraries};
 use client_bevy::resources::map_reader::{resolve_map_path, MapReader};
 
 fn main() {
@@ -60,6 +60,30 @@ fn main() {
         }
         if sampled == 0 {
             println!("  {}: no tiles found in map!", layer_name);
+        }
+    }
+
+    // 验证数组库（角色/怪物/NPC）
+    println!("===== 数组库校验 =====");
+    for (ty, idxs) in [
+        (ArrayLibType::CArmours, vec![0usize]),
+        (ArrayLibType::CHair, vec![0usize]),
+        (ArrayLibType::CWeapons, vec![0usize]),
+        (ArrayLibType::Monsters, vec![1usize, 5, 9]),
+        (ArrayLibType::Npcs, vec![0usize]),
+    ] {
+        for idx in idxs {
+            match libs.get_array_image_debug(ty, idx, 0) {
+                Ok(info) => println!(
+                    "✓ {}[{}] img0: {}x{} rgba={}",
+                    ty.name(),
+                    idx,
+                    info.width,
+                    info.height,
+                    info.rgba.is_some()
+                ),
+                Err(e) => println!("✗ {}[{}] img0: {}", ty.name(), idx, e),
+            }
         }
     }
 

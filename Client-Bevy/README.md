@@ -13,8 +13,15 @@
 - `map_renderer.rs` — 每 32x32 格合成一张块纹理（1536x1024），Back/Middle/Front 三层
 - Bevy `Image` 资产 + Sprite 渲染，相机控制（WASD/方向键平移，+/- 缩放）
 
+✅ 角色/NPC/怪物精灵渲染与帧动画（里程碑 2）：
+- `objects/frames.rs` — 帧表原样复用（PLAYER/MONSTER/NPC + 特殊怪物）
+- `actor.rs` — ActorPlugin：ActorAnim/ActorAppearance/SpriteLayer 组件
+- 帧号公式与 C#/macroquad 一致：DrawFrame = Start + Dir*OffSet + FrameIndex
+- 分层渲染（护甲/发型/武器/特效）+ 精灵图缓存（按 库+槽位+帧 复用 Image 资产）
+- 数组库懒加载（CArmour/CHair/CWeapon/CHumEffect/Monster/NPC）
+- 演示：玩家绕方块行走、怪物待机转向/周期攻击、NPC 待机
+
 🚧 待办（后续里程碑）：
-- 角色/NPC/怪物精灵渲染与动画（objects/frames）
 - 场景系统（login/select/game）+ bevy_egui 对话框
 - 网络层（17 handler + mock 模式）
 - ECS 系统移植（combat/AI/physics/presentation）

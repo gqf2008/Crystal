@@ -10,6 +10,7 @@
 
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
+use client_bevy::actor::ActorPlugin;
 use client_bevy::map_renderer::MapRenderPlugin;
 
 fn main() {
@@ -28,6 +29,6 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins(MapRenderPlugin)
+        .add_plugins((MapRenderPlugin, ActorPlugin))
         .run();
 }

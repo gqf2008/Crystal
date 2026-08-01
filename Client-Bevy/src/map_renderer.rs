@@ -26,12 +26,15 @@ pub const CHUNK_TILES: u32 = 32;
 pub const CHUNK_PIXEL_W: u32 = CHUNK_TILES * TILE_WIDTH as u32; // 1536
 pub const CHUNK_PIXEL_H: u32 = CHUNK_TILES * TILE_HEIGHT as u32; // 1024
 
-/// 游戏数据资源：库 + 地图
+/// 游戏数据资源：当前地图信息
 #[derive(Resource, Default)]
 pub struct GameData {
-    pub libraries: Option<Libraries>,
     pub map: Option<LoadedMap>,
 }
+
+/// 图像库资源（地图库 + 数组库，供渲染系统使用）
+#[derive(Resource)]
+pub struct GameLibraries(pub Libraries);
 
 /// 已加载地图
 pub struct LoadedMap {
@@ -170,7 +173,7 @@ fn setup_world(
         }),
     ));
 
-    game_data.libraries = Some(libraries);
+    commands.insert_resource(GameLibraries(libraries));
     game_data.map = Some(LoadedMap {
         name: map_name,
         width: map.width,
@@ -261,7 +264,7 @@ fn blit(
 }
 
 /// 用原始 RGBA 数据构造 Bevy Image 资产
-fn make_image(rgba: Vec<u8>, width: u32, height: u32) -> Image {
+pub(crate) fn make_image(rgba: Vec<u8>, width: u32, height: u32) -> Image {
     Image::new(
         Extent3d {
             width,

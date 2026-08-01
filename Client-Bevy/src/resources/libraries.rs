@@ -70,6 +70,54 @@ impl LibraryName {
     }
 }
 
+/// 数组库类型（角色/怪物/NPC 装备库，按需懒加载）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ArrayLibType {
+    /// 怪物库 Monster/{:03}.Lib
+    Monsters,
+    /// NPC 库 NPC/{:02}.Lib
+    Npcs,
+    /// 战士/法师/道士护甲 CArmour/{:02}.Lib
+    CArmours,
+    /// 发型 CHair/{:02}.Lib
+    CHair,
+    /// 武器 CWeapon/{:02}.Lib
+    CWeapons,
+    /// 人物特效（翅膀等）CHumEffect/{:02}.Lib
+    CHumEffect,
+}
+
+impl ArrayLibType {
+    pub fn name(&self) -> &'static str {
+        match self {
+            ArrayLibType::Monsters => "Monsters",
+            ArrayLibType::Npcs => "Npcs",
+            ArrayLibType::CArmours => "CArmours",
+            ArrayLibType::CHair => "CHair",
+            ArrayLibType::CWeapons => "CWeapons",
+            ArrayLibType::CHumEffect => "CHumEffect",
+        }
+    }
+
+    /// 相对 Data 目录的路径（不含扩展名）
+    pub fn default_path(&self, index: usize) -> String {
+        match self {
+            ArrayLibType::Monsters => format!("Monster/{:03}", index),
+            ArrayLibType::Npcs => format!("NPC/{:02}", index),
+            ArrayLibType::CArmours => format!("CArmour/{:02}", index),
+            ArrayLibType::CHair => format!("CHair/{:02}", index),
+            ArrayLibType::CWeapons => format!("CWeapon/{:02}", index),
+            ArrayLibType::CHumEffect => format!("CHumEffect/{:02}", index),
+        }
+    }
+}
+
+impl std::fmt::Display for ArrayLibType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
 /// 解析 Data 根目录。
 ///
 /// 优先使用本 crate 的 Data/，其次共享其他客户端的数据目录
@@ -108,6 +156,8 @@ pub struct Libraries {
     libraries: HashMap<LibraryName, MLibrary>,
     /// 地图库 (C#: MapLibs[400])
     map_libs: Vec<Option<MLibrary>>,
+    /// 数组库（角色/怪物/NPC，懒加载）
+    array_libs: HashMap<ArrayLibType, Vec<Option<MLibrary>>>,
     /// 数据根目录
     data_path: PathBuf,
     /// 已加载数量
@@ -119,6 +169,7 @@ impl Libraries {
         Self {
             libraries: HashMap::new(),
             map_libs: (0..400).map(|_| None).collect(),
+            array_libs: HashMap::new(),
             data_path: data_path.into(),
             loaded: 0,
         }
@@ -277,6 +328,76 @@ impl Libraries {
         for i in 1..31 {
             self.load_to_map_slot(320 + i, base.join(format!("Objects{}", i + 1)));
         }
+    }
+
+    // ===== 数组库（角色/怪物/NPC，懒加载） =====
+
+    /// 获取数组库（不存在/未加载返回 None）
+    pub fn get_array_lib(&self, ty: ArrayLibType, index: usize) -> Option<&MLibrary> {
+        self.array_libs.get(&ty)?.get(index)?.as_ref()
+    }
+
+    /// 加载数组库到指定槽位（懒加载：只有实际用到才打开文件）
+    fn ensure_array_lib(&mut self, ty: ArrayLibType, index: usize) -> Option<()> {
+        let slot = self
+            .array_libs
+            .entry(ty)
+            .or_default();
+        if index >= slot.len() {
+            slot.resize_with(index + 1, || None);
+        }
+        if slot[index].is_some() {
+            return Some(());
+        }
+        let path = self.data_path.join(ty.default_path(index));
+        match MLibrary::open(&path) {
+            Ok(lib) => {
+                tracing::debug!("✓ {}[{}] = {} ({} 张图像)", ty, index, path.display(), lib.count());
+                slot[index] = Some(lib);
+                self.loaded += 1;
+                Some(())
+            }
+            Err(e) => {
+                tracing::warn!("✗ {}[{}] = {} 失败: {}", ty, index, path.display(), e);
+                None
+            }
+        }
+    }
+
+    /// 获取数组库图像（懒加载 + 解压 RGBA）
+    pub fn get_array_image(
+        &mut self,
+        ty: ArrayLibType,
+        index: usize,
+        image_index: usize,
+    ) -> Option<ImageInfo> {
+        self.try_get_array_image(ty, index, image_index).ok()
+    }
+
+    /// 获取数组库图像（返回具体错误，用于诊断）
+    pub fn get_array_image_debug(
+        &mut self,
+        ty: ArrayLibType,
+        index: usize,
+        image_index: usize,
+    ) -> Result<ImageInfo, String> {
+        self.try_get_array_image(ty, index, image_index)
+    }
+
+    fn try_get_array_image(
+        &mut self,
+        ty: ArrayLibType,
+        index: usize,
+        image_index: usize,
+    ) -> Result<ImageInfo, String> {
+        self.ensure_array_lib(ty, index)
+            .ok_or_else(|| format!("{}[{}] 加载失败", ty, index))?;
+        let slot = self.array_libs.get_mut(&ty).unwrap();
+        let lib = slot[index].as_mut().unwrap();
+        let count = lib.count();
+        lib.get_or_load_image(image_index)
+            .cloned()
+            .map_err(|e| format!("{}[{}] idx {} (count {}): {}", ty, index, image_index, count, e))
     }
 
     /// 获取单体库
