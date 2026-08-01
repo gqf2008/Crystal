@@ -10,6 +10,7 @@
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::{OrthographicProjection, Projection};
+use bevy::image::ImageSampler;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
@@ -45,7 +46,7 @@ pub struct LoadedMap {
 
 /// 图层
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Layer {
+pub enum Layer {
     Back,
     Middle,
     Front,
@@ -175,21 +176,23 @@ fn setup_world(
 
     commands.insert_resource(GameLibraries(libraries));
     game_data.map = Some(LoadedMap {
-        name: map_name,
+        name: map_name.clone(),
         width: map.width,
         height: map.height,
     });
+
 }
 
-/// 把指定块的三层之一合成一张纹理。块内无任何瓦片时返回 None。
-fn build_chunk(
+/// 把指定块的三层之一合成一张 RGBA 画布。块内无任何瓦片时返回 None。
+///
+/// 供 Bevy 渲染与离屏诊断（examples）共用，确保验证路径与渲染路径一致。
+pub fn build_chunk_rgba(
     libraries: &mut Libraries,
     map: &MapReader,
     layer: Layer,
     cx: i32,
     cy: i32,
-    assets: &mut Assets<Image>,
-) -> Option<Handle<Image>> {
+) -> Option<Vec<u8>> {
     let mut canvas = vec![0u8; (CHUNK_PIXEL_W * CHUNK_PIXEL_H * 4) as usize];
     let mut any_drawn = false;
 
@@ -223,7 +226,22 @@ fn build_chunk(
         return None;
     }
 
-    let image = make_image(canvas, CHUNK_PIXEL_W, CHUNK_PIXEL_H);
+    Some(canvas)
+}
+
+/// 把指定块的三层之一合成一张纹理。块内无任何瓦片时返回 None。
+fn build_chunk(
+    libraries: &mut Libraries,
+    map: &MapReader,
+    layer: Layer,
+    cx: i32,
+    cy: i32,
+    assets: &mut Assets<Image>,
+) -> Option<Handle<Image>> {
+    let canvas = build_chunk_rgba(libraries, map, layer, cx, cy)?;
+    let mut image = make_image(canvas, CHUNK_PIXEL_W, CHUNK_PIXEL_H);
+    // 地图瓦片用最近邻过滤，避免缩放时发虚（与 macroquad MapLibs 的 Nearest 一致）
+    image.sampler = ImageSampler::nearest();
     Some(assets.add(image))
 }
 
