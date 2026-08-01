@@ -34,10 +34,15 @@ pub fn depth_y(world_y_screen_down: f32) -> f32 {
     0.2 + world_y_screen_down * 0.00001
 }
 
-/// Front 瓦片标记：记录基准 Y（格子底边），用于深度排序/后续动画
+/// Front 瓦片标记：记录世界矩形（屏幕向下坐标）与基准 Y，
+/// 用于深度排序与本地玩家遮挡检测
 #[derive(Component)]
 pub struct FrontTile {
     pub base_y: f32,
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
 }
 
 /// 游戏数据资源：当前地图信息
@@ -219,13 +224,21 @@ fn setup_world(
                     };
                     // 基准 Y = 格子底边 (y+1)*32（macroquad: offset_y = y*32 + 32 - h）
                     let base_y = ((y + 1) * TILE_HEIGHT as i32) as f32;
-                    let center_x = (x as f32) * TILE_WIDTH + w as f32 / 2.0;
+                    let left = (x as f32) * TILE_WIDTH;
+                    let top = base_y - h as f32;
+                    let center_x = left + w as f32 / 2.0;
                     let center_y = -(base_y - h as f32 / 2.0);
                     commands.spawn((
                         Sprite::from_image(handle),
                         Transform::from_xyz(center_x, center_y, depth_y(base_y)),
                         Visibility::default(),
-                        FrontTile { base_y },
+                        FrontTile {
+                            base_y,
+                            left,
+                            top,
+                            right: left + w as f32,
+                            bottom: base_y,
+                        },
                     ));
                     front_spawned += 1;
                 }

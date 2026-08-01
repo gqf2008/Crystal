@@ -14,6 +14,7 @@
 // 渲染方式: 每个角色实体挂多层子实体（身体/发型/武器/特效），
 // 每帧按帧号从对应 .Lib 取图并缓存为 Bevy Image 资产。
 
+use bevy::color::Alpha;
 use bevy::prelude::*;
 use mir2_shared::{MirAction, MirClass, MirDirection, MirGender};
 
@@ -40,7 +41,7 @@ impl Plugin for ActorPlugin {
             )
                 .chain(),
         );
-        app.add_systems(Update, (demo_drive, sync_actor_depth));
+        app.add_systems(Update, (demo_drive, sync_actor_depth, local_player_ghost, log_player_walk));
     }
 }
 
@@ -68,6 +69,10 @@ pub enum ActorAppearance {
         npc_index: u16,
     },
 }
+
+/// 本地玩家标记（用于遮挡 ghost 效果）
+#[derive(Component)]
+pub struct LocalPlayer;
 
 /// 动画状态（动作/朝向/当前帧）
 #[derive(Component)]
@@ -105,12 +110,17 @@ pub struct SpriteLayer {
 /// 演示行为（统一枚举，挂在演示角色上）
 #[derive(Component)]
 pub enum DemoBehavior {
-    /// 玩家：绕方块行走
+    /// 玩家：绕方块行走（平滑插值，一格 0.6s）
     Walk {
         side_len: i32,
         side_progress: i32,
         direction: u8,
-        move_timer: f32,
+        step_progress: f32,
+        from_x: f32,
+        from_y: f32,
+        to_x: f32,
+        to_y: f32,
+        started: bool,
     },
     /// 原地待机并缓慢转向
     Idle {
@@ -308,6 +318,7 @@ fn spawn_player(commands: &mut Commands, x: f32, y: f32) {
     let z = depth_z(y);
     let root = commands
         .spawn((
+            LocalPlayer,
             ActorAppearance::Player {
                 class: MirClass::Warrior,
                 gender: MirGender::Male,
@@ -322,7 +333,12 @@ fn spawn_player(commands: &mut Commands, x: f32, y: f32) {
                 side_len: 6,
                 side_progress: 0,
                 direction: 0,
-                move_timer: 0.0,
+                step_progress: 0.0,
+                from_x: x,
+                from_y: y,
+                to_x: x,
+                to_y: y,
+                started: false,
             },
             Transform::from_xyz(x, -y, z),
             Visibility::default(),
@@ -430,16 +446,19 @@ fn spawn_npc(commands: &mut Commands, npc_index: u16, x: f32, y: f32) {
     });
 }
 
-/// 调试：输出角色 z 与附近 front 瓦片 z 的一次性对比（验证遮挡排序）
+/// 调试：输出角色 z、玩家平滑移动进度与 ghost 遮挡瓦片数（帧 30 一次）
 fn dump_depth_debug(
     actors: Query<(&ActorAppearance, &Transform)>,
     front: Query<(&Transform, &crate::map_renderer::FrontTile)>,
-    mut done: Local<bool>,
+    mut frames: Local<u32>,
 ) {
-    if *done {
+    if std::env::var_os("CRYSTAL_DEPTH_DEBUG").is_none() {
         return;
     }
-    *done = true;
+    *frames += 1;
+    if *frames != 30 {
+        return;
+    }
     let mut lines = String::from("depth debug\n");
     for (app, tf) in &actors {
         let label = match app {
@@ -467,7 +486,77 @@ fn dump_depth_debug(
         fz.first().map(|x| x.0).unwrap_or(0.0),
         fz.last().map(|x| x.0).unwrap_or(0.0)
     ));
+    // ghost 统计：玩家前方遮挡瓦片数（本地玩家）
+    let player_y = actors
+        .iter()
+        .filter(|(app, _)| matches!(app, ActorAppearance::Player { .. }))
+        .map(|(_, tf)| -tf.translation.y)
+        .next();
+    if let Some(foot_y) = player_y {
+        let occluding = front
+            .iter()
+            .filter(|(tf, ft)| {
+                ft.bottom > foot_y
+                    && (tf.translation.x - 16600.0).abs() < 300.0
+                    && ft.base_y < foot_y + 500.0
+            })
+            .count();
+        lines.push_str(&format!("  player foot_y={:.0} occluding_front_tiles={}\n", foot_y, occluding));
+    }
     let _ = std::fs::write("E:/tmp/depth_debug.txt", lines);
+}
+
+/// 本地玩家遮挡 ghost：被 front 瓦片（建筑/树）遮挡时，
+/// 把遮挡瓦片变半透明，让玩家透过建筑显示出来（macroquad focus_mask 等效）
+fn local_player_ghost(
+    mut front: Query<(&mut Sprite, &crate::map_renderer::FrontTile)>,
+    local: Query<&Transform, (With<LocalPlayer>, With<ActorAppearance>)>,
+) {
+    let Ok(tf) = local.single() else {
+        return;
+    };
+    let foot_x = tf.translation.x;
+    let foot_y = -tf.translation.y; // 屏幕向下世界坐标
+    // 玩家大致包围盒（覆盖身体/武器/翅膀）
+    let (pl, pt, pr, pb) = (foot_x - 32.0, foot_y - 112.0, foot_x + 32.0, foot_y + 4.0);
+    const GHOST_ALPHA: f32 = 0.45;
+
+    for (mut sprite, ft) in &mut front {
+        // 瓦片基准（底边）低于玩家脚底 → 该瓦片处于玩家前方、遮挡玩家
+        let occludes = ft.bottom > foot_y
+            && ft.left < pr
+            && ft.right > pl
+            && ft.top < pb
+            && ft.bottom > pt;
+        let target = if occludes { GHOST_ALPHA } else { 1.0 };
+        if (sprite.color.alpha() - target).abs() > 0.001 {
+            sprite.color = Color::srgba(1.0, 1.0, 1.0, target);
+        }
+    }
+}
+
+/// 调试：记录玩家位置采样，验证移动平滑（每 6 帧一次，前 90 帧）
+fn log_player_walk(
+    local: Query<&Transform, With<LocalPlayer>>,
+    mut frames: Local<u32>,
+) {
+    if std::env::var_os("CRYSTAL_DEPTH_DEBUG").is_none() {
+        return;
+    }
+    *frames += 1;
+    if *frames > 90 || !(*frames).is_multiple_of(6) {
+        return;
+    }
+    if let Ok(tf) = local.single() {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("E:/tmp/player_walk.txt")
+        {
+            let _ = writeln!(f, "frame={} x={:.1} y={:.1}", *frames, tf.translation.x, tf.translation.y);
+        }
+    }
 }
 
 /// 角色 z 与脚底世界 Y 保持同步（移动/转向时深度正确）
@@ -491,23 +580,46 @@ fn demo_drive(
                 side_len,
                 side_progress,
                 direction,
-                move_timer,
+                step_progress,
+                from_x,
+                from_y,
+                to_x,
+                to_y,
+                started,
             } => {
+                anim.action = MirAction::Walking;
+                anim.direction = *direction;
                 let step_time = 0.6; // 与 Walking 帧间隔同步（6帧 * 100ms）
-                *move_timer += dt;
-                while *move_timer >= step_time {
-                    *move_timer -= step_time;
+                if !*started {
+                    // 首次：从当前位置初始化目标
+                    *from_x = tf.translation.x;
+                    *from_y = -tf.translation.y;
                     let (dx, dy) = dir_vec(*direction);
-                    tf.translation.x += dx * TILE_WIDTH;
-                    tf.translation.y -= dy * TILE_HEIGHT;
+                    *to_x = *from_x + dx * TILE_WIDTH;
+                    *to_y = *from_y + dy * TILE_HEIGHT;
+                    *started = true;
+                    *step_progress = 0.0;
+                }
+                *step_progress += dt / step_time;
+                // 低帧率时可能一次跨多步：逐格完成
+                while *step_progress >= 1.0 {
+                    *step_progress -= 1.0;
+                    *from_x = *to_x;
+                    *from_y = *to_y;
                     *side_progress += 1;
                     if *side_progress >= *side_len {
                         *side_progress = 0;
                         *direction = (*direction + 2) % 8;
+                        anim.direction = *direction;
                     }
+                    let (dx, dy) = dir_vec(*direction);
+                    *to_x = *from_x + dx * TILE_WIDTH;
+                    *to_y = *from_y + dy * TILE_HEIGHT;
                 }
-                anim.action = MirAction::Walking;
-                anim.direction = *direction;
+                // 平滑插值：从当前格到目标格
+                let t = (*step_progress).clamp(0.0, 1.0);
+                tf.translation.x = *from_x + (*to_x - *from_x) * t;
+                tf.translation.y = -(*from_y + (*to_y - *from_y) * t);
             }
             DemoBehavior::Idle { timer, interval } => {
                 *timer += dt;
