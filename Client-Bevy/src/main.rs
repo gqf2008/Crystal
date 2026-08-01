@@ -12,6 +12,7 @@
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
+use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
 use client_bevy::actor::ActorPlugin;
 use client_bevy::event_bus::EventBusPlugin;
@@ -67,6 +68,8 @@ fn main() {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
         app.add_systems(Update, auto_enter);
     }
+    // F12: 保存当前帧截图到 ../../tools/bevy_shot_N.png（开发调试用）
+    app.add_systems(Update, debug_screenshot);
     // --no-actors: 只渲染地图（用于纯地图截图验证）
     if std::env::args().any(|a| a == "--no-actors") {
         app.add_plugins(MapRenderPlugin);
@@ -76,11 +79,46 @@ fn main() {
     app.run();
 }
 
+/// F12 截图（保存到工作区 tools/ 目录）
+/// F12 截图；设置 BEVY_AUTO_SHOT=1 时按 BEVY_SHOT_INTERVAL（默认 2 秒）自动截一张
+/// （保存到工作区 tools/ 目录，开发调试用）
+fn debug_screenshot(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut counter: Local<u32>,
+    time: Res<Time>,
+    mut acc: Local<f32>,
+) {
+    if std::env::var("BEVY_AUTO_SHOT").is_ok() {
+        let interval: f32 = std::env::var("BEVY_SHOT_INTERVAL")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2.0);
+        *acc += time.delta_secs();
+        if *acc >= interval {
+            *acc = 0.0;
+            capture_shot(&mut commands, &mut counter);
+        }
+    }
+    if keys.just_pressed(KeyCode::F12) {
+        capture_shot(&mut commands, &mut counter);
+    }
+}
+
+fn capture_shot(commands: &mut Commands, counter: &mut u32) {
+    let path = format!("../tools/bevy_shot_{}.png", *counter);
+    *counter += 1;
+    commands
+        .spawn(Screenshot::primary_window())
+        .observe(save_to_disk(path));
+}
 /// --auto-enter：自动驱动 mock 登录流程（Login→Select→Game，验证网络管道）
 fn auto_enter(
     mut net: ResMut<client_bevy::network::NetworkContext>,
     state: Res<State<AppState>>,
+    time: Res<Time>,
     mut login_sent: Local<bool>,
+    mut select_timer: Local<f32>,
 ) {
     use mir2_shared::packets::client::account::{Login, StartGame};
     if *state == AppState::Login && !*login_sent {
@@ -91,13 +129,19 @@ fn auto_enter(
             password: "123456".to_string(),
         });
     }
+    // 在选角界面停留 3 秒再进游戏（便于 live 截屏验证选角界面）
     if *state == AppState::Select && net.selected_index.is_none() {
-        let first_index = net.characters.first().map(|c| c.index);
-        if let Some(idx) = first_index {
-            net.selected_index = Some(idx);
-            net.send_packet(&StartGame {
-                character_index: idx,
-            });
+        *select_timer += time.delta_secs();
+        if *select_timer >= 3.0 {
+            let first_index = net.characters.first().map(|c| c.index);
+            if let Some(idx) = first_index {
+                net.selected_index = Some(idx);
+                net.send_packet(&StartGame {
+                    character_index: idx,
+                });
+            }
         }
     }
 }
+
+

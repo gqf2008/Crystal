@@ -2,4 +2,5 @@
 pub mod intro;
 pub mod login;
 pub mod select;
+pub mod sprite_ui;
 pub mod theme;

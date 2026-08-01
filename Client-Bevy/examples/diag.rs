@@ -30,7 +30,8 @@ fn main() {
     println!("libs: single={} map={}", s, m);
 
     // 采样：每层前 10 个瓦片
-    let layers: [(&str, fn(&client_bevy::resources::map_reader::CellInfo) -> Option<(i16, i32)>); 3] = [
+    type LayerGetter = fn(&client_bevy::resources::map_reader::CellInfo) -> Option<(i16, i32)>;
+    let layers: [(&str, LayerGetter); 3] = [
         ("back", client_bevy::resources::map_reader::CellInfo::back_tile),
         ("middle", client_bevy::resources::map_reader::CellInfo::middle_tile),
         ("front", client_bevy::resources::map_reader::CellInfo::front_tile),
@@ -228,7 +229,7 @@ fn main() {
                 tiles += 1;
                 if let Some(info) = libs.get_map_image(li, ii) {
                     let h = info.height as usize;
-                    bands += (h + 31) / 32;
+                    bands += h.div_ceil(32);
                     if h > 48 { tall += 1; }
                 }
             }
