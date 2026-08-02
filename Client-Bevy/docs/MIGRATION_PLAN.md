@@ -72,7 +72,7 @@
 ### M9: 对话框系统（56 个游戏对话框，分 4 批）
 > 参考：**以原版 C# 为准** `Client/MirScenes/Dialogs/*.cs`（36 个文件）；Rust 版 `Client-Macroquad/src/scenes/dialogs/` 仅作迁移对照
 - [x] 通用 UI 基建：对话框管理器（DialogManager 开关/z 序）、HUD 按钮接入、--auto-inv/--auto-char 调试
-- [x] 第 1 批（核心）: inventory / character（4 标签页+14 装备槽）/ menu / minimap（玩家点/M 键）/ belt（快捷栏）/ compass 全部完成
+- [x] 第 1 批（核心）: inventory（**数据驱动完成**：40 格物品图标/堆叠数量/双击使用/装备）/ character（4 标签页+14 装备槽）/ menu / minimap（玩家点/M 键）/ belt（快捷栏）/ compass 全部完成
 - [x] 第 2 批（交互）: npc / npc_goods（商店闭环）/ trade / amount_box / group / quest_log / friend / inspect 全部完成
 - [ ] 第 2 批（交互）: npc / npc_goods / trade / amount_box / group / quest_log / friend / inspect
 - [x] 第 3 批（社交）: guild / guild_territory / mail / trust_merchant / item_rental / ranking / report / mentor / relationship / hero / intelligent_creature / mount 全部完成
@@ -86,7 +86,7 @@
 - [ ] combat: magic / skill / buff / regen（技能栏 F1-F8 待续）
 - [x] decision: 服务端驱动怪物 AI（ObjectWalk/Run/Turn/Attack/Death 接入）；NPC 对话闭环
 - [x] physics: movement / pathfinding / collision（A* + 步进 + 远端插值）
-- [ ] input: auto_potion / local_player_ai（待续）
+- [x] input: auto_potion（**数据驱动**：从背包找真实 Potion 并发送 unique_id）/ [ ] local_player_ai（待续）
 - **验收（进行中）**: 打怪/飘字闭环已验；技能/自动喝药待续
 
 ### M11: 呈现与特效
@@ -103,6 +103,23 @@
 - [x] **与真实 ServerRust 全流程联调通过**：握手→登录→建角色→角色列表→StartGame→进游戏
 - [ ] 设置对话框、性能基线（精灵 Atlas）、README 完善（后续）
 - **验收**: cargo test 24 全过、release 构建成功、真实服务器全流程打通
+
+### M13: 背包数据驱动（2026-08-02 完成）
+- [x] **网络数据链路**：ServerRust `UserInformation` 携带背包(40 格)/装备(12 槽) 及 ItemInfo（名称/图标/类型）
+  - SharedRust 新增 `UserItem::write_to_with_info` / `read_from_with_info`（UserInformation 专用内联 ItemInfo）
+  - C#→SharedRust 枚举映射：ItemType/ItemGrade/RequiredType/ItemSet/HeroBehaviour（编号差 3）
+- [x] **客户端渲染**：背包格子子实体 = Items 库图标 + 堆叠数量文本；按 `hud.inventory.items` 逐帧更新显隐
+- [x] **交互**：双击格子 → 药水/卷轴 `UseItem{unique_id}`，装备 `EquipItem{grid: MirGridType, unique_id, to}`（服务端按 unique_id 定位背包格）
+- [x] **自动喝药**：HP<35% 自动找背包第一个 Potion 使用
+- [x] **服务端全链路修复**（真实联调中发现）：
+  - `SetPlayerState`/`SetMapData` 的 ask 补 `.await`（kameo 惰性发送，原消息从未送达 → 角色状态永远空背包）
+  - `save_character` 先删子表行再 INSERT OR REPLACE（有背包物品时 FK 冲突无法存档）
+  - tick 自动存档传 `account_username`（原传角色名 → 账号 FK 失败）
+  - 断线/登出时登出账号（否则账号一直 online 无法重登）
+  - PBKDF2 校验修复（`splitn(2)` + `parts[0]/parts[1]`，C# 迁移账号可登录）
+  - `EquipItem` 按 unique_id 定位背包格（原把 MirGridType 当格索引）
+- [x] 验证：真实 ServerRust 全流程——登录→进游戏→UserInformation 4 件物品→客户端背包图标渲染；客户端 24 测试 + 服务端 139 测试全过
+- [ ] 待续：技能栏 F1-F8 `Magic` 包、拖拽移动/拆分/丢弃、装备栏渲染、tooltip
 
 ---
 
