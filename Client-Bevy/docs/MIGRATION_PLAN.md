@@ -274,6 +274,12 @@
 - [ ] 行会仓库物品存取（GuildStorageItemChange wire 已存在）、Ranking（排行榜）
 
 ---
+### M31: 排行榜（Ranking）（2026-08-03 完成）
+- [x] **客户端**：Rankings 包手动解析（服务端实际 wire：rank_type u8 + my_rank i32 + count i32 + 每项 rank/name(dotnet)/class/level/exp + listings/count；SharedRust read_body 与 write_body 不对称不能直接复用）→ RankingState
+- [x] **排行榜对话框**：10 行列表（名次/名字/职业/等级），打开时自动 C.GetRanking{rank_index}（C# RankingDialog.Show 语义）、关闭按钮
+- [x] 验证：真实 ServerRust E2E——打开排行榜 → `🏅 排行榜: 9 条` → `✅ 第一名: bevychar`（Lv.7 DB 最高，排序正确）✅；客户端 34 测试全过（服务端 GetRanking 已完整，无改动）
+
+---
 ## 四、执行顺序与依赖
 
 ```
@@ -293,6 +299,7 @@ M7（真实网络）→ M8（HUD+控制）→ M9（对话框 1→4 批）→ M10
 | 渲染后端冻结 | 强制 DX12（Vulkan present 在此机器异常） |
 | 大量精灵性能 | 精灵图缓存已建；后续 Atlas/批处理 |
 | 数据依赖 | 复用 Client-Macroquad/Data，`resolve_data_path` 自动解析 |
+
 
 
 

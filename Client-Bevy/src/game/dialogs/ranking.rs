@@ -8,13 +8,24 @@
 use bevy::prelude::*;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::network::NetworkContext;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{spawn_ui_text, UiEntity, UiFont};
+
+/// 排名条目（服务端 Rankings 包）
+#[derive(Debug, Clone, Default)]
+pub struct RankEntry {
+    pub rank: i32,
+    pub player_name: String,
+    pub class: u8,
+    pub level: i32,
+    pub experience: i64,
+}
 
 #[derive(Resource, Default)]
 pub struct RankingState {
     pub visible: bool,
-    pub entries: Vec<String>,
+    pub entries: Vec<RankEntry>,
 }
 
 #[derive(Component)]
@@ -96,20 +107,40 @@ fn spawn_ranking(
 fn ranking_ui_system(
     mut mgr: ResMut<DialogManager>,
     ranking: Res<RankingState>,
+    net: Res<NetworkContext>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut widgets: Query<&mut Visibility, With<RankingWidget>>,
     mut lines: Query<(&mut Text2d, &RankingLine)>,
+    mut requested: Local<bool>,
 ) {
     let open = ranking.visible || mgr.is_open(DialogKind::Ranking);
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
     if !open {
+        *requested = false;
         return;
     }
+    // 打开瞬间请求排行榜（原版 C# RankingDialog.Show → GetRanking）
+    if !*requested {
+        *requested = true;
+        net.send_packet(&mir2_shared::packets::client::misc::GetRanking { rank_index: 0 });
+        tracing::info!("🏅 请求排行榜");
+    }
     for (mut text, line) in &mut lines {
-        text.0 = ranking.entries.get(line.0).cloned().unwrap_or_default();
+        text.0 = match ranking.entries.get(line.0) {
+            Some(e) => {
+                let class = match e.class {
+                    0 => "战士",
+                    1 => "法师",
+                    2 => "道士",
+                    _ => "未知",
+                };
+                format!("#{} {} ({} Lv.{})", e.rank, e.player_name, class, e.level)
+            }
+            None => String::new(),
+        };
     }
     // 点击右上角关闭
     let Ok(window) = windows.single() else { return };

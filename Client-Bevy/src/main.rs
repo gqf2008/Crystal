@@ -193,6 +193,10 @@ fn main() {
     if std::env::args().any(|a| a == "--shop-test") {
         app.add_systems(Update, auto_shop_test);
     }
+    // --ranking-test: 排行榜链路（打开对话框 → GetRanking → 显示）
+    if std::env::args().any(|a| a == "--ranking-test") {
+        app.add_systems(Update, auto_ranking_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -1378,6 +1382,52 @@ fn auto_guild_gold_test(
                 tracing::info!("[GUILDGOLD] ✅ 取出后仓库金币: {}", guild.gold);
             } else {
                 tracing::warn!("[GUILDGOLD] ❌ 取出后金币异常: {}", guild.gold);
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --ranking-test：打开排行榜 → 等 Rankings 数据
+#[allow(clippy::too_many_arguments)]
+fn auto_ranking_test(
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    ranking: Res<client_bevy::game::dialogs::ranking::RankingState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Ranking) {
+                mgr.toggle(client_bevy::game::dialogs::DialogKind::Ranking);
+            }
+            tracing::info!("[RANKTEST] 打开排行榜对话框");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 4.0 {
+                return;
+            }
+            if !ranking.entries.is_empty() {
+                tracing::info!(
+                    "[RANKTEST] ✅ 排行榜 {} 条，第一名: {}",
+                    ranking.entries.len(),
+                    ranking.entries[0].player_name
+                );
+            } else {
+                tracing::warn!("[RANKTEST] ❌ 排行榜为空");
             }
             *stage = 9;
         }

@@ -18,6 +18,7 @@ use crate::game::chat::ChatState;
 use crate::game::combat::CombatEvents;
 use crate::game::dialogs::friend::{FriendEntry, FriendState};
 use crate::game::dialogs::guild::{GuildMember as UiGuildMember, GuildState};
+use crate::game::dialogs::ranking::{RankEntry, RankingState};
 use crate::game::dialogs::group::GroupState;
 use crate::game::dialogs::mail::{MailDetail, MailEntry, MailState};
 use crate::game::dialogs::inventory::InvItem;
@@ -325,6 +326,7 @@ struct NetworkPanels<'w> {
     trade: ResMut<'w, TradeState>,
     friend: ResMut<'w, FriendState>,
     guild: ResMut<'w, GuildState>,
+    ranking: ResMut<'w, RankingState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -368,6 +370,7 @@ fn network_system(
                         &mut *panels.trade,
                         &mut *panels.friend,
                         &mut *panels.guild,
+                        &mut *panels.ranking,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -415,6 +418,7 @@ fn network_system(
                         &mut *panels.trade,
                         &mut *panels.friend,
                         &mut *panels.guild,
+                        &mut *panels.ranking,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -552,6 +556,7 @@ fn handle_packet(
     trade: &mut TradeState,
     friend: &mut FriendState,
     guild: &mut GuildState,
+    ranking: &mut RankingState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -1263,6 +1268,53 @@ fn handle_packet(
                         m.online = online;
                     }
                     tracing::info!("🏰 行会成员更新: {} rank={} online={}", name, rank, online);
+                }
+            }
+        }
+
+        // ---- M31: 排行榜 ----
+        x if x == ServerPacketIds::Rankings as i16 => {
+            use byteorder::ReadBytesExt;
+            // 手动解析服务端实际 wire：[rank_type u8][my_rank i32][count i32]
+            //   [per: rank i32][name dotnet][class u8][level i32][exp i64]...[listings_count i32][count i32]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            let _rank_type = cur.read_u8().unwrap_or(0);
+            let mut my_rank_buf = [0u8; 4];
+            if std::io::Read::read_exact(&mut cur, &mut my_rank_buf).is_err() {
+                ranking.entries.clear();
+                tracing::warn!("⚠️ Rankings 解析失败: (len={})", payload.len());
+            } else {
+                let mut count_buf = [0u8; 4];
+                let count = if std::io::Read::read_exact(&mut cur, &mut count_buf).is_ok() {
+                    i32::from_le_bytes(count_buf).max(0) as usize
+                } else {
+                    0
+                };
+                let mut entries = Vec::new();
+                let mut ok = true;
+                for _ in 0..count {
+                    let mut rb = [0u8; 4];
+                    if std::io::Read::read_exact(&mut cur, &mut rb).is_err() { ok = false; break; }
+                    let rank = i32::from_le_bytes(rb);
+                    let player_name = match mir2_shared::binary::read_dotnet_string(&mut cur) {
+                        Ok(n) => n,
+                        Err(_) => { ok = false; break; }
+                    };
+                    let class = cur.read_u8().unwrap_or(0);
+                    let mut lb = [0u8; 4];
+                    if std::io::Read::read_exact(&mut cur, &mut lb).is_err() { ok = false; break; }
+                    let level = i32::from_le_bytes(lb);
+                    let mut eb = [0u8; 8];
+                    if std::io::Read::read_exact(&mut cur, &mut eb).is_err() { ok = false; break; }
+                    let experience = i64::from_le_bytes(eb);
+                    entries.push(RankEntry { rank, player_name, class, level, experience });
+                }
+                if ok {
+                    ranking.entries = entries;
+                    tracing::info!("🏅 排行榜: {} 条", ranking.entries.len());
+                } else {
+                    tracing::warn!("⚠️ Rankings 解析失败: (len={})", payload.len());
                 }
             }
         }
