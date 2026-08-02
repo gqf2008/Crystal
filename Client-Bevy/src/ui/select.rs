@@ -266,14 +266,15 @@ fn build_select_ui(
         let e = spawn_ui_sprite(&mut *commands, pv, px, py, 3.0, PREVIEW_SCALE);
         commands.entity(e).insert(PreviewImg);
     }
-    // 角色信息（Last Online 对齐原版 (200,623)/(280,623)）
+    // 角色信息（Last Online 对齐原版：值 LastAccessLabel(265,609) 带框，
+    // 标签 "Last Online:" 在值左侧 -65，即 (200,609)；原版字号较小用 12px）
     spawn_ui_text(
         &mut *commands,
         &font,
         "Last Online:",
-        200.0,
-        623.0,
-        14.0,
+        202.0,
+        612.0,
+        12.0,
         Color::WHITE,
         2.0,
     );
@@ -281,10 +282,10 @@ fn build_select_ui(
         let e = spawn_ui_text(
             &mut *commands,
             &font,
-            &c.last_access.format("%Y-%m-%d %H:%M").to_string(),
-            280.0,
-            623.0,
-            14.0,
+            &c.last_access.format("%Y/%m/%d %H:%M:%S").to_string(),
+            278.0,
+            612.0,
+            12.0,
             Color::WHITE,
             2.0,
         );
@@ -687,7 +688,7 @@ fn select_ui_system(
                 }
             }
             if let Ok(mut t) = last_access_texts.single_mut() {
-                t.0 = c.last_access.format("%Y-%m-%d %H:%M").to_string();
+                t.0 = c.last_access.format("%Y/%m/%d %H:%M:%S").to_string();
             }
         }
     }
