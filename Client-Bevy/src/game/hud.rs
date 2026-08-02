@@ -35,6 +35,10 @@ pub struct HudState {
     pub player_object_id: Option<u32>,
     /// 角色职业（显示用）
     pub class: u8,
+    /// 自动喝药开关（HP < 35% 自动使用背包药品）
+    pub auto_pot_hp: bool,
+    /// 自动喝药冷却（避免连发）
+    pub pot_cooldown: f32,
 }
 
 impl Default for HudState {
@@ -51,6 +55,8 @@ impl Default for HudState {
             name: String::new(),
             player_object_id: None,
             class: 0,
+            auto_pot_hp: true,
+            pot_cooldown: 0.0,
         }
     }
 }
@@ -114,7 +120,7 @@ impl Plugin for HudPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_hud);
         app.add_systems(
             Update,
-            (ui_button_system, hud_button_system, hud_update_system)
+            (ui_button_system, hud_button_system, auto_potion_system, hud_update_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -274,6 +280,26 @@ fn spawn_text(
 ) {
     let e = spawn_ui_text(commands, font, text, x, y, 12.0, Color::WHITE, 4.0);
     commands.entity(e).insert(_marker);
+}
+
+/// 自动喝药（M10）：HP < 35% 且冷却结束 → 使用背包药品（UseItem）
+fn auto_potion_system(
+    mut hud: ResMut<HudState>,
+    net: Res<crate::network::NetworkContext>,
+    time: Res<Time>,
+) {
+    hud.pot_cooldown -= time.delta_secs();
+    if !hud.auto_pot_hp || hud.pot_cooldown > 0.0 {
+        return;
+    }
+    let pct = hud.hp as f32 / hud.max_hp.max(1) as f32;
+    if pct < 0.35 {
+        // 简化：使用背包第一格（真实药品索引待背包数据接入）
+        // 金创药(小) item_index=1（mock 商品一致）
+        net.send_packet(&mir2_shared::packets::client::item::UseItem { unique_id: 0 });
+        tracing::info!("💊 自动喝药（HP {}/{}）", hud.hp, hud.max_hp);
+        hud.pot_cooldown = 3.0;
+    }
 }
 
 /// 每帧按 HudState 更新血/蓝/经验条与文本（单查询避免 Bevy B0001 冲突）
