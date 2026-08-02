@@ -1883,7 +1883,12 @@ impl Message<CreateGuildRequest> for SocialActor {
         }).await;
 
         send_system_message(&self.gate_ref, msg.session_id, &format!("行会 \"{}\" 已创建", msg.guild_name));
-        send_guild_status_packet(&self.gate_ref, msg.session_id, true);
+        // 发送完整行会信息（客户端据此显示行会对话框）
+        if let Some(guild) = self.guilds.get(&msg.guild_name) {
+            send_guild_info_packet(&self.gate_ref, msg.session_id, guild);
+        } else {
+            send_guild_status_packet(&self.gate_ref, msg.session_id, true);
+        }
         debug!("Guild created: {} by {}", msg.guild_name, state.name);
     }
 }

@@ -2196,15 +2196,9 @@ fn handle_request_guild_info(social_ref: &Option<ActorRef<crate::actors::social:
 fn handle_edit_guild_member(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 2 { return; }
     let change_type = payload[0];
-    let name_start = 2;
-    if name_start + 4 > payload.len() { return; }
-    let name_len = u32::from_le_bytes(payload[name_start..name_start+4].try_into().unwrap_or([0;4])) as usize;
-    let name_end = name_start + 4 + name_len;
-    let member_name = if name_end <= payload.len() {
-        String::from_utf8_lossy(&payload[name_start+4..name_end]).to_string()
-    } else {
-        return;
-    };
+    // C#/SharedRust：[change_type u8][rank_index u8][name DotNet][rank_name DotNet]
+    let mut cur = std::io::Cursor::new(&payload[1..]);
+    let Ok(member_name) = mir2_shared::binary::read_dotnet_string(&mut cur) else { return };
     debug!("EditGuildMember: session={} type={} name={}", session_id, change_type, member_name);
     let social_ref = match social_ref { Some(s) => s, None => return };
     let _ = social_ref.tell(crate::actors::social::EditGuildMemberRequest { session_id, change_type, member_name }).try_send();
@@ -2213,16 +2207,15 @@ fn handle_edit_guild_member(social_ref: &Option<ActorRef<crate::actors::social::
 /// EditGuildNotice: [count: i32][line1: DotNetString][line2: DotNetString]...
 fn handle_edit_guild_notice(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 4 { return; }
+    // C#/SharedRust：[count i32][lines DotNet...]
     let count = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0;4])) as usize;
     let mut notice_lines = Vec::new();
-    let mut offset = 4;
+    let mut cur = std::io::Cursor::new(&payload[4..]);
     for _ in 0..count {
-        if offset + 4 > payload.len() { break; }
-        let len = u32::from_le_bytes(payload[offset..offset+4].try_into().unwrap_or([0;4])) as usize;
-        offset += 4;
-        if offset + len > payload.len() { break; }
-        notice_lines.push(String::from_utf8_lossy(&payload[offset..offset+len]).to_string());
-        offset += len;
+        match mir2_shared::binary::read_dotnet_string(&mut cur) {
+            Ok(line) => notice_lines.push(line),
+            Err(_) => break,
+        }
     }
     debug!("EditGuildNotice: session={} lines={}", session_id, notice_lines.len());
     let social_ref = match social_ref { Some(s) => s, None => return };
@@ -2231,10 +2224,9 @@ fn handle_edit_guild_notice(social_ref: &Option<ActorRef<crate::actors::social::
 
 /// GuildNameReturn: [name: DotNetString]
 fn handle_guild_name_return(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 4 { return; }
-    let name_len = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0;4])) as usize;
-    if payload.len() < 4 + name_len { return; }
-    let name = String::from_utf8_lossy(&payload[4..4+name_len]).to_string();
+    // C#/SharedRust：name 是 DotNet 7-bit 编码字符串
+    let mut cur = std::io::Cursor::new(payload);
+    let Ok(name) = mir2_shared::binary::read_dotnet_string(&mut cur) else { return };
     debug!("GuildNameReturn: session={} name={}", session_id, name);
     let social_ref = match social_ref { Some(s) => s, None => return };
     let _ = social_ref.tell(crate::actors::social::CreateGuildRequest { session_id, guild_name: name }).try_send();
