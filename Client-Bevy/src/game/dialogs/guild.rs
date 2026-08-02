@@ -7,6 +7,7 @@
 // ============================================================================
 
 use bevy::prelude::*;
+use std::collections::HashMap;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
@@ -25,6 +26,15 @@ pub struct GuildMember {
     pub online: bool,
 }
 
+/// 行会仓库物品条目（GuildStorageList，M32）
+#[derive(Debug, Clone, Default)]
+pub struct StorageItem {
+    pub unique_id: u64,
+    pub item_index: i32,
+    pub name: String,
+    pub count: u16,
+}
+
 /// 行会状态
 #[derive(Resource, Default)]
 pub struct GuildState {
@@ -34,10 +44,30 @@ pub struct GuildState {
     pub notice: Vec<String>,
     pub members: Vec<GuildMember>,
     pub gold: u32,
+    /// 行会仓库物品（100 格，GuildStorageList 写入）
+    pub storage_items: Vec<Option<StorageItem>>,
+    /// 仓库列表是否已收到（E2E/UI 等待标记）
+    pub storage_received: bool,
+    /// 仓库翻页（每页 8 格，共 13 页）
+    pub storage_page: usize,
+    /// 选中的仓库格子（取出用）
+    pub selected_storage: Option<usize>,
+    /// 物品名缓存（item_index → name，来自 UserInformation 内嵌 ItemInfo）
+    pub item_names: HashMap<i32, String>,
     /// 待处理行会邀请（行会名）
     pub invite: Option<String>,
     /// 选中的成员行（踢出用）
     pub selected_member: Option<usize>,
+}
+
+impl GuildState {
+    /// 物品显示名：优先缓存名，回退 #index
+    pub fn item_name(&self, index: i32) -> String {
+        self.item_names
+            .get(&index)
+            .cloned()
+            .unwrap_or_else(|| format!("#{}", index))
+    }
 }
 
 #[derive(Component)]
@@ -81,6 +111,18 @@ pub struct GuildGoldDeposit;
 #[derive(Component)]
 pub struct GuildGoldWithdraw;
 
+#[derive(Component)]
+pub struct GuildItemDeposit;
+
+#[derive(Component)]
+pub struct GuildItemWithdraw;
+
+#[derive(Component)]
+pub struct GuildStorageUp;
+
+#[derive(Component)]
+pub struct GuildStorageDown;
+
 // 邀请提示
 #[derive(Component)]
 pub struct GuildInviteWidget;
@@ -106,7 +148,12 @@ impl Plugin for GuildPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_guild);
         app.add_systems(
             Update,
-            (guild_ui_system, guild_invite_system, ui_button_system)
+            (
+                guild_ui_system,
+                guild_storage_system,
+                guild_invite_system,
+                ui_button_system,
+            )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -390,6 +437,75 @@ fn spawn_guild(
         ));
     }
 
+    // 仓库物品（M32）：8 行列表 + 页签 + 存入/取出/翻页
+    // 原版 C# GuildDialog.StorageGrid 8x14（这里分页显示 8 格/页）
+    for i in 0..8usize {
+        let e = spawn_ui_text(
+            &mut commands, &font, "",
+            298.0, 595.0 + i as f32 * 18.0,
+            12.0, Color::WHITE, 8.0,
+        );
+        commands.entity(e).insert((
+            GuildLine(11 + i),
+            DialogRoot(DialogKind::Guild),
+            GuildWidget,
+        ));
+    }
+    let page = spawn_ui_text(
+        &mut commands, &font, "",
+        298.0, 745.0, 12.0, Color::srgb(1.0, 0.9, 0.5), 8.0,
+    );
+    commands.entity(page).insert((
+        GuildLine(19),
+        DialogRoot(DialogKind::Guild),
+        GuildWidget,
+    ));
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 206, 207, 208,
+        300.0, 770.0, 8.3, 76.0, 25.0,
+    ) {
+        commands.entity(e).insert((
+            GuildItemDeposit,
+            DialogRoot(DialogKind::Guild),
+            GuildWidget,
+        ));
+    }
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 210, 211, 212,
+        390.0, 770.0, 8.3, 76.0, 25.0,
+    ) {
+        commands.entity(e).insert((
+            GuildItemWithdraw,
+            DialogRoot(DialogKind::Guild),
+            GuildWidget,
+        ));
+    }
+    // 翻页（原版 C# Prguse2 197/198/199 上、207/208/209 下）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Prguse2, 197, 198, 199,
+        300.0, 802.0, 8.3, 16.0, 14.0,
+    ) {
+        commands.entity(e).insert((
+            GuildStorageUp,
+            DialogRoot(DialogKind::Guild),
+            GuildWidget,
+        ));
+    }
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Prguse2, 207, 208, 209,
+        320.0, 802.0, 8.3, 16.0, 14.0,
+    ) {
+        commands.entity(e).insert((
+            GuildStorageDown,
+            DialogRoot(DialogKind::Guild),
+            GuildWidget,
+        ));
+    }
+
     // 邀请提示（MirMessageBox）
     let (bx, by) = (284.0, 289.0);
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 360) {
@@ -488,7 +604,7 @@ fn guild_ui_system(
                     "未加入行会".to_string()
                 }
             }
-            i => match guild.members.get(i - 1) {
+            i if (1..=10).contains(&i) => match guild.members.get(i - 1) {
                 Some(m) => {
                     let rank = match m.rank {
                         0 => "会长",
@@ -504,6 +620,20 @@ fn guild_ui_system(
                 }
                 None => String::new(),
             },
+            i if (11..=18).contains(&i) => {
+                let slot = guild.storage_page * 8 + (i - 11);
+                match guild.storage_items.get(slot).and_then(|s| s.as_ref()) {
+                    Some(it) => format!(
+                        "{:02}: {} x{}",
+                        slot + 1,
+                        guild.item_name(it.item_index),
+                        it.count
+                    ),
+                    None => format!("{:02}: 空", slot + 1),
+                }
+            }
+            19 => format!("仓库 第{}/13页", guild.storage_page + 1),
+            _ => String::new(),
         };
     }
     // 创建按钮 → GuildNameReturn（原版 C#：输入行会名 → 创建）
@@ -617,6 +747,106 @@ fn guild_ui_system(
                         break;
                     }
                 }
+                // 仓库格子点击选中（取出目标，原版 C# StorageGrid 点击语义）
+                for i in 11..=18usize {
+                    let y = 595.0 + (i - 11) as f32 * 18.0;
+                    if cursor.x >= 298.0 && cursor.x <= 600.0 && cursor.y >= y && cursor.y <= y + 16.0 {
+                        let slot = guild.storage_page * 8 + (i - 11);
+                        if slot < guild.storage_items.len() {
+                            guild.selected_storage = Some(slot);
+                            tracing::info!("🏰 选中仓库格子 {}", slot);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 仓库物品交互（M32）：打开时请求列表 + 存入/取出/翻页
+/// 原版 C# GuildDialog：StorageGrid 点击选中 → 拖拽/按钮存入取出；列表由
+/// S.GuildStorageList 推送（C# GuildStorageItemChange type=3 请求）
+#[allow(clippy::too_many_arguments)]
+fn guild_storage_system(
+    mut mgr: ResMut<DialogManager>,
+    mut guild: ResMut<GuildState>,
+    net: Res<NetworkContext>,
+    hud: Res<crate::game::hud::HudState>,
+    inv_click: Res<crate::game::dialogs::inventory::InvClickState>,
+    deposit_btn: Query<&UiButton, With<GuildItemDeposit>>,
+    withdraw_btn: Query<&UiButton, With<GuildItemWithdraw>>,
+    up_btn: Query<&UiButton, With<GuildStorageUp>>,
+    down_btn: Query<&UiButton, With<GuildStorageDown>>,
+    mut requested: Local<bool>,
+) {
+    let open = mgr.is_open(DialogKind::Guild);
+    if !open {
+        *requested = false;
+        return;
+    }
+    // 打开瞬间请求仓库物品列表（原版 C# GuildStorageItemChange type=3 语义）
+    if !*requested {
+        *requested = true;
+        net.send_packet(&crate::network::GuildStorageItemChangeWire {
+            change_type: 3,
+            grid: 0,
+            unique_id: 0,
+            count: 0,
+        });
+        tracing::info!("🏰 请求仓库物品列表");
+    }
+    for btn in &up_btn {
+        if btn.clicked {
+            guild.storage_page = guild.storage_page.saturating_sub(1);
+        }
+    }
+    for btn in &down_btn {
+        if btn.clicked && guild.storage_page + 1 < 13 {
+            guild.storage_page += 1;
+        }
+    }
+    for btn in &deposit_btn {
+        if btn.clicked && guild.in_guild {
+            // 选中背包物品 → 存入（原版 C#：选中物品 → GuildStorageItemChange type=0）
+            let idx = inv_click
+                .selected
+                .filter(|i| hud.inventory.items.get(*i).and_then(|s| s.as_ref()).is_some())
+                .or_else(|| hud.inventory.items.iter().position(|s| s.is_some()));
+            if let Some(i) = idx {
+                if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
+                    net.send_packet(&crate::network::GuildStorageItemChangeWire {
+                        change_type: 0,
+                        grid: 0,
+                        unique_id: item.unique_id,
+                        count: item.count as u32,
+                    });
+                    tracing::info!(
+                        "🏰 存入背包物品 [{}] uid={} x{}",
+                        item.name,
+                        item.unique_id,
+                        item.count
+                    );
+                }
+            } else {
+                tracing::warn!("🏰 背包没有可存入的物品");
+            }
+        }
+    }
+    for btn in &withdraw_btn {
+        if btn.clicked && guild.in_guild {
+            if let Some(slot) = guild.selected_storage {
+                if slot < guild.storage_items.len() && guild.storage_items[slot].is_some() {
+                    net.send_packet(&crate::network::GuildStorageItemChangeWire {
+                        change_type: 1,
+                        grid: slot as u8,
+                        unique_id: 0,
+                        count: 0,
+                    });
+                    tracing::info!("🏰 取出仓库格子 {}", slot);
+                }
+            } else {
+                tracing::warn!("🏰 请先点击选中一个仓库格子");
             }
         }
     }

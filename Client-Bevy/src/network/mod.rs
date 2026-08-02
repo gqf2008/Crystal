@@ -17,7 +17,7 @@ use std::path::Path;
 use crate::game::chat::ChatState;
 use crate::game::combat::CombatEvents;
 use crate::game::dialogs::friend::{FriendEntry, FriendState};
-use crate::game::dialogs::guild::{GuildMember as UiGuildMember, GuildState};
+use crate::game::dialogs::guild::{GuildMember as UiGuildMember, GuildState, StorageItem};
 use crate::game::dialogs::ranking::{RankEntry, RankingState};
 use crate::game::dialogs::group::GroupState;
 use crate::game::dialogs::mail::{MailDetail, MailEntry, MailState};
@@ -219,6 +219,47 @@ impl NetworkContext {
                 let _ = tx.send(inner);
             }
         }
+    }
+}
+
+/// 行会仓库物品存取包（M32）
+/// 注意：ServerRust gate 实际解析 wire 为
+/// `[change_type u8][grid u8][unique_id u64][count u32]`
+/// （与 SharedRust 客户端包结构 [u8][i32][i32] 不一致），
+/// 以服务端 gate 解析为准手动构造。
+#[derive(Debug, Clone, Copy)]
+pub struct GuildStorageItemChangeWire {
+    pub change_type: u8, // 0=存入 1=取出 2=移动 3=请求列表
+    pub grid: u8,
+    pub unique_id: u64,
+    pub count: u32,
+}
+
+impl Packet for GuildStorageItemChangeWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::GuildStorageItemChange as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            change_type: reader.read_u8()?,
+            grid: reader.read_u8()?,
+            unique_id: reader.read_u64::<LittleEndian>()?,
+            count: reader.read_u32::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u8(self.change_type)?;
+        writer.write_u8(self.grid)?;
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        writer.write_u32::<LittleEndian>(self.count)?;
+        Ok(())
     }
 }
 
@@ -850,6 +891,22 @@ fn handle_packet(
                             .map(|slot| slot.as_ref().map(to_inv_item))
                             .collect();
                     }
+
+                    // 物品名缓存（供仓库等无内嵌 ItemInfo 的列表显示，M32）
+                    if let Some(inv) = &p.inventory {
+                        for slot in inv.iter().filter_map(|s| s.as_ref()) {
+                            if let Some(info) = &slot.info {
+                                guild.item_names.insert(slot.item_index, info.name.clone());
+                            }
+                        }
+                    }
+                    if let Some(eq) = &p.equipment {
+                        for slot in eq.iter().filter_map(|s| s.as_ref()) {
+                            if let Some(info) = &slot.info {
+                                guild.item_names.insert(slot.item_index, info.name.clone());
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
                     tracing::warn!("⚠️ UserInformation 解析失败: {} (len={})", e, payload.len())
@@ -1177,6 +1234,8 @@ fn handle_packet(
                     guild.members.clear();
                     guild.notice.clear();
                     guild.gold = 0;
+                    guild.storage_items.clear();
+                    guild.storage_received = false;
                 }
                 tracing::info!("🏰 行会状态: {}", if guild.in_guild { "在行会中" } else { "未加入行会" });
             } else {
@@ -1218,6 +1277,43 @@ fn handle_packet(
                     guild.members.len(),
                     guild.gold
                 );
+            }
+        }
+        // ---- M32: 行会仓库物品列表 ----
+        x if x == ServerPacketIds::GuildStorageList as i16 => {
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            match mir2_shared::packets::server::guild::GuildStorageList::read_body(&mut cur) {
+                Ok(p) => {
+                    guild.storage_items = p
+                        .items
+                        .iter()
+                        .take(100)
+                        .map(|opt| {
+                            opt.as_ref().map(|gsi| StorageItem {
+                                unique_id: gsi.item.unique_id,
+                                item_index: gsi.item.item_index,
+                                name: gsi
+                                    .item
+                                    .info
+                                    .as_ref()
+                                    .map(|i| i.name.clone())
+                                    .or_else(|| guild.item_names.get(&gsi.item.item_index).cloned())
+                                    .unwrap_or_default(),
+                                count: gsi.item.count,
+                            })
+                        })
+                        .collect();
+                    guild.storage_received = true;
+                    tracing::info!(
+                        "🏰 仓库物品列表: {} 格（{} 件）",
+                        guild.storage_items.len(),
+                        guild.storage_items.iter().filter_map(|s| s.as_ref()).count()
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ GuildStorageList 解析失败: {} (len={})", e, payload.len())
+                }
             }
         }
         x if x == ServerPacketIds::GuildNoticeChange as i16 => {

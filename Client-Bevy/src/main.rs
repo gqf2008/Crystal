@@ -197,6 +197,10 @@ fn main() {
     if std::env::args().any(|a| a == "--ranking-test") {
         app.add_systems(Update, auto_ranking_test);
     }
+    // --guild-item-test: 行会仓库物品链路（打开仓库 → 存入背包物品 → 取出）
+    if std::env::args().any(|a| a == "--guild-item-test") {
+        app.add_systems(Update, auto_guild_item_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -1428,6 +1432,174 @@ fn auto_ranking_test(
                 );
             } else {
                 tracing::warn!("[RANKTEST] ❌ 排行榜为空");
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --guild-item-test：行会仓库物品链路（打开仓库 → 存入背包物品 → 取出）
+#[allow(clippy::too_many_arguments)]
+fn auto_guild_item_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    guild: Res<client_bevy::game::dialogs::guild::GuildState>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut deposited_uid: Local<Option<u64>>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Guild) {
+                mgr.toggle(client_bevy::game::dialogs::DialogKind::Guild);
+            }
+            tracing::info!("[GUILDITEM] 打开行会对话框");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 3.0 {
+                return;
+            }
+            if guild.in_guild {
+                tracing::info!("[GUILDITEM] 已在行会: {}", guild.name);
+                *stage = 2;
+                *t = 0.0;
+            } else {
+                net.send_packet(&mir2_shared::packets::client::guild::GuildNameReturn {
+                    name: "TestGuild5".to_string(),
+                });
+                tracing::info!("[GUILDITEM] 创建行会 TestGuild5");
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t < 3.0 {
+                return;
+            }
+            if !guild.in_guild {
+                return;
+            }
+            // 请求仓库列表（打开对话框时已自动请求，这里兜底）
+            net.send_packet(&client_bevy::network::GuildStorageItemChangeWire {
+                change_type: 3,
+                grid: 0,
+                unique_id: 0,
+                count: 0,
+            });
+            tracing::info!("[GUILDITEM] 请求仓库列表");
+            *stage = 3;
+            *t = 0.0;
+        }
+        3 => {
+            if *t < 3.0 {
+                return;
+            }
+            if guild.storage_received {
+                tracing::info!(
+                    "[GUILDITEM] ✅ 仓库列表 {} 格",
+                    guild.storage_items.len()
+                );
+            } else {
+                tracing::warn!("[GUILDITEM] ❌ 仓库列表未收到");
+                *stage = 9;
+                return;
+            }
+            // 选第一个背包物品存入
+            let first = hud
+                .inventory
+                .items
+                .iter()
+                .enumerate()
+                .find_map(|(i, s)| s.as_ref().map(|it| (i, it)));
+            match first {
+                Some((i, item)) => {
+                    *deposited_uid = Some(item.unique_id);
+                    net.send_packet(&client_bevy::network::GuildStorageItemChangeWire {
+                        change_type: 0,
+                        grid: 0,
+                        unique_id: item.unique_id,
+                        count: item.count as u32,
+                    });
+                    tracing::info!(
+                        "[GUILDITEM] 存入背包物品 [{}] uid={} (格 {})",
+                        item.name,
+                        item.unique_id,
+                        i
+                    );
+                    *stage = 4;
+                    *t = 0.0;
+                }
+                None => {
+                    tracing::warn!("[GUILDITEM] ❌ 背包为空，无法测试存入");
+                    *stage = 9;
+                }
+            }
+        }
+        4 => {
+            if *t < 3.0 {
+                return;
+            }
+            let slot0 = guild.storage_items.get(0).and_then(|s| s.as_ref());
+            match slot0 {
+                Some(it) => {
+                    tracing::info!(
+                        "[GUILDITEM] ✅ 仓库格1: {} x{} (uid={})",
+                        it.name,
+                        it.count,
+                        it.unique_id
+                    );
+                    net.send_packet(&client_bevy::network::GuildStorageItemChangeWire {
+                        change_type: 1,
+                        grid: 0,
+                        unique_id: 0,
+                        count: 0,
+                    });
+                    tracing::info!("[GUILDITEM] 取出仓库格1");
+                    *stage = 5;
+                    *t = 0.0;
+                }
+                None => {
+                    tracing::warn!("[GUILDITEM] ❌ 仓库格1为空，存入失败");
+                    *stage = 9;
+                }
+            }
+        }
+        5 => {
+            if *t < 3.0 {
+                return;
+            }
+            let slot0_empty = guild.storage_items.get(0).and_then(|s| s.as_ref()).is_none();
+            let uid_back = match *deposited_uid {
+                Some(uid) => hud
+                    .inventory
+                    .items
+                    .iter()
+                    .filter_map(|s| s.as_ref())
+                    .any(|it| it.unique_id == uid),
+                None => false,
+            };
+            if slot0_empty && uid_back {
+                tracing::info!("[GUILDITEM] ✅ 取出成功：仓库格1已空，物品回到背包");
+            } else {
+                tracing::warn!(
+                    "[GUILDITEM] ❌ 取出异常: slot0_empty={} uid_back={}",
+                    slot0_empty,
+                    uid_back
+                );
             }
             *stage = 9;
         }

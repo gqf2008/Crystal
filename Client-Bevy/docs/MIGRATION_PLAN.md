@@ -280,6 +280,17 @@
 - [x] 验证：真实 ServerRust E2E——打开排行榜 → `🏅 排行榜: 9 条` → `✅ 第一名: bevychar`（Lv.7 DB 最高，排序正确）✅；客户端 34 测试全过（服务端 GetRanking 已完整，无改动）
 
 ---
+### M32: 行会仓库物品存取（GuildStorageItemChange / GuildStorageList）（2026-08-03 完成）
+- [x] **客户端**：仓库物品列表显示（8 格/页 × 13 页 + 存入/取出/翻页按钮）；打开行会对话框自动请求列表（C# type=3 语义）；存入 = 选中背包物品 → `[type=0][grid][uid][count]`，取出 = 点击仓库格 → `[type=1][grid]`
+- [x] **服务端**：
+  - `GuildStorageItemChange` type=3 请求列表 → 发 `S.GuildStorageList`（100 格 UserItem + user_id）
+  - 存入/取出成功后向所有在线成员广播 `S.GuildStorageList`
+  - 修复 **SocialPlayerJoined 未同步行会成员 session**（重启后行会从 DB 加载，成员全离线 → 广播空）；SocialPlayerLeft 同步置离线
+  - 修复 **行会仓库/金币从未持久化**（save_guild 只在创建时调用）→ 金币/物品变更后保存 DB
+- [x] 注意：ServerRust gate 实际解析 wire 为 `[type u8][grid u8][unique_id u64][count u32]`（与 SharedRust 客户端包结构 [u8][i32][i32] 不一致），客户端以服务端为准手动构造
+- [x] 验证：真实 ServerRust E2E——打开仓库 → 存入 Venison → `✅ 仓库格1: Venison x1` → 取出 → `✅ 取出成功：仓库格1已空，物品回到背包`；DB 持久化验证（仓库 0 格 / 背包有 Venison）✅；客户端 34 / 服务端 139 测试全过（protocol_conformance 的 test_startgame_full_flow 栈溢出为 HEAD 既有问题）
+
+---
 ## 四、执行顺序与依赖
 
 ```
