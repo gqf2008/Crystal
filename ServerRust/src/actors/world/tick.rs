@@ -1650,6 +1650,7 @@ impl Message<Tick> for WorldActor {
         _msg: Tick,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        // [DEBUG] 每 5 秒打一次 tick 确认 WorldActor 活着
         self.tick_count += 1;
 
         // --- 怪物 AI ---

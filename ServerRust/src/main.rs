@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use kameo::actor::Spawn;
+use kameo::mailbox;
 use tracing::{info, error, warn};
 
 use crystal_server::actors::account::AccountActor;
@@ -57,7 +58,7 @@ async fn async_main() -> anyhow::Result<()> {
     info!("Spawning actors...");
 
     // GateActor 先启动
-    let gate_ref = GateActor::spawn(());
+    let gate_ref = GateActor::spawn_with_mailbox((), mailbox::unbounded());
     info!("GateActor spawned");
 
     // Phase 1.1: 把 cfg.network.max_connections 传给 GateActor(防止资源耗尽)

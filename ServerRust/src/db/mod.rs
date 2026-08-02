@@ -557,6 +557,28 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     // Migration: add hero_behaviour column to characters (safe to re-run)
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN hero_behaviour INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN allow_lover_recall INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN is_mounted INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN mount_type INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN reincarnation_host TEXT")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN reincarnation_ready INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN reincarnation_expire_time INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN enable_group_recall INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN last_recall_time INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN exp_multiplier REAL NOT NULL DEFAULT 1.0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN exp_multiplier_end_tick INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN is_gm INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     // Migration: add auto_pot columns to characters (safe to re-run)
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN auto_pot_hp INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
@@ -700,6 +722,16 @@ pub async fn save_account(pool: &DbPool, account: &AccountInfo) -> anyhow::Resul
     Ok(())
 }
 
+/// 角色摘要（登录列表用）
+#[derive(Debug, Clone)]
+pub struct CharacterSummary {
+    pub name: String,
+    pub class: u8,
+    pub gender: u8,
+    pub level: u16,
+    pub last_access: i64,
+}
+
 pub async fn list_characters_by_account(pool: &DbPool, account_username: &str) -> anyhow::Result<Vec<(String, u16, i32, i32)>> {
     let rows = sqlx::query(
         "SELECT name, map_index, x, y FROM characters WHERE account_username = ?"
@@ -714,6 +746,24 @@ pub async fn list_characters_by_account(pool: &DbPool, account_username: &str) -
         r.get::<i32, _>("x"),
         r.get::<i32, _>("y"),
     )).collect())
+}
+
+/// 角色摘要列表（含 class/gender/level，登录选角用）
+pub async fn list_character_summaries(pool: &DbPool, account_username: &str) -> anyhow::Result<Vec<CharacterSummary>> {
+    let rows = sqlx::query(
+        "SELECT name, class, gender, level FROM characters WHERE account_username = ? ORDER BY name"
+    )
+    .bind(account_username)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.into_iter().map(|r| CharacterSummary {
+        name: r.get::<String, _>("name"),
+        class: r.get::<i32, _>("class") as u8,
+        gender: r.get::<i32, _>("gender") as u8,
+        level: r.get::<i32, _>("level") as u16,
+        last_access: 0,
+    }).collect())
 }
 
 pub async fn load_account(pool: &DbPool, username: &str) -> anyhow::Result<Option<AccountInfo>> {

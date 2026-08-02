@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 use tracing::{info, warn, error, debug};
 
 use mir2_shared::enums::{ClientPacketIds, ServerPacketIds};
+use mir2_shared::packets::Packet;
 
 use super::codec::{encode, decode};
 use crate::util::wire::build_packet_bytes;
@@ -192,6 +193,8 @@ pub struct LoginResult {
     pub session_id: SessionId,
     pub success: bool,
     pub username: String,
+    /// 角色摘要列表（登录成功时携带，用于选角界面）
+    pub characters: Vec<crate::db::CharacterSummary>,
 }
 
 /// 设置 AccountActor 引用
@@ -235,8 +238,7 @@ impl Message<SessionCreated> for GateActor {
             .tell(SendToClient {
                 session_id: msg.session_id,
                 data: connected_data,
-            })
-            .await;
+            }).await;
     }
 }
 
@@ -556,7 +558,7 @@ impl Message<ClientData> for GateActor {
             }
             // 账号管理
             x if x == ClientPacketIds::NewCharacter as i16 => {
-                forward_new_character(&self.world_ref, &self.session_usernames, msg.session_id, payload);
+                forward_new_character(&self.world_ref, &self.session_usernames, msg.session_id, payload).await;
             }
             x if x == ClientPacketIds::ChangePassword as i16 => {
                 forward_change_password(&self.account_ref, &self.session_usernames, msg.session_id, payload);
@@ -931,6 +933,7 @@ impl Message<SendToClient> for GateActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         if let Some(tx) = self.sessions.get(&msg.session_id) {
+            debug!("SendToClient: session={} bytes={}", msg.session_id, msg.data.len());
             let _ = tx.send(msg.data);
         } else {
             warn!(
@@ -978,9 +981,31 @@ impl Message<LoginResult> for GateActor {
             // 记录 session 关联的用户名（用于 ChangePassword 等）
             self.session_usernames.insert(msg.session_id, msg.username.clone());
 
-            // LoginSuccess: 空角色列表
+            // LoginSuccess: 角色列表（用 SharedRust 序列化，保证与客户端解析一致）
+            let characters: Vec<mir2_shared::data::client_data::SelectInfo> = msg
+                .characters
+                .iter()
+                .enumerate()
+                .map(|(i, ch)| mir2_shared::data::client_data::SelectInfo {
+                    index: i as i32,
+                    name: ch.name.clone(),
+                    level: ch.level,
+                    class: mir2_shared::enums::MirClass::try_from(ch.class)
+                        .unwrap_or(mir2_shared::enums::MirClass::Warrior),
+                    gender: mir2_shared::enums::MirGender::try_from(ch.gender)
+                        .unwrap_or(mir2_shared::enums::MirGender::Male),
+                    last_access: chrono::Utc::now(),
+                })
+                .collect();
             let mut body = Vec::new();
-            body.extend_from_slice(&0i32.to_le_bytes()); // count = 0
+            if (mir2_shared::packets::server::login::LoginSuccess { characters })
+                .write_body(&mut body)
+                .is_err()
+            {
+                // 序列化失败：发空列表兜底
+                body = Vec::new();
+                body.extend_from_slice(&0i32.to_le_bytes());
+            }
             let response_data = build_packet_bytes(ServerPacketIds::LoginSuccess as i16, &body);
 
             let gate_ref = ctx.actor_ref().clone();
@@ -988,8 +1013,7 @@ impl Message<LoginResult> for GateActor {
                 .tell(SendToClient {
                     session_id: msg.session_id,
                     data: response_data,
-                })
-                .await;
+                }).await;
         } else {
             // Login failure
             let response_data = build_packet_bytes(ServerPacketIds::Login as i16, &[4u8]);
@@ -998,8 +1022,7 @@ impl Message<LoginResult> for GateActor {
                 .tell(SendToClient {
                     session_id: msg.session_id,
                     data: response_data,
-                })
-                .await;
+                }).await;
         }
     }
 }
@@ -1059,8 +1082,7 @@ async fn handle_client_version(gate_ref: &ActorRef<GateActor>, session_id: Sessi
         .tell(SendToClient {
             session_id,
             data: response,
-        })
-        .await;
+        }).await;
 }
 
 /// 处理新账号注册
@@ -1072,8 +1094,7 @@ async fn handle_new_account(gate_ref: &ActorRef<GateActor>, session_id: SessionI
         .tell(SendToClient {
             session_id,
             data: response,
-        })
-        .await;
+        }).await;
 }
 
 /// 解析登录包：account_id (DotNetString) + password (DotNetString)
@@ -1095,8 +1116,7 @@ async fn handle_keep_alive(gate_ref: &ActorRef<GateActor>, session_id: SessionId
         .tell(SendToClient {
             session_id,
             data: response,
-        })
-        .await;
+        }).await;
 }
 
 /// 解析 DotNetString: [length: i32 LE][bytes...]
@@ -1658,21 +1678,34 @@ fn forward_remove_storage_password(
     }
 }
 
-/// NewCharacter: [name: DotNetString][class: u8][gender: u8][hair: u16]
-fn forward_new_character(
+/// NewCharacter: [name: DotNetString(7bit)][gender: u8][class: u8]（对齐 C# ClientPackets.NewCharacter）
+async fn forward_new_character(
     world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
     session_usernames: &HashMap<SessionId, String>,
     session_id: SessionId,
     payload: &[u8],
 ) {
-    if payload.len() < 6 { return; }
+    if payload.len() < 4 { return; }
     let world_ref = match world_ref { Some(w) => w, None => { return; } };
-    let name_len = u16::from_le_bytes(payload[0..2].try_into().unwrap_or([0; 2])) as usize;
-    if payload.len() < 2 + name_len + 4 { return; }
-    let name = String::from_utf8_lossy(&payload[2..2 + name_len]).to_string();
-    let class = payload[2 + name_len];
-    let gender = payload[2 + name_len + 1];
-    let hair = u16::from_le_bytes(payload[2 + name_len + 2..2 + name_len + 4].try_into().unwrap_or([0; 2]));
+    // 用 SharedRust 的 DotNetString 解析（7-bit 长度前缀），与客户端一致
+    let mut cur = std::io::Cursor::new(payload);
+    let name = match mir2_shared::binary::read_dotnet_string(&mut cur) {
+        Ok(n) => n,
+        Err(e) => {
+            warn!("NewCharacter name parse failed: {}", e);
+            return;
+        }
+    };
+    let gender = match cur.get_ref().get(cur.position() as usize).copied() {
+        Some(g) => g,
+        None => return,
+    };
+    let class = match cur.get_ref().get(cur.position() as usize + 1).copied() {
+        Some(c) => c,
+        None => return,
+    };
+    // hair 由服务端随机生成（C# HumanObject.NewCharacter: Hair = Random.Next(0, 9)）
+    let hair = 0;
 
     // Phase 1.3: 角色名输入验证
     if !crate::util::validation::validate_character_name(&name) {
@@ -1681,7 +1714,11 @@ fn forward_new_character(
     }
     debug!("NewCharacter: session={} name={} class={} gender={} hair={}", session_id, name, class, gender, hair);
     let account_username = session_usernames.get(&session_id).cloned().unwrap_or_else(|| name.clone());
-    let _ = world_ref.ask(crate::actors::world::NewCharacterRequest { session_id, name, class, gender, hair, account_username });
+    let req = crate::actors::world::NewCharacterRequest { session_id, name, class, gender, hair, account_username };
+    match world_ref.ask(req).await {
+        Ok(()) => info!("NewCharacter ask completed: session={}", session_id),
+        Err(e) => warn!("NewCharacter ask failed: session={} err={}", session_id, e),
+    }
 }
 
 /// DeleteCharacter: [character_index: i32]
@@ -2776,8 +2813,7 @@ async fn handle_mail_cost(gate_ref: &ActorRef<GateActor>, session_id: SessionId,
         .tell(SendToClient {
             session_id,
             data: build_packet_bytes(ServerPacketIds::MailCost as i16, &body),
-        })
-        .await;
+        }).await;
 }
 
 /// ShareQuest: [quest_id: u32]

@@ -445,6 +445,7 @@ impl Message<NewCharacterRequest> for WorldActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: NewCharacterRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        debug!("NewCharacterRequest handler entered: {}", msg.name);
         // 验证角色名称
         if msg.name.is_empty() || msg.name.len() > 20 {
             send_system_message(&self.gate_ref, msg.session_id, "角色名称无效");
@@ -575,19 +576,26 @@ impl Message<NewCharacterRequest> for WorldActor {
             exp_multiplier: 1.0,
             exp_multiplier_end_tick: 0,
         };
-        if let Err(e) = db::save_character(&self.db_pool, &default_state, &msg.account_username).await {
-            warn!("Failed to save new character '{}': {}", msg.name, e);
+        debug!("NewCharacter: saving '{}' ...", msg.name);
+        match db::save_character(&self.db_pool, &default_state, &msg.account_username).await {
+            Ok(_) => info!("NewCharacter: saved '{}' ok", msg.name),
+            Err(e) => warn!("Failed to save new character '{}': {}", msg.name, e),
         }
 
+        // 发送 NewCharacterSuccess（SelectInfo：name + index + level + class + gender + last_access）
         let mut body = Vec::new();
-        write_dotnet_string(&mut body, &msg.name);
+        mir2_shared::binary::write_dotnet_string(&mut body, &msg.name).ok();
+        body.extend_from_slice(&0i32.to_le_bytes()); // index = 0（新角色列表首位）
+        body.extend_from_slice(&1u16.to_le_bytes()); // level = 1
         body.push(msg.class);
         body.push(msg.gender);
-        body.extend_from_slice(&msg.hair.to_le_bytes());
-        let _ = self.gate_ref.ask(SendToClient {
+        body.extend_from_slice(&0i64.to_le_bytes()); // last_access ticks
+        let data = build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewCharacterSuccess as i16, &body);
+        debug!("NewCharacterSuccess: session={} name={} bytes={}", msg.session_id, msg.name, data.len());
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewCharacter as i16, &body),
-        });
+            data,
+        }).await;
 
         debug!("NewCharacter: session={} name={} class={} gender={}", msg.session_id, msg.name, msg.class, msg.gender);
     }
