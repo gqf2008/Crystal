@@ -6,6 +6,7 @@
 
 pub mod chat;
 pub mod combat;
+pub mod day_night;
 pub mod dialogs;
 pub mod hud;
 pub mod movement;
@@ -43,6 +44,7 @@ impl Plugin for GamePlugin {
             combat::CombatPlugin,
             weather::WeatherPlugin,
             sound::SoundPlugin,
+            day_night::DayNightPlugin,
         ));
     }
 }
