@@ -29,7 +29,7 @@ impl Plugin for LoginPlugin {
         app.add_systems(OnExit(AppState::Login), cleanup_login_ui);
         app.add_systems(
             Update,
-            (login_ui_system, login_anim_system, ui_button_system)
+            (login_ui_system, login_status_system, login_anim_system, ui_button_system)
                 .run_if(in_state(AppState::Login)),
         );
     }
@@ -39,7 +39,14 @@ impl Plugin for LoginPlugin {
 pub struct LoginState {
     pub show_new_account: bool,
     pub show_change_password: bool,
+    /// 屏幕提示（登录错误/断线/注册结果），is_error=true 时红色显示
+    pub status_msg: String,
+    pub status_error: bool,
 }
+
+/// 登录界面底部状态文本标记
+#[derive(Component)]
+struct LoginStatusText;
 
 #[derive(Resource, Default)]
 pub struct LoginAnim {
@@ -143,11 +150,24 @@ fn setup_login_ui(
     }
 
     // 登录对话框
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 1084) {
+    if let Some(h) = ui_image(
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse,
+        1084,
+    ) {
         spawn_ui_sprite(&mut commands, h, DX, DY, 1.0, 1.0);
     }
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 30) {
-        spawn_ui_sprite(&mut commands, h, DX + (328.0 - 102.0) / 2.0, DY + 12.0, 1.0, 1.0);
+        spawn_ui_sprite(
+            &mut commands,
+            h,
+            DX + (328.0 - 102.0) / 2.0,
+            DY + 12.0,
+            1.0,
+            1.0,
+        );
     }
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 31) {
         spawn_ui_sprite(&mut commands, h, DX + 52.0, DY + 83.0, 1.0, 1.0);
@@ -157,32 +177,132 @@ fn setup_login_ui(
     }
 
     // 输入框
-    spawn_input(&mut commands, &font, InputKind::LoginAccount, DX + 85.0, DY + 85.0, false, true);
-    spawn_input(&mut commands, &font, InputKind::LoginPassword, DX + 85.0, DY + 108.0, true, false);
+    spawn_input(
+        &mut commands,
+        &font,
+        InputKind::LoginAccount,
+        DX + 85.0,
+        DY + 85.0,
+        false,
+        true,
+    );
+    spawn_input(
+        &mut commands,
+        &font,
+        InputKind::LoginPassword,
+        DX + 85.0,
+        DY + 108.0,
+        true,
+        false,
+    );
 
     // 按钮（三态帧：正常/hover/按下，对齐原版 LoginDialog）
-    if let Some(e) = spawn_ui_button(&mut commands, &mut libs, &mut images, &mut cache, LibraryName::Title, 320, 321, 322, DX + 227.0, DY + 81.0, 2.0, 48.0, 48.0) {
+    if let Some(e) = spawn_ui_button(
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        320,
+        321,
+        322,
+        DX + 227.0,
+        DY + 81.0,
+        2.0,
+        48.0,
+        48.0,
+    ) {
         commands.entity(e).insert(UiButtonKind(ButtonKind::LoginOk));
     }
-    if let Some(e) = spawn_ui_button(&mut commands, &mut libs, &mut images, &mut cache, LibraryName::Title, 323, 324, 325, DX + 60.0, DY + 163.0, 2.0, 100.0, 25.0) {
-        commands.entity(e).insert(UiButtonKind(ButtonKind::NewAccount));
+    if let Some(e) = spawn_ui_button(
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        323,
+        324,
+        325,
+        DX + 60.0,
+        DY + 163.0,
+        2.0,
+        100.0,
+        25.0,
+    ) {
+        commands
+            .entity(e)
+            .insert(UiButtonKind(ButtonKind::NewAccount));
     }
-    if let Some(e) = spawn_ui_button(&mut commands, &mut libs, &mut images, &mut cache, LibraryName::Title, 326, 327, 328, DX + 166.0, DY + 163.0, 2.0, 100.0, 25.0) {
-        commands.entity(e).insert(UiButtonKind(ButtonKind::ChangePassword));
+    if let Some(e) = spawn_ui_button(
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        326,
+        327,
+        328,
+        DX + 166.0,
+        DY + 163.0,
+        2.0,
+        100.0,
+        25.0,
+    ) {
+        commands
+            .entity(e)
+            .insert(UiButtonKind(ButtonKind::ChangePassword));
     }
     // ViewKeyButton Title[332-334] at (60,189)；CloseButton Title[329-331] at (166,189)
-    if let Some(e) = spawn_ui_button(&mut commands, &mut libs, &mut images, &mut cache, LibraryName::Title, 332, 333, 334, DX + 60.0, DY + 189.0, 2.0, 100.0, 25.0) {
+    if let Some(e) = spawn_ui_button(
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        332,
+        333,
+        334,
+        DX + 60.0,
+        DY + 189.0,
+        2.0,
+        100.0,
+        25.0,
+    ) {
         commands.entity(e).insert(UiButtonKind(ButtonKind::ViewKey));
     }
-    if let Some(e) = spawn_ui_button(&mut commands, &mut libs, &mut images, &mut cache, LibraryName::Title, 329, 330, 331, DX + 166.0, DY + 189.0, 2.0, 100.0, 25.0) {
+    if let Some(e) = spawn_ui_button(
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        329,
+        330,
+        331,
+        DX + 166.0,
+        DY + 189.0,
+        2.0,
+        100.0,
+        25.0,
+    ) {
         commands.entity(e).insert(UiButtonKind(ButtonKind::Close));
     }
 
     // 左下角服务器/模式状态提示（对齐原版）
     let status = "服务器: mock  模式: Mock";
-    spawn_ui_text(&mut commands, &font, status, DX + 10.0, DY + 210.0, 12.0, Color::srgb(0.75, 0.75, 0.75), 3.0);
+    spawn_ui_text(
+        &mut commands,
+        &font,
+        status,
+        DX + 10.0,
+        DY + 210.0,
+        12.0,
+        Color::srgb(0.75, 0.75, 0.75),
+        3.0,
+    );
 
     // 对话框
+    spawn_status_text(&mut commands, &font);
     spawn_new_account_dialog(&mut commands, &mut libs, &mut images, &mut cache, &font);
     spawn_change_password_dialog(&mut commands, &mut libs, &mut images, &mut cache, &font);
 
@@ -203,7 +323,16 @@ fn spawn_input(
     password: bool,
     focused: bool,
 ) {
-    let text_entity = spawn_ui_text(commands, font, "", x + 3.0, y + 2.0, 14.0, Color::WHITE, 3.0);
+    let text_entity = spawn_ui_text(
+        commands,
+        font,
+        "",
+        x + 3.0,
+        y + 2.0,
+        14.0,
+        Color::WHITE,
+        3.0,
+    );
     commands.spawn((
         UiEntity,
         UiInput {
@@ -228,12 +357,44 @@ fn spawn_btn(
     kind: ButtonKind,
     dlg: Option<DialogKind>,
 ) {
-    if let Some(e) = spawn_ui_button(commands, libs, images, cache, name, index, index + 1, index + 2, rect.0, rect.1, 2.0, rect.2, rect.3) {
+    if let Some(e) = spawn_ui_button(
+        commands,
+        libs,
+        images,
+        cache,
+        name,
+        index,
+        index + 1,
+        index + 2,
+        rect.0,
+        rect.1,
+        2.0,
+        rect.2,
+        rect.3,
+    ) {
         commands.entity(e).insert(UiButtonKind(kind));
         if let Some(d) = dlg {
             commands.entity(e).insert((InDialog(d), Visibility::Hidden));
         }
     }
+}
+
+/// 登录状态文本（错误/断线/注册结果）
+fn spawn_status_text(
+    commands: &mut Commands,
+    font: &Handle<Font>,
+) {
+    let e = spawn_ui_text(
+        commands,
+        font,
+        "",
+        360.0,
+        508.0,
+        16.0,
+        Color::srgb(1.0, 0.35, 0.35),
+        5.0,
+    );
+    commands.entity(e).insert(LoginStatusText);
 }
 
 fn spawn_new_account_dialog(
@@ -247,15 +408,45 @@ fn spawn_new_account_dialog(
     let dy = (SH - 460.0) / 2.0;
     if let Some(h) = ui_image(libs, images, cache, LibraryName::Prguse, 63) {
         let e = spawn_ui_sprite(commands, h, dx, dy, 4.0, 1.0);
-        commands.entity(e).insert((InDialog(DialogKind::NewAccount), Visibility::Hidden));
+        commands
+            .entity(e)
+            .insert((InDialog(DialogKind::NewAccount), Visibility::Hidden));
     }
     let ys = [103.0f32, 129.0, 155.0, 189.0, 215.0, 250.0, 276.0, 311.0];
     let pws = [false, true, true, false, false, false, false, false];
     for i in 0..8 {
-        spawn_input(commands, font, InputKind::Na(i as u8), dx + 226.0, dy + ys[i], pws[i], false);
+        spawn_input(
+            commands,
+            font,
+            InputKind::Na(i as u8),
+            dx + 226.0,
+            dy + ys[i],
+            pws[i],
+            false,
+        );
     }
-    spawn_btn(commands, libs, images, cache, LibraryName::Title, 200, (dx + 135.0, dy + 425.0, 76.0, 25.0), ButtonKind::NaOk, Some(DialogKind::NewAccount));
-    spawn_btn(commands, libs, images, cache, LibraryName::Title, 203, (dx + 409.0, dy + 425.0, 76.0, 25.0), ButtonKind::NaCancel, Some(DialogKind::NewAccount));
+    spawn_btn(
+        commands,
+        libs,
+        images,
+        cache,
+        LibraryName::Title,
+        200,
+        (dx + 135.0, dy + 425.0, 76.0, 25.0),
+        ButtonKind::NaOk,
+        Some(DialogKind::NewAccount),
+    );
+    spawn_btn(
+        commands,
+        libs,
+        images,
+        cache,
+        LibraryName::Title,
+        203,
+        (dx + 409.0, dy + 425.0, 76.0, 25.0),
+        ButtonKind::NaCancel,
+        Some(DialogKind::NewAccount),
+    );
 }
 
 fn spawn_change_password_dialog(
@@ -269,15 +460,45 @@ fn spawn_change_password_dialog(
     let dy = (SH - 268.0) / 2.0;
     if let Some(h) = ui_image(libs, images, cache, LibraryName::Prguse, 50) {
         let e = spawn_ui_sprite(commands, h, dx, dy, 4.0, 1.0);
-        commands.entity(e).insert((InDialog(DialogKind::ChangePassword), Visibility::Hidden));
+        commands
+            .entity(e)
+            .insert((InDialog(DialogKind::ChangePassword), Visibility::Hidden));
     }
     let ys = [75.0f32, 113.0, 151.0, 188.0];
     let pws = [false, true, true, true];
     for i in 0..4 {
-        spawn_input(commands, font, InputKind::Cp(i as u8), dx + 178.0, dy + ys[i], pws[i], false);
+        spawn_input(
+            commands,
+            font,
+            InputKind::Cp(i as u8),
+            dx + 178.0,
+            dy + ys[i],
+            pws[i],
+            false,
+        );
     }
-    spawn_btn(commands, libs, images, cache, LibraryName::Title, 107, (dx + 80.0, dy + 236.0, 90.0, 25.0), ButtonKind::CpOk, Some(DialogKind::ChangePassword));
-    spawn_btn(commands, libs, images, cache, LibraryName::Title, 110, (dx + 222.0, dy + 236.0, 90.0, 25.0), ButtonKind::CpCancel, Some(DialogKind::ChangePassword));
+    spawn_btn(
+        commands,
+        libs,
+        images,
+        cache,
+        LibraryName::Title,
+        107,
+        (dx + 80.0, dy + 236.0, 90.0, 25.0),
+        ButtonKind::CpOk,
+        Some(DialogKind::ChangePassword),
+    );
+    spawn_btn(
+        commands,
+        libs,
+        images,
+        cache,
+        LibraryName::Title,
+        110,
+        (dx + 222.0, dy + 236.0, 90.0, 25.0),
+        ButtonKind::CpCancel,
+        Some(DialogKind::ChangePassword),
+    );
 }
 
 fn cleanup_login_ui(mut commands: Commands, root: Query<Entity, With<UiEntity>>) {
@@ -307,7 +528,10 @@ fn login_ui_system(
     }
 
     let (mx, my) = match windows.single() {
-        Ok(w) => w.cursor_position().map(|p| (p.x, p.y)).unwrap_or((0.0, 0.0)),
+        Ok(w) => w
+            .cursor_position()
+            .map(|p| (p.x, p.y))
+            .unwrap_or((0.0, 0.0)),
         Err(_) => (0.0, 0.0),
     };
     let lclick = mouse.just_pressed(MouseButton::Left);
@@ -396,7 +620,11 @@ fn login_ui_system(
             DialogKind::NewAccount => login.show_new_account,
             DialogKind::ChangePassword => login.show_change_password,
         };
-        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+        *vis = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
 
     // 按钮点击
@@ -434,20 +662,145 @@ fn login_ui_system(
                             _ => {}
                         }
                     }
-                    net.state = crate::network::NetState::LoggingIn;
-                    net.send_packet(&mir2_shared::packets::client::account::Login {
-                        account_id: account,
-                        password,
-                    });
+                    if account.is_empty() {
+                        login.status_msg = "请输入账号".to_string();
+                        login.status_error = true;
+                    } else if password.is_empty() {
+                        login.status_msg = "请输入密码".to_string();
+                        login.status_error = true;
+                    } else {
+                        net.state = crate::network::NetState::LoggingIn;
+                        net.login_error = None;
+                        login.status_msg = String::new();
+                        net.send_packet(&mir2_shared::packets::client::account::Login {
+                            account_id: account,
+                            password,
+                        });
+                    }
                 }
             }
             ButtonKind::NewAccount => login.show_new_account = true,
             ButtonKind::ChangePassword => login.show_change_password = true,
-            ButtonKind::NaOk | ButtonKind::NaCancel => login.show_new_account = false,
-            ButtonKind::CpOk | ButtonKind::CpCancel => login.show_change_password = false,
+            ButtonKind::NaOk => {
+                // 收集新建账号对话框输入（原版顺序：账号/密码/确认/用户名/生日/问题/答案/邮箱）
+                let mut v: Vec<String> = vec![String::new(); 8];
+                for input in inputs.iter() {
+                    if let InputKind::Na(i) = input.kind {
+                        if let Some(slot) = v.get_mut(i as usize) {
+                            *slot = input.value.clone();
+                        }
+                    }
+                }
+                if v[0].is_empty() {
+                    login.status_msg = "请输入账号".to_string();
+                    login.status_error = true;
+                } else if v[1].is_empty() {
+                    login.status_msg = "请输入密码".to_string();
+                    login.status_error = true;
+                } else if v[1] != v[2] {
+                    login.status_msg = "两次输入的密码不一致".to_string();
+                    login.status_error = true;
+                } else {
+                    login.show_new_account = false;
+                    login.status_msg = "注册请求已发送…".to_string();
+                    login.status_error = false;
+                    net.new_account_error = None;
+                    net.new_account_success = false;
+                    net.send_packet(&mir2_shared::packets::client::account::NewAccount {
+                        account_id: v[0].clone(),
+                        password: v[1].clone(),
+                        birth_date_binary: 0,
+                        user_name: v[3].clone(),
+                        secret_question: v[5].clone(),
+                        secret_answer: v[6].clone(),
+                        email_address: v[7].clone(),
+                    });
+                }
+            }
+            ButtonKind::NaCancel => {
+                login.show_new_account = false;
+                login.status_msg = String::new();
+            }
+            ButtonKind::CpOk => {
+                // 收集修改密码对话框输入：账号/当前密码/新密码/确认
+                let mut v: Vec<String> = vec![String::new(); 4];
+                for input in inputs.iter() {
+                    if let InputKind::Cp(i) = input.kind {
+                        if let Some(slot) = v.get_mut(i as usize) {
+                            *slot = input.value.clone();
+                        }
+                    }
+                }
+                if v[0].is_empty() {
+                    login.status_msg = "请输入账号".to_string();
+                    login.status_error = true;
+                } else if v[1].is_empty() {
+                    login.status_msg = "请输入当前密码".to_string();
+                    login.status_error = true;
+                } else if v[2].is_empty() {
+                    login.status_msg = "请输入新密码".to_string();
+                    login.status_error = true;
+                } else if v[2] != v[3] {
+                    login.status_msg = "两次输入的新密码不一致".to_string();
+                    login.status_error = true;
+                } else {
+                    login.show_change_password = false;
+                    login.status_msg = "修改密码请求已发送…".to_string();
+                    login.status_error = false;
+                    net.change_password_error = None;
+                    net.change_password_success = false;
+                    net.send_packet(&mir2_shared::packets::client::account::ChangePassword {
+                        account_id: v[0].clone(),
+                        current_password: v[1].clone(),
+                        new_password: v[2].clone(),
+                    });
+                }
+            }
+            ButtonKind::CpCancel => {
+                login.show_change_password = false;
+                login.status_msg = String::new();
+            }
             ButtonKind::ViewKey => {}
             ButtonKind::Close => std::process::exit(0),
         }
+    }
+}
+
+/// 网络状态提示（登录错误/断线/注册结果）显示到底部状态文本
+fn login_status_system(
+    mut net: ResMut<NetworkContext>,
+    login: ResMut<LoginState>,
+    mut texts: Query<(&mut Text2d, &mut TextColor), With<LoginStatusText>>,
+) {
+    // 优先级：断线 > 注册/改密结果 > 登录错误 > 本地校验消息
+    let (msg, is_error) = if let Some(d) = &net.disconnected {
+        (format!("与服务器断开连接：{}", d), true)
+    } else if let Some(e) = &net.new_account_error {
+        (e.clone(), true)
+    } else if net.new_account_success {
+        net.new_account_success = false;
+        ("注册成功，请登录".to_string(), false)
+    } else if let Some(e) = &net.change_password_error {
+        (e.clone(), true)
+    } else if net.change_password_success {
+        net.change_password_success = false;
+        ("密码修改成功".to_string(), false)
+    } else if let Some(e) = &net.login_error {
+        (e.clone(), true)
+    } else {
+        (login.status_msg.clone(), login.status_error)
+    };
+
+    if msg.is_empty() {
+        return;
+    }
+    for (mut text, mut color) in texts.iter_mut() {
+        text.0 = msg.clone();
+        color.0 = if is_error {
+            Color::srgb(1.0, 0.35, 0.35)
+        } else {
+            Color::srgb(0.4, 1.0, 0.4)
+        };
     }
 }
 

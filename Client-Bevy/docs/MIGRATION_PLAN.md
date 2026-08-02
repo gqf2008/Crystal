@@ -38,12 +38,14 @@
 ## 三、剩余里程碑提案（M7–M12）
 
 ### M7: 真实网络层（TCP 接入 ServerRust + 全量 handler）
-- [ ] TCP 客户端线程（crossbeam 通道 + 阻塞读写），连接 `ServerRust`（默认 0.0.0.0:7000），ClientVersion 握手 + KeepAlive 心跳
-- [ ] 移植 17 个 handler：connection / player / movement / chat / combat / item / npc / quest / group / trade / guild / mail / market / friend / hero / creature / social / ui_events
+- [x] TCP 客户端线程（crossbeam 通道 + 阻塞读写），连接 `ServerRust`（`--real-net [addr]`，默认 mock），ClientVersion 握手 + KeepAlive 心跳 + 断线通知（`src/network/tcp.rs`）
+- [x] 已接入包：Connected / ClientVersion / NewAccount / ChangePassword / Login / LoginSuccess / StartGame / NewCharacter(Success) / DeleteCharacter(Success) / MapChanged / ObjectPlayer / ObjectMonster / ObjectNpc / ObjectRemove（实体删除）/ KeepAlive
+- [ ] 剩余 handler：movement / chat / combat / item / npc / quest / group / trade / guild / mail / market / friend / hero / creature / social / ui_events（M8–M10 随场景/对话框推进）
 - [ ] NetworkContext 扩展为完整网络事件分发（对齐 macroquad 264 个 NetworkEvent 变体）
 - [ ] 发包补齐：~145 个 C→S 包（移动/攻击/技能/对话框动作/组队/行会/邮件等）
-- [ ] 断线重连、登录失败提示、KeepAlive 超时处理
-- **验收**: 与真实 ServerRust 联调完成 登录→选角→进游戏→对象生成；`cargo check` / `clippy` 零 error
+- [x] 登录失败/注册/改密结果提示、断线提示（登录界面状态文本）；KeepAlive 心跳自动发送
+- [ ] 自动重连
+- **验收（进行中）**: 与真实 ServerRust 联调 握手→登录 已通（`examples/net_smoke.rs` 验证 Connected/ClientVersion/Login 响应）；登录→选角→进游戏→对象生成待 GUI 联调；`cargo check` / `clippy` / `cargo test` 全过
 
 ### M8: 游戏场景基础（HUD + 玩家控制）
 - [ ] Game 场景骨架：StartGame/MapChanged 加载地图、相机跟随、出生点

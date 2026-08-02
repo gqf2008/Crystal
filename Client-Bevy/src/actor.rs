@@ -21,9 +21,7 @@ use std::collections::HashMap;
 
 use crate::map_renderer::{make_image, GameData, GameLibraries, TILE_HEIGHT, TILE_WIDTH};
 use crate::network::{NetObject, NetObjects};
-use crate::objects::frames::{
-    get_default_npc_frame, get_monster_frame, get_player_frame, Frame,
-};
+use crate::objects::frames::{get_default_npc_frame, get_monster_frame, get_player_frame, Frame};
 use crate::resources::libraries::ArrayLibType;
 
 pub struct ActorPlugin;
@@ -36,6 +34,7 @@ impl Plugin for ActorPlugin {
             (
                 spawn_demo_actors_when_ready,
                 spawn_net_objects_when_ready,
+                despawn_removed_objects,
                 advance_actor_animations,
                 actor_sprite_render,
                 update_local_ghost,
@@ -80,6 +79,10 @@ pub enum ActorAppearance {
 /// 本地玩家标记（用于遮挡 ghost 效果）
 #[derive(Component)]
 pub struct LocalPlayer;
+
+/// 服务器对象 ID（ObjectRemove 用它删除实体）
+#[derive(Component, Clone, Copy)]
+pub struct NetObjectId(pub u32);
 
 /// 动画状态（动作/朝向/当前帧）
 #[derive(Component)]
@@ -130,10 +133,7 @@ pub enum DemoBehavior {
         started: bool,
     },
     /// 原地待机并缓慢转向
-    Idle {
-        timer: f32,
-        interval: f32,
-    },
+    Idle { timer: f32, interval: f32 },
     /// 周期性攻击
     Attack {
         timer: f32,
@@ -191,8 +191,7 @@ fn advance_actor_animations(
         let Some(frame) = actor_frame(app, &anim) else {
             continue;
         };
-        let draw_frame =
-            frame.start + (anim.direction as i32) * frame.offset() + anim.frame_index;
+        let draw_frame = frame.start + (anim.direction as i32) * frame.offset() + anim.frame_index;
         let effect_frame =
             frame.effect_start + (anim.direction as i32) * frame.effect_offset() + anim.frame_index;
 
@@ -320,7 +319,7 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject) {
 
     match obj {
         NetObject::Player {
-            object_id: _,
+            object_id,
             name: _,
             class,
             gender,
@@ -333,7 +332,7 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject) {
             armour,
             wing_effect,
         } => {
-            spawn_player_with(
+            let e = spawn_player_with(
                 commands,
                 wx(*location_x),
                 wy(*location_y),
@@ -345,32 +344,59 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject) {
                 *weapon_effect,
                 *wing_effect,
             );
+            commands.entity(e).insert(NetObjectId(*object_id));
         }
         NetObject::Monster {
-            object_id: _,
+            object_id,
             name: _,
             location_x,
             location_y,
             image,
             direction,
         } => {
-            spawn_monster(
+            let e = spawn_monster(
                 commands,
                 *image,
                 wx(*location_x),
                 wy(*location_y),
                 *direction,
             );
+            commands.entity(e).insert(NetObjectId(*object_id));
         }
         NetObject::Npc {
-            object_id: _,
+            object_id,
             name: _,
             image,
             location_x,
             location_y,
             direction,
         } => {
-            spawn_npc(commands, *image, wx(*location_x), wy(*location_y), *direction);
+            let e = spawn_npc(
+                commands,
+                *image,
+                wx(*location_x),
+                wy(*location_y),
+                *direction,
+            );
+            commands.entity(e).insert(NetObjectId(*object_id));
+        }
+    }
+}
+
+/// 处理 ObjectRemove：按 NetObjectId 删除对应实体
+fn despawn_removed_objects(
+    mut commands: Commands,
+    mut net_objects: ResMut<NetObjects>,
+    query: Query<(Entity, &NetObjectId)>,
+) {
+    let to_remove: Vec<u32> = net_objects.to_remove.drain(..).collect();
+    if to_remove.is_empty() {
+        return;
+    }
+    for (e, id) in &query {
+        if to_remove.contains(&id.0) {
+            tracing::debug!("🗑️ 移除对象实体 id={}", id.0);
+            commands.entity(e).despawn();
         }
     }
 }
@@ -397,10 +423,34 @@ fn spawn_demo_actors_when_ready(
     let cy = (map.height as f32 * TILE_HEIGHT) / 2.0;
 
     spawn_player(&mut commands, cx, cy - 4.0 * TILE_HEIGHT);
-    spawn_monster(&mut commands, 1, cx - 4.0 * TILE_WIDTH, cy + 2.0 * TILE_HEIGHT, 0);
-    spawn_monster(&mut commands, 5, cx + 4.0 * TILE_WIDTH, cy - 3.0 * TILE_HEIGHT, 0);
-    spawn_monster(&mut commands, 9, cx - 3.0 * TILE_WIDTH, cy + 4.0 * TILE_HEIGHT, 0);
-    spawn_npc(&mut commands, 0, cx + 3.0 * TILE_WIDTH, cy + 3.0 * TILE_HEIGHT, 0);
+    spawn_monster(
+        &mut commands,
+        1,
+        cx - 4.0 * TILE_WIDTH,
+        cy + 2.0 * TILE_HEIGHT,
+        0,
+    );
+    spawn_monster(
+        &mut commands,
+        5,
+        cx + 4.0 * TILE_WIDTH,
+        cy - 3.0 * TILE_HEIGHT,
+        0,
+    );
+    spawn_monster(
+        &mut commands,
+        9,
+        cx - 3.0 * TILE_WIDTH,
+        cy + 4.0 * TILE_HEIGHT,
+        0,
+    );
+    spawn_npc(
+        &mut commands,
+        0,
+        cx + 3.0 * TILE_WIDTH,
+        cy + 3.0 * TILE_HEIGHT,
+        0,
+    );
 }
 
 /// 世界 y（屏幕向下）→ Bevy 深度 z（与 front 瓦片共用同一深度函数，
@@ -437,7 +487,7 @@ fn spawn_player_with(
     weapon: i16,
     weapon_effect: i16,
     wing_effect: u8,
-) {
+) -> Entity {
     let z = depth_z(y);
     let root = commands
         .spawn((
@@ -512,15 +562,10 @@ fn spawn_player_with(
             ));
         }
     });
+    root
 }
 
-fn spawn_monster(
-    commands: &mut Commands,
-    monster_type: u16,
-    x: f32,
-    y: f32,
-    direction: u8,
-) {
+fn spawn_monster(commands: &mut Commands, monster_type: u16, x: f32, y: f32, direction: u8) -> Entity {
     let z = depth_z(y);
     let root = commands
         .spawn((
@@ -563,15 +608,10 @@ fn spawn_monster(
             },
         ));
     });
+    root
 }
 
-fn spawn_npc(
-    commands: &mut Commands,
-    npc_index: u16,
-    x: f32,
-    y: f32,
-    direction: u8,
-) {
+fn spawn_npc(commands: &mut Commands, npc_index: u16, x: f32, y: f32, direction: u8) -> Entity {
     let z = depth_z(y);
     let root = commands
         .spawn((
@@ -602,6 +642,7 @@ fn spawn_npc(
             },
         ));
     });
+    root
 }
 
 /// 调试：输出角色 z、玩家平滑移动进度与 ghost 遮挡瓦片数（帧 30 一次）
@@ -629,9 +670,7 @@ fn dump_depth_debug(
         };
         lines.push_str(&format!(
             "  actor {} at world_y={:.0} z={:.4}\n",
-            label,
-            -tf.translation.y,
-            tf.translation.z
+            label, -tf.translation.y, tf.translation.z
         ));
     }
     // 角色附近（中心 1280x800 视野内）的 front 瓦片 z
@@ -668,7 +707,10 @@ fn dump_depth_debug(
                     && ft.base_y < foot_y + 500.0
             })
             .count();
-        lines.push_str(&format!("  player foot_y={:.0} occluding_front_tiles={}\n", foot_y, occluding));
+        lines.push_str(&format!(
+            "  player foot_y={:.0} occluding_front_tiles={}\n",
+            foot_y, occluding
+        ));
     }
     // ghost 状态：本地玩家是否被遮挡、残影是否可见
     if let Ok(tf) = local.single() {
@@ -719,11 +761,7 @@ fn update_local_ghost(
     // 玩家身体包围盒（覆盖身体/武器/翅膀）
     let (bl, bt, br, bb) = (foot_x - 22.0, foot_y - 92.0, foot_x + 22.0, foot_y + 2.0);
     let occluded = front.iter().any(|ft| {
-        ft.bottom > foot_y
-            && ft.left < br
-            && ft.right > bl
-            && ft.top < bb
-            && ft.bottom > bt
+        ft.bottom > foot_y && ft.left < br && ft.right > bl && ft.top < bb && ft.bottom > bt
     });
     const GHOST_ALPHA: f32 = 0.55; // 与 macroquad PLAYER_GHOST_ALPHA 一致
     const GHOST_LOCAL_Z: f32 = 0.5; // 本地 z 偏移：保证世界 z 高于所有 front 瓦片
@@ -753,10 +791,7 @@ fn update_local_ghost(
 }
 
 /// 调试：记录玩家位置采样，验证移动平滑（每 6 帧一次，前 90 帧，CRYSTAL_DEPTH_DEBUG 开启）
-fn log_player_walk(
-    local: Query<&Transform, With<LocalPlayer>>,
-    mut frames: Local<u32>,
-) {
+fn log_player_walk(local: Query<&Transform, With<LocalPlayer>>, mut frames: Local<u32>) {
     if std::env::var_os("CRYSTAL_DEPTH_DEBUG").is_none() {
         return;
     }
@@ -771,7 +806,11 @@ fn log_player_walk(
             .append(true)
             .open("E:/tmp/player_walk.txt")
         {
-            let _ = writeln!(f, "frame={} x={:.1} y={:.1}", *frames, tf.translation.x, tf.translation.y);
+            let _ = writeln!(
+                f,
+                "frame={} x={:.1} y={:.1}",
+                *frames, tf.translation.x, tf.translation.y
+            );
         }
     }
 }
