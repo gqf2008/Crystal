@@ -1972,9 +1972,10 @@ fn forward_trade_request(
     _payload: &[u8],
 ) {
     if social_ref.is_none() { return; }
-    let _ = social_ref.as_ref().unwrap().ask(crate::actors::social::TradeStartRequest {
+    // 注意：必须用 tell（ask 的 future 被丢弃时消息不会发出）
+    let _ = social_ref.as_ref().unwrap().tell(crate::actors::social::TradeStartRequest {
         session_id,
-    });
+    }).try_send();
 }
 
 /// TradeReply: [accept: bool]

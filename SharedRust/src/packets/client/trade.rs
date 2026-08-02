@@ -82,6 +82,52 @@ impl Packet for TradeConfirm {
     }
 }
 
+/// Deposit item into trade (from inventory slot to trade slot)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DepositTradeItem {
+    pub from: i32,
+    pub to: i32,
+}
+
+impl Packet for DepositTradeItem {
+    const OPCODE: i16 = ClientPacketIds::DepositTradeItem as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let from = reader.read_i32::<LittleEndian>()?;
+        let to = reader.read_i32::<LittleEndian>()?;
+        Ok(Self { from, to })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.from)?;
+        writer.write_i32::<LittleEndian>(self.to)?;
+        Ok(())
+    }
+}
+
+/// Retrieve item from trade (from trade slot to inventory)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetrieveTradeItem {
+    pub from: i32,
+    pub to: i32,
+}
+
+impl Packet for RetrieveTradeItem {
+    const OPCODE: i16 = ClientPacketIds::RetrieveTradeItem as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let from = reader.read_i32::<LittleEndian>()?;
+        let to = reader.read_i32::<LittleEndian>()?;
+        Ok(Self { from, to })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_i32::<LittleEndian>(self.from)?;
+        writer.write_i32::<LittleEndian>(self.to)?;
+        Ok(())
+    }
+}
+
 /// Cancel trade
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TradeCancel;

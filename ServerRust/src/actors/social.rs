@@ -601,8 +601,10 @@ impl SocialActor {
                 let _ = rec.ask(AddGold { amount: gold_b }).await;
             }
             for item in &items_b {
-                // 查询原始物品数据
-                if let Some(rec2) = self.players.get(&s2) {
+                // 优先使用交易侧缓存的完整物品（DepositTradeItemBySlot 已从背包移除，不能再查询）
+                if let Some(data) = item.item_data.clone() {
+                    let _ = rec.ask(AddItemToInventory { item: data }).await;
+                } else if let Some(rec2) = self.players.get(&s2) {
                     if let Ok(Some(item_data)) = rec2.ask(GetItemInfo { unique_id: item.uid }).await {
                         let _ = rec.ask(AddItemToInventory { item: item_data }).await;
                     }
@@ -616,7 +618,9 @@ impl SocialActor {
                 let _ = rec.ask(AddGold { amount: gold_a }).await;
             }
             for item in &items_a {
-                if let Some(rec2) = self.players.get(&s1) {
+                if let Some(data) = item.item_data.clone() {
+                    let _ = rec.ask(AddItemToInventory { item: data }).await;
+                } else if let Some(rec2) = self.players.get(&s1) {
                     if let Ok(Some(item_data)) = rec2.ask(GetItemInfo { unique_id: item.uid }).await {
                         let _ = rec.ask(AddItemToInventory { item: item_data }).await;
                     }
