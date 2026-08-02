@@ -146,7 +146,7 @@ impl Plugin for InventoryDialogPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_dialogs);
         app.add_systems(
             Update,
-            (inventory_ui_system, ui_button_system)
+            (inventory_ui_system, inv_selection_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -349,6 +349,8 @@ pub struct InvCount(pub usize);
 #[derive(Resource, Default)]
 pub struct InvClickState {
     pub last: Option<(usize, f64)>,
+    /// 当前选中格子（原版 C# GameScene.SelectedCell）
+    pub selected: Option<usize>,
 }
 
 /// 显示/隐藏 + 页切换 + 关闭 + 物品图标渲染 + 双击使用/装备
@@ -472,6 +474,8 @@ fn inventory_ui_system(
         return;
     };
     let mut dbl: Option<usize> = None;
+    // 本次左键点击的格子（原版 C#：选中格子后点另一格 = MoveItem）
+    let mut single: Option<usize> = None;
     if mouse.just_pressed(MouseButton::Left) {
         for (_vis, slot) in &all_vis {
             let Some(slot) = slot else { continue };
@@ -489,11 +493,40 @@ fn inventory_ui_system(
                     if last_i == i && now - last_t < 0.4 {
                         dbl = Some(i);
                         click.last = None;
+                    } else {
+                        click.last = Some((i, now));
+                        single = Some(i);
                     }
                 } else {
                     click.last = Some((i, now));
+                    single = Some(i);
                 }
                 break;
+            }
+        }
+    }
+    // 单击：选中 → 移动（MoveItem，原版 C# MirItemCell.MoveItem）
+    if dbl.is_none() {
+        if let Some(i) = single {
+            match click.selected {
+                Some(from) if from == i => click.selected = None,
+                Some(from) => {
+                    // 目标格子可空可满（服务端处理交换/合并）
+                    net.send_packet(&mir2_shared::packets::client::item::MoveItem {
+                        grid: mir2_shared::enums::MirGridType::Inventory,
+                        from: from as i32,
+                        to: i as i32,
+                    });
+                    tracing::info!("📦 移动物品 {} -> {}", from, i);
+                    click.selected = None;
+                }
+                None => {
+                    // 只有物品格可选中（空格不选中）
+                    if inv.items.get(i).and_then(|s| s.as_ref()).is_some() {
+                        click.selected = Some(i);
+                        tracing::debug!("🎒 选中格子 {}", i);
+                    }
+                }
             }
         }
     }
@@ -542,6 +575,24 @@ fn inventory_ui_system(
             t.0 = format!("{}", inv.gold);
         } else if weight.is_some() {
             t.0 = format!("{}/{}", inv.weight, inv.max_weight);
+        }
+    }
+}
+
+/// 选中格子高亮（原版 C# SelectedCell 黄色边框语义：用黄色半透明覆盖表示）
+fn inv_selection_system(
+    click: Res<InvClickState>,
+    mut slots: Query<(&mut Sprite, &InvSlot), Without<InvIcon>>,
+) {
+    for (mut sprite, slot) in &mut slots {
+        let selected = click.selected == Some(slot.0);
+        let target = if selected {
+            Color::srgba(1.0, 0.9, 0.2, 0.35)
+        } else {
+            Color::srgba(0.0, 0.0, 0.0, 0.18)
+        };
+        if sprite.color != target {
+            sprite.color = target;
         }
     }
 }

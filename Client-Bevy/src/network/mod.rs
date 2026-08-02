@@ -811,6 +811,20 @@ fn handle_packet(
             }
         }
 
+        // ---- M13: 物品操作响应 ----
+        x if x == ServerPacketIds::MoveItem as i16 => {
+            if let Ok(p) = item_operations::MoveItem::read_body(&mut cur) {
+                if p.success && p.grid == mir2_shared::enums::MirGridType::Inventory {
+                    let from = p.from as usize;
+                    let to = p.to as usize;
+                    if from < hud.inventory.items.len() && to < hud.inventory.items.len() {
+                        hud.inventory.items.swap(from, to);
+                        tracing::info!("📦 移动物品 {} -> {}", p.from, p.to);
+                    }
+                }
+            }
+        }
+
         // ---- M13: 技能 ----
         x if x == ServerPacketIds::NewMagic as i16 => {
             if let Ok(p) = magic::NewMagic::read_body(&mut cur) {
