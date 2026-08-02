@@ -75,7 +75,8 @@
 - [x] 第 1 批（核心）: inventory / character（4 标签页+14 装备槽）/ menu / minimap（玩家点/M 键）/ belt（快捷栏）/ compass 全部完成
 - [x] 第 2 批（交互）: npc / npc_goods（商店闭环）/ trade / amount_box / group / quest_log / friend / inspect 全部完成
 - [ ] 第 2 批（交互）: npc / npc_goods / trade / amount_box / group / quest_log / friend / inspect
-- [ ] 第 3 批（社交）: guild / guild_territory / mail / trust_merchant / item_rental / ranking / report / mentor / relationship / hero / intelligent_creature / mount（进行中）
+- [x] 第 3 批（社交）: guild / guild_territory / mail / trust_merchant / item_rental / ranking / report / mentor / relationship / hero / intelligent_creature / mount 全部完成
+- [ ] 第 4 批（系统）: game_shop / refine / craft / socket / dura_status / npc_drop / roll / npc_awake / notice / chat_notice / timer / option / help / keyboard_layout / big_map / fishing / buff（进行中）
 - [ ] 第 4 批（系统）: game_shop / refine / craft / socket / dura_status / npc_drop / roll / npc_awake / notice / chat_notice / timer / option / help / keyboard_layout / big_map / fishing / buff
 - **验收**: 每个对话框交互与原版 C# / macroquad 一致（数据驱动，mock 先行）
 
