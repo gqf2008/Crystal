@@ -10,11 +10,12 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::{DialogKind, DialogManager};
-use crate::ui::sprite_ui::UiButton;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
+use crate::ui::sprite_ui::UiButton;
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiEntity, UiFont, UiImageCache,
 };
@@ -39,6 +40,10 @@ pub struct HudState {
     pub auto_pot_hp: bool,
     /// 自动喝药冷却（避免连发）
     pub pot_cooldown: f32,
+    /// 背包（网络 UserInformation 写入）
+    pub inventory: crate::game::dialogs::inventory::InventoryState,
+    /// 装备（12 槽）
+    pub equipment: Vec<Option<InvItem>>,
 }
 
 impl Default for HudState {
@@ -57,6 +62,8 @@ impl Default for HudState {
             class: 0,
             auto_pot_hp: true,
             pot_cooldown: 0.0,
+            inventory: Default::default(),
+            equipment: vec![None; 12],
         }
     }
 }
@@ -76,10 +83,7 @@ pub enum HudButtonKind {
 pub struct HudButton(pub HudButtonKind);
 
 /// HUD 按钮 → 对话框开关（M9：接入 DialogManager）
-fn hud_button_system(
-    mut mgr: ResMut<DialogManager>,
-    buttons: Query<(&UiButton, &HudButton)>,
-) {
+fn hud_button_system(mut mgr: ResMut<DialogManager>, buttons: Query<(&UiButton, &HudButton)>) {
     for (btn, kind) in &buttons {
         if btn.clicked {
             tracing::info!("🎛️ HUD 按钮点击: {:?}", kind.0);
@@ -97,15 +101,24 @@ fn hud_button_system(
 }
 
 /// 动态部件标记（每帧按 HudState 更新）
-#[derive(Component)] struct HpHpFill;
-#[derive(Component)] struct MpMpFill;
-#[derive(Component)] struct ExpFill;
-#[derive(Component)] struct HpHpText;
-#[derive(Component)] struct MpMpText;
-#[derive(Component)] struct ExpText;
-#[derive(Component)] struct LevelText;
-#[derive(Component)] struct GoldText;
-#[derive(Component)] struct NameText;
+#[derive(Component)]
+struct HpHpFill;
+#[derive(Component)]
+struct MpMpFill;
+#[derive(Component)]
+struct ExpFill;
+#[derive(Component)]
+struct HpHpText;
+#[derive(Component)]
+struct MpMpText;
+#[derive(Component)]
+struct ExpText;
+#[derive(Component)]
+struct LevelText;
+#[derive(Component)]
+struct GoldText;
+#[derive(Component)]
+struct NameText;
 
 const ORB_HEIGHT: f32 = 80.0;
 const ORB_TOP: f32 = 30.0;
@@ -120,7 +133,12 @@ impl Plugin for HudPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_hud);
         app.add_systems(
             Update,
-            (ui_button_system, hud_button_system, auto_potion_system, hud_update_system)
+            (
+                ui_button_system,
+                hud_button_system,
+                auto_potion_system,
+                hud_update_system,
+            )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -159,7 +177,13 @@ fn spawn_hud(
     let main_y = 768.0 - bg_h;
 
     // 背景
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, resolution_index) {
+    if let Some(h) = ui_image(
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse,
+        resolution_index,
+    ) {
         spawn_ui_sprite(&mut commands, h, main_x, main_y, 1.0, 1.0);
     }
 
@@ -224,12 +248,66 @@ fn spawn_hud(
     // 文本
     let orb_x = main_x;
     let orb_y = main_y + ORB_TOP;
-    spawn_text(&mut commands, &font, &mut images, &mut cache, HpHpText, orb_x + 9.0, orb_y + 18.0, "");
-    spawn_text(&mut commands, &font, &mut images, &mut cache, MpMpText, orb_x + 60.0, orb_y + 18.0, "");
-    spawn_text(&mut commands, &font, &mut images, &mut cache, ExpText, main_x + 9.0 + 50.0, main_y + EXP_TOP - 2.0, "");
-    spawn_text(&mut commands, &font, &mut images, &mut cache, LevelText, main_x + 9.0, main_y + 2.0, "");
-    spawn_text(&mut commands, &font, &mut images, &mut cache, GoldText, main_x + bg_w - 90.0, main_y + 2.0, "");
-    spawn_text(&mut commands, &font, &mut images, &mut cache, NameText, main_x + 9.0, main_y + 14.0, "");
+    spawn_text(
+        &mut commands,
+        &font,
+        &mut images,
+        &mut cache,
+        HpHpText,
+        orb_x + 9.0,
+        orb_y + 18.0,
+        "",
+    );
+    spawn_text(
+        &mut commands,
+        &font,
+        &mut images,
+        &mut cache,
+        MpMpText,
+        orb_x + 60.0,
+        orb_y + 18.0,
+        "",
+    );
+    spawn_text(
+        &mut commands,
+        &font,
+        &mut images,
+        &mut cache,
+        ExpText,
+        main_x + 9.0 + 50.0,
+        main_y + EXP_TOP - 2.0,
+        "",
+    );
+    spawn_text(
+        &mut commands,
+        &font,
+        &mut images,
+        &mut cache,
+        LevelText,
+        main_x + 9.0,
+        main_y + 2.0,
+        "",
+    );
+    spawn_text(
+        &mut commands,
+        &font,
+        &mut images,
+        &mut cache,
+        GoldText,
+        main_x + bg_w - 90.0,
+        main_y + 2.0,
+        "",
+    );
+    spawn_text(
+        &mut commands,
+        &font,
+        &mut images,
+        &mut cache,
+        NameText,
+        main_x + 9.0,
+        main_y + 14.0,
+        "",
+    );
 
     // 主对话框按钮（C# 位置：Size.Width - 119/-96/-73/-50/-27，y=+76）
     let button_y = main_y + BUTTON_TOP;
@@ -242,28 +320,60 @@ fn spawn_hud(
     ];
     for (kind, n, h, p, xoff) in buttons {
         if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-            &mut commands, &mut libs, &mut images, &mut cache,
-            LibraryName::Prguse, n, h, p,
-            main_x + xoff, button_y, 3.0, 23.0, 23.0,
+            &mut commands,
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Prguse,
+            n,
+            h,
+            p,
+            main_x + xoff,
+            button_y,
+            3.0,
+            23.0,
+            23.0,
         ) {
             commands.entity(e).insert(HudButton(kind));
         }
     }
     // 菜单按钮（C#：Width-55, 35）
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse, 1960, 1961, 1962,
-        main_x + bg_w - 55.0, main_y + 35.0, 3.0, 23.0, 23.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse,
+        1960,
+        1961,
+        1962,
+        main_x + bg_w - 55.0,
+        main_y + 35.0,
+        3.0,
+        23.0,
+        23.0,
     ) {
         commands.entity(e).insert(HudButton(HudButtonKind::Menu));
     }
     // 商城按钮（C#：Width-105, 35）
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse, 826, 827, 828,
-        main_x + bg_w - 105.0, main_y + 35.0, 3.0, 23.0, 23.0,
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse,
+        826,
+        827,
+        828,
+        main_x + bg_w - 105.0,
+        main_y + 35.0,
+        3.0,
+        23.0,
+        23.0,
     ) {
-        commands.entity(e).insert(HudButton(HudButtonKind::GameShop));
+        commands
+            .entity(e)
+            .insert(HudButton(HudButtonKind::GameShop));
     }
 }
 
@@ -294,11 +404,24 @@ fn auto_potion_system(
     }
     let pct = hud.hp as f32 / hud.max_hp.max(1) as f32;
     if pct < 0.35 {
-        // 简化：使用背包第一格（真实药品索引待背包数据接入）
-        // 金创药(小) item_index=1（mock 商品一致）
-        net.send_packet(&mir2_shared::packets::client::item::UseItem { unique_id: 0 });
-        tracing::info!("💊 自动喝药（HP {}/{}）", hud.hp, hud.max_hp);
-        hud.pot_cooldown = 3.0;
+        // 数据驱动：从背包找第一个药品（ItemType::Potion）
+        let potion = hud.inventory.items.iter().flatten().find(|it| {
+            mir2_shared::enums::ItemType::try_from(it.item_type)
+                == Ok(mir2_shared::enums::ItemType::Potion)
+        });
+        if let Some(potion) = potion {
+            net.send_packet(&mir2_shared::packets::client::item::UseItem {
+                unique_id: potion.unique_id,
+            });
+            tracing::info!(
+                "💊 自动喝药 {} (uid={})（HP {}/{}）",
+                potion.name,
+                potion.unique_id,
+                hud.hp,
+                hud.max_hp
+            );
+            hud.pot_cooldown = 3.0;
+        }
     }
 }
 

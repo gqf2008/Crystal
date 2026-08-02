@@ -1,8 +1,8 @@
 //! A* 寻路（参考 Client-Macroquad/src/systems/logic/physics/pathfinding_system.rs）
 //! 在 walkable 网格上计算路径，8 方向，返回瓦片坐标序列（不含起点）。
 
-use std::collections::{BinaryHeap, HashMap};
 use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap};
 
 use crate::map_renderer::LoadedMap;
 
@@ -28,8 +28,14 @@ impl PartialOrd for Node {
 }
 
 const DIRS: [(i32, i32); 8] = [
-    (0, -1), (1, -1), (1, 0), (1, 1),
-    (0, 1), (-1, 1), (-1, 0), (-1, -1),
+    (0, -1),
+    (1, -1),
+    (1, 0),
+    (1, 1),
+    (0, 1),
+    (-1, 1),
+    (-1, 0),
+    (-1, -1),
 ];
 
 fn heuristic(x: i32, y: i32, tx: i32, ty: i32) -> u32 {
@@ -56,7 +62,12 @@ pub fn find_path(map: &LoadedMap, from: (i32, i32), to: (i32, i32)) -> Option<Ve
     let mut came_from: HashMap<(i32, i32), (i32, i32)> = HashMap::new();
 
     g_score.insert(from, 0);
-    open.push(Node { x: from.0, y: from.1, g: 0, f: heuristic(from.0, from.1, to.0, to.1) });
+    open.push(Node {
+        x: from.0,
+        y: from.1,
+        g: 0,
+        f: heuristic(from.0, from.1, to.0, to.1),
+    });
 
     const MAX_STEPS: usize = 2000;
     let mut visited = 0usize;
@@ -87,8 +98,7 @@ pub fn find_path(map: &LoadedMap, from: (i32, i32), to: (i32, i32)) -> Option<Ve
             // 禁止斜穿墙（两个直向格子都要可走）
             if dx != 0
                 && dy != 0
-                && (!map.is_walkable(node.x + dx, node.y)
-                    || !map.is_walkable(node.x, node.y + dy))
+                && (!map.is_walkable(node.x + dx, node.y) || !map.is_walkable(node.x, node.y + dy))
             {
                 continue;
             }
@@ -144,7 +154,7 @@ mod tests {
     fn test_find_path_around_obstacle() {
         let map = test_map(10, 10, &[(5, 0), (5, 1), (5, 2)]);
         let path = find_path(&map, (3, 0), (7, 0)).unwrap();
-        assert!(path.iter().all(|p| !map.is_walkable(p.0, p.1) == false));
+        assert!(path.iter().all(|p| map.is_walkable(p.0, p.1)));
         assert_eq!(path.last(), Some(&(7, 0)));
     }
 
@@ -153,10 +163,15 @@ mod tests {
         let map = test_map(5, 5, &[]);
         // 起点被墙围住
         let mut blocked = vec![vec![true; 5]; 5];
-        for x in 0..5 {
-            blocked[2][x] = false;
+        for cell in blocked[2].iter_mut() {
+            *cell = false;
         }
-        let map2 = LoadedMap { name: "t".into(), width: 5, height: 5, walkable: blocked };
+        let map2 = LoadedMap {
+            name: "t".into(),
+            width: 5,
+            height: 5,
+            walkable: blocked,
+        };
         let _ = map;
         assert!(find_path(&map2, (0, 2), (4, 2)).is_none());
     }

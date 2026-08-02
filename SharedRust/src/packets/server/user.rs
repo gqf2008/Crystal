@@ -85,7 +85,7 @@ impl Packet for UserInformation {
             let mut items = Vec::with_capacity(count);
             for _ in 0..count {
                 if reader.read_u8()? != 0 {
-                    items.push(Some(UserItem::read_from(reader, i32::MAX, i32::MAX)?));
+                    items.push(Some(UserItem::read_from_with_info(reader)?));
                 } else {
                     items.push(None);
                 }
@@ -107,7 +107,7 @@ impl Packet for UserInformation {
             let mut items = Vec::with_capacity(count);
             for _ in 0..count {
                 if reader.read_u8()? != 0 {
-                    items.push(Some(UserItem::read_from(reader, i32::MAX, i32::MAX)?));
+                    items.push(Some(UserItem::read_from_with_info(reader)?));
                 } else {
                     items.push(None);
                 }
@@ -129,7 +129,7 @@ impl Packet for UserInformation {
             let mut items = Vec::with_capacity(count);
             for _ in 0..count {
                 if reader.read_u8()? != 0 {
-                    items.push(Some(UserItem::read_from(reader, i32::MAX, i32::MAX)?));
+                    items.push(Some(UserItem::read_from_with_info(reader)?));
                 } else {
                     items.push(None);
                 }
@@ -345,7 +345,7 @@ impl Packet for UserSlotsRefresh {
             let mut items = Vec::with_capacity(count);
             for _ in 0..count {
                 if reader.read_u8()? != 0 {
-                    items.push(Some(UserItem::read_from(reader, i32::MAX, i32::MAX)?));
+                    items.push(Some(UserItem::read_from_with_info(reader)?));
                 } else {
                     items.push(None);
                 }
@@ -360,7 +360,7 @@ impl Packet for UserSlotsRefresh {
             let mut items = Vec::with_capacity(count);
             for _ in 0..count {
                 if reader.read_u8()? != 0 {
-                    items.push(Some(UserItem::read_from(reader, i32::MAX, i32::MAX)?));
+                    items.push(Some(UserItem::read_from_with_info(reader)?));
                 } else {
                     items.push(None);
                 }

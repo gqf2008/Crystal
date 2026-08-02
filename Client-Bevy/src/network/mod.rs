@@ -8,18 +8,19 @@ pub mod tcp;
 
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender};
-use std::path::Path;
 use mir2_shared::enums::ServerPacketIds;
 use mir2_shared::packets::base::{Packet, PacketHeader};
 use mir2_shared::SelectInfo;
+use std::path::Path;
 
 use crate::game::chat::ChatState;
 use crate::game::combat::CombatEvents;
-use crate::game::weather::WeatherState;
+use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::npc::NpcDialogState;
 use crate::game::dialogs::npc_goods::{GoodsEntry, NpcGoodsState};
 use crate::game::hud::HudState;
 use crate::game::movement::{NetMotion, NetMotions};
+use crate::game::weather::WeatherState;
 use crate::map_renderer::GameData;
 use crate::scenes::AppState;
 
@@ -47,10 +48,8 @@ pub fn load_runtime_config() -> RuntimeConfig {
     // config.ini 优先：工作目录，其次 crate 根
     let mut content = std::fs::read_to_string("config.ini").ok();
     if content.is_none() {
-        content = std::fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("config.ini"),
-        )
-        .ok();
+        content =
+            std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("config.ini")).ok();
     }
     let Some(content) = content else { return cfg };
     let mut section = String::new();
@@ -63,19 +62,22 @@ pub fn load_runtime_config() -> RuntimeConfig {
             section = line[1..line.len() - 1].trim().to_string();
             continue;
         }
-        let Some((k, v)) = line.split_once('=') else { continue };
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
         let key = k.trim();
         let value = v.trim();
         if section.eq_ignore_ascii_case("Network") {
             if key.eq_ignore_ascii_case("ServerAddr") && !value.is_empty() {
                 cfg.server_addr = value.to_string();
             } else if key.eq_ignore_ascii_case("UseMock") {
-                cfg.use_mock = matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "y" | "on");
+                cfg.use_mock = matches!(
+                    value.to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "y" | "on"
+                );
             }
-        } else if section.eq_ignore_ascii_case("Login") {
-            if key.eq_ignore_ascii_case("Account") {
-                cfg.saved_account = value.to_string();
-            }
+        } else if section.eq_ignore_ascii_case("Login") && key.eq_ignore_ascii_case("Account") {
+            cfg.saved_account = value.to_string();
         }
     }
     cfg
@@ -281,21 +283,19 @@ fn setup_network(mut net: ResMut<NetworkContext>, mode: Res<NetMode>, addr: Res<
             mock::spawn_mock(to_client, from_client);
             tracing::info!("🌐 Mock 网络已启动（本地模拟服务器）");
         }
-        NetworkMode::Real => {
-            match tcp::connect(&addr.0, net.client_version_hash) {
-                Ok(conn) => {
-                    net.to_server = Some(conn.to_server);
-                    net.tcp_events = Some(conn.from_server);
-                    net.mode = NetworkMode::Real;
-                    tracing::info!("🌐 真实 TCP 已连接: {}", addr.0);
-                }
-                Err(e) => {
-                    tracing::error!("🔌 连接服务器 {} 失败: {}", addr.0, e);
-                    net.login_error = Some(format!("无法连接服务器 {}：{}", addr.0, e));
-                    net.disconnected = Some(format!("{}", e));
-                }
+        NetworkMode::Real => match tcp::connect(&addr.0, net.client_version_hash) {
+            Ok(conn) => {
+                net.to_server = Some(conn.to_server);
+                net.tcp_events = Some(conn.from_server);
+                net.mode = NetworkMode::Real;
+                tracing::info!("🌐 真实 TCP 已连接: {}", addr.0);
             }
-        }
+            Err(e) => {
+                tracing::error!("🔌 连接服务器 {} 失败: {}", addr.0, e);
+                net.login_error = Some(format!("无法连接服务器 {}：{}", addr.0, e));
+                net.disconnected = Some(format!("{}", e));
+            }
+        },
     }
 }
 
@@ -382,6 +382,23 @@ fn network_system(
                 None => break,
             }
         }
+    }
+}
+
+/// 把服务端 UserItem 转成客户端背包条目（含 ItemType/Shape 用于使用/装备判断）
+fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
+    InvItem {
+        unique_id: item.unique_id,
+        item_index: item.item_index,
+        name: item
+            .info
+            .as_ref()
+            .map(|i| i.name.clone())
+            .unwrap_or_else(|| format!("#{}", item.item_index)),
+        image: item.info.as_ref().map(|i| i.image).unwrap_or(0),
+        count: item.count,
+        item_type: item.info.as_ref().map(|i| i.item_type as u8).unwrap_or(0),
+        shape: item.info.as_ref().map(|i| i.shape).unwrap_or(0),
     }
 }
 
@@ -611,22 +628,57 @@ fn handle_packet(
         }
         // ---- M8: 玩家状态 ----
         x if x == ServerPacketIds::UserInformation as i16 => {
-            if let Ok(p) = user::UserInformation::read_body(&mut cur) {
-                tracing::info!(
-                    "👤 UserInformation: {} Lv.{} hp={} mp={} exp={}/{} gold={}",
-                    p.name, p.level, p.hp, p.mp, p.experience, p.max_experience, p.gold
-                );
-                hud.name = p.name.clone();
-                hud.level = p.level;
-                hud.hp = p.hp;
-                hud.mp = p.mp;
-                hud.exp = p.experience;
-                hud.max_exp = p.max_experience.max(1);
-                hud.gold = p.gold;
-                hud.class = p.class as u8;
-                hud.player_object_id = Some(p.object_id);
-                net.local_player_id = Some(p.object_id);
-                net.self_position = Some((p.location_x, p.location_y, p.direction as u8));
+            match user::UserInformation::read_body(&mut cur) {
+                Ok(p) => {
+                    tracing::info!(
+                        "👤 UserInformation: {} Lv.{} hp={} mp={} exp={}/{} gold={}",
+                        p.name,
+                        p.level,
+                        p.hp,
+                        p.mp,
+                        p.experience,
+                        p.max_experience,
+                        p.gold
+                    );
+                    hud.name = p.name.clone();
+                    hud.level = p.level;
+                    hud.hp = p.hp;
+                    hud.mp = p.mp;
+                    hud.exp = p.experience;
+                    hud.max_exp = p.max_experience.max(1);
+                    hud.gold = p.gold;
+                    hud.class = p.class as u8;
+                    hud.player_object_id = Some(p.object_id);
+                    net.local_player_id = Some(p.object_id);
+                    net.self_position = Some((p.location_x, p.location_y, p.direction as u8));
+
+                    // 背包（40 格）
+                    if let Some(inv) = &p.inventory {
+                        let items: Vec<Option<InvItem>> = inv
+                            .iter()
+                            .take(40)
+                            .map(|slot| slot.as_ref().map(to_inv_item))
+                            .collect();
+                        hud.inventory.items = items;
+                        hud.inventory.gold = p.gold;
+                        tracing::info!(
+                            "🎒 背包 {} 格（{} 件物品）",
+                            hud.inventory.items.len(),
+                            hud.inventory.items.iter().flatten().count()
+                        );
+                    }
+
+                    // 装备（12 槽）
+                    if let Some(equip) = &p.equipment {
+                        hud.equipment = equip
+                            .iter()
+                            .map(|slot| slot.as_ref().map(to_inv_item))
+                            .collect();
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ UserInformation 解析失败: {} (len={})", e, payload.len())
+                }
             }
         }
         x if x == ServerPacketIds::HealthChanged as i16 => {
@@ -724,7 +776,9 @@ fn handle_packet(
         }
         x if x == ServerPacketIds::DamageIndicator as i16 => {
             if let Ok(p) = combat::DamageIndicator::read_body(&mut cur) {
-                combat_evt.damages.push((p.object_id, p.damage, p.damage_type));
+                combat_evt
+                    .damages
+                    .push((p.object_id, p.damage, p.damage_type));
             }
         }
 

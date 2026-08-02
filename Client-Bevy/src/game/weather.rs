@@ -77,7 +77,9 @@ fn weather_update_system(
             let e = commands
                 .spawn((
                     UiEntity,
-                    RainDrop { vy: 600.0 + fastrand_f32() * 200.0 },
+                    RainDrop {
+                        vy: 600.0 + fastrand_f32() * 200.0,
+                    },
                     Sprite::from_image(white.clone()),
                     Anchor::TOP_LEFT,
                     Transform::from_xyz(x, -y, 50.0),
@@ -101,7 +103,7 @@ fn weather_update_system(
                     SnowFlake {
                         vy: 40.0 + fastrand_f32() * 30.0,
                         sway: 20.0 + fastrand_f32() * 30.0,
-                        phase: fastrand_f32() * 6.283,
+                        phase: fastrand_f32() * std::f32::consts::TAU,
                     },
                     Sprite::from_image(white.clone()),
                     Anchor::TOP_LEFT,
