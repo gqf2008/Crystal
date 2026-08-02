@@ -23,6 +23,9 @@ impl Plugin for GamePlugin {
         app.init_resource::<chat::ChatState>();
         app.init_resource::<movement::NetMotions>();
         app.init_resource::<player_control::ControlState>();
+        // 网络系统直接引用的对话框状态（与插件解耦，避免资源未注册）
+        app.init_resource::<dialogs::npc::NpcDialogState>();
+        app.init_resource::<dialogs::npc_goods::NpcGoodsState>();
         // 游戏场景 UI 相机（HUD/聊天共用，先于各 UI 插件创建）
         app.add_systems(
             OnEnter(AppState::Game),

@@ -9,10 +9,13 @@ pub mod amount_box;
 pub mod belt;
 pub mod character;
 pub mod npc;
+pub mod npc_goods;
 pub mod quest_log;
 pub mod compass;
 pub mod friend;
 pub mod group;
+pub mod inspect;
+pub mod trade;
 pub mod inventory;
 pub mod menu;
 pub mod minimap;
@@ -32,6 +35,9 @@ pub enum DialogKind {
     Npc,
     Group,
     Friend,
+    Trade,
+    Inspect,
+    NpcGoods,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）
@@ -79,6 +85,9 @@ impl Plugin for DialogsPlugin {
             group::GroupPlugin,
             friend::FriendPlugin,
             amount_box::AmountBoxPlugin,
+            trade::TradePlugin,
+            inspect::InspectPlugin,
+            npc_goods::NpcGoodsPlugin,
         ));
     }
 }

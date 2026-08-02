@@ -132,6 +132,36 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         tracing::info!("[MOCK] NPC 对话: id={} key={}", p.object_id, p.key);
                                         // 简单对话页：欢迎 + 选项
                                         let key = p.key.to_uppercase();
+                                        if key == "[@SHOP]" {
+                                            // 商店商品（带 ItemInfo）
+                                            use mir2_shared::data::item::ItemInfo;
+                                            let mk = |index: i32, name: &str, price: u32| {
+                                                mir2_shared::data::item::UserItem {
+                                                    item_index: index,
+                                                    count: 1,
+                                                    info: Some(ItemInfo {
+                                                        index,
+                                                        name: name.to_string(),
+                                                        price,
+                                                        ..Default::default()
+                                                    }),
+                                                    ..Default::default()
+                                                }
+                                            };
+                                            send(
+                                                &to_client,
+                                                &server::npc_interaction::NPCGoods {
+                                                    list: vec![
+                                                        mk(1, "金创药(小)", 10),
+                                                        mk(2, "魔法药(小)", 10),
+                                                        mk(3, "随机传送卷", 100),
+                                                    ],
+                                                    rate: 1.0,
+                                                    panel_type: mir2_shared::enums::PanelType::Buy,
+                                                    hide_added_stats: false,
+                                                },
+                                            );
+                                        }
                                         let page: Vec<String> = match key.as_str() {
                                             "[@SHOP]" => vec![
                                                 "这里是商店（MOCK）".to_string(),

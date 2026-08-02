@@ -52,6 +52,7 @@ pub struct AmountBoxPlugin;
 impl Plugin for AmountBoxPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AmountBoxState>();
+        app.add_message::<AmountBoxResult>();
         app.add_systems(OnEnter(AppState::Game), spawn_amount_box);
         app.add_systems(OnExit(AppState::Game), cleanup_amount_box);
         app.add_systems(
@@ -143,8 +144,8 @@ fn amount_box_system(
     cancel: Query<&UiButton, (With<AmountCancel>, Without<AmountOk>, Without<AmountClose>)>,
     close: Query<&UiButton, (With<AmountClose>, Without<AmountOk>, Without<AmountCancel>)>,
     mut widgets: Query<&mut Visibility, With<AmountBoxWidget>>,
-    mut titles: Query<&mut Text2d, With<AmountTitleText>>,
-    mut values: Query<&mut Text2d, With<AmountValueText>>,
+    mut titles: Query<&mut Text2d, (With<AmountTitleText>, Without<AmountValueText>)>,
+    mut values: Query<&mut Text2d, (With<AmountValueText>, Without<AmountTitleText>)>,
 ) {
     for mut vis in widgets.iter_mut() {
         *vis = if state.visible {

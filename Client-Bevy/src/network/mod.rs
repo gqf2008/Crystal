@@ -14,6 +14,7 @@ use mir2_shared::SelectInfo;
 
 use crate::game::chat::ChatState;
 use crate::game::dialogs::npc::NpcDialogState;
+use crate::game::dialogs::npc_goods::{GoodsEntry, NpcGoodsState};
 use crate::game::hud::HudState;
 use crate::game::movement::{NetMotion, NetMotions};
 use crate::map_renderer::GameData;
@@ -253,6 +254,7 @@ fn network_system(
     mut hud: ResMut<HudState>,
     mut chat: ResMut<ChatState>,
     mut npc_dialog: ResMut<NpcDialogState>,
+    mut npc_goods: ResMut<NpcGoodsState>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     // 真实 TCP：TcpEvent（完整内层包 / 断线）
@@ -268,6 +270,7 @@ fn network_system(
                         &mut hud,
                         &mut chat,
                         &mut npc_dialog,
+                        &mut npc_goods,
                         &mut next,
                         &payload,
                     );
@@ -303,6 +306,7 @@ fn network_system(
                         &mut hud,
                         &mut chat,
                         &mut npc_dialog,
+                        &mut npc_goods,
                         &mut next,
                         &payload,
                     );
@@ -330,6 +334,7 @@ fn handle_packet(
     hud: &mut HudState,
     chat: &mut ChatState,
     npc_dialog: &mut NpcDialogState,
+    npc_goods: &mut NpcGoodsState,
     next: &mut NextState<AppState>,
     payload: &[u8],
 ) {
@@ -640,6 +645,30 @@ fn handle_packet(
                 tracing::info!("🧙 NPC 对话: {} 行", p.page.len());
                 npc_dialog.lines = p.page;
                 npc_dialog.visible = true;
+            }
+        }
+
+        // ---- M9: NPC 商店 ----
+        x if x == ServerPacketIds::NPCGoods as i16 => {
+            if let Ok(p) = npc_interaction::NPCGoods::read_body(&mut cur) {
+                let goods: Vec<GoodsEntry> = p
+                    .list
+                    .iter()
+                    .map(|item| GoodsEntry {
+                        item_index: item.item_index,
+                        name: item
+                            .info
+                            .as_ref()
+                            .map(|i| i.name.clone())
+                            .unwrap_or_else(|| format!("#{}", item.item_index)),
+                        price: item.info.as_ref().map(|i| i.price).unwrap_or(0),
+                        count: item.count,
+                    })
+                    .collect();
+                tracing::info!("🏪 NPC 商品: {} 件 (rate={})", goods.len(), p.rate);
+                npc_goods.goods = goods;
+                npc_goods.selected = None;
+                npc_goods.visible = true;
             }
         }
 
