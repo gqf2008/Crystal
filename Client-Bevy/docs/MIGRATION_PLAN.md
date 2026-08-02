@@ -7,6 +7,18 @@
 
 ---
 
+## 零、移植参考原则（重要）
+
+| 部分 | 参考源码 | 说明 |
+|---|---|---|
+| **UI 逻辑**（对话框布局/交互/流程/文案） | 原版 C#：`Client/MirScenes/`（LoginScene/SelectScene/GameScene.cs）+ `Client/MirScenes/Dialogs/`（36 个对话框）+ `Client/MirControls/` | UI 行为以原版 C# 为准，macroquad 版仅作参考 |
+| **游戏绘制**（地图/精灵/帧动画/特效/遮挡） | Rust：`Client-Macroquad/src/`（map_renderer、rendering、objects、components） | 渲染数据流以 Rust 实现为准 |
+| **网络**（协议/TCP/编解码/包处理） | Rust：`Client-Macroquad/src/network/` + `SharedRust/` | 协议与帧格式以 Rust/SharedRust 为准 |
+
+> 原因：C# 版是 WinForms + DirectX 的原始实现，UI 交互（焦点、按钮三态、对话框层级）最贴近原版；而 Rust 版已完成协议对齐与渲染管线打磨，绘制/网络直接复用可避免重复踩坑。
+
+---
+
 ## 一、现状（已完成里程碑 M1–M6）
 
 | 里程碑 | 内容 | 状态 |
@@ -48,6 +60,7 @@
 - **验收（进行中）**: 与真实 ServerRust 联调 握手→登录 已通（`examples/net_smoke.rs` 验证 Connected/ClientVersion/Login 响应）；登录→选角→进游戏→对象生成待 GUI 联调；`cargo check` / `clippy` / `cargo test` 全过
 
 ### M8: 游戏场景基础（HUD + 玩家控制）
+> 参考：HUD/对话框 → `Client/MirScenes/GameScene.cs` + `Client/MirScenes/Dialogs/MainDialogs.cs`；绘制 → `Client-Macroquad/src/rendering`；网络 → `Client-Macroquad/src/network`
 - [ ] Game 场景骨架：StartGame/MapChanged 加载地图、相机跟随、出生点
 - [ ] 主对话框（血/蓝/经验/金币/快捷栏/功能按钮）与聊天对话框（输入/系统消息/公告）
 - [ ] 小地图、菜单/帮助/设置入口
@@ -56,6 +69,7 @@
 - **验收**: 可进入游戏移动、聊天、看到怪物/NPC 待机与周围玩家
 
 ### M9: 对话框系统（56 个游戏对话框，分 4 批）
+> 参考：**以原版 C# 为准** `Client/MirScenes/Dialogs/*.cs`（36 个文件）；Rust 版 `Client-Macroquad/src/scenes/dialogs/` 仅作迁移对照
 - [ ] 通用 UI 基建：对话框管理器（开关/焦点/拖拽/层级）、AmountBox、TextInput、native_ui_utils
 - [ ] 第 1 批（核心）: inventory / character / belt / menu / minimap / chat_control / compass
 - [ ] 第 2 批（交互）: npc / npc_goods / trade / amount_box / group / quest_log / friend / inspect
