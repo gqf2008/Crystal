@@ -415,6 +415,32 @@ impl SocialActor {
         }
     }
 
+    /// 向所有在线行会成员广播仓库物品列表（M32）
+    async fn broadcast_guild_storage_list(&self, guild_name: &str) {
+        match self.guilds.get(guild_name) {
+            Some(guild) => {
+                let sids = guild.online_sessions(0);
+                debug!(
+                    "GuildStorageList broadcast '{}': sessions={:?}",
+                    guild_name, sids
+                );
+                for sid in sids {
+                    send_guild_storage_list_packet(&self.gate_ref, sid, guild);
+                }
+            }
+            None => tracing::warn!("🏰 M32 broadcast: guild '{}' not found", guild_name),
+        }
+    }
+
+    /// 保存行会到数据库（创建/金币/物品/公告等变更后调用）
+    async fn save_guild_to_db(&self, guild_name: &str) {
+        if let Some(guild) = self.guilds.get(guild_name) {
+            if let Err(e) = db::save_guild(&self.db_pool, guild).await {
+                warn!("Failed to save guild '{}' to DB: {}", guild.name, e);
+            }
+        }
+    }
+
     // === 组队辅助方法 ===
 
     /// 加入或创建组队
@@ -1044,7 +1070,20 @@ impl Message<SocialPlayerJoined> for SocialActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: SocialPlayerJoined, _ctx: &mut Context<Self, Self::Reply>) {
-        self.players.insert(msg.session_id, msg.actor_ref);
+        self.players.insert(msg.session_id, msg.actor_ref.clone());
+        // 同步行会成员在线状态（服务端重启后行会从 DB 加载，成员 session 为 None；
+        // 不更新则行会广播/在线显示失效）
+        if let Ok(Some(state)) = msg.actor_ref.ask(GetPlayerState).await {
+            if let Some(guild_name) = &state.guild_name {
+                if let Some(guild) = self.guilds.get_mut(guild_name) {
+                    guild.set_online(&state.name, msg.session_id);
+                    debug!(
+                        "SocialActor: guild member {} online (guild={})",
+                        state.name, guild_name
+                    );
+                }
+            }
+        }
         debug!("SocialActor: player {} joined", msg.name);
     }
 }
@@ -1058,6 +1097,14 @@ impl Message<SocialPlayerLeft> for SocialActor {
 
     async fn handle(&mut self, msg: SocialPlayerLeft, _ctx: &mut Context<Self, Self::Reply>) {
         self.players.remove(&msg.session_id);
+
+        // 行会成员离线标记（保持 session 为空，行会广播/在线显示正确）
+        for guild in self.guilds.values_mut() {
+            if let Some(member) = guild.members.iter_mut().find(|m| m.session_id == Some(msg.session_id)) {
+                member.session_id = None;
+                debug!("SocialActor: guild member {} offline", member.name);
+            }
+        }
 
         // 处理组队离线标记
         for group in self.groups.values_mut() {
@@ -2238,6 +2285,7 @@ impl Message<GuildStorageGoldChangeRequest> for SocialActor {
                 let _ = record.ask(DeductGold { amount: msg.amount as u64 }).await;
                 guild.gold += msg.amount as u64;
                 send_system_message(&self.gate_ref, msg.session_id, &format!("已存入 {} 金币到行会仓库", msg.amount));
+                self.save_guild_to_db(&guild_name).await;
                 self.broadcast_guild_info(&guild_name).await;
             }
             1 => { // 取出
@@ -2253,6 +2301,7 @@ impl Message<GuildStorageGoldChangeRequest> for SocialActor {
                 guild.gold -= msg.amount as u64;
                 let _ = record.ask(AddGold { amount: msg.amount as u64 }).await;
                 send_system_message(&self.gate_ref, msg.session_id, &format!("已从行会仓库取出 {} 金币", msg.amount));
+                self.save_guild_to_db(&guild_name).await;
                 self.broadcast_guild_info(&guild_name).await;
             }
             _ => {}
@@ -2295,16 +2344,25 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                 }
 
                 let removed = record.ask(RemoveItemFromInventory { unique_id: msg.unique_id }).await.unwrap_or(None);
+                let mut deposited = false;
                 if let Some(removed_item) = removed {
                     let item_index = removed_item.item_index;
                     let slot = guild.deposit_item(removed_item.clone(), msg.count);
                     if let Some(slot_val) = slot {
                         send_system_message(&self.gate_ref, msg.session_id, "物品已存入行会仓库");
                         debug!("GuildStorageItem: {} deposited item={} slot={}", state.name, item_index, slot_val);
+                        deposited = true;
                     } else {
                         let _ = record.ask(AddItemToInventory { item: removed_item }).await;
                         send_system_message(&self.gate_ref, msg.session_id, "行会仓库已满");
                     }
+                }
+                if deposited {
+                    debug!("GuildStorageItem: saved + broadcast storage list");
+                    self.save_guild_to_db(&guild_name).await;
+                    self.broadcast_guild_storage_list(&guild_name).await;
+                } else {
+                    debug!("GuildStorageItem: deposit failed");
                 }
             }
             1 => { // 取出物品
@@ -2319,11 +2377,13 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                 }
 
                 let result = guild.withdraw_item(msg.grid);
+                let mut withdrew = false;
                 match result {
                     Some((item_data, qty, _slot)) => {
                         let added = record.ask(AddItemToInventory { item: item_data.clone() }).await.unwrap_or(false);
                         if added {
                             send_system_message(&self.gate_ref, msg.session_id, "物品已取出");
+                            withdrew = true;
                         } else {
                             guild.storage_items[msg.grid as usize] = Some((item_data, qty));
                             send_system_message(&self.gate_ref, msg.session_id, "背包已满");
@@ -2333,6 +2393,16 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                         send_system_message(&self.gate_ref, msg.session_id, "该仓库格子没有物品");
                     }
                 }
+                if withdrew {
+                    debug!("GuildStorageItem: saved + broadcast storage list");
+                    self.save_guild_to_db(&guild_name).await;
+                    self.broadcast_guild_storage_list(&guild_name).await;
+                } else {
+                    debug!("GuildStorageItem: withdraw failed");
+                }
+            }
+            3 => { // 请求仓库列表（C# GuildStorageItemChange type=3 语义）
+                send_guild_storage_list_packet(&self.gate_ref, msg.session_id, guild);
             }
             _ => {}
         }

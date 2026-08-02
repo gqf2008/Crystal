@@ -666,3 +666,36 @@ pub async fn handle_player_group_disconnect(
         }
     }
 }
+
+/// Send guild storage item list to a client（C# S.GuildStorageList 语义，M32）
+pub fn send_guild_storage_list_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, guild: &Guild) {
+    use mir2_shared::enums::ServerPacketIds;
+    use mir2_shared::data::client_data::GuildStorageItem;
+    use mir2_shared::packets::base::Packet;
+    use mir2_shared::packets::server::guild::GuildStorageList;
+    let items: Vec<Option<GuildStorageItem>> = guild
+        .storage_items
+        .iter()
+        .map(|slot| {
+            slot.as_ref().map(|(item, qty)| GuildStorageItem {
+                item: {
+                    let mut it = item.clone();
+                    it.count = (*qty).min(u16::MAX as u32) as u16;
+                    it
+                },
+                user_id: 0,
+            })
+        })
+        .collect();
+    let mut body = Vec::new();
+    let packet = GuildStorageList { items };
+    match packet.write_body(&mut body) {
+        Ok(()) => {
+            let _ = gate_ref.tell(SendToClient {
+                session_id,
+                data: build_packet_bytes(ServerPacketIds::GuildStorageList as i16, &body),
+            }).try_send();
+        }
+        Err(e) => tracing::error!("GuildStorageList write failed: {:?}", e),
+    }
+}
