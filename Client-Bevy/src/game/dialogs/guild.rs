@@ -64,6 +64,13 @@ pub struct GuildInviteBtn;
 #[derive(Component)]
 pub struct GuildKickBtn;
 
+/// 公告输入框（TextInput id 2）
+#[derive(Component)]
+pub struct GuildNoticeField;
+
+#[derive(Component)]
+pub struct GuildNoticeBtn;
+
 // 邀请提示
 #[derive(Component)]
 pub struct GuildInviteWidget;
@@ -271,6 +278,51 @@ fn spawn_guild(
             GuildWidget,
         ));
     }
+    // 公告输入框（TextInput id 2）+ 设置按钮（C# GuildDialog 公告编辑）
+    let notice_box = commands
+        .spawn((
+            crate::ui::sprite_ui::UiEntity,
+            DialogRoot(DialogKind::Guild),
+            GuildWidget,
+            GuildNoticeField,
+            crate::game::dialogs::text_input::TextInputField(2),
+            crate::game::dialogs::text_input::TextInputRect(340.0, 460.0, 200.0, 20.0),
+            Sprite {
+                image: white.clone(),
+                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
+                custom_size: Some(Vec2::new(200.0, 20.0)),
+                ..default()
+            },
+            bevy::sprite::Anchor::TOP_LEFT,
+            Transform::from_xyz(340.0, -460.0, 8.1),
+            Visibility::Hidden,
+        ))
+        .id();
+    commands.entity(notice_box).with_children(|p| {
+        p.spawn((
+            crate::game::dialogs::text_input::TextInputDisplay(2),
+            Text2d::new(String::new()),
+            bevy::sprite::Anchor::TOP_LEFT,
+            TextFont {
+                font: FontSource::Handle(font.clone()),
+                font_size: FontSize::Px(12.0),
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 1.0, 1.0)),
+            Transform::from_xyz(4.0, -2.0, 8.2),
+        ));
+    });
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 206, 207, 208,
+        300.0, 490.0, 8.3, 76.0, 25.0,
+    ) {
+        commands.entity(e).insert((
+            GuildNoticeBtn,
+            DialogRoot(DialogKind::Guild),
+            GuildWidget,
+        ));
+    }
 
     // 邀请提示（MirMessageBox）
     let (bx, by) = (284.0, 289.0);
@@ -310,6 +362,7 @@ fn guild_ui_system(
     create_btn: Query<&UiButton, With<GuildCreateBtn>>,
     invite_btn: Query<&UiButton, With<GuildInviteBtn>>,
     kick_btn: Query<&UiButton, With<GuildKickBtn>>,
+    notice_btn: Query<&UiButton, With<GuildNoticeBtn>>,
     close: Query<&UiButton, With<GuildClose>>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
@@ -346,12 +399,23 @@ fn guild_ui_system(
         text.0 = match line.0 {
             0 => {
                 if guild.in_guild {
-                    format!(
-                        "{}（{}）金币:{}",
-                        guild.name,
-                        guild.leader,
-                        guild.gold
-                    )
+                    let notice = guild.notice.first().cloned().unwrap_or_default();
+                    if notice.is_empty() {
+                        format!(
+                            "{}（{}）金币:{}",
+                            guild.name,
+                            guild.leader,
+                            guild.gold
+                        )
+                    } else {
+                        format!(
+                            "{}（{}）金币:{} 公告:{}",
+                            guild.name,
+                            guild.leader,
+                            guild.gold,
+                            notice
+                        )
+                    }
                 } else {
                     "未加入行会".to_string()
                 }
@@ -421,6 +485,21 @@ fn guild_ui_system(
                     tracing::info!("🏰 踢出行会成员: {}", m.name);
                     guild.selected_member = None;
                 }
+            }
+        }
+    }
+    // 公告按钮 → EditGuildNotice（C# GuildDialog 公告编辑）
+    for btn in &notice_btn {
+        if btn.clicked {
+            let notice = input.texts.get(2).cloned().unwrap_or_default();
+            let notice = notice.trim().to_string();
+            if !notice.is_empty() && guild.in_guild {
+                net.send_packet(&mir2_shared::packets::client::guild::EditGuildNotice {
+                    notice_lines: vec![notice.clone()],
+                });
+                tracing::info!("🏰 更新行会公告: {}", notice);
+                input.texts[2].clear();
+                input.active = None;
             }
         }
     }

@@ -262,6 +262,11 @@
 - [ ] 行会公告编辑 UI（EditGuildNotice wire 已修）、行会仓库（GuildStorage）
 
 ---
+### M29: 行会公告编辑（2026-08-03 完成）
+- [x] **客户端公告编辑**：行会对话框加公告输入框（TextInput 复用）+ 设置按钮 → `C.EditGuildNotice{notice_lines}`（C# GuildDialog 公告编辑语义）；行会头部行显示公告（服务端 GuildNoticeChange 广播 M27 已接入）
+- [x] 验证：真实 ServerRust E2E——创建行会 → 设置公告 → `🏰 行会公告更新: ["TestNotice 公告内容"]` → ✅；客户端 34 测试全过（服务端 EditGuildNotice wire M27 已修，无改动）
+
+---
 ## 四、执行顺序与依赖
 
 ```
@@ -281,6 +286,7 @@ M7（真实网络）→ M8（HUD+控制）→ M9（对话框 1→4 批）→ M10
 | 渲染后端冻结 | 强制 DX12（Vulkan present 在此机器异常） |
 | 大量精灵性能 | 精灵图缓存已建；后续 Atlas/批处理 |
 | 数据依赖 | 复用 Client-Macroquad/Data，`resolve_data_path` 自动解析 |
+
 
 
 

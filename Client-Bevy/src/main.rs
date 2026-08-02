@@ -177,6 +177,14 @@ fn main() {
     if std::env::args().any(|a| a == "--shop-test") {
         app.add_systems(Update, auto_shop_test);
     }
+    // --guild-notice-test: 行会公告链路（创建→设置公告→等 GuildNoticeChange）
+    if std::env::args().any(|a| a == "--guild-notice-test") {
+        app.add_systems(Update, auto_guild_notice_test);
+    }
+    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
+    if std::env::args().any(|a| a == "--shop-test") {
+        app.add_systems(Update, auto_shop_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -1233,6 +1241,61 @@ fn auto_guild_accept(
                 );
             } else {
                 tracing::warn!("[GUILDACCEPT] ❌ 未加入行会");
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --guild-notice-test：创建行会 → 设置公告 → 等 GuildNoticeChange 回包
+#[allow(clippy::too_many_arguments)]
+fn auto_guild_notice_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    guild: Res<client_bevy::game::dialogs::guild::GuildState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::guild::GuildNameReturn {
+                name: "TestGuild3".to_string(),
+            });
+            tracing::info!("[GUILDNOTICE] 创建行会 TestGuild3");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 3.0 {
+                return;
+            }
+            if guild.in_guild && guild.name == "TestGuild3" {
+                net.send_packet(&mir2_shared::packets::client::guild::EditGuildNotice {
+                    notice_lines: vec!["TestNotice 公告内容".to_string()],
+                });
+                tracing::info!("[GUILDNOTICE] 设置公告");
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t < 3.0 {
+                return;
+            }
+            if guild.notice.iter().any(|l| l.contains("TestNotice")) {
+                tracing::info!("[GUILDNOTICE] ✅ 公告已更新: {:?}", guild.notice);
+            } else {
+                tracing::warn!("[GUILDNOTICE] ❌ 公告未更新: {:?}", guild.notice);
             }
             *stage = 9;
         }
