@@ -3634,6 +3634,7 @@ async fn send_game_entry_sequence(
     map_file: &str,
     map_title: &str,
     is_big_map: bool,
+    item_infos: &std::collections::HashMap<i32, db::ItemInfo>,
 ) {
     use mir2_shared::enums::ServerPacketIds;
 
@@ -3655,8 +3656,8 @@ async fn send_game_entry_sequence(
         data: map_changed,
     }).await;
 
-    // 3. UserInformation
-    let user_info = build_user_information_packet(state);
+    // 3. UserInformation（含背包/装备 ItemInfo）
+    let user_info = build_user_information_packet(state, item_infos);
     let _ = gate_ref.tell(SendToClient {
         session_id: sid,
         data: user_info,
@@ -3753,7 +3754,16 @@ fn can_attack_player(attacker: &PlayerState, target: &PlayerState) -> bool {
     }
 }
 
-fn build_user_information_packet(state: &PlayerState) -> Vec<u8> {
+/// C# ItemType → SharedRust ItemType（两者编号差 3：Nothing=0→3, Weapon=1→4 ...）
+fn shared_item_type(cs_type: i32) -> mir2_shared::enums::ItemType {
+    mir2_shared::enums::ItemType::try_from((cs_type + 3) as u8)
+        .unwrap_or(mir2_shared::enums::ItemType::Nothing)
+}
+
+fn build_user_information_packet(
+    state: &PlayerState,
+    item_infos: &std::collections::HashMap<i32, db::ItemInfo>,
+) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
 
@@ -3777,18 +3787,101 @@ fn build_user_information_packet(state: &PlayerState) -> Vec<u8> {
     body.extend_from_slice(&state.max_experience.to_le_bytes()); // max_experience
     body.extend_from_slice(&0u16.to_le_bytes());              // level_effects
     body.push(0u8);                                           // has_hero=false
-    body.push(state.hero_behaviour);                           // hero_behaviour
+    // C# HeroBehaviour(0..3) → SharedRust(3..6)，客户端 try_from 需要有效判别值
+    body.push(state.hero_behaviour.saturating_add(3));        // hero_behaviour
 
-    // 客户端期望的后续字段（read_body 继续读取的部分）
-    body.push(0u8);                                           // has_inventory=false
-    body.push(0u8);                                           // has_equipment=false
+    // 背包（40 格，含 info 供客户端显示名称/图标/类型）
+    body.push(1u8);                                           // has_inventory=true
+    body.extend_from_slice(&(state.inventory.backpack.len() as i32).to_le_bytes());
+    for slot in state.inventory.backpack.iter() {
+        if let Some(slot) = slot {
+            body.push(1u8);
+            let mut item = slot.item.clone();
+            if item.info.is_none() {
+                item.info = item_infos.get(&item.item_index).map(|info| mir2_shared::data::item::ItemInfo {
+                    index: info.index,
+                    name: info.name.clone(),
+                    item_type: shared_item_type(info.item_type),
+                    // SharedRust 枚举从 3 开始（C# 从 0 开始），默认值 0 会让客户端 try_from 失败
+                    grade: mir2_shared::enums::ItemGrade::try_from((info.grade + 3) as u8)
+                        .unwrap_or(mir2_shared::enums::ItemGrade::None),
+                    required_type: mir2_shared::enums::RequiredType::try_from(
+                        (info.required_type + 3) as u8,
+                    )
+                    .unwrap_or(mir2_shared::enums::RequiredType::Level),
+                    required_class: mir2_shared::enums::RequiredClass::from_bits_truncate(
+                        info.required_class as u8,
+                    ),
+                    required_gender: mir2_shared::enums::RequiredGender::from_bits_truncate(
+                        info.required_gender as u8,
+                    ),
+                    set: mir2_shared::enums::ItemSet::try_from((info.set_type + 3) as u8)
+                        .unwrap_or(mir2_shared::enums::ItemSet::None),
+                    shape: info.shape as i16,
+                    weight: info.weight as u8,
+                    image: info.image as u16,
+                    durability: info.durability as u16,
+                    price: info.price,
+                    stack_size: info.stack_size as u16,
+                    ..Default::default()
+                });
+            }
+            if item.write_to_with_info(&mut body).is_err() {
+                body.push(0u8); // 回退：空格子
+            }
+        } else {
+            body.push(0u8);
+        }
+    }
+    // 装备（12 槽，含 info）
+    body.push(1u8);                                           // has_equipment=true
+    body.extend_from_slice(&(state.inventory.equipment.len() as i32).to_le_bytes());
+    for eq in state.inventory.equipment.iter() {
+        if let Some(item) = eq {
+            body.push(1u8);
+            let mut item = item.clone();
+            if item.info.is_none() {
+                item.info = item_infos.get(&item.item_index).map(|info| mir2_shared::data::item::ItemInfo {
+                    index: info.index,
+                    name: info.name.clone(),
+                    item_type: shared_item_type(info.item_type),
+                    grade: mir2_shared::enums::ItemGrade::try_from((info.grade + 3) as u8)
+                        .unwrap_or(mir2_shared::enums::ItemGrade::None),
+                    required_type: mir2_shared::enums::RequiredType::try_from(
+                        (info.required_type + 3) as u8,
+                    )
+                    .unwrap_or(mir2_shared::enums::RequiredType::Level),
+                    required_class: mir2_shared::enums::RequiredClass::from_bits_truncate(
+                        info.required_class as u8,
+                    ),
+                    required_gender: mir2_shared::enums::RequiredGender::from_bits_truncate(
+                        info.required_gender as u8,
+                    ),
+                    set: mir2_shared::enums::ItemSet::try_from((info.set_type + 3) as u8)
+                        .unwrap_or(mir2_shared::enums::ItemSet::None),
+                    shape: info.shape as i16,
+                    weight: info.weight as u8,
+                    image: info.image as u16,
+                    durability: info.durability as u16,
+                    price: info.price,
+                    stack_size: info.stack_size as u16,
+                    ..Default::default()
+                });
+            }
+            if item.write_to_with_info(&mut body).is_err() {
+                body.push(0u8);
+            }
+        } else {
+            body.push(0u8);
+        }
+    }
     body.push(0u8);                                           // has_quest_inventory=false
     body.extend_from_slice(&(state.inventory.gold as u32).to_le_bytes()); // gold
     body.extend_from_slice(&0u32.to_le_bytes());              // credit
     body.push(0u8);                                           // has_expanded_storage=false
     body.extend_from_slice(&0i64.to_le_bytes());              // expanded_storage_expiry_time
     body.extend_from_slice(&0i32.to_le_bytes());              // magic_count=0
-    body.extend_from_slice(&0i32.to_le_bytes());              // creature_count=0
+    body.extend_from_slice(&0i32.to_le_bytes());              // intelligent creatures count=0
     body.push(0u8);                                           // summoned_creature_type
     body.push(0u8);                                           // creature_summoned=false
     body.push(0u8);                                           // allow_observe=false

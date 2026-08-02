@@ -435,7 +435,15 @@ impl Message<ClientData> for GateActor {
                     }).await;
                 }
                 self.sessions.remove(&msg.session_id);
+                let logged_out_username = self.session_usernames.get(&msg.session_id).cloned();
                 self.session_usernames.remove(&msg.session_id);
+                if let Some(username) = logged_out_username {
+                    if let Some(account_ref) = &self.account_ref {
+                        let _ = account_ref.ask(crate::actors::account::LogoutRequest {
+                            username,
+                        }).await;
+                    }
+                }
             }
             x if x == ClientPacketIds::Chat as i16 => {
                 // Chat - 解析并广播 (Phase 1.3: 输入验证)
@@ -957,8 +965,16 @@ impl Message<ClientDisconnected> for GateActor {
             return;
         }
         self.sessions.remove(&msg.session_id);
+        let logged_out_username = self.session_usernames.get(&msg.session_id).cloned();
         self.session_usernames.remove(&msg.session_id);
         debug!("Session {} disconnected (TCP close)", msg.session_id);
+        if let Some(username) = logged_out_username {
+            if let Some(account_ref) = &self.account_ref {
+                let _ = account_ref.ask(crate::actors::account::LogoutRequest {
+                    username,
+                }).await;
+            }
+        }
 
         // 通知 WorldActor 清理玩家状态
         if let Some(world_ref) = &self.world_ref {

@@ -42,9 +42,9 @@ fn verify_password(password: &str, hash: &str) -> (bool, bool) {
     // Check if it's a migrated PBKDF2 hash
     if let Some(rest) = hash.strip_prefix("pbkdf2_sha1$") {
         // Format: pbkdf2_sha1$<base64_salt>$<base64_hash>
-        let parts: Vec<&str> = rest.splitn(3, '$').collect();
-        if parts.len() == 3 {
-            if let (Ok(salt), Ok(expected_hash)) = (data_encoding::BASE64.decode(parts[1].as_bytes()), data_encoding::BASE64.decode(parts[2].as_bytes())) {
+        let parts: Vec<&str> = rest.splitn(2, '$').collect();
+        if parts.len() == 2 {
+            if let (Ok(salt), Ok(expected_hash)) = (data_encoding::BASE64.decode(parts[0].as_bytes()), data_encoding::BASE64.decode(parts[1].as_bytes())) {
                 let mut computed = vec![0u8; 24]; // Crypto.HashSize = 24
                 pbkdf2_hmac::<Sha1>(password.as_bytes(), &salt, 50, &mut computed); // Crypto.Iterations = 50
                 if computed == expected_hash {

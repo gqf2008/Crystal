@@ -670,7 +670,7 @@ impl WorldActor {
             let mut saved = 0;
             for record in self.players.values() {
                 if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                    if let Err(e) = db::save_character(&self.db_pool, &state, &record.name).await {
+                    if let Err(e) = db::save_character(&self.db_pool, &state, &record.account_username).await {
                         warn!("Auto-save failed for player {}: {}", record.name, e);
                     } else {
                         saved += 1;

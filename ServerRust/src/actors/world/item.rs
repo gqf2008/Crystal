@@ -455,8 +455,20 @@ impl Message<EquipItemRequest> for WorldActor {
             None => return,
         };
 
+        // 按 unique_id 在背包中定位格子（客户端发来的 grid 是 MirGridType）
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        let Some(grid_idx) = state.inventory.backpack.iter().position(|s| {
+            s.as_ref().map_or(false, |slot| slot.item.unique_id == msg.unique_id)
+        }) else {
+            send_system_message(&self.gate_ref, msg.session_id, "找不到该物品");
+            return;
+        };
+
         let result = record.actor_ref.ask(InventoryEquipItem {
-            grid: msg.grid,
+            grid: grid_idx as u8,
             slot,
         }).await.unwrap_or(None);
 

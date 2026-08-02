@@ -169,7 +169,7 @@ impl Message<StartGameRequest> for WorldActor {
 
         // 注入地图数据（按真实 map_index 查找）
         if let Some(map_data) = self.maps.get(&map_slot).cloned() {
-            let _ = player_ref.ask(SetMapData { map: map_data });
+            let _ = player_ref.ask(SetMapData { map: map_data }).await;
         }
 
         // 注入数据库加载的状态
@@ -214,7 +214,7 @@ impl Message<StartGameRequest> for WorldActor {
         loaded_state.freezing = b.freezing;
         loaded_state.poison_attack = b.poison_attack;
 
-        let _ = player_ref.ask(SetPlayerState { state: loaded_state.clone() });
+        let _ = player_ref.ask(SetPlayerState { state: loaded_state.clone() }).await;
 
         self.players.insert(msg.session_id, PlayerRecord {
             actor_ref: player_ref,
@@ -299,7 +299,15 @@ impl Message<StartGameRequest> for WorldActor {
 
         // 发送游戏进入序列（使用真实状态数据）
         let is_big_map = self.map_infos.get(&map_info_idx).map(|m| m.big_map).unwrap_or(false);
-        send_game_entry_sequence(self.gate_ref.clone(), msg.session_id, &loaded_state, &map_file, &map_title, is_big_map).await;
+        send_game_entry_sequence(
+            self.gate_ref.clone(),
+            msg.session_id,
+            &loaded_state,
+            &map_file,
+            &map_title,
+            is_big_map,
+            &self.item_infos,
+        ).await;
 
         // 发送地图上的 NPC 和怪物
         let spawn_dir = self.spawn_dir.clone();

@@ -668,6 +668,25 @@ impl UserItem {
         Ok(())
     }
 
+    /// UserInformation 专用：write_to + 内联 ItemInfo（供客户端显示名称/图标/类型）
+    pub fn write_to_with_info<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        self.write_to(writer)?;
+        write_bool(writer, self.info.is_some())?;
+        if let Some(info) = &self.info {
+            info.write_to(writer)?;
+        }
+        Ok(())
+    }
+
+    /// UserInformation 专用：read_default + 内联 ItemInfo
+    pub fn read_from_with_info<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let mut item = Self::read_default(reader)?;
+        if read_bool(reader)? {
+            item.info = Some(ItemInfo::read_default(reader)?);
+        }
+        Ok(item)
+    }
+
     pub fn is_added(&self, info: Option<&ItemInfo>) -> bool {
         let base_info = info.or(self.info.as_ref());
         let slot_limit = base_info

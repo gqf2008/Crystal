@@ -861,6 +861,20 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     // 如果任何步骤失败,整个事务回滚,不会出现半保存状态。
     let mut tx = pool.begin().await?;
 
+    // 先删子表行：INSERT OR REPLACE 会先删旧角色行再插入，
+    // 若子表仍有引用会触发立即 FK 冲突（尤其是有背包物品的角色）。
+    for tbl in [
+        "inventory_backpack", "inventory_equipment", "inventory_storage",
+        "hero_inventory_backpack", "friends", "blocked_list", "mail",
+        "quests", "completed_quests", "player_magics", "player_flags",
+        "creatures", "refine_log",
+    ] {
+        sqlx::query(&format!("DELETE FROM {tbl} WHERE character_name = ?"))
+            .bind(&state.name)
+            .execute(&mut *tx)
+            .await?;
+    }
+
     // Save character
     sqlx::query(
         r#"INSERT OR REPLACE INTO characters (
