@@ -47,6 +47,8 @@ fn main() {
                 primary_window: Some(Window {
                     title: "Mir2 (Bevy) — 传奇2 客户端移植".to_string(),
                     resolution: (1024u32, 768u32).into(),
+                    // 启用 IME：支持中文输入法（角色名/账号密码等）
+                    ime_enabled: true,
                     // 无 vsync：避免会话中 vblank 缺失导致 present 永久阻塞（画面冻结）
                     present_mode: bevy::window::PresentMode::Immediate,
                     ..default()

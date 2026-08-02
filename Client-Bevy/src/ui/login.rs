@@ -5,6 +5,7 @@
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::MessageReader;
 use bevy::prelude::*;
+use bevy::window::Ime;
 
 use crate::map_renderer::GameLibraries;
 use crate::network::NetworkContext;
@@ -297,6 +298,7 @@ fn login_ui_system(
     mut dlg_sprites: Query<(&InDialog, &mut Visibility)>,
     windows: Query<&Window>,
     mouse: Res<ButtonInput<MouseButton>>,
+    mut ime: MessageReader<Ime>,
 ) {
     cursor.timer += time.delta_secs();
     if cursor.timer >= 0.5 {
@@ -317,6 +319,17 @@ fn login_ui_system(
             input.focused = true;
         } else if lclick {
             input.focused = false;
+        }
+    }
+
+    // 中文输入法：IME 组合完成文本追加到聚焦输入框
+    for ev in ime.read() {
+        if let Ime::Commit { value, .. } = ev {
+            for mut input in inputs.iter_mut() {
+                if input.focused && !input.password {
+                    input.value.push_str(value);
+                }
+            }
         }
     }
 

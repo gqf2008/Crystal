@@ -10,6 +10,7 @@
 
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
+use bevy::window::Ime;
 use mir2_shared::{MirClass, MirGender};
 
 use crate::map_renderer::GameLibraries;
@@ -33,6 +34,10 @@ impl Plugin for NewCharacterPlugin {
         app.add_systems(
             Update,
             new_char_anim_system.run_if(in_state(AppState::Select)),
+        );
+        app.add_systems(
+            Update,
+            new_char_ime_system.run_if(in_state(AppState::Select)),
         );
     }
 }
@@ -524,6 +529,30 @@ fn new_char_ui_system(
     }
     if let Ok(mut t) = texts.p0().single_mut() {
         t.0 = display;
+    }
+}
+
+/// 中文输入法：IME 组合完成文本追加到名字（单独系统避免参数超限）
+fn new_char_ime_system(
+    mut state: ResMut<NewCharState>,
+    mut ime: MessageReader<Ime>,
+    mut windows: Query<&mut Window>,
+) {
+    if !state.visible || !state.name_focused {
+        return;
+    }
+    if let Ok(mut w) = windows.single_mut() {
+        // IME 候选框跟随输入框位置
+        w.ime_position = Vec2::new(DLG_X + 325.0, DLG_Y + 268.0);
+    }
+    for ev in ime.read() {
+        if let Ime::Commit { value, .. } = ev {
+            for ch in value.chars() {
+                if state.name.chars().count() < 12 {
+                    state.name.push(ch);
+                }
+            }
+        }
     }
 }
 

@@ -8,6 +8,7 @@
 
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
+use bevy::window::Ime;
 use mir2_shared::SelectInfo;
 
 use crate::map_renderer::GameLibraries;
@@ -26,6 +27,10 @@ impl Plugin for ModalBoxPlugin {
         app.add_systems(
             Update,
             modal_ui_system.run_if(in_state(AppState::Select)),
+        );
+        app.add_systems(
+            Update,
+            modal_ime_system.run_if(in_state(AppState::Select)),
         );
     }
 }
@@ -432,6 +437,29 @@ fn modal_ui_system(
             state.kind = ModalKind::None;
             state.name_input.clear();
             state.error = None;
+        }
+    }
+}
+
+/// 中文输入法：删除确认输入框 IME 组合文本
+fn modal_ime_system(
+    mut state: ResMut<ModalState>,
+    mut ime: MessageReader<Ime>,
+    mut windows: Query<&mut Window>,
+) {
+    if state.kind != ModalKind::DeleteConfirm || !state.input_focused {
+        return;
+    }
+    if let Ok(mut w) = windows.single_mut() {
+        w.ime_position = Vec2::new(DLG_X + 23.0, DLG_Y + 86.0);
+    }
+    for ev in ime.read() {
+        if let Ime::Commit { value, .. } = ev {
+            for ch in value.chars() {
+                if state.name_input.chars().count() < 24 {
+                    state.name_input.push(ch);
+                }
+            }
         }
     }
 }
