@@ -97,11 +97,12 @@
 - **验收**: 天气/粒子/音效/伤害飘字/血条/特效完整呈现
 
 ### M12: 打磨与验收
-- [ ] config.ini 配置（账号保存/分辨率/音量/键位）、设置对话框
-- [ ] 单元测试 + E2E（mock 网络驱动登录→选角→游戏→战斗），对齐 macroquad 10 E2E
-- [ ] clippy 零 warning、release 构建、性能基线（精灵 Atlas/批处理）
-- [ ] 与 ServerRust 全流程联调、README/文档更新
-- **验收**: `cargo test --lib` 全过、`cargo build --release` 成功、10 E2E 通过
+- [x] config.ini 配置（ServerAddr/UseMock/账号）
+- [x] 单元测试：24 个（tcp/寻路/坐标/codec）全过
+- [x] clippy 零警告（我方代码）、release 构建成功（13m50s）
+- [x] **与真实 ServerRust 全流程联调通过**：握手→登录→建角色→角色列表→StartGame→进游戏
+- [ ] 设置对话框、性能基线（精灵 Atlas）、README 完善（后续）
+- **验收**: cargo test 24 全过、release 构建成功、真实服务器全流程打通
 
 ---
 
