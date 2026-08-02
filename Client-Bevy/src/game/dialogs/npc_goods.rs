@@ -189,13 +189,18 @@ fn npc_goods_ui_system(
             state.selected = None;
         }
     }
-    // 购买（发送 BuyItem；后续接入）
-    for _btn in &buy {
-        if let Some(idx) = state.selected {
-            if let Some(g) = state.goods.get(idx) {
-                tracing::info!("🏪 购买 {} (item_index={})", g.name, g.item_index);
-                // BuyItem 包字段待确认后接入
-                let _ = &net;
+    // 购买（原版 C# NPCGoodsDialog 购买按钮 → C.BuyItem{ItemIndex, Count, Type}）
+    for btn in &buy {
+        if btn.clicked {
+            if let Some(idx) = state.selected {
+                if let Some(g) = state.goods.get(idx) {
+                    net.send_packet(&mir2_shared::packets::client::npc::BuyItem {
+                        item_index: g.item_index as u64,
+                        count: 1,
+                        panel_type: mir2_shared::enums::PanelType::Buy,
+                    });
+                    tracing::info!("🏪 购买 {} (item_index={})", g.name, g.item_index);
+                }
             }
         }
     }

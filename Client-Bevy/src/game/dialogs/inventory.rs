@@ -756,6 +756,7 @@ fn inv_item_action_system(
     time: Res<Time>,
     mut amount: ResMut<AmountBoxState>,
     mut confirm: ResMut<InvDropConfirm>,
+    npc_goods: Res<crate::game::dialogs::npc_goods::NpcGoodsState>,
     mut pending: ResMut<InvPendingAmount>,
     mut result: MessageReader<AmountBoxResult>,
     all_buttons: Query<&UiButton>,
@@ -872,6 +873,22 @@ fn inv_item_action_system(
                 use_or_equip(item, &net);
             }
         }
+    }
+
+    // Alt+左键：快速出售（原版 C# "Add support for ALT + click to sell quickly"）
+    if mouse.just_pressed(MouseButton::Left) && keys.pressed(KeyCode::AltLeft) {
+        if npc_goods.visible {
+            if let Some(i) = slot_at(cursor.x, cursor.y) {
+                if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
+                    net.send_packet(&mir2_shared::packets::client::npc::SellItem {
+                        unique_id: item.unique_id,
+                        count: 1,
+                    });
+                    tracing::info!("💰 出售 {} (uid={})", item.name, item.unique_id);
+                }
+            }
+        }
+        return;
     }
 
     // Shift+左键：拆分堆叠

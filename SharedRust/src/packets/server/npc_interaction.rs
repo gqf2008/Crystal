@@ -51,7 +51,7 @@ impl Packet for NPCGoods {
         let count = reader.read_i32::<LittleEndian>()? as usize;
         let mut list = Vec::with_capacity(count);
         for _ in 0..count {
-            list.push(UserItem::read_from(reader, i32::MAX, i32::MAX)?);
+            list.push(UserItem::read_from_with_info(reader)?);
         }
 
         let rate = reader.read_f32::<LittleEndian>()?;
@@ -69,7 +69,7 @@ impl Packet for NPCGoods {
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_i32::<LittleEndian>(self.list.len() as i32)?;
         for item in &self.list {
-            item.write_to(writer)?;
+            item.write_to_with_info(writer)?;
         }
 
         writer.write_f32::<LittleEndian>(self.rate)?;
@@ -156,3 +156,4 @@ impl Packet for DefaultNPC {
         Ok(())
     }
 }
+

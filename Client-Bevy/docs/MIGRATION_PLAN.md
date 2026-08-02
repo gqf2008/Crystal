@@ -154,6 +154,20 @@
 
 ---
 
+### M17: NPC 商店买卖闭环（2026-08-03 完成）
+- [x] **NPCGoods gzip 解压**：C# 协议 `ServerPackets.NPCGoods.Compressed==true`（SharedRust `is_compressed()==true`），客户端此前未解压直接解析压缩字节 → 修复为收到后先 GzipDecoder 再 read_body
+- [x] **修复服务端双重包头**：`send_npc_goods`/`send_npc_panel`/`send_user_storage` 先用 `serialize_packet`（已写完整内层包头）又用 `build_packet_bytes` 二次包装 → 去掉二次包装，与 ObjectItem/UserInformation 一致
+- [x] **NPCGoods 内联 ItemInfo**：与 UserInformation/ObjectItem 同约定，SharedRust NPCGoods 改 `write_to_with_info`/`read_from_with_info`（原版 C# 客户端用本地 GetItemInfo 解析，Rust 客户端无本地物品库 → 服务端内联）
+- [x] **购买闭环**：BuyItem（C# wire：`[u64 item_index][u16 count][u8 panel]`）→ 服务端按 `session_npc` 会话上下文解析 NPC → 商品匹配/库存/金币校验 → 扣款发物 → 完整 UserInformation 刷新
+- [x] **出售闭环**：SellItem（`[u64 uid][u16 count]`）→ 按 unique_id 移除背包物品 → 半价加金币 → SellItem 响应 + 完整 UserInformation 刷新；修复响应包 count 写成 u32 而协议是 u16 导致 success 误读
+- [x] **服务端预存 bug 修复**：
+  - `load_character` 不读 `characters.gold` → 每次登录金币归零（已补）
+  - `load_npc_goods` 老库无 stock/infinite_stock 列 → 默认 0/售罄（已改默认无限库存，C# 语义）
+  - 同批修正 SplitItem 响应 count u16（DropItem 保持 u32）
+- [x] **客户端 UI 对齐原版 C#**：`npc.rs` 支持 `<文字/@Buy>` 原版行格式点击；`npc_goods.rs` 购买按钮 → `C.BuyItem{item_index, count, PanelType::Buy}`；`inventory.rs` Alt+左键快速出售（NPC 商店打开时）→ `C.SellItem{unique_id, count}`
+- [x] 验证：真实 ServerRust E2E（`--shop-test --auto-enter`）——CallNPC → [@Buy] → NPCGoods 18 件（含名称/价格）→ 购买 (HP)DrugSmall 扣 40 金 → 背包 +1 → 出售响应 success=true 回 +20 金 → 背包清空 → DB 落库（gold 持久化）
+
+---
 ## 四、执行顺序与依赖
 
 ```
@@ -173,3 +187,4 @@ M7（真实网络）→ M8（HUD+控制）→ M9（对话框 1→4 批）→ M10
 | 渲染后端冻结 | 强制 DX12（Vulkan present 在此机器异常） |
 | 大量精灵性能 | 精灵图缓存已建；后续 Atlas/批处理 |
 | 数据依赖 | 复用 Client-Macroquad/Data，`resolve_data_path` 自动解析 |
+

@@ -799,10 +799,13 @@ fn handle_packet(
 
         // ---- M9: NPC 对话 ----
         x if x == ServerPacketIds::NPCResponse as i16 => {
-            if let Ok(p) = npc_interaction::NPCResponse::read_body(&mut cur) {
+            match npc_interaction::NPCResponse::read_body(&mut cur) {
+            Ok(p) => {
                 tracing::info!("🧙 NPC 对话: {} 行", p.page.len());
                 npc_dialog.lines = p.page;
                 npc_dialog.visible = true;
+            }
+            Err(e) => tracing::warn!("⚠️ NPCResponse 解析失败: {} (len={})", e, payload.len()),
             }
         }
 
@@ -827,25 +830,44 @@ fn handle_packet(
 
         // ---- M9: NPC 商店 ----
         x if x == ServerPacketIds::NPCGoods as i16 => {
-            if let Ok(p) = npc_interaction::NPCGoods::read_body(&mut cur) {
-                let goods: Vec<GoodsEntry> = p
-                    .list
-                    .iter()
-                    .map(|item| GoodsEntry {
-                        item_index: item.item_index,
-                        name: item
-                            .info
-                            .as_ref()
-                            .map(|i| i.name.clone())
-                            .unwrap_or_else(|| format!("#{}", item.item_index)),
-                        price: item.info.as_ref().map(|i| i.price).unwrap_or(0),
-                        count: item.count,
-                    })
-                    .collect();
-                tracing::info!("🏪 NPC 商品: {} 件 (rate={})", goods.len(), p.rate);
-                npc_goods.goods = goods;
-                npc_goods.selected = None;
-                npc_goods.visible = true;
+            // C# 协议：NPCGoods 的 body 是 gzip 压缩的（C# ServerPackets.NPCGoods.Compressed == true，
+            // Rust SharedRust 对应 is_compressed()==true），必须解压后再解析。
+            let mut body = Vec::new();
+            let mut gz = flate2::read::GzDecoder::new(std::io::Cursor::new(
+                &payload[PacketHeader::HEADER_SIZE..],
+            ));
+            match std::io::Read::read_to_end(&mut gz, &mut body) {
+                Ok(_) => {
+                    let mut cur = std::io::Cursor::new(body);
+                    match npc_interaction::NPCGoods::read_body(&mut cur) {
+                        Ok(p) => {
+                            let goods: Vec<GoodsEntry> = p
+                                .list
+                                .iter()
+                                .map(|item| GoodsEntry {
+                                    item_index: item.item_index,
+                                    name: item
+                                        .info
+                                        .as_ref()
+                                        .map(|i| i.name.clone())
+                                        .unwrap_or_else(|| format!("#{}", item.item_index)),
+                                    price: item.info.as_ref().map(|i| i.price).unwrap_or(0),
+                                    count: item.count,
+                                })
+                                .collect();
+                            tracing::info!("🏪 NPC 商品: {} 件 (rate={})", goods.len(), p.rate);
+                            npc_goods.goods = goods;
+                            npc_goods.selected = None;
+                            npc_goods.visible = true;
+                        }
+                        Err(e) => {
+                            tracing::warn!("⚠️ NPCGoods 解析失败: {} (len={})", e, payload.len())
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ NPCGoods gzip 解压失败: {} (len={})", e, payload.len())
+                }
             }
         }
 
@@ -954,6 +976,11 @@ fn handle_packet(
                 tracing::info!("🧬 合并响应: from={} to={} success={}", p.id_from, p.id_to, p.success);
             }
         }
+        x if x == ServerPacketIds::SellItem as i16 => {
+            if let Ok(p) = item::SellItem::read_body(&mut cur) {
+                tracing::info!("💰 出售响应: uid={} count={} success={}", p.unique_id, p.count, p.success);
+            }
+        }
 
         // ---- M13: 技能 ----
         x if x == ServerPacketIds::NewMagic as i16 => {
@@ -1012,3 +1039,4 @@ fn chat_color(t: mir2_shared::enums::ChatType) -> bevy::prelude::Color {
         _ => bevy::prelude::Color::WHITE,
     }
 }
+

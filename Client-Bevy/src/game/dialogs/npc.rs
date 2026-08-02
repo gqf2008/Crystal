@@ -153,17 +153,38 @@ fn npc_ui_system(
         return;
     }
     for (i, l) in npc.lines.iter().enumerate() {
-        if i < 8 && l.trim_start().starts_with("[@") {
+        if i < 8 && is_clickable_npc_line(l) {
             let y = 34.0 + i as f32 * 18.0;
             if cursor.x >= 8.0 && cursor.x <= 400.0 && cursor.y >= y && cursor.y <= y + 16.0 {
-                let key = l.trim().trim_start_matches('[').trim_end_matches(']').to_string();
+                let key = extract_npc_key(l);
                 net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
                     object_id: npc.npc_object_id,
-                    key,
+                    key: key.clone(),
                 });
-                tracing::info!("🧙 NPC 选项: {}", l.trim());
+                tracing::info!("🧙 NPC 选项: {} → {}", l.trim(), key);
                 break;
             }
         }
+    }
+}
+
+/// 可点击的 NPC 菜单行：[@XXX] 或 <文字/@XXX>（原版 C# 链接格式）
+fn is_clickable_npc_line(line: &str) -> bool {
+    let t = line.trim();
+    t.starts_with("[@") || t.contains("/@")
+}
+
+/// 提取菜单键（统一为 "[@XXX]" 格式，服务端按该格式匹配）
+pub fn extract_npc_key(line: &str) -> String {
+    let t = line.trim();
+    if t.starts_with("[@") {
+        let end = t.find(']').unwrap_or(t.len());
+        t[..end].to_string()
+    } else if let Some(slash) = t.find("/@") {
+        let rest = &t[slash + 1..];
+        let end = rest.find('>').unwrap_or(rest.len());
+        format!("[@{}]", &rest[..end])
+    } else {
+        t.to_string()
     }
 }

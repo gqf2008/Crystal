@@ -85,6 +85,11 @@ fn main() {
     if std::env::args().any(|a| a == "--auto-char") {
         app.add_systems(Update, auto_open_character);
     }
+    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
+    if std::env::args().any(|a| a == "--shop-test") {
+        app.add_systems(Update, auto_shop_test);
+    }
+
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -111,6 +116,108 @@ fn main() {
 /// F12 截图（保存到工作区 tools/ 目录）
 /// F12 截图；设置 BEVY_AUTO_SHOT=1 时按 BEVY_SHOT_INTERVAL（默认 2 秒）自动截一张
 /// （保存到工作区 tools/ 目录，开发调试用）
+/// --shop-test：自动 NPC 商店买卖链路（CallNPC → [@Buy] → BuyItem → SellItem）
+#[allow(clippy::too_many_arguments)]
+fn auto_shop_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    npc_dialog: Res<client_bevy::game::dialogs::npc::NpcDialogState>,
+    npc_goods: Res<client_bevy::game::dialogs::npc_goods::NpcGoodsState>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    npcs: Query<(
+        &client_bevy::actor::NetObjectId,
+        &client_bevy::actor::NpcName,
+    )>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut npc_oid: Local<Option<u32>>,
+    mut bought_idx: Local<Option<i32>>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 6.0 {
+                return;
+            }
+            let oid = npcs
+                .iter()
+                .find(|(_, n)| n.0.contains("Alchemist"))
+                .or_else(|| npcs.iter().find(|(_, n)| n.0.contains("Merchant")))
+                .map(|(id, _)| id.0);
+            if let Some(oid) = oid {
+                *npc_oid = Some(oid);
+                net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                    object_id: oid,
+                    key: "[@Main]".to_string(),
+                });
+                tracing::info!("[SHOPTEST] CallNPC {}", oid);
+                *stage = 1;
+                *t = 0.0;
+            }
+        }
+        1 => {
+            if *t < 2.0 {
+                return;
+            }
+            // 直接发送 [@Buy]（服务端匹配该键打开商店；脚本 NPC 菜单行不包含 <购买/@Buy>）
+            if let Some(oid) = *npc_oid {
+                net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                    object_id: oid,
+                    key: "[@Buy]".to_string(),
+                });
+                tracing::info!("[SHOPTEST] 发送购买菜单指令 [@Buy]");
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t < 2.0 {
+                return;
+            }
+            if npc_goods.visible && !npc_goods.goods.is_empty() {
+                let g = &npc_goods.goods[0];
+                net.send_packet(&mir2_shared::packets::client::npc::BuyItem {
+                    item_index: g.item_index as u64,
+                    count: 1,
+                    panel_type: mir2_shared::enums::PanelType::Buy,
+                });
+                tracing::info!("[SHOPTEST] 购买 {} (idx={})", g.name, g.item_index);
+                *bought_idx = Some(g.item_index);
+                *stage = 3;
+                *t = 0.0;
+            }
+        }
+        3 => {
+            if *t < 3.0 {
+                return;
+            }
+            // 出售刚购买的物品（按 item_index 匹配，uid 每次服务端启动都会重新分配）
+            if let Some(idx) = *bought_idx {
+                if let Some(item) = hud
+                    .inventory
+                    .items
+                    .iter()
+                    .flatten()
+                    .find(|i| i.item_index == idx)
+                {
+                    net.send_packet(&mir2_shared::packets::client::npc::SellItem {
+                        unique_id: item.unique_id,
+                        count: 1,
+                    });
+                    tracing::info!("[SHOPTEST] 出售 {} (uid={})", item.name, item.unique_id);
+                }
+            }
+            *stage = 4;
+        }
+        _ => {}
+    }
+}
+
 fn debug_screenshot(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
@@ -293,3 +400,4 @@ fn demo_delete_flow(
         }
     }
 }
+

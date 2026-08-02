@@ -94,6 +94,10 @@ pub struct GroundItem {
     pub name: String,
 }
 
+/// NPC 名称（测试驱动/调试用）
+#[derive(Component)]
+pub struct NpcName(pub String);
+
 /// 动画状态（动作/朝向/当前帧）
 #[derive(Component)]
 pub struct ActorAnim {
@@ -431,7 +435,7 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
         }
         NetObject::Npc {
             object_id,
-            name: _,
+            name,
             image,
             location_x,
             location_y,
@@ -444,7 +448,9 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
                 wy(*location_y),
                 *direction,
             );
-            commands.entity(e).insert(NetObjectId(*object_id));
+            commands
+                .entity(e)
+                .insert((NetObjectId(*object_id), NpcName(name.clone())));
         }
         // 地面物品在 spawn_net_objects_when_ready 中带资源生成，此处不处理
         NetObject::GroundItem { .. } => {}
