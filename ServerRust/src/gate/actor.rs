@@ -232,7 +232,7 @@ impl Message<SessionCreated> for GateActor {
         let connected_data = build_packet_bytes(ServerPacketIds::Connected as i16, &[]);
         let gate_ref = _ctx.actor_ref().clone();
         let _ = gate_ref
-            .ask(SendToClient {
+            .tell(SendToClient {
                 session_id: msg.session_id,
                 data: connected_data,
             })
@@ -263,7 +263,7 @@ impl Message<ShutdownAll> for GateActor {
                 mir2_shared::enums::ServerPacketIds::Disconnect as i16,
                 &[],
             );
-            let _ = ctx.actor_ref().ask(SendToClient {
+            let _ = ctx.actor_ref().tell(SendToClient {
                 session_id: *sid,
                 data: disconnect_data,
             }).await;
@@ -985,7 +985,7 @@ impl Message<LoginResult> for GateActor {
 
             let gate_ref = ctx.actor_ref().clone();
             let _ = gate_ref
-                .ask(SendToClient {
+                .tell(SendToClient {
                     session_id: msg.session_id,
                     data: response_data,
                 })
@@ -995,7 +995,7 @@ impl Message<LoginResult> for GateActor {
             let response_data = build_packet_bytes(ServerPacketIds::Login as i16, &[4u8]);
             let gate_ref = ctx.actor_ref().clone();
             let _ = gate_ref
-                .ask(SendToClient {
+                .tell(SendToClient {
                     session_id: msg.session_id,
                     data: response_data,
                 })
@@ -1056,7 +1056,7 @@ async fn handle_client_version(gate_ref: &ActorRef<GateActor>, session_id: Sessi
     debug!("ClientVersion from session {}", session_id);
     let response = build_packet_bytes(ServerPacketIds::ClientVersion as i16, &[1u8]); // accepted
     let _ = gate_ref
-        .ask(SendToClient {
+        .tell(SendToClient {
             session_id,
             data: response,
         })
@@ -1069,7 +1069,7 @@ async fn handle_new_account(gate_ref: &ActorRef<GateActor>, session_id: SessionI
     // Phase 1: auto-register, respond success (result=8)
     let response = build_packet_bytes(ServerPacketIds::NewAccount as i16, &[8u8]);
     let _ = gate_ref
-        .ask(SendToClient {
+        .tell(SendToClient {
             session_id,
             data: response,
         })
@@ -1092,7 +1092,7 @@ fn parse_login_payload(payload: &[u8]) -> Option<(String, String)> {
 async fn handle_keep_alive(gate_ref: &ActorRef<GateActor>, session_id: SessionId) {
     let response = build_packet_bytes(ServerPacketIds::KeepAlive as i16, &[]);
     let _ = gate_ref
-        .ask(SendToClient {
+        .tell(SendToClient {
             session_id,
             data: response,
         })
@@ -2773,7 +2773,7 @@ async fn handle_mail_cost(gate_ref: &ActorRef<GateActor>, session_id: SessionId,
     let mut body = Vec::new();
     body.extend_from_slice(&0u32.to_le_bytes());
     let _ = gate_ref
-        .ask(SendToClient {
+        .tell(SendToClient {
             session_id,
             data: build_packet_bytes(ServerPacketIds::MailCost as i16, &body),
         })
