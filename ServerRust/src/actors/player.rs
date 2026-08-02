@@ -2335,9 +2335,11 @@ impl Message<SetSpellKey> for PlayerActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: SetSpellKey, _ctx: &mut Context<Self, Self::Reply>) {
+        // 客户端协议编号 = C# 编号 + 3（与 combat.rs MagicRequest 的 spell_cs 转换一致）
+        let spell_cs = msg.spell.saturating_sub(3);
         let mut target_found = false;
         for magic in &mut self.state.magics {
-            if magic.spell == msg.spell {
+            if magic.spell == spell_cs {
                 magic.key = msg.key;
                 target_found = true;
             } else if msg.key > 0 && magic.key == msg.key {
@@ -2345,7 +2347,7 @@ impl Message<SetSpellKey> for PlayerActor {
             }
         }
         if target_found {
-            debug!("Player {} spell {} key -> {}", self.state.name, msg.spell, msg.key);
+            debug!("Player {} spell {} key -> {}", self.state.name, spell_cs, msg.key);
         }
     }
 }
@@ -2360,10 +2362,12 @@ impl Message<ToggleSpell> for PlayerActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: ToggleSpell, _ctx: &mut Context<Self, Self::Reply>) {
+        // 客户端协议编号 = C# 编号 + 3
+        let spell_cs = msg.spell.saturating_sub(3);
         for magic in &mut self.state.magics {
-            if magic.spell == msg.spell {
+            if magic.spell == spell_cs {
                 magic.toggled = msg.toggled;
-                debug!("Player {} spell {} toggled -> {}", self.state.name, msg.spell, msg.toggled);
+                debug!("Player {} spell {} toggled -> {}", self.state.name, spell_cs, msg.toggled);
                 break;
             }
         }
