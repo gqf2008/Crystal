@@ -246,6 +246,14 @@
 - [x] 验证：真实 ServerRust 双客户端 E2E——A 打开写界面填收件人/主题/正文 → `✉️ 发送邮件: bevy2char - ComposeSubject` → B `📧 新邮件: ComposeSubject（未读）` → ReadMail → 详情正文 `ComposeSubject\n邮件正文 M26 测试` ✅；客户端 34 测试全过
 
 ---
+### M27: 行会（Guild）创建链路（2026-08-03 完成）
+- [x] **服务端 wire 修复**（同款 u32 前缀 bug ×3）：GuildNameReturn/EditGuildMember/EditGuildNotice 改 `read_dotnet_string`（C#/SharedRust wire）
+- [x] **服务端创建行会后发完整行会信息**：原只发 GuildStatus(1 字节 in_guild)，客户端无法显示行会名/成员 → 补 send_guild_info_packet
+- [x] **客户端**：GuildStatus 双格式解析（1 字节 in_guild / 完整信息 name+leader+公告+成员+金币）；GuildMemberChange 双格式（加入/离开 vs 成员更新，服务端复用同 opcode）；GuildNoticeChange；行会对话框（行会名/会长/金币/成员列表（职务+在线）/创建输入框（TextInput 复用）+ 创建按钮）；打开时自动 RequestGuildInfo（C# GuildDialog.Show 语义）
+- [x] 验证：真实 ServerRust E2E——A Lv.7 创建 TestGuild → `🏰 行会信息: TestGuild（bevychar）成员 1 金币 0` → ✅；DB 权威验证：characters.guild_name='TestGuild'、guild_rank=0、guilds 表落库 ✅；客户端 34 测试、服务端 139 测试全过
+- [ ] 行会邀请/加入（GuildInvite 服务器邀请包未实现）、成员管理 UI（踢人/升职，EditGuildMember wire 已修）
+
+---
 ## 四、执行顺序与依赖
 
 ```
@@ -265,6 +273,7 @@ M7（真实网络）→ M8（HUD+控制）→ M9（对话框 1→4 批）→ M10
 | 渲染后端冻结 | 强制 DX12（Vulkan present 在此机器异常） |
 | 大量精灵性能 | 精灵图缓存已建；后续 Atlas/批处理 |
 | 数据依赖 | 复用 Client-Macroquad/Data，`resolve_data_path` 自动解析 |
+
 
 
 

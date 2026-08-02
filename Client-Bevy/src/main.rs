@@ -157,6 +157,14 @@ fn main() {
     if std::env::args().any(|a| a == "--shop-test") {
         app.add_systems(Update, auto_shop_test);
     }
+    // --guild-test: 创建行会链路（GuildNameReturn → GuildStatus 信息）
+    if std::env::args().any(|a| a == "--guild-test") {
+        app.add_systems(Update, auto_guild_test);
+    }
+    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
+    if std::env::args().any(|a| a == "--shop-test") {
+        app.add_systems(Update, auto_shop_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -1035,6 +1043,75 @@ fn auto_mail_compose_test(
             client_bevy::game::dialogs::mail::send_composed_mail(&net, &input);
             mail.compose = false;
             tracing::info!("[MAILCOMPOSE] 发送邮件");
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --guild-test：创建行会（打开行会对话框 → 输入行会名 → GuildNameReturn → 等 GuildStatus 信息）
+#[allow(clippy::too_many_arguments)]
+fn auto_guild_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    guild: Res<client_bevy::game::dialogs::guild::GuildState>,
+    mut input: ResMut<client_bevy::game::dialogs::text_input::TextInputState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Guild) {
+                mgr.toggle(client_bevy::game::dialogs::DialogKind::Guild);
+            }
+            if input.texts.len() < 1 {
+                input.texts.resize(1, String::new());
+            }
+            input.texts[0] = "TestGuild".to_string();
+            tracing::info!("[GUILDTEST] 打开行会对话框，输入行会名 TestGuild");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 1.0 {
+                return;
+            }
+            // 与创建按钮相同：GuildNameReturn{name}
+            net.send_packet(&mir2_shared::packets::client::guild::GuildNameReturn {
+                name: "TestGuild".to_string(),
+            });
+            tracing::info!("[GUILDTEST] 创建行会 TestGuild");
+            *stage = 2;
+            *t = 0.0;
+        }
+        2 => {
+            if *t < 4.0 {
+                return;
+            }
+            if guild.in_guild && guild.name == "TestGuild" {
+                tracing::info!(
+                    "[GUILDTEST] ✅ 行会创建成功: {}（{}）成员 {}",
+                    guild.name,
+                    guild.leader,
+                    guild.members.len()
+                );
+            } else {
+                tracing::warn!(
+                    "[GUILDTEST] ❌ 行会状态: in_guild={} name={}",
+                    guild.in_guild,
+                    guild.name
+                );
+            }
             *stage = 9;
         }
         _ => {}

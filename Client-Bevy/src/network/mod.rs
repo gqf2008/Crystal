@@ -17,6 +17,7 @@ use std::path::Path;
 use crate::game::chat::ChatState;
 use crate::game::combat::CombatEvents;
 use crate::game::dialogs::friend::{FriendEntry, FriendState};
+use crate::game::dialogs::guild::{GuildMember as UiGuildMember, GuildState};
 use crate::game::dialogs::group::GroupState;
 use crate::game::dialogs::mail::{MailDetail, MailEntry, MailState};
 use crate::game::dialogs::inventory::InvItem;
@@ -323,6 +324,7 @@ struct NetworkPanels<'w> {
     mail: ResMut<'w, MailState>,
     trade: ResMut<'w, TradeState>,
     friend: ResMut<'w, FriendState>,
+    guild: ResMut<'w, GuildState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -365,6 +367,7 @@ fn network_system(
                         &mut *panels.mail,
                         &mut *panels.trade,
                         &mut *panels.friend,
+                        &mut *panels.guild,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -411,6 +414,7 @@ fn network_system(
                         &mut *panels.mail,
                         &mut *panels.trade,
                         &mut *panels.friend,
+                        &mut *panels.guild,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -547,6 +551,7 @@ fn handle_packet(
     mail: &mut MailState,
     trade: &mut TradeState,
     friend: &mut FriendState,
+    guild: &mut GuildState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -1151,6 +1156,114 @@ fn handle_packet(
                     }
                 }
                 Err(e) => tracing::warn!("⚠️ UserStorage 解析失败: {} (len={})", e, payload.len()),
+            }
+        }
+
+        // ---- M27: 行会 ----
+        x if x == ServerPacketIds::GuildStatus as i16 => {
+            use byteorder::{LittleEndian, ReadBytesExt};
+            // 双格式：1 字节 in_guild / 完整行会信息（服务端 send_guild_info_packet 复用此 opcode）
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() == 1 {
+                guild.in_guild = body[0] != 0;
+                if !guild.in_guild {
+                    guild.name.clear();
+                    guild.leader.clear();
+                    guild.members.clear();
+                    guild.notice.clear();
+                    guild.gold = 0;
+                }
+                tracing::info!("🏰 行会状态: {}", if guild.in_guild { "在行会中" } else { "未加入行会" });
+            } else {
+                let mut cur = std::io::Cursor::new(body);
+                let name = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
+                let leader = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
+                let notice_count = cur.read_u8().unwrap_or(0) as usize;
+                let mut notice = Vec::new();
+                for _ in 0..notice_count {
+                    match mir2_shared::binary::read_dotnet_string(&mut cur) {
+                        Ok(l) => notice.push(l),
+                        Err(_) => break,
+                    }
+                }
+                let member_count = cur.read_u8().unwrap_or(0) as usize;
+                let mut members = Vec::new();
+                for _ in 0..member_count {
+                    let mname = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
+                    let rank = cur.read_u8().unwrap_or(0);
+                    let online = cur.read_u8().unwrap_or(0) != 0;
+                    members.push(UiGuildMember { name: mname, rank, online });
+                }
+                let mut gold_buf = [0u8; 4];
+                let gold = if std::io::Read::read_exact(&mut cur, &mut gold_buf).is_ok() {
+                    u32::from_le_bytes(gold_buf)
+                } else {
+                    0
+                };
+                guild.in_guild = true;
+                guild.name = name;
+                guild.leader = leader;
+                guild.notice = notice;
+                guild.members = members;
+                guild.gold = gold;
+                tracing::info!(
+                    "🏰 行会信息: {}（{}）成员 {} 金币 {}",
+                    guild.name,
+                    guild.leader,
+                    guild.members.len(),
+                    guild.gold
+                );
+            }
+        }
+        x if x == ServerPacketIds::GuildNoticeChange as i16 => {
+            use byteorder::{LittleEndian, ReadBytesExt};
+            // [count u8][lines dotnet...]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            let count = cur.read_u8().unwrap_or(0) as usize;
+            let mut notice = Vec::new();
+            for _ in 0..count {
+                match mir2_shared::binary::read_dotnet_string(&mut cur) {
+                    Ok(l) => notice.push(l),
+                    Err(_) => break,
+                }
+            }
+            guild.notice = notice;
+            tracing::info!("🏰 行会公告更新: {:?}", guild.notice);
+        }
+        x if x == ServerPacketIds::GuildMemberChange as i16 => {
+            use byteorder::{LittleEndian, ReadBytesExt};
+            // 双格式：加入/离开 [joined u8][name dotnet] / 成员更新 [name dotnet][rank u8][online u8]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut handled = false;
+            if body.len() >= 2 && body[0] <= 1 {
+                let mut cur = std::io::Cursor::new(&body[1..]);
+                if let Ok(name) = mir2_shared::binary::read_dotnet_string(&mut cur) {
+                    if cur.position() as usize == body.len() - 1 {
+                        let joined = body[0] != 0;
+                        tracing::info!("🏰 行会成员{}: {}", if joined { "加入" } else { "离开" }, name);
+                        if joined {
+                            if !guild.members.iter().any(|m| m.name == name) {
+                                guild.members.push(UiGuildMember { name, rank: 2, online: true });
+                            }
+                        } else {
+                            guild.members.retain(|m| m.name != name);
+                        }
+                        handled = true;
+                    }
+                }
+            }
+            if !handled {
+                let mut cur = std::io::Cursor::new(body);
+                if let Ok(name) = mir2_shared::binary::read_dotnet_string(&mut cur) {
+                    let rank = cur.read_u8().unwrap_or(2);
+                    let online = cur.read_u8().unwrap_or(0) != 0;
+                    if let Some(m) = guild.members.iter_mut().find(|m| m.name == name) {
+                        m.rank = rank;
+                        m.online = online;
+                    }
+                    tracing::info!("🏰 行会成员更新: {} rank={} online={}", name, rank, online);
+                }
             }
         }
 
