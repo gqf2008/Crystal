@@ -1267,6 +1267,19 @@ fn handle_packet(
             }
         }
 
+        // ---- M28: 行会邀请 ----
+        x if x == ServerPacketIds::GuildInvite as i16 => {
+            // [guild_name dotnet]（C# S.GuildInvite{Name}）
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            match mir2_shared::binary::read_dotnet_string(&mut std::io::Cursor::new(body)) {
+                Ok(name) => {
+                    guild.invite = Some(name.clone());
+                    tracing::info!("🏰 收到行会邀请: {}", name);
+                }
+                Err(e) => tracing::warn!("⚠️ GuildInvite 解析失败: {} (len={})", e, payload.len()),
+            }
+        }
+
         // ---- M25: 好友 ----
         x if x == ServerPacketIds::FriendUpdate as i16 => {
             // 服务端 wire：列表包 [count i32][oid u32][name][memo][online]... / 单个包 [oid u32][name][memo][online]

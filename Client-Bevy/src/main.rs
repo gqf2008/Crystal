@@ -165,6 +165,18 @@ fn main() {
     if std::env::args().any(|a| a == "--shop-test") {
         app.add_systems(Update, auto_shop_test);
     }
+    // --guild-invite-test: 行会邀请链路（创建→邀请，配合 --guild-accept）
+    if std::env::args().any(|a| a == "--guild-invite-test") {
+        app.add_systems(Update, auto_guild_invite_test);
+    }
+    // --guild-accept: 自动接受行会邀请
+    if std::env::args().any(|a| a == "--guild-accept") {
+        app.add_systems(Update, auto_guild_accept);
+    }
+    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
+    if std::env::args().any(|a| a == "--shop-test") {
+        app.add_systems(Update, auto_shop_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -1111,6 +1123,116 @@ fn auto_guild_test(
                     guild.in_guild,
                     guild.name
                 );
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --guild-invite-test：创建行会 → 邀请 bevy2char → 等成员数 2
+#[allow(clippy::too_many_arguments)]
+fn auto_guild_invite_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    guild: Res<client_bevy::game::dialogs::guild::GuildState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::guild::GuildNameReturn {
+                name: "TestGuild2".to_string(),
+            });
+            tracing::info!("[GUILDINV] 创建行会 TestGuild2");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 3.0 {
+                return;
+            }
+            if guild.in_guild && guild.name == "TestGuild2" {
+                tracing::info!("[GUILDINV] ✅ 行会已创建");
+                net.send_packet(&mir2_shared::packets::client::guild::EditGuildMember {
+                    change_type: 0,
+                    rank_index: 0,
+                    name: "bevy2char".to_string(),
+                    rank_name: String::new(),
+                });
+                tracing::info!("[GUILDINV] 邀请 bevy2char 加入");
+                *stage = 2;
+                *t = 0.0;
+            } else {
+                tracing::warn!("[GUILDINV] ❌ 行会未创建: {}", guild.name);
+                *stage = 9;
+            }
+        }
+        2 => {
+            if *t < 5.0 {
+                return;
+            }
+            if guild.members.iter().any(|m| m.name == "bevy2char") {
+                tracing::info!(
+                    "[GUILDINV] ✅ 成员加入: {} 人",
+                    guild.members.len()
+                );
+            } else {
+                tracing::warn!("[GUILDINV] ❌ 成员未加入: {:?}", guild.members);
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --guild-accept：自动接受行会邀请（GuildInvite → C.GuildInvite{true} → 等 in_guild）
+#[allow(clippy::too_many_arguments)]
+fn auto_guild_accept(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut guild: ResMut<client_bevy::game::dialogs::guild::GuildState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if let Some(name) = guild.invite.clone() {
+                net.send_packet(&mir2_shared::packets::client::guild::GuildInvite {
+                    accept_invite: true,
+                });
+                tracing::info!("[GUILDACCEPT] ✅ 接受行会邀请: {}", name);
+                guild.invite = None;
+                *stage = 1;
+                *t = 0.0;
+            }
+        }
+        1 => {
+            if *t < 4.0 {
+                return;
+            }
+            if guild.in_guild {
+                tracing::info!(
+                    "[GUILDACCEPT] ✅ 已加入行会: {}",
+                    guild.name
+                );
+            } else {
+                tracing::warn!("[GUILDACCEPT] ❌ 未加入行会");
             }
             *stage = 9;
         }

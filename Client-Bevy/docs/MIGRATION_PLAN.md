@@ -254,6 +254,14 @@
 - [ ] 行会邀请/加入（GuildInvite 服务器邀请包未实现）、成员管理 UI（踢人/升职，EditGuildMember wire 已修）
 
 ---
+### M28: 行会邀请/加入 + 成员管理（2026-08-03 完成）
+- [x] **服务端 EditGuildMember change_type 对齐 C#**：0=邀请加入（新增：查目标在线/未入会 → S.GuildInvite{行会名} + pending_guild_invites）、1=踢出、2=升职、3=降职（原 0=踢出语义错位）
+- [x] **服务端 gate 邀请解析修复**：EditGuildMember 解析需跳过 change_type+rank_index 两字节（原只跳 1 字节 → 名字读错）
+- [x] **客户端**：GuildInvite 服务器包处理（[name dotnet]）→ 邀请提示（MirMessageBox Yes/No → C.GuildInvite{accept}）；行会对话框加邀请输入框+按钮（EditGuildMember{0}）、成员行点击选中 + 踢出按钮（EditGuildMember{1}）
+- [x] 验证：真实 ServerRust 双客户端 E2E——A 创建 TestGuild2 → 邀请 bevy2char → A `🏰 行会成员加入: bevy2char`（2 人）；B `🏰 收到行会邀请` → 接受 → `🏰 行会状态: 在行会中` ✅；DB 权威验证：bevychar rank=0（会长）、bevy2char rank=2（成员）、guilds 表落库 ✅；客户端 34 / 服务端 139 测试全过
+- [ ] 行会公告编辑 UI（EditGuildNotice wire 已修）、行会仓库（GuildStorage）
+
+---
 ## 四、执行顺序与依赖
 
 ```
@@ -273,6 +281,7 @@ M7（真实网络）→ M8（HUD+控制）→ M9（对话框 1→4 批）→ M10
 | 渲染后端冻结 | 强制 DX12（Vulkan present 在此机器异常） |
 | 大量精灵性能 | 精灵图缓存已建；后续 Atlas/批处理 |
 | 数据依赖 | 复用 Client-Macroquad/Data，`resolve_data_path` 自动解析 |
+
 
 
 
