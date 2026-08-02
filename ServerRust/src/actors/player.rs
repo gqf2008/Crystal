@@ -2749,35 +2749,31 @@ impl Message<SetRefineLog> for PlayerActor {
     }
 }
 
-/// 存入仓库
-pub struct StoreItem {
-    pub grid: u8,
+/// 存入仓库（C# StoreItem{From=背包格, To=仓库格}）
+pub struct StoreItemTo {
+    pub from: i32,
+    pub to: i32,
 }
 
-impl Message<StoreItem> for PlayerActor {
-    type Reply = bool;
+impl Message<StoreItemTo> for PlayerActor {
+    type Reply = Option<(mir2_shared::data::item::UserItem, usize)>;
 
-    async fn handle(&mut self, msg: StoreItem, _ctx: &mut Context<Self, Self::Reply>) -> bool {
-        match self.state.inventory.store_item(msg.grid) {
-            Some((_item, _storage_grid)) => true,
-            None => false,
-        }
+    async fn handle(&mut self, msg: StoreItemTo, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.inventory.store_item_to(msg.from, msg.to)
     }
 }
 
-/// 从仓库取出
-pub struct TakeBackItem {
-    pub grid: u8,
+/// 从仓库取出（C# TakeBackItem{From=仓库格, To=背包格}）
+pub struct TakeBackItemTo {
+    pub from: i32,
+    pub to: i32,
 }
 
-impl Message<TakeBackItem> for PlayerActor {
-    type Reply = bool;
+impl Message<TakeBackItemTo> for PlayerActor {
+    type Reply = Option<(mir2_shared::data::item::UserItem, u8)>;
 
-    async fn handle(&mut self, msg: TakeBackItem, _ctx: &mut Context<Self, Self::Reply>) -> bool {
-        match self.state.inventory.take_back_item(msg.grid) {
-            Some((_item, _backpack_grid)) => true,
-            None => false,
-        }
+    async fn handle(&mut self, msg: TakeBackItemTo, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.inventory.take_back_item_to(msg.from, msg.to)
     }
 }
 

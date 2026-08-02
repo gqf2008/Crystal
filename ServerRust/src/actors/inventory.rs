@@ -598,11 +598,46 @@ impl PlayerInventory {
         None
     }
 
+    /// 存入仓库指定格（C# StoreItem{From=背包格, To=仓库格} 语义）：优先目标格，占用则找第一个空位
+    pub fn store_item_to(&mut self, from: i32, to: i32) -> Option<(UserItem, usize)> {
+        let idx = from as usize;
+        if idx >= BACKPACK_SIZE {
+            return None;
+        }
+        let item = self.backpack[idx].take()?.item;
+        let mut target = to;
+        if target < 0 || target as usize >= self.storage.len() || self.storage[target as usize].is_some() {
+            target = self.storage.iter().position(|s| s.is_none())? as i32;
+        }
+        self.storage[target as usize] = Some(InventorySlot {
+            grid: target as u8,
+            item: item.clone(),
+        });
+        Some((item, target as usize))
+    }
+
+    /// 从仓库指定格取出（C# TakeBackItem{From=仓库格, To=背包格} 语义）：优先目标格，占用则找第一个空位
+    pub fn take_back_item_to(&mut self, from: i32, to: i32) -> Option<(UserItem, u8)> {
+        let sidx = from as usize;
+        if sidx >= self.storage.len() {
+            return None;
+        }
+        let item = self.storage[sidx].take()?.item;
+        let mut target = to;
+        if target < 0 || target as usize >= BACKPACK_SIZE || self.backpack[target as usize].is_some() {
+            target = self.backpack.iter().position(|s| s.is_none())? as i32;
+        }
+        self.backpack[target as usize] = Some(InventorySlot {
+            grid: target as u8,
+            item: item.clone(),
+        });
+        Some((item, target as u8))
+    }
+
     /// 检查仓库是否有空位
     pub fn storage_has_space(&self) -> bool {
         self.storage.iter().any(|s| s.is_none())
     }
-
     /// 镶嵌宝石：将 from_grid 的宝石插入 to_grid 装备的第一个空槽位
     /// 返回 (source_uid, target_uid) 或 None
     pub fn socket_gem(&mut self, from_grid: u8, to_grid: u8, target_slot_count: usize) -> Option<(u64, u64)> {

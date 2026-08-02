@@ -3565,27 +3565,6 @@ fn send_hero_update_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, hero
 // 仓库/金币网络辅助函数
 // ============================================================
 
-fn send_store_item_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, _grid: u8, success: bool) {
-    let mut body = Vec::new();
-    body.extend_from_slice(&0i32.to_le_bytes()); // from
-    body.extend_from_slice(&0i32.to_le_bytes()); // to
-    body.push(if success { 1u8 } else { 0u8 });
-    let _ = gate_ref.tell(SendToClient {
-        session_id,
-        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::StoreItem as i16, &body),
-    }).try_send();
-}
-
-fn send_take_back_item_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, _grid: u8, success: bool) {
-    let mut body = Vec::new();
-    body.extend_from_slice(&0i32.to_le_bytes()); // from
-    body.extend_from_slice(&0i32.to_le_bytes()); // to
-    body.push(if success { 1u8 } else { 0u8 });
-    let _ = gate_ref.tell(SendToClient {
-        session_id,
-        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::TakeBackItem as i16, &body),
-    }).try_send();
-}
 
 fn send_gold_changed_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, new_gold: u64) {
     let mut body = Vec::new();

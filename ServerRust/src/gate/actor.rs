@@ -1405,41 +1405,37 @@ fn forward_buy_item_back(
 // 仓库 handlers
 // ============================================================================
 
-/// StoreItem (存入仓库): [grid: u8][unique_id: u64][count: u32]
+/// StoreItem (存入仓库): [from: i32][to: i32]（C# 协议，from=背包格 to=仓库格）
 fn handle_store_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 13 {
+    if payload.len() < 8 {
         debug!("StoreItem: session={} payload too short", session_id);
         return;
     }
-    let grid = payload[0];
-    let uid = u64::from_le_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
-    let count = u32::from_le_bytes(payload[9..13].try_into().unwrap_or([0; 4]));
-    debug!("StoreItem: session={} grid={} uid={} count={}", session_id, grid, uid, count);
+    let from = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    let to = i32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
+    debug!("StoreItem: session={} from={} to={}", session_id, from, to);
     let world_ref = match world_ref { Some(w) => w, None => return };
     let _ = world_ref.tell(crate::actors::world::StoreItemRequest {
         session_id,
-        grid,
-        uid,
-        count,
+        from,
+        to,
     }).try_send();
 }
 
-/// TakeBackItem (从仓库取出): [grid: u8][unique_id: u64][count: u32]
+/// TakeBackItem (从仓库取出): [from: i32][to: i32]（C# 协议，from=仓库格 to=背包格）
 fn handle_take_back_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 13 {
+    if payload.len() < 8 {
         debug!("TakeBackItem: session={} payload too short", session_id);
         return;
     }
-    let grid = payload[0];
-    let uid = u64::from_le_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
-    let count = u32::from_le_bytes(payload[9..13].try_into().unwrap_or([0; 4]));
-    debug!("TakeBackItem: session={} grid={} uid={} count={}", session_id, grid, uid, count);
+    let from = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    let to = i32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
+    debug!("TakeBackItem: session={} from={} to={}", session_id, from, to);
     let world_ref = match world_ref { Some(w) => w, None => return };
     let _ = world_ref.tell(crate::actors::world::TakeBackItemRequest {
         session_id,
-        grid,
-        uid,
-        count,
+        from,
+        to,
     }).try_send();
 }
 

@@ -106,20 +106,18 @@ pub struct ReplaceWedRingRequest {
     pub unique_id: u64,
 }
 
-/// 存入仓库
+/// 存入仓库（C# StoreItem{From=背包格, To=仓库格}）
 pub struct StoreItemRequest {
     pub session_id: u64,
-    pub grid: u8,
-    pub uid: u64,
-    pub count: u32,
+    pub from: i32,
+    pub to: i32,
 }
 
-/// 从仓库取出
+/// 从仓库取出（C# TakeBackItem{From=仓库格, To=背包格}）
 pub struct TakeBackItemRequest {
     pub session_id: u64,
-    pub grid: u8,
-    pub uid: u64,
-    pub count: u32,
+    pub from: i32,
+    pub to: i32,
 }
 
 /// 合成物品请求
@@ -1060,24 +1058,29 @@ impl Message<StoreItemRequest> for WorldActor {
             _ => return,
         };
 
-        // 检查仓库是否有空位
-        if !state.inventory.storage_has_space() {
-            send_system_message(&self.gate_ref, msg.session_id, "仓库已满");
-            return;
-        }
-
         // 检查物品是否在背包中
-        if state.inventory.get_item(msg.uid).is_none() {
+        if msg.from < 0 || msg.from as usize >= state.inventory.backpack.len() || state.inventory.backpack[msg.from as usize].is_none() {
             send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
             return;
         }
 
-        // 执行存入
-        let result = record.actor_ref.ask(StoreItem { grid: msg.grid }).await;
+        // 执行存入（目标格优先，占用则找第一个空位）
+        let result = record.actor_ref.ask(StoreItemTo {
+            from: msg.from,
+            to: msg.to,
+        }).await;
         match result {
-            Ok(true) => {
-                send_store_item_packet(&self.gate_ref, msg.session_id, msg.grid, true);
-                debug!("StoreItem: {} grid={} uid={}", state.name, msg.grid, msg.uid);
+            Ok(Some((_, storage_grid))) => {
+                debug!("StoreItem: {} from={} to_storage={}", state.name, msg.from, storage_grid);
+                // 完整刷新：仓库 + 背包
+                if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
+                    self.send_user_storage(msg.session_id, &new_state.inventory.storage);
+                    let packet = super::build_user_information_packet(&new_state, &self.item_infos);
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: packet,
+                    }).await;
+                }
             }
             _ => {
                 send_system_message(&self.gate_ref, msg.session_id, "存入仓库失败");
@@ -1099,18 +1102,28 @@ impl Message<TakeBackItemRequest> for WorldActor {
             _ => return,
         };
 
-        // 检查背包是否有空位
-        if !state.inventory.has_space() {
-            send_system_message(&self.gate_ref, msg.session_id, "背包已满");
+        // 检查物品是否在仓库中
+        if msg.from < 0 || msg.from as usize >= state.inventory.storage.len() || state.inventory.storage[msg.from as usize].is_none() {
+            send_system_message(&self.gate_ref, msg.session_id, "仓库该格为空");
             return;
         }
 
-        // 执行取出
-        let result = record.actor_ref.ask(TakeBackItem { grid: msg.grid }).await;
+        // 执行取出（目标格优先，占用则找第一个空位）
+        let result = record.actor_ref.ask(TakeBackItemTo {
+            from: msg.from,
+            to: msg.to,
+        }).await;
         match result {
-            Ok(true) => {
-                send_take_back_item_packet(&self.gate_ref, msg.session_id, msg.grid, true);
-                debug!("TakeBackItem: {} grid={} uid={}", state.name, msg.grid, msg.uid);
+            Ok(Some((_, backpack_grid))) => {
+                debug!("TakeBackItem: {} from_storage={} to={}", state.name, msg.from, backpack_grid);
+                if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
+                    self.send_user_storage(msg.session_id, &new_state.inventory.storage);
+                    let packet = super::build_user_information_packet(&new_state, &self.item_infos);
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: packet,
+                    }).await;
+                }
             }
             _ => {
                 send_system_message(&self.gate_ref, msg.session_id, "取出物品失败");
