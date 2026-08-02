@@ -291,6 +291,19 @@
 - [x] 验证：真实 ServerRust E2E——打开仓库 → 存入 Venison → `✅ 仓库格1: Venison x1` → 取出 → `✅ 取出成功：仓库格1已空，物品回到背包`；DB 持久化验证（仓库 0 格 / 背包有 Venison）✅；客户端 34 / 服务端 139 测试全过（protocol_conformance 的 test_startgame_full_flow 栈溢出为 HEAD 既有问题）
 
 ---
+### M33: 师徒（Mentor）（2026-08-03 完成）
+- [x] **客户端**：师徒对话框（C# MentorDialog 布局：Prguse[170] + Title[51]；师父/徒弟两行 + 拜师经验 + 允许开关 + 加师父/解除按钮）；邀请弹窗（Yes/No → C.MentorReply）；MentorRequest/MentorUpdate 解析（含等级/在线/经验）
+- [x] **服务端**：
+  - 修复 gate `handle_add_mentor` 用 u32 长度解析（错误）→ 7-bit DotNet 字符串（与 C#/SharedRust 一致）——此前 AddMentor 永远被静默丢弃
+  - AddMentor 对齐 C# 规则：不能拜自己、双方无师徒关系、同职业、等级差 ≥ 10
+  - MentorReply 接受后双方互记（原实现导师侧 mentor_name=None 导致导师看不到徒弟）+ 双方发 MentorUpdate（C# GetMentor 语义）
+  - CancelMentor 双向清除 + 双方发空 MentorUpdate
+  - SocialPlayerJoined/Left 师徒在线状态同步（上线通知双方，下线通知对方）
+  - send_mentor_invite_packet 补 Level（C# S.MentorRequest 语义）
+- [x] 注意：AllowMentor wire 服务端 gate 解析 `[allow u8]`，SharedRust 为空包 → 客户端手动构造 AllowMentorWire
+- [x] 验证：真实 ServerRust 双客户端 E2E——A 请求拜师 → B 收到邀请 `✅ bevychar Lv.7` → 接受 → A `✅ 拜师成功: 师父=bevy2char Lv.20`、B `✅ 收徒成功: 徒弟=bevychar` → A 解除 → 双方 `✅ 已清除`；客户端 34 / 服务端 139 测试全过
+
+---
 ## 四、执行顺序与依赖
 
 ```

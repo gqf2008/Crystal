@@ -201,6 +201,14 @@ fn main() {
     if std::env::args().any(|a| a == "--guild-item-test") {
         app.add_systems(Update, auto_guild_item_test);
     }
+    // --mentor-test: 师徒链路（发起拜师，配合 --mentor-accept）
+    if std::env::args().any(|a| a == "--mentor-test") {
+        app.add_systems(Update, auto_mentor_test);
+    }
+    // --mentor-accept: 师徒链路（允许拜师 + 接受邀请，配合 --mentor-test）
+    if std::env::args().any(|a| a == "--mentor-accept") {
+        app.add_systems(Update, auto_mentor_accept);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -1599,6 +1607,152 @@ fn auto_guild_item_test(
                     "[GUILDITEM] ❌ 取出异常: slot0_empty={} uid_back={}",
                     slot0_empty,
                     uid_back
+                );
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --mentor-test：发起拜师 → 等 MentorUpdate → 解除（配合 --mentor-accept）
+#[allow(clippy::too_many_arguments)]
+fn auto_mentor_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mentor: Res<client_bevy::game::dialogs::mentor::MentorState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 12.0 {
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::misc::AddMentor {
+                name: "bevy2char".to_string(),
+            });
+            tracing::info!("[MENTORTEST] 请求拜师 bevy2char");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t >= 15.0 {
+                tracing::warn!(
+                    "[MENTORTEST] ❌ 未收到师徒关系: mentor_name={}",
+                    mentor.mentor_name
+                );
+                *stage = 9;
+                return;
+            }
+            if mentor.mentor_name == "bevy2char" {
+                tracing::info!(
+                    "[MENTORTEST] ✅ 拜师成功: 师父={} Lv.{} 在线={}",
+                    mentor.mentor_name,
+                    mentor.mentor_level,
+                    mentor.mentor_online
+                );
+                net.send_packet(&mir2_shared::packets::client::misc::CancelMentor);
+                tracing::info!("[MENTORTEST] 解除师徒关系");
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t < 5.0 {
+                return;
+            }
+            if mentor.mentor_name.is_empty() {
+                tracing::info!("[MENTORTEST] ✅ 解除成功");
+            } else {
+                tracing::warn!(
+                    "[MENTORTEST] ❌ 解除失败: mentor_name={}",
+                    mentor.mentor_name
+                );
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --mentor-accept：允许拜师 → 接受邀请 → 等 MentorUpdate → 等解除
+#[allow(clippy::too_many_arguments)]
+fn auto_mentor_accept(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mentor: Res<client_bevy::game::dialogs::mentor::MentorState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 10.0 {
+                return;
+            }
+            net.send_packet(&client_bevy::network::AllowMentorWire { allow: true });
+            tracing::info!("[MENTORACCEPT] 允许拜师");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t >= 15.0 {
+                tracing::warn!("[MENTORACCEPT] ❌ 未收到拜师邀请");
+                *stage = 9;
+                return;
+            }
+            if let Some((name, level)) = mentor.invite.as_ref() {
+                tracing::info!("[MENTORACCEPT] ✅ 收到拜师邀请: {} Lv.{}", name, level);
+                net.send_packet(&mir2_shared::packets::client::misc::MentorReply {
+                    accept_invite: true,
+                });
+                tracing::info!("[MENTORACCEPT] 接受拜师");
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t >= 15.0 {
+                tracing::warn!(
+                    "[MENTORACCEPT] ❌ 未收到师徒关系: mentor_name={}",
+                    mentor.mentor_name
+                );
+                *stage = 9;
+                return;
+            }
+            if mentor.mentor_name == "bevychar" {
+                tracing::info!(
+                    "[MENTORACCEPT] ✅ 收徒成功: 徒弟={} Lv.{} 在线={}",
+                    mentor.mentor_name,
+                    mentor.mentor_level,
+                    mentor.mentor_online
+                );
+                *stage = 3;
+                *t = 0.0;
+            }
+        }
+        3 => {
+            if *t < 10.0 {
+                return;
+            }
+            if mentor.mentor_name.is_empty() {
+                tracing::info!("[MENTORACCEPT] ✅ 对方解除，师徒关系已清除");
+            } else {
+                tracing::warn!(
+                    "[MENTORACCEPT] ❌ 未收到解除: mentor_name={}",
+                    mentor.mentor_name
                 );
             }
             *stage = 9;

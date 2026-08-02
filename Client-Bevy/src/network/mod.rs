@@ -21,6 +21,7 @@ use crate::game::dialogs::guild::{GuildMember as UiGuildMember, GuildState, Stor
 use crate::game::dialogs::ranking::{RankEntry, RankingState};
 use crate::game::dialogs::group::GroupState;
 use crate::game::dialogs::mail::{MailDetail, MailEntry, MailState};
+use crate::game::dialogs::mentor::MentorState;
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::npc::NpcDialogState;
 use crate::game::dialogs::npc_goods::{GoodsEntry, NpcGoodsState};
@@ -263,6 +264,34 @@ impl Packet for GuildStorageItemChangeWire {
     }
 }
 
+/// 允许拜师开关（ServerRust gate 解析 [allow u8]，与 SharedRust 空包不一致，手动构造）
+#[derive(Debug, Clone, Copy)]
+pub struct AllowMentorWire {
+    pub allow: bool,
+}
+
+impl Packet for AllowMentorWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::AllowMentor as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            allow: reader.read_u8()? != 0,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u8(if self.allow { 1 } else { 0 })?;
+        Ok(())
+    }
+}
+
 /// 待生成的网络对象（MapChanged 后由 Game 状态消费）
 #[derive(Debug, Clone)]
 pub enum NetObject {
@@ -368,6 +397,7 @@ struct NetworkPanels<'w> {
     friend: ResMut<'w, FriendState>,
     guild: ResMut<'w, GuildState>,
     ranking: ResMut<'w, RankingState>,
+    mentor: ResMut<'w, MentorState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -412,6 +442,7 @@ fn network_system(
                         &mut *panels.friend,
                         &mut *panels.guild,
                         &mut *panels.ranking,
+                        &mut *panels.mentor,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -460,6 +491,7 @@ fn network_system(
                         &mut *panels.friend,
                         &mut *panels.guild,
                         &mut *panels.ranking,
+                        &mut *panels.mentor,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -598,6 +630,7 @@ fn handle_packet(
     friend: &mut FriendState,
     guild: &mut GuildState,
     ranking: &mut RankingState,
+    mentor: &mut MentorState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -1315,6 +1348,58 @@ fn handle_packet(
                     tracing::warn!("⚠️ GuildStorageList 解析失败: {} (len={})", e, payload.len())
                 }
             }
+        }
+        // ---- M33: 师徒 ----
+        x if x == ServerPacketIds::MentorRequest as i16 => {
+            // [name dotnet][level u16]（C# S.MentorRequest）
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            match mir2_shared::binary::read_dotnet_string(&mut cur) {
+                Ok(name) => {
+                    let mut lb = [0u8; 2];
+                    let level = if std::io::Read::read_exact(&mut cur, &mut lb).is_ok() {
+                        u16::from_le_bytes(lb)
+                    } else {
+                        0
+                    };
+                    mentor.invite = Some((name.clone(), level));
+                    tracing::info!("🧑‍🏫 收到拜师邀请: {} Lv.{}", name, level);
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ MentorRequest 解析失败: {} (len={})", e, payload.len())
+                }
+            }
+        }
+        x if x == ServerPacketIds::MentorUpdate as i16 => {
+            use byteorder::ReadBytesExt;
+            // [name dotnet][level i32][online u8][exp i64]（C# S.MentorUpdate 语义）
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            let name = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
+            let mut lb = [0u8; 4];
+            let level = if std::io::Read::read_exact(&mut cur, &mut lb).is_ok() {
+                i32::from_le_bytes(lb).max(0) as u32
+            } else {
+                0
+            };
+            let online = cur.read_u8().unwrap_or(0) != 0;
+            let mut eb = [0u8; 8];
+            let exp = if std::io::Read::read_exact(&mut cur, &mut eb).is_ok() {
+                i64::from_le_bytes(eb)
+            } else {
+                0
+            };
+            mentor.mentor_name = name.clone();
+            mentor.mentor_level = level;
+            mentor.mentor_online = online;
+            mentor.mentee_exp = exp;
+            tracing::info!(
+                "🧑‍🏫 师徒更新: {} Lv.{} 在线={} 经验={}",
+                if name.is_empty() { "无" } else { &name },
+                level,
+                online,
+                exp
+            );
         }
         x if x == ServerPacketIds::GuildNoticeChange as i16 => {
             use byteorder::{LittleEndian, ReadBytesExt};
