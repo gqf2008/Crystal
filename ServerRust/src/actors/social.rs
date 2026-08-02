@@ -452,7 +452,7 @@ impl SocialActor {
                 }
                 // 更新加入者的 group_id
                 if let Some(record) = self.players.get(&joiner_session) {
-                    let _ = record.ask(SetGroupId { group_id: Some(target_group_id) });
+                    let _ = record.ask(SetGroupId { group_id: Some(target_group_id) }).await;
                 }
                 send_system_message(&self.gate_ref, joiner_session, &format!("已加入队伍 #{}", target_group_id));
                 self.broadcast_group_update(target_group_id);
@@ -475,10 +475,10 @@ impl SocialActor {
 
             // 更新两个玩家的 group_id
             if let Some(record) = self.players.get(&target_session) {
-                let _ = record.ask(SetGroupId { group_id: Some(group_id) });
+                let _ = record.ask(SetGroupId { group_id: Some(group_id) }).await;
             }
             if let Some(record) = self.players.get(&joiner_session) {
-                let _ = record.ask(SetGroupId { group_id: Some(group_id) });
+                let _ = record.ask(SetGroupId { group_id: Some(group_id) }).await;
             }
 
             self.groups.insert(group_id, group);
@@ -495,7 +495,7 @@ impl SocialActor {
         if let Some(group) = self.groups.get_mut(&group_id) {
             if group.remove_member(session_id).is_some() {
                 if let Some(record) = self.players.get(&session_id) {
-                    let _ = record.ask(SetGroupId { group_id: None });
+                    let _ = record.ask(SetGroupId { group_id: None }).await;
                 }
                 send_system_message(&self.gate_ref, session_id, "已离开队伍");
                 debug!("Player {} left group #{}", name, group_id);
@@ -1743,13 +1743,13 @@ impl Message<AddFriendRequest> for SocialActor {
                 let record = match self.players.get(&msg.session_id) {
                     Some(r) => r, None => return,
                 };
-                let _ = record.ask(AddFriendToSelf { friend_oid: target_oid, friend_name: target_name.clone() });
+                let _ = record.ask(AddFriendToSelf { friend_oid: target_oid, friend_name: target_name.clone() }).await;
             }
             {
                 let target_r = match self.players.get(&target_session) {
                     Some(r) => r, None => return,
                 };
-                let _ = target_r.ask(AddFriendToSelf { friend_oid: state.object_id, friend_name: state.name.clone() });
+                let _ = target_r.ask(AddFriendToSelf { friend_oid: state.object_id, friend_name: state.name.clone() }).await;
             }
 
             // 通知双方
@@ -2389,8 +2389,8 @@ impl Message<MarriageReply> for SocialActor {
             _ => return,
         };
 
-        let _ = replier_record.ask(SetSpouse { spouse_name: Some(requester_state.name.clone()) });
-        let _ = requester_record.ask(SetSpouse { spouse_name: Some(replier_state.name.clone()) });
+        let _ = replier_record.ask(SetSpouse { spouse_name: Some(requester_state.name.clone()) }).await;
+        let _ = requester_record.ask(SetSpouse { spouse_name: Some(replier_state.name.clone()) }).await;
 
         send_system_message(&self.gate_ref, replier_session, &format!("结婚成功，你的配偶是: {}", requester_state.name));
         send_system_message(&self.gate_ref, requester_session, &format!("结婚成功，你的配偶是: {}", replier_state.name));
@@ -2472,7 +2472,7 @@ impl Message<SocialDivorceReply> for SocialActor {
 
         // 双方解除婚姻关系
         let spouse_name = replier_state.spouse_name.clone();
-        let _ = replier_record.ask(SetSpouse { spouse_name: None });
+        let _ = replier_record.ask(SetSpouse { spouse_name: None }).await;
 
         // 通知前配偶
         if let Some(ref name) = spouse_name {
@@ -2616,8 +2616,8 @@ impl Message<SocialMentorReply> for SocialActor {
         };
 
         // replier = 导师，requester = 徒弟
-        let _ = replier_record.ask(SetMentor { mentor_name: None });
-        let _ = requester_record.ask(SetMentor { mentor_name: Some(replier_state.name.clone()) });
+        let _ = replier_record.ask(SetMentor { mentor_name: None }).await;
+        let _ = requester_record.ask(SetMentor { mentor_name: Some(replier_state.name.clone()) }).await;
 
         send_system_message(&self.gate_ref, replier_session, &format!("收徒成功，你的徒弟是: {}", requester_state.name));
         send_system_message(&self.gate_ref, requester_session, &format!("拜师成功，你的导师是: {}", replier_state.name));
@@ -2633,7 +2633,7 @@ impl Message<SocialAllowMentor> for SocialActor {
             Some(r) => r,
             None => return,
         };
-        let _ = record.ask(SetAllowMentor { allow: msg.allow });
+        let _ = record.ask(SetAllowMentor { allow: msg.allow }).await;
         send_system_message(
             &self.gate_ref,
             msg.session_id,
@@ -2661,7 +2661,7 @@ impl Message<SocialCancelMentor> for SocialActor {
             return;
         }
 
-        let _ = record.ask(SetMentor { mentor_name: None });
+        let _ = record.ask(SetMentor { mentor_name: None }).await;
         send_system_message(&self.gate_ref, msg.session_id, "已解除师徒关系");
         debug!("CancelMentor: {} removed mentor", state.name);
     }

@@ -2046,12 +2046,12 @@ fn forward_add_friend(
     session_id: SessionId,
     payload: &[u8],
 ) {
-    if payload.len() < 2 { return; }
     let social_ref = match social_ref { Some(s) => s, None => return };
-    let name_len = u16::from_le_bytes(payload[0..2].try_into().unwrap_or([0; 2])) as usize;
-    if payload.len() < 2 + name_len + 1 { return; }
-    let name = String::from_utf8_lossy(&payload[2..2 + name_len]).to_string();
-    let blocked = payload[2 + name_len] != 0;
+    // C#/SharedRust：name 是 DotNet 7-bit 编码字符串，随后 1 字节 blocked
+    let mut cur = std::io::Cursor::new(payload);
+    let Ok(name) = mir2_shared::binary::read_dotnet_string(&mut cur) else { return };
+    let mut blocked_buf = [0u8; 1];
+    let blocked = std::io::Read::read_exact(&mut cur, &mut blocked_buf).is_ok() && blocked_buf[0] != 0;
     debug!("AddFriend: session={} name={} blocked={}", session_id, name, blocked);
     let _ = social_ref.tell(crate::actors::social::AddFriendRequest {
         session_id, friend_name: name, blocked,
