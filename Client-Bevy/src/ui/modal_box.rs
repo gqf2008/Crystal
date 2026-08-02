@@ -326,7 +326,22 @@ fn modal_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     mut delete_dlg: Query<&mut Visibility, (With<ModalDeleteDlg>, Without<ModalDeleteAskDlg>)>,
     mut delete_ask_dlg: Query<&mut Visibility, (With<ModalDeleteAskDlg>, Without<ModalDeleteDlg>)>,
-    mut texts: Query<&mut Text2d, (With<ModalText>, Without<ModalError>, Without<ModalInput>)>,
+    mut ask_texts: Query<
+        &mut Text2d,
+        (
+            With<ModalDeleteAskDlg>,
+            With<ModalText>,
+            Without<ModalDeleteDlg>,
+        ),
+    >,
+    mut confirm_texts: Query<
+        &mut Text2d,
+        (
+            With<ModalDeleteDlg>,
+            With<ModalText>,
+            Without<ModalDeleteAskDlg>,
+        ),
+    >,
     mut errors: Query<&mut Text2d, (With<ModalError>, Without<ModalText>, Without<ModalInput>)>,
     mut inputs: Query<&mut Text2d, (With<ModalInput>, Without<ModalText>, Without<ModalError>)>,
     ok_btns: Query<&UiButton, With<ModalOk>>,
@@ -366,17 +381,16 @@ fn modal_ui_system(
         .and_then(|i| net.characters.iter().find(|c| c.index == i))
         .cloned();
 
-    // 主文本
-    let main_text = match state.kind {
-        ModalKind::DeleteAsk => match &selected {
-            Some(c) => format!("确定要删除角色「{}」吗？", c.name),
-            None => "没有选中的角色。".to_string(),
-        },
-        ModalKind::DeleteConfirm => "请输入角色名确认删除：".to_string(),
-        ModalKind::None => String::new(),
+    // 主文本（询问框 / 输入框各自的 ModalText 分别更新）
+    let ask_text = match &selected {
+        Some(c) => format!("确定要删除角色「{}」吗？", c.name),
+        None => "没有选中的角色。".to_string(),
     };
-    if let Ok(mut t) = texts.single_mut() {
-        t.0 = main_text;
+    for mut t in ask_texts.iter_mut() {
+        t.0 = ask_text.clone();
+    }
+    for mut t in confirm_texts.iter_mut() {
+        t.0 = "请输入角色名确认删除：".to_string();
     }
     if let Ok(mut t) = errors.single_mut() {
         t.0 = state.error.clone().unwrap_or_default();

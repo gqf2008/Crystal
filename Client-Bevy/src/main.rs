@@ -11,9 +11,9 @@
 
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
-use bevy::render::RenderPlugin;
-use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
+use bevy::render::view::screenshot::{save_to_disk, Screenshot};
+use bevy::render::RenderPlugin;
 use client_bevy::actor::ActorPlugin;
 use client_bevy::event_bus::EventBusPlugin;
 use client_bevy::map_renderer::MapRenderPlugin;
@@ -60,17 +60,27 @@ fn main() {
     app.init_state::<AppState>();
     // --skip-login: 直接从登录界面进入游戏（诊断呈现问题用）
     if std::env::args().any(|a| a == "--skip-login") {
-        app.add_systems(
-            Update,
-            |mut next: ResMut<NextState<AppState>>| next.set(AppState::Game),
-        );
+        app.add_systems(Update, |mut next: ResMut<NextState<AppState>>| {
+            next.set(AppState::Game)
+        });
     }
     app.add_plugins(EventBusPlugin);
-    app.add_plugins((NetworkPlugin, IntroPlugin, LoginPlugin, SelectPlugin, NewCharacterPlugin, ModalBoxPlugin));
+    app.add_plugins((
+        NetworkPlugin,
+        IntroPlugin,
+        LoginPlugin,
+        SelectPlugin,
+        NewCharacterPlugin,
+        ModalBoxPlugin,
+    ));
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
         app.add_systems(Update, auto_enter);
+    }
+    // BEVY_DEMO_DELETE=1: 自动登录→进选角→打开删除询问框（截图验证用）
+    if std::env::var("BEVY_DEMO_DELETE").as_deref() == Ok("1") {
+        app.add_systems(Update, demo_delete_flow);
     }
     // F12: 保存当前帧截图到 ../../tools/bevy_shot_N.png（开发调试用）
     app.add_systems(Update, debug_screenshot);
@@ -148,4 +158,34 @@ fn auto_enter(
     }
 }
 
-
+/// BEVY_DEMO_DELETE=1：自动登录→进选角→选中角色→打开删除询问框（截图验证用）
+fn demo_delete_flow(
+    mut net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<AppState>>,
+    mut modal: ResMut<client_bevy::ui::modal_box::ModalState>,
+    time: Res<Time>,
+    mut login_sent: Local<bool>,
+    mut select_timer: Local<f32>,
+    mut opened: Local<bool>,
+) {
+    use mir2_shared::packets::client::account::Login;
+    if *state == AppState::Login && !*login_sent {
+        *login_sent = true;
+        net.state = client_bevy::network::NetState::LoggingIn;
+        net.send_packet(&Login {
+            account_id: "test".to_string(),
+            password: "123456".to_string(),
+        });
+    }
+    if *state == AppState::Select && !*opened {
+        *select_timer += time.delta_secs();
+        if *select_timer >= 1.0 {
+            *opened = true;
+            if net.selected_index.is_none() {
+                net.selected_index = net.characters.first().map(|c| c.index);
+            }
+            modal.kind = client_bevy::ui::modal_box::ModalKind::DeleteAsk;
+            tracing::info!("[DEMO] 打开删除询问框, selected={:?}", net.selected_index);
+        }
+    }
+}
