@@ -16,7 +16,11 @@ pub mod friend;
 pub mod group;
 pub mod guild;
 pub mod mail;
+pub mod mentor;
+pub mod mount;
 pub mod ranking;
+pub mod relationship;
+pub mod report;
 pub mod inspect;
 pub mod trade;
 pub mod inventory;
@@ -44,6 +48,10 @@ pub enum DialogKind {
     Guild,
     Mail,
     Ranking,
+    Mentor,
+    Relationship,
+    Mount,
+    Report,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）
@@ -100,6 +108,10 @@ impl Plugin for DialogsPlugin {
                 guild::GuildPlugin,
                 mail::MailPlugin,
                 ranking::RankingPlugin,
+                mentor::MentorPlugin,
+                relationship::RelationshipPlugin,
+                mount::MountPlugin,
+                report::ReportPlugin,
             ),
         ));
     }
