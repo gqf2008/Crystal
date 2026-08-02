@@ -2107,50 +2107,32 @@ fn forward_add_memo(
 // 邮件系统
 // ============================================================================
 
-/// SendMail: [receiver_name: DotNetString][subject: DotNetString][message: DotNetString][gold: u32][items: 5*u64][stamped: bool]
+/// SendMail: [name: DotNetString][message: DotNetString][gold: u32][items: 5*u64][stamped: bool]（C#/SharedRust wire）
 fn handle_send_mail(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
     if payload.len() < 4 { return; }
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let mut offset = 0;
+    let mut cur = std::io::Cursor::new(payload);
 
-    // Parse receiver name
-    let name_len = u32::from_le_bytes(payload[offset..offset+4].try_into().unwrap_or([0;4])) as usize;
-    offset += 4;
-    let receiver_name = String::from_utf8_lossy(&payload[offset..offset+name_len.min(payload.len()-offset)]).to_string();
-    offset += name_len;
-    if offset + 4 > payload.len() { return; }
-
-    // Parse subject
-    let subj_len = u32::from_le_bytes(payload[offset..offset+4].try_into().unwrap_or([0;4])) as usize;
-    offset += 4;
-    let subject = String::from_utf8_lossy(&payload[offset..offset+subj_len.min(payload.len()-offset)]).to_string();
-    offset += subj_len;
-    if offset + 4 > payload.len() { return; }
-
-    // Parse message
-    let msg_len = u32::from_le_bytes(payload[offset..offset+4].try_into().unwrap_or([0;4])) as usize;
-    offset += 4;
-    let message = String::from_utf8_lossy(&payload[offset..offset+msg_len.min(payload.len()-offset)]).to_string();
-    offset += msg_len;
-    if offset + 4 > payload.len() { return; }
-
-    // Parse gold
-    let gold = u32::from_le_bytes(payload[offset..offset+4].try_into().unwrap_or([0;4]));
-    offset += 4;
-
-    // Parse 5 item UIDs
+    // 收件人 + 正文（DotNet 7-bit 字符串；subject 由正文首行派生，C# 语义）
+    let Ok(receiver_name) = mir2_shared::binary::read_dotnet_string(&mut cur) else { return };
+    let Ok(message) = mir2_shared::binary::read_dotnet_string(&mut cur) else { return };
+    let mut gold_buf = [0u8; 4];
+    if std::io::Read::read_exact(&mut cur, &mut gold_buf).is_err() { return; }
+    let gold = u32::from_le_bytes(gold_buf);
     let mut item_uids = Vec::new();
     for _ in 0..5 {
-        if offset + 8 > payload.len() { break; }
-        let uid = u64::from_le_bytes(payload[offset..offset+8].try_into().unwrap_or([0;8]));
-        offset += 8;
-        if uid != 0 { item_uids.push(uid); }
+        let mut uid_buf = [0u8; 8];
+        if std::io::Read::read_exact(&mut cur, &mut uid_buf).is_err() { return; }
+        let uid = u64::from_le_bytes(uid_buf);
+        if uid != 0 {
+            item_uids.push(uid);
+        }
     }
+    let mut stamped_buf = [0u8; 1];
+    let _stamped = if std::io::Read::read_exact(&mut cur, &mut stamped_buf).is_ok() { stamped_buf[0] } else { 0 };
 
-    // Parse stamped
-    let _stamped = if offset < payload.len() { payload[offset] != 0 } else { false };
-
-    debug!("SendMail: session={} to={} gold={}", session_id, receiver_name, gold);
+    let subject = message.lines().next().unwrap_or("").to_string();
+    debug!("SendMail: session={} to={} subject={} gold={} items={}", session_id, receiver_name, subject, gold, item_uids.len());
     let _ = world_ref.tell(crate::actors::world::SendMailRequest {
         session_id,
         receiver_name,
