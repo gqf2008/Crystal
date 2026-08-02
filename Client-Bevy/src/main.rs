@@ -149,6 +149,14 @@ fn main() {
     if std::env::args().any(|a| a == "--shop-test") {
         app.add_systems(Update, auto_shop_test);
     }
+    // --mail-compose-test: 写邮件界面 → 发送（配合 B --mail-read）
+    if std::env::args().any(|a| a == "--mail-compose-test") {
+        app.add_systems(Update, auto_mail_compose_test);
+    }
+    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
+    if std::env::args().any(|a| a == "--shop-test") {
+        app.add_systems(Update, auto_shop_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -976,6 +984,57 @@ fn auto_friend_test(
             } else {
                 tracing::warn!("[FRIENDTEST] ❌ 好友列表为空或未包含 bevy2char: {:?}", friend.friends);
             }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --mail-compose-test：写邮件界面（输入框状态 → send_composed_mail → B 读取）
+#[allow(clippy::too_many_arguments)]
+fn auto_mail_compose_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut mail: ResMut<client_bevy::game::dialogs::mail::MailState>,
+    mut input: ResMut<client_bevy::game::dialogs::text_input::TextInputState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            // 打开邮件对话框 + 写界面（原版 C# MailDialog 写邮件流程）
+            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Mail) {
+                mgr.toggle(client_bevy::game::dialogs::DialogKind::Mail);
+            }
+            mail.compose = true;
+            mail.detail = None;
+            input.texts = vec![
+                "bevy2char".to_string(),
+                "ComposeSubject".to_string(),
+                "邮件正文 M26 测试".to_string(),
+            ];
+            tracing::info!("[MAILCOMPOSE] 打开写邮件界面，填写收件人/主题/正文");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 2.0 {
+                return;
+            }
+            // 与发送按钮相同的代码路径
+            client_bevy::game::dialogs::mail::send_composed_mail(&net, &input);
+            mail.compose = false;
+            tracing::info!("[MAILCOMPOSE] 发送邮件");
             *stage = 9;
         }
         _ => {}

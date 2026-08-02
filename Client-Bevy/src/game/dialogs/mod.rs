@@ -48,6 +48,7 @@ pub mod roll;
  pub mod sell_panel;
 pub mod socket;
  pub mod storage;
+pub mod text_input;
 pub mod timer;
 pub mod trade;
 pub mod trust_merchant;
@@ -132,6 +133,7 @@ impl Plugin for DialogsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DialogManager>();
         app.init_resource::<inventory::InventoryState>();
+        app.add_plugins(text_input::TextInputPlugin);
         app.init_resource::<character::CharacterState>();
         app.add_plugins((
             (

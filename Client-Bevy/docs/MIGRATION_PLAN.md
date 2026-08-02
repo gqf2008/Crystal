@@ -240,6 +240,12 @@
 - [x] 验证：真实 ServerRust 双客户端 E2E——A 添加 bevy2char → `👥 好友列表: bevy2char(在线)` → ✅；客户端 34 测试、服务端 139 测试全过
 
 ---
+### M26: 写邮件 UI + 通用文本输入框（2026-08-03 完成）
+- [x] **通用 TextInput 组件**（text_input.rs）：点击聚焦（原版 C# MirInputBox 语义）、Backspace/字符输入、内置拼音 IME 中文提交、Enter 提交消息（Bevy 0.19 Message）、TextInputState.texts[id] 供使用方读取；注册为独立插件（避开 Bevy 插件元组上限）
+- [x] **写邮件界面**（mail.rs）：写按钮 → 写界面（收件人/主题/正文 3 个输入框 + 发送/取消按钮，半透明面板）；发送 → `send_composed_mail`（C# MailDialog 语义：C.SendMail{Name, Message}，subject 由正文首行派生）——发送逻辑提取为 pub fn，按钮与 E2E 驱动共用
+- [x] 验证：真实 ServerRust 双客户端 E2E——A 打开写界面填收件人/主题/正文 → `✉️ 发送邮件: bevy2char - ComposeSubject` → B `📧 新邮件: ComposeSubject（未读）` → ReadMail → 详情正文 `ComposeSubject\n邮件正文 M26 测试` ✅；客户端 34 测试全过
+
+---
 ## 四、执行顺序与依赖
 
 ```
@@ -259,6 +265,7 @@ M7（真实网络）→ M8（HUD+控制）→ M9（对话框 1→4 批）→ M10
 | 渲染后端冻结 | 强制 DX12（Vulkan present 在此机器异常） |
 | 大量精灵性能 | 精灵图缓存已建；后续 Atlas/批处理 |
 | 数据依赖 | 复用 Client-Macroquad/Data，`resolve_data_path` 自动解析 |
+
 
 
 
