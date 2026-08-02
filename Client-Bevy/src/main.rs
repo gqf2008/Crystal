@@ -133,6 +133,14 @@ fn main() {
     if std::env::args().any(|a| a == "--shop-test") {
         app.add_systems(Update, auto_shop_test);
     }
+    // --drop-pick-test: 怪物掉落 → 地面物品 → 拾取 → 背包（自动化验证用）
+    if std::env::args().any(|a| a == "--drop-pick-test") {
+        app.add_systems(Update, auto_drop_pick_test);
+    }
+    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
+    if std::env::args().any(|a| a == "--shop-test") {
+        app.add_systems(Update, auto_shop_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -836,6 +844,85 @@ fn auto_trade_accept(
                 tracing::info!("[TRADEACCEPT] 🎉 交易完成");
             }
             *stage = 4;
+        }
+        _ => {}
+    }
+}
+
+/// --drop-pick-test：怪物掉落 → 地面物品 → 拾取 → 背包
+/// 前提：DB 配置 bevychar 在 Deer(340,325) 左侧、攻击力秒杀、Deer 掉落 chance=1.0
+#[allow(clippy::too_many_arguments)]
+fn auto_drop_pick_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    ground: Query<&client_bevy::actor::NetObjectId, With<client_bevy::actor::GroundItem>>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut atk_timer: Local<f32>,
+    mut dir_idx: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            // 每 1.2s 轮换方向攻击（Deer 刷新点 (205,325)，spread 45 会偏移）
+            *atk_timer += time.delta_secs();
+            if *atk_timer >= 1.2 {
+                *atk_timer = 0.0;
+                let dirs = [
+                    mir2_shared::enums::MirDirection::Right,
+                    mir2_shared::enums::MirDirection::Up,
+                    mir2_shared::enums::MirDirection::Down,
+                    mir2_shared::enums::MirDirection::Left,
+                    mir2_shared::enums::MirDirection::UpRight,
+                    mir2_shared::enums::MirDirection::DownRight,
+                    mir2_shared::enums::MirDirection::UpLeft,
+                    mir2_shared::enums::MirDirection::DownLeft,
+                ];
+                let d = dirs[*dir_idx as usize % dirs.len()];
+                *dir_idx += 1;
+                net.send_packet(&mir2_shared::packets::client::combat::Attack {
+                    direction: d,
+                    spell: mir2_shared::enums::Spell::None,
+                });
+                tracing::info!("[DROPTEST] 攻击方向 {:?}", d);
+            }
+            if ground.iter().next().is_some() {
+                tracing::info!("[DROPTEST] ✅ 检测到地面物品实体");
+                *stage = 1;
+                *t = 0.0;
+            } else if *t > 25.0 {
+                tracing::warn!("[DROPTEST] ❌ 超时未检测到掉落（怪物可能已死/未掉）");
+                *stage = 9;
+            }
+        }
+        1 => {
+            if *t < 1.0 {
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::item::PickUp {});
+            tracing::info!("[DROPTEST] 发送 PickUp");
+            *stage = 2;
+            *t = 0.0;
+        }
+        2 => {
+            if *t < 3.0 {
+                return;
+            }
+            if hud.inventory.items.iter().flatten().any(|i| i.item_index == 853) {
+                tracing::info!("[DROPTEST] ✅ 拾取成功：背包有物品 853");
+            } else {
+                tracing::warn!("[DROPTEST] ❌ 背包未找到物品 853");
+            }
+            *stage = 9;
         }
         _ => {}
     }

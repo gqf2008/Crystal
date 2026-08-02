@@ -227,6 +227,12 @@
 - [x] 验证：真实 ServerRust 双客户端 E2E——邀请/接受/开窗 → A 金币 500 + 物品 (HP)DrugSmall → B 金币 300 → 双方锁定 → 🎉 交易完成 → DB：A gold 999,800（-200）、B gold 1,000,200、物品转移到 B 背包 ✅
 
 ---
+### M24: 怪物掉落 → 拾取联调（2026-08-03 完成）
+- [x] **服务端 spawn_single_drop 补 ItemInfo**：怪物掉落 ObjectItem 此前不带 info（地面物品显示 #853）→ 与 M16 玩家丢弃路径一致，掉落渲染真实名称（如 Venison）
+- [x] **E2E 全链路验证**（真实 ServerRust）：角色 (205,325) 秒杀 Deer（DB 掉落 chance=1.0）→ 服务端 spawn_monster_drops → `📦 地面物品: Venison (uid=1/2) @ (205,325)` + 实体生成 → PickUp（1 格内）→ `🎒 背包 40 格（1 件物品）` → DB 落库 item 853 ✅（杀怪经验同步生效）
+- [x] `--drop-pick-test` 自动驱动（多方向攻击轮换 + 地面物品检测 + 拾取 + 背包校验）
+
+---
 ## 四、执行顺序与依赖
 
 ```
@@ -246,6 +252,7 @@ M7（真实网络）→ M8（HUD+控制）→ M9（对话框 1→4 批）→ M10
 | 渲染后端冻结 | 强制 DX12（Vulkan present 在此机器异常） |
 | 大量精灵性能 | 精灵图缓存已建；后续 Atlas/批处理 |
 | 数据依赖 | 复用 Client-Macroquad/Data，`resolve_data_path` 自动解析 |
+
 
 
 
