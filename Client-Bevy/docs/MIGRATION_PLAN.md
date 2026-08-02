@@ -177,6 +177,14 @@
 - [x] 验证：真实 ServerRust E2E（`--storage-test --auto-enter`）——CallNPC → [@Storage] → 仓库 80 格解析 → 存入背包格 0→仓库 0（仓库 0→1 件、背包 1→0）→ 取出仓库 0→背包格 0（仓库 1→0、背包 0→1）→ DB 落库 ✅
 
 ---
+### M19: NPC 商店回购（BuyItemBack）（2026-08-03 完成）
+- [x] **[@BuyBack] 引擎级按键**：服务端 CallNPC 对 [@BuyBack] 直接发回购商品列表（C# NPCScript.BuyBackKey 语义），不被 NPC 脚本页遮蔽
+- [x] **回购列表**：出售物品进 buyback_items（服务端已有）→ 回购面板以 NPCGoods 发送（原物品 + 原始 unique_id + ItemInfo）
+- [x] **回购动作**：客户端 NPC 菜单点 `<回购/@BuyBack>`（is_buyback 标记）→ 购买按钮发 `C.BuyItemBack{unique_id, count}`（C# wire [u64][u16]）；服务端按 unique_id 定位回购条目，2×卖价扣款、物品回背包、完整 UserInformation 刷新
+- [x] **gate wire 修复**：BuyItemBack 原解析 `[item_index u32]` 与 C# `[uid u64][count u16]` 不符 → 修正
+- [x] 验证：真实 ServerRust E2E（`--shop-test` 扩展）——购买(HP)DrugSmall(-40金) → 出售(+20金) → [@BuyBack] 列表 1 件(uid=1) → 回购(-40金) → 物品回背包 ✅（DB 落库，新 uid=2）
+
+---
 ## 四、执行顺序与依赖
 
 ```
@@ -196,5 +204,6 @@ M7（真实网络）→ M8（HUD+控制）→ M9（对话框 1→4 批）→ M10
 | 渲染后端冻结 | 强制 DX12（Vulkan present 在此机器异常） |
 | 大量精灵性能 | 精灵图缓存已建；后续 Atlas/批处理 |
 | 数据依赖 | 复用 Client-Macroquad/Data，`resolve_data_path` 自动解析 |
+
 
 

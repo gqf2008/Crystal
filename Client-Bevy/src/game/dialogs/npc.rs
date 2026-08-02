@@ -112,6 +112,7 @@ fn spawn_npc_dialog(
 /// 显示/关闭 + 文本渲染 + 选项点击
 fn npc_ui_system(
     mut npc: ResMut<NpcDialogState>,
+    mut npc_goods: ResMut<crate::game::dialogs::npc_goods::NpcGoodsState>,
     net: Res<NetworkContext>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
@@ -157,6 +158,8 @@ fn npc_ui_system(
             let y = 34.0 + i as f32 * 18.0;
             if cursor.x >= 8.0 && cursor.x <= 400.0 && cursor.y >= y && cursor.y <= y + 16.0 {
                 let key = extract_npc_key(l);
+                // 菜单类型标记（购买按钮据此区分 BuyItem / BuyItemBack）
+                npc_goods.is_buyback = key.eq_ignore_ascii_case("[@BuyBack]");
                 net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
                     object_id: npc.npc_object_id,
                     key: key.clone(),

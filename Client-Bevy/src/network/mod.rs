@@ -855,6 +855,7 @@ fn handle_packet(
                                 .iter()
                                 .map(|item| GoodsEntry {
                                     item_index: item.item_index,
+                                    unique_id: item.unique_id,
                                     name: item
                                         .info
                                         .as_ref()

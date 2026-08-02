@@ -130,7 +130,7 @@ fn auto_shop_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     npc_dialog: Res<client_bevy::game::dialogs::npc::NpcDialogState>,
-    npc_goods: Res<client_bevy::game::dialogs::npc_goods::NpcGoodsState>,
+    mut npc_goods: ResMut<client_bevy::game::dialogs::npc_goods::NpcGoodsState>,
     hud: Res<client_bevy::game::hud::HudState>,
     npcs: Query<(
         &client_bevy::actor::NetObjectId,
@@ -220,6 +220,51 @@ fn auto_shop_test(
                 }
             }
             *stage = 4;
+            *t = 0.0;
+        }
+        4 => {
+            if *t < 3.0 {
+                return;
+            }
+            // 回购：标记回购面板 → 发 [@BuyBack]
+            npc_goods.is_buyback = true;
+            if let Some(oid) = *npc_oid {
+                net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                    object_id: oid,
+                    key: "[@BuyBack]".to_string(),
+                });
+                tracing::info!("[SHOPTEST] 发送回购指令 [@BuyBack]");
+            }
+            *stage = 5;
+            *t = 0.0;
+        }
+        5 => {
+            if *t < 2.0 {
+                return;
+            }
+            if npc_goods.visible && !npc_goods.goods.is_empty() {
+                let g = &npc_goods.goods[0];
+                net.send_packet(&mir2_shared::packets::client::npc::BuyItemBack {
+                    unique_id: g.unique_id,
+                    count: 1,
+                });
+                tracing::info!("[SHOPTEST] 回购 {} (uid={})", g.name, g.unique_id);
+                *stage = 6;
+                *t = 0.0;
+            }
+        }
+        6 => {
+            if *t < 3.0 {
+                return;
+            }
+            if let Some(idx) = *bought_idx {
+                if hud.inventory.items.iter().flatten().any(|i| i.item_index == idx) {
+                    tracing::info!("[SHOPTEST] ✅ 回购完成：物品已回背包");
+                } else {
+                    tracing::warn!("[SHOPTEST] ❌ 回购后背包未找到物品");
+                }
+            }
+            *stage = 7;
         }
         _ => {}
     }

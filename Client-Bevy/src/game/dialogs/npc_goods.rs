@@ -22,6 +22,8 @@ use crate::ui::sprite_ui::{
 #[derive(Debug, Clone)]
 pub struct GoodsEntry {
     pub item_index: i32,
+    /// 物品唯一 ID（回购列表原物品携带；普通商店商品为 0）
+    pub unique_id: u64,
     pub name: String,
     pub price: u32,
     pub count: u16,
@@ -34,6 +36,8 @@ pub struct NpcGoodsState {
     pub title: String,
     pub goods: Vec<GoodsEntry>,
     pub selected: Option<usize>,
+    /// 当前面板是否为回购列表（客户端按菜单项设置；购买按钮据此发 BuyItemBack）
+    pub is_buyback: bool,
 }
 
 #[derive(Component)]
@@ -189,17 +193,25 @@ fn npc_goods_ui_system(
             state.selected = None;
         }
     }
-    // 购买（原版 C# NPCGoodsDialog 购买按钮 → C.BuyItem{ItemIndex, Count, Type}）
+    // 购买/回购（原版 C# NPCGoodsDialog 购买按钮 → C.BuyItem；回购面板 → C.BuyItemBack）
     for btn in &buy {
         if btn.clicked {
             if let Some(idx) = state.selected {
                 if let Some(g) = state.goods.get(idx) {
-                    net.send_packet(&mir2_shared::packets::client::npc::BuyItem {
-                        item_index: g.item_index as u64,
-                        count: 1,
-                        panel_type: mir2_shared::enums::PanelType::Buy,
-                    });
-                    tracing::info!("🏪 购买 {} (item_index={})", g.name, g.item_index);
+                    if state.is_buyback && g.unique_id != 0 {
+                        net.send_packet(&mir2_shared::packets::client::npc::BuyItemBack {
+                            unique_id: g.unique_id,
+                            count: 1,
+                        });
+                        tracing::info!("🔄 回购 {} (uid={})", g.name, g.unique_id);
+                    } else {
+                        net.send_packet(&mir2_shared::packets::client::npc::BuyItem {
+                            item_index: g.item_index as u64,
+                            count: 1,
+                            panel_type: mir2_shared::enums::PanelType::Buy,
+                        });
+                        tracing::info!("🏪 购买 {} (item_index={})", g.name, g.item_index);
+                    }
                 }
             }
         }
