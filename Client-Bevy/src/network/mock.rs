@@ -19,6 +19,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
         .name("mock-server".into())
         .spawn(move || {
             let mut in_game = false;
+            let mut characters: Vec<SelectInfo> = Vec::new();
             let mut last_ping = std::time::Instant::now();
             loop {
                 match from_client.recv_timeout(std::time::Duration::from_millis(100)) {
@@ -29,8 +30,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                 x if x == ClientPacketIds::Login as i16 => {
                                     if let Ok(p) = client::account::Login::read_body(&mut cur) {
                                         tracing::info!("[MOCK] 登录请求: {}", p.account_id);
-                                        // 回 2 个角色
-                                        let characters = vec![
+                                        // 回 4 个角色（战士/法师/道士/刺客，对应 4 个选角槽位）
+                                        characters = vec![
                                             SelectInfo {
                                                 index: 0,
                                                 name: "刀客".to_string(),
@@ -45,10 +46,26 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 level: 28,
                                                 class: MirClass::Wizard,
                                                 gender: MirGender::Female,
+                                                 last_access: chrono::Utc::now(),
+                                             },
+                                            SelectInfo {
+                                                index: 2,
+                                                name: "道士".to_string(),
+                                                level: 30,
+                                                class: MirClass::Taoist,
+                                                gender: MirGender::Male,
+                                                last_access: chrono::Utc::now(),
+                                            },
+                                            SelectInfo {
+                                                index: 3,
+                                                name: "刺客".to_string(),
+                                                level: 26,
+                                                class: MirClass::Assassin,
+                                                gender: MirGender::Female,
                                                 last_access: chrono::Utc::now(),
                                             },
                                         ];
-                                        send(&to_client, &server::login::LoginSuccess { characters });
+                                        send(&to_client, &server::login::LoginSuccess { characters: characters.clone() });
                                     }
                                 }
                                 x if x == ClientPacketIds::StartGame as i16 => {
@@ -63,6 +80,51 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         );
                                         send_map_and_objects(&to_client, p.character_index);
                                         in_game = true;
+                                    }
+                                }
+                                x if x == ClientPacketIds::NewCharacter as i16 => {
+                                    if let Ok(p) = client::NewCharacter::read_body(&mut cur) {
+                                        tracing::info!("[MOCK] 新建角色: {} {:?} {:?}", p.name, p.class, p.gender);
+                                        // 对齐原版：最多 4 个角色（Globals.MaxCharacterCount）
+                                        if characters.len() >= 4 {
+                                            send(&to_client, &server::NewCharacter { result: 4 });
+                                            continue;
+                                        }
+                                        let idx = characters.len() as i32;
+                                        let info = SelectInfo {
+                                            index: idx,
+                                            name: p.name.clone(),
+                                            level: 1,
+                                            class: p.class,
+                                            gender: p.gender,
+                                            last_access: chrono::Utc::now(),
+                                        };
+                                        characters.push(info.clone());
+                                        send(
+                                            &to_client,
+                                            &server::NewCharacterSuccess {
+                                                character: mir2_shared::packets::CharacterSummary {
+                                                    index: idx,
+                                                    name: p.name,
+                                                    level: 1,
+                                                    class: p.class,
+                                                    gender: p.gender,
+                                                    last_access: chrono::Utc::now(),
+                                                },
+                                            },
+                                        );
+                                    }
+                                }
+                                x if x == ClientPacketIds::DeleteCharacter as i16 => {
+                                    if let Ok(p) = client::DeleteCharacter::read_body(&mut cur) {
+                                        tracing::info!("[MOCK] 删除角色 idx={}", p.character_index);
+                                        characters.retain(|c| c.index != p.character_index);
+                                        send(
+                                            &to_client,
+                                            &server::DeleteCharacterSuccess {
+                                                character_index: p.character_index,
+                                            },
+                                        );
                                     }
                                 }
                                 x if x == ClientPacketIds::KeepAlive as i16 => {
@@ -129,7 +191,12 @@ fn send_map_and_objects(to_client: &Sender<Vec<u8>>, char_index: i32) {
         to_client,
         &server::objects::ObjectPlayer {
             object_id: 100,
-            name: if char_index == 1 { "法师".to_string() } else { "刀客".to_string() },
+            name: match char_index {
+                1 => "法师".to_string(),
+                2 => "道士".to_string(),
+                3 => "刺客".to_string(),
+                _ => "刀客".to_string(),
+            },
             guild_name: String::new(),
             guild_rank_name: String::new(),
             name_colour: 0,
@@ -206,3 +273,4 @@ fn send_map_and_objects(to_client: &Sender<Vec<u8>>, char_index: i32) {
         },
     );
 }
+

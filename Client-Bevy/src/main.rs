@@ -21,6 +21,8 @@ use client_bevy::network::NetworkPlugin;
 use client_bevy::scenes::AppState;
 use client_bevy::ui::intro::IntroPlugin;
 use client_bevy::ui::login::LoginPlugin;
+use client_bevy::ui::modal_box::ModalBoxPlugin;
+use client_bevy::ui::new_character::NewCharacterPlugin;
 use client_bevy::ui::select::SelectPlugin;
 
 fn main() {
@@ -62,7 +64,7 @@ fn main() {
         );
     }
     app.add_plugins(EventBusPlugin);
-    app.add_plugins((NetworkPlugin, IntroPlugin, LoginPlugin, SelectPlugin));
+    app.add_plugins((NetworkPlugin, IntroPlugin, LoginPlugin, SelectPlugin, NewCharacterPlugin, ModalBoxPlugin));
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）

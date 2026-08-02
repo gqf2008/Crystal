@@ -34,6 +34,10 @@ pub struct NetworkContext {
     pub state: NetState,
     /// 角色列表（LoginSuccess 携带）
     pub characters: Vec<SelectInfo>,
+    /// 新建角色成功后置 true，选角界面需要重建槽位
+    pub select_reload: bool,
+    /// 新建角色被服务器拒绝时的提示
+    pub character_error: Option<String>,
     /// 选中的角色
     pub selected_index: Option<i32>,
     /// 登录错误信息
@@ -168,6 +172,7 @@ fn handle_packet(
             if let Ok(p) = login::LoginSuccess::read_body(&mut cur) {
                 tracing::info!("✅ 登录成功，角色 {} 个", p.characters.len());
                 net.characters = p.characters;
+                net.select_reload = false;
                 net.state = NetState::Select;
                 net.login_error = None;
                 net.login_success = true;
@@ -177,6 +182,37 @@ fn handle_packet(
             if let Ok(p) = login::StartGame::read_body(&mut cur) {
                 tracing::info!("✅ 开始游戏 result={}", p.result);
                 net.state = NetState::InGame;
+            }
+        }
+        x if x == ServerPacketIds::NewCharacter as i16 => {
+            if let Ok(p) = account::NewCharacter::read_body(&mut cur) {
+                tracing::info!("⛔ 新建角色被拒绝 result={}", p.result);
+                net.character_error = Some(match p.result {
+                    4 => "最多只能创建4个角色！".to_string(),
+                    _ => "创建角色失败！".to_string(),
+                });
+            }
+        }
+        x if x == ServerPacketIds::NewCharacterSuccess as i16 => {
+            if let Ok(p) = account::NewCharacterSuccess::read_body(&mut cur) {
+                tracing::info!("✅ 新建角色成功: {}", p.character.name);
+                net.characters.push(SelectInfo {
+                    index: p.character.index,
+                    name: p.character.name.clone(),
+                    level: p.character.level,
+                    class: p.character.class,
+                    gender: p.character.gender,
+                    last_access: p.character.last_access,
+                });
+                net.select_reload = true;
+            }
+        }
+        x if x == ServerPacketIds::DeleteCharacterSuccess as i16 => {
+            if let Ok(p) = account::DeleteCharacterSuccess::read_body(&mut cur) {
+                tracing::info!("🗑️ 删除角色成功 idx={}", p.character_index);
+                net.characters.retain(|c| c.index != p.character_index);
+                net.selected_index = None;
+                net.select_reload = true;
             }
         }
         x if x == ServerPacketIds::MapChanged as i16 => {
@@ -243,3 +279,4 @@ fn handle_packet(
         }
     }
 }
+
