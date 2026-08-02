@@ -142,11 +142,19 @@ impl Plugin for InventoryDialogPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InvPage>();
         app.init_resource::<InvClickState>();
+        app.init_resource::<InvTooltip>();
         app.add_systems(OnEnter(AppState::Game), spawn_inventory_dialog);
         app.add_systems(OnExit(AppState::Game), cleanup_dialogs);
+        app.add_systems(OnEnter(AppState::Game), spawn_inv_tooltip_text);
         app.add_systems(
             Update,
-            (inventory_ui_system, inv_selection_system, ui_button_system)
+            (
+                inventory_ui_system,
+                inv_selection_system,
+                inv_tooltip_system,
+                inv_tooltip_text_system,
+                ui_button_system,
+            )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -344,6 +352,14 @@ pub struct InvIcon(pub usize);
 /// 堆叠数量文本（格子子实体）
 #[derive(Component, Clone, Copy)]
 pub struct InvCount(pub usize);
+
+/// 悬停提示（原版 C# MirItemCell.Hint）
+#[derive(Resource, Default)]
+pub struct InvTooltip {
+    pub text: String,
+    pub x: f32,
+    pub y: f32,
+}
 
 /// 双击检测（记录最近一次左键点击的格子与时间）
 #[derive(Resource, Default)]
@@ -579,6 +595,40 @@ fn inventory_ui_system(
     }
 }
 
+/// 悬停提示系统：光标在物品格上时显示 名称 x数量
+fn inv_tooltip_system(
+    inv: Res<crate::game::hud::HudState>,
+    mut tooltip: ResMut<InvTooltip>,
+    windows: Query<&Window>,
+    slots: Query<&InvSlot, Without<InvIcon>>,
+) {
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    let mut text = String::new();
+    for slot in &slots {
+        let i = slot.0;
+        let x = i % GRID_COLS;
+        let y = i / GRID_COLS;
+        let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
+        let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
+        if cursor.x >= sx && cursor.x <= sx + CELL_W && cursor.y >= sy && cursor.y <= sy + CELL_H {
+            if let Some(item) = inv.inventory.items.get(i).and_then(|s| s.as_ref()) {
+                if item.count > 1 {
+                    text = format!("{} x{}", item.name, item.count);
+                } else {
+                    text = item.name.clone();
+                }
+            }
+            break;
+        }
+    }
+    if tooltip.text != text {
+        tooltip.text = text;
+    }
+    tooltip.x = cursor.x + 14.0;
+    tooltip.y = cursor.y + 14.0;
+}
+
 /// 选中格子高亮（原版 C# SelectedCell 黄色边框语义：用黄色半透明覆盖表示）
 fn inv_selection_system(
     click: Res<InvClickState>,
@@ -594,5 +644,52 @@ fn inv_selection_system(
         if sprite.color != target {
             sprite.color = target;
         }
+    }
+}
+
+/// 悬停提示文本实体（常驻，跟随光标）
+#[derive(Component)]
+pub struct InvTooltipText;
+
+fn spawn_inv_tooltip_text(
+    mut commands: Commands,
+    mut fonts: ResMut<Assets<Font>>,
+    mut ui_font: ResMut<UiFont>,
+) {
+    if !ui_font.0.is_strong() {
+        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+    }
+    let font = ui_font.0.clone();
+    commands.spawn((
+        UiEntity,
+        InvTooltipText,
+        Text2d::new(String::new()),
+        Anchor::TOP_LEFT,
+        TextFont {
+            font: FontSource::Handle(font),
+            font_size: FontSize::Px(12.0),
+            ..default()
+        },
+        TextColor(Color::srgb(1.0, 1.0, 0.85)),
+        Transform::from_xyz(0.0, 0.0, 9.0),
+        Visibility::Hidden,
+    ));
+}
+
+/// 更新提示文本位置与内容
+fn inv_tooltip_text_system(
+    tooltip: Res<InvTooltip>,
+    mut texts: Query<(&mut Text2d, &mut Transform, &mut Visibility), With<InvTooltipText>>,
+) {
+    for (mut text, mut tf, mut vis) in &mut texts {
+        if tooltip.text.is_empty() {
+            *vis = Visibility::Hidden;
+            continue;
+        }
+        text.0 = tooltip.text.clone();
+        // 跟随光标（右上偏移，避免遮住物品）
+        tf.translation.x = tooltip.x + 4.0;
+        tf.translation.y = -(tooltip.y + 4.0);
+        *vis = Visibility::Visible;
     }
 }
