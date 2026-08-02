@@ -1023,8 +1023,19 @@ impl WorldActor {
                 count: good.count as u16,
                 ..Default::default()
             };
-            // 填充耐久（如果有物品配置）
+            // 填充物品信息（客户端商店列表需要名称/价格/图标）
             if let Some(info) = self.item_infos.get(&good.item_index) {
+                item.info = Some(mir2_shared::data::item::ItemInfo {
+                    index: info.index,
+                    name: info.name.clone(),
+                    shape: info.shape as i16,
+                    weight: info.weight as u8,
+                    image: info.image as u16,
+                    durability: info.durability as u16,
+                    price: info.price,
+                    stack_size: info.stack_size as u16,
+                    ..Default::default()
+                });
                 item.max_dura = info.durability as u16;
                 item.current_dura = info.durability as u16;
             }
