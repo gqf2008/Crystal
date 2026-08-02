@@ -71,6 +71,20 @@ pub struct LoadedMap {
     pub name: String,
     pub width: i32,
     pub height: i32,
+    /// 可行走网格（M8 寻路用；back_image 障碍标志位）
+    pub walkable: Vec<Vec<bool>>,
+}
+
+impl LoadedMap {
+    pub fn in_bounds(&self, x: i32, y: i32) -> bool {
+        x >= 0 && y >= 0 && x < self.width && y < self.height
+    }
+    pub fn is_walkable(&self, x: i32, y: i32) -> bool {
+        if !self.in_bounds(x, y) {
+            return false;
+        }
+        self.walkable[x as usize][y as usize]
+    }
 }
 
 /// 图层
@@ -279,10 +293,21 @@ fn setup_world(
         cam_tf.translation = Vec3::new(cam_x, cam_y, 10.0);
     }
 
+    // 构建可行走网格（M8 寻路）
+    let mut walkable = Vec::with_capacity(map.width as usize);
+    for x in 0..map.width {
+        let mut col = Vec::with_capacity(map.height as usize);
+        for y in 0..map.height {
+            col.push(map.map_cells[x as usize][y as usize].is_walkable());
+        }
+        walkable.push(col);
+    }
+
     game_data.map = Some(LoadedMap {
         name: map_name.clone(),
         width: map.width,
         height: map.height,
+        walkable,
     });
 
 }

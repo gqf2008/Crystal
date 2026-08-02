@@ -12,6 +12,9 @@ use mir2_shared::enums::ServerPacketIds;
 use mir2_shared::packets::base::{Packet, PacketHeader};
 use mir2_shared::SelectInfo;
 
+use crate::game::chat::ChatState;
+use crate::game::hud::HudState;
+use crate::game::movement::{NetMotion, NetMotions};
 use crate::map_renderer::GameData;
 use crate::scenes::AppState;
 
@@ -106,6 +109,10 @@ pub struct NetworkContext {
     pub client_version_hash: [u8; 16],
     /// 是否已发送 ClientVersion（每次连接只发一次）
     pub client_version_sent: bool,
+    /// 本地玩家 object_id（UserInformation 提供；mock 模式为 None=第一个 ObjectPlayer）
+    pub local_player_id: Option<u32>,
+    /// 服务器 UserLocation 权威位置（瓦片坐标 + 朝向），由移动系统消费
+    pub self_position: Option<(i32, i32, u8)>,
 }
 
 impl Default for NetworkContext {
@@ -129,6 +136,8 @@ impl Default for NetworkContext {
             disconnected: None,
             client_version_hash: [0u8; 16],
             client_version_sent: false,
+            local_player_id: None,
+            self_position: None,
         }
     }
 }
@@ -239,6 +248,9 @@ fn network_system(
     mut net: ResMut<NetworkContext>,
     mut game_data: ResMut<GameData>,
     mut net_objects: ResMut<NetObjects>,
+    mut motions: ResMut<NetMotions>,
+    mut hud: ResMut<HudState>,
+    mut chat: ResMut<ChatState>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     // 真实 TCP：TcpEvent（完整内层包 / 断线）
@@ -246,7 +258,16 @@ fn network_system(
         while let Ok(ev) = rx.try_recv() {
             match ev {
                 tcp::TcpEvent::Packet(payload) => {
-                    handle_packet(&mut net, &mut game_data, &mut net_objects, &mut next, &payload);
+                    handle_packet(
+                        &mut net,
+                        &mut game_data,
+                        &mut net_objects,
+                        &mut motions,
+                        &mut hud,
+                        &mut chat,
+                        &mut next,
+                        &payload,
+                    );
                 }
                 tcp::TcpEvent::Disconnected { reason } => {
                     tracing::warn!("🔌 与服务器断开: {}", reason);
@@ -275,6 +296,9 @@ fn network_system(
                         &mut net,
                         &mut game_data,
                         &mut net_objects,
+                        &mut motions,
+                        &mut hud,
+                        &mut chat,
                         &mut next,
                         &payload,
                     );
@@ -298,6 +322,9 @@ fn handle_packet(
     net: &mut NetworkContext,
     game_data: &mut GameData,
     net_objects: &mut NetObjects,
+    motions: &mut NetMotions,
+    hud: &mut HudState,
+    chat: &mut ChatState,
     next: &mut NextState<AppState>,
     payload: &[u8],
 ) {
@@ -509,6 +536,99 @@ fn handle_packet(
                 net_objects.to_remove.push(p.object_id);
             }
         }
+        // ---- M8: 玩家状态 ----
+        x if x == ServerPacketIds::UserInformation as i16 => {
+            if let Ok(p) = user::UserInformation::read_body(&mut cur) {
+                tracing::info!(
+                    "👤 UserInformation: {} Lv.{} hp={} mp={} exp={}/{} gold={}",
+                    p.name, p.level, p.hp, p.mp, p.experience, p.max_experience, p.gold
+                );
+                hud.name = p.name.clone();
+                hud.level = p.level;
+                hud.hp = p.hp;
+                hud.mp = p.mp;
+                hud.exp = p.experience;
+                hud.max_exp = p.max_experience.max(1);
+                hud.gold = p.gold;
+                hud.class = p.class as u8;
+                hud.player_object_id = Some(p.object_id);
+                net.local_player_id = Some(p.object_id);
+                net.self_position = Some((p.location_x, p.location_y, p.direction as u8));
+            }
+        }
+        x if x == ServerPacketIds::HealthChanged as i16 => {
+            if let Ok(p) = combat::HealthChanged::read_body(&mut cur) {
+                hud.hp = p.hp as i32;
+                hud.mp = p.mp as i32;
+            }
+        }
+        x if x == ServerPacketIds::UserLocation as i16 => {
+            if let Ok(p) = user::UserLocation::read_body(&mut cur) {
+                net.self_position = Some((p.location_x, p.location_y, p.direction as u8));
+            }
+        }
+        x if x == ServerPacketIds::GainedGold as i16 => {
+            if let Ok(p) = drops::GainedGold::read_body(&mut cur) {
+                hud.gold = p.gold;
+            }
+        }
+        x if x == ServerPacketIds::GainExperience as i16 => {
+            if let Ok(p) = experience::GainExperience::read_body(&mut cur) {
+                hud.exp += p.amount as i64;
+            }
+        }
+        x if x == ServerPacketIds::LevelChanged as i16 => {
+            if let Ok(p) = experience::LevelChanged::read_body(&mut cur) {
+                hud.level = p.level;
+                hud.exp = p.experience;
+                hud.max_exp = p.max_experience.max(1);
+            }
+        }
+
+        // ---- M8: 对象移动与聊天 ----
+        x if x == ServerPacketIds::ObjectTurn as i16 => {
+            if let Ok(p) = objects::ObjectTurn::read_body(&mut cur) {
+                motions.pending.push(NetMotion::Turn {
+                    object_id: p.object_id,
+                    x: p.location_x,
+                    y: p.location_y,
+                    dir: p.direction as u8,
+                });
+            }
+        }
+        x if x == ServerPacketIds::ObjectWalk as i16 => {
+            if let Ok(p) = objects::ObjectWalk::read_body(&mut cur) {
+                motions.pending.push(NetMotion::Walk {
+                    object_id: p.object_id,
+                    x: p.location_x,
+                    y: p.location_y,
+                    dir: p.direction as u8,
+                });
+            }
+        }
+        x if x == ServerPacketIds::ObjectRun as i16 => {
+            if let Ok(p) = objects::ObjectRun::read_body(&mut cur) {
+                motions.pending.push(NetMotion::Run {
+                    object_id: p.object_id,
+                    x: p.location_x,
+                    y: p.location_y,
+                    dir: p.direction as u8,
+                });
+            }
+        }
+        x if x == ServerPacketIds::Chat as i16 => {
+            if let Ok(p) = chat::Chat::read_body(&mut cur) {
+                let color = chat_color(p.chat_type);
+                chat.add_line(p.message, color);
+            }
+        }
+        x if x == ServerPacketIds::ObjectChat as i16 => {
+            if let Ok(p) = chat::ObjectChat::read_body(&mut cur) {
+                let color = chat_color(p.chat_type);
+                chat.add_line(p.text, color);
+            }
+        }
+
         x if x == ServerPacketIds::KeepAlive as i16 => {
             // 服务器心跳：回一个 KeepAlive
             net.send_packet(&mir2_shared::packets::client::connection::KeepAlive { time: 0 });
@@ -516,5 +636,28 @@ fn handle_packet(
         other => {
             tracing::debug!("未处理服务器包 opcode {:04X}", other);
         }
+    }
+}
+
+/// 聊天颜色（参考 C# ReceiveChat / macroquad chat_dialog 配色）
+fn chat_color(t: mir2_shared::enums::ChatType) -> bevy::prelude::Color {
+    use mir2_shared::enums::ChatType;
+    match t {
+        ChatType::Normal => bevy::prelude::Color::WHITE,
+        ChatType::Shout | ChatType::Shout2 | ChatType::Shout3 => {
+            bevy::prelude::Color::srgb(1.0, 0.75, 0.3)
+        }
+        ChatType::System | ChatType::System2 | ChatType::Announcement => {
+            bevy::prelude::Color::srgb(1.0, 0.95, 0.4)
+        }
+        ChatType::Hint => bevy::prelude::Color::srgb(0.4, 1.0, 0.4),
+        ChatType::Group => bevy::prelude::Color::srgb(0.5, 0.9, 1.0),
+        ChatType::WhisperIn | ChatType::WhisperOut => bevy::prelude::Color::srgb(1.0, 0.5, 1.0),
+        ChatType::Guild => bevy::prelude::Color::srgb(0.8, 0.6, 1.0),
+        ChatType::LevelUp => bevy::prelude::Color::srgb(1.0, 0.9, 0.2),
+        ChatType::Mentor | ChatType::Trainer | ChatType::Relationship => {
+            bevy::prelude::Color::srgb(0.6, 1.0, 0.8)
+        }
+        _ => bevy::prelude::Color::WHITE,
     }
 }

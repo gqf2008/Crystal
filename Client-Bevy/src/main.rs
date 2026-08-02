@@ -72,6 +72,7 @@ fn main() {
         SelectPlugin,
         NewCharacterPlugin,
         ModalBoxPlugin,
+        client_bevy::game::GamePlugin,
     ));
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
@@ -84,6 +85,9 @@ fn main() {
     }
     // F12: 保存当前帧截图到 ../../tools/bevy_shot_N.png（开发调试用）
     app.add_systems(Update, debug_screenshot);
+    // 窗口获得焦点时强制激活 winit IME（见 ime_focus_activation）
+    app.init_resource::<ImePulse>();
+    app.add_systems(Update, ime_focus_activation);
     // --no-actors: 只渲染地图（用于纯地图截图验证）
     if std::env::args().any(|a| a == "--no-actors") {
         app.add_plugins(MapRenderPlugin);
@@ -125,6 +129,40 @@ fn capture_shot(commands: &mut Commands, counter: &mut u32) {
     commands
         .spawn(Screenshot::primary_window())
         .observe(save_to_disk(path));
+}
+
+/// 强制激活 winit IME。
+/// 根因：winit 创建窗口时强制 set_ime_allowed(false) 断开 IMM 上下文；
+/// bevy_winit 创建时不同步 ime_enabled（仅后续 Changed<Window> 脏检测才 set_ime_allowed），
+/// 缓存初值=true 导致 winit 的 IME 永远停在 false。
+/// 这里在窗口首次报告 focused 后做一次 false→true 两帧脉冲，借脏检测触发
+/// winit set_ime_allowed(true) 重连 IMM。不依赖 WindowFocused 事件（启动即聚焦时不会发）。
+#[derive(Resource, Default)]
+struct ImePulse(u8); // 0=待触发 1=已置false待回true 2=已完成
+
+fn ime_focus_activation(mut windows: Query<&mut Window>, mut pulse: ResMut<ImePulse>) {
+    match pulse.0 {
+        0 => {
+            // 等窗口报告已聚焦（启动即聚焦或用户点击后）
+            let focused = windows.iter().any(|w| w.focused);
+            if focused {
+                for mut w in windows.iter_mut() {
+                    if w.ime_enabled {
+                        w.ime_enabled = false;
+                    }
+                }
+                pulse.0 = 1;
+            }
+        }
+        1 => {
+            for mut w in windows.iter_mut() {
+                w.ime_enabled = true;
+            }
+            pulse.0 = 2;
+            tracing::debug!("[IME] 已激活 winit IME（set_ime_allowed(true)）");
+        }
+        _ => {}
+    }
 }
 /// --auto-enter：自动驱动 mock 登录流程（Login→Select→Game，验证网络管道）
 fn auto_enter(

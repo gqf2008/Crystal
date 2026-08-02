@@ -290,29 +290,43 @@ fn actor_sprite_render(
 // 演示内容
 // ============================================================================
 
-/// 等待地图加载后生成网络对象（MapChanged 后 mock 发的 ObjectPlayer/Monster/Npc）
+/// 等待地图加载后生成网络对象（MapChanged 后服务器发的 ObjectPlayer/Monster/Npc）
 fn spawn_net_objects_when_ready(
     mut commands: Commands,
     data: Res<GameData>,
     mut net_objects: ResMut<NetObjects>,
-    mut done: Local<bool>,
+    net: Res<crate::network::NetworkContext>,
 ) {
-    if *done {
-        return;
-    }
     if data.map.is_none() {
         return;
     }
-    *done = true;
     let pending: Vec<NetObject> = net_objects.pending.drain(..).collect();
+    if pending.is_empty() {
+        return;
+    }
+    // mock 模式没有 UserInformation → local_player_id=None，第一个 ObjectPlayer 视为本地
+    let mut local_spawned = net.local_player_id.is_some();
     for obj in &pending {
-        spawn_net_object_entity(&mut commands, obj);
+        let is_local = match obj {
+            NetObject::Player { object_id, .. } => {
+                if net.local_player_id == Some(*object_id) {
+                    true
+                } else if net.local_player_id.is_none() && !local_spawned {
+                    local_spawned = true;
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
+        spawn_net_object_entity(&mut commands, obj, is_local);
     }
     tracing::info!("🌐 网络对象生成完成: {} 个", pending.len());
 }
 
-/// 按网络对象生成实体
-fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject) {
+/// 按网络对象生成实体；is_local_player 时生成受控本地玩家（无 DemoBehavior）
+fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_player: bool) {
     // 瓦片坐标 → 世界像素（脚点）
     let wx = |tx: i32| tx as f32 * TILE_WIDTH + TILE_WIDTH / 2.0;
     let wy = |ty: i32| ty as f32 * TILE_HEIGHT + TILE_HEIGHT;
@@ -332,19 +346,36 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject) {
             armour,
             wing_effect,
         } => {
-            let e = spawn_player_with(
-                commands,
-                wx(*location_x),
-                wy(*location_y),
-                *class,
-                *gender,
-                *armour,
-                *hair,
-                *weapon,
-                *weapon_effect,
-                *wing_effect,
-            );
-            commands.entity(e).insert(NetObjectId(*object_id));
+            let e = if is_local_player {
+                spawn_local_player_with(
+                    commands,
+                    wx(*location_x),
+                    wy(*location_y),
+                    *class,
+                    *gender,
+                    *armour,
+                    *hair,
+                    *weapon,
+                    *weapon_effect,
+                    *wing_effect,
+                    *object_id,
+                )
+            } else {
+                spawn_remote_player_with(
+                    commands,
+                    wx(*location_x),
+                    wy(*location_y),
+                    *class,
+                    *gender,
+                    *armour,
+                    *hair,
+                    *weapon,
+                    *weapon_effect,
+                    *wing_effect,
+                    *object_id,
+                )
+            };
+            let _ = e;
         }
         NetObject::Monster {
             object_id,
@@ -455,7 +486,7 @@ fn spawn_demo_actors_when_ready(
 
 /// 世界 y（屏幕向下）→ Bevy 深度 z（与 front 瓦片共用同一深度函数，
 /// 实现角色与建筑/树的经典交错遮挡）
-fn depth_z(world_y: f32) -> f32 {
+pub fn depth_z(world_y: f32) -> f32 {
     crate::map_renderer::depth_y(world_y)
 }
 
@@ -563,6 +594,135 @@ fn spawn_player_with(
         }
     });
     root
+}
+
+/// 生成本地受控玩家（真实网络；无 DemoBehavior，由玩家控制系统驱动）
+#[allow(clippy::too_many_arguments)]
+fn spawn_local_player_with(
+    commands: &mut Commands,
+    x: f32,
+    y: f32,
+    class: MirClass,
+    gender: MirGender,
+    armour: i16,
+    hair: u8,
+    weapon: i16,
+    weapon_effect: i16,
+    wing_effect: u8,
+    object_id: u32,
+) -> Entity {
+    let z = depth_z(y);
+    let root = commands
+        .spawn((
+            LocalPlayer,
+            NetObjectId(object_id),
+            ActorAppearance::Player {
+                class,
+                gender,
+                armour: armour.max(0) as u16,
+                hair,
+                weapon,
+                weapon_effect,
+                wing_effect,
+            },
+            ActorAnim::default(),
+            Transform::from_xyz(x, y, z),
+            Visibility::default(),
+        ))
+        .id();
+    attach_player_layers(commands, root, armour, hair, weapon);
+    root
+}
+
+/// 生成远端玩家（其他玩家；无 LocalPlayer、无 DemoBehavior）
+#[allow(clippy::too_many_arguments)]
+fn spawn_remote_player_with(
+    commands: &mut Commands,
+    x: f32,
+    y: f32,
+    class: MirClass,
+    gender: MirGender,
+    armour: i16,
+    hair: u8,
+    weapon: i16,
+    weapon_effect: i16,
+    wing_effect: u8,
+    object_id: u32,
+) -> Entity {
+    let z = depth_z(y);
+    let root = commands
+        .spawn((
+            NetObjectId(object_id),
+            ActorAppearance::Player {
+                class,
+                gender,
+                armour: armour.max(0) as u16,
+                hair,
+                weapon,
+                weapon_effect,
+                wing_effect,
+            },
+            ActorAnim::default(),
+            Transform::from_xyz(x, y, z),
+            Visibility::default(),
+        ))
+        .id();
+    attach_player_layers(commands, root, armour, hair, weapon);
+    root
+}
+
+/// 玩家分层子精灵（护甲/发型/武器 + ghost 层）
+fn attach_player_layers(
+    commands: &mut Commands,
+    root: Entity,
+    armour: i16,
+    hair: u8,
+    weapon: i16,
+) {
+    commands.entity(root).with_children(|p| {
+        p.spawn((
+            Sprite::default(),
+            Transform::default(),
+            SpriteLayer {
+                lib: ArrayLibType::CArmours,
+                slot: armour.max(0) as u32,
+                frame: 0,
+                is_effect: false,
+            },
+        ));
+        p.spawn((
+            Sprite::default(),
+            Transform::default(),
+            SpriteLayer {
+                lib: ArrayLibType::CHair,
+                slot: hair as u32,
+                frame: 0,
+                is_effect: false,
+            },
+        ));
+        p.spawn((
+            Sprite::default(),
+            Transform::default(),
+            SpriteLayer {
+                lib: ArrayLibType::CWeapons,
+                slot: weapon.max(0) as u32,
+                frame: 0,
+                is_effect: false,
+            },
+        ));
+        for lib in [
+            ArrayLibType::CArmours,
+            ArrayLibType::CHair,
+            ArrayLibType::CWeapons,
+        ] {
+            p.spawn((
+                Sprite::default(),
+                Transform::from_xyz(0.0, 0.0, 0.5),
+                Visibility::Hidden,
+                GhostLayer { lib },
+            ));
+        }
+    });
 }
 
 fn spawn_monster(commands: &mut Commands, monster_type: u16, x: f32, y: f32, direction: u8) -> Entity {
