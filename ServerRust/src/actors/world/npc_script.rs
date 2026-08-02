@@ -865,15 +865,15 @@ async fn teleport_player(world: &mut WorldActor, session_id: u64, map_index: u16
             .ask(SetPlayerPosition { x, y, direction: 4, map_index: Some(map_index), is_mounted: None })
             .await;
         let map_pkt = build_map_changed_packet(map_index, &dest_file, &dest_title, x, y, false);
-        let _ = world.gate_ref.ask(SendToClient { session_id, data: map_pkt });
+        let _ = world.gate_ref.tell(SendToClient { session_id, data: map_pkt }).await;
         let mut body = Vec::new();
         body.extend_from_slice(&x.to_le_bytes());
         body.extend_from_slice(&y.to_le_bytes());
         body.push(4u8);
-        let _ = world.gate_ref.ask(SendToClient {
+        let _ = world.gate_ref.tell(SendToClient {
             session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
-        });
+        }).await;
     }
 }
 

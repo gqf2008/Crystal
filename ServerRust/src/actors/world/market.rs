@@ -43,10 +43,10 @@ impl Message<MarketSearchRequest> for WorldActor {
             warn!("Failed to serialize NPCMarket: {}", e);
             return;
         }
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCMarket as i16, &body),
-        });
+        }).await;
 
         // Send first page
         let end = 10.min(results.len());
@@ -68,10 +68,10 @@ impl Message<MarketSearchRequest> for WorldActor {
                 warn!("Failed to serialize NPCMarketPage: {}", e);
                 return;
             }
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCMarketPage as i16, &body),
-            });
+            }).await;
         }
     }
 }
@@ -110,10 +110,10 @@ impl Message<MarketRefreshRequest> for WorldActor {
             warn!("Failed to serialize NPCMarket: {}", e);
             return;
         }
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCMarket as i16, &body),
-        });
+        }).await;
 
         // Send first page
         let end = 10.min(results.len());
@@ -135,10 +135,10 @@ impl Message<MarketRefreshRequest> for WorldActor {
                 warn!("Failed to serialize NPCMarketPage: {}", e);
                 return;
             }
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCMarketPage as i16, &body),
-            });
+            }).await;
         }
     }
 }
@@ -164,10 +164,10 @@ impl Message<MarketPageRequest> for WorldActor {
                     warn!("Failed to serialize NPCMarketPage: {}", e);
                     return;
                 }
-                let _ = self.gate_ref.ask(SendToClient {
+                let _ = self.gate_ref.tell(SendToClient {
                     session_id: msg.session_id,
                     data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCMarketPage as i16, &body),
-                });
+                }).await;
                 return;
             }
         };
@@ -194,10 +194,10 @@ impl Message<MarketPageRequest> for WorldActor {
             warn!("Failed to serialize NPCMarketPage: {}", e);
             return;
         }
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCMarketPage as i16, &body),
-        });
+        }).await;
     }
 }
 
@@ -322,10 +322,10 @@ impl Message<MarketBuyRequest> for WorldActor {
             warn!("Failed to serialize MarketSuccess: {}", e);
             return;
         }
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MarketSuccess as i16, &body),
-        });
+        }).await;
     }
 }
 
@@ -539,10 +539,10 @@ impl Message<ConsignItemRequest> for WorldActor {
             warn!("Failed to serialize ConsignItem response: {}", e);
             return;
         }
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ConsignItem as i16, &body),
-        });
+        }).await;
 
         send_system_message(&self.gate_ref, msg.session_id,
             &format!("寄售成功！{} 以 {} 金币上架", item_info.name, price));

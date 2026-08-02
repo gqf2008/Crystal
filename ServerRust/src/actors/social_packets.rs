@@ -25,10 +25,10 @@ pub fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: u64, mess
     let mut body = Vec::new();
     write_dotnet_string(&mut body, message);
     body.push(0u8); // ChatType::System
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(ServerPacketIds::Chat as i16, &body),
-    });
+    }).try_send();
 }
 
 // ============================================================
@@ -45,10 +45,10 @@ pub fn send_group_members_map(gate_ref: &ActorRef<GateActor>, session_id: u64, m
         body.push(if member.is_leader { 1u8 } else { 0u8 });
         body.push(if member.online { 1u8 } else { 0u8 });
     }
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GroupMembersMap as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send group invite to a client.
@@ -56,10 +56,10 @@ pub fn send_group_invite_packet(gate_ref: &ActorRef<GateActor>, session_id: u64,
     let mut body = Vec::new();
     write_dotnet_string(&mut body, inviter_name);
     body.extend_from_slice(&inviter_id.to_le_bytes());
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GroupInvite as i16, &body),
-    });
+    }).try_send();
 }
 
 // ============================================================
@@ -70,30 +70,30 @@ pub fn send_group_invite_packet(gate_ref: &ActorRef<GateActor>, session_id: u64,
 pub fn send_trade_invite_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, inviter_name: &str) {
     let mut body = Vec::new();
     write_dotnet_string(&mut body, inviter_name);
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::TradeRequest as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send trade open (partner info) to a client.
 pub fn send_trade_open_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, partner_name: &str) {
     let mut body = Vec::new();
     write_dotnet_string(&mut body, partner_name);
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::TradeRequest as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send trade gold update to a client.
 pub fn send_trade_gold_update_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, _other_session: u64, amount: u64) {
     let mut body = Vec::new();
     body.extend_from_slice(&amount.to_le_bytes());
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::TradeGold as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send trade confirm (lock status) to a client.
@@ -101,34 +101,34 @@ pub fn send_trade_confirm_packet(gate_ref: &ActorRef<GateActor>, session_id: u64
     let mut body = Vec::new();
     body.push(if side_a.locked { 1u8 } else { 0u8 });
     body.push(if side_b.locked { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::TradeConfirm as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send trade cancel to a client.
 pub fn send_trade_cancel_packet(gate_ref: &ActorRef<GateActor>, session_id: u64) {
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::TradeCancel as i16, &[]),
-    });
+    }).try_send();
 }
 
 /// Send trade success to a client.
 pub fn send_trade_success_packet(gate_ref: &ActorRef<GateActor>, session_id: u64) {
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::TradeConfirm as i16, &[1u8, 1u8]),
-    });
+    }).try_send();
 }
 
 /// Send trade close to a client.
 pub fn send_trade_close_packet(gate_ref: &ActorRef<GateActor>, session_id: u64) {
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::TradeCancel as i16, &[]),
-    });
+    }).try_send();
 }
 
 /// Send trade item update to a client.
@@ -138,10 +138,10 @@ pub fn send_trade_item_update_packet(gate_ref: &ActorRef<GateActor>, session_id:
     body.push(grid);
     body.extend_from_slice(&count.to_le_bytes());
     body.push(if is_add { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::TradeItem as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send DepositTradeItem response to a client.
@@ -149,10 +149,10 @@ pub fn send_deposit_trade_item_packet(gate_ref: &ActorRef<GateActor>, session_id
     let mut body = Vec::new();
     body.extend_from_slice(&from_slot.to_le_bytes());
     body.push(if success { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DepositTradeItem as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send RetrieveTradeItem response to a client.
@@ -160,10 +160,10 @@ pub fn send_retrieve_trade_item_packet(gate_ref: &ActorRef<GateActor>, session_i
     let mut body = Vec::new();
     body.extend_from_slice(&from_slot.to_le_bytes());
     body.push(if success { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RetrieveTradeItem as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Find a trade session by session_id (immutable).
@@ -195,10 +195,10 @@ pub fn send_friends_list_packet(gate_ref: &ActorRef<GateActor>, session_id: u64,
         write_dotnet_string(&mut body, &friend.memo);
         body.push(if online_object_ids.contains(&friend.object_id) { 1u8 } else { 0u8 });
     }
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::FriendUpdate as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send friend add result to a client.
@@ -208,10 +208,10 @@ pub fn send_friend_add_result_packet(gate_ref: &ActorRef<GateActor>, session_id:
     write_dotnet_string(&mut body, &friend.name);
     write_dotnet_string(&mut body, &friend.memo);
     body.push(if online { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::FriendUpdate as i16, &body),
-    });
+    }).try_send();
 }
 
 // ============================================================
@@ -229,10 +229,10 @@ pub fn send_mail_received_packet(gate_ref: &ActorRef<GateActor>, session_id: u64
     body.push(if mail.collected { 1u8 } else { 0u8 });
     body.extend_from_slice(&(mail.gold as u32).to_le_bytes());
     body.push(mail.items.len() as u8);
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ReceiveMail as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send full mail content to a client.
@@ -256,10 +256,10 @@ pub fn send_mail_content_packet(gate_ref: &ActorRef<GateActor>, session_id: u64,
         body.extend_from_slice(&item.current_dura.to_le_bytes());
         body.extend_from_slice(&item.max_dura.to_le_bytes());
     }
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ReceiveMail as i16, &body),
-    });
+    }).try_send();
 }
 
 // ============================================================
@@ -270,10 +270,10 @@ pub fn send_mail_content_packet(gate_ref: &ActorRef<GateActor>, session_id: u64,
 pub fn send_guild_status_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, in_guild: bool) {
     let mut body = Vec::new();
     body.push(if in_guild { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildStatus as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send guild info to a client.
@@ -295,10 +295,10 @@ pub fn send_guild_info_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, g
     }
     // Guild gold
     body.extend_from_slice(&(guild.gold as u32).to_le_bytes());
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildStatus as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send guild member change notification to a client.
@@ -306,10 +306,10 @@ pub fn send_guild_member_change_packet(gate_ref: &ActorRef<GateActor>, session_i
     let mut body = Vec::new();
     body.push(if joined { 1u8 } else { 0u8 });
     write_dotnet_string(&mut body, member_name);
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildMemberChange as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send guild notice change to a client.
@@ -319,10 +319,10 @@ pub fn send_guild_notice_change_packet(gate_ref: &ActorRef<GateActor>, session_i
     for line in notice {
         write_dotnet_string(&mut body, line);
     }
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildNoticeChange as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send guild member update to a client.
@@ -331,10 +331,10 @@ pub fn send_guild_member_update_packet(gate_ref: &ActorRef<GateActor>, session_i
     write_dotnet_string(&mut body, member_name);
     body.push(rank);
     body.push(if online { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildMemberChange as i16, &body),
-    });
+    }).try_send();
 }
 
 // ============================================================
@@ -345,48 +345,48 @@ pub fn send_guild_member_update_packet(gate_ref: &ActorRef<GateActor>, session_i
 pub fn send_marriage_status_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, married: bool) {
     let mut body = Vec::new();
     body.push(if married { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LoverUpdate as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send marriage invite to a client.
 pub fn send_marriage_invite_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, requester_name: &str) {
     let mut body = Vec::new();
     write_dotnet_string(&mut body, requester_name);
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MarriageRequest as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send divorce request to a client.
 pub fn send_divorce_request_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, requester_name: &str) {
     let mut body = Vec::new();
     write_dotnet_string(&mut body, requester_name);
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DivorceRequest as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send divorce to a client (confirmation/completion).
 pub fn send_divorce_packet(gate_ref: &ActorRef<GateActor>, session_id: u64) {
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DivorceRequest as i16, &[]),
-    });
+    }).try_send();
 }
 
 /// Send mentor invite to a client.
 pub fn send_mentor_invite_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, requester_name: &str) {
     let mut body = Vec::new();
     write_dotnet_string(&mut body, requester_name);
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MentorRequest as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send mentor cancel to a client (sends empty MentorUpdate to clear mentor state).
@@ -395,10 +395,10 @@ pub fn send_mentor_cancel_packet(gate_ref: &ActorRef<GateActor>, session_id: u64
     write_dotnet_string(&mut body, "");       // empty mentor name = no mentor
     body.extend_from_slice(&0i32.to_le_bytes()); // level 0
     body.push(0u8);                            // offline
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MentorUpdate as i16, &body),
-    });
+    }).try_send();
 }
 
 // ============================================================
@@ -408,10 +408,10 @@ pub fn send_mentor_cancel_packet(gate_ref: &ActorRef<GateActor>, session_id: u64
 /// Send hero update to a client.
 pub fn send_hero_update_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, hero_index: u8) {
     let body = vec![hero_index];
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChangeHero as i16, &body),
-    });
+    }).try_send();
 }
 
 // ============================================================
@@ -422,10 +422,10 @@ pub fn send_hero_update_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, 
 pub fn send_quest_complete_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, quest_index: i32) {
     let mut body = Vec::new();
     body.extend_from_slice(&quest_index.to_le_bytes());
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CompleteQuest as i16, &body),
-    });
+    }).try_send();
 }
 
 // ============================================================
@@ -445,10 +445,10 @@ pub fn send_creature_list_packet(gate_ref: &ActorRef<GateActor>, session_id: u64
     } else {
         body.extend_from_slice(&0i32.to_le_bytes());
     }
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UpdateIntelligentCreatureList as i16, &body),
-    });
+    }).try_send();
 }
 
 // ============================================================
@@ -461,10 +461,10 @@ pub fn send_store_item_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, _
     body.extend_from_slice(&0i32.to_le_bytes()); // from
     body.extend_from_slice(&0i32.to_le_bytes()); // to
     body.push(if success { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::StoreItem as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send take back item response to a client.
@@ -473,20 +473,20 @@ pub fn send_take_back_item_packet(gate_ref: &ActorRef<GateActor>, session_id: u6
     body.extend_from_slice(&0i32.to_le_bytes()); // from
     body.extend_from_slice(&0i32.to_le_bytes()); // to
     body.push(if success { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::TakeBackItem as i16, &body),
-    });
+    }).try_send();
 }
 
 /// Send gold changed notification to a client.
 pub fn send_gold_changed_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, new_gold: u64) {
     let mut body = Vec::new();
     body.extend_from_slice(&(new_gold as u32).to_le_bytes());
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LoseGold as i16, &body),
-    });
+    }).try_send();
 }
 
 // ============================================================

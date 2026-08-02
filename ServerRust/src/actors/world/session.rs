@@ -393,7 +393,9 @@ impl Message<StartGameRequest> for WorldActor {
             if let Some(info) = self.magic_infos.get(&(magic.spell as u32)) {
                 let client_magic = mir2_shared::data::client_data::ClientMagic {
                     name: info.name.clone(),
-                    spell: mir2_shared::enums::Spell::try_from(magic.spell as u8).unwrap_or(mir2_shared::enums::Spell::None),
+                    // DB 用 C# 编号，客户端协议用 SharedRust(+3)
+                    spell: mir2_shared::enums::Spell::try_from(magic.spell as u8 + 3)
+                        .unwrap_or(mir2_shared::enums::Spell::None),
                     base_cost: info.base_cost as u8,
                     level_cost: info.level_cost as u8,
                     icon: info.icon as u8,
@@ -579,7 +581,7 @@ impl Message<WorldMoveRequest> for WorldActor {
 
                         // Inject new map data into player for collision/pathfinding
                         if let Some(map_data) = self.maps.get(&dest_slot).cloned() {
-                            let _ = player_ref.ask(SetMapData { map: map_data });
+                            let _ = player_ref.ask(SetMapData { map: map_data }).await;
                         }
 
                         // Update player position

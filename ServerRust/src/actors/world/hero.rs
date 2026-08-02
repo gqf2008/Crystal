@@ -28,7 +28,7 @@ impl Message<ChangeHeroRequest> for WorldActor {
             return;
         }
 
-        let _ = record.actor_ref.ask(SetHeroIndex { hero_index: msg.hero_index });
+        let _ = record.actor_ref.ask(SetHeroIndex { hero_index: msg.hero_index }).await;
         send_hero_update_packet(&self.gate_ref, msg.session_id, msg.hero_index);
         debug!("Hero switched: {} -> index {}", state.name, msg.hero_index);
     }
@@ -123,7 +123,7 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
             // 关闭宠物
             let mut log = state.creature_log;
             log.active_creature = None;
-            let _ = record.actor_ref.ask(SetCreature { creature_log: log });
+            let _ = record.actor_ref.ask(SetCreature { creature_log: log }).await;
             send_system_message(&self.gate_ref, msg.session_id, "宠物已关闭");
             return;
         }
@@ -141,7 +141,7 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
             log.active_creature = Some(creature);
         }
         let creature_ref = log.active_creature.clone();
-        let _ = record.actor_ref.ask(SetCreature { creature_log: log });
+        let _ = record.actor_ref.ask(SetCreature { creature_log: log }).await;
 
         send_creature_list_packet(&self.gate_ref, msg.session_id, creature_ref.as_ref());
         debug!("UpdateIntelligentCreature: {} type={:?} mode={:?}", state.name, creature_type, pickup);
@@ -209,10 +209,10 @@ impl Message<IntelligentCreaturePickup> for WorldActor {
                 for (sid, rec) in &self.players {
                     if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
                         if s.map_index == state.map_index {
-                            let _ = self.gate_ref.ask(SendToClient {
+                            let _ = self.gate_ref.tell(SendToClient {
                                 session_id: *sid,
                                 data: remove_packet.clone(),
-                            });
+                            }).await;
                         }
                     }
                 }
@@ -622,10 +622,10 @@ impl WorldActor {
             );
             // 简化：广播给所有在线玩家（单地图运行环境下足够）
             for sid in self.players.keys() {
-                let _ = self.gate_ref.ask(SendToClient {
+                let _ = self.gate_ref.tell(SendToClient {
                     session_id: *sid,
                     data: walk_packet.clone(),
-                });
+                }).await;
             }
         }
 
@@ -718,10 +718,10 @@ impl WorldActor {
                 &attack_body,
             );
             for sid in self.players.keys() {
-                let _ = self.gate_ref.ask(SendToClient {
+                let _ = self.gate_ref.tell(SendToClient {
                     session_id: *sid,
                     data: attack_packet.clone(),
-                });
+                }).await;
             }
         }
     }
@@ -821,9 +821,9 @@ async fn broadcast_hero_attack(
         &attack_body,
     );
     for sid in world.players.keys() {
-        let _ = world.gate_ref.ask(SendToClient {
+        let _ = world.gate_ref.tell(SendToClient {
             session_id: *sid,
             data: attack_packet.clone(),
-        });
+        }).await;
     }
 }

@@ -157,18 +157,18 @@ impl Message<WorldAttackRequest> for WorldActor {
 
                     // 广播给所有玩家
                     for session_id in self.players.keys() {
-                        let _ = self.gate_ref.ask(SendToClient {
+                        let _ = self.gate_ref.tell(SendToClient {
                             session_id: *session_id,
                             data: struck_packet.clone(),
-                        });
-                        let _ = self.gate_ref.ask(SendToClient {
+                        }).await;
+                        let _ = self.gate_ref.tell(SendToClient {
                             session_id: *session_id,
                             data: dmg_packet.clone(),
-                        });
-                        let _ = self.gate_ref.ask(SendToClient {
+                        }).await;
+                        let _ = self.gate_ref.tell(SendToClient {
                             session_id: *session_id,
                             data: health_packet.clone(),
-                        });
+                        }).await;
                     }
 
                     primary_target_oid = *oid;
@@ -224,10 +224,10 @@ impl Message<WorldAttackRequest> for WorldActor {
                         const MELEE_RANGE: i32 = 2; // 近战有效范围
 
                         // 发送 ObjectAttack 动画（无论距离）
-                        let _ = self.gate_ref.ask(SendToClient {
+                        let _ = self.gate_ref.tell(SendToClient {
                             session_id: other_session,
                             data: packet.clone(),
-                        });
+                        }).await;
 
                         // 只有范围内的玩家才受到伤害
                         if dist <= MELEE_RANGE {
@@ -278,10 +278,10 @@ impl Message<WorldAttackRequest> for WorldActor {
                                 let died_packet = Self::build_object_died_packet(
                                     other_state.object_id, other_state.x, other_state.y, other_state.direction);
                                 for (sid, _) in &self.players {
-                                    let _ = self.gate_ref.ask(SendToClient {
+                                    let _ = self.gate_ref.tell(SendToClient {
                                         session_id: *sid,
                                         data: died_packet.clone(),
-                                    });
+                                    }).await;
                                 }
                                 self.handle_player_death_drop(other_session, other_state.x, other_state.y, other_state.map_index).await;
 
@@ -293,10 +293,10 @@ impl Message<WorldAttackRequest> for WorldActor {
                                         name_colour_for_pk(attacker_state.pk_points),
                                     );
                                     for (sid, _) in &self.players {
-                                        let _ = self.gate_ref.ask(SendToClient {
+                                        let _ = self.gate_ref.tell(SendToClient {
                                             session_id: *sid,
                                             data: colour_packet.clone(),
-                                        });
+                                        }).await;
                                     }
                                     if let Some(r) = self.players.get_mut(&msg.session_id) {
                                         r.last_pk_points = attacker_state.pk_points;
@@ -311,10 +311,10 @@ impl Message<WorldAttackRequest> for WorldActor {
             } else {
                 // 命中怪物时也要广播 ObjectAttack 给所有玩家
                 for (_other_actor, other_session) in &self.players.iter().map(|(s, r)| (r.actor_ref.clone(), *s)).collect::<Vec<_>>() {
-                    let _ = self.gate_ref.ask(SendToClient {
+                    let _ = self.gate_ref.tell(SendToClient {
                         session_id: *other_session,
                         data: packet.clone(),
-                    });
+                    }).await;
                 }
             }
         }
@@ -390,10 +390,10 @@ impl Message<HarvestRequest> for WorldActor {
             build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectHarvest as i16, &b)
         };
         for other in self.other_players(msg.session_id) {
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: other.session_id,
                 data: harvest_body.clone(),
-            });
+            }).await;
         }
 
         // 延迟处理采集结果
@@ -411,10 +411,10 @@ impl Message<HarvestRequest> for WorldActor {
             let packet = build_packet_bytes(
                 mir2_shared::enums::ServerPacketIds::ObjectHarvested as i16, &b,
             );
-            let _ = gate_ref.ask(SendToClient {
+            let _ = gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: packet,
-            });
+            }).await;
 
             // Drop table by mine type
             let roll = (msg.session_id.wrapping_add(tokio::time::Instant::now().elapsed().as_millis() as u64) % 100) as u8;
@@ -512,10 +512,10 @@ impl Message<ObservePlayerRequest> for WorldActor {
         // Send AllowObserve(true)
         let mut allow_body = Vec::new();
         allow_body.push(1u8);
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::AllowObserve as i16, &allow_body),
-        });
+        }).await;
 
         // Send PlayerInspect with target info
         send_inspect_packet(&self.gate_ref, msg.session_id, &target);
@@ -556,10 +556,10 @@ impl Message<TownReviveRequest> for WorldActor {
         let mut health_body = Vec::new();
         health_body.extend_from_slice(&(state.max_hp as u32).to_le_bytes());
         health_body.extend_from_slice(&(state.max_mp as u32).to_le_bytes());
-        let _ = self.gate_ref.ask(crate::gate::actor::SendToClient {
+        let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &health_body),
-        });
+        }).await;
 
         debug!("TownRevive: {} revived at ({}, {})", state.name, spawn_x, spawn_y);
     }
@@ -601,10 +601,10 @@ impl Message<RangeAttackRequest> for WorldActor {
             body.extend_from_slice(&object_id.to_le_bytes());
             body.push(msg.direction);
             body.push(0u8); // spell = 0 (range attack)
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: other.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &body),
-            });
+            }).await;
         }
 
         // 检测范围内的怪物
@@ -695,10 +695,10 @@ impl Message<RangeAttackRequest> for WorldActor {
                             let died_packet = Self::build_object_died_packet(
                                 other_state.object_id, other_state.x, other_state.y, other_state.direction);
                             for (sid, _) in &self.players {
-                                let _ = self.gate_ref.ask(SendToClient {
+                                let _ = self.gate_ref.tell(SendToClient {
                                     session_id: *sid,
                                     data: died_packet.clone(),
-                                });
+                                }).await;
                             }
                             self.handle_player_death_drop(other.session_id, other_state.x, other_state.y, other_state.map_index).await;
 
@@ -710,10 +710,10 @@ impl Message<RangeAttackRequest> for WorldActor {
                                     name_colour_for_pk(attacker_state.pk_points),
                                 );
                                 for (sid, _) in &self.players {
-                                    let _ = self.gate_ref.ask(SendToClient {
+                                    let _ = self.gate_ref.tell(SendToClient {
                                         session_id: *sid,
                                         data: colour_packet.clone(),
-                                    });
+                                    }).await;
                                 }
                                 if let Some(r) = self.players.get_mut(&msg.session_id) {
                                     r.last_pk_points = attacker_state.pk_points;
@@ -795,11 +795,13 @@ impl Message<MagicRequest> for WorldActor {
         let spell_oid = if needs_spell_obj { Some(self.alloc_object_id()) } else { None };
 
         // Validate spell exists in DB
-        let spell_db = self.magic_infos.get(&(msg.spell as u32));
+        // DB magic_infos/player_magics 使用 C# 枚举编号，客户端发来的是 SharedRust(+3)
+        let spell_cs = msg.spell.saturating_sub(3);
+        let spell_db = self.magic_infos.get(&(spell_cs as u32));
 
         // 检查玩家是否已学习该技能（基础攻击魔法不需要学习）
-        let basic_spells = [0, 1]; // None, 基础攻击
-        if !basic_spells.contains(&msg.spell) && !state.magics.iter().any(|m| m.spell == msg.spell as i32) {
+        let basic_spells = [0, 1]; // None, 基础攻击（C# 编号）
+        if !basic_spells.contains(&spell_cs) && !state.magics.iter().any(|m| m.spell == spell_cs as i32) {
             send_system_message(&self.gate_ref, msg.session_id, "你尚未学会这个技能");
             return;
         }
@@ -807,7 +809,7 @@ impl Message<MagicRequest> for WorldActor {
         let power = spell_db.map(|m| m.power_base).unwrap_or(10); // for buff/heal scaling
         // Use spell level from PlayerMagic if learned
         let spell_level = state.magics.iter()
-            .find(|m| m.spell == msg.spell as i32)
+            .find(|m| m.spell == spell_cs as i32)
             .map(|m| m.level)
             .unwrap_or(0);
 
@@ -821,7 +823,7 @@ impl Message<MagicRequest> for WorldActor {
         if let Some(spell_info) = spell_db {
             let delay_ms = crate::combat::magic::magic_delay(spell_info, spell_level);
             let last_cast = state.magics.iter()
-                .find(|m| m.spell == msg.spell as i32)
+                .find(|m| m.spell == spell_cs as i32)
                 .map(|m| m.cast_time)
                 .unwrap_or(0);
             if last_cast > 0 && (now_ms - last_cast) < delay_ms as i64 {
@@ -861,10 +863,10 @@ impl Message<MagicRequest> for WorldActor {
         let magic_cast = mir2_shared::packets::server::magic_combat::MagicCast { spell: spell_enum };
         let mut cast_body = Vec::new();
         if magic_cast.write_body(&mut cast_body).is_ok() {
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MagicCast as i16, &cast_body),
-            });
+            }).await;
         }
 
         // 广播 ObjectMagic 给其他玩家
@@ -889,10 +891,10 @@ impl Message<MagicRequest> for WorldActor {
         let mut om_body = Vec::new();
         if object_magic.write_body(&mut om_body).is_ok() {
             for other in &others {
-                let _ = self.gate_ref.ask(SendToClient {
+                let _ = self.gate_ref.tell(SendToClient {
                     session_id: other.session_id,
                     data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectMagic as i16, &om_body),
-                });
+                }).await;
             }
         }
 
@@ -1628,10 +1630,10 @@ impl Message<MagicRequest> for WorldActor {
                         if self.monsters.remove(&victim_id).is_some() {
                             let rm_pkt = Self::build_object_remove_packet(victim_id);
                             for sid in self.players.keys() {
-                                let _ = self.gate_ref.ask(SendToClient {
+                                let _ = self.gate_ref.tell(SendToClient {
                                     session_id: *sid,
                                     data: rm_pkt.clone(),
-                                });
+                                }).await;
                             }
                             debug!("Magic: {} reached slave cap, recalled monster {}",
                                 state.name, victim_id);
@@ -1666,10 +1668,10 @@ impl Message<MagicRequest> for WorldActor {
                             };
                             let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
                             for session_id in self.players.keys() {
-                                let _ = self.gate_ref.ask(SendToClient {
+                                let _ = self.gate_ref.tell(SendToClient {
                                     session_id: *session_id,
                                     data: packet.clone(),
-                                });
+                                }).await;
                             }
                             let ai_profile = MonsterAiProfile::from_info(&info);
                             // 召唤物：target_session=主人、provoked=true 主动攻击
@@ -1819,10 +1821,10 @@ impl Message<MagicRequest> for WorldActor {
                         let walk_packet = build_packet_bytes(
                             mir2_shared::enums::ServerPacketIds::ObjectWalk as i16, &walk_body);
                         for session_id in self.players.keys() {
-                            let _ = self.gate_ref.ask(SendToClient {
+                            let _ = self.gate_ref.tell(SendToClient {
                                 session_id: *session_id,
                                 data: walk_packet.clone(),
-                            });
+                            }).await;
                         }
                         debug!("Magic: {} casts Entrapment (pulled monster {} paralysis {}s)",
                             state.name, mid, para_dur);
@@ -1934,10 +1936,10 @@ impl Message<MagicRequest> for WorldActor {
                     let walk_packet = build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::ObjectWalk as i16, &walk_body);
                     for session_id in self.players.keys() {
-                        let _ = self.gate_ref.ask(SendToClient {
+                        let _ = self.gate_ref.tell(SendToClient {
                             session_id: *session_id,
                             data: walk_packet.clone(),
-                        });
+                        }).await;
                     }
                 }
                 debug!("Magic: {} casts Repulsion", state.name);

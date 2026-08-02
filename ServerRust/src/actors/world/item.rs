@@ -208,10 +208,10 @@ impl Message<PickUpRequest> for WorldActor {
                 for (sid, rec) in &self.players {
                     if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
                         if s.map_index == state.map_index {
-                            let _ = self.gate_ref.ask(SendToClient {
+                            let _ = self.gate_ref.tell(SendToClient {
                                 session_id: *sid,
                                 data: remove_packet.clone(),
-                            });
+                            }).await;
                         }
                     }
                 }
@@ -563,7 +563,7 @@ impl Message<DropItemRequest> for WorldActor {
             let mut buf = Vec::new();
             if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item).is_ok() {
                 for sid in self.players.keys() {
-                    let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: buf.clone() });
+                    let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: buf.clone() }).await;
                 }
             }
 
@@ -667,7 +667,7 @@ impl Message<DropGoldRequest> for WorldActor {
             if mir2_shared::packets::base::serialize_packet(
                 &mut std::io::Cursor::new(&mut buf), &object_gold).is_ok() {
                 for sid in self.players.keys() {
-                    let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: buf.clone() });
+                    let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: buf.clone() }).await;
                 }
             }
 
@@ -1083,10 +1083,10 @@ impl Message<CraftItemRequest> for WorldActor {
                 body.extend_from_slice(&msg.recipe_id.to_le_bytes());
                 body.extend_from_slice(&0u16.to_le_bytes());
                 body.push(0u8); // success = false
-                let _ = self.gate_ref.ask(SendToClient {
+                let _ = self.gate_ref.tell(SendToClient {
                     session_id: msg.session_id,
                     data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CraftItem as i16, &body),
-                });
+                }).await;
                 return;
             }
         };
@@ -1098,10 +1098,10 @@ impl Message<CraftItemRequest> for WorldActor {
             body.extend_from_slice(&msg.recipe_id.to_le_bytes());
             body.extend_from_slice(&0u16.to_le_bytes());
             body.push(0u8);
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CraftItem as i16, &body),
-            });
+            }).await;
             return;
         }
 
@@ -1117,10 +1117,10 @@ impl Message<CraftItemRequest> for WorldActor {
                 body.extend_from_slice(&msg.recipe_id.to_le_bytes());
                 body.extend_from_slice(&0u16.to_le_bytes());
                 body.push(0u8);
-                let _ = self.gate_ref.ask(SendToClient {
+                let _ = self.gate_ref.tell(SendToClient {
                     session_id: msg.session_id,
                     data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CraftItem as i16, &body),
-                });
+                }).await;
                 return;
             }
         }
@@ -1159,10 +1159,10 @@ impl Message<CraftItemRequest> for WorldActor {
         body.extend_from_slice(&msg.recipe_id.to_le_bytes());
         body.extend_from_slice(&(if success { recipe.product_count } else { 0 }).to_le_bytes());
         body.push(if success { 1u8 } else { 0u8 });
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CraftItem as i16, &body),
-        });
+        }).await;
     }
 }
 
@@ -1386,7 +1386,7 @@ impl Message<DisassembleItemRequest> for WorldActor {
                 warn!("Failed to serialize disassemble drop: {}", e);
             } else {
                 for sid in self.players.keys() {
-                    let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: buf.clone() });
+                    let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: buf.clone() }).await;
                 }
                 self.ground_items.push(GroundItem {
                     object_id: drop_oid,

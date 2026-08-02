@@ -21,10 +21,10 @@ impl Message<RequestUserNameMsg> for WorldActor {
                         let mut body = Vec::new();
                         body.extend_from_slice(&msg.object_id.to_le_bytes());
                         crate::util::wire::write_dotnet_string(&mut body, &state.name);
-                        let _ = self.gate_ref.ask(SendToClient {
+                        let _ = self.gate_ref.tell(SendToClient {
                             session_id: msg.session_id,
                             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserName as i16, &body),
-                        });
+                        }).await;
                         return;
                     }
                 }
@@ -36,10 +36,10 @@ impl Message<RequestUserNameMsg> for WorldActor {
             let mut body = Vec::new();
             body.extend_from_slice(&msg.object_id.to_le_bytes());
             crate::util::wire::write_dotnet_string(&mut body, &name);
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserName as i16, &body),
-            });
+            }).await;
         }
     }
 }
@@ -79,10 +79,10 @@ impl Message<RequestChatItemMsg> for WorldActor {
             let mut body = Vec::new();
             body.extend_from_slice(&msg.unique_id.to_le_bytes());
             crate::util::wire::write_dotnet_string(&mut body, &stats_str);
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChatItemStats as i16, &body),
-            });
+            }).await;
         }
     }
 }
@@ -113,19 +113,19 @@ impl Message<AcceptReincarnationRequest> for WorldActor {
         // Verify host is still online and ready
         if !self.players.contains_key(&host_session) {
             debug!("AcceptReincarnation: host disconnected for {}", state.name);
-            let _ = record.actor_ref.ask(ClearReincarnation);
+            let _ = record.actor_ref.ask(ClearReincarnation).await;
             return;
         }
 
         debug!("AcceptReincarnation: {} accepted from host session={}", state.name, host_session);
 
         // Revive the dead player at half HP
-        let _ = record.actor_ref.ask(ReviveAtHalfHp);
+        let _ = record.actor_ref.ask(ReviveAtHalfHp).await;
 
         // Clear reincarnation state on both players
-        let _ = record.actor_ref.ask(ClearReincarnation);
+        let _ = record.actor_ref.ask(ClearReincarnation).await;
         if let Some(host_record) = self.players.get(&host_session) {
-            let _ = host_record.actor_ref.ask(ClearReincarnationHost);
+            let _ = host_record.actor_ref.ask(ClearReincarnationHost).await;
         }
     }
 }
@@ -145,12 +145,12 @@ impl Message<CancelReincarnationRequest> for WorldActor {
         debug!("CancelReincarnation: {}", state.name);
 
         // Set expire time to now, triggering immediate cleanup
-        let _ = record.actor_ref.ask(ClearReincarnation);
+        let _ = record.actor_ref.ask(ClearReincarnation).await;
 
         // Also notify host to clear their state
         if let Some(host_session) = state.reincarnation_host {
             if let Some(host_record) = self.players.get(&host_session) {
-                let _ = host_record.actor_ref.ask(ClearReincarnationHost);
+                let _ = host_record.actor_ref.ask(ClearReincarnationHost).await;
             }
         }
     }
@@ -227,10 +227,10 @@ impl Message<GuildWarReturnRequest> for WorldActor {
         let war_packet = GuildRequestWar { guild_name: msg.guild_name.clone() };
         let mut war_body = Vec::new();
         if let Ok(()) = mir2_shared::packets::Packet::write_body(&war_packet, &mut war_body) {
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildRequestWar as i16, &war_body),
-            });
+            }).await;
         }
 
         send_system_message(&self.gate_ref, msg.session_id, &format!("已向 {} 行会宣战", msg.guild_name));
@@ -258,10 +258,10 @@ impl Message<GuildBuffUpdateRequest> for WorldActor {
         // buff_id=0 means "request buff list" - send empty list (no buffs defined yet)
         if msg.buff_id == 0 {
             let body = Vec::new();
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildBuffList as i16, &body),
-            });
+            }).await;
         } else {
             debug!("GuildBuffUpdate: {} buff_id={} (guild buff system not implemented)", state.name, msg.buff_id);
         }

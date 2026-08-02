@@ -255,10 +255,10 @@ impl Message<NPCCallRequest> for WorldActor {
         }
         let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCResponse as i16, &body);
 
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: packet,
-        });
+        }).await;
     }
 }
 
@@ -294,15 +294,15 @@ impl Message<TeleportToNPCRequest> for WorldActor {
         let new_y = npc.y;
 
         // 更新玩家位置
-        let _ = record.actor_ref.ask(SetPlayerPosition { x: new_x, y: new_y, direction: npc.direction, map_index: None, is_mounted: None });
+        let _ = record.actor_ref.ask(SetPlayerPosition { x: new_x, y: new_y, direction: npc.direction, map_index: None, is_mounted: None }).await;
         let mut body = Vec::new();
         body.extend_from_slice(&new_x.to_le_bytes());
         body.extend_from_slice(&new_y.to_le_bytes());
         body.push(npc.direction);
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
-        });
+        }).await;
 
         debug!("TeleportToNPC: {} -> {} ({}, {})", state.name, npc.name, new_x, new_y);
     }
@@ -357,27 +357,27 @@ impl Message<RequestMapInfoRequest> for WorldActor {
 
         // Inject new map data into player for collision/pathfinding
         if let Some(map_data) = self.maps.get(&0).cloned() {
-            let _ = record.actor_ref.ask(SetMapData { map: map_data });
+            let _ = record.actor_ref.ask(SetMapData { map: map_data }).await;
         }
 
         // Update player position
-        let _ = record.actor_ref.ask(SetPlayerPosition { x: spawn_x, y: spawn_y, direction: state.direction, map_index: Some(msg.map_id as u16), is_mounted: None });
+        let _ = record.actor_ref.ask(SetPlayerPosition { x: spawn_x, y: spawn_y, direction: state.direction, map_index: Some(msg.map_id as u16), is_mounted: None }).await;
 
         // Send MapChanged first, then UserLocation (client processes in order)
         let map_changed_body = build_map_changed_packet(msg.map_id as u16, &dest_file, &dest_title, spawn_x, spawn_y, false);
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: map_changed_body,
-        });
+        }).await;
 
         let mut body = Vec::new();
         body.extend_from_slice(&spawn_x.to_le_bytes());
         body.extend_from_slice(&spawn_y.to_le_bytes());
         body.push(state.direction);
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
-        });
+        }).await;
 
         debug!("RequestMapInfo: {} -> map {} ({}) ({}, {})", state.name, msg.map_id, dest_file, spawn_x, spawn_y);
     }
@@ -619,10 +619,10 @@ impl Message<DeleteCharacterRequest> for WorldActor {
         let mut body = Vec::new();
         body.extend_from_slice(&msg.character_index.to_le_bytes());
         body.push(if success { 1u8 } else { 0u8 });
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DeleteCharacter as i16, &body),
-        });
+        }).await;
 
         debug!("DeleteCharacter: session={} index={}", msg.session_id, msg.character_index);
     }
@@ -649,13 +649,13 @@ impl Message<NewHeroRequest> for WorldActor {
 
         // 设置英雄索引
         let hero_index = msg.hero_type;
-        let _ = record.actor_ref.ask(SetHeroIndex { hero_index });
+        let _ = record.actor_ref.ask(SetHeroIndex { hero_index }).await;
 
         let body = vec![hero_index, 1u8];
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewHero as i16, &body),
-        });
+        }).await;
 
         debug!("NewHero: {} type={}", state.name, msg.hero_type);
     }
@@ -690,17 +690,17 @@ impl Message<FishingCastRequest> for WorldActor {
             return;
         }
 
-        let _ = record.actor_ref.ask(SetFishing { is_fishing: true, autocast: false });
+        let _ = record.actor_ref.ask(SetFishing { is_fishing: true, autocast: false }).await;
 
         // Send FishingUpdate: progress=1 (waiting), success=false
         use mir2_shared::packets::server::miscellaneous::FishingUpdate;
         let packet = FishingUpdate { fishing_progress: 1, fishing_success: false };
         let mut body = Vec::new();
         if let Ok(()) = mir2_shared::packets::Packet::write_body(&packet, &mut body) {
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::FishingUpdate as i16, &body),
-            });
+            }).await;
         }
 
         debug!("FishingCast: {} type={}", state.name, msg.fishing_type);
@@ -718,17 +718,17 @@ impl Message<FishingChangeAutocastRequest> for WorldActor {
         let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
-        let _ = record.actor_ref.ask(SetFishing { is_fishing: state.is_fishing, autocast: msg.enabled });
+        let _ = record.actor_ref.ask(SetFishing { is_fishing: state.is_fishing, autocast: msg.enabled }).await;
 
         // Send FishingUpdate: progress=5 (autocast toggle), success=enabled
         use mir2_shared::packets::server::miscellaneous::FishingUpdate;
         let packet = FishingUpdate { fishing_progress: 5, fishing_success: msg.enabled };
         let mut body = Vec::new();
         if let Ok(()) = mir2_shared::packets::Packet::write_body(&packet, &mut body) {
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::FishingUpdate as i16, &body),
-            });
+            }).await;
         }
 
         debug!("FishingChangeAutocast: {} enabled={}", state.name, msg.enabled);
@@ -907,10 +907,10 @@ fn send_game_shop_catalog(gate_ref: &ActorRef<GateActor>, session_id: u64, gold:
 
     let mut body = Vec::new();
     let _ = packet.write_body(&mut body);
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GameShopInfo as i16, &body),
-    });
+    }).try_send();
 }
 
 pub struct GameshopBuyRequest {
@@ -1017,7 +1017,7 @@ impl Message<GameshopBuyRequest> for WorldActor {
 
         // 发送库存更新
         let stock_remaining = item_count.saturating_sub(buy_count);
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GameShopStock as i16, &{
                 let mut body = Vec::new();
@@ -1025,7 +1025,7 @@ impl Message<GameshopBuyRequest> for WorldActor {
                 body.extend_from_slice(&stock_remaining.to_le_bytes());
                 body
             }),
-        });
+        }).await;
     }
 }
 
@@ -1115,10 +1115,10 @@ impl Message<GetRankingRequest> for WorldActor {
         let packet = mir2_shared::packets::server::special_systems::Rankings { rankings };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Rankings as i16, &body),
-            });
+            }).await;
         }
     }
 }
@@ -1192,13 +1192,13 @@ impl Message<RequestMonsterInfoRequest> for WorldActor {
         let packet = mir2_shared::packets::server::NewMonsterInfo { info };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(
                     mir2_shared::enums::ServerPacketIds::NewMonsterInfo as i16,
                     &body,
                 ),
-            });
+            }).await;
         }
     }
 }
@@ -1238,13 +1238,13 @@ impl Message<RequestNPCInfoRequest> for WorldActor {
         let packet = mir2_shared::packets::server::NewNPCInfo { info };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(
                     mir2_shared::enums::ServerPacketIds::NewNPCInfo as i16,
                     &body,
                 ),
-            });
+            }).await;
         }
     }
 }

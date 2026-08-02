@@ -902,10 +902,10 @@ impl WorldActor {
             warn!("Failed to serialize TimeOfDay: {}", e);
             return;
         }
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::TimeOfDay as i16, &body),
-        });
+        }).try_send();
     }
 
     /// 发送 ObjectRemove 给同地图其他玩家，使该玩家从他人视野中消失
@@ -917,7 +917,7 @@ impl WorldActor {
             if *sid == session_id { continue; }
             if let Ok(Some(other_state)) = record.actor_ref.ask(GetPlayerState).await {
                 if other_state.map_index == state.map_index {
-                    let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: packet.clone() });
+                    let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet.clone() }).await;
                 }
             }
         }
@@ -945,7 +945,7 @@ impl WorldActor {
             if *sid == session_id { continue; }
             if let Ok(Some(other_state)) = record.actor_ref.ask(GetPlayerState).await {
                 if other_state.map_index == state.map_index {
-                    let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: packet.clone() });
+                    let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet.clone() }).await;
                 }
             }
         }
@@ -1055,10 +1055,10 @@ impl WorldActor {
             return;
         }
         let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCGoods as i16, &body);
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id,
             data: packet,
-        });
+        }).try_send();
         debug!("Sent {} goods from NPC '{}' (rate={}) to session {}", goods.len(), npc.name, rate, session_id);
     }
 
@@ -1077,10 +1077,10 @@ impl WorldActor {
             return;
         }
         let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCGoods as i16, &body);
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id,
             data: packet,
-        });
+        }).try_send();
         debug!("Sent NPC panel {:?} to session {}", panel_type, session_id);
     }
 
@@ -1097,10 +1097,10 @@ impl WorldActor {
             return;
         }
         let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserStorage as i16, &body);
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id,
             data: packet,
-        });
+        }).try_send();
         debug!("Sent UserStorage to session {}", session_id);
     }
 
@@ -1125,10 +1125,10 @@ impl WorldActor {
             warn!("Failed to serialize CombineItem: {}", e);
             return;
         }
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CombineItem as i16, &body),
-        });
+        }).try_send();
     }
 
     /// 广播玩家外观更新给同地图的其他玩家
@@ -1160,7 +1160,7 @@ impl WorldActor {
             if let Ok(Some(other_state)) = other_record.actor_ref.ask(GetPlayerState).await {
                 if other_state.map_index != player_map_index { continue; }
             }
-            let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: packet.clone() });
+            let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet.clone() }).await;
         }
     }
 
@@ -1194,10 +1194,10 @@ impl WorldActor {
                 return;
             }
             for session_id in self.players.keys() {
-                let _ = self.gate_ref.ask(SendToClient {
+                let _ = self.gate_ref.tell(SendToClient {
                     session_id: *session_id,
                     data: buf.clone(),
-                });
+                }).await;
             }
             self.ground_items.push(GroundItem {
                 object_id: drop_oid,
@@ -1236,10 +1236,10 @@ impl WorldActor {
                 return;
             }
             for session_id in self.players.keys() {
-                let _ = self.gate_ref.ask(SendToClient {
+                let _ = self.gate_ref.tell(SendToClient {
                     session_id: *session_id,
                     data: buf.clone(),
-                });
+                }).await;
             }
             self.ground_items.push(GroundItem {
                 object_id: drop_oid,
@@ -1349,7 +1349,7 @@ impl WorldActor {
                 continue;
             }
             for sid in self.players.keys() {
-                let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: buf.clone() });
+                let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: buf.clone() }).await;
             }
             self.ground_items.push(GroundItem { object_id: drop_oid, item, x, y, map_index, dropper_session: Some(session_id), drop_tick: self.tick_count });
         }
@@ -1372,7 +1372,7 @@ impl WorldActor {
                     warn!("Failed to serialize ObjectGold: {}", e);
                 } else {
                     for sid in self.players.keys() {
-                        let _ = self.gate_ref.ask(SendToClient { session_id: *sid, data: buf.clone() });
+                        let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: buf.clone() }).await;
                     }
                     self.ground_items.push(GroundItem {
                         object_id: drop_oid,
@@ -1837,10 +1837,10 @@ impl WorldActor {
                                     let mut body = Vec::new();
                                     body.extend_from_slice(&hp.to_le_bytes());
                                     body.extend_from_slice(&mp.to_le_bytes());
-                                    let _ = self.gate_ref.ask(SendToClient {
+                                    let _ = self.gate_ref.tell(SendToClient {
                                         session_id,
                                         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
-                                    });
+                                    }).await;
                                     send_system_message(&self.gate_ref, session_id, "你的生命和魔法已恢复！");
                                 }
                             }
@@ -1929,10 +1929,10 @@ impl WorldActor {
                                         let new_magic = mir2_shared::packets::server::magic::NewMagic { magic, hero: false };
                                         let mut body = Vec::new();
                                         if new_magic.write_body(&mut body).is_ok() {
-                                            let _ = self.gate_ref.ask(SendToClient {
+                                            let _ = self.gate_ref.tell(SendToClient {
                                                 session_id,
                                                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewMagic as i16, &body),
-                                            });
+                                            }).await;
                                         }
                                     }
                                     send_system_message(&self.gate_ref, session_id, "你学会了一项新技能！");
@@ -1977,10 +1977,10 @@ impl WorldActor {
                                         let leveled = mir2_shared::packets::server::magic::MagicLeveled { spell: spell_enum, level: state.magics.iter().find(|m| m.spell == spell).map(|m| m.level).unwrap_or(0), hero: false };
                                         let mut body = Vec::new();
                                         if leveled.write_body(&mut body).is_ok() {
-                                            let _ = self.gate_ref.ask(SendToClient {
+                                            let _ = self.gate_ref.tell(SendToClient {
                                                 session_id,
                                                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MagicLeveled as i16, &body),
-                                            });
+                                            }).await;
                                         }
                                         send_system_message(&self.gate_ref, session_id, "技能升级成功！");
                                         debug!("UPGRADESKILL: session={} spell={} level={}", session_id, spell, state.magics.iter().find(|m| m.spell == spell).map(|m| m.level).unwrap_or(0));
@@ -2272,10 +2272,10 @@ impl WorldActor {
                                         map_index: target_map_index,
                                     }, boss_oid, &format!("[世界Boss] {}", monster_info.name));
                                 for session_id in self.players.keys() {
-                                    let _ = self.gate_ref.ask(SendToClient {
+                                    let _ = self.gate_ref.tell(SendToClient {
                                         session_id: *session_id,
                                         data: packet.clone(),
-                                    });
+                                    }).await;
                                 }
                                 let map_title = self.map_infos.get(&(target_map_index as i32))
                                     .map(|m| m.title.clone())
@@ -2397,10 +2397,10 @@ impl WorldActor {
                                     body.extend_from_slice(&tx.to_le_bytes());
                                     body.extend_from_slice(&ty.to_le_bytes());
                                     body.push(state.direction);
-                                    let _ = self.gate_ref.ask(SendToClient {
+                                    let _ = self.gate_ref.tell(SendToClient {
                                         session_id,
                                         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
-                                    });
+                                    }).await;
                                     debug!("NPC teleport: session={} to map={} ({},{})", session_id, map_name, tx, ty);
                                 }
                             }
@@ -2425,10 +2425,10 @@ impl WorldActor {
                                 body.extend_from_slice(&npc.x.to_le_bytes());
                                 body.extend_from_slice(&npc.y.to_le_bytes());
                                 body.push(state.direction);
-                                let _ = self.gate_ref.ask(SendToClient {
+                                let _ = self.gate_ref.tell(SendToClient {
                                     session_id,
                                     data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
-                                });
+                                }).await;
                                 debug!("NPC recall: session={} to npc {} ({},{})", session_id, npc.name, npc.x, npc.y);
                             }
                         }
@@ -2971,10 +2971,10 @@ impl WorldActor {
             warn!("Failed to serialize Awakening result: {}", e);
             return;
         }
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Awakening as i16, &body),
-        });
+        }).try_send();
     }
 }
 
@@ -2985,10 +2985,10 @@ impl WorldActor {
             warn!("Failed to serialize rental packet: {}", e);
             return;
         }
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id,
             data: build_packet_bytes(T::OPCODE, &body),
-        });
+        }).try_send();
     }
 
     async fn find_session_by_name(&self, name: &str) -> Option<u64> {
@@ -3314,10 +3314,10 @@ async fn broadcast_opendoor_async(gate_ref: &ActorRef<GateActor>, players: &Hash
         if record.session_id == exclude_session_id { continue; }
         let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await else { continue };
         if state.map_index == map_index {
-            let _ = gate_ref.ask(SendToClient {
+            let _ = gate_ref.tell(SendToClient {
                 session_id: record.session_id,
                 data: packet.clone(),
-            });
+            }).await;
         }
     }
 }
@@ -3328,19 +3328,19 @@ fn send_move_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, grid
     body.extend_from_slice(&from.to_le_bytes());
     body.extend_from_slice(&to.to_le_bytes());
     body.push(if success { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MoveItem as i16, &body),
-    });
+    }).try_send();
 }
 
 fn send_use_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, uid: u64) {
     let mut body = Vec::new();
     body.extend_from_slice(&uid.to_le_bytes());
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UseItem as i16, &body),
-    });
+    }).try_send();
 }
 
 /// 计算装备属性加成总和
@@ -3405,10 +3405,10 @@ fn send_equip_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, gri
     body.extend_from_slice(&uid.to_le_bytes());
     body.extend_from_slice(&slot.to_le_bytes());
     body.push(if success { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::EquipItem as i16, &body),
-    });
+    }).try_send();
 }
 
 fn send_remove_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, grid: u8, uid: u64, success: bool) {
@@ -3417,10 +3417,10 @@ fn send_remove_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, gr
     body.extend_from_slice(&uid.to_le_bytes());
     body.extend_from_slice(&0i32.to_le_bytes());
     body.push(if success { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveItem as i16, &body),
-    });
+    }).try_send();
 }
 
 fn send_drop_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, uid: u64, count: u32, success: bool) {
@@ -3428,10 +3428,10 @@ fn send_drop_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, uid:
     body.extend_from_slice(&uid.to_le_bytes());
     body.extend_from_slice(&count.to_le_bytes());
     body.push(if success { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DropItem as i16, &body),
-    });
+    }).try_send();
 }
 
 fn send_merge_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, grid_from: u8, grid_to: u8, from_uid: u64, to_uid: u64, success: bool) {
@@ -3441,10 +3441,10 @@ fn send_merge_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, gri
     body.extend_from_slice(&from_uid.to_le_bytes());
     body.extend_from_slice(&to_uid.to_le_bytes());
     body.push(if success { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MergeItem as i16, &body),
-    });
+    }).try_send();
 }
 
 fn send_split_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, grid: u8, uid: u64, count: u32) {
@@ -3452,10 +3452,10 @@ fn send_split_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, gri
     body.push(grid);
     body.extend_from_slice(&uid.to_le_bytes());
     body.extend_from_slice(&count.to_le_bytes());
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SplitItem as i16, &body),
-    });
+    }).try_send();
 }
 
 fn send_sell_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, uid: u64, count: u32, success: bool) {
@@ -3463,10 +3463,10 @@ fn send_sell_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, uid:
     body.extend_from_slice(&uid.to_le_bytes());
     body.extend_from_slice(&count.to_le_bytes());
     body.push(if success { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SellItem as i16, &body),
-    });
+    }).try_send();
 }
 
 // ============================================================
@@ -3483,10 +3483,10 @@ fn send_mail_received_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, ma
     body.push(if mail.collected { 1u8 } else { 0u8 });
     body.extend_from_slice(&(mail.gold as u32).to_le_bytes());
     body.push(mail.items.len() as u8);
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ReceiveMail as i16, &body),
-    });
+    }).try_send();
 }
 
 fn send_mail_content_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, mail: &MailMessage) {
@@ -3509,10 +3509,10 @@ fn send_mail_content_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, mai
         body.extend_from_slice(&item.current_dura.to_le_bytes());
         body.extend_from_slice(&item.max_dura.to_le_bytes());
     }
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ReceiveMail as i16, &body),
-    });
+    }).try_send();
 }
 
 fn send_inspect_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, state: &crate::actors::player::PlayerState) {
@@ -3534,10 +3534,10 @@ fn send_inspect_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, state: &
         body.extend_from_slice(&(eq.max_dura as i32).to_le_bytes());
     }
 
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(ServerPacketIds::PlayerInspect as i16, &body),
-    });
+    }).try_send();
 }
 
 // ============================================================
@@ -3547,10 +3547,10 @@ fn send_inspect_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, state: &
 fn send_quest_complete_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, quest_index: i32) {
     let mut body = Vec::new();
     body.extend_from_slice(&quest_index.to_le_bytes());
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CompleteQuest as i16, &body),
-    });
+    }).try_send();
 }
 
 // ============================================================
@@ -3559,10 +3559,10 @@ fn send_quest_complete_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, q
 
 fn send_hero_update_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, hero_index: u8) {
     let body = vec![hero_index];
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ChangeHero as i16, &body),
-    });
+    }).try_send();
 }
 
 // ============================================================
@@ -3574,10 +3574,10 @@ fn send_store_item_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, _grid
     body.extend_from_slice(&0i32.to_le_bytes()); // from
     body.extend_from_slice(&0i32.to_le_bytes()); // to
     body.push(if success { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::StoreItem as i16, &body),
-    });
+    }).try_send();
 }
 
 fn send_take_back_item_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, _grid: u8, success: bool) {
@@ -3585,19 +3585,19 @@ fn send_take_back_item_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, _
     body.extend_from_slice(&0i32.to_le_bytes()); // from
     body.extend_from_slice(&0i32.to_le_bytes()); // to
     body.push(if success { 1u8 } else { 0u8 });
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::TakeBackItem as i16, &body),
-    });
+    }).try_send();
 }
 
 fn send_gold_changed_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, new_gold: u64) {
     let mut body = Vec::new();
     body.extend_from_slice(&(new_gold as u32).to_le_bytes());
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LoseGold as i16, &body),
-    });
+    }).try_send();
 }
 
 // ============================================================
@@ -3616,10 +3616,10 @@ fn send_creature_list_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, cr
     } else {
         body.extend_from_slice(&0i32.to_le_bytes());
     }
-    let _ = gate_ref.ask(SendToClient {
+    let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UpdateIntelligentCreatureList as i16, &body),
-    });
+    }).try_send();
 }
 
 // ============================================================

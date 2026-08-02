@@ -739,10 +739,10 @@ impl SocialActor {
                     body.extend_from_slice(&target_x.to_le_bytes());
                     body.extend_from_slice(&target_y.to_le_bytes());
                     body.push(mem_state.direction);
-                    let _ = self.gate_ref.ask(SendToClient {
+                    let _ = self.gate_ref.tell(SendToClient {
                         session_id: member.session_id,
                         data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &body),
-                    });
+                    }).await;
                     debug!("GROUPRECALL: {} recalled to ({}, {}) on map {}", mem_state.name, target_x, target_y, target_map);
                 }
             }
@@ -820,10 +820,10 @@ impl SocialActor {
                         body.extend_from_slice(&target_x.to_le_bytes());
                         body.extend_from_slice(&target_y.to_le_bytes());
                         body.push(mem_state.direction);
-                        let _ = self.gate_ref.ask(SendToClient {
+                        let _ = self.gate_ref.tell(SendToClient {
                             session_id: member.session_id,
                             data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &body),
-                        });
+                        }).await;
                         debug!("RECALLMEMBER: {} recalled to ({}, {})", mem_state.name, target_x, target_y);
                         return;
                     }
@@ -949,10 +949,10 @@ impl SocialActor {
                     body.extend_from_slice(&front_x.to_le_bytes());
                     body.extend_from_slice(&front_y.to_le_bytes());
                     body.push(other_state.direction);
-                    let _ = self.gate_ref.ask(SendToClient {
+                    let _ = self.gate_ref.tell(SendToClient {
                         session_id: *other_session,
                         data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &body),
-                    });
+                    }).await;
                     debug!("RECALL: {} recalled {} to ({}, {})", state.name, spouse_name, front_x, front_y);
                     return;
                 }
@@ -1281,7 +1281,7 @@ impl Message<DellMemberRequest> for SocialActor {
             if group.remove_member(member_session).is_some() {
                 // 更新被踢出玩家的 group_id
                 if let Some(target_record) = self.players.get(&member_session) {
-                    let _ = target_record.ask(SetGroupId { group_id: None });
+                    let _ = target_record.ask(SetGroupId { group_id: None }).await;
                 }
 
                 debug!("Kicked {} from group #{}", msg.member_name, group_id);
@@ -2472,7 +2472,7 @@ impl Message<SocialDivorceReply> for SocialActor {
         if let Some(ref name) = spouse_name {
             if let Some(target_session) = self.find_player_by_name(name, msg.session_id).await {
                 if let Some(target_record) = self.players.get(&target_session) {
-                    let _ = target_record.ask(SetSpouse { spouse_name: None });
+                    let _ = target_record.ask(SetSpouse { spouse_name: None }).await;
                     send_system_message(&self.gate_ref, target_session, "你已离婚");
                 }
             }

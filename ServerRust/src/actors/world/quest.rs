@@ -194,10 +194,10 @@ impl Message<ShareQuestRequest> for WorldActor {
                 if *sid == msg.session_id { continue; }
                 if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
                     if s.group_id == Some(group_id) {
-                        let _ = self.gate_ref.ask(SendToClient {
+                        let _ = self.gate_ref.tell(SendToClient {
                             session_id: *sid,
                             data: data.clone(),
-                        });
+                        }).await;
                     }
                 }
             }

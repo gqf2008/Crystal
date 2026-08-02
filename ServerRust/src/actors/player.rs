@@ -520,10 +520,10 @@ impl PlayerActor {
         body.extend_from_slice(&self.state.x.to_le_bytes());
         body.extend_from_slice(&self.state.y.to_le_bytes());
         body.push(self.state.direction);
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: self.state.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
-        });
+        }).try_send();
     }
 }
 
@@ -742,10 +742,10 @@ impl Message<BroadcastMovement> for PlayerActor {
         body.extend_from_slice(&msg.y.to_le_bytes());
         body.push(msg.direction);
 
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: self.state.session_id,
             data: build_packet_bytes(opcode as i16, &body),
-        });
+        }).await;
     }
 }
 
@@ -842,10 +842,10 @@ impl Message<TakeDamage> for PlayerActor {
         // 发送 Struck（自己被攻击的动画）
         let mut struck_body = Vec::new();
         struck_body.extend_from_slice(&msg.attacker_id.to_le_bytes());
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: self.state.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Struck as i16, &struck_body),
-        });
+        }).await;
 
         // 死亡处理
         if self.state.hp <= 0 && !self.state.is_dead {
@@ -856,10 +856,10 @@ impl Message<TakeDamage> for PlayerActor {
             debug!("Player {} died (attacker={})", self.state.name, msg.attacker_id);
 
             // 发送 S.Death 包给死亡玩家（客户端需要此包进入死亡状态，C# PlayerObject.Die L649）
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: self.state.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Death as i16, &[]),
-            });
+            }).await;
             // S.ObjectDied 广播由 WorldActor 的 combat.rs 死亡分支处理（已实现）
 
             return true;
@@ -870,10 +870,10 @@ impl Message<TakeDamage> for PlayerActor {
             let mut health_body = Vec::new();
             health_body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
             health_body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: self.state.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &health_body),
-            });
+            }).await;
         }
         false
     }
@@ -904,10 +904,10 @@ impl Message<AddExperience> for PlayerActor {
         // 发送 GainExperience 给客户端
         let mut body = Vec::new();
         body.extend_from_slice(&(amount as u32).to_le_bytes());
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: self.state.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainExperience as i16, &body),
-        });
+        }).await;
 
         // 检查升级（用 SharedRust BaseStats 公式计算属性，对齐 C# RefreshLevelStats）
         const MAX_LEVEL: u16 = 200;
@@ -953,10 +953,10 @@ impl Message<AddExperience> for PlayerActor {
             lv_body.extend_from_slice(&self.state.level.to_le_bytes());
             lv_body.extend_from_slice(&self.state.experience.to_le_bytes());
             lv_body.extend_from_slice(&self.state.max_experience.to_le_bytes());
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: self.state.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LevelChanged as i16, &lv_body),
-            });
+            }).await;
         }
     }
 }
@@ -988,10 +988,10 @@ impl Message<DeductExperience> for PlayerActor {
         let mut body = Vec::new();
         body.extend_from_slice(&self.state.experience.to_le_bytes());
         body.extend_from_slice(&self.state.max_experience.to_le_bytes());
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: self.state.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainExperience as i16, &body),
-        });
+        }).await;
 
         deducted
     }
@@ -1021,10 +1021,10 @@ impl Message<Heal> for PlayerActor {
         let mut body = Vec::new();
         body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
         body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: self.state.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
-        });
+        }).await;
 
         debug!("Player {} healed for {} HP ({} -> {})", self.state.name, healed, before, self.state.hp);
         healed
@@ -1053,10 +1053,10 @@ impl Message<Revive> for PlayerActor {
         let mut body = Vec::new();
         body.extend_from_slice(&self.state.hp.to_le_bytes());
         body.extend_from_slice(&self.state.mp.to_le_bytes());
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: self.state.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
-        });
+        }).await;
 
         debug!("Player {} revived (hp={} mp={})", self.state.name, self.state.hp, self.state.mp);
     }
@@ -1214,10 +1214,10 @@ impl Message<TickBuff> for PlayerActor {
             let mut body = Vec::new();
             body.extend_from_slice(&self.state.hp.to_le_bytes());
             body.extend_from_slice(&self.state.mp.to_le_bytes());
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: self.state.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
-            });
+            }).await;
         }
     }
 }
@@ -1773,10 +1773,10 @@ impl Message<DeductMP> for PlayerActor {
             let mut body = Vec::new();
             body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
             body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-            let _ = self.gate_ref.ask(SendToClient {
+            let _ = self.gate_ref.tell(SendToClient {
                 session_id: self.state.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
-            });
+            }).await;
             true
         } else {
             false
@@ -1799,10 +1799,10 @@ impl Message<AddMP> for PlayerActor {
         let mut body = Vec::new();
         body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
         body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: self.state.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
-        });
+        }).await;
     }
 }
 
@@ -2400,7 +2400,7 @@ impl Message<GainSpellExp> for PlayerActor {
                             data: crate::util::wire::build_packet_bytes(
                                 mir2_shared::enums::ServerPacketIds::MagicLeveled as i16, &body,
                             ),
-                        });
+                        }).await;
                     }
                 }
                 break;
@@ -2783,10 +2783,10 @@ impl Message<ReviveAtHalfHp> for PlayerActor {
         let mut body = Vec::new();
         body.extend_from_slice(&self.state.hp.to_le_bytes());
         body.extend_from_slice(&self.state.mp.to_le_bytes());
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: self.state.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
-        });
+        }).await;
 
         debug!("ReviveAtHalfHp: {} hp={}/{}", self.state.name, self.state.hp, self.state.max_hp);
     }
@@ -2856,10 +2856,10 @@ impl PlayerActor {
         body.push(0u8);                                                 // creature_summoned=false
         body.push(0u8);                                                 // allow_observe=false
 
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: self.state.session_id,
             data: build_packet_bytes(ServerPacketIds::UserInformation as i16, &body),
-        });
+        }).try_send();
     }
 }
 

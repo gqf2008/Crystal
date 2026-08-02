@@ -32,7 +32,7 @@ impl Message<DepositRefineItemRequest> for WorldActor {
             return;
         }
 
-        let _ = record.actor_ref.ask(SetRefineLog { refine_log: log });
+        let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
         send_system_message(&self.gate_ref, msg.session_id, "精炼物品已存入");
         debug!("DepositRefineItem: {} uid={}", state.name, msg.unique_id);
     }
@@ -71,7 +71,7 @@ impl Message<RetrieveRefineItemRequest> for WorldActor {
 
         let mut log = state.refine_log;
         if let Some(_item) = log.retrieve() {
-            let _ = record.actor_ref.ask(SetRefineLog { refine_log: log });
+            let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
             send_system_message(&self.gate_ref, msg.session_id, "精炼物品已取回");
             debug!("RetrieveRefineItem: {} uid={}", state.name, msg.unique_id);
         }
@@ -103,7 +103,7 @@ impl Message<RefineCancelRequest> for WorldActor {
 
         let mut log = state.refine_log;
         log.cancel();
-        let _ = record.actor_ref.ask(SetRefineLog { refine_log: log });
+        let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
         send_system_message(&self.gate_ref, msg.session_id, "精炼已取消");
         debug!("RefineCancel: {}", state.name);
     }
@@ -145,7 +145,7 @@ impl Message<RefineItemRequest> for WorldActor {
         let duration = 60u64; // 1 分钟
         let success_chance = 80u8; // 80%
         log.start_refine(msg.item_id, current_time, duration, success_chance);
-        let _ = record.actor_ref.ask(SetRefineLog { refine_log: log });
+        let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
 
         send_system_message(&self.gate_ref, msg.session_id, "精炼已开始，请稍后查看");
         debug!("RefineItem: {} item={} materials={}", state.name, msg.item_id, msg.materials);
@@ -181,7 +181,7 @@ impl Message<CheckRefineRequest> for WorldActor {
                 // 精炼完成，自动标记为完成
                 let mut log = state.refine_log;
                 let success = log.finish();
-                let _ = record.actor_ref.ask(SetRefineLog { refine_log: log });
+                let _ = record.actor_ref.ask(SetRefineLog { refine_log: log }).await;
                 if success {
                     send_system_message(&self.gate_ref, msg.session_id, "精炼成功！物品已提升");
                 } else {
@@ -283,10 +283,10 @@ impl Message<AwakeningNeedMaterialsRequest> for WorldActor {
             warn!("Failed to serialize AwakeningNeedMaterials: {}", e);
             return;
         }
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::AwakeningNeedMaterials as i16, &body),
-        });
+        }).await;
     }
 }
 
@@ -309,10 +309,10 @@ impl Message<AwakeningLockedItemRequest> for WorldActor {
             warn!("Failed to serialize AwakeningLockedItem: {}", e);
             return;
         }
-        let _ = self.gate_ref.ask(SendToClient {
+        let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::AwakeningLockedItem as i16, &body),
-        });
+        }).await;
     }
 }
 
