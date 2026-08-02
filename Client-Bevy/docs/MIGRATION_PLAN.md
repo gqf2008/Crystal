@@ -76,7 +76,8 @@
 - [x] 第 2 批（交互）: npc / npc_goods（商店闭环）/ trade / amount_box / group / quest_log / friend / inspect 全部完成
 - [ ] 第 2 批（交互）: npc / npc_goods / trade / amount_box / group / quest_log / friend / inspect
 - [x] 第 3 批（社交）: guild / guild_territory / mail / trust_merchant / item_rental / ranking / report / mentor / relationship / hero / intelligent_creature / mount 全部完成
-- [ ] 第 4 批（系统）: game_shop / refine / craft / socket / dura_status / npc_drop / roll / npc_awake / notice / chat_notice / timer / option / help / keyboard_layout / big_map / fishing / buff（进行中）
+- [x] 第 4 批（系统）: 全部 17 个完成（含 chat_notice 屏幕通知、game_shop 商城）
+- [x] **M9 全部完成：56 个游戏对话框骨架就位**（数据驱动，网络后续批次接入）
 - [ ] 第 4 批（系统）: game_shop / refine / craft / socket / dura_status / npc_drop / roll / npc_awake / notice / chat_notice / timer / option / help / keyboard_layout / big_map / fishing / buff
 - **验收**: 每个对话框交互与原版 C# / macroquad 一致（数据驱动，mock 先行）
 
