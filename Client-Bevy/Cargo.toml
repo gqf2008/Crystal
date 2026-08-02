@@ -6,7 +6,7 @@ description = "Legend of Mir 2 (传奇2) 游戏客户端 — Bevy 移植版（�
 
 [dependencies]
 # Bevy 游戏引擎 0.19（ECS/渲染大幅升级）
-bevy = "0.19"
+bevy = { version = "0.19", features = ["wav"] }
 # B0001 调试：显示冲突系统/组件名
 bevy_ecs = { version = "0.19", features = ["debug"] }
 

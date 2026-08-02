@@ -51,10 +51,13 @@ impl Plugin for CombatPlugin {
 fn apply_combat_events(
     mut commands: Commands,
     ui_font: Res<UiFont>,
+    sound_bank: Res<crate::game::sound::SoundBank>,
+    mut audio_assets: ResMut<Assets<AudioSource>>,
     mut events: ResMut<CombatEvents>,
     mut actors: Query<(Entity, &NetObjectId, &mut ActorAnim)>,
 ) {
     for (object_id, direction) in events.strikes.drain(..) {
+        crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, 10060);
         for (e, id, mut anim) in &mut actors {
             if id.0 == object_id {
                 anim.action = mir2_shared::enums::MirAction::Attack1;

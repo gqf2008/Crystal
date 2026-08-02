@@ -11,6 +11,7 @@ pub mod hud;
 pub mod movement;
 pub mod pathfinding;
 pub mod player_control;
+pub mod sound;
 pub mod weather;
 
 use bevy::prelude::*;
@@ -41,6 +42,7 @@ impl Plugin for GamePlugin {
             player_control::PlayerControlPlugin,
             combat::CombatPlugin,
             weather::WeatherPlugin,
+            sound::SoundPlugin,
         ));
     }
 }

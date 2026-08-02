@@ -177,9 +177,12 @@ fn player_input_system(
 
 /// 自动攻击（目标存在且存活时循环攻击）
 fn auto_attack_system(
+    mut commands: Commands,
     time: Res<Time>,
     mut control: ResMut<ControlState>,
     net: Res<NetworkContext>,
+    sound_bank: Res<crate::game::sound::SoundBank>,
+    mut audio_assets: ResMut<Assets<AudioSource>>,
     players: Query<&Transform, (With<LocalPlayer>, Without<NetObjectId>)>,
     actors: Query<(&NetObjectId, &Transform)>,
 ) {
@@ -207,5 +210,6 @@ fn auto_attack_system(
         direction: dir,
         spell: mir2_shared::enums::Spell::None,
     });
+    crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, 10050);
     tracing::debug!("⚔️ Attack {}", target_id);
 }
