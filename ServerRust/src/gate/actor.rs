@@ -207,6 +207,11 @@ pub struct SetWorldRef {
     pub world_ref: ActorRef<crate::actors::world::WorldActor>,
 }
 
+/// 设置 SocialActor 引用（组队/交易/好友等社交转发）
+pub struct SetSocialRef {
+    pub social_ref: ActorRef<crate::actors::social::SocialActor>,
+}
+
 // ============================================================
 // Handler 实现
 // ============================================================
@@ -1071,6 +1076,19 @@ impl Message<SetWorldRef> for GateActor {
     }
 }
 
+impl Message<SetSocialRef> for GateActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetSocialRef,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.set_social_ref(msg.social_ref);
+        info!("GateActor linked to SocialActor");
+    }
+}
+
 // ============================================================
 // 辅助函数
 // ============================================================
@@ -1783,11 +1801,10 @@ fn forward_add_member(
     session_id: SessionId,
     payload: &[u8],
 ) {
-    if payload.len() < 2 { return; }
     let social_ref = match social_ref { Some(s) => s, None => return };
-    let name_len = u16::from_le_bytes(payload[0..2].try_into().unwrap_or([0; 2])) as usize;
-    if payload.len() < 2 + name_len { return; }
-    let name = String::from_utf8_lossy(&payload[2..2 + name_len]).to_string();
+    // C#/SharedRust：name 是 DotNet 7-bit 编码字符串
+    let mut cur = std::io::Cursor::new(payload);
+    let Ok(name) = mir2_shared::binary::read_dotnet_string(&mut cur) else { return };
     debug!("AddMember: session={} name={}", session_id, name);
     let _ = social_ref.tell(crate::actors::social::GroupInviteRequest {
         session_id,
@@ -1818,11 +1835,10 @@ fn forward_dell_member(
     session_id: SessionId,
     payload: &[u8],
 ) {
-    if payload.len() < 2 { return; }
     let social_ref = match social_ref { Some(s) => s, None => return };
-    let name_len = u16::from_le_bytes(payload[0..2].try_into().unwrap_or([0; 2])) as usize;
-    if payload.len() < 2 + name_len { return; }
-    let name = String::from_utf8_lossy(&payload[2..2 + name_len]).to_string();
+    // C#/SharedRust：name 是 DotNet 7-bit 编码字符串
+    let mut cur = std::io::Cursor::new(payload);
+    let Ok(name) = mir2_shared::binary::read_dotnet_string(&mut cur) else { return };
     debug!("DellMember: session={} name={}", session_id, name);
     let _ = social_ref.tell(crate::actors::social::DellMemberRequest {
         session_id,

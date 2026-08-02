@@ -484,6 +484,8 @@ impl SocialActor {
             self.groups.insert(group_id, group);
             send_system_message(&self.gate_ref, joiner_session, &format!("队伍 #{} 已创建", group_id));
             send_system_message(&self.gate_ref, target_session, &format!("队伍 #{} 已创建", group_id));
+            // 创建后广播成员列表（C# 语义：双方立即看到组队面板）
+            self.broadcast_group_update(group_id);
             debug!("Created group #{} with {} and {}", group_id, target_state.name, joiner_name);
         }
     }

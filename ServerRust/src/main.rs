@@ -14,7 +14,7 @@ use tracing::{info, error, warn};
 use crystal_server::actors::account::AccountActor;
 use crystal_server::actors::world::{WorldActor, WorldActorArgs};
 use crystal_server::actors::social::{SocialActor, SocialActorArgs, SocialActorConfig};
-use crystal_server::gate::actor::{GateActor, SetAccountRef, SetWorldRef, SetMaxConnections, ShutdownAll};
+use crystal_server::gate::actor::{GateActor, SetAccountRef, SetSocialRef, SetWorldRef, SetMaxConnections, ShutdownAll};
 use crystal_server::util::config;
 use crystal_server::db;
 
@@ -124,6 +124,9 @@ async fn async_main() -> anyhow::Result<()> {
     }).await;
     let _ = gate_ref.ask(SetWorldRef {
         world_ref: world_ref.clone(),
+    }).await;
+    let _ = gate_ref.ask(SetSocialRef {
+        social_ref: social_ref.clone(),
     }).await;
 
     // 启动 TCP 监听

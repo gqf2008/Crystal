@@ -36,25 +36,42 @@ impl Packet for SwitchGroup {
     }
 }
 
-/// Group members map info
+/// 组队成员信息（ServerRust send_group_members_map wire：name + is_leader + online）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupMember {
+    pub name: String,
+    pub is_leader: bool,
+    pub online: bool,
+}
+
+/// Group members map info（ServerRust wire：count + 成员列表，非 C# 逐成员包）
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupMembersMap {
-    pub player_name: String,
-    pub player_map: String,
+    pub members: Vec<GroupMember>,
 }
 
 impl Packet for GroupMembersMap {
     const OPCODE: i16 = ServerPacketIds::GroupMembersMap as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let player_name = read_dotnet_string(reader)?;
-        let player_map = read_dotnet_string(reader)?;
-        Ok(Self { player_name, player_map })
+        let count = reader.read_i32::<LittleEndian>()? as usize;
+        let mut members = Vec::with_capacity(count);
+        for _ in 0..count {
+            let name = read_dotnet_string(reader)?;
+            let is_leader = reader.read_u8()? != 0;
+            let online = reader.read_u8()? != 0;
+            members.push(GroupMember { name, is_leader, online });
+        }
+        Ok(Self { members })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
-        write_dotnet_string(writer, &self.player_name)?;
-        write_dotnet_string(writer, &self.player_map)?;
+        writer.write_i32::<LittleEndian>(self.members.len() as i32)?;
+        for m in &self.members {
+            write_dotnet_string(writer, &m.name)?;
+            writer.write_u8(if m.is_leader { 1 } else { 0 })?;
+            writer.write_u8(if m.online { 1 } else { 0 })?;
+        }
         Ok(())
     }
 }
@@ -125,10 +142,11 @@ impl Packet for DeleteMember {
     }
 }
 
-/// Group invite from another player
+/// Group invite from another player（ServerRust wire：inviter_name + inviter_id u64）
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupInvite {
     pub name: String,
+    pub inviter_id: u64,
 }
 
 impl Packet for GroupInvite {
@@ -136,11 +154,13 @@ impl Packet for GroupInvite {
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let name = read_dotnet_string(reader)?;
-        Ok(Self { name })
+        let inviter_id = reader.read_u64::<LittleEndian>()?;
+        Ok(Self { name, inviter_id })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         write_dotnet_string(writer, &self.name)?;
+        writer.write_u64::<LittleEndian>(self.inviter_id)?;
         Ok(())
     }
 }

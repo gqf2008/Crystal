@@ -217,7 +217,7 @@ impl Message<StartGameRequest> for WorldActor {
         let _ = player_ref.ask(SetPlayerState { state: loaded_state.clone() }).await;
 
         self.players.insert(msg.session_id, PlayerRecord {
-            actor_ref: player_ref,
+            actor_ref: player_ref.clone(),
             session_id: msg.session_id,
             name: player_name.clone(),
             account_username: msg.account_username.clone(),
@@ -227,6 +227,13 @@ impl Message<StartGameRequest> for WorldActor {
 
         info!("Player {} entered world (object_id={}, session={})",
               player_name, object_id, msg.session_id);
+
+        // 通知 SocialActor 玩家上线（组队/好友/行会查询依赖在线表）
+        let _ = self.social_ref.tell(crate::actors::social::SocialPlayerJoined {
+            session_id: msg.session_id,
+            actor_ref: player_ref.clone(),
+            name: player_name.clone(),
+        }).try_send();
 
         // 行会在线状态由 SocialActor 管理
 
@@ -818,6 +825,11 @@ impl Message<PlayerDisconnected> for WorldActor {
             // 行会离线状态由 SocialActor 管理
         }
 
+        // 通知 SocialActor 玩家下线（组队/好友在线表清理）
+        let _ = self.social_ref.tell(crate::actors::social::SocialPlayerLeft {
+            session_id: msg.session_id,
+        }).try_send();
+
         // 组队离线状态由 SocialActor 管理
 
         // 通知其他玩家该玩家已离开
@@ -886,6 +898,10 @@ impl Message<PlayerLogOut> for WorldActor {
 
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
             info!("Player {} logged out (session={})", state.name, msg.session_id);
+        // 通知 SocialActor 玩家下线（组队/好友在线表清理）
+        let _ = self.social_ref.tell(crate::actors::social::SocialPlayerLeft {
+            session_id: msg.session_id,
+        }).try_send();
 
             // 保存玩家数据到数据库
             if let Err(e) = db::save_character(&self.db_pool, &state, &record.account_username).await {
