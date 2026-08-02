@@ -122,7 +122,8 @@
 - [x] **技能栏 F1-F8 `Magic` 包**：NewMagic 包写入已学技能（key 绑定），F1-F8 发送 Magic（spell/direction/位置）；快捷栏按 key 显示 MagIcon[icon*2] 技能图标（原版 C# MainDialogs）
 - [x] **服务端系统性修复**：kameo 0.20 的 ask/tell 是惰性 request，丢弃 future 消息永远不会发送——gate 转发（MoveItem/UseItem/EquipItem/Magic/组队/行会/邮件等 ~335 处）全部静默丢失。async 上下文补 .await，sync 上下文改 tell().try_send()，SendToClient 一律 tell 防死锁
 - [x] 技能编号对齐：DB magic_infos/player_magics 用 C# 编号，客户端协议 SharedRust(+3)，MagicRequest/NewMagic 统一换算
-- [ ] 待续：拖拽移动/拆分/丢弃物品、装备栏渲染、技能拖拽绑定（MagicKey 包）、tooltip
+- [x] **背包点击移动（MoveItem 全链路）**：单击选中（黄色高亮，原版 C# SelectedCell）→ 点目标格发送 MoveItem；服务端响应后本地 swap；服务端修复 from/to 槽位索引
+- [ ] 待续：拆分/丢弃物品、装备栏渲染、技能拖拽绑定（MagicKey 包）、tooltip
 
 ---
 
