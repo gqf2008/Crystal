@@ -5,10 +5,14 @@
 // 框架：DialogManager 维护打开栈（z 序），每个对话框一个插件子模块
 // ============================================================================
 
+pub mod amount_box;
 pub mod belt;
 pub mod character;
 pub mod npc;
+pub mod quest_log;
 pub mod compass;
+pub mod friend;
+pub mod group;
 pub mod inventory;
 pub mod menu;
 pub mod minimap;
@@ -26,6 +30,8 @@ pub enum DialogKind {
     GameShop,
     Minimap,
     Npc,
+    Group,
+    Friend,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）
@@ -69,6 +75,10 @@ impl Plugin for DialogsPlugin {
             belt::BeltPlugin,
             compass::CompassPlugin,
             npc::NpcDialogPlugin,
+            quest_log::QuestLogPlugin,
+            group::GroupPlugin,
+            friend::FriendPlugin,
+            amount_box::AmountBoxPlugin,
         ));
     }
 }
