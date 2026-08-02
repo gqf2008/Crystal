@@ -98,6 +98,10 @@ pub struct GroundItem {
 #[derive(Component)]
 pub struct NpcName(pub String);
 
+/// 玩家名称（右键邀请组队/交易等交互用）
+#[derive(Component)]
+pub struct PlayerName(pub String);
+
 /// 动画状态（动作/朝向/当前帧）
 #[derive(Component)]
 pub struct ActorAnim {
@@ -372,7 +376,7 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
     match obj {
         NetObject::Player {
             object_id,
-            name: _,
+            name,
             class,
             gender,
             location_x,
@@ -414,7 +418,7 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
                     *object_id,
                 )
             };
-            let _ = e;
+            commands.entity(e).insert(PlayerName(name.clone()));
         }
         NetObject::Monster {
             object_id,

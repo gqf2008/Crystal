@@ -56,7 +56,7 @@ impl Plugin for PlayerControlPlugin {
 }
 
 /// 屏幕坐标 → 世界坐标（用物理像素，避免 DPI 缩放导致 cursor_position 偏差）
-fn screen_to_world(screen: Vec2, cam_tf: &Transform, window: &Window) -> Vec2 {
+pub fn screen_to_world(screen: Vec2, cam_tf: &Transform, window: &Window) -> Vec2 {
     let half_w = window.physical_width() as f32 / 2.0;
     let half_h = window.physical_height() as f32 / 2.0;
     Vec2::new(screen.x - half_w + cam_tf.translation.x, screen.y - half_h + cam_tf.translation.y)
@@ -162,7 +162,7 @@ fn player_input_system(
             }
             let _ = app;
         }
-        tracing::debug!("🎯 命中候选: {:?}", best);
+        tracing::info!("[HITDBG] best_actor={:?}", best);
         // 地面物品命中（原版 C# ItemObject：点击物品 → 邻近拾取 / 远距离走过去拾取）
         let mut best_item: Option<(u32, f32)> = None;
         for (id, tf) in &items {

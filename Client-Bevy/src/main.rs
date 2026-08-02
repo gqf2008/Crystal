@@ -97,6 +97,18 @@ fn main() {
     if std::env::args().any(|a| a == "--shop-test") {
         app.add_systems(Update, auto_shop_test);
     }
+    // --group-test: 自动组队邀请链路（自动化验证用，配合 --group-accept）
+    if std::env::args().any(|a| a == "--group-test") {
+        app.add_systems(Update, auto_group_test);
+    }
+    // --group-accept: 自动接受组队邀请（自动化验证用）
+    if std::env::args().any(|a| a == "--group-accept") {
+        app.add_systems(Update, auto_group_accept);
+    }
+    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
+    if std::env::args().any(|a| a == "--shop-test") {
+        app.add_systems(Update, auto_shop_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -510,6 +522,80 @@ fn ime_focus_activation(mut windows: Query<&mut Window>, mut pulse: ResMut<ImePu
         _ => {}
     }
 }
+/// --group-test：自动组队邀请链路（登录后向 bevy2char 发 AddMember，等成员列表）
+#[allow(clippy::too_many_arguments)]
+fn auto_group_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    group: Res<client_bevy::game::dialogs::group::GroupState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            let invitee = std::env::args()
+                .skip_while(|a| a != "--e2e-invitee")
+                .nth(1)
+                .unwrap_or_else(|| "bevy2char".to_string());
+            net.send_packet(&mir2_shared::packets::client::group::AddMember {
+                name: invitee.clone(),
+            });
+            tracing::info!("[GROUPTEST] 邀请组队: {}", invitee);
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 5.0 {
+                return;
+            }
+            if group.members.len() >= 2 {
+                tracing::info!(
+                    "[GROUPTEST] ✅ 组队成功: {}",
+                    group.members.iter().map(|m| m.name.as_str()).collect::<Vec<_>>().join(", ")
+                );
+            } else {
+                tracing::warn!("[GROUPTEST] ❌ 组队成员不足: {:?}", group.members);
+            }
+            *stage = 2;
+        }
+        _ => {}
+    }
+}
+
+/// --group-accept：自动接受组队邀请（自动化验证用）
+#[allow(clippy::too_many_arguments)]
+fn auto_group_accept(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    mut group: ResMut<client_bevy::game::dialogs::group::GroupState>,
+    mut accepted: Local<bool>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    if *accepted {
+        return;
+    }
+    if let Some(inv) = group.invite.clone() {
+        net.send_packet(&mir2_shared::packets::client::group::GroupInvite {
+            accept_invite: true,
+        });
+        tracing::info!("[GROUPACCEPT] ✅ 接受邀请: {}", inv.inviter_name);
+        group.invite = None;
+        *accepted = true;
+    }
+}
+
 /// --auto-enter：自动驱动 mock 登录流程（Login→Select→Game，验证网络管道）
 fn auto_enter(
     mut net: ResMut<client_bevy::network::NetworkContext>,
@@ -523,8 +609,20 @@ fn auto_enter(
         *login_sent = true;
         net.state = client_bevy::network::NetState::LoggingIn;
         net.send_packet(&Login {
-            account_id: "test".to_string(),
-            password: "123456".to_string(),
+            account_id: {
+            let user = std::env::args()
+                .skip_while(|a| a != "--e2e-user")
+                .nth(1)
+                .unwrap_or_else(|| "test".to_string());
+            user
+        },
+        password: {
+            let pass = std::env::args()
+                .skip_while(|a| a != "--e2e-pass")
+                .nth(1)
+                .unwrap_or_else(|| "123456".to_string());
+            pass
+        },
         });
     }
     // 在选角界面停留 3 秒再进游戏（便于 live 截屏验证选角界面）

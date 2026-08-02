@@ -15,6 +15,7 @@ use std::path::Path;
 
 use crate::game::chat::ChatState;
 use crate::game::combat::CombatEvents;
+use crate::game::dialogs::group::GroupState;
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::npc::NpcDialogState;
 use crate::game::dialogs::npc_goods::{GoodsEntry, NpcGoodsState};
@@ -324,6 +325,7 @@ fn network_system(
     mut magics: ResMut<MagicsState>,
      mut storage: ResMut<StorageState>,
     mut sell_panel: ResMut<SellPanelState>,
+    mut group: ResMut<GroupState>,
      mut mgr: ResMut<crate::game::dialogs::DialogManager>,
     mut next: ResMut<NextState<AppState>>,
 ) {
@@ -346,6 +348,7 @@ fn network_system(
                         &mut magics,
                         &mut storage,
                         &mut sell_panel,
+                        &mut group,
                         &mut mgr,
                         &mut next,
                         &payload,
@@ -388,6 +391,7 @@ fn network_system(
                         &mut magics,
                         &mut storage,
                         &mut sell_panel,
+                        &mut group,
                         &mut mgr,
                         &mut next,
                         &payload,
@@ -439,6 +443,7 @@ fn handle_packet(
     magics: &mut MagicsState,
     storage: &mut StorageState,
     sell_panel: &mut SellPanelState,
+    group: &mut GroupState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -1043,6 +1048,56 @@ fn handle_packet(
                     }
                 }
                 Err(e) => tracing::warn!("⚠️ UserStorage 解析失败: {} (len={})", e, payload.len()),
+            }
+        }
+
+        // ---- M21: 组队 ----
+        x if x == ServerPacketIds::GroupMembersMap as i16 => {
+            match group::GroupMembersMap::read_body(&mut cur) {
+                Ok(p) => {
+                    group.members = p.members;
+                    tracing::info!(
+                        "👥 组队成员: {}",
+                        group
+                            .members
+                            .iter()
+                            .map(|m| format!(
+                                "{}{}",
+                                if m.is_leader { "★" } else { "" },
+                                m.name
+                            ))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ GroupMembersMap 解析失败: {} (len={})", e, payload.len())
+                }
+            }
+        }
+        x if x == ServerPacketIds::GroupInvite as i16 => {
+            match group::GroupInvite::read_body(&mut cur) {
+                Ok(p) => {
+                    group.invite = Some(crate::game::dialogs::group::GroupInviteInfo {
+                        inviter_name: p.name.clone(),
+                        inviter_id: p.inviter_id,
+                    });
+                    tracing::info!("👥 收到组队邀请: {} (id={})", p.name, p.inviter_id);
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ GroupInvite 解析失败: {} (len={})", e, payload.len())
+                }
+            }
+        }
+        x if x == ServerPacketIds::DeleteGroup as i16 => {
+            group.members.clear();
+            group.invite = None;
+            tracing::info!("👥 组队已解散");
+        }
+        x if x == ServerPacketIds::DeleteMember as i16 => {
+            if let Ok(p) = group::DeleteMember::read_body(&mut cur) {
+                group.members.retain(|m| m.name != p.name);
+                tracing::info!("👥 成员离开: {}", p.name);
             }
         }
         x if x == ServerPacketIds::NewMagic as i16 => {

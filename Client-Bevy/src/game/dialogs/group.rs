@@ -1,25 +1,45 @@
 // ============================================================================
-// 组队对话框（M9 第 2 批）
-// 布局参考：macroquad group_dialog.rs
-//   - 背景 Prguse[964]，位置 (250,100)，标题 Title[16] (18,9)
-//   - 成员列表 y=40 每 20px；按钮 y=210
+// 组队对话框（M21）
+// 布局参考：C# GroupDialog.cs（背景 Prguse[964]，居中；成员 2 列）
+//   - 成员[0] (16,33)，其余 ((i+1)%2)*100+16, 55+((i-1)/2)*20
+//   - 开关按钮 Prguse[114/115] (25,219)；关闭 Prguse2[360-362]
+//   - 邀请提示：MirMessageBox（Prguse[360]，Yes Title[206-208] / No Title[210-212]）
+// 网络：GroupMembersMap（成员列表）→ 显示；GroupInvite（邀请）→ 提示
+//       右键玩家 → C.AddMember{Name} 邀请；开关 → C.SwitchGroup；回复 → C.GroupInvite{accept}
 // ============================================================================
 
 use bevy::prelude::*;
-
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
+use crate::network::NetworkContext;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont,
+    UiImageCache,
 };
 
-/// 组队状态（网络 GroupMembersMap 等写入）
+/// 组队成员（SharedRust 定义，与服务端 GroupMembersMap wire 一致）
+pub use mir2_shared::packets::server::group::GroupMember;
+
+/// 待处理邀请
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupInviteInfo {
+    pub inviter_name: String,
+    pub inviter_id: u64,
+}
+
+/// 组队状态（网络 GroupMembersMap / GroupInvite 写入）
 #[derive(Resource, Default)]
 pub struct GroupState {
-    pub members: Vec<String>,
+    pub members: Vec<GroupMember>,
+    pub invite: Option<GroupInviteInfo>,
+    /// 是否允许组队（原版 C# GroupDialog.AllowGroup）
+    pub allow_group: bool,
 }
+
+const DIALOG_X: f32 = 250.0;
+const DIALOG_Y: f32 = 100.0;
 
 #[derive(Component)]
 pub struct GroupWidget;
@@ -28,7 +48,23 @@ pub struct GroupWidget;
 pub struct GroupClose;
 
 #[derive(Component)]
+pub struct GroupSwitch;
+
+#[derive(Component)]
 pub struct GroupMemberLine(usize);
+
+// 邀请提示组件
+#[derive(Component)]
+pub struct GroupInviteWidget;
+
+#[derive(Component)]
+pub struct GroupInviteText;
+
+#[derive(Component)]
+pub struct GroupInviteYes;
+
+#[derive(Component)]
+pub struct GroupInviteNo;
 
 pub struct GroupPlugin;
 
@@ -39,7 +75,13 @@ impl Plugin for GroupPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_group);
         app.add_systems(
             Update,
-            (group_ui_system, ui_button_system)
+            (
+                group_ui_system,
+                group_invite_system,
+                group_switch_system,
+                group_invite_player_system,
+                ui_button_system,
+            )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -66,26 +108,25 @@ fn spawn_group(
     }
     let font = ui_font.0.clone();
 
+    // 背景 Prguse[964]
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 964) {
-        let e = spawn_ui_sprite(&mut commands, h, 250.0, 100.0, 6.0, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Group),
-            GroupWidget,
-            Visibility::Hidden,
-        ));
+        let e = spawn_ui_sprite(&mut commands, h, DIALOG_X, DIALOG_Y, 6.0, 1.0);
+        commands
+            .entity(e)
+            .insert((DialogRoot(DialogKind::Group), GroupWidget, Visibility::Hidden));
     }
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 16) {
-        let e = spawn_ui_sprite(&mut commands, h, 268.0, 109.0, 6.2, 1.0);
-        commands.entity(e).insert((
-            DialogRoot(DialogKind::Group),
-            GroupWidget,
-            Visibility::Hidden,
-        ));
+    // 标题 Title[5]（C# GroupDialog.TitleLabel）
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 5) {
+        let e = spawn_ui_sprite(&mut commands, h, DIALOG_X + 18.0, DIALOG_Y + 8.0, 6.2, 1.0);
+        commands
+            .entity(e)
+            .insert((DialogRoot(DialogKind::Group), GroupWidget, Visibility::Hidden));
     }
+    // 关闭按钮
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands, &mut libs, &mut images, &mut cache,
         LibraryName::Prguse2, 360, 361, 362,
-        250.0 + 290.0, 103.0, 7.0, 20.0, 20.0,
+        DIALOG_X + 206.0, DIALOG_Y + 3.0, 7.0, 20.0, 20.0,
     ) {
         commands.entity(e).insert((
             GroupClose,
@@ -93,10 +134,28 @@ fn spawn_group(
             GroupWidget,
         ));
     }
+    // 允许组队开关（C# SwitchButton Prguse[114/115] (25,219)）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Prguse, 114, 115, 115,
+        DIALOG_X + 25.0, DIALOG_Y + 219.0, 7.0, 60.0, 23.0,
+    ) {
+        commands.entity(e).insert((
+            GroupSwitch,
+            DialogRoot(DialogKind::Group),
+            GroupWidget,
+        ));
+    }
+    // 成员列表（C# GroupMembers 2 列布局）
     for i in 0..8usize {
+        let (x, y) = if i == 0 {
+            (16.0, 33.0)
+        } else {
+            (((i + 1) % 2) as f32 * 100.0 + 16.0, 55.0 + ((i - 1) / 2) as f32 * 20.0)
+        };
         let e = spawn_ui_text(
             &mut commands, &font, "",
-            258.0, 140.0 + i as f32 * 20.0,
+            DIALOG_X + x, DIALOG_Y + y,
             12.0, Color::WHITE, 8.0,
         );
         commands.entity(e).insert((
@@ -105,17 +164,58 @@ fn spawn_group(
             GroupWidget,
         ));
     }
+
+    // 邀请提示（MirMessageBox：Prguse[360] 居中，Yes Title[206-208] / No Title[210-212]）
+    let (bx, by) = (284.0, 289.0);
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 360) {
+        let e = spawn_ui_sprite(&mut commands, h, bx, by, 9.5, 1.0);
+        commands
+            .entity(e)
+            .insert((GroupInviteWidget, Visibility::Hidden));
+    }
+    let t = spawn_ui_text(
+        &mut commands, &font, "", bx + 35.0, by + 40.0, 12.0, Color::WHITE, 9.6,
+    );
+    commands.entity(t).insert((GroupInviteText, GroupInviteWidget));
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 206, 207, 208,
+        bx + 240.0, by + 150.0, 9.7, 76.0, 25.0,
+    ) {
+        commands.entity(e).insert((GroupInviteYes, GroupInviteWidget));
+    }
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 210, 211, 212,
+        bx + 340.0, by + 150.0, 9.7, 76.0, 25.0,
+    ) {
+        commands.entity(e).insert((GroupInviteNo, GroupInviteWidget));
+    }
 }
 
+/// 显示/隐藏 + 成员列表渲染 + 邀请提示显隐
+#[allow(clippy::type_complexity)]
 fn group_ui_system(
     mut mgr: ResMut<DialogManager>,
     group: Res<GroupState>,
     close: Query<&UiButton, With<GroupClose>>,
-    mut widgets: Query<&mut Visibility, With<GroupWidget>>,
-    mut lines: Query<(&mut Text2d, &GroupMemberLine)>,
+    mut widgets: Query<
+        (&mut Visibility, Option<&GroupMemberLine>),
+        (
+            With<GroupWidget>,
+            Without<GroupInviteWidget>,
+            Without<GroupInviteText>,
+        ),
+    >,
+    mut lines: Query<(&mut Text2d, &GroupMemberLine), Without<GroupInviteText>>,
+    mut invite_widgets: Query<
+        &mut Visibility,
+        (With<GroupInviteWidget>, Without<GroupWidget>),
+    >,
+    mut invite_texts: Query<(&mut Text2d, &GroupInviteText), Without<GroupMemberLine>>,
 ) {
     let open = mgr.is_open(DialogKind::Group);
-    for mut vis in widgets.iter_mut() {
+    for (mut vis, _line) in &mut widgets {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
     if !open {
@@ -126,7 +226,118 @@ fn group_ui_system(
             mgr.close(DialogKind::Group);
         }
     }
+    // 成员列表（队长/离线标记，原版 C# 语义）
     for (mut text, line) in &mut lines {
-        text.0 = group.members.get(line.0).cloned().unwrap_or_default();
+        text.0 = match group.members.get(line.0) {
+            Some(m) if m.is_leader => format!("★{}", m.name),
+            Some(m) if !m.online => format!("{}（离线）", m.name),
+            Some(m) => m.name.clone(),
+            None => String::new(),
+        };
+    }
+    // 邀请提示
+    let has_invite = group.invite.is_some();
+    for mut vis in &mut invite_widgets {
+        *vis = if has_invite {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    for (mut text, _) in &mut invite_texts {
+        text.0 = match group.invite.as_ref() {
+            Some(inv) => format!("{} 邀请你加入组队", inv.inviter_name),
+            None => String::new(),
+        };
+    }
+}
+
+/// 邀请提示：Yes/No → C.GroupInvite{accept}
+fn group_invite_system(
+    mut group: ResMut<GroupState>,
+    net: Res<NetworkContext>,
+    yes: Query<&UiButton, With<GroupInviteYes>>,
+    no: Query<&UiButton, With<GroupInviteNo>>,
+) {
+    if group.invite.is_none() {
+        return;
+    }
+    let mut accept: Option<bool> = None;
+    for btn in &yes {
+        if btn.clicked {
+            accept = Some(true);
+        }
+    }
+    for btn in &no {
+        if btn.clicked {
+            accept = Some(false);
+        }
+    }
+    if let Some(a) = accept {
+        net.send_packet(&mir2_shared::packets::client::group::GroupInvite {
+            accept_invite: a,
+        });
+        tracing::info!(
+            "👥 组队邀请回复: accept={} (来自 {})",
+            a,
+            group.invite.as_ref().map(|i| i.inviter_name.as_str()).unwrap_or("?")
+        );
+        group.invite = None;
+    }
+}
+
+/// 允许组队开关 → C.SwitchGroup{allow_group}
+fn group_switch_system(
+    mut group: ResMut<GroupState>,
+    net: Res<NetworkContext>,
+    btns: Query<&UiButton, With<GroupSwitch>>,
+) {
+    for btn in &btns {
+        if btn.clicked {
+            group.allow_group = !group.allow_group;
+            net.send_packet(&mir2_shared::packets::client::group::SwitchGroup {
+                allow_group: group.allow_group,
+            });
+            tracing::info!("👥 允许组队: {}", group.allow_group);
+        }
+    }
+}
+
+/// 右键点击远端玩家 → 组队邀请（原版 C# MainDialogs 右键玩家 → 组队邀请 → C.AddMember{Name}）
+#[allow(clippy::too_many_arguments)]
+fn group_invite_player_system(
+    net: Res<NetworkContext>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    camera: Query<&Transform, With<Camera2d>>,
+    remote_players: Query<
+        (&crate::actor::PlayerName, &Transform),
+        (
+            Without<crate::actor::LocalPlayer>,
+            With<crate::actor::NetObjectId>,
+        ),
+    >,
+) {
+    if !mouse.just_pressed(MouseButton::Right) {
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    let Ok(cam) = camera.single() else { return };
+    // 屏幕坐标 → 世界坐标（原版 C# 点击玩家判定）
+    let world = crate::game::player_control::screen_to_world(
+        cursor,
+        cam,
+        &window,
+    );
+    let mut target: Option<String> = None;
+    for (name, tf) in &remote_players {
+        if (tf.translation.x - world.x).abs() < 24.0 && (tf.translation.y - world.y).abs() < 24.0 {
+            target = Some(name.0.clone());
+        }
+    }
+    if let Some(name) = target {
+        net.send_packet(&mir2_shared::packets::client::group::AddMember { name: name.clone() });
+        tracing::info!("👥 邀请组队: {}", name);
     }
 }

@@ -193,6 +193,20 @@
 - [x] 验证：真实 ServerRust E2E（--shop-test 扩展）——[@Sell] → `🧰 NPC 面板: Sell` → 出售面板打开 ✅；买→卖→回购全链路仍通
 
 ---
+### M21: 组队（Group）全链路（2026-08-03 完成）
+- [x] **SharedRust 对齐服务端 wire**：GroupMembersMap 改成员列表（name + is_leader + online，count 前缀）、GroupInvite 加 inviter_id（u64）——原定义（逐成员 name+map / 仅 name）与服务端实际发送不符（两仓库同步）
+- [x] **服务端修复**：
+  - `SetSocialRef` 从未被 main.rs 调用 → gate social_ref 恒 None，所有社交转发静默丢弃（组队/交易/好友全断）——补消息 + 启动链接
+  - `SocialPlayerJoined/Left` 从未发送 → SocialActor 在线表恒空（find_player_by_name 永远失败）——session StartGame/断开/登出补通知
+  - gate AddMember/DellMember 用 u16 前缀解析 DotNet 字符串 → 改 `read_dotnet_string`（7-bit）
+  - 创建组队分支漏 `broadcast_group_update` → 双方收不到成员列表
+- [x] **客户端**：
+  - GroupMembersMap/GroupInvite/DeleteGroup/DeleteMember 网络处理 → GroupState
+  - 组队对话框（C# GroupDialog 布局）：成员列表 2 列（队长★/离线标记）、允许组队开关（Prguse[114/115]）、邀请提示（MirMessageBox：Yes/No → C.GroupInvite）
+  - 右键点击远端玩家 → C.AddMember{Name}（原版 C# MainDialogs 右键邀请）；PlayerName 组件
+- [x] 验证：真实 ServerRust 双客户端 E2E——A(test/bevychar) 发 AddMember → B(bevy2/bevy2char) 收到邀请提示 → 自动接受 → 双方收到 `👥 组队成员: ★bevychar, bevy2char` ✅
+
+---
 ## 四、执行顺序与依赖
 
 ```
@@ -212,6 +226,7 @@ M7（真实网络）→ M8（HUD+控制）→ M9（对话框 1→4 批）→ M10
 | 渲染后端冻结 | 强制 DX12（Vulkan present 在此机器异常） |
 | 大量精灵性能 | 精灵图缓存已建；后续 Atlas/批处理 |
 | 数据依赖 | 复用 Client-Macroquad/Data，`resolve_data_path` 自动解析 |
+
 
 
 
