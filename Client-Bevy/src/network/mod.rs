@@ -18,6 +18,7 @@ use crate::game::combat::CombatEvents;
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::npc::NpcDialogState;
 use crate::game::dialogs::npc_goods::{GoodsEntry, NpcGoodsState};
+use crate::game::dialogs::sell_panel::SellPanelState;
  use crate::game::dialogs::storage::StorageState;
 use crate::game::hud::HudState;
 use crate::game::movement::{NetMotion, NetMotions};
@@ -322,6 +323,7 @@ fn network_system(
     mut weather: ResMut<WeatherState>,
     mut magics: ResMut<MagicsState>,
      mut storage: ResMut<StorageState>,
+    mut sell_panel: ResMut<SellPanelState>,
      mut mgr: ResMut<crate::game::dialogs::DialogManager>,
     mut next: ResMut<NextState<AppState>>,
 ) {
@@ -343,6 +345,7 @@ fn network_system(
                         &mut weather,
                         &mut magics,
                         &mut storage,
+                        &mut sell_panel,
                         &mut mgr,
                         &mut next,
                         &payload,
@@ -384,6 +387,7 @@ fn network_system(
                         &mut weather,
                         &mut magics,
                         &mut storage,
+                        &mut sell_panel,
                         &mut mgr,
                         &mut next,
                         &payload,
@@ -434,6 +438,7 @@ fn handle_packet(
     weather: &mut WeatherState,
     magics: &mut MagicsState,
     storage: &mut StorageState,
+    sell_panel: &mut SellPanelState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -850,6 +855,25 @@ fn handle_packet(
                     let mut cur = std::io::Cursor::new(body);
                     match npc_interaction::NPCGoods::read_body(&mut cur) {
                         Ok(p) => {
+                            // C# 语义：Sell/Repair/SpecialRepair 面板 → 打开出售/修理面板（NPCDropDialog），
+                            // 其余（Buy/BuySub/Craft）→ 商品对话框
+                            if matches!(
+                                p.panel_type,
+                                mir2_shared::enums::PanelType::Sell
+                                    | mir2_shared::enums::PanelType::Repair
+                                    | mir2_shared::enums::PanelType::SpecialRepair
+                            ) {
+                                npc_goods.visible = false;
+                                sell_panel.mode = Some(p.panel_type);
+                                sell_panel.target = None;
+                                sell_panel.visible = true;
+                                tracing::info!("🧰 NPC 面板: {:?}", p.panel_type);
+                                // C# NPCDropDialog.Show() 同时打开背包
+                                if !mgr.is_open(crate::game::dialogs::DialogKind::Inventory) {
+                                    mgr.open.push(crate::game::dialogs::DialogKind::Inventory);
+                                }
+                                return;
+                            }
                             let goods: Vec<GoodsEntry> = p
                                 .list
                                 .iter()

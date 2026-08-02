@@ -131,6 +131,7 @@ fn auto_shop_test(
     time: Res<Time>,
     npc_dialog: Res<client_bevy::game::dialogs::npc::NpcDialogState>,
     mut npc_goods: ResMut<client_bevy::game::dialogs::npc_goods::NpcGoodsState>,
+    sell_panel: Res<client_bevy::game::dialogs::sell_panel::SellPanelState>,
     hud: Res<client_bevy::game::hud::HudState>,
     npcs: Query<(
         &client_bevy::actor::NetObjectId,
@@ -265,6 +266,33 @@ fn auto_shop_test(
                 }
             }
             *stage = 7;
+            *t = 0.0;
+        }
+        7 => {
+            if *t < 2.0 {
+                return;
+            }
+            // 出售面板：[@Sell] → 服务端发 NPCGoods(Sell) → 客户端打开出售面板
+            if let Some(oid) = *npc_oid {
+                net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                    object_id: oid,
+                    key: "[@Sell]".to_string(),
+                });
+                tracing::info!("[SHOPTEST] 发送出售面板指令 [@Sell]");
+            }
+            *stage = 8;
+            *t = 0.0;
+        }
+        8 => {
+            if *t < 2.0 {
+                return;
+            }
+            if sell_panel.visible {
+                tracing::info!("[SHOPTEST] ✅ 出售面板已打开 (mode={:?})", sell_panel.mode);
+            } else {
+                tracing::warn!("[SHOPTEST] ❌ 出售面板未打开");
+            }
+            *stage = 9;
         }
         _ => {}
     }

@@ -45,6 +45,7 @@ pub mod refine;
 pub mod relationship;
 pub mod report;
 pub mod roll;
+ pub mod sell_panel;
 pub mod socket;
  pub mod storage;
 pub mod timer;
@@ -185,6 +186,7 @@ impl Plugin for DialogsPlugin {
                 chat_notice::ChatNoticePlugin,
                 game_shop::GameShopPlugin,
                 storage::StoragePlugin,
+                sell_panel::SellPanelPlugin,
             ),
         ));
     }

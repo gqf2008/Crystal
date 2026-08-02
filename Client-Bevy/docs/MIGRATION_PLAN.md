@@ -185,6 +185,14 @@
 - [x] 验证：真实 ServerRust E2E（`--shop-test` 扩展）——购买(HP)DrugSmall(-40金) → 出售(+20金) → [@BuyBack] 列表 1 件(uid=1) → 回购(-40金) → 物品回背包 ✅（DB 落库，新 uid=2）
 
 ---
+### M20: NPC 出售/修理面板（NPCDropDialog）（2026-08-03 完成）
+- [x] **PanelType 路由**：NPCGoods(panel_type=Sell/Repair/SpecialRepair) → 打开出售/修理面板（C# GameScene.NPCSell/NPCRepair → NPCDropDialog），不再误开商品对话框
+- [x] **出售/修理面板 UI**：Prguse[392]（C# NPCDropDialog 布局 (264,224)）、确认按钮 Title[290-292]、拖放区 (20,55,75,75)、提示文本
+- [x] **交互（原版 C# 拖放语义）**：点背包物品选中（SelectedCell）→ 点面板拖放区放入 TargetItem → 点确认：Sell 卖整叠（`C.SellItem{uid, count=整叠数量}`）/ Repair 发 `C.RepairItem{uid}`
+- [x] 面板打开时同时打开背包（C# NPCDropDialog.Show 语义）
+- [x] 验证：真实 ServerRust E2E（--shop-test 扩展）——[@Sell] → `🧰 NPC 面板: Sell` → 出售面板打开 ✅；买→卖→回购全链路仍通
+
+---
 ## 四、执行顺序与依赖
 
 ```
@@ -204,6 +212,7 @@ M7（真实网络）→ M8（HUD+控制）→ M9（对话框 1→4 批）→ M10
 | 渲染后端冻结 | 强制 DX12（Vulkan present 在此机器异常） |
 | 大量精灵性能 | 精灵图缓存已建；后续 Atlas/批处理 |
 | 数据依赖 | 复用 Client-Macroquad/Data，`resolve_data_path` 自动解析 |
+
 
 
 
