@@ -113,6 +113,13 @@ impl Message<NPCCallRequest> for WorldActor {
         // 记录会话当前 NPC（BuyItem 等包不含 npc_id，按会话解析）
         self.session_npc.insert(msg.session_id, npc.object_id);
 
+        // [@BuyBack] 是引擎级按键（C# NPCScript.BuyBackKey）：直接发回购商品列表，
+        // 不走脚本页（脚本页只有提示文本，C# 引擎同样只发商品）
+        if msg.key.eq_ignore_ascii_case("[@BuyBack]") {
+            self.send_buyback_goods(msg.session_id, &npc);
+            return;
+        }
+
         // 优先使用 DB 脚本（支持 GOTO 跳转）
         let mut dialog_lines = Vec::new();
         let mut current_key = msg.key.clone();
@@ -215,6 +222,9 @@ impl Message<NPCCallRequest> for WorldActor {
                         if npc.db_index > 0 && self.npc_goods.get(&npc.db_index).is_some_and(|g| !g.is_empty()) {
                             lines.push("<购买/@Buy>".into());
                         }
+                        if self.buyback_items.get(&msg.session_id).is_some_and(|l| !l.is_empty()) {
+                            lines.push("<回购/@BuyBack>".into());
+                        }
                         lines.push("<出售/@Sell>".into());
                         lines.push("<修理/@Repair>".into());
                         lines.push("<仓库/@Storage>".into());
@@ -222,6 +232,10 @@ impl Message<NPCCallRequest> for WorldActor {
                     }
                     "[@Buy]" => {
                         self.send_npc_goods(msg.session_id, &npc);
+                        return;
+                    }
+                    "[@BuyBack]" => {
+                        self.send_buyback_goods(msg.session_id, &npc);
                         return;
                     }
                     "[@Sell]" => {

@@ -1011,15 +1011,8 @@ impl WorldActor {
             .collect()
     }
 
-    /// 发送 NPC 商店商品列表（Phase 1：空列表，仅打开 UI）
+    /// 发送 NPC 商店商品列表（DB 商品）
     pub(crate) fn send_npc_goods(&self, session_id: u64, npc: &NpcState) {
-        // Use DB rate if available, default 1.0
-        let rate = if npc.db_index > 0 {
-            self.npc_infos.get(&npc.db_index).map(|n| n.rate as f32 / 100.0).unwrap_or(1.0)
-        } else {
-            1.0
-        };
-
         let goods = self.npc_goods.get(&npc.db_index).cloned().unwrap_or_default();
 
         let mut items = Vec::new();
@@ -1038,8 +1031,43 @@ impl WorldActor {
             items.push(item);
         }
 
+        self.send_npc_goods_items(session_id, npc, items);
+    }
+
+    /// 发送回购列表（C# 语义：原物品 + 原始 unique_id，客户端据此发 BuyItemBack）
+    pub(crate) fn send_buyback_goods(&self, session_id: u64, npc: &NpcState) {
+        let items: Vec<mir2_shared::data::item::UserItem> = self
+            .buyback_items
+            .get(&session_id)
+            .map(|l| {
+                l.iter()
+                    .map(|b| {
+                        let mut item = b.item.clone();
+                        enrich_item_info(&mut item, &self.item_infos);
+                        item
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.send_npc_goods_items(session_id, npc, items);
+    }
+
+    /// 发送 NPCGoods 通用实现（rate 由 NPC 配置决定）
+    fn send_npc_goods_items(
+        &self,
+        session_id: u64,
+        npc: &NpcState,
+        items: Vec<mir2_shared::data::item::UserItem>,
+    ) {
+        // Use DB rate if available, default 1.0
+        let rate = if npc.db_index > 0 {
+            self.npc_infos.get(&npc.db_index).map(|n| n.rate as f32 / 100.0).unwrap_or(1.0)
+        } else {
+            1.0
+        };
+
         let npc_goods_packet = mir2_shared::packets::server::npc_interaction::NPCGoods {
-            list: items,
+            list: items.clone(),
             rate,
             panel_type: mir2_shared::enums::PanelType::Buy,
             hide_added_stats: false,
@@ -1056,7 +1084,7 @@ impl WorldActor {
             session_id,
             data: body,
         }).try_send();
-        debug!("Sent {} goods from NPC '{}' (rate={}) to session {}", goods.len(), npc.name, rate, session_id);
+        debug!("Sent {} goods from NPC '{}' (rate={}) to session {}", items.len(), npc.name, rate, session_id);
     }
 
     /// 发送 NPC 面板（出售/修理等，空商品列表）

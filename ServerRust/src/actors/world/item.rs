@@ -129,7 +129,8 @@ pub struct CraftItemRequest {
 /// 回购物品请求（从 NPC 回购最近卖出的物品）
 pub struct BuyItemBackRequest {
     pub session_id: u64,
-    pub item_index: u32,
+    pub unique_id: u64,
+    pub count: u32,
 }
 
 pub struct CombineItemRequest {
@@ -1251,7 +1252,7 @@ impl Message<BuyItemBackRequest> for WorldActor {
             _ => return,
         };
 
-        // 查找回购列表中的对应物品
+        // 查找回购列表中的对应物品（按 unique_id，C# BuyItemBack 语义）
         let list = match self.buyback_items.get_mut(&msg.session_id) {
             Some(l) => l,
             None => {
@@ -1259,7 +1260,7 @@ impl Message<BuyItemBackRequest> for WorldActor {
                 return;
             }
         };
-        let idx = match list.iter().position(|b| b.item.item_index == msg.item_index as i32) {
+        let idx = match list.iter().position(|b| b.item.unique_id == msg.unique_id) {
             Some(i) => i,
             None => {
                 send_system_message(&self.gate_ref, msg.session_id, "该物品已无法回购");
@@ -1268,7 +1269,11 @@ impl Message<BuyItemBackRequest> for WorldActor {
         };
 
         let buyback = list.remove(idx);
-        let cost = buyback.sell_price * 2;
+        // 数量按回购请求扣减（整件回购时 count 即物品数量）
+        let count = (msg.count as u16).min(buyback.item.count.max(1));
+        let mut item = buyback.item.clone();
+        item.count = count;
+        let cost = buyback.sell_price * msg.count as u64;
 
         // 检查背包空间
         if !state.inventory.has_space() {
@@ -1285,13 +1290,19 @@ impl Message<BuyItemBackRequest> for WorldActor {
             return;
         }
 
-        // 添加物品到背包
+        // 添加物品到背包 + 完整刷新（背包 + 金币）
         let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory {
-            item: buyback.item.clone(),
+            item: item.clone(),
         }).await;
-
+        if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
+            let packet = super::build_user_information_packet(&new_state, &self.item_infos);
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: packet,
+            }).await;
+        }
         send_system_message(&self.gate_ref, msg.session_id, &format!("回购成功，花费 {} 金币", cost));
-        debug!("BuyItemBack: {} item_index={} cost={}", state.name, msg.item_index, cost);
+        debug!("BuyItemBack: {} uid={} count={} cost={}", state.name, msg.unique_id, count, cost);
     }
 }
 

@@ -1388,17 +1388,22 @@ fn forward_craft_item(
     let _ = world_ref.tell(crate::actors::world::CraftItemRequest { session_id, recipe_id }).try_send();
 }
 
-/// BuyItemBack (回购): [item_index: u32]
+/// BuyItemBack (回购): [unique_id: u64][count: u16]（C# ClientPackets.BuyItemBack wire）
 fn forward_buy_item_back(
     world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
-    if payload.len() < 4 { return; }
+    if payload.len() < 10 { return; }
     let world_ref = match world_ref { Some(w) => w, None => { return; } };
-    let item_index = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    debug!("BuyItemBack: session={} item_index={}", session_id, item_index);
-    let _ = world_ref.tell(crate::actors::world::BuyItemBackRequest { session_id, item_index }).try_send();
+    let unique_id = u64::from_le_bytes(payload[0..8].try_into().unwrap_or([0; 8]));
+    let count = u16::from_le_bytes(payload[8..10].try_into().unwrap_or([0; 2]));
+    debug!("BuyItemBack: session={} uid={} count={}", session_id, unique_id, count);
+    let _ = world_ref.tell(crate::actors::world::BuyItemBackRequest {
+        session_id,
+        unique_id,
+        count: count as u32,
+    }).try_send();
 }
 
 // ============================================================================
