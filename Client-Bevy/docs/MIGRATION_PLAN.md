@@ -61,12 +61,13 @@
 
 ### M8: 游戏场景基础（HUD + 玩家控制）
 > 参考：HUD/对话框 → `Client/MirScenes/GameScene.cs` + `Client/MirScenes/Dialogs/MainDialogs.cs`；绘制 → `Client-Macroquad/src/rendering`；网络 → `Client-Macroquad/src/network`
-- [ ] Game 场景骨架：StartGame/MapChanged 加载地图、相机跟随、出生点
-- [ ] 主对话框（血/蓝/经验/金币/快捷栏/功能按钮）与聊天对话框（输入/系统消息/公告）
-- [ ] 小地图、菜单/帮助/设置入口
-- [ ] 玩家控制：点击移动（寻路）、攻击目标、NPC 交互、拾取、自动喝药
-- [ ] 移植基础组件：player / movement / input / network / session / settings
-- **验收**: 可进入游戏移动、聊天、看到怪物/NPC 待机与周围玩家
+- [x] Game 场景骨架：StartGame/MapChanged 加载地图、相机定位、出生点（map_renderer）
+- [x] 主对话框 HUD（血/蓝球、经验条、金币/等级/名字、原版五按钮+菜单/商城）与聊天面板（历史/Enter 输入/IME）（`src/game/hud.rs` + `chat.rs`）
+- [ ] 小地图、菜单/帮助/设置入口（M9 对话框接入）
+- [x] 玩家控制：右键寻路（A*）、左键 NPC CallNPC / 怪物攻击、中键 AutoRun；移动 Walk/Run 发包 + 远端插值（`src/game/player_control.rs` + `movement.rs` + `pathfinding.rs`）
+- [ ] 拾取、自动喝药、快捷栏（后续）
+- [x] 移植基础组件：player / movement / input / network / session / settings（部分）
+- **验收（进行中）**: mock --auto-enter 全流程稳定运行；地图/HUD/聊天像素级验证通过；真实 ServerRust 移动/聊天待联调
 
 ### M9: 对话框系统（56 个游戏对话框，分 4 批）
 > 参考：**以原版 C# 为准** `Client/MirScenes/Dialogs/*.cs`（36 个文件）；Rust 版 `Client-Macroquad/src/scenes/dialogs/` 仅作迁移对照
