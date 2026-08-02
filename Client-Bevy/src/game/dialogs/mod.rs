@@ -6,6 +6,7 @@
 // ============================================================================
 
 pub mod amount_box;
+pub mod assign_key;
 pub mod belt;
 pub mod big_map;
 pub mod buff;
@@ -132,6 +133,7 @@ impl Plugin for DialogsPlugin {
         app.add_plugins((
             (
                 inventory::InventoryDialogPlugin,
+                assign_key::AssignKeyPlugin,
                 character::CharacterDialogPlugin,
                 menu::MenuDialogPlugin,
                 minimap::MiniMapPlugin,

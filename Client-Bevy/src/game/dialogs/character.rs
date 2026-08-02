@@ -12,14 +12,16 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use crate::game::dialogs::assign_key::AssignKeyState;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
+use crate::game::skills::MagicsState;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
-    UiImageCache,
+    spawn_ui_button, spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton,
+    UiEntity, UiFont, UiImageCache,
 };
 
 /// 角色状态（网络写入；当前服务器未下发属性，先默认值）
@@ -110,6 +112,37 @@ pub struct CharGuildText;
 
 #[derive(Component)]
 pub struct CharStatText(pub usize); // 状态数值标签序号
+// ---- 技能页（C# CharacterDialog.MagicButton 7 行 + Next/Back） ----
+const SKILL_ROW_COUNT: usize = 7;
+/// 翻页按钮在 children 可见性查询中的哨兵行号
+/// 技能页当前起始行（C# CharacterDialog.StartIndex）
+#[derive(Resource, Default)]
+pub struct CharSkillStart(pub usize);
+/// 技能行（整行 231x33 可点击，打开快捷键面板）
+#[derive(Component)]
+pub struct CharSkillRow(pub usize);
+/// 技能图标（MagIcon2[icon*2]，行内 (36,0)）
+#[derive(Component)]
+pub struct CharSkillIcon(pub usize);
+/// 技能行子控件（图标/背景条/文本，可见性跟随行）
+#[derive(Component)]
+pub struct CharSkillRowChild(pub usize);
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SkillTextKind {
+    Key,
+    Level,
+    Name,
+    Exp,
+}
+#[derive(Component)]
+pub struct CharSkillText {
+    pub row: usize,
+    pub kind: SkillTextKind,
+}
+#[derive(Component)]
+pub struct CharSkillNext;
+#[derive(Component)]
+pub struct CharSkillBack;
 
 pub struct CharacterDialogPlugin;
 
@@ -121,11 +154,12 @@ impl Plugin for CharacterDialogPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CharacterState>();
         app.init_resource::<CharPage>();
+        app.init_resource::<CharSkillStart>();
         app.add_systems(OnEnter(AppState::Game), spawn_character_dialog);
         app.add_systems(OnExit(AppState::Game), cleanup_character_dialog);
         app.add_systems(
             Update,
-            (character_ui_system, char_equip_system, ui_button_system)
+            (character_ui_system, char_equip_system, char_skill_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -283,12 +317,111 @@ fn spawn_character_dialog(
             CharDialogWidget,
         ));
     }
+    // 技能页（页 3）：7 行技能按钮（C# MagicButton (8, 8+i*33)，231x33）
+    // 行内子控件坐标参考 C# MagicButton：图标 (36,0)、LevelImage Title[516] (73,7)、
+    // ExpImage Title[517] (73,19)、KeyLabel (2,2)、LevelLabel (88,2)、NameLabel (109,2)、ExpLabel (109,15)
+    let transparent = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    for i in 0..SKILL_ROW_COUNT {
+        let rx = DIALOG_X + PAGE_X + 8.0;
+        let ry = DIALOG_Y + PAGE_Y + 8.0 + i as f32 * 33.0;
+        let row = commands
+            .spawn((
+                UiEntity,
+                DialogRoot(DialogKind::Character),
+                CharSkillRow(i),
+                UiButton {
+                    rect: (rx, ry, 231.0, 33.0),
+                    clicked: false,
+                },
+                Sprite {
+                    image: transparent.clone(),
+                    color: Color::srgba(0.0, 0.0, 0.0, 0.0),
+                    custom_size: Some(Vec2::new(231.0, 33.0)),
+                    ..default()
+                },
+                Anchor::TOP_LEFT,
+                Transform::from_xyz(rx, -ry, 6.5),
+                Visibility::Hidden,
+            ))
+            .id();
+        commands.entity(row).with_children(|p| {
+            // 技能图标（MagIcon2[icon*2]，原版 SkillButton (36,0)）
+            p.spawn((
+                CharSkillIcon(i),
+                CharSkillRowChild(i),
+                Sprite {
+                    image: transparent.clone(),
+                    custom_size: Some(Vec2::new(36.0, 36.0)),
+                    ..default()
+                },
+                Anchor::TOP_LEFT,
+                Transform::from_xyz(36.0, 0.0, 6.6),
+                Visibility::Hidden,
+            ));
+            // 等级/经验背景条（Title[516] / Title[517]）
+            for (tex, oy) in [(516usize, 7.0f32), (517, 19.0)] {
+                if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, tex) {
+                    p.spawn((
+                        CharSkillRowChild(i),
+                        Sprite::from_image(h),
+                        Anchor::TOP_LEFT,
+                        Transform::from_xyz(73.0, -oy, 6.5),
+                        Visibility::Hidden,
+                    ));
+                }
+            }
+            // Key/Level/Name/Exp 文本
+            for (kind, ox, oy, size) in [
+                (SkillTextKind::Key, 2.0f32, 2.0f32, 10.0f32),
+                (SkillTextKind::Level, 88.0, 2.0, 11.0),
+                (SkillTextKind::Name, 109.0, 2.0, 11.0),
+                (SkillTextKind::Exp, 109.0, 15.0, 11.0),
+            ] {
+                p.spawn((
+                    CharSkillText { row: i, kind },
+                    CharSkillRowChild(i),
+                    Text2d::new(""),
+                    Anchor::TOP_LEFT,
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(size),
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    Transform::from_xyz(ox, -oy, 6.7),
+                    Visibility::Hidden,
+                ));
+            }
+        });
+    }
+    // Next/Back（Prguse[396/397] (140,250) / [398/399] (90,250)，页内）
+    for (is_next, idx, x) in [
+        (true, 396usize, 140.0f32),
+        (false, 398usize, 90.0f32),
+    ] {
+        if let Some(e) = spawn_ui_button(
+            &mut commands, &mut libs, &mut images, &mut cache,
+            LibraryName::Prguse, idx, idx, idx + 1,
+            DIALOG_X + PAGE_X + x, DIALOG_Y + PAGE_Y + 250.0, 7.0, 40.0, 22.0,
+        ) {
+            let mut ec = commands.entity(e);
+            ec.insert((
+                DialogRoot(DialogKind::Character),
+            ));
+            if is_next {
+                ec.insert(CharSkillNext);
+            } else {
+                ec.insert(CharSkillBack);
+            }
+        }
+    }
 }
 
 /// 显示/隐藏 + 页切换 + 关闭 + 状态更新
 fn character_ui_system(
     mut mgr: ResMut<DialogManager>,
     state: Res<CharacterState>,
+    assign_key: Res<AssignKeyState>,
     mut page: ResMut<CharPage>,
     mut widgets: Query<&mut Visibility, (With<CharDialogWidget>, Without<CharPageBg>)>,
     tabs: Query<(&UiButton, &CharTab)>,
@@ -314,16 +447,18 @@ fn character_ui_system(
         return;
     }
 
-    // 标签页切换
-    for (btn, tab) in &tabs {
-        if btn.clicked {
-            page.0 = tab.0;
+    if !assign_key.visible {
+        // 标签页切换
+        for (btn, tab) in &tabs {
+            if btn.clicked {
+                page.0 = tab.0;
+            }
         }
-    }
-    // 关闭
-    for btn in &close {
-        if btn.clicked {
-            mgr.close(DialogKind::Character);
+        // 关闭
+        for btn in &close {
+            if btn.clicked {
+                mgr.close(DialogKind::Character);
+            }
         }
     }
 
@@ -381,5 +516,127 @@ fn char_equip_system(
             }
             None => *vis = Visibility::Hidden,
         }
+    }
+}
+
+/// 技能页：行可见性/内容/翻页 + 点击打开快捷键面板
+/// （C# CharacterDialog.RefreshInterface + MagicButton.Click → AssignKeyPanel）
+fn char_skill_system(
+    mgr: Res<DialogManager>,
+    page: Res<CharPage>,
+    magics: Res<MagicsState>,
+    mut start: ResMut<CharSkillStart>,
+    mut assign_key: ResMut<AssignKeyState>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    mut rows: Query<
+        (
+            &mut Visibility,
+            &UiButton,
+            Option<&CharSkillRow>,
+            Option<&CharSkillNext>,
+            Option<&CharSkillBack>,
+        ),
+    >,
+    mut children: Query<(&mut Visibility, &CharSkillRowChild), Without<UiButton>>,
+    mut icons: Query<(&mut Sprite, &CharSkillIcon), Without<CharSkillText>>,
+    mut texts: Query<(&mut Text2d, &CharSkillText), Without<CharSkillIcon>>,
+    windows: Query<&Window>,
+    mouse: Res<ButtonInput<MouseButton>>,
+) {
+    let open = mgr.is_open(DialogKind::Character) && page.0 == 3;
+    let cursor = windows.single().ok().and_then(|w| w.cursor_position());
+    let mouse_down = mouse.pressed(MouseButton::Left);
+
+    for (mut vis, btn, row, next, back) in &mut rows {
+        let (show, magic) = if let Some(row) = row {
+            let magic = magics.magics.get(start.0 + row.0);
+            (open && magic.is_some(), magic)
+        } else {
+            (open, None) // Next/Back 仅在技能页显示
+        };
+        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+        if !show || assign_key.visible {
+            continue;
+        }
+        if let Some(row) = row {
+            if btn.clicked {
+                if let Some(m) = magic {
+                    assign_key.open(m.spell, m.key);
+                    tracing::info!(
+                        "🔑 打开技能快捷键面板: {} ({:?}) key={}",
+                        m.name, m.spell, m.key
+                    );
+                }
+            }
+            // 图标帧：按下 = icon*2+1，否则 icon*2（原版 MagIcon2 Index/PressedIndex）
+            if let Some(m) = magic {
+                let over = cursor
+                    .map(|c| {
+                        let (x, y, w, h) = btn.rect;
+                        c.x >= x && c.x <= x + w && c.y >= y && c.y <= y + h
+                    })
+                    .unwrap_or(false);
+                let frame = m.icon as usize * 2 + if mouse_down && over { 1 } else { 0 };
+                if let Some(h) =
+                    ui_image(&mut libs, &mut images, &mut cache, LibraryName::MagIcon2, frame)
+                {
+                    for (mut sprite, ic) in &mut icons {
+                        if ic.0 == row.0 && sprite.image != h {
+                            sprite.image = h.clone();
+                        }
+                    }
+                }
+            }
+        } else if btn.clicked {
+            if next.is_some() && start.0 + SKILL_ROW_COUNT < magics.magics.len() {
+                start.0 += SKILL_ROW_COUNT;
+            } else if back.is_some() && start.0 >= SKILL_ROW_COUNT {
+                start.0 -= SKILL_ROW_COUNT;
+            }
+        }
+    }
+
+    // 子控件可见性：行有技能时显示（行/翻页按钮的可见性在 rows 查询中处理）
+    for (mut vis, child) in &mut children {
+        let show = open && magics.magics.get(start.0 + child.0).is_some();
+        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+    }
+
+    // 文本内容
+    for (mut t, txt) in &mut texts {
+        if let Some(m) = magics.magics.get(start.0 + txt.row) {
+            t.0 = match txt.kind {
+                SkillTextKind::Key => key_label(m.key),
+                SkillTextKind::Level => m.level.to_string(),
+                SkillTextKind::Name => m.name.clone(),
+                SkillTextKind::Exp => exp_label(m),
+            };
+        }
+    }
+}
+
+/// C# KeyLabel：Key=0 空；1..8 "F1..F8"；9..16 "CTRL\nF1.."；17..24 "Shift\nF1.."
+fn key_label(key: u8) -> String {
+    if key == 0 {
+        return String::new();
+    }
+    let prefix = ["", "CTRL", "Shift"][((key - 1) / 8) as usize];
+    let f = (key - 1) % 8 + 1;
+    if key > 8 {
+        format!("{}\nF{}", prefix, f)
+    } else {
+        format!("F{}", f)
+    }
+}
+
+/// C# ExpLabel：0/1/2 级 "exp/need"；3 级 "-"
+fn exp_label(m: &mir2_shared::data::client_data::ClientMagic) -> String {
+    match m.level {
+        0 => format!("{}/{}", m.experience, m.need1),
+        1 => format!("{}/{}", m.experience, m.need2),
+        2 => format!("{}/{}", m.experience, m.need3),
+        _ => "-".to_string(),
     }
 }

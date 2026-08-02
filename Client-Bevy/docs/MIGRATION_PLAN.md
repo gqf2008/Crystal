@@ -125,7 +125,16 @@
 - [x] **背包点击移动（MoveItem 全链路）**：单击选中（黄色高亮，原版 C# SelectedCell）→ 点目标格发送 MoveItem；服务端响应后本地 swap；服务端修复 from/to 槽位索引
 - [x] **装备流程闭环**：双击装备（EquipItem 响应本地同步、旧装备回背包）、使用物品扣减、卸下装备回背包；角色对话框 14 槽映射服务端 12 槽渲染装备图标
 - [x] **物品 tooltip**：悬停物品格跟随光标显示 名称 x数量（原版 C# MirItemCell.Hint 语义）
-- [ ] 待续：拆分/丢弃物品、技能拖拽绑定（MagicKey 包）
+- [ ] 待续：拆分/丢弃物品（SplitItem/DropItem）、装备卸下右键（RemoveItem）
+### M14: 技能页 + 快捷键分配面板（2026-08-02 完成）
+- [x] **技能页（角色对话框第 4 页）**：7 行技能按钮（原版 C# CharacterDialog.MagicButton，行距 33px），行内渲染 MagIcon2 图标 / Title[516,517] 等级经验条 / Key 标签（F1..F8、CTRL\nF1..、Shift\nF1..）/ 等级 / 名称 / 经验；Next/Back 翻页（Prguse[396-399]，StartIndex 按 7 步进，原版语义）
+- [x] **快捷键分配面板**（原版 C# AssignKeyPanel）：Prguse[710] 居中，魔法图标 + 名称，16 个 F 键按钮（F1-F8 / Ctrl+F1-8，Prguse[1656-1658] 三态），None（Title[287-289]）/ Save（Title[156-158]）
+- [x] **MagicKey 包闭环**：Save 时清除占用同键的其他技能（C# SaveButton 语义）→ 发送 `C.MagicKey{Spell, Key, OldKey}` → 本地 MagicsState 更新（快捷栏图标自动刷新）→ 服务端 SetSpellKey 落库
+- [x] **服务端修复**：SetSpellKey/ToggleSpell 补 C#→SharedRust 编号换算（-3，与 MagicRequest 一致）——原实现直接比较导致快捷键绑到错误技能
+- [x] 验证：真实 ServerRust E2E——技能页点行 → 面板打开 → 点 F3/F1 → Save → 服务端落库（FireBall key=3→1，冲突技能 GreatFireBall key 自动清 0）；客户端 34 测试全过
+
+---
+
 
 ---
 

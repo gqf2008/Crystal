@@ -1,11 +1,12 @@
 // ============================================================================
-// 技能系统（M13 续）：已学技能列表 + F1-F8 施放
+// 技能系统（M13 续）：已学技能列表 + F1-F8 施放 + 快捷键绑定
 // UI 交互参考：C# MainDialogs.cs（magic.Key == 1..8 = F1..F8 快捷施放）
-// 网络参考：SharedRust packets/client/combat.rs::Magic
+// 网络参考：SharedRust packets/client/combat.rs::Magic / MagicKey
 // ============================================================================
 
 use bevy::prelude::*;
 use mir2_shared::data::client_data::ClientMagic;
+use mir2_shared::enums::Spell;
 
 use crate::network::NetworkContext;
 use crate::scenes::AppState;
@@ -26,6 +27,11 @@ impl MagicsState {
         }
     }
 
+    /// 按 spell 查技能
+    pub fn by_spell(&self, spell: Spell) -> Option<&ClientMagic> {
+        self.magics.iter().find(|m| m.spell == spell)
+    }
+
     /// 按快捷键 1..8 查绑定技能（原版 C#：m.Key == 槽位，F1=1）
     pub fn by_key(&self, key: u8) -> Option<&ClientMagic> {
         if let Some(m) = self.magics.iter().find(|m| m.key == key) {
@@ -37,6 +43,21 @@ impl MagicsState {
         } else {
             None
         }
+    }
+
+    /// 绑定快捷键（原版 C# AssignKeyPanel.SaveButton 语义）：
+    /// 先清除所有占用该键的技能，再设置目标技能；返回目标旧键（发包用）
+    pub fn assign_key(&mut self, spell: Spell, key: u8) -> Option<u8> {
+        let old = self.by_spell(spell).map(|m| m.key);
+        for m in &mut self.magics {
+            if m.spell != spell && m.key == key {
+                m.key = 0;
+            }
+        }
+        if let Some(m) = self.magics.iter_mut().find(|m| m.spell == spell) {
+            m.key = key;
+        }
+        old
     }
 }
 
@@ -81,4 +102,61 @@ fn skill_bar_system(
         location: mir2_shared::Point { x, y },
     });
     tracing::info!("✨ F{} 施放 {} ({:?}) @ ({},{})", slot + 1, magic.name, magic.spell, x, y);
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn magic(spell: Spell, key: u8) -> ClientMagic {
+        ClientMagic {
+            name: String::new(),
+            spell,
+            base_cost: 0,
+            level_cost: 0,
+            icon: 0,
+            level1: 0,
+            level2: 0,
+            level3: 0,
+            need1: 0,
+            need2: 0,
+            need3: 0,
+            level: 0,
+            key,
+            experience: 0,
+            delay: 0,
+            range: 0,
+            cast_time: 0,
+        }
+    }
+
+    /// 原版 C# SaveButton：清除占用同键的技能，再设置目标，返回旧键
+    #[test]
+    fn assign_key_clears_conflicts_and_returns_old() {
+        let mut s = MagicsState::default();
+        s.upsert(magic(Spell::Fencing, 1));
+        s.upsert(magic(Spell::Slaying, 0));
+        s.upsert(magic(Spell::Thrusting, 3));
+
+        // Fencing 从 F1 改绑 F3：占用 F3 的 Thrusting 应被清 0
+        let old = s.assign_key(Spell::Fencing, 3);
+        assert_eq!(old, Some(1));
+        assert_eq!(s.by_spell(Spell::Fencing).unwrap().key, 3);
+        assert_eq!(s.by_spell(Spell::Thrusting).unwrap().key, 0);
+        assert_eq!(s.by_spell(Spell::Slaying).unwrap().key, 0);
+
+        // 绑定到 0（None）
+        let old = s.assign_key(Spell::Fencing, 0);
+        assert_eq!(old, Some(3));
+        assert_eq!(s.by_spell(Spell::Fencing).unwrap().key, 0);
+    }
+
+    /// 未找到技能时返回 None，不影响其他技能
+    #[test]
+    fn assign_key_unknown_spell_is_noop() {
+        let mut s = MagicsState::default();
+        s.upsert(magic(Spell::Fencing, 1));
+        let old = s.assign_key(Spell::Slaying, 5);
+        assert_eq!(old, None);
+        assert_eq!(s.by_spell(Spell::Fencing).unwrap().key, 1);
+    }
 }
