@@ -82,11 +82,12 @@
 - **验收**: 每个对话框交互与原版 C# / macroquad 一致（数据驱动，mock 先行）
 
 ### M10: 战斗 / 逻辑 / 物理
-- [ ] combat: attack / magic / skill / buff / regen（公式与 C# 一致，91 法术差异化）
-- [ ] decision: monster_ai（212 怪物行为数据驱动）/ npc_ai / npc_dialogue
-- [ ] physics: movement / collision / pathfinding / map_load / map_update
-- [ ] input: player_control / local_player_ai / auto_potion
-- **验收**: 打怪、技能、怪物 AI 行为与 macroquad 版一致
+- [x] combat（部分）: 攻击发包、受击/死亡动画、伤害飘字（ObjectStruck/Died/DamageIndicator 闭环验证）
+- [ ] combat: magic / skill / buff / regen（技能栏 F1-F8、自动喝药待续）
+- [x] decision: 服务端驱动怪物 AI（ObjectWalk/Run/Turn/Attack/Death 接入）；NPC 对话闭环
+- [x] physics: movement / pathfinding / collision（A* + 步进 + 远端插值）
+- [ ] input: auto_potion / local_player_ai（待续）
+- **验收（进行中）**: 打怪/飘字闭环已验；技能/自动喝药待续
 
 ### M11: 呈现与特效
 - [ ] animation_system（帧动画/挂点/武器特效/坐骑状态）
