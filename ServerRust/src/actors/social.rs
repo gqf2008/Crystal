@@ -1968,6 +1968,11 @@ impl Message<GuildInviteReply> for SocialActor {
             }
         }
 
+        // 发送完整行会信息给新成员（客户端据此显示行会对话框）
+        if let Some(g) = self.guilds.get(&guild_name) {
+            send_guild_info_packet(&self.gate_ref, msg.session_id, g);
+        }
+
         debug!("Guild invite accepted: {} joined {}", invitee_name, guild_name);
     }
 }
@@ -2028,7 +2033,43 @@ impl Message<EditGuildMemberRequest> for SocialActor {
         }
 
         match msg.change_type {
-            0 => { // 踢出
+            0 => { // 邀请加入（C# EditGuildMember ChangeType=0 add member）
+                // 查找目标玩家（在线）
+                let mut target_session: Option<u64> = None;
+                for (sid, r) in &self.players {
+                    if let Ok(Some(s)) = r.ask(GetPlayerState).await {
+                        if s.name == msg.member_name {
+                            target_session = Some(*sid);
+                            break;
+                        }
+                    }
+                }
+                let Some(target) = target_session else {
+                    send_system_message(&self.gate_ref, msg.session_id, "玩家不在线");
+                    return;
+                };
+                // 检查目标是否已在行会
+                let target_in_guild = match self.players.get(&target) {
+                    Some(r) => match r.ask(GetPlayerState).await {
+                        Ok(Some(s)) => s.guild_name.is_some(),
+                        _ => true,
+                    },
+                    None => true,
+                };
+                if target_in_guild {
+                    send_system_message(&self.gate_ref, msg.session_id, "对方已有行会");
+                    return;
+                }
+                // 已有待处理邀请
+                if self.pending_guild_invites.contains_key(&target) {
+                    send_system_message(&self.gate_ref, msg.session_id, "邀请已发送，等待对方回复");
+                    return;
+                }
+                self.pending_guild_invites.insert(target, (msg.session_id, guild_name.clone()));
+                send_guild_invite_packet(&self.gate_ref, target, &guild_name);
+                send_system_message(&self.gate_ref, msg.session_id, &format!("已向 {} 发送行会邀请", msg.member_name));
+            }
+            1 => { // 踢出（C# ChangeType=1 delete member）
                 // 不能踢会长
                 if guild.members.iter().any(|m| m.name == msg.member_name && m.rank == GuildRank::Leader) {
                     send_system_message(&self.gate_ref, msg.session_id, "不能踢出会长");
@@ -2065,7 +2106,7 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                     send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已被踢出行会", msg.member_name));
                 }
             }
-            1 => { // 升职
+            2 => { // 升职
                 if my_rank != GuildRank::Leader {
                     send_system_message(&self.gate_ref, msg.session_id, "只有会长可以升职成员");
                     return;
@@ -2074,7 +2115,7 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                     send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已升职为副会长", msg.member_name));
                 }
             }
-            2 => { // 降职
+            3 => { // 降职
                 if my_rank != GuildRank::Leader {
                     send_system_message(&self.gate_ref, msg.session_id, "只有会长可以降职成员");
                     return;

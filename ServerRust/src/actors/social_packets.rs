@@ -266,6 +266,16 @@ pub fn send_mail_content_packet(gate_ref: &ActorRef<GateActor>, session_id: u64,
 // 行会系统
 // ============================================================
 
+/// Send guild invite to a client（C# S.GuildInvite{Name}）
+pub fn send_guild_invite_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, guild_name: &str) {
+    let mut body = Vec::new();
+    write_dotnet_string(&mut body, guild_name);
+    let _ = gate_ref.tell(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildInvite as i16, &body),
+    }).try_send();
+}
+
 /// Send guild status (in/out) to a client.
 pub fn send_guild_status_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, in_guild: bool) {
     let mut body = Vec::new();
