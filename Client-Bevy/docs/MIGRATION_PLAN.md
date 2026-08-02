@@ -233,6 +233,13 @@
 - [x] `--drop-pick-test` 自动驱动（多方向攻击轮换 + 地面物品检测 + 拾取 + 背包校验）
 
 ---
+### M25: 好友（Friend）网络接线（2026-08-03 完成）
+- [x] **服务端 gate AddFriend 解析修复**：u16 前缀 → `read_dotnet_string`（+ blocked u8，C#/SharedRust wire）
+- [x] **服务端系统性修复 `ask()` future 被丢弃**（同类 bug 批量修复）：SetGroupId ×4、AddFriendToSelf ×2、SetSpouse ×3、SetMentor ×3、SetAllowMentor ×1、SetPlayerPosition ×5、SetGuildInfo ×4——这些消息从未发出（组队持久化/传送/行会/婚姻/师徒全部失效）
+- [x] **客户端**：FriendUpdate 双格式解析（count 前缀列表 / 单个添加，同 opcode）→ FriendState；好友对话框列表渲染（在线/离线 + 备注）；打开时自动 C.RefreshFriends（原版 C# FriendDialog.Show 语义）
+- [x] 验证：真实 ServerRust 双客户端 E2E——A 添加 bevy2char → `👥 好友列表: bevy2char(在线)` → ✅；客户端 34 测试、服务端 139 测试全过
+
+---
 ## 四、执行顺序与依赖
 
 ```
@@ -252,6 +259,7 @@ M7（真实网络）→ M8（HUD+控制）→ M9（对话框 1→4 批）→ M10
 | 渲染后端冻结 | 强制 DX12（Vulkan present 在此机器异常） |
 | 大量精灵性能 | 精灵图缓存已建；后续 Atlas/批处理 |
 | 数据依赖 | 复用 Client-Macroquad/Data，`resolve_data_path` 自动解析 |
+
 
 
 

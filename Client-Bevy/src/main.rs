@@ -141,6 +141,14 @@ fn main() {
     if std::env::args().any(|a| a == "--shop-test") {
         app.add_systems(Update, auto_shop_test);
     }
+    // --friend-test: 自动加好友链路（配合 B 在线）
+    if std::env::args().any(|a| a == "--friend-test") {
+        app.add_systems(Update, auto_friend_test);
+    }
+    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
+    if std::env::args().any(|a| a == "--shop-test") {
+        app.add_systems(Update, auto_shop_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -921,6 +929,52 @@ fn auto_drop_pick_test(
                 tracing::info!("[DROPTEST] ✅ 拾取成功：背包有物品 853");
             } else {
                 tracing::warn!("[DROPTEST] ❌ 背包未找到物品 853");
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --friend-test：自动加好友（AddFriend bevy2char → 等 FriendUpdate 列表出现）
+#[allow(clippy::too_many_arguments)]
+fn auto_friend_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    friend: Res<client_bevy::game::dialogs::friend::FriendState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::friend::AddFriend {
+                name: "bevy2char".to_string(),
+                blocked: false,
+            });
+            tracing::info!("[FRIENDTEST] 添加好友 bevy2char");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 3.0 {
+                return;
+            }
+            if friend.friends.iter().any(|f| f.name == "bevy2char") {
+                tracing::info!(
+                    "[FRIENDTEST] ✅ 好友列表包含 bevy2char (在线={})",
+                    friend.friends.iter().find(|f| f.name == "bevy2char").map(|f| f.online).unwrap_or(false)
+                );
+            } else {
+                tracing::warn!("[FRIENDTEST] ❌ 好友列表为空或未包含 bevy2char: {:?}", friend.friends);
             }
             *stage = 9;
         }

@@ -16,6 +16,7 @@ use std::path::Path;
 
 use crate::game::chat::ChatState;
 use crate::game::combat::CombatEvents;
+use crate::game::dialogs::friend::{FriendEntry, FriendState};
 use crate::game::dialogs::group::GroupState;
 use crate::game::dialogs::mail::{MailDetail, MailEntry, MailState};
 use crate::game::dialogs::inventory::InvItem;
@@ -321,6 +322,7 @@ struct NetworkPanels<'w> {
     group: ResMut<'w, GroupState>,
     mail: ResMut<'w, MailState>,
     trade: ResMut<'w, TradeState>,
+    friend: ResMut<'w, FriendState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -362,6 +364,7 @@ fn network_system(
                         &mut *panels.group,
                         &mut *panels.mail,
                         &mut *panels.trade,
+                        &mut *panels.friend,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -407,6 +410,7 @@ fn network_system(
                         &mut *panels.group,
                         &mut *panels.mail,
                         &mut *panels.trade,
+                        &mut *panels.friend,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -542,6 +546,7 @@ fn handle_packet(
     group: &mut GroupState,
     mail: &mut MailState,
     trade: &mut TradeState,
+    friend: &mut FriendState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -1146,6 +1151,77 @@ fn handle_packet(
                     }
                 }
                 Err(e) => tracing::warn!("⚠️ UserStorage 解析失败: {} (len={})", e, payload.len()),
+            }
+        }
+
+        // ---- M25: 好友 ----
+        x if x == ServerPacketIds::FriendUpdate as i16 => {
+            // 服务端 wire：列表包 [count i32][oid u32][name][memo][online]... / 单个包 [oid u32][name][memo][online]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut parsed: Option<Vec<FriendEntry>> = None;
+            if body.len() >= 4 {
+                let count = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
+                if (0..=200).contains(&count) {
+                    let mut entries = Vec::new();
+                    let mut cur = std::io::Cursor::new(&body[4..]);
+                    let mut ok = true;
+                    for _ in 0..count {
+                        let mut oid_buf = [0u8; 4];
+                        if std::io::Read::read_exact(&mut cur, &mut oid_buf).is_err() { ok = false; break; }
+                        let object_id = u32::from_le_bytes(oid_buf);
+                        let name = match mir2_shared::binary::read_dotnet_string(&mut cur) {
+                            Ok(n) => n,
+                            Err(_) => { ok = false; break; }
+                        };
+                        let memo = match mir2_shared::binary::read_dotnet_string(&mut cur) {
+                            Ok(m) => m,
+                            Err(_) => { ok = false; break; }
+                        };
+                        let mut online_buf = [0u8; 1];
+                        if std::io::Read::read_exact(&mut cur, &mut online_buf).is_err() { ok = false; break; }
+                        entries.push(FriendEntry { object_id, name, memo, online: online_buf[0] != 0 });
+                    }
+                    if ok && count as usize == entries.len() {
+                        parsed = Some(entries);
+                    }
+                }
+            }
+            if parsed.is_none() {
+                // 单个添加包
+                let mut cur = std::io::Cursor::new(body);
+                let mut oid_buf = [0u8; 4];
+                if std::io::Read::read_exact(&mut cur, &mut oid_buf).is_ok() {
+                    let object_id = u32::from_le_bytes(oid_buf);
+                    if let (Ok(name), Ok(memo)) = (
+                        mir2_shared::binary::read_dotnet_string(&mut cur),
+                        mir2_shared::binary::read_dotnet_string(&mut cur),
+                    ) {
+                        let mut online_buf = [0u8; 1];
+                        let online = std::io::Read::read_exact(&mut cur, &mut online_buf).is_ok() && online_buf[0] != 0;
+                        parsed = Some(vec![FriendEntry { object_id, name, memo, online }]);
+                    }
+                }
+            }
+            match parsed {
+                Some(entries) => {
+                    for e in entries {
+                        if let Some(existing) = friend.friends.iter_mut().find(|f| f.object_id == e.object_id) {
+                            *existing = e.clone();
+                        } else {
+                            friend.friends.push(e.clone());
+                        }
+                    }
+                    tracing::info!(
+                        "👥 好友列表: {}",
+                        friend
+                            .friends
+                            .iter()
+                            .map(|f| format!("{}{}", f.name, if f.online { "(在线)" } else { "" }))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                }
+                None => tracing::warn!("⚠️ FriendUpdate 解析失败: (len={})", payload.len()),
             }
         }
 
