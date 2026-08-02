@@ -462,8 +462,10 @@ impl Message<ClientData> for GateActor {
             }
             x if x == ClientPacketIds::CallNPC as i16 => {
                 // CallNPC - 与 NPC 对话
+                debug!("CallNPC packet len={}", payload.len());
                 if let Some(world_ref) = &self.world_ref {
                     if let Some((npc_object_id, key)) = parse_call_npc_payload(payload) {
+                        debug!("CallNPC npc={} key={}", npc_object_id, key);
                         let _ = world_ref.ask(crate::actors::world::NPCCallRequest {
                             session_id: msg.session_id,
                             npc_object_id,
@@ -1280,33 +1282,35 @@ fn forward_split_item(
     }).try_send();
 }
 
+/// BuyItem: [item_index: u64][count: u16][panel_type: u8]（C# 协议，无 npc_id）
 fn forward_buy_item(
     world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
-    if payload.len() < 12 { return; }
+    if payload.len() < 11 { warn!("BuyItem payload too short: {}", payload.len()); return; }
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let npc_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    let item_index = u32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
-    let count = u32::from_le_bytes(payload[8..12].try_into().unwrap_or([0; 4]));
+    let item_index = u64::from_le_bytes(payload[0..8].try_into().unwrap_or([0; 8]));
+    let count = u16::from_le_bytes(payload[8..10].try_into().unwrap_or([0; 2]));
+    let _panel_type = payload[10];
+    debug!("BuyItem session={} item_index={} count={}", session_id, item_index, count);
     let _ = world_ref.tell(crate::actors::world::BuyItemRequest {
-        session_id, npc_id, item_index, count,
+        session_id, item_index, count: count as u32,
     }).try_send();
 }
 
+/// SellItem: [uid: u64][count: u16]（C# 协议）
 fn forward_sell_item(
     world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
-    if payload.len() < 13 { return; }
+    if payload.len() < 10 { return; }
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let grid = payload[0];
-    let uid = u64::from_le_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
-    let count = u32::from_le_bytes(payload[9..13].try_into().unwrap_or([0; 4]));
+    let uid = u64::from_le_bytes(payload[0..8].try_into().unwrap_or([0; 8]));
+    let count = u16::from_le_bytes(payload[8..10].try_into().unwrap_or([0; 2]));
     let _ = world_ref.tell(crate::actors::world::SellItemRequest {
-        session_id, grid, unique_id: uid, count,
+        session_id, unique_id: uid, count: count as u32,
     }).try_send();
 }
 
@@ -3055,4 +3059,5 @@ mod tests {
         assert_eq!(result, "");
     }
 }
+
 

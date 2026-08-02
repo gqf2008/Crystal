@@ -106,7 +106,7 @@ async fn simulate_client(port: u16, id: usize) -> Result<u64, String> {
 
 async fn run_load_test(concurrent: usize) {
     let port = find_free_port();
-    let gate_ref = GateActor::spawn(());
+    let gate_ref = GateActor::spawn_with_mailbox((), kameo::mailbox::unbounded());
     let _ = gate_ref.ask(SetMaxConnections(concurrent + 100)).await;
     let db_pool = db::init_db_pool("sqlite::memory:").await.unwrap();
     let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool));

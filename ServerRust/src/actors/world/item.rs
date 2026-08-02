@@ -64,18 +64,16 @@ pub struct DropGoldRequest {
     pub amount: u32,
 }
 
-/// 购买物品（NPC 商店）
+/// 购买物品（NPC 商店；npc 由 session_npc 会话上下文解析）
 pub struct BuyItemRequest {
     pub session_id: u64,
-    pub npc_id: u32,
-    pub item_index: u32,
+    pub item_index: u64,
     pub count: u32,
 }
 
 /// 出售物品（NPC 商店）
 pub struct SellItemRequest {
     pub session_id: u64,
-    pub grid: u8,
     pub unique_id: u64,
     pub count: u32,
 }
@@ -739,19 +737,25 @@ impl Message<BuyItemRequest> for WorldActor {
     async fn handle(&mut self, msg: BuyItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
             Some(r) => r,
-            None => return,
+            None => { warn!("BuyItem: no player record for session {}", msg.session_id); return; }
         };
 
         let state = match record.actor_ref.ask(GetPlayerState).await {
             Ok(Some(s)) => s,
-            _ => return,
+            _ => { warn!("BuyItem: no player state for session {}", msg.session_id); return; }
         };
 
-        // 查找 NPC 并验证商品是否在销售列表中
-        let npc_db_index = match self.npcs.get(&msg.npc_id) {
-            Some(n) => n.db_index,
+        // 查找 NPC 并验证商品是否在销售列表中（客户端 BuyItem 不含 npc_id）
+        let (npc_oid, npc_db_index) = match self.session_npc.get(&msg.session_id) {
+            Some(npc_oid) => match self.npcs.get(npc_oid) {
+                Some(n) => (*npc_oid, n.db_index),
+                None => {
+                    send_system_message(&self.gate_ref, msg.session_id, "找不到该 NPC");
+                    return;
+                }
+            },
             None => {
-                send_system_message(&self.gate_ref, msg.session_id, "找不到该 NPC");
+                send_system_message(&self.gate_ref, msg.session_id, "请先与 NPC 对话");
                 return;
             }
         };
@@ -822,12 +826,20 @@ impl Message<BuyItemRequest> for WorldActor {
         };
 
         let _ = record.actor_ref.ask(AddItemToInventory { item }).await;
+        // 完整 UserInformation 刷新（背包 + 金币）
+        if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
+            let packet = super::build_user_information_packet(&new_state, &self.item_infos);
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: packet,
+            }).await;
+        }
         let updates = record.actor_ref.ask(crate::actors::player::CheckQuestItemProgress).await.unwrap_or_default();
         if !updates.is_empty() {
             send_system_message(&self.gate_ref, msg.session_id, "任务进度更新：获得物品");
         }
         send_system_message(&self.gate_ref, msg.session_id, &format!("购买成功 (花费 {} 金币)", total_price));
-        let npc_name = self.npcs.get(&msg.npc_id).map(|n| n.name.as_str()).unwrap_or("?");
+        let npc_name = self.npcs.get(&npc_oid).map(|n| n.name.as_str()).unwrap_or("?");
         debug!("BuyItem: {} bought item={} ({}) x{} for {} gold from NPC '{}' (stock={})", state.name, item_db.name, msg.item_index, msg.count, total_price, npc_name,
             if goods_list[good_idx].infinite_stock { "∞".to_string() } else { goods_list[good_idx].stock.to_string() });
     }
@@ -882,6 +894,14 @@ impl Message<SellItemRequest> for WorldActor {
                 list.pop();
             }
             send_sell_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count, true);
+            // 完整 UserInformation 刷新（背包 + 金币）
+            if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
+                let packet = super::build_user_information_packet(&new_state, &self.item_infos);
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: packet,
+                }).await;
+            }
             debug!("SellItem: {} sold item={} x{} for {} gold", state.name, item_data.item_index, msg.count, total_gold);
         }
     }
@@ -1447,3 +1467,4 @@ impl Message<DisassembleItemRequest> for WorldActor {
         debug!("DisassembleItem: {} disassembled {} into {} x{}", state.name, item_name, mat_name, mat_count);
     }
 }
+

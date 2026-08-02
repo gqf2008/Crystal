@@ -72,7 +72,7 @@ async fn recv_packet(stream: &mut TcpStream) -> (i16, Vec<u8>) {
 /// 启动服务器并返回端口。
 async fn start_server() -> u16 {
     let port = find_free_port();
-    let gate_ref = GateActor::spawn(());
+    let gate_ref = GateActor::spawn_with_mailbox((), kameo::mailbox::unbounded());
     let _ = gate_ref.ask(SetMaxConnections(1024)).await;
 
     tokio::spawn(async move {
@@ -85,7 +85,7 @@ async fn start_server() -> u16 {
 /// 启动带 AccountActor 的服务器(支持 Login 流程)。
 async fn start_server_with_login() -> u16 {
     let port = find_free_port();
-    let gate_ref = GateActor::spawn(());
+    let gate_ref = GateActor::spawn_with_mailbox((), kameo::mailbox::unbounded());
     let _ = gate_ref.ask(SetMaxConnections(1024)).await;
 
     // AccountActor + in-memory DB
@@ -104,7 +104,7 @@ async fn start_server_with_login() -> u16 {
 /// 需要 Daneo1989/ 目录(地图 + 任务文件)。
 async fn start_server_with_world() -> u16 {
     let port = find_free_port();
-    let gate_ref = GateActor::spawn(());
+    let gate_ref = GateActor::spawn_with_mailbox((), kameo::mailbox::unbounded());
     let _ = gate_ref.ask(SetMaxConnections(1024)).await;
 
     let db_pool = db::init_db_pool("sqlite:data/crystal.db").await.expect("init_db");

@@ -27,9 +27,12 @@ impl Message<NPCCallRequest> for WorldActor {
         // 获取玩家状态
         let player_state = match record.actor_ref.ask(GetPlayerState).await {
             Ok(Some(s)) => s,
-            _ => return,
+            Ok(None) => return,
+            Err(_) => return,
         };
-        if player_state.is_dead { return; }
+        if player_state.is_dead {
+            return;
+        }
         let player_pos = (player_state.x, player_state.y);
 
         // 查找对应的 NPC
@@ -106,6 +109,9 @@ impl Message<NPCCallRequest> for WorldActor {
         }
 
         debug!("Player called NPC '{}' (#{}) with key='{}'", npc.name, msg.npc_object_id, msg.key);
+
+        // 记录会话当前 NPC（BuyItem 等包不含 npc_id，按会话解析）
+        self.session_npc.insert(msg.session_id, npc.object_id);
 
         // 优先使用 DB 脚本（支持 GOTO 跳转）
         let mut dialog_lines = Vec::new();
@@ -248,6 +254,7 @@ impl Message<NPCCallRequest> for WorldActor {
             }
         }
 
+        debug!("Send NPCResponse {} lines", dialog_lines.len());
         let mut body = Vec::new();
         body.extend_from_slice(&(dialog_lines.len() as i32).to_le_bytes());
         for line in &dialog_lines {

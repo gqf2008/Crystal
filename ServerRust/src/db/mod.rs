@@ -988,7 +988,9 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         None => return Ok(None),
     };
 
-    let inventory = load_inventory(pool, character_name).await?;
+    let mut inventory = load_inventory(pool, character_name).await?;
+    // 金币持久化：load_inventory 不读 gold，这里从 characters.gold 恢复
+    inventory.gold = row.get::<i64, _>("gold").max(0) as u64;
     let friend_list = load_friends(pool, character_name).await?;
     let mailbox = load_mail(pool, character_name).await?;
     let quest_log = load_quests(pool, character_name).await?;
@@ -2528,8 +2530,9 @@ pub async fn load_npc_goods(pool: &DbPool) -> anyhow::Result<HashMap<i32, Vec<Np
     let mut map: HashMap<i32, Vec<NpcGoodsInfo>> = HashMap::new();
     for r in rows {
         let npc_index: i32 = r.get("npc_index");
-        let stock: i32 = r.try_get("stock").unwrap_or(0);
-        let infinite: i32 = r.try_get("infinite_stock").unwrap_or(0);
+        // 老库没有 stock/infinite_stock 列：NPC 商店默认无限库存（C# 语义）
+        let stock: i32 = r.try_get("stock").unwrap_or(i32::MAX);
+        let infinite: i32 = r.try_get("infinite_stock").unwrap_or(1);
         let entry = NpcGoodsInfo {
             npc_index,
             item_index: r.get("item_index"),
@@ -3338,3 +3341,5 @@ mod tests {
         assert!(loaded.is_empty());
     }
 }
+
+

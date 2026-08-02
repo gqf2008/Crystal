@@ -11,6 +11,14 @@ x = 330
 y = 332
 direction = 4  # Down
 
+[[npcs]]
+name = "GM_Potion"
+image = 5
+x = 332
+y = 332
+direction = 4  # Down
+db_index = 266  # 商店（药水/材料）
+
 [[monsters]]
 name = "Chicken"
 image = 3  # Hen

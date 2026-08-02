@@ -152,7 +152,7 @@ fn load_spawn_config(map_name: &str, map_index: u16, spawn_dir: &Path) -> SpawnC
                         x: n.x,
                         y: n.y,
                         direction: n.direction,
-                        db_index: 0,
+                        db_index: n.db_index,
                     }).collect(),
                     monsters: raw.monsters.into_iter().map(|m| MonsterSpawn {
                         name: m.name,
@@ -252,6 +252,9 @@ struct RawNpc {
     y: i32,
     #[serde(default = "default_direction")]
     direction: u8,
+    /// NPC 数据库索引（对应 npc_infos，商店商品/脚本用；TOML 刷怪配置可选）
+    #[serde(default)]
+    db_index: i32,
 }
 
 #[derive(serde::Deserialize)]
@@ -712,6 +715,8 @@ pub struct WorldActor {
     pub(crate) npc_infos: HashMap<i32, db::NPCInfo>,
     /// 游戏配置：NPC 商品（npc_index -> goods list）
     pub(crate) npc_goods: HashMap<i32, Vec<db::NpcGoodsInfo>>,
+    /// 会话当前对话的 NPC（BuyItem 用，客户端协议不含 npc_id）
+    pub(crate) session_npc: HashMap<u64, u32>,
     /// 游戏配置：NPC 脚本 ((npc_index, page_name) -> lines)
     pub(crate) npc_scripts: HashMap<(i32, String), Vec<String>>,
     /// 游戏配置：任务信息
@@ -839,6 +844,7 @@ impl WorldActor {
             monster_drops: HashMap::new(),
             npc_infos: HashMap::new(),
             npc_goods: HashMap::new(),
+            session_npc: HashMap::new(),
             npc_scripts: HashMap::new(),
             quest_infos: HashMap::new(),
             magic_infos: HashMap::new(),
@@ -1023,19 +1029,9 @@ impl WorldActor {
                 count: good.count as u16,
                 ..Default::default()
             };
-            // 填充物品信息（客户端商店列表需要名称/价格/图标）
+            // 填充物品信息（客户端商店列表需要名称/价格/图标/类型；枚举需 C#→SharedRust +3）
+            enrich_item_info(&mut item, &self.item_infos);
             if let Some(info) = self.item_infos.get(&good.item_index) {
-                item.info = Some(mir2_shared::data::item::ItemInfo {
-                    index: info.index,
-                    name: info.name.clone(),
-                    shape: info.shape as i16,
-                    weight: info.weight as u8,
-                    image: info.image as u16,
-                    durability: info.durability as u16,
-                    price: info.price,
-                    stack_size: info.stack_size as u16,
-                    ..Default::default()
-                });
                 item.max_dura = info.durability as u16;
                 item.current_dura = info.durability as u16;
             }
@@ -1054,10 +1050,11 @@ impl WorldActor {
             warn!("Failed to serialize NPCGoods: {}", e);
             return;
         }
-        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCGoods as i16, &body);
+
+        // serialize_packet 已写入完整内层包头（length+opcode），不能再用 build_packet_bytes 二次包装
         let _ = self.gate_ref.tell(SendToClient {
             session_id,
-            data: packet,
+            data: body,
         }).try_send();
         debug!("Sent {} goods from NPC '{}' (rate={}) to session {}", goods.len(), npc.name, rate, session_id);
     }
@@ -1076,10 +1073,9 @@ impl WorldActor {
             warn!("Failed to serialize NPCGoods panel: {}", e);
             return;
         }
-        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCGoods as i16, &body);
         let _ = self.gate_ref.tell(SendToClient {
             session_id,
-            data: packet,
+            data: body,
         }).try_send();
         debug!("Sent NPC panel {:?} to session {}", panel_type, session_id);
     }
@@ -1096,10 +1092,9 @@ impl WorldActor {
             warn!("Failed to serialize UserStorage: {}", e);
             return;
         }
-        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserStorage as i16, &body);
         let _ = self.gate_ref.tell(SendToClient {
             session_id,
-            data: packet,
+            data: body,
         }).try_send();
         debug!("Sent UserStorage to session {}", session_id);
     }
@@ -2906,6 +2901,7 @@ impl Actor for WorldActor {
             monster_drops,
             npc_infos,
             npc_goods,
+            session_npc: HashMap::new(),
             npc_scripts,
             quest_infos,
             magic_infos,
@@ -3426,7 +3422,7 @@ fn send_remove_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, gr
 fn send_drop_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, uid: u64, count: u32, success: bool) {
     let mut body = Vec::new();
     body.extend_from_slice(&uid.to_le_bytes());
-    body.extend_from_slice(&count.to_le_bytes());
+    body.extend_from_slice(&count.to_le_bytes()); // DropItem 包：count 是 u32
     body.push(if success { 1u8 } else { 0u8 });
     let _ = gate_ref.tell(SendToClient {
         session_id,
@@ -3451,7 +3447,7 @@ fn send_split_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, gri
     let mut body = Vec::new();
     body.push(grid);
     body.extend_from_slice(&uid.to_le_bytes());
-    body.extend_from_slice(&count.to_le_bytes());
+    body.extend_from_slice(&(count as u16).to_le_bytes()); // SellItem 包：count 是 u16（与 SharedRust 一致）
     let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SplitItem as i16, &body),
@@ -3461,7 +3457,7 @@ fn send_split_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, gri
 fn send_sell_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, uid: u64, count: u32, success: bool) {
     let mut body = Vec::new();
     body.extend_from_slice(&uid.to_le_bytes());
-    body.extend_from_slice(&count.to_le_bytes());
+    body.extend_from_slice(&(count as u16).to_le_bytes()); // SellItem 包：count 是 u16（与 SharedRust 一致）
     body.push(if success { 1u8 } else { 0u8 });
     let _ = gate_ref.tell(SendToClient {
         session_id,
@@ -4377,3 +4373,4 @@ mod tests {
 
 #[cfg(test)]
 mod e2e;
+
