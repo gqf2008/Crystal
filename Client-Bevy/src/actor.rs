@@ -19,7 +19,11 @@ use mir2_shared::{MirAction, MirClass, MirDirection, MirGender};
 
 use std::collections::HashMap;
 
+use bevy::sprite::Anchor;
+
 use crate::map_renderer::{make_image, GameData, GameLibraries, TILE_HEIGHT, TILE_WIDTH};
+use crate::resources::libraries::LibraryName;
+use crate::ui::sprite_ui::{UiFont, UiImageCache};
 use crate::network::{NetObject, NetObjects};
 use crate::objects::frames::{get_default_npc_frame, get_monster_frame, get_player_frame, Frame};
 use crate::resources::libraries::ArrayLibType;
@@ -83,6 +87,12 @@ pub struct LocalPlayer;
 /// 服务器对象 ID（ObjectRemove 用它删除实体）
 #[derive(Component, Clone, Copy)]
 pub struct NetObjectId(pub u32);
+
+/// 地面物品（ObjectItem）：世界坐标精灵，随 ObjectRemove 清除
+#[derive(Component)]
+pub struct GroundItem {
+    pub name: String,
+}
 
 /// 动画状态（动作/朝向/当前帧）
 #[derive(Component)]
@@ -296,6 +306,11 @@ fn spawn_net_objects_when_ready(
     data: Res<GameData>,
     mut net_objects: ResMut<NetObjects>,
     net: Res<crate::network::NetworkContext>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    mut fonts: ResMut<Assets<Font>>,
+    mut ui_font: ResMut<UiFont>,
 ) {
     if data.map.is_none() {
         return;
@@ -320,7 +335,26 @@ fn spawn_net_objects_when_ready(
             }
             _ => false,
         };
-        spawn_net_object_entity(&mut commands, obj, is_local);
+        match obj {
+            NetObject::GroundItem {
+                object_id,
+                item,
+                location_x,
+                location_y,
+            } => spawn_ground_item(
+                &mut commands,
+                &mut libs,
+                &mut images,
+                &mut cache,
+                &mut fonts,
+                &mut ui_font,
+                item,
+                *location_x,
+                *location_y,
+                *object_id,
+            ),
+            _ => spawn_net_object_entity(&mut commands, obj, is_local),
+        }
     }
     tracing::info!("🌐 网络对象生成完成: {} 个", pending.len());
 }
@@ -346,11 +380,12 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
             armour,
             wing_effect,
         } => {
+            // 注意：世界坐标 y 向下取负（与地图/怪物/NPC 一致），此前玩家未取负导致镜像位置
             let e = if is_local_player {
                 spawn_local_player_with(
                     commands,
                     wx(*location_x),
-                    wy(*location_y),
+                    -wy(*location_y),
                     *class,
                     *gender,
                     *armour,
@@ -364,7 +399,7 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
                 spawn_remote_player_with(
                     commands,
                     wx(*location_x),
-                    wy(*location_y),
+                    -wy(*location_y),
                     *class,
                     *gender,
                     *armour,
@@ -411,6 +446,69 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
             );
             commands.entity(e).insert(NetObjectId(*object_id));
         }
+        // 地面物品在 spawn_net_objects_when_ready 中带资源生成，此处不处理
+        NetObject::GroundItem { .. } => {}
+    }
+}
+
+/// 生成地面物品实体：Items 库图标 + 名称标签（原版 C# ItemObject 地面渲染）
+fn spawn_ground_item(
+    commands: &mut Commands,
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    cache: &mut UiImageCache,
+    fonts: &mut Assets<Font>,
+    ui_font: &mut UiFont,
+    item: &crate::game::dialogs::inventory::InvItem,
+    tx: i32,
+    ty: i32,
+    object_id: u32,
+) {
+    libs.0.ensure_initialized();
+    if !ui_font.0.is_strong() {
+        ui_font.0 = crate::ui::sprite_ui::load_ui_font(fonts);
+    }
+    let font = ui_font.0.clone();
+    let wx = tx as f32 * TILE_WIDTH + TILE_WIDTH / 2.0;
+    let wy = ty as f32 * TILE_HEIGHT + TILE_HEIGHT;
+    let z = depth_z(wy);
+    let e = commands
+        .spawn((
+            GroundItem {
+                name: item.name.clone(),
+            },
+            NetObjectId(object_id),
+            Transform::from_xyz(wx, -wy + 8.0, z),
+            Visibility::default(),
+        ))
+        .id();
+    if let Some(h) = crate::ui::sprite_ui::ui_image(
+        libs,
+        images,
+        cache,
+        LibraryName::Items,
+        item.image as usize,
+    ) {
+        commands.entity(e).with_children(|p| {
+            // 物品图标（原版 ItemObject.Draw 用 Items 库帧）
+            p.spawn((
+                Sprite::from_image(h),
+                Anchor::CENTER,
+                Transform::from_xyz(0.0, 0.0, 0.1),
+            ));
+            // 名称标签（白字，图标上方）
+            p.spawn((
+                Text2d::new(item.name.clone()),
+                Anchor::TOP_LEFT,
+                TextFont {
+                    font: FontSource::Handle(font),
+                    font_size: FontSize::Px(10.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                Transform::from_xyz(-22.0, -22.0, 0.2),
+            ));
+        });
     }
 }
 

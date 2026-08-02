@@ -141,6 +141,17 @@
 ---
 
 
+### M16: 地面物品渲染 + 拾取（2026-08-03 完成）
+- [x] **ObjectItem 携带 ItemInfo**：SharedRust ObjectItem 改 write_to_with_info/read_from_with_info，服务端掉落广播前补 ItemInfo（DB 配置 → SharedRust 枚举 +3），客户端渲染图标/名称
+- [x] **地面物品实体**：NetObject::GroundItem → Items 库图标 + 名称标签（世界坐标），随 ObjectRemove 清除
+- [x] **点击拾取**：点击地面物品 → 邻近（1 格）直接发 PickUp，远距离寻路后自动拾取（原版 C# ItemObject）
+- [x] **拾取后完整 UserInformation 刷新**：服务端 PickUp 成功后发完整背包刷新（客户端立即显示物品回包）
+- [x] **修复玩家实体渲染（预存 bug）**：
+  - 服务端 ObjectPlayer 的 effect 写 0 但 SharedRust SpellEffect::None=3 → 玩家包永远解析失败（本地/远端玩家从未渲染）
+  - 服务端向新玩家补发自身 ObjectPlayer（客户端据此生成本地玩家实体）
+  - 客户端玩家生成未取负 y → 玩家在世界镜像位置（本地玩家实体一直存在但位置错误）
+- [x] 验证：真实 ServerRust E2E——丢弃（确认框）→ ObjectItem 解析/地面实体生成 → 点击 → PickUp → 背包刷新 1 件 → DB 落库
+
 ---
 
 ## 四、执行顺序与依赖

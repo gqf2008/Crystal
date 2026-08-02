@@ -246,6 +246,13 @@ pub enum NetObject {
         location_y: i32,
         direction: u8,
     },
+    /// 地面物品（ObjectItem）
+    GroundItem {
+        object_id: u32,
+        item: InvItem,
+        location_x: i32,
+        location_y: i32,
+    },
 }
 
 #[derive(Resource, Default)]
@@ -584,7 +591,8 @@ fn handle_packet(
             }
         }
         x if x == ServerPacketIds::ObjectPlayer as i16 => {
-            if let Ok(p) = objects::ObjectPlayer::read_body(&mut cur) {
+            match objects::ObjectPlayer::read_body(&mut cur) {
+            Ok(p) => {
                 net_objects.pending.push(NetObject::Player {
                     object_id: p.object_id,
                     name: p.name,
@@ -599,6 +607,10 @@ fn handle_packet(
                     armour: p.armour,
                     wing_effect: p.wing_effect,
                 });
+            }
+            Err(e) => {
+                tracing::warn!("⚠️ ObjectPlayer 解析失败: {} (len={})", e, payload.len());
+            }
             }
         }
         x if x == ServerPacketIds::ObjectMonster as i16 => {
@@ -629,6 +641,32 @@ fn handle_packet(
             if let Ok(p) = objects::ObjectRemove::read_body(&mut cur) {
                 tracing::debug!("🗑️ ObjectRemove id={}", p.object_id);
                 net_objects.to_remove.push(p.object_id);
+            }
+        }
+        x if x == ServerPacketIds::ObjectItem as i16 => {
+            match drops::ObjectItem::read_body(&mut cur) {
+            Ok(p) => {
+                let name = p
+                    .item
+                    .info
+                    .as_ref()
+                    .map(|i| i.name.clone())
+                    .unwrap_or_else(|| format!("#{}", p.item.item_index));
+                tracing::info!(
+                    "📦 地面物品: {} (uid={}) @ ({},{})",
+                    name,
+                    p.item.unique_id,
+                    p.location_x,
+                    p.location_y
+                );
+                net_objects.pending.push(NetObject::GroundItem {
+                    object_id: p.object_id,
+                    item: to_inv_item(&p.item),
+                    location_x: p.location_x,
+                    location_y: p.location_y,
+                });
+            }
+            Err(e) => tracing::warn!("⚠️ ObjectItem 解析失败: {} (len={})", e, payload.len()),
             }
         }
         // ---- M8: 玩家状态 ----

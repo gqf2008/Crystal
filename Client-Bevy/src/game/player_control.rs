@@ -9,7 +9,7 @@
 
 use bevy::prelude::*;
 
-use crate::actor::{ActorAnim, ActorAppearance, LocalPlayer, NetObjectId};
+use crate::actor::{ActorAnim, ActorAppearance, GroundItem, LocalPlayer, NetObjectId};
 use crate::game::movement::{direction_from_delta, world_to_tile, LocalMove};
 use crate::game::pathfinding;
 use crate::map_renderer::{GameData, GameLibraries};
@@ -27,6 +27,8 @@ pub struct ControlState {
     pub last_attack: f32,
     /// 攻击间隔（原版 AttackTime 约 1 秒）
     pub attack_interval: f32,
+    /// 待拾取的地面物品 object_id（寻路到达后自动 PickUp）
+    pub pickup_target: Option<u32>,
 }
 
 impl Default for ControlState {
@@ -36,6 +38,7 @@ impl Default for ControlState {
             attack_target: None,
             last_attack: 0.0,
             attack_interval: 1.0,
+            pickup_target: None,
         }
     }
 }
@@ -46,7 +49,8 @@ impl Plugin for PlayerControlPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (player_input_system, auto_attack_system).run_if(in_state(AppState::Game)),
+            (player_input_system, auto_attack_system, pickup_arrival_system)
+                .run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -81,9 +85,10 @@ fn player_input_system(
     camera: Query<&Transform, (With<Camera2d>, Without<UiButton>, Without<crate::ui::sprite_ui::UiEntity>)>,
     players: Query<
         (Entity, &Transform, &mut ActorAnim),
-        (With<LocalPlayer>, Without<NetObjectId>),
+        (With<LocalPlayer>, With<NetObjectId>),
     >,
     actors: Query<(&NetObjectId, &Transform, &ActorAppearance)>,
+    items: Query<(&NetObjectId, &Transform), (With<GroundItem>, Without<LocalPlayer>)>,
     buttons: Query<&UiButton>,
     // 物品选中/弹窗打开时屏蔽世界左键点击（原版 C# SelectedCell/Modal）
     click: Res<crate::game::dialogs::inventory::InvClickState>,
@@ -158,6 +163,53 @@ fn player_input_system(
             let _ = app;
         }
         tracing::debug!("🎯 命中候选: {:?}", best);
+        // 地面物品命中（原版 C# ItemObject：点击物品 → 邻近拾取 / 远距离走过去拾取）
+        let mut best_item: Option<(u32, f32)> = None;
+        for (id, tf) in &items {
+            let d1 = Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length();
+            let d2 = Vec2::new(tf.translation.x - world_logical.x, tf.translation.y - world_logical.y).length();
+            let dist = d1.min(d2);
+            if dist < 45.0 && best_item.map(|(_, d)| dist < d).unwrap_or(true) {
+                best_item = Some((id.0, dist));
+            }
+        }
+        if let Some((item_id, item_d)) = best_item {
+            let actor_d = best.map(|(_, d)| d);
+            if actor_d.map(|d| item_d < d).unwrap_or(true) {
+                let Ok((pe, ptf, _)) = players.single() else { return };
+                let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
+                let item_tile = items
+                    .iter()
+                    .find(|(id, _)| id.0 == item_id)
+                    .map(|(_, tf)| world_to_tile(tf.translation.x, tf.translation.y));
+                if let Some(item_tile) = item_tile {
+                    let adjacent = (item_tile.0 - from_tile.0).abs() <= 1
+                        && (item_tile.1 - from_tile.1).abs() <= 1;
+                    if adjacent {
+                        net.send_packet(&mir2_shared::packets::client::item::PickUp {});
+                        control.attack_target = None;
+                        tracing::info!("🎒 拾取地面物品 id={}", item_id);
+                    } else if let Some(map) = &game_data.map {
+                        if let Some(p) = pathfinding::find_path(map, from_tile, item_tile) {
+                            if p.is_empty() {
+                                tracing::debug!("🚫 物品不可达: {:?}", item_tile);
+                            } else {
+                                let len = p.len();
+                                commands.entity(pe).insert(LocalMove {
+                                    path: p.into(),
+                                    step_timer_ms: 0.0,
+                                    run: control.autorun,
+                                });
+                                control.attack_target = None;
+                                control.pickup_target = Some(item_id);
+                                tracing::info!("🚶 走向物品 id={}（{} 格）", item_id, len);
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+        }
         if let Some((object_id, _)) = best {
             // 区分 NPC 与怪物/玩家
             let is_npc = actors
@@ -187,6 +239,37 @@ fn player_input_system(
     let _ = &mut libs;
 }
 
+/// 拾取到达：寻路结束后自动 PickUp（原版 C# 点击物品 → 移动 → 拾取）
+fn pickup_arrival_system(
+    mut control: ResMut<ControlState>,
+    net: Res<NetworkContext>,
+    items: Query<(&NetObjectId, &Transform), (With<GroundItem>, Without<LocalPlayer>)>,
+    players: Query<(&Transform, Option<&LocalMove>), (With<LocalPlayer>, With<NetObjectId>)>,
+) {
+    let Some(target) = control.pickup_target else { return };
+    // 物品已消失（被拾取/过期）→ 清除目标
+    let Some((_, item_tf)) = items.iter().find(|(id, _)| id.0 == target) else {
+        control.pickup_target = None;
+        return;
+    };
+    let Ok((player_tf, lm)) = players.single() else { return };
+    // 仍在移动中（路径未走完）
+    if let Some(lm) = lm {
+        if !lm.path.is_empty() {
+            return;
+        }
+    } else {
+        return;
+    }
+    let item_tile = world_to_tile(item_tf.translation.x, item_tf.translation.y);
+    let player_tile = world_to_tile(player_tf.translation.x, player_tf.translation.y);
+    if (item_tile.0 - player_tile.0).abs() <= 1 && (item_tile.1 - player_tile.1).abs() <= 1 {
+        net.send_packet(&mir2_shared::packets::client::item::PickUp {});
+        tracing::info!("🎒 到达后拾取物品 id={}", target);
+    }
+    control.pickup_target = None;
+}
+
 /// 自动攻击（目标存在且存活时循环攻击）
 fn auto_attack_system(
     mut commands: Commands,
@@ -195,7 +278,7 @@ fn auto_attack_system(
     net: Res<NetworkContext>,
     sound_bank: Res<crate::game::sound::SoundBank>,
     mut audio_assets: ResMut<Assets<AudioSource>>,
-    players: Query<&Transform, (With<LocalPlayer>, Without<NetObjectId>)>,
+    players: Query<&Transform, (With<LocalPlayer>, With<NetObjectId>)>,
     actors: Query<(&NetObjectId, &Transform)>,
 ) {
     control.last_attack += time.delta_secs();
