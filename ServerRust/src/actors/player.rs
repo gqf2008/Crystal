@@ -1567,9 +1567,9 @@ impl Message<InventoryMergeItem> for PlayerActor {
     }
 }
 
-/// 拆分物品
+/// 拆分物品（按 unique_id 定位原格）
 pub struct InventorySplitItem {
-    pub grid: u8,
+    pub unique_id: u64,
     pub count: u16,
 }
 
@@ -1577,7 +1577,43 @@ impl Message<InventorySplitItem> for PlayerActor {
     type Reply = bool;
 
     async fn handle(&mut self, msg: InventorySplitItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        let success = self.state.inventory.split_item(msg.grid, msg.count);
+        let success = self.state.inventory.split_item_by_uid(msg.unique_id, msg.count);
+        if success {
+            self.send_inventory_changed();
+        }
+        success
+    }
+}
+
+/// 丢弃物品（支持部分数量）
+pub struct DropInventoryItem {
+    pub unique_id: u64,
+    pub count: u16,
+}
+
+impl Message<DropInventoryItem> for PlayerActor {
+    type Reply = Option<mir2_shared::data::item::UserItem>;
+
+    async fn handle(&mut self, msg: DropInventoryItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let item = self.state.inventory.remove_item_by_uid_partial(msg.unique_id, msg.count);
+        if item.is_some() {
+            self.send_inventory_changed();
+        }
+        item
+    }
+}
+
+/// 按 unique_id 合并物品
+pub struct MergeInventoryItemByUid {
+    pub from_uid: u64,
+    pub to_uid: u64,
+}
+
+impl Message<MergeInventoryItemByUid> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: MergeInventoryItemByUid, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let success = self.state.inventory.merge_item_by_uid(msg.from_uid, msg.to_uid);
         if success {
             self.send_inventory_changed();
         }
@@ -2844,7 +2880,8 @@ impl PlayerActor {
         body.extend_from_slice(&self.state.max_experience.to_le_bytes()); // max_experience
         body.extend_from_slice(&0u16.to_le_bytes());                    // level_effects
         body.push(if self.state.hero_index > 0 { 1u8 } else { 0u8 });  // has_hero
-        body.push(self.state.hero_behaviour);                           // hero_behaviour
+        // C# HeroBehaviour(0..3) → SharedRust(3..6)，与 build_user_information_packet 一致
+        body.push(self.state.hero_behaviour.saturating_add(3));             // hero_behaviour
 
         // 背包/装备数据（简化版：不发送完整物品，客户端通过 ItemChanged 等增量包更新）
         body.push(0u8);                                                 // has_inventory=false
@@ -2859,6 +2896,7 @@ impl PlayerActor {
         body.push(0u8);                                                 // summoned_creature_type
         body.push(0u8);                                                 // creature_summoned=false
         body.push(0u8);                                                 // allow_observe=false
+        body.push(0u8);                                                 // observer=false
 
         let _ = self.gate_ref.tell(SendToClient {
             session_id: self.state.session_id,

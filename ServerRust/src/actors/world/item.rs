@@ -536,18 +536,19 @@ impl Message<DropItemRequest> for WorldActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: DropItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        let record = match self.players.get(&msg.session_id) {
-            Some(r) => r,
-            None => return,
+        let actor_ref = match self.players.get(&msg.session_id) {            Some(r) => r.actor_ref.clone(),            None => return,
         };
 
-        let state = match record.actor_ref.ask(GetPlayerState).await {
+        let state = match actor_ref.ask(GetPlayerState).await {
             Ok(Some(s)) => s,
             _ => return,
         };
         if state.is_dead { return; }
 
-        let item = record.actor_ref.ask(RemoveItemFromInventory { unique_id: msg.unique_id }).await.unwrap_or(None);
+        let item = actor_ref.ask(DropInventoryItem {
+            unique_id: msg.unique_id,
+            count: msg.count,
+        }).await.unwrap_or(None);
         if let Some(item) = item {
             let player_pos = (state.x, state.y);
 
@@ -580,6 +581,15 @@ impl Message<DropItemRequest> for WorldActor {
             });
 
             send_drop_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count as u32, true);
+            // 完整 UserInformation 刷新（含背包/装备，客户端按权威状态重建）
+            // 注意：build_user_information_packet 已含包头发送帧，直接 SendToClient
+            if let Ok(Some(state)) = actor_ref.ask(GetPlayerState).await {
+                let packet = super::build_user_information_packet(&state, &self.item_infos);
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: packet,
+                }).await;
+            }
         }
     }
 }
@@ -588,18 +598,25 @@ impl Message<MergeItemRequest> for WorldActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: MergeItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        let record = match self.players.get(&msg.session_id) {
-            Some(r) => r,
-            None => return,
+        let actor_ref = match self.players.get(&msg.session_id) {            Some(r) => r.actor_ref.clone(),            None => return,
         };
 
-        let success = record.actor_ref.ask(InventoryMergeItem {
-            from_grid: msg.grid_from,
-            to_grid: msg.grid_to,
+        let success = actor_ref.ask(MergeInventoryItemByUid {
+            from_uid: msg.from_uid,
+            to_uid: msg.to_uid,
         }).await.unwrap_or(false);
 
         if success {
             send_merge_item_response(&self.gate_ref, msg.session_id, msg.grid_from, msg.grid_to, msg.from_uid, msg.to_uid, true);
+            // 完整 UserInformation 刷新（含背包/装备，客户端按权威状态重建）
+            // 注意：build_user_information_packet 已含包头发送帧，直接 SendToClient
+            if let Ok(Some(state)) = actor_ref.ask(GetPlayerState).await {
+                let packet = super::build_user_information_packet(&state, &self.item_infos);
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: packet,
+                }).await;
+            }
         }
     }
 }
@@ -608,18 +625,25 @@ impl Message<SplitItemRequest> for WorldActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: SplitItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        let record = match self.players.get(&msg.session_id) {
-            Some(r) => r,
-            None => return,
+        let actor_ref = match self.players.get(&msg.session_id) {            Some(r) => r.actor_ref.clone(),            None => return,
         };
 
-        let success = record.actor_ref.ask(InventorySplitItem {
-            grid: msg.grid,
+        let success = actor_ref.ask(InventorySplitItem {
+            unique_id: msg.unique_id,
             count: msg.count as u16,
         }).await.unwrap_or(false);
 
         if success {
             send_split_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, msg.count);
+            // 完整 UserInformation 刷新（含背包/装备，客户端按权威状态重建）
+            // 注意：build_user_information_packet 已含包头发送帧，直接 SendToClient
+            if let Ok(Some(state)) = actor_ref.ask(GetPlayerState).await {
+                let packet = super::build_user_information_packet(&state, &self.item_infos);
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: packet,
+                }).await;
+            }
         }
     }
 }

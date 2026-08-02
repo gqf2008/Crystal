@@ -310,6 +310,104 @@ impl PlayerInventory {
         true
     }
 
+
+    /// 按 unique_id 拆分物品：从 uid 所在格拆出 count 数量到空位
+    pub fn split_item_by_uid(&mut self, uid: u64, count: u16) -> bool {
+        let mut src_idx = None;
+        for (i, slot) in self.backpack.iter().enumerate() {
+            if let Some(s) = slot {
+                if s.item.unique_id == uid && s.item.count > 1 && count > 0 && count < s.item.count {
+                    src_idx = Some(i);
+                    break;
+                }
+            }
+        }
+        let Some(idx) = src_idx else { return false; };
+        let item_data = match &self.backpack[idx] {
+            Some(s) => s.item.clone(),
+            None => return false,
+        };
+        let mut new_grid = None;
+        for g in 0..BACKPACK_SIZE {
+            if self.backpack[g].is_none() && g != idx {
+                new_grid = Some(g);
+                break;
+            }
+        }
+        let Some(new_grid) = new_grid else { return false; };
+        if let Some(s) = &mut self.backpack[idx] {
+            s.item.count -= count;
+        }
+        let mut new_item = item_data;
+        new_item.count = count;
+        new_item.unique_id = self.next_unique_id();
+        self.backpack[new_grid] = Some(InventorySlot {
+            grid: new_grid as u8,
+            item: new_item,
+        });
+        true
+    }
+
+    /// 按 unique_id 移除 count 数量（count >= 原数量时移除整叠），返回被移除的物品
+    pub fn remove_item_by_uid_partial(&mut self, uid: u64, count: u16) -> Option<UserItem> {
+        for slot in &mut self.backpack {
+            if let Some(s) = slot {
+                if s.item.unique_id != uid {
+                    continue;
+                }
+                if count >= s.item.count {
+                    return slot.take().map(|s| s.item);
+                }
+                let mut removed = s.item.clone();
+                removed.count = count;
+                s.item.count -= count;
+                return Some(removed);
+            }
+        }
+        None
+    }
+
+    /// 按 unique_id 合并：from_uid 整叠合并到 to_uid 叠（同物品且不超堆叠上限）
+    pub fn merge_item_by_uid(&mut self, from_uid: u64, to_uid: u64) -> bool {
+        let mut from_idx = None;
+        let mut to_idx = None;
+        for (i, slot) in self.backpack.iter().enumerate() {
+            if let Some(s) = slot {
+                if s.item.unique_id == from_uid {
+                    from_idx = Some(i);
+                }
+                if s.item.unique_id == to_uid {
+                    to_idx = Some(i);
+                }
+            }
+        }
+        let (fi, ti) = match (from_idx, to_idx) {
+            (Some(f), Some(t)) if f != t => (f, t),
+            _ => return false,
+        };
+        let from_item = match &self.backpack[fi] {
+            Some(s) => s.item.clone(),
+            None => return false,
+        };
+        let to_item = match &self.backpack[ti] {
+            Some(s) => s.item.clone(),
+            None => return false,
+        };
+        if from_item.item_index != to_item.item_index {
+            return false;
+        }
+        let max_stack = to_item.max_dura.max(1);
+        let new_count = from_item.count as u32 + to_item.count as u32;
+        if new_count > max_stack as u32 {
+            return false;
+        }
+        if let Some(s) = &mut self.backpack[ti] {
+            s.item.count = new_count as u16;
+        }
+        self.backpack[fi] = None;
+        true
+    }
+
     /// 检查背包是否有空位
     pub fn has_space(&self) -> bool {
         self.backpack.iter().any(|s| s.is_none())
