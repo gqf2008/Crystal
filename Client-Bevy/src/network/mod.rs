@@ -8,6 +8,7 @@ pub mod tcp;
 
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender};
+use std::path::Path;
 use mir2_shared::enums::ServerPacketIds;
 use mir2_shared::packets::base::{Packet, PacketHeader};
 use mir2_shared::SelectInfo;
@@ -30,15 +31,66 @@ pub enum NetworkMode {
     Real,
 }
 
+/// 从 config.ini 读取网络配置（ServerAddr / UseMock / 记住的账号）
+pub struct RuntimeConfig {
+    pub server_addr: String,
+    pub use_mock: bool,
+    pub saved_account: String,
+}
+
+pub fn load_runtime_config() -> RuntimeConfig {
+    let mut cfg = RuntimeConfig {
+        server_addr: "127.0.0.1:7000".to_string(),
+        use_mock: true,
+        saved_account: String::new(),
+    };
+    // config.ini 优先：工作目录，其次 crate 根
+    let mut content = std::fs::read_to_string("config.ini").ok();
+    if content.is_none() {
+        content = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("config.ini"),
+        )
+        .ok();
+    }
+    let Some(content) = content else { return cfg };
+    let mut section = String::new();
+    for raw in content.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_string();
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else { continue };
+        let key = k.trim();
+        let value = v.trim();
+        if section.eq_ignore_ascii_case("Network") {
+            if key.eq_ignore_ascii_case("ServerAddr") && !value.is_empty() {
+                cfg.server_addr = value.to_string();
+            } else if key.eq_ignore_ascii_case("UseMock") {
+                cfg.use_mock = matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "y" | "on");
+            }
+        } else if section.eq_ignore_ascii_case("Login") {
+            if key.eq_ignore_ascii_case("Account") {
+                cfg.saved_account = value.to_string();
+            }
+        }
+    }
+    cfg
+}
+
 /// 网络模式资源（Startup 时由命令行参数决定）
 #[derive(Resource)]
 pub struct NetMode(pub NetworkMode);
 
 /// 解析网络模式：--real-net [addr] 走真实 TCP；--mock 强制 mock（默认）
 fn resolve_net_mode() -> (NetworkMode, String) {
+    let runtime = load_runtime_config();
     let args: Vec<String> = std::env::args().collect();
-    let mut addr = "127.0.0.1:7000".to_string();
-    let mut real = false;
+    let mut addr = runtime.server_addr.clone();
+    let mut real = !runtime.use_mock;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
