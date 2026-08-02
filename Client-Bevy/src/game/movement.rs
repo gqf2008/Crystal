@@ -300,3 +300,25 @@ fn advance_local_move(
     anim.direction = dir as u8;
     anim.frame_index = 0;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tile_world_roundtrip() {
+        for (tx, ty) in [(0i32, 0i32), (5, 3), (100, 200)] {
+            let w = tile_to_world(tx, ty);
+            let (back_tx, back_ty) = world_to_tile(w.x, w.y);
+            assert_eq!((back_tx, back_ty), (tx, ty), "roundtrip ({},{})", tx, ty);
+        }
+    }
+
+    #[test]
+    fn test_direction_from_delta() {
+        assert_eq!(direction_from_delta(0, -1), Some(MirDirection::Up));
+        assert_eq!(direction_from_delta(1, 1), Some(MirDirection::DownRight));
+        assert_eq!(direction_from_delta(-1, 0), Some(MirDirection::Left));
+        assert_eq!(direction_from_delta(0, 0), None);
+    }
+}

@@ -108,3 +108,62 @@ pub fn find_path(map: &LoadedMap, from: (i32, i32), to: (i32, i32)) -> Option<Ve
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_map(w: i32, h: i32, obstacles: &[(i32, i32)]) -> LoadedMap {
+        let mut walkable = vec![vec![true; h as usize]; w as usize];
+        for (x, y) in obstacles {
+            walkable[*x as usize][*y as usize] = false;
+        }
+        LoadedMap {
+            name: "test".into(),
+            width: w,
+            height: h,
+            walkable,
+        }
+    }
+
+    #[test]
+    fn test_find_path_straight_line() {
+        let map = test_map(10, 10, &[]);
+        let path = find_path(&map, (0, 0), (5, 0)).unwrap();
+        assert_eq!(path.len(), 5);
+        assert_eq!(path.last(), Some(&(5, 0)));
+        // 每步只走一格
+        for pair in path.windows(2) {
+            let dx = (pair[1].0 - pair[0].0).abs();
+            let dy = (pair[1].1 - pair[0].1).abs();
+            assert!(dx <= 1 && dy <= 1 && dx + dy >= 1);
+        }
+    }
+
+    #[test]
+    fn test_find_path_around_obstacle() {
+        let map = test_map(10, 10, &[(5, 0), (5, 1), (5, 2)]);
+        let path = find_path(&map, (3, 0), (7, 0)).unwrap();
+        assert!(path.iter().all(|p| !map.is_walkable(p.0, p.1) == false));
+        assert_eq!(path.last(), Some(&(7, 0)));
+    }
+
+    #[test]
+    fn test_find_path_unreachable() {
+        let map = test_map(5, 5, &[]);
+        // 起点被墙围住
+        let mut blocked = vec![vec![true; 5]; 5];
+        for x in 0..5 {
+            blocked[2][x] = false;
+        }
+        let map2 = LoadedMap { name: "t".into(), width: 5, height: 5, walkable: blocked };
+        let _ = map;
+        assert!(find_path(&map2, (0, 2), (4, 2)).is_none());
+    }
+
+    #[test]
+    fn test_same_tile_returns_empty() {
+        let map = test_map(5, 5, &[]);
+        assert_eq!(find_path(&map, (2, 2), (2, 2)).unwrap().len(), 0);
+    }
+}

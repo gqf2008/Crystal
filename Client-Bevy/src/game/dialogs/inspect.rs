@@ -30,7 +30,7 @@ pub struct InspectClose;
 pub struct InspectName;
 
 #[derive(Component)]
-pub struct InspectItemLine(usize);
+pub struct InspectItemLine;
 
 pub struct InspectPlugin;
 
@@ -99,7 +99,7 @@ fn spawn_inspect(
             12.0, Color::WHITE, 8.2,
         );
         commands.entity(e).insert((
-            InspectItemLine(i),
+            InspectItemLine,
             DialogRoot(DialogKind::Inspect),
             InspectWidget,
         ));

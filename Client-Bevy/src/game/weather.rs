@@ -120,8 +120,8 @@ fn fastrand_f32() -> f32 {
     let seed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
-        .unwrap_or(0) as u32;
-    ((seed.wrapping_mul(1664525).wrapping_add(1013904223)) as f32 / u32::MAX as f32)
+        .unwrap_or(0);
+    (seed.wrapping_mul(1664525).wrapping_add(1013904223)) as f32 / u32::MAX as f32
 }
 
 /// 推进雨/雪粒子

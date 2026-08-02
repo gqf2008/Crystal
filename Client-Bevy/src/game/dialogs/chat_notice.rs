@@ -11,7 +11,7 @@ use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_image, UiEntity, UiFont, UiImageCache,
+    spawn_ui_sprite, spawn_ui_text, ui_image, UiFont, UiImageCache,
 };
 
 /// 屏幕通知状态（网络 ChatNotice 写入）

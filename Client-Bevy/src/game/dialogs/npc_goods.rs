@@ -14,7 +14,7 @@ use crate::network::NetworkContext;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
+    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont,
     UiImageCache,
 };
 

@@ -8,7 +8,7 @@ use bevy::prelude::*;
 
 use crate::actor::{ActorAnim, NetObjectId};
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{UiEntity, UiFont};
+use crate::ui::sprite_ui::UiFont;
 use bevy::sprite::Anchor;
 
 /// 服务器战斗事件（网络 handler 写入）
