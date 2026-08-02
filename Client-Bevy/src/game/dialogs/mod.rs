@@ -46,6 +46,7 @@ pub mod relationship;
 pub mod report;
 pub mod roll;
 pub mod socket;
+ pub mod storage;
 pub mod timer;
 pub mod trade;
 pub mod trust_merchant;
@@ -95,6 +96,7 @@ pub enum DialogKind {
     KeyboardLayout,
     BigMap,
     ChatNotice,
+    Storage,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）
@@ -182,6 +184,7 @@ impl Plugin for DialogsPlugin {
                 big_map::BigMapPlugin,
                 chat_notice::ChatNoticePlugin,
                 game_shop::GameShopPlugin,
+                storage::StoragePlugin,
             ),
         ));
     }

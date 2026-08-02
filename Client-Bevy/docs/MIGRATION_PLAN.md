@@ -168,6 +168,15 @@
 - [x] 验证：真实 ServerRust E2E（`--shop-test --auto-enter`）——CallNPC → [@Buy] → NPCGoods 18 件（含名称/价格）→ 购买 (HP)DrugSmall 扣 40 金 → 背包 +1 → 出售响应 success=true 回 +20 金 → 背包清空 → DB 落库（gold 持久化）
 
 ---
+### M18: 仓库（Storage）物品存取（2026-08-03 完成）
+- [x] **UserStorage 解析 + 仓库对话框**：服务端 [@Storage] → UserStorage（80 格，含物品）→ 客户端打开仓库面板（10 列 x 8 行，原版 C# StorageDialog 布局），同时打开背包（原版 C# 语义）
+- [x] **存入**：选中背包物品 → 点仓库格 → `C.StoreItem{From=背包格, To=仓库格}`（原版 C# MirItemCell 拖放语义；服务端优先目标格，占用则找第一个空位）
+- [x] **取出**：选中仓库物品 → 点背包格 → `C.TakeBackItem{From=仓库格, To=背包格}`
+- [x] **服务端 wire 对齐 C#/SharedRust**：gate 原解析 `[grid u8][uid u64][count u32]`（与 C# `[From i32][To i32]` 不符）→ 改回 `[from i32][to i32]`；PlayerInventory 新增 `store_item_to`/`take_back_item_to`（目标格优先 + 首空位兜底）
+- [x] **操作后完整刷新**：存入/取出成功 → 完整 UserStorage + UserInformation（仓库与背包同时重建）
+- [x] 验证：真实 ServerRust E2E（`--storage-test --auto-enter`）——CallNPC → [@Storage] → 仓库 80 格解析 → 存入背包格 0→仓库 0（仓库 0→1 件、背包 1→0）→ 取出仓库 0→背包格 0（仓库 1→0、背包 0→1）→ DB 落库 ✅
+
+---
 ## 四、执行顺序与依赖
 
 ```
@@ -187,4 +196,5 @@ M7（真实网络）→ M8（HUD+控制）→ M9（对话框 1→4 批）→ M10
 | 渲染后端冻结 | 强制 DX12（Vulkan present 在此机器异常） |
 | 大量精灵性能 | 精灵图缓存已建；后续 Atlas/批处理 |
 | 数据依赖 | 复用 Client-Macroquad/Data，`resolve_data_path` 自动解析 |
+
 

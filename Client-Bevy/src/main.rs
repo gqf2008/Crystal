@@ -90,6 +90,13 @@ fn main() {
         app.add_systems(Update, auto_shop_test);
     }
 
+    // --storage-test: 自动仓库存取链路（自动化验证用）
+    if std::env::args().any(|a| a == "--storage-test") {
+        app.add_systems(Update, auto_storage_test);
+    }    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
+    if std::env::args().any(|a| a == "--shop-test") {
+        app.add_systems(Update, auto_shop_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -213,6 +220,99 @@ fn auto_shop_test(
                 }
             }
             *stage = 4;
+        }
+        _ => {}
+    }
+}
+
+/// --storage-test：自动仓库存取链路（CallNPC → [@Storage] → StoreItem → TakeBackItem）
+#[allow(clippy::too_many_arguments)]
+fn auto_storage_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    storage: Res<client_bevy::game::dialogs::storage::StorageState>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    npcs: Query<(
+        &client_bevy::actor::NetObjectId,
+        &client_bevy::actor::NpcName,
+    )>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut npc_oid: Local<Option<u32>>,
+    mut inv_slot: Local<Option<usize>>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 6.0 {
+                return;
+            }
+            let oid = npcs
+                .iter()
+                .find(|(_, n)| n.0.contains("Alchemist"))
+                .or_else(|| npcs.iter().find(|(_, n)| n.0.contains("Merchant")))
+                .map(|(id, _)| id.0);
+            if let Some(oid) = oid {
+                *npc_oid = Some(oid);
+                net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                    object_id: oid,
+                    key: "[@Main]".to_string(),
+                });
+                tracing::info!("[STORAGETEST] CallNPC {}", oid);
+                *stage = 1;
+                *t = 0.0;
+            }
+        }
+        1 => {
+            if *t < 2.0 {
+                return;
+            }
+            if let Some(oid) = *npc_oid {
+                net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                    object_id: oid,
+                    key: "[@Storage]".to_string(),
+                });
+                tracing::info!("[STORAGETEST] 发送仓库指令 [@Storage]");
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t < 2.0 {
+                return;
+            }
+            if storage.visible {
+                if let Some(idx) = hud.inventory.items.iter().position(|s| s.is_some()) {
+                    *inv_slot = Some(idx);
+                    net.send_packet(&mir2_shared::packets::client::item::StoreItem {
+                        from: idx as i32,
+                        to: 0,
+                    });
+                    tracing::info!("[STORAGETEST] 存入背包格 {} -> 仓库 0", idx);
+                    *stage = 3;
+                    *t = 0.0;
+                }
+            }
+        }
+        3 => {
+            if *t < 2.0 {
+                return;
+            }
+            if storage.items.get(0).and_then(|s| s.as_ref()).is_some() {
+                if let Some(idx) = *inv_slot {
+                    net.send_packet(&mir2_shared::packets::client::item::TakeBackItem {
+                        from: 0,
+                        to: idx as i32,
+                    });
+                    tracing::info!("[STORAGETEST] 取出仓库 0 -> 背包格 {}", idx);
+                }
+                *stage = 4;
+            }
         }
         _ => {}
     }

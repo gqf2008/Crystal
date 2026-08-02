@@ -18,6 +18,7 @@ use crate::game::combat::CombatEvents;
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::npc::NpcDialogState;
 use crate::game::dialogs::npc_goods::{GoodsEntry, NpcGoodsState};
+ use crate::game::dialogs::storage::StorageState;
 use crate::game::hud::HudState;
 use crate::game::movement::{NetMotion, NetMotions};
 use crate::game::skills::MagicsState;
@@ -320,6 +321,8 @@ fn network_system(
     mut combat_evt: ResMut<CombatEvents>,
     mut weather: ResMut<WeatherState>,
     mut magics: ResMut<MagicsState>,
+     mut storage: ResMut<StorageState>,
+     mut mgr: ResMut<crate::game::dialogs::DialogManager>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     // 真实 TCP：TcpEvent（完整内层包 / 断线）
@@ -339,6 +342,8 @@ fn network_system(
                         &mut combat_evt,
                         &mut weather,
                         &mut magics,
+                        &mut storage,
+                        &mut mgr,
                         &mut next,
                         &payload,
                     );
@@ -378,6 +383,8 @@ fn network_system(
                         &mut combat_evt,
                         &mut weather,
                         &mut magics,
+                        &mut storage,
+                        &mut mgr,
                         &mut next,
                         &payload,
                     );
@@ -426,6 +433,8 @@ fn handle_packet(
     combat_evt: &mut CombatEvents,
     weather: &mut WeatherState,
     magics: &mut MagicsState,
+    storage: &mut StorageState,
+    mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
 ) {
@@ -983,6 +992,34 @@ fn handle_packet(
         }
 
         // ---- M13: 技能 ----
+
+        // ---- M18: 仓库 ----
+        x if x == ServerPacketIds::UserStorage as i16 => {
+            match player::UserStorage::read_body(&mut cur) {
+                Ok(p) => {
+                    let items: Vec<Option<InvItem>> = p
+                        .storage
+                        .iter()
+                        .map(|s| s.as_ref().map(to_inv_item))
+                        .collect();
+                    tracing::info!(
+                        "🏬 仓库 {} 格（{} 件物品）",
+                        items.len(),
+                        items.iter().flatten().count()
+                    );
+                    storage.items = items;
+                    storage.visible = true;
+                    // 原版 C#：仓库打开时同时显示背包
+                    if !mgr.is_open(crate::game::dialogs::DialogKind::Storage) {
+                        mgr.open.push(crate::game::dialogs::DialogKind::Storage);
+                    }
+                    if !mgr.is_open(crate::game::dialogs::DialogKind::Inventory) {
+                        mgr.open.push(crate::game::dialogs::DialogKind::Inventory);
+                    }
+                }
+                Err(e) => tracing::warn!("⚠️ UserStorage 解析失败: {} (len={})", e, payload.len()),
+            }
+        }
         x if x == ServerPacketIds::NewMagic as i16 => {
             if let Ok(p) = magic::NewMagic::read_body(&mut cur) {
                 if !p.hero {

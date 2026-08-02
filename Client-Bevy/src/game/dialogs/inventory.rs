@@ -352,6 +352,20 @@ fn spawn_inventory_dialog(
 #[derive(Component)]
 struct InvCloseBtn;
 
+/// 光标坐标 → 背包格（0..39）；供仓库对话框复用（原版 C# MirItemCell 命中语义）
+pub fn inv_slot_at(cx: f32, cy: f32) -> Option<usize> {
+    for i in 0..(GRID_COLS * GRID_ROWS) {
+        let x = i % GRID_COLS;
+        let y = i / GRID_COLS;
+        let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
+        let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
+        if cx >= sx && cx <= sx + CELL_W && cy >= sy && cy <= sy + CELL_H {
+            return Some(i);
+        }
+    }
+    None
+}
+
 /// 背包格子索引（0..39）
 #[derive(Component, Clone, Copy)]
 pub struct InvSlot(pub usize);
