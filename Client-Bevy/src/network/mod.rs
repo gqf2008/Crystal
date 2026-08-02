@@ -825,6 +825,82 @@ fn handle_packet(
             }
         }
 
+        // ---- M13: 装备/使用响应（本地同步） ----
+        x if x == ServerPacketIds::EquipItem as i16 => {
+            if let Ok(p) = item_operations::EquipItem::read_body(&mut cur) {
+                if p.success {
+                    let to = p.to as usize;
+                    // 从背包移除并放入装备槽
+                    let from_idx = hud
+                        .inventory
+                        .items
+                        .iter()
+                        .position(|s| s.as_ref().map(|it| it.unique_id) == Some(p.unique_id));
+                    if let Some(from_idx) = from_idx {
+                        let item = hud.inventory.items[from_idx].take();
+                        if let Some(item) = item {
+                            let name = item.name.clone();
+                            if to < hud.equipment.len() {
+                                let old = hud.equipment[to].take();
+                                hud.equipment[to] = Some(item);
+                                // 旧装备放回背包空格
+                                if let Some(old) = old {
+                                    if let Some(empty) = hud.inventory.items.iter_mut().find(|s| s.is_none()) {
+                                        *empty = Some(old);
+                                    }
+                                }
+                            }
+                            tracing::info!("⚔️ 装备成功: {} -> 槽 {}", name, p.to);
+                        }
+                    }
+                }
+            }
+        }
+        x if x == ServerPacketIds::RemoveItem as i16 => {
+            if let Ok(p) = item_operations::RemoveItem::read_body(&mut cur) {
+                if p.success {
+                    let item = hud
+                        .equipment
+                        .iter_mut()
+                        .flatten()
+                        .find(|it| it.unique_id == p.unique_id)
+                        .cloned();
+                    if let Some(item) = item {
+                        for slot in hud.equipment.iter_mut() {
+                            if slot.as_ref().map(|it| it.unique_id) == Some(p.unique_id) {
+                                *slot = None;
+                                break;
+                            }
+                        }
+                        if let Some(empty) = hud.inventory.items.iter_mut().find(|s| s.is_none()) {
+                            *empty = Some(item);
+                        }
+                        tracing::info!("🛡️ 卸下装备 uid={}", p.unique_id);
+                    }
+                }
+            }
+        }
+        x if x == ServerPacketIds::UseItem as i16 => {
+            if let Ok(p) = item_operations::UseItem::read_body(&mut cur) {
+                let idx = hud
+                    .inventory
+                    .items
+                    .iter()
+                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(p.unique_id));
+                if let Some(idx) = idx {
+                    let count = hud.inventory.items[idx].as_ref().map(|it| it.count).unwrap_or(0);
+                    if count > 1 {
+                        if let Some(it) = hud.inventory.items[idx].as_mut() {
+                            it.count -= 1;
+                        }
+                    } else {
+                        hud.inventory.items[idx] = None;
+                    }
+                    tracing::info!("💊 使用物品 uid={} 剩余 {}", p.unique_id, count.saturating_sub(1));
+                }
+            }
+        }
+
         // ---- M13: 技能 ----
         x if x == ServerPacketIds::NewMagic as i16 => {
             if let Ok(p) = magic::NewMagic::read_body(&mut cur) {

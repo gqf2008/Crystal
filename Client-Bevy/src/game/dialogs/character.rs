@@ -13,6 +13,7 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
@@ -93,6 +94,14 @@ pub struct CharPageBg(pub usize);
 #[derive(Component)]
 pub struct CharClose;
 
+/// 装备槽（服务端 12 槽序号）
+#[derive(Component, Clone, Copy)]
+pub struct CharEquipSlot(pub usize);
+
+/// 装备图标（子实体）
+#[derive(Component, Clone, Copy)]
+pub struct CharEquipIcon(pub usize);
+
 #[derive(Component)]
 pub struct CharNameText;
 
@@ -104,6 +113,10 @@ pub struct CharStatText(pub usize); // 状态数值标签序号
 
 pub struct CharacterDialogPlugin;
 
+/// ServerRust equipment 槽位(0..10) → C# EQUIP_SLOTS 位置索引
+/// 服务端: 0Weapon 1Armour 2Helmet 3Necklace 4BraceletL 5BraceletR 6RingL 7RingR 8Shoes 9Pendant 10Mount
+const SERVER_SLOT_TO_POS: [usize; 12] = [0, 1, 2, 4, 5, 6, 7, 8, 11, 9, 13, 13];
+
 impl Plugin for CharacterDialogPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CharacterState>();
@@ -112,7 +125,7 @@ impl Plugin for CharacterDialogPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_character_dialog);
         app.add_systems(
             Update,
-            (character_ui_system, ui_button_system)
+            (character_ui_system, char_equip_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -215,23 +228,43 @@ fn spawn_character_dialog(
         CharDialogWidget,
     ));
 
-    // 装备槽（14 个，深色底）
+    // 装备槽（14 个，深色底；服务端 12 槽按 SERVER_SLOT_TO_POS 映射）
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    for (ox, oy) in EQUIP_SLOTS {
-        commands.spawn((
-            UiEntity,
-            DialogRoot(DialogKind::Character),
-            CharDialogWidget,
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.0, 0.0, 0.0, 0.25),
-                custom_size: Some(Vec2::new(SLOT_SIZE, SLOT_SIZE)),
-                ..default()
-            },
-            Anchor::TOP_LEFT,
-            Transform::from_xyz(DIALOG_X + ox, -(DIALOG_Y + oy), 6.3),
-            Visibility::Hidden,
-        ));
+    for (pos, (ox, oy)) in EQUIP_SLOTS.iter().enumerate() {
+        let slot_entity = commands
+            .spawn((
+                UiEntity,
+                DialogRoot(DialogKind::Character),
+                CharDialogWidget,
+                CharEquipSlot(pos),
+                Sprite {
+                    image: white.clone(),
+                    color: Color::srgba(0.0, 0.0, 0.0, 0.25),
+                    custom_size: Some(Vec2::new(SLOT_SIZE, SLOT_SIZE)),
+                    ..default()
+                },
+                Anchor::TOP_LEFT,
+                Transform::from_xyz(DIALOG_X + ox, -(DIALOG_Y + oy), 6.3),
+                Visibility::Hidden,
+            ))
+            .id();
+        // 服务端槽位对应此位置（无对应则 -1）
+        let server_idx = SERVER_SLOT_TO_POS.iter().position(|p| *p == pos);
+        if let Some(si) = server_idx {
+            commands.entity(slot_entity).with_children(|p| {
+                p.spawn((
+                    CharEquipIcon(si),
+                    Sprite {
+                        image: white.clone(),
+                        custom_size: Some(Vec2::new(SLOT_SIZE - 4.0, SLOT_SIZE - 4.0)),
+                        ..default()
+                    },
+                    Anchor::TOP_LEFT,
+                    Transform::from_xyz(2.0, -2.0, 6.4),
+                    Visibility::Hidden,
+                ));
+            });
+        }
     }
 
     // 状态数值标签（Status 页：HP/MP/AC/MAC/DC/MC/SC/CritR/CritD/AtkSpd/Acc/Agil/Luck）
@@ -312,5 +345,41 @@ fn character_ui_system(
             6 => format!("{}-{}", state.stats[4][0], state.stats[4][1]),
             _ => String::new(),
         };
+    }
+}
+
+/// 装备图标（从 HudState.equipment 渲染 Items 库图标）
+fn char_equip_system(
+    hud: Res<HudState>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    mut icons: Query<
+        (&mut Sprite, &mut Visibility, &CharEquipIcon),
+        (Without<CharDialogWidget>, Without<CharEquipSlot>),
+    >,
+) {
+    for (mut sprite, mut vis, icon) in &mut icons {
+        let item = hud.equipment.get(icon.0).and_then(|s| s.as_ref());
+        match item {
+            Some(item) => {
+                let handle = ui_image(
+                    &mut libs,
+                    &mut images,
+                    &mut cache,
+                    LibraryName::Items,
+                    item.image as usize,
+                );
+                match handle {
+                    Some(h) if sprite.image != h => sprite.image = h,
+                    None => *vis = Visibility::Hidden,
+                    _ => {}
+                }
+                if sprite.image.is_strong() {
+                    *vis = Visibility::Visible;
+                }
+            }
+            None => *vis = Visibility::Hidden,
+        }
     }
 }
