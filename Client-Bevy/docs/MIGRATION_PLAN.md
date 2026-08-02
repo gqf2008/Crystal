@@ -71,8 +71,8 @@
 
 ### M9: 对话框系统（56 个游戏对话框，分 4 批）
 > 参考：**以原版 C# 为准** `Client/MirScenes/Dialogs/*.cs`（36 个文件）；Rust 版 `Client-Macroquad/src/scenes/dialogs/` 仅作迁移对照
-- [ ] 通用 UI 基建：对话框管理器（开关/焦点/拖拽/层级）、AmountBox、TextInput、native_ui_utils
-- [ ] 第 1 批（核心）: inventory / character / belt / menu / minimap / chat_control / compass
+- [x] 通用 UI 基建：对话框管理器（DialogManager 开关/z 序）、HUD 按钮接入、--auto-inv 调试
+- [x] 第 1 批（部分）: inventory（Title[196] 背景/标签页/关闭/金币/负重/8x5 格子）；character / belt / menu / minimap / chat_control / compass 待续
 - [ ] 第 2 批（交互）: npc / npc_goods / trade / amount_box / group / quest_log / friend / inspect
 - [ ] 第 3 批（社交）: guild / guild_territory / mail / trust_merchant / item_rental / ranking / report / mentor / relationship / hero / intelligent_creature / mount
 - [ ] 第 4 批（系统）: game_shop / refine / craft / socket / dura_status / npc_drop / roll / npc_awake / notice / chat_notice / timer / option / help / keyboard_layout / big_map / fishing / buff
