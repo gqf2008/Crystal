@@ -900,6 +900,22 @@ fn handle_packet(
                 }
             }
         }
+        x if x == ServerPacketIds::SplitItem as i16 => {
+            // 拆分响应后服务端会跟完整 UserInformation 刷新（权威重建背包）
+            if let Ok(p) = item::SplitItem::read_body(&mut cur) {
+                tracing::info!("🔪 拆分响应: grid={:?} uid={} count={}", p.grid, p.unique_id, p.count);
+            }
+        }
+        x if x == ServerPacketIds::DropItem as i16 => {
+            if let Ok(p) = item_operations::DropItem::read_body(&mut cur) {
+                tracing::info!("🗑️ 丢弃响应: uid={} count={} success={}", p.unique_id, p.count, p.success);
+            }
+        }
+        x if x == ServerPacketIds::MergeItem as i16 => {
+            if let Ok(p) = item_operations::MergeItem::read_body(&mut cur) {
+                tracing::info!("🧬 合并响应: from={} to={} success={}", p.id_from, p.id_to, p.success);
+            }
+        }
 
         // ---- M13: 技能 ----
         x if x == ServerPacketIds::NewMagic as i16 => {

@@ -17,6 +17,7 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
 use crate::game::skills::MagicsState;
 use crate::map_renderer::GameLibraries;
+use crate::network::NetworkContext;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -56,13 +57,13 @@ impl Default for CharacterState {
     }
 }
 
-const DIALOG_X: f32 = 1024.0 - 264.0;
-const DIALOG_Y: f32 = 0.0;
+pub(crate) const DIALOG_X: f32 = 1024.0 - 264.0;
+pub(crate) const DIALOG_Y: f32 = 0.0;
 const PAGE_X: f32 = 8.0;
 const PAGE_Y: f32 = 90.0;
 
 /// 装备槽位置（C# EquipmentSlot 顺序）
-const EQUIP_SLOTS: [(f32, f32); 14] = [
+pub(crate) const EQUIP_SLOTS: [(f32, f32); 14] = [
     (123.0, 7.0),   // Weapon
     (163.0, 7.0),   // Armor
     (203.0, 7.0),   // Helmet
@@ -78,7 +79,7 @@ const EQUIP_SLOTS: [(f32, f32); 14] = [
     (128.0, 242.0), // Stone
     (203.0, 62.0),  // Mount
 ];
-const SLOT_SIZE: f32 = 36.0;
+pub(crate) const SLOT_SIZE: f32 = 36.0;
 
 #[derive(Component)]
 pub struct CharDialogWidget;
@@ -483,7 +484,8 @@ fn character_ui_system(
     }
 }
 
-/// 装备图标（从 HudState.equipment 渲染 Items 库图标）
+/// 装备图标（从 HudState.equipment 渲染 Items 库图标）+ 右键卸下装备
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn char_equip_system(
     hud: Res<HudState>,
     mut libs: ResMut<GameLibraries>,
@@ -493,7 +495,50 @@ fn char_equip_system(
         (&mut Sprite, &mut Visibility, &CharEquipIcon),
         (Without<CharDialogWidget>, Without<CharEquipSlot>),
     >,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    net: Res<NetworkContext>,
+    mgr: Res<DialogManager>,
+    page: Res<CharPage>,
 ) {
+    // 右键卸下装备（原版 C# MirItemCell 右键 → UseItem → Equipment → RemoveItem）
+    if mouse.just_pressed(MouseButton::Right) && mgr.is_open(DialogKind::Character) && page.0 == 0
+    {
+        if let Ok(window) = windows.single() {
+            if let Some(cursor) = window.cursor_position() {
+                for (pos, (ox, oy)) in EQUIP_SLOTS.iter().enumerate() {
+                    let sx = DIALOG_X + ox;
+                    let sy = DIALOG_Y + oy;
+                    if cursor.x >= sx
+                        && cursor.x <= sx + SLOT_SIZE
+                        && cursor.y >= sy
+                        && cursor.y <= sy + SLOT_SIZE
+                    {
+                        // 位置 → 服务端槽位（SERVER_SLOT_TO_POS 反查）
+                        if let Some(server_idx) = SERVER_SLOT_TO_POS.iter().position(|p| *p == pos) {
+                            if let Some(item) = hud
+                                .equipment
+                                .get(server_idx)
+                                .and_then(|s| s.as_ref())
+                            {
+                                net.send_packet(&mir2_shared::packets::client::item::RemoveItem {
+                                    grid: mir2_shared::enums::MirGridType::Inventory,
+                                    unique_id: item.unique_id,
+                                    to: 0,
+                                });
+                                tracing::info!(
+                                    "🛡️ 右键卸下装备 {} (uid={})",
+                                    item.name,
+                                    item.unique_id
+                                );
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
     for (mut sprite, mut vis, icon) in &mut icons {
         let item = hud.equipment.get(icon.0).and_then(|s| s.as_ref());
         match item {

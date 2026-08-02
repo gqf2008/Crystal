@@ -125,7 +125,12 @@
 - [x] **背包点击移动（MoveItem 全链路）**：单击选中（黄色高亮，原版 C# SelectedCell）→ 点目标格发送 MoveItem；服务端响应后本地 swap；服务端修复 from/to 槽位索引
 - [x] **装备流程闭环**：双击装备（EquipItem 响应本地同步、旧装备回背包）、使用物品扣减、卸下装备回背包；角色对话框 14 槽映射服务端 12 槽渲染装备图标
 - [x] **物品 tooltip**：悬停物品格跟随光标显示 名称 x数量（原版 C# MirItemCell.Hint 语义）
-- [ ] 待续：拆分/丢弃物品（SplitItem/DropItem）、装备卸下右键（RemoveItem）
+- [x] **物品完整交互（M13 收尾）**：右键使用/装备、Shift+左键拆分（MirAmountBox → SplitItem）、选中物品点地面丢弃（单件 YesNo 确认 / 多件数量框 → DropItem）、装备格右键卸下（RemoveItem）
+  - 客户端：背包点击逻辑重构进 `inv_item_action_system`（单选/双击/右键/拆分/丢弃 + 弹窗模态门，原版 C# Modal 语义）
+  - 数量框输入兜底 `logical_key`（winit 注入事件 text=None 时仍可输入数字）
+  - 服务端修复：SplitItem 按 unique_id 定位原格（原误把 MirGridType 当格索引）；DropItem 支持部分数量（原整叠移除）；MergeItem 按 uid 合并；物品操作后发完整 UserInformation 刷新（含背包/装备）
+  - 服务端刷新修复：`send_user_information_refresh` 补 HeroBehaviour(+3) 与 observer 字节（原包客户端解析失败）；物品操作刷新复用 `build_user_information_packet`（原双重包头导致解析失败）
+  - 验证：真实 ServerRust E2E——拆分 10→7+3（客户端重建 3 件）、丢弃 8→6、右键卸下 SpiritBlade → 装备槽清空回背包，DB 全链路确认
 ### M14: 技能页 + 快捷键分配面板（2026-08-02 完成）
 - [x] **技能页（角色对话框第 4 页）**：7 行技能按钮（原版 C# CharacterDialog.MagicButton，行距 33px），行内渲染 MagIcon2 图标 / Title[516,517] 等级经验条 / Key 标签（F1..F8、CTRL\nF1..、Shift\nF1..）/ 等级 / 名称 / 经验；Next/Back 翻页（Prguse[396-399]，StartIndex 按 7 步进，原版语义）
 - [x] **快捷键分配面板**（原版 C# AssignKeyPanel）：Prguse[710] 居中，魔法图标 + 名称，16 个 F 键按钮（F1-F8 / Ctrl+F1-8，Prguse[1656-1658] 三态），None（Title[287-289]）/ Save（Title[156-158]）

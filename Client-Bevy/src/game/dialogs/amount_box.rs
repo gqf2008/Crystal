@@ -160,6 +160,7 @@ fn amount_box_system(
 
     // 数字键盘输入
     for key in keys.read() {
+
         if key.state != bevy::input::ButtonState::Pressed {
             continue;
         }
@@ -168,6 +169,11 @@ fn amount_box_system(
         } else if let Some(text) = &key.text {
             if text.chars().all(|c| c.is_ascii_digit()) && state.value.len() < 10 {
                 state.value.push_str(text);
+            }
+        } else if let Key::Character(c) = &key.logical_key {
+            // winit 注入/部分键盘事件 text=None，用 logical_key 兜底（原版 C# 任意可打印字符）
+            if c.chars().all(|ch| ch.is_ascii_digit()) && state.value.len() < 10 {
+                state.value.push_str(c);
             }
         }
     }

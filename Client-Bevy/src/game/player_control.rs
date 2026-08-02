@@ -85,6 +85,10 @@ fn player_input_system(
     >,
     actors: Query<(&NetObjectId, &Transform, &ActorAppearance)>,
     buttons: Query<&UiButton>,
+    // 物品选中/弹窗打开时屏蔽世界左键点击（原版 C# SelectedCell/Modal）
+    click: Res<crate::game::dialogs::inventory::InvClickState>,
+    amount: Res<crate::game::dialogs::amount_box::AmountBoxState>,
+    confirm: Res<crate::game::dialogs::inventory::InvDropConfirm>,
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.physical_cursor_position() else { return };
@@ -132,7 +136,15 @@ fn player_input_system(
     }
 
     // 左键：点击 NPC → CallNPC；点击怪物 → 攻击目标
-    if mouse.just_pressed(MouseButton::Left) && !over_ui && !over_main_dialog(cursor) && !over_chat_panel(cursor) {
+    // （选中物品/数量框/确认框打开时不处理世界点击——丢弃流程由背包系统接管）
+    if mouse.just_pressed(MouseButton::Left)
+        && click.selected.is_none()
+        && !amount.visible
+        && !confirm.visible
+        && !over_ui
+        && !over_main_dialog(cursor)
+        && !over_chat_panel(cursor)
+    {
         tracing::debug!("🖱️ 左键点击 screen=({},{}) world=({:.0},{:.0})", cursor.x, cursor.y, world.x, world.y);
         // 命中测试：世界坐标下最近的对象（20px 内）
         let mut best: Option<(u32, f32)> = None;

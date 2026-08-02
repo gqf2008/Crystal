@@ -11,11 +11,16 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
+use crate::game::dialogs::character;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetworkContext;
+use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
+use mir2_shared::enums::MirGridType;
+
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
     UiImageCache,
@@ -143,7 +148,10 @@ impl Plugin for InventoryDialogPlugin {
         app.init_resource::<InvPage>();
         app.init_resource::<InvClickState>();
         app.init_resource::<InvTooltip>();
+        app.init_resource::<InvDropConfirm>();
+        app.init_resource::<InvPendingAmount>();
         app.add_systems(OnEnter(AppState::Game), spawn_inventory_dialog);
+        app.add_systems(OnEnter(AppState::Game), spawn_inv_confirm);
         app.add_systems(OnExit(AppState::Game), cleanup_dialogs);
         app.add_systems(OnEnter(AppState::Game), spawn_inv_tooltip_text);
         app.add_systems(
@@ -153,6 +161,8 @@ impl Plugin for InventoryDialogPlugin {
                 inv_selection_system,
                 inv_tooltip_system,
                 inv_tooltip_text_system,
+                inv_item_action_system,
+                inv_confirm_system,
                 ui_button_system,
             )
                 .chain()
@@ -369,17 +379,37 @@ pub struct InvClickState {
     pub selected: Option<usize>,
 }
 
+/// 丢弃确认框（原版 C# MirMessageBox YesNo：DropTip）
+#[derive(Resource, Default)]
+pub struct InvDropConfirm {
+    pub visible: bool,
+    pub text: String,
+    pub unique_id: u64,
+    pub count: u16,
+}
+
+/// 数量框待处理操作（拆分/丢弃，原版 C# MirAmountBox OK 回调）
+#[derive(Resource, Default)]
+pub struct InvPendingAmount {
+    pub split_uid: Option<u64>,
+    pub drop_uid: Option<u64>,
+}
+
+#[derive(Component)]
+pub struct InvConfirmWidget;
+
+#[derive(Component)]
+pub struct InvConfirmYes;
+
+#[derive(Component)]
+pub struct InvConfirmNo;
+
 /// 显示/隐藏 + 页切换 + 关闭 + 物品图标渲染 + 双击使用/装备
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn inventory_ui_system(
     mut mgr: ResMut<DialogManager>,
     hud: Res<HudState>,
     mut page: ResMut<InvPage>,
-    mut click: ResMut<InvClickState>,
-    net: Res<NetworkContext>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window>,
-    time: Res<Time>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
@@ -477,99 +507,6 @@ fn inventory_ui_system(
             _ => {
                 text.0 = String::new();
                 *vis = Visibility::Hidden;
-            }
-        }
-    }
-
-    // 双击格子 → 使用/装备（原版 C# MirItemCell.OnMouseDoubleClick → UseItem）
-    let now = time.elapsed_secs_f64();
-    let Ok(window) = windows.single() else {
-        return;
-    };
-    let Some(cursor) = window.cursor_position() else {
-        return;
-    };
-    let mut dbl: Option<usize> = None;
-    // 本次左键点击的格子（原版 C#：选中格子后点另一格 = MoveItem）
-    let mut single: Option<usize> = None;
-    if mouse.just_pressed(MouseButton::Left) {
-        for (_vis, slot) in &all_vis {
-            let Some(slot) = slot else { continue };
-            let i = slot.0;
-            let x = i % GRID_COLS;
-            let y = i / GRID_COLS;
-            let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
-            let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
-            if cursor.x >= sx
-                && cursor.x <= sx + CELL_W
-                && cursor.y >= sy
-                && cursor.y <= sy + CELL_H
-            {
-                if let Some((last_i, last_t)) = click.last {
-                    if last_i == i && now - last_t < 0.4 {
-                        dbl = Some(i);
-                        click.last = None;
-                    } else {
-                        click.last = Some((i, now));
-                        single = Some(i);
-                    }
-                } else {
-                    click.last = Some((i, now));
-                    single = Some(i);
-                }
-                break;
-            }
-        }
-    }
-    // 单击：选中 → 移动（MoveItem，原版 C# MirItemCell.MoveItem）
-    if dbl.is_none() {
-        if let Some(i) = single {
-            match click.selected {
-                Some(from) if from == i => click.selected = None,
-                Some(from) => {
-                    // 目标格子可空可满（服务端处理交换/合并）
-                    net.send_packet(&mir2_shared::packets::client::item::MoveItem {
-                        grid: mir2_shared::enums::MirGridType::Inventory,
-                        from: from as i32,
-                        to: i as i32,
-                    });
-                    tracing::info!("📦 移动物品 {} -> {}", from, i);
-                    click.selected = None;
-                }
-                None => {
-                    // 只有物品格可选中（空格不选中）
-                    if inv.items.get(i).and_then(|s| s.as_ref()).is_some() {
-                        click.selected = Some(i);
-                        tracing::debug!("🎒 选中格子 {}", i);
-                    }
-                }
-            }
-        }
-    }
-    if let Some(i) = dbl {
-        if let Some(item) = inv.items.get(i).and_then(|s| s.as_ref()) {
-            if item.is_equipment() {
-                if let Some(to) = item.equip_slot() {
-                    net.send_packet(&mir2_shared::packets::client::item::EquipItem {
-                        // 协议字段为 MirGridType；服务端按 unique_id 定位背包格
-                        grid: mir2_shared::enums::MirGridType::Inventory,
-                        unique_id: item.unique_id,
-                        to,
-                    });
-                    tracing::info!(
-                        "⚔️ 双击装备 {} (uid={}) -> 槽 {}",
-                        item.name,
-                        item.unique_id,
-                        to
-                    );
-                }
-            } else if item.is_usable() {
-                net.send_packet(&mir2_shared::packets::client::item::UseItem {
-                    unique_id: item.unique_id,
-                });
-                tracing::info!("💊 双击使用 {} (uid={})", item.name, item.unique_id);
-            } else {
-                tracing::debug!("背包物品 {} 不可用/不可装备", item.name);
             }
         }
     }
@@ -693,3 +630,324 @@ fn inv_tooltip_text_system(
         *vis = Visibility::Visible;
     }
 }
+
+/// 使用/装备物品（原版 C# MirItemCell.UseItem：右键/双击触发）
+fn use_or_equip(item: &InvItem, net: &NetworkContext) {
+    if item.is_equipment() {
+        if let Some(to) = item.equip_slot() {
+            net.send_packet(&mir2_shared::packets::client::item::EquipItem {
+                // 协议字段为 MirGridType；服务端按 unique_id 定位背包格
+                grid: MirGridType::Inventory,
+                unique_id: item.unique_id,
+                to,
+            });
+            tracing::info!(
+                "⚔️ 使用/装备 {} (uid={}) -> 槽 {}",
+                item.name,
+                item.unique_id,
+                to
+            );
+        }
+    } else if item.is_usable() {
+        net.send_packet(&mir2_shared::packets::client::item::UseItem {
+            unique_id: item.unique_id,
+        });
+        tracing::info!("💊 使用 {} (uid={})", item.name, item.unique_id);
+    } else {
+        tracing::debug!("背包物品 {} 不可用/不可装备", item.name);
+    }
+}
+
+/// 生成丢弃确认框（原版 C# MirMessageBox：Prguse[360] 456x190，Yes/No Title[206-208]/[210-212]）
+fn spawn_inv_confirm(
+    mut commands: Commands,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    mut fonts: ResMut<Assets<Font>>,
+    mut ui_font: ResMut<UiFont>,
+) {
+    libs.0.ensure_initialized();
+    if !ui_font.0.is_strong() {
+        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+    }
+    let font = ui_font.0.clone();
+    // MirMessageBox 居中（原版 456x190 → (1024-456)/2=284, (768-190)/2=289）
+    let (bx, by) = (284.0, 289.0);
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 360) {
+        let e = spawn_ui_sprite(&mut commands, h, bx, by, 9.5, 1.0);
+        commands.entity(e).insert((InvConfirmWidget, Visibility::Hidden));
+    }
+    let t = spawn_ui_text(
+        &mut commands, &font, "", bx + 35.0, by + 35.0, 12.0, Color::WHITE, 9.6,
+    );
+    commands.entity(t).insert((InvConfirmWidget, Visibility::Hidden));
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 206, 207, 208,
+        bx + 260.0, by + 157.0, 9.7, 76.0, 25.0,
+    ) {
+        commands.entity(e).insert((InvConfirmYes, InvConfirmWidget));
+    }
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 210, 211, 212,
+        bx + 360.0, by + 157.0, 9.7, 76.0, 25.0,
+    ) {
+        commands.entity(e).insert((InvConfirmNo, InvConfirmWidget));
+    }
+}
+
+/// 丢弃确认框：Yes → DropItem；No → 关闭（原版 C# MirMessageBox YesNo）
+fn inv_confirm_system(
+    mut confirm: ResMut<InvDropConfirm>,
+    mut click: ResMut<InvClickState>,
+    net: Res<NetworkContext>,
+    mut widgets: Query<&mut Visibility, With<InvConfirmWidget>>,
+    yes: Query<&UiButton, (With<InvConfirmYes>, Without<InvConfirmNo>)>,
+    no: Query<&UiButton, (With<InvConfirmNo>, Without<InvConfirmYes>)>,
+) {
+    for mut vis in &mut widgets {
+        *vis = if confirm.visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    if !confirm.visible {
+        return;
+    }
+    for btn in &yes {
+        if btn.clicked {
+            net.send_packet(&mir2_shared::packets::client::item::DropItem {
+                unique_id: confirm.unique_id,
+                count: confirm.count as u32,
+                hero_inventory: false,
+            });
+            tracing::info!(
+                "🗑️ 确认丢弃 uid={} count={}",
+                confirm.unique_id,
+                confirm.count
+            );
+            confirm.visible = false;
+            click.selected = None;
+        }
+    }
+    for btn in &no {
+        if btn.clicked {
+            confirm.visible = false;
+        }
+    }
+}
+
+/// 物品高级交互：
+///   - 右键 → 使用/装备（原版 C# MouseButtons.Right → UseItem）
+///   - Shift+左键 → 拆分堆叠（MirAmountBox → SplitItem）
+///   - 选中物品 + 点场景地面 → 丢弃（单件 YesNo 确认 / 多件数量框 → DropItem）
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn inv_item_action_system(
+    hud: Res<HudState>,
+    mgr: Res<DialogManager>,
+    mut click: ResMut<InvClickState>,
+    net: Res<NetworkContext>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    windows: Query<&Window>,
+    time: Res<Time>,
+    mut amount: ResMut<AmountBoxState>,
+    mut confirm: ResMut<InvDropConfirm>,
+    mut pending: ResMut<InvPendingAmount>,
+    mut result: MessageReader<AmountBoxResult>,
+    all_buttons: Query<&UiButton>,
+    // 弹窗模态门：上一帧有弹窗 → 本帧点击视为弹窗按钮，不处理格子（原版 C# Modal）
+    mut last_modal: Local<bool>,
+) {
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+
+    // 数量框结果：拆分/丢弃
+    for r in result.read() {
+        let Some(n) = r.0 else {
+            pending.split_uid = None;
+            pending.drop_uid = None;
+            continue;
+        };
+        if n == 0 {
+            continue;
+        }
+        if let Some(uid) = pending.split_uid.take() {
+            net.send_packet(&mir2_shared::packets::client::item::SplitItem {
+                grid: MirGridType::Inventory,
+                unique_id: uid,
+                count: n,
+            });
+            tracing::info!("🔪 拆分物品 uid={} count={}", uid, n);
+        } else if let Some(uid) = pending.drop_uid.take() {
+            net.send_packet(&mir2_shared::packets::client::item::DropItem {
+                unique_id: uid,
+                count: n,
+                hero_inventory: false,
+            });
+            tracing::info!("🗑️ 丢弃物品 uid={} count={}", uid, n);
+        }
+    }
+
+    // 光标下的背包格
+    let slot_at = |cx: f32, cy: f32| -> Option<usize> {
+        for i in 0..(GRID_COLS * GRID_ROWS) {
+            let x = i % GRID_COLS;
+            let y = i / GRID_COLS;
+            let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
+            let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
+            if cx >= sx && cx <= sx + CELL_W && cy >= sy && cy <= sy + CELL_H {
+                return Some(i);
+            }
+        }
+        None
+    };
+
+    // 弹窗模态门（原版 C# Modal：弹窗打开期间/刚关闭帧不响应格子点击）
+    let modal_now = amount.visible || confirm.visible;
+    let modal_was = *last_modal;
+    *last_modal = modal_now;
+    if modal_was || modal_now {
+        return;
+    }
+
+    // 双击/单击检测（原版 C# MirItemCell.OnMouseDoubleClick / OnMouseClick）
+    let now = time.elapsed_secs_f64();
+    let mut dbl: Option<usize> = None;
+    let mut single: Option<usize> = None;
+    if mouse.just_pressed(MouseButton::Left) {
+        if let Some(i) = slot_at(cursor.x, cursor.y) {
+            if let Some((last_i, last_t)) = click.last {
+                if last_i == i && now - last_t < 0.4 {
+                    dbl = Some(i);
+                    click.last = None;
+                } else {
+                    click.last = Some((i, now));
+                    single = Some(i);
+                }
+            } else {
+                click.last = Some((i, now));
+                single = Some(i);
+            }
+        }
+    }
+    // 单击：选中 → 移动（MoveItem，原版 C# MirItemCell.MoveItem）
+    if dbl.is_none() {
+        if let Some(i) = single {
+            match click.selected {
+                Some(from) if from == i => click.selected = None,
+                Some(from) => {
+                    // 目标格子可空可满（服务端处理交换/合并）
+                    net.send_packet(&mir2_shared::packets::client::item::MoveItem {
+                        grid: MirGridType::Inventory,
+                        from: from as i32,
+                        to: i as i32,
+                    });
+                    tracing::info!("📦 移动物品 {} -> {}", from, i);
+                    click.selected = None;
+                }
+                None => {
+                    // 只有物品格可选中（空格不选中）
+                    if hud.inventory.items.get(i).and_then(|s| s.as_ref()).is_some() {
+                        click.selected = Some(i);
+                    }
+                }
+            }
+        }
+    }
+    // 双击：使用/装备
+    if let Some(i) = dbl {
+        if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
+            use_or_equip(item, &net);
+        }
+    }
+
+    // 右键：使用/装备
+    if mouse.just_pressed(MouseButton::Right) {
+        if let Some(i) = slot_at(cursor.x, cursor.y) {
+            if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
+                use_or_equip(item, &net);
+            }
+        }
+    }
+
+    // Shift+左键：拆分堆叠
+    if mouse.just_pressed(MouseButton::Left) && keys.pressed(KeyCode::ShiftLeft) {
+        if let Some(i) = slot_at(cursor.x, cursor.y) {
+            if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
+                if item.count > 1 {
+                    if !hud.inventory.items.iter().any(|s| s.is_none()) {
+                        tracing::warn!("背包已满，无法拆分");
+                        return;
+                    }
+                    amount.ask("拆分数量", (item.count - 1) as u32);
+                    pending.split_uid = Some(item.unique_id);
+                    tracing::info!(
+                        "🔪 拆分 {} (uid={}) 最大 {}",
+                        item.name,
+                        item.unique_id,
+                        item.count - 1
+                    );
+                    return;
+                }
+            }
+        }
+    }
+
+    // 选中物品 + 左键点场景（非背包格/非装备格/非按钮/非背包面板）→ 丢弃流程
+    if mouse.just_pressed(MouseButton::Left) {
+        let Some(sel) = click.selected else { return };
+        if slot_at(cursor.x, cursor.y).is_some() {
+            return;
+        }
+        // 背包面板背景内不触发（原版：点对话框不丢物品）
+        if cursor.x >= DIALOG_X
+            && cursor.x <= DIALOG_X + 318.0
+            && cursor.y >= DIALOG_Y
+            && cursor.y <= DIALOG_Y + 256.0
+        {
+            return;
+        }
+        // 角色对话框装备格区域不触发
+        if mgr.is_open(DialogKind::Character) {
+            let in_eq = character::EQUIP_SLOTS.iter().any(|(ox, oy)| {
+                let sx = character::DIALOG_X + ox;
+                let sy = character::DIALOG_Y + oy;
+                cursor.x >= sx
+                    && cursor.x <= sx + character::SLOT_SIZE
+                    && cursor.y >= sy
+                    && cursor.y <= sy + character::SLOT_SIZE
+            });
+            if in_eq {
+                return;
+            }
+        }
+        // 任意 UI 按钮上不触发
+        let over_btn = all_buttons.iter().any(|b| {
+            let (x, y, w, h) = b.rect;
+            cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h
+        });
+        if over_btn {
+            return;
+        }
+        let Some(item) = hud.inventory.items.get(sel).and_then(|s| s.as_ref()) else {
+            click.selected = None;
+            return;
+        };
+        if item.count > 1 {
+            amount.ask("丢弃数量", item.count as u32);
+            pending.drop_uid = Some(item.unique_id);
+        } else {
+            confirm.text = format!("确定丢弃 {} 吗？", item.name);
+            confirm.unique_id = item.unique_id;
+            confirm.count = 1;
+            confirm.visible = true;
+        }
+        tracing::info!("🗑️ 准备丢弃 {} (uid={})", item.name, item.unique_id);
+        click.selected = None;
+    }
+}
+
