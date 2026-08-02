@@ -10,6 +10,8 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use crate::game::dialogs::{DialogKind, DialogManager};
+use crate::ui::sprite_ui::UiButton;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
@@ -67,6 +69,27 @@ pub enum HudButtonKind {
 #[derive(Component)]
 pub struct HudButton(pub HudButtonKind);
 
+/// HUD 按钮 → 对话框开关（M9：接入 DialogManager）
+fn hud_button_system(
+    mut mgr: ResMut<DialogManager>,
+    buttons: Query<(&UiButton, &HudButton)>,
+) {
+    for (btn, kind) in &buttons {
+        if btn.clicked {
+            tracing::info!("🎛️ HUD 按钮点击: {:?}", kind.0);
+            match kind.0 {
+                HudButtonKind::Inventory => mgr.toggle(DialogKind::Inventory),
+                HudButtonKind::Character => mgr.toggle(DialogKind::Character),
+                HudButtonKind::Skills => mgr.toggle(DialogKind::Character),
+                HudButtonKind::QuestLog => mgr.toggle(DialogKind::QuestLog),
+                HudButtonKind::Option => mgr.toggle(DialogKind::Option),
+                HudButtonKind::Menu => mgr.toggle(DialogKind::Menu),
+                HudButtonKind::GameShop => mgr.toggle(DialogKind::GameShop),
+            }
+        }
+    }
+}
+
 /// 动态部件标记（每帧按 HudState 更新）
 #[derive(Component)] struct HpHpFill;
 #[derive(Component)] struct MpMpFill;
@@ -91,7 +114,7 @@ impl Plugin for HudPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_hud);
         app.add_systems(
             Update,
-            (ui_button_system, hud_update_system)
+            (ui_button_system, hud_button_system, hud_update_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );

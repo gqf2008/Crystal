@@ -5,6 +5,7 @@
 // ============================================================================
 
 pub mod chat;
+pub mod dialogs;
 pub mod hud;
 pub mod movement;
 pub mod pathfinding;
@@ -27,6 +28,7 @@ impl Plugin for GamePlugin {
         app.add_plugins((
             hud::HudPlugin,
             chat::ChatPlugin,
+            dialogs::DialogsPlugin,
             movement::MovementPlugin,
             player_control::PlayerControlPlugin,
         ));
@@ -50,7 +52,7 @@ fn setup_game_ui_camera(mut commands: Commands) {
         }),
         Camera {
             order: 1,
-            clear_color: ClearColorConfig::None,
+            // [DEBUG] 先用默认清屏验证 UI 渲染
             ..default()
         },
     ));

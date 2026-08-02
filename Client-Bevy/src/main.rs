@@ -74,6 +74,10 @@ fn main() {
         ModalBoxPlugin,
         client_bevy::game::GamePlugin,
     ));
+    // --auto-inv: 进游戏 3 秒后自动打开背包（M9 对话框调试）
+    if std::env::args().any(|a| a == "--auto-inv") {
+        app.add_systems(Update, auto_open_inventory);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -129,6 +133,23 @@ fn capture_shot(commands: &mut Commands, counter: &mut u32) {
     commands
         .spawn(Screenshot::primary_window())
         .observe(save_to_disk(path));
+}
+
+/// --auto-inv：进游戏 3 秒后自动打开背包
+fn auto_open_inventory(
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut timer: Local<f32>,
+) {
+    if *state != client_bevy::scenes::AppState::Game {
+        return;
+    }
+    *timer += time.delta_secs();
+    if *timer >= 3.0 && !mgr.is_open(client_bevy::game::dialogs::DialogKind::Inventory) {
+        mgr.toggle(client_bevy::game::dialogs::DialogKind::Inventory);
+        tracing::info!("🎛️ --auto-inv 自动打开背包");
+    }
 }
 
 /// 强制激活 winit IME。
