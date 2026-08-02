@@ -267,6 +267,13 @@
 - [x] 验证：真实 ServerRust E2E——创建行会 → 设置公告 → `🏰 行会公告更新: ["TestNotice 公告内容"]` → ✅；客户端 34 测试全过（服务端 EditGuildNotice wire M27 已修，无改动）
 
 ---
+### M30: 行会仓库（金币存取）（2026-08-03 完成）
+- [x] **服务端存取后广播完整行会信息**：GuildStorageGoldChange 存入/取出后原只发系统消息，客户端看不到金币变化 → 新增 broadcast_guild_info 给所有在线成员
+- [x] **客户端**：行会对话框加仓库金币输入框（TextInput 复用）+ 存入/取出按钮 → `C.GuildStorageGoldChange{change_type, amount}`（C# GuildDialog 仓库语义）；头部行金币实时刷新
+- [x] 验证：真实 ServerRust E2E——创建行会（扣 100 万）→ 存入 100 → `🏰 行会信息: ... 金币 100` → 取出 50 → `金币 50` → **DB 金币精确匹配**（2,000,000-1,000,000-100+50=999,950 ✅）；客户端 34 / 服务端 139 测试全过
+- [ ] 行会仓库物品存取（GuildStorageItemChange wire 已存在）、Ranking（排行榜）
+
+---
 ## 四、执行顺序与依赖
 
 ```
@@ -286,6 +293,7 @@ M7（真实网络）→ M8（HUD+控制）→ M9（对话框 1→4 批）→ M10
 | 渲染后端冻结 | 强制 DX12（Vulkan present 在此机器异常） |
 | 大量精灵性能 | 精灵图缓存已建；后续 Atlas/批处理 |
 | 数据依赖 | 复用 Client-Macroquad/Data，`resolve_data_path` 自动解析 |
+
 
 
 

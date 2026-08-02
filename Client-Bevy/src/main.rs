@@ -185,6 +185,14 @@ fn main() {
     if std::env::args().any(|a| a == "--shop-test") {
         app.add_systems(Update, auto_shop_test);
     }
+    // --guild-gold-test: 行会仓库金币链路（创建→存入→取出）
+    if std::env::args().any(|a| a == "--guild-gold-test") {
+        app.add_systems(Update, auto_guild_gold_test);
+    }
+    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
+    if std::env::args().any(|a| a == "--shop-test") {
+        app.add_systems(Update, auto_shop_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -1296,6 +1304,80 @@ fn auto_guild_notice_test(
                 tracing::info!("[GUILDNOTICE] ✅ 公告已更新: {:?}", guild.notice);
             } else {
                 tracing::warn!("[GUILDNOTICE] ❌ 公告未更新: {:?}", guild.notice);
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --guild-gold-test：创建行会 → 存入 100 → 取出 50 → 验证仓库金币
+#[allow(clippy::too_many_arguments)]
+fn auto_guild_gold_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    guild: Res<client_bevy::game::dialogs::guild::GuildState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::guild::GuildNameReturn {
+                name: "TestGuild4".to_string(),
+            });
+            tracing::info!("[GUILDGOLD] 创建行会 TestGuild4");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 3.0 {
+                return;
+            }
+            if guild.in_guild && guild.name == "TestGuild4" {
+                net.send_packet(&mir2_shared::packets::client::guild::GuildStorageGoldChange {
+                    change_type: 0,
+                    amount: 100,
+                });
+                tracing::info!("[GUILDGOLD] 存入 100 金币");
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t < 3.0 {
+                return;
+            }
+            if guild.gold >= 100 {
+                tracing::info!("[GUILDGOLD] ✅ 仓库金币: {}", guild.gold);
+                net.send_packet(&mir2_shared::packets::client::guild::GuildStorageGoldChange {
+                    change_type: 1,
+                    amount: 50,
+                });
+                tracing::info!("[GUILDGOLD] 取出 50 金币");
+                *stage = 3;
+                *t = 0.0;
+            } else {
+                tracing::warn!("[GUILDGOLD] ❌ 仓库金币未更新: {}", guild.gold);
+                *stage = 9;
+            }
+        }
+        3 => {
+            if *t < 3.0 {
+                return;
+            }
+            if guild.gold >= 50 {
+                tracing::info!("[GUILDGOLD] ✅ 取出后仓库金币: {}", guild.gold);
+            } else {
+                tracing::warn!("[GUILDGOLD] ❌ 取出后金币异常: {}", guild.gold);
             }
             *stage = 9;
         }

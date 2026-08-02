@@ -71,6 +71,16 @@ pub struct GuildNoticeField;
 #[derive(Component)]
 pub struct GuildNoticeBtn;
 
+/// 仓库金币输入框（TextInput id 3）
+#[derive(Component)]
+pub struct GuildGoldField;
+
+#[derive(Component)]
+pub struct GuildGoldDeposit;
+
+#[derive(Component)]
+pub struct GuildGoldWithdraw;
+
 // 邀请提示
 #[derive(Component)]
 pub struct GuildInviteWidget;
@@ -323,6 +333,62 @@ fn spawn_guild(
             GuildWidget,
         ));
     }
+    // 仓库金币：输入框（TextInput id 3）+ 存入/取出（C# GuildDialog 仓库语义）
+    let gold_box = commands
+        .spawn((
+            crate::ui::sprite_ui::UiEntity,
+            DialogRoot(DialogKind::Guild),
+            GuildWidget,
+            GuildGoldField,
+            crate::game::dialogs::text_input::TextInputField(3),
+            crate::game::dialogs::text_input::TextInputRect(340.0, 530.0, 200.0, 20.0),
+            Sprite {
+                image: white.clone(),
+                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
+                custom_size: Some(Vec2::new(200.0, 20.0)),
+                ..default()
+            },
+            bevy::sprite::Anchor::TOP_LEFT,
+            Transform::from_xyz(340.0, -530.0, 8.1),
+            Visibility::Hidden,
+        ))
+        .id();
+    commands.entity(gold_box).with_children(|p| {
+        p.spawn((
+            crate::game::dialogs::text_input::TextInputDisplay(3),
+            Text2d::new(String::new()),
+            bevy::sprite::Anchor::TOP_LEFT,
+            TextFont {
+                font: FontSource::Handle(font.clone()),
+                font_size: FontSize::Px(12.0),
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 1.0, 1.0)),
+            Transform::from_xyz(4.0, -2.0, 8.2),
+        ));
+    });
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 206, 207, 208,
+        300.0, 560.0, 8.3, 76.0, 25.0,
+    ) {
+        commands.entity(e).insert((
+            GuildGoldDeposit,
+            DialogRoot(DialogKind::Guild),
+            GuildWidget,
+        ));
+    }
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 210, 211, 212,
+        390.0, 560.0, 8.3, 76.0, 25.0,
+    ) {
+        commands.entity(e).insert((
+            GuildGoldWithdraw,
+            DialogRoot(DialogKind::Guild),
+            GuildWidget,
+        ));
+    }
 
     // 邀请提示（MirMessageBox）
     let (bx, by) = (284.0, 289.0);
@@ -363,6 +429,8 @@ fn guild_ui_system(
     invite_btn: Query<&UiButton, With<GuildInviteBtn>>,
     kick_btn: Query<&UiButton, With<GuildKickBtn>>,
     notice_btn: Query<&UiButton, With<GuildNoticeBtn>>,
+    gold_deposit: Query<&UiButton, With<GuildGoldDeposit>>,
+    gold_withdraw: Query<&UiButton, With<GuildGoldWithdraw>>,
     close: Query<&UiButton, With<GuildClose>>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
@@ -499,6 +567,35 @@ fn guild_ui_system(
                 });
                 tracing::info!("🏰 更新行会公告: {}", notice);
                 input.texts[2].clear();
+                input.active = None;
+            }
+        }
+    }
+    // 仓库金币：存入/取出（C# GuildDialog 仓库语义：GuildStorageGoldChange）
+    for btn in &gold_deposit {
+        if btn.clicked && guild.in_guild {
+            let amount = input.texts.get(3).cloned().unwrap_or_default().trim().parse::<u32>().unwrap_or(0);
+            if amount > 0 {
+                net.send_packet(&mir2_shared::packets::client::guild::GuildStorageGoldChange {
+                    change_type: 0,
+                    amount,
+                });
+                tracing::info!("🏰 存入行会仓库 {} 金币", amount);
+                input.texts[3].clear();
+                input.active = None;
+            }
+        }
+    }
+    for btn in &gold_withdraw {
+        if btn.clicked && guild.in_guild {
+            let amount = input.texts.get(3).cloned().unwrap_or_default().trim().parse::<u32>().unwrap_or(0);
+            if amount > 0 {
+                net.send_packet(&mir2_shared::packets::client::guild::GuildStorageGoldChange {
+                    change_type: 1,
+                    amount,
+                });
+                tracing::info!("🏰 取出行会仓库 {} 金币", amount);
+                input.texts[3].clear();
                 input.active = None;
             }
         }
