@@ -14,6 +14,7 @@ use mir2_shared::SelectInfo;
 
 use crate::game::chat::ChatState;
 use crate::game::combat::CombatEvents;
+use crate::game::weather::WeatherState;
 use crate::game::dialogs::npc::NpcDialogState;
 use crate::game::dialogs::npc_goods::{GoodsEntry, NpcGoodsState};
 use crate::game::hud::HudState;
@@ -257,6 +258,7 @@ fn network_system(
     mut npc_dialog: ResMut<NpcDialogState>,
     mut npc_goods: ResMut<NpcGoodsState>,
     mut combat_evt: ResMut<CombatEvents>,
+    mut weather: ResMut<WeatherState>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     // 真实 TCP：TcpEvent（完整内层包 / 断线）
@@ -274,6 +276,7 @@ fn network_system(
                         &mut npc_dialog,
                         &mut npc_goods,
                         &mut combat_evt,
+                        &mut weather,
                         &mut next,
                         &payload,
                     );
@@ -311,6 +314,7 @@ fn network_system(
                         &mut npc_dialog,
                         &mut npc_goods,
                         &mut combat_evt,
+                        &mut weather,
                         &mut next,
                         &payload,
                     );
@@ -340,6 +344,7 @@ fn handle_packet(
     npc_dialog: &mut NpcDialogState,
     npc_goods: &mut NpcGoodsState,
     combat_evt: &mut CombatEvents,
+    weather: &mut WeatherState,
     next: &mut NextState<AppState>,
     payload: &[u8],
 ) {
@@ -500,6 +505,7 @@ fn handle_packet(
                 game_data.desired_map = Some(p.file_name);
                 game_data.player_spawn =
                     Some((p.location_x as f32, p.location_y as f32, p.direction));
+                weather.code = p.weather;
                 next.set(AppState::Game);
             }
         }

@@ -256,7 +256,7 @@ fn send_map_and_objects(to_client: &Sender<Vec<u8>>, char_index: i32) {
             direction: 0,
             map_dark_light: 0,
             music: 0,
-            weather: 0,
+            weather: 1,
         },
     );
 
