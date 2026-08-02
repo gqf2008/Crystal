@@ -12,8 +12,12 @@ pub mod npc;
 pub mod npc_goods;
 pub mod quest_log;
 pub mod compass;
+pub mod creature;
 pub mod friend;
 pub mod group;
+pub mod guild_territory;
+pub mod hero;
+pub mod item_rental;
 pub mod guild;
 pub mod mail;
 pub mod mentor;
@@ -21,6 +25,7 @@ pub mod mount;
 pub mod ranking;
 pub mod relationship;
 pub mod report;
+pub mod trust_merchant;
 pub mod inspect;
 pub mod trade;
 pub mod inventory;
@@ -52,6 +57,11 @@ pub enum DialogKind {
     Relationship,
     Mount,
     Report,
+    Hero,
+    Creature,
+    TrustMerchant,
+    ItemRental,
+    GuildTerritory,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）
@@ -107,11 +117,18 @@ impl Plugin for DialogsPlugin {
                 npc_goods::NpcGoodsPlugin,
                 guild::GuildPlugin,
                 mail::MailPlugin,
+            ),
+            (
                 ranking::RankingPlugin,
                 mentor::MentorPlugin,
                 relationship::RelationshipPlugin,
                 mount::MountPlugin,
                 report::ReportPlugin,
+                hero::HeroPlugin,
+                creature::CreaturePlugin,
+                trust_merchant::TrustMerchantPlugin,
+                item_rental::ItemRentalPlugin,
+                guild_territory::GuildTerritoryPlugin,
             ),
         ));
     }
