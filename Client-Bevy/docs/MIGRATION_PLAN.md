@@ -119,7 +119,10 @@
   - PBKDF2 校验修复（`splitn(2)` + `parts[0]/parts[1]`，C# 迁移账号可登录）
   - `EquipItem` 按 unique_id 定位背包格（原把 MirGridType 当格索引）
 - [x] 验证：真实 ServerRust 全流程——登录→进游戏→UserInformation 4 件物品→客户端背包图标渲染；客户端 24 测试 + 服务端 139 测试全过
-- [ ] 待续：技能栏 F1-F8 `Magic` 包、拖拽移动/拆分/丢弃、装备栏渲染、tooltip
+- [x] **技能栏 F1-F8 `Magic` 包**：NewMagic 包写入已学技能（key 绑定），F1-F8 发送 Magic（spell/direction/位置）；快捷栏按 key 显示 MagIcon[icon*2] 技能图标（原版 C# MainDialogs）
+- [x] **服务端系统性修复**：kameo 0.20 的 ask/tell 是惰性 request，丢弃 future 消息永远不会发送——gate 转发（MoveItem/UseItem/EquipItem/Magic/组队/行会/邮件等 ~335 处）全部静默丢失。async 上下文补 .await，sync 上下文改 tell().try_send()，SendToClient 一律 tell 防死锁
+- [x] 技能编号对齐：DB magic_infos/player_magics 用 C# 编号，客户端协议 SharedRust(+3)，MagicRequest/NewMagic 统一换算
+- [ ] 待续：拖拽移动/拆分/丢弃物品、装备栏渲染、技能拖拽绑定（MagicKey 包）、tooltip
 
 ---
 
