@@ -1247,6 +1247,8 @@ impl WorldActor {
                 item.max_dura = info.durability as u16;
                 item.current_dura = info.durability as u16;
             }
+            // 补 ItemInfo（ObjectItem 携带 info 供客户端渲染名称/图标，与 M16 玩家丢弃路径一致）
+            enrich_item_info(&mut item, &self.item_infos);
             let object_item = mir2_shared::packets::server::ObjectItem {
                 object_id: drop_oid,
                 item: item.clone(),
