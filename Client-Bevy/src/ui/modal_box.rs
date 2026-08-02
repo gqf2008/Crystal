@@ -1,10 +1,16 @@
 // ============================================================================
-// ModalBoxPlugin - 模态框（删除角色确认 = 原版 MirInputBox / Credits = 原版 MirMessageBox）
+// ModalBoxPlugin - 模态框（对齐原版 C# MirMessageBox / MirInputBox）
 // ============================================================================
+// 原版流程（SelectScene.DeleteCharacter）：
+//   1. 点“删除角色” → MirMessageBox YesNo（Prguse[360]）：确认删除角色「name」？
+//   2. 点 Yes      → MirInputBox（Prguse[660]）：输入角色名确认删除
 // 原版布局：
+// - MirMessageBox:背景 Prguse[360] 456x190，文字(35,35) 390x110，
+//                 Yes Title[206-208]@(260,157)，No Title[210-212]@(360,157)
 // - MirInputBox:  背景 Prguse[660] 288x156，文字(25,25)，输入框(23,86) 240x19，
 //                 OK Title[200-202]@(60,123)，Cancel Title[203-205]@(160,123)
-// - MirMessageBox:背景 Prguse[360] 456x190，文字(35,35) 390x110，OK Title[200-202]@(360,157)
+//
+// 注意：原版 SelectScene 的 CreditsButton.Click 为空 → Bevy 版不做任何 Credits 弹窗。
 
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
@@ -24,22 +30,18 @@ pub struct ModalBoxPlugin;
 impl Plugin for ModalBoxPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ModalState>();
-        app.add_systems(
-            Update,
-            modal_ui_system.run_if(in_state(AppState::Select)),
-        );
-        app.add_systems(
-            Update,
-            modal_ime_system.run_if(in_state(AppState::Select)),
-        );
+        app.add_systems(Update, modal_ui_system.run_if(in_state(AppState::Select)));
+        app.add_systems(Update, modal_ime_system.run_if(in_state(AppState::Select)));
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModalKind {
     None,
+    /// 第一步：MirMessageBox YesNo（确认删除角色？）
+    DeleteAsk,
+    /// 第二步：MirInputBox（输入角色名确认）
     DeleteConfirm,
-    Credits,
 }
 
 #[derive(Resource)]
@@ -65,10 +67,11 @@ impl Default for ModalState {
     }
 }
 
-// 删除确认框（原版 MirInputBox，Prguse[660] 288x156）
+// 删除确认输入框（原版 MirInputBox，Prguse[660] 288x156）
 const DLG_X: f32 = (1024.0 - 288.0) / 2.0; // 368
 const DLG_Y: f32 = (768.0 - 156.0) / 2.0; // 306
-// Credits 框（原版 MirMessageBox，Prguse[360] 456x190）
+
+// 删除确认询问框（原版 MirMessageBox，Prguse[360] 456x190）
 const MSG_X: f32 = (1024.0 - 456.0) / 2.0; // 284
 const MSG_Y: f32 = (768.0 - 190.0) / 2.0; // 289
 
@@ -76,13 +79,19 @@ const MSG_Y: f32 = (768.0 - 190.0) / 2.0; // 289
 struct ModalDeleteDlg;
 
 #[derive(Component)]
-struct ModalCreditsDlg;
+struct ModalDeleteAskDlg;
 
 #[derive(Component)]
 struct ModalOk;
 
 #[derive(Component)]
 struct ModalCancel;
+
+#[derive(Component)]
+struct ModalYes;
+
+#[derive(Component)]
+struct ModalNo;
 
 #[derive(Component)]
 struct ModalInput;
@@ -104,7 +113,9 @@ pub fn spawn_modal_box(
     // ===== 删除确认框（MirInputBox 样式）=====
     if let Some(h) = ui_image(libs, images, cache, LibraryName::Prguse, 660) {
         let e = spawn_ui_sprite(commands, h, DLG_X, DLG_Y, 6.0, 1.0);
-        commands.entity(e).insert((ModalDeleteDlg, Visibility::Hidden));
+        commands
+            .entity(e)
+            .insert((ModalDeleteDlg, Visibility::Hidden));
     }
     // 提示文字
     let text_e = spawn_ui_text(
@@ -244,12 +255,15 @@ pub fn spawn_modal_box(
             .insert((ModalDeleteDlg, ModalCancel, Visibility::Hidden));
     }
 
-    // ===== Credits 框（MirMessageBox 样式）=====
+    // ===== 删除确认询问框（MirMessageBox YesNo 样式）=====
     if let Some(h) = ui_image(libs, images, cache, LibraryName::Prguse, 360) {
         let e = spawn_ui_sprite(commands, h, MSG_X, MSG_Y, 6.0, 1.0);
-        commands.entity(e).insert((ModalCreditsDlg, Visibility::Hidden));
+        commands
+            .entity(e)
+            .insert((ModalDeleteAskDlg, Visibility::Hidden));
     }
-    let c_text = spawn_ui_text(
+    // 提示文字（原版 MirMessageBox Label (35,35) 390x110）
+    let ask_text = spawn_ui_text(
         commands,
         font,
         "",
@@ -260,17 +274,37 @@ pub fn spawn_modal_box(
         7.0,
     );
     commands
-        .entity(c_text)
-        .insert((UiEntity, ModalCreditsDlg, ModalText, Visibility::Hidden));
+        .entity(ask_text)
+        .insert((UiEntity, ModalDeleteAskDlg, ModalText, Visibility::Hidden));
+    // Yes Title[206-208]@(260,157) / No Title[210-212]@(360,157)
     if let Some(e) = spawn_ui_button(
         commands,
         libs,
         images,
         cache,
         LibraryName::Title,
-        200,
-        201,
-        202,
+        206,
+        207,
+        208,
+        MSG_X + 260.0,
+        MSG_Y + 157.0,
+        7.0,
+        76.0,
+        25.0,
+    ) {
+        commands
+            .entity(e)
+            .insert((ModalDeleteAskDlg, ModalYes, Visibility::Hidden));
+    }
+    if let Some(e) = spawn_ui_button(
+        commands,
+        libs,
+        images,
+        cache,
+        LibraryName::Title,
+        210,
+        211,
+        212,
         MSG_X + 360.0,
         MSG_Y + 157.0,
         7.0,
@@ -279,7 +313,7 @@ pub fn spawn_modal_box(
     ) {
         commands
             .entity(e)
-            .insert((ModalCreditsDlg, ModalOk, Visibility::Hidden));
+            .insert((ModalDeleteAskDlg, ModalNo, Visibility::Hidden));
     }
 }
 
@@ -290,13 +324,15 @@ fn modal_ui_system(
     time: Res<Time>,
     windows: Query<&Window>,
     mouse: Res<ButtonInput<MouseButton>>,
-    mut delete_dlg: Query<&mut Visibility, (With<ModalDeleteDlg>, Without<ModalCreditsDlg>)>,
-    mut credits_dlg: Query<&mut Visibility, (With<ModalCreditsDlg>, Without<ModalDeleteDlg>)>,
+    mut delete_dlg: Query<&mut Visibility, (With<ModalDeleteDlg>, Without<ModalDeleteAskDlg>)>,
+    mut delete_ask_dlg: Query<&mut Visibility, (With<ModalDeleteAskDlg>, Without<ModalDeleteDlg>)>,
     mut texts: Query<&mut Text2d, (With<ModalText>, Without<ModalError>, Without<ModalInput>)>,
     mut errors: Query<&mut Text2d, (With<ModalError>, Without<ModalText>, Without<ModalInput>)>,
     mut inputs: Query<&mut Text2d, (With<ModalInput>, Without<ModalText>, Without<ModalError>)>,
     ok_btns: Query<&UiButton, With<ModalOk>>,
     cancel_btns: Query<&UiButton, With<ModalCancel>>,
+    yes_btns: Query<&UiButton, (With<ModalYes>, Without<ModalOk>, Without<ModalNo>)>,
+    no_btns: Query<&UiButton, (With<ModalNo>, Without<ModalOk>, Without<ModalYes>)>,
 ) {
     state.cursor_timer += time.delta_secs();
     if state.cursor_timer >= 0.5 {
@@ -305,7 +341,7 @@ fn modal_ui_system(
     }
 
     let show_delete = state.kind == ModalKind::DeleteConfirm;
-    let show_credits = state.kind == ModalKind::Credits;
+    let show_delete_ask = state.kind == ModalKind::DeleteAsk;
     for mut vis in delete_dlg.iter_mut() {
         *vis = if show_delete {
             Visibility::Visible
@@ -313,14 +349,14 @@ fn modal_ui_system(
             Visibility::Hidden
         };
     }
-    for mut vis in credits_dlg.iter_mut() {
-        *vis = if show_credits {
+    for mut vis in delete_ask_dlg.iter_mut() {
+        *vis = if show_delete_ask {
             Visibility::Visible
         } else {
             Visibility::Hidden
         };
     }
-    if !show_delete && !show_credits {
+    if !show_delete && !show_delete_ask {
         return;
     }
 
@@ -332,13 +368,11 @@ fn modal_ui_system(
 
     // 主文本
     let main_text = match state.kind {
-        ModalKind::DeleteConfirm => match &selected {
-            Some(c) => format!("删除角色「{}」？\n请输入角色名确认：", c.name),
+        ModalKind::DeleteAsk => match &selected {
+            Some(c) => format!("确定要删除角色「{}」吗？", c.name),
             None => "没有选中的角色。".to_string(),
         },
-        ModalKind::Credits => {
-            "传 奇 2 (Legend of Mir 2)\nBevy 客户端移植版 v0.1.0\n\n原版资源 + Rust/Bevy 重制".to_string()
-        }
+        ModalKind::DeleteConfirm => "请输入角色名确认删除：".to_string(),
         ModalKind::None => String::new(),
     };
     if let Ok(mut t) = texts.single_mut() {
@@ -363,12 +397,16 @@ fn modal_ui_system(
         .unwrap_or((0.0, 0.0));
     let lclick = mouse.just_pressed(MouseButton::Left);
 
-    // 输入框聚焦（删除确认）
+    let in_rect = |rect: (f32, f32, f32, f32)| {
+        let (x, y, w, h) = rect;
+        mx >= x && mx <= x + w && my >= y && my <= y + h
+    };
+
+    // 输入框聚焦 + 字符输入（第二步 MirInputBox）
     if state.kind == ModalKind::DeleteConfirm {
         let input_rect = (DLG_X + 23.0, DLG_Y + 86.0, 240.0, 19.0);
         if lclick {
-            let (x, y, w, h) = input_rect;
-            state.input_focused = mx >= x && mx <= x + w && my >= y && my <= y + h;
+            state.input_focused = in_rect(input_rect);
         }
         let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
         if state.input_focused {
@@ -392,52 +430,85 @@ fn modal_ui_system(
         }
     }
 
-    // OK（点击自算）
-    for btn in ok_btns.iter() {
-        let (x, y, w, h) = btn.rect;
-        let over = mx >= x && mx <= x + w && my >= y && my <= y + h;
-        if lclick && over {
-            match state.kind {
-                ModalKind::DeleteConfirm => {
-                    if let Some(c) = &selected {
-                        if state.name_input.trim() == c.name {
-                            net.send_packet(&mir2_shared::packets::client::DeleteCharacter {
-                                character_index: c.index,
-                            });
-                            state.kind = ModalKind::None;
-                            state.name_input.clear();
-                            state.error = None;
-                        } else {
-                            state.error = Some("输入的角色名不匹配！".to_string());
-                        }
-                    } else {
-                        state.error = Some("没有选中的角色。".to_string());
-                    }
-                }
-                ModalKind::Credits => {
+    // 提交删除（第二步 MirInputBox OK / 回车）
+    let submit_delete =
+        |net: &NetworkContext, state: &mut ModalState, selected: &Option<SelectInfo>| {
+            if let Some(c) = selected {
+                if state.name_input.trim() == c.name {
+                    net.send_packet(&mir2_shared::packets::client::DeleteCharacter {
+                        character_index: c.index,
+                    });
                     state.kind = ModalKind::None;
+                    state.name_input.clear();
+                    state.error = None;
+                } else {
+                    state.error = Some("输入的角色名不匹配！".to_string());
                 }
-                ModalKind::None => {}
+            } else {
+                state.error = Some("没有选中的角色。".to_string());
+            }
+        };
+    // 取消（关闭对话框）
+    let cancel = |state: &mut ModalState| {
+        state.kind = ModalKind::None;
+        state.name_input.clear();
+        state.error = None;
+    };
+
+    // 键盘：回车=确认，ESC=取消（对齐原版 MirInputBox/MirMessageBox）
+    let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
+    let mut enter = false;
+    let mut escape = false;
+    for key in &key_list {
+        if key.state != bevy::input::ButtonState::Pressed {
+            continue;
+        }
+        match key.logical_key {
+            Key::Enter => enter = true,
+            Key::Escape => escape = true,
+            _ => {}
+        }
+    }
+    if escape {
+        cancel(&mut state);
+        return;
+    }
+    if enter {
+        match state.kind {
+            ModalKind::DeleteConfirm => submit_delete(&net, &mut state, &selected),
+            // 原版 MirMessageBox YesNo 回车 = Yes
+            ModalKind::DeleteAsk => {
+                state.kind = ModalKind::DeleteConfirm;
+                state.name_input.clear();
+                state.error = None;
+                state.input_focused = true;
+            }
+            ModalKind::None => {}
+        }
+        return;
+    }
+
+    // 按钮点击
+    match state.kind {
+        ModalKind::DeleteConfirm => {
+            if ok_btns.iter().any(|b| lclick && in_rect(b.rect)) {
+                submit_delete(&net, &mut state, &selected);
+            } else if cancel_btns.iter().any(|b| lclick && in_rect(b.rect)) {
+                cancel(&mut state);
             }
         }
-    }
-    for btn in cancel_btns.iter() {
-        let (x, y, w, h) = btn.rect;
-        let over = mx >= x && mx <= x + w && my >= y && my <= y + h;
-        if lclick && over {
-            state.kind = ModalKind::None;
-            state.name_input.clear();
-            state.error = None;
+        ModalKind::DeleteAsk => {
+            if yes_btns.iter().any(|b| lclick && in_rect(b.rect)) {
+                // 点 Yes → 进入输入角色名确认框
+                state.kind = ModalKind::DeleteConfirm;
+                state.name_input.clear();
+                state.error = None;
+                state.input_focused = true;
+            } else if no_btns.iter().any(|b| lclick && in_rect(b.rect)) {
+                cancel(&mut state);
+            }
         }
-    }
-    // ESC 关闭
-    let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
-    for key in &key_list {
-        if key.state == bevy::input::ButtonState::Pressed && key.logical_key == Key::Escape {
-            state.kind = ModalKind::None;
-            state.name_input.clear();
-            state.error = None;
-        }
+        ModalKind::None => {}
     }
 }
 

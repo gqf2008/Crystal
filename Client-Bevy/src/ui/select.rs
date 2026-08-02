@@ -105,16 +105,22 @@ fn load_preview(
             .map(|info| (info.offset_x as f32, info.offset_y as f32));
         if let Some(h) = ui_image(libs, images, cache, LibraryName::ChrSel, idx) {
             anim.preview_handles.push(h);
-            anim.preview_offsets
-                .push(offsets.unwrap_or((0.0, 0.0)));
+            anim.preview_offsets.push(offsets.unwrap_or((0.0, 0.0)));
         }
     }
 }
 
 /// 计算第 frame 帧的屏幕坐标（Location + offset * scale）
 fn preview_pos(anim: &SelectAnim, frame: usize) -> (f32, f32) {
-    let (ox, oy) = anim.preview_offsets.get(frame).copied().unwrap_or((0.0, 0.0));
-    (PREVIEW_X + ox * PREVIEW_SCALE, PREVIEW_Y + oy * PREVIEW_SCALE)
+    let (ox, oy) = anim
+        .preview_offsets
+        .get(frame)
+        .copied()
+        .unwrap_or((0.0, 0.0));
+    (
+        PREVIEW_X + ox * PREVIEW_SCALE,
+        PREVIEW_Y + oy * PREVIEW_SCALE,
+    )
 }
 
 fn preview_base_index(class: mir2_shared::MirClass, gender: mir2_shared::MirGender) -> usize {
@@ -169,10 +175,10 @@ fn setup_select_ui(
             net.selected_index = Some(i);
         }
     }
-    // 调试：BEVY_OPEN_MODAL=delete/credits 打开对应模态框（live 截屏验证用）
+    // 调试：BEVY_OPEN_MODAL=delete/delete_confirm 打开对应模态框（live 截屏验证用）
     match std::env::var("BEVY_OPEN_MODAL").as_deref() {
-        Ok("delete") => modal.kind = ModalKind::DeleteConfirm,
-        Ok("credits") => modal.kind = ModalKind::Credits,
+        Ok("delete") => modal.kind = ModalKind::DeleteAsk,
+        Ok("delete_confirm") => modal.kind = ModalKind::DeleteConfirm,
         _ => {}
     }
     build_select_ui(
@@ -208,15 +214,36 @@ fn build_select_ui(
     spawn_ui_camera(commands.reborrow());
 
     // 背景 Prguse[65]（1024x768）
-    if let Some(h) = ui_image(&mut *libs, &mut *images, &mut *cache, LibraryName::Prguse, 65) {
+    if let Some(h) = ui_image(
+        &mut *libs,
+        &mut *images,
+        &mut *cache,
+        LibraryName::Prguse,
+        65,
+    ) {
         spawn_ui_sprite(&mut *commands, h, 0.0, 0.0, 0.0, 1.0);
     }
     // 标题 Title[40]
-    if let Some(h) = ui_image(&mut *libs, &mut *images, &mut *cache, LibraryName::Title, 40) {
+    if let Some(h) = ui_image(
+        &mut *libs,
+        &mut *images,
+        &mut *cache,
+        LibraryName::Title,
+        40,
+    ) {
         spawn_ui_sprite(&mut *commands, h, 468.0, 20.0, 1.0, 1.0);
     }
     // 服务器名
-    spawn_ui_text(&mut *commands, &font, "Legend of Mir 2", 460.0, 77.0, 17.0, Color::WHITE, 2.0);
+    spawn_ui_text(
+        &mut *commands,
+        &font,
+        "Legend of Mir 2",
+        460.0,
+        77.0,
+        17.0,
+        Color::WHITE,
+        2.0,
+    );
 
     // 角色预览（初始）
     // 角色预览（初始，带帧偏移，对齐 C# UseOffSet=true；优先选中的角色）
@@ -225,7 +252,14 @@ fn build_select_ui(
         .and_then(|i| net.characters.iter().find(|c| c.index == i))
         .or_else(|| net.characters.first());
     if let Some(c) = preview_char {
-        load_preview(&mut *libs, &mut *images, &mut *cache, &mut *anim, c.class, c.gender);
+        load_preview(
+            &mut *libs,
+            &mut *images,
+            &mut *cache,
+            &mut *anim,
+            c.class,
+            c.gender,
+        );
     }
     if let Some(pv) = anim.preview_handles.first().cloned() {
         let (px, py) = preview_pos(&anim, 0);
@@ -233,7 +267,16 @@ fn build_select_ui(
         commands.entity(e).insert(PreviewImg);
     }
     // 角色信息（Last Online 对齐原版 (200,623)/(280,623)）
-    spawn_ui_text(&mut *commands, &font, "Last Online:", 200.0, 623.0, 14.0, Color::WHITE, 2.0);
+    spawn_ui_text(
+        &mut *commands,
+        &font,
+        "Last Online:",
+        200.0,
+        623.0,
+        14.0,
+        Color::WHITE,
+        2.0,
+    );
     if let Some(c) = net.characters.first() {
         let e = spawn_ui_text(
             &mut *commands,
@@ -249,13 +292,24 @@ fn build_select_ui(
     }
 
     // 角色按钮（4 槽位，对齐 C# CharacterButton：选中帧 660+class+5）
-    let positions = [(637.0f32, 194.0f32), (637.0, 298.0), (637.0, 402.0), (637.0, 506.0)];
+    let positions = [
+        (637.0f32, 194.0f32),
+        (637.0, 298.0),
+        (637.0, 402.0),
+        (637.0, 506.0),
+    ];
     for (i, (x, y)) in positions.iter().enumerate() {
         if let Some(c) = net.characters.get(i) {
             let slot = class_slot(c);
             let selected = net.selected_index == Some(i as i32);
             let frame = if selected { slot + 5 } else { slot };
-            if let Some(h) = ui_image(&mut *libs, &mut *images, &mut *cache, LibraryName::Title, 660 + frame) {
+            if let Some(h) = ui_image(
+                &mut *libs,
+                &mut *images,
+                &mut *cache,
+                LibraryName::Title,
+                660 + frame,
+            ) {
                 let e = spawn_ui_sprite(&mut *commands, h, *x, *y, 2.0, 1.0);
                 commands.entity(e).insert(CharButton {
                     index: i as i32,
@@ -272,12 +326,45 @@ fn build_select_ui(
                 mir2_shared::MirClass::Assassin => "刺客",
                 mir2_shared::MirClass::Archer => "弓手",
             };
-            spawn_ui_text(&mut *commands, &font, &c.name, x + 107.0, y + 18.0, 13.0, Color::WHITE, 3.0);
-            spawn_ui_text(&mut *commands, &font, &format!("Lv.{}", c.level), x + 107.0, y + 37.0, 11.0, Color::srgb(0.75, 0.75, 0.75), 3.0);
-            spawn_ui_text(&mut *commands, &font, class_name, x + 178.0, y + 37.0, 11.0, Color::srgb(0.75, 0.75, 0.75), 3.0);
+            spawn_ui_text(
+                &mut *commands,
+                &font,
+                &c.name,
+                x + 107.0,
+                y + 18.0,
+                13.0,
+                Color::WHITE,
+                3.0,
+            );
+            spawn_ui_text(
+                &mut *commands,
+                &font,
+                &format!("Lv.{}", c.level),
+                x + 107.0,
+                y + 37.0,
+                11.0,
+                Color::srgb(0.75, 0.75, 0.75),
+                3.0,
+            );
+            spawn_ui_text(
+                &mut *commands,
+                &font,
+                class_name,
+                x + 178.0,
+                y + 37.0,
+                11.0,
+                Color::srgb(0.75, 0.75, 0.75),
+                3.0,
+            );
         } else {
             // 空槽位 Prguse[44]
-            if let Some(h) = ui_image(&mut *libs, &mut *images, &mut *cache, LibraryName::Prguse, 44) {
+            if let Some(h) = ui_image(
+                &mut *libs,
+                &mut *images,
+                &mut *cache,
+                LibraryName::Prguse,
+                44,
+            ) {
                 spawn_ui_sprite(&mut *commands, h, *x, *y, 2.0, 1.0);
             }
         }
@@ -287,11 +374,56 @@ fn build_select_ui(
     let screen_w = 1024.0f32;
     let x_point = (screen_w - 200.0) / 5.0;
     let y = 768.0 - 32.0;
-    spawn_bottom_btn(&mut *commands, &mut *libs, &mut *images, &mut *cache, 340, 100.0 + x_point - x_point / 2.0 - 50.0, y, BottomBtn::Start);
-    spawn_bottom_btn(&mut *commands, &mut *libs, &mut *images, &mut *cache, 343, 100.0 + x_point * 2.0 - x_point / 2.0 - 50.0, y, BottomBtn::NewChar);
-    spawn_bottom_btn(&mut *commands, &mut *libs, &mut *images, &mut *cache, 346, 100.0 + x_point * 3.0 - x_point / 2.0 - 50.0, y, BottomBtn::Delete);
-    spawn_bottom_btn(&mut *commands, &mut *libs, &mut *images, &mut *cache, 349, 100.0 + x_point * 4.0 - x_point / 2.0 - 50.0, y, BottomBtn::Credits);
-    spawn_bottom_btn(&mut *commands, &mut *libs, &mut *images, &mut *cache, 352, 100.0 + x_point * 5.0 - x_point / 2.0 - 50.0, y, BottomBtn::Exit);
+    spawn_bottom_btn(
+        &mut *commands,
+        &mut *libs,
+        &mut *images,
+        &mut *cache,
+        340,
+        100.0 + x_point - x_point / 2.0 - 50.0,
+        y,
+        BottomBtn::Start,
+    );
+    spawn_bottom_btn(
+        &mut *commands,
+        &mut *libs,
+        &mut *images,
+        &mut *cache,
+        343,
+        100.0 + x_point * 2.0 - x_point / 2.0 - 50.0,
+        y,
+        BottomBtn::NewChar,
+    );
+    spawn_bottom_btn(
+        &mut *commands,
+        &mut *libs,
+        &mut *images,
+        &mut *cache,
+        346,
+        100.0 + x_point * 3.0 - x_point / 2.0 - 50.0,
+        y,
+        BottomBtn::Delete,
+    );
+    spawn_bottom_btn(
+        &mut *commands,
+        &mut *libs,
+        &mut *images,
+        &mut *cache,
+        349,
+        100.0 + x_point * 4.0 - x_point / 2.0 - 50.0,
+        y,
+        BottomBtn::Credits,
+    );
+    spawn_bottom_btn(
+        &mut *commands,
+        &mut *libs,
+        &mut *images,
+        &mut *cache,
+        352,
+        100.0 + x_point * 5.0 - x_point / 2.0 - 50.0,
+        y,
+        BottomBtn::Exit,
+    );
 
     // 新建角色对话框（隐藏，点“新建角色”打开）
     spawn_new_character_dialog(commands, libs, images, cache, &font, new_char);
@@ -299,14 +431,7 @@ fn build_select_ui(
     spawn_modal_box(commands, libs, images, cache, &font);
 }
 /// 角色按钮高亮边框（4 条细线，选中绿 / 悬停黄）
-fn spawn_char_border(
-    commands: &mut Commands,
-    index: i32,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-) {
+fn spawn_char_border(commands: &mut Commands, index: i32, x: f32, y: f32, w: f32, h: f32) {
     let color = Color::srgba(0.0, 0.0, 0.0, 0.0); // 初始透明
     let z = 2.5;
     // 上
@@ -369,7 +494,21 @@ fn spawn_bottom_btn(
     y: f32,
     kind: BottomBtn,
 ) {
-    if let Some(e) = spawn_ui_button(commands, libs, images, cache, LibraryName::Title, index, index + 1, index + 2, x, y, 2.0, 100.0, 25.0) {
+    if let Some(e) = spawn_ui_button(
+        commands,
+        libs,
+        images,
+        cache,
+        LibraryName::Title,
+        index,
+        index + 1,
+        index + 2,
+        x,
+        y,
+        2.0,
+        100.0,
+        25.0,
+    ) {
         commands.entity(e).insert(BottomButton(kind));
     }
 }
@@ -416,10 +555,10 @@ fn select_reload_system(
             net.selected_index = Some(i);
         }
     }
-    // 调试：BEVY_OPEN_MODAL=delete/credits 打开对应模态框（live 截屏验证用）
+    // 调试：BEVY_OPEN_MODAL=delete/delete_confirm 打开对应模态框（live 截屏验证用）
     match std::env::var("BEVY_OPEN_MODAL").as_deref() {
-        Ok("delete") => modal.kind = ModalKind::DeleteConfirm,
-        Ok("credits") => modal.kind = ModalKind::Credits,
+        Ok("delete") => modal.kind = ModalKind::DeleteAsk,
+        Ok("delete_confirm") => modal.kind = ModalKind::DeleteConfirm,
         _ => {}
     }
     build_select_ui(
@@ -444,10 +583,7 @@ fn select_ui_system(
     mut cache: ResMut<UiImageCache>,
     mut new_char: ResMut<NewCharState>,
     mut modal: ResMut<ModalState>,
-    mut char_btns: Query<
-        (&CharButton, &mut Sprite),
-        (Without<CharBorder>, Without<PreviewImg>),
-    >,
+    mut char_btns: Query<(&CharButton, &mut Sprite), (Without<CharBorder>, Without<PreviewImg>)>,
     mut borders: Query<
         (&CharBorder, &mut Sprite, &mut Visibility),
         (Without<CharButton>, Without<PreviewImg>),
@@ -488,8 +624,18 @@ fn select_ui_system(
             selection_changed = true;
         }
         // 选中或悬停都显示高亮帧（原版选中帧 660+slot+5）
-        let frame = if selected || hovered { cb.slot + 5 } else { cb.slot };
-        if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 660 + frame) {
+        let frame = if selected || hovered {
+            cb.slot + 5
+        } else {
+            cb.slot
+        };
+        if let Some(h) = ui_image(
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Title,
+            660 + frame,
+        ) {
             if sprite.image != h {
                 sprite.image = h;
             }
@@ -523,7 +669,14 @@ fn select_ui_system(
             .selected_index
             .and_then(|i| net.characters.iter().find(|c| c.index == i))
         {
-            load_preview(&mut libs, &mut images, &mut cache, &mut anim, c.class, c.gender);
+            load_preview(
+                &mut libs,
+                &mut images,
+                &mut cache,
+                &mut anim,
+                c.class,
+                c.gender,
+            );
             anim.preview_frame = 0;
             if let Ok(mut s) = preview.single_mut() {
                 if let Some(h) = anim.preview_handles.first() {
@@ -559,13 +712,14 @@ fn select_ui_system(
                 }
                 BottomBtn::Delete => {
                     new_char.visible = false;
-                    modal.kind = ModalKind::DeleteConfirm;
+                    modal.kind = ModalKind::DeleteAsk;
                     modal.name_input.clear();
                     modal.error = None;
                 }
                 BottomBtn::Credits => {
+                    // 原版 SelectScene 的 CreditsButton.Click 为空 → 不做任何弹窗
                     new_char.visible = false;
-                    modal.kind = ModalKind::Credits;
+                    modal.kind = ModalKind::None;
                     modal.error = None;
                 }
             }
@@ -574,10 +728,7 @@ fn select_ui_system(
 }
 
 /// 调试：BEVY_AUTO_CREATE=1 进入选角后自动创建角色（验证 新建→列表刷新 链路）
-fn auto_create_system(
-    net: ResMut<NetworkContext>,
-    mut done: Local<bool>,
-) {
+fn auto_create_system(net: ResMut<NetworkContext>, mut done: Local<bool>) {
     if *done {
         return;
     }
@@ -616,7 +767,3 @@ fn select_anim_system(
         }
     }
 }
-
-
-
-
