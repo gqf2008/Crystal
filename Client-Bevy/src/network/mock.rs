@@ -180,6 +180,31 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         }
                                     }
                                 }
+                                x if x == ClientPacketIds::Attack as i16 => {
+                                    // 攻击反馈：怪物受击动画 + 伤害飘字
+                                    if let Ok(p) = client::Attack::read_body(&mut cur) {
+                                        tracing::info!("[MOCK] 攻击 dir={:?}", p.direction);
+                                        let target = 101u32; // 第一个怪物
+                                        send(
+                                            &to_client,
+                                            &server::combat::ObjectStruck {
+                                                object_id: target,
+                                                attacker_id: 100,
+                                                location_x: 344,
+                                                location_y: 352,
+                                                direction: p.direction as u8,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::combat::DamageIndicator {
+                                                damage: 15,
+                                                damage_type: 0,
+                                                object_id: target,
+                                            },
+                                        );
+                                    }
+                                }
                                 x if x == ClientPacketIds::KeepAlive as i16 => {
                                     // 客户端心跳回应，无需处理
                                 }

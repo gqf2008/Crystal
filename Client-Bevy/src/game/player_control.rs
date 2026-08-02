@@ -51,10 +51,10 @@ impl Plugin for PlayerControlPlugin {
     }
 }
 
-/// 屏幕坐标 → 世界坐标
+/// 屏幕坐标 → 世界坐标（用物理像素，避免 DPI 缩放导致 cursor_position 偏差）
 fn screen_to_world(screen: Vec2, cam_tf: &Transform, window: &Window) -> Vec2 {
-    let half_w = window.width() / 2.0;
-    let half_h = window.height() / 2.0;
+    let half_w = window.physical_width() as f32 / 2.0;
+    let half_h = window.physical_height() as f32 / 2.0;
     Vec2::new(screen.x - half_w + cam_tf.translation.x, screen.y - half_h + cam_tf.translation.y)
 }
 
@@ -78,7 +78,7 @@ fn player_input_system(
     mut libs: ResMut<GameLibraries>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    camera: Query<&Transform, (With<Camera2d>, Without<UiButton>)>,
+    camera: Query<&Transform, (With<Camera2d>, Without<UiButton>, Without<crate::ui::sprite_ui::UiEntity>)>,
     players: Query<
         (Entity, &Transform, &mut ActorAnim),
         (With<LocalPlayer>, Without<NetObjectId>),
@@ -87,7 +87,8 @@ fn player_input_system(
     buttons: Query<&UiButton>,
 ) {
     let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    let Some(cursor) = window.physical_cursor_position() else { return };
+    let Some(cursor_logical) = window.cursor_position() else { return };
     let Ok(cam_tf) = camera.single() else { return };
 
     // UI 按钮点击时不处理地图交互
@@ -96,7 +97,9 @@ fn player_input_system(
         cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h
     });
 
+    // DPI 环境下物理/逻辑坐标可能不一致，两个换算点都参与命中
     let world = screen_to_world(cursor, cam_tf, window);
+    let world_logical = screen_to_world(cursor_logical, cam_tf, window);
 
     // 中键：AutoRun 切换（原版 GameScene.OnMouseClick Middle）
     if mouse.just_pressed(MouseButton::Middle) {
@@ -130,15 +133,19 @@ fn player_input_system(
 
     // 左键：点击 NPC → CallNPC；点击怪物 → 攻击目标
     if mouse.just_pressed(MouseButton::Left) && !over_ui && !over_main_dialog(cursor) && !over_chat_panel(cursor) {
+        tracing::debug!("🖱️ 左键点击 screen=({},{}) world=({:.0},{:.0})", cursor.x, cursor.y, world.x, world.y);
         // 命中测试：世界坐标下最近的对象（20px 内）
         let mut best: Option<(u32, f32)> = None;
         for (id, tf, app) in &actors {
-            let dist = Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length();
-            if dist < 24.0 && best.map(|(_, d)| dist < d).unwrap_or(true) {
+            let d1 = Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length();
+            let d2 = Vec2::new(tf.translation.x - world_logical.x, tf.translation.y - world_logical.y).length();
+            let dist = d1.min(d2);
+            if dist < 60.0 && best.map(|(_, d)| dist < d).unwrap_or(true) {
                 best = Some((id.0, dist));
             }
             let _ = app;
         }
+        tracing::debug!("🎯 命中候选: {:?}", best);
         if let Some((object_id, _)) = best {
             // 区分 NPC 与怪物/玩家
             let is_npc = actors

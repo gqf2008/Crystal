@@ -13,6 +13,7 @@ use mir2_shared::packets::base::{Packet, PacketHeader};
 use mir2_shared::SelectInfo;
 
 use crate::game::chat::ChatState;
+use crate::game::combat::CombatEvents;
 use crate::game::dialogs::npc::NpcDialogState;
 use crate::game::dialogs::npc_goods::{GoodsEntry, NpcGoodsState};
 use crate::game::hud::HudState;
@@ -255,6 +256,7 @@ fn network_system(
     mut chat: ResMut<ChatState>,
     mut npc_dialog: ResMut<NpcDialogState>,
     mut npc_goods: ResMut<NpcGoodsState>,
+    mut combat_evt: ResMut<CombatEvents>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     // 真实 TCP：TcpEvent（完整内层包 / 断线）
@@ -271,6 +273,7 @@ fn network_system(
                         &mut chat,
                         &mut npc_dialog,
                         &mut npc_goods,
+                        &mut combat_evt,
                         &mut next,
                         &payload,
                     );
@@ -307,6 +310,7 @@ fn network_system(
                         &mut chat,
                         &mut npc_dialog,
                         &mut npc_goods,
+                        &mut combat_evt,
                         &mut next,
                         &payload,
                     );
@@ -335,6 +339,7 @@ fn handle_packet(
     chat: &mut ChatState,
     npc_dialog: &mut NpcDialogState,
     npc_goods: &mut NpcGoodsState,
+    combat_evt: &mut CombatEvents,
     next: &mut NextState<AppState>,
     payload: &[u8],
 ) {
@@ -645,6 +650,23 @@ fn handle_packet(
                 tracing::info!("🧙 NPC 对话: {} 行", p.page.len());
                 npc_dialog.lines = p.page;
                 npc_dialog.visible = true;
+            }
+        }
+
+        // ---- M10: 战斗反馈 ----
+        x if x == ServerPacketIds::ObjectStruck as i16 => {
+            if let Ok(p) = combat::ObjectStruck::read_body(&mut cur) {
+                combat_evt.strikes.push((p.object_id, p.direction));
+            }
+        }
+        x if x == ServerPacketIds::ObjectDied as i16 => {
+            if let Ok(p) = combat::ObjectDied::read_body(&mut cur) {
+                combat_evt.deaths.push((p.object_id, p.death_type));
+            }
+        }
+        x if x == ServerPacketIds::DamageIndicator as i16 => {
+            if let Ok(p) = combat::DamageIndicator::read_body(&mut cur) {
+                combat_evt.damages.push((p.object_id, p.damage, p.damage_type));
             }
         }
 

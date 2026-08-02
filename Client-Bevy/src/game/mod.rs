@@ -5,6 +5,7 @@
 // ============================================================================
 
 pub mod chat;
+pub mod combat;
 pub mod dialogs;
 pub mod hud;
 pub mod movement;
@@ -37,6 +38,7 @@ impl Plugin for GamePlugin {
             dialogs::DialogsPlugin,
             movement::MovementPlugin,
             player_control::PlayerControlPlugin,
+            combat::CombatPlugin,
         ));
     }
 }

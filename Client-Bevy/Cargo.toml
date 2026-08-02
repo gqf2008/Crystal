@@ -36,6 +36,9 @@ windows = { version = "0.62", features = [
     "Win32_UI_TextServices",
     "Win32_System_Com",
     "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_Graphics_Gdi",
 ] }
 # windows 0.62 的 #[implement] 宏展开引用 ::windows_core 绝对路径，需直接依赖
 windows-core = "0.62"

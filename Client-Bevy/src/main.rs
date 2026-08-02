@@ -74,6 +74,10 @@ fn main() {
         ModalBoxPlugin,
         client_bevy::game::GamePlugin,
     ));
+    // --auto-attack: 进游戏后每 1.5s 自动攻击（M10 战斗链路调试）
+    if std::env::args().any(|a| a == "--auto-attack") {
+        app.add_systems(Update, auto_attack_debug);
+    }
     // --auto-inv / --auto-char: 进游戏 3 秒后自动打开背包/角色对话框（M9 调试）
     if std::env::args().any(|a| a == "--auto-inv") {
         app.add_systems(Update, auto_open_inventory);
@@ -136,6 +140,27 @@ fn capture_shot(commands: &mut Commands, counter: &mut u32) {
     commands
         .spawn(Screenshot::primary_window())
         .observe(save_to_disk(path));
+}
+
+/// --auto-attack：自动攻击（验证 攻击→受击→飘字 链路）
+fn auto_attack_debug(
+    net: Res<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut timer: Local<f32>,
+) {
+    if *state != client_bevy::scenes::AppState::Game {
+        return;
+    }
+    *timer += time.delta_secs();
+    if *timer >= 1.5 {
+        *timer = 0.0;
+        net.send_packet(&mir2_shared::packets::client::combat::Attack {
+            direction: mir2_shared::enums::MirDirection::Up,
+            spell: mir2_shared::enums::Spell::None,
+        });
+        tracing::info!("⚔️ --auto-attack 自动攻击");
+    }
 }
 
 /// --auto-char：进游戏 3 秒后自动打开角色对话框
