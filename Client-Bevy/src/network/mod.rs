@@ -23,6 +23,7 @@ use crate::game::dialogs::npc::NpcDialogState;
 use crate::game::dialogs::npc_goods::{GoodsEntry, NpcGoodsState};
 use crate::game::dialogs::sell_panel::SellPanelState;
  use crate::game::dialogs::storage::StorageState;
+use crate::game::dialogs::trade::{TradeItem as UiTradeItem, TradeState};
 use crate::game::hud::HudState;
 use crate::game::movement::{NetMotion, NetMotions};
 use crate::game::skills::MagicsState;
@@ -319,6 +320,7 @@ struct NetworkPanels<'w> {
     sell_panel: ResMut<'w, SellPanelState>,
     group: ResMut<'w, GroupState>,
     mail: ResMut<'w, MailState>,
+    trade: ResMut<'w, TradeState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -359,6 +361,7 @@ fn network_system(
                         &mut *panels.sell_panel,
                         &mut *panels.group,
                         &mut *panels.mail,
+                        &mut *panels.trade,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -403,6 +406,7 @@ fn network_system(
                         &mut *panels.sell_panel,
                         &mut *panels.group,
                         &mut *panels.mail,
+                        &mut *panels.trade,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -537,6 +541,7 @@ fn handle_packet(
     sell_panel: &mut SellPanelState,
     group: &mut GroupState,
     mail: &mut MailState,
+    trade: &mut TradeState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -1141,6 +1146,123 @@ fn handle_packet(
                     }
                 }
                 Err(e) => tracing::warn!("⚠️ UserStorage 解析失败: {} (len={})", e, payload.len()),
+            }
+        }
+
+        // ---- M23: 交易 ----
+        x if x == ServerPacketIds::TradeRequest as i16 => {
+            use mir2_shared::binary::read_dotnet_string;
+            match read_dotnet_string(&mut cur) {
+                Ok(name) => {
+                    if trade.visible {
+                        // 打开包（服务器权威 partner）
+                        trade.partner_name = name.clone();
+                        tracing::info!("🤝 交易窗口: 与 {} 交易", name);
+                    } else if trade.is_initiator {
+                        // 发起者收到的第一个包就是 open（同 opcode）
+                        trade.visible = true;
+                        trade.partner_name = name.clone();
+                        tracing::info!("🤝 交易窗口已打开（发起者）: {}", name);
+                    } else if trade.invite.is_none() {
+                        // 邀请包
+                        trade.invite = Some(name.clone());
+                        tracing::info!("🤝 收到交易邀请: {}", name);
+                    }
+                }
+                Err(e) => tracing::warn!("⚠️ TradeRequest 解析失败: {} (len={})", e, payload.len()),
+            }
+        }
+        x if x == ServerPacketIds::TradeGold as i16 => {
+            // 服务端 wire：[amount: u64 LE]
+            if payload.len() >= 12 {
+                let amount = u64::from_le_bytes(payload[4..12].try_into().unwrap_or([0; 8]));
+                trade.their_gold = amount;
+                tracing::info!("💰 对方交易金币: {}", amount);
+            }
+        }
+        x if x == ServerPacketIds::TradeConfirm as i16 => {
+            // 服务端 wire：[side_a.locked u8][side_b.locked u8]（a=发起者）
+            if payload.len() >= 6 {
+                let a = payload[4] != 0;
+                let b = payload[5] != 0;
+                if trade.is_initiator {
+                    trade.my_locked = a;
+                    trade.their_locked = b;
+                } else {
+                    trade.my_locked = b;
+                    trade.their_locked = a;
+                }
+                tracing::info!(
+                    "🔒 交易锁定状态: 我={} 对方={}",
+                    trade.my_locked,
+                    trade.their_locked
+                );
+                if a && b {
+                    tracing::info!("🎉 交易完成！");
+                    trade.visible = false;
+                    trade.invite = None;
+                    trade.pending_deposit = None;
+                }
+            }
+        }
+        x if x == ServerPacketIds::TradeCancel as i16 => {
+            if trade.visible {
+                tracing::info!("🚫 交易已取消/关闭");
+            }
+            trade.visible = false;
+            trade.invite = None;
+            trade.pending_deposit = None;
+        }
+        x if x == ServerPacketIds::TradeItem as i16 => {
+            // 服务端 wire：[uid u64][grid u8][count u16][is_add u8]（对方物品更新）
+            if payload.len() >= 15 {
+                let uid = u64::from_le_bytes(payload[4..12].try_into().unwrap_or([0; 8]));
+                let grid = payload[12] as usize;
+                let count = u16::from_le_bytes(payload[13..15].try_into().unwrap_or([0; 2]));
+                let is_add = payload[15] != 0;
+                if is_add {
+                    // 对方新增物品：保留已有条目的显示信息（服务端只发 uid/grid/count）
+                    if let Some(slot) = trade.their_items.get_mut(grid) {
+                        let prev = slot.take();
+                        *slot = Some(UiTradeItem {
+                            uid,
+                            item_index: prev.as_ref().map(|p| p.item_index).unwrap_or(0),
+                            name: prev
+                                .as_ref()
+                                .map(|p| p.name.clone())
+                                .unwrap_or_else(|| format!("#{}", uid)),
+                            image: prev.as_ref().map(|p| p.image).unwrap_or(0),
+                            count: if count > 0 { count } else { 1 },
+                        });
+                    }
+                    tracing::info!("📦 对方放入交易物品 uid={} 槽={} x{}", uid, grid, count);
+                } else {
+                    if let Some(slot) = trade.their_items.get_mut(grid) {
+                        *slot = None;
+                    }
+                    trade.their_items.retain(|s| s.as_ref().map(|i| i.uid) != Some(uid));
+                    tracing::info!("↩️ 对方取回物品 uid={}", uid);
+                }
+            }
+        }
+        x if x == ServerPacketIds::DepositTradeItem as i16 => {
+            // 服务端响应：[from_slot i32][success u8]
+            if payload.len() >= 9 {
+                let success = payload[8] != 0;
+                if success {
+                    if let Some((from, to)) = trade.pending_deposit.take() {
+                        if let Some(item) = hud.inventory.items.get(from).and_then(|s| s.as_ref()) {
+                            if let Some(slot) = trade.my_items.get_mut(to) {
+                                *slot = Some(UiTradeItem::from(item));
+                            }
+                        }
+                        trade.my_locked = false;
+                        tracing::info!("✅ 物品已放入交易槽 {}", to);
+                    }
+                } else {
+                    trade.pending_deposit = None;
+                    tracing::warn!("❌ 放入交易失败");
+                }
             }
         }
 

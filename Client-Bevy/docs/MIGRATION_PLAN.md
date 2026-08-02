@@ -216,6 +216,17 @@
 - [ ] 写邮件 UI（收件人/主题/正文输入框，需通用文本输入框组件）；登录时同步已有邮件列表（服务端未发）
 
 ---
+### M23: 交易（Trade）全链路（2026-08-03 完成）
+- [x] **SharedRust 补 DepositTradeItem/RetrieveTradeItem 客户端包**（[from i32][to i32]，双仓库同步）
+- [x] **交易对话框**（C# TradeDialogs 语义）：左右 5x4 物品槽 + 物品图标/数量、金币显示、金币输入按钮（数量框 → C.TradeGold）、锁定按钮（C.TradeConfirm）、关闭（C.TradeCancel）、邀请提示（MirMessageBox Yes/No → C.TradeReply）
+- [x] **交互**：点背包物品 → C.DepositTradeItem{from,to}（pending_deposit 本地乐观）；点我方槽 → C.RetrieveTradeItem 取回；邀请接受后本地开窗（is_initiator 区分发起者/接受者）
+- [x] **服务端 wire 手动解析**：TradeRequest 邀请/打开同 opcode（is_initiator 区分）、TradeGold [u64]、TradeConfirm [a][b]（按 is_initiator 映射）、TradeItem [uid][grid][count][is_add]、DepositTradeItem [from][success]
+- [x] **服务端修复**：
+  - gate forward_trade_request 用 `.ask()` 但丢弃 future → 消息从未发送（改 tell）
+  - execute_trade 从玩家背包重新查 uid（物品已随 DepositTradeItemBySlot 移除）→ 物品丢失；改用 TradeItem.item_data 缓存（fallback 查询）
+- [x] 验证：真实 ServerRust 双客户端 E2E——邀请/接受/开窗 → A 金币 500 + 物品 (HP)DrugSmall → B 金币 300 → 双方锁定 → 🎉 交易完成 → DB：A gold 999,800（-200）、B gold 1,000,200、物品转移到 B 背包 ✅
+
+---
 ## 四、执行顺序与依赖
 
 ```
@@ -235,6 +246,7 @@ M7（真实网络）→ M8（HUD+控制）→ M9（对话框 1→4 批）→ M10
 | 渲染后端冻结 | 强制 DX12（Vulkan present 在此机器异常） |
 | 大量精灵性能 | 精灵图缓存已建；后续 Atlas/批处理 |
 | 数据依赖 | 复用 Client-Macroquad/Data，`resolve_data_path` 自动解析 |
+
 
 
 

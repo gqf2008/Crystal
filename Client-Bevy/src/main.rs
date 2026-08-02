@@ -121,6 +121,18 @@ fn main() {
     if std::env::args().any(|a| a == "--shop-test") {
         app.add_systems(Update, auto_shop_test);
     }
+    // --trade-test: 自动交易链路（发起者，配合 --trade-accept）
+    if std::env::args().any(|a| a == "--trade-test") {
+        app.add_systems(Update, auto_trade_test);
+    }
+    // --trade-accept: 自动接受交易邀请（配合 --trade-test）
+    if std::env::args().any(|a| a == "--trade-accept") {
+        app.add_systems(Update, auto_trade_accept);
+    }
+    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
+    if std::env::args().any(|a| a == "--shop-test") {
+        app.add_systems(Update, auto_shop_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -678,6 +690,154 @@ fn auto_mail_read(
             tracing::info!("[MAILREAD] 请求读取: {} ({})", m.subject, m.mail_id);
             read_ids.insert(m.mail_id);
         }
+    }
+}
+
+/// --trade-test：自动交易链路（发起者：TradeRequest → 金币 500 → 放入物品 → 锁定 → 完成）
+#[allow(clippy::too_many_arguments)]
+fn auto_trade_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut trade: ResMut<client_bevy::game::dialogs::trade::TradeState>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 10.0 {
+                return;
+            }
+            trade.is_initiator = true;
+            net.send_packet(&mir2_shared::packets::client::trade::TradeRequest);
+            tracing::info!("[TRADETEST] 发起交易请求");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 3.0 {
+                return;
+            }
+            if trade.visible {
+                tracing::info!("[TRADETEST] ✅ 交易窗口已打开，对方={}", trade.partner_name);
+                net.send_packet(&mir2_shared::packets::client::trade::TradeGold { amount: 500 });
+                tracing::info!("[TRADETEST] 放入金币 500");
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t < 2.0 {
+                return;
+            }
+            // 放入背包第一个物品
+            if let Some((from, _)) = hud.inventory.items.iter().enumerate().find(|(_, s)| s.is_some()) {
+                if trade.pending_deposit.is_none() && trade.my_items[0].is_none() {
+                    trade.pending_deposit = Some((from, 0));
+                    net.send_packet(&mir2_shared::packets::client::trade::DepositTradeItem {
+                        from: from as i32,
+                        to: 0,
+                    });
+                    tracing::info!("[TRADETEST] 放入背包格 {} -> 交易槽 0", from);
+                    *stage = 3;
+                    *t = 0.0;
+                }
+            }
+        }
+        3 => {
+            if *t < 3.0 {
+                return;
+            }
+            if trade.my_items[0].is_some() {
+                tracing::info!("[TRADETEST] ✅ 物品已入槽: {}", trade.my_items[0].as_ref().unwrap().name);
+                net.send_packet(&mir2_shared::packets::client::trade::TradeConfirm { locked: true });
+                tracing::info!("[TRADETEST] 锁定交易");
+                *stage = 4;
+                *t = 0.0;
+            }
+        }
+        4 => {
+            if *t < 5.0 {
+                return;
+            }
+            if !trade.visible {
+                tracing::info!("[TRADETEST] 🎉 交易完成（窗口已关闭）");
+            } else {
+                tracing::warn!("[TRADETEST] ❌ 交易未完成，locked=({},{})", trade.my_locked, trade.their_locked);
+            }
+            *stage = 5;
+        }
+        _ => {}
+    }
+}
+
+/// --trade-accept：自动接受交易邀请 + 加金币 300 + 锁定
+#[allow(clippy::too_many_arguments)]
+fn auto_trade_accept(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut trade: ResMut<client_bevy::game::dialogs::trade::TradeState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if trade.invite.is_some() {
+                net.send_packet(&mir2_shared::packets::client::trade::TradeReply {
+                    accept_invite: true,
+                });
+                tracing::info!(
+                    "[TRADEACCEPT] ✅ 接受邀请: {}",
+                    trade.invite.as_ref().unwrap()
+                );
+                trade.invite = None;
+                trade.visible = true;
+                *stage = 1;
+                *t = 0.0;
+            }
+        }
+        1 => {
+            if *t < 2.0 {
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::trade::TradeGold { amount: 300 });
+            tracing::info!("[TRADEACCEPT] 放入金币 300");
+            *stage = 2;
+            *t = 0.0;
+        }
+        2 => {
+            if *t < 3.0 {
+                return;
+            }
+            if trade.their_locked && !trade.my_locked {
+                net.send_packet(&mir2_shared::packets::client::trade::TradeConfirm { locked: true });
+                tracing::info!("[TRADEACCEPT] 对方已锁定，我方锁定");
+                *stage = 3;
+                *t = 0.0;
+            }
+        }
+        3 => {
+            if *t < 5.0 {
+                return;
+            }
+            if !trade.visible {
+                tracing::info!("[TRADEACCEPT] 🎉 交易完成");
+            }
+            *stage = 4;
+        }
+        _ => {}
     }
 }
 
