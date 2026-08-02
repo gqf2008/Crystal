@@ -386,6 +386,7 @@ impl SocialActor {
 
     /// 发送好友列表
     async fn send_friends_list(&self, session_id: u64) {
+
         let record = match self.players.get(&session_id) {
             Some(r) => r, None => return,
         };
@@ -403,6 +404,15 @@ impl SocialActor {
         }
 
         send_friends_list_packet(&self.gate_ref, session_id, &state.friend_list.friends, &online_object_ids);
+    }
+
+    /// 向所有在线行会成员广播完整行会信息
+    async fn broadcast_guild_info(&self, guild_name: &str) {
+        if let Some(guild) = self.guilds.get(guild_name) {
+            for sid in guild.online_sessions(0) {
+                send_guild_info_packet(&self.gate_ref, sid, guild);
+            }
+        }
     }
 
     // === 组队辅助方法 ===
@@ -2228,6 +2238,7 @@ impl Message<GuildStorageGoldChangeRequest> for SocialActor {
                 let _ = record.ask(DeductGold { amount: msg.amount as u64 }).await;
                 guild.gold += msg.amount as u64;
                 send_system_message(&self.gate_ref, msg.session_id, &format!("已存入 {} 金币到行会仓库", msg.amount));
+                self.broadcast_guild_info(&guild_name).await;
             }
             1 => { // 取出
                 // 只有会长和副会长可以取出
@@ -2242,6 +2253,7 @@ impl Message<GuildStorageGoldChangeRequest> for SocialActor {
                 guild.gold -= msg.amount as u64;
                 let _ = record.ask(AddGold { amount: msg.amount as u64 }).await;
                 send_system_message(&self.gate_ref, msg.session_id, &format!("已从行会仓库取出 {} 金币", msg.amount));
+                self.broadcast_guild_info(&guild_name).await;
             }
             _ => {}
         }
