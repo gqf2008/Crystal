@@ -82,7 +82,7 @@ fn hud_button_system(
                 HudButtonKind::Character => mgr.toggle(DialogKind::Character),
                 HudButtonKind::Skills => mgr.toggle(DialogKind::Character),
                 HudButtonKind::QuestLog => mgr.toggle(DialogKind::QuestLog),
-                HudButtonKind::Option => mgr.toggle(DialogKind::Option),
+                HudButtonKind::Option => mgr.toggle(DialogKind::Settings),
                 HudButtonKind::Menu => mgr.toggle(DialogKind::Menu),
                 HudButtonKind::GameShop => mgr.toggle(DialogKind::GameShop),
             }

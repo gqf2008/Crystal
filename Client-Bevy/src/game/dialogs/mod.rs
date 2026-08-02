@@ -7,30 +7,47 @@
 
 pub mod amount_box;
 pub mod belt;
+pub mod big_map;
+pub mod buff;
 pub mod character;
-pub mod npc;
-pub mod npc_goods;
-pub mod quest_log;
+pub mod chat_notice;
 pub mod compass;
+pub mod craft;
 pub mod creature;
+pub mod dura_status;
+pub mod fishing;
 pub mod friend;
+pub mod game_shop;
 pub mod group;
-pub mod guild_territory;
-pub mod hero;
-pub mod item_rental;
 pub mod guild;
+pub mod guild_territory;
+pub mod help;
+pub mod hero;
+pub mod inspect;
+pub mod inventory;
+pub mod item_rental;
+pub mod keyboard_layout;
 pub mod mail;
+pub mod menu;
 pub mod mentor;
+pub mod minimap;
 pub mod mount;
+pub mod notice;
+pub mod npc;
+pub mod npc_awake;
+pub mod npc_drop;
+pub mod npc_goods;
+pub mod option;
+pub mod quest_log;
 pub mod ranking;
+pub mod refine;
 pub mod relationship;
 pub mod report;
-pub mod trust_merchant;
-pub mod inspect;
+pub mod roll;
+pub mod socket;
+pub mod timer;
 pub mod trade;
-pub mod inventory;
-pub mod menu;
-pub mod minimap;
+pub mod trust_merchant;
 
 use bevy::prelude::*;
 
@@ -40,7 +57,7 @@ pub enum DialogKind {
     Inventory,
     Character,
     QuestLog,
-    Option,
+    Settings,
     Menu,
     GameShop,
     Minimap,
@@ -62,6 +79,21 @@ pub enum DialogKind {
     TrustMerchant,
     ItemRental,
     GuildTerritory,
+    Help,
+    Notice,
+    Buff,
+    Fishing,
+    Socket,
+    Refine,
+    Craft,
+    DuraStatus,
+    NpcDrop,
+    Roll,
+    NpcAwake,
+    Timer,
+    KeyboardLayout,
+    BigMap,
+    ChatNotice,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）
@@ -129,6 +161,25 @@ impl Plugin for DialogsPlugin {
                 trust_merchant::TrustMerchantPlugin,
                 item_rental::ItemRentalPlugin,
                 guild_territory::GuildTerritoryPlugin,
+                option::OptionPlugin,
+                help::HelpPlugin,
+                notice::NoticePlugin,
+                buff::BuffPlugin,
+            ),
+            (
+                fishing::FishingPlugin,
+                socket::SocketPlugin,
+                refine::RefinePlugin,
+                craft::CraftPlugin,
+                dura_status::DuraPlugin,
+                npc_drop::NpcDropPlugin,
+                roll::RollPlugin,
+                npc_awake::NpcAwakePlugin,
+                timer::TimerPlugin,
+                keyboard_layout::KeyboardPlugin,
+                big_map::BigMapPlugin,
+                chat_notice::ChatNoticePlugin,
+                game_shop::GameShopPlugin,
             ),
         ));
     }
