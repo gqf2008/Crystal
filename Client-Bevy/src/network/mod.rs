@@ -13,6 +13,7 @@ use mir2_shared::packets::base::{Packet, PacketHeader};
 use mir2_shared::SelectInfo;
 
 use crate::game::chat::ChatState;
+use crate::game::dialogs::npc::NpcDialogState;
 use crate::game::hud::HudState;
 use crate::game::movement::{NetMotion, NetMotions};
 use crate::map_renderer::GameData;
@@ -251,6 +252,7 @@ fn network_system(
     mut motions: ResMut<NetMotions>,
     mut hud: ResMut<HudState>,
     mut chat: ResMut<ChatState>,
+    mut npc_dialog: ResMut<NpcDialogState>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     // 真实 TCP：TcpEvent（完整内层包 / 断线）
@@ -265,6 +267,7 @@ fn network_system(
                         &mut motions,
                         &mut hud,
                         &mut chat,
+                        &mut npc_dialog,
                         &mut next,
                         &payload,
                     );
@@ -299,6 +302,7 @@ fn network_system(
                         &mut motions,
                         &mut hud,
                         &mut chat,
+                        &mut npc_dialog,
                         &mut next,
                         &payload,
                     );
@@ -325,6 +329,7 @@ fn handle_packet(
     motions: &mut NetMotions,
     hud: &mut HudState,
     chat: &mut ChatState,
+    npc_dialog: &mut NpcDialogState,
     next: &mut NextState<AppState>,
     payload: &[u8],
 ) {
@@ -626,6 +631,15 @@ fn handle_packet(
             if let Ok(p) = chat::ObjectChat::read_body(&mut cur) {
                 let color = chat_color(p.chat_type);
                 chat.add_line(p.text, color);
+            }
+        }
+
+        // ---- M9: NPC 对话 ----
+        x if x == ServerPacketIds::NPCResponse as i16 => {
+            if let Ok(p) = npc_interaction::NPCResponse::read_body(&mut cur) {
+                tracing::info!("🧙 NPC 对话: {} 行", p.page.len());
+                npc_dialog.lines = p.page;
+                npc_dialog.visible = true;
             }
         }
 

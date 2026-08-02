@@ -127,6 +127,29 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         );
                                     }
                                 }
+                                x if x == ClientPacketIds::CallNPC as i16 => {
+                                    if let Ok(p) = client::CallNPC::read_body(&mut cur) {
+                                        tracing::info!("[MOCK] NPC 对话: id={} key={}", p.object_id, p.key);
+                                        // 简单对话页：欢迎 + 选项
+                                        let key = p.key.to_uppercase();
+                                        let page: Vec<String> = match key.as_str() {
+                                            "[@SHOP]" => vec![
+                                                "这里是商店（MOCK）".to_string(),
+                                                "[@BUY] 购买".to_string(),
+                                                "[@MAIN] 返回".to_string(),
+                                            ],
+                                            "[@CLOSE]" => vec![],
+                                            _ => vec![
+                                                "欢迎来到传奇 2（MOCK NPC）".to_string(),
+                                                "[@SHOP] 商店".to_string(),
+                                                "[@CLOSE] 关闭".to_string(),
+                                            ],
+                                        };
+                                        if !page.is_empty() {
+                                            send(&to_client, &server::npc_interaction::NPCResponse { page });
+                                        }
+                                    }
+                                }
                                 x if x == ClientPacketIds::KeepAlive as i16 => {
                                     // 客户端心跳回应，无需处理
                                 }

@@ -7,6 +7,7 @@
 
 pub mod belt;
 pub mod character;
+pub mod npc;
 pub mod compass;
 pub mod inventory;
 pub mod menu;
@@ -24,6 +25,7 @@ pub enum DialogKind {
     Menu,
     GameShop,
     Minimap,
+    Npc,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）
@@ -66,6 +68,7 @@ impl Plugin for DialogsPlugin {
             minimap::MiniMapPlugin,
             belt::BeltPlugin,
             compass::CompassPlugin,
+            npc::NpcDialogPlugin,
         ));
     }
 }
