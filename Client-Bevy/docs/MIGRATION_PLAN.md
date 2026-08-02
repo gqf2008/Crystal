@@ -207,6 +207,15 @@
 - [x] 验证：真实 ServerRust 双客户端 E2E——A(test/bevychar) 发 AddMember → B(bevy2/bevy2char) 收到邀请提示 → 自动接受 → 双方收到 `👥 组队成员: ★bevychar, bevy2char` ✅
 
 ---
+### M22: 邮件（Mail）收发闭环（2026-08-03 完成）
+- [x] **服务端 SendMail wire 修复**：gate 用 u32 前缀解析字符串 + 拆 subject/message 三字段，与 C#/SharedRust `[name][message][gold][5×u64][stamped]` 不符 → 改 `read_dotnet_string`×2 + 二进制字段，subject 由正文首行派生（C# 语义）
+- [x] **ReceiveMail 双格式解析**：服务端同 opcode 发两种包（新邮件条目 / ReadMail 全文，正文在 timestamp 之前）→ 客户端先尝试全文格式再回退条目格式
+- [x] **邮件对话框**：列表（发件人-主题-未读标记）、点击列表项 → `C.ReadMail{mail_id}` → 内容区显示正文/金币/附件（C# MailDialog 语义）
+- [x] **Bevy 16 参数上限**：network_system 达 17 参数 → 自定义 `SystemParam`（NetworkPanels）合并 5 个对话框状态资源
+- [x] 验证：真实 ServerRust 双客户端 E2E——A 发邮件（含 100 金币，扣款 1,000,000→999,900）→ B `📧 新邮件: bevychar - HelloSubject（未读）` → ReadMail → `📧 邮件详情: ... 金币=100` + 正文 ✅
+- [ ] 写邮件 UI（收件人/主题/正文输入框，需通用文本输入框组件）；登录时同步已有邮件列表（服务端未发）
+
+---
 ## 四、执行顺序与依赖
 
 ```
@@ -226,6 +235,7 @@ M7（真实网络）→ M8（HUD+控制）→ M9（对话框 1→4 批）→ M10
 | 渲染后端冻结 | 强制 DX12（Vulkan present 在此机器异常） |
 | 大量精灵性能 | 精灵图缓存已建；后续 Atlas/批处理 |
 | 数据依赖 | 复用 Client-Macroquad/Data，`resolve_data_path` 自动解析 |
+
 
 
 

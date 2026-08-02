@@ -109,6 +109,18 @@ fn main() {
     if std::env::args().any(|a| a == "--shop-test") {
         app.add_systems(Update, auto_shop_test);
     }
+    // --mail-test: 自动发邮件链路（自动化验证用，配合 --mail-read）
+    if std::env::args().any(|a| a == "--mail-test") {
+        app.add_systems(Update, auto_mail_test);
+    }
+    // --mail-read: 自动读取新邮件（自动化验证用）
+    if std::env::args().any(|a| a == "--mail-read") {
+        app.add_systems(Update, auto_mail_read);
+    }
+    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
+    if std::env::args().any(|a| a == "--shop-test") {
+        app.add_systems(Update, auto_shop_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -593,6 +605,79 @@ fn auto_group_accept(
         tracing::info!("[GROUPACCEPT] ✅ 接受邀请: {}", inv.inviter_name);
         group.invite = None;
         *accepted = true;
+    }
+}
+
+/// --mail-test：自动发邮件（登录后向 bevy2char 发 SendMail，含金币）
+#[allow(clippy::too_many_arguments)]
+fn auto_mail_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut t: Local<f32>,
+    mut sent: Local<bool>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    if *sent {
+        return;
+    }
+    *t += time.delta_secs();
+    if *t < 8.0 {
+        return;
+    }
+    let receiver = std::env::args()
+        .skip_while(|a| a != "--e2e-receiver")
+        .nth(1)
+        .unwrap_or_else(|| "bevy2char".to_string());
+    net.send_packet(&mir2_shared::packets::client::mail::SendMail {
+        name: receiver.clone(),
+        message: "HelloSubject\n邮件正文测试 100 金币".to_string(),
+        gold: 100,
+        items_idx: [0; 5],
+        stamped: false,
+    });
+    tracing::info!("[MAILTEST] 发送邮件给 {} (含 100 金币)", receiver);
+    *sent = true;
+}
+
+/// --mail-read：自动读取新邮件（收到列表条目 → ReadMail → 详情）
+#[allow(clippy::too_many_arguments)]
+fn auto_mail_read(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    mail: Res<client_bevy::game::dialogs::mail::MailState>,
+    mut read_ids: Local<std::collections::HashSet<u64>>,
+    mut done: Local<bool>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    if *done {
+        return;
+    }
+    if let Some(d) = mail.detail.as_ref() {
+        tracing::info!(
+            "[MAILREAD] ✅ 已读取邮件: {} - {} 金币={} 正文={}",
+            d.sender,
+            d.subject,
+            d.gold,
+            d.body
+        );
+        *done = true;
+        return;
+    }
+    for m in mail.mails.iter() {
+        if m.unread && !read_ids.contains(&m.mail_id) {
+            net.send_packet(&mir2_shared::packets::client::mail::ReadMail {
+                mail_id: m.mail_id,
+            });
+            tracing::info!("[MAILREAD] 请求读取: {} ({})", m.subject, m.mail_id);
+            read_ids.insert(m.mail_id);
+        }
     }
 }
 

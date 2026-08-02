@@ -1,32 +1,49 @@
 // ============================================================================
-// 邮件对话框（M9 第 3 批）
-// 布局参考：macroquad mail_dialog.rs
+// 邮件对话框（M22）
+// 布局参考：macroquad mail_dialog.rs / C# MailDialog
 //   - 背景 Prguse[956]，标题 Title[20]，位置 (280,80)
-//   - 邮件列表 y=60 起每 22px
+//   - 邮件列表 y=60 起每 22px；点击列表项 → C.ReadMail{mail_id} → 内容区显示正文/金币
+// 网络：ReceiveMail（新邮件条目 / 邮件全文，服务端同 opcode 双格式）→ 列表 + 详情
 // ============================================================================
 
 use bevy::prelude::*;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
+use crate::network::NetworkContext;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
 };
 
-/// 邮件条目
+/// 邮件列表条目
 #[derive(Debug, Clone, Default)]
 pub struct MailEntry {
+    pub mail_id: u64,
     pub sender: String,
     pub subject: String,
     pub unread: bool,
+    pub gold: u32,
 }
 
-/// 邮件状态（网络 ReceiveMail 等写入）
+/// 邮件详情（ReadMail 响应全文）
+#[derive(Debug, Clone, Default)]
+pub struct MailDetail {
+    pub mail_id: u64,
+    pub sender: String,
+    pub subject: String,
+    pub body: String,
+    pub gold: u32,
+    /// 附件名列表
+    pub items: Vec<String>,
+}
+
+/// 邮件状态（网络 ReceiveMail 写入）
 #[derive(Resource, Default)]
 pub struct MailState {
     pub mails: Vec<MailEntry>,
+    pub detail: Option<MailDetail>,
 }
 
 #[derive(Component)]
@@ -37,6 +54,9 @@ pub struct MailClose;
 
 #[derive(Component)]
 pub struct MailLine(usize);
+
+#[derive(Component)]
+pub struct MailDetailText;
 
 pub struct MailPlugin;
 
@@ -83,7 +103,7 @@ fn spawn_mail(
         ));
     }
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 20) {
-        let e = spawn_ui_sprite(&mut commands, h, 298.0, 89.0, 6.2, 1.0);
+        let e = spawn_ui_sprite(&mut commands, h, 298.0, 88.0, 6.2, 1.0);
         commands.entity(e).insert((
             DialogRoot(DialogKind::Mail),
             MailWidget,
@@ -93,7 +113,7 @@ fn spawn_mail(
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands, &mut libs, &mut images, &mut cache,
         LibraryName::Prguse2, 360, 361, 362,
-        280.0 + 290.0, 83.0, 7.0, 20.0, 20.0,
+        280.0 + 340.0, 83.0, 7.0, 20.0, 20.0,
     ) {
         commands.entity(e).insert((
             MailClose,
@@ -101,10 +121,11 @@ fn spawn_mail(
             MailWidget,
         ));
     }
+    // 邮件列表（8 行）
     for i in 0..8usize {
         let e = spawn_ui_text(
             &mut commands, &font, "",
-            288.0, 140.0 + i as f32 * 22.0,
+            298.0, 140.0 + i as f32 * 22.0,
             12.0, Color::WHITE, 8.0,
         );
         commands.entity(e).insert((
@@ -113,17 +134,39 @@ fn spawn_mail(
             MailWidget,
         ));
     }
+    // 内容区（正文/金币）
+    let detail = spawn_ui_text(
+        &mut commands, &font, "",
+        298.0, 340.0, 12.0, Color::srgb(0.95, 0.95, 0.8), 8.0,
+    );
+    commands.entity(detail).insert((
+        MailDetailText,
+        DialogRoot(DialogKind::Mail),
+        MailWidget,
+    ));
 }
 
+/// 显示/隐藏 + 列表渲染 + 内容区 + 点击读取
+#[allow(clippy::too_many_arguments)]
 fn mail_ui_system(
     mut mgr: ResMut<DialogManager>,
     mail: Res<MailState>,
+    net: Res<NetworkContext>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
     close: Query<&UiButton, With<MailClose>>,
-    mut widgets: Query<&mut Visibility, With<MailWidget>>,
-    mut lines: Query<(&mut Text2d, &MailLine)>,
+    mut widgets: Query<
+        (&mut Visibility, Option<&MailLine>, Option<&MailDetailText>),
+        With<MailWidget>,
+    >,
+    mut lines: Query<(&mut Text2d, &MailLine), Without<MailDetailText>>,
+    mut detail_texts: Query<(&mut Text2d, &MailDetailText), Without<MailLine>>,
 ) {
     let open = mgr.is_open(DialogKind::Mail);
-    for mut vis in widgets.iter_mut() {
+    for (mut vis, line, _det) in &mut widgets {
+        if line.is_some() || _det.is_some() {
+            continue;
+        }
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
     if !open {
@@ -134,12 +177,47 @@ fn mail_ui_system(
             mgr.close(DialogKind::Mail);
         }
     }
+    // 列表
     for (mut text, line) in &mut lines {
-        if let Some(m) = mail.mails.get(line.0) {
-            let mark = if m.unread { "● " } else { "" };
-            text.0 = format!("{}{}: {}", mark, m.sender, m.subject);
-        } else {
-            text.0 = String::new();
+        text.0 = match mail.mails.get(line.0) {
+            Some(m) => {
+                let mark = if m.unread { "（未读）" } else { "" };
+                format!("{} - {}{}", m.sender, m.subject, mark)
+            }
+            None => String::new(),
+        };
+    }
+    // 内容区
+    for (mut text, _) in &mut detail_texts {
+        text.0 = match mail.detail.as_ref() {
+            Some(d) => {
+                let mut s = format!("发件人: {}\n主题: {}\n\n{}", d.sender, d.subject, d.body);
+                if d.gold > 0 {
+                    s.push_str(&format!("\n金币: {}", d.gold));
+                }
+                if !d.items.is_empty() {
+                    s.push_str(&format!("\n附件: {}", d.items.join(", ")));
+                }
+                s
+            }
+            None => "点击上方邮件查看内容".to_string(),
+        };
+    }
+    // 点击列表项 → ReadMail
+    if mouse.just_pressed(MouseButton::Left) {
+        let Ok(window) = windows.single() else { return };
+        let Some(cursor) = window.cursor_position() else { return };
+        for i in 0..8usize {
+            let y = 140.0 + i as f32 * 22.0;
+            if cursor.x >= 298.0 && cursor.x <= 600.0 && cursor.y >= y && cursor.y <= y + 20.0 {
+                if let Some(m) = mail.mails.get(i) {
+                    net.send_packet(&mir2_shared::packets::client::mail::ReadMail {
+                        mail_id: m.mail_id,
+                    });
+                    tracing::info!("📧 读取邮件: {} ({})", m.subject, m.mail_id);
+                }
+                break;
+            }
         }
     }
 }

@@ -6,6 +6,7 @@ pub mod codec;
 pub mod mock;
 pub mod tcp;
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender};
 use mir2_shared::enums::ServerPacketIds;
@@ -16,6 +17,7 @@ use std::path::Path;
 use crate::game::chat::ChatState;
 use crate::game::combat::CombatEvents;
 use crate::game::dialogs::group::GroupState;
+use crate::game::dialogs::mail::{MailDetail, MailEntry, MailState};
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::npc::NpcDialogState;
 use crate::game::dialogs::npc_goods::{GoodsEntry, NpcGoodsState};
@@ -310,6 +312,16 @@ fn setup_network(mut net: ResMut<NetworkContext>, mode: Res<NetMode>, addr: Res<
     }
 }
 
+/// 网络系统参数（Bevy 16 参数上限：合并对话框状态）
+#[derive(SystemParam)]
+struct NetworkPanels<'w> {
+    storage: ResMut<'w, StorageState>,
+    sell_panel: ResMut<'w, SellPanelState>,
+    group: ResMut<'w, GroupState>,
+    mail: ResMut<'w, MailState>,
+    mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
+}
+
 /// 网络系统：拉取服务器数据 → 解析包 → 分发处理
 fn network_system(
     mut net: ResMut<NetworkContext>,
@@ -323,10 +335,7 @@ fn network_system(
     mut combat_evt: ResMut<CombatEvents>,
     mut weather: ResMut<WeatherState>,
     mut magics: ResMut<MagicsState>,
-     mut storage: ResMut<StorageState>,
-    mut sell_panel: ResMut<SellPanelState>,
-    mut group: ResMut<GroupState>,
-     mut mgr: ResMut<crate::game::dialogs::DialogManager>,
+    mut panels: NetworkPanels,
     mut next: ResMut<NextState<AppState>>,
 ) {
     // 真实 TCP：TcpEvent（完整内层包 / 断线）
@@ -346,10 +355,11 @@ fn network_system(
                         &mut combat_evt,
                         &mut weather,
                         &mut magics,
-                        &mut storage,
-                        &mut sell_panel,
-                        &mut group,
-                        &mut mgr,
+                        &mut *panels.storage,
+                        &mut *panels.sell_panel,
+                        &mut *panels.group,
+                        &mut *panels.mail,
+                        &mut *panels.mgr,
                         &mut next,
                         &payload,
                     );
@@ -389,10 +399,11 @@ fn network_system(
                         &mut combat_evt,
                         &mut weather,
                         &mut magics,
-                        &mut storage,
-                        &mut sell_panel,
-                        &mut group,
-                        &mut mgr,
+                        &mut *panels.storage,
+                        &mut *panels.sell_panel,
+                        &mut *panels.group,
+                        &mut *panels.mail,
+                        &mut *panels.mgr,
                         &mut next,
                         &payload,
                     );
@@ -428,6 +439,87 @@ fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
     }
 }
 
+/// 解析服务端 ReceiveMail（同 opcode 双格式）：
+/// - 条目包：mail_id, sender, subject, timestamp, read, collected, gold, item_count
+/// - 全文包：mail_id, sender, subject, body, timestamp, read, collected, gold, item_count, items...
+/// 先尝试全文格式，失败再按条目格式（条目包按全文解析时 timestamp 首字节必然导致 7-bit 长度越界）
+fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)> {
+    use mir2_shared::binary::read_dotnet_string;
+    use byteorder::{LittleEndian, ReadBytesExt};
+
+    fn parse_content(
+        payload: &[u8],
+    ) -> Option<(MailEntry, Option<MailDetail>)> {
+        let mut cur = std::io::Cursor::new(payload);
+        let mail_id = cur.read_u64::<LittleEndian>().ok()?;
+        let sender = read_dotnet_string(&mut cur).ok()?;
+        let subject = read_dotnet_string(&mut cur).ok()?;
+        let body = read_dotnet_string(&mut cur).ok()?;
+        let _timestamp = cur.read_i64::<LittleEndian>().ok()?;
+        let read_flag = cur.read_u8().ok()? != 0;
+        let _collected = cur.read_u8().ok()? != 0;
+        let gold = cur.read_u32::<LittleEndian>().ok()?;
+        let item_count = cur.read_u8().ok()? as usize;
+        let mut items = Vec::new();
+        for _ in 0..item_count {
+            let _uid = cur.read_u64::<LittleEndian>().ok()?;
+            let _idx = cur.read_u32::<LittleEndian>().ok()?;
+            let name = read_dotnet_string(&mut cur).ok()?;
+            let _count = cur.read_u16::<LittleEndian>().ok()?;
+            let _cd = cur.read_u16::<LittleEndian>().ok()?;
+            let _md = cur.read_u16::<LittleEndian>().ok()?;
+            items.push(name);
+        }
+        if payload.len() as u64 != cur.position() {
+            return None;
+        }
+        Some((
+            MailEntry {
+                mail_id,
+                sender: sender.clone(),
+                subject: subject.clone(),
+                unread: !read_flag,
+                gold,
+            },
+            Some(MailDetail {
+                mail_id,
+                sender,
+                subject,
+                body,
+                gold,
+                items,
+            }),
+        ))
+    }
+
+    fn parse_entry(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)> {
+        let mut cur = std::io::Cursor::new(payload);
+        let mail_id = cur.read_u64::<LittleEndian>().ok()?;
+        let sender = read_dotnet_string(&mut cur).ok()?;
+        let subject = read_dotnet_string(&mut cur).ok()?;
+        let _timestamp = cur.read_i64::<LittleEndian>().ok()?;
+        let read_flag = cur.read_u8().ok()? != 0;
+        let _collected = cur.read_u8().ok()? != 0;
+        let gold = cur.read_u32::<LittleEndian>().ok()?;
+        let _item_count = cur.read_u8().ok()?;
+        if payload.len() as u64 != cur.position() {
+            return None;
+        }
+        Some((
+            MailEntry {
+                mail_id,
+                sender,
+                subject,
+                unread: !read_flag,
+                gold,
+            },
+            None,
+        ))
+    }
+
+    parse_content(payload).or_else(|| parse_entry(payload))
+}
+
 /// 处理单个内层包
 fn handle_packet(
     net: &mut NetworkContext,
@@ -444,6 +536,7 @@ fn handle_packet(
     storage: &mut StorageState,
     sell_panel: &mut SellPanelState,
     group: &mut GroupState,
+    mail: &mut MailState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -1048,6 +1141,37 @@ fn handle_packet(
                     }
                 }
                 Err(e) => tracing::warn!("⚠️ UserStorage 解析失败: {} (len={})", e, payload.len()),
+            }
+        }
+
+        // ---- M22: 邮件 ----
+        x if x == ServerPacketIds::ReceiveMail as i16 => {
+            match parse_receive_mail(&payload[PacketHeader::HEADER_SIZE..]) {
+                Some((entry, detail)) => {
+                    // 去重：同 mail_id 已存在则替换（全文包会更新未读标记）
+                    if let Some(existing) = mail.mails.iter_mut().find(|m| m.mail_id == entry.mail_id) {
+                        *existing = entry;
+                    } else {
+                        mail.mails.insert(0, entry);
+                    }
+                    if let Some(d) = detail {
+                        mail.detail = Some(d);
+                        tracing::info!(
+                            "📧 邮件详情: {} - {} 金币={}",
+                            mail.detail.as_ref().map(|x| x.sender.as_str()).unwrap_or("?"),
+                            mail.detail.as_ref().map(|x| x.subject.as_str()).unwrap_or("?"),
+                            mail.detail.as_ref().map(|x| x.gold).unwrap_or(0)
+                        );
+                    } else {
+                        tracing::info!(
+                            "📧 新邮件: {} - {}{}",
+                            mail.mails[0].sender,
+                            mail.mails[0].subject,
+                            if mail.mails[0].unread { "（未读）" } else { "" }
+                        );
+                    }
+                }
+                None => tracing::warn!("⚠️ ReceiveMail 解析失败: (len={})", payload.len()),
             }
         }
 
