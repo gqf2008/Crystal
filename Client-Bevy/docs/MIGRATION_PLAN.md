@@ -82,8 +82,8 @@
 - **验收**: 每个对话框交互与原版 C# / macroquad 一致（数据驱动，mock 先行）
 
 ### M10: 战斗 / 逻辑 / 物理
-- [x] combat（部分）: 攻击发包、受击/死亡动画、伤害飘字（ObjectStruck/Died/DamageIndicator 闭环验证）
-- [ ] combat: magic / skill / buff / regen（技能栏 F1-F8、自动喝药待续）
+- [x] combat（部分）: 攻击发包、受击/死亡动画、伤害飘字、自动喝药（闭环验证）
+- [ ] combat: magic / skill / buff / regen（技能栏 F1-F8 待续）
 - [x] decision: 服务端驱动怪物 AI（ObjectWalk/Run/Turn/Attack/Death 接入）；NPC 对话闭环
 - [x] physics: movement / pathfinding / collision（A* + 步进 + 远端插值）
 - [ ] input: auto_potion / local_player_ai（待续）
@@ -91,9 +91,9 @@
 
 ### M11: 呈现与特效
 - [ ] animation_system（帧动画/挂点/武器特效/坐骑状态）
-- [ ] particle / weather / floating_text / health_bar_anim / sound（bevy_audio）
+- [x] particle / weather（雨/雪粒子）/ floating_text（伤害飘字）/ sound（SoundList 450 条 + 攻击/受击音效）
 - [ ] rendering: sprite_system 分层遮挡 / effect_system / map_system 分块 + 唯一贴图去重
-- [ ] 日夜循环、屏幕通知（ChatNotice）
+- [x] 日夜循环（24 分钟一天夜晚覆盖层）；屏幕通知（ChatNotice 对话框就位）
 - **验收**: 天气/粒子/音效/伤害飘字/血条/特效完整呈现
 
 ### M12: 打磨与验收
