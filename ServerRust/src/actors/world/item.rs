@@ -239,8 +239,9 @@ impl Message<MoveItemRequest> for WorldActor {
             None => return,
         };
 
+        // 客户端发来的 grid 是 MirGridType，实际移动的源/目标槽位是 from/to
         let success = record.actor_ref.ask(InventoryMoveItem {
-            from_grid: msg.grid,
+            from_grid: msg.from as u8,
             to_grid: msg.to as u8,
         }).await.unwrap_or(false);
 
