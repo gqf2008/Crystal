@@ -3760,6 +3760,41 @@ fn shared_item_type(cs_type: i32) -> mir2_shared::enums::ItemType {
         .unwrap_or(mir2_shared::enums::ItemType::Nothing)
 }
 
+/// 给物品补 ItemInfo（DB 配置 → SharedRust，编号差 3；已有 info 则跳过）
+fn enrich_item_info(
+    item: &mut mir2_shared::data::item::UserItem,
+    item_infos: &std::collections::HashMap<i32, db::ItemInfo>,
+) {
+    if item.info.is_some() {
+        return;
+    }
+    item.info = item_infos.get(&item.item_index).map(|info| mir2_shared::data::item::ItemInfo {
+        index: info.index,
+        name: info.name.clone(),
+        item_type: shared_item_type(info.item_type),
+        // SharedRust 枚举从 3 开始（C# 从 0 开始），默认值 0 会让客户端 try_from 失败
+        grade: mir2_shared::enums::ItemGrade::try_from((info.grade + 3) as u8)
+            .unwrap_or(mir2_shared::enums::ItemGrade::None),
+        required_type: mir2_shared::enums::RequiredType::try_from((info.required_type + 3) as u8)
+            .unwrap_or(mir2_shared::enums::RequiredType::Level),
+        required_class: mir2_shared::enums::RequiredClass::from_bits_truncate(
+            info.required_class as u8,
+        ),
+        required_gender: mir2_shared::enums::RequiredGender::from_bits_truncate(
+            info.required_gender as u8,
+        ),
+        set: mir2_shared::enums::ItemSet::try_from((info.set_type + 3) as u8)
+            .unwrap_or(mir2_shared::enums::ItemSet::None),
+        shape: info.shape as i16,
+        weight: info.weight as u8,
+        image: info.image as u16,
+        durability: info.durability as u16,
+        price: info.price,
+        stack_size: info.stack_size as u16,
+        ..Default::default()
+    });
+}
+
 fn build_user_information_packet(
     state: &PlayerState,
     item_infos: &std::collections::HashMap<i32, db::ItemInfo>,
@@ -3797,35 +3832,7 @@ fn build_user_information_packet(
         if let Some(slot) = slot {
             body.push(1u8);
             let mut item = slot.item.clone();
-            if item.info.is_none() {
-                item.info = item_infos.get(&item.item_index).map(|info| mir2_shared::data::item::ItemInfo {
-                    index: info.index,
-                    name: info.name.clone(),
-                    item_type: shared_item_type(info.item_type),
-                    // SharedRust 枚举从 3 开始（C# 从 0 开始），默认值 0 会让客户端 try_from 失败
-                    grade: mir2_shared::enums::ItemGrade::try_from((info.grade + 3) as u8)
-                        .unwrap_or(mir2_shared::enums::ItemGrade::None),
-                    required_type: mir2_shared::enums::RequiredType::try_from(
-                        (info.required_type + 3) as u8,
-                    )
-                    .unwrap_or(mir2_shared::enums::RequiredType::Level),
-                    required_class: mir2_shared::enums::RequiredClass::from_bits_truncate(
-                        info.required_class as u8,
-                    ),
-                    required_gender: mir2_shared::enums::RequiredGender::from_bits_truncate(
-                        info.required_gender as u8,
-                    ),
-                    set: mir2_shared::enums::ItemSet::try_from((info.set_type + 3) as u8)
-                        .unwrap_or(mir2_shared::enums::ItemSet::None),
-                    shape: info.shape as i16,
-                    weight: info.weight as u8,
-                    image: info.image as u16,
-                    durability: info.durability as u16,
-                    price: info.price,
-                    stack_size: info.stack_size as u16,
-                    ..Default::default()
-                });
-            }
+            enrich_item_info(&mut item, item_infos);
             if item.write_to_with_info(&mut body).is_err() {
                 body.push(0u8); // 回退：空格子
             }
@@ -3840,34 +3847,7 @@ fn build_user_information_packet(
         if let Some(item) = eq {
             body.push(1u8);
             let mut item = item.clone();
-            if item.info.is_none() {
-                item.info = item_infos.get(&item.item_index).map(|info| mir2_shared::data::item::ItemInfo {
-                    index: info.index,
-                    name: info.name.clone(),
-                    item_type: shared_item_type(info.item_type),
-                    grade: mir2_shared::enums::ItemGrade::try_from((info.grade + 3) as u8)
-                        .unwrap_or(mir2_shared::enums::ItemGrade::None),
-                    required_type: mir2_shared::enums::RequiredType::try_from(
-                        (info.required_type + 3) as u8,
-                    )
-                    .unwrap_or(mir2_shared::enums::RequiredType::Level),
-                    required_class: mir2_shared::enums::RequiredClass::from_bits_truncate(
-                        info.required_class as u8,
-                    ),
-                    required_gender: mir2_shared::enums::RequiredGender::from_bits_truncate(
-                        info.required_gender as u8,
-                    ),
-                    set: mir2_shared::enums::ItemSet::try_from((info.set_type + 3) as u8)
-                        .unwrap_or(mir2_shared::enums::ItemSet::None),
-                    shape: info.shape as i16,
-                    weight: info.weight as u8,
-                    image: info.image as u16,
-                    durability: info.durability as u16,
-                    price: info.price,
-                    stack_size: info.stack_size as u16,
-                    ..Default::default()
-                });
-            }
+            enrich_item_info(&mut item, item_infos);
             if item.write_to_with_info(&mut body).is_err() {
                 body.push(0u8);
             }
@@ -3922,7 +3902,8 @@ fn build_object_player_packet(
     body.extend_from_slice(&0u16.to_le_bytes());        // poison=None (client reads u16)
     body.push(0u8);                                     // dead=false
     body.push(0u8);                                     // hidden=false
-    body.push(0u8);                                     // effect=None
+    // SharedRust SpellEffect::None=3（C# 从 0 开始），写 0 会让客户端 try_from 失败
+    body.push(mir2_shared::enums::SpellEffect::None as u8); // effect=None
     body.push(0u8);                                     // wing_effect
     body.push(0u8);                                     // extra=false
     body.extend_from_slice(&mount_type.to_le_bytes());  // mount_type
@@ -4002,7 +3983,6 @@ fn build_object_monster_packet(monster: &MonsterSpawn, object_id: u32, name: &st
     body.extend_from_slice(&monster.y.to_le_bytes());   // location_y
     body.extend_from_slice(&monster.image.to_le_bytes()); // image (Monster enum)
     body.push(monster.direction);                       // direction
-    body.push(0u8);                                     // effect=None
     body.push(0u8);                                     // ai=None
     body.push(1u8);                                     // light
     body.push(0u8);                                     // dead=false

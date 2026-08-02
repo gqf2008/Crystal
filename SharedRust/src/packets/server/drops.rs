@@ -23,7 +23,8 @@ impl Packet for ObjectItem {
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let object_id = reader.read_u32::<LittleEndian>()?;
-        let item = UserItem::read_from(reader, i32::MAX, i32::MAX)?;
+        // 携带 ItemInfo（与 UserInformation 一致），客户端渲染图标/名称
+        let item = UserItem::read_from_with_info(reader)?;
         let location_x = reader.read_i32::<LittleEndian>()?;
         let location_y = reader.read_i32::<LittleEndian>()?;
         Ok(Self { object_id, item, location_x, location_y })
@@ -31,7 +32,7 @@ impl Packet for ObjectItem {
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_u32::<LittleEndian>(self.object_id)?;
-        self.item.write_to(writer)?;
+        self.item.write_to_with_info(writer)?;
         writer.write_i32::<LittleEndian>(self.location_x)?;
         writer.write_i32::<LittleEndian>(self.location_y)?;
         Ok(())

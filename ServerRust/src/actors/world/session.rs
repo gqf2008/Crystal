@@ -230,6 +230,28 @@ impl Message<StartGameRequest> for WorldActor {
 
         // 行会在线状态由 SocialActor 管理
 
+        // 发送玩家自身的 ObjectPlayer（客户端据此生成本地玩家实体并驱动移动/拾取）
+        let self_weapon = loaded_state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.shape as i16).unwrap_or(-1);
+        let self_armor = loaded_state.inventory.get_equipment(EquipmentSlot::Armour)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.shape as i16).unwrap_or(0);
+        let self_weapon_effect = loaded_state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| info.effect as i16).unwrap_or(0);
+        let self_packet = build_object_player_packet(
+            &player_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction,
+            loaded_state.level, name_colour_for_pk(loaded_state.pk_points),
+            loaded_state.class, loaded_state.gender, loaded_state.hair,
+            self_weapon, self_weapon_effect, self_armor,
+            loaded_state.mount_type, loaded_state.is_mounted,
+        );
+        let _ = self.gate_ref.tell(SendToClient {
+            session_id: msg.session_id,
+            data: self_packet,
+        }).await;
+
         // 多玩家可见性：向新玩家发送已有玩家的 ObjectPlayer
         let existing_players: Vec<_> = self.players.values()
             .filter(|r| r.session_id != msg.session_id)

@@ -202,6 +202,17 @@ impl Message<PickUpRequest> for WorldActor {
                 self.ground_items.push(ground_item);
             }
 
+            // 拾取成功：完整 UserInformation 刷新（背包新增物品）
+            if picked_up {
+                if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
+                    let packet = super::build_user_information_packet(&new_state, &self.item_infos);
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: packet,
+                    }).await;
+                }
+            }
+
             // 拾取成功：广播 ObjectRemove 给同地图玩家
             if picked_up {
                 let remove_packet = Self::build_object_remove_packet(picked_oid);
@@ -549,10 +560,13 @@ impl Message<DropItemRequest> for WorldActor {
             unique_id: msg.unique_id,
             count: msg.count,
         }).await.unwrap_or(None);
-        if let Some(item) = item {
+        if let Some(mut item) = item {
             let player_pos = (state.x, state.y);
 
             debug!("Player session={} dropped item uid={}", msg.session_id, msg.unique_id);
+
+            // 补 ItemInfo（ObjectItem 携带 info 供客户端渲染图标/名称）
+            super::enrich_item_info(&mut item, &self.item_infos);
 
             // 广播 ObjectItem 给所有玩家
             let drop_oid = self.alloc_object_id();
