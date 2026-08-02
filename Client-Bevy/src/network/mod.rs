@@ -20,6 +20,7 @@ use crate::game::dialogs::npc::NpcDialogState;
 use crate::game::dialogs::npc_goods::{GoodsEntry, NpcGoodsState};
 use crate::game::hud::HudState;
 use crate::game::movement::{NetMotion, NetMotions};
+use crate::game::skills::MagicsState;
 use crate::game::weather::WeatherState;
 use crate::map_renderer::GameData;
 use crate::scenes::AppState;
@@ -311,6 +312,7 @@ fn network_system(
     mut npc_goods: ResMut<NpcGoodsState>,
     mut combat_evt: ResMut<CombatEvents>,
     mut weather: ResMut<WeatherState>,
+    mut magics: ResMut<MagicsState>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     // 真实 TCP：TcpEvent（完整内层包 / 断线）
@@ -329,6 +331,7 @@ fn network_system(
                         &mut npc_goods,
                         &mut combat_evt,
                         &mut weather,
+                        &mut magics,
                         &mut next,
                         &payload,
                     );
@@ -367,6 +370,7 @@ fn network_system(
                         &mut npc_goods,
                         &mut combat_evt,
                         &mut weather,
+                        &mut magics,
                         &mut next,
                         &payload,
                     );
@@ -414,6 +418,7 @@ fn handle_packet(
     npc_goods: &mut NpcGoodsState,
     combat_evt: &mut CombatEvents,
     weather: &mut WeatherState,
+    magics: &mut MagicsState,
     next: &mut NextState<AppState>,
     payload: &[u8],
 ) {
@@ -803,6 +808,31 @@ fn handle_packet(
                 npc_goods.goods = goods;
                 npc_goods.selected = None;
                 npc_goods.visible = true;
+            }
+        }
+
+        // ---- M13: 技能 ----
+        x if x == ServerPacketIds::NewMagic as i16 => {
+            if let Ok(p) = magic::NewMagic::read_body(&mut cur) {
+                if !p.hero {
+                    magics.upsert(p.magic.clone());
+                    tracing::info!(
+                        "📖 学会技能: {} ({:?}) key={}",
+                        p.magic.name,
+                        p.magic.spell,
+                        p.magic.key
+                    );
+                }
+            }
+        }
+        x if x == ServerPacketIds::MagicDelay as i16 => {
+            if let Ok(p) = MagicDelay::read_body(&mut cur) {
+                tracing::debug!("⏳ 技能冷却: object={} spell={:?} delay={}ms", p.object_id, p.spell, p.delay);
+            }
+        }
+        x if x == ServerPacketIds::MagicCast as i16 => {
+            if let Ok(p) = MagicCast::read_body(&mut cur) {
+                tracing::info!("🪄 MagicCast: spell={:?}", p.spell);
             }
         }
 

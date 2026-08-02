@@ -12,6 +12,7 @@ pub mod hud;
 pub mod movement;
 pub mod pathfinding;
 pub mod player_control;
+pub mod skills;
 pub mod sound;
 pub mod weather;
 
@@ -41,6 +42,7 @@ impl Plugin for GamePlugin {
             dialogs::DialogsPlugin,
             movement::MovementPlugin,
             player_control::PlayerControlPlugin,
+            skills::SkillsPlugin,
             combat::CombatPlugin,
             weather::WeatherPlugin,
             sound::SoundPlugin,

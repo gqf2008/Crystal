@@ -9,6 +9,7 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use crate::game::skills::MagicsState;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
@@ -37,6 +38,10 @@ pub struct BeltClose;
 #[derive(Component)]
 pub struct BeltSlot;
 
+/// 快捷格技能图标（子实体）
+#[derive(Component, Clone, Copy)]
+pub struct BeltIcon(pub usize);
+
 #[derive(Resource, Default)]
 pub struct BeltVisible(pub bool);
 
@@ -52,13 +57,14 @@ pub struct BeltPlugin;
 impl Plugin for BeltPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BeltState>();
-        app.init_resource::<BeltVisible>();
+        // 原版 C# SkillBarDialog 默认显示（F1-F8 快捷技能栏）
+        app.insert_resource(BeltVisible(true));
         app.init_resource::<BeltVertical>();
         app.add_systems(OnEnter(AppState::Game), spawn_belt);
         app.add_systems(OnExit(AppState::Game), cleanup_belt);
         app.add_systems(
             Update,
-            (belt_ui_system, ui_button_system)
+            (belt_ui_system, belt_icon_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -92,20 +98,36 @@ fn spawn_belt(
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     for i in 0..8usize {
         let x = pos + CELL_OFFSET + i as f32 * CELL_SPACING;
-        commands.spawn((
-            UiEntity,
-            BeltWidget,
-            BeltSlot,
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.0, 0.0, 0.0, 0.2),
-                custom_size: Some(Vec2::new(CELL_SIZE, CELL_SIZE)),
-                ..default()
-            },
-            Anchor::TOP_LEFT,
-            Transform::from_xyz(x, -603.0, 5.6),
-            Visibility::Visible,
-        ));
+        let slot = commands
+            .spawn((
+                UiEntity,
+                BeltWidget,
+                BeltSlot,
+                Sprite {
+                    image: white.clone(),
+                    color: Color::srgba(0.0, 0.0, 0.0, 0.2),
+                    custom_size: Some(Vec2::new(CELL_SIZE, CELL_SIZE)),
+                    ..default()
+                },
+                Anchor::TOP_LEFT,
+                Transform::from_xyz(x, -603.0, 5.6),
+                Visibility::Visible,
+            ))
+            .id();
+        // 技能图标（MagIcon[icon*2]，原版 C# Cells[i].Index = magic.Icon * 2）
+        commands.entity(slot).with_children(|p| {
+            p.spawn((
+                BeltIcon(i),
+                Sprite {
+                    image: white.clone(),
+                    custom_size: Some(Vec2::new(CELL_SIZE - 4.0, CELL_SIZE - 4.0)),
+                    ..default()
+                },
+                Anchor::TOP_LEFT,
+                Transform::from_xyz(2.0, -2.0, 5.7),
+                Visibility::Hidden,
+            ));
+        });
     }
 
     // 旋转按钮（横 Prguse[1926-1928]）
@@ -153,6 +175,40 @@ fn belt_ui_system(
     for btn in &close {
         if btn.clicked {
             visible.0 = false;
+        }
+    }
+}
+
+/// 快捷栏技能图标：按 MagicsState 中 key 绑定（F1=1..F8=8）显示 MagIcon 图标
+fn belt_icon_system(
+    magics: Res<MagicsState>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    mut icons: Query<(&mut Sprite, &mut Visibility, &BeltIcon), Without<BeltWidget>>,
+) {
+    for (mut sprite, mut vis, icon) in &mut icons {
+        let slot = icon.0;
+        let magic = magics.by_key(slot as u8 + 1);
+        match magic {
+            Some(m) => {
+                let handle = ui_image(
+                    &mut libs,
+                    &mut images,
+                    &mut cache,
+                    LibraryName::MagIcon,
+                    (m.icon as usize) * 2,
+                );
+                match handle {
+                    Some(h) if sprite.image != h => sprite.image = h,
+                    None => *vis = Visibility::Hidden,
+                    _ => {}
+                }
+                if sprite.image.is_strong() {
+                    *vis = Visibility::Visible;
+                }
+            }
+            None => *vis = Visibility::Hidden,
         }
     }
 }
