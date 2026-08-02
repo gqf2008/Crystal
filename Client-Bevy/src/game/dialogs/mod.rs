@@ -14,6 +14,9 @@ pub mod quest_log;
 pub mod compass;
 pub mod friend;
 pub mod group;
+pub mod guild;
+pub mod mail;
+pub mod ranking;
 pub mod inspect;
 pub mod trade;
 pub mod inventory;
@@ -38,6 +41,9 @@ pub enum DialogKind {
     Trade,
     Inspect,
     NpcGoods,
+    Guild,
+    Mail,
+    Ranking,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）
@@ -74,20 +80,27 @@ impl Plugin for DialogsPlugin {
         app.init_resource::<inventory::InventoryState>();
         app.init_resource::<character::CharacterState>();
         app.add_plugins((
-            inventory::InventoryDialogPlugin,
-            character::CharacterDialogPlugin,
-            menu::MenuDialogPlugin,
-            minimap::MiniMapPlugin,
-            belt::BeltPlugin,
-            compass::CompassPlugin,
-            npc::NpcDialogPlugin,
-            quest_log::QuestLogPlugin,
-            group::GroupPlugin,
-            friend::FriendPlugin,
-            amount_box::AmountBoxPlugin,
-            trade::TradePlugin,
-            inspect::InspectPlugin,
-            npc_goods::NpcGoodsPlugin,
+            (
+                inventory::InventoryDialogPlugin,
+                character::CharacterDialogPlugin,
+                menu::MenuDialogPlugin,
+                minimap::MiniMapPlugin,
+                belt::BeltPlugin,
+                compass::CompassPlugin,
+                npc::NpcDialogPlugin,
+                quest_log::QuestLogPlugin,
+            ),
+            (
+                group::GroupPlugin,
+                friend::FriendPlugin,
+                amount_box::AmountBoxPlugin,
+                trade::TradePlugin,
+                inspect::InspectPlugin,
+                npc_goods::NpcGoodsPlugin,
+                guild::GuildPlugin,
+                mail::MailPlugin,
+                ranking::RankingPlugin,
+            ),
         ));
     }
 }
