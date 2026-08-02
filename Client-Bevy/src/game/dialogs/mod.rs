@@ -5,7 +5,10 @@
 // 框架：DialogManager 维护打开栈（z 序），每个对话框一个插件子模块
 // ============================================================================
 
+pub mod character;
 pub mod inventory;
+pub mod menu;
+pub mod minimap;
 
 use bevy::prelude::*;
 
@@ -18,6 +21,7 @@ pub enum DialogKind {
     Option,
     Menu,
     GameShop,
+    Minimap,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）
@@ -52,6 +56,12 @@ impl Plugin for DialogsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DialogManager>();
         app.init_resource::<inventory::InventoryState>();
-        app.add_plugins(inventory::InventoryDialogPlugin);
+        app.init_resource::<character::CharacterState>();
+        app.add_plugins((
+            inventory::InventoryDialogPlugin,
+            character::CharacterDialogPlugin,
+            menu::MenuDialogPlugin,
+            minimap::MiniMapPlugin,
+        ));
     }
 }

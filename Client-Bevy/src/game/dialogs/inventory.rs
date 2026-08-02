@@ -53,14 +53,8 @@ pub struct InvGoldText;
 pub struct InvWeightText;
 
 /// 页切换（当前显示页）
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct InvPage(pub usize);
-
-impl Default for InvPage {
-    fn default() -> Self {
-        Self(0)
-    }
-}
 
 pub struct InventoryDialogPlugin;
 

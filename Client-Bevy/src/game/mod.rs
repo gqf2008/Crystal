@@ -24,7 +24,10 @@ impl Plugin for GamePlugin {
         app.init_resource::<movement::NetMotions>();
         app.init_resource::<player_control::ControlState>();
         // 游戏场景 UI 相机（HUD/聊天共用，先于各 UI 插件创建）
-        app.add_systems(OnEnter(AppState::Game), setup_game_ui_camera);
+        app.add_systems(
+            OnEnter(AppState::Game),
+            (setup_game_ui_camera, open_minimap_default).chain(),
+        );
         app.add_plugins((
             hud::HudPlugin,
             chat::ChatPlugin,
@@ -56,4 +59,11 @@ fn setup_game_ui_camera(mut commands: Commands) {
             ..default()
         },
     ));
+}
+
+/// 小地图默认显示（原版为常驻控件）
+fn open_minimap_default(mut mgr: ResMut<dialogs::DialogManager>) {
+    if !mgr.is_open(dialogs::DialogKind::Minimap) {
+        mgr.open.push(dialogs::DialogKind::Minimap);
+    }
 }

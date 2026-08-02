@@ -74,9 +74,12 @@ fn main() {
         ModalBoxPlugin,
         client_bevy::game::GamePlugin,
     ));
-    // --auto-inv: 进游戏 3 秒后自动打开背包（M9 对话框调试）
+    // --auto-inv / --auto-char: 进游戏 3 秒后自动打开背包/角色对话框（M9 调试）
     if std::env::args().any(|a| a == "--auto-inv") {
         app.add_systems(Update, auto_open_inventory);
+    }
+    if std::env::args().any(|a| a == "--auto-char") {
+        app.add_systems(Update, auto_open_character);
     }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
@@ -133,6 +136,23 @@ fn capture_shot(commands: &mut Commands, counter: &mut u32) {
     commands
         .spawn(Screenshot::primary_window())
         .observe(save_to_disk(path));
+}
+
+/// --auto-char：进游戏 3 秒后自动打开角色对话框
+fn auto_open_character(
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut timer: Local<f32>,
+) {
+    if *state != client_bevy::scenes::AppState::Game {
+        return;
+    }
+    *timer += time.delta_secs();
+    if *timer >= 3.0 && !mgr.is_open(client_bevy::game::dialogs::DialogKind::Character) {
+        mgr.toggle(client_bevy::game::dialogs::DialogKind::Character);
+        tracing::info!("🎛️ --auto-char 自动打开角色对话框");
+    }
 }
 
 /// --auto-inv：进游戏 3 秒后自动打开背包
