@@ -1073,15 +1073,61 @@ impl Message<SocialPlayerJoined> for SocialActor {
         self.players.insert(msg.session_id, msg.actor_ref.clone());
         // 同步行会成员在线状态（服务端重启后行会从 DB 加载，成员 session 为 None；
         // 不更新则行会广播/在线显示失效）
-        if let Ok(Some(state)) = msg.actor_ref.ask(GetPlayerState).await {
-            if let Some(guild_name) = &state.guild_name {
-                if let Some(guild) = self.guilds.get_mut(guild_name) {
-                    guild.set_online(&state.name, msg.session_id);
-                    debug!(
-                        "SocialActor: guild member {} online (guild={})",
-                        state.name, guild_name
-                    );
+        let state = match msg.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        if let Some(guild_name) = &state.guild_name {
+            if let Some(guild) = self.guilds.get_mut(guild_name) {
+                guild.set_online(&state.name, msg.session_id);
+                debug!(
+                    "SocialActor: guild member {} online (guild={})",
+                    state.name, guild_name
+                );
+            }
+        }
+
+        // 师徒状态同步（C# GetMentor 语义：上线时通知双方，双方各发 MentorUpdate）
+        if let Some(partner_name) = &state.mentor_name {
+            if let Some(partner_sid) = self.find_player_by_name(partner_name, msg.session_id).await {
+                if let Some(partner_record) = self.players.get(&partner_sid) {
+                    if let Ok(Some(partner_state)) = partner_record.ask(GetPlayerState).await {
+                        // 上线者视角：对方（师父/徒弟）信息
+                        send_mentor_update_packet(
+                            &self.gate_ref,
+                            msg.session_id,
+                            partner_name,
+                            partner_state.level as u32,
+                            true,
+                            0,
+                        );
+                        // 对方视角：上线者信息
+                        send_mentor_update_packet(
+                            &self.gate_ref,
+                            partner_sid,
+                            &state.name,
+                            state.level as u32,
+                            true,
+                            0,
+                        );
+                        let rel = if partner_state.mentor_name.as_deref() == Some(state.name.as_str()) {
+                            "徒弟"
+                        } else {
+                            "师父"
+                        };
+                        send_system_message(&self.gate_ref, partner_sid, &format!("你的{} {} 上线了", rel, state.name));
+                    }
                 }
+            } else {
+                // 对方离线：显示名字 + 离线（等级未知给 0）
+                send_mentor_update_packet(
+                    &self.gate_ref,
+                    msg.session_id,
+                    partner_name,
+                    0,
+                    false,
+                    0,
+                );
             }
         }
         debug!("SocialActor: player {} joined", msg.name);
@@ -1096,7 +1142,32 @@ impl Message<SocialPlayerLeft> for SocialActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: SocialPlayerLeft, _ctx: &mut Context<Self, Self::Reply>) {
+        // 提前取师徒信息（随后从 players 移除）
+        let leaving_mentor = if let Some(rec) = self.players.get(&msg.session_id) {
+            match rec.ask(GetPlayerState).await {
+                Ok(Some(s)) => Some((s.name.clone(), s.level, s.mentor_name.clone())),
+                _ => None,
+            }
+        } else {
+            None
+        };
+
         self.players.remove(&msg.session_id);
+
+        // 师徒下线通知（对方在线 → 刷新在线状态）
+        if let Some((name, level, Some(partner_name))) = leaving_mentor {
+            if let Some(partner_sid) = self.find_player_by_name(&partner_name, msg.session_id).await {
+                send_mentor_update_packet(
+                    &self.gate_ref,
+                    partner_sid,
+                    &name,
+                    level as u32,
+                    false,
+                    0,
+                );
+                send_system_message(&self.gate_ref, partner_sid, &format!("{} 下线了", name));
+            }
+        }
 
         // 行会成员离线标记（保持 session 为空，行会广播/在线显示正确）
         for guild in self.guilds.values_mut() {
@@ -2686,9 +2757,27 @@ impl Message<SocialAddMentor> for SocialActor {
             return;
         }
 
-        // 发送拜师请求给目标
+        // C# PlayerObject.AddMentor 规则（同职业 + 等级差 + 双方无师徒关系）
+        if requester_state.name == msg.mentor_name {
+            send_system_message(&self.gate_ref, msg.session_id, "不能拜自己为师");
+            return;
+        }
+        if target_state.mentor_name.is_some() {
+            send_system_message(&self.gate_ref, msg.session_id, "对方已有师徒关系");
+            return;
+        }
+        if requester_state.class != target_state.class {
+            send_system_message(&self.gate_ref, msg.session_id, "只能拜同职业的师父");
+            return;
+        }
+        if (requester_state.level as u32 + 10) > target_state.level as u32 {
+            send_system_message(&self.gate_ref, msg.session_id, "师父等级需高于徒弟至少 10 级");
+            return;
+        }
+
+        // 发送拜师请求给目标（C# S.MentorRequest：Name + Level）
         self.pending_mentor_invites.insert(target_session, msg.session_id);
-        send_mentor_invite_packet(&self.gate_ref, target_session, &requester_state.name);
+        send_mentor_invite_packet(&self.gate_ref, target_session, &requester_state.name, requester_state.level);
         debug!("AddMentor: {} -> {}", requester_state.name, msg.mentor_name);
     }
 }
@@ -2743,12 +2832,30 @@ impl Message<SocialMentorReply> for SocialActor {
             _ => return,
         };
 
-        // replier = 导师，requester = 徒弟
-        let _ = replier_record.ask(SetMentor { mentor_name: None }).await;
+        // 双方互相记录（C#：student.Info.Mentor = mentor；mentor.Info.Mentor = student）
+        let _ = replier_record.ask(SetMentor { mentor_name: Some(requester_state.name.clone()) }).await;
         let _ = requester_record.ask(SetMentor { mentor_name: Some(replier_state.name.clone()) }).await;
 
         send_system_message(&self.gate_ref, replier_session, &format!("收徒成功，你的徒弟是: {}", requester_state.name));
         send_system_message(&self.gate_ref, requester_session, &format!("拜师成功，你的导师是: {}", replier_state.name));
+
+        // 双方 MentorUpdate 同步（C# GetMentor 语义：Name = 对方）
+        send_mentor_update_packet(
+            &self.gate_ref,
+            replier_session,
+            &requester_state.name,
+            requester_state.level as u32,
+            true,
+            0,
+        );
+        send_mentor_update_packet(
+            &self.gate_ref,
+            requester_session,
+            &replier_state.name,
+            replier_state.level as u32,
+            true,
+            0,
+        );
         debug!("Mentor: {} is mentor of {}", replier_state.name, requester_state.name);
     }
 }
@@ -2785,12 +2892,23 @@ impl Message<SocialCancelMentor> for SocialActor {
         };
 
         if state.mentor_name.is_none() {
-            send_system_message(&self.gate_ref, msg.session_id, "你没有导师");
+            send_system_message(&self.gate_ref, msg.session_id, "你没有师徒关系");
             return;
         }
 
+        let partner_name = state.mentor_name.clone().unwrap_or_default();
         let _ = record.ask(SetMentor { mentor_name: None }).await;
+        send_mentor_cancel_packet(&self.gate_ref, msg.session_id);
         send_system_message(&self.gate_ref, msg.session_id, "已解除师徒关系");
+
+        // 对方在线则同步清除（C# 双方 Info.Mentor 同时清空）
+        if let Some(partner_sid) = self.find_player_by_name(&partner_name, msg.session_id).await {
+            if let Some(partner_record) = self.players.get(&partner_sid) {
+                let _ = partner_record.ask(SetMentor { mentor_name: None }).await;
+                send_mentor_cancel_packet(&self.gate_ref, partner_sid);
+                send_system_message(&self.gate_ref, partner_sid, &format!("{} 解除了师徒关系", state.name));
+            }
+        }
         debug!("CancelMentor: {} removed mentor", state.name);
     }
 }

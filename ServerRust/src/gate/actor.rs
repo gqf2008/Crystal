@@ -2307,13 +2307,10 @@ fn handle_divorce_reply(social_ref: &Option<ActorRef<crate::actors::social::Soci
     let _ = social_ref.tell(crate::actors::social::SocialDivorceReply { session_id, accept }).try_send();
 }
 
-/// AddMentor: [mentor_name: DotNetString]
+/// AddMentor: [mentor_name: DotNet 7-bit string]（C# BinaryWriter.Write(string)）
 fn handle_add_mentor(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 4 { return; }
-    let name_len = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0;4])) as usize;
-    let mentor_name = if payload.len() >= 4 + name_len {
-        String::from_utf8_lossy(&payload[4..4+name_len]).to_string()
-    } else { return; };
+    let mut cur = std::io::Cursor::new(payload);
+    let Ok(mentor_name) = mir2_shared::binary::read_dotnet_string(&mut cur) else { return };
     debug!("AddMentor: session={} mentor={}", session_id, mentor_name);
     let social_ref = match social_ref { Some(s) => s, None => return };
     let _ = social_ref.tell(crate::actors::social::SocialAddMentor { session_id, mentor_name }).try_send();

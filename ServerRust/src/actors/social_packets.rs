@@ -389,26 +389,40 @@ pub fn send_divorce_packet(gate_ref: &ActorRef<GateActor>, session_id: u64) {
     }).try_send();
 }
 
-/// Send mentor invite to a client.
-pub fn send_mentor_invite_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, requester_name: &str) {
+/// Send mentor invite to a client（C# S.MentorRequest：Name + Level u16）
+pub fn send_mentor_invite_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, requester_name: &str, requester_level: u16) {
     let mut body = Vec::new();
     write_dotnet_string(&mut body, requester_name);
+    body.extend_from_slice(&requester_level.to_le_bytes());
     let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MentorRequest as i16, &body),
     }).try_send();
 }
 
-/// Send mentor cancel to a client (sends empty MentorUpdate to clear mentor state).
-pub fn send_mentor_cancel_packet(gate_ref: &ActorRef<GateActor>, session_id: u64) {
+/// Send mentor update to a client（C# S.MentorUpdate：Name + Level + Online + MenteeEXP）
+pub fn send_mentor_update_packet(
+    gate_ref: &ActorRef<GateActor>,
+    session_id: u64,
+    mentor_name: &str,
+    mentor_level: u32,
+    mentor_online: bool,
+    mentee_exp: i64,
+) {
     let mut body = Vec::new();
-    write_dotnet_string(&mut body, "");       // empty mentor name = no mentor
-    body.extend_from_slice(&0i32.to_le_bytes()); // level 0
-    body.push(0u8);                            // offline
+    write_dotnet_string(&mut body, mentor_name);
+    body.extend_from_slice(&(mentor_level as i32).to_le_bytes());
+    body.push(if mentor_online { 1u8 } else { 0u8 });
+    body.extend_from_slice(&mentee_exp.to_le_bytes());
     let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MentorUpdate as i16, &body),
     }).try_send();
+}
+
+/// Send mentor cancel to a client (sends empty MentorUpdate to clear mentor state).
+pub fn send_mentor_cancel_packet(gate_ref: &ActorRef<GateActor>, session_id: u64) {
+    send_mentor_update_packet(gate_ref, session_id, "", 0, false, 0);
 }
 
 // ============================================================
