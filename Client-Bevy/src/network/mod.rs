@@ -33,6 +33,7 @@ use crate::game::dialogs::quest_log::{QuestEntry, QuestLogState};
 use crate::game::dialogs::buff::{BuffEntry, BuffState};
 use crate::game::dialogs::report::ReportState;
 use crate::game::dialogs::inspect::{InspectItem, InspectState};
+use crate::game::dialogs::creature::{CreatureEntry, CreatureState};
 use crate::game::effects::{EffectsState, PendingEffect};
 use crate::game::player_control::ControlState;
 use crate::game::dialogs::inventory::InvItem;
@@ -304,6 +305,34 @@ impl Packet for ReportIssueWire {
         use byteorder::{LittleEndian, WriteBytesExt};
         writer.write_u32::<LittleEndian>(self.issue_type)?;
         mir2_shared::binary::write_dotnet_string(writer, &self.description)?;
+        Ok(())
+    }
+}
+
+/// 宠物列表请求（M47：gate 解析 [request_updates u8]）
+#[derive(Debug, Clone, Copy)]
+pub struct CreatureRequestWire {
+    pub request: bool,
+}
+
+impl Packet for CreatureRequestWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::RequestIntelligentCreatureUpdates as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            request: reader.read_u8()? != 0,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u8(if self.request { 1 } else { 0 })?;
         Ok(())
     }
 }
@@ -999,6 +1028,7 @@ struct NetworkPanels<'w> {
     buff: ResMut<'w, BuffState>,
     report: ResMut<'w, ReportState>,
     inspect: ResMut<'w, InspectState>,
+    creature: ResMut<'w, CreatureState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -1057,6 +1087,7 @@ fn network_system(
                         &mut *panels.buff,
                         &mut *panels.report,
                         &mut *panels.inspect,
+                        &mut *panels.creature,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1119,6 +1150,7 @@ fn network_system(
                         &mut *panels.buff,
                         &mut *panels.report,
                         &mut *panels.inspect,
+                        &mut *panels.creature,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1271,6 +1303,7 @@ fn handle_packet(
     buff: &mut BuffState,
     report: &mut ReportState,
     inspect: &mut InspectState,
+    creature: &mut CreatureState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -2432,6 +2465,31 @@ fn handle_packet(
                 );
             } else {
                 tracing::warn!("⚠️ PlayerInspect 装备解析失败");
+            }
+        }
+        // ---- M47: 宠物 ----
+        x if x == ServerPacketIds::UpdateIntelligentCreatureList as i16 => {
+            // [count i32][per: type u8][pickup u8][enabled u8][hunger u8][name dotnet]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            use byteorder::{LittleEndian, ReadBytesExt};
+            let count = cur.read_i32::<LittleEndian>().unwrap_or(0).max(0) as usize;
+            let mut creatures = Vec::with_capacity(count);
+            let mut ok = true;
+            for _ in 0..count {
+                let creature_type = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let pickup_mode = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let enabled = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } } != 0;
+                let hunger = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let name = match mir2_shared::binary::read_dotnet_string(&mut cur) { Ok(v) => v, Err(_) => { ok = false; break; } };
+                creatures.push(CreatureEntry { creature_type, pickup_mode, enabled, hunger, name });
+            }
+            if ok {
+                creature.creatures = creatures;
+                creature.message = "宠物列表已更新".to_string();
+                tracing::info!("🐾 宠物列表: {} 个", creature.creatures.len());
+            } else {
+                tracing::warn!("⚠️ UpdateIntelligentCreatureList 解析失败");
             }
         }
         // ---- M39: 钓鱼 ----

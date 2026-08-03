@@ -396,6 +396,13 @@
 - [x] 验证：真实 ServerRust 双客户端 E2E——`🔍 PlayerInspect: bevy2char Lv.20 装备 0 件` → `✅ 查看成功: bevy2char Lv.20 行会=TestGuildWar`；客户端 34 / 服务端 139 测试全过
 
 ---
+### M47: 宠物（IntelligentCreature）（2026-08-03 完成）
+- [x] **客户端**：宠物对话框（列表：名称/类型/拾取/饥饿/启用 + 刷新按钮 + 状态行）；打开自动请求列表
+- [x] 网络：UpdateIntelligentCreatureList 解析（服务端实际 wire：[count i32][per: type/pickup/enabled/hunger/name dotnet]）；CreatureRequestWire [request_updates u8] 手动构造
+- [x] 服务端：无改动（hero.rs 宠物系统已完整）
+- [x] 验证：真实 ServerRust E2E——`🐾 宠物列表: 0 个` → `✅ 宠物列表: 0 个`（空列表解析正确）；客户端 34 / 服务端 139 测试全过
+
+---
 ## 四、执行顺序与依赖
 
 ```

@@ -269,6 +269,10 @@ fn main() {
     if std::env::args().any(|a| a == "--inspect-test") {
         app.add_systems(Update, auto_inspect_test);
     }
+    // --creature-test: 宠物链路（打开宠物 → 请求列表 → 解析）
+    if std::env::args().any(|a| a == "--creature-test") {
+        app.add_systems(Update, auto_creature_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -3242,6 +3246,54 @@ fn auto_inspect_test(
                     inspect.level,
                     inspect.guild,
                     inspect.items.len()
+                );
+                *stage = 9;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// --creature-test：打开宠物对话框 → 自动请求列表 → 等解析完成
+#[allow(clippy::too_many_arguments)]
+fn auto_creature_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    creature: Res<client_bevy::game::dialogs::creature::CreatureState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Creature) {
+                mgr.toggle(client_bevy::game::dialogs::DialogKind::Creature);
+            }
+            // 打开对话框会自动请求；这里兜底再发一次
+            net.send_packet(&client_bevy::network::CreatureRequestWire { request: true });
+            tracing::info!("[CREATURETEST] 请求宠物列表");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t >= 8.0 {
+                tracing::warn!("[CREATURETEST] ❌ 未收到宠物列表");
+                *stage = 9;
+                return;
+            }
+            if creature.message.contains("宠物列表已更新") {
+                tracing::info!(
+                    "[CREATURETEST] ✅ 宠物列表: {} 个",
+                    creature.creatures.len()
                 );
                 *stage = 9;
             }
