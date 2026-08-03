@@ -133,6 +133,48 @@ pub struct SpriteLayer {
     pub frame: i32,
     /// true = 特效层（用 effect 帧段，如翅膀）
     pub is_effect: bool,
+    /// true = 坐骑层（M60：帧号按坐骑库布局计算，非玩家帧表）
+    pub is_mount: bool,
+}
+
+/// M60 坐骑状态（挂玩家实体；mount_type>=0 且骑乘时显示坐骑层）
+#[derive(Component)]
+pub struct MountState {
+    pub mount_type: i16,
+}
+
+/// 坐骑动作 → 坐骑库内帧布局 [起始, 每方向帧数]（Mount/xx.Lib 内布局）
+fn mount_lib_frames(action: MirAction) -> (i32, i32) {
+    match action {
+        MirAction::Walking => (32, 8),
+        MirAction::Running => (96, 6),
+        MirAction::Struck => (144, 3),
+        MirAction::Attack1
+        | MirAction::Attack2
+        | MirAction::Attack3
+        | MirAction::Attack4
+        | MirAction::AttackRange1
+        | MirAction::AttackRange2
+        | MirAction::AttackRange3 => (168, 6),
+        _ => (0, 4), // Standing 等
+    }
+}
+
+/// 坐骑动作 → 玩家 Hum 帧表动作（C# Frames.cs Mounts 段）
+fn mount_player_action(action: MirAction) -> MirAction {
+    match action {
+        MirAction::Walking => MirAction::MountWalking,
+        MirAction::Running => MirAction::MountRunning,
+        MirAction::Struck => MirAction::MountStruck,
+        MirAction::Attack1
+        | MirAction::Attack2
+        | MirAction::Attack3
+        | MirAction::Attack4
+        | MirAction::AttackRange1
+        | MirAction::AttackRange2
+        | MirAction::AttackRange3 => MirAction::MountAttack,
+        _ => MirAction::MountStanding,
+    }
 }
 
 /// 演示行为（统一枚举，挂在演示角色上）
@@ -201,17 +243,27 @@ pub struct ActorImageCache {
 /// 动画推进：按帧表 interval 推进 frame_index，并把各层的绘制帧号写回
 fn advance_actor_animations(
     time: Res<Time>,
-    mut actors: Query<(&ActorAppearance, &mut ActorAnim, &Children)>,
+    mut actors: Query<(&ActorAppearance, &mut ActorAnim, &Children, Option<&MountState>)>,
     mut layers: Query<&mut SpriteLayer>,
 ) {
     let dt_ms = time.delta_secs() * 1000.0;
-    for (app, mut anim, children) in &mut actors {
+    for (app, mut anim, children, mounted) in &mut actors {
         let Some(frame) = actor_frame(app, &anim) else {
             continue;
         };
         let draw_frame = frame.start + (anim.direction as i32) * frame.offset() + anim.frame_index;
         let effect_frame =
             frame.effect_start + (anim.direction as i32) * frame.effect_offset() + anim.frame_index;
+
+        // M60：骑乘时玩家帧表改用坐骑动作（C# Frames.cs Mounts 段）
+        let mount_draw_frame = mounted.is_some().then(|| {
+            let ma = mount_player_action(anim.action);
+            get_player_frame(ma)
+                .map(|mf| mf.start + (anim.direction as i32) * mf.offset() + anim.frame_index)
+                .unwrap_or(draw_frame)
+        });
+        let (mount_base, mount_off) = mount_lib_frames(anim.action);
+        let mount_layer_frame = mount_base + (anim.direction as i32) * mount_off + anim.frame_index;
 
         anim.elapsed_ms += dt_ms;
         let interval = frame.interval.max(1) as f32;
@@ -223,11 +275,15 @@ fn advance_actor_animations(
 
         for child in children.iter() {
             if let Ok(mut layer) = layers.get_mut(child) {
-                layer.frame = if layer.is_effect {
-                    effect_frame
+                if layer.is_mount {
+                    layer.frame = mount_layer_frame;
+                } else if layer.is_effect {
+                    layer.frame = effect_frame;
+                } else if let Some(mdf) = mount_draw_frame {
+                    layer.frame = mdf;
                 } else {
-                    draw_frame
-                };
+                    layer.frame = draw_frame;
+                }
             }
         }
     }
@@ -319,6 +375,9 @@ fn spawn_net_objects_when_ready(
     mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
+    mut actors: Query<(Entity, &NetObjectId, Option<&MountState>)>,
+    children: Query<&Children>,
+    mut layers: Query<&mut SpriteLayer>,
 ) {
     if data.map.is_none() {
         return;
@@ -361,6 +420,54 @@ fn spawn_net_objects_when_ready(
                 *location_y,
                 *object_id,
             ),
+            NetObject::Player {
+                object_id,
+                mount_type,
+                is_mounted,
+                ..
+            } => {
+                // M60：已存在的玩家（骑乘/下马重发 ObjectPlayer）→ 只更新坐骑层，不重复生成
+                let existing = actors
+                    .iter()
+                    .find(|(_, id, _)| id.0 == *object_id)
+                    .map(|(e, _, _)| e);
+                if let Some(ent) = existing {
+                    let has_mount = actors
+                        .iter()
+                        .any(|(e, _, m)| e == ent && m.is_some());
+                    if *is_mounted && *mount_type >= 0 && !has_mount {
+                        commands.entity(ent).insert(MountState { mount_type: *mount_type });
+                        commands.entity(ent).with_children(|p| {
+                            p.spawn((
+                                Sprite::default(),
+                                Transform::default(),
+                                SpriteLayer {
+                                    lib: ArrayLibType::Mounts,
+                                    slot: (*mount_type).max(0) as u32,
+                                    frame: 0,
+                                    is_effect: false,
+                                    is_mount: true,
+                                },
+                            ));
+                        });
+                        tracing::info!("🐴 玩家 {} 骑乘坐骑 type={}", object_id, mount_type);
+                    } else if !*is_mounted && has_mount {
+                        commands.entity(ent).remove::<MountState>();
+                        if let Ok(children_of) = children.get(ent) {
+                            for c in children_of.iter() {
+                                if let Ok(l) = layers.get(c) {
+                                    if l.is_mount {
+                                        commands.entity(c).despawn();
+                                    }
+                                }
+                            }
+                        }
+                        tracing::info!("🐴 玩家 {} 下马", object_id);
+                    }
+                    continue;
+                }
+                spawn_net_object_entity(&mut commands, obj, is_local);
+            }
             _ => spawn_net_object_entity(&mut commands, obj, is_local),
         }
     }
@@ -387,6 +494,8 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
             weapon_effect,
             armour,
             wing_effect,
+            mount_type,
+            is_mounted,
         } => {
             // 注意：世界坐标 y 向下取负（与地图/怪物/NPC 一致），此前玩家未取负导致镜像位置
             let e = if is_local_player {
@@ -402,6 +511,8 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
                     *weapon_effect,
                     *wing_effect,
                     *object_id,
+                    *mount_type,
+                    *is_mounted,
                 )
             } else {
                 spawn_remote_player_with(
@@ -416,6 +527,8 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
                     *weapon_effect,
                     *wing_effect,
                     *object_id,
+                    *mount_type,
+                    *is_mounted,
                 )
             };
             commands.entity(e).insert(PlayerName(name.clone()));
@@ -665,6 +778,7 @@ fn spawn_player_with(
                 slot: armour.max(0) as u32,
                 frame: 0,
                 is_effect: false,
+                is_mount: false,
             },
         ));
         p.spawn((
@@ -675,6 +789,7 @@ fn spawn_player_with(
                 slot: hair as u32,
                 frame: 0,
                 is_effect: false,
+                is_mount: false,
             },
         ));
         p.spawn((
@@ -685,6 +800,7 @@ fn spawn_player_with(
                 slot: weapon.max(0) as u32,
                 frame: 0,
                 is_effect: false,
+                is_mount: false,
             },
         ));
         // ghost 残影层（遮挡时显示，镜像对应图层）
@@ -718,6 +834,8 @@ fn spawn_local_player_with(
     weapon_effect: i16,
     wing_effect: u8,
     object_id: u32,
+    mount_type: i16,
+    is_mounted: bool,
 ) -> Entity {
     let z = depth_z(y);
     let root = commands
@@ -739,6 +857,10 @@ fn spawn_local_player_with(
         ))
         .id();
     attach_player_layers(commands, root, armour, hair, weapon);
+    if is_mounted && mount_type >= 0 {
+        commands.entity(root).insert(MountState { mount_type });
+        attach_mount_layer(commands, root, mount_type);
+    }
     root
 }
 
@@ -756,6 +878,8 @@ fn spawn_remote_player_with(
     weapon_effect: i16,
     wing_effect: u8,
     object_id: u32,
+    mount_type: i16,
+    is_mounted: bool,
 ) -> Entity {
     let z = depth_z(y);
     let root = commands
@@ -776,7 +900,28 @@ fn spawn_remote_player_with(
         ))
         .id();
     attach_player_layers(commands, root, armour, hair, weapon);
+    if is_mounted && mount_type >= 0 {
+        commands.entity(root).insert(MountState { mount_type });
+        attach_mount_layer(commands, root, mount_type);
+    }
     root
+}
+
+/// 坐骑子精灵（Mount/xx.Lib，帧号由动画系统按坐骑动作写入）
+fn attach_mount_layer(commands: &mut Commands, root: Entity, mount_type: i16) {
+    commands.entity(root).with_children(|p| {
+        p.spawn((
+            Sprite::default(),
+            Transform::default(),
+            SpriteLayer {
+                lib: ArrayLibType::Mounts,
+                slot: mount_type.max(0) as u32,
+                frame: 0,
+                is_effect: false,
+                is_mount: true,
+            },
+        ));
+    });
 }
 
 /// 玩家分层子精灵（护甲/发型/武器 + ghost 层）
@@ -796,6 +941,7 @@ fn attach_player_layers(
                 slot: armour.max(0) as u32,
                 frame: 0,
                 is_effect: false,
+                is_mount: false,
             },
         ));
         p.spawn((
@@ -806,6 +952,7 @@ fn attach_player_layers(
                 slot: hair as u32,
                 frame: 0,
                 is_effect: false,
+                is_mount: false,
             },
         ));
         p.spawn((
@@ -816,6 +963,7 @@ fn attach_player_layers(
                 slot: weapon.max(0) as u32,
                 frame: 0,
                 is_effect: false,
+                is_mount: false,
             },
         ));
         for lib in [
@@ -873,6 +1021,7 @@ fn spawn_monster(commands: &mut Commands, monster_type: u16, x: f32, y: f32, dir
                 slot: monster_type as u32,
                 frame: 0,
                 is_effect: false,
+                is_mount: false,
             },
         ));
     });
@@ -907,6 +1056,7 @@ fn spawn_npc(commands: &mut Commands, npc_index: u16, x: f32, y: f32, direction:
                 slot: npc_index as u32,
                 frame: 0,
                 is_effect: false,
+                is_mount: false,
             },
         ));
     });

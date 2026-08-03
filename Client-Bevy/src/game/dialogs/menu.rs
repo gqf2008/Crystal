@@ -129,6 +129,11 @@ fn menu_ui_system(
                     tracing::info!("🎮 下线（待接入 LogoutRequest）");
                     mgr.close(DialogKind::Menu);
                 }
+                MenuAction::Mount => {
+                    tracing::info!("🐴 打开坐骑面板");
+                    mgr.open(DialogKind::Mount);
+                    mgr.close(DialogKind::Menu);
+                }
                 other => {
                     tracing::info!("🎮 菜单: {:?}", other);
                     mgr.close(DialogKind::Menu);

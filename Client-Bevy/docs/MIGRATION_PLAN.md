@@ -500,6 +500,17 @@
 - [x] 注：重连期间的场景切换偶发 despawn 警告（既有场景清理行为，不影响功能）
 ---
 
+### M60: 坐骑 MountDialog + 骑乘全链路（2026-08-03 完成，含服务端 RIDE 广播）
+- [x] 客户端 MountDialog：Prguse[160/167] 面板（按孔数 4/5 切换）、名称/忠诚度标签、骑乘按钮 Prguse[155-157]、关闭/帮助、坐骑装备 5 格（Reins/Bells/Saddle/Ribbon/Mask）；菜单“坐骑”打开
+- [x] 骑乘按钮 → Chat "@ride"（对齐 C# Ride()）；服务端 chat 命令修复：去掉前导 @
+- [x] 服务端 RIDE：坐骑类型取装备坐骑物品 shape（C# MountType），切换 is_mounted + 广播 ObjectPlayer 给自身与同图玩家
+- [x] 客户端 ObjectPlayer 解析 mount_type/riding_mount；已存在玩家（含本地）去重重发 → 增删 MountState + 坐骑子层（Mount/xx.Lib，帧布局 站立0/行走32/奔跑96/受击144/攻击168，对齐 C# DrawMount）
+- [x] 骑乘时玩家帧表切换坐骑动作（Frames.cs Mounts 段：416-616），坐骑层随动作推进
+- [x] 验证：真实 ServerRust E2E（--mount-test）——面板 🐴 坐骑: BengalTiger (5 孔, 鞍=true) → @ride → 🐴 玩家 1000 骑乘坐骑 type=0 → ✅ 骑乘成功 → @ride → 🐴 玩家 1000 下马 → ✅ 下马成功；客户端 34 / 服务端 139 测试全过
+- [x] 注：服务端遗留 NPC 登出未清理问题仍未处理（后续迭代）
+
+---
+
 ### M59: 最终审计 + README（2026-08-03 完成）
 - [x] README.md 全面更新：当前状态（M58）、运行/测试/E2E 驱动用法、与 C#/macroquad 关系、Bevy 0.19 适配要点
 - [x] 审计：客户端 34 / 服务端 139 单元测试全过；真实 ServerRust E2E 冒烟（--option-test）通过

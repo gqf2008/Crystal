@@ -1042,6 +1042,9 @@ pub enum NetObject {
         weapon_effect: i16,
         armour: i16,
         wing_effect: u8,
+        /// M60 坐骑
+        mount_type: i16,
+        is_mounted: bool,
     },
     Monster {
         object_id: u32,
@@ -1775,6 +1778,8 @@ fn handle_packet(
                     weapon_effect: p.weapon_effect,
                     armour: p.armour,
                     wing_effect: p.wing_effect,
+                    mount_type: p.mount_type,
+                    is_mounted: p.riding_mount,
                 });
             }
             Err(e) => {

@@ -321,6 +321,10 @@ fn main() {
     if std::env::args().any(|a| a == "--reconnect-test") {
         app.add_systems(Update, auto_reconnect_test);
     }
+    // --mount-test: 坐骑链路（装备坐骑 → 面板 → @ride 骑乘/下马 → 外观广播）
+    if std::env::args().any(|a| a == "--mount-test") {
+        app.add_systems(Update, auto_mount_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -3538,6 +3542,89 @@ fn auto_marriage_accept(
             *stage = 9;
         }
         _ => {}
+    }
+}
+
+/// --mount-test：打开坐骑面板 → 骑乘/下马（@ride）→ 外观广播 → 坐骑层
+#[allow(clippy::too_many_arguments)]
+fn auto_mount_test(
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    net: ResMut<client_bevy::network::NetworkContext>,
+    mounts: Query<Option<&client_bevy::actor::MountState>, With<client_bevy::actor::LocalPlayer>>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut phase: Local<f32>,
+    mut rode: Local<bool>,
+) {
+    use client_bevy::scenes::AppState;
+    use client_bevy::game::dialogs::DialogKind;
+    use mir2_shared::packets::client::chat::Chat;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    if *stage == 0 {
+        if !mgr.is_open(DialogKind::Mount) {
+            mgr.open(DialogKind::Mount);
+            tracing::info!("[MOUNT] 打开坐骑面板");
+        }
+        *phase = *t;
+        *stage = 1;
+        return;
+    }
+    if *stage == 1 && *t - *phase >= 1.5 {
+        let mounted = mounts.single().ok().flatten().is_some();
+        tracing::info!("[MOUNT] ✅ 面板状态: 本地坐骑层={}", mounted);
+        net.send_packet(&Chat {
+            message: "@ride".to_string(),
+            linked_items: Vec::new(),
+        });
+        tracing::info!("[MOUNT] ✅ 发送 @ride（骑乘）");
+        *stage = 2;
+        *phase = *t;
+        return;
+    }
+    if *stage == 2 {
+        if mounts.single().ok().flatten().is_some() {
+            tracing::info!("[MOUNT] ✅ 骑乘成功（本地玩家出现坐骑层）");
+            *rode = true;
+            *stage = 3;
+            *phase = *t;
+        } else if *t - *phase >= 8.0 {
+            tracing::warn!("[MOUNT] ❌ 骑乘超时（检查地图限制/鞍）");
+            *stage = 9;
+        }
+        return;
+    }
+    if *stage == 3 && *t - *phase >= 1.5 {
+        net.send_packet(&Chat {
+            message: "@ride".to_string(),
+            linked_items: Vec::new(),
+        });
+        tracing::info!("[MOUNT] ✅ 发送 @ride（下马）");
+        *stage = 4;
+        *phase = *t;
+        return;
+    }
+    if *stage == 4 {
+        if mounts.single().ok().flatten().is_none() {
+            tracing::info!("[MOUNT] ✅ 下马成功");
+            if mgr.is_open(DialogKind::Mount) {
+                mgr.close(DialogKind::Mount);
+                tracing::info!("[MOUNT] ✅ 关闭坐骑面板");
+            }
+            *stage = 9;
+        } else if *t - *phase >= 8.0 {
+            tracing::warn!("[MOUNT] ❌ 下马超时");
+            *stage = 9;
+        }
+        return;
+    }
+    if *t >= 60.0 && *stage < 9 {
+        tracing::warn!("[MOUNT] ❌ 总超时 stage={}", *stage);
+        *stage = 9;
     }
 }
 
