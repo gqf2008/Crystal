@@ -84,11 +84,11 @@ pub enum ArrayLibType {
     /// 武器 CWeapon/{:02}.Lib
     CWeapons,
     /// 人物特效（翅膀等）CHumEffect/{:02}.Lib
-    /// 武器特效 CWeaponEffect/{:02}.Lib（M62；DrawBlend 0.4 透明度）
-    CWeaponEffect,
     CHumEffect,
     /// 坐骑 Mount/{:02}.Lib（M60；帧布局：站立 0/行走 32/奔跑 96/受击 144/攻击 168）
     Mounts,
+    /// 武器特效 CWeaponEffect/{:02}.Lib（M62；DrawBlend 0.4 透明度）
+    CWeaponEffect,
 }
 
 impl ArrayLibType {

@@ -812,7 +812,7 @@ fn spawn_player_with(
         ));
         // M62：武器特效（C# DrawWeapon：WeaponEffectLibrary1.DrawBlend(DrawFrame, 0.4F)）
         if weapon_effect > 0 {
-            tracing::info!("⚔️ 武器特效层: type={}", weapon_effect);
+            tracing::debug!("⚔️ 武器特效层: type={}", weapon_effect);
             p.spawn((
                 Sprite::default(),
                 Transform::default(),
@@ -828,7 +828,7 @@ fn spawn_player_with(
         }
         // M62：翅膀特效（C# DrawWings：WingLibrary.DrawBlend(DrawWingFrame)）
         if wing_effect > 0 && wing_effect < 100 {
-            tracing::info!("🪽 翅膀特效层: type={}", wing_effect);
+            tracing::debug!("🪽 翅膀特效层: type={}", wing_effect);
             p.spawn((
                 Sprite::default(),
                 Transform::default(),
@@ -1014,7 +1014,7 @@ fn attach_player_layers(
         ));
         // M62：武器特效（C# DrawWeapon：WeaponEffectLibrary1.DrawBlend(DrawFrame, 0.4F)）
         if weapon_effect > 0 {
-            tracing::info!("⚔️ 武器特效层: type={}", weapon_effect);
+            tracing::debug!("⚔️ 武器特效层: type={}", weapon_effect);
             p.spawn((
                 Sprite::default(),
                 Transform::default(),
@@ -1030,7 +1030,7 @@ fn attach_player_layers(
         }
         // M62：翅膀特效（C# DrawWings：WingLibrary.DrawBlend(DrawWingFrame)）
         if wing_effect > 0 && wing_effect < 100 {
-            tracing::info!("🪽 翅膀特效层: type={}", wing_effect);
+            tracing::debug!("🪽 翅膀特效层: type={}", wing_effect);
             p.spawn((
                 Sprite::default(),
                 Transform::default(),
