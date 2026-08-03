@@ -2004,8 +2004,6 @@ dependencies = [
  "once_cell",
  "tracing",
  "tracing-subscriber",
- "windows",
- "windows-core",
 ]
 
 [[package]]

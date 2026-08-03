@@ -10,13 +10,13 @@
 
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
-use bevy::window::Ime;
 use mir2_shared::{MirClass, MirGender};
 
 use crate::map_renderer::GameLibraries;
 use crate::network::NetworkContext;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
+use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
 use crate::ui::sprite_ui::{
     spawn_ui_button, spawn_ui_sprite, spawn_ui_text, ui_image, UiButton, UiEntity,
     UiImageCache,
@@ -38,6 +38,10 @@ impl Plugin for NewCharacterPlugin {
         app.add_systems(
             Update,
             new_char_ime_system.run_if(in_state(AppState::Select)),
+        );
+        app.add_systems(
+            Update,
+            new_char_name_border_system.run_if(in_state(AppState::Select)),
         );
     }
 }
@@ -61,6 +65,9 @@ pub struct NewCharState {
     pub preview_timer: f32,
     pub preview_handles: Vec<Handle<Image>>,
     pub preview_offsets: Vec<(f32, f32)>,
+    /// 法师 blend 叠加层 16 帧（ChrSel[frame+560]；对齐 C# DrawBlend）
+    pub blend_handles: Vec<Handle<Image>>,
+    pub blend_offsets: Vec<(f32, f32)>,
 }
 
 impl Default for NewCharState {
@@ -80,6 +87,8 @@ impl Default for NewCharState {
             preview_timer: 0.0,
             preview_handles: Vec::new(),
             preview_offsets: Vec::new(),
+            blend_handles: Vec::new(),
+            blend_offsets: Vec::new(),
         }
     }
 }
@@ -111,6 +120,11 @@ struct NcCancelBtn;
 #[derive(Component)]
 struct NcPreview;
 
+/// 法师 blend 叠加层精灵（对齐 C# CharacterDisplay.AfterDraw: Class==Wizard 时
+/// ChrSel.DrawBlend(Index+560, DisplayLocationWithoutOffSet, White, offSet=true)）
+#[derive(Component)]
+struct NcBlend;
+
 #[derive(Component)]
 struct NcDesc;
 
@@ -120,11 +134,26 @@ struct NcError;
 #[derive(Component)]
 struct NcNameBox;
 
+/// 名字输入框校验边框（4 条细线；颜色随校验结果变化：空=透明 / 不合法=红 / 合法=绿）
+#[derive(Component)]
+struct NcNameBorder;
+
+/// 名字合法性（对齐原版 NewCharacterDialog 正则意图：仅允许字母数字与中文，长度 1..=15）。
+/// 原版正则 `^[A-Za-z0-9]|[一-龥]{3,15}$` 因 `|` 拼接存在缺陷，此处取其语义。
+fn name_valid(name: &str) -> bool {
+    let count = name.chars().count();
+    if count == 0 || count > 15 {
+        return false;
+    }
+    name.chars()
+        .all(|c| c.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fa5}').contains(&c))
+}
+
 /// 对话框常量（相对 1024x768 画布，背景居中）
 const DLG_W: f32 = 588.0;
 const DLG_H: f32 = 460.0;
-const DLG_X: f32 = (1024.0 - DLG_W) / 2.0; // 218
-const DLG_Y: f32 = (768.0 - DLG_H) / 2.0; // 154
+pub const DLG_X: f32 = (1024.0 - DLG_W) / 2.0; // 218
+pub const DLG_Y: f32 = (768.0 - DLG_H) / 2.0; // 154
 const PREVIEW_X: f32 = 120.0;
 const PREVIEW_Y: f32 = 250.0;
 
@@ -174,6 +203,20 @@ fn load_preview_frames(
             state.preview_offsets.push(offsets.unwrap_or((0.0, 0.0)));
         }
     }
+    // 法师 blend 叠加层（ChrSel[frame+560]）。非法师职业该段为空占位（4x1），仅 Wizard 有内容。
+    state.blend_handles.clear();
+    state.blend_offsets.clear();
+    for i in 0..16usize {
+        let idx = base + i + 560;
+        let boff = libs
+            .0
+            .get_image(LibraryName::ChrSel, idx)
+            .map(|info| (info.offset_x as f32, info.offset_y as f32));
+        if let Some(h) = ui_image(libs, images, cache, LibraryName::ChrSel, idx) {
+            state.blend_handles.push(h);
+            state.blend_offsets.push(boff.unwrap_or((0.0, 0.0)));
+        }
+    }
 }
 
 fn preview_pos(state: &NewCharState, frame: usize) -> (f32, f32) {
@@ -183,6 +226,51 @@ fn preview_pos(state: &NewCharState, frame: usize) -> (f32, f32) {
         .copied()
         .unwrap_or((0.0, 0.0));
     (DLG_X + PREVIEW_X + ox, DLG_Y + PREVIEW_Y + oy)
+}
+
+/// blend 叠加层屏幕坐标（= Location + blend 精灵自身 offset，与主帧同 Location、各自 offset）
+fn blend_pos(state: &NewCharState, frame: usize) -> (f32, f32) {
+    let (ox, oy) = state
+        .blend_offsets
+        .get(frame)
+        .copied()
+        .unwrap_or((0.0, 0.0));
+    (DLG_X + PREVIEW_X + ox, DLG_Y + PREVIEW_Y + oy)
+}
+
+/// 生成对话框作用域的空心边框（4 条细线，带 NcDlg 随对话框显隐），返回 4 个实体。
+/// 用于对齐原版 MirLabel/MirTextBox 的 Border=true。
+fn spawn_dlg_border(
+    commands: &mut Commands,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    color: Color,
+    z: f32,
+) -> Vec<Entity> {
+    let t = 1.0_f32; // 线宽
+    let mut ids: Vec<Entity> = Vec::with_capacity(4);
+    let mut line = |cx: f32, cy: f32, sw: f32, sh: f32| -> Entity {
+        commands
+            .spawn((
+                UiEntity,
+                NcDlg,
+                Visibility::Hidden,
+                Sprite {
+                    color,
+                    custom_size: Some(Vec2::new(sw, sh)),
+                    ..default()
+                },
+                Transform::from_xyz(cx, -cy, z),
+            ))
+            .id()
+    };
+    ids.push(line(x + w / 2.0, y - t / 2.0, w + t, t)); // 上
+    ids.push(line(x + w / 2.0, y + h + t / 2.0, w + t, t)); // 下
+    ids.push(line(x - t / 2.0, y + h / 2.0, t, h + t)); // 左
+    ids.push(line(x + w + t / 2.0, y + h / 2.0, t, h + t)); // 右
+    ids
 }
 
 /// 生成新建角色对话框（由 SelectPlugin setup 调用；实体带 NcDlg 标记便于显隐）
@@ -211,6 +299,12 @@ pub fn spawn_new_character_dialog(
         let e = spawn_ui_sprite(commands, h, px, py, 5.0, 1.0);
         commands.entity(e).insert((NcDlg, NcPreview, Visibility::Hidden));
     }
+    // 法师 blend 叠加层（z=5.1 略高于预览；显隐由 new_char_ui_system 按 class==Wizard 控制）
+    if let Some(h) = state.blend_handles.first().cloned() {
+        let (bx, by) = blend_pos(state, 0);
+        let e = spawn_ui_sprite(commands, h, bx, by, 5.1, 1.0);
+        commands.entity(e).insert((NcDlg, NcBlend, Visibility::Hidden));
+    }
     // 描述
     let desc_e = spawn_ui_text(
         commands,
@@ -225,6 +319,16 @@ pub fn spawn_new_character_dialog(
     commands
         .entity(desc_e)
         .insert((NcDlg, NcDesc, Visibility::Hidden));
+    // 描述边框（原版 Description MirLabel Border=true，278x170 @(279,70)）
+    spawn_dlg_border(
+        commands,
+        DLG_X + 279.0,
+        DLG_Y + 70.0,
+        278.0,
+        170.0,
+        Color::srgb(0.4, 0.4, 0.4),
+        4.8,
+    );
     // 创建失败提示
     let err_e = spawn_ui_text(
         commands,
@@ -251,6 +355,18 @@ pub fn spawn_new_character_dialog(
         },
         Transform::from_xyz(DLG_X + 325.0 + 120.0, -(DLG_Y + 268.0 + 10.0), 4.5),
     ));
+    // 名字校验边框（240x20 @(325,268)；颜色由 new_char_name_border_system 按合法性更新）
+    for e in spawn_dlg_border(
+        commands,
+        DLG_X + 325.0,
+        DLG_Y + 268.0,
+        240.0,
+        20.0,
+        Color::srgba(0.0, 0.0, 0.0, 0.0),
+        4.6,
+    ) {
+        commands.entity(e).insert(NcNameBorder);
+    }
     // 名字文本
     let name_e = spawn_ui_text(
         commands,
@@ -266,12 +382,13 @@ pub fn spawn_new_character_dialog(
         .entity(name_e)
         .insert((NcDlg, NcNameBox, Visibility::Hidden));
 
-    // 职业按钮：战士/法师/道士/刺客（原版坐标，帧组 2426/2429/2432/2435）
-    let class_btns: [(MirClass, usize, f32); 4] = [
+    // 职业按钮：战士/法师/道士/刺客/弓手（原版坐标 y=296，帧组 2426/2429/2432/2435/2438）
+    let class_btns: [(MirClass, usize, f32); 5] = [
         (MirClass::Warrior, 2426, 323.0),
         (MirClass::Wizard, 2429, 373.0),
         (MirClass::Taoist, 2432, 423.0),
         (MirClass::Assassin, 2435, 473.0),
+        (MirClass::Archer, 2438, 523.0),
     ];
     for (class, base, x) in class_btns {
         if let Some(e) = spawn_ui_button(
@@ -379,10 +496,20 @@ fn new_char_ui_system(
     mut cache: ResMut<UiImageCache>,
     windows: Query<&Window>,
     mouse: Res<ButtonInput<MouseButton>>,
-    mut dlg: Query<&mut Visibility, With<NcDlg>>,
-    mut class_btns: Query<(&NcClassBtn, &mut Sprite), (Without<NcPreview>, Without<NcGenderBtn>)>,
-    mut gender_btns: Query<(&NcGenderBtn, &mut Sprite), (Without<NcPreview>, Without<NcClassBtn>)>,
-    mut preview: Query<(&mut Sprite, &mut Transform), With<NcPreview>>,
+    mut dlg: Query<&mut Visibility, (With<NcDlg>, Without<NcBlend>)>,
+    mut class_btns: Query<
+        (&NcClassBtn, &mut Sprite),
+        (Without<NcPreview>, Without<NcGenderBtn>, Without<NcBlend>),
+    >,
+    mut gender_btns: Query<
+        (&NcGenderBtn, &mut Sprite),
+        (Without<NcPreview>, Without<NcClassBtn>, Without<NcBlend>),
+    >,
+    // p0=主预览帧；p1=法师 blend 叠加层（含 Visibility 以按 class==Wizard 控制显隐）
+    mut preview: ParamSet<(
+        Query<(&mut Sprite, &mut Transform), With<NcPreview>>,
+        Query<(&mut Sprite, &mut Transform, &mut Visibility), With<NcBlend>>,
+    )>,
     mut texts: ParamSet<(
         Query<&mut Text2d, (With<NcNameBox>, Without<NcDesc>, Without<NcError>)>,
         Query<&mut Text2d, (With<NcDesc>, Without<NcNameBox>, Without<NcError>)>,
@@ -390,11 +517,21 @@ fn new_char_ui_system(
     )>,
     ok_btns: Query<&UiButton, With<NcOkBtn>>,
     cancel_btns: Query<&UiButton, With<NcCancelBtn>>,
+    ime: Res<PinyinIme>,
 ) {
     // 显隐
     let show = state.visible;
     for mut vis in dlg.iter_mut() {
         *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+    }
+    // 法师 blend 叠加层：仅对话框可见且职业为法师时显示（对齐 C# AfterDraw: Class==Wizard）
+    let blend_show = show && state.class == MirClass::Wizard;
+    for (_, _, mut vis) in preview.p1().iter_mut() {
+        *vis = if blend_show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !show {
         return;
@@ -421,13 +558,17 @@ fn new_char_ui_system(
             if key.state != bevy::input::ButtonState::Pressed {
                 continue;
             }
+            // 内置 IME 接管该键（拼音/选候选/编辑）→ 跳过原始插入
+            if ime.consumes_key(key) {
+                continue;
+            }
             match key.logical_key {
                 Key::Backspace => {
                     state.name.pop();
                 }
                 _ => {
                     if let Some(text) = &key.text {
-                        if !text.is_empty() && state.name.chars().count() < 12 {
+                        if !text.is_empty() && state.name.chars().count() < 15 {
                             state.name.push_str(text);
                         }
                     }
@@ -467,18 +608,27 @@ fn new_char_ui_system(
         }
     }
 
-    // 职业/性别变化 → 重载预览
+    // 职业/性别变化 → 重载预览（主帧 + 法师 blend 叠加层）
     if state.class != state.last_class || state.gender != state.last_gender {
         state.last_class = state.class;
         state.last_gender = state.gender;
         state.preview_frame = 0;
         load_preview_frames(&mut libs, &mut images, &mut cache, &mut state);
-        if let Ok((mut s, mut tf)) = preview.single_mut() {
+        if let Ok((mut s, mut tf)) = preview.p0().single_mut() {
             if let Some(h) = state.preview_handles.first() {
                 s.image = h.clone();
                 let (px, py) = preview_pos(&state, 0);
                 tf.translation.x = px;
                 tf.translation.y = -py;
+            }
+        }
+        // blend 叠加层复位到第 0 帧（仅法师有内容；非法师为 4x1 空占位）
+        if let Ok((mut s, mut tf, _)) = preview.p1().single_mut() {
+            if let Some(h) = state.blend_handles.first() {
+                s.image = h.clone();
+                let (bx, by) = blend_pos(&state, 0);
+                tf.translation.x = bx;
+                tf.translation.y = -by;
             }
         }
         if let Ok(mut t) = texts.p1().single_mut() {
@@ -490,7 +640,7 @@ fn new_char_ui_system(
     for btn in ok_btns.iter() {
         let (x, y, w, h) = btn.rect;
         let over = mx >= x && mx <= x + w && my >= y && my <= y + h;
-        if lclick && over && !state.name.is_empty() {
+        if lclick && over && name_valid(&state.name) {
             state.visible = false;
             state.error = None;
             net.send_packet(&mir2_shared::packets::client::NewCharacter {
@@ -509,11 +659,32 @@ fn new_char_ui_system(
             state.name.clear();
         }
     }
-    // ESC 关闭
+    // ESC 关闭 / Enter 提交（对齐 C# NewCharacterDialog：Esc 隐藏，TextBox_KeyPress 中
+    // Enter 且 OKButton.Enabled → CreateCharacter）
     for key in &key_list {
-        if key.state == bevy::input::ButtonState::Pressed && key.logical_key == Key::Escape {
-            state.visible = false;
-            state.name.clear();
+        if key.state != bevy::input::ButtonState::Pressed {
+            continue;
+        }
+        // 内置 IME 接管该键（如组合中按 Enter 提交候选）→ 不触发提交
+        if ime.consumes_key(key) {
+            continue;
+        }
+        match key.logical_key {
+            Key::Escape => {
+                state.visible = false;
+                state.name.clear();
+            }
+            Key::Enter if name_valid(&state.name) => {
+                state.visible = false;
+                state.error = None;
+                net.send_packet(&mir2_shared::packets::client::NewCharacter {
+                    name: state.name.clone(),
+                    gender: state.gender,
+                    class: state.class,
+                });
+                state.name.clear();
+            }
+            _ => {}
         }
     }
 
@@ -532,23 +703,23 @@ fn new_char_ui_system(
     }
 }
 
-/// 中文输入法：IME 组合完成文本追加到名字（单独系统避免参数超限）
+/// 内置拼音 IME：回填名字框聚焦矩形 + 注入已选汉字（单独系统避免参数超限）
 fn new_char_ime_system(
     mut state: ResMut<NewCharState>,
-    mut ime: MessageReader<Ime>,
-    mut windows: Query<&mut Window>,
+    mut ime: ResMut<PinyinIme>,
+    mut focus: ResMut<ImeFocus>,
 ) {
-    if !state.visible || !state.name_focused {
-        return;
+    // 只写 Some（None 由 clear_ime_focus 每帧统一重置，避免与 Select 态其他输入框互相覆盖）
+    if state.visible && state.name_focused {
+        // 名字输入框屏幕矩形（候选条定位 + 判定字母是否进 IME）
+        focus.rect = Some((DLG_X + 325.0, DLG_Y + 268.0, 240.0, 20.0));
     }
-    if let Ok(mut w) = windows.single_mut() {
-        // IME 候选框跟随输入框位置
-        w.ime_position = Vec2::new(DLG_X + 325.0, DLG_Y + 268.0);
-    }
-    for ev in ime.read() {
-        if let Ime::Commit { value, .. } = ev {
-            for ch in value.chars() {
-                if state.name.chars().count() < 12 {
+
+    // 内置拼音 IME 提交的汉字 → 追加到名字（≤15 字）
+    if let Some(c) = ime.take_commit() {
+        if state.visible && state.name_focused {
+            for ch in c.chars() {
+                if state.name.chars().count() < 15 {
                     state.name.push(ch);
                 }
             }
@@ -556,10 +727,31 @@ fn new_char_ime_system(
     }
 }
 
+/// 名字校验边框颜色（独立系统，避免 new_char_ui_system 参数超限）：
+/// 空=透明、不合法=红、合法=绿（对齐原版 NameTextBox.TextChanged 的 BorderColour）
+fn new_char_name_border_system(
+    state: Res<NewCharState>,
+    mut borders: Query<&mut Sprite, With<NcNameBorder>>,
+) {
+    let color = if state.name.is_empty() {
+        Color::srgba(0.0, 0.0, 0.0, 0.0)
+    } else if name_valid(&state.name) {
+        Color::srgb(0.0, 1.0, 0.0)
+    } else {
+        Color::srgb(1.0, 0.0, 0.0)
+    };
+    for mut s in borders.iter_mut() {
+        s.color = color;
+    }
+}
+
 fn new_char_anim_system(
     mut state: ResMut<NewCharState>,
     time: Res<Time>,
-    mut preview: Query<(&mut Sprite, &mut Transform), With<NcPreview>>,
+    mut preview: ParamSet<(
+        Query<(&mut Sprite, &mut Transform), With<NcPreview>>,
+        Query<(&mut Sprite, &mut Transform), With<NcBlend>>,
+    )>,
 ) {
     if !state.visible {
         return;
@@ -568,12 +760,21 @@ fn new_char_anim_system(
     if state.preview_timer >= 0.25 {
         state.preview_timer = 0.0;
         state.preview_frame = (state.preview_frame + 1) % state.preview_handles.len().max(1);
-        if let Ok(mut s) = preview.single_mut() {
+        if let Ok(mut s) = preview.p0().single_mut() {
             if let Some(h) = state.preview_handles.get(state.preview_frame) {
                 s.0.image = h.clone();
                 let (px, py) = preview_pos(&state, state.preview_frame);
                 s.1.translation.x = px;
                 s.1.translation.y = -py;
+            }
+        }
+        // 法师 blend 叠加层同步推进一帧（与主帧同帧号）
+        if let Ok(mut s) = preview.p1().single_mut() {
+            if let Some(h) = state.blend_handles.get(state.preview_frame) {
+                s.0.image = h.clone();
+                let (bx, by) = blend_pos(&state, state.preview_frame);
+                s.1.translation.x = bx;
+                s.1.translation.y = -by;
             }
         }
     }

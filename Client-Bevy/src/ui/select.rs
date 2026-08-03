@@ -45,10 +45,18 @@ pub struct SelectAnim {
     pub preview_handles: Vec<Handle<Image>>,
     /// 每帧 ChrSel 的 offset_x/offset_y（对齐 C# UseOffSet=true）
     pub preview_offsets: Vec<(f32, f32)>,
+    /// 法师 blend 叠加层 16 帧（ChrSel[frame+560]；对齐 C# SelectScene AfterDraw DrawBlend）
+    pub blend_handles: Vec<Handle<Image>>,
+    pub blend_offsets: Vec<(f32, f32)>,
 }
 
 #[derive(Component)]
 struct PreviewImg;
+
+/// 法师 blend 叠加层精灵（对齐 C# CharacterDisplay.AfterDraw:
+/// ChrSel.DrawBlend(Index+560, DisplayLocationWithoutOffSet, White, offSet=true)）
+#[derive(Component)]
+struct PreviewBlend;
 
 #[derive(Component)]
 struct CharButton {
@@ -57,10 +65,6 @@ struct CharButton {
     slot: usize,
     rect: (f32, f32, f32, f32),
 }
-
-/// 角色按钮选中/悬停高亮边框
-#[derive(Component)]
-struct CharBorder(i32);
 
 /// 最近登录时间文本（随选中角色更新）
 #[derive(Component)]
@@ -108,12 +112,39 @@ fn load_preview(
             anim.preview_offsets.push(offsets.unwrap_or((0.0, 0.0)));
         }
     }
+    // 法师 blend 叠加层（ChrSel[frame+560]）。非法师职业该段为空占位（4x1），仅 Wizard 有内容。
+    anim.blend_handles.clear();
+    anim.blend_offsets.clear();
+    for i in 0..PREVIEW_FRAMES {
+        let idx = base + i + 560;
+        let boff = libs
+            .0
+            .get_image(LibraryName::ChrSel, idx)
+            .map(|info| (info.offset_x as f32, info.offset_y as f32));
+        if let Some(h) = ui_image(libs, images, cache, LibraryName::ChrSel, idx) {
+            anim.blend_handles.push(h);
+            anim.blend_offsets.push(boff.unwrap_or((0.0, 0.0)));
+        }
+    }
 }
 
 /// 计算第 frame 帧的屏幕坐标（Location + offset * scale）
 fn preview_pos(anim: &SelectAnim, frame: usize) -> (f32, f32) {
     let (ox, oy) = anim
         .preview_offsets
+        .get(frame)
+        .copied()
+        .unwrap_or((0.0, 0.0));
+    (
+        PREVIEW_X + ox * PREVIEW_SCALE,
+        PREVIEW_Y + oy * PREVIEW_SCALE,
+    )
+}
+
+/// blend 叠加层屏幕坐标（= Location + blend 精灵自身 offset，与主帧同 Location、各自 offset）
+fn blend_pos(anim: &SelectAnim, frame: usize) -> (f32, f32) {
+    let (ox, oy) = anim
+        .blend_offsets
         .get(frame)
         .copied()
         .unwrap_or((0.0, 0.0));
@@ -233,13 +264,13 @@ fn build_select_ui(
     ) {
         spawn_ui_sprite(&mut *commands, h, 468.0, 20.0, 1.0, 1.0);
     }
-    // 服务器名
+    // 服务器名（原版 ServerLabel (432,60) 155x17 居中；Parent=Background 在 (0,0)）
     spawn_ui_text(
         &mut *commands,
         &font,
         "Legend of Mir 2",
-        460.0,
-        77.0,
+        432.0,
+        60.0,
         17.0,
         Color::WHITE,
         2.0,
@@ -266,14 +297,20 @@ fn build_select_ui(
         let e = spawn_ui_sprite(&mut *commands, pv, px, py, 3.0, PREVIEW_SCALE);
         commands.entity(e).insert(PreviewImg);
     }
-    // 角色信息（Last Online 对齐原版：值 LastAccessLabel(265,609) 带框，
-    // 标签 "Last Online:" 在值左侧 -65，即 (200,609)；原版字号较小用 12px）
+    // 法师 blend 叠加层（z=3.1 略高于预览；仅 Wizard 有内容，其余为 4x1 空占位）
+    if let Some(bv) = anim.blend_handles.first().cloned() {
+        let (bx, by) = blend_pos(&anim, 0);
+        let e = spawn_ui_sprite(&mut *commands, bv, bx, by, 3.1, PREVIEW_SCALE);
+        commands.entity(e).insert(PreviewBlend);
+    }
+    // 角色信息（对齐原版：LastAccessLabel 值 (265,609) 180x21，
+    // LastAccessLabelLabel 标题 "最后登录:" 是其子控件 (-65,0) → 绝对 (200,609) 100x21）
     spawn_ui_text(
         &mut *commands,
         &font,
-        "Last Online:",
-        202.0,
-        612.0,
+        "最后登录:",
+        200.0,
+        609.0,
         12.0,
         Color::WHITE,
         2.0,
@@ -283,8 +320,8 @@ fn build_select_ui(
             &mut *commands,
             &font,
             &c.last_access.format("%Y/%m/%d %H:%M:%S").to_string(),
-            278.0,
-            612.0,
+            265.0,
+            609.0,
             12.0,
             Color::WHITE,
             2.0,
@@ -315,9 +352,9 @@ fn build_select_ui(
                 commands.entity(e).insert(CharButton {
                     index: i as i32,
                     slot,
-                    rect: (*x, *y, 280.0, 90.0),
+                    // 原版 CharacterButton: MirImageControl AutoSize → 命中框 = 精灵尺寸 Title[660]=288x56
+                    rect: (*x, *y, 288.0, 56.0),
                 });
-                spawn_char_border(&mut *commands, i as i32, *x, *y, 288.0, 56.0);
             }
             // 名字/Lv/职业
             let class_name = match c.class {
@@ -332,19 +369,19 @@ fn build_select_ui(
                 &font,
                 &c.name,
                 x + 107.0,
-                y + 18.0,
-                13.0,
+                y + 9.0,
+                12.0,
                 Color::WHITE,
                 3.0,
             );
             spawn_ui_text(
                 &mut *commands,
                 &font,
-                &format!("Lv.{}", c.level),
+                &c.level.to_string(),
                 x + 107.0,
-                y + 37.0,
+                y + 28.0,
                 11.0,
-                Color::srgb(0.75, 0.75, 0.75),
+                Color::WHITE,
                 3.0,
             );
             spawn_ui_text(
@@ -352,9 +389,9 @@ fn build_select_ui(
                 &font,
                 class_name,
                 x + 178.0,
-                y + 37.0,
+                y + 28.0,
                 11.0,
-                Color::srgb(0.75, 0.75, 0.75),
+                Color::WHITE,
                 3.0,
             );
         } else {
@@ -372,8 +409,9 @@ fn build_select_ui(
     }
 
     // 底部按钮（三态帧，对齐原版 SelectScene）
-    let screen_w = 1024.0f32;
-    let x_point = (screen_w - 200.0) / 5.0;
+    // 原版用整数：xPoint=(1024-200)/5=164，btnX(N)=100+164*N-82-50 = 164*N-32
+    // → 132 / 296 / 460 / 624 / 788，y=ScreenHeight-32=736
+    let bottom_xs: [f32; 5] = [132.0, 296.0, 460.0, 624.0, 788.0];
     let y = 768.0 - 32.0;
     spawn_bottom_btn(
         &mut *commands,
@@ -381,7 +419,7 @@ fn build_select_ui(
         &mut *images,
         &mut *cache,
         340,
-        100.0 + x_point - x_point / 2.0 - 50.0,
+        bottom_xs[0],
         y,
         BottomBtn::Start,
     );
@@ -391,7 +429,7 @@ fn build_select_ui(
         &mut *images,
         &mut *cache,
         343,
-        100.0 + x_point * 2.0 - x_point / 2.0 - 50.0,
+        bottom_xs[1],
         y,
         BottomBtn::NewChar,
     );
@@ -401,7 +439,7 @@ fn build_select_ui(
         &mut *images,
         &mut *cache,
         346,
-        100.0 + x_point * 3.0 - x_point / 2.0 - 50.0,
+        bottom_xs[2],
         y,
         BottomBtn::Delete,
     );
@@ -411,7 +449,7 @@ fn build_select_ui(
         &mut *images,
         &mut *cache,
         349,
-        100.0 + x_point * 4.0 - x_point / 2.0 - 50.0,
+        bottom_xs[3],
         y,
         BottomBtn::Credits,
     );
@@ -421,7 +459,7 @@ fn build_select_ui(
         &mut *images,
         &mut *cache,
         352,
-        100.0 + x_point * 5.0 - x_point / 2.0 - 50.0,
+        bottom_xs[4],
         y,
         BottomBtn::Exit,
     );
@@ -431,60 +469,6 @@ fn build_select_ui(
     // 通用模态框（删除确认 / Credits）
     spawn_modal_box(commands, libs, images, cache, &font);
 }
-/// 角色按钮高亮边框（4 条细线，选中绿 / 悬停黄）
-fn spawn_char_border(commands: &mut Commands, index: i32, x: f32, y: f32, w: f32, h: f32) {
-    let color = Color::srgba(0.0, 0.0, 0.0, 0.0); // 初始透明
-    let z = 2.5;
-    // 上
-    commands.spawn((
-        UiEntity,
-        CharBorder(index),
-        Visibility::Hidden,
-        Sprite {
-            color,
-            custom_size: Some(Vec2::new(w, 2.0)),
-            ..default()
-        },
-        Transform::from_xyz(x + w / 2.0, -(y + 1.0), z),
-    ));
-    // 下
-    commands.spawn((
-        UiEntity,
-        CharBorder(index),
-        Visibility::Hidden,
-        Sprite {
-            color,
-            custom_size: Some(Vec2::new(w, 2.0)),
-            ..default()
-        },
-        Transform::from_xyz(x + w / 2.0, -(y + h - 1.0), z),
-    ));
-    // 左
-    commands.spawn((
-        UiEntity,
-        CharBorder(index),
-        Visibility::Hidden,
-        Sprite {
-            color,
-            custom_size: Some(Vec2::new(2.0, h)),
-            ..default()
-        },
-        Transform::from_xyz(x + 1.0, -(y + h / 2.0), z),
-    ));
-    // 右
-    commands.spawn((
-        UiEntity,
-        CharBorder(index),
-        Visibility::Hidden,
-        Sprite {
-            color,
-            custom_size: Some(Vec2::new(2.0, h)),
-            ..default()
-        },
-        Transform::from_xyz(x + w - 1.0, -(y + h / 2.0), z),
-    ));
-}
-
 fn spawn_bottom_btn(
     commands: &mut Commands,
     libs: &mut GameLibraries,
@@ -584,17 +568,14 @@ fn select_ui_system(
     mut cache: ResMut<UiImageCache>,
     mut new_char: ResMut<NewCharState>,
     mut modal: ResMut<ModalState>,
-    mut char_btns: Query<(&CharButton, &mut Sprite), (Without<CharBorder>, Without<PreviewImg>)>,
-    mut borders: Query<
-        (&CharBorder, &mut Sprite, &mut Visibility),
-        (Without<CharButton>, Without<PreviewImg>),
-    >,
+    mut char_btns: Query<(&CharButton, &mut Sprite), (Without<PreviewImg>, Without<PreviewBlend>)>,
     mut last_access_texts: Query<&mut Text2d, With<LastAccessText>>,
     bottom: Query<(&UiButton, &BottomButton)>,
-    mut preview: Query<
-        (&mut Sprite, &mut Transform),
-        (With<PreviewImg>, Without<CharButton>, Without<CharBorder>),
-    >,
+    // p0=主预览帧；p1=法师 blend 叠加层（均在 CharButton 之外）
+    mut preview: ParamSet<(
+        Query<(&mut Sprite, &mut Transform), (With<PreviewImg>, Without<CharButton>)>,
+        Query<(&mut Sprite, &mut Transform), (With<PreviewBlend>, Without<CharButton>)>,
+    )>,
     windows: Query<&Window>,
     mouse: Res<ButtonInput<MouseButton>>,
 ) {
@@ -642,29 +623,7 @@ fn select_ui_system(
             }
         }
     }
-    // 边框：选中绿色、悬停黄色、其余隐藏
-    for (b, mut sprite, mut vis) in borders.iter_mut() {
-        let cb = char_btns
-            .iter()
-            .find(|(cb, _)| cb.index == b.0)
-            .map(|(cb, _)| (cb.rect, cb.index));
-        let (rect, index) = match cb {
-            Some(v) => v,
-            None => continue,
-        };
-        let (x, y, w, h) = rect;
-        let hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
-        let selected = net.selected_index == Some(index);
-        if selected {
-            sprite.color = Color::srgb(0.2, 1.0, 0.2);
-            *vis = Visibility::Visible;
-        } else if hovered {
-            sprite.color = Color::srgb(1.0, 1.0, 0.3);
-            *vis = Visibility::Visible;
-        } else {
-            *vis = Visibility::Hidden;
-        }
-    }
+    // 边框：原版仅靠选中/悬停的精灵帧（Title[660+slot+5]）表示高亮，无自绘边框
     if selection_changed {
         if let Some(c) = net
             .selected_index
@@ -679,12 +638,21 @@ fn select_ui_system(
                 c.gender,
             );
             anim.preview_frame = 0;
-            if let Ok(mut s) = preview.single_mut() {
+            if let Ok(mut s) = preview.p0().single_mut() {
                 if let Some(h) = anim.preview_handles.first() {
                     s.0.image = h.clone();
                     let (px, py) = preview_pos(&anim, 0);
                     s.1.translation.x = px;
                     s.1.translation.y = -py;
+                }
+            }
+            // 法师 blend 叠加层复位到第 0 帧（仅 Wizard 有内容；其余为 4x1 空占位）
+            if let Ok(mut s) = preview.p1().single_mut() {
+                if let Some(h) = anim.blend_handles.first() {
+                    s.0.image = h.clone();
+                    let (bx, by) = blend_pos(&anim, 0);
+                    s.1.translation.x = bx;
+                    s.1.translation.y = -by;
                 }
             }
             if let Ok(mut t) = last_access_texts.single_mut() {
@@ -751,19 +719,31 @@ fn auto_create_system(net: ResMut<NetworkContext>, mut done: Local<bool>) {
 fn select_anim_system(
     mut anim: ResMut<SelectAnim>,
     time: Res<Time>,
-    mut preview: Query<(&mut Sprite, &mut Transform), With<PreviewImg>>,
+    mut preview: ParamSet<(
+        Query<(&mut Sprite, &mut Transform), With<PreviewImg>>,
+        Query<(&mut Sprite, &mut Transform), With<PreviewBlend>>,
+    )>,
 ) {
     anim.preview_timer += time.delta_secs();
     if anim.preview_timer >= 0.25 {
         anim.preview_timer = 0.0;
         anim.preview_frame = (anim.preview_frame + 1) % anim.preview_handles.len().max(1);
-        if let Ok(mut s) = preview.single_mut() {
+        if let Ok(mut s) = preview.p0().single_mut() {
             if let Some(h) = anim.preview_handles.get(anim.preview_frame) {
                 s.0.image = h.clone();
                 // 对齐 C#：每帧按自身 offset 绘制（世界坐标 y 取反）
                 let (px, py) = preview_pos(&anim, anim.preview_frame);
                 s.1.translation.x = px;
                 s.1.translation.y = -py;
+            }
+        }
+        // 法师 blend 叠加层同步推进一帧（与主帧同帧号）
+        if let Ok(mut s) = preview.p1().single_mut() {
+            if let Some(h) = anim.blend_handles.get(anim.preview_frame) {
+                s.0.image = h.clone();
+                let (bx, by) = blend_pos(&anim, anim.preview_frame);
+                s.1.translation.x = bx;
+                s.1.translation.y = -by;
             }
         }
     }

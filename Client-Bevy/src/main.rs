@@ -23,6 +23,7 @@ use client_bevy::ui::intro::IntroPlugin;
 use client_bevy::ui::login::LoginPlugin;
 use client_bevy::ui::modal_box::ModalBoxPlugin;
 use client_bevy::ui::new_character::NewCharacterPlugin;
+use client_bevy::ui::pinyin_ime::PinyinImePlugin;
 use client_bevy::ui::select::SelectPlugin;
 
 fn main() {
@@ -47,8 +48,10 @@ fn main() {
                 primary_window: Some(Window {
                     title: "Mir2 (Bevy) — 传奇2 客户端移植".to_string(),
                     resolution: (1024u32, 768u32).into(),
-                    // 启用 IME：支持中文输入法（角色名/账号密码等）
-                    ime_enabled: true,
+                    // 禁用系统 IME：用游戏内置拼音输入法（src/ui/pinyin_ime.rs）。
+                    // winit 用 IACE_CHILDREN 解关联 IME 上下文，字母键作为原始
+                    // KeyboardInput 到达，不被手心等系统输入法拦截。
+                    ime_enabled: false,
                     // 无 vsync：避免会话中 vblank 缺失导致 present 永久阻塞（画面冻结）
                     present_mode: bevy::window::PresentMode::Immediate,
                     ..default()
@@ -65,6 +68,7 @@ fn main() {
         });
     }
     app.add_plugins(EventBusPlugin);
+    app.add_plugins(PinyinImePlugin);
     app.add_plugins((
         NetworkPlugin,
         IntroPlugin,
@@ -85,17 +89,10 @@ fn main() {
     if std::env::args().any(|a| a == "--auto-char") {
         app.add_systems(Update, auto_open_character);
     }
-    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
-    if std::env::args().any(|a| a == "--shop-test") {
-        app.add_systems(Update, auto_shop_test);
-    }
 
     // --storage-test: 自动仓库存取链路（自动化验证用）
     if std::env::args().any(|a| a == "--storage-test") {
         app.add_systems(Update, auto_storage_test);
-    }    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
-    if std::env::args().any(|a| a == "--shop-test") {
-        app.add_systems(Update, auto_shop_test);
     }
     // --group-test: 自动组队邀请链路（自动化验证用，配合 --group-accept）
     if std::env::args().any(|a| a == "--group-test") {
@@ -105,10 +102,6 @@ fn main() {
     if std::env::args().any(|a| a == "--group-accept") {
         app.add_systems(Update, auto_group_accept);
     }
-    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
-    if std::env::args().any(|a| a == "--shop-test") {
-        app.add_systems(Update, auto_shop_test);
-    }
     // --mail-test: 自动发邮件链路（自动化验证用，配合 --mail-read）
     if std::env::args().any(|a| a == "--mail-test") {
         app.add_systems(Update, auto_mail_test);
@@ -116,10 +109,6 @@ fn main() {
     // --mail-read: 自动读取新邮件（自动化验证用）
     if std::env::args().any(|a| a == "--mail-read") {
         app.add_systems(Update, auto_mail_read);
-    }
-    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
-    if std::env::args().any(|a| a == "--shop-test") {
-        app.add_systems(Update, auto_shop_test);
     }
     // --trade-test: 自动交易链路（发起者，配合 --trade-accept）
     if std::env::args().any(|a| a == "--trade-test") {
@@ -129,41 +118,21 @@ fn main() {
     if std::env::args().any(|a| a == "--trade-accept") {
         app.add_systems(Update, auto_trade_accept);
     }
-    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
-    if std::env::args().any(|a| a == "--shop-test") {
-        app.add_systems(Update, auto_shop_test);
-    }
     // --drop-pick-test: 怪物掉落 → 地面物品 → 拾取 → 背包（自动化验证用）
     if std::env::args().any(|a| a == "--drop-pick-test") {
         app.add_systems(Update, auto_drop_pick_test);
-    }
-    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
-    if std::env::args().any(|a| a == "--shop-test") {
-        app.add_systems(Update, auto_shop_test);
     }
     // --friend-test: 自动加好友链路（配合 B 在线）
     if std::env::args().any(|a| a == "--friend-test") {
         app.add_systems(Update, auto_friend_test);
     }
-    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
-    if std::env::args().any(|a| a == "--shop-test") {
-        app.add_systems(Update, auto_shop_test);
-    }
     // --mail-compose-test: 写邮件界面 → 发送（配合 B --mail-read）
     if std::env::args().any(|a| a == "--mail-compose-test") {
         app.add_systems(Update, auto_mail_compose_test);
     }
-    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
-    if std::env::args().any(|a| a == "--shop-test") {
-        app.add_systems(Update, auto_shop_test);
-    }
     // --guild-test: 创建行会链路（GuildNameReturn → GuildStatus 信息）
     if std::env::args().any(|a| a == "--guild-test") {
         app.add_systems(Update, auto_guild_test);
-    }
-    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
-    if std::env::args().any(|a| a == "--shop-test") {
-        app.add_systems(Update, auto_shop_test);
     }
     // --guild-invite-test: 行会邀请链路（创建→邀请，配合 --guild-accept）
     if std::env::args().any(|a| a == "--guild-invite-test") {
@@ -173,29 +142,21 @@ fn main() {
     if std::env::args().any(|a| a == "--guild-accept") {
         app.add_systems(Update, auto_guild_accept);
     }
-    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
-    if std::env::args().any(|a| a == "--shop-test") {
-        app.add_systems(Update, auto_shop_test);
-    }
     // --guild-notice-test: 行会公告链路（创建→设置公告→等 GuildNoticeChange）
     if std::env::args().any(|a| a == "--guild-notice-test") {
         app.add_systems(Update, auto_guild_notice_test);
-    }
-    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
-    if std::env::args().any(|a| a == "--shop-test") {
-        app.add_systems(Update, auto_shop_test);
     }
     // --guild-gold-test: 行会仓库金币链路（创建→存入→取出）
     if std::env::args().any(|a| a == "--guild-gold-test") {
         app.add_systems(Update, auto_guild_gold_test);
     }
-    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
-    if std::env::args().any(|a| a == "--shop-test") {
-        app.add_systems(Update, auto_shop_test);
-    }
     // --ranking-test: 排行榜链路（打开对话框 → GetRanking → 显示）
     if std::env::args().any(|a| a == "--ranking-test") {
         app.add_systems(Update, auto_ranking_test);
+    }
+    // --shop-test: 自动 NPC 商店买卖链路（自动化验证用）
+    if std::env::args().any(|a| a == "--shop-test") {
+        app.add_systems(Update, auto_shop_test);
     }
     // --guild-item-test: 行会仓库物品链路（打开仓库 → 存入背包物品 → 取出）
     if std::env::args().any(|a| a == "--guild-item-test") {
@@ -336,9 +297,6 @@ fn main() {
     }
     // F12: 保存当前帧截图到 ../../tools/bevy_shot_N.png（开发调试用）
     app.add_systems(Update, debug_screenshot);
-    // 窗口获得焦点时强制激活 winit IME（见 ime_focus_activation）
-    app.init_resource::<ImePulse>();
-    app.add_systems(Update, ime_focus_activation);
     // --no-actors: 只渲染地图（用于纯地图截图验证）
     if std::env::args().any(|a| a == "--no-actors") {
         app.add_plugins(MapRenderPlugin);
@@ -351,6 +309,92 @@ fn main() {
 /// F12 截图（保存到工作区 tools/ 目录）
 /// F12 截图；设置 BEVY_AUTO_SHOT=1 时按 BEVY_SHOT_INTERVAL（默认 2 秒）自动截一张
 /// （保存到工作区 tools/ 目录，开发调试用）
+fn debug_screenshot(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut counter: Local<u32>,
+    time: Res<Time>,
+    mut acc: Local<f32>,
+) {
+    if std::env::var("BEVY_AUTO_SHOT").is_ok() {
+        let interval: f32 = std::env::var("BEVY_SHOT_INTERVAL")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2.0);
+        *acc += time.delta_secs();
+        if *acc >= interval {
+            *acc = 0.0;
+            capture_shot(&mut commands, &mut counter);
+        }
+    }
+    if keys.just_pressed(KeyCode::F12) {
+        capture_shot(&mut commands, &mut counter);
+    }
+}
+
+fn capture_shot(commands: &mut Commands, counter: &mut u32) {
+    let path = format!("../tools/bevy_shot_{}.png", *counter);
+    *counter += 1;
+    commands
+        .spawn(Screenshot::primary_window())
+        .observe(save_to_disk(path));
+}
+
+/// --auto-attack：自动攻击（验证 攻击→受击→飘字 链路）
+fn auto_attack_debug(
+    net: Res<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut timer: Local<f32>,
+) {
+    if *state != client_bevy::scenes::AppState::Game {
+        return;
+    }
+    *timer += time.delta_secs();
+    if *timer >= 1.5 {
+        *timer = 0.0;
+        net.send_packet(&mir2_shared::packets::client::combat::Attack {
+            direction: mir2_shared::enums::MirDirection::Up,
+            spell: mir2_shared::enums::Spell::None,
+        });
+        tracing::info!("⚔️ --auto-attack 自动攻击");
+    }
+}
+
+/// --auto-char：进游戏 3 秒后自动打开角色对话框
+fn auto_open_character(
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut timer: Local<f32>,
+) {
+    if *state != client_bevy::scenes::AppState::Game {
+        return;
+    }
+    *timer += time.delta_secs();
+    if *timer >= 3.0 && !mgr.is_open(client_bevy::game::dialogs::DialogKind::Character) {
+        mgr.toggle(client_bevy::game::dialogs::DialogKind::Character);
+        tracing::info!("🎛️ --auto-char 自动打开角色对话框");
+    }
+}
+
+/// --auto-inv：进游戏 3 秒后自动打开背包
+fn auto_open_inventory(
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut timer: Local<f32>,
+) {
+    if *state != client_bevy::scenes::AppState::Game {
+        return;
+    }
+    *timer += time.delta_secs();
+    if *timer >= 3.0 && !mgr.is_open(client_bevy::game::dialogs::DialogKind::Inventory) {
+        mgr.toggle(client_bevy::game::dialogs::DialogKind::Inventory);
+        tracing::info!("🎛️ --auto-inv 自动打开背包");
+    }
+}
+
 /// --shop-test：自动 NPC 商店买卖链路（CallNPC → [@Buy] → BuyItem → SellItem）
 #[allow(clippy::too_many_arguments)]
 fn auto_shop_test(
@@ -619,125 +663,6 @@ fn auto_storage_test(
     }
 }
 
-fn debug_screenshot(
-    mut commands: Commands,
-    keys: Res<ButtonInput<KeyCode>>,
-    mut counter: Local<u32>,
-    time: Res<Time>,
-    mut acc: Local<f32>,
-) {
-    if std::env::var("BEVY_AUTO_SHOT").is_ok() {
-        let interval: f32 = std::env::var("BEVY_SHOT_INTERVAL")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(2.0);
-        *acc += time.delta_secs();
-        if *acc >= interval {
-            *acc = 0.0;
-            capture_shot(&mut commands, &mut counter);
-        }
-    }
-    if keys.just_pressed(KeyCode::F12) {
-        capture_shot(&mut commands, &mut counter);
-    }
-}
-
-fn capture_shot(commands: &mut Commands, counter: &mut u32) {
-    let path = format!("../tools/bevy_shot_{}.png", *counter);
-    *counter += 1;
-    commands
-        .spawn(Screenshot::primary_window())
-        .observe(save_to_disk(path));
-}
-
-/// --auto-attack：自动攻击（验证 攻击→受击→飘字 链路）
-fn auto_attack_debug(
-    net: Res<client_bevy::network::NetworkContext>,
-    state: Res<State<client_bevy::scenes::AppState>>,
-    time: Res<Time>,
-    mut timer: Local<f32>,
-) {
-    if *state != client_bevy::scenes::AppState::Game {
-        return;
-    }
-    *timer += time.delta_secs();
-    if *timer >= 1.5 {
-        *timer = 0.0;
-        net.send_packet(&mir2_shared::packets::client::combat::Attack {
-            direction: mir2_shared::enums::MirDirection::Up,
-            spell: mir2_shared::enums::Spell::None,
-        });
-        tracing::info!("⚔️ --auto-attack 自动攻击");
-    }
-}
-
-/// --auto-char：进游戏 3 秒后自动打开角色对话框
-fn auto_open_character(
-    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
-    state: Res<State<client_bevy::scenes::AppState>>,
-    time: Res<Time>,
-    mut timer: Local<f32>,
-) {
-    if *state != client_bevy::scenes::AppState::Game {
-        return;
-    }
-    *timer += time.delta_secs();
-    if *timer >= 3.0 && !mgr.is_open(client_bevy::game::dialogs::DialogKind::Character) {
-        mgr.toggle(client_bevy::game::dialogs::DialogKind::Character);
-        tracing::info!("🎛️ --auto-char 自动打开角色对话框");
-    }
-}
-
-/// --auto-inv：进游戏 3 秒后自动打开背包
-fn auto_open_inventory(
-    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
-    state: Res<State<client_bevy::scenes::AppState>>,
-    time: Res<Time>,
-    mut timer: Local<f32>,
-) {
-    if *state != client_bevy::scenes::AppState::Game {
-        return;
-    }
-    *timer += time.delta_secs();
-    if *timer >= 3.0 && !mgr.is_open(client_bevy::game::dialogs::DialogKind::Inventory) {
-        mgr.toggle(client_bevy::game::dialogs::DialogKind::Inventory);
-        tracing::info!("🎛️ --auto-inv 自动打开背包");
-    }
-}
-
-/// 强制激活 winit IME。
-/// 根因：winit 创建窗口时强制 set_ime_allowed(false) 断开 IMM 上下文；
-/// bevy_winit 创建时不同步 ime_enabled（仅后续 Changed<Window> 脏检测才 set_ime_allowed），
-/// 缓存初值=true 导致 winit 的 IME 永远停在 false。
-/// 这里在窗口首次报告 focused 后做一次 false→true 两帧脉冲，借脏检测触发
-/// winit set_ime_allowed(true) 重连 IMM。不依赖 WindowFocused 事件（启动即聚焦时不会发）。
-#[derive(Resource, Default)]
-struct ImePulse(u8); // 0=待触发 1=已置false待回true 2=已完成
-
-fn ime_focus_activation(mut windows: Query<&mut Window>, mut pulse: ResMut<ImePulse>) {
-    match pulse.0 {
-        0 => {
-            // 等窗口报告已聚焦（启动即聚焦或用户点击后）
-            let focused = windows.iter().any(|w| w.focused);
-            if focused {
-                for mut w in windows.iter_mut() {
-                    if w.ime_enabled {
-                        w.ime_enabled = false;
-                    }
-                }
-                pulse.0 = 1;
-            }
-        }
-        1 => {
-            for mut w in windows.iter_mut() {
-                w.ime_enabled = true;
-            }
-            pulse.0 = 2;
-            tracing::debug!("[IME] 已激活 winit IME（set_ime_allowed(true)）");
-        }
-        _ => {}
-    }
-}
 /// --group-test：自动组队邀请链路（登录后向 bevy2char 发 AddMember，等成员列表）
 #[allow(clippy::too_many_arguments)]
 fn auto_group_test(

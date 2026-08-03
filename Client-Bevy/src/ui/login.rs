@@ -5,12 +5,12 @@
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::MessageReader;
 use bevy::prelude::*;
-use bevy::window::Ime;
 
 use crate::map_renderer::GameLibraries;
 use crate::network::NetworkContext;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
+use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
 use crate::ui::sprite_ui::{
     spawn_ui_button, spawn_ui_camera, spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image,
     UiButton, UiEntity, UiFont, UiImageCache,
@@ -25,11 +25,19 @@ impl Plugin for LoginPlugin {
         app.init_resource::<CursorBlink>();
         app.init_resource::<UiImageCache>();
         app.init_resource::<UiFont>();
+        app.init_resource::<LoginValidation>();
         app.add_systems(OnEnter(AppState::Login), setup_login_ui);
         app.add_systems(OnExit(AppState::Login), cleanup_login_ui);
         app.add_systems(
             Update,
-            (login_ui_system, login_status_system, login_anim_system, ui_button_system)
+            (
+                login_input_validation_system,
+                login_ui_system,
+                login_status_system,
+                login_anim_system,
+                ui_button_system,
+            )
+                .chain()
                 .run_if(in_state(AppState::Login)),
         );
     }
@@ -62,10 +70,23 @@ pub struct CursorBlink {
     pub visible: bool,
 }
 
-const SW: f32 = 1024.0;
-const SH: f32 = 768.0;
-const DX: f32 = 348.0;
-const DY: f32 = 274.0;
+pub const DX: f32 = 348.0;
+pub const DY: f32 = 274.0;
+/// 新建账号对话框原点（Prguse[63] 588×460 居中）
+pub const NA_X: f32 = (1024.0 - 588.0) / 2.0;
+pub const NA_Y: f32 = (768.0 - 460.0) / 2.0;
+/// 修改密码对话框原点（Prguse[50] 348×268 居中）
+pub const CP_X: f32 = (1024.0 - 348.0) / 2.0;
+pub const CP_Y: f32 = (768.0 - 268.0) / 2.0;
+
+/// 账号/密码长度限制（对齐 Shared/Globals.cs：MinAccountID=3/Max=15，MinPassword=5/Max=15）
+const MIN_ACC_ID: usize = 3;
+const MAX_ACC_ID: usize = 15;
+const MIN_PW: usize = 5;
+const MAX_PW: usize = 15;
+const GREEN: Color = Color::srgb(0.0, 1.0, 0.0);
+const RED: Color = Color::srgb(1.0, 0.0, 0.0);
+const GRAY: Color = Color::srgb(0.5, 0.5, 0.5);
 
 #[derive(Component)]
 pub struct UiInput {
@@ -83,6 +104,22 @@ pub enum InputKind {
     LoginPassword,
     Na(u8),
     Cp(u8),
+}
+
+/// 输入框校验边框（4 条细线之一），关联到 InputKind
+#[derive(Component)]
+struct InputBorderTag(InputKind);
+
+/// 新建账号对话框"字段说明"文字（随聚焦字段变化，对齐 C# Description (15,340,300x70)）
+#[derive(Component)]
+struct NaDesc;
+
+/// 各对话框整体校验结果（validation 系统写、ui 系统读以 gate OK/Enter）
+#[derive(Resource, Default)]
+struct LoginValidation {
+    login_ok: bool,
+    na_ok: bool,
+    cp_ok: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -176,13 +213,15 @@ fn setup_login_ui(
         spawn_ui_sprite(&mut commands, h, DX + 43.0, DY + 105.0, 1.0, 1.0);
     }
 
-    // 输入框
+    // 输入框（原版 LoginDialog：账号/密码均 136x15）
     spawn_input(
         &mut commands,
         &font,
         InputKind::LoginAccount,
         DX + 85.0,
         DY + 85.0,
+        136.0,
+        15.0,
         false,
         true,
     );
@@ -192,6 +231,8 @@ fn setup_login_ui(
         InputKind::LoginPassword,
         DX + 85.0,
         DY + 108.0,
+        136.0,
+        15.0,
         true,
         false,
     );
@@ -301,6 +342,31 @@ fn setup_login_ui(
         3.0,
     );
 
+    // 左下角版本号（对齐原版 LoginScene.Version：AutoSize、半透明深色底、黑边、(5,748)）
+    let version_text = format!(
+        "Build: Crystal.Debug.{}",
+        env!("CARGO_PKG_VERSION")
+    );
+    commands.spawn((
+        UiEntity,
+        Sprite {
+            color: Color::srgba(0.196, 0.196, 0.196, 0.78), // Color.FromArgb(200,50,50,50)
+            custom_size: Some(Vec2::new(170.0, 16.0)),
+            ..default()
+        },
+        Transform::from_xyz(5.0 + 85.0, -(748.0 + 8.0), 2.0),
+    ));
+    spawn_ui_text(
+        &mut commands,
+        &font,
+        &version_text,
+        8.0,
+        749.0,
+        10.0,
+        Color::WHITE,
+        3.0,
+    );
+
     // 对话框
     spawn_status_text(&mut commands, &font);
     spawn_new_account_dialog(&mut commands, &mut libs, &mut images, &mut cache, &font);
@@ -314,12 +380,166 @@ fn setup_login_ui(
     }
 }
 
+fn ascii_alnum(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+fn valid_account(s: &str) -> bool {
+    (MIN_ACC_ID..=MAX_ACC_ID).contains(&s.len()) && ascii_alnum(s)
+}
+fn valid_password(s: &str) -> bool {
+    (MIN_PW..=MAX_PW).contains(&s.len()) && ascii_alnum(s)
+}
+/// 简易邮箱（近似 C# regex）：含 @ 且 @ 后含 .
+fn valid_email(s: &str) -> bool {
+    s.len() <= 50 && s.contains('@') && s.split('@').last().map(|d| d.contains('.')).unwrap_or(false)
+}
+/// 简易日期：长度<=10 且仅含数字/分隔符（近似 C# DateTime.TryParse）
+fn valid_date(s: &str) -> bool {
+    s.len() <= 10 && !s.is_empty() && s.chars().all(|c| c.is_ascii_digit() || c == '/' || c == '-')
+}
+
+/// 新建账号字段合法性 → (valid, required)，字段顺序：账号/密码/确认/用户名/生日/问题/答案/邮箱
+fn na_field_valid(k: u8, v: &str, na: &[String; 8]) -> (bool, bool) {
+    match k {
+        0 => (valid_account(v), true),
+        1 => (valid_password(v), true),
+        2 => (valid_password(v) && v == na[1].as_str(), true),
+        3 => (v.len() <= 20, false),
+        4 => (v.is_empty() || valid_date(v), false),
+        5 => (v.len() <= 30, false),
+        6 => (v.len() <= 30, false),
+        7 => (v.is_empty() || valid_email(v), false),
+        _ => (true, false),
+    }
+}
+/// 修改密码字段合法性 → (valid, required)，顺序：账号/当前密码/新密码/确认
+fn cp_field_valid(k: u8, v: &str, cp: &[String; 4]) -> (bool, bool) {
+    match k {
+        0 => (valid_account(v), true),
+        1 => (valid_password(v), true),
+        2 => (valid_password(v), true),
+        3 => (valid_password(v) && v == cp[2].as_str(), true),
+        _ => (true, false),
+    }
+}
+
+/// 登录输入框边框色：空=透明（C# Border=!empty），非空非法=红，合法=绿
+fn login_border_color(valid: bool, empty: bool) -> Color {
+    if empty { Color::NONE } else if valid { GREEN } else { RED }
+}
+/// 必填/可选字段边框色：必填空=红；可选空=灰；否则绿/红
+fn field_border_color(valid: bool, required: bool, empty: bool) -> Color {
+    if empty { if required { RED } else { GRAY } } else if valid { GREEN } else { RED }
+}
+
+fn na_desc(k: u8) -> &'static str {
+    match k {
+        0 => "账号：3-15 位字母或数字",
+        1 | 2 => "密码：5-15 位字母或数字，两次需一致",
+        3 => "用户名：可选，最长 20 字",
+        4 => "生日：可选，格式 yyyy/MM/dd",
+        5 => "密保问题：可选，最长 30 字",
+        6 => "密保答案：可选，最长 30 字",
+        7 => "邮箱：可选，最长 50 字",
+        _ => "",
+    }
+}
+
+/// 输入框校验边框（4 条细线），关联 InputKind。z 高于对话框背景与文字。
+fn spawn_input_border(commands: &mut Commands, kind: InputKind, x: f32, y: f32, w: f32, h: f32) {
+    let z = match kind {
+        InputKind::LoginAccount | InputKind::LoginPassword => 3.5,
+        _ => 4.6,
+    };
+    let t = 1.0;
+    let line = |c: &mut Commands, cx: f32, cy: f32, sw: f32, sh: f32| {
+        c.spawn((
+            UiEntity,
+            InputBorderTag(kind),
+            Sprite {
+                color: Color::NONE,
+                custom_size: Some(Vec2::new(sw, sh)),
+                ..default()
+            },
+            Transform::from_xyz(cx, -cy, z),
+        ));
+    };
+    line(commands, x + w / 2.0, y - t / 2.0, w + t, t);
+    line(commands, x + w / 2.0, y + h + t / 2.0, w + t, t);
+    line(commands, x - t / 2.0, y + h / 2.0, t, h + t);
+    line(commands, x + w + t / 2.0, y + h / 2.0, t, h + t);
+}
+
+/// 实时校验：重算各对话框整体合法性 → 写 LoginValidation；按字段重绘红/绿/灰边框；
+/// 更新新建账号字段说明文字。对齐 C# 各 *_TextChanged + GotFocus Description。
+fn login_input_validation_system(
+    login: Res<LoginState>,
+    inputs: Query<&UiInput>,
+    mut borders: Query<(&InputBorderTag, &mut Sprite)>,
+    mut val: ResMut<LoginValidation>,
+    mut desc: Query<&mut Text2d, With<NaDesc>>,
+) {
+    let mut acc = String::new();
+    let mut pw = String::new();
+    let mut na: [String; 8] = Default::default();
+    let mut cp: [String; 4] = Default::default();
+    for i in &inputs {
+        match i.kind {
+            InputKind::LoginAccount => acc = i.value.clone(),
+            InputKind::LoginPassword => pw = i.value.clone(),
+            InputKind::Na(k) if (k as usize) < 8 => na[k as usize] = i.value.clone(),
+            InputKind::Cp(k) if (k as usize) < 4 => cp[k as usize] = i.value.clone(),
+            _ => {}
+        }
+    }
+    val.login_ok = valid_account(&acc) && valid_password(&pw);
+    val.na_ok = (0u8..8).all(|k| na_field_valid(k, &na[k as usize], &na).0);
+    val.cp_ok = (0u8..4).all(|k| cp_field_valid(k, &cp[k as usize], &cp).0);
+
+    for (tag, mut sprite) in &mut borders {
+        let (color, visible) = match tag.0 {
+            InputKind::LoginAccount => (login_border_color(valid_account(&acc), acc.is_empty()), true),
+            InputKind::LoginPassword => (login_border_color(valid_password(&pw), pw.is_empty()), true),
+            InputKind::Na(k) => match na.get(k as usize) {
+                Some(v) => {
+                    let (valid, req) = na_field_valid(k, v, &na);
+                    (field_border_color(valid, req, v.is_empty()), login.show_new_account)
+                }
+                None => (Color::NONE, false),
+            },
+            InputKind::Cp(k) => match cp.get(k as usize) {
+                Some(v) => {
+                    let (valid, req) = cp_field_valid(k, v, &cp);
+                    (field_border_color(valid, req, v.is_empty()), login.show_change_password)
+                }
+                None => (Color::NONE, false),
+            },
+        };
+        sprite.color = if visible { color } else { Color::NONE };
+    }
+
+    // 新建账号字段说明（聚焦字段的帮助文字）
+    let focused_na = inputs.iter().find_map(|i| {
+        if i.focused {
+            if let InputKind::Na(k) = i.kind { Some(k) } else { None }
+        } else {
+            None
+        }
+    });
+    let text = if login.show_new_account { focused_na.map(na_desc).unwrap_or("") } else { "" };
+    if let Ok(mut t) = desc.single_mut() {
+        t.0 = text.to_string();
+    }
+}
+
 fn spawn_input(
     commands: &mut Commands,
     font: &Handle<Font>,
     kind: InputKind,
     x: f32,
     y: f32,
+    w: f32,
+    h: f32,
     password: bool,
     focused: bool,
 ) {
@@ -339,11 +559,12 @@ fn spawn_input(
             value: String::new(),
             focused,
             password,
-            rect: (x, y, 136.0, 18.0),
+            rect: (x, y, w, h),
             text_entity,
             kind,
         },
     ));
+    spawn_input_border(commands, kind, x, y, w, h);
 }
 
 fn spawn_btn(
@@ -404,8 +625,8 @@ fn spawn_new_account_dialog(
     cache: &mut UiImageCache,
     font: &Handle<Font>,
 ) {
-    let dx = (SW - 588.0) / 2.0;
-    let dy = (SH - 460.0) / 2.0;
+    let dx = NA_X;
+    let dy = NA_Y;
     if let Some(h) = ui_image(libs, images, cache, LibraryName::Prguse, 63) {
         let e = spawn_ui_sprite(commands, h, dx, dy, 4.0, 1.0);
         commands
@@ -414,6 +635,8 @@ fn spawn_new_account_dialog(
     }
     let ys = [103.0f32, 129.0, 155.0, 189.0, 215.0, 250.0, 276.0, 311.0];
     let pws = [false, true, true, false, false, false, false, false];
+    // 原版 NewAccountDialog：密码问题(i=5)/答案(i=6) 为 190 宽，其余 136 宽，统一 18 高
+    let widths = [136.0f32, 136.0, 136.0, 136.0, 136.0, 190.0, 190.0, 136.0];
     for i in 0..8 {
         spawn_input(
             commands,
@@ -421,6 +644,8 @@ fn spawn_new_account_dialog(
             InputKind::Na(i as u8),
             dx + 226.0,
             dy + ys[i],
+            widths[i],
+            18.0,
             pws[i],
             false,
         );
@@ -447,6 +672,18 @@ fn spawn_new_account_dialog(
         ButtonKind::NaCancel,
         Some(DialogKind::NewAccount),
     );
+    // 字段说明文字（C# Description (15,340,300x70)，随聚焦字段变化）
+    let desc_e = spawn_ui_text(
+        commands,
+        font,
+        "",
+        dx + 15.0,
+        dy + 340.0,
+        12.0,
+        Color::srgb(0.85, 0.85, 0.85),
+        4.7,
+    );
+    commands.entity(desc_e).insert((UiEntity, NaDesc));
 }
 
 fn spawn_change_password_dialog(
@@ -456,8 +693,8 @@ fn spawn_change_password_dialog(
     cache: &mut UiImageCache,
     font: &Handle<Font>,
 ) {
-    let dx = (SW - 348.0) / 2.0;
-    let dy = (SH - 268.0) / 2.0;
+    let dx = CP_X;
+    let dy = CP_Y;
     if let Some(h) = ui_image(libs, images, cache, LibraryName::Prguse, 50) {
         let e = spawn_ui_sprite(commands, h, dx, dy, 4.0, 1.0);
         commands
@@ -473,6 +710,8 @@ fn spawn_change_password_dialog(
             InputKind::Cp(i as u8),
             dx + 178.0,
             dy + ys[i],
+            136.0,
+            18.0,
             pws[i],
             false,
         );
@@ -495,7 +734,7 @@ fn spawn_change_password_dialog(
         cache,
         LibraryName::Title,
         110,
-        (dx + 222.0, dy + 236.0, 90.0, 25.0),
+        (dx + 222.0, dy + 236.0, 68.0, 25.0),
         ButtonKind::CpCancel,
         Some(DialogKind::ChangePassword),
     );
@@ -513,13 +752,15 @@ fn login_ui_system(
     mut login: ResMut<LoginState>,
     mut cursor: ResMut<CursorBlink>,
     time: Res<Time>,
+    val: Res<LoginValidation>,
     mut inputs: Query<&mut UiInput>,
     mut texts: Query<&mut Text2d>,
     buttons: Query<(&UiButton, &UiButtonKind)>,
     mut dlg_sprites: Query<(&InDialog, &mut Visibility)>,
     windows: Query<&Window>,
     mouse: Res<ButtonInput<MouseButton>>,
-    mut ime: MessageReader<Ime>,
+    mut ime: ResMut<PinyinIme>,
+    mut focus: ResMut<ImeFocus>,
 ) {
     cursor.timer += time.delta_secs();
     if cursor.timer >= 0.5 {
@@ -536,7 +777,8 @@ fn login_ui_system(
     };
     let lclick = mouse.just_pressed(MouseButton::Left);
 
-    // 聚焦
+    // 聚焦 + 回填内置 IME 聚焦框（仅非密码框：候选条定位 + 决定字母是否进 IME）
+    // 只写 Some；None 由 clear_ime_focus 每帧统一重置
     for mut input in inputs.iter_mut() {
         let (x, y, w, h) = input.rect;
         if lclick && mx >= x && mx <= x + w && my >= y && my <= y + h {
@@ -544,15 +786,16 @@ fn login_ui_system(
         } else if lclick {
             input.focused = false;
         }
+        if input.focused && !input.password {
+            focus.rect = Some(input.rect);
+        }
     }
 
-    // 中文输入法：IME 组合完成文本追加到聚焦输入框
-    for ev in ime.read() {
-        if let Ime::Commit { value, .. } = ev {
-            for mut input in inputs.iter_mut() {
-                if input.focused && !input.password {
-                    input.value.push_str(value);
-                }
+    // 内置拼音 IME 提交的汉字 → 注入聚焦的非密码输入框
+    if let Some(c) = ime.take_commit() {
+        for mut input in inputs.iter_mut() {
+            if input.focused && !input.password {
+                input.value.push_str(&c);
             }
         }
     }
@@ -565,6 +808,10 @@ fn login_ui_system(
         }
         for key in &key_list {
             if key.state != bevy::input::ButtonState::Pressed {
+                continue;
+            }
+            // 内置 IME 接管该键（拼音/选候选/编辑）→ 跳过原始插入
+            if ime.consumes_key(key) {
                 continue;
             }
             if key.logical_key == Key::Backspace {
@@ -649,6 +896,22 @@ fn login_ui_system(
             clicked = Some(kind.0);
         }
     }
+    // Enter 提交（对齐 C# TextBox_KeyPress：登录/新建账号/改密）
+    for key in &key_list {
+        if key.state == bevy::input::ButtonState::Pressed
+            && key.logical_key == Key::Enter
+            && !ime.consumes_key(key)
+        {
+            if login.show_new_account && val.na_ok {
+                clicked = Some(ButtonKind::NaOk);
+            } else if login.show_change_password && val.cp_ok {
+                clicked = Some(ButtonKind::CpOk);
+            } else if val.login_ok {
+                clicked = Some(ButtonKind::LoginOk);
+            }
+        }
+    }
+
     if let Some(kind) = clicked {
         match kind {
             ButtonKind::LoginOk => {
@@ -662,11 +925,8 @@ fn login_ui_system(
                             _ => {}
                         }
                     }
-                    if account.is_empty() {
-                        login.status_msg = "请输入账号".to_string();
-                        login.status_error = true;
-                    } else if password.is_empty() {
-                        login.status_msg = "请输入密码".to_string();
+                    if !val.login_ok {
+                        login.status_msg = "账号 3-15 位、密码 5-15 位（字母数字）".to_string();
                         login.status_error = true;
                     } else {
                         net.state = crate::network::NetState::LoggingIn;
@@ -691,14 +951,8 @@ fn login_ui_system(
                         }
                     }
                 }
-                if v[0].is_empty() {
-                    login.status_msg = "请输入账号".to_string();
-                    login.status_error = true;
-                } else if v[1].is_empty() {
-                    login.status_msg = "请输入密码".to_string();
-                    login.status_error = true;
-                } else if v[1] != v[2] {
-                    login.status_msg = "两次输入的密码不一致".to_string();
+                if !val.na_ok {
+                    login.status_msg = "请检查标红的字段".to_string();
                     login.status_error = true;
                 } else {
                     login.show_new_account = false;
@@ -731,17 +985,8 @@ fn login_ui_system(
                         }
                     }
                 }
-                if v[0].is_empty() {
-                    login.status_msg = "请输入账号".to_string();
-                    login.status_error = true;
-                } else if v[1].is_empty() {
-                    login.status_msg = "请输入当前密码".to_string();
-                    login.status_error = true;
-                } else if v[2].is_empty() {
-                    login.status_msg = "请输入新密码".to_string();
-                    login.status_error = true;
-                } else if v[2] != v[3] {
-                    login.status_msg = "两次输入的新密码不一致".to_string();
+                if !val.cp_ok {
+                    login.status_msg = "请检查标红的字段".to_string();
                     login.status_error = true;
                 } else {
                     login.show_change_password = false;
