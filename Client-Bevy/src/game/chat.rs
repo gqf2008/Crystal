@@ -8,11 +8,11 @@ use std::collections::VecDeque;
 
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
-use bevy::window::Ime;
 
 use crate::map_renderer::GameLibraries;
 use crate::network::NetworkContext;
 use crate::scenes::AppState;
+use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
 use crate::ui::sprite_ui::{spawn_ui_text, UiEntity, UiFont};
 
 /// 聊天状态（网络 handler 写入，显示系统读取）
@@ -128,18 +128,29 @@ fn spawn_chat(
     commands.entity(e).insert(ChatInputText);
 }
 
-/// 键盘输入：Enter 激活/发送；字符输入；Backspace 删除；IME 中文提交
+/// 键盘输入：Enter 激活/发送；字符输入；Backspace 删除；内置拼音 IME 中文提交
 fn chat_input_system(
     mut keys: MessageReader<KeyboardInput>,
-    mut ime: MessageReader<Ime>,
+    mut ime: ResMut<PinyinIme>,
+    mut focus: ResMut<ImeFocus>,
     mut chat: ResMut<ChatState>,
     net: Res<NetworkContext>,
 ) {
     let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
 
-    // Enter：激活/发送
+    // 回填 IME 聚焦框（聊天输入行屏幕矩形，候选条定位 + 判定字母是否进 IME）
+    // 输入行位置见 spawn_chat：panel_x+4=10, panel_y+140=568
+    // 只写 Some（None 由 clear_ime_focus 每帧统一重置，避免与 Game 态其他输入框互相覆盖）
+    if chat.input_active {
+        focus.rect = Some((10.0, 568.0, 350.0, 16.0));
+    }
+
+    // Enter：激活/发送（组合中被 IME 接管 → 跳过，不发送）
     for key in &key_list {
         if key.state != bevy::input::ButtonState::Pressed {
+            continue;
+        }
+        if ime.consumes_key(key) {
             continue;
         }
         if key.logical_key == Key::Enter {
@@ -170,6 +181,9 @@ fn chat_input_system(
         if key.state != bevy::input::ButtonState::Pressed {
             continue;
         }
+        if ime.consumes_key(key) {
+            continue;
+        }
         if key.logical_key == Key::Backspace {
             chat.input_text.pop();
         } else if let Some(text) = &key.text {
@@ -178,11 +192,10 @@ fn chat_input_system(
             }
         }
     }
-    // IME 中文输入
-    for ev in ime.read() {
-        if let Ime::Commit { value, .. } = ev {
-            chat.input_text.push_str(value);
-        }
+
+    // 内置拼音 IME 提交的汉字
+    if let Some(c) = ime.take_commit() {
+        chat.input_text.push_str(&c);
     }
 }
 

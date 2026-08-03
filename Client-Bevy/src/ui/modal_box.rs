@@ -14,13 +14,13 @@
 
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
-use bevy::window::Ime;
 use mir2_shared::SelectInfo;
 
 use crate::map_renderer::GameLibraries;
 use crate::network::NetworkContext;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
+use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
 use crate::ui::sprite_ui::{
     spawn_ui_button, spawn_ui_sprite, spawn_ui_text, ui_image, UiButton, UiEntity, UiImageCache,
 };
@@ -31,7 +31,6 @@ impl Plugin for ModalBoxPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ModalState>();
         app.add_systems(Update, modal_ui_system.run_if(in_state(AppState::Select)));
-        app.add_systems(Update, modal_ime_system.run_if(in_state(AppState::Select)));
     }
 }
 
@@ -68,12 +67,12 @@ impl Default for ModalState {
 }
 
 // 删除确认输入框（原版 MirInputBox，Prguse[660] 288x156）
-const DLG_X: f32 = (1024.0 - 288.0) / 2.0; // 368
-const DLG_Y: f32 = (768.0 - 156.0) / 2.0; // 306
+pub const DLG_X: f32 = (1024.0 - 288.0) / 2.0; // 368
+pub const DLG_Y: f32 = (768.0 - 156.0) / 2.0; // 306
 
 // 删除确认询问框（原版 MirMessageBox，Prguse[360] 456x190）
-const MSG_X: f32 = (1024.0 - 456.0) / 2.0; // 284
-const MSG_Y: f32 = (768.0 - 190.0) / 2.0; // 289
+pub const MSG_X: f32 = (1024.0 - 456.0) / 2.0; // 284
+pub const MSG_Y: f32 = (768.0 - 190.0) / 2.0; // 289
 
 #[derive(Component)]
 struct ModalDeleteDlg;
@@ -326,33 +325,30 @@ fn modal_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     mut delete_dlg: Query<&mut Visibility, (With<ModalDeleteDlg>, Without<ModalDeleteAskDlg>)>,
     mut delete_ask_dlg: Query<&mut Visibility, (With<ModalDeleteAskDlg>, Without<ModalDeleteDlg>)>,
-    mut ask_texts: Query<
-        &mut Text2d,
-        (
-            With<ModalDeleteAskDlg>,
-            With<ModalText>,
-            Without<ModalDeleteDlg>,
-        ),
-    >,
-    mut confirm_texts: Query<
-        &mut Text2d,
-        (
-            With<ModalDeleteDlg>,
-            With<ModalText>,
-            Without<ModalDeleteAskDlg>,
-        ),
-    >,
-    mut errors: Query<&mut Text2d, (With<ModalError>, Without<ModalText>, Without<ModalInput>)>,
-    mut inputs: Query<&mut Text2d, (With<ModalInput>, Without<ModalText>, Without<ModalError>)>,
+    // 4 个 Text2d 查询互斥（不同 With/Without），并入 ParamSet 以腾出参数位给内置 IME
+    mut texts: ParamSet<(
+        Query<&mut Text2d, (With<ModalDeleteAskDlg>, With<ModalText>, Without<ModalDeleteDlg>)>,
+        Query<&mut Text2d, (With<ModalDeleteDlg>, With<ModalText>, Without<ModalDeleteAskDlg>)>,
+        Query<&mut Text2d, (With<ModalError>, Without<ModalText>, Without<ModalInput>)>,
+        Query<&mut Text2d, (With<ModalInput>, Without<ModalText>, Without<ModalError>)>,
+    )>,
     ok_btns: Query<&UiButton, With<ModalOk>>,
     cancel_btns: Query<&UiButton, With<ModalCancel>>,
     yes_btns: Query<&UiButton, (With<ModalYes>, Without<ModalOk>, Without<ModalNo>)>,
     no_btns: Query<&UiButton, (With<ModalNo>, Without<ModalOk>, Without<ModalYes>)>,
+    mut ime: ResMut<PinyinIme>,
+    mut focus: ResMut<ImeFocus>,
 ) {
     state.cursor_timer += time.delta_secs();
     if state.cursor_timer >= 0.5 {
         state.cursor_timer = 0.0;
         state.cursor_visible = !state.cursor_visible;
+    }
+
+    // 回填内置 IME 聚焦框（只写 Some；None 由 clear_ime_focus 每帧统一重置，
+    // 避免与 Select 态其他输入框如新建角色名互相覆盖）
+    if state.kind == ModalKind::DeleteConfirm && state.input_focused {
+        focus.rect = Some((DLG_X + 23.0, DLG_Y + 86.0, 240.0, 19.0));
     }
 
     let show_delete = state.kind == ModalKind::DeleteConfirm;
@@ -375,6 +371,9 @@ fn modal_ui_system(
         return;
     }
 
+    // 一帧键盘事件只读一次（MessageReader::read() 推进游标，二次 read 为空）
+    let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
+
     // 当前选中角色（删除确认用）
     let selected: Option<SelectInfo> = net
         .selected_index
@@ -386,16 +385,16 @@ fn modal_ui_system(
         Some(c) => format!("确定要删除角色「{}」吗？", c.name),
         None => "没有选中的角色。".to_string(),
     };
-    for mut t in ask_texts.iter_mut() {
+    for mut t in texts.p0().iter_mut() {
         t.0 = ask_text.clone();
     }
-    for mut t in confirm_texts.iter_mut() {
+    for mut t in texts.p1().iter_mut() {
         t.0 = "请输入角色名确认删除：".to_string();
     }
-    if let Ok(mut t) = errors.single_mut() {
+    if let Ok(mut t) = texts.p2().single_mut() {
         t.0 = state.error.clone().unwrap_or_default();
     }
-    for mut t in inputs.iter_mut() {
+    for mut t in texts.p3().iter_mut() {
         let mut display = state.name_input.clone();
         if state.input_focused && state.cursor_visible {
             display.push('|');
@@ -419,13 +418,20 @@ fn modal_ui_system(
     // 输入框聚焦 + 字符输入（第二步 MirInputBox）
     if state.kind == ModalKind::DeleteConfirm {
         let input_rect = (DLG_X + 23.0, DLG_Y + 86.0, 240.0, 19.0);
+        // 只有点击落在对话框内才改变聚焦（点 OK/Cancel 按钮不清除聚焦）
         if lclick {
-            state.input_focused = in_rect(input_rect);
+            let in_dlg = in_rect((DLG_X, DLG_Y, 288.0, 156.0));
+            if in_dlg {
+                state.input_focused = in_rect(input_rect);
+            }
         }
-        let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
         if state.input_focused {
             for key in &key_list {
                 if key.state != bevy::input::ButtonState::Pressed {
+                    continue;
+                }
+                // 内置 IME 接管该键（拼音/选候选/编辑）→ 跳过原始插入
+                if ime.consumes_key(key) {
                     continue;
                 }
                 match key.logical_key {
@@ -434,11 +440,22 @@ fn modal_ui_system(
                     }
                     _ => {
                         if let Some(text) = &key.text {
-                            if !text.is_empty() && state.name_input.chars().count() < 24 {
+                            if !text.is_empty() && state.name_input.chars().count() < 50 {
                                 state.name_input.push_str(text);
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // 内置拼音 IME 提交的汉字 → 追加到删除确认输入框（≤24 字）
+    if let Some(c) = ime.take_commit() {
+        if state.kind == ModalKind::DeleteConfirm && state.input_focused {
+            for ch in c.chars() {
+                if state.name_input.chars().count() < 50 {
+                    state.name_input.push(ch);
                 }
             }
         }
@@ -470,11 +487,14 @@ fn modal_ui_system(
     };
 
     // 键盘：回车=确认，ESC=取消（对齐原版 MirInputBox/MirMessageBox）
-    let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
     let mut enter = false;
     let mut escape = false;
     for key in &key_list {
         if key.state != bevy::input::ButtonState::Pressed {
+            continue;
+        }
+        // 内置 IME 接管该键（如组合中按 Enter 提交候选）→ 不触发对话框动作
+        if ime.consumes_key(key) {
             continue;
         }
         match key.logical_key {
@@ -523,28 +543,5 @@ fn modal_ui_system(
             }
         }
         ModalKind::None => {}
-    }
-}
-
-/// 中文输入法：删除确认输入框 IME 组合文本
-fn modal_ime_system(
-    mut state: ResMut<ModalState>,
-    mut ime: MessageReader<Ime>,
-    mut windows: Query<&mut Window>,
-) {
-    if state.kind != ModalKind::DeleteConfirm || !state.input_focused {
-        return;
-    }
-    if let Ok(mut w) = windows.single_mut() {
-        w.ime_position = Vec2::new(DLG_X + 23.0, DLG_Y + 86.0);
-    }
-    for ev in ime.read() {
-        if let Ime::Commit { value, .. } = ev {
-            for ch in value.chars() {
-                if state.name_input.chars().count() < 24 {
-                    state.name_input.push(ch);
-                }
-            }
-        }
     }
 }

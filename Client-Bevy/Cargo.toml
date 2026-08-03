@@ -30,19 +30,6 @@ once_cell = "1"
 crossbeam-channel = "0.5"
 chrono = "0.4"
 
-# Windows TSF（输入法候选词）—— 仅 windows target 需要
-[target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = [
-    "Win32_UI_TextServices",
-    "Win32_System_Com",
-    "Win32_Foundation",
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_Graphics_Gdi",
-] }
-# windows 0.62 的 #[implement] 宏展开引用 ::windows_core 绝对路径，需直接依赖
-windows-core = "0.62"
-
 [profile.dev]
 opt-level = 1
 # 调试信息只保留行号（完整 debug 信息导致 exe 2GB+ 超出 Windows 加载器限制）

@@ -113,6 +113,9 @@ fn spawn_npc_dialog(
 fn npc_ui_system(
     mut npc: ResMut<NpcDialogState>,
     mut npc_goods: ResMut<crate::game::dialogs::npc_goods::NpcGoodsState>,
+    mut sell_panel: ResMut<crate::game::dialogs::sell_panel::SellPanelState>,
+    mut storage: ResMut<crate::game::dialogs::storage::StorageState>,
+    mut mgr: ResMut<crate::game::dialogs::DialogManager>,
     net: Res<NetworkContext>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
@@ -128,6 +131,17 @@ fn npc_ui_system(
         };
     }
     if !npc.visible {
+        // C# 语义：NPC 对话框关闭时联动隐藏商店/出售/仓库面板
+        if npc_goods.visible {
+            npc_goods.visible = false;
+        }
+        if sell_panel.visible {
+            sell_panel.visible = false;
+        }
+        if storage.visible {
+            storage.visible = false;
+            mgr.close(crate::game::dialogs::DialogKind::Storage);
+        }
         return;
     }
 
