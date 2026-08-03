@@ -24,7 +24,7 @@ pub fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: u64, mess
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
     write_dotnet_string(&mut body, message);
-    body.push(0u8); // ChatType::System
+    body.push(mir2_shared::enums::ChatType::System as u8); // ChatType::System=5（SharedRust 枚举与 C# 差 3）
     let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(ServerPacketIds::Chat as i16, &body),

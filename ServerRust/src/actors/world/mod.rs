@@ -3229,7 +3229,7 @@ fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: u64, message:
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
     crate::util::wire::write_dotnet_string(&mut body, message);
-    body.push(0u8); // ChatType::System
+    body.push(mir2_shared::enums::ChatType::System as u8); // ChatType::System=5（SharedRust 枚举与 C# 差 3）
     let packet = build_packet_bytes(ServerPacketIds::Chat as i16, &body);
     let gate_ref = gate_ref.clone();
     tokio::spawn(async move {
