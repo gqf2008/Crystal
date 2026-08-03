@@ -15,13 +15,8 @@ use crate::map_renderer::{TILE_HEIGHT, TILE_WIDTH};
 use crate::network::NetworkContext;
 use crate::scenes::AppState;
 
-/// 服务器对象移动事件（网络 handler 写入）
-#[derive(Resource, Default)]
-pub struct NetMotions {
-    pub pending: Vec<NetMotion>,
-}
-
-#[derive(Debug, Clone)]
+/// 服务器对象移动事件（网络 handler 发送，移动系统消费）
+#[derive(Message, Debug, Clone)]
 pub enum NetMotion {
     Walk { object_id: u32, x: i32, y: i32, dir: u8 },
     Run { object_id: u32, x: i32, y: i32, dir: u8 },
@@ -94,6 +89,7 @@ pub struct MovementPlugin;
 
 impl Plugin for MovementPlugin {
     fn build(&self, app: &mut App) {
+        app.add_message::<NetMotion>();
         app.add_systems(
             Update,
             (
@@ -103,6 +99,7 @@ impl Plugin for MovementPlugin {
                 apply_self_position,
             )
                 .chain()
+                .after(crate::network::network_system)
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -135,10 +132,10 @@ fn apply_self_position(
 /// 消耗 NetMotions：给对象实体挂 MoveTween / 转向
 fn apply_net_motions(
     mut commands: Commands,
-    mut motions: ResMut<NetMotions>,
+    mut motions: MessageReader<NetMotion>,
     mut actors: Query<(Entity, &NetObjectId, &mut ActorAnim, &Transform, Option<&LocalPlayer>)>,
 ) {
-    let pending: Vec<NetMotion> = motions.pending.drain(..).collect();
+    let pending: Vec<NetMotion> = motions.read().cloned().collect();
     for motion in pending {
         for (e, id, mut anim, tf, local) in &mut actors {
             if id.0 != motion.object_id() {
@@ -301,9 +298,11 @@ fn advance_local_move(
     anim.frame_index = 0;
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actor::{ActorAnim, NetObjectId};
 
     #[test]
     fn test_tile_world_roundtrip() {
@@ -320,5 +319,36 @@ mod tests {
         assert_eq!(direction_from_delta(1, 1), Some(MirDirection::DownRight));
         assert_eq!(direction_from_delta(-1, 0), Some(MirDirection::Left));
         assert_eq!(direction_from_delta(0, 0), None);
+    }
+
+    /// 网络→游戏消息管道：MessageWriter 写入 NetMotion，
+    /// apply_net_motions 同帧消费并更新角色朝向（替代原手写 Vec 队列）。
+    #[test]
+    fn net_motion_message_pipeline() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_message::<NetMotion>();
+        app.add_systems(Update, apply_net_motions);
+
+        // 非本地角色实体（无 LocalPlayer）
+        let e = app
+            .world_mut()
+            .spawn((NetObjectId(7), ActorAnim::default(), Transform::default()))
+            .id();
+
+        // 服务器 Turn 消息 → 同帧消费并转向
+        app.world_mut()
+            .resource_mut::<Messages<NetMotion>>()
+            .write(NetMotion::Turn {
+                object_id: 7,
+                x: 0,
+                y: 0,
+                dir: 3,
+            });
+        app.update();
+
+        let anim = app.world().get::<ActorAnim>(e).unwrap();
+        assert_eq!(anim.direction, 3);
+        assert_eq!(anim.action, mir2_shared::enums::MirAction::Standing);
     }
 }
