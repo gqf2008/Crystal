@@ -31,6 +31,7 @@ use crate::game::dialogs::craft::CraftState;
 use crate::game::dialogs::item_rental::ItemRentalState;
 use crate::game::dialogs::quest_log::{QuestEntry, QuestLogState};
 use crate::game::dialogs::buff::{BuffEntry, BuffState};
+use crate::game::dialogs::report::ReportState;
 use crate::game::effects::{EffectsState, PendingEffect};
 use crate::game::player_control::ControlState;
 use crate::game::dialogs::inventory::InvItem;
@@ -271,6 +272,37 @@ impl Packet for GuildStorageItemChangeWire {
         writer.write_u8(self.grid)?;
         writer.write_u64::<LittleEndian>(self.unique_id)?;
         writer.write_u32::<LittleEndian>(self.count)?;
+        Ok(())
+    }
+}
+
+/// 举报（M45：gate 解析 [type u32][description dotnet]，与 SharedRust 不一致）
+#[derive(Debug, Clone)]
+pub struct ReportIssueWire {
+    pub issue_type: u32,
+    pub description: String,
+}
+
+impl Packet for ReportIssueWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::ReportIssue as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            issue_type: reader.read_u32::<LittleEndian>()?,
+            description: mir2_shared::binary::read_dotnet_string(reader)?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u32::<LittleEndian>(self.issue_type)?;
+        mir2_shared::binary::write_dotnet_string(writer, &self.description)?;
         Ok(())
     }
 }
@@ -844,6 +876,7 @@ impl Packet for RefineCheckWire {
         writer.write_u64::<LittleEndian>(self.unique_id)?;
         Ok(())
     }
+
 }
 
 /// 待生成的网络对象（MapChanged 后由 Game 状态消费）
@@ -963,6 +996,7 @@ struct NetworkPanels<'w> {
     rental: ResMut<'w, ItemRentalState>,
     quest_log: ResMut<'w, QuestLogState>,
     buff: ResMut<'w, BuffState>,
+    report: ResMut<'w, ReportState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -1019,6 +1053,7 @@ fn network_system(
                         &mut *panels.rental,
                         &mut *panels.quest_log,
                         &mut *panels.buff,
+                        &mut *panels.report,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1079,6 +1114,7 @@ fn network_system(
                         &mut *panels.rental,
                         &mut *panels.quest_log,
                         &mut *panels.buff,
+                        &mut *panels.report,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1229,6 +1265,7 @@ fn handle_packet(
     rental: &mut ItemRentalState,
     quest_log: &mut QuestLogState,
     buff: &mut BuffState,
+    report: &mut ReportState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],

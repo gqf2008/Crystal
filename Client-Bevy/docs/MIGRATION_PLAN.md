@@ -383,6 +383,12 @@
 - [x] 注：player_magics 表存 C# 编号，登录 NewMagic 发 SharedRust(+3)；服务端施法校验用 spell_cs=SharedRust-3
 
 ---
+### M45: 举报（Report）（2026-08-03 完成）
+- [x] **客户端**：举报对话框（类型 + 描述输入 + 提交）；ReportIssueWire [type u32][description dotnet] 手动构造（gate wire 与 SharedRust [message dotnet] 不一致）；结果系统消息显示
+- [x] 服务端：无改动（ReportIssueRequest 已完整：保存 DB + 系统消息）
+- [x] 验证：真实 ServerRust E2E——`✅ 举报已提交确认`（"举报信息已提交，感谢您的反馈"）；客户端 40 / 服务端 139 测试全过
+
+---
 ## 四、执行顺序与依赖
 
 ```

@@ -261,6 +261,10 @@ fn main() {
     if std::env::args().any(|a| a == "--buff-test") {
         app.add_systems(Update, auto_buff_test);
     }
+    // --report-test: 举报链路（提交举报 → 系统消息确认）
+    if std::env::args().any(|a| a == "--report-test") {
+        app.add_systems(Update, auto_report_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -3118,6 +3122,56 @@ fn auto_buff_test(
                 buff.buffs.len()
             );
             *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --report-test：打开举报 → 提交 → 等系统消息确认
+#[allow(clippy::too_many_arguments)]
+fn auto_report_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    chat: Res<client_bevy::game::chat::ChatState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    fn chat_has(chat: &client_bevy::game::chat::ChatState, needle: &str) -> bool {
+        chat.lines.iter().rev().take(60).any(|(t, _)| t.contains(needle))
+    }
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Report) {
+                mgr.toggle(client_bevy::game::dialogs::DialogKind::Report);
+            }
+            net.send_packet(&client_bevy::network::ReportIssueWire {
+                issue_type: 1,
+                description: "测试举报".to_string(),
+            });
+            tracing::info!("[REPORTTEST] 提交举报（type=1）");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t >= 8.0 {
+                tracing::warn!("[REPORTTEST] ❌ 未收到举报确认");
+                *stage = 9;
+                return;
+            }
+            if chat_has(&chat, "举报信息已提交") {
+                tracing::info!("[REPORTTEST] ✅ 举报已提交确认");
+                *stage = 9;
+            }
         }
         _ => {}
     }
