@@ -1112,6 +1112,7 @@ struct NetworkPanels<'w> {
     creature: ResMut<'w, CreatureState>,
     hero: ResMut<'w, HeroState>,
     relationship: ResMut<'w, RelationshipState>,
+    big_map: ResMut<'w, crate::game::dialogs::big_map::BigMapState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -1173,6 +1174,7 @@ fn network_system(
                         &mut *panels.creature,
                         &mut *panels.hero,
                         &mut *panels.relationship,
+                        &mut *panels.big_map,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1238,6 +1240,7 @@ fn network_system(
                         &mut *panels.creature,
                         &mut *panels.hero,
                         &mut *panels.relationship,
+                        &mut *panels.big_map,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1393,6 +1396,7 @@ fn handle_packet(
     creature: &mut CreatureState,
     hero: &mut HeroState,
     relationship: &mut RelationshipState,
+    big_map: &mut crate::game::dialogs::big_map::BigMapState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -1556,6 +1560,32 @@ fn handle_packet(
                     Some((p.location_x as f32, p.location_y as f32, p.direction));
                 weather.code = p.weather;
                 next.set(AppState::Game);
+            }
+        }
+        x if x == ServerPacketIds::NewMapInfo as i16 => {
+            if let Ok(p) = map::NewMapInfo::read_body(&mut cur) {
+                tracing::info!(
+                    "🗺️ NewMapInfo: map={} title={} npcs={}",
+                    p.map_index,
+                    p.title,
+                    p.npcs.len()
+                );
+                big_map.map_index = p.map_index;
+                big_map.title = p.title.clone();
+                big_map.npcs = p
+                    .npcs
+                    .into_iter()
+                    .map(|n| crate::game::dialogs::big_map::NpcRow {
+                        object_id: n.object_id,
+                        name: n.name,
+                        x: n.location_x,
+                        y: n.location_y,
+                        icon: n.icon,
+                        can_teleport_to: n.can_teleport_to,
+                    })
+                    .collect();
+                big_map.selected = None;
+                big_map.top_line = 0;
             }
         }
         x if x == ServerPacketIds::ObjectPlayer as i16 => {
@@ -1733,8 +1763,14 @@ fn handle_packet(
             }
         }
         x if x == ServerPacketIds::UserLocation as i16 => {
-            if let Ok(p) = user::UserLocation::read_body(&mut cur) {
-                net.self_position = Some((p.location_x, p.location_y, p.direction as u8));
+            match user::UserLocation::read_body(&mut cur) {
+                Ok(p) => {
+                    tracing::info!("📍 UserLocation: ({},{}) dir={:?}", p.location_x, p.location_y, p.direction);
+                    net.self_position = Some((p.location_x, p.location_y, p.direction as u8));
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ UserLocation 解析失败: {}", e);
+                }
             }
         }
         x if x == ServerPacketIds::GainedGold as i16 => {

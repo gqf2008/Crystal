@@ -297,6 +297,10 @@ fn main() {
     if std::env::args().any(|a| a == "--keyboard-test") {
         app.add_systems(Update, auto_keyboard_test);
     }
+    // --bigmap-test: 大地图对话框验证（NewMapInfo → 地形 → NPC 列表 → 传送）
+    if std::env::args().any(|a| a == "--bigmap-test") {
+        app.add_systems(Update, auto_bigmap_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -3514,6 +3518,106 @@ fn auto_marriage_accept(
             *stage = 9;
         }
         _ => {}
+    }
+}
+
+/// --bigmap-test：打开大地图 → 等 NewMapInfo/地形 → 选中 NPC → 传送 → 关闭
+#[allow(clippy::too_many_arguments)]
+fn auto_bigmap_test(
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut bm: ResMut<client_bevy::game::dialogs::big_map::BigMapState>,
+    net: ResMut<client_bevy::network::NetworkContext>,
+    players: Query<&Transform, With<client_bevy::actor::LocalPlayer>>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut phase: Local<f32>,
+    mut target: Local<(i32, i32)>,
+) {
+    use client_bevy::scenes::AppState;
+    use client_bevy::game::dialogs::DialogKind;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    if *stage == 0 {
+        if !mgr.is_open(DialogKind::BigMap) {
+            mgr.toggle(DialogKind::BigMap);
+            tracing::info!("[BIGMAP] 打开大地图");
+        }
+        *phase = *t;
+        *stage = 1;
+        return;
+    }
+    if *stage == 1 && *t - *phase >= 1.0 {
+        if bm.npcs.is_empty() {
+            tracing::warn!("[BIGMAP] ⚠️ 无 NewMapInfo NPC 数据（服务端需 M53 支持）");
+        } else {
+            tracing::info!("[BIGMAP] ✅ NewMapInfo: {} 个 NPC（{}）", bm.npcs.len(), bm.title);
+        }
+        *stage = 2;
+        *phase = *t;
+        return;
+    }
+    if *stage == 2 {
+        if bm.viewport_ready {
+            tracing::info!("[BIGMAP] ✅ 地形纹理生成完成 {}x{}", bm.tex_size.0, bm.tex_size.1);
+            *stage = 3;
+            *phase = *t;
+        } else if *t - *phase >= 8.0 {
+            tracing::warn!("[BIGMAP] ❌ 地形生成超时");
+            *stage = 9;
+        }
+        return;
+    }
+    if *stage == 3 && *t - *phase >= 1.0 {
+        let tp = bm.npcs.iter().find(|n| n.can_teleport_to).cloned();
+        if let Some(npc) = tp {
+            bm.selected = Some(0);
+            *target = (npc.x, npc.y);
+            tracing::info!("[BIGMAP] ✅ 选中可传送 NPC: {} ({},{})", npc.name, npc.x, npc.y);
+            net.send_packet(&mir2_shared::packets::client::npc::TeleportToNPC {
+                object_id: npc.object_id,
+            });
+            tracing::info!("[BIGMAP] ✅ 发送传送请求 id={}", npc.object_id);
+        } else {
+            tracing::warn!("[BIGMAP] ⚠️ 无可传送 NPC");
+        }
+        *stage = 4;
+        *phase = *t;
+        return;
+    }
+    if *stage == 4 && *t - *phase >= 3.0 {
+        let moved = players.single().ok().map(|tf| {
+            client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y)
+        });
+        match moved {
+            Some((x, y)) if (x, y) == *target => {
+                tracing::info!("[BIGMAP] ✅ 传送生效 玩家位置=({},{})", x, y);
+            }
+            Some((x, y)) => {
+                tracing::info!(
+                    "[BIGMAP] ✅ 传送已处理 玩家位置=({},{})（目标 ({},{})）",
+                    x,
+                    y,
+                    target.0,
+                    target.1
+                );
+            }
+            None => {
+                tracing::warn!("[BIGMAP] ⚠️ 无法读取玩家位置");
+            }
+        }
+        if mgr.is_open(DialogKind::BigMap) {
+            mgr.close(DialogKind::BigMap);
+            tracing::info!("[BIGMAP] ✅ 关闭大地图");
+        }
+        *stage = 9;
+    }
+    if *t >= 40.0 && *stage < 9 {
+        tracing::warn!("[BIGMAP] ❌ 超时 stage={}", *stage);
+        *stage = 9;
     }
 }
 

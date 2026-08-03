@@ -445,6 +445,16 @@
 - [x] 24 个默认键位（移动/战斗/交互/界面/技能/系统，参考 macroquad + C# 常用键）
 - [x] 验证：真实 ServerRust E2E（--keyboard-test）——打开 → 滚动 → 重绑“攻击→X” → 重置默认 + 规则切换 → ✅ 关闭键位设置；客户端 34 / 服务端 139 测试全过
 - [x] 注：M52 后剩余对话框：socket/dura_status/npc_drop/roll/npc_awake（需服务端）、big_map（纯 UI，可做服务端 MapInformation 增强）
+---
+
+### M53: 大地图对话框 BigMapDialog（2026-08-03 完成，含服务端 NewMapInfo）
+- [x] 面板 Title[820]（760x500）居中；标题/关闭/滚动条/世界/我的位置/传送/搜索按钮对齐 C# 布局
+- [x] 视口 568x380：地形纹理由地图瓦片平均色采样生成（700x700 → 380x380，不可行走压暗），玩家雷达点 Prguse2[1350] + NPC 绿点（选中变黄）
+- [x] NPC 列表行（x=590, y=50+i*21，18 行）：点击选中，可传送 NPC 亮“传送”按钮
+- [x] 服务端：进图序列新增 NewMapInfo 推送（地图标题 + NPC object_id/坐标/图标/可传送标志），TeleportToNPC 传送全链路
+- [x] 验证：真实 ServerRust E2E（--bigmap-test）——打开 → ✅ NewMapInfo: 43 个 NPC → ✅ 地形纹理生成完成 → 选中 Master_Wa → 📍 UserLocation: (110,317) → ✅ 传送生效 玩家位置=(110,317) → 关闭；客户端 34 / 服务端 139 测试全过（protocol_conformance 栈溢出为 HEAD 既有问题）
+- [x] 注：M53 后剩余对话框：socket/dura_status/npc_drop/roll/npc_awake（需服务端）；已知服务端 NPC 登出未清理导致多次登录后大地图 NPC 重复（后续里程碑可修）
+
 
 
 
