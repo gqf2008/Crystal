@@ -30,6 +30,11 @@ fn main() {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
+            // 资源目录固定到源码 assets/（Bevy 0.19 默认按 exe 目录解析，跨 target 运行会找不到 shader）
+            .set(AssetPlugin {
+                file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/assets").to_string(),
+                ..default()
+            })
             // 使用 DX12 后端（Vulkan 的 swapchain present 在此机器上会冻结）
             .set(RenderPlugin {
                 render_creation: RenderCreation::Automatic(Box::new(WgpuSettings {

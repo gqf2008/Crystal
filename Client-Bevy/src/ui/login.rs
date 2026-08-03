@@ -163,8 +163,7 @@ fn setup_login_ui(
     libs.0.ensure_initialized();
     ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
     let font = ui_font.0.clone();
-    spawn_ui_camera(commands.reborrow());
-
+    
     // ChrSel 动画帧
     anim.handles.clear();
     for i in 0..19usize {

@@ -311,22 +311,24 @@ impl Libraries {
         for (state_idx, state) in map_states.iter().enumerate() {
             let state_base = base.join(state);
             let offset = 200 + (state_idx * 15);
+            // 与 C# MLibrary.cs 一致（WemadeMir3 每状态 14 个库）：
+            // Tilesc/Tiles30c/Tiles5c/Smtilesc/Housesc/Cliffsc/Dungeonsc/
+            // Innersc/Furnituresc/Wallsc/smObjectsc/Animationsc/Object1c/Object2c
             let tiles = [
                 "Tilesc",
                 "Tiles30c",
                 "Tiles5c",
                 "Smtilesc",
                 "Housesc",
-                "Objects0c",
-                "Objects1c",
-                "Objects2c",
-                "Objects3c",
-                "Objects4c",
-                "Objects5c",
-                "Objects6c",
-                "Objects7c",
-                "Objects8c",
-                "Objects9c",
+                "Cliffsc",
+                "Dungeonsc",
+                "Innersc",
+                "Furnituresc",
+                "Wallsc",
+                "SmObjectsc",
+                "Animationsc",
+                "Object1c",
+                "Object2c",
             ];
             for (i, t) in tiles.iter().enumerate() {
                 self.load_to_map_slot(offset + i, state_base.join(t));
