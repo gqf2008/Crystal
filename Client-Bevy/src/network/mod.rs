@@ -25,6 +25,8 @@ use crate::game::dialogs::mentor::MentorState;
 use crate::game::dialogs::market::{MarketItem, MarketState};
 use crate::game::dialogs::game_shop::{GameShopState, ShopItem as UiShopItem};
 use crate::game::dialogs::guild_territory::{GuildTerritoryState, TerritoryRow};
+use crate::game::effects::{EffectsState, PendingEffect};
+use crate::game::player_control::ControlState;
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::npc::NpcDialogState;
 use crate::game::dialogs::npc_goods::{GoodsEntry, NpcGoodsState};
@@ -668,6 +670,8 @@ struct NetworkPanels<'w> {
     market: ResMut<'w, MarketState>,
     shop: ResMut<'w, GameShopState>,
     territory: ResMut<'w, GuildTerritoryState>,
+    effects: ResMut<'w, EffectsState>,
+    control: ResMut<'w, ControlState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -716,6 +720,8 @@ fn network_system(
                         &mut *panels.market,
                         &mut *panels.shop,
                         &mut *panels.territory,
+                        &mut *panels.effects,
+                        &mut *panels.control,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -768,6 +774,8 @@ fn network_system(
                         &mut *panels.market,
                         &mut *panels.shop,
                         &mut *panels.territory,
+                        &mut *panels.effects,
+                        &mut *panels.control,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -910,6 +918,8 @@ fn handle_packet(
     market: &mut MarketState,
     shop: &mut GameShopState,
     territory: &mut GuildTerritoryState,
+    effects: &mut EffectsState,
+    control: &mut ControlState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -1332,6 +1342,13 @@ fn handle_packet(
         x if x == ServerPacketIds::ObjectStruck as i16 => {
             if let Ok(p) = combat::ObjectStruck::read_body(&mut cur) {
                 combat_evt.strikes.push((p.object_id, p.direction));
+                // M38：选中的目标受击 → 命中爆炸特效
+                if control.attack_target == Some(p.object_id) {
+                    effects.pending.push(PendingEffect::Burst {
+                        target_id: p.object_id,
+                        color: [1.0, 0.7, 0.2],
+                    });
+                }
             }
         }
         x if x == ServerPacketIds::ObjectDied as i16 => {
@@ -2297,6 +2314,13 @@ fn handle_packet(
         x if x == ServerPacketIds::MagicCast as i16 => {
             if let Ok(p) = MagicCast::read_body(&mut cur) {
                 tracing::info!("🪄 MagicCast: spell={:?}", p.spell);
+                // M38：有选中目标 → 生成魔法弹道特效
+                if let Some(tid) = control.attack_target {
+                    effects.pending.push(PendingEffect::Projectile {
+                        target_id: tid,
+                        color: [1.0, 0.6, 0.2],
+                    });
+                }
             }
         }
 

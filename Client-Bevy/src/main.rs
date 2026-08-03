@@ -2352,6 +2352,9 @@ fn auto_combat_test(
     mut target: Local<Option<u32>>,
     mut target_tile: Local<Option<(i32, i32)>>,
     mut item_count_before: Local<usize>,
+    mut effect_seen: Local<bool>,
+    effects: Res<client_bevy::game::effects::EffectsState>,
+    mut control: ResMut<client_bevy::game::player_control::ControlState>,
     actors: Query<(
         &client_bevy::actor::NetObjectId,
         &Transform,
@@ -2421,6 +2424,8 @@ fn auto_combat_test(
                     *target = Some(oid);
                     *target_tile = Some((mx, my));
                     *item_count_before = items.iter().count();
+                    // 模拟真实玩法：点击选中攻击目标（供特效/施法定位）
+                    control.attack_target = Some(oid);
                     tracing::info!(
                         "[COMBAT] 🎯 目标怪物 id={} @ ({},{}) 距离={}",
                         oid,
@@ -2453,6 +2458,14 @@ fn auto_combat_test(
                 *stage = 2;
                 *t = 0.0;
                 return;
+            }
+            // M38：魔法特效验证（MagicCast → 弹道，ObjectStruck → 爆炸）
+            if !*effect_seen && effects.spawned > 0 {
+                *effect_seen = true;
+                tracing::info!(
+                    "[COMBAT] ✅ 魔法特效已生成（计数 {}）",
+                    effects.spawned
+                );
             }
             // 每 1.3 秒施放一次 FireBall（目标位置）
             *cast_timer += time.delta_secs();
