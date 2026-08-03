@@ -363,6 +363,13 @@
 - [x] 注：DB 手工插物品时 `refined_value: 0` 会导致 UserItem 反序列化失败被静默跳过（改用 3 正常）
 
 ---
+### M42: 物品租赁（ItemRental）（2026-08-03 完成）
+- [x] **客户端**：租赁对话框（目标名/费用/期限输入 + 发起/存入/设费/设期/锁费/锁物/确认/取消按钮 + 会话状态显示）
+- [x] **网络**：解析 ItemRentalRequest / UpdateRentalItem[hasdata+fee+period] / ItemRentalFee / Period / DepositRentalItem / RetrieveRentalItem / Lock / PartnerLock / CanConfirm / Confirm / Cancel；RentalRequestWire [target dotnet]、RentalDepositWire/RetrieveWire [uid u64] 手动构造（gate wire 与 SharedRust 不一致）；Fee/Period/Lock/Confirm 复用 SharedRust（匹配 gate）
+- [x] 服务端：无改动（market.rs 租赁会话已完整）
+- [x] 验证：真实 ServerRust 双客户端 E2E——A 发起 → B `✅ 收到租赁请求` → 存入物品 `success=true` → 双方锁定 → `✅ 双方已锁定，可确认` → A `✅ 租赁成交确认收到`；客户端 34 / 服务端 139 测试全过
+
+---
 ## 四、执行顺序与依赖
 
 ```

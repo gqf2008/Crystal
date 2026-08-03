@@ -245,6 +245,14 @@ fn main() {
     if std::env::args().any(|a| a == "--craft-test") {
         app.add_systems(Update, auto_craft_test);
     }
+    // --rental-test: 物品租赁链路（租方，配合 --rental-owner）
+    if std::env::args().any(|a| a == "--rental-test") {
+        app.add_systems(Update, auto_rental_test);
+    }
+    // --rental-owner: 物品租赁链路（物主，配合 --rental-test）
+    if std::env::args().any(|a| a == "--rental-owner") {
+        app.add_systems(Update, auto_rental_owner);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -2784,6 +2792,164 @@ fn auto_craft_test(
                     "[CRAFTTEST] ✅ 合成结果: {}",
                     craft.message
                 );
+                *stage = 9;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// --rental-test（租方）：发起租赁 → 等 UpdateRentalItem → 锁定费用 → 确认
+#[allow(clippy::too_many_arguments)]
+fn auto_rental_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    rental: Res<client_bevy::game::dialogs::item_rental::ItemRentalState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 10.0 {
+                return;
+            }
+            net.send_packet(&client_bevy::network::RentalRequestWire {
+                target_name: "bevy2char".to_string(),
+            });
+            tracing::info!("[RENTAL] 向 bevy2char 发起租赁");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t >= 25.0 {
+                tracing::warn!("[RENTAL] ❌ 未收到租赁更新（has_item={}）", rental.has_item);
+                *stage = 9;
+                return;
+            }
+            if rental.has_item {
+                tracing::info!(
+                    "[RENTAL] ✅ 收到租赁物品（费用={} 期限={}）",
+                    rental.fee,
+                    rental.period
+                );
+                net.send_packet(&mir2_shared::packets::client::item::ItemRentalLockFee);
+                tracing::info!("[RENTAL] 锁定费用");
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t >= 15.0 {
+                tracing::warn!("[RENTAL] ❌ 未收到可确认");
+                *stage = 9;
+                return;
+            }
+            if rental.can_confirm {
+                tracing::info!("[RENTAL] ✅ 双方已锁定，确认成交");
+                net.send_packet(&mir2_shared::packets::client::item::ConfirmItemRental);
+                *stage = 3;
+                *t = 0.0;
+            }
+        }
+        3 => {
+            if *t < 5.0 {
+                return;
+            }
+            if rental.confirmed {
+                tracing::info!("[RENTAL] ✅ 租赁成交确认收到");
+            } else {
+                tracing::warn!("[RENTAL] ⚠️ 未收到成交确认包");
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --rental-owner（物主）：等请求 → 存入物品 → 设费/期 → 锁定物品 → 等可确认
+#[allow(clippy::too_many_arguments)]
+fn auto_rental_owner(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    rental: Res<client_bevy::game::dialogs::item_rental::ItemRentalState>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t >= 30.0 {
+                tracing::warn!("[RENTALOWNER] ❌ 未收到租赁请求");
+                *stage = 9;
+                return;
+            }
+            if rental.request_received {
+                tracing::info!("[RENTALOWNER] ✅ 收到租赁请求");
+                // 存入第一个背包物品
+                let first = hud
+                    .inventory
+                    .items
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, s)| s.as_ref().map(|it| (i, it)));
+                match first {
+                    Some((_i, item)) => {
+                        net.send_packet(&client_bevy::network::RentalDepositWire {
+                            unique_id: item.unique_id,
+                        });
+                        tracing::info!(
+                            "[RENTALOWNER] 存入物品 uid={}",
+                            item.unique_id
+                        );
+                        *stage = 1;
+                        *t = 0.0;
+                    }
+                    None => {
+                        tracing::warn!("[RENTALOWNER] ❌ 背包为空");
+                        *stage = 9;
+                    }
+                }
+            }
+        }
+        1 => {
+            if *t < 4.0 {
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::item::ItemRentalFee { amount: 100 });
+            net.send_packet(&mir2_shared::packets::client::item::ItemRentalPeriod { days: 24 });
+            tracing::info!("[RENTALOWNER] 设置费用 100 / 期限 24");
+            *stage = 2;
+            *t = 0.0;
+        }
+        2 => {
+            if *t < 4.0 {
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::item::ItemRentalLockItem);
+            tracing::info!("[RENTALOWNER] 锁定物品");
+            *stage = 3;
+            *t = 0.0;
+        }
+        3 => {
+            if *t >= 15.0 {
+                tracing::warn!("[RENTALOWNER] ❌ 未收到可确认");
+                *stage = 9;
+                return;
+            }
+            if rental.can_confirm {
+                tracing::info!("[RENTALOWNER] ✅ 双方已锁定，可确认");
                 *stage = 9;
             }
         }

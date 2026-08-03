@@ -28,6 +28,7 @@ use crate::game::dialogs::guild_territory::{GuildTerritoryState, TerritoryRow};
 use crate::game::dialogs::fishing::FishingState;
 use crate::game::dialogs::refine::RefineState;
 use crate::game::dialogs::craft::CraftState;
+use crate::game::dialogs::item_rental::ItemRentalState;
 use crate::game::effects::{EffectsState, PendingEffect};
 use crate::game::player_control::ControlState;
 use crate::game::dialogs::inventory::InvItem;
@@ -679,6 +680,86 @@ impl Packet for CraftItemWire {
     }
 }
 
+/// 物品租赁客户端包（M42：gate wire 与 SharedRust 不一致的手动构造）
+#[derive(Debug, Clone)]
+pub struct RentalRequestWire {
+    pub target_name: String,
+}
+
+impl Packet for RentalRequestWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::ItemRentalRequest as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        Ok(Self {
+            target_name: mir2_shared::binary::read_dotnet_string(reader)?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        mir2_shared::binary::write_dotnet_string(writer, &self.target_name)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RentalDepositWire {
+    pub unique_id: u64,
+}
+
+impl Packet for RentalDepositWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::DepositRentalItem as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            unique_id: reader.read_u64::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RentalRetrieveWire {
+    pub unique_id: u64,
+}
+
+impl Packet for RentalRetrieveWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::RetrieveRentalItem as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            unique_id: reader.read_u64::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RefineRetrieveWire {
     pub unique_id: u64,
@@ -877,6 +958,7 @@ struct NetworkPanels<'w> {
     fishing: ResMut<'w, FishingState>,
     refine: ResMut<'w, RefineState>,
     craft: ResMut<'w, CraftState>,
+    rental: ResMut<'w, ItemRentalState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -930,6 +1012,7 @@ fn network_system(
                         &mut *panels.fishing,
                         &mut *panels.refine,
                         &mut *panels.craft,
+                        &mut *panels.rental,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -987,6 +1070,7 @@ fn network_system(
                         &mut *panels.fishing,
                         &mut *panels.refine,
                         &mut *panels.craft,
+                        &mut *panels.rental,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1134,6 +1218,7 @@ fn handle_packet(
     fishing: &mut FishingState,
     refine: &mut RefineState,
     craft: &mut CraftState,
+    rental: &mut ItemRentalState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -2091,6 +2176,97 @@ fn handle_packet(
                 };
                 tracing::info!("🔧 CraftItem: recipe={} count={} success={}", recipe_id, count, success);
             }
+        }
+        // ---- M42: 物品租赁 ----
+        x if x == ServerPacketIds::ItemRentalRequest as i16 => {
+            rental.request_received = true;
+            rental.message = "收到租赁请求（物主）".to_string();
+            tracing::info!("📦 收到租赁请求");
+        }
+        x if x == ServerPacketIds::UpdateRentalItem as i16 => {
+            // [hasdata u8][fee u32][period i32]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 9 {
+                rental.has_item = body[0] != 0;
+                rental.fee = u32::from_le_bytes(body[1..5].try_into().unwrap_or([0; 4]));
+                rental.period = i32::from_le_bytes(body[5..9].try_into().unwrap_or([0; 4]));
+                rental.message = format!(
+                    "租赁更新: 物品={} 费用={} 期限={}",
+                    if rental.has_item { "有" } else { "无" },
+                    rental.fee,
+                    rental.period
+                );
+                tracing::info!("📦 UpdateRentalItem: item={} fee={} period={}", rental.has_item, rental.fee, rental.period);
+            }
+        }
+        x if x == ServerPacketIds::ItemRentalFee as i16 => {
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 4 {
+                rental.fee = u32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
+                rental.message = format!("租赁费用更新: {}", rental.fee);
+            }
+        }
+        x if x == ServerPacketIds::ItemRentalPeriod as i16 => {
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 4 {
+                rental.period = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
+                rental.message = format!("租赁期限更新: {} 小时", rental.period);
+            }
+        }
+        x if x == ServerPacketIds::DepositRentalItem as i16 => {
+            // [uid u64][success u8]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 9 {
+                let uid = u64::from_le_bytes(body[0..8].try_into().unwrap_or([0; 8]));
+                let success = body[8] != 0;
+                rental.message = format!("存入租赁物品: {} ({})", uid, if success { "成功" } else { "失败" });
+                tracing::info!("📦 存入租赁物品 uid={} success={}", uid, success);
+            }
+        }
+        x if x == ServerPacketIds::RetrieveRentalItem as i16 => {
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 9 {
+                let uid = u64::from_le_bytes(body[0..8].try_into().unwrap_or([0; 8]));
+                let success = body[8] != 0;
+                rental.message = format!("取回租赁物品: {} ({})", uid, if success { "成功" } else { "失败" });
+                rental.has_item = false;
+            }
+        }
+        x if x == ServerPacketIds::ItemRentalLock as i16 => {
+            rental.message = "锁定状态更新".to_string();
+            tracing::info!("📦 租赁锁定（本侧）");
+        }
+        x if x == ServerPacketIds::ItemRentalPartnerLock as i16 => {
+            rental.message = "对方已锁定".to_string();
+            tracing::info!("📦 租赁锁定（对方）");
+        }
+        x if x == ServerPacketIds::CanConfirmItemRental as i16 => {
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            rental.can_confirm = body.first().copied().unwrap_or(0) != 0;
+            rental.message = if rental.can_confirm {
+                "双方已锁定，可以确认成交".to_string()
+            } else {
+                "尚未可确认".to_string()
+            };
+            tracing::info!("📦 CanConfirmItemRental: {}", rental.can_confirm);
+        }
+        x if x == ServerPacketIds::ConfirmItemRental as i16 => {
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let success = body.first().copied().unwrap_or(0) != 0;
+            rental.confirmed = success;
+            rental.message = if success {
+                "租赁成交！".to_string()
+            } else {
+                "确认失败".to_string()
+            };
+            tracing::info!("📦 ConfirmItemRental: {}", success);
+        }
+        x if x == ServerPacketIds::CancelItemRental as i16 => {
+            rental.request_received = false;
+            rental.has_item = false;
+            rental.can_confirm = false;
+            rental.message = "租赁已取消".to_string();
+            tracing::info!("📦 租赁取消");
         }
         // ---- M39: 钓鱼 ----
         x if x == ServerPacketIds::FishingUpdate as i16 => {
