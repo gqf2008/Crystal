@@ -1,0 +1,31 @@
+pinyin_dict.txt 的数据来源与许可
+================================
+
+本目录下的 pinyin_dict.txt 由 tools/gen_pinyin_dict.py 从 Unicode® Unihan
+数据生成，并叠加作者自有（公共领域）的策展常用词表。
+
+数据来源
+--------
+- Unihan_Readings.txt         （kMandarin、kHanyuPinlu 字段）
+- Unihan_DictionaryLikeData.txt（kUnihanCore2020 字段）
+
+以上均属 Unicode Data Files，来源：
+  https://www.unicode.org/Public/UCD/latest/ucd/Unihan.zip
+
+许可
+----
+Unicode Data Files 按 Unicode License v3 提供（OSI 批准的宽松许可，无 copyleft）。
+全文见：https://www.unicode.org/license.txt
+
+摘要（非法律文本，以原文为准）：
+  在保留版权声明与许可声明的前提下，可免费使用、复制、修改、分发、再授权，
+  无任何使用场景限制。
+
+策展常用词
+----------
+CURATED_WORDS（见 gen_pinyin_dict.py）为本项目作者编写，公共领域，无限制。
+
+版权
+-----
+© 1991-2025 Unicode, Inc. —— Unihan 原始数据。
+pinyin_dict.txt 的生成逻辑与策展词：本项目作者。
