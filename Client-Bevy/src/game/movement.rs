@@ -43,6 +43,8 @@ pub struct LocalMove {
     pub run: bool,
     /// 当前路径段离开的节点（到达节点时更新；用于稳定方向，避免滑行中方向抖动）
     pub last: Option<(i32, i32)>,
+    /// 转向计时器（固定角速度：每 125ms 转 1 个方向）
+    pub turn_acc: f32,
 }
 
 /// 一段插值移动（本地与远端通用）
@@ -85,6 +87,21 @@ pub fn direction_from_delta(dx: i32, dy: i32) -> Option<MirDirection> {
         (-1, -1) => MirDirection::UpLeft,
         _ => return None,
     })
+}
+
+/// 向前看最多 2 个路径节点，返回整体前进方向（若 2 格共线则用 2 格方向，
+/// 否则用第 1 格方向）——减少短锯齿路径引起的方向乱跳
+fn lookahead_direction(last: (i32, i32), path: &VecDeque<(i32, i32)>) -> Option<mir2_shared::enums::MirDirection> {
+    let p0 = *path.front()?;
+    let d0 = (p0.0 - last.0, p0.1 - last.1);
+    if path.len() >= 2 {
+        let p1 = path.iter().nth(1).copied().unwrap_or(p0);
+        let d1 = (p1.0 - p0.0, p1.1 - p0.1);
+        if d1 == d0 {
+            return direction_from_delta(d0.0 * 2, d0.1 * 2);
+        }
+    }
+    direction_from_delta(d0.0, d0.1)
 }
 
 /// 逐步转向（对齐 macroquad MovementSystem::step_towards_direction）：
@@ -242,8 +259,10 @@ fn advance_local_move(
     net: Res<NetworkContext>,
     mut players: Query<(Entity, &mut LocalMove, &mut Transform, &mut ActorAnim), With<LocalPlayer>>,
 ) {
-    const WALK_SPEED: f32 = 130.0;
-    const RUN_SPEED: f32 = 200.0;
+    // 与动画帧率同步（C#：走 1 格/6 帧/100ms，跑 2 格/6 帧/100ms）
+    // walk = 48/0.6 = 80px/s，run = 96/0.6 = 160px/s → 脚部与地面严格同步
+    const WALK_SPEED: f32 = 80.0;
+    const RUN_SPEED: f32 = 160.0;
     const ARRIVAL: f32 = 5.0;
 
     let Ok((e, mut lm, mut tf, mut anim)) = players.single_mut() else {
@@ -267,16 +286,23 @@ fn advance_local_move(
     let speed = if lm.run { RUN_SPEED } else { WALK_SPEED };
     let step = speed * dt;
 
-    // 动画：走路/跑步 + 方向（每段方向固定，避免滑行中 world_to_tile 翻转导致抖动）
+    // 动画：走路/跑步 + 方向（向前看 2 个节点取平均方向，避免短锯齿路径导致方向乱跳）
     let cur = world_to_tile(tf.translation.x, tf.translation.y);
     let desired = if let Some(last) = lm.last {
-        direction_from_delta(target.0 - last.0, target.1 - last.1)
+        lookahead_direction(last, &lm.path)
+            .or_else(|| direction_from_delta(target.0 - last.0, target.1 - last.1))
     } else {
         direction_from_delta(target.0 - cur.0, target.1 - cur.1)
     }
     .unwrap_or(mir2_shared::enums::MirDirection::Up) as u8;
-    let turn_steps = (dt * 12.0).ceil() as i32;
-    anim.direction = step_towards_direction(anim.direction, desired, turn_steps);
+    // 固定角速度转向：每 125ms 转 1 个方向（8 方向/秒，平滑不抖动）
+    lm.turn_acc += dt;
+    let mut turn_steps = 0i32;
+    while lm.turn_acc >= 0.125 {
+        lm.turn_acc -= 0.125;
+        turn_steps += 1;
+    }
+    anim.direction = step_towards_direction(anim.direction, desired, turn_steps.max(1));
     anim.action = if lm.run {
         mir2_shared::enums::MirAction::Running
     } else {

@@ -821,21 +821,17 @@ fn camera_follow_system(
             Without<Camera2d>,
         ),
     >,
-    time: Res<Time>,
 ) {
     let Ok(mut cam) = camera.single_mut() else { return };
     let Ok(player) = players.single() else { return };
+    // C# 风格：相机精确跟随玩家（玩家恒定在屏幕中心），
+    // 消除 lerp 滞后造成的画面轻微抖动/拖影
     let p = player.translation;
     let c = cam.translation;
-    // 首次/大跨度传送：直接对齐
     let far = (p.x - c.x).abs() > 1024.0 * 6.0 || (p.y - c.y).abs() > 768.0 * 6.0;
-    if far {
+    if far || (p.x - c.x).abs() > 0.01 || (p.y - c.y).abs() > 0.01 {
         cam.translation.x = p.x;
         cam.translation.y = p.y;
-    } else {
-        let t = (10.0 * time.delta_secs()).min(1.0);
-        cam.translation.x += (p.x - c.x) * t;
-        cam.translation.y += (p.y - c.y) * t;
     }
 }
 
