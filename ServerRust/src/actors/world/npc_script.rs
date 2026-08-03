@@ -659,6 +659,30 @@ async fn exec_action(
         "BREAK" => {
             flow.break_loop = true;
         }
+
+        // ROLLDIE <page> <autoRoll> / ROLLYUT <page> <autoRoll>（C# ActionType.RollDie/RollYut）
+        // 掷骰后发 Roll 包（270），客户端动画结束回 CallNPC "[page]"，结果存 %NPCRollResult
+        "ROLLDIE" | "ROLLYUT" => {
+            let page = unquote(arg0()).to_string();
+            let auto_roll = arg1().eq_ignore_ascii_case("true") || arg1() == "1";
+            let result = fastrand::i32(1..=6);
+            custom_vars.insert("NPCRollResult".into(), result.to_string());
+            let r#type = if act.action_type == "ROLLYUT" { 1 } else { 0 };
+            let packet = mir2_shared::packets::server::ui_events::Roll {
+                r#type,
+                page: page.clone(),
+                result,
+                auto_roll,
+            };
+            let mut body = Vec::new();
+            if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
+                let _ = world.gate_ref.tell(SendToClient {
+                    session_id,
+                    data: body,
+                }).await;
+            }
+            info!("NPC {}: ROLL type={} result={} page={} auto={}", npc.name, r#type, result, page, auto_roll);
+        }
         // MOVE <map_index> <x> <y>（C# 格式）
         "MOVE" | "MAPMOVE" | "TELEPORT" => {
             let map_idx = arg0().parse::<u16>().unwrap_or(0);

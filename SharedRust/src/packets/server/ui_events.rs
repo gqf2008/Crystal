@@ -233,10 +233,18 @@ impl Packet for UpdateNotice {
 }
 
 /// Roll - 掷骰子 (270)
+/// Roll - 掷骰子 (270)
+/// wire 对齐 C# ServerPackets.Roll：Type/Page/Result/AutoRoll
 #[derive(Debug, Clone)]
 pub struct Roll {
-    pub object_id: u32,             // 对象ID
-    pub result: i32,                // 结果
+    /// 0=骰子（Prguse 281+result），1=尤茨（Items 2587+result）
+    pub r#type: i32,
+    /// 掷完后客户端回调的 NPC 页（C# RollDialog.ReturnResult → CallNPC "[page]"）
+    pub page: String,
+    /// 结果 1-6
+    pub result: i32,
+    /// 是否自动掷骰（true 到达即掷，false 需点击）
+    pub auto_roll: bool,
 }
 
 impl Packet for Roll {
@@ -244,19 +252,27 @@ impl Packet for Roll {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
-        writer.write_u32::<LittleEndian>(self.object_id)?;
+        use crate::binary::write_dotnet_string;
+
+        writer.write_i32::<LittleEndian>(self.r#type)?;
+        write_dotnet_string(writer, &self.page)?;
         writer.write_i32::<LittleEndian>(self.result)?;
-        
+        writer.write_u8(if self.auto_roll { 1 } else { 0 })?;
+
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let object_id = reader.read_u32::<LittleEndian>()?;
+        use crate::binary::read_dotnet_string;
+
+        let r#type = reader.read_i32::<LittleEndian>()?;
+        let page = read_dotnet_string(reader)?;
         let result = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { object_id, result })
+        let auto_roll = reader.read_u8()? != 0;
+        Ok(Self { r#type, page, result, auto_roll })
     }
 }
+
 
 /// SetCompass - 设置指南针 (271)
 #[derive(Debug, Clone)]
