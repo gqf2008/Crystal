@@ -198,6 +198,20 @@ pub struct NetworkContext {
     pub local_player_id: Option<u32>,
     /// 服务器 UserLocation 权威位置（瓦片坐标 + 朝向），由移动系统消费
     pub self_position: Option<(i32, i32, u8)>,
+    /// M58 自动重连：断线后自动重连并重新登录（默认开启）
+    pub auto_reconnect: bool,
+    /// 是否处于自动重连流程
+    pub reconnecting: bool,
+    /// 重连倒计时（秒）
+    pub reconnect_timer: f32,
+    /// 重连延迟（指数退避，2→4→8...最大 30 秒）
+    pub reconnect_delay: f32,
+    /// 重连尝试次数
+    pub reconnect_attempts: u32,
+    /// 最近登录凭据（send_packet 捕获 Login 包，自动重连用）
+    pub saved_login: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>>,
+    /// 最近选择的角色下标（自动重连后自动进游戏）
+    pub saved_character: std::sync::Arc<std::sync::Mutex<Option<i32>>>,
 }
 
 impl Default for NetworkContext {
@@ -223,13 +237,35 @@ impl Default for NetworkContext {
             client_version_sent: false,
             local_player_id: None,
             self_position: None,
+            auto_reconnect: true,
+            reconnecting: false,
+            reconnect_timer: 0.0,
+            reconnect_delay: 2.0,
+            reconnect_attempts: 0,
+            saved_login: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            saved_character: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
 }
 
 impl NetworkContext {
     /// 发送客户端包（serialize 内层 → 发送）
-    pub fn send_packet<P: Packet>(&self, packet: &P) {
+    /// M58：顺带捕获 Login/StartGame 用于自动重连
+    pub fn send_packet<P: Packet + 'static>(&self, packet: &P) {
+        if let Some(login) = (packet as &dyn std::any::Any)
+            .downcast_ref::<mir2_shared::packets::client::account::Login>()
+        {
+            if let Ok(mut g) = self.saved_login.lock() {
+                *g = Some((login.account_id.clone(), login.password.clone()));
+            }
+        }
+        if let Some(start) = (packet as &dyn std::any::Any)
+            .downcast_ref::<mir2_shared::packets::client::account::StartGame>()
+        {
+            if let Ok(mut g) = self.saved_character.lock() {
+                *g = Some(start.character_index);
+            }
+        }
         if let Some(tx) = &self.to_server {
             let mut inner = Vec::new();
             if mir2_shared::packets::base::serialize_packet(&mut inner, packet).is_ok() {
@@ -1133,7 +1169,46 @@ fn network_system(
     mut magics: ResMut<MagicsState>,
     mut panels: NetworkPanels,
     mut next: ResMut<NextState<AppState>>,
+    time: Res<Time>,
+    addr: Res<NetServerAddr>,
 ) {
+    // M58：断线自动重连（真实 TCP，指数退避）
+    if net.mode == NetworkMode::Real && net.reconnecting && net.to_server.is_none() {
+        net.reconnect_timer -= time.delta_secs();
+        if net.reconnect_timer <= 0.0 {
+            match tcp::connect(&addr.0, net.client_version_hash) {
+                Ok(conn) => {
+                    net.to_server = Some(conn.to_server);
+                    net.tcp_events = Some(conn.from_server);
+                    net.client_version_sent = false;
+                    net.state = NetState::LoggingIn;
+                    net.login_error = Some("连接已恢复，正在重新登录...".to_string());
+                    let creds = net.saved_login.lock().ok().map(|g| g.clone()).flatten();
+                    if let Some((acct, pass)) = creds {
+                        net.send_packet(&mir2_shared::packets::client::account::Login {
+                            account_id: acct,
+                            password: pass,
+                        });
+                        tracing::info!("🔌 自动重连成功，已重新发送登录请求");
+                    } else {
+                        net.reconnecting = false;
+                        net.login_error = Some("连接已恢复，请重新登录".to_string());
+                    }
+                }
+                Err(e) => {
+                    net.reconnect_attempts += 1;
+                    net.reconnect_delay = (net.reconnect_delay * 2.0).min(30.0);
+                    net.reconnect_timer = net.reconnect_delay;
+                    net.login_error = Some(format!(
+                        "重连失败（{}），{:.0} 秒后重试（第 {} 次）",
+                        e, net.reconnect_delay, net.reconnect_attempts
+                    ));
+                    tracing::warn!("🔌 重连失败: {}（第 {} 次）", e, net.reconnect_attempts);
+                }
+            }
+        }
+    }
+
     // 真实 TCP：TcpEvent（完整内层包 / 断线）
     if let Some(rx) = net.tcp_events.clone() {
         while let Ok(ev) = rx.try_recv() {
@@ -1188,8 +1263,17 @@ fn network_system(
                     tracing::warn!("🔌 与服务器断开: {}", reason);
                     net.state = NetState::Offline;
                     net.disconnected = Some(reason.clone());
-                    net.login_error = Some(format!("与服务器断开连接：{}", reason));
                     net.login_success = false;
+                    net.to_server = None;
+                    net.tcp_events = None;
+                    if net.auto_reconnect {
+                        net.reconnecting = true;
+                        net.reconnect_delay = 2.0;
+                        net.reconnect_timer = 2.0;
+                        net.login_error = Some(format!("连接断开，2 秒后自动重连...（{}）", reason));
+                    } else {
+                        net.login_error = Some(format!("与服务器断开连接：{}", reason));
+                    }
                 }
             }
         }
@@ -1495,6 +1579,7 @@ fn handle_packet(
                 tracing::warn!("⛔ 登录失败 result={} {}", p.result, msg);
                 net.state = NetState::Offline;
                 net.login_error = Some(msg);
+                net.reconnecting = false;
             }
         }
         x if x == ServerPacketIds::LoginSuccess as i16 => {
@@ -1505,6 +1590,17 @@ fn handle_packet(
                 net.state = NetState::Select;
                 net.login_error = None;
                 net.login_success = true;
+                // M58：重连成功后自动进入之前的角色
+                if net.reconnecting {
+                    net.reconnecting = false;
+                    let saved = net.saved_character.lock().ok().map(|g| g.clone()).flatten();
+                    if let Some(idx) = saved {
+                        net.send_packet(&mir2_shared::packets::client::account::StartGame {
+                            character_index: idx,
+                        });
+                        tracing::info!("🔌 自动重连成功，自动进入角色 idx={}", idx);
+                    }
+                }
             }
         }
 

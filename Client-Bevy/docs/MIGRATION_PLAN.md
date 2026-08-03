@@ -490,6 +490,15 @@
 - [x] 客户端 RollDialog：骰子 Prguse[281+result] / 尤茨 Items[2587+result]，autoRoll 2 秒后或点击 → CallNPC "[page]" 回调
 - [x] 验证：真实 ServerRust E2E（--roll-test）——CallNPC [@TestRoll] → 服务端 NPC Master_Wa: ROLL type=0 result=1 → 客户端 🎲 Roll: type=0 result=1 → ✅ 收到 Roll 包 → 自动回调 NPC 1424 [@TestRollResult] → 服务端执行结果页；客户端 34 / 服务端 139 测试全过
 - [x] 注：剩余对话框 npc_drop 已由 M20 sell_panel 覆盖（C# NPCDropDialog=出售/修理面板）；对话框里程碑全部完成
+---
+
+### M58: 断线自动重连 Auto-Reconnect（2026-08-03 完成）
+- [x] 断线（EOF/IO 错误）→ 清除旧通道 → 2 秒后自动重连，指数退避（2→4→8...最大 30 秒），成功后重置
+- [x] send_packet 通过 Any downcast 捕获 Login/StartGame（账号/密码/角色下标），重连后自动登录并自动进入之前的角色
+- [x] 登录失败/手动场景自动停止重连；重连状态实时写入 login_error 提示
+- [x] 验证：真实 ServerRust E2E（--reconnect-test）——进入游戏 → 杀掉服务器 → ✅ 检测到断线 → 重连失败退避（第 1 次）→ 重启服务器 → ✅ 自动重连成功并重新进入游戏；客户端 34 / 服务端 139 测试全过
+- [x] 注：重连期间的场景切换偶发 despawn 警告（既有场景清理行为，不影响功能）
+
 
 
 

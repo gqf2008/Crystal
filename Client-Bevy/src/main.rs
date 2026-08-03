@@ -317,6 +317,10 @@ fn main() {
     if std::env::args().any(|a| a == "--roll-test") {
         app.add_systems(Update, auto_roll_test);
     }
+    // --reconnect-test: 断线自动重连验证（等断线 → 重连 → 自动登录进游戏）
+    if std::env::args().any(|a| a == "--reconnect-test") {
+        app.add_systems(Update, auto_reconnect_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -3534,6 +3538,59 @@ fn auto_marriage_accept(
             *stage = 9;
         }
         _ => {}
+    }
+}
+
+/// --reconnect-test：进入游戏 → 等服务器断开 → 自动重连 → 自动登录并重新进游戏
+#[allow(clippy::too_many_arguments)]
+fn auto_reconnect_test(
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut net: ResMut<client_bevy::network::NetworkContext>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut phase: Local<f32>,
+    mut saw_disconnect: Local<bool>,
+) {
+    use client_bevy::scenes::AppState;
+    use client_bevy::network::NetState;
+    *t += time.delta_secs();
+    if *stage == 0 {
+        if *state == AppState::Game {
+            tracing::info!("[RECON] 已进入游戏，等待服务器断开...");
+            *stage = 1;
+            *phase = *t;
+        } else if *t >= 60.0 {
+            tracing::warn!("[RECON] ❌ 60 秒内未进入游戏");
+            *stage = 9;
+        }
+        return;
+    }
+    if *stage == 1 {
+        if net.disconnected.is_some() && !*saw_disconnect {
+            *saw_disconnect = true;
+            tracing::info!("[RECON] ✅ 检测到断线: {:?}", net.disconnected);
+            *stage = 2;
+            *phase = *t;
+        } else if *t - *phase >= 60.0 {
+            tracing::warn!("[RECON] ❌ 未检测到断线");
+            *stage = 9;
+        }
+        return;
+    }
+    if *stage == 2 {
+        if net.state == NetState::InGame && *state == AppState::Game && !net.reconnecting {
+            tracing::info!("[RECON] ✅ 自动重连成功并重新进入游戏");
+            *stage = 9;
+        } else if *t - *phase >= 90.0 {
+            tracing::warn!("[RECON] ❌ 重连超时（state={:?} reconnecting={}）", net.state, net.reconnecting);
+            *stage = 9;
+        }
+        return;
+    }
+    if *t >= 200.0 && *stage < 9 {
+        tracing::warn!("[RECON] ❌ 总超时 stage={}", *stage);
+        *stage = 9;
     }
 }
 
