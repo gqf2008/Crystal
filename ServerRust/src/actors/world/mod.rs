@@ -871,7 +871,7 @@ impl WorldActor {
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
-            conquest_instances: Vec::new(),
+            conquest_instances: default_conquest_instances(),
             siege_structures: HashMap::new(),
             guild_wars: HashMap::new(),
             hero_ai_states: HashMap::new(),
@@ -2958,12 +2958,20 @@ impl Actor for WorldActor {
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
-            conquest_instances: Vec::new(),
+            conquest_instances: default_conquest_instances(),
             siege_structures: HashMap::new(),
             guild_wars: HashMap::new(),
             hero_ai_states: HashMap::new(),
         })
     }
+}
+
+/// 默认行会领地实例（conquest_infos 表为空时种子；对应 C# Envir 默认沙巴克等 8 个领地）
+/// M36：领地列表/购买 E2E 用；购买仅内存态（服务端暂无持久化）
+fn default_conquest_instances() -> Vec<conquest::ConquestInstance> {
+    (1..=8)
+        .map(|i| conquest::ConquestInstance::new(i, 0, 0, conquest::ConquestGame::ControlPoints))
+        .collect()
 }
 
 /// 合成材料
