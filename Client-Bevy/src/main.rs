@@ -229,6 +229,10 @@ fn main() {
     if std::env::args().any(|a| a == "--territory-war") {
         app.add_systems(Update, auto_territory_war);
     }
+    // --combat-test: 战斗闭环（选中怪物 → 连续 FireBall → 死亡 → 掉落）
+    if std::env::args().any(|a| a == "--combat-test") {
+        app.add_systems(Update, auto_combat_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -2331,6 +2335,168 @@ fn auto_territory_war(
                 tracing::warn!("[TERRWAR] ❌ 行会创建失败");
                 *stage = 9;
             }
+        }
+        _ => {}
+    }
+}
+
+/// --combat-test：自动选怪 → 连续 FireBall → 验证死亡 + 掉落（M37 战斗闭环）
+#[allow(clippy::too_many_arguments)]
+fn auto_combat_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut cast_timer: Local<f32>,
+    mut target: Local<Option<u32>>,
+    mut target_tile: Local<Option<(i32, i32)>>,
+    mut item_count_before: Local<usize>,
+    actors: Query<(
+        &client_bevy::actor::NetObjectId,
+        &Transform,
+        &client_bevy::actor::ActorAppearance,
+    )>,
+    items: Query<(&client_bevy::actor::NetObjectId, &client_bevy::actor::GroundItem)>,
+    players: Query<
+        &Transform,
+        (
+            With<client_bevy::actor::LocalPlayer>,
+            With<client_bevy::actor::NetObjectId>,
+        ),
+    >,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 10.0 {
+                return;
+            }
+            let Ok(pf) = players.single() else { return };
+            let (px, py) =
+                client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+            // 找 10 格内最近的怪物
+            let mut best: Option<(u32, i32, i32, i32)> = None;
+            for (id, tf, app) in &actors {
+                if !matches!(app, client_bevy::actor::ActorAppearance::Monster { .. }) {
+                    continue;
+                }
+                let (mx, my) =
+                    client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+                let d = (mx - px).abs() + (my - py).abs();
+                if d <= 40 && best.map(|(_, _, _, bd)| d < bd).unwrap_or(true) {
+                    best = Some((id.0, mx, my, d));
+                }
+            }
+            if best.is_none() {
+                // 探测：附近 40 格内怪物数量与最近距离
+                let mut total = 0usize;
+                let mut nearest = i32::MAX;
+                for (_, tf, app) in &actors {
+                    if !matches!(app, client_bevy::actor::ActorAppearance::Monster { .. }) {
+                        continue;
+                    }
+                    total += 1;
+                    let (mx, my) =
+                        client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+                    let d = (mx - px).abs() + (my - py).abs();
+                    if d < nearest {
+                        nearest = d;
+                    }
+                }
+                tracing::warn!(
+                    "[COMBAT] 40 格内无怪物：玩家=({},{}), 全图可见怪物={}, 最近距离={}",
+                    px,
+                    py,
+                    total,
+                    nearest
+                );
+            }
+            match best {
+                Some((oid, mx, my, d)) => {
+                    *target = Some(oid);
+                    *target_tile = Some((mx, my));
+                    *item_count_before = items.iter().count();
+                    tracing::info!(
+                        "[COMBAT] 🎯 目标怪物 id={} @ ({},{}) 距离={}",
+                        oid,
+                        mx,
+                        my,
+                        d
+                    );
+                    *stage = 1;
+                    *t = 0.0;
+                    *cast_timer = 0.0;
+                }
+                None => {
+                    tracing::warn!("[COMBAT] ❌ 附近没有怪物");
+                    *stage = 9;
+                }
+            }
+        }
+        1 => {
+            if *t >= 45.0 {
+                tracing::warn!("[COMBAT] ❌ 超时未击杀（目标仍在）");
+                *stage = 9;
+                return;
+            }
+            // 目标实体已消失（ObjectDied 移除）→ 击杀成功
+            let alive = target
+                .and_then(|tid| actors.iter().find(|(id, _, _)| id.0 == tid))
+                .is_some();
+            if !alive {
+                tracing::info!("[COMBAT] ✅ 目标怪物已死亡（实体移除）");
+                *stage = 2;
+                *t = 0.0;
+                return;
+            }
+            // 每 1.3 秒施放一次 FireBall（目标位置）
+            *cast_timer += time.delta_secs();
+            if *cast_timer >= 1.3 {
+                *cast_timer = 0.0;
+                let (mx, my) = target_tile.unwrap_or((0, 0));
+                let Ok(pf) = players.single() else { return };
+                let (px, py) =
+                    client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+                let dir = client_bevy::game::movement::direction_from_delta(
+                    (mx - px).signum(),
+                    (my - py).signum(),
+                )
+                .unwrap_or(mir2_shared::enums::MirDirection::Down);
+                net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                    spell: mir2_shared::enums::Spell::FireBall,
+                    direction: dir,
+                    target_id: target.unwrap_or(0),
+                    location: mir2_shared::Point { x: mx, y: my },
+                });
+                tracing::info!("[COMBAT] 🔥 FireBall → ({},{})", mx, my);
+            }
+        }
+        2 => {
+            if *t < 5.0 {
+                return;
+            }
+            // 对比地面物品计数（M24 掉落链路）
+            let now = items.iter().count();
+            let before = *item_count_before;
+            if now > before {
+                tracing::info!(
+                    "[COMBAT] ✅ 死亡后出现掉落（地面物品 {} → {}）",
+                    before,
+                    now
+                );
+            } else {
+                tracing::warn!(
+                    "[COMBAT] ⚠️ 地面物品数未增加（{} → {}，可能掉落被拾取）",
+                    before,
+                    now
+                );
+            }
+            *stage = 9;
         }
         _ => {}
     }

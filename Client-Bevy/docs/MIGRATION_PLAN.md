@@ -328,6 +328,12 @@
 - [x] 验证：真实 ServerRust 双客户端 E2E——`✅ 领地列表 8 个` → 购买 #1 → `✅ 购买成功：领地 #1 归属 TestGuild4`（无主 7）→ B 创建 TestGuildWar → A `✅ 宣战成功`；客户端 34 / 服务端 139 测试全过
 
 ---
+### M37: 战斗/技能闭环（Combat & Magic）（2026-08-03 完成）
+- [x] **修复重大 bug**：服务端 build_object_monster_packet 缺 `effect` 字节（C# ObjectMonster wire 有），客户端 SharedRust 解析错位 → 全部怪物静默丢弃无法渲染（网络对象 44 → 修复后 402）
+- [x] **客户端**：F1-F8 施法升级——有选中攻击目标（点击怪物）时朝目标施放（target_id + 目标位置 + 朝向），无目标时按朝向施放（fallback）；玩家位置以本地实体 Transform 为准（原 self_position 常被消费为 None 导致在 (0,0) 施放）
+- [x] 验证：真实 ServerRust E2E——`🎯 目标怪物 id=1091` → `🔥 FireBall` → `🪄 MagicCast: spell=FireBall`（服务器确认）→ `✅ 目标怪物已死亡` → `✅ 死亡后出现掉落（地面物品 0 → 2）`；客户端 34 / 服务端 139 测试全过
+
+---
 ## 四、执行顺序与依赖
 
 ```

@@ -71,10 +71,15 @@ impl Plugin for SkillsPlugin {
 }
 
 /// F1-F8 施放绑定技能（原版 C#：F1-F8 → UserMagic(key) → Magic 包）
+/// M37：有选中攻击目标时朝目标施放（弹道类魔法 target_id + 目标位置），
+/// 无目标时朝当前朝向施放（fallback）。
 fn skill_bar_system(
     keys: Res<ButtonInput<KeyCode>>,
     magics: Res<MagicsState>,
     net: Res<NetworkContext>,
+    control: Res<crate::game::player_control::ControlState>,
+    actors: Query<(&crate::actor::NetObjectId, &Transform), Without<crate::actor::LocalPlayer>>,
+    players: Query<&Transform, (With<crate::actor::LocalPlayer>, With<crate::actor::NetObjectId>)>,
 ) {
     const F_KEYS: [KeyCode; 8] = [
         KeyCode::F1,
@@ -92,16 +97,49 @@ fn skill_bar_system(
     let Some(magic) = magics.by_key(slot as u8 + 1) else {
         return;
     };
-    // 玩家当前瓦片位置与朝向（服务器权威坐标，UserLocation 持续更新）
-    let (x, y, dir) = net.self_position.unwrap_or((0, 0, 4));
+    // 玩家当前瓦片位置（以本地玩家实体 Transform 为准，服务器坐标更稳）
+    let (px, py) = players
+        .single()
+        .ok()
+        .map(|tf| crate::game::movement::world_to_tile(tf.translation.x, tf.translation.y))
+        .or_else(|| net.self_position.map(|(x, y, _)| (x, y)))
+        .unwrap_or((0, 0));
+    // 有选中目标 → 朝目标施放
+    let mut target_id = 0u32;
+    let mut tx = px;
+    let mut ty = py;
+    let mut cast_dir = mir2_shared::enums::MirDirection::try_from(
+        net.self_position.map(|(_, _, d)| d).unwrap_or(4),
+    )
+    .unwrap_or(mir2_shared::enums::MirDirection::Down);
+    if let Some(tid) = control.attack_target {
+        if let Some((_, tf)) = actors.iter().find(|(id, _)| id.0 == tid) {
+            let (ttx, tty) = crate::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+            target_id = tid;
+            tx = ttx;
+            ty = tty;
+            cast_dir = crate::game::movement::direction_from_delta(
+                (ttx - px).signum(),
+                (tty - py).signum(),
+            )
+            .unwrap_or(cast_dir);
+        }
+    }
     net.send_packet(&mir2_shared::packets::client::combat::Magic {
         spell: magic.spell,
-        direction: mir2_shared::enums::MirDirection::try_from(dir)
-            .unwrap_or(mir2_shared::enums::MirDirection::Down),
-        target_id: 0,
-        location: mir2_shared::Point { x, y },
+        direction: cast_dir,
+        target_id,
+        location: mir2_shared::Point { x: tx, y: ty },
     });
-    tracing::info!("✨ F{} 施放 {} ({:?}) @ ({},{})", slot + 1, magic.name, magic.spell, x, y);
+    tracing::info!(
+        "✨ F{} 施放 {} ({:?}) 目标={} @ ({},{})",
+        slot + 1,
+        magic.name,
+        magic.spell,
+        target_id,
+        tx,
+        ty
+    );
 }
 #[cfg(test)]
 mod tests {
