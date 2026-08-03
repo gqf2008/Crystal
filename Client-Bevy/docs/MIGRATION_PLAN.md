@@ -434,6 +434,18 @@
 - [x] 2 条音量滑条：Prguse2[468] 部分裁剪填充 + Prguse[20] 滑块，点击/拖动设置音量
 - [x] 验证：真实 ServerRust E2E（--option-test）——打开 → 8 组开关全翻转 + 音量 50%/35% → ✅ 设置对话框渲染正常 → 关闭；客户端 34 / 服务端 139 测试全过
 - [x] 注：M51 后剩余对话框：socket/dura_status/npc_drop/roll/npc_awake（需服务端）、keyboard_layout/big_map（纯 UI）
+---
+
+### M52: 键位设置对话框 KeyboardLayoutDialog（2026-08-03 完成）
+- [x] 面板 Title[119]（512x430）居中；标题“键位设置”（C# PageLabel (135,34)）
+- [x] 关闭按钮 Prguse2[360/361/362] (489,3)
+- [x] 滚动：Prguse2[197/198/199] 上 (491,88)、Prguse2[207/208/209] 下 (491,363)、位置条 Prguse2[205/206] (491,101)
+- [x] 重置按钮 Title[120/121/122] (30,400)、严格/宽松规则复选框 Prguse[1346/1347] (105,406)
+- [x] 行区按 C# UpdateText 规则：组标题 30px + 绑定行 18px，点击绑定行 → 等待按键 → 重绑（Esc 取消），滚动/位置条联动
+- [x] 24 个默认键位（移动/战斗/交互/界面/技能/系统，参考 macroquad + C# 常用键）
+- [x] 验证：真实 ServerRust E2E（--keyboard-test）——打开 → 滚动 → 重绑“攻击→X” → 重置默认 + 规则切换 → ✅ 关闭键位设置；客户端 34 / 服务端 139 测试全过
+- [x] 注：M52 后剩余对话框：socket/dura_status/npc_drop/roll/npc_awake（需服务端）、big_map（纯 UI，可做服务端 MapInformation 增强）
+
 
 
 ---

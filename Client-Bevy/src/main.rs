@@ -293,6 +293,10 @@ fn main() {
     if std::env::args().any(|a| a == "--option-test") {
         app.add_systems(Update, auto_option_test);
     }
+    // --keyboard-test: 键位设置对话框验证（打开 → 滚动 → 重绑 → 重置 → 关闭）
+    if std::env::args().any(|a| a == "--keyboard-test") {
+        app.add_systems(Update, auto_keyboard_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -3510,6 +3514,75 @@ fn auto_marriage_accept(
             *stage = 9;
         }
         _ => {}
+    }
+}
+
+/// --keyboard-test：打开键位设置 → 滚动 → 重绑一行 → 重置 → 关闭
+#[allow(clippy::too_many_arguments)]
+fn auto_keyboard_test(
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut kb: ResMut<client_bevy::game::dialogs::keyboard_layout::KeyboardState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut phase: Local<f32>,
+) {
+    use client_bevy::scenes::AppState;
+    use client_bevy::game::dialogs::DialogKind;
+    use bevy::input::keyboard::KeyCode;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    if *stage == 0 {
+        if !mgr.is_open(DialogKind::KeyboardLayout) {
+            mgr.toggle(DialogKind::KeyboardLayout);
+            tracing::info!("[KBD] 打开键位设置");
+        }
+        *phase = *t;
+        *stage = 1;
+        return;
+    }
+    if *stage == 1 && *t - *phase >= 1.0 {
+        kb.top_line = kb.top_line.saturating_add(2);
+        tracing::info!("[KBD] ✅ 滚动 top_line={}", kb.top_line);
+        kb.rebinding = Some(4);
+        tracing::info!("[KBD] ✅ 等待按键: 行 4");
+        *stage = 2;
+        *phase = *t;
+        return;
+    }
+    if *stage == 2 && *t - *phase >= 1.0 {
+        if let Some(b) = kb.bindings.get_mut(4) {
+            tracing::info!("[KBD] ✅ 绑定 {} → {}", b.action, "X");
+            b.key = KeyCode::KeyX;
+        }
+        kb.rebinding = None;
+        tracing::info!("[KBD] ✅ 重绑完成");
+        *stage = 3;
+        *phase = *t;
+        return;
+    }
+    if *stage == 3 && *t - *phase >= 1.0 {
+        kb.bindings = kb.defaults.clone();
+        kb.top_line = 0;
+        kb.enforce = !kb.enforce;
+        tracing::info!("[KBD] ✅ 重置默认 + 规则切换（严格/宽松）完成");
+        *stage = 4;
+        *phase = *t;
+        return;
+    }
+    if *stage == 4 && *t - *phase >= 1.0 {
+        if mgr.is_open(DialogKind::KeyboardLayout) {
+            mgr.close(DialogKind::KeyboardLayout);
+            tracing::info!("[KBD] ✅ 关闭键位设置");
+        }
+        *stage = 9;
+    }
+    if *t >= 30.0 && *stage < 9 {
+        tracing::warn!("[KBD] ❌ 超时 stage={}", *stage);
+        *stage = 9;
     }
 }
 
