@@ -1,4 +1,4 @@
-﻿using ClientPackets;
+using ClientPackets;
 using Server.Library.MirDatabase;
 using Server.Library.Utils;
 using Server.MirDatabase;
@@ -59,6 +59,7 @@ namespace Server.MirEnvir
         public static readonly string AccountPath = Path.Combine(".", "Server.MirADB");
         public static readonly string BackUpPath = Path.Combine(".", "Back Up");
         public static readonly string AccountsBackUpPath = Path.Combine(".", "Back Up", "Accounts");
+        public static readonly string DatabaseBackUpPath = Path.Combine(".", "Back Up", "Database");
         public static readonly string ArchivePath = Path.Combine(".", "Archive");
         public bool ResetGS = false;
         public bool GuildRefreshNeeded;
@@ -2147,6 +2148,7 @@ namespace Server.MirEnvir
                         {
                             saveTime = Time + Settings.SaveDelay * Settings.Minute;
                             BeginSaveAccounts();
+                            SaveDB();
                             SaveGuilds();
                             SaveGoods();
                             SaveConquests();
@@ -2436,6 +2438,19 @@ namespace Server.MirEnvir
 
         public void SaveDB()
         {
+            if (File.Exists(DatabasePath))
+            {
+                if (!Directory.Exists(DatabaseBackUpPath)) Directory.CreateDirectory(DatabaseBackUpPath);
+
+                var fileName =
+                    $"Database {Now.Year:0000}-{Now.Month:00}-{Now.Day:00} {Now.Hour:00}-{Now.Minute:00}-{Now.Second:00}.bak";
+
+                var backupFile = Path.Combine(DatabaseBackUpPath, fileName);
+
+                if (File.Exists(backupFile)) File.Delete(backupFile);
+                File.Copy(DatabasePath, backupFile);
+            }
+
             using (var stream = File.Create(DatabasePath))
             using (var writer = new BinaryWriter(stream))
             {
@@ -2616,9 +2631,16 @@ namespace Server.MirEnvir
                 if (GuildList[i].NeedSave || forced)
                 {
                     GuildList[i].NeedSave = false;
-                    var mStream = new MemoryStream();
+
+					GuildObject liveGuild = Guilds.Find(g => g.Guildindex == GuildList[i].GuildIndex);
+					if (liveGuild != null)
+					{
+						GuildList[i] = liveGuild.Info;
+					}
+
+					var mStream = new MemoryStream();
                     var writer = new BinaryWriter(mStream);
-                    GuildList[i].Save(writer);
+					GuildList[i].Save(writer);
                     var fStream = new FileStream(Path.Combine(Settings.GuildPath, i + ".mgdn"), FileMode.Create);
                     var data = mStream.ToArray();
                     fStream.BeginWrite(data, 0, data.Length, EndSaveGuildsAsync, fStream);
