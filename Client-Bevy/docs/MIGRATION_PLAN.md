@@ -321,6 +321,13 @@
 - [x] 验证：真实 ServerRust E2E——打开商城 → `✅ 商城目录 106 件` → 购买 #1268（165000 金币）→ `📧 新邮件: GameShop - 商城购买` → `✅ 购买邮件送达` → `🛒 库存剩余 0`；客户端 34 / 服务端 139 测试全过
 
 ---
+### M36: 行会领地（GuildTerritory）+ 宣战（GuildWar）（2026-08-03 完成）
+- [x] **服务端**：默认 8 个领地实例种子（conquest_instances 原为 Vec::new()，列表永远为空）；购买领地扣 1,000,000 金币（内存态，持久化待后续）
+- [x] **客户端**：行会领地对话框（C# GuildTerritoryDialog 布局：Prguse[680] + Title[54]；7 行/页 + 翻页 + 购买按钮 + 宣战输入框）；打开自动请求第 0 页；GuildTerritoryPage(276) 解析（id/map/owner/state）；GuildRequestWar(173) 宣战确认显示
+- [x] 网络：GuildTerritoryPageWire [page u32] / PurchaseGuildTerritoryWire [territory_id u32] 手动构造（与 SharedRust 结构不一致）；GuildWarReturn 复用 SharedRust（7-bit dotnet 匹配 gate）
+- [x] 验证：真实 ServerRust 双客户端 E2E——`✅ 领地列表 8 个` → 购买 #1 → `✅ 购买成功：领地 #1 归属 TestGuild4`（无主 7）→ B 创建 TestGuildWar → A `✅ 宣战成功`；客户端 34 / 服务端 139 测试全过
+
+---
 ## 四、执行顺序与依赖
 
 ```

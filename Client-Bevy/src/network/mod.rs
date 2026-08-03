@@ -24,6 +24,7 @@ use crate::game::dialogs::mail::{MailDetail, MailEntry, MailState};
 use crate::game::dialogs::mentor::MentorState;
 use crate::game::dialogs::market::{MarketItem, MarketState};
 use crate::game::dialogs::game_shop::{GameShopState, ShopItem as UiShopItem};
+use crate::game::dialogs::guild_territory::{GuildTerritoryState, TerritoryRow};
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::npc::NpcDialogState;
 use crate::game::dialogs::npc_goods::{GoodsEntry, NpcGoodsState};
@@ -502,6 +503,62 @@ impl Packet for GameshopBuyWire {
     }
 }
 
+/// 行会领地页请求（M36：gate 解析 [page u32]）
+#[derive(Debug, Clone, Copy)]
+pub struct GuildTerritoryPageWire {
+    pub page: u32,
+}
+
+impl Packet for GuildTerritoryPageWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::GuildTerritoryPage as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            page: reader.read_u32::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u32::<LittleEndian>(self.page)?;
+        Ok(())
+    }
+}
+
+/// 购买行会领地（M36：gate 解析 [territory_id u32]）
+#[derive(Debug, Clone, Copy)]
+pub struct PurchaseGuildTerritoryWire {
+    pub territory_id: u32,
+}
+
+impl Packet for PurchaseGuildTerritoryWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::PurchaseGuildTerritory as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            territory_id: reader.read_u32::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u32::<LittleEndian>(self.territory_id)?;
+        Ok(())
+    }
+}
+
 /// 待生成的网络对象（MapChanged 后由 Game 状态消费）
 #[derive(Debug, Clone)]
 pub enum NetObject {
@@ -610,6 +667,7 @@ struct NetworkPanels<'w> {
     mentor: ResMut<'w, MentorState>,
     market: ResMut<'w, MarketState>,
     shop: ResMut<'w, GameShopState>,
+    territory: ResMut<'w, GuildTerritoryState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -657,6 +715,7 @@ fn network_system(
                         &mut *panels.mentor,
                         &mut *panels.market,
                         &mut *panels.shop,
+                        &mut *panels.territory,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -708,6 +767,7 @@ fn network_system(
                         &mut *panels.mentor,
                         &mut *panels.market,
                         &mut *panels.shop,
+                        &mut *panels.territory,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -849,6 +909,7 @@ fn handle_packet(
     mentor: &mut MentorState,
     market: &mut MarketState,
     shop: &mut GameShopState,
+    territory: &mut GuildTerritoryState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -1740,6 +1801,47 @@ fn handle_packet(
                     it.stock = stock;
                 }
                 tracing::info!("🛒 商城库存: #{} 剩余 {}", item_id, stock);
+            }
+        }
+        // ---- M36: 行会领地/宣战 ----
+        x if x == ServerPacketIds::GuildTerritoryPage as i16 => {
+            // [count i32][per: id i32][map_index i32][owner 7-bit dotnet][state u8]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            use byteorder::{LittleEndian, ReadBytesExt};
+            let count = cur.read_i32::<LittleEndian>().unwrap_or(0).max(0) as usize;
+            let mut rows = Vec::with_capacity(count);
+            let mut ok = true;
+            for _ in 0..count {
+                let id = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let map_index = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let owner = match mir2_shared::binary::read_dotnet_string(&mut cur) { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let state = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                rows.push(TerritoryRow { id, map_index, owner, state });
+            }
+            if ok {
+                territory.rows = rows;
+                tracing::info!(
+                    "🏯 领地列表: {} 个（无主 {}）",
+                    territory.rows.len(),
+                    territory.rows.iter().filter(|r| r.owner.is_empty()).count()
+                );
+            } else {
+                tracing::warn!("⚠️ GuildTerritoryPage 解析失败: (len={})", payload.len());
+            }
+        }
+        x if x == ServerPacketIds::GuildRequestWar as i16 => {
+            // [guild_name 7-bit dotnet]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            match mir2_shared::binary::read_dotnet_string(&mut cur) {
+                Ok(name) => {
+                    territory.war_message = format!("已向 {} 行会宣战", name);
+                    tracing::info!("🏯 宣战确认: {}", name);
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ GuildRequestWar 解析失败: {} (len={})", e, payload.len())
+                }
             }
         }
         // ---- M33: 师徒 ----

@@ -221,6 +221,14 @@ fn main() {
     if std::env::args().any(|a| a == "--gameshop-test") {
         app.add_systems(Update, auto_gameshop_test);
     }
+    // --territory-test: 行会领地链路（打开领地 → 购买无主领地 → 宣战，配合 --territory-war）
+    if std::env::args().any(|a| a == "--territory-test") {
+        app.add_systems(Update, auto_territory_test);
+    }
+    // --territory-war: 创建目标行会供宣战（配合 --territory-test）
+    if std::env::args().any(|a| a == "--territory-war") {
+        app.add_systems(Update, auto_territory_war);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -2146,6 +2154,183 @@ fn auto_gameshop_test(
                 bought_item.unwrap_or(-1)
             );
             *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --territory-test：打开行会领地 → 购买第一个无主领地 → 向 TestGuildWar 宣战
+#[allow(clippy::too_many_arguments)]
+fn auto_territory_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    territory: Res<client_bevy::game::dialogs::guild_territory::GuildTerritoryState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut bought_id: Local<Option<i32>>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 10.0 {
+                return;
+            }
+            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::GuildTerritory) {
+                mgr.toggle(client_bevy::game::dialogs::DialogKind::GuildTerritory);
+            }
+            tracing::info!("[TERRTEST] 打开行会领地（自动请求列表）");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t >= 10.0 {
+                tracing::warn!("[TERRTEST] ❌ 领地列表未收到");
+                *stage = 9;
+                return;
+            }
+            if !territory.rows.is_empty() {
+                tracing::info!(
+                    "[TERRTEST] ✅ 领地列表 {} 个",
+                    territory.rows.len()
+                );
+                let free = territory
+                    .rows
+                    .iter()
+                    .find(|r| r.owner.is_empty())
+                    .cloned();
+                match free {
+                    Some(r) => {
+                        *bought_id = Some(r.id);
+                        net.send_packet(&client_bevy::network::PurchaseGuildTerritoryWire {
+                            territory_id: r.id as u32,
+                        });
+                        tracing::info!("[TERRTEST] 购买领地 #{}", r.id);
+                        *stage = 2;
+                        *t = 0.0;
+                    }
+                    None => {
+                        tracing::warn!("[TERRTEST] ❌ 没有无主领地");
+                        *stage = 9;
+                    }
+                }
+            }
+        }
+        2 => {
+            if *t < 6.0 {
+                return;
+            }
+            // 重新请求列表验证购买
+            net.send_packet(&client_bevy::network::GuildTerritoryPageWire { page: 0 });
+            tracing::info!("[TERRTEST] 购买后刷新领地列表");
+            *stage = 3;
+            *t = 0.0;
+        }
+        3 => {
+            if *t < 6.0 {
+                return;
+            }
+            let id = bought_id.unwrap_or(-1);
+            let row = territory.rows.iter().find(|r| r.id == id);
+            match row {
+                Some(r) if r.owner == "TestGuild4" => {
+                    tracing::info!(
+                        "[TERRTEST] ✅ 购买成功：领地 #{} 归属 {}",
+                        r.id,
+                        r.owner
+                    );
+                    *stage = 4;
+                    *t = 0.0;
+                }
+                Some(r) => {
+                    tracing::warn!(
+                        "[TERRTEST] ❌ 领地 #{} 归属异常: {}",
+                        r.id,
+                        r.owner
+                    );
+                    *stage = 9;
+                }
+                None => {
+                    tracing::warn!("[TERRTEST] ❌ 领地 #{} 不存在", id);
+                    *stage = 9;
+                }
+            }
+        }
+        4 => {
+            if *t < 6.0 {
+                return;
+            }
+            // 向 TestGuildWar 宣战（--territory-war 客户端先创建）
+            net.send_packet(&mir2_shared::packets::client::guild::GuildWarReturn {
+                guild_name: "TestGuildWar".to_string(),
+            });
+            tracing::info!("[TERRTEST] 向 TestGuildWar 宣战");
+            *stage = 5;
+            *t = 0.0;
+        }
+        5 => {
+            if *t >= 10.0 {
+                tracing::warn!("[TERRTEST] ❌ 未收到宣战确认");
+                *stage = 9;
+                return;
+            }
+            if territory.war_message.contains("TestGuildWar") {
+                tracing::info!("[TERRTEST] ✅ 宣战成功: {}", territory.war_message);
+                *stage = 9;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// --territory-war：创建目标行会 TestGuildWar（供 --territory-test 宣战）
+#[allow(clippy::too_many_arguments)]
+fn auto_territory_war(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    guild: Res<client_bevy::game::dialogs::guild::GuildState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            if guild.in_guild && guild.name == "TestGuildWar" {
+                tracing::info!("[TERRWAR] ✅ 已在行会 TestGuildWar");
+                *stage = 9;
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::guild::GuildNameReturn {
+                name: "TestGuildWar".to_string(),
+            });
+            tracing::info!("[TERRWAR] 创建行会 TestGuildWar");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 8.0 {
+                return;
+            }
+            if guild.in_guild && guild.name == "TestGuildWar" {
+                tracing::info!("[TERRWAR] ✅ 行会创建成功");
+                *stage = 9;
+            } else {
+                tracing::warn!("[TERRWAR] ❌ 行会创建失败");
+                *stage = 9;
+            }
         }
         _ => {}
     }
