@@ -1114,6 +1114,7 @@ struct NetworkPanels<'w> {
     relationship: ResMut<'w, RelationshipState>,
     big_map: ResMut<'w, crate::game::dialogs::big_map::BigMapState>,
     awake: ResMut<'w, crate::game::dialogs::npc_awake::NpcAwakeState>,
+    roll: ResMut<'w, crate::game::dialogs::roll::RollState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -1177,6 +1178,7 @@ fn network_system(
                         &mut *panels.relationship,
                         &mut *panels.big_map,
                         &mut *panels.awake,
+                        &mut *panels.roll,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1244,6 +1246,7 @@ fn network_system(
                         &mut *panels.relationship,
                         &mut *panels.big_map,
                         &mut *panels.awake,
+                        &mut *panels.roll,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1404,6 +1407,7 @@ fn handle_packet(
     relationship: &mut RelationshipState,
     big_map: &mut crate::game::dialogs::big_map::BigMapState,
     awake: &mut crate::game::dialogs::npc_awake::NpcAwakeState,
+    roll: &mut crate::game::dialogs::roll::RollState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -1638,6 +1642,25 @@ fn handle_packet(
                 tracing::info!("⚒️ 觉醒结果: {} -> {}", p.result, msg);
                 awake.result = p.result;
                 awake.result_text = msg;
+            }
+        }
+        x if x == ServerPacketIds::Roll as i16 => {
+            if let Ok(p) = mir2_shared::packets::server::ui_events::Roll::read_body(&mut cur) {
+                tracing::info!(
+                    "🎲 Roll: type={} result={} page={} auto={}",
+                    p.r#type,
+                    p.result,
+                    p.page,
+                    p.auto_roll
+                );
+                roll.npc_id = npc_dialog.npc_object_id;
+                roll.r#type = p.r#type;
+                roll.page = p.page;
+                roll.result = p.result;
+                roll.auto_roll = p.auto_roll;
+                roll.visible = true;
+                roll.started_at = 0.0;
+                roll.finished = false;
             }
         }
         x if x == ServerPacketIds::ObjectPlayer as i16 => {

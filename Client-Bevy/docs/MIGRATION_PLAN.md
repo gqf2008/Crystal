@@ -482,6 +482,15 @@
 - [x] 打开方式：背包 Ctrl+右键（C# MirItemCell.OpenItem）；InvItem 新增 slots 并解析 UserInformation 孔内宝石
 - [x] 验证：真实 ServerRust E2E（--socket-test）——[SOCKET] 打开镶嵌面板: WoodenSword (3 孔) → 💎 0#913=#913, 1#空, 2#917=#917 → ✅ 关闭；客户端 34 / 服务端 139 测试全过
 - [x] 注：M56 后剩余对话框：npc_drop/roll（需服务端支持）
+---
+
+### M57: 掷骰子 RollDialog（2026-08-03 完成，含服务端 ROLLDIE/ROLLYUT）
+- [x] SharedRust Roll 包（270）wire 对齐 C# ServerPackets.Roll：Type/Page/Result/AutoRoll
+- [x] 服务端 NPC 脚本新增 ROLLDIE/ROLLYUT 动作：随机 1-6 → 发 Roll 包 + %NPCRollResult 变量
+- [x] 客户端 RollDialog：骰子 Prguse[281+result] / 尤茨 Items[2587+result]，autoRoll 2 秒后或点击 → CallNPC "[page]" 回调
+- [x] 验证：真实 ServerRust E2E（--roll-test）——CallNPC [@TestRoll] → 服务端 NPC Master_Wa: ROLL type=0 result=1 → 客户端 🎲 Roll: type=0 result=1 → ✅ 收到 Roll 包 → 自动回调 NPC 1424 [@TestRollResult] → 服务端执行结果页；客户端 34 / 服务端 139 测试全过
+- [x] 注：剩余对话框 npc_drop 已由 M20 sell_panel 覆盖（C# NPCDropDialog=出售/修理面板）；对话框里程碑全部完成
+
 
 
 

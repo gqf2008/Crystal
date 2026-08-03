@@ -313,6 +313,10 @@ fn main() {
     if std::env::args().any(|a| a == "--socket-test") {
         app.add_systems(Update, auto_socket_test);
     }
+    // --roll-test: 掷骰链路（CallNPC TestRoll → 服务端 Roll 包 → 动画/回调）
+    if std::env::args().any(|a| a == "--roll-test") {
+        app.add_systems(Update, auto_roll_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -3530,6 +3534,91 @@ fn auto_marriage_accept(
             *stage = 9;
         }
         _ => {}
+    }
+}
+
+/// --roll-test：触发 NPC 掷骰 → 服务端 Roll 包 → 客户端骰子对话框 → 自动回调
+#[allow(clippy::too_many_arguments)]
+fn auto_roll_test(
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut roll: ResMut<client_bevy::game::dialogs::roll::RollState>,
+    bm: Res<client_bevy::game::dialogs::big_map::BigMapState>,
+    game_data: Res<client_bevy::map_renderer::GameData>,
+    mut npc_dialog: ResMut<client_bevy::game::dialogs::npc::NpcDialogState>,
+    net: ResMut<client_bevy::network::NetworkContext>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut phase: Local<f32>,
+    mut npc_id: Local<u32>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    if *stage == 0 {
+        // 选离玩家出生点最近的 NPC（CallNPC 需 2 格内）
+        let spawn = game_data.player_spawn.map(|(x, y, _)| (x as i32, y as i32));
+        let picked = if let Some((sx, sy)) = spawn {
+            bm.npcs
+                .iter()
+                .min_by_key(|n| (n.x - sx).abs() + (n.y - sy).abs())
+                .cloned()
+        } else {
+            bm.npcs.first().cloned()
+        };
+        if let Some(npc) = picked {
+            *npc_id = npc.object_id;
+            npc_dialog.npc_object_id = npc.object_id;
+            net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                object_id: npc.object_id,
+                key: "[@TestRoll]".to_string(),
+            });
+            tracing::info!(
+                "[ROLL] 触发 NPC {} ({},{}) 掷骰页",
+                npc.object_id,
+                npc.x,
+                npc.y
+            );
+            *stage = 1;
+            *phase = *t;
+        } else if *t - *phase >= 15.0 {
+            tracing::warn!("[ROLL] ❌ 未等到 NPC 数据");
+            *stage = 9;
+        }
+        return;
+    }
+    if *stage == 1 {
+        if roll.visible {
+            tracing::info!(
+                "[ROLL] ✅ 收到 Roll 包: type={} result={} page={} auto={}",
+                roll.r#type,
+                roll.result,
+                roll.page,
+                roll.auto_roll
+            );
+            *stage = 2;
+            *phase = *t;
+        } else if *t - *phase >= 10.0 {
+            tracing::warn!("[ROLL] ❌ 未收到 Roll 包");
+            *stage = 9;
+        }
+        return;
+    }
+    if *stage == 2 {
+        if !roll.visible && roll.finished {
+            tracing::info!("[ROLL] ✅ 掷骰完成回调已发送（NPC {}）", *npc_id);
+            *stage = 9;
+        } else if *t - *phase >= 12.0 {
+            tracing::warn!("[ROLL] ❌ 回调超时");
+            *stage = 9;
+        }
+        return;
+    }
+    if *t >= 40.0 && *stage < 9 {
+        tracing::warn!("[ROLL] ❌ 超时 stage={}", *stage);
+        *stage = 9;
     }
 }
 
