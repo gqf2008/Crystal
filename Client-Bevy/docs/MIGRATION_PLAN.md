@@ -304,6 +304,16 @@
 - [x] 验证：真实 ServerRust 双客户端 E2E——A 请求拜师 → B 收到邀请 `✅ bevychar Lv.7` → 接受 → A `✅ 拜师成功: 师父=bevy2char Lv.20`、B `✅ 收徒成功: 徒弟=bevychar` → A 解除 → 双方 `✅ 已清除`；客户端 34 / 服务端 139 测试全过
 
 ---
+### M34: 市场/交易所（Market）（2026-08-03 完成）
+- [x] **客户端**：市场对话框（10 行商品列表 + 翻页 + 刷新/搜索/购买/寄售/取回/立即售出按钮 + 价格输入）；打开自动刷新
+- [x] **网络**：NPCMarket（页数）/ NPCMarketPage（商品列表：UserItem + 卖家 + 价格）/ ConsignItem / MarketSuccess / MarketFail 解析；客户端→服务端 wire 与 SharedRust 结构不一致（gate 实际解析），手动构造 MarketConsignWire/MarketSearchWire/MarketPageWire/MarketBuyWire/MarketGetBackWire/MarketSellNowWire
+- [x] **服务端**（ServerRust market.rs）：
+  - 寄售/取回/购买成功后推**完整 UserInformation**（原 send_inventory_changed 只发部分刷新，客户端背包不同步）
+  - 寄售失败退回收寄费（原先扣费后移除，失败不退）
+  - 空搜索结果也发空 NPCMarketPage（原 `if end > 0` 守卫导致客户端残留旧列表）
+- [x] 验证：真实 ServerRust 双客户端 E2E——A 寄售×2 → `✅ 第一件寄售成功` → 取回 uid=101 → `✅ 取回成功：剩 1 件寄售` → B 购买 → `✅ 购买成功` → `✅ 购买的物品已进入背包`；客户端 34 / 服务端 139 测试全过
+
+---
 ## 四、执行顺序与依赖
 
 ```

@@ -209,6 +209,14 @@ fn main() {
     if std::env::args().any(|a| a == "--mentor-accept") {
         app.add_systems(Update, auto_mentor_accept);
     }
+    // --market-test: 市场链路（寄售×2 → 取回一件 → 留一件给 --market-buy 买）
+    if std::env::args().any(|a| a == "--market-test") {
+        app.add_systems(Update, auto_market_test);
+    }
+    // --market-buy: 市场购买链路（配合 --market-test）
+    if std::env::args().any(|a| a == "--market-buy") {
+        app.add_systems(Update, auto_market_buy);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -1754,6 +1762,285 @@ fn auto_mentor_accept(
                     "[MENTORACCEPT] ❌ 未收到解除: mentor_name={}",
                     mentor.mentor_name
                 );
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --market-test：寄售背包物品×2 → 取回一件 → 留一件给买家（配合 --market-buy）
+#[allow(clippy::too_many_arguments)]
+fn auto_market_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    market: Res<client_bevy::game::dialogs::market::MarketState>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut consigned: Local<Vec<u32>>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 12.0 {
+                return;
+            }
+            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Market) {
+                mgr.toggle(client_bevy::game::dialogs::DialogKind::Market);
+            }
+            net.send_packet(&mir2_shared::packets::client::market::MarketRefresh);
+            tracing::info!("[MARKETTEST] 打开市场 + 刷新");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 4.0 {
+                return;
+            }
+            // 寄售第一个背包物品（uid=100，价格 500）
+            let first = hud
+                .inventory
+                .items
+                .iter()
+                .enumerate()
+                .find_map(|(i, s)| s.as_ref().map(|it| (i, it)));
+            match first {
+                Some((_i, item)) => {
+                    net.send_packet(&client_bevy::network::MarketConsignWire {
+                        unique_id: item.unique_id as u32,
+                        price: 500,
+                        duration: 0,
+                    });
+                    tracing::info!(
+                        "[MARKETTEST] 寄售 [{}] uid={} 价格500",
+                        item.name,
+                        item.unique_id
+                    );
+                    consigned.push(item.unique_id as u32);
+                    *stage = 2;
+                    *t = 0.0;
+                }
+                None => {
+                    tracing::warn!("[MARKETTEST] ❌ 背包为空");
+                    *stage = 9;
+                }
+            }
+        }
+        2 => {
+            if *t < 5.0 {
+                return;
+            }
+            if market.consign_ok.is_some() {
+                tracing::info!(
+                    "[MARKETTEST] ✅ 第一件寄售成功 uid={}",
+                    market.consign_ok.unwrap_or(0)
+                );
+            } else {
+                tracing::warn!("[MARKETTEST] ❌ 第一件寄售未确认");
+                *stage = 9;
+                return;
+            }
+            // 寄售第二件（uid=101，价格 600）
+            let first = hud
+                .inventory
+                .items
+                .iter()
+                .enumerate()
+                .find_map(|(i, s)| s.as_ref().map(|it| (i, it)));
+            match first {
+                Some((_i, item)) => {
+                    net.send_packet(&client_bevy::network::MarketConsignWire {
+                        unique_id: item.unique_id as u32,
+                        price: 600,
+                        duration: 0,
+                    });
+                    tracing::info!(
+                        "[MARKETTEST] 寄售第二件 [{}] uid={} 价格600",
+                        item.name,
+                        item.unique_id
+                    );
+                    consigned.push(item.unique_id as u32);
+                    *stage = 3;
+                    *t = 0.0;
+                }
+                None => {
+                    tracing::warn!("[MARKETTEST] ❌ 背包只剩 0 件（应剩 1 件）");
+                    *stage = 9;
+                }
+            }
+        }
+        3 => {
+            if *t < 5.0 {
+                return;
+            }
+            // 刷新市场，取回第二件（uid=101）
+            net.send_packet(&mir2_shared::packets::client::market::MarketRefresh);
+            tracing::info!("[MARKETTEST] 刷新市场准备取回");
+            *stage = 4;
+            *t = 0.0;
+        }
+        4 => {
+            if *t < 5.0 {
+                return;
+            }
+            let mine: Vec<&client_bevy::game::dialogs::market::MarketItem> = market
+                .listings
+                .iter()
+                .filter(|it| it.seller == "bevychar")
+                .collect();
+            tracing::info!("[MARKETTEST] 我的寄售: {} 件", mine.len());
+            let target = mine.iter().find(|it| it.unique_id == 101).copied();
+            match target {
+                Some(it) => {
+                    net.send_packet(&client_bevy::network::MarketGetBackWire {
+                        listing_id: it.auction_id as u32,
+                    });
+                    tracing::info!("[MARKETTEST] 取回商品 {} uid={}", it.auction_id, it.unique_id);
+                    *stage = 5;
+                    *t = 0.0;
+                }
+                None => {
+                    tracing::warn!(
+                        "[MARKETTEST] ❌ 未找到 uid=101 的寄售: {:?}",
+                        mine.iter().map(|x| x.unique_id).collect::<Vec<_>>()
+                    );
+                    *stage = 9;
+                }
+            }
+        }
+        5 => {
+            if *t < 6.0 {
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::market::MarketRefresh);
+            tracing::info!("[MARKETTEST] 取回后刷新市场");
+            *stage = 6;
+            *t = 0.0;
+        }
+        6 => {
+            if *t < 5.0 {
+                return;
+            }
+            let mine: Vec<&client_bevy::game::dialogs::market::MarketItem> = market
+                .listings
+                .iter()
+                .filter(|it| it.seller == "bevychar")
+                .collect();
+            if mine.len() == 1 && mine[0].unique_id == 100 {
+                tracing::info!(
+                    "[MARKETTEST] ✅ 取回成功：剩 1 件寄售（uid=100 价格{}）",
+                    mine[0].price
+                );
+            } else {
+                tracing::warn!(
+                    "[MARKETTEST] ❌ 取回后异常: mine={:?}",
+                    mine.iter().map(|x| x.unique_id).collect::<Vec<_>>()
+                );
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --market-buy：刷新市场 → 买下卖家 bevychar 的商品（配合 --market-test）
+#[allow(clippy::too_many_arguments)]
+fn auto_market_buy(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    market: Res<client_bevy::game::dialogs::market::MarketState>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut bought_id: Local<Option<u64>>,
+    mut last_refresh: Local<f32>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 45.0 {
+                return;
+            }
+            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Market) {
+                mgr.toggle(client_bevy::game::dialogs::DialogKind::Market);
+            }
+            net.send_packet(&mir2_shared::packets::client::market::MarketRefresh);
+            tracing::info!("[MARKETBUY] 打开市场 + 刷新");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t >= 20.0 {
+                tracing::warn!("[MARKETBUY] ❌ 未找到卖家 bevychar 的商品");
+                *stage = 9;
+                return;
+            }
+            // 等待期每 4 秒刷新一次市场（卖家可能尚未上架）
+            if *t - *last_refresh >= 4.0 {
+                *last_refresh = *t;
+                net.send_packet(&mir2_shared::packets::client::market::MarketRefresh);
+                tracing::info!("[MARKETBUY] 等待中刷新市场");
+            }
+            let target = market
+                .listings
+                .iter()
+                .find(|it| it.seller == "bevychar" && it.unique_id == 100)
+                .cloned();
+            if let Some(it) = target {
+                *bought_id = Some(it.auction_id);
+                net.send_packet(&client_bevy::network::MarketBuyWire {
+                    listing_id: it.auction_id as u32,
+                });
+                tracing::info!(
+                    "[MARKETBUY] 购买商品 {} [{}] {}金币",
+                    it.auction_id,
+                    it.name,
+                    it.price
+                );
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t >= 15.0 {
+                tracing::warn!("[MARKETBUY] ❌ 购买未确认: message={}", market.message);
+                *stage = 9;
+                return;
+            }
+            if market.message.contains("购买成功") {
+                tracing::info!("[MARKETBUY] ✅ 购买成功: {}", market.message);
+                *stage = 3;
+                *t = 0.0;
+            }
+        }
+        3 => {
+            if *t < 5.0 {
+                return;
+            }
+            // 验证物品进入背包（item_index=853）
+            let has = hud
+                .inventory
+                .items
+                .iter()
+                .filter_map(|s| s.as_ref())
+                .any(|it| it.item_index == 853);
+            if has {
+                tracing::info!("[MARKETBUY] ✅ 购买的物品已进入背包");
+            } else {
+                tracing::warn!("[MARKETBUY] ❌ 背包未见购买的物品");
             }
             *stage = 9;
         }

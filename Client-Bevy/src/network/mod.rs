@@ -22,6 +22,7 @@ use crate::game::dialogs::ranking::{RankEntry, RankingState};
 use crate::game::dialogs::group::GroupState;
 use crate::game::dialogs::mail::{MailDetail, MailEntry, MailState};
 use crate::game::dialogs::mentor::MentorState;
+use crate::game::dialogs::market::{MarketItem, MarketState};
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::npc::NpcDialogState;
 use crate::game::dialogs::npc_goods::{GoodsEntry, NpcGoodsState};
@@ -292,6 +293,183 @@ impl Packet for AllowMentorWire {
     }
 }
 
+/// 市场客户端包（M34）
+/// ServerRust gate 实际解析 wire 与 SharedRust 客户端包结构不一致，手动构造：
+///   ConsignItem: [unique_id u32][price u32][duration u32]（gate 要求 ≥12 字节）
+///   MarketSearch: [item_index u32]   MarketPage: [page u32]
+///   MarketBuy: [listing_id u32]      MarketGetBack: [listing_id u32]
+///   MarketSellNow: [unique_id u32][price u32]
+#[derive(Debug, Clone, Copy)]
+pub struct MarketConsignWire {
+    pub unique_id: u32,
+    pub price: u32,
+    pub duration: u32,
+}
+
+impl Packet for MarketConsignWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::ConsignItem as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            unique_id: reader.read_u32::<LittleEndian>()?,
+            price: reader.read_u32::<LittleEndian>()?,
+            duration: reader.read_u32::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u32::<LittleEndian>(self.unique_id)?;
+        writer.write_u32::<LittleEndian>(self.price)?;
+        writer.write_u32::<LittleEndian>(self.duration)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MarketSearchWire {
+    pub item_index: u32,
+}
+
+impl Packet for MarketSearchWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::MarketSearch as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            item_index: reader.read_u32::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u32::<LittleEndian>(self.item_index)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MarketPageWire {
+    pub page: u32,
+}
+
+impl Packet for MarketPageWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::MarketPage as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            page: reader.read_u32::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u32::<LittleEndian>(self.page)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MarketBuyWire {
+    pub listing_id: u32,
+}
+
+impl Packet for MarketBuyWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::MarketBuy as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            listing_id: reader.read_u32::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u32::<LittleEndian>(self.listing_id)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MarketGetBackWire {
+    pub listing_id: u32,
+}
+
+impl Packet for MarketGetBackWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::MarketGetBack as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            listing_id: reader.read_u32::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u32::<LittleEndian>(self.listing_id)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MarketSellNowWire {
+    pub unique_id: u32,
+    pub price: u32,
+}
+
+impl Packet for MarketSellNowWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::MarketSellNow as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            unique_id: reader.read_u32::<LittleEndian>()?,
+            price: reader.read_u32::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u32::<LittleEndian>(self.unique_id)?;
+        writer.write_u32::<LittleEndian>(self.price)?;
+        Ok(())
+    }
+}
+
 /// 待生成的网络对象（MapChanged 后由 Game 状态消费）
 #[derive(Debug, Clone)]
 pub enum NetObject {
@@ -398,6 +576,7 @@ struct NetworkPanels<'w> {
     guild: ResMut<'w, GuildState>,
     ranking: ResMut<'w, RankingState>,
     mentor: ResMut<'w, MentorState>,
+    market: ResMut<'w, MarketState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -443,6 +622,7 @@ fn network_system(
                         &mut *panels.guild,
                         &mut *panels.ranking,
                         &mut *panels.mentor,
+                        &mut *panels.market,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -492,6 +672,7 @@ fn network_system(
                         &mut *panels.guild,
                         &mut *panels.ranking,
                         &mut *panels.mentor,
+                        &mut *panels.market,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -631,6 +812,7 @@ fn handle_packet(
     guild: &mut GuildState,
     ranking: &mut RankingState,
     mentor: &mut MentorState,
+    market: &mut MarketState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -937,6 +1119,15 @@ fn handle_packet(
                         for slot in eq.iter().filter_map(|s| s.as_ref()) {
                             if let Some(info) = &slot.info {
                                 guild.item_names.insert(slot.item_index, info.name.clone());
+                            }
+                        }
+                    }
+
+                    // 市场物品名缓存（M34，与行会缓存同源）
+                    if let Some(inv) = &p.inventory {
+                        for slot in inv.iter().filter_map(|s| s.as_ref()) {
+                            if let Some(info) = &slot.info {
+                                market.item_names.insert(slot.item_index, info.name.clone());
                             }
                         }
                     }
@@ -1348,6 +1539,113 @@ fn handle_packet(
                     tracing::warn!("⚠️ GuildStorageList 解析失败: {} (len={})", e, payload.len())
                 }
             }
+        }
+        // ---- M34: 市场 ----
+        x if x == ServerPacketIds::NPCMarket as i16 => {
+            // [count i32][per page: 7-bit dotnet]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            use byteorder::{LittleEndian, ReadBytesExt};
+            let count = cur.read_i32::<LittleEndian>().unwrap_or(0).max(0) as usize;
+            // 只取页数（页名可跳过）
+            let mut pages = 0usize;
+            for _ in 0..count {
+                if mir2_shared::binary::read_dotnet_string(&mut cur).is_ok() {
+                    pages += 1;
+                } else {
+                    break;
+                }
+            }
+            market.pages = pages.max(1);
+            tracing::info!("🏪 市场页数: {}", market.pages);
+        }
+        x if x == ServerPacketIds::NPCMarketPage as i16 => {
+            // [count i32][per listing: auction_id u64][UserItem][7-bit seller][price u32][date i64]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            use byteorder::{LittleEndian, ReadBytesExt};
+            let count = cur.read_i32::<LittleEndian>().unwrap_or(0).max(0) as usize;
+            let mut listings = Vec::with_capacity(count);
+            let mut ok = true;
+            for _ in 0..count {
+                let auction_id = match cur.read_u64::<LittleEndian>() {
+                    Ok(v) => v,
+                    Err(_) => { ok = false; break; }
+                };
+                let item = match mir2_shared::data::item::UserItem::read_from(&mut cur, i32::MAX, i32::MAX) {
+                    Ok(v) => v,
+                    Err(_) => { ok = false; break; }
+                };
+                let seller = match mir2_shared::binary::read_dotnet_string(&mut cur) {
+                    Ok(v) => v,
+                    Err(_) => { ok = false; break; }
+                };
+                let price = match cur.read_u32::<LittleEndian>() {
+                    Ok(v) => v,
+                    Err(_) => { ok = false; break; }
+                };
+                let _date = match cur.read_i64::<LittleEndian>() {
+                    Ok(v) => v,
+                    Err(_) => { ok = false; break; }
+                };
+                let name = item
+                    .info
+                    .as_ref()
+                    .map(|i| i.name.clone())
+                    .or_else(|| market.item_names.get(&item.item_index).cloned())
+                    .unwrap_or_else(|| format!("#{}", item.item_index));
+                listings.push(MarketItem {
+                    auction_id,
+                    unique_id: item.unique_id,
+                    name,
+                    item_index: item.item_index,
+                    count: item.count,
+                    seller,
+                    price,
+                });
+            }
+            if ok {
+                market.listings = listings;
+                tracing::info!(
+                    "🏪 市场列表: {} 件",
+                    market.listings.len()
+                );
+            } else {
+                tracing::warn!("⚠️ NPCMarketPage 解析失败: (len={})", payload.len());
+            }
+        }
+        x if x == ServerPacketIds::ConsignItem as i16 => {
+            // [unique_id u64][success u8]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            use byteorder::{LittleEndian, ReadBytesExt};
+            if let Ok(uid) = cur.read_u64::<LittleEndian>() {
+                let ok = cur.read_u8().unwrap_or(0) != 0;
+                if ok {
+                    market.consign_ok = Some(uid);
+                    market.message = format!("寄售成功 uid={}", uid);
+                    tracing::info!("🏪 寄售成功: uid={}", uid);
+                } else {
+                    market.message = "寄售失败".to_string();
+                    tracing::warn!("🏪 寄售失败: uid={}", uid);
+                }
+            }
+        }
+        x if x == ServerPacketIds::MarketSuccess as i16 => {
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            match mir2_shared::binary::read_dotnet_string(&mut cur) {
+                Ok(msg) => {
+                    market.message = msg.clone();
+                    tracing::info!("🏪 市场成功: {}", msg);
+                }
+                Err(e) => tracing::warn!("⚠️ MarketSuccess 解析失败: {} (len={})", e, payload.len()),
+            }
+        }
+        x if x == ServerPacketIds::MarketFail as i16 => {
+            let reason = payload.get(PacketHeader::HEADER_SIZE).copied().unwrap_or(0);
+            market.message = format!("市场操作失败（原因 {}）", reason);
+            tracing::warn!("🏪 市场失败原因: {}", reason);
         }
         // ---- M33: 师徒 ----
         x if x == ServerPacketIds::MentorRequest as i16 => {

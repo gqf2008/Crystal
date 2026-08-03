@@ -29,6 +29,7 @@ pub mod inventory;
 pub mod item_rental;
 pub mod keyboard_layout;
 pub mod mail;
+pub mod market;
 pub mod menu;
 pub mod mentor;
 pub mod minimap;
@@ -98,6 +99,7 @@ pub enum DialogKind {
     KeyboardLayout,
     BigMap,
     ChatNotice,
+    Market,
     Storage,
 }
 
@@ -186,6 +188,9 @@ impl Plugin for DialogsPlugin {
                 keyboard_layout::KeyboardPlugin,
                 big_map::BigMapPlugin,
                 chat_notice::ChatNoticePlugin,
+            ),
+            (
+                market::MarketPlugin,
                 game_shop::GameShopPlugin,
                 storage::StoragePlugin,
                 sell_panel::SellPanelPlugin,
