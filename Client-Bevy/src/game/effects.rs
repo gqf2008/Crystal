@@ -12,7 +12,7 @@ use crate::actor::{LocalPlayer, NetObjectId};
 use crate::scenes::AppState;
 
 /// 待生成特效（网络事件 → 渲染，按 target object_id 定位）
-#[derive(Debug, Clone, Copy)]
+#[derive(Message, Debug, Clone, Copy)]
 pub enum PendingEffect {
     /// 魔法弹道：从玩家飞向目标
     Projectile {
@@ -26,10 +26,9 @@ pub enum PendingEffect {
     },
 }
 
-/// 特效状态（网络层写入 pending，特效系统消费）
+/// 特效状态（已生成特效计数，E2E 验证用；待生成特效走 Message<PendingEffect>）
 #[derive(Resource, Default)]
 pub struct EffectsState {
-    pub pending: Vec<PendingEffect>,
     /// 已生成特效计数（E2E 验证）
     pub spawned: u64,
 }
@@ -54,10 +53,12 @@ pub struct EffectsPlugin;
 impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EffectsState>();
+        app.add_message::<PendingEffect>();
         app.add_systems(
             Update,
             (spawn_pending_effects, advance_projectiles, advance_bursts)
                 .chain()
+                .after(crate::network::network_system)
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -67,11 +68,12 @@ impl Plugin for EffectsPlugin {
 fn spawn_pending_effects(
     mut commands: Commands,
     mut state: ResMut<EffectsState>,
+    mut effects: MessageReader<PendingEffect>,
     mut images: ResMut<Assets<Image>>,
     actors: Query<(&NetObjectId, &Transform)>,
     players: Query<&Transform, (With<LocalPlayer>, With<NetObjectId>)>,
 ) {
-    let pending = std::mem::take(&mut state.pending);
+    let pending: Vec<PendingEffect> = effects.read().copied().collect();
     if pending.is_empty() {
         return;
     }

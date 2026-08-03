@@ -15,7 +15,7 @@ use mir2_shared::SelectInfo;
 use std::path::Path;
 
 use crate::game::chat::ChatState;
-use crate::game::combat::CombatEvents;
+use crate::game::combat::CombatEvent;
 use crate::game::dialogs::friend::{FriendEntry, FriendState};
 use crate::game::dialogs::guild::{GuildMember as UiGuildMember, GuildState, StorageItem};
 use crate::game::dialogs::ranking::{RankEntry, RankingState};
@@ -36,7 +36,7 @@ use crate::game::dialogs::inspect::{InspectItem, InspectState};
 use crate::game::dialogs::creature::{CreatureEntry, CreatureState};
 use crate::game::dialogs::hero::HeroState;
 use crate::game::dialogs::relationship::RelationshipState;
-use crate::game::effects::{EffectsState, PendingEffect};
+use crate::game::effects::PendingEffect;
 use crate::game::player_control::ControlState;
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::npc::NpcDialogState;
@@ -45,7 +45,7 @@ use crate::game::dialogs::sell_panel::SellPanelState;
  use crate::game::dialogs::storage::StorageState;
 use crate::game::dialogs::trade::{TradeItem as UiTradeItem, TradeState};
 use crate::game::hud::HudState;
-use crate::game::movement::{NetMotion, NetMotions};
+use crate::game::movement::NetMotion;
 use crate::game::skills::MagicsState;
 use crate::game::weather::WeatherState;
 use crate::map_renderer::GameData;
@@ -1027,7 +1027,7 @@ impl Packet for RefineCheckWire {
 }
 
 /// 待生成的网络对象（MapChanged 后由 Game 状态消费）
-#[derive(Debug, Clone)]
+#[derive(Message, Debug, Clone)]
 pub enum NetObject {
     Player {
         object_id: u32,
@@ -1071,12 +1071,9 @@ pub enum NetObject {
     },
 }
 
-#[derive(Resource, Default)]
-pub struct NetObjects {
-    pub pending: Vec<NetObject>,
-    /// 待移除的服务器对象 ID（ObjectRemove）
-    pub to_remove: Vec<u32>,
-}
+/// 服务器对象移除消息（ObjectRemove）
+#[derive(Message, Debug, Clone, Copy)]
+pub struct NetObjectRemoved(pub u32);
 
 pub struct NetworkPlugin;
 
@@ -1086,7 +1083,8 @@ impl Plugin for NetworkPlugin {
         app.insert_resource(NetMode(mode));
         app.insert_resource(NetServerAddr(addr));
         app.init_resource::<NetworkContext>();
-        app.init_resource::<NetObjects>();
+        app.add_message::<NetObject>();
+        app.add_message::<NetObjectRemoved>();
         app.add_systems(Startup, setup_network);
         app.add_systems(Update, network_system);
     }
@@ -1125,7 +1123,7 @@ fn setup_network(mut net: ResMut<NetworkContext>, mode: Res<NetMode>, addr: Res<
 
 /// 网络系统参数（Bevy 16 参数上限：合并对话框状态）
 #[derive(SystemParam)]
-struct NetworkPanels<'w> {
+pub(crate) struct NetworkPanels<'w> {
     storage: ResMut<'w, StorageState>,
     sell_panel: ResMut<'w, SellPanelState>,
     group: ResMut<'w, GroupState>,
@@ -1138,7 +1136,6 @@ struct NetworkPanels<'w> {
     market: ResMut<'w, MarketState>,
     shop: ResMut<'w, GameShopState>,
     territory: ResMut<'w, GuildTerritoryState>,
-    effects: ResMut<'w, EffectsState>,
     control: ResMut<'w, ControlState>,
     fishing: ResMut<'w, FishingState>,
     refine: ResMut<'w, RefineState>,
@@ -1157,17 +1154,25 @@ struct NetworkPanels<'w> {
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
+/// 网络→游戏消息出口（对象/移动/战斗/特效；MessageWriter 替代手写 Vec 队列）
+#[derive(SystemParam)]
+pub(crate) struct NetworkOutbox<'w> {
+    net_objects: MessageWriter<'w, NetObject>,
+    net_removals: MessageWriter<'w, NetObjectRemoved>,
+    motions: MessageWriter<'w, NetMotion>,
+    combat: MessageWriter<'w, CombatEvent>,
+    effects: MessageWriter<'w, PendingEffect>,
+}
+
 /// 网络系统：拉取服务器数据 → 解析包 → 分发处理
-fn network_system(
+pub(crate) fn network_system(
     mut net: ResMut<NetworkContext>,
     mut game_data: ResMut<GameData>,
-    mut net_objects: ResMut<NetObjects>,
-    mut motions: ResMut<NetMotions>,
+    mut outbox: NetworkOutbox,
     mut hud: ResMut<HudState>,
     mut chat: ResMut<ChatState>,
     mut npc_dialog: ResMut<NpcDialogState>,
     mut npc_goods: ResMut<NpcGoodsState>,
-    mut combat_evt: ResMut<CombatEvents>,
     mut weather: ResMut<WeatherState>,
     mut magics: ResMut<MagicsState>,
     mut panels: NetworkPanels,
@@ -1220,13 +1225,14 @@ fn network_system(
                     handle_packet(
                         &mut net,
                         &mut game_data,
-                        &mut net_objects,
-                        &mut motions,
+                        &mut outbox.net_objects,
+                        &mut outbox.net_removals,
+                        &mut outbox.motions,
                         &mut hud,
                         &mut chat,
                         &mut npc_dialog,
                         &mut npc_goods,
-                        &mut combat_evt,
+                        &mut outbox.combat,
                         &mut weather,
                         &mut magics,
                         &mut *panels.storage,
@@ -1241,7 +1247,7 @@ fn network_system(
                         &mut *panels.market,
                         &mut *panels.shop,
                         &mut *panels.territory,
-                        &mut *panels.effects,
+                        &mut outbox.effects,
                         &mut *panels.control,
                         &mut *panels.fishing,
                         &mut *panels.refine,
@@ -1297,13 +1303,14 @@ fn network_system(
                     handle_packet(
                         &mut net,
                         &mut game_data,
-                        &mut net_objects,
-                        &mut motions,
+                        &mut outbox.net_objects,
+                        &mut outbox.net_removals,
+                        &mut outbox.motions,
                         &mut hud,
                         &mut chat,
                         &mut npc_dialog,
                         &mut npc_goods,
-                        &mut combat_evt,
+                        &mut outbox.combat,
                         &mut weather,
                         &mut magics,
                         &mut *panels.storage,
@@ -1318,7 +1325,7 @@ fn network_system(
                         &mut *panels.market,
                         &mut *panels.shop,
                         &mut *panels.territory,
-                        &mut *panels.effects,
+                        &mut outbox.effects,
                         &mut *panels.control,
                         &mut *panels.fishing,
                         &mut *panels.refine,
@@ -1458,13 +1465,14 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
 fn handle_packet(
     net: &mut NetworkContext,
     game_data: &mut GameData,
-    net_objects: &mut NetObjects,
-    motions: &mut NetMotions,
+    net_objects: &mut MessageWriter<NetObject>,
+    net_removals: &mut MessageWriter<NetObjectRemoved>,
+    motions: &mut MessageWriter<NetMotion>,
     hud: &mut HudState,
     chat: &mut ChatState,
     npc_dialog: &mut NpcDialogState,
     npc_goods: &mut NpcGoodsState,
-    combat_evt: &mut CombatEvents,
+    combat_evt: &mut MessageWriter<CombatEvent>,
     weather: &mut WeatherState,
     magics: &mut MagicsState,
     storage: &mut StorageState,
@@ -1479,7 +1487,7 @@ fn handle_packet(
     market: &mut MarketState,
     shop: &mut GameShopState,
     territory: &mut GuildTerritoryState,
-    effects: &mut EffectsState,
+    effects: &mut MessageWriter<PendingEffect>,
     control: &mut ControlState,
     fishing: &mut FishingState,
     refine: &mut RefineState,
@@ -1765,7 +1773,7 @@ fn handle_packet(
         x if x == ServerPacketIds::ObjectPlayer as i16 => {
             match objects::ObjectPlayer::read_body(&mut cur) {
             Ok(p) => {
-                net_objects.pending.push(NetObject::Player {
+                net_objects.write(NetObject::Player {
                     object_id: p.object_id,
                     name: p.name,
                     class: p.class,
@@ -1789,7 +1797,7 @@ fn handle_packet(
         }
         x if x == ServerPacketIds::ObjectMonster as i16 => {
             if let Ok(p) = objects::ObjectMonster::read_body(&mut cur) {
-                net_objects.pending.push(NetObject::Monster {
+                net_objects.write(NetObject::Monster {
                     object_id: p.object_id,
                     name: p.name,
                     location_x: p.location_x,
@@ -1801,7 +1809,7 @@ fn handle_packet(
         }
         x if x == ServerPacketIds::ObjectNpc as i16 => {
             if let Ok(p) = objects::ObjectNpc::read_body(&mut cur) {
-                net_objects.pending.push(NetObject::Npc {
+                net_objects.write(NetObject::Npc {
                     object_id: p.object_id,
                     name: p.name,
                     image: p.image,
@@ -1814,7 +1822,7 @@ fn handle_packet(
         x if x == ServerPacketIds::ObjectRemove as i16 => {
             if let Ok(p) = objects::ObjectRemove::read_body(&mut cur) {
                 tracing::debug!("🗑️ ObjectRemove id={}", p.object_id);
-                net_objects.to_remove.push(p.object_id);
+                net_removals.write(NetObjectRemoved(p.object_id));
             }
         }
         x if x == ServerPacketIds::ObjectItem as i16 => {
@@ -1833,7 +1841,7 @@ fn handle_packet(
                     p.location_x,
                     p.location_y
                 );
-                net_objects.pending.push(NetObject::GroundItem {
+                net_objects.write(NetObject::GroundItem {
                     object_id: p.object_id,
                     item: to_inv_item(&p.item),
                     location_x: p.location_x,
@@ -1970,7 +1978,7 @@ fn handle_packet(
         // ---- M8: 对象移动与聊天 ----
         x if x == ServerPacketIds::ObjectTurn as i16 => {
             if let Ok(p) = objects::ObjectTurn::read_body(&mut cur) {
-                motions.pending.push(NetMotion::Turn {
+                motions.write(NetMotion::Turn {
                     object_id: p.object_id,
                     x: p.location_x,
                     y: p.location_y,
@@ -1980,7 +1988,7 @@ fn handle_packet(
         }
         x if x == ServerPacketIds::ObjectWalk as i16 => {
             if let Ok(p) = objects::ObjectWalk::read_body(&mut cur) {
-                motions.pending.push(NetMotion::Walk {
+                motions.write(NetMotion::Walk {
                     object_id: p.object_id,
                     x: p.location_x,
                     y: p.location_y,
@@ -1990,7 +1998,7 @@ fn handle_packet(
         }
         x if x == ServerPacketIds::ObjectRun as i16 => {
             if let Ok(p) = objects::ObjectRun::read_body(&mut cur) {
-                motions.pending.push(NetMotion::Run {
+                motions.write(NetMotion::Run {
                     object_id: p.object_id,
                     x: p.location_x,
                     y: p.location_y,
@@ -2026,10 +2034,10 @@ fn handle_packet(
         // ---- M10: 战斗反馈 ----
         x if x == ServerPacketIds::ObjectStruck as i16 => {
             if let Ok(p) = combat::ObjectStruck::read_body(&mut cur) {
-                combat_evt.strikes.push((p.object_id, p.direction));
+                combat_evt.write(CombatEvent::Struck { object_id: p.object_id, direction: p.direction });
                 // M38：选中的目标受击 → 命中爆炸特效
                 if control.attack_target == Some(p.object_id) {
-                    effects.pending.push(PendingEffect::Burst {
+                    effects.write(PendingEffect::Burst {
                         target_id: p.object_id,
                         color: [1.0, 0.7, 0.2],
                     });
@@ -2038,14 +2046,12 @@ fn handle_packet(
         }
         x if x == ServerPacketIds::ObjectDied as i16 => {
             if let Ok(p) = combat::ObjectDied::read_body(&mut cur) {
-                combat_evt.deaths.push((p.object_id, p.death_type));
+                combat_evt.write(CombatEvent::Died { object_id: p.object_id, death_type: p.death_type });
             }
         }
         x if x == ServerPacketIds::DamageIndicator as i16 => {
             if let Ok(p) = combat::DamageIndicator::read_body(&mut cur) {
-                combat_evt
-                    .damages
-                    .push((p.object_id, p.damage, p.damage_type));
+                combat_evt.write(CombatEvent::Damage { object_id: p.object_id, damage: p.damage, dmg_type: p.damage_type });
             }
         }
 
@@ -3318,7 +3324,7 @@ fn handle_packet(
                 tracing::info!("🪄 MagicCast: spell={:?}", p.spell);
                 // M38：有选中目标 → 生成魔法弹道特效
                 if let Some(tid) = control.attack_target {
-                    effects.pending.push(PendingEffect::Projectile {
+                    effects.write(PendingEffect::Projectile {
                         target_id: tid,
                         color: [1.0, 0.6, 0.2],
                     });

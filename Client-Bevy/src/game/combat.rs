@@ -11,12 +11,12 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
 use bevy::sprite::Anchor;
 
-/// 服务器战斗事件（网络 handler 写入）
-#[derive(Resource, Default)]
-pub struct CombatEvents {
-    pub strikes: Vec<(u32, u8)>,                  // (object_id, direction)
-    pub deaths: Vec<(u32, u8)>,                   // (object_id, death_type)
-    pub damages: Vec<(u32, i32, u8)>,             // (object_id, damage, type)
+/// 服务器战斗事件（网络 handler 发送，战斗系统消费）
+#[derive(Message, Debug, Clone, Copy)]
+pub enum CombatEvent {
+    Struck { object_id: u32, direction: u8 },
+    Died { object_id: u32, death_type: u8 },
+    Damage { object_id: u32, damage: i32, dmg_type: u8 },
 }
 
 /// 伤害飘字
@@ -38,10 +38,11 @@ pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<CombatEvents>();
+        app.add_message::<CombatEvent>();
         app.add_systems(
             Update,
             (apply_combat_events, advance_combat_timers, advance_damage_texts)
+                .after(crate::network::network_system)
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -53,54 +54,57 @@ fn apply_combat_events(
     ui_font: Res<UiFont>,
     sound_bank: Res<crate::game::sound::SoundBank>,
     mut audio_assets: ResMut<Assets<AudioSource>>,
-    mut events: ResMut<CombatEvents>,
+    mut events: MessageReader<CombatEvent>,
     mut actors: Query<(Entity, &NetObjectId, &mut ActorAnim)>,
 ) {
-    for (object_id, direction) in events.strikes.drain(..) {
-        crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, 10060);
-        for (e, id, mut anim) in &mut actors {
-            if id.0 == object_id {
-                anim.action = mir2_shared::enums::MirAction::Attack1;
-                anim.direction = direction;
-                anim.frame_index = 0;
-                commands.entity(e).insert(StruckTimer(0.6));
-                break;
+    for ev in events.read() {
+        match ev {
+            CombatEvent::Struck { object_id, direction } => {
+                crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, 10060);
+                for (e, id, mut anim) in &mut actors {
+                    if id.0 == *object_id {
+                        anim.action = mir2_shared::enums::MirAction::Attack1;
+                        anim.direction = *direction;
+                        anim.frame_index = 0;
+                        commands.entity(e).insert(StruckTimer(0.6));
+                        break;
+                    }
+                }
+            }
+            CombatEvent::Died { object_id, .. } => {
+                for (e, id, mut anim) in &mut actors {
+                    if id.0 == *object_id {
+                        anim.action = mir2_shared::enums::MirAction::Dead;
+                        anim.frame_index = 0;
+                        commands.entity(e).insert(DeathTimer(3.0));
+                        break;
+                    }
+                }
+            }
+            // 伤害飘字（挂到目标实体上自动跟随）
+            CombatEvent::Damage { object_id, damage, .. } => {
+                if !ui_font.0.is_strong() {
+                    continue;
+                }
+                let Some(target) = actors.iter().find(|(_, id, _)| id.0 == *object_id).map(|(e, _, _)| e) else {
+                    continue;
+                };
+                commands.entity(target).with_children(|p| {
+                    p.spawn((
+                        Text2d::new(format!("-{}", damage)),
+                        Anchor::TOP_LEFT,
+                        TextColor(Color::srgb(1.0, 0.9, 0.3)),
+                        TextFont {
+                            font: FontSource::Handle(ui_font.0.clone()),
+                            font_size: FontSize::Px(16.0),
+                            ..default()
+                        },
+                        Transform::from_xyz(0.0, -40.0, 20.0),
+                        DamageText { vy: -50.0, life: 1.2 },
+                    ));
+                });
             }
         }
-    }
-    for (object_id, _death_type) in events.deaths.drain(..) {
-        for (e, id, mut anim) in &mut actors {
-            if id.0 == object_id {
-                anim.action = mir2_shared::enums::MirAction::Dead;
-                anim.frame_index = 0;
-                commands.entity(e).insert(DeathTimer(3.0));
-                break;
-            }
-        }
-    }
-
-    // 伤害飘字（挂到目标实体上自动跟随）
-    for (object_id, damage, _dmg_type) in events.damages.drain(..) {
-        if !ui_font.0.is_strong() {
-            continue;
-        }
-        let Some(target) = actors.iter().find(|(_, id, _)| id.0 == object_id).map(|(e, _, _)| e) else {
-            continue;
-        };
-        commands.entity(target).with_children(|p| {
-            p.spawn((
-                Text2d::new(format!("-{}", damage)),
-                Anchor::TOP_LEFT,
-                TextColor(Color::srgb(1.0, 0.9, 0.3)),
-                TextFont {
-                    font: FontSource::Handle(ui_font.0.clone()),
-                    font_size: FontSize::Px(16.0),
-                    ..default()
-                },
-                Transform::from_xyz(0.0, -40.0, 20.0),
-                DamageText { vy: -50.0, life: 1.2 },
-            ));
-        });
     }
 }
 

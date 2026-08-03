@@ -24,7 +24,7 @@ use bevy::sprite::Anchor;
 use crate::map_renderer::{make_image, GameData, GameLibraries, TILE_HEIGHT, TILE_WIDTH};
 use crate::resources::libraries::LibraryName;
 use crate::ui::sprite_ui::{UiFont, UiImageCache};
-use crate::network::{NetObject, NetObjects};
+use crate::network::{NetObject, NetObjectRemoved};
 use crate::objects::frames::{get_default_npc_frame, get_monster_frame, get_player_frame, Frame};
 use crate::resources::libraries::ArrayLibType;
 
@@ -45,6 +45,7 @@ impl Plugin for ActorPlugin {
                 dump_depth_debug,
             )
                 .chain()
+                .after(crate::network::network_system)
                 .run_if(in_state(crate::scenes::AppState::Game)),
         );
         app.add_systems(
@@ -371,7 +372,7 @@ fn actor_sprite_render(
 fn spawn_net_objects_when_ready(
     mut commands: Commands,
     data: Res<GameData>,
-    mut net_objects: ResMut<NetObjects>,
+    mut spawns: MessageReader<NetObject>,
     net: Res<crate::network::NetworkContext>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
@@ -385,7 +386,7 @@ fn spawn_net_objects_when_ready(
     if data.map.is_none() {
         return;
     }
-    let pending: Vec<NetObject> = net_objects.pending.drain(..).collect();
+    let pending: Vec<NetObject> = spawns.read().cloned().collect();
     if pending.is_empty() {
         return;
     }
@@ -642,10 +643,10 @@ fn spawn_ground_item(
 /// 处理 ObjectRemove：按 NetObjectId 删除对应实体
 fn despawn_removed_objects(
     mut commands: Commands,
-    mut net_objects: ResMut<NetObjects>,
+    mut removals: MessageReader<NetObjectRemoved>,
     query: Query<(Entity, &NetObjectId)>,
 ) {
-    let to_remove: Vec<u32> = net_objects.to_remove.drain(..).collect();
+    let to_remove: Vec<u32> = removals.read().map(|r| r.0).collect();
     if to_remove.is_empty() {
         return;
     }
