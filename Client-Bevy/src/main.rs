@@ -285,6 +285,10 @@ fn main() {
     if std::env::args().any(|a| a == "--marriage-accept") {
         app.add_systems(Update, auto_marriage_accept);
     }
+    // --ui-dialog-test: 纯客户端对话框批量验证（公告/聊天公告/计时器/帮助）
+    if std::env::args().any(|a| a == "--ui-dialog-test") {
+        app.add_systems(Update, auto_ui_dialog_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -3502,6 +3506,50 @@ fn auto_marriage_accept(
             *stage = 9;
         }
         _ => {}
+    }
+}
+
+/// --ui-dialog-test：依次打开 Notice/ChatNotice/Timer/Help 验证渲染
+#[allow(clippy::too_many_arguments)]
+fn auto_ui_dialog_test(
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut phase: Local<f32>,
+) {
+    use client_bevy::scenes::AppState;
+    use client_bevy::game::dialogs::DialogKind;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    const KINDS: [DialogKind; 4] = [
+        DialogKind::Notice,
+        DialogKind::ChatNotice,
+        DialogKind::Timer,
+        DialogKind::Help,
+    ];
+    if *stage >= KINDS.len() as u8 {
+        return;
+    }
+    let kind = KINDS[*stage as usize];
+    if !mgr.is_open(kind) && *phase == 0.0 {
+        mgr.toggle(kind);
+        tracing::info!("[UIDLG] 打开 {:?}", kind);
+        *phase = *t;
+    }
+    if mgr.is_open(kind) && *t - *phase >= 1.5 {
+        mgr.close(kind);
+        tracing::info!("[UIDLG] ✅ {:?} 渲染正常", kind);
+        *stage += 1;
+        *phase = 0.0;
+        *t = 0.0;
+    }
+    if *t >= 30.0 && *stage < KINDS.len() as u8 {
+        tracing::warn!("[UIDLG] ❌ 卡在 {:?}", kind);
+        *stage = 9;
     }
 }
 

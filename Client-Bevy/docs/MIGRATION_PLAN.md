@@ -416,6 +416,15 @@
 - [x] 验证：真实 ServerRust 双客户端 E2E——求婚 → `✅ 结婚成功`（双方 LoverUpdate=true）→ 离婚请求 → 确认 → `✅ 离婚成功`（双方 LoverUpdate=false）；客户端 34 / 服务端 139 测试全过
 
 ---
+### M50: 纯客户端对话框批量补齐（Notice/ChatNotice/Timer/Help）（2026-08-03 完成）
+- [x] 公告（Notice）：服务器公告本地显示
+- [x] 聊天公告（ChatNotice）：聊天颜色说明
+- [x] 计时器（Timer）：本地计时占位
+- [x] 帮助（Help）：操作说明（F1-F8 施法/左键移动/右键使用/中键跑步/HUD 开对话框）
+- [x] 验证：真实 ServerRust E2E——`✅ Notice/ChatNotice/Timer/Help 渲染正常`（打开+渲染+关闭全通过）；客户端 34 / 服务端 139 测试全过
+- [x] 注：M50 后剩余对话框：socket/dura_status/npc_drop/roll/npc_awake（需服务端）、option/keyboard_layout/big_map（纯 UI）
+
+---
 ## 四、执行顺序与依赖
 
 ```

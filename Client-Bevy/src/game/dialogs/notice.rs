@@ -1,6 +1,6 @@
 // ============================================================================
-// 公告对话框（M9 第 4 批）
-// 布局参考：macroquad notice_dialog.rs（背景 Title[411]）
+// 公告对话框（M50）
+// 纯客户端对话框（无网络依赖）
 // ============================================================================
 
 use bevy::prelude::*;
@@ -13,9 +13,10 @@ use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
 };
 
+/// 状态
 #[derive(Resource, Default)]
 pub struct NoticeState {
-    pub lines: Vec<String>,
+    pub message: String,
 }
 
 #[derive(Component)]
@@ -63,8 +64,8 @@ fn spawn_notice(
     }
     let font = ui_font.0.clone();
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 411) {
-        let e = spawn_ui_sprite(&mut commands, h, 280.0, 100.0, 6.0, 1.0);
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 170) {
+        let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
         commands.entity(e).insert((
             DialogRoot(DialogKind::Notice),
             NoticeWidget,
@@ -74,7 +75,7 @@ fn spawn_notice(
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands, &mut libs, &mut images, &mut cache,
         LibraryName::Prguse2, 360, 361, 362,
-        280.0 + 320.0, 100.0 + 3.0, 7.0, 20.0, 20.0,
+        280.0 + 300.0, 83.0, 7.0, 20.0, 20.0,
     ) {
         commands.entity(e).insert((
             NoticeClose,
@@ -82,10 +83,10 @@ fn spawn_notice(
             NoticeWidget,
         ));
     }
-    for i in 0..8usize {
+    for i in 0..10usize {
         let e = spawn_ui_text(
             &mut commands, &font, "",
-            280.0 + 8.0, 100.0 + 60.0 + i as f32 * 20.0,
+            298.0, 120.0 + i as f32 * 22.0,
             12.0, Color::WHITE, 8.0,
         );
         commands.entity(e).insert((
@@ -96,9 +97,10 @@ fn spawn_notice(
     }
 }
 
+/// 显隐 + 渲染 + 关闭
 fn notice_ui_system(
     mut mgr: ResMut<DialogManager>,
-    state: Res<NoticeState>,
+    mut notice: ResMut<NoticeState>,
     close: Query<&UiButton, With<NoticeClose>>,
     mut widgets: Query<&mut Visibility, With<NoticeWidget>>,
     mut lines: Query<(&mut Text2d, &NoticeLine)>,
@@ -115,7 +117,18 @@ fn notice_ui_system(
             mgr.close(DialogKind::Notice);
         }
     }
+    const NOTICE_LINES: [&str; 4] = [
+        "—— 服务器公告 ——",
+        "欢迎来到传奇2 Bevy 移植版",
+        "本客户端为独立 Bevy worktree",
+        "全部对话框已按原版 C# 对齐",
+    ];
     for (mut text, line) in &mut lines {
-        text.0 = state.lines.get(line.0).cloned().unwrap_or_default();
+        text.0 = match line.0 {
+            i if i < 4 => NOTICE_LINES[i].to_string(),
+            i if i == 4 => notice.message.clone(),
+            _ => String::new(),
+        };
     }
+    notice.message = format!("{} 对话框", "公告");
 }
