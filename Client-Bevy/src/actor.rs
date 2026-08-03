@@ -135,6 +135,8 @@ pub struct SpriteLayer {
     pub is_effect: bool,
     /// true = 坐骑层（M60：帧号按坐骑库布局计算，非玩家帧表）
     pub is_mount: bool,
+    /// 透明度（M62：武器特效 DrawBlend 0.4）
+    pub alpha: f32,
 }
 
 /// M60 坐骑状态（挂玩家实体；mount_type>=0 且骑乘时显示坐骑层）
@@ -345,6 +347,7 @@ fn actor_sprite_render(
         match cached {
             Some(c) => {
                 sprite.image = c.handle;
+                sprite.color = Color::srgba(1.0, 1.0, 1.0, layer.alpha);
                 // 相对父实体（演员脚点）的本地坐标：macroquad 里图左上角在
                 // (pos.x + offset_x, pos.y + offset_y)，Bevy 以中心为锚且 y 向上
                 transform.translation = Vec3::new(
@@ -447,6 +450,7 @@ fn spawn_net_objects_when_ready(
                                     frame: 0,
                                     is_effect: false,
                                     is_mount: true,
+                                    alpha: 1.0,
                                 },
                             ));
                         });
@@ -779,6 +783,7 @@ fn spawn_player_with(
                 frame: 0,
                 is_effect: false,
                 is_mount: false,
+                alpha: 1.0,
             },
         ));
         p.spawn((
@@ -790,6 +795,7 @@ fn spawn_player_with(
                 frame: 0,
                 is_effect: false,
                 is_mount: false,
+                alpha: 1.0,
             },
         ));
         p.spawn((
@@ -801,8 +807,41 @@ fn spawn_player_with(
                 frame: 0,
                 is_effect: false,
                 is_mount: false,
+                alpha: 1.0,
             },
         ));
+        // M62：武器特效（C# DrawWeapon：WeaponEffectLibrary1.DrawBlend(DrawFrame, 0.4F)）
+        if weapon_effect > 0 {
+            tracing::info!("⚔️ 武器特效层: type={}", weapon_effect);
+            p.spawn((
+                Sprite::default(),
+                Transform::default(),
+                SpriteLayer {
+                    lib: ArrayLibType::CWeaponEffect,
+                    slot: weapon_effect.max(0) as u32,
+                    frame: 0,
+                    is_effect: false,
+                    is_mount: false,
+                    alpha: 0.4,
+                },
+            ));
+        }
+        // M62：翅膀特效（C# DrawWings：WingLibrary.DrawBlend(DrawWingFrame)）
+        if wing_effect > 0 && wing_effect < 100 {
+            tracing::info!("🪽 翅膀特效层: type={}", wing_effect);
+            p.spawn((
+                Sprite::default(),
+                Transform::default(),
+                SpriteLayer {
+                    lib: ArrayLibType::CHumEffect,
+                    slot: wing_effect.saturating_sub(1).max(0) as u32,
+                    frame: 0,
+                    is_effect: true,
+                    is_mount: false,
+                    alpha: 1.0,
+                },
+            ));
+        }
         // ghost 残影层（遮挡时显示，镜像对应图层）
         for lib in [
             ArrayLibType::CArmours,
@@ -856,7 +895,7 @@ fn spawn_local_player_with(
             Visibility::default(),
         ))
         .id();
-    attach_player_layers(commands, root, armour, hair, weapon);
+    attach_player_layers(commands, root, armour, hair, weapon, weapon_effect, wing_effect);
     if is_mounted && mount_type >= 0 {
         commands.entity(root).insert(MountState { mount_type });
         attach_mount_layer(commands, root, mount_type);
@@ -899,7 +938,7 @@ fn spawn_remote_player_with(
             Visibility::default(),
         ))
         .id();
-    attach_player_layers(commands, root, armour, hair, weapon);
+    attach_player_layers(commands, root, armour, hair, weapon, weapon_effect, wing_effect);
     if is_mounted && mount_type >= 0 {
         commands.entity(root).insert(MountState { mount_type });
         attach_mount_layer(commands, root, mount_type);
@@ -919,18 +958,22 @@ fn attach_mount_layer(commands: &mut Commands, root: Entity, mount_type: i16) {
                 frame: 0,
                 is_effect: false,
                 is_mount: true,
+                alpha: 1.0,
             },
         ));
     });
 }
 
-/// 玩家分层子精灵（护甲/发型/武器 + ghost 层）
+/// 玩家分层子精灵（护甲/发型/武器 + 武器特效/翅膀 + ghost 层）
+#[allow(clippy::too_many_arguments)]
 fn attach_player_layers(
     commands: &mut Commands,
     root: Entity,
     armour: i16,
     hair: u8,
     weapon: i16,
+    weapon_effect: i16,
+    wing_effect: u8,
 ) {
     commands.entity(root).with_children(|p| {
         p.spawn((
@@ -942,6 +985,7 @@ fn attach_player_layers(
                 frame: 0,
                 is_effect: false,
                 is_mount: false,
+                alpha: 1.0,
             },
         ));
         p.spawn((
@@ -953,6 +997,7 @@ fn attach_player_layers(
                 frame: 0,
                 is_effect: false,
                 is_mount: false,
+                alpha: 1.0,
             },
         ));
         p.spawn((
@@ -964,8 +1009,41 @@ fn attach_player_layers(
                 frame: 0,
                 is_effect: false,
                 is_mount: false,
+                alpha: 1.0,
             },
         ));
+        // M62：武器特效（C# DrawWeapon：WeaponEffectLibrary1.DrawBlend(DrawFrame, 0.4F)）
+        if weapon_effect > 0 {
+            tracing::info!("⚔️ 武器特效层: type={}", weapon_effect);
+            p.spawn((
+                Sprite::default(),
+                Transform::default(),
+                SpriteLayer {
+                    lib: ArrayLibType::CWeaponEffect,
+                    slot: weapon_effect.max(0) as u32,
+                    frame: 0,
+                    is_effect: false,
+                    is_mount: false,
+                    alpha: 0.4,
+                },
+            ));
+        }
+        // M62：翅膀特效（C# DrawWings：WingLibrary.DrawBlend(DrawWingFrame)）
+        if wing_effect > 0 && wing_effect < 100 {
+            tracing::info!("🪽 翅膀特效层: type={}", wing_effect);
+            p.spawn((
+                Sprite::default(),
+                Transform::default(),
+                SpriteLayer {
+                    lib: ArrayLibType::CHumEffect,
+                    slot: wing_effect.saturating_sub(1).max(0) as u32,
+                    frame: 0,
+                    is_effect: true,
+                    is_mount: false,
+                    alpha: 1.0,
+                },
+            ));
+        }
         for lib in [
             ArrayLibType::CArmours,
             ArrayLibType::CHair,
@@ -1022,6 +1100,7 @@ fn spawn_monster(commands: &mut Commands, monster_type: u16, x: f32, y: f32, dir
                 frame: 0,
                 is_effect: false,
                 is_mount: false,
+                alpha: 1.0,
             },
         ));
     });
@@ -1057,6 +1136,7 @@ fn spawn_npc(commands: &mut Commands, npc_index: u16, x: f32, y: f32, direction:
                 frame: 0,
                 is_effect: false,
                 is_mount: false,
+                alpha: 1.0,
             },
         ));
     });

@@ -84,6 +84,8 @@ pub enum ArrayLibType {
     /// 武器 CWeapon/{:02}.Lib
     CWeapons,
     /// 人物特效（翅膀等）CHumEffect/{:02}.Lib
+    /// 武器特效 CWeaponEffect/{:02}.Lib（M62；DrawBlend 0.4 透明度）
+    CWeaponEffect,
     CHumEffect,
     /// 坐骑 Mount/{:02}.Lib（M60；帧布局：站立 0/行走 32/奔跑 96/受击 144/攻击 168）
     Mounts,
@@ -99,6 +101,7 @@ impl ArrayLibType {
             ArrayLibType::CWeapons => "CWeapons",
             ArrayLibType::CHumEffect => "CHumEffect",
             ArrayLibType::Mounts => "Mounts",
+            ArrayLibType::CWeaponEffect => "CWeaponEffect",
         }
     }
 
@@ -112,6 +115,7 @@ impl ArrayLibType {
             ArrayLibType::CWeapons => format!("CWeapon/{:02}", index),
             ArrayLibType::CHumEffect => format!("CHumEffect/{:02}", index),
             ArrayLibType::Mounts => format!("Mount/{:02}", index),
+            ArrayLibType::CWeaponEffect => format!("CWeaponEffect/{:02}", index),
         }
     }
 }

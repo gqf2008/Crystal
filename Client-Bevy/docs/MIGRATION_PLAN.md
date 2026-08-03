@@ -515,6 +515,15 @@
 - [x] 验证：真实 ServerRust 连续两次登录——第一次 NewMapInfo npcs=43 → 登出 Map 1 spawns cleaned (npcs=43 monsters=358) → 第二次仍 
 pcs=43（此前 43→86→129→172 递增）；服务端 139 测试全过
 - [x] 注：M61 后遗留为 M10/M11 深度玩法迭代（动画打磨等）
+---
+
+### M62: 武器特效 + 翅膀特效渲染（2026-08-03 完成，M11 补齐）
+- [x] SpriteLayer 新增 alpha（M62：武器特效 DrawBlend 0.4 透明度）
+- [x] 武器特效层：CWeaponEffect/{:02}.Lib（对齐 C# WeaponEffectLibrary1.DrawBlend(DrawFrame, 0.4F)），武器 effect>0 时挂载
+- [x] 翅膀特效层：CHumEffect（对齐 C# DrawWings：WingLibrary.DrawBlend(DrawWingFrame)），wing_effect 1-99 时挂载（服务端暂未下发 wing_effect，客户端已就绪）
+- [x] 验证：真实 ServerRust E2E——临时将 BlueFishingRod effect=1 → 登录 → ⚔️ 武器特效层: type=1（CWeaponEffect/01.Lib 渲染）；测试数据已还原；客户端 34 测试全过
+- [x] 注：M11 剩余性能基线（精灵 Atlas）为可选优化项
+
 
 
 ---
