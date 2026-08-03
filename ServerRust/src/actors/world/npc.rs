@@ -325,7 +325,7 @@ impl Message<TeleportToNPCRequest> for WorldActor {
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
         }).await;
 
-        debug!("TeleportToNPC: {} -> {} ({}, {})", state.name, npc.name, new_x, new_y);
+        info!("TeleportToNPC: {} -> {} ({}, {})", state.name, npc.name, new_x, new_y);
     }
 }
 

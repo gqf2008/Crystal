@@ -358,6 +358,24 @@ impl Message<StartGameRequest> for WorldActor {
         for npc in new_npcs {
             self.npcs.insert(npc.object_id, npc);
         }
+        // M53：发送 NewMapInfo（大地图 NPC 列表，供 BigMapDialog 显示）
+        let map_npcs: Vec<crate::actors::world::NpcState> = self.npcs.values()
+            .filter(|n| n.map_index == loaded_state.map_index)
+            .cloned()
+            .collect();
+        if !map_npcs.is_empty() {
+            let new_map_info = super::build_new_map_info_packet(
+                map_info_idx,
+                &map_title,
+                &map_npcs,
+                &self.npc_infos,
+            );
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: new_map_info,
+            }).await;
+            info!("NewMapInfo: map={} npcs={}", map_info_idx, map_npcs.len());
+        }
         // 先收集精英广播信息（move 前遍历）
         let elite_broadcasts: Vec<String> = new_monsters.iter()
             .filter(|m| m.is_elite)

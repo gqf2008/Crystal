@@ -3737,6 +3737,40 @@ fn build_map_changed_packet(
 
     build_packet_bytes(ServerPacketIds::MapChanged as i16, &body)
 }
+/// 构建 NewMapInfo 包（M53：大地图地图信息，含 NPC 列表）
+/// wire 对齐 SharedRust NewMapInfo：map_index/title/width/height/big_map/movements/npcs
+fn build_new_map_info_packet(
+    map_index: i32,
+    title: &str,
+    npcs: &[NpcState],
+    npc_infos: &std::collections::HashMap<i32, db::NPCInfo>,
+) -> Vec<u8> {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+
+    body.extend_from_slice(&map_index.to_le_bytes());
+    write_dotnet_string(&mut body, title);
+    // width/height/big_map：客户端本地有地图数据，服务端补 0
+    body.extend_from_slice(&0i32.to_le_bytes());
+    body.extend_from_slice(&0i32.to_le_bytes());
+    body.extend_from_slice(&0i32.to_le_bytes());
+    // movements：暂无传送点数据，发空
+    body.extend_from_slice(&0i32.to_le_bytes());
+    // npcs
+    body.extend_from_slice(&(npcs.len() as i32).to_le_bytes());
+    for n in npcs {
+        body.extend_from_slice(&n.object_id.to_le_bytes());
+        write_dotnet_string(&mut body, &n.name);
+        body.extend_from_slice(&n.x.to_le_bytes());
+        body.extend_from_slice(&n.y.to_le_bytes());
+        let icon = npc_infos.get(&n.db_index).map(|i| i.big_map_icon).unwrap_or(0);
+        body.extend_from_slice(&icon.to_le_bytes());
+        let can_tp = npc_infos.get(&n.db_index).map(|i| i.can_teleport_to).unwrap_or(true);
+        body.push(if can_tp { 1u8 } else { 0u8 });
+    }
+
+    build_packet_bytes(ServerPacketIds::NewMapInfo as i16, &body)
+}
 
 /// 根据 PK 值计算名字颜色（0=白名, 1=红名, 2=橙名）
 fn name_colour_for_pk(pk_points: i32) -> i32 {
