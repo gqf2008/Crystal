@@ -473,6 +473,16 @@
 - [x] DialogManager 新增 open()（幂等）
 - [x] 验证：真实 ServerRust E2E（--dura-test）——打开 → 🔧 Weapon idx=2125 (10000/10000) 正常态 + 🔧 Armour idx=2151 (150/1000) 危险态 → ✅ 关闭；客户端 34 / 服务端 139 测试全过
 - [x] 注：M55 后剩余对话框：socket/npc_drop/roll（需服务端支持）
+---
+
+### M56: 镶嵌（宝石槽）对话框 SocketDialog（2026-08-03 完成）
+- [x] 面板 Prguse3[20 + 孔数-1]（1-6 孔单行 81-268x62；7-12 孔双行 268x95），按物品孔数动态换图并定位在背包下方
+- [x] 12 个镶嵌格（6x2，C# 位置 x*36+23+x, y*33+15+y），孔内宝石图标（Items 库）渲染，空格隐藏
+- [x] 关闭按钮 Prguse2[360/361/362]（W-23, 3）
+- [x] 打开方式：背包 Ctrl+右键（C# MirItemCell.OpenItem）；InvItem 新增 slots 并解析 UserInformation 孔内宝石
+- [x] 验证：真实 ServerRust E2E（--socket-test）——[SOCKET] 打开镶嵌面板: WoodenSword (3 孔) → 💎 0#913=#913, 1#空, 2#917=#917 → ✅ 关闭；客户端 34 / 服务端 139 测试全过
+- [x] 注：M56 后剩余对话框：npc_drop/roll（需服务端支持）
+
 
 
 

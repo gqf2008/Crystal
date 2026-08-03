@@ -42,6 +42,8 @@ pub struct InvItem {
     pub current_dura: u16,
     /// 最大耐久
     pub max_dura: u16,
+    /// 镶嵌宝石槽（M56 SocketDialog 用；长度=孔数，元素=宝石）
+    pub slots: Vec<Option<InvItem>>,
 }
 
 impl InvItem {
@@ -765,7 +767,7 @@ fn inv_confirm_system(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn inv_item_action_system(
     hud: Res<HudState>,
-    mgr: Res<DialogManager>,
+    mut mgr: ResMut<DialogManager>,
     mut click: ResMut<InvClickState>,
     net: Res<NetworkContext>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -775,6 +777,7 @@ fn inv_item_action_system(
     mut amount: ResMut<AmountBoxState>,
     mut confirm: ResMut<InvDropConfirm>,
     npc_goods: Res<crate::game::dialogs::npc_goods::NpcGoodsState>,
+    mut socket: ResMut<crate::game::dialogs::socket::SocketState>,
     mut pending: ResMut<InvPendingAmount>,
     mut result: MessageReader<AmountBoxResult>,
     all_buttons: Query<&UiButton>,
@@ -882,6 +885,20 @@ fn inv_item_action_system(
         if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
             use_or_equip(item, &net);
         }
+    }
+
+    // Ctrl+右键：打开镶嵌面板（C# MirItemCell.OpenItem）
+    if mouse.just_pressed(MouseButton::Right) && keys.pressed(KeyCode::ControlLeft) {
+        if let Some(i) = slot_at(cursor.x, cursor.y) {
+            if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
+                if !item.slots.is_empty() {
+                    socket.item = Some(item.clone());
+                    mgr.open(DialogKind::Socket);
+                    tracing::info!("💎 打开镶嵌面板: {} ({} 孔)", item.name, item.slots.len());
+                }
+            }
+        }
+        return;
     }
 
     // 右键：使用/装备

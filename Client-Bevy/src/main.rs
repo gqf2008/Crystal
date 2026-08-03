@@ -309,6 +309,10 @@ fn main() {
     if std::env::args().any(|a| a == "--dura-test") {
         app.add_systems(Update, auto_dura_test);
     }
+    // --socket-test: 镶嵌面板验证（带宝石槽物品 → 孔位/宝石渲染 → 关闭）
+    if std::env::args().any(|a| a == "--socket-test") {
+        app.add_systems(Update, auto_socket_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -3526,6 +3530,83 @@ fn auto_marriage_accept(
             *stage = 9;
         }
         _ => {}
+    }
+}
+
+/// --socket-test：打开镶嵌面板 → 孔位/宝石渲染 → 关闭
+#[allow(clippy::too_many_arguments)]
+fn auto_socket_test(
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut socket: ResMut<client_bevy::game::dialogs::socket::SocketState>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut phase: Local<f32>,
+) {
+    use client_bevy::scenes::AppState;
+    use client_bevy::game::dialogs::DialogKind;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    if *stage == 0 {
+        let sock = hud
+            .inventory
+            .items
+            .iter()
+            .flatten()
+            .find(|it| !it.slots.is_empty())
+            .cloned();
+        if let Some(item) = sock {
+            socket.item = Some(item.clone());
+            if !mgr.is_open(DialogKind::Socket) {
+                mgr.open(DialogKind::Socket);
+            }
+            tracing::info!(
+                "[SOCKET] 打开镶嵌面板: {} ({} 孔)",
+                item.name,
+                item.slots.len()
+            );
+            *stage = 1;
+        } else {
+            tracing::warn!("[SOCKET] ❌ 背包中没有带孔物品");
+            *stage = 9;
+        }
+        *phase = *t;
+        return;
+    }
+    if *stage == 1 && *t - *phase >= 1.5 {
+        let gems: Vec<String> = socket
+            .item
+            .as_ref()
+            .map(|i| {
+                i.slots
+                    .iter()
+                    .map(|s| {
+                        s.as_ref()
+                            .map(|g| format!("{}", g.name))
+                            .unwrap_or_else(|| "空".to_string())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        tracing::info!("[SOCKET] ✅ 孔位渲染: {}", gems.join(", "));
+        *stage = 2;
+        *phase = *t;
+        return;
+    }
+    if *stage == 2 && *t - *phase >= 1.0 {
+        if mgr.is_open(DialogKind::Socket) {
+            mgr.close(DialogKind::Socket);
+            tracing::info!("[SOCKET] ✅ 关闭镶嵌面板");
+        }
+        *stage = 9;
+    }
+    if *t >= 25.0 && *stage < 9 {
+        tracing::warn!("[SOCKET] ❌ 超时 stage={}", *stage);
+        *stage = 9;
     }
 }
 

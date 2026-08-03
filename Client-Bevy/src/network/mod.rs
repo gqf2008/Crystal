@@ -1279,6 +1279,7 @@ fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
         shape: item.info.as_ref().map(|i| i.shape).unwrap_or(0),
         current_dura: item.current_dura,
         max_dura: item.max_dura,
+        slots: item.slots.iter().map(|s| s.as_ref().map(to_inv_item)).collect(),
     }
 }
 
