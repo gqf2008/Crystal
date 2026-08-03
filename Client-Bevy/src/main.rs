@@ -253,6 +253,10 @@ fn main() {
     if std::env::args().any(|a| a == "--rental-owner") {
         app.add_systems(Update, auto_rental_owner);
     }
+    // --quest-test: 任务日志链路（接受任务 → ChangeQuest 显示 → 放弃）
+    if std::env::args().any(|a| a == "--quest-test") {
+        app.add_systems(Update, auto_quest_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -2952,6 +2956,98 @@ fn auto_rental_owner(
                 tracing::info!("[RENTALOWNER] ✅ 双方已锁定，可确认");
                 *stage = 9;
             }
+        }
+        _ => {}
+    }
+}
+
+/// --quest-test：打开任务日志 → 接受任务1 → 等 ChangeQuest → 放弃
+#[allow(clippy::too_many_arguments)]
+fn auto_quest_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut quest_log: ResMut<client_bevy::game::dialogs::quest_log::QuestLogState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::QuestLog) {
+                mgr.toggle(client_bevy::game::dialogs::DialogKind::QuestLog);
+            }
+            // 登录推送容错：若任务 1 已存在（上次会话残留）则直接走放弃流程
+            if quest_log.quests.iter().any(|q| q.id == 1) {
+                tracing::info!("[QUESTTEST] 任务 1 已在列表中（登录推送），直接放弃");
+                net.send_packet(&mir2_shared::packets::client::quest::AbandonQuest {
+                    quest_index: 1,
+                });
+                quest_log.quests.retain(|q| q.id != 1);
+                *stage = 2;
+                *t = 0.0;
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::quest::AcceptQuest {
+                npc_index: 0,
+                quest_index: 1,
+            });
+            tracing::info!("[QUESTTEST] 接受任务 1");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t >= 8.0 {
+                tracing::warn!("[QUESTTEST] ❌ 未收到任务更新");
+                *stage = 9;
+                return;
+            }
+            let first_id = quest_log.quests.first().map(|q| q.id);
+            if let Some(qid) = first_id {
+                let qname = quest_log
+                    .quests
+                    .iter()
+                    .find(|q| q.id == qid)
+                    .map(|q| q.name.clone())
+                    .unwrap_or_default();
+                tracing::info!("[QUESTTEST] ✅ 任务已显示: {}（任务 {}）", qname, qid);
+                net.send_packet(&mir2_shared::packets::client::quest::AbandonQuest {
+                    quest_index: qid,
+                });
+                // 模拟放弃按钮：本地移除
+                quest_log.quests.retain(|x| x.id != qid);
+                tracing::info!(
+                    "[QUESTTEST] 放弃任务 {}（移除后剩 {}）",
+                    qid,
+                    quest_log.quests.len()
+                );
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t < 5.0 {
+                return;
+            }
+            if quest_log.quests.is_empty() {
+                tracing::info!("[QUESTTEST] ✅ 任务已放弃（列表清空）");
+            } else {
+                let ids: Vec<i32> = quest_log.quests.iter().map(|q| q.id).collect();
+                tracing::warn!(
+                    "[QUESTTEST] ⚠️ 任务列表仍非空: {} ids={:?}",
+                    quest_log.quests.len(),
+                    ids
+                );
+            }
+            *stage = 9;
         }
         _ => {}
     }

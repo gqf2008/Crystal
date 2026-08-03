@@ -370,6 +370,12 @@
 - [x] 验证：真实 ServerRust 双客户端 E2E——A 发起 → B `✅ 收到租赁请求` → 存入物品 `success=true` → 双方锁定 → `✅ 双方已锁定，可确认` → A `✅ 租赁成交确认收到`；客户端 34 / 服务端 139 测试全过
 
 ---
+### M43: 任务日志（QuestLog）（2026-08-03 完成）
+- [x] **服务端**：AcceptQuest 成功后推送 ChangeQuest（C# S.ChangeQuest 语义：id + task_list + taken/completed/new）；登录进入世界序列推送已接任务列表（任务日志跨会话同步）
+- [x] **客户端**：任务日志对话框（8 行任务列表 + 选中详情 + 放弃按钮）；ChangeQuest 手动解析（SharedRust ClientQuestProgress wire）+ CompleteQuest 处理（完成移除）；AcceptQuest/AbandonQuest 复用 SharedRust（与 gate 兼容）
+- [x] 验证：真实 ServerRust E2E——接受任务 1 → `📜 ChangeQuest: id=1` → `✅ 任务已显示: Assistant's Request` → 放弃 → `✅ 任务已放弃（列表清空）`；客户端 34 / 服务端 139 测试全过
+
+---
 ## 四、执行顺序与依赖
 
 ```

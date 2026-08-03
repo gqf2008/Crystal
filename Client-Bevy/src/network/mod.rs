@@ -29,6 +29,7 @@ use crate::game::dialogs::fishing::FishingState;
 use crate::game::dialogs::refine::RefineState;
 use crate::game::dialogs::craft::CraftState;
 use crate::game::dialogs::item_rental::ItemRentalState;
+use crate::game::dialogs::quest_log::{QuestEntry, QuestLogState};
 use crate::game::effects::{EffectsState, PendingEffect};
 use crate::game::player_control::ControlState;
 use crate::game::dialogs::inventory::InvItem;
@@ -959,6 +960,7 @@ struct NetworkPanels<'w> {
     refine: ResMut<'w, RefineState>,
     craft: ResMut<'w, CraftState>,
     rental: ResMut<'w, ItemRentalState>,
+    quest_log: ResMut<'w, QuestLogState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -1013,6 +1015,7 @@ fn network_system(
                         &mut *panels.refine,
                         &mut *panels.craft,
                         &mut *panels.rental,
+                        &mut *panels.quest_log,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1071,6 +1074,7 @@ fn network_system(
                         &mut *panels.refine,
                         &mut *panels.craft,
                         &mut *panels.rental,
+                        &mut *panels.quest_log,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1219,6 +1223,7 @@ fn handle_packet(
     refine: &mut RefineState,
     craft: &mut CraftState,
     rental: &mut ItemRentalState,
+    quest_log: &mut QuestLogState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -2267,6 +2272,48 @@ fn handle_packet(
             rental.can_confirm = false;
             rental.message = "租赁已取消".to_string();
             tracing::info!("📦 租赁取消");
+        }
+        // ---- M43: 任务日志 ----
+        x if x == ServerPacketIds::ChangeQuest as i16 => {
+            // [id i32][count i32][task dotnet...][taken u8][completed u8][new u8]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            use byteorder::{LittleEndian, ReadBytesExt};
+            let id = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { tracing::warn!("⚠️ ChangeQuest 解析失败"); return; } };
+            let count = cur.read_i32::<LittleEndian>().unwrap_or(0).max(0) as usize;
+            let mut tasks = Vec::with_capacity(count);
+            let mut ok = true;
+            for _ in 0..count {
+                match mir2_shared::binary::read_dotnet_string(&mut cur) {
+                    Ok(t) => tasks.push(t),
+                    Err(_) => { ok = false; break; }
+                }
+            }
+            if !ok { tracing::warn!("⚠️ ChangeQuest 任务解析失败"); return; }
+            let taken = cur.read_u8().unwrap_or(0) != 0;
+            let completed = cur.read_u8().unwrap_or(0) != 0;
+            let is_new = cur.read_u8().unwrap_or(0) != 0;
+            let name = tasks.first().cloned().unwrap_or_else(|| format!("#{}", id));
+            let entry = QuestEntry { id, name, tasks, taken, completed, is_new };
+            if completed {
+                quest_log.quests.retain(|q| q.id != id);
+            } else if let Some(e) = quest_log.quests.iter_mut().find(|q| q.id == id) {
+                *e = entry;
+            } else {
+                quest_log.quests.push(entry);
+            }
+            quest_log.message = format!("任务更新: {}", quest_log.quests.last().map(|q| q.name.clone()).unwrap_or_default());
+            tracing::info!("📜 ChangeQuest: id={} completed={} 已接任务 {}", id, completed, quest_log.quests.len());
+        }
+        x if x == ServerPacketIds::CompleteQuest as i16 => {
+            // [quest_index i32]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 4 {
+                let id = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
+                quest_log.quests.retain(|q| q.id != id);
+                quest_log.message = format!("任务 {} 完成！", id);
+                tracing::info!("📜 CompleteQuest: {}", id);
+            }
         }
         // ---- M39: 钓鱼 ----
         x if x == ServerPacketIds::FishingUpdate as i16 => {
