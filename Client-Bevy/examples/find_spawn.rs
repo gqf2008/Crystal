@@ -1,6 +1,7 @@
 use client_bevy::resources::map_reader::{resolve_map_path, MapReader};
 fn main() {
-    let map = MapReader::new(&resolve_map_path("5")).unwrap();
+    let name = std::env::args().nth(1).unwrap_or_else(|| "5".to_string());
+    let map = MapReader::new(&resolve_map_path(&name)).unwrap();
     let (cx, cy) = (map.width as i32 / 2, map.height as i32 / 2);
     let mut found = 0;
     'outer: for r in 0..40 { for dy in -r..=r { for dx in -r..=r {

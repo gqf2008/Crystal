@@ -1,6 +1,6 @@
 use client_bevy::resources::map_reader::{resolve_map_path, MapReader};
 fn main() {
-    for name in ["3","4","5","6","7","8","9","10","11","12","13","14","15","20","21","0"] {
+    for name in ["n0","0","3","4","5","6","7","8","9","10","11","12","13","14","15","20","21"] {
         let Ok(map) = MapReader::new(&resolve_map_path(name)) else { continue };
         let (mut fa, mut fa_blend, mut ta, mut mid_anim, mut light) = (0,0,0,0,0);
         for x in 0..map.width as usize {
