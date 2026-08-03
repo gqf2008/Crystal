@@ -233,7 +233,6 @@ impl Packet for UpdateNotice {
 }
 
 /// Roll - 掷骰子 (270)
-/// Roll - 掷骰子 (270)
 /// wire 对齐 C# ServerPackets.Roll：Type/Page/Result/AutoRoll
 #[derive(Debug, Clone)]
 pub struct Roll {
