@@ -423,6 +423,18 @@
 - [x] 帮助（Help）：操作说明（F1-F8 施法/左键移动/右键使用/中键跑步/HUD 开对话框）
 - [x] 验证：真实 ServerRust E2E——`✅ Notice/ChatNotice/Timer/Help 渲染正常`（打开+渲染+关闭全通过）；客户端 34 / 服务端 139 测试全过
 - [x] 注：M50 后剩余对话框：socket/dura_status/npc_drop/roll/npc_awake（需服务端）、option/keyboard_layout/big_map（纯 UI）
+---
+
+### M51: 设置对话框 OptionDialog（2026-08-03 完成）
+- [x] 面板 Title[411]（259x354，纹理自带标签文字）屏幕居中
+- [x] 关闭按钮 Prguse2[360/361/362] 右上角（HUD 齿轮按钮 → DialogKind::Settings 接入）
+- [x] 8 组开/关按钮（36x17）：SkillMode/SkillBar/Effect/DropView/NameView/HPView/Observe/NewMove
+  - 纹理索引与选中态切换完全对齐 C# BeforeDraw（450-455/456-461/462-467/848-853）
+  - 每帧按 OptionState 切换 ButtonFrames 的 normal/hover/pressed，等效原版按状态换 Index
+- [x] 2 条音量滑条：Prguse2[468] 部分裁剪填充 + Prguse[20] 滑块，点击/拖动设置音量
+- [x] 验证：真实 ServerRust E2E（--option-test）——打开 → 8 组开关全翻转 + 音量 50%/35% → ✅ 设置对话框渲染正常 → 关闭；客户端 34 / 服务端 139 测试全过
+- [x] 注：M51 后剩余对话框：socket/dura_status/npc_drop/roll/npc_awake（需服务端）、keyboard_layout/big_map（纯 UI）
+
 
 ---
 ## 四、执行顺序与依赖

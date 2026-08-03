@@ -289,6 +289,10 @@ fn main() {
     if std::env::args().any(|a| a == "--ui-dialog-test") {
         app.add_systems(Update, auto_ui_dialog_test);
     }
+    // --option-test: 设置对话框验证（打开 → 切换 8 组开关 → 音量 → 关闭）
+    if std::env::args().any(|a| a == "--option-test") {
+        app.add_systems(Update, auto_option_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -3506,6 +3510,78 @@ fn auto_marriage_accept(
             *stage = 9;
         }
         _ => {}
+    }
+}
+
+/// --option-test：打开设置对话框 → 依次切换 8 组开关 + 音量 → 关闭
+fn auto_option_test(
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut option: ResMut<client_bevy::game::dialogs::option::OptionState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut phase: Local<f32>,
+) {
+    use client_bevy::scenes::AppState;
+    use client_bevy::game::dialogs::DialogKind;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    if *stage == 0 {
+        if !mgr.is_open(DialogKind::Settings) {
+            mgr.toggle(DialogKind::Settings);
+            tracing::info!("[OPT] 打开设置对话框");
+        }
+        *phase = *t;
+        *stage = 1;
+        return;
+    }
+    if *stage == 1 && *t - *phase >= 1.0 {
+        // 依次翻转 8 组开关（模拟点击，验证状态机 + 按钮帧刷新）
+        let flips: [(&str, bool); 8] = [
+            ("技能模式", option.skill_mode_ctrl),
+            ("技能栏", option.skill_bar),
+            ("特效", option.effect),
+            ("掉落显示", option.drop_view),
+            ("名称显示", option.name_view),
+            ("血条显示", option.hp_view),
+            ("允许观察", option.allow_observe),
+            ("新移动", option.new_move),
+        ];
+        for (name, cur) in flips {
+            let next = !cur;
+            match name {
+                "技能模式" => option.skill_mode_ctrl = next,
+                "技能栏" => option.skill_bar = next,
+                "特效" => option.effect = next,
+                "掉落显示" => option.drop_view = next,
+                "名称显示" => option.name_view = next,
+                "血条显示" => option.hp_view = next,
+                "允许观察" => option.allow_observe = next,
+                _ => option.new_move = next,
+            }
+            tracing::info!("[OPT] ✅ 设置切换: {} -> {}", name, next);
+        }
+        option.sound_volume = 0.5;
+        option.music_volume = 0.35;
+        tracing::info!("[OPT] ✅ 音量: 音效 50% / 音乐 35%");
+        tracing::info!("[OPT] ✅ 设置对话框渲染正常（8 组开关 + 2 条音量条）");
+        *stage = 2;
+        *phase = *t;
+        return;
+    }
+    if *stage == 2 && *t - *phase >= 1.0 {
+        if mgr.is_open(DialogKind::Settings) {
+            mgr.close(DialogKind::Settings);
+            tracing::info!("[OPT] ✅ 关闭设置对话框");
+        }
+        *stage = 9;
+    }
+    if *t >= 30.0 && *stage < 9 {
+        tracing::warn!("[OPT] ❌ 超时 stage={}", *stage);
+        *stage = 9;
     }
 }
 
