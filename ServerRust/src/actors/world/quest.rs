@@ -71,6 +71,10 @@ impl Message<AcceptQuestRequest> for WorldActor {
 
         if accepted {
             send_system_message(&self.gate_ref, msg.session_id, "任务已接受");
+            // M43：推送任务进度到客户端任务日志（C# S.ChangeQuest 语义）
+            if let Ok(Some(q)) = record.actor_ref.ask(GetQuest { quest_index: msg.quest_index }).await {
+                crate::actors::social_packets::send_quest_change_packet(&self.gate_ref, msg.session_id, &q);
+            }
             debug!("Quest accepted: {} ({}) by session {}", quest_db.name, msg.quest_index, msg.session_id);
         } else {
             send_system_message(&self.gate_ref, msg.session_id, "任务接受失败");

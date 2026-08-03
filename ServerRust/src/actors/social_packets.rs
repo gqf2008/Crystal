@@ -442,6 +442,29 @@ pub fn send_hero_update_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, 
 // 任务系统
 // ============================================================
 
+/// Send quest progress/status to a client（C# S.ChangeQuest 语义，M43）
+pub fn send_quest_change_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, quest: &crate::actors::quest::QuestInstance) {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+    body.extend_from_slice(&quest.quest_index.to_le_bytes()); // id
+    // task_list：标题 + 每项 "current/target"
+    let mut tasks = vec![quest.title.clone()];
+    for p in &quest.progress {
+        tasks.push(format!("{}/{}", p.current, p.target));
+    }
+    body.extend_from_slice(&(tasks.len() as i32).to_le_bytes());
+    for t in &tasks {
+        write_dotnet_string(&mut body, t);
+    }
+    body.push(1u8); // taken
+    body.push(if quest.status == crate::actors::quest::QuestStatus::Completed { 1u8 } else { 0u8 });
+    body.push(0u8); // new
+    let _ = gate_ref.tell(SendToClient {
+        session_id,
+        data: build_packet_bytes(ServerPacketIds::ChangeQuest as i16, &body),
+    }).try_send();
+}
+
 /// Send quest complete to a client.
 pub fn send_quest_complete_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, quest_index: i32) {
     let mut body = Vec::new();

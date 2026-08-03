@@ -3685,6 +3685,15 @@ async fn send_game_entry_sequence(
         data: build_packet_bytes(ServerPacketIds::HealthChanged as i16, &health_body),
     }).await;
 
+    // 4.5 任务日志推送（M43：C# S.ChangeQuest 语义，登录同步已接任务）
+    for quest in &state.quest_log.quests {
+        if quest.status == crate::actors::quest::QuestStatus::Accepted
+            || quest.status == crate::actors::quest::QuestStatus::InProgress
+        {
+            crate::actors::social_packets::send_quest_change_packet(&gate_ref, session_id, quest);
+        }
+    }
+
     // 5. UserLocation
     let mut location_body = Vec::new();
     location_body.extend_from_slice(&state.x.to_le_bytes());
