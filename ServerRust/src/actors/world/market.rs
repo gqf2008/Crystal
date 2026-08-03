@@ -48,9 +48,9 @@ impl Message<MarketSearchRequest> for WorldActor {
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCMarket as i16, &body),
         }).await;
 
-        // Send first page
+        // Send first page（空结果也发空列表，客户端据此清空旧数据）
         let end = 10.min(results.len());
-        if end > 0 {
+        {
             let listings: Vec<mir2_shared::packets::server::market_system::MarketListing> = results[..end]
                 .iter()
                 .filter_map(|&idx| self.auctions.get(idx))
@@ -115,9 +115,9 @@ impl Message<MarketRefreshRequest> for WorldActor {
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCMarket as i16, &body),
         }).await;
 
-        // Send first page
+        // Send first page（空结果也发空列表，客户端据此清空旧数据）
         let end = 10.min(results.len());
-        if end > 0 {
+        {
             let listings: Vec<mir2_shared::packets::server::market_system::MarketListing> = results[..end]
                 .iter()
                 .filter_map(|&idx| self.auctions.get(idx))
@@ -314,6 +314,15 @@ impl Message<MarketBuyRequest> for WorldActor {
 
         send_system_message(&self.gate_ref, msg.session_id, &format!("购买成功：获得物品"));
 
+        // 完整 UserInformation 刷新（背包 + 金币）
+        if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
+            let packet = super::build_user_information_packet(&new_state, &self.item_infos);
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: packet,
+            }).await;
+        }
+
         let packet = mir2_shared::packets::server::market_system::MarketSuccess {
             message: "购买成功".to_string(),
         };
@@ -370,6 +379,15 @@ impl Message<MarketGetBackRequest> for WorldActor {
         let _ = db::delete_auction(&self.db_pool, msg.listing_id as i64).await;
         self.auctions.remove(auction_idx);
         send_system_message(&self.gate_ref, msg.session_id, "取回寄售物品成功");
+
+        // 完整 UserInformation 刷新（背包 + 金币）
+        if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
+            let packet = super::build_user_information_packet(&new_state, &self.item_infos);
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: packet,
+            }).await;
+        }
     }
 }
 
@@ -486,7 +504,9 @@ impl Message<ConsignItemRequest> for WorldActor {
             unique_id: msg.unique_id,
         }).await.ok().flatten();
         if removed.is_none() {
-            send_system_message(&self.gate_ref, msg.session_id, "移除物品失败");
+            // 退回收寄费
+            let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount: CONSIGN_FEE }).await;
+            send_system_message(&self.gate_ref, msg.session_id, "移除物品失败，寄售费已退回");
             return;
         }
 
@@ -530,6 +550,15 @@ impl Message<ConsignItemRequest> for WorldActor {
         });
 
         // 发送成功响应
+        // 完整 UserInformation 刷新（背包移除 + 寄售费扣除，客户端本地背包同步）
+        if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
+            let packet = super::build_user_information_packet(&new_state, &self.item_infos);
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: packet,
+            }).await;
+        }
+
         let packet = mir2_shared::packets::server::market_system::ConsignItem {
             unique_id: msg.unique_id,
             success: true,
