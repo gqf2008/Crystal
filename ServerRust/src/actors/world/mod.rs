@@ -3773,7 +3773,7 @@ fn build_new_map_info_packet(
 }
 
 /// 根据 PK 值计算名字颜色（0=白名, 1=红名, 2=橙名）
-fn name_colour_for_pk(pk_points: i32) -> i32 {
+pub(crate) fn name_colour_for_pk(pk_points: i32) -> i32 {
     if pk_points >= 200 {
         1 // Red
     } else if pk_points >= 100 {
@@ -3927,7 +3927,7 @@ fn build_user_information_packet(
 }
 
 /// 构建 ObjectPlayer 数据包（其他玩家进入视野）
-fn build_object_player_packet(
+pub(crate) fn build_object_player_packet(
     name: &str, object_id: u32, x: i32, y: i32, direction: u8, level: u16,
     name_colour: i32,
     class: mir2_shared::enums::MirClass,

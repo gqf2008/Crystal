@@ -989,7 +989,8 @@ impl Message<ChatRequest> for WorldActor {
 
         // Check for social chat commands and forward to SocialActor
         let parts: Vec<&str> = message.split_whitespace().collect();
-        let cmd = parts.first().unwrap_or(&"").to_uppercase();
+        // 去掉前导 @（C# 客户端命令如 @ride 均带 @）
+        let cmd = parts.first().unwrap_or(&"").trim_start_matches('@').to_uppercase();
         match cmd.as_str() {
             "GROUPRECALL" | "RECALLMEMBER" | "RECALL" | "ENABLEGROUPRECALL" | "DISABLEGROUPRECALL" | "RIDE" => {
                 let args: Vec<String> = parts.iter().skip(1).map(|s| s.to_string()).collect();

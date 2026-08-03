@@ -1005,16 +1005,25 @@ impl SocialActor {
 
     /// RIDE - 切换骑乘状态
     async fn handle_toggle_ride(&mut self, session_id: u64) {
-        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        info!("RIDE: session={} toggle", session_id);
+        let record = match self.players.get(&session_id) {
+            Some(r) => r.clone(),
+            None => {
+                warn!("RIDE: session {} not in social players", session_id);
+                return;
+            }
+        };
         let state = match record.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
         let mount_item = match state.inventory.get_equipment(EquipmentSlot::Mount) {
             Some(m) => m.clone(),
             None => {
+                info!("RIDE: no mount equipped (slots={:?})", state.inventory.equipment.len());
                 send_system_message(&self.gate_ref, session_id, "你没有装备坐骑");
                 return;
             }
         };
+        info!("RIDE: mount item idx={} slots={}", mount_item.item_index, mount_item.slots.len());
 
         let has_saddle = mount_item.slots.get(2).and_then(|s| s.as_ref()).is_some();
         if !has_saddle {
@@ -1035,6 +1044,13 @@ impl SocialActor {
                 map_index: None,
                 is_mounted: Some(false),
             }).await;
+            // M60：清坐骑类型 + 同步外观给自身与同图玩家
+            if let Ok(Some(mut st)) = record.ask(GetPlayerState).await {
+                st.mount_type = 0;
+                let _ = record.ask(crate::actors::player::SetPlayerState { state: st.clone() }).await;
+                self.broadcast_ride_appearance(session_id, &st).await;
+            }
+            send_system_message(&self.gate_ref, session_id, "你下了坐骑");
             debug!("RIDE: {} dismounted", state.name);
         } else {
             if let Some(ref mi) = map_info {
@@ -1057,10 +1073,23 @@ impl SocialActor {
                 map_index: None,
                 is_mounted: Some(true),
             }).await;
-            debug!("RIDE: {} mounted", state.name);
+            // M60：坐骑类型取装备坐骑物品 shape（C# Mount.MountType）
+            let mount_type: i16 = {
+                let infos = self.config.item_infos.read().await;
+                infos.get(&mount_item.item_index).map(|i| i.shape as i16).unwrap_or(0)
+            };
+            if let Ok(Some(mut st)) = record.ask(GetPlayerState).await {
+                st.mount_type = mount_type;
+                let _ = record.ask(crate::actors::player::SetPlayerState { state: st.clone() }).await;
+                self.broadcast_ride_appearance(session_id, &st).await;
+            }
+            send_system_message(&self.gate_ref, session_id, "你骑上了坐骑");
+            debug!("RIDE: {} mounted (mount_type={})", state.name, mount_type);
         }
     }
 }
+
+
 
 // ============================================================
 // Message: SocialPlayerJoined
@@ -2913,4 +2942,37 @@ impl Message<SocialCancelMentor> for SocialActor {
         }
         debug!("CancelMentor: {} removed mentor", state.name);
     }
+}
+
+impl SocialActor {
+/// M60：骑乘/下马后同步外观（自身 + 同地图其他玩家）
+    async fn broadcast_ride_appearance(&self, session_id: u64, state: &crate::actors::player::PlayerState) {
+    use crate::actors::inventory::EquipmentSlot;
+    let infos = self.config.item_infos.read().await;
+    let weapon = state.inventory.get_equipment(EquipmentSlot::Weapon)
+        .and_then(|item| infos.get(&item.item_index).cloned())
+        .map(|info| info.shape as i16).unwrap_or(-1);
+    let armor = state.inventory.get_equipment(EquipmentSlot::Armour)
+        .and_then(|item| infos.get(&item.item_index).cloned())
+        .map(|info| info.shape as i16).unwrap_or(0);
+    let weapon_effect = state.inventory.get_equipment(EquipmentSlot::Weapon)
+        .and_then(|item| infos.get(&item.item_index).cloned())
+        .map(|info| info.effect as i16).unwrap_or(0);
+    let packet = crate::actors::world::build_object_player_packet(
+        &state.name, state.object_id, state.x, state.y, state.direction, state.level,
+        crate::actors::world::name_colour_for_pk(state.pk_points),
+        state.class, state.gender, state.hair,
+        weapon, weapon_effect, armor,
+        state.mount_type, state.is_mounted,
+    );
+    let _ = self.gate_ref.tell(SendToClient { session_id, data: packet.clone() }).await;
+    for (sid, other) in &self.players {
+        if *sid == session_id { continue; }
+        if let Ok(Some(os)) = other.ask(GetPlayerState).await {
+            if os.map_index == state.map_index {
+                let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: packet.clone() }).await;
+            }
+        }
+    }
+}
 }
