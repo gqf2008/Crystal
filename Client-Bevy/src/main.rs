@@ -265,6 +265,10 @@ fn main() {
     if std::env::args().any(|a| a == "--report-test") {
         app.add_systems(Update, auto_report_test);
     }
+    // --inspect-test: 查看玩家链路（找到 bevy2char → Inspect → PlayerInspect 显示）
+    if std::env::args().any(|a| a == "--inspect-test") {
+        app.add_systems(Update, auto_inspect_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -3170,6 +3174,75 @@ fn auto_report_test(
             }
             if chat_has(&chat, "举报信息已提交") {
                 tracing::info!("[REPORTTEST] ✅ 举报已提交确认");
+                *stage = 9;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// --inspect-test：找目标玩家 → 发 Inspect → 等 PlayerInspect
+#[allow(clippy::too_many_arguments)]
+fn auto_inspect_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    inspect: Res<client_bevy::game::dialogs::inspect::InspectState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    actors: Query<(
+        &client_bevy::actor::NetObjectId,
+        Option<&client_bevy::actor::PlayerName>,
+    )>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 10.0 {
+                return;
+            }
+            // 找到 bevy2char
+            let target = actors
+                .iter()
+                .find(|(_, name)| name.and_then(|n| Some(n.0 == "bevy2char")).unwrap_or(false))
+                .map(|(id, _)| id.0);
+            match target {
+                Some(oid) => {
+                    if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Inspect) {
+                        mgr.toggle(client_bevy::game::dialogs::DialogKind::Inspect);
+                    }
+                    net.send_packet(&mir2_shared::packets::client::chat::Inspect {
+                        object_id: oid,
+                    });
+                    tracing::info!("[INSPECTTEST] 查看玩家 bevy2char (oid={})", oid);
+                    *stage = 1;
+                    *t = 0.0;
+                }
+                None => {
+                    tracing::warn!("[INSPECTTEST] ❌ 找不到目标玩家 bevy2char");
+                    *stage = 9;
+                }
+            }
+        }
+        1 => {
+            if *t >= 8.0 {
+                tracing::warn!("[INSPECTTEST] ❌ 未收到 PlayerInspect");
+                *stage = 9;
+                return;
+            }
+            if !inspect.name.is_empty() {
+                tracing::info!(
+                    "[INSPECTTEST] ✅ 查看成功: {} Lv.{} 行会={} 装备 {} 件",
+                    inspect.name,
+                    inspect.level,
+                    inspect.guild,
+                    inspect.items.len()
+                );
                 *stage = 9;
             }
         }

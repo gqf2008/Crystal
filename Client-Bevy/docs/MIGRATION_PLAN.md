@@ -389,6 +389,13 @@
 - [x] 验证：真实 ServerRust E2E——`✅ 举报已提交确认`（"举报信息已提交，感谢您的反馈"）；客户端 40 / 服务端 139 测试全过
 
 ---
+### M46: 查看玩家（Inspect）（2026-08-03 完成）
+- [x] **客户端**：查看对话框（名字/职业/等级/行会 + 装备列表）；PlayerInspect(57) 手动解析（服务端 wire：object_id/name/guild/level/class/gender/count + 装备 uid/index/耐久）
+- [x] 网络：Inspect[object_id u32] 复用 SharedRust（与 gate 兼容）
+- [x] 服务端：无改动（InspectPlayerRequest + send_inspect_packet 已完整）
+- [x] 验证：真实 ServerRust 双客户端 E2E——`🔍 PlayerInspect: bevy2char Lv.20 装备 0 件` → `✅ 查看成功: bevy2char Lv.20 行会=TestGuildWar`；客户端 34 / 服务端 139 测试全过
+
+---
 ## 四、执行顺序与依赖
 
 ```

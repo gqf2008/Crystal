@@ -32,6 +32,7 @@ use crate::game::dialogs::item_rental::ItemRentalState;
 use crate::game::dialogs::quest_log::{QuestEntry, QuestLogState};
 use crate::game::dialogs::buff::{BuffEntry, BuffState};
 use crate::game::dialogs::report::ReportState;
+use crate::game::dialogs::inspect::{InspectItem, InspectState};
 use crate::game::effects::{EffectsState, PendingEffect};
 use crate::game::player_control::ControlState;
 use crate::game::dialogs::inventory::InvItem;
@@ -997,6 +998,7 @@ struct NetworkPanels<'w> {
     quest_log: ResMut<'w, QuestLogState>,
     buff: ResMut<'w, BuffState>,
     report: ResMut<'w, ReportState>,
+    inspect: ResMut<'w, InspectState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -1054,6 +1056,7 @@ fn network_system(
                         &mut *panels.quest_log,
                         &mut *panels.buff,
                         &mut *panels.report,
+                        &mut *panels.inspect,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1115,6 +1118,7 @@ fn network_system(
                         &mut *panels.quest_log,
                         &mut *panels.buff,
                         &mut *panels.report,
+                        &mut *panels.inspect,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1266,6 +1270,7 @@ fn handle_packet(
     quest_log: &mut QuestLogState,
     buff: &mut BuffState,
     report: &mut ReportState,
+    inspect: &mut InspectState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -2386,6 +2391,47 @@ fn handle_packet(
                     crate::game::dialogs::buff::buff_name(tag)
                 );
                 tracing::info!("✨ RemoveBuff: tag={}", tag);
+            }
+        }
+        // ---- M46: 查看玩家 ----
+        x if x == ServerPacketIds::PlayerInspect as i16 => {
+            // [object_id u32][name dotnet][guild dotnet][level u16][class u8][gender u8]
+            // [count u8][per: uid u64][index i32][dura i32][max_dura i32]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            use byteorder::{LittleEndian, ReadBytesExt};
+            let _oid = match cur.read_u32::<LittleEndian>() { Ok(v) => v, Err(_) => { tracing::warn!("⚠️ PlayerInspect 解析失败"); return; } };
+            let name = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
+            let guild = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
+            let level = match cur.read_u16::<LittleEndian>() { Ok(v) => v, Err(_) => { tracing::warn!("⚠️ PlayerInspect 解析失败"); return; } };
+            let class = cur.read_u8().unwrap_or(0);
+            let gender = cur.read_u8().unwrap_or(0);
+            let count = cur.read_u8().unwrap_or(0) as usize;
+            let mut items = Vec::with_capacity(count);
+            let mut ok = true;
+            for _ in 0..count {
+                let unique_id = match cur.read_u64::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let item_index = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let current_dura = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let max_dura = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                items.push(InspectItem { unique_id, item_index, current_dura, max_dura });
+            }
+            if ok {
+                inspect.name = name.clone();
+                inspect.guild = guild;
+                inspect.level = level;
+                inspect.class = class;
+                inspect.gender = gender;
+                inspect.items = items;
+                inspect.message = "查看成功".to_string();
+                tracing::info!(
+                    "🔍 PlayerInspect: {} Lv.{} 装备 {} 件",
+                    name,
+                    level,
+                    inspect.items.len()
+                );
+            } else {
+                tracing::warn!("⚠️ PlayerInspect 装备解析失败");
             }
         }
         // ---- M39: 钓鱼 ----
