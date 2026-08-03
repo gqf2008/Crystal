@@ -1,2 +1,5 @@
 /target
 *.exe
+
+# UI 布局核验截图（临时产物）
+layout_*.png
