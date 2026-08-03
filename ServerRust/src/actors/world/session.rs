@@ -843,6 +843,11 @@ impl Message<PlayerDisconnected> for WorldActor {
             // 行会离线状态由 SocialActor 管理
         }
 
+        // M61：若该地图已无其他玩家，清理该地图的 NPC/怪物（修复多次登录 NPC 泄漏）
+        if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+            self.cleanup_map_spawns(state.map_index).await;
+        }
+
         // 通知 SocialActor 玩家下线（组队/好友在线表清理）
         let _ = self.social_ref.tell(crate::actors::social::SocialPlayerLeft {
             session_id: msg.session_id,
@@ -916,6 +921,8 @@ impl Message<PlayerLogOut> for WorldActor {
 
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
             info!("Player {} logged out (session={})", state.name, msg.session_id);
+            // M61：该地图无其他玩家时清理 NPC/怪物
+            self.cleanup_map_spawns(state.map_index).await;
         // 通知 SocialActor 玩家下线（组队/好友在线表清理）
         let _ = self.social_ref.tell(crate::actors::social::SocialPlayerLeft {
             session_id: msg.session_id,
@@ -955,6 +962,44 @@ impl Message<PlayerLogOut> for WorldActor {
             }
         }
         // 玩家已从 self.players 移除，无需再发 PlayerDisconnected
+    }
+}
+
+impl WorldActor {
+    /// M61：地图上无其他玩家时，清理该地图的 NPC/怪物（避免多次登录泄漏）
+    pub(crate) async fn cleanup_map_spawns(&mut self, map_index: u16) {
+        let mut others_on_map = 0usize;
+        for r in self.players.values() {
+            if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                if os.map_index == map_index {
+                    others_on_map += 1;
+                }
+            }
+        }
+        if others_on_map > 0 {
+            return;
+        }
+        let npc_count = self.npcs.values().filter(|n| n.map_index == map_index).count();
+        let npc_ids: Vec<u32> = self
+            .npcs
+            .iter()
+            .filter(|(_, n)| n.map_index == map_index)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in &npc_ids {
+            self.npcs.remove(id);
+        }
+        let mon_count = self.monsters.values().filter(|m| m.map_index == map_index).count();
+        let mon_ids: Vec<u32> = self
+            .monsters
+            .iter()
+            .filter(|(_, m)| m.map_index == map_index)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in &mon_ids {
+            self.monsters.remove(id);
+        }
+        info!("Map {} spawns cleaned (npcs={} monsters={})", map_index, npc_count, mon_count);
     }
 }
 
