@@ -403,6 +403,13 @@
 - [x] 验证：真实 ServerRust E2E——`🐾 宠物列表: 0 个` → `✅ 宠物列表: 0 个`（空列表解析正确）；客户端 34 / 服务端 139 测试全过
 
 ---
+### M48: 英雄（Hero）（2026-08-03 完成）
+- [x] **客户端**：英雄对话框（当前角色显示 + 切换主角色/英雄1 按钮 + 状态行）；ChangeHero 包解析（[hero_index u8]）
+- [x] 网络：ChangeHeroWire [hero_index u8] 手动构造（gate 解析）
+- [x] 服务端：无改动（ChangeHeroRequest + send_hero_update_packet 已完整）
+- [x] 验证：真实 ServerRust E2E——`🦸 ChangeHero: index=1` → `✅ 英雄切换成功` → `🦸 ChangeHero: index=0` → `✅ 切回主角色成功`；客户端 34 / 服务端 139 测试全过
+
+---
 ## 四、执行顺序与依赖
 
 ```

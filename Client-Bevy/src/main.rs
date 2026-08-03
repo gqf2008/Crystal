@@ -273,6 +273,10 @@ fn main() {
     if std::env::args().any(|a| a == "--creature-test") {
         app.add_systems(Update, auto_creature_test);
     }
+    // --hero-test: 英雄链路（切换英雄1 → ChangeHero 包 → 切回主角色）
+    if std::env::args().any(|a| a == "--hero-test") {
+        app.add_systems(Update, auto_hero_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -3297,6 +3301,64 @@ fn auto_creature_test(
                 );
                 *stage = 9;
             }
+        }
+        _ => {}
+    }
+}
+
+/// --hero-test：打开英雄 → 切换英雄1 → 等 ChangeHero → 切回主角色
+#[allow(clippy::too_many_arguments)]
+fn auto_hero_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    hero: Res<client_bevy::game::dialogs::hero::HeroState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Hero) {
+                mgr.toggle(client_bevy::game::dialogs::DialogKind::Hero);
+            }
+            net.send_packet(&client_bevy::network::ChangeHeroWire { hero_index: 1 });
+            tracing::info!("[HEROTEST] 切换英雄 1");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t >= 8.0 {
+                tracing::warn!("[HEROTEST] ❌ 未收到 ChangeHero（index={}）", hero.hero_index);
+                *stage = 9;
+                return;
+            }
+            if hero.hero_index == 1 {
+                tracing::info!("[HEROTEST] ✅ 英雄切换成功: {}", hero.message);
+                net.send_packet(&client_bevy::network::ChangeHeroWire { hero_index: 0 });
+                tracing::info!("[HEROTEST] 切回主角色");
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t < 5.0 {
+                return;
+            }
+            if hero.hero_index == 0 {
+                tracing::info!("[HEROTEST] ✅ 切回主角色成功");
+            } else {
+                tracing::warn!("[HEROTEST] ⚠️ 当前 index={}", hero.hero_index);
+            }
+            *stage = 9;
         }
         _ => {}
     }

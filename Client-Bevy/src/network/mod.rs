@@ -34,6 +34,7 @@ use crate::game::dialogs::buff::{BuffEntry, BuffState};
 use crate::game::dialogs::report::ReportState;
 use crate::game::dialogs::inspect::{InspectItem, InspectState};
 use crate::game::dialogs::creature::{CreatureEntry, CreatureState};
+use crate::game::dialogs::hero::HeroState;
 use crate::game::effects::{EffectsState, PendingEffect};
 use crate::game::player_control::ControlState;
 use crate::game::dialogs::inventory::InvItem;
@@ -333,6 +334,34 @@ impl Packet for CreatureRequestWire {
     ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::WriteBytesExt;
         writer.write_u8(if self.request { 1 } else { 0 })?;
+        Ok(())
+    }
+}
+
+/// 英雄切换（M48：gate 解析 [hero_index u8]）
+#[derive(Debug, Clone, Copy)]
+pub struct ChangeHeroWire {
+    pub hero_index: u8,
+}
+
+impl Packet for ChangeHeroWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::ChangeHero as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            hero_index: reader.read_u8()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u8(self.hero_index)?;
         Ok(())
     }
 }
@@ -1029,6 +1058,7 @@ struct NetworkPanels<'w> {
     report: ResMut<'w, ReportState>,
     inspect: ResMut<'w, InspectState>,
     creature: ResMut<'w, CreatureState>,
+    hero: ResMut<'w, HeroState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -1088,6 +1118,7 @@ fn network_system(
                         &mut *panels.report,
                         &mut *panels.inspect,
                         &mut *panels.creature,
+                        &mut *panels.hero,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1151,6 +1182,7 @@ fn network_system(
                         &mut *panels.report,
                         &mut *panels.inspect,
                         &mut *panels.creature,
+                        &mut *panels.hero,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1304,6 +1336,7 @@ fn handle_packet(
     report: &mut ReportState,
     inspect: &mut InspectState,
     creature: &mut CreatureState,
+    hero: &mut HeroState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -2491,6 +2524,19 @@ fn handle_packet(
             } else {
                 tracing::warn!("⚠️ UpdateIntelligentCreatureList 解析失败");
             }
+        }
+        // ---- M48: 英雄 ----
+        x if x == ServerPacketIds::ChangeHero as i16 => {
+            // [hero_index u8]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let idx = body.first().copied().unwrap_or(0);
+            hero.hero_index = idx;
+            hero.message = if idx == 0 {
+                "已切换主角色".to_string()
+            } else {
+                format!("已切换英雄 {}", idx)
+            };
+            tracing::info!("🦸 ChangeHero: index={}", idx);
         }
         // ---- M39: 钓鱼 ----
         x if x == ServerPacketIds::FishingUpdate as i16 => {
