@@ -454,6 +454,16 @@
 - [x] 服务端：进图序列新增 NewMapInfo 推送（地图标题 + NPC object_id/坐标/图标/可传送标志），TeleportToNPC 传送全链路
 - [x] 验证：真实 ServerRust E2E（--bigmap-test）——打开 → ✅ NewMapInfo: 43 个 NPC → ✅ 地形纹理生成完成 → 选中 Master_Wa → 📍 UserLocation: (110,317) → ✅ 传送生效 玩家位置=(110,317) → 关闭；客户端 34 / 服务端 139 测试全过（protocol_conformance 栈溢出为 HEAD 既有问题）
 - [x] 注：M53 后剩余对话框：socket/dura_status/npc_drop/roll/npc_awake（需服务端）；已知服务端 NPC 登出未清理导致多次登录后大地图 NPC 重复（后续里程碑可修）
+---
+
+### M54: NPC 觉醒对话框 NPCAwakeDialog（2026-08-03 完成，服务端觉醒链路已存在直接复用）
+- [x] 面板 Title[710]（360x420）位于 (0,0)；升级按钮 Title[712/713/714] (115,391)、关闭 Prguse2[360/361/362] (284,4)
+- [x] 主物品格 (202,91)（点击循环选择背包武器 + Items 图标渲染）、材料/结果标签 (67,317)/(192,317)/(112,354)
+- [x] 觉醒类型选择（武器：攻/魔/道）→ AwakeningNeedMaterials 请求 → 服务端返回材料需求展示
+- [x] 网络解析：AwakeningNeedMaterials / AwakeningLockedItem / Awakening 三个服务端包
+- [x] 验证：真实 ServerRust E2E（--awake-test）——选择 WoodenSword → ✅ 材料需求: 8 种符文 x3 → 执行觉醒 → 金币 2000008→1998508 → ⚒️ 觉醒结果: 1 -> 觉醒成功 → ✅ 关闭；客户端 34 / 服务端 139 测试全过
+- [x] 注：M54 后剩余对话框：socket/dura_status/npc_drop/roll（需服务端支持）
+
 
 
 

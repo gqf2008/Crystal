@@ -301,6 +301,10 @@ fn main() {
     if std::env::args().any(|a| a == "--bigmap-test") {
         app.add_systems(Update, auto_bigmap_test);
     }
+    // --awake-test: 觉醒对话框验证（选武器 → 类型 → 材料 → 觉醒 → 结果）
+    if std::env::args().any(|a| a == "--awake-test") {
+        app.add_systems(Update, auto_awake_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -3518,6 +3522,158 @@ fn auto_marriage_accept(
             *stage = 9;
         }
         _ => {}
+    }
+}
+
+/// --awake-test：打开觉醒 → 选武器 → 选类型/材料 → 执行觉醒（可重试）→ 关闭
+#[allow(clippy::too_many_arguments)]
+fn auto_awake_test(
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut aw: ResMut<client_bevy::game::dialogs::npc_awake::NpcAwakeState>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    net: ResMut<client_bevy::network::NetworkContext>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut phase: Local<f32>,
+    mut attempts: Local<u32>,
+) {
+    use client_bevy::scenes::AppState;
+    use client_bevy::game::dialogs::DialogKind;
+    use mir2_shared::packets::client::misc::{Awakening, AwakeningNeedMaterials};
+    use mir2_shared::enums::AwakeType;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    if *stage == 0 {
+        if !mgr.is_open(DialogKind::NpcAwake) {
+            mgr.toggle(DialogKind::NpcAwake);
+            tracing::info!("[AWAKE] 打开觉醒对话框");
+        }
+        *phase = *t;
+        *stage = 1;
+        return;
+    }
+    if *stage == 1 && *t - *phase >= 1.0 {
+        for (i, it) in hud.inventory.items.iter().enumerate() {
+            if let Some(item) = it {
+                tracing::info!(
+                    "[AWAKE] inv[{}] uid={} idx={} name={}",
+                    i,
+                    item.unique_id,
+                    item.item_index,
+                    item.name
+                );
+            }
+        }
+        let sword = hud
+            .inventory
+            .items
+            .iter()
+            .flatten()
+            .find(|it| it.item_index == 221)
+            .cloned();
+        if let Some(item) = sword {
+            aw.selected_uid = Some(item.unique_id);
+            aw.selected_item = Some(item.clone());
+            aw.awake_type = None;
+            tracing::info!("[AWAKE] ✅ 选择武器: {} (uid={})", item.name, item.unique_id);
+            *stage = 2;
+        } else {
+            tracing::warn!("[AWAKE] ❌ 背包中没有 WoodenSword");
+            *stage = 9;
+        }
+        *phase = *t;
+        return;
+    }
+    if *stage == 2 && *t - *phase >= 1.0 {
+        if let Some(uid) = aw.selected_uid {
+            aw.awake_type = Some(AwakeType::Dc);
+            net.send_packet(&AwakeningNeedMaterials {
+                unique_id: uid,
+                awake_type: AwakeType::Dc,
+            });
+            tracing::info!("[AWAKE] ✅ 请求觉醒材料 uid={} type=Dc", uid);
+        }
+        *stage = 3;
+        *phase = *t;
+        return;
+    }
+    if *stage == 3 && *t - *phase >= 1.5 {
+        tracing::info!(
+            "[AWAKE] ✅ 材料需求: {}",
+            if aw.materials.is_empty() {
+                "无（跳过材料检查）".to_string()
+            } else {
+                aw.materials
+                    .iter()
+                    .map(|m| format!("#{}x{}", m.item_id, m.count))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+        );
+        if let Some(uid) = aw.selected_uid {
+            net.send_packet(&Awakening {
+                unique_id: uid,
+                awake_type: AwakeType::Dc,
+                position_idx: 0,
+            });
+            tracing::info!("[AWAKE] ✅ 执行觉醒 uid={}（第 {} 次）", uid, *attempts + 1);
+            *attempts += 1;
+        }
+        aw.result = 0;
+        *stage = 4;
+        *phase = *t;
+        return;
+    }
+    if *stage == 4 && *t - *phase >= 2.5 {
+        if aw.result == 1 {
+            tracing::info!("[AWAKE] ✅ 觉醒成功（结果 {}）", aw.result);
+            *stage = 5;
+            *phase = *t;
+        } else if *attempts < 6 {
+            // 失败/销毁：换下一把武器重试
+            tracing::warn!(
+                "[AWAKE] ⚠️ 觉醒结果 {}（{}），换武器重试",
+                aw.result,
+                aw.result_text
+            );
+            let swords: Vec<_> = hud
+                .inventory
+                .items
+                .iter()
+                .flatten()
+                .filter(|it| it.item_index == 221)
+                .collect();
+            let next = swords
+                .get((*attempts) as usize % swords.len().max(1))
+                .cloned();
+            if let Some(item) = next {
+                aw.selected_uid = Some(item.unique_id);
+                aw.selected_item = Some(item.clone());
+            }
+            aw.materials.clear();
+            aw.result_text = String::new();
+            *stage = 2;
+            *phase = *t;
+        } else {
+            tracing::warn!("[AWAKE] ❌ 多次觉醒未成功");
+            *stage = 9;
+        }
+        return;
+    }
+    if *stage == 5 && *t - *phase >= 1.0 {
+        if mgr.is_open(DialogKind::NpcAwake) {
+            mgr.close(DialogKind::NpcAwake);
+            tracing::info!("[AWAKE] ✅ 关闭觉醒对话框");
+        }
+        *stage = 9;
+    }
+    if *t >= 45.0 && *stage < 9 {
+        tracing::warn!("[AWAKE] ❌ 超时 stage={}", *stage);
+        *stage = 9;
     }
 }
 

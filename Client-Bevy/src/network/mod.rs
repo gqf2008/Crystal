@@ -1113,6 +1113,7 @@ struct NetworkPanels<'w> {
     hero: ResMut<'w, HeroState>,
     relationship: ResMut<'w, RelationshipState>,
     big_map: ResMut<'w, crate::game::dialogs::big_map::BigMapState>,
+    awake: ResMut<'w, crate::game::dialogs::npc_awake::NpcAwakeState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -1175,6 +1176,7 @@ fn network_system(
                         &mut *panels.hero,
                         &mut *panels.relationship,
                         &mut *panels.big_map,
+                        &mut *panels.awake,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1241,6 +1243,7 @@ fn network_system(
                         &mut *panels.hero,
                         &mut *panels.relationship,
                         &mut *panels.big_map,
+                        &mut *panels.awake,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1397,6 +1400,7 @@ fn handle_packet(
     hero: &mut HeroState,
     relationship: &mut RelationshipState,
     big_map: &mut crate::game::dialogs::big_map::BigMapState,
+    awake: &mut crate::game::dialogs::npc_awake::NpcAwakeState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -1586,6 +1590,51 @@ fn handle_packet(
                     .collect();
                 big_map.selected = None;
                 big_map.top_line = 0;
+            }
+        }
+        x if x == ServerPacketIds::AwakeningNeedMaterials as i16 => {
+            if let Ok(p) = mir2_shared::packets::server::awakening_system::AwakeningNeedMaterials::read_body(
+                &mut cur
+            ) {
+                tracing::info!(
+                    "⚒️ 觉醒材料: item={} materials={:?}",
+                    p.item_id,
+                    p.materials
+                        .iter()
+                        .map(|m| format!("#{}x{}", m.item_id, m.count))
+                        .collect::<Vec<_>>()
+                );
+                awake.materials = p
+                    .materials
+                    .into_iter()
+                    .map(|m| crate::game::dialogs::npc_awake::MaterialRow {
+                        item_id: m.item_id,
+                        count: m.count,
+                    })
+                    .collect();
+            }
+        }
+        x if x == ServerPacketIds::AwakeningLockedItem as i16 => {
+            if let Ok(p) =
+                mir2_shared::packets::server::awakening_system::AwakeningLockedItem::read_body(&mut cur)
+            {
+                tracing::info!("⚒️ 觉醒锁定: uid={} locked={}", p.unique_id, p.locked);
+            }
+        }
+        x if x == ServerPacketIds::Awakening as i16 => {
+            if let Ok(p) = mir2_shared::packets::server::awakening_system::Awakening::read_body(&mut cur) {
+                let msg = match p.result {
+                    1 => "觉醒成功".to_string(),
+                    0 => format!("觉醒失败，物品已损毁 (uid={})", p.remove_id),
+                    -1 => "觉醒失败".to_string(),
+                    -2 => "已达最大觉醒等级".to_string(),
+                    -3 => "金币不足".to_string(),
+                    -4 => "材料不足".to_string(),
+                    _ => format!("未知结果 {}", p.result),
+                };
+                tracing::info!("⚒️ 觉醒结果: {} -> {}", p.result, msg);
+                awake.result = p.result;
+                awake.result_text = msg;
             }
         }
         x if x == ServerPacketIds::ObjectPlayer as i16 => {
