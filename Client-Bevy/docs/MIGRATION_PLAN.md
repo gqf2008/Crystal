@@ -314,6 +314,13 @@
 - [x] 验证：真实 ServerRust 双客户端 E2E——A 寄售×2 → `✅ 第一件寄售成功` → 取回 uid=101 → `✅ 取回成功：剩 1 件寄售` → B 购买 → `✅ 购买成功` → `✅ 购买的物品已进入背包`；客户端 34 / 服务端 139 测试全过
 
 ---
+### M35: 商城（GameShop）（2026-08-03 完成）
+- [x] **客户端**：商城对话框（10 行商品列表 + 金币显示 + 购买按钮）；打开自动请求目录（C# GameshopDialog.Show → C.GameshopBuy{g_index=0}）；点击商品行选中 → 购买
+- [x] **网络**：GameShopInfo(250) 商品列表解析（item_index/gold/credit/count/class/category/stock/is_bought/deal + 点券/金币）；GameShopStock(251) 库存更新；GameshopBuyWire 手动构造（gate 解析 [item_id u32][quantity u32]，与 SharedRust 结构不一致）
+- [x] **服务端**：无需改动（GameshopBuy item_id=0 返回目录、购买扣款 + 邮件送达 + 库存包已完整）
+- [x] 验证：真实 ServerRust E2E——打开商城 → `✅ 商城目录 106 件` → 购买 #1268（165000 金币）→ `📧 新邮件: GameShop - 商城购买` → `✅ 购买邮件送达` → `🛒 库存剩余 0`；客户端 34 / 服务端 139 测试全过
+
+---
 ## 四、执行顺序与依赖
 
 ```

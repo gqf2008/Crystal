@@ -23,6 +23,7 @@ use crate::game::dialogs::group::GroupState;
 use crate::game::dialogs::mail::{MailDetail, MailEntry, MailState};
 use crate::game::dialogs::mentor::MentorState;
 use crate::game::dialogs::market::{MarketItem, MarketState};
+use crate::game::dialogs::game_shop::{GameShopState, ShopItem as UiShopItem};
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::npc::NpcDialogState;
 use crate::game::dialogs::npc_goods::{GoodsEntry, NpcGoodsState};
@@ -470,6 +471,37 @@ impl Packet for MarketSellNowWire {
     }
 }
 
+/// 商城购买（ServerRust gate 解析 [item_id u32][quantity u32]，与 SharedRust 结构不一致）
+#[derive(Debug, Clone, Copy)]
+pub struct GameshopBuyWire {
+    pub item_id: u32,
+    pub quantity: u32,
+}
+
+impl Packet for GameshopBuyWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::GameshopBuy as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            item_id: reader.read_u32::<LittleEndian>()?,
+            quantity: reader.read_u32::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u32::<LittleEndian>(self.item_id)?;
+        writer.write_u32::<LittleEndian>(self.quantity)?;
+        Ok(())
+    }
+}
+
 /// 待生成的网络对象（MapChanged 后由 Game 状态消费）
 #[derive(Debug, Clone)]
 pub enum NetObject {
@@ -577,6 +609,7 @@ struct NetworkPanels<'w> {
     ranking: ResMut<'w, RankingState>,
     mentor: ResMut<'w, MentorState>,
     market: ResMut<'w, MarketState>,
+    shop: ResMut<'w, GameShopState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -623,6 +656,7 @@ fn network_system(
                         &mut *panels.ranking,
                         &mut *panels.mentor,
                         &mut *panels.market,
+                        &mut *panels.shop,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -673,6 +707,7 @@ fn network_system(
                         &mut *panels.ranking,
                         &mut *panels.mentor,
                         &mut *panels.market,
+                        &mut *panels.shop,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -813,6 +848,7 @@ fn handle_packet(
     ranking: &mut RankingState,
     mentor: &mut MentorState,
     market: &mut MarketState,
+    shop: &mut GameShopState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -1128,6 +1164,15 @@ fn handle_packet(
                         for slot in inv.iter().filter_map(|s| s.as_ref()) {
                             if let Some(info) = &slot.info {
                                 market.item_names.insert(slot.item_index, info.name.clone());
+                            }
+                        }
+                    }
+
+                    // 商城物品名缓存（M35）
+                    if let Some(inv) = &p.inventory {
+                        for slot in inv.iter().filter_map(|s| s.as_ref()) {
+                            if let Some(info) = &slot.info {
+                                shop.item_names.insert(slot.item_index, info.name.clone());
                             }
                         }
                     }
@@ -1646,6 +1691,56 @@ fn handle_packet(
             let reason = payload.get(PacketHeader::HEADER_SIZE).copied().unwrap_or(0);
             market.message = format!("市场操作失败（原因 {}）", reason);
             tracing::warn!("🏪 市场失败原因: {}", reason);
+        }
+        // ---- M35: 商城 ----
+        x if x == ServerPacketIds::GameShopInfo as i16 => {
+            // [count i32][per: item_index i32][gold u32][credit u32][count i32][class u8]
+            //      [category 7-bit][stock i32][is_bought u8][deal u8]...[credit u32][gold u32]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            use byteorder::{LittleEndian, ReadBytesExt};
+            let count = cur.read_i32::<LittleEndian>().unwrap_or(0).max(0) as usize;
+            let mut items = Vec::with_capacity(count);
+            let mut ok = true;
+            for _ in 0..count {
+                let item_index = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let gold_price = match cur.read_u32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let credit_price = match cur.read_u32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let _count = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let _class = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let category = match mir2_shared::binary::read_dotnet_string(&mut cur) { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let stock = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let _is_bought = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let _deal = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let name = shop.item_names.get(&item_index).cloned().unwrap_or_default();
+                items.push(UiShopItem { item_index, name, gold_price, credit_price, category, stock });
+            }
+            if ok {
+                let _credit = cur.read_u32::<LittleEndian>().unwrap_or(0);
+                let gold = cur.read_u32::<LittleEndian>().unwrap_or(0);
+                shop.items = items;
+                shop.gold = gold;
+                tracing::info!(
+                    "🛒 商城目录: {} 件，金币 {}",
+                    shop.items.len(),
+                    shop.gold
+                );
+            } else {
+                tracing::warn!("⚠️ GameShopInfo 解析失败: (len={})", payload.len());
+            }
+        }
+        x if x == ServerPacketIds::GameShopStock as i16 => {
+            // [item_id i32][stock i32]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 8 {
+                let item_id = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
+                let stock = i32::from_le_bytes(body[4..8].try_into().unwrap_or([0; 4]));
+                shop.message = format!("商品 #{} 库存剩余 {}", item_id, stock);
+                if let Some(it) = shop.items.iter_mut().find(|i| i.item_index == item_id) {
+                    it.stock = stock;
+                }
+                tracing::info!("🛒 商城库存: #{} 剩余 {}", item_id, stock);
+            }
         }
         // ---- M33: 师徒 ----
         x if x == ServerPacketIds::MentorRequest as i16 => {

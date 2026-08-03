@@ -217,6 +217,10 @@ fn main() {
     if std::env::args().any(|a| a == "--market-buy") {
         app.add_systems(Update, auto_market_buy);
     }
+    // --gameshop-test: 商城链路（打开商城 → 目录 → 购买 → 邮件送达）
+    if std::env::args().any(|a| a == "--gameshop-test") {
+        app.add_systems(Update, auto_gameshop_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -2042,6 +2046,105 @@ fn auto_market_buy(
             } else {
                 tracing::warn!("[MARKETBUY] ❌ 背包未见购买的物品");
             }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --gameshop-test：打开商城 → 请求目录 → 购买第一件可负担商品 → 邮件送达
+#[allow(clippy::too_many_arguments)]
+fn auto_gameshop_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    shop: Res<client_bevy::game::dialogs::game_shop::GameShopState>,
+    mail: Res<client_bevy::game::dialogs::mail::MailState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut bought_item: Local<Option<i32>>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::GameShop) {
+                mgr.toggle(client_bevy::game::dialogs::DialogKind::GameShop);
+            }
+            tracing::info!("[SHOPTEST] 打开商城（自动请求目录）");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t >= 10.0 {
+                tracing::warn!("[SHOPTEST] ❌ 商城目录未收到");
+                *stage = 9;
+                return;
+            }
+            if !shop.items.is_empty() {
+                tracing::info!(
+                    "[SHOPTEST] ✅ 商城目录 {} 件，我的金币 {}",
+                    shop.items.len(),
+                    shop.gold
+                );
+                // 选第一件金币价 <= 我的金币 的商品
+                let target = shop.items.iter().find(|it| it.gold_price > 0);
+                match target {
+                    Some(it) => {
+                        *bought_item = Some(it.item_index);
+                        net.send_packet(&client_bevy::network::GameshopBuyWire {
+                            item_id: it.item_index as u32,
+                            quantity: 1,
+                        });
+                        tracing::info!(
+                            "[SHOPTEST] 购买 #{} {} {}金币",
+                            it.item_index,
+                            it.name,
+                            it.gold_price
+                        );
+                        *stage = 2;
+                        *t = 0.0;
+                    }
+                    None => {
+                        tracing::warn!("[SHOPTEST] ❌ 目录为空或没有可购买商品");
+                        *stage = 9;
+                    }
+                }
+            }
+        }
+        2 => {
+            if *t >= 12.0 {
+                tracing::warn!("[SHOPTEST] ❌ 未收到购买邮件");
+                *stage = 9;
+                return;
+            }
+            if mail.mails.iter().any(|m| m.sender == "GameShop") {
+                let ms: Vec<String> = mail
+                    .mails
+                    .iter()
+                    .filter(|m| m.sender == "GameShop")
+                    .map(|m| format!("{}: {}", m.sender, m.subject))
+                    .collect();
+                tracing::info!("[SHOPTEST] ✅ 购买邮件送达: {:?}", ms);
+                *stage = 3;
+                *t = 0.0;
+            }
+        }
+        3 => {
+            if *t < 3.0 {
+                return;
+            }
+            tracing::info!(
+                "[SHOPTEST] ✅ 完成（购买 #{}）",
+                bought_item.unwrap_or(-1)
+            );
             *stage = 9;
         }
         _ => {}
