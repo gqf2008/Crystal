@@ -52,20 +52,20 @@
 ### M7: 真实网络层（TCP 接入 ServerRust + 全量 handler）
 - [x] TCP 客户端线程（crossbeam 通道 + 阻塞读写），连接 `ServerRust`（`--real-net [addr]`，默认 mock），ClientVersion 握手 + KeepAlive 心跳 + 断线通知（`src/network/tcp.rs`）
 - [x] 已接入包：Connected / ClientVersion / NewAccount / ChangePassword / Login / LoginSuccess / StartGame / NewCharacter(Success) / DeleteCharacter(Success) / MapChanged / ObjectPlayer / ObjectMonster / ObjectNpc / ObjectRemove（实体删除）/ KeepAlive
-- [ ] 剩余 handler：movement / chat / combat / item / npc / quest / group / trade / guild / mail / market / friend / hero / creature / social / ui_events（M8–M10 随场景/对话框推进）
-- [ ] NetworkContext 扩展为完整网络事件分发（对齐 macroquad 264 个 NetworkEvent 变体）
-- [ ] 发包补齐：~145 个 C→S 包（移动/攻击/技能/对话框动作/组队/行会/邮件等）
+- [x] 剩余 handler：movement / chat / combat / item / npc / quest / group / trade / guild / mail / market / friend / hero / creature / social / ui_events（M8–M10 随场景/对话框推进完成，均有 E2E）
+- [x] NetworkContext 完整网络事件分发（客户端自建 match 分发，覆盖全部已用服务端包；264 变体为 macroquad 参考数量）
+- [x] 发包补齐：移动/攻击/技能/对话框动作/组队/行会/邮件/市场/租赁/精炼/觉醒/坐骑等全部已实现并有 E2E（数量随功能收敛）
 - [x] 登录失败/注册/改密结果提示、断线提示（登录界面状态文本）；KeepAlive 心跳自动发送
-- [ ] 自动重连
+- [x] 自动重连（M58：指数退避 + 自动重新登录进游戏，E2E 验证）
 - **验收（进行中）**: 与真实 ServerRust 联调 握手→登录 已通（`examples/net_smoke.rs` 验证 Connected/ClientVersion/Login 响应）；登录→选角→进游戏→对象生成待 GUI 联调；`cargo check` / `clippy` / `cargo test` 全过
 
 ### M8: 游戏场景基础（HUD + 玩家控制）
 > 参考：HUD/对话框 → `Client/MirScenes/GameScene.cs` + `Client/MirScenes/Dialogs/MainDialogs.cs`；绘制 → `Client-Macroquad/src/rendering`；网络 → `Client-Macroquad/src/network`
 - [x] Game 场景骨架：StartGame/MapChanged 加载地图、相机定位、出生点（map_renderer）
 - [x] 主对话框 HUD（血/蓝球、经验条、金币/等级/名字、原版五按钮+菜单/商城）与聊天面板（历史/Enter 输入/IME）（`src/game/hud.rs` + `chat.rs`）
-- [ ] 小地图、菜单/帮助/设置入口（M9 对话框接入）
+- [x] 小地图（M 键）、菜单/帮助/设置入口（M9/M50/M51 接入）
 - [x] 玩家控制：右键寻路（A*）、左键 NPC CallNPC / 怪物攻击、中键 AutoRun；移动 Walk/Run 发包 + 远端插值（`src/game/player_control.rs` + `movement.rs` + `pathfinding.rs`）
-- [ ] 拾取、自动喝药、快捷栏（后续）
+- [x] 拾取（--drop-pick-test）、自动喝药（M13）、快捷栏 F1-F8（belt.rs + skills.rs）
 - [x] 移植基础组件：player / movement / input / network / session / settings（部分）
 - **验收（进行中）**: mock --auto-enter 全流程稳定运行；地图/HUD/聊天像素级验证通过；真实 ServerRust 移动/聊天待联调
 
@@ -74,25 +74,25 @@
 - [x] 通用 UI 基建：对话框管理器（DialogManager 开关/z 序）、HUD 按钮接入、--auto-inv/--auto-char 调试
 - [x] 第 1 批（核心）: inventory（**数据驱动完成**：40 格物品图标/堆叠数量/双击使用/装备）/ character（4 标签页+14 装备槽）/ menu / minimap（玩家点/M 键）/ belt（快捷栏）/ compass 全部完成
 - [x] 第 2 批（交互）: npc / npc_goods（商店闭环）/ trade / amount_box / group / quest_log / friend / inspect 全部完成
-- [ ] 第 2 批（交互）: npc / npc_goods / trade / amount_box / group / quest_log / friend / inspect
+- [x] 第 2 批（交互）: npc / npc_goods / trade / amount_box / group / quest_log / friend / inspect（全部完成，见下）
 - [x] 第 3 批（社交）: guild / guild_territory / mail / trust_merchant / item_rental / ranking / report / mentor / relationship / hero / intelligent_creature / mount 全部完成
 - [x] 第 4 批（系统）: 全部 17 个完成（含 chat_notice 屏幕通知、game_shop 商城）
 - [x] **M9 全部完成：56 个游戏对话框骨架就位**（数据驱动，网络后续批次接入）
-- [ ] 第 4 批（系统）: game_shop / refine / craft / socket / dura_status / npc_drop / roll / npc_awake / notice / chat_notice / timer / option / help / keyboard_layout / big_map / fishing / buff
+- [x] 第 4 批（系统）: 全部完成（socket M56 / roll M57 / npc_awake M54 / option M51 / keyboard M52 / big_map M53 / dura M55；npc_drop=sell_panel）
 - **验收**: 每个对话框交互与原版 C# / macroquad 一致（数据驱动，mock 先行）
 
 ### M10: 战斗 / 逻辑 / 物理
 - [x] combat（部分）: 攻击发包、受击/死亡动画、伤害飘字、自动喝药（闭环验证）
-- [ ] combat: magic / skill / buff / regen（技能栏 F1-F8 待续）
+- [x] combat: magic / skill / buff / regen（F1-F8 施放 + belt 技能栏 + buff M44 + 服务端 regen tick）
 - [x] decision: 服务端驱动怪物 AI（ObjectWalk/Run/Turn/Attack/Death 接入）；NPC 对话闭环
 - [x] physics: movement / pathfinding / collision（A* + 步进 + 远端插值）
 - [x] input: auto_potion（**数据驱动**：从背包找真实 Potion 并发送 unique_id）/ [ ] local_player_ai（待续）
 - **验收（进行中）**: 打怪/飘字闭环已验；技能/自动喝药待续
 
 ### M11: 呈现与特效
-- [ ] animation_system（帧动画/挂点/武器特效/坐骑状态）
+- [x] animation_system（帧动画/分层挂点/武器特效 M62/翅膀 M62/坐骑状态 M60）
 - [x] particle / weather（雨/雪粒子）/ floating_text（伤害飘字）/ sound（SoundList 450 条 + 攻击/受击音效）
-- [ ] rendering: sprite_system 分层遮挡 / effect_system / map_system 分块 + 唯一贴图去重
+- [x] rendering: sprite_system 分层遮挡 / effect_system / map_system 分块 + 唯一贴图去重
 - [x] 日夜循环（24 分钟一天夜晚覆盖层）；屏幕通知（ChatNotice 对话框就位）
 - **验收**: 天气/粒子/音效/伤害飘字/血条/特效完整呈现
 
@@ -101,7 +101,7 @@
 - [x] 单元测试：24 个（tcp/寻路/坐标/codec）全过
 - [x] clippy 零警告（我方代码）、release 构建成功（13m50s）
 - [x] **与真实 ServerRust 全流程联调通过**：握手→登录→建角色→角色列表→StartGame→进游戏
-- [ ] 设置对话框、性能基线（精灵 Atlas）、README 完善（后续）
+- [x] 设置对话框（M51）、README 完善（M59）；[ ] 性能基线（精灵 Atlas，可选优化项）
 - **验收**: cargo test 24 全过、release 构建成功、真实服务器全流程打通
 
 ### M13: 背包数据驱动（2026-08-02 完成）
@@ -213,7 +213,7 @@
 - [x] **邮件对话框**：列表（发件人-主题-未读标记）、点击列表项 → `C.ReadMail{mail_id}` → 内容区显示正文/金币/附件（C# MailDialog 语义）
 - [x] **Bevy 16 参数上限**：network_system 达 17 参数 → 自定义 `SystemParam`（NetworkPanels）合并 5 个对话框状态资源
 - [x] 验证：真实 ServerRust 双客户端 E2E——A 发邮件（含 100 金币，扣款 1,000,000→999,900）→ B `📧 新邮件: bevychar - HelloSubject（未读）` → ReadMail → `📧 邮件详情: ... 金币=100` + 正文 ✅
-- [ ] 写邮件 UI（收件人/主题/正文输入框，需通用文本输入框组件）；登录时同步已有邮件列表（服务端未发）
+- [x] 写邮件 UI（--mail-compose-test 验证）；登录同步邮件列表（--mail-test/-read 验证）
 
 ---
 ### M23: 交易（Trade）全链路（2026-08-03 完成）
@@ -251,7 +251,7 @@
 - [x] **服务端创建行会后发完整行会信息**：原只发 GuildStatus(1 字节 in_guild)，客户端无法显示行会名/成员 → 补 send_guild_info_packet
 - [x] **客户端**：GuildStatus 双格式解析（1 字节 in_guild / 完整信息 name+leader+公告+成员+金币）；GuildMemberChange 双格式（加入/离开 vs 成员更新，服务端复用同 opcode）；GuildNoticeChange；行会对话框（行会名/会长/金币/成员列表（职务+在线）/创建输入框（TextInput 复用）+ 创建按钮）；打开时自动 RequestGuildInfo（C# GuildDialog.Show 语义）
 - [x] 验证：真实 ServerRust E2E——A Lv.7 创建 TestGuild → `🏰 行会信息: TestGuild（bevychar）成员 1 金币 0` → ✅；DB 权威验证：characters.guild_name='TestGuild'、guild_rank=0、guilds 表落库 ✅；客户端 34 测试、服务端 139 测试全过
-- [ ] 行会邀请/加入（GuildInvite 服务器邀请包未实现）、成员管理 UI（踢人/升职，EditGuildMember wire 已修）
+- [x] 行会邀请/加入（--guild-invite-test）、成员管理（--guild-test 等）
 
 ---
 ### M28: 行会邀请/加入 + 成员管理（2026-08-03 完成）
@@ -259,7 +259,7 @@
 - [x] **服务端 gate 邀请解析修复**：EditGuildMember 解析需跳过 change_type+rank_index 两字节（原只跳 1 字节 → 名字读错）
 - [x] **客户端**：GuildInvite 服务器包处理（[name dotnet]）→ 邀请提示（MirMessageBox Yes/No → C.GuildInvite{accept}）；行会对话框加邀请输入框+按钮（EditGuildMember{0}）、成员行点击选中 + 踢出按钮（EditGuildMember{1}）
 - [x] 验证：真实 ServerRust 双客户端 E2E——A 创建 TestGuild2 → 邀请 bevy2char → A `🏰 行会成员加入: bevy2char`（2 人）；B `🏰 收到行会邀请` → 接受 → `🏰 行会状态: 在行会中` ✅；DB 权威验证：bevychar rank=0（会长）、bevy2char rank=2（成员）、guilds 表落库 ✅；客户端 34 / 服务端 139 测试全过
-- [ ] 行会公告编辑 UI（EditGuildNotice wire 已修）、行会仓库（GuildStorage）
+- [x] 行会公告（--guild-notice-test）、行会仓库（--guild-item-test / --guild-gold-test）
 
 ---
 ### M29: 行会公告编辑（2026-08-03 完成）
@@ -271,7 +271,7 @@
 - [x] **服务端存取后广播完整行会信息**：GuildStorageGoldChange 存入/取出后原只发系统消息，客户端看不到金币变化 → 新增 broadcast_guild_info 给所有在线成员
 - [x] **客户端**：行会对话框加仓库金币输入框（TextInput 复用）+ 存入/取出按钮 → `C.GuildStorageGoldChange{change_type, amount}`（C# GuildDialog 仓库语义）；头部行金币实时刷新
 - [x] 验证：真实 ServerRust E2E——创建行会（扣 100 万）→ 存入 100 → `🏰 行会信息: ... 金币 100` → 取出 50 → `金币 50` → **DB 金币精确匹配**（2,000,000-1,000,000-100+50=999,950 ✅）；客户端 34 / 服务端 139 测试全过
-- [ ] 行会仓库物品存取（GuildStorageItemChange wire 已存在）、Ranking（排行榜）
+- [x] 行会仓库物品存取（M32）、Ranking（--ranking-test）
 
 ---
 ### M31: 排行榜（Ranking）（2026-08-03 完成）
