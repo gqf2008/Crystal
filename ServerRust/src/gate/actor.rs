@@ -2258,13 +2258,10 @@ fn handle_guild_storage_item(social_ref: &Option<ActorRef<crate::actors::social:
 // 婚姻系统
 // ============================================================================
 
-/// MarriageRequest: [target_name: DotNetString]
+/// MarriageRequest: [target_name: DotNet 7-bit string]（C# BinaryWriter.Write(string)）
 fn handle_marriage_request(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 4 { return; }
-    let name_len = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0;4])) as usize;
-    let target_name = if payload.len() >= 4 + name_len {
-        String::from_utf8_lossy(&payload[4..4+name_len]).to_string()
-    } else { return; };
+    let mut cur = std::io::Cursor::new(payload);
+    let Ok(target_name) = mir2_shared::binary::read_dotnet_string(&mut cur) else { return };
     debug!("MarriageRequest: session={} to={}", session_id, target_name);
     let social_ref = match social_ref { Some(s) => s, None => return };
     let _ = social_ref.tell(crate::actors::social::MarriageRequest { session_id, target_name }).try_send();
@@ -2286,13 +2283,10 @@ fn handle_change_marriage(social_ref: &Option<ActorRef<crate::actors::social::So
     let _ = social_ref.tell(crate::actors::social::SocialChangeMarriage { session_id }).try_send();
 }
 
-/// DivorceRequest
+/// DivorceRequest: [partner_name: DotNet 7-bit string]
 fn handle_divorce_request(social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 4 { return; }
-    let name_len = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0;4])) as usize;
-    let partner_name = if payload.len() >= 4 + name_len {
-        String::from_utf8_lossy(&payload[4..4+name_len]).to_string()
-    } else { return; };
+    let mut cur = std::io::Cursor::new(payload);
+    let Ok(partner_name) = mir2_shared::binary::read_dotnet_string(&mut cur) else { return };
     debug!("DivorceRequest: session={} partner={}", session_id, partner_name);
     let social_ref = match social_ref { Some(s) => s, None => return };
     let _ = social_ref.tell(crate::actors::social::SocialDivorceRequest { session_id, partner_name }).try_send();

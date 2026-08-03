@@ -2679,6 +2679,8 @@ impl Message<SocialDivorceReply> for SocialActor {
                 if let Some(target_record) = self.players.get(&target_session) {
                     let _ = target_record.ask(SetSpouse { spouse_name: None }).await;
                     send_system_message(&self.gate_ref, target_session, "你已离婚");
+                    // M49：前配偶状态同步（原实现只更新确认方）
+                    send_marriage_status_packet(&self.gate_ref, target_session, false);
                 }
             }
         }
