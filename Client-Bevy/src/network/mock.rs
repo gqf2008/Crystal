@@ -246,13 +246,13 @@ fn send_map_and_objects(to_client: &Sender<Vec<u8>>, char_index: i32) {
         to_client,
         &server::map::MapChanged {
             map_index: 0,
-            file_name: "n0".to_string(),
+            file_name: "5".to_string(),
             title: "新手村".to_string(),
             minimap: 0,
             big_map: 0,
             lights: 0,
-            location_x: 350,
-            location_y: 350,
+            location_x: 400,
+            location_y: 400,
             direction: 0,
             map_dark_light: 0,
             music: 0,
@@ -281,8 +281,8 @@ fn send_map_and_objects(to_client: &Sender<Vec<u8>>, char_index: i32) {
             class,
             gender,
             level: 30,
-            location_x: 350,
-            location_y: 350,
+            location_x: 400,
+            location_y: 400,
             direction: MirDirection::Up,
             hair: 0,
             light: 0,
@@ -308,7 +308,7 @@ fn send_map_and_objects(to_client: &Sender<Vec<u8>>, char_index: i32) {
     );
 
     // 怪物
-    for (id, img, x, y) in [(101u32, 1u16, 344i32, 352i32), (102, 5, 356, 347), (103, 9, 345, 345)] {
+    for (id, img, x, y) in [(101u32, 1u16, 396i32, 396i32), (102, 5, 404, 404), (103, 9, 396, 404)] {
         send(
             to_client,
             &server::objects::ObjectMonster {
@@ -344,8 +344,8 @@ fn send_map_and_objects(to_client: &Sender<Vec<u8>>, char_index: i32) {
             name_colour: 0,
             image: 0,
             colour: 0,
-            location_x: 353,
-            location_y: 353,
+            location_x: 404,
+            location_y: 396,
             direction: MirDirection::Up,
             quest_ids: vec![],
         },

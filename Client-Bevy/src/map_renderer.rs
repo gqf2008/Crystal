@@ -14,6 +14,10 @@ use bevy::image::ImageSampler;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
+use crate::map_tile_anim::{
+    map_tile_anim_system, register_blend_material, spawn_anim_tile, spawn_blend_tile,
+    MapAnimClock, MapBlendMaterial, TileAnimKind, TileImageCache,
+};
 use crate::resources::libraries::Libraries;
 use crate::resources::map_reader::{resolve_map_path, CellInfo, MapReader};
 use crate::resources::mlibrary::ImageInfo;
@@ -45,10 +49,38 @@ pub struct FrontTile {
     pub bottom: f32,
 }
 
+/// 图层显隐调试（热键 1=Back 2=Middle 3=Front静态 F=动画/混合）
+#[derive(Resource)]
+pub struct MapLayerShow {
+    pub back: bool,
+    pub middle: bool,
+    pub front: bool,
+    pub anim: bool,
+}
+impl Default for MapLayerShow {
+    fn default() -> Self {
+        Self { back: true, middle: true, front: true, anim: true }
+    }
+}
+#[derive(Component)]
+pub struct MapFloorMark(pub Layer);
+
+/// 已生成的地板块 key（流式加载/卸载用）
+#[derive(Component)]
+pub struct ChunkKey(pub i32, pub i32, pub Layer);
+
+/// chunk 流式状态
+#[derive(Resource, Default)]
+pub struct ChunkStream {
+    pub last_cam_chunk: Option<(i32, i32)>,
+}
+
 /// 游戏数据资源：当前地图信息
 #[derive(Resource, Default)]
 pub struct GameData {
     pub map: Option<LoadedMap>,
+    /// 地图解析器（供 chunk 流式按需加载）
+    pub map_reader: Option<std::sync::Arc<MapReader>>,
     /// 网络 MapChanged 指定的地图名（优先于命令行 --map）
     pub desired_map: Option<String>,
     /// 玩家出生位置（瓦片坐标 + 朝向），来自 MapChanged
@@ -88,7 +120,7 @@ impl LoadedMap {
 }
 
 /// 图层
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Layer {
     Back,
     Middle,
@@ -120,7 +152,23 @@ impl Plugin for MapRenderPlugin {
         app.init_resource::<GameData>();
         app.init_resource::<GameLibraries>();
         app.add_systems(Startup, spawn_camera);
+        app.init_resource::<MapLayerShow>();
+        app.init_resource::<MapAnimClock>();
+        app.init_resource::<TileImageCache>();
+        register_blend_material(app);
         app.add_systems(OnEnter(crate::scenes::AppState::Game), setup_world);
+        app.add_systems(
+            Update,
+            map_layer_toggle_system.run_if(in_state(crate::scenes::AppState::Game)),
+        );
+        app.add_systems(
+            Update,
+            map_tile_anim_system.run_if(in_state(crate::scenes::AppState::Game)),
+        );
+        app.add_systems(
+            Update,
+            camera_follow_system.run_if(in_state(crate::scenes::AppState::Game)),
+        );
         app.add_systems(
             Update,
             camera_control.run_if(in_state(crate::scenes::AppState::Game)),
@@ -152,7 +200,14 @@ fn setup_world(
     mut assets: ResMut<Assets<Image>>,
     mut game_data: ResMut<GameData>,
     mut game_libs: ResMut<GameLibraries>,
-    mut camera: Query<&mut Transform, With<Camera2d>>,
+    mut tile_cache: ResMut<TileImageCache>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut blend_materials: ResMut<Assets<MapBlendMaterial>>,
+    // 只取地图相机（排除 UI 相机：UiEntity + Camera2d；否则两个相机 single_mut 失败 → 相机停在 (0,0) 显示左上角）
+    mut camera: Query<
+        &mut Transform,
+        (With<Camera2d>, Without<crate::ui::sprite_ui::UiEntity>),
+    >,
 ) {
     // 1. 加载图像库（MapLibs）
     game_libs.0.ensure_initialized();
@@ -184,19 +239,26 @@ fn setup_world(
         map.height
     );
 
-    // 3. 按块生成纹理
+    // 灯光混合瓦片共享单位 quad（缩放 = 瓦片尺寸）
+    let blend_quad = meshes.add(Rectangle::new(1.0, 1.0));
+
+    // 3. 按块生成纹理（流式：只烘焙相机附近初始窗口，其余由 chunk_stream_system 按需加载）
     let mut spawned = 0usize;
     let chunks_x = div_ceil_i32(map.width, CHUNK_TILES as i32);
     let chunks_y = div_ceil_i32(map.height, CHUNK_TILES as i32);
 
-    // Front 层改为逐瓦片精灵（按基准 Y 与角色交错排序），不走块纹理
+    let cam_cx = (map.width as f32 * TILE_WIDTH / 2.0 / CHUNK_PIXEL_W as f32) as i32;
+    let cam_cy = (map.height as f32 * TILE_HEIGHT / 2.0 / CHUNK_PIXEL_H as f32) as i32;
+    let radius = 2i32;
     for layer in [Layer::Back, Layer::Middle] {
-        for cy in 0..chunks_y {
-            for cx in 0..chunks_x {
+        for cy in (cam_cy - radius)..=(cam_cy + radius) {
+            for cx in (cam_cx - radius)..=(cam_cx + radius) {
+                if cx < 0 || cy < 0 || cx >= chunks_x || cy >= chunks_y {
+                    continue;
+                }
                 if let Some(handle) =
                     build_chunk(libraries, &map, layer, cx, cy, &mut assets)
                 {
-                    // 块中心（世界坐标，y 取反适配 Bevy）
                     let rect_x = (cx * CHUNK_TILES as i32) as f32 * TILE_WIDTH;
                     let rect_y = (cy * CHUNK_TILES as i32) as f32 * TILE_HEIGHT;
                     let px = rect_x + CHUNK_PIXEL_W as f32 / 2.0;
@@ -205,13 +267,15 @@ fn setup_world(
                         Sprite::from_image(handle),
                         Transform::from_xyz(px, py, layer.z()),
                         Visibility::default(),
+                        MapFloorMark(layer),
+                        ChunkKey(cx, cy, layer),
                     ));
                     spawned += 1;
                 }
             }
         }
     }
-    tracing::info!("🧩 地图块生成完成: {} 个 Sprite", spawned);
+    tracing::info!("🧩 地图块初始窗口生成: {} 个 Sprite", spawned);
 
     // 3.5 Front 层：逐瓦片精灵，z 按基准 Y（格子底边）与角色交错排序。
     // 经典传奇遮挡：角色脚底 Y < 瓦片基准 Y → 被建筑/树遮挡；反之在建筑前。
@@ -228,6 +292,50 @@ fn setup_world(
             for x in f_start_x..f_end_x {
                 for y in f_start_y..f_end_y {
                     let cell = &map.map_cells[x as usize][y as usize];
+                    if cell.front_animation_frame > 0 {
+                        // 动画/灯光混合瓦片：单独生成（blend → ADD 混合材质）
+                        if let Some((file_index, base_image_index)) = cell.front_tile() {
+                            let mut animation = cell.front_animation_frame;
+                            let blend = (animation & 0x80) > 0;
+                            if blend {
+                                animation &= 0x7F;
+                            }
+                            let tick = cell.front_animation_tick;
+                            let base_y_world = (y + 1) as f32 * TILE_HEIGHT as f32;
+                            let should_apply_offset = if blend {
+                                (100..199).contains(&file_index)
+                            } else {
+                                file_index == 28
+                            };
+                            if let Some(info) = libraries.get_map_image(file_index, base_image_index) {
+                                let off_x = if should_apply_offset { info.offset_x as f32 } else { 0.0 };
+                                let off_y = if should_apply_offset { info.offset_y as f32 } else { 0.0 };
+                                let left = x as f32 * TILE_WIDTH as f32 + off_x;
+                                let (anchor_y, top_anchored) = if blend {
+                                    (-(base_y_world - 3.0 * TILE_HEIGHT as f32 + off_y), true)
+                                } else {
+                                    (-(base_y_world + off_y), false)
+                                };
+                                if blend {
+                                    spawn_blend_tile(
+                                        &mut commands, libraries, &mut assets, &mut tile_cache,
+                                        &mut blend_materials, blend_quad.clone(),
+                                        TileAnimKind::Front, file_index, base_image_index,
+                                        animation, tick, left, anchor_y, top_anchored,
+                                        depth_y(base_y_world),
+                                    );
+                                } else {
+                                    spawn_anim_tile(
+                                        &mut commands, libraries, &mut assets, &mut tile_cache,
+                                        TileAnimKind::Front, file_index, base_image_index,
+                                        animation, tick, false, left, anchor_y, top_anchored,
+                                        depth_y(base_y_world),
+                                    );
+                                }
+                            }
+                        }
+                        continue;
+                    }
                     let Some((file_index, image_index)) = cell.front_tile() else {
                         continue;
                     };
@@ -254,15 +362,24 @@ fn setup_world(
                             (handle, w, h)
                         }
                     };
-                    // 基准 Y = 格子底边 (y+1)*32（macroquad: offset_y = y*32 + 32 - h）
+                    // 基准 Y = 格子底边 (y+1)*32
                     let base_y = ((y + 1) * TILE_HEIGHT as i32) as f32;
                     let left = (x as f32) * TILE_WIDTH;
                     let top = base_y - h as f32;
                     let center_x = left + w as f32 / 2.0;
-                    let center_y = -(base_y - h as f32 / 2.0);
+                    let (center_y, z) = if (w == TILE_WIDTH as i16 && h == TILE_HEIGHT as i16)
+                        || (w == TILE_WIDTH as i16 * 2 && h == TILE_HEIGHT as i16 * 2)
+                    {
+                        // C# DrawFloor：1x1/2x2 地面贴花左上角对齐，且 z 在地板之上、角色之下
+                        // （不能放 depth_y，否则与角色/建筑同 z 会盖住它们）
+                        (-(y as f32 * TILE_HEIGHT + h as f32 / 2.0), 0.15)
+                    } else {
+                        // C# DrawObjects：高物件底边对齐，与角色按 Y 交错
+                        (-(base_y - h as f32 / 2.0), depth_y(base_y))
+                    };
                     commands.spawn((
                         Sprite::from_image(handle),
-                        Transform::from_xyz(center_x, center_y, depth_y(base_y)),
+                        Transform::from_xyz(center_x, center_y, z),
                         Visibility::default(),
                         FrontTile {
                             base_y,
@@ -279,18 +396,56 @@ fn setup_world(
     }
     tracing::info!("🌳 Front 瓦片精灵生成完成: {} 个", front_spawned);
 
+    // 3.7 C# DrawObjects：非 1x1/2x2 的静态 Middle（大树/建筑等）底边对齐单独画
+    let mut obj_spawned = 0usize;
+    for y in 0..map.height as usize {
+        for x in 0..map.width as usize {
+            let cell = &map.map_cells[x][y];
+            if let Some((file_index, image_index)) = cell.middle_tile() {
+                if let Some(info) = libraries.get_map_image(file_index, image_index) {
+                    let (w, h) = (info.width.max(0) as u32, info.height.max(0) as u32);
+                    if w > 0
+                        && h > 0
+                        && !((w == TILE_WIDTH as u32 && h == TILE_HEIGHT as u32)
+                            || (w == TILE_WIDTH as u32 * 2 && h == TILE_HEIGHT as u32 * 2))
+                    {
+                        let left = x as f32 * TILE_WIDTH as f32;
+                        let bottom = -((y + 1) as f32 * TILE_HEIGHT as f32);
+                        let center_x = left + w as f32 / 2.0;
+                        let center_y = bottom + h as f32 / 2.0;
+                        if let Some(rgba) = info.rgba.clone() {
+                            let mut img = make_image(rgba, w, h);
+                            img.sampler = ImageSampler::nearest();
+                            let handle = assets.add(img);
+                            commands.spawn((
+                                Sprite::from_image(handle),
+                                Transform::from_xyz(
+                                    center_x,
+                                    center_y,
+                                    depth_y((y + 1) as f32 * TILE_HEIGHT as f32),
+                                ),
+                                Visibility::default(),
+                            ));
+                            obj_spawned += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    tracing::info!("🏛️ 对象层 Middle 大图生成完成: {} 个", obj_spawned);
+
     // 4. 相机定位（优先玩家出生点，否则地图中心）
     let center_x = map.width as f32 * TILE_WIDTH / 2.0;
     let center_y = -(map.height as f32 * TILE_HEIGHT / 2.0);
-    let (cam_x, cam_y) = match game_data.player_spawn {
-        Some((tx, ty, _)) => {
-            // 出生点是瓦片坐标：世界像素 = (tx*48 + 24, ty*32 + 32)
-            (tx * TILE_WIDTH + TILE_WIDTH / 2.0, -(ty * TILE_HEIGHT + TILE_HEIGHT))
-        }
-        None => (center_x, center_y),
-    };
+    // 相机固定放地图中心（用户要求：中心才能看到建筑；玩家在中心附近）
+    let (cam_x, cam_y) = (center_x, center_y);
+
     if let Ok(mut cam_tf) = camera.single_mut() {
         cam_tf.translation = Vec3::new(cam_x, cam_y, 10.0);
+        tracing::info!("[DIAG] 相机定位: ({:.0},{:.0})", cam_x, cam_y);
+    } else {
+        tracing::warn!("[DIAG] 相机定位失败！Camera2d 数量={}", camera.iter().count());
     }
 
     // 构建可行走网格（M8 寻路）
@@ -303,12 +458,22 @@ fn setup_world(
         walkable.push(col);
     }
 
+pub struct GameData {
+    pub map: Option<LoadedMap>,
+    /// 地图解析器（供 chunk 流式按需加载）
+    pub map_reader: Option<std::sync::Arc<MapReader>>,
+    /// 网络 MapChanged 指定的地图名（优先于命令行 --map）
+    pub desired_map: Option<String>,
+    /// 玩家出生位置（瓦片坐标 + 朝向），来自 MapChanged
+    pub player_spawn: Option<(f32, f32, u8)>,
+}
     game_data.map = Some(LoadedMap {
         name: map_name.clone(),
         width: map.width,
         height: map.height,
         walkable,
     });
+    game_data.map_reader = Some(std::sync::Arc::new(map));
 
 }
 
@@ -368,12 +533,21 @@ pub fn build_chunk_rgba(
             let Some(info) = libraries.get_map_image(file_index, image_index) else {
                 continue;
             };
+            // C# DrawFloor：地板层 Middle 只画 1x1/2x2，其余走对象层
+            if layer == Layer::Middle {
+                let (w, h) = (info.width, info.height);
+                if !((w == TILE_WIDTH as i16 && h == TILE_HEIGHT as i16)
+                    || (w == TILE_WIDTH as i16 * 2 && h == TILE_HEIGHT as i16 * 2))
+                {
+                    continue;
+                }
+            }
             let Some(rgba) = info.rgba.as_ref() else {
                 continue;
             };
-            // 块内相对位置（macroquad 的 offset 规则：图片底边对齐格子底边）
+            // C# DrawFloor：地板层左上角对齐格子左上角
             let dx = (x - start_x) * TILE_WIDTH as i32;
-            let dy = (y - start_y) * TILE_HEIGHT as i32 + TILE_HEIGHT as i32 - info.height as i32;
+            let dy = (y - start_y) * TILE_HEIGHT as i32;
             if blit(&mut canvas, dx, dy, &info, rgba) {
                 any_drawn = true;
             }
@@ -490,5 +664,146 @@ fn camera_control(
     }
     if keys.pressed(KeyCode::Minus) || keys.pressed(KeyCode::NumpadSubtract) {
         ortho.scale = (ortho.scale * 1.02).min(4.0);
+    }
+}
+
+
+/// 图层调试热键：1=Back 2=Middle 3=Front静态 F=动画/混合
+fn map_layer_toggle_system(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut show: ResMut<MapLayerShow>,
+    mut floors: Query<(&MapFloorMark, &mut Visibility), (Without<FrontTile>,)>,
+    mut fronts: Query<&mut Visibility, (With<FrontTile>, Without<MapFloorMark>)>,
+) {
+    if keys.just_pressed(KeyCode::Digit1) { show.back = !show.back; tracing::info!("[LAYER] Back {}", if show.back {"ON"} else {"OFF"}); }
+    if keys.just_pressed(KeyCode::Digit2) { show.middle = !show.middle; tracing::info!("[LAYER] Middle {}", if show.middle {"ON"} else {"OFF"}); }
+    if keys.just_pressed(KeyCode::Digit3) { show.front = !show.front; tracing::info!("[LAYER] Front {}", if show.front {"ON"} else {"OFF"}); }
+    if keys.just_pressed(KeyCode::KeyF) { show.anim = !show.anim; tracing::info!("[LAYER] Anim {}", if show.anim {"ON"} else {"OFF"}); }
+    for (mark, mut vis) in floors.iter_mut() {
+        let on = match mark.0 { Layer::Back => show.back, Layer::Middle => show.middle, Layer::Front => show.front };
+        *vis = if on { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for mut vis in fronts.iter_mut() {
+        *vis = if show.front { Visibility::Visible } else { Visibility::Hidden };
+    }
+}
+
+
+/// 相机跟随（参考 macroquad CameraFollowSystem）：远距直跳 + lerp 平滑
+fn camera_follow_system(
+    mut camera: Query<
+        &mut Transform,
+        (
+            With<Camera2d>,
+            Without<crate::ui::sprite_ui::UiEntity>,
+            Without<crate::actor::LocalPlayer>,
+        ),
+    >,
+    players: Query<
+        &Transform,
+        (
+            With<crate::actor::LocalPlayer>,
+            With<crate::actor::NetObjectId>,
+            Without<Camera2d>,
+        ),
+    >,
+    time: Res<Time>,
+) {
+    let Ok(mut cam) = camera.single_mut() else { return };
+    let Ok(player) = players.single() else { return };
+    let p = player.translation;
+    let c = cam.translation;
+    // 首次/大跨度传送：直接对齐
+    let far = (p.x - c.x).abs() > 1024.0 * 6.0 || (p.y - c.y).abs() > 768.0 * 6.0;
+    if far {
+        cam.translation.x = p.x;
+        cam.translation.y = p.y;
+    } else {
+        let t = (10.0 * time.delta_secs()).min(1.0);
+        cam.translation.x += (p.x - c.x) * t;
+        cam.translation.y += (p.y - c.y) * t;
+    }
+}
+
+
+/// chunk 流式系统：相机移动到新 chunk 时，加载 3x3 窗口内的地板块，卸载窗口外的。
+/// 全图烘焙 = 数 GB 内存；流式 = 常驻 ~几十 MB。
+fn chunk_stream_system(
+    mut commands: Commands,
+    mut stream: ResMut<ChunkStream>,
+    game_data: Res<GameData>,
+    mut game_libs: ResMut<GameLibraries>,
+    mut assets: ResMut<Assets<Image>>,
+    camera: Query<
+        &Transform,
+        (
+            With<Camera2d>,
+            Without<crate::ui::sprite_ui::UiEntity>,
+            Without<crate::actor::LocalPlayer>,
+        ),
+    >,
+    chunks: Query<(Entity, &ChunkKey)>,
+) {
+    let Some(map_reader) = game_data.map_reader.clone() else { return };
+    let Ok(cam) = camera.single() else { return };
+    let cam_cx = (cam.translation.x / CHUNK_PIXEL_W as f32) as i32;
+    let cam_cy = ((-cam.translation.y) / CHUNK_PIXEL_H as f32) as i32;
+    if stream.last_cam_chunk == Some((cam_cx, cam_cy)) {
+        return;
+    }
+    stream.last_cam_chunk = Some((cam_cx, cam_cy));
+    let chunks_x = div_ceil_i32(map_reader.width, CHUNK_TILES as i32);
+    let chunks_y = div_ceil_i32(map_reader.height, CHUNK_TILES as i32);
+    let radius = 2i32;
+
+    let mut wanted = std::collections::HashSet::new();
+    for layer in [Layer::Back, Layer::Middle] {
+        for cy in (cam_cy - radius)..=(cam_cy + radius) {
+            for cx in (cam_cx - radius)..=(cam_cx + radius) {
+                if cx >= 0 && cy >= 0 && cx < chunks_x && cy < chunks_y {
+                    wanted.insert((cx, cy, layer));
+                }
+            }
+        }
+    }
+    let existing: std::collections::HashSet<_> =
+        chunks.iter().map(|(_, k)| (k.0, k.1, k.2)).collect();
+
+    // 卸载窗口外
+    for (e, k) in chunks.iter() {
+        if !wanted.contains(&(k.0, k.1, k.2)) {
+            commands.entity(e).despawn();
+        }
+    }
+    // 加载窗口内缺失
+    let mut added = 0usize;
+    for (cx, cy, layer) in &wanted {
+        if existing.contains(&(*cx, *cy, *layer)) {
+            continue;
+        }
+        if let Some(handle) = build_chunk(
+            &mut game_libs.0,
+            &map_reader,
+            *layer,
+            *cx,
+            *cy,
+            &mut assets,
+        ) {
+            let rect_x = (*cx * CHUNK_TILES as i32) as f32 * TILE_WIDTH;
+            let rect_y = (*cy * CHUNK_TILES as i32) as f32 * TILE_HEIGHT;
+            let px = rect_x + CHUNK_PIXEL_W as f32 / 2.0;
+            let py = -(rect_y + CHUNK_PIXEL_H as f32 / 2.0);
+            commands.spawn((
+                Sprite::from_image(handle),
+                Transform::from_xyz(px, py, layer.z()),
+                Visibility::default(),
+                MapFloorMark(*layer),
+                ChunkKey(*cx, *cy, *layer),
+            ));
+            added += 1;
+        }
+    }
+    if added > 0 {
+        tracing::info!("🧩 chunk 流式加载 {} 个", added);
     }
 }

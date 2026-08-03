@@ -86,7 +86,8 @@ pub fn find_path(map: &LoadedMap, from: (i32, i32), to: (i32, i32)) -> Option<Ve
                 cur = *prev;
             }
             path.reverse();
-            return Some(path);
+            // 路径平滑：把 (1,0)+(0,1) 等直线对合成 (1,1) 对角，消除 45° 锯齿
+            return Some(smooth_path(map, from, path));
         }
 
         for (dx, dy) in DIRS {
@@ -181,4 +182,39 @@ mod tests {
         let map = test_map(5, 5, &[]);
         assert_eq!(find_path(&map, (2, 2), (2, 2)).unwrap().len(), 0);
     }
+}
+
+
+/// 路径平滑：将锯齿状直线对 (1,0)+(0,1) 或 (0,1)+(1,0) 合并为对角步 (1,1)，
+/// 让 45° 斜向移动保持单一方向（消除 A* 等代价路径的任意 tie-break 造成的抖动）。
+fn smooth_path(map: &LoadedMap, from: (i32, i32), path: Vec<(i32, i32)>) -> Vec<(i32, i32)> {
+    let mut out: Vec<(i32, i32)> = Vec::with_capacity(path.len());
+    let mut prev = from;
+    let mut i = 0;
+    while i < path.len() {
+        let n = path[i];
+        let dx = n.0 - prev.0;
+        let dy = n.1 - prev.1;
+        if (dx == 0 || dy == 0) && (dx.abs() + dy.abs() == 1) && i + 1 < path.len() {
+            let n2 = path[i + 1];
+            let dx2 = n2.0 - prev.0;
+            let dy2 = n2.1 - prev.1;
+            if dx2.abs() == 1 && dy2.abs() == 1 {
+                // 合成对角：检查对角格与两个直向格都可走（防斜穿墙）
+                let corner_ok = map.is_walkable(n2.0, n2.1)
+                    && map.is_walkable(prev.0 + dx2, prev.1)
+                    && map.is_walkable(prev.0, prev.1 + dy2);
+                if corner_ok {
+                    out.push(n2);
+                    prev = n2;
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        out.push(n);
+        prev = n;
+        i += 1;
+    }
+    out
 }
