@@ -25,6 +25,7 @@ use crate::game::dialogs::mentor::MentorState;
 use crate::game::dialogs::market::{MarketItem, MarketState};
 use crate::game::dialogs::game_shop::{GameShopState, ShopItem as UiShopItem};
 use crate::game::dialogs::guild_territory::{GuildTerritoryState, TerritoryRow};
+use crate::game::dialogs::fishing::FishingState;
 use crate::game::effects::{EffectsState, PendingEffect};
 use crate::game::player_control::ControlState;
 use crate::game::dialogs::inventory::InvItem;
@@ -561,6 +562,62 @@ impl Packet for PurchaseGuildTerritoryWire {
     }
 }
 
+/// 钓鱼抛竿（M39：gate 解析 [fishing_type u8]）
+#[derive(Debug, Clone, Copy)]
+pub struct FishingCastWire {
+    pub fishing_type: u8,
+}
+
+impl Packet for FishingCastWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::FishingCast as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            fishing_type: reader.read_u8()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u8(self.fishing_type)?;
+        Ok(())
+    }
+}
+
+/// 自动钓鱼开关（M39：gate 解析 [enabled u8]）
+#[derive(Debug, Clone, Copy)]
+pub struct FishingChangeAutocastWire {
+    pub enabled: bool,
+}
+
+impl Packet for FishingChangeAutocastWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::FishingChangeAutocast as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            enabled: reader.read_u8()? != 0,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u8(if self.enabled { 1 } else { 0 })?;
+        Ok(())
+    }
+}
+
 /// 待生成的网络对象（MapChanged 后由 Game 状态消费）
 #[derive(Debug, Clone)]
 pub enum NetObject {
@@ -672,6 +729,7 @@ struct NetworkPanels<'w> {
     territory: ResMut<'w, GuildTerritoryState>,
     effects: ResMut<'w, EffectsState>,
     control: ResMut<'w, ControlState>,
+    fishing: ResMut<'w, FishingState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -722,6 +780,7 @@ fn network_system(
                         &mut *panels.territory,
                         &mut *panels.effects,
                         &mut *panels.control,
+                        &mut *panels.fishing,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -776,6 +835,7 @@ fn network_system(
                         &mut *panels.territory,
                         &mut *panels.effects,
                         &mut *panels.control,
+                        &mut *panels.fishing,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -920,6 +980,7 @@ fn handle_packet(
     territory: &mut GuildTerritoryState,
     effects: &mut EffectsState,
     control: &mut ControlState,
+    fishing: &mut FishingState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -1859,6 +1920,33 @@ fn handle_packet(
                 Err(e) => {
                     tracing::warn!("⚠️ GuildRequestWar 解析失败: {} (len={})", e, payload.len())
                 }
+            }
+        }
+        // ---- M39: 钓鱼 ----
+        x if x == ServerPacketIds::FishingUpdate as i16 => {
+            // [progress i32][success u8]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 5 {
+                let progress = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
+                let success = body[4] != 0;
+                fishing.progress = progress;
+                fishing.success = success;
+                fishing.message = match progress {
+                    1 => "等待中…".to_string(),
+                    2 => {
+                        if success {
+                            "上钩了！".to_string()
+                        } else {
+                            "鱼跑了…".to_string()
+                        }
+                    }
+                    5 => format!(
+                        "自动钓鱼: {}",
+                        if success { "开" } else { "关" }
+                    ),
+                    _ => format!("进度 {}", progress),
+                };
+                tracing::info!("🎣 FishingUpdate: progress={} success={}", progress, success);
             }
         }
         // ---- M33: 师徒 ----

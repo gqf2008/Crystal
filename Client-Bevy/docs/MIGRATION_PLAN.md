@@ -341,6 +341,13 @@
 - [x] 验证：真实 ServerRust E2E——`✅ 魔法特效已生成（计数 1）` + 战斗闭环（死亡 + 掉落）全过；客户端 34 测试全过
 
 ---
+### M39: 钓鱼（Fishing）（2026-08-03 完成）
+- [x] **客户端**：钓鱼对话框（C# FishingDialog 参考：Prguse[1340]；抛竿 + 自动钓鱼开关 + 状态/消息显示）；FishingUpdate(198) 解析（progress/success）
+- [x] **修复重大 bug**：`send_system_message` 两处（social_packets/world）写 chat_type=0，SharedRust ChatType 无 0 变体（System=5，C# 为 2）→ **所有系统消息客户端解析失败不显示**（自 M17 起）；改为 ChatType::System=5
+- [x] 网络：FishingCastWire [fishing_type u8] / FishingChangeAutocastWire [enabled u8] 手动构造
+- [x] 验证：真实 ServerRust E2E——装备 BlueFishingRod（武器栏）→ `✅ 抛竿成功（等待中）` → `✅ 收获消息: 钓到了宝箱！获得 24 金币`；客户端 40 / 服务端 139 测试全过
+
+---
 ## 四、执行顺序与依赖
 
 ```

@@ -233,6 +233,10 @@ fn main() {
     if std::env::args().any(|a| a == "--combat-test") {
         app.add_systems(Update, auto_combat_test);
     }
+    // --fishing-test: 钓鱼链路（装备鱼竿 → 抛竿 → 等收获消息）
+    if std::env::args().any(|a| a == "--fishing-test") {
+        app.add_systems(Update, auto_fishing_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -2510,6 +2514,79 @@ fn auto_combat_test(
                 );
             }
             *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --fishing-test：打开钓鱼 → 抛竿 → 等 FishingUpdate → 等收获聊天消息
+#[allow(clippy::too_many_arguments)]
+fn auto_fishing_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    fishing: Res<client_bevy::game::dialogs::fishing::FishingState>,
+    chat: Res<client_bevy::game::chat::ChatState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Fishing) {
+                mgr.toggle(client_bevy::game::dialogs::DialogKind::Fishing);
+            }
+            net.send_packet(&client_bevy::network::FishingCastWire { fishing_type: 0 });
+            tracing::info!("[FISHTEST] 抛竿");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t >= 6.0 {
+                tracing::warn!(
+                    "[FISHTEST] ❌ 未收到 FishingUpdate（progress={}）",
+                    fishing.progress
+                );
+                *stage = 9;
+                return;
+            }
+            if fishing.progress == 1 {
+                tracing::info!("[FISHTEST] ✅ 抛竿成功（等待中）");
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t < 12.0 {
+                return;
+            }
+            let hit = chat
+                .lines
+                .iter()
+                .rev()
+                .take(30)
+                .find(|(text, _)| {
+                    text.contains("钓到了") || text.contains("鱼跑了") || text.contains("需要装备鱼竿")
+                })
+                .map(|(text, _)| text.clone());
+            match hit {
+                Some(text) => {
+                    tracing::info!("[FISHTEST] ✅ 收获消息: {}", text);
+                    *stage = 9;
+                }
+                None => {
+                    tracing::warn!("[FISHTEST] ❌ 未收到收获消息");
+                    *stage = 9;
+                }
+            }
         }
         _ => {}
     }
