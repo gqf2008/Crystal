@@ -35,6 +35,7 @@ use crate::game::dialogs::report::ReportState;
 use crate::game::dialogs::inspect::{InspectItem, InspectState};
 use crate::game::dialogs::creature::{CreatureEntry, CreatureState};
 use crate::game::dialogs::hero::HeroState;
+use crate::game::dialogs::relationship::RelationshipState;
 use crate::game::effects::{EffectsState, PendingEffect};
 use crate::game::player_control::ControlState;
 use crate::game::dialogs::inventory::InvItem;
@@ -362,6 +363,57 @@ impl Packet for ChangeHeroWire {
     ) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::WriteBytesExt;
         writer.write_u8(self.hero_index)?;
+        Ok(())
+    }
+}
+
+/// 婚姻客户端包（M49：SharedRust 为空包，gate 期望 dotnet，手动构造）
+#[derive(Debug, Clone)]
+pub struct MarriageRequestWire {
+    pub target_name: String,
+}
+
+impl Packet for MarriageRequestWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::MarriageRequest as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        Ok(Self {
+            target_name: mir2_shared::binary::read_dotnet_string(reader)?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        mir2_shared::binary::write_dotnet_string(writer, &self.target_name)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DivorceRequestWire {
+    pub partner_name: String,
+}
+
+impl Packet for DivorceRequestWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::DivorceRequest as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        Ok(Self {
+            partner_name: mir2_shared::binary::read_dotnet_string(reader)?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        mir2_shared::binary::write_dotnet_string(writer, &self.partner_name)?;
         Ok(())
     }
 }
@@ -1059,6 +1111,7 @@ struct NetworkPanels<'w> {
     inspect: ResMut<'w, InspectState>,
     creature: ResMut<'w, CreatureState>,
     hero: ResMut<'w, HeroState>,
+    relationship: ResMut<'w, RelationshipState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -1119,6 +1172,7 @@ fn network_system(
                         &mut *panels.inspect,
                         &mut *panels.creature,
                         &mut *panels.hero,
+                        &mut *panels.relationship,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1183,6 +1237,7 @@ fn network_system(
                         &mut *panels.inspect,
                         &mut *panels.creature,
                         &mut *panels.hero,
+                        &mut *panels.relationship,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1337,6 +1392,7 @@ fn handle_packet(
     inspect: &mut InspectState,
     creature: &mut CreatureState,
     hero: &mut HeroState,
+    relationship: &mut RelationshipState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -2537,6 +2593,36 @@ fn handle_packet(
                 format!("已切换英雄 {}", idx)
             };
             tracing::info!("🦸 ChangeHero: index={}", idx);
+        }
+        // ---- M49: 婚姻/关系 ----
+        x if x == ServerPacketIds::MarriageRequest as i16 => {
+            // [lover dotnet]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            match mir2_shared::binary::read_dotnet_string(&mut cur) {
+                Ok(name) => {
+                    relationship.invite = Some(name.clone());
+                    relationship.message = format!("收到 {} 的求婚", name);
+                    tracing::info!("💍 收到求婚: {}", name);
+                }
+                Err(_) => tracing::warn!("⚠️ MarriageRequest 解析失败"),
+            }
+        }
+        x if x == ServerPacketIds::LoverUpdate as i16 => {
+            // [married u8]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let married = body.first().copied().unwrap_or(0) != 0;
+            relationship.married = married;
+            relationship.message = if married {
+                "婚姻关系已建立！".to_string()
+            } else {
+                "婚姻关系已解除".to_string()
+            };
+            tracing::info!("💍 LoverUpdate: married={}", married);
+        }
+        x if x == ServerPacketIds::DivorceRequest as i16 => {
+            relationship.message = "收到离婚请求".to_string();
+            tracing::info!("💔 收到离婚请求");
         }
         // ---- M39: 钓鱼 ----
         x if x == ServerPacketIds::FishingUpdate as i16 => {

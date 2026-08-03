@@ -410,6 +410,12 @@
 - [x] 验证：真实 ServerRust E2E——`🦸 ChangeHero: index=1` → `✅ 英雄切换成功` → `🦸 ChangeHero: index=0` → `✅ 切回主角色成功`；客户端 34 / 服务端 139 测试全过
 
 ---
+### M49: 婚姻/关系（Relationship）（2026-08-03 完成）
+- [x] **服务端**：gate handle_marriage_request / handle_divorce_request 改 7-bit dotnet 解析（原 u32 长度与 C#/SharedRust 不一致）；离婚确认后前配偶同步 LoverUpdate(false)（原只更新确认方）
+- [x] **客户端**：关系对话框（婚姻状态 + 求婚输入 + 离婚按钮 + 邀请弹窗 Yes/No）；MarriageRequest/LoverUpdate/DivorceRequest 解析；MarriageRequestWire/DivorceRequestWire [dotnet] 手动构造（SharedRust 为空包）；MarriageReply/DivorceReply 复用 SharedRust
+- [x] 验证：真实 ServerRust 双客户端 E2E——求婚 → `✅ 结婚成功`（双方 LoverUpdate=true）→ 离婚请求 → 确认 → `✅ 离婚成功`（双方 LoverUpdate=false）；客户端 34 / 服务端 139 测试全过
+
+---
 ## 四、执行顺序与依赖
 
 ```

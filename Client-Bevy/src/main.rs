@@ -277,6 +277,14 @@ fn main() {
     if std::env::args().any(|a| a == "--hero-test") {
         app.add_systems(Update, auto_hero_test);
     }
+    // --marriage-test: 婚姻链路（求婚 → 结婚 → 离婚，配合 --marriage-accept）
+    if std::env::args().any(|a| a == "--marriage-test") {
+        app.add_systems(Update, auto_marriage_test);
+    }
+    // --marriage-accept: 婚姻链路（接受求婚 → 离婚确认，配合 --marriage-test）
+    if std::env::args().any(|a| a == "--marriage-accept") {
+        app.add_systems(Update, auto_marriage_accept);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -3357,6 +3365,139 @@ fn auto_hero_test(
                 tracing::info!("[HEROTEST] ✅ 切回主角色成功");
             } else {
                 tracing::warn!("[HEROTEST] ⚠️ 当前 index={}", hero.hero_index);
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --marriage-test（求婚方）：求婚 → 等 LoverUpdate → 离婚
+#[allow(clippy::too_many_arguments)]
+fn auto_marriage_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    relationship: Res<client_bevy::game::dialogs::relationship::RelationshipState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 10.0 {
+                return;
+            }
+            net.send_packet(&client_bevy::network::MarriageRequestWire {
+                target_name: "bevy2char".to_string(),
+            });
+            tracing::info!("[MARRY] 向 bevy2char 求婚");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t >= 15.0 {
+                tracing::warn!("[MARRY] ❌ 未结婚（married={}）", relationship.married);
+                *stage = 9;
+                return;
+            }
+            if relationship.married {
+                tracing::info!("[MARRY] ✅ 结婚成功");
+                net.send_packet(&client_bevy::network::DivorceRequestWire {
+                    partner_name: "bevy2char".to_string(),
+                });
+                tracing::info!("[MARRY] 发起离婚");
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t >= 15.0 {
+                tracing::warn!("[MARRY] ❌ 未离婚（married={}）", relationship.married);
+                *stage = 9;
+                return;
+            }
+            if !relationship.married {
+                tracing::info!("[MARRY] ✅ 离婚成功");
+                *stage = 9;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// --marriage-accept（被求婚方）：接受求婚 → 等结婚 → 离婚确认
+#[allow(clippy::too_many_arguments)]
+fn auto_marriage_accept(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    relationship: Res<client_bevy::game::dialogs::relationship::RelationshipState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t >= 20.0 {
+                tracing::warn!("[MARRYACC] ❌ 未收到求婚");
+                *stage = 9;
+                return;
+            }
+            if relationship.invite.is_some() {
+                tracing::info!(
+                    "[MARRYACC] ✅ 收到求婚: {}",
+                    relationship.invite.clone().unwrap_or_default()
+                );
+                net.send_packet(&mir2_shared::packets::client::misc::MarriageReply {
+                    accept_invite: true,
+                });
+                tracing::info!("[MARRYACC] 接受求婚");
+                *stage = 1;
+                *t = 0.0;
+            }
+        }
+        1 => {
+            if *t >= 15.0 {
+                tracing::warn!("[MARRYACC] ❌ 未结婚");
+                *stage = 9;
+                return;
+            }
+            if relationship.married {
+                tracing::info!("[MARRYACC] ✅ 已婚");
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            // 等待对方离婚请求并确认
+            if relationship.message.contains("离婚请求") {
+                tracing::info!("[MARRYACC] ✅ 收到离婚请求，确认");
+                net.send_packet(&mir2_shared::packets::client::misc::DivorceReply {
+                    accept_invite: true,
+                });
+                *stage = 3;
+                *t = 0.0;
+            }
+            if *t >= 20.0 {
+                tracing::warn!("[MARRYACC] ❌ 未收到离婚请求");
+                *stage = 9;
+            }
+        }
+        3 => {
+            if *t < 5.0 {
+                return;
+            }
+            if !relationship.married {
+                tracing::info!("[MARRYACC] ✅ 离婚完成");
             }
             *stage = 9;
         }
