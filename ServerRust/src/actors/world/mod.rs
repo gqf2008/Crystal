@@ -3996,6 +3996,7 @@ fn build_object_monster_packet(monster: &MonsterSpawn, object_id: u32, name: &st
     body.extend_from_slice(&monster.y.to_le_bytes());   // location_y
     body.extend_from_slice(&monster.image.to_le_bytes()); // image (Monster enum)
     body.push(monster.direction);                       // direction
+    body.push(0u8);                                     // effect（C# ObjectMonster.Effect，缺失会导致客户端解析错位）
     body.push(0u8);                                     // ai=None
     body.push(1u8);                                     // light
     body.push(0u8);                                     // dead=false
