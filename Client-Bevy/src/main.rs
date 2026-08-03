@@ -237,6 +237,10 @@ fn main() {
     if std::env::args().any(|a| a == "--fishing-test") {
         app.add_systems(Update, auto_fishing_test);
     }
+    // --refine-test: 精炼链路（存入 → 开始 → 等待 → 查看 → 取回）
+    if std::env::args().any(|a| a == "--refine-test") {
+        app.add_systems(Update, auto_refine_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -2587,6 +2591,135 @@ fn auto_fishing_test(
                     *stage = 9;
                 }
             }
+        }
+        _ => {}
+    }
+}
+
+/// --refine-test：精炼全流程（存入 → 开始 60 秒 → 查看 → 取回）
+#[allow(clippy::too_many_arguments)]
+fn auto_refine_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    chat: Res<client_bevy::game::chat::ChatState>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut uid: Local<Option<u64>>,
+    mut item_index: Local<Option<i32>>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    // 聊天辅助：最近 60 条里找子串
+    fn chat_has(chat: &client_bevy::game::chat::ChatState, needle: &str) -> bool {
+        chat.lines.iter().rev().take(60).any(|(t, _)| t.contains(needle))
+    }
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Refine) {
+                mgr.toggle(client_bevy::game::dialogs::DialogKind::Refine);
+            }
+            let first = hud
+                .inventory
+                .items
+                .iter()
+                .enumerate()
+                .find_map(|(i, s)| s.as_ref().map(|it| (i, it)));
+            match first {
+                Some((_i, item)) => {
+                    *uid = Some(item.unique_id);
+                    *item_index = Some(item.item_index);
+                    net.send_packet(&client_bevy::network::RefineDepositWire {
+                        unique_id: item.unique_id,
+                    });
+                    tracing::info!(
+                        "[REFINETEST] 存入精炼物品 uid={} #{}",
+                        item.unique_id,
+                        item.item_index
+                    );
+                    *stage = 1;
+                    *t = 0.0;
+                }
+                None => {
+                    tracing::warn!("[REFINETEST] ❌ 背包为空");
+                    *stage = 9;
+                }
+            }
+        }
+        1 => {
+            if *t >= 6.0 {
+                tracing::warn!("[REFINETEST] ❌ 未收到存入确认");
+                *stage = 9;
+                return;
+            }
+            if chat_has(&chat, "精炼物品已存入") {
+                tracing::info!("[REFINETEST] ✅ 存入成功");
+                net.send_packet(&client_bevy::network::RefineItemWire {
+                    item_id: item_index.unwrap_or(0) as u32,
+                    materials: 1,
+                });
+                tracing::info!("[REFINETEST] 开始精炼");
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t >= 6.0 {
+                tracing::warn!("[REFINETEST] ❌ 未收到精炼开始确认");
+                *stage = 9;
+                return;
+            }
+            if chat_has(&chat, "精炼已开始") {
+                tracing::info!("[REFINETEST] ✅ 精炼已开始（等待 65 秒）");
+                *stage = 3;
+                *t = 0.0;
+            }
+        }
+        3 => {
+            if *t < 65.0 {
+                return;
+            }
+            net.send_packet(&client_bevy::network::RefineCheckWire {
+                unique_id: uid.unwrap_or(0),
+            });
+            tracing::info!("[REFINETEST] 查看精炼结果");
+            *stage = 4;
+            *t = 0.0;
+        }
+        4 => {
+            if *t >= 8.0 {
+                tracing::warn!("[REFINETEST] ❌ 未收到精炼结果");
+                *stage = 9;
+                return;
+            }
+            if chat_has(&chat, "精炼成功") || chat_has(&chat, "精炼失败") || chat_has(&chat, "已完成") {
+                tracing::info!("[REFINETEST] ✅ 精炼结果已返回");
+                net.send_packet(&client_bevy::network::RefineRetrieveWire {
+                    unique_id: uid.unwrap_or(0),
+                });
+                tracing::info!("[REFINETEST] 取回精炼物品");
+                *stage = 5;
+                *t = 0.0;
+            }
+        }
+        5 => {
+            if *t < 5.0 {
+                return;
+            }
+            if chat_has(&chat, "精炼物品已取回") {
+                tracing::info!("[REFINETEST] ✅ 取回成功，精炼全流程完成");
+            } else {
+                tracing::warn!("[REFINETEST] ⚠️ 取回未确认（可能已自动完成）");
+            }
+            *stage = 9;
         }
         _ => {}
     }

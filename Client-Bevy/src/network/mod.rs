@@ -26,6 +26,7 @@ use crate::game::dialogs::market::{MarketItem, MarketState};
 use crate::game::dialogs::game_shop::{GameShopState, ShopItem as UiShopItem};
 use crate::game::dialogs::guild_territory::{GuildTerritoryState, TerritoryRow};
 use crate::game::dialogs::fishing::FishingState;
+use crate::game::dialogs::refine::RefineState;
 use crate::game::effects::{EffectsState, PendingEffect};
 use crate::game::player_control::ControlState;
 use crate::game::dialogs::inventory::InvItem;
@@ -618,6 +619,118 @@ impl Packet for FishingChangeAutocastWire {
     }
 }
 
+/// 精炼客户端包（M40：gate 实际 wire 与 SharedRust 结构不一致，手动构造）
+#[derive(Debug, Clone, Copy)]
+pub struct RefineDepositWire {
+    pub unique_id: u64,
+}
+
+impl Packet for RefineDepositWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::DepositRefineItem as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            unique_id: reader.read_u64::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RefineRetrieveWire {
+    pub unique_id: u64,
+}
+
+impl Packet for RefineRetrieveWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::RetrieveRefineItem as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            unique_id: reader.read_u64::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RefineItemWire {
+    pub item_id: u32,
+    pub materials: u32,
+}
+
+impl Packet for RefineItemWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::RefineItem as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            item_id: reader.read_u32::<LittleEndian>()?,
+            materials: reader.read_u32::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u32::<LittleEndian>(self.item_id)?;
+        writer.write_u32::<LittleEndian>(self.materials)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RefineCheckWire {
+    pub unique_id: u64,
+}
+
+impl Packet for RefineCheckWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::CheckRefine as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            unique_id: reader.read_u64::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        Ok(())
+    }
+}
+
 /// 待生成的网络对象（MapChanged 后由 Game 状态消费）
 #[derive(Debug, Clone)]
 pub enum NetObject {
@@ -730,6 +843,7 @@ struct NetworkPanels<'w> {
     effects: ResMut<'w, EffectsState>,
     control: ResMut<'w, ControlState>,
     fishing: ResMut<'w, FishingState>,
+    refine: ResMut<'w, RefineState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -781,6 +895,7 @@ fn network_system(
                         &mut *panels.effects,
                         &mut *panels.control,
                         &mut *panels.fishing,
+                        &mut *panels.refine,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -836,6 +951,7 @@ fn network_system(
                         &mut *panels.effects,
                         &mut *panels.control,
                         &mut *panels.fishing,
+                        &mut *panels.refine,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -981,6 +1097,7 @@ fn handle_packet(
     effects: &mut EffectsState,
     control: &mut ControlState,
     fishing: &mut FishingState,
+    refine: &mut RefineState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],

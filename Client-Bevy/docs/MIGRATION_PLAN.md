@@ -348,6 +348,13 @@
 - [x] 验证：真实 ServerRust E2E——装备 BlueFishingRod（武器栏）→ `✅ 抛竿成功（等待中）` → `✅ 收获消息: 钓到了宝箱！获得 24 金币`；客户端 40 / 服务端 139 测试全过
 
 ---
+### M40: 精炼（Refine）（2026-08-03 完成）
+- [x] **客户端**：精炼对话框（存入选中背包物品 / 取回 / 开始精炼 / 查看状态 / 取消）；结果通过系统聊天消息显示（M39 chat_type 修复后可见）
+- [x] 网络：RefineDepositWire/RefineRetrieveWire [uid u64]、RefineItemWire [item_id u32][materials u32]、RefineCheckWire [uid u64] 手动构造（gate wire 与 SharedRust 不一致）；RefineCancel 复用 SharedRust（空包）
+- [x] 服务端：无改动（awakening.rs 精炼流程已完整：60 秒 / 80% 成功率）
+- [x] 验证：真实 ServerRust E2E——`✅ 存入成功` → `✅ 精炼已开始`（65 秒）→ `✅ 精炼结果已返回` → `✅ 取回成功，精炼全流程完成`；客户端 34 / 服务端 139 测试全过
+
+---
 ## 四、执行顺序与依赖
 
 ```
