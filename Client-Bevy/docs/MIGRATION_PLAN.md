@@ -523,6 +523,14 @@ pcs=43（此前 43→86→129→172 递增）；服务端 139 测试全过
 - [x] 翅膀特效层：CHumEffect（对齐 C# DrawWings：WingLibrary.DrawBlend(DrawWingFrame)），wing_effect 1-99 时挂载（服务端暂未下发 wing_effect，客户端已就绪）
 - [x] 验证：真实 ServerRust E2E——临时将 BlueFishingRod effect=1 → 登录 → ⚔️ 武器特效层: type=1（CWeaponEffect/01.Lib 渲染）；测试数据已还原；客户端 34 测试全过
 - [x] 注：M11 剩余性能基线（精灵 Atlas）为可选优化项
+---
+
+### M63: Release 构建 + 最终验收（2026-08-03 完成）
+- [x] cargo build --release 成功（14m51s，含 M51-M62 全部改动）
+- [x] Release 二进制真实 ServerRust E2E：登录 → 坐骑骑乘/下马全链路通过（优化构建无回归）
+- [x] 客户端 34 / 服务端 139 测试全过；迁移计划 M7-M12 全部完成
+- [x] 仅剩：精灵 Atlas 性能优化（可选，后续）
+
 
 
 
