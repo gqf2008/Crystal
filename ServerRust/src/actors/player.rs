@@ -353,6 +353,35 @@ pub struct PlayerActor {
     map_data: Option<MapData>,
 }
 
+
+/// M44：Buff 类型 → 客户端 tag（与 Client-Bevy buff.rs 名称表对应）
+fn buff_tag(t: &crate::combat::buff::BuffType) -> u8 {
+    use crate::combat::buff::BuffType;
+    match t {
+        BuffType::HpRegen { .. } => 0,
+        BuffType::MpRegen { .. } => 1,
+        BuffType::AttackBoost { .. } => 2,
+        BuffType::DefenseBoost { .. } => 3,
+        BuffType::AcDefenseBoost { .. } => 4,
+        BuffType::MacDefenseBoost { .. } => 5,
+        BuffType::DamageReduction { .. } => 6,
+        BuffType::Poison { .. } => 7,
+        BuffType::Silence => 8,
+        BuffType::Stun => 9,
+        BuffType::Invisibility => 10,
+        BuffType::AttackSpeedBoost { .. } => 11,
+        BuffType::MoveSpeedBoost { .. } => 12,
+        BuffType::AgilityBoost { .. } => 13,
+        BuffType::CriticalRateBoost { .. } => 14,
+        BuffType::MpRegenBoost { .. } => 15,
+        BuffType::MaxMpBoost { .. } => 16,
+        BuffType::Reflect { .. } => 17,
+        BuffType::Taunt => 18,
+        BuffType::Slow { .. } => 19,
+        BuffType::Frozen => 20,
+    }
+}
+
 impl PlayerActor {
     pub fn new(
         object_id: u32,
@@ -513,6 +542,7 @@ impl PlayerActor {
         let tag = std::mem::discriminant(&buff_type);
         self.state.buffs.iter().any(|b| std::mem::discriminant(&b.buff_type) == tag)
     }
+
 
     /// 发送 UserLocation 给玩家
     fn send_user_location(&self) {
@@ -1075,9 +1105,15 @@ impl Message<ApplyBuff> for PlayerActor {
         msg: ApplyBuff,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        crate::combat::buff::apply_buff(&mut self.state.buffs,
-            msg.buff,
-        );
+        crate::combat::buff::apply_buff(&mut self.state.buffs, msg.buff.clone());
+        // M44：推送 AddBuff 给客户端（简化 wire：[tag u8][remaining_ticks u32]）
+        let mut body = Vec::new();
+        body.push(buff_tag(&msg.buff.buff_type));
+        body.extend_from_slice(&msg.buff.remaining_ticks.to_le_bytes());
+        let _ = self.gate_ref.tell(SendToClient {
+            session_id: self.state.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::AddBuff as i16, &body),
+        }).try_send();
     }
 }
 
@@ -1154,6 +1190,13 @@ impl Message<RemoveBuff> for PlayerActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         crate::combat::buff::remove_buff_by_type(&mut self.state.buffs, &msg.buff_type);
+        // M44：推送 RemoveBuff（[tag u8]）
+        let mut body = Vec::new();
+        body.push(buff_tag(&msg.buff_type));
+        let _ = self.gate_ref.tell(SendToClient {
+            session_id: self.state.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveBuff as i16, &body),
+        }).try_send();
     }
 }
 
