@@ -376,6 +376,13 @@
 - [x] 验证：真实 ServerRust E2E——接受任务 1 → `📜 ChangeQuest: id=1` → `✅ 任务已显示: Assistant's Request` → 放弃 → `✅ 任务已放弃（列表清空）`；客户端 34 / 服务端 139 测试全过
 
 ---
+### M44: 状态/Buff（2026-08-03 完成）
+- [x] **服务端**：PlayerActor ApplyBuff/RemoveBuff 后推送 AddBuff/RemoveBuff（简化 wire：[tag u8][remaining_ticks u32] / [tag u8]；服务端此前无任何 buff 推送，无兼容负担）；buff_tag 映射（HpRegen..Frozen → 0..20）
+- [x] **客户端**：状态对话框（8 行 buff 列表：名称 + 剩余 tick + 状态行）；AddBuff/RemoveBuff 解析；tag→名称表
+- [x] 验证：真实 ServerRust E2E——DB 学 C# 编号 48（Mirroring，SharedRust 51）→ 施放 → `✨ AddBuff: tag=17 ticks=300` → `✅ 获得状态: 反伤（剩余 300 tick）`；客户端 34 / 服务端 139 测试全过
+- [x] 注：player_magics 表存 C# 编号，登录 NewMagic 发 SharedRust(+3)；服务端施法校验用 spell_cs=SharedRust-3
+
+---
 ## 四、执行顺序与依赖
 
 ```

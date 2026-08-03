@@ -30,6 +30,7 @@ use crate::game::dialogs::refine::RefineState;
 use crate::game::dialogs::craft::CraftState;
 use crate::game::dialogs::item_rental::ItemRentalState;
 use crate::game::dialogs::quest_log::{QuestEntry, QuestLogState};
+use crate::game::dialogs::buff::{BuffEntry, BuffState};
 use crate::game::effects::{EffectsState, PendingEffect};
 use crate::game::player_control::ControlState;
 use crate::game::dialogs::inventory::InvItem;
@@ -961,6 +962,7 @@ struct NetworkPanels<'w> {
     craft: ResMut<'w, CraftState>,
     rental: ResMut<'w, ItemRentalState>,
     quest_log: ResMut<'w, QuestLogState>,
+    buff: ResMut<'w, BuffState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -1016,6 +1018,7 @@ fn network_system(
                         &mut *panels.craft,
                         &mut *panels.rental,
                         &mut *panels.quest_log,
+                        &mut *panels.buff,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1075,6 +1078,7 @@ fn network_system(
                         &mut *panels.craft,
                         &mut *panels.rental,
                         &mut *panels.quest_log,
+                        &mut *panels.buff,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1224,6 +1228,7 @@ fn handle_packet(
     craft: &mut CraftState,
     rental: &mut ItemRentalState,
     quest_log: &mut QuestLogState,
+    buff: &mut BuffState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -2313,6 +2318,37 @@ fn handle_packet(
                 quest_log.quests.retain(|q| q.id != id);
                 quest_log.message = format!("任务 {} 完成！", id);
                 tracing::info!("📜 CompleteQuest: {}", id);
+            }
+        }
+        // ---- M44: 状态/Buff ----
+        x if x == ServerPacketIds::AddBuff as i16 => {
+            // [tag u8][remaining_ticks u32]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 5 {
+                let tag = body[0];
+                let ticks = u32::from_le_bytes(body[1..5].try_into().unwrap_or([0; 4]));
+                if let Some(e) = buff.buffs.iter_mut().find(|b| b.tag == tag) {
+                    e.remaining_ticks = ticks;
+                } else {
+                    buff.buffs.push(BuffEntry { tag, remaining_ticks: ticks });
+                }
+                buff.message = format!(
+                    "获得状态: {}",
+                    crate::game::dialogs::buff::buff_name(tag)
+                );
+                tracing::info!("✨ AddBuff: tag={} ticks={}", tag, ticks);
+            }
+        }
+        x if x == ServerPacketIds::RemoveBuff as i16 => {
+            // [tag u8]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if let Some(tag) = body.first().copied() {
+                buff.buffs.retain(|b| b.tag != tag);
+                buff.message = format!(
+                    "状态消失: {}",
+                    crate::game::dialogs::buff::buff_name(tag)
+                );
+                tracing::info!("✨ RemoveBuff: tag={}", tag);
             }
         }
         // ---- M39: 钓鱼 ----

@@ -257,6 +257,10 @@ fn main() {
     if std::env::args().any(|a| a == "--quest-test") {
         app.add_systems(Update, auto_quest_test);
     }
+    // --buff-test: 状态/Buff 链路（施放 Fury → AddBuff 显示）
+    if std::env::args().any(|a| a == "--buff-test") {
+        app.add_systems(Update, auto_buff_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -3047,6 +3051,72 @@ fn auto_quest_test(
                     ids
                 );
             }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --buff-test：打开状态对话框 → 施放 Fury（攻击提升）→ 等 AddBuff
+#[allow(clippy::too_many_arguments)]
+fn auto_buff_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    buff: Res<client_bevy::game::dialogs::buff::BuffState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    tracing::debug!("[BUFFTEST] 驱动运行中 stage={} t={:.1}", *stage, *t);
+    match *stage {
+        0 => {
+            if *t < 4.0 {
+                return;
+            }
+            tracing::info!("[BUFFTEST] 打开状态对话框");
+            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Buff) {
+                mgr.toggle(client_bevy::game::dialogs::DialogKind::Buff);
+            }
+            net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                spell: mir2_shared::enums::Spell::Mirroring,
+                direction: mir2_shared::enums::MirDirection::Down,
+                target_id: 0,
+                location: mir2_shared::Point { x: 0, y: 0 },
+            });
+            tracing::info!("[BUFFTEST] 施放 Mirroring");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t >= 8.0 {
+                tracing::warn!("[BUFFTEST] ❌ 未收到 AddBuff（buff={}）", buff.buffs.len());
+                *stage = 9;
+                return;
+            }
+            if let Some(b) = buff.buffs.first() {
+                tracing::info!(
+                    "[BUFFTEST] ✅ 获得状态: {}（剩余 {} tick）",
+                    client_bevy::game::dialogs::buff::buff_name(b.tag),
+                    b.remaining_ticks
+                );
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t < 4.0 {
+                return;
+            }
+            tracing::info!(
+                "[BUFFTEST] ✅ 完成（当前 {} 个状态）",
+                buff.buffs.len()
+            );
             *stage = 9;
         }
         _ => {}
