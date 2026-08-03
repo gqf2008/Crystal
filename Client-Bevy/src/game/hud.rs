@@ -102,6 +102,8 @@ fn hud_button_system(mut mgr: ResMut<DialogManager>, buttons: Query<(&UiButton, 
 
 /// 动态部件标记（每帧按 HudState 更新）
 #[derive(Component)]
+struct OrbBase(f32);
+#[derive(Component)]
 struct HpHpFill;
 #[derive(Component)]
 struct MpMpFill;
@@ -194,6 +196,7 @@ fn spawn_hud(
         // HP 球（左半）
         commands.spawn((
             UiEntity,
+            OrbBase(-orb_y),
             HpHpFill,
             Sprite {
                 image: h.clone(),
@@ -208,6 +211,7 @@ fn spawn_hud(
         // MP 球（右半）
         commands.spawn((
             UiEntity,
+            OrbBase(-orb_y),
             MpMpFill,
             Sprite {
                 image: h,
@@ -431,6 +435,7 @@ fn hud_update_system(
     mut fills: Query<(
         &mut Sprite,
         &mut Transform,
+        Option<&OrbBase>,
         Option<&HpHpFill>,
         Option<&MpMpFill>,
         Option<&ExpFill>,
@@ -449,17 +454,22 @@ fn hud_update_system(
     let mp_pct = (hud.mp as f32 / hud.max_mp.max(1) as f32).clamp(0.0, 1.0);
     let exp_pct = (hud.exp as f32 / hud.max_exp.max(1) as f32).clamp(0.0, 1.0);
 
-    for (mut sprite, mut tf, hp, mp, exp) in &mut fills {
+    for (mut sprite, mut tf, orb_base, hp, mp, exp) in &mut fills {
         if hp.is_some() {
             let h = ORB_HEIGHT * hp_pct;
             sprite.rect = Some(Rect::new(0.0, ORB_HEIGHT - h, 50.0, ORB_HEIGHT));
             sprite.custom_size = Some(Vec2::new(50.0, h));
-            tf.translation.y = -(ORB_TOP + (ORB_HEIGHT - h));
+            // 底部对齐：基准 Y（主对话框内血球顶）向下偏移 (ORB_HEIGHT - h)
+            if let Some(base) = orb_base {
+                tf.translation.y = base.0 - (ORB_HEIGHT - h);
+            }
         } else if mp.is_some() {
             let h = ORB_HEIGHT * mp_pct;
             sprite.rect = Some(Rect::new(51.0, ORB_HEIGHT - h, 101.0, ORB_HEIGHT));
             sprite.custom_size = Some(Vec2::new(50.0, h));
-            tf.translation.y = -(ORB_TOP + (ORB_HEIGHT - h));
+            if let Some(base) = orb_base {
+                tf.translation.y = base.0 - (ORB_HEIGHT - h);
+            }
         } else if exp.is_some() {
             let (tw, th) = match sprite.rect {
                 Some(r) => (r.max.x - r.min.x, r.max.y - r.min.y),
