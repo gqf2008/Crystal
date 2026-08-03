@@ -27,6 +27,7 @@ use crate::game::dialogs::game_shop::{GameShopState, ShopItem as UiShopItem};
 use crate::game::dialogs::guild_territory::{GuildTerritoryState, TerritoryRow};
 use crate::game::dialogs::fishing::FishingState;
 use crate::game::dialogs::refine::RefineState;
+use crate::game::dialogs::craft::CraftState;
 use crate::game::effects::{EffectsState, PendingEffect};
 use crate::game::player_control::ControlState;
 use crate::game::dialogs::inventory::InvItem;
@@ -647,6 +648,37 @@ impl Packet for RefineDepositWire {
     }
 }
 
+/// 合成请求（M41：gate 解析 [recipe_id u32][materials_count u32]）
+#[derive(Debug, Clone, Copy)]
+pub struct CraftItemWire {
+    pub recipe_id: u32,
+    pub materials: u32,
+}
+
+impl Packet for CraftItemWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::CraftItem as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        Ok(Self {
+            recipe_id: reader.read_u32::<LittleEndian>()?,
+            materials: reader.read_u32::<LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u32::<LittleEndian>(self.recipe_id)?;
+        writer.write_u32::<LittleEndian>(self.materials)?;
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RefineRetrieveWire {
     pub unique_id: u64,
@@ -844,6 +876,7 @@ struct NetworkPanels<'w> {
     control: ResMut<'w, ControlState>,
     fishing: ResMut<'w, FishingState>,
     refine: ResMut<'w, RefineState>,
+    craft: ResMut<'w, CraftState>,
     mgr: ResMut<'w, crate::game::dialogs::DialogManager>,
 }
 
@@ -896,6 +929,7 @@ fn network_system(
                         &mut *panels.control,
                         &mut *panels.fishing,
                         &mut *panels.refine,
+                        &mut *panels.craft,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -952,6 +986,7 @@ fn network_system(
                         &mut *panels.control,
                         &mut *panels.fishing,
                         &mut *panels.refine,
+                        &mut *panels.craft,
                         &mut *panels.mgr,
                         &mut next,
                         &payload,
@@ -1098,6 +1133,7 @@ fn handle_packet(
     control: &mut ControlState,
     fishing: &mut FishingState,
     refine: &mut RefineState,
+    craft: &mut CraftState,
     mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
     payload: &[u8],
@@ -2037,6 +2073,23 @@ fn handle_packet(
                 Err(e) => {
                     tracing::warn!("⚠️ GuildRequestWar 解析失败: {} (len={})", e, payload.len())
                 }
+            }
+        }
+        // ---- M41: 合成 ----
+        x if x == ServerPacketIds::CraftItem as i16 => {
+            // 服务端实际 wire：[recipe_id u32][count u16][success u8]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 7 {
+                let recipe_id = u32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
+                let count = u16::from_le_bytes(body[4..6].try_into().unwrap_or([0; 2]));
+                let success = body[6] != 0;
+                craft.last_result = Some((recipe_id, count, success));
+                craft.message = if success {
+                    format!("合成成功！配方 {} ×{}", recipe_id, count)
+                } else {
+                    format!("合成失败（配方 {}）", recipe_id)
+                };
+                tracing::info!("🔧 CraftItem: recipe={} count={} success={}", recipe_id, count, success);
             }
         }
         // ---- M39: 钓鱼 ----

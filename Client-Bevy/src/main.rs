@@ -241,6 +241,10 @@ fn main() {
     if std::env::args().any(|a| a == "--refine-test") {
         app.add_systems(Update, auto_refine_test);
     }
+    // --craft-test: 合成链路（配方1：木材x3+铁矿石x2 → 铁剑）
+    if std::env::args().any(|a| a == "--craft-test") {
+        app.add_systems(Update, auto_craft_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -2720,6 +2724,68 @@ fn auto_refine_test(
                 tracing::warn!("[REFINETEST] ⚠️ 取回未确认（可能已自动完成）");
             }
             *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --craft-test：打开合成 → 配方1 → 合成 → 等 CraftItem 响应/聊天
+#[allow(clippy::too_many_arguments)]
+fn auto_craft_test(
+    net: ResMut<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    craft: Res<client_bevy::game::dialogs::craft::CraftState>,
+    chat: Res<client_bevy::game::chat::ChatState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    fn chat_has(chat: &client_bevy::game::chat::ChatState, needle: &str) -> bool {
+        chat.lines.iter().rev().take(60).any(|(t, _)| t.contains(needle))
+    }
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Craft) {
+                mgr.toggle(client_bevy::game::dialogs::DialogKind::Craft);
+            }
+            net.send_packet(&client_bevy::network::CraftItemWire {
+                recipe_id: 1,
+                materials: 0,
+            });
+            tracing::info!("[CRAFTTEST] 合成配方 1（木材x3+铁矿石x2）");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t >= 8.0 {
+                tracing::warn!(
+                    "[CRAFTTEST] ❌ 未收到合成结果: message={}",
+                    craft.message
+                );
+                *stage = 9;
+                return;
+            }
+            let ok = craft.last_result.is_some()
+                || chat_has(&chat, "合成成功")
+                || chat_has(&chat, "合成失败")
+                || chat_has(&chat, "材料不足")
+                || chat_has(&chat, "未知配方");
+            if ok {
+                tracing::info!(
+                    "[CRAFTTEST] ✅ 合成结果: {}",
+                    craft.message
+                );
+                *stage = 9;
+            }
         }
         _ => {}
     }

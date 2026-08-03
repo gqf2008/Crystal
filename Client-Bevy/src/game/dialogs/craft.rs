@@ -1,21 +1,54 @@
 // ============================================================================
-// 锻造对话框（M9 第 4 批）
-// 布局参考：macroquad craft_dialog.rs（背景 Title[468]）
+// 合成对话框（M41）
+// 参考：C# NPC 合成页面 + ServerRust get_craft_recipes / CraftItemRequest
+// 网络（ServerRust gate 实际 wire）：
+//   C: CraftItem[recipe_id u32][materials_count u32]
+//   S: CraftItem[recipe_id u32][count u16][success u8] + 系统聊天消息
 // ============================================================================
 
 use bevy::prelude::*;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
+use crate::network::NetworkContext;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
 };
 
+/// 配方（服务端 get_craft_recipes 硬编码 3 条）
+#[derive(Debug, Clone, Copy)]
+pub struct RecipeInfo {
+    pub recipe_id: u32,
+    pub product_index: i32,
+    pub ingredients: &'static str,
+}
+
+pub const RECIPES: [RecipeInfo; 3] = [
+    RecipeInfo {
+        recipe_id: 1,
+        product_index: 100,
+        ingredients: "木材x3 + 铁矿石x2",
+    },
+    RecipeInfo {
+        recipe_id: 2,
+        product_index: 101,
+        ingredients: "草药x2 + 清水x1",
+    },
+    RecipeInfo {
+        recipe_id: 3,
+        product_index: 102,
+        ingredients: "铁矿石x5",
+    },
+];
+
+/// 合成状态（CraftItem 响应写入）
 #[derive(Resource, Default)]
 pub struct CraftState {
-    pub lines: Vec<String>,
+    pub selected: Option<usize>,
+    pub message: String,
+    pub last_result: Option<(u32, u16, bool)>,
 }
 
 #[derive(Component)]
@@ -23,6 +56,9 @@ pub struct CraftWidget;
 
 #[derive(Component)]
 pub struct CraftClose;
+
+#[derive(Component)]
+pub struct CraftBtn;
 
 #[derive(Component)]
 pub struct CraftLine(usize);
@@ -63,8 +99,8 @@ fn spawn_craft(
     }
     let font = ui_font.0.clone();
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 468) {
-        let e = spawn_ui_sprite(&mut commands, h, 280.0, 100.0, 6.0, 1.0);
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 170) {
+        let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
         commands.entity(e).insert((
             DialogRoot(DialogKind::Craft),
             CraftWidget,
@@ -74,7 +110,7 @@ fn spawn_craft(
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands, &mut libs, &mut images, &mut cache,
         LibraryName::Prguse2, 360, 361, 362,
-        280.0 + 320.0, 100.0 + 3.0, 7.0, 20.0, 20.0,
+        280.0 + 300.0, 83.0, 7.0, 20.0, 20.0,
     ) {
         commands.entity(e).insert((
             CraftClose,
@@ -82,10 +118,11 @@ fn spawn_craft(
             CraftWidget,
         ));
     }
-    for i in 0..8usize {
+    // 配方 3 行 + 状态 3 行
+    for i in 0..6usize {
         let e = spawn_ui_text(
             &mut commands, &font, "",
-            280.0 + 8.0, 100.0 + 60.0 + i as f32 * 20.0,
+            298.0, 120.0 + i as f32 * 22.0,
             12.0, Color::WHITE, 8.0,
         );
         commands.entity(e).insert((
@@ -94,12 +131,30 @@ fn spawn_craft(
             CraftWidget,
         ));
     }
+    // 合成按钮
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 206, 207, 208,
+        360.0, 260.0, 8.3, 76.0, 25.0,
+    ) {
+        commands.entity(e).insert((
+            CraftBtn,
+            DialogRoot(DialogKind::Craft),
+            CraftWidget,
+        ));
+    }
 }
 
+/// 显隐 + 渲染 + 选择 + 合成
+#[allow(clippy::too_many_arguments)]
 fn craft_ui_system(
     mut mgr: ResMut<DialogManager>,
-    state: Res<CraftState>,
+    mut state: ResMut<CraftState>,
+    net: Res<NetworkContext>,
     close: Query<&UiButton, With<CraftClose>>,
+    craft_btn: Query<&UiButton, With<CraftBtn>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
     mut widgets: Query<&mut Visibility, With<CraftWidget>>,
     mut lines: Query<(&mut Text2d, &CraftLine)>,
 ) {
@@ -116,6 +171,57 @@ fn craft_ui_system(
         }
     }
     for (mut text, line) in &mut lines {
-        text.0 = state.lines.get(line.0).cloned().unwrap_or_default();
+        text.0 = match line.0 {
+            i if i < 3 => {
+                let r = &RECIPES[i];
+                format!(
+                    "{}: 成品#{}（{}）成功率80%",
+                    r.recipe_id,
+                    r.product_index,
+                    r.ingredients
+                )
+            }
+            3 => format!(
+                "选中配方: {}",
+                state
+                    .selected
+                    .map(|i| format!("配方 {}", RECIPES[i].recipe_id))
+                    .unwrap_or_else(|| "无".to_string())
+            ),
+            4 => state.message.clone(),
+            5 => "点击配方行选中 → 点合成".to_string(),
+            _ => String::new(),
+        };
+    }
+    // 配方行点击选中
+    if mouse.just_pressed(MouseButton::Left) {
+        if let Ok(window) = windows.single() {
+            if let Some(cursor) = window.cursor_position() {
+                for i in 0..3usize {
+                    let y = 120.0 + i as f32 * 22.0;
+                    if cursor.x >= 298.0 && cursor.x <= 600.0 && cursor.y >= y && cursor.y <= y + 20.0 {
+                        state.selected = Some(i);
+                        tracing::info!("🔧 选中配方 {}", RECIPES[i].recipe_id);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    // 合成
+    for btn in &craft_btn {
+        if btn.clicked {
+            if let Some(i) = state.selected {
+                let r = &RECIPES[i];
+                net.send_packet(&crate::network::CraftItemWire {
+                    recipe_id: r.recipe_id,
+                    materials: 0,
+                });
+                state.message = format!("合成配方 {} 中…", r.recipe_id);
+                tracing::info!("🔧 合成配方 {}（成品#{}）", r.recipe_id, r.product_index);
+            } else {
+                state.message = "请先点击选中一个配方".to_string();
+            }
+        }
     }
 }

@@ -355,6 +355,14 @@
 - [x] 验证：真实 ServerRust E2E——`✅ 存入成功` → `✅ 精炼已开始`（65 秒）→ `✅ 精炼结果已返回` → `✅ 取回成功，精炼全流程完成`；客户端 34 / 服务端 139 测试全过
 
 ---
+### M41: 合成（Craft）（2026-08-03 完成）
+- [x] **客户端**：合成对话框（3 个配方列表 + 点击选中 + 合成按钮 + 结果状态）；CraftItem 响应解析（服务端 wire [recipe_id u32][count u16][success u8]，SharedRust 读 u64 不一致 → 手动解析）
+- [x] 网络：CraftItemWire [recipe_id u32][materials u32] 手动构造
+- [x] 服务端：无改动（get_craft_recipes 硬编码 3 配方 + CraftItemRequest 校验/扣料/成功率已完整）
+- [x] 验证：真实 ServerRust E2E——背包装入木材x3+铁矿石x2 → `✅ 合成结果: 合成成功！配方 1 ×1`（CraftItem success=true）；客户端 34 / 服务端 139 测试全过
+- [x] 注：DB 手工插物品时 `refined_value: 0` 会导致 UserItem 反序列化失败被静默跳过（改用 3 正常）
+
+---
 ## 四、执行顺序与依赖
 
 ```
