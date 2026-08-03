@@ -10,6 +10,7 @@ pub mod actor;
 pub mod event_bus;
 pub mod game;
 pub mod map_renderer;
+pub mod map_tile_anim;
 pub mod network;
 pub mod objects;
 pub mod resources;

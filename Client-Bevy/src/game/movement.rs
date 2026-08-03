@@ -41,6 +41,8 @@ pub struct LocalMove {
     pub step_timer_ms: f32,
     /// 是否跑步（中键 AutoRun / 双击）
     pub run: bool,
+    /// 当前路径段离开的节点（到达节点时更新；用于稳定方向，避免滑行中方向抖动）
+    pub last: Option<(i32, i32)>,
 }
 
 /// 一段插值移动（本地与远端通用）
@@ -85,6 +87,25 @@ pub fn direction_from_delta(dx: i32, dy: i32) -> Option<MirDirection> {
     })
 }
 
+/// 逐步转向（对齐 macroquad MovementSystem::step_towards_direction）：
+/// 每帧最多转 max_steps 步，选择最短旋转方向（顺时针/逆时针）
+fn step_towards_direction(current: u8, desired: u8, max_steps: i32) -> u8 {
+    let cur = current % 8;
+    let des = desired % 8;
+    let diff = (des as i32 - cur as i32).rem_euclid(8);
+    if diff == 0 {
+        return current;
+    }
+    let cw = diff;
+    let ccw = 8 - diff;
+    let steps = max_steps.clamp(1, 3);
+    if cw <= ccw {
+        ((cur as i32 + cw.min(steps)) % 8) as u8
+    } else {
+        ((cur as i32 - ccw.min(steps)).rem_euclid(8)) as u8
+    }
+}
+
 pub struct MovementPlugin;
 
 impl Plugin for MovementPlugin {
@@ -124,7 +145,7 @@ fn apply_self_position(
         let p = tile_to_world(tx, ty);
         tf.translation.x = p.x;
         tf.translation.y = p.y;
-        tf.translation.z = depth_z(p.y);
+        tf.translation.z = depth_z(-p.y);
         tracing::info!("📍 服务器位置校正 -> ({},{})", tx, ty);
     }
 }
@@ -187,26 +208,33 @@ fn apply_net_motions(
 fn advance_move_tweens(
     mut commands: Commands,
     time: Res<Time>,
-    mut actors: Query<(Entity, &mut MoveTween, &mut Transform, &mut ActorAnim)>,
+    mut actors: Query<
+        (Entity, &mut MoveTween, &mut Transform, &mut ActorAnim, Option<&LocalMove>),
+    >,
 ) {
-    for (e, mut tween, mut tf, mut anim) in &mut actors {
+    for (e, mut tween, mut tf, mut anim, lm) in &mut actors {
         tween.t += time.delta_secs();
         let k = (tween.t / tween.dur).clamp(0.0, 1.0);
         let pos = tween.from.lerp(tween.to, k);
         tf.translation.x = pos.x;
         tf.translation.y = pos.y;
         // z 深度排序跟随脚底 Y
-        tf.translation.z = depth_z(pos.y);
+        tf.translation.z = depth_z(-pos.y);
         if tween.t >= tween.dur {
             commands.entity(e).remove::<MoveTween>();
-            anim.action = mir2_shared::enums::MirAction::Standing;
-            anim.frame_index = 0;
+            // 路径还有下一步 → 保持走路/跑步动画（否则每格复位成站立 = 像瞬移/机器人）
+            let still_moving = lm.map(|lm| !lm.path.is_empty()).unwrap_or(false);
+            if !still_moving {
+                anim.action = mir2_shared::enums::MirAction::Standing;
+                anim.frame_index = 0;
+            }
         }
     }
 }
 
-/// 本地玩家沿路径步进：100ms/格（走），Run 一次 2 格
-// 注：编译器对 Mut<T> 元组解构的 unused_mut 判定与 E0596 自相矛盾，显式允许
+/// 本地玩家沿路径连续速度移动（对齐 macroquad MovementSystem）：
+/// - 走 100px/s、跑 150px/s（1.5 倍），每帧平滑位移 → 丝滑
+/// - 走到路径节点附近(5px)后对齐并推进下一个节点；跨格时发 Walk/Run 包
 #[allow(unused_mut)]
 fn advance_local_move(
     mut commands: Commands,
@@ -214,88 +242,72 @@ fn advance_local_move(
     net: Res<NetworkContext>,
     mut players: Query<(Entity, &mut LocalMove, &mut Transform, &mut ActorAnim), With<LocalPlayer>>,
 ) {
+    const WALK_SPEED: f32 = 130.0;
+    const RUN_SPEED: f32 = 200.0;
+    const ARRIVAL: f32 = 5.0;
+
     let Ok((e, mut lm, mut tf, mut anim)) = players.single_mut() else {
         return;
     };
+    let dt = time.delta_secs();
     if lm.path.is_empty() {
+        // 路径结束：恢复站立
+        if anim.action != mir2_shared::enums::MirAction::Standing {
+            anim.action = mir2_shared::enums::MirAction::Standing;
+            anim.frame_index = 0;
+        }
         return;
     }
-    lm.step_timer_ms += time.delta_secs() * 1000.0;
-    if lm.step_timer_ms < 100.0 {
-        return;
-    }
-    lm.step_timer_ms = 0.0;
 
-    // 当前瓦片
+    let target = *lm.path.front().unwrap();
+    let target_world = tile_to_world(target.0, target.1);
+    let dx = target_world.x - tf.translation.x;
+    let dy = target_world.y - tf.translation.y;
+    let dist = (dx * dx + dy * dy).sqrt();
+    let speed = if lm.run { RUN_SPEED } else { WALK_SPEED };
+    let step = speed * dt;
+
+    // 动画：走路/跑步 + 方向（每段方向固定，避免滑行中 world_to_tile 翻转导致抖动）
     let cur = world_to_tile(tf.translation.x, tf.translation.y);
-    let Some(next) = lm.path.pop_front() else {
-        return;
-    };
-
-    // Run：连走 2 格（若路径第二格存在且可走）
-    let (target, send_run) = if lm.run {
-        if let Some(&third) = lm.path.front() {
-            if let Some(dir2) = direction_from_delta(
-                (third.0 - cur.0).clamp(-1, 1),
-                (third.1 - cur.1).clamp(-1, 1),
-            ) {
-                let _ = dir2;
-                // 第二格与第三格方向一致才连跑
-                let d1 = direction_from_delta(next.0 - cur.0, next.1 - cur.1);
-                let d2 = direction_from_delta(third.0 - next.0, third.1 - next.1);
-                if d1 == d2 {
-                    lm.path.pop_front();
-                    (third, true)
-                } else {
-                    (next, false)
-                }
-            } else {
-                (next, false)
-            }
-        } else {
-            (next, false)
-        }
+    let desired = if let Some(last) = lm.last {
+        direction_from_delta(target.0 - last.0, target.1 - last.1)
     } else {
-        (next, false)
-    };
-
-    let dir = match direction_from_delta(target.0 - cur.0, target.1 - cur.1) {
-        Some(d) => d,
-        None => {
-            // 目标不可达/同格：跳过
-            return;
-        }
-    };
-
-    // 发送移动包（服务器步进语义）
-    if send_run {
-        net.send_packet(&mir2_shared::packets::client::movement::Run { direction: dir });
-    } else {
-        net.send_packet(&mir2_shared::packets::client::movement::Walk { direction: dir });
+        direction_from_delta(target.0 - cur.0, target.1 - cur.1)
     }
-
-    // 本地插值移动
-    let from = Vec2::new(tf.translation.x, tf.translation.y);
-    let to = tile_to_world(target.0, target.1);
-    commands.entity(e).insert(MoveTween {
-        from,
-        to,
-        t: 0.0,
-        dur: if send_run { 0.20 } else { 0.16 },
-        action: if send_run {
-            mir2_shared::enums::MirAction::Running
-        } else {
-            mir2_shared::enums::MirAction::Walking
-        },
-        dir: dir as u8,
-    });
-    anim.action = if send_run {
+    .unwrap_or(mir2_shared::enums::MirDirection::Up) as u8;
+    let turn_steps = (dt * 12.0).ceil() as i32;
+    anim.direction = step_towards_direction(anim.direction, desired, turn_steps);
+    anim.action = if lm.run {
         mir2_shared::enums::MirAction::Running
     } else {
         mir2_shared::enums::MirAction::Walking
     };
-    anim.direction = dir as u8;
-    anim.frame_index = 0;
+
+    if dist <= step || dist < ARRIVAL {
+        // 到达节点：对齐并推进（先发包用段方向，再更新 last）
+        let seg_dir = if let Some(last) = lm.last {
+            direction_from_delta(target.0 - last.0, target.1 - last.1)
+        } else {
+            direction_from_delta(target.0 - cur.0, target.1 - cur.1)
+        };
+        tf.translation.x = target_world.x;
+        tf.translation.y = target_world.y;
+        lm.path.pop_front();
+        lm.last = Some(target);
+        if let Some(d) = seg_dir {
+            if lm.run {
+                net.send_packet(&mir2_shared::packets::client::movement::Run { direction: d });
+            } else {
+                net.send_packet(&mir2_shared::packets::client::movement::Walk { direction: d });
+            }
+        }
+    } else {
+        // 平滑滑向目标
+        tf.translation.x += dx / dist * step;
+        tf.translation.y += dy / dist * step;
+    }
+    // z 深度跟随脚底
+    tf.translation.z = depth_z(-tf.translation.y);
 }
 
 

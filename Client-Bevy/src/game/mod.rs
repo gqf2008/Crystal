@@ -36,6 +36,8 @@ impl Plugin for GamePlugin {
             OnEnter(AppState::Game),
             (setup_game_ui_camera, open_minimap_default).chain(),
         );
+        // UI 实体标记渲染层 1（只被 UI 相机渲染）
+        app.add_systems(Update, crate::ui::sprite_ui::mark_ui_render_layers);
         app.add_plugins((
             hud::HudPlugin,
             chat::ChatPlugin,
@@ -72,6 +74,9 @@ fn setup_game_ui_camera(mut commands: Commands) {
             // [DEBUG] 先用默认清屏验证 UI 渲染
             ..default()
         },
+        // 关键：UI 相机只渲染 UI 层（layer 1），否则会把地图大块纹理
+        // 重新渲染到全屏，盖住地图相机（order 0）画的村庄和角色
+        bevy::camera::visibility::RenderLayers::layer(1),
     ));
 }
 

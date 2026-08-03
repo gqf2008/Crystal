@@ -745,7 +745,7 @@ fn spawn_player_with(
     weapon_effect: i16,
     wing_effect: u8,
 ) -> Entity {
-    let z = depth_z(y);
+    let z = depth_z(-y); // y 是 Bevy 负坐标
     let root = commands
         .spawn((
             LocalPlayer,
@@ -877,7 +877,7 @@ fn spawn_local_player_with(
     mount_type: i16,
     is_mounted: bool,
 ) -> Entity {
-    let z = depth_z(y);
+    let z = depth_z(-y); // y 是 Bevy 负坐标
     let root = commands
         .spawn((
             LocalPlayer,
@@ -921,7 +921,7 @@ fn spawn_remote_player_with(
     mount_type: i16,
     is_mounted: bool,
 ) -> Entity {
-    let z = depth_z(y);
+    let z = depth_z(-y); // y 是 Bevy 负坐标
     let root = commands
         .spawn((
             NetObjectId(object_id),
@@ -1061,7 +1061,7 @@ fn attach_player_layers(
 }
 
 fn spawn_monster(commands: &mut Commands, monster_type: u16, x: f32, y: f32, direction: u8) -> Entity {
-    let z = depth_z(y);
+    let z = depth_z(-y); // y 是 Bevy 负坐标
     let root = commands
         .spawn((
             ActorAppearance::Monster {
@@ -1109,7 +1109,7 @@ fn spawn_monster(commands: &mut Commands, monster_type: u16, x: f32, y: f32, dir
 }
 
 fn spawn_npc(commands: &mut Commands, npc_index: u16, x: f32, y: f32, direction: u8) -> Entity {
-    let z = depth_z(y);
+    let z = depth_z(-y); // y 是 Bevy 负坐标
     let root = commands
         .spawn((
             ActorAppearance::Npc { npc_index },

@@ -29,6 +29,9 @@ pub struct ControlState {
     pub attack_interval: f32,
     /// 待拾取的地面物品 object_id（寻路到达后自动 PickUp）
     pub pickup_target: Option<u32>,
+    /// 按住移动状态：目标格 + 模式（true=跑, false=走），用于持续追踪鼠标
+    pub hold_target: Option<(i32, i32)>,
+    pub hold_run: Option<bool>,
 }
 
 impl Default for ControlState {
@@ -39,6 +42,8 @@ impl Default for ControlState {
             last_attack: 0.0,
             attack_interval: 1.0,
             pickup_target: None,
+            hold_target: None,
+            hold_run: None,
         }
     }
 }
@@ -49,7 +54,7 @@ impl Plugin for PlayerControlPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (player_input_system, auto_attack_system, pickup_arrival_system)
+            (player_input_system, hold_move_system, auto_attack_system, pickup_arrival_system)
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -59,7 +64,11 @@ impl Plugin for PlayerControlPlugin {
 pub fn screen_to_world(screen: Vec2, cam_tf: &Transform, window: &Window) -> Vec2 {
     let half_w = window.physical_width() as f32 / 2.0;
     let half_h = window.physical_height() as f32 / 2.0;
-    Vec2::new(screen.x - half_w + cam_tf.translation.x, screen.y - half_h + cam_tf.translation.y)
+    // 屏幕 y 向下、世界 y 向上：点击下方 → 世界 y 减小（必须取反，否则方向相反）
+    Vec2::new(
+        screen.x - half_w + cam_tf.translation.x,
+        cam_tf.translation.y - (screen.y - half_h),
+    )
 }
 
 /// 主对话框底部区域（点击不响应移动）
@@ -132,6 +141,7 @@ fn player_input_system(
                     path: p.into(),
                     step_timer_ms: 0.0,
                     run: control.autorun,
+                    last: None,
                 });
                 tracing::info!("🚶 寻路 {} -> {}（{} 格）", from_tile.0, from_tile.1, len);
             }
@@ -199,6 +209,7 @@ fn player_input_system(
                                     path: p.into(),
                                     step_timer_ms: 0.0,
                                     run: control.autorun,
+                                    last: None,
                                 });
                                 control.attack_target = None;
                                 control.pickup_target = Some(item_id);
@@ -307,4 +318,102 @@ fn auto_attack_system(
     });
     crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, 10050);
     tracing::debug!("⚔️ Attack {}", target_id);
+}
+
+
+/// 按住鼠标持续移动（对齐原版 C# GameScene）：
+/// - 右键按住 = 跑、左键按住 = 走，方向持续跟随鼠标
+/// - 目标格变化或路径走完 → 自动重新寻路（避障，不停下）
+/// - 左键按住且鼠标下有 NPC/怪物/物品时不做移动（交互交给点击处理）
+fn hold_move_system(
+    mut commands: Commands,
+    mut control: ResMut<ControlState>,
+    game_data: Res<GameData>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    camera: Query<
+        &Transform,
+        (With<Camera2d>, Without<UiButton>, Without<crate::ui::sprite_ui::UiEntity>),
+    >,
+    mut players: Query<
+        (Entity, &Transform, &mut LocalMove, &mut ActorAnim),
+        (With<LocalPlayer>, With<NetObjectId>),
+    >,
+    actors: Query<(&Transform, &ActorAppearance), (Without<LocalPlayer>, Without<GroundItem>)>,
+    items: Query<&Transform, (With<GroundItem>, Without<LocalPlayer>)>,
+) {
+    let Some(map) = &game_data.map else { return };
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.physical_cursor_position() else { return };
+    let Ok(cam_tf) = camera.single() else { return };
+    let world = screen_to_world(cursor, cam_tf, window);
+    let target_tile = world_to_tile(world.x, world.y);
+
+    let run = if mouse.pressed(MouseButton::Right) {
+        Some(true)
+    } else if mouse.pressed(MouseButton::Left) {
+        // 左键按住：鼠标下有可交互对象时交给点击交互，不做移动
+        let near_actor = actors
+            .iter()
+            .any(|(tf, _)| Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length() < 45.0)
+            || items
+                .iter()
+                .any(|tf| Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length() < 40.0);
+        if near_actor {
+            None
+        } else {
+            Some(false)
+        }
+    } else {
+        None
+    };
+
+    match run {
+        Some(run) => {
+            let Ok((pe, ptf, mut lm, mut anim)) = players.single_mut() else { return };
+            let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
+            let need_repath = control.hold_target != Some(target_tile)
+                || control.hold_run != Some(run)
+                || lm.path.is_empty();
+            if need_repath {
+                control.hold_target = Some(target_tile);
+                control.hold_run = Some(run);
+                if from_tile == target_tile {
+                    return;
+                }
+                if let Some(p) = pathfinding::find_path(map, from_tile, target_tile) {
+                    if !p.is_empty() {
+                        let first = p[0];
+                        if let Some(d) =
+                            direction_from_delta(first.0 - from_tile.0, first.1 - from_tile.1)
+                        {
+                            anim.direction = d as u8;
+                        }
+                        anim.action = if run {
+                            mir2_shared::enums::MirAction::Running
+                        } else {
+                            mir2_shared::enums::MirAction::Walking
+                        };
+                        commands.entity(pe).insert(LocalMove {
+                            path: p.into(),
+                            step_timer_ms: 0.0,
+                            run,
+                            last: None,
+                        });
+                    }
+                }
+            }
+        }
+        None => {
+            control.hold_target = None;
+            control.hold_run = None;
+            // 松开鼠标 → 立即停下
+            if let Ok((_, _, mut lm, mut anim)) = players.single_mut() {
+                lm.path.clear();
+                lm.last = None;
+                anim.action = mir2_shared::enums::MirAction::Standing;
+                anim.frame_index = 0;
+            }
+        }
+    }
 }

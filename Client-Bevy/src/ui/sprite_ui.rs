@@ -30,6 +30,16 @@ pub struct UiImageCache {
 #[derive(Component)]
 pub struct UiEntity;
 
+/// 给所有 UI 实体加渲染层 1（只被 UI 相机渲染，避免 UI 相机重画地图）
+pub fn mark_ui_render_layers(
+    q: Query<Entity, Added<UiEntity>>,
+    mut commands: Commands,
+) {
+    for e in &q {
+        commands.entity(e).try_insert(bevy::camera::visibility::RenderLayers::layer(1));
+    }
+}
+
 /// UI 相机（世界坐标 = 屏幕逻辑像素 0..1024 x 0..768，y 向下）
 /// 带 UiEntity 标记，随场景退出清理，避免泄漏到游戏场景
 pub fn spawn_ui_camera(mut commands: Commands) {
@@ -48,6 +58,8 @@ pub fn spawn_ui_camera(mut commands: Commands) {
             order: 1,
             ..default()
         },
+        // 只渲染 UI 层，避免把地图实体也画一遍（见 game/mod.rs）
+        bevy::camera::visibility::RenderLayers::layer(1),
     ));
 }
 
