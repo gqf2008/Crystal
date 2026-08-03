@@ -463,6 +463,17 @@
 - [x] 网络解析：AwakeningNeedMaterials / AwakeningLockedItem / Awakening 三个服务端包
 - [x] 验证：真实 ServerRust E2E（--awake-test）——选择 WoodenSword → ✅ 材料需求: 8 种符文 x3 → 执行觉醒 → 金币 2000008→1998508 → ⚒️ 觉醒结果: 1 -> 觉醒成功 → ✅ 关闭；客户端 34 / 服务端 139 测试全过
 - [x] 注：M54 后剩余对话框：socket/dura_status/npc_drop/roll（需服务端支持）
+---
+
+### M55: 耐久面板 CharacterDuraPanel（2026-08-03 完成）
+- [x] 切换按钮 DuraStatusDialog：Prguse[2111/2112/2113]（打开时 2110）@ (984,124)
+- [x] 面板 Prguse[2105]（64x85）@ (963,200)，11 个装备部位按 C# 布局（武器/护甲/头盔/项链/手镯/戒指/靴子/项链坠/坐骑）
+- [x] 耐久三态索引完全对齐 C# UpdateCharacterDura（正常/警告/危险，Prguse 2122-2160；0 耐久隐藏）
+- [x] InvItem 新增 current_dura/max_dura 并解析 UserInformation/装备
+- [x] DialogManager 新增 open()（幂等）
+- [x] 验证：真实 ServerRust E2E（--dura-test）——打开 → 🔧 Weapon idx=2125 (10000/10000) 正常态 + 🔧 Armour idx=2151 (150/1000) 危险态 → ✅ 关闭；客户端 34 / 服务端 139 测试全过
+- [x] 注：M55 后剩余对话框：socket/npc_drop/roll（需服务端支持）
+
 
 
 

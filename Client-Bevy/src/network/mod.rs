@@ -1277,6 +1277,8 @@ fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
         count: item.count,
         item_type: item.info.as_ref().map(|i| i.item_type as u8).unwrap_or(0),
         shape: item.info.as_ref().map(|i| i.shape).unwrap_or(0),
+        current_dura: item.current_dura,
+        max_dura: item.max_dura,
     }
 }
 

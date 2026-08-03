@@ -305,6 +305,10 @@ fn main() {
     if std::env::args().any(|a| a == "--awake-test") {
         app.add_systems(Update, auto_awake_test);
     }
+    // --dura-test: 耐久面板验证（打开 → 装备耐久三态渲染 → 关闭）
+    if std::env::args().any(|a| a == "--dura-test") {
+        app.add_systems(Update, auto_dura_test);
+    }
     // --auto-enter: 自动从登录界面进入游戏（自动化验证用）
     if std::env::args().any(|a| a == "--auto-enter") {
         // auto_enter 需要覆盖 Login 和 Select 两个状态（内部自行判断）
@@ -3522,6 +3526,56 @@ fn auto_marriage_accept(
             *stage = 9;
         }
         _ => {}
+    }
+}
+
+/// --dura-test：打开耐久面板 → 装备耐久三态渲染 → 关闭
+fn auto_dura_test(
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut phase: Local<f32>,
+) {
+    use client_bevy::scenes::AppState;
+    use client_bevy::game::dialogs::DialogKind;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    if *stage == 0 {
+        if !mgr.is_open(DialogKind::DuraStatus) {
+            mgr.open(DialogKind::DuraStatus);
+            tracing::info!("[DURA] 打开耐久面板");
+        }
+        *phase = *t;
+        *stage = 1;
+        return;
+    }
+    if *stage == 1 && *t - *phase >= 1.0 {
+        let equipped: Vec<String> = hud
+            .equipment
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| s.as_ref().map(|it| format!("slot{}={}({}/{})", i, it.name, it.current_dura, it.max_dura)))
+            .collect();
+        tracing::info!("[DURA] ✅ 装备耐久数据: {}", if equipped.is_empty() { "无".to_string() } else { equipped.join(", ") });
+        *stage = 2;
+        *phase = *t;
+        return;
+    }
+    if *stage == 2 && *t - *phase >= 1.5 {
+        if mgr.is_open(DialogKind::DuraStatus) {
+            mgr.close(DialogKind::DuraStatus);
+            tracing::info!("[DURA] ✅ 关闭耐久面板");
+        }
+        *stage = 9;
+    }
+    if *t >= 25.0 && *stage < 9 {
+        tracing::warn!("[DURA] ❌ 超时 stage={}", *stage);
+        *stage = 9;
     }
 }
 

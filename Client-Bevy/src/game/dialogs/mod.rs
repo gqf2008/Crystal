@@ -120,6 +120,12 @@ impl DialogManager {
             self.open.push(kind);
         }
     }
+    /// 打开对话框（幂等）
+    pub fn open(&mut self, kind: DialogKind) {
+        if !self.open.contains(&kind) {
+            self.open.push(kind);
+        }
+    }
     pub fn close(&mut self, kind: DialogKind) {
         self.open.retain(|k| *k != kind);
     }

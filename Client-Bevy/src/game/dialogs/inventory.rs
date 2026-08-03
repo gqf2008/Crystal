@@ -38,6 +38,10 @@ pub struct InvItem {
     pub item_type: u8,
     /// ItemInfo.shape（部分物品按形状区分用途）
     pub shape: i16,
+    /// 当前耐久（M55 耐久面板用）
+    pub current_dura: u16,
+    /// 最大耐久
+    pub max_dura: u16,
 }
 
 impl InvItem {
