@@ -302,6 +302,18 @@ fn main() {
     }
     // F12: 保存当前帧截图到 ../../tools/bevy_shot_N.png（开发调试用）
     app.add_systems(Update, debug_screenshot);
+    // --auto-walk <up|down|left|right>: 调试 chunk 流式（每帧驱动玩家平移）
+    {
+        let dir = std::env::args()
+            .position(|a| a == "--auto-walk")
+            .and_then(|i| std::env::args().nth(i + 1))
+            .unwrap_or_default();
+        let dir_copy = dir.clone();
+        app.insert_resource(AutoWalkDir(dir));
+        if !dir_copy.is_empty() {
+            app.add_systems(Update, auto_walk_system);
+        }
+    }
     // --no-actors: 只渲染地图（用于纯地图截图验证）
     if std::env::args().any(|a| a == "--no-actors") {
         app.add_plugins(MapRenderPlugin);
@@ -4336,3 +4348,41 @@ fn demo_delete_flow(
     }
 }
 
+
+#[derive(Resource)]
+struct AutoWalkDir(String);
+
+/// 调试：把本地玩家按方向持续平移（--auto-walk down），用于验证 chunk 流式加载
+fn auto_walk_system(
+    mut timer: Local<f32>,
+    time: Res<Time>,
+    dir: Res<AutoWalkDir>,
+    mut players: Query<&mut Transform, (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>)>,
+) {
+    if dir.0.is_empty() {
+        return;
+    }
+    *timer += time.delta_secs();
+    if *timer < 0.06 {
+        return;
+    }
+    *timer = 0.0;
+    let step = match dir.0.as_str() {
+        "down" => Vec3::new(0.0, -client_bevy::map_renderer::TILE_HEIGHT, 0.0),
+        "up" => Vec3::new(0.0, client_bevy::map_renderer::TILE_HEIGHT, 0.0),
+        "left" => Vec3::new(-client_bevy::map_renderer::TILE_WIDTH, 0.0, 0.0),
+        "right" => Vec3::new(client_bevy::map_renderer::TILE_WIDTH, 0.0, 0.0),
+        _ => return,
+    };
+    for mut tf in players.iter_mut() {
+        // 调试边界：向下最多走到 tile 430（n0 村庄下方），避免走出地图
+        let tile_y = ((-tf.translation.y - 32.0) / 32.0).round() as i32;
+        if dir.0 == "down" && tile_y >= 430 {
+            return;
+        }
+        if dir.0 == "up" && tile_y <= 270 {
+            return;
+        }
+        tf.translation += step;
+    }
+}

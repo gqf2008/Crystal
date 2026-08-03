@@ -205,6 +205,7 @@ impl Plugin for MapRenderPlugin {
         app.init_resource::<GameLibraries>();
         app.add_systems(Startup, spawn_camera);
         app.init_resource::<MapLayerShow>();
+        app.init_resource::<ChunkStream>();
         app.init_resource::<MapAnimClock>();
         app.init_resource::<TileImageCache>();
         register_blend_material(app);
@@ -225,6 +226,12 @@ impl Plugin for MapRenderPlugin {
             Update,
             camera_control.run_if(in_state(crate::scenes::AppState::Game)),
         );
+        // 关键：chunk 流式（之前定义了但漏注册 → 走出初始窗口后地图空白/黑色）
+        app.add_systems(
+            Update,
+            chunk_stream_system.run_if(in_state(crate::scenes::AppState::Game)),
+        );
+
     }
 }
 
