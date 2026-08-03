@@ -29,15 +29,13 @@ impl Plugin for NewCharacterPlugin {
         app.init_resource::<NewCharState>();
         app.add_systems(
             Update,
-            new_char_ui_system.run_if(in_state(AppState::Select)),
+            (new_char_ui_system, new_char_ime_system)
+                .chain()
+                .run_if(in_state(AppState::Select)),
         );
         app.add_systems(
             Update,
             new_char_anim_system.run_if(in_state(AppState::Select)),
-        );
-        app.add_systems(
-            Update,
-            new_char_ime_system.run_if(in_state(AppState::Select)),
         );
         app.add_systems(
             Update,

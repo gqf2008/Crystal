@@ -450,7 +450,9 @@ fn modal_ui_system(
         }
     }
 
-    // 内置拼音 IME 提交的汉字 → 追加到删除确认输入框（≤24 字）
+    // 内置拼音 IME 提交的汉字 → 追加到删除确认输入框（≤50 字）
+    // 先记录本帧是否有 IME 提交（take_commit 会清空 commit_pending，Enter 守卫需要它）
+    let ime_committed = ime.has_commit();
     if let Some(c) = ime.take_commit() {
         if state.kind == ModalKind::DeleteConfirm && state.input_focused {
             for ch in c.chars() {
@@ -495,6 +497,10 @@ fn modal_ui_system(
         }
         // 内置 IME 接管该键（如组合中按 Enter 提交候选）→ 不触发对话框动作
         if ime.consumes_key(key) {
+            continue;
+        }
+        // 本帧 IME 刚提交候选（Enter 被 IME 消费）→ 不触发对话框 Enter 动作
+        if ime_committed && key.logical_key == Key::Enter {
             continue;
         }
         match key.logical_key {

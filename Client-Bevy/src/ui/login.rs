@@ -792,6 +792,8 @@ fn login_ui_system(
     }
 
     // 内置拼音 IME 提交的汉字 → 注入聚焦的非密码输入框
+    // 先记录本帧是否有 IME 提交（take_commit 会清空 commit_pending，Enter 守卫需要它）
+    let ime_committed = ime.has_commit();
     if let Some(c) = ime.take_commit() {
         for mut input in inputs.iter_mut() {
             if input.focused && !input.password {
@@ -901,6 +903,8 @@ fn login_ui_system(
         if key.state == bevy::input::ButtonState::Pressed
             && key.logical_key == Key::Enter
             && !ime.consumes_key(key)
+            // 本帧 IME 刚提交候选（Enter 被 IME 消费）→ 不触发登录/注册/改密提交
+            && !ime_committed
         {
             if login.show_new_account && val.na_ok {
                 clicked = Some(ButtonKind::NaOk);
