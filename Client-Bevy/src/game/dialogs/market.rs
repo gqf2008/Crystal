@@ -537,6 +537,11 @@ fn market_server_events(
             ServerEvent::MarketFail { reason } => {
                 market.message = format!("市场操作失败（原因 {}）", reason);
             }
+            ServerEvent::UserInformation { item_names, .. } => {
+                for (idx, name) in item_names {
+                    market.item_names.insert(*idx, name.clone());
+                }
+            }
             _ => {}
         }
     }

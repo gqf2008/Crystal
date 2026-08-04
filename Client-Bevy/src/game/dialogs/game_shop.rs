@@ -269,6 +269,11 @@ fn shop_server_events(
                     it.stock = *stock;
                 }
             }
+            ServerEvent::UserInformation { item_names, .. } => {
+                for (idx, name) in item_names {
+                    shop.item_names.insert(*idx, name.clone());
+                }
+            }
             _ => {}
         }
     }

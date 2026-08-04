@@ -769,6 +769,33 @@ fn hud_server_events(
                     }
                 }
             }
+            ServerEvent::UserInformation {
+                name,
+                level,
+                hp,
+                mp,
+                exp,
+                max_exp,
+                gold,
+                class,
+                object_id,
+                inventory,
+                equipment,
+                ..
+            } => {
+                hud.name = name.clone();
+                hud.level = *level;
+                hud.hp = *hp;
+                hud.mp = *mp;
+                hud.exp = *exp;
+                hud.max_exp = (*max_exp).max(1);
+                hud.gold = *gold;
+                hud.class = *class;
+                hud.player_object_id = Some(*object_id);
+                hud.inventory.items = inventory.clone();
+                hud.inventory.gold = *gold;
+                hud.equipment = equipment.clone();
+            }
             ServerEvent::PlayerDied => {
                 hud.dead = true;
             }

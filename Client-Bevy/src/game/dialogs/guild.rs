@@ -960,6 +960,11 @@ fn guild_server_events(
             ServerEvent::GuildInvited { name } => {
                 guild.invite = Some(name.clone());
             }
+            ServerEvent::UserInformation { item_names, .. } => {
+                for (idx, name) in item_names {
+                    guild.item_names.insert(*idx, name.clone());
+                }
+            }
             _ => {}
         }
     }

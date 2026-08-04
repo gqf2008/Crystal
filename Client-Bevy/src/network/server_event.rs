@@ -203,6 +203,22 @@ pub enum ServerEvent {
     NpcGoods { goods: Vec<GoodsEntry>, rate: f32 },
     /// NPCGoods（Sell/Repair/SpecialRepair）：出售/修理面板
     NpcSellPanel { panel_type: mir2_shared::enums::PanelType },
+    /// UserInformation：进图初始化同步（HUD/技能/背包/装备/物品名缓存）
+    UserInformation {
+        name: String,
+        level: u16,
+        hp: i32,
+        mp: i32,
+        exp: i64,
+        max_exp: i64,
+        gold: u32,
+        class: u8,
+        object_id: u32,
+        magics: Vec<ClientMagic>,
+        inventory: Vec<Option<InvItem>>,
+        equipment: Vec<Option<InvItem>>,
+        item_names: Vec<(i32, String)>,
+    },
 }
 
 use crate::game::dialogs::npc_goods::GoodsEntry;

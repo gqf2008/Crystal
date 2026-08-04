@@ -212,8 +212,16 @@ fn skills_server_events(
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
-        if let ServerEvent::MagicLearned { magic } = ev {
-            magics.upsert(magic.clone());
+        match ev {
+            ServerEvent::MagicLearned { magic } => {
+                magics.upsert(magic.clone());
+            }
+            ServerEvent::UserInformation { magics: ms, .. } => {
+                for m in ms {
+                    magics.upsert(m.clone());
+                }
+            }
+            _ => {}
         }
     }
 }

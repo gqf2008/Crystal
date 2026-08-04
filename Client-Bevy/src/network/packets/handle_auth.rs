@@ -421,80 +421,55 @@ pub(crate) fn handle_auth(
                         p.max_experience,
                         p.gold
                     );
-                    hud.name = p.name.clone();
-                    hud.level = p.level;
-                    hud.hp = p.hp;
-                    hud.mp = p.mp;
-                    hud.exp = p.experience;
-                    hud.max_exp = p.max_experience.max(1);
-                    hud.gold = p.gold;
-                    hud.class = p.class as u8;
-                    hud.player_object_id = Some(p.object_id);
+                    // ---- 会话状态（网络层保留直写） ----
                     session.local_player_id = Some(p.object_id);
                     session.self_position = Some((p.location_x, p.location_y, p.direction as u8));
 
-                    // 技能（MagicsState）：UserInformation 携带已学技能
-                    for m in &p.magics {
-                        magics.upsert(m.clone());
-                    }
-
-                    // 背包（40 格）
-                    if let Some(inv) = &p.inventory {
-                        let items: Vec<Option<InvItem>> = inv
-                            .iter()
-                            .take(40)
-                            .map(|slot| slot.as_ref().map(to_inv_item))
-                            .collect();
-                        hud.inventory.items = items;
-                        hud.inventory.gold = p.gold;
-                        tracing::info!(
-                            "🎒 背包 {} 格（{} 件物品）",
-                            hud.inventory.items.len(),
-                            hud.inventory.items.iter().flatten().count()
-                        );
-                    }
-
-                    // 装备（12 槽）
-                    if let Some(equip) = &p.equipment {
-                        hud.equipment = equip
-                            .iter()
-                            .map(|slot| slot.as_ref().map(to_inv_item))
-                            .collect();
-                    }
-
-                    // 物品名缓存（供仓库等无内嵌 ItemInfo 的列表显示，M32）
-                    if let Some(inv) = &p.inventory {
-                        for slot in inv.iter().filter_map(|s| s.as_ref()) {
+                    // ---- UI 数据：广播 ServerEvent，由各模块消费 ----
+                    let magics: Vec<mir2_shared::data::client_data::ClientMagic> = p.magics.clone();
+                    let inventory: Vec<Option<InvItem>> = p
+                        .inventory
+                        .as_ref()
+                        .map(|inv| {
+                            inv.iter()
+                                .take(40)
+                                .map(|slot| slot.as_ref().map(to_inv_item))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let equipment: Vec<Option<InvItem>> = p
+                        .equipment
+                        .as_ref()
+                        .map(|eq| eq.iter().map(|slot| slot.as_ref().map(to_inv_item)).collect())
+                        .unwrap_or_default();
+                    let mut item_names: Vec<(i32, String)> = Vec::new();
+                    for slot in p
+                        .inventory
+                        .iter()
+                        .flat_map(|inv| inv.iter())
+                        .chain(p.equipment.iter().flat_map(|eq| eq.iter()))
+                    {
+                        if let Some(slot) = slot {
                             if let Some(info) = &slot.info {
-                                guild.item_names.insert(slot.item_index, info.name.clone());
+                                item_names.push((slot.item_index, info.name.clone()));
                             }
                         }
                     }
-                    if let Some(eq) = &p.equipment {
-                        for slot in eq.iter().filter_map(|s| s.as_ref()) {
-                            if let Some(info) = &slot.info {
-                                guild.item_names.insert(slot.item_index, info.name.clone());
-                            }
-                        }
-                    }
-
-                    // 市场物品名缓存（M34，与行会缓存同源）
-                    if let Some(inv) = &p.inventory {
-                        for slot in inv.iter().filter_map(|s| s.as_ref()) {
-                            if let Some(info) = &slot.info {
-                                market.item_names.insert(slot.item_index, info.name.clone());
-                            }
-                        }
-                    }
-
-                    // 商城物品名缓存（M35）
-                    if let Some(inv) = &p.inventory {
-                        for slot in inv.iter().filter_map(|s| s.as_ref()) {
-                            if let Some(info) = &slot.info {
-                                shop.item_names.insert(slot.item_index, info.name.clone());
-                            }
-                        }
-                    }
+                    server_events.write(ServerEvent::UserInformation {
+                        name: p.name.clone(),
+                        level: p.level,
+                        hp: p.hp,
+                        mp: p.mp,
+                        exp: p.experience,
+                        max_exp: p.max_experience.max(1),
+                        gold: p.gold,
+                        class: p.class as u8,
+                        object_id: p.object_id,
+                        magics,
+                        inventory,
+                        equipment,
+                        item_names,
+                    });
                 }
                 Err(e) => {
                     tracing::warn!("⚠️ UserInformation 解析失败: {} (len={})", e, payload.len())
