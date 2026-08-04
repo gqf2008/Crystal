@@ -371,7 +371,6 @@ fn big_map_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
 ) {
-    
     let open = mgr.is_open(DialogKind::BigMap);
     let npc_count = state.npcs.len();
     for (mut vis, dot, pdot) in &mut widgets {

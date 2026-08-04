@@ -123,7 +123,6 @@ fn npc_ui_system(
     mut widgets: Query<&mut Visibility, With<NpcDialogWidget>>,
     mut lines: Query<(&mut Text2d, &NpcLine)>,
 ) {
-    
     for mut vis in widgets.iter_mut() {
         *vis = if npc.visible {
             Visibility::Visible
