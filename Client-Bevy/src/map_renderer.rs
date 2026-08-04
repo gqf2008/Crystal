@@ -597,6 +597,12 @@ fn setup_world(
         }
         walkable.push(col);
     }
+    // 诊断：可走格统计（#57 排查 0.map 寻路失败）
+    {
+        let total = map.width as usize * map.height as usize;
+        let walkable_count = walkable.iter().flatten().filter(|w| **w).count();
+        tracing::info!("🚶 可行走网格: {}/{} 格可走（{:.1}%）", walkable_count, total, walkable_count as f64 * 100.0 / total.max(1) as f64);
+    }
 
 pub struct GameData {
     pub map: Option<LoadedMap>,

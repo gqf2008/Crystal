@@ -542,9 +542,14 @@ impl Message<TownReviveRequest> for WorldActor {
         };
         if !state.is_dead { return; }
 
-        // 复活：重置 HP/MP 到最大值，回到地图出生点
-        let spawn_x = DEFAULT_SPAWN_X;
-        let spawn_y = DEFAULT_SPAWN_Y;
+        // 复活：重置 HP/MP 到最大值，回到地图安全区出生点
+        // （#57：硬编码 DEFAULT_SPAWN (330,330) 在 0.map 上不可走，复活后玩家卡墙内无法移动）
+        let (spawn_x, spawn_y) = self
+            .map_infos
+            .get(&(state.map_index as i32))
+            .and_then(|mi| mi.safe_zones.iter().find(|s| s.start_point))
+            .map(|sz| (sz.x, sz.y))
+            .unwrap_or((DEFAULT_SPAWN_X, DEFAULT_SPAWN_Y));
 
         let _ = record.actor_ref.ask(crate::actors::player::RevivePlayer {
             x: spawn_x,

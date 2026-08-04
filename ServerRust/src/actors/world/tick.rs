@@ -2343,6 +2343,7 @@ impl Message<Tick> for WorldActor {
                     m.direction = *dir;
 
                     // 广播 ObjectWalk（object_id + x + y + direction，~12字节 vs ObjectMonster ~40字节）
+                    debug!("Monster #{} moved to ({},{}) dir={} (broadcast)", oid, m.x, m.y, m.direction);
                     let mut walk_body = Vec::new();
                     walk_body.extend_from_slice(&oid.to_le_bytes());
                     walk_body.extend_from_slice(&m.x.to_le_bytes());

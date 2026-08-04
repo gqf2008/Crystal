@@ -37,6 +37,17 @@ pub fn resolve_map_path(file_name: &str) -> String {
         f.clone(),
         format!("{}/Data/{}", manifest_dir, f),
         format!("{}/{}", manifest_dir, f),
+        // ServerRust/Daneo1989/Maps：真实服务器使用的地图（Map 2010 Ver 1.0 格式），
+        // 与服务器坐标体系一致——客户端必须加载它而不是 Client-Macroquad 的 Type100 转换版（#57 实测坐标错位）
+        // f 形如 "Map/0.map"，Daneo1989/Maps 下直接是 "0.map"，需去掉前缀
+        {
+            let base = f.trim_start_matches("Map/");
+            format!("{}/../ServerRust/Daneo1989/Maps/{}", manifest_dir, base)
+        },
+        {
+            let base = f.trim_start_matches("Map/");
+            format!("{}/../../Crystal/ServerRust/Daneo1989/Maps/{}", manifest_dir, base)
+        },
         // 共享其他客户端的数据目录（避免复制数 GB 资源）
         format!("{}/../Client-Macroquad/Data/{}", manifest_dir, f),
         format!("{}/../Client-Macroquad/{}", manifest_dir, f),

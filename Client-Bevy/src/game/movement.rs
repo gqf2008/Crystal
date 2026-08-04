@@ -146,7 +146,9 @@ impl Plugin for MovementPlugin {
 /// 服务器权威位置（UserLocation）：距离超过 2 格时瞬移校正
 fn apply_self_position(
     mut net: ResMut<NetworkContext>,
-    mut players: Query<&mut Transform, (With<LocalPlayer>, Without<NetObjectId>)>,
+    // 本地玩家同时带 NetObjectId（此前误用 Without<NetObjectId> 把玩家自己排除，
+    // 服务器 UserLocation 校正永不生效 → 客户端位置漂移（#57 实测）
+    mut players: Query<&mut Transform, (With<LocalPlayer>, With<NetObjectId>)>,
 ) {
     let Some((tx, ty, _dir)) = net.self_position.take() else {
         return;

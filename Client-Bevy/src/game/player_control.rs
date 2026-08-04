@@ -346,7 +346,11 @@ fn auto_attack_system(
         spell: mir2_shared::enums::Spell::None,
     });
     crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, 10050);
-    tracing::debug!("⚔️ Attack {}", target_id);
+    // 诊断（#57）：攻击时打印玩家/目标瓦片与方向（debug 级）
+    tracing::debug!(
+        "⚔️ Attack target={} dir={:?}",
+        target_id, dir
+    );
 }
 
 
