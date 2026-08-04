@@ -232,14 +232,14 @@ impl Packet for UserInformation {
         writer.write_u8(self.has_hero as u8)?;
         writer.write_u8(self.hero_behaviour as u8)?;
 
-        // Write inventory
+        // Write inventory（注意：read_body 用 read_from_with_info 读 ItemInfo，必须 write_to_with_info 对称）
         if let Some(ref inventory) = self.inventory {
             writer.write_u8(1)?;
             writer.write_i32::<LittleEndian>(inventory.len() as i32)?;
             for item in inventory {
                 if let Some(ref item) = item {
                     writer.write_u8(1)?;
-                    item.write_to(writer)?;
+                    item.write_to_with_info(writer)?;
                 } else {
                     writer.write_u8(0)?;
                 }
@@ -255,7 +255,7 @@ impl Packet for UserInformation {
             for item in equipment {
                 if let Some(ref item) = item {
                     writer.write_u8(1)?;
-                    item.write_to(writer)?;
+                    item.write_to_with_info(writer)?;
                 } else {
                     writer.write_u8(0)?;
                 }
@@ -271,7 +271,7 @@ impl Packet for UserInformation {
             for item in quest_inventory {
                 if let Some(ref item) = item {
                     writer.write_u8(1)?;
-                    item.write_to(writer)?;
+                    item.write_to_with_info(writer)?;
                 } else {
                     writer.write_u8(0)?;
                 }
