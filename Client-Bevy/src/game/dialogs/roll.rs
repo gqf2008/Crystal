@@ -14,6 +14,7 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
+use crate::game::dialogs::npc::NpcDialogState;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_image, UiFont, UiImageCache,
@@ -190,11 +191,11 @@ fn roll_ui_system(
 fn roll_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut roll: ResMut<RollState>,
+    npc_dialog: Res<NpcDialogState>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
         if let ServerEvent::Roll {
-            npc_id,
             r#type,
             page,
             result,
@@ -204,7 +205,8 @@ fn roll_server_events(
             finished,
         } = ev
         {
-            roll.npc_id = *npc_id;
+            // npc_id 来自当前 NPC 对话框（原网络层直读，现由数据所有者提供）
+            roll.npc_id = npc_dialog.npc_object_id;
             roll.r#type = *r#type;
             roll.page = page.clone();
             roll.result = *result;

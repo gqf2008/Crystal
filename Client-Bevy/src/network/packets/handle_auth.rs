@@ -16,13 +16,10 @@ pub(crate) fn handle_auth(
     net_objects: &mut MessageWriter<NetObject>,
     net_removals: &mut MessageWriter<NetObjectRemoved>,
     motions: &mut MessageWriter<NetMotion>,
-    hud: &mut HudState,
     chat: &mut ChatState,
-    npc_dialog: &mut NpcDialogState,
     npc_goods: &mut NpcGoodsState,
     combat_evt: &mut MessageWriter<CombatEvent>,
     weather: &mut WeatherState,
-    magics: &mut MagicsState,
     storage: &mut StorageState,
     sell_panel: &mut SellPanelState,
     group: &mut GroupState,
@@ -315,7 +312,6 @@ pub(crate) fn handle_auth(
                     p.auto_roll
                 );
                 server_events.write(ServerEvent::Roll {
-                    npc_id: npc_dialog.npc_object_id,
                     r#type: p.r#type,
                     page: p.page,
                     result: p.result,

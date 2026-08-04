@@ -28,13 +28,10 @@ pub(crate) fn handle_packet(
     net_objects: &mut MessageWriter<NetObject>,
     net_removals: &mut MessageWriter<NetObjectRemoved>,
     motions: &mut MessageWriter<NetMotion>,
-    hud: &mut HudState,
     chat: &mut ChatState,
-    npc_dialog: &mut NpcDialogState,
     npc_goods: &mut NpcGoodsState,
     combat_evt: &mut MessageWriter<CombatEvent>,
     weather: &mut WeatherState,
-    magics: &mut MagicsState,
     storage: &mut StorageState,
     sell_panel: &mut SellPanelState,
     group: &mut GroupState,
@@ -75,19 +72,19 @@ pub(crate) fn handle_packet(
         return;
     };
     let opcode = header.opcode;
-    if handle_auth(net, session, auth, game_data, net_objects, net_removals, motions, hud, chat, npc_dialog, npc_goods, combat_evt, weather, magics, storage, sell_panel, group, mail, trade, friend, guild, ranking, mentor, market, shop, territory, effects, server_events, control, fishing, refine, craft, rental, quest_log, buff, report, inspect, creature, hero, relationship, big_map, awake, roll, mgr, next, payload) {
+    if handle_auth(net, session, auth, game_data, net_objects, net_removals, motions, chat, npc_goods, combat_evt, weather, storage, sell_panel, group, mail, trade, friend, guild, ranking, mentor, market, shop, territory, effects, server_events, control, fishing, refine, craft, rental, quest_log, buff, report, inspect, creature, hero, relationship, big_map, awake, roll, mgr, next, payload) {
         return;
     }
-    if handle_npc_items(net, session, auth, game_data, net_objects, net_removals, motions, hud, chat, npc_dialog, npc_goods, combat_evt, weather, magics, storage, sell_panel, group, mail, trade, friend, guild, ranking, mentor, market, shop, territory, effects, server_events, control, fishing, refine, craft, rental, quest_log, buff, report, inspect, creature, hero, relationship, big_map, awake, roll, mgr, next, payload) {
+    if handle_npc_items(net, session, auth, game_data, net_objects, net_removals, motions, chat, npc_goods, combat_evt, weather, storage, sell_panel, group, mail, trade, friend, guild, ranking, mentor, market, shop, territory, effects, server_events, control, fishing, refine, craft, rental, quest_log, buff, report, inspect, creature, hero, relationship, big_map, awake, roll, mgr, next, payload) {
         return;
     }
-    if handle_guild(net, session, auth, game_data, net_objects, net_removals, motions, hud, chat, npc_dialog, npc_goods, combat_evt, weather, magics, storage, sell_panel, group, mail, trade, friend, guild, ranking, mentor, market, shop, territory, effects, server_events, control, fishing, refine, craft, rental, quest_log, buff, report, inspect, creature, hero, relationship, big_map, awake, roll, mgr, next, payload) {
+    if handle_guild(net, session, auth, game_data, net_objects, net_removals, motions, chat, npc_goods, combat_evt, weather, storage, sell_panel, group, mail, trade, friend, guild, ranking, mentor, market, shop, territory, effects, server_events, control, fishing, refine, craft, rental, quest_log, buff, report, inspect, creature, hero, relationship, big_map, awake, roll, mgr, next, payload) {
         return;
     }
     if handle_progress(server_events, payload) {
         return;
     }
-    if handle_social(net, session, auth, game_data, net_objects, net_removals, motions, hud, chat, npc_dialog, npc_goods, combat_evt, weather, magics, storage, sell_panel, group, mail, trade, friend, guild, ranking, mentor, market, shop, territory, effects, server_events, control, fishing, refine, craft, rental, quest_log, buff, report, inspect, creature, hero, relationship, big_map, awake, roll, mgr, next, payload) {
+    if handle_social(net, session, auth, game_data, net_objects, net_removals, motions, chat, npc_goods, combat_evt, weather, storage, sell_panel, group, mail, trade, friend, guild, ranking, mentor, market, shop, territory, effects, server_events, control, fishing, refine, craft, rental, quest_log, buff, report, inspect, creature, hero, relationship, big_map, awake, roll, mgr, next, payload) {
         return;
     }
     tracing::debug!("未处理服务器包 opcode {:04X}", opcode);

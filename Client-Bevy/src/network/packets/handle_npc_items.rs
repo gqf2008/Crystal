@@ -16,13 +16,10 @@ pub(crate) fn handle_npc_items(
     net_objects: &mut MessageWriter<NetObject>,
     net_removals: &mut MessageWriter<NetObjectRemoved>,
     motions: &mut MessageWriter<NetMotion>,
-    hud: &mut HudState,
     chat: &mut ChatState,
-    npc_dialog: &mut NpcDialogState,
     npc_goods: &mut NpcGoodsState,
     combat_evt: &mut MessageWriter<CombatEvent>,
     weather: &mut WeatherState,
-    magics: &mut MagicsState,
     storage: &mut StorageState,
     sell_panel: &mut SellPanelState,
     group: &mut GroupState,
@@ -106,14 +103,14 @@ pub(crate) fn handle_npc_items(
                 loc = (p.location_x, p.location_y);
                 parsed = true;
             }
-            let pid = hud.player_object_id.unwrap_or(100);
+            let pid = session.local_player_id.unwrap_or(100);
             server_events.write(ServerEvent::PlayerDied);
             combat_evt.write(CombatEvent::Died { object_id: pid, death_type: 0 });
             tracing::info!("💀 玩家死亡 ({},{}){}", loc.0, loc.1, if parsed { "" } else { "（空 body 容错）" });
         }
         x if x == ServerPacketIds::Revived as i16 => {
             if combat::Revived::read_body(&mut cur).is_ok() {
-                let pid = hud.player_object_id.unwrap_or(100);
+                let pid = session.local_player_id.unwrap_or(100);
                 server_events.write(ServerEvent::PlayerRevived);
                 combat_evt.write(CombatEvent::Revived { object_id: pid });
                 tracing::info!("💚 玩家复活");
