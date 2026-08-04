@@ -84,7 +84,7 @@ pub(crate) fn handle_packet(
     if handle_guild(net, session, auth, game_data, net_objects, net_removals, motions, hud, chat, npc_dialog, npc_goods, combat_evt, weather, magics, storage, sell_panel, group, mail, trade, friend, guild, ranking, mentor, market, shop, territory, effects, server_events, control, fishing, refine, craft, rental, quest_log, buff, report, inspect, creature, hero, relationship, big_map, awake, roll, mgr, next, payload) {
         return;
     }
-    if handle_progress(net, session, auth, game_data, net_objects, net_removals, motions, hud, chat, npc_dialog, npc_goods, combat_evt, weather, magics, storage, sell_panel, group, mail, trade, friend, guild, ranking, mentor, market, shop, territory, effects, server_events, control, fishing, refine, craft, rental, quest_log, buff, report, inspect, creature, hero, relationship, big_map, awake, roll, mgr, next, payload) {
+    if handle_progress(server_events, payload) {
         return;
     }
     if handle_social(net, session, auth, game_data, net_objects, net_removals, motions, hud, chat, npc_dialog, npc_goods, combat_evt, weather, magics, storage, sell_panel, group, mail, trade, friend, guild, ranking, mentor, market, shop, territory, effects, server_events, control, fishing, refine, craft, rental, quest_log, buff, report, inspect, creature, hero, relationship, big_map, awake, roll, mgr, next, payload) {
