@@ -104,8 +104,13 @@ impl Mailbox {
     }
 }
 
-/// 全局邮件 ID 计数器
+/// 全局邮件 ID 计数器（#73：服务器重启从 1 开始会与 DB 已有 mail_id 冲突 → UNIQUE 约束失败）
 static NEXT_MAIL_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// 启动时把计数器初始化到 DB 最大 mail_id+1（避免重启后新邮件 id 冲突）
+pub fn init_mail_id(max_id: u64) {
+    NEXT_MAIL_ID.store(max_id.max(1), std::sync::atomic::Ordering::Relaxed);
+}
 
 pub fn generate_mail_id() -> u64 {
     NEXT_MAIL_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
