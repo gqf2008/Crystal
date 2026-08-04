@@ -511,8 +511,10 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
             mount_type,
             is_mounted,
         } => {
+            tracing::debug!("🧍 NetObject::Player id={} name={} loc=({},{}) local={}", object_id, name, location_x, location_y, is_local_player);
             // 注意：世界坐标 y 向下取负（与地图/怪物/NPC 一致），此前玩家未取负导致镜像位置
             let e = if is_local_player {
+                tracing::debug!("🧍 生成本地玩家 world=({:.0},{:.0})", wx(*location_x), -wy(*location_y));
                 spawn_local_player_with(
                     commands,
                     wx(*location_x),

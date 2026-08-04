@@ -154,9 +154,11 @@ fn apply_self_position(
         return;
     };
     let Ok(mut tf) = players.single_mut() else {
+        tracing::debug!("📍 位置校正：玩家 Query 未匹配（self_position 丢弃 ({},{})）", tx, ty);
         return;
     };
     let cur = world_to_tile(tf.translation.x, tf.translation.y);
+    tracing::debug!("📍 位置校正检查：server=({},{}) cur=({},{})", tx, ty, cur.0, cur.1);
     let dist = ((tx - cur.0).abs() + (ty - cur.1).abs()).max(
         ((tx - cur.0).abs()).max((ty - cur.1).abs()),
     );
@@ -288,6 +290,7 @@ fn advance_local_move(
     } else {
         *lm.path.front().unwrap()
     };
+    tracing::debug!("🚶 move: run_step2={} path_len={} target=({},{})", run_step2, lm.path.len(), target.0, target.1);
     let target_world = tile_to_world(target.0, target.1);
     let dx = target_world.x - tf.translation.x;
     let dy = target_world.y - tf.translation.y;
