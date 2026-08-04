@@ -630,7 +630,12 @@ fn auto_storage_test(
     npcs: Query<(
         &client_bevy::actor::NetObjectId,
         &client_bevy::actor::NpcName,
+        &Transform,
     )>,
+    players: Query<
+        &Transform,
+        (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>),
+    >,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut npc_oid: Local<Option<u32>>,
@@ -646,11 +651,20 @@ fn auto_storage_test(
             if *t < 6.0 {
                 return;
             }
-            let oid = npcs
-                .iter()
-                .find(|(_, n)| n.0.contains("Alchemist"))
-                .or_else(|| npcs.iter().find(|(_, n)| n.0.contains("Merchant")))
-                .map(|(id, _)| id.0);
+            // 名字匹配且距离最近的 NPC（真实服务器 NPC 分散，纯名字匹配会选到远处 NPC 被距离校验拒绝）
+            let oid = players.single().ok().and_then(|ptf| {
+                let (px, py) =
+                    client_bevy::game::movement::world_to_tile(ptf.translation.x, ptf.translation.y);
+                npcs.iter()
+                    .filter(|(_, n, _)| n.0.contains("Alchemist") || n.0.contains("Merchant"))
+                    .map(|(id, _, tf)| {
+                        let (nx, ny) =
+                            client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+                        (id.0, (nx - px).abs() + (ny - py).abs())
+                    })
+                    .min_by_key(|(_, d)| *d)
+                    .map(|(id, _)| id)
+            });
             if let Some(oid) = oid {
                 *npc_oid = Some(oid);
                 net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
