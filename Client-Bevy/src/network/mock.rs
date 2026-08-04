@@ -7,7 +7,7 @@
 use crossbeam_channel::{Receiver, Sender};
 use mir2_shared::data::client_data::SelectInfo;
 use mir2_shared::enums::{
-    ClientPacketIds, LevelEffects, MirClass, MirDirection, MirGender, PoisonType, SpellEffect,
+    ClientPacketIds, HeroBehaviour, LevelEffects, MirClass, MirDirection, MirGender, PoisonType, SpellEffect,
 };
 use mir2_shared::packets::base::{serialize_packet, Packet, PacketHeader};
 use mir2_shared::packets::{client, server};
@@ -350,5 +350,51 @@ fn send_map_and_objects(to_client: &Sender<Vec<u8>>, char_index: i32) {
             quest_ids: vec![],
         },
     );
+
+    // UserInformation：玩家属性（HP/MP/等级/金币 → HUD 血蓝球/经验/金币）
+    send(
+        to_client,
+        &server::user::UserInformation {
+            object_id: 100,
+            real_id: 100,
+            name: match char_index {
+                1 => "法师".to_string(),
+                2 => "道士".to_string(),
+                3 => "刺客".to_string(),
+                _ => "刀客".to_string(),
+            },
+            guild_name: String::new(),
+            guild_rank: String::new(),
+            name_colour: 0,
+            class,
+            gender,
+            level: 30,
+            location_x: 354,
+            location_y: 352,
+            direction: MirDirection::Up,
+            hair: 0,
+            hp: 850,
+            mp: 420,
+            experience: 12000,
+            max_experience: 30000,
+            level_effects: LevelEffects::NONE,
+            has_hero: false,
+            hero_behaviour: HeroBehaviour::Follow,
+            inventory: Some(vec![None; 40]),
+            equipment: Some(vec![None; 12]),
+            quest_inventory: Some(vec![]),
+            gold: 10000,
+            credit: 0,
+            has_expanded_storage: false,
+            expanded_storage_expiry_time: 0,
+            magics: vec![],
+            summoned_creature_type: 0,
+            creature_summoned: false,
+            allow_observe: false,
+            observer: false,
+        },
+    );
+    // HealthChanged：血蓝实时值（mock 直接发满值）
+    send(to_client, &server::combat::HealthChanged { hp: 850, mp: 420 });
 }
 

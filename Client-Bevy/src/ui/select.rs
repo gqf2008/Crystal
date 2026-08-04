@@ -242,8 +242,7 @@ fn build_select_ui(
     libs.0.ensure_initialized();
     ui_font.0 = crate::ui::sprite_ui::load_ui_font(fonts);
     let font = ui_font.0.clone();
-    spawn_ui_camera(commands.reborrow());
-
+    
     // 背景 Prguse[65]（1024x768）
     if let Some(h) = ui_image(
         &mut *libs,

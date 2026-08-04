@@ -65,6 +65,58 @@ impl Default for MapLayerShow {
 #[derive(Component)]
 pub struct MapFloorMark(pub Layer);
 
+/// 地图灯光（C# DrawLights Map Lights：cell.Light 1..9，白色径向渐变，ADD 混合）
+#[derive(Component)]
+pub struct MapLight;
+
+/// C# DXManager.Lights[i] = LightSizes[i+1]（径向渐变光斑尺寸，索引 0..9）
+pub const LIGHT_SIZES: [(f32, f32); 10] = [
+    (205.0, 156.0),
+    (285.0, 217.0),
+    (365.0, 277.0),
+    (445.0, 338.0),
+    (525.0, 399.0),
+    (605.0, 460.0),
+    (685.0, 521.0),
+    (765.0, 581.0),
+    (845.0, 642.0),
+    (925.0, 703.0),
+];
+
+/// 生成 C# DXManager.CreateLights 同款径向渐变纹理（白心 → 边缘透明）
+pub fn make_light_texture(assets: &mut Assets<Image>, size: u32) -> Handle<Image> {
+    let mut rgba = vec![0u8; (size * size * 4) as usize];
+    let r = size as f32 / 2.0;
+    for y in 0..size {
+        for x in 0..size {
+            let dx = x as f32 + 0.5 - r;
+            let dy = y as f32 + 0.5 - r;
+            let d = (dx * dx + dy * dy).sqrt() / r;
+            let t = d.clamp(0.0, 1.0);
+            // C# ColorBlend: 1.0, 210/255, 160/255, 70/255, 40/255, 0 at 0,.2,.4,.6,.8,1.0
+            let stops = [0.0f32, 0.2, 0.4, 0.6, 0.8, 1.0];
+            let vals = [1.0f32, 210.0 / 255.0, 160.0 / 255.0, 70.0 / 255.0, 40.0 / 255.0, 0.0];
+            let mut a = 0.0f32;
+            for i in 0..5 {
+                if t >= stops[i] && t <= stops[i + 1] {
+                    let k = (t - stops[i]) / (stops[i + 1] - stops[i]);
+                    a = vals[i] + (vals[i + 1] - vals[i]) * k;
+                    break;
+                }
+            }
+            let idx = ((y * size + x) * 4) as usize;
+            let v = (a * 255.0).round() as u8;
+            rgba[idx] = v;
+            rgba[idx + 1] = v;
+            rgba[idx + 2] = v;
+            rgba[idx + 3] = v;
+        }
+    }
+    let mut img = make_image(rgba, size, size);
+    img.sampler = bevy::image::ImageSampler::linear();
+    assets.add(img)
+}
+
 /// 已生成的地板块 key（流式加载/卸载用）
 #[derive(Component)]
 pub struct ChunkKey(pub i32, pub i32, pub Layer);
@@ -153,6 +205,7 @@ impl Plugin for MapRenderPlugin {
         app.init_resource::<GameLibraries>();
         app.add_systems(Startup, spawn_camera);
         app.init_resource::<MapLayerShow>();
+        app.init_resource::<ChunkStream>();
         app.init_resource::<MapAnimClock>();
         app.init_resource::<TileImageCache>();
         register_blend_material(app);
@@ -173,6 +226,12 @@ impl Plugin for MapRenderPlugin {
             Update,
             camera_control.run_if(in_state(crate::scenes::AppState::Game)),
         );
+        // 关键：chunk 流式（之前定义了但漏注册 → 走出初始窗口后地图空白/黑色）
+        app.add_systems(
+            Update,
+            chunk_stream_system.run_if(in_state(crate::scenes::AppState::Game)),
+        );
+
     }
 }
 
@@ -395,6 +454,52 @@ fn setup_world(
         }
     }
     tracing::info!("🌳 Front 瓦片精灵生成完成: {} 个", front_spawned);
+
+    // 3.6 地图灯光（C# DrawLights Map Lights）：cell.Light 1..9 全量生成，
+    // 白色径向渐变 + ADD 混合，z=0.9（场景之上、UI 之下，F 键可开关）
+    let light_tex = make_light_texture(&mut assets, 128);
+    let mut light_spawned = 0usize;
+    for y in 0..map.height as usize {
+        for x in 0..map.width as usize {
+            let cell = &map.map_cells[x][y];
+            let l = cell.light;
+            if l == 0 || l >= 10 {
+                continue;
+            }
+            let li = ((l as usize % 10) * 3).min(9);
+            let (lw, lh) = LIGHT_SIZES[li];
+            // C#：若该格有 front 动画，叠加库偏移
+            let mut off_x = 0.0f32;
+            let mut off_y = 0.0f32;
+            if cell.front_animation_frame > 0 {
+                if let Some((file_index, image_index)) = cell.front_tile() {
+                    if let Some(info) = libraries.get_map_image(file_index, image_index) {
+                        off_x = info.offset_x as f32;
+                        off_y = info.offset_y as f32;
+                    }
+                }
+            }
+            let cell_left = x as f32 * TILE_WIDTH as f32;
+            let cell_bottom_world = -((y + 1) as f32 * TILE_HEIGHT as f32);
+            // C# p.Offset(-(W/2)-24+10, -(H/2)-16-5)，中心=cell_left+off_x-14+W/2, bottom-11
+            let cx = cell_left + off_x - 14.0 + lw / 2.0;
+            let cy = cell_bottom_world - 11.0;
+            let mat = blend_materials.add(crate::map_tile_anim::MapBlendMaterial {
+                color: bevy::prelude::LinearRgba::WHITE,
+                texture: light_tex.clone(),
+            });
+            commands.spawn((
+                MapLight,
+                bevy::prelude::Mesh2d(blend_quad.clone()),
+                bevy::prelude::MeshMaterial2d(mat),
+                Transform::from_xyz(cx, cy, 0.9)
+                    .with_scale(Vec3::new(lw, lh, 1.0)),
+                Visibility::default(),
+            ));
+            light_spawned += 1;
+        }
+    }
+    tracing::info!("💡 地图灯光生成完成: {} 个", light_spawned);
 
     // 3.7 C# DrawObjects：非 1x1/2x2 的静态 Middle（大树/建筑等）底边对齐单独画
     let mut obj_spawned = 0usize;
@@ -674,6 +779,8 @@ fn map_layer_toggle_system(
     mut show: ResMut<MapLayerShow>,
     mut floors: Query<(&MapFloorMark, &mut Visibility), (Without<FrontTile>,)>,
     mut fronts: Query<&mut Visibility, (With<FrontTile>, Without<MapFloorMark>)>,
+    mut anims: Query<&mut Visibility, (With<crate::map_tile_anim::MapTileAnim>, Without<MapFloorMark>, Without<FrontTile>)>,
+    mut lights: Query<&mut Visibility, (With<MapLight>, Without<MapFloorMark>, Without<FrontTile>, Without<crate::map_tile_anim::MapTileAnim>)>,
 ) {
     if keys.just_pressed(KeyCode::Digit1) { show.back = !show.back; tracing::info!("[LAYER] Back {}", if show.back {"ON"} else {"OFF"}); }
     if keys.just_pressed(KeyCode::Digit2) { show.middle = !show.middle; tracing::info!("[LAYER] Middle {}", if show.middle {"ON"} else {"OFF"}); }
@@ -685,6 +792,13 @@ fn map_layer_toggle_system(
     }
     for mut vis in fronts.iter_mut() {
         *vis = if show.front { Visibility::Visible } else { Visibility::Hidden };
+    }
+    // F 键同时控制动画/混合瓦片与地图灯光（原版 F 键开关动画/灯光）
+    for mut vis in anims.iter_mut() {
+        *vis = if show.anim { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for mut vis in lights.iter_mut() {
+        *vis = if show.anim { Visibility::Visible } else { Visibility::Hidden };
     }
 }
 
@@ -707,21 +821,17 @@ fn camera_follow_system(
             Without<Camera2d>,
         ),
     >,
-    time: Res<Time>,
 ) {
     let Ok(mut cam) = camera.single_mut() else { return };
     let Ok(player) = players.single() else { return };
+    // C# 风格：相机精确跟随玩家（玩家恒定在屏幕中心），
+    // 消除 lerp 滞后造成的画面轻微抖动/拖影
     let p = player.translation;
     let c = cam.translation;
-    // 首次/大跨度传送：直接对齐
     let far = (p.x - c.x).abs() > 1024.0 * 6.0 || (p.y - c.y).abs() > 768.0 * 6.0;
-    if far {
+    if far || (p.x - c.x).abs() > 0.01 || (p.y - c.y).abs() > 0.01 {
         cam.translation.x = p.x;
         cam.translation.y = p.y;
-    } else {
-        let t = (10.0 * time.delta_secs()).min(1.0);
-        cam.translation.x += (p.x - c.x) * t;
-        cam.translation.y += (p.y - c.y) * t;
     }
 }
 

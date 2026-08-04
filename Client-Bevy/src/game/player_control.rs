@@ -32,6 +32,10 @@ pub struct ControlState {
     /// 按住移动状态：目标格 + 模式（true=跑, false=走），用于持续追踪鼠标
     pub hold_target: Option<(i32, i32)>,
     pub hold_run: Option<bool>,
+    /// 是否已进入“按住移动”模式（长按 0.2s 后才置位，区分单击寻路）
+    pub hold_active: bool,
+    /// 按下时刻（秒），用于区分单击/长按
+    pub hold_pressed_at: Option<f32>,
 }
 
 impl Default for ControlState {
@@ -44,6 +48,8 @@ impl Default for ControlState {
             pickup_target: None,
             hold_target: None,
             hold_run: None,
+            hold_active: false,
+            hold_pressed_at: None,
         }
     }
 }
@@ -109,10 +115,11 @@ fn player_input_system(
     let Some(cursor_logical) = window.cursor_position() else { return };
     let Ok(cam_tf) = camera.single() else { return };
 
-    // UI 按钮点击时不处理地图交互
+    // UI 按钮点击时不处理地图交互（按钮 rect 是逻辑坐标，必须用逻辑光标比较；
+    // 之前误用物理光标 → DPI 1.5 下坐标错位，右下大部分点击被当成主对话框忽略）
     let over_ui = buttons.iter().any(|b| {
         let (x, y, w, h) = b.rect;
-        cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h
+        cursor_logical.x >= x && cursor_logical.x <= x + w && cursor_logical.y >= y && cursor_logical.y <= y + h
     });
 
     // DPI 环境下物理/逻辑坐标可能不一致，两个换算点都参与命中
@@ -126,7 +133,7 @@ fn player_input_system(
     }
 
     // 右键：寻路移动（原版 NewMove + PathFinder.FindPath）
-    if mouse.just_pressed(MouseButton::Right) && !over_ui && !over_main_dialog(cursor) && !over_chat_panel(cursor) {
+    if mouse.just_pressed(MouseButton::Right) && !over_ui && !over_main_dialog(cursor_logical) && !over_chat_panel(cursor_logical) {
         let Some(map) = &game_data.map else { return };
         let target_tile = world_to_tile(world.x, world.y);
         let Ok((pe, ptf, _)) = players.single() else { return };
@@ -142,6 +149,7 @@ fn player_input_system(
                     step_timer_ms: 0.0,
                     run: control.autorun,
                     last: None,
+                    turn_acc: 0.0,
                 });
                 tracing::info!("🚶 寻路 {} -> {}（{} 格）", from_tile.0, from_tile.1, len);
             }
@@ -157,8 +165,8 @@ fn player_input_system(
         && !amount.visible
         && !confirm.visible
         && !over_ui
-        && !over_main_dialog(cursor)
-        && !over_chat_panel(cursor)
+        && !over_main_dialog(cursor_logical)
+        && !over_chat_panel(cursor_logical)
     {
         tracing::debug!("🖱️ 左键点击 screen=({},{}) world=({:.0},{:.0})", cursor.x, cursor.y, world.x, world.y);
         // 命中测试：世界坐标下最近的对象（20px 内）
@@ -210,6 +218,7 @@ fn player_input_system(
                                     step_timer_ms: 0.0,
                                     run: control.autorun,
                                     last: None,
+                                    turn_acc: 0.0,
                                 });
                                 control.attack_target = None;
                                 control.pickup_target = Some(item_id);
@@ -328,6 +337,7 @@ fn auto_attack_system(
 fn hold_move_system(
     mut commands: Commands,
     mut control: ResMut<ControlState>,
+    time: Res<Time>,
     game_data: Res<GameData>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
@@ -368,8 +378,21 @@ fn hold_move_system(
         None
     };
 
-    match run {
-        Some(run) => {
+    // 长按 0.2s 才进入“按住移动”模式（单击只触发 NewMove 寻路）
+    let t = time.elapsed_secs();
+    if mouse.just_pressed(MouseButton::Right) || mouse.just_pressed(MouseButton::Left) {
+        control.hold_pressed_at = Some(t);
+    }
+    let pressed_long = control
+        .hold_pressed_at
+        .map(|p| t - p >= 0.2)
+        .unwrap_or(false);
+    if run.is_some() && pressed_long {
+        control.hold_active = true;
+    }
+
+    if control.hold_active {
+        if let Some(run) = run {
             let Ok((pe, ptf, mut lm, mut anim)) = players.single_mut() else { return };
             let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
             let need_repath = control.hold_target != Some(target_tile)
@@ -382,6 +405,9 @@ fn hold_move_system(
                     return;
                 }
                 if let Some(p) = pathfinding::find_path(map, from_tile, target_tile) {
+                    if p.is_empty() {
+                        tracing::debug!("[HOLD] 目标不可达 {:?}", target_tile);
+                    }
                     if !p.is_empty() {
                         let first = p[0];
                         if let Some(d) =
@@ -399,15 +425,17 @@ fn hold_move_system(
                             step_timer_ms: 0.0,
                             run,
                             last: None,
+                            turn_acc: 0.0,
                         });
                     }
                 }
             }
-        }
-        None => {
+        } else {
+            // 按住移动中松开 → 立即停下
             control.hold_target = None;
             control.hold_run = None;
-            // 松开鼠标 → 立即停下
+            control.hold_active = false;
+            control.hold_pressed_at = None;
             if let Ok((_, _, mut lm, mut anim)) = players.single_mut() {
                 lm.path.clear();
                 lm.last = None;
@@ -415,5 +443,11 @@ fn hold_move_system(
                 anim.frame_index = 0;
             }
         }
+    } else if run.is_none() {
+        // 未进入按住模式且鼠标未按住：清除按住状态（单击寻路路径保留）
+        control.hold_target = None;
+        control.hold_run = None;
+        control.hold_active = false;
+        control.hold_pressed_at = None;
     }
 }

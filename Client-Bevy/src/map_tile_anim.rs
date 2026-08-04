@@ -75,14 +75,15 @@ impl Material2d for MapBlendMaterial {
         _layout: &MeshVertexBufferLayoutRef,
         _key: Material2dKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
+        // 与 C# DXManager.SetBlend(true) 一致：SourceAlpha / One（ADD）
         let add = BlendState {
             color: BlendComponent {
-                src_factor: BlendFactor::One,
+                src_factor: BlendFactor::SrcAlpha,
                 dst_factor: BlendFactor::One,
                 operation: BlendOperation::Add,
             },
             alpha: BlendComponent {
-                src_factor: BlendFactor::One,
+                src_factor: BlendFactor::SrcAlpha,
                 dst_factor: BlendFactor::One,
                 operation: BlendOperation::Add,
             },

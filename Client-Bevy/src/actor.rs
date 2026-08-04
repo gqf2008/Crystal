@@ -1295,7 +1295,7 @@ fn log_player_walk(local: Query<&Transform, With<LocalPlayer>>, mut frames: Loca
         return;
     }
     *frames += 1;
-    if *frames > 90 || !(*frames).is_multiple_of(6) {
+    if !(*frames).is_multiple_of(6) {
         return;
     }
     if let Ok(tf) = local.single() {

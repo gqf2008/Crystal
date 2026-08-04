@@ -56,6 +56,8 @@ pub mod trust_merchant;
 
 use bevy::prelude::*;
 
+use crate::scenes::AppState;
+
 /// 对话框类型
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum DialogKind {
@@ -131,15 +133,91 @@ impl DialogManager {
     }
 }
 
+
 /// 对话框根标记（OnExit(Game) 统一清理）
 #[derive(Component)]
 pub struct DialogRoot(pub DialogKind);
+
+/// 弹窗拖动状态（#34：原版弹窗可拖动）
+#[derive(Resource, Default)]
+pub struct DialogDrag {
+    /// 正在拖动的对话框类型
+    pub dragging: Option<DialogKind>,
+    /// 拖动开始时的鼠标位置（逻辑坐标）
+    pub start_cursor: Vec2,
+    /// 拖动开始时各实体的原始 Transform（用于增量位移）
+    pub origins: std::collections::HashMap<Entity, Vec3>,
+}
+
+/// 通用弹窗拖动系统：
+/// - 按 DialogKind 聚合实体，用实体位置估算窗口包围盒，标题栏（顶部 28px）可拖
+/// - 拖动时对所有该对话框实体整体平移（保持相对布局）
+pub fn dialog_drag_system(
+    mut commands: Commands,
+    mut drag: ResMut<DialogDrag>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    mut dialogs: Query<(Entity, &DialogRoot, &mut Transform)>,
+) {
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+
+    // 聚合每个对话框的包围盒
+    let mut boxes: std::collections::HashMap<DialogKind, (f32, f32, f32, f32)> =
+        std::collections::HashMap::new();
+    for (_, root, tf) in dialogs.iter() {
+        let (x, y) = (tf.translation.x, -tf.translation.y);
+        let b = boxes.entry(root.0).or_insert((x, y, x, y));
+        b.0 = b.0.min(x);
+        b.1 = b.1.min(y);
+        b.2 = b.2.max(x);
+        b.3 = b.3.max(y);
+    }
+
+    // 点击标题栏开始拖动
+    if mouse.just_pressed(MouseButton::Left) && drag.dragging.is_none() {
+        for (kind, (minx, miny, maxx, maxy)) in &boxes {
+            // 标题栏：窗口顶部 28px（粗略；至少 24px 宽）
+            if cursor.x >= *minx && cursor.x <= *maxx && cursor.y >= *miny && cursor.y <= *miny + 28.0 {
+                let origins = dialogs
+                    .iter()
+                    .filter(|(_, r, _)| r.0 == *kind)
+                    .map(|(e, _, tf)| (e, tf.translation))
+                    .collect::<std::collections::HashMap<_, _>>();
+                drag.dragging = Some(*kind);
+                drag.start_cursor = cursor;
+                drag.origins = origins;
+                tracing::info!("🖱️ 拖动对话框 {:?}", kind);
+                break;
+            }
+        }
+    }
+
+    // 拖动中：整体平移
+    if let Some(kind) = drag.dragging {
+        if mouse.pressed(MouseButton::Left) {
+            let delta = cursor - drag.start_cursor;
+            for (e, _, mut tf) in dialogs.iter_mut() {
+                if let Some(orig) = drag.origins.get(&e) {
+                    tf.translation = *orig + Vec3::new(delta.x, -delta.y, 0.0);
+                }
+            }
+        } else {
+            // 松开结束
+            drag.dragging = None;
+            drag.origins.clear();
+        }
+    }
+}
+
 
 pub struct DialogsPlugin;
 
 impl Plugin for DialogsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DialogManager>();
+        app.init_resource::<DialogDrag>();
+        app.add_systems(Update, dialog_drag_system.run_if(in_state(AppState::Game)));
         app.init_resource::<inventory::InventoryState>();
         app.add_plugins(text_input::TextInputPlugin);
         app.init_resource::<character::CharacterState>();

@@ -22,8 +22,12 @@ pub struct DayNight {
 
 impl Default for DayNight {
     fn default() -> Self {
+        let start = std::env::var("BEVY_START_MINUTES")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(8.0 * 60.0);
         Self {
-            time_minutes: 8.0 * 60.0, // 早上 8 点开始
+            time_minutes: start, // 默认早上 8 点；BEVY_START_MINUTES=1320 可切到晚上 22:00 验证灯光
             day_length_secs: 24.0 * 60.0, // 24 分钟一天
             enabled: true,
         }
@@ -67,7 +71,8 @@ fn spawn_overlay(
             color: Color::srgba(0.02, 0.02, 0.12, 0.0),
             ..default()
         },
-        Transform::from_xyz(512.0, -384.0, 40.0),
+        // z=0.8：只压暗场景（地图/角色 z<=0.5），灯光 0.9 在其上，UI z>=1 不受影响
+        Transform::from_xyz(512.0, -384.0, 0.8),
         Visibility::Visible,
     ));
 }
