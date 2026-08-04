@@ -885,10 +885,15 @@ impl Message<TakeDamage> for PlayerActor {
             self.state.buffs.clear();
             debug!("Player {} died (attacker={})", self.state.name, msg.attacker_id);
 
-            // 发送 S.Death 包给死亡玩家（客户端需要此包进入死亡状态，C# PlayerObject.Die L649）
+            // 发送 S.Death 包给死亡玩家（C# Shared/ServerPackets.cs Death: [Location Point][Direction u8]）
+            // 之前误发空 body，客户端 read_body 解析失败 → 不进入死亡状态（#55 实测发现）
+            let mut death_body = Vec::new();
+            death_body.extend_from_slice(&self.state.x.to_le_bytes());
+            death_body.extend_from_slice(&self.state.y.to_le_bytes());
+            death_body.push(self.state.direction);
             let _ = self.gate_ref.tell(SendToClient {
                 session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Death as i16, &[]),
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Death as i16, &death_body),
             }).await;
             // S.ObjectDied 广播由 WorldActor 的 combat.rs 死亡分支处理（已实现）
 

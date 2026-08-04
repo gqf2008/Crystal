@@ -1995,6 +1995,7 @@ fn handle_packet(
         }
         x if x == ServerPacketIds::ObjectWalk as i16 => {
             if let Ok(p) = objects::ObjectWalk::read_body(&mut cur) {
+                tracing::debug!("🚶 ObjectWalk id={} -> ({},{})", p.object_id, p.location_x, p.location_y);
                 motions.write(NetMotion::Walk {
                     object_id: p.object_id,
                     x: p.location_x,
@@ -2058,12 +2059,18 @@ fn handle_packet(
         }
         // ---- M46: 玩家死亡/复活 ----
         x if x == ServerPacketIds::Death as i16 => {
+            // 容忍空 body：ServerRust 早期版本发空 Death 包（#55 实测），
+            // 标准协议为 [loc_x i32][loc_y i32][direction u8]；解析失败也进入死亡状态
+            let mut loc = (0u32, 0u32);
+            let mut parsed = false;
             if let Ok(p) = combat::Death::read_body(&mut cur) {
-                let pid = hud.player_object_id.unwrap_or(100);
-                hud.dead = true;
-                combat_evt.write(CombatEvent::Died { object_id: pid, death_type: 0 });
-                tracing::info!("💀 玩家死亡 ({},{})", p.location_x, p.location_y);
+                loc = (p.location_x, p.location_y);
+                parsed = true;
             }
+            let pid = hud.player_object_id.unwrap_or(100);
+            hud.dead = true;
+            combat_evt.write(CombatEvent::Died { object_id: pid, death_type: 0 });
+            tracing::info!("💀 玩家死亡 ({},{}){}", loc.0, loc.1, if parsed { "" } else { "（空 body 容错）" });
         }
         x if x == ServerPacketIds::Revived as i16 => {
             if combat::Revived::read_body(&mut cur).is_ok() {

@@ -27,15 +27,16 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn async_main() -> anyhow::Result<()> {
-    // 初始化日志
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("crystal_server=info".parse()?)
-                .add_directive("tokio=warn".parse()?)
-                .add_directive("kameo=warn".parse()?),
-        )
-        .init();
+    // 初始化日志：显式设置 RUST_LOG 时以它为准（否则默认指令会覆盖环境变量）
+    let env_filter = if std::env::var("RUST_LOG").is_ok() {
+        tracing_subscriber::EnvFilter::from_default_env()
+    } else {
+        tracing_subscriber::EnvFilter::from_default_env()
+            .add_directive("crystal_server=info".parse()?)
+            .add_directive("tokio=warn".parse()?)
+            .add_directive("kameo=warn".parse()?)
+    };
+    tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
     info!("Crystal Server starting...");
 
