@@ -10,7 +10,7 @@ use bevy::prelude::*;
 
 use crate::game::dialogs::DialogRoot;
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -142,7 +142,7 @@ fn spawn_npc_goods(
 /// 显示/隐藏 + 商品列表渲染 + 选中/购买/关闭
 fn npc_goods_ui_system(
     mut state: ResMut<NpcGoodsState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     close: Query<&UiButton, (With<NpcGoodsClose>, Without<NpcGoodsBuy>)>,

@@ -11,7 +11,7 @@ use bevy::sprite::Anchor;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect};
@@ -101,7 +101,7 @@ fn cleanup_mail(mut commands: Commands, roots: Query<Entity, With<DialogRoot>>) 
 /// 写邮件界面：写按钮 → 打开；发送/取消
 fn mail_compose_system(
     mut mail: ResMut<MailState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
     write_btn: Query<&UiButton, With<MailWrite>>,
     send_btn: Query<&UiButton, With<MailSendBtn>>,
@@ -145,7 +145,7 @@ fn mail_compose_system(
 }
 
 /// 发送写好的邮件（原版 C# MailDialog 发送 → C.SendMail{Name, Message}；subject 由正文首行派生）
-pub fn send_composed_mail(net: &NetworkContext, input: &crate::game::dialogs::text_input::TextInputState) {
+pub fn send_composed_mail(net: &NetConnection, input: &crate::game::dialogs::text_input::TextInputState) {
     let to = input.texts.get(0).cloned().unwrap_or_default();
     let subject = input.texts.get(1).cloned().unwrap_or_default();
     let body = input.texts.get(2).cloned().unwrap_or_default();
@@ -338,7 +338,7 @@ fn spawn_mail(
 fn mail_ui_system(
     mut mgr: ResMut<DialogManager>,
     mail: Res<MailState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     close: Query<&UiButton, With<MailClose>>,

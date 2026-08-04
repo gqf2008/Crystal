@@ -391,7 +391,7 @@ fn capture_shot(commands: &mut Commands, counter: &mut u32) {
 
 /// --auto-attack：自动攻击（验证 攻击→受击→飘字 链路）
 fn auto_attack_debug(
-    net: Res<client_bevy::network::NetworkContext>,
+    net: Res<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mut timer: Local<f32>,
@@ -447,7 +447,7 @@ fn auto_open_inventory(
 /// --shop-test：自动 NPC 商店买卖链路（CallNPC → [@Buy] → BuyItem → SellItem）
 #[allow(clippy::too_many_arguments)]
 fn auto_shop_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     npc_dialog: Res<client_bevy::game::dialogs::npc::NpcDialogState>,
@@ -622,7 +622,7 @@ fn auto_shop_test(
 /// --storage-test：自动仓库存取链路（CallNPC → [@Storage] → StoreItem → TakeBackItem）
 #[allow(clippy::too_many_arguments)]
 fn auto_storage_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     storage: Res<client_bevy::game::dialogs::storage::StorageState>,
@@ -729,7 +729,7 @@ fn auto_storage_test(
 /// --group-test：自动组队邀请链路（登录后向 bevy2char 发 AddMember，等成员列表）
 #[allow(clippy::too_many_arguments)]
 fn auto_group_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     group: Res<client_bevy::game::dialogs::group::GroupState>,
@@ -778,7 +778,7 @@ fn auto_group_test(
 /// --group-accept：自动接受组队邀请（自动化验证用）
 #[allow(clippy::too_many_arguments)]
 fn auto_group_accept(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     mut group: ResMut<client_bevy::game::dialogs::group::GroupState>,
     mut accepted: Local<bool>,
@@ -803,7 +803,7 @@ fn auto_group_accept(
 /// --mail-test：自动发邮件（登录后向 bevy2char 发 SendMail，含金币）
 #[allow(clippy::too_many_arguments)]
 fn auto_mail_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mut t: Local<f32>,
@@ -838,7 +838,7 @@ fn auto_mail_test(
 /// --mail-read：自动读取新邮件（收到列表条目 → ReadMail → 详情）
 #[allow(clippy::too_many_arguments)]
 fn auto_mail_read(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     mail: Res<client_bevy::game::dialogs::mail::MailState>,
     mut read_ids: Local<std::collections::HashSet<u64>>,
@@ -876,7 +876,7 @@ fn auto_mail_read(
 /// --trade-test：自动交易链路（发起者：TradeRequest → 金币 500 → 放入物品 → 锁定 → 完成）
 #[allow(clippy::too_many_arguments)]
 fn auto_trade_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mut trade: ResMut<client_bevy::game::dialogs::trade::TradeState>,
@@ -960,7 +960,7 @@ fn auto_trade_test(
 /// --trade-accept：自动接受交易邀请 + 加金币 300 + 锁定
 #[allow(clippy::too_many_arguments)]
 fn auto_trade_accept(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mut trade: ResMut<client_bevy::game::dialogs::trade::TradeState>,
@@ -1025,7 +1025,7 @@ fn auto_trade_accept(
 /// 前提：DB 配置 bevychar 在 Deer(340,325) 左侧、攻击力秒杀、Deer 掉落 chance=1.0
 #[allow(clippy::too_many_arguments)]
 fn auto_drop_pick_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     hud: Res<client_bevy::game::hud::HudState>,
@@ -1103,7 +1103,7 @@ fn auto_drop_pick_test(
 /// --friend-test：自动加好友（AddFriend bevy2char → 等 FriendUpdate 列表出现）
 #[allow(clippy::too_many_arguments)]
 fn auto_friend_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     friend: Res<client_bevy::game::dialogs::friend::FriendState>,
@@ -1149,7 +1149,7 @@ fn auto_friend_test(
 /// --mail-compose-test：写邮件界面（输入框状态 → send_composed_mail → B 读取）
 #[allow(clippy::too_many_arguments)]
 fn auto_mail_compose_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mut mail: ResMut<client_bevy::game::dialogs::mail::MailState>,
@@ -1200,7 +1200,7 @@ fn auto_mail_compose_test(
 /// --guild-test：创建行会（打开行会对话框 → 输入行会名 → GuildNameReturn → 等 GuildStatus 信息）
 #[allow(clippy::too_many_arguments)]
 fn auto_guild_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     guild: Res<client_bevy::game::dialogs::guild::GuildState>,
@@ -1269,7 +1269,7 @@ fn auto_guild_test(
 /// --guild-invite-test：创建行会 → 邀请 bevy2char → 等成员数 2
 #[allow(clippy::too_many_arguments)]
 fn auto_guild_invite_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     guild: Res<client_bevy::game::dialogs::guild::GuildState>,
@@ -1334,7 +1334,7 @@ fn auto_guild_invite_test(
 /// --guild-accept：自动接受行会邀请（GuildInvite → C.GuildInvite{true} → 等 in_guild）
 #[allow(clippy::too_many_arguments)]
 fn auto_guild_accept(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mut guild: ResMut<client_bevy::game::dialogs::guild::GuildState>,
@@ -1379,7 +1379,7 @@ fn auto_guild_accept(
 /// --guild-notice-test：创建行会 → 设置公告 → 等 GuildNoticeChange 回包
 #[allow(clippy::too_many_arguments)]
 fn auto_guild_notice_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     guild: Res<client_bevy::game::dialogs::guild::GuildState>,
@@ -1434,7 +1434,7 @@ fn auto_guild_notice_test(
 /// --guild-gold-test：创建行会 → 存入 100 → 取出 50 → 验证仓库金币
 #[allow(clippy::too_many_arguments)]
 fn auto_guild_gold_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     guild: Res<client_bevy::game::dialogs::guild::GuildState>,
@@ -1554,7 +1554,7 @@ fn auto_ranking_test(
 /// --guild-item-test：行会仓库物品链路（打开仓库 → 存入背包物品 → 取出）
 #[allow(clippy::too_many_arguments)]
 fn auto_guild_item_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     guild: Res<client_bevy::game::dialogs::guild::GuildState>,
@@ -1722,7 +1722,7 @@ fn auto_guild_item_test(
 /// --mentor-test：发起拜师 → 等 MentorUpdate → 解除（配合 --mentor-accept）
 #[allow(clippy::too_many_arguments)]
 fn auto_mentor_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mentor: Res<client_bevy::game::dialogs::mentor::MentorState>,
@@ -1789,7 +1789,7 @@ fn auto_mentor_test(
 /// --mentor-accept：允许拜师 → 接受邀请 → 等 MentorUpdate → 等解除
 #[allow(clippy::too_many_arguments)]
 fn auto_mentor_accept(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mentor: Res<client_bevy::game::dialogs::mentor::MentorState>,
@@ -1868,7 +1868,7 @@ fn auto_mentor_accept(
 /// --market-test：寄售背包物品×2 → 取回一件 → 留一件给买家（配合 --market-buy）
 #[allow(clippy::too_many_arguments)]
 fn auto_market_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     market: Res<client_bevy::game::dialogs::market::MarketState>,
@@ -2049,7 +2049,7 @@ fn auto_market_test(
 /// --market-buy：刷新市场 → 买下卖家 bevychar 的商品（配合 --market-test）
 #[allow(clippy::too_many_arguments)]
 fn auto_market_buy(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     market: Res<client_bevy::game::dialogs::market::MarketState>,
@@ -2147,7 +2147,7 @@ fn auto_market_buy(
 /// --gameshop-test：打开商城 → 请求目录 → 购买第一件可负担商品 → 邮件送达
 #[allow(clippy::too_many_arguments)]
 fn auto_gameshop_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     shop: Res<client_bevy::game::dialogs::game_shop::GameShopState>,
@@ -2246,7 +2246,7 @@ fn auto_gameshop_test(
 /// --territory-test：打开行会领地 → 购买第一个无主领地 → 向 TestGuildWar 宣战
 #[allow(clippy::too_many_arguments)]
 fn auto_territory_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     territory: Res<client_bevy::game::dialogs::guild_territory::GuildTerritoryState>,
@@ -2375,7 +2375,7 @@ fn auto_territory_test(
 /// --territory-war：创建目标行会 TestGuildWar（供 --territory-test 宣战）
 #[allow(clippy::too_many_arguments)]
 fn auto_territory_war(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     guild: Res<client_bevy::game::dialogs::guild::GuildState>,
@@ -2423,7 +2423,7 @@ fn auto_territory_war(
 /// --combat-test：自动选怪 → 连续 FireBall → 验证死亡 + 掉落（M37 战斗闭环）
 #[allow(clippy::too_many_arguments)]
 fn auto_combat_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mut t: Local<f32>,
@@ -2598,7 +2598,7 @@ fn auto_combat_test(
 /// --fishing-test：打开钓鱼 → 抛竿 → 等 FishingUpdate → 等收获聊天消息
 #[allow(clippy::too_many_arguments)]
 fn auto_fishing_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     fishing: Res<client_bevy::game::dialogs::fishing::FishingState>,
@@ -2671,7 +2671,7 @@ fn auto_fishing_test(
 /// --refine-test：精炼全流程（存入 → 开始 60 秒 → 查看 → 取回）
 #[allow(clippy::too_many_arguments)]
 fn auto_refine_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     chat: Res<client_bevy::game::chat::ChatState>,
@@ -2800,7 +2800,7 @@ fn auto_refine_test(
 /// --craft-test：打开合成 → 配方1 → 合成 → 等 CraftItem 响应/聊天
 #[allow(clippy::too_many_arguments)]
 fn auto_craft_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     craft: Res<client_bevy::game::dialogs::craft::CraftState>,
@@ -2862,7 +2862,7 @@ fn auto_craft_test(
 /// --rental-test（租方）：发起租赁 → 等 UpdateRentalItem → 锁定费用 → 确认
 #[allow(clippy::too_many_arguments)]
 fn auto_rental_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     rental: Res<client_bevy::game::dialogs::item_rental::ItemRentalState>,
@@ -2935,7 +2935,7 @@ fn auto_rental_test(
 /// --rental-owner（物主）：等请求 → 存入物品 → 设费/期 → 锁定物品 → 等可确认
 #[allow(clippy::too_many_arguments)]
 fn auto_rental_owner(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     rental: Res<client_bevy::game::dialogs::item_rental::ItemRentalState>,
@@ -3020,7 +3020,7 @@ fn auto_rental_owner(
 /// --quest-test：打开任务日志 → 接受任务1 → 等 ChangeQuest → 放弃
 #[allow(clippy::too_many_arguments)]
 fn auto_quest_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mut quest_log: ResMut<client_bevy::game::dialogs::quest_log::QuestLogState>,
@@ -3112,7 +3112,7 @@ fn auto_quest_test(
 /// --buff-test：打开状态对话框 → 施放 Fury（攻击提升）→ 等 AddBuff
 #[allow(clippy::too_many_arguments)]
 fn auto_buff_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     buff: Res<client_bevy::game::dialogs::buff::BuffState>,
@@ -3178,7 +3178,7 @@ fn auto_buff_test(
 /// --report-test：打开举报 → 提交 → 等系统消息确认
 #[allow(clippy::too_many_arguments)]
 fn auto_report_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     chat: Res<client_bevy::game::chat::ChatState>,
@@ -3228,7 +3228,7 @@ fn auto_report_test(
 /// --inspect-test：找目标玩家 → 发 Inspect → 等 PlayerInspect
 #[allow(clippy::too_many_arguments)]
 fn auto_inspect_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     inspect: Res<client_bevy::game::dialogs::inspect::InspectState>,
@@ -3297,7 +3297,7 @@ fn auto_inspect_test(
 /// --creature-test：打开宠物对话框 → 自动请求列表 → 等解析完成
 #[allow(clippy::too_many_arguments)]
 fn auto_creature_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     creature: Res<client_bevy::game::dialogs::creature::CreatureState>,
@@ -3345,7 +3345,7 @@ fn auto_creature_test(
 /// --hero-test：打开英雄 → 切换英雄1 → 等 ChangeHero → 切回主角色
 #[allow(clippy::too_many_arguments)]
 fn auto_hero_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     hero: Res<client_bevy::game::dialogs::hero::HeroState>,
@@ -3403,7 +3403,7 @@ fn auto_hero_test(
 /// --marriage-test（求婚方）：求婚 → 等 LoverUpdate → 离婚
 #[allow(clippy::too_many_arguments)]
 fn auto_marriage_test(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     relationship: Res<client_bevy::game::dialogs::relationship::RelationshipState>,
@@ -3461,7 +3461,7 @@ fn auto_marriage_test(
 /// --marriage-accept（被求婚方）：接受求婚 → 等结婚 → 离婚确认
 #[allow(clippy::too_many_arguments)]
 fn auto_marriage_accept(
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     relationship: Res<client_bevy::game::dialogs::relationship::RelationshipState>,
@@ -3539,7 +3539,7 @@ fn auto_mount_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     mounts: Query<Option<&client_bevy::actor::MountState>, With<client_bevy::actor::LocalPlayer>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -3621,7 +3621,7 @@ fn auto_mount_test(
 fn auto_reconnect_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    mut net: ResMut<client_bevy::network::NetworkContext>,
+    mut net: ResMut<client_bevy::network::NetConnection>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut phase: Local<f32>,
@@ -3678,7 +3678,7 @@ fn auto_roll_test(
     bm: Res<client_bevy::game::dialogs::big_map::BigMapState>,
     game_data: Res<client_bevy::map_renderer::GameData>,
     mut npc_dialog: ResMut<client_bevy::game::dialogs::npc::NpcDialogState>,
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut phase: Local<f32>,
@@ -3889,7 +3889,7 @@ fn auto_awake_test(
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
     mut aw: ResMut<client_bevy::game::dialogs::npc_awake::NpcAwakeState>,
     hud: Res<client_bevy::game::hud::HudState>,
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
     mut phase: Local<f32>,
@@ -4040,7 +4040,7 @@ fn auto_bigmap_test(
     time: Res<Time>,
     mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
     mut bm: ResMut<client_bevy::game::dialogs::big_map::BigMapState>,
-    net: ResMut<client_bevy::network::NetworkContext>,
+    net: ResMut<client_bevy::network::NetConnection>,
     players: Query<&Transform, With<client_bevy::actor::LocalPlayer>>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
@@ -4320,7 +4320,8 @@ fn auto_ui_dialog_test(
 
 /// --auto-enter：自动驱动 mock 登录流程（Login→Select→Game，验证网络管道）
 fn auto_enter(
-    mut net: ResMut<client_bevy::network::NetworkContext>,
+    mut net: ResMut<client_bevy::network::NetConnection>,
+    mut session: ResMut<client_bevy::network::SessionState>,
     state: Res<State<AppState>>,
     time: Res<Time>,
     mut login_sent: Local<bool>,
@@ -4348,12 +4349,12 @@ fn auto_enter(
         });
     }
     // 在选角界面停留 3 秒再进游戏（便于 live 截屏验证选角界面）
-    if *state == AppState::Select && net.selected_index.is_none() {
+    if *state == AppState::Select && session.selected_index.is_none() {
         *select_timer += time.delta_secs();
         if *select_timer >= 3.0 {
-            let first_index = net.characters.first().map(|c| c.index);
+            let first_index = session.characters.first().map(|c| c.index);
             if let Some(idx) = first_index {
-                net.selected_index = Some(idx);
+                session.selected_index = Some(idx);
                 net.send_packet(&StartGame {
                     character_index: idx,
                 });
@@ -4364,7 +4365,8 @@ fn auto_enter(
 
 /// BEVY_DEMO_DELETE=1：自动登录→进选角→选中角色→打开删除询问框（截图验证用）
 fn demo_delete_flow(
-    mut net: ResMut<client_bevy::network::NetworkContext>,
+    mut net: ResMut<client_bevy::network::NetConnection>,
+    mut session: ResMut<client_bevy::network::SessionState>,
     state: Res<State<AppState>>,
     mut modal: ResMut<client_bevy::ui::modal_box::ModalState>,
     time: Res<Time>,
@@ -4385,11 +4387,11 @@ fn demo_delete_flow(
         *select_timer += time.delta_secs();
         if *select_timer >= 1.0 {
             *opened = true;
-            if net.selected_index.is_none() {
-                net.selected_index = net.characters.first().map(|c| c.index);
+            if session.selected_index.is_none() {
+                session.selected_index = session.characters.first().map(|c| c.index);
             }
             modal.kind = client_bevy::ui::modal_box::ModalKind::DeleteAsk;
-            tracing::info!("[DEMO] 打开删除询问框, selected={:?}", net.selected_index);
+            tracing::info!("[DEMO] 打开删除询问框, selected={:?}", session.selected_index);
         }
     }
 }
@@ -4438,7 +4440,7 @@ fn auto_pickup_system(
     mut commands: Commands,
     mut timer: Local<f32>,
     time: Res<Time>,
-    net: Res<client_bevy::network::NetworkContext>,
+    net: Res<client_bevy::network::NetConnection>,
     mut control: ResMut<client_bevy::game::player_control::ControlState>,
     game_data: Res<client_bevy::map_renderer::GameData>,
     players: Query<(Entity, &Transform), With<client_bevy::actor::LocalPlayer>>,
@@ -4493,7 +4495,7 @@ fn auto_cast_system(
     mut timer: Local<f32>,
     mut fired: Local<bool>,
     time: Res<Time>,
-    net: Res<client_bevy::network::NetworkContext>,
+    net: Res<client_bevy::network::NetConnection>,
     magics: Res<client_bevy::game::skills::MagicsState>,
 ) {
     *timer += time.delta_secs();
@@ -4519,7 +4521,7 @@ fn auto_equip_system(
     mut timer: Local<f32>,
     mut fired: Local<bool>,
     time: Res<Time>,
-    net: Res<client_bevy::network::NetworkContext>,
+    net: Res<client_bevy::network::NetConnection>,
     hud: Res<client_bevy::game::hud::HudState>,
 ) {
     if *fired {
@@ -4547,7 +4549,7 @@ fn auto_life_system(
     mut timer: Local<f32>,
     mut phase: Local<u8>,
     time: Res<Time>,
-    net: Res<client_bevy::network::NetworkContext>,
+    net: Res<client_bevy::network::NetConnection>,
     hud: Res<client_bevy::game::hud::HudState>,
 ) {
     *timer += time.delta_secs();
@@ -4588,7 +4590,7 @@ fn auto_life_system(
 /// --auto-quest：任务闭环自动化（#44）
 /// 阶段：0 接受任务1 → 1 等 ChangeQuest → 2 自动击杀怪物101 直到完成 → 3 交任务验证 CompleteQuest
 fn auto_quest_system(
-    net: Res<client_bevy::network::NetworkContext>,
+    net: Res<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     quest_log: Res<client_bevy::game::dialogs::quest_log::QuestLogState>,
@@ -4668,7 +4670,7 @@ fn auto_quest_system(
 
 /// --auto-revive：死亡后 1s 自动发 TownRevive（验证 死亡→复活 全链路，#46）
 fn auto_revive_system(
-    net: Res<client_bevy::network::NetworkContext>,
+    net: Res<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     hud: Res<client_bevy::game::hud::HudState>,
@@ -4695,7 +4697,7 @@ fn auto_cast_loop_system(
     mut timer: Local<f32>,
     mut last_cast: Local<f32>,
     time: Res<Time>,
-    net: Res<client_bevy::network::NetworkContext>,
+    net: Res<client_bevy::network::NetConnection>,
     magics: Res<client_bevy::game::skills::MagicsState>,
     hud: Res<client_bevy::game::hud::HudState>,
 ) {
@@ -4765,7 +4767,7 @@ struct RealVerifyState {
 #[allow(clippy::too_many_arguments)]
 fn real_verify_system(
     mut commands: Commands,
-    net: Res<client_bevy::network::NetworkContext>,
+    net: Res<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     mut control: ResMut<client_bevy::game::player_control::ControlState>,

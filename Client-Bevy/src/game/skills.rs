@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use mir2_shared::data::client_data::ClientMagic;
 use mir2_shared::enums::Spell;
 
-use crate::network::NetworkContext;
+use crate::network::{NetConnection, SessionState};
 use crate::scenes::AppState;
 
 /// 已学技能列表（NewMagic 包写入）
@@ -76,7 +76,8 @@ impl Plugin for SkillsPlugin {
 fn skill_bar_system(
     keys: Res<ButtonInput<KeyCode>>,
     magics: Res<MagicsState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
+    session: Res<SessionState>,
     control: Res<crate::game::player_control::ControlState>,
     actors: Query<(&crate::actor::NetObjectId, &Transform), Without<crate::actor::LocalPlayer>>,
     players: Query<&Transform, (With<crate::actor::LocalPlayer>, With<crate::actor::NetObjectId>)>,
@@ -102,14 +103,14 @@ fn skill_bar_system(
         .single()
         .ok()
         .map(|tf| crate::game::movement::world_to_tile(tf.translation.x, tf.translation.y))
-        .or_else(|| net.self_position.map(|(x, y, _)| (x, y)))
+        .or_else(|| session.self_position.map(|(x, y, _)| (x, y)))
         .unwrap_or((0, 0));
     // 有选中目标 → 朝目标施放
     let mut target_id = 0u32;
     let mut tx = px;
     let mut ty = py;
     let mut cast_dir = mir2_shared::enums::MirDirection::try_from(
-        net.self_position.map(|(_, _, d)| d).unwrap_or(4),
+        session.self_position.map(|(_, _, d)| d).unwrap_or(4),
     )
     .unwrap_or(mir2_shared::enums::MirDirection::Down);
     if let Some(tid) = control.attack_target {

@@ -14,7 +14,7 @@ use mir2_shared::enums::Spell;
 
 use crate::game::skills::MagicsState;
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -262,7 +262,7 @@ fn spawn_assign_key_panel(
 fn assign_key_system(
     mut state: ResMut<AssignKeyState>,
     mut magics: ResMut<MagicsState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,

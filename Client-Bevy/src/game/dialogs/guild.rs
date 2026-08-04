@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -539,7 +539,7 @@ fn spawn_guild(
 fn guild_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut guild: ResMut<GuildState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
     create_btn: Query<&UiButton, With<GuildCreateBtn>>,
     invite_btn: Query<&UiButton, With<GuildInviteBtn>>,
@@ -771,7 +771,7 @@ fn guild_ui_system(
 fn guild_storage_system(
     mut mgr: ResMut<DialogManager>,
     mut guild: ResMut<GuildState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     hud: Res<crate::game::hud::HudState>,
     inv_click: Res<crate::game::dialogs::inventory::InvClickState>,
     deposit_btn: Query<&UiButton, With<GuildItemDeposit>>,
@@ -855,7 +855,7 @@ fn guild_storage_system(
 /// 行会邀请提示：Yes/No → C.GuildInvite{accept}
 fn guild_invite_system(
     mut guild: ResMut<GuildState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     yes: Query<&UiButton, With<GuildInviteYes>>,
     no: Query<&UiButton, With<GuildInviteNo>>,
     mut widgets: Query<

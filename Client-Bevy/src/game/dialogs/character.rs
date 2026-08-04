@@ -17,7 +17,7 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
 use crate::game::skills::MagicsState;
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -497,7 +497,7 @@ fn char_equip_system(
     >,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mgr: Res<DialogManager>,
     page: Res<CharPage>,
 ) {

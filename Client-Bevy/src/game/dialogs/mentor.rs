@@ -14,7 +14,7 @@ use bevy::prelude::*;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -261,7 +261,7 @@ fn spawn_mentor(
 fn mentor_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<MentorState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
     hud: Res<crate::game::hud::HudState>,
     close: Query<&UiButton, With<MentorClose>>,
@@ -370,7 +370,7 @@ fn mentor_ui_system(
 /// 拜师邀请提示：Yes/No → C.MentorReply{accept}
 fn mentor_invite_system(
     mut state: ResMut<MentorState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     yes: Query<&UiButton, With<MentorInviteYes>>,
     no: Query<&UiButton, With<MentorInviteNo>>,
     mut widgets: Query<&mut Visibility, With<MentorInviteWidget>>,

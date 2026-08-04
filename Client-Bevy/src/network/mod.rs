@@ -52,6 +52,7 @@ use crate::game::skills::MagicsState;
 use crate::game::weather::WeatherState;
 use crate::map_renderer::GameData;
 use crate::scenes::AppState;
+use crate::ui::login::AuthFeedback;
 
 /// 网络模式（M7：--real-net 走真实 TCP，默认 mock 便于离线开发）
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -159,9 +160,9 @@ pub enum NetState {
     InGame,
 }
 
-/// 网络上下文（Bevy Resource）
+/// 网络连接资源（#66 拆分：只保留连接/传输职责）
 #[derive(Resource)]
-pub struct NetworkContext {
+pub struct NetConnection {
     /// 发往服务器的内层包（PacketHeader+body）
     pub to_server: Option<Sender<Vec<u8>>>,
     /// Mock 模式：从服务器接收的外帧编码字节
@@ -170,36 +171,12 @@ pub struct NetworkContext {
     pub tcp_events: Option<Receiver<tcp::TcpEvent>>,
     pub mode: NetworkMode,
     pub state: NetState,
-    /// 角色列表（LoginSuccess 携带）
-    pub characters: Vec<SelectInfo>,
-    /// 新建角色成功后置 true，选角界面需要重建槽位
-    pub select_reload: bool,
-    /// 新建角色被服务器拒绝时的提示
-    pub character_error: Option<String>,
-    /// 选中的角色
-    pub selected_index: Option<i32>,
-    /// 登录错误信息（登录失败 / 连接失败 / 断线）
-    pub login_error: Option<String>,
-    /// 登录成功标志（LoginScene 播放 ChrSel 动画后进选角）
-    pub login_success: bool,
-    /// 注册新账号错误信息
-    pub new_account_error: Option<String>,
-    /// 注册新账号成功（UI 关闭对话框并提示）
-    pub new_account_success: bool,
-    /// 修改密码错误信息
-    pub change_password_error: Option<String>,
-    /// 修改密码成功
-    pub change_password_success: bool,
     /// 与服务器断开的原因
     pub disconnected: Option<String>,
     /// ClientVersion 的 16 字节版本哈希（服务端 CheckVersion 时需匹配）
     pub client_version_hash: [u8; 16],
     /// 是否已发送 ClientVersion（每次连接只发一次）
     pub client_version_sent: bool,
-    /// 本地玩家 object_id（UserInformation 提供；mock 模式为 None=第一个 ObjectPlayer）
-    pub local_player_id: Option<u32>,
-    /// 服务器 UserLocation 权威位置（瓦片坐标 + 朝向），由移动系统消费
-    pub self_position: Option<(i32, i32, u8)>,
     /// M58 自动重连：断线后自动重连并重新登录（默认开启）
     pub auto_reconnect: bool,
     /// 是否处于自动重连流程
@@ -216,7 +193,7 @@ pub struct NetworkContext {
     pub saved_character: std::sync::Arc<std::sync::Mutex<Option<i32>>>,
 }
 
-impl Default for NetworkContext {
+impl Default for NetConnection {
     fn default() -> Self {
         Self {
             to_server: None,
@@ -224,21 +201,9 @@ impl Default for NetworkContext {
             tcp_events: None,
             mode: NetworkMode::Mock,
             state: NetState::Offline,
-            characters: Vec::new(),
-            select_reload: false,
-            character_error: None,
-            selected_index: None,
-            login_error: None,
-            login_success: false,
-            new_account_error: None,
-            new_account_success: false,
-            change_password_error: None,
-            change_password_success: false,
             disconnected: None,
             client_version_hash: [0u8; 16],
             client_version_sent: false,
-            local_player_id: None,
-            self_position: None,
             auto_reconnect: true,
             reconnecting: false,
             reconnect_timer: 0.0,
@@ -250,7 +215,7 @@ impl Default for NetworkContext {
     }
 }
 
-impl NetworkContext {
+impl NetConnection {
     /// 发送客户端包（serialize 内层 → 发送）
     /// M58：顺带捕获 Login/StartGame 用于自动重连
     pub fn send_packet<P: Packet + 'static>(&self, packet: &P) {
@@ -276,6 +241,23 @@ impl NetworkContext {
             }
         }
     }
+}
+
+/// 会话状态（#66 拆分：角色列表/选中/本地玩家/位置同步等非传输职责）
+#[derive(Resource, Default)]
+pub struct SessionState {
+    /// 角色列表（LoginSuccess 携带）
+    pub characters: Vec<SelectInfo>,
+    /// 新建角色成功后置 true，选角界面需要重建槽位
+    pub select_reload: bool,
+    /// 新建角色被服务器拒绝时的提示
+    pub character_error: Option<String>,
+    /// 选中的角色
+    pub selected_index: Option<i32>,
+    /// 本地玩家 object_id（UserInformation 提供；mock 模式为 None=第一个 ObjectPlayer）
+    pub local_player_id: Option<u32>,
+    /// 服务器 UserLocation 权威位置（瓦片坐标 + 朝向），由移动系统消费
+    pub self_position: Option<(i32, i32, u8)>,
 }
 
 /// 行会仓库物品存取包（M32）
@@ -1085,7 +1067,9 @@ impl Plugin for NetworkPlugin {
         let (mode, addr) = resolve_net_mode();
         app.insert_resource(NetMode(mode));
         app.insert_resource(NetServerAddr(addr));
-        app.init_resource::<NetworkContext>();
+        app.init_resource::<NetConnection>();
+        app.init_resource::<SessionState>();
+        app.init_resource::<AuthFeedback>();
         app.add_message::<NetObject>();
         app.add_message::<NetObjectRemoved>();
         app.add_message::<ServerEvent>();
@@ -1099,7 +1083,12 @@ impl Plugin for NetworkPlugin {
 pub struct NetServerAddr(pub String);
 
 /// 启动网络（按模式：mock 或真实 TCP）
-fn setup_network(mut net: ResMut<NetworkContext>, mode: Res<NetMode>, addr: Res<NetServerAddr>) {
+fn setup_network(
+    mut net: ResMut<NetConnection>,
+    mut auth: ResMut<AuthFeedback>,
+    mode: Res<NetMode>,
+    addr: Res<NetServerAddr>,
+) {
     match mode.0 {
         NetworkMode::Mock => {
             let (to_server, from_client) = crossbeam_channel::bounded::<Vec<u8>>(1024);
@@ -1118,7 +1107,7 @@ fn setup_network(mut net: ResMut<NetworkContext>, mode: Res<NetMode>, addr: Res<
             }
             Err(e) => {
                 tracing::error!("🔌 连接服务器 {} 失败: {}", addr.0, e);
-                net.login_error = Some(format!("无法连接服务器 {}：{}", addr.0, e));
+                auth.login_error = Some(format!("无法连接服务器 {}：{}", addr.0, e));
                 net.disconnected = Some(format!("{}", e));
             }
         },
@@ -1172,7 +1161,9 @@ pub(crate) struct NetworkOutbox<'w> {
 
 /// 网络系统：拉取服务器数据 → 解析包 → 分发处理
 pub(crate) fn network_system(
-    mut net: ResMut<NetworkContext>,
+    mut net: ResMut<NetConnection>,
+    mut session: ResMut<SessionState>,
+    mut auth: ResMut<AuthFeedback>,
     mut game_data: ResMut<GameData>,
     mut outbox: NetworkOutbox,
     mut hud: ResMut<HudState>,
@@ -1196,7 +1187,7 @@ pub(crate) fn network_system(
                     net.tcp_events = Some(conn.from_server);
                     net.client_version_sent = false;
                     net.state = NetState::LoggingIn;
-                    net.login_error = Some("连接已恢复，正在重新登录...".to_string());
+                    auth.login_error = Some("连接已恢复，正在重新登录...".to_string());
                     let creds = net.saved_login.lock().ok().map(|g| g.clone()).flatten();
                     if let Some((acct, pass)) = creds {
                         net.send_packet(&mir2_shared::packets::client::account::Login {
@@ -1206,14 +1197,14 @@ pub(crate) fn network_system(
                         tracing::info!("🔌 自动重连成功，已重新发送登录请求");
                     } else {
                         net.reconnecting = false;
-                        net.login_error = Some("连接已恢复，请重新登录".to_string());
+                        auth.login_error = Some("连接已恢复，请重新登录".to_string());
                     }
                 }
                 Err(e) => {
                     net.reconnect_attempts += 1;
                     net.reconnect_delay = (net.reconnect_delay * 2.0).min(30.0);
                     net.reconnect_timer = net.reconnect_delay;
-                    net.login_error = Some(format!(
+                    auth.login_error = Some(format!(
                         "重连失败（{}），{:.0} 秒后重试（第 {} 次）",
                         e, net.reconnect_delay, net.reconnect_attempts
                     ));
@@ -1230,6 +1221,8 @@ pub(crate) fn network_system(
                 tcp::TcpEvent::Packet(payload) => {
                     handle_packet(
                         &mut net,
+                        &mut session,
+                        &mut auth,
                         &mut game_data,
                         &mut outbox.net_objects,
                         &mut outbox.net_removals,
@@ -1279,16 +1272,16 @@ pub(crate) fn network_system(
                     tracing::warn!("🔌 与服务器断开: {}", reason);
                     net.state = NetState::Offline;
                     net.disconnected = Some(reason.clone());
-                    net.login_success = false;
+                    auth.login_success = false;
                     net.to_server = None;
                     net.tcp_events = None;
                     if net.auto_reconnect {
                         net.reconnecting = true;
                         net.reconnect_delay = 2.0;
                         net.reconnect_timer = 2.0;
-                        net.login_error = Some(format!("连接断开，2 秒后自动重连...（{}）", reason));
+                        auth.login_error = Some(format!("连接断开，2 秒后自动重连...（{}）", reason));
                     } else {
-                        net.login_error = Some(format!("与服务器断开连接：{}", reason));
+                        auth.login_error = Some(format!("与服务器断开连接：{}", reason));
                     }
                 }
             }
@@ -1309,6 +1302,8 @@ pub(crate) fn network_system(
                     buf.drain(..consumed);
                     handle_packet(
                         &mut net,
+                        &mut session,
+                        &mut auth,
                         &mut game_data,
                         &mut outbox.net_objects,
                         &mut outbox.net_removals,
@@ -1471,7 +1466,9 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
 
 /// 处理单个内层包
 fn handle_packet(
-    net: &mut NetworkContext,
+    net: &mut NetConnection,
+    session: &mut SessionState,
+    auth: &mut AuthFeedback,
     game_data: &mut GameData,
     net_objects: &mut MessageWriter<NetObject>,
     net_removals: &mut MessageWriter<NetObjectRemoved>,
@@ -1544,8 +1541,8 @@ fn handle_packet(
             if let Ok(p) = login::NewAccount::read_body(&mut cur) {
                 let msg = match p.result {
                     8 => {
-                        net.new_account_success = true;
-                        net.new_account_error = None;
+                        auth.new_account_success = true;
+                        auth.new_account_error = None;
                         "注册成功，请登录".to_string()
                     }
                     0 => "服务器暂时关闭注册".to_string(),
@@ -1560,7 +1557,7 @@ fn handle_packet(
                 };
                 tracing::info!("📝 NewAccount result={} {}", p.result, msg);
                 if p.result != 8 {
-                    net.new_account_error = Some(msg);
+                    auth.new_account_error = Some(msg);
                 }
             }
         }
@@ -1568,8 +1565,8 @@ fn handle_packet(
             if let Ok(p) = login::ChangePassword::read_body(&mut cur) {
                 let msg = match p.result {
                     6 => {
-                        net.change_password_success = true;
-                        net.change_password_error = None;
+                        auth.change_password_success = true;
+                        auth.change_password_error = None;
                         "密码修改成功".to_string()
                     }
                     0 => "服务器关闭修改密码".to_string(),
@@ -1582,7 +1579,7 @@ fn handle_packet(
                 };
                 tracing::info!("🔑 ChangePassword result={} {}", p.result, msg);
                 if p.result != 6 {
-                    net.change_password_error = Some(msg);
+                    auth.change_password_error = Some(msg);
                 }
             }
         }
@@ -1598,18 +1595,18 @@ fn handle_packet(
                 };
                 tracing::warn!("⛔ 登录失败 result={} {}", p.result, msg);
                 net.state = NetState::Offline;
-                net.login_error = Some(msg);
+                auth.login_error = Some(msg);
                 net.reconnecting = false;
             }
         }
         x if x == ServerPacketIds::LoginSuccess as i16 => {
             if let Ok(p) = login::LoginSuccess::read_body(&mut cur) {
                 tracing::info!("✅ 登录成功，角色 {} 个", p.characters.len());
-                net.characters = p.characters;
-                net.select_reload = false;
+                session.characters = p.characters;
+                session.select_reload = false;
                 net.state = NetState::Select;
-                net.login_error = None;
-                net.login_success = true;
+                auth.login_error = None;
+                auth.login_success = true;
                 // M58：重连成功后自动进入之前的角色
                 if net.reconnecting {
                     net.reconnecting = false;
@@ -1634,7 +1631,7 @@ fn handle_packet(
         x if x == ServerPacketIds::NewCharacter as i16 => {
             if let Ok(p) = account::NewCharacter::read_body(&mut cur) {
                 tracing::info!("⛔ 新建角色被拒绝 result={}", p.result);
-                net.character_error = Some(match p.result {
+                session.character_error = Some(match p.result {
                     4 => "最多只能创建4个角色！".to_string(),
                     _ => "创建角色失败！".to_string(),
                 });
@@ -1643,7 +1640,7 @@ fn handle_packet(
         x if x == ServerPacketIds::NewCharacterSuccess as i16 => {
             if let Ok(p) = account::NewCharacterSuccess::read_body(&mut cur) {
                 tracing::info!("✅ 新建角色成功: {}", p.character.name);
-                net.characters.push(SelectInfo {
+                session.characters.push(SelectInfo {
                     index: p.character.index,
                     name: p.character.name.clone(),
                     level: p.character.level,
@@ -1651,13 +1648,13 @@ fn handle_packet(
                     gender: p.character.gender,
                     last_access: p.character.last_access,
                 });
-                net.select_reload = true;
+                session.select_reload = true;
             }
         }
         x if x == ServerPacketIds::DeleteCharacter as i16 => {
             if let Ok(p) = account::DeleteCharacter::read_body(&mut cur) {
                 tracing::warn!("⛔ 删除角色被拒绝 result={}", p.result);
-                net.character_error = Some(match p.result {
+                session.character_error = Some(match p.result {
                     0 => "删除失败：不能删除当前在线角色".to_string(),
                     1 => "删除失败：角色不存在".to_string(),
                     _ => format!("删除角色失败（{}）", p.result),
@@ -1667,9 +1664,9 @@ fn handle_packet(
         x if x == ServerPacketIds::DeleteCharacterSuccess as i16 => {
             if let Ok(p) = account::DeleteCharacterSuccess::read_body(&mut cur) {
                 tracing::info!("🗑️ 删除角色成功 idx={}", p.character_index);
-                net.characters.retain(|c| c.index != p.character_index);
-                net.selected_index = None;
-                net.select_reload = true;
+                session.characters.retain(|c| c.index != p.character_index);
+                session.selected_index = None;
+                session.select_reload = true;
             }
         }
 
@@ -1883,8 +1880,8 @@ fn handle_packet(
                     hud.gold = p.gold;
                     hud.class = p.class as u8;
                     hud.player_object_id = Some(p.object_id);
-                    net.local_player_id = Some(p.object_id);
-                    net.self_position = Some((p.location_x, p.location_y, p.direction as u8));
+                    session.local_player_id = Some(p.object_id);
+                    session.self_position = Some((p.location_x, p.location_y, p.direction as u8));
 
                     // 技能（MagicsState）：UserInformation 携带已学技能
                     for m in &p.magics {
@@ -1963,7 +1960,7 @@ fn handle_packet(
             match user::UserLocation::read_body(&mut cur) {
                 Ok(p) => {
                     tracing::info!("📍 UserLocation: ({},{}) dir={:?}", p.location_x, p.location_y, p.direction);
-                    net.self_position = Some((p.location_x, p.location_y, p.direction as u8));
+                    session.self_position = Some((p.location_x, p.location_y, p.direction as u8));
                 }
                 Err(e) => {
                     tracing::warn!("⚠️ UserLocation 解析失败: {}", e);

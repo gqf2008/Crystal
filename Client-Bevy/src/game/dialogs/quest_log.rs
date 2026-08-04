@@ -11,7 +11,7 @@ use bevy::prelude::*;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -136,7 +136,7 @@ fn spawn_quest_log(
 fn quest_log_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<QuestLogState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     close: Query<&UiButton, With<QuestLogClose>>,
     abandon_btn: Query<&UiButton, With<QuestLogAbandon>>,
     mouse: Res<ButtonInput<MouseButton>>,

@@ -458,7 +458,7 @@ fn spawn_text(
 /// 自动喝药（M10）：HP < 35% 且冷却结束 → 使用背包药品（UseItem）
 fn auto_potion_system(
     mut hud: ResMut<HudState>,
-    net: Res<crate::network::NetworkContext>,
+    net: Res<crate::network::NetConnection>,
     time: Res<Time>,
 ) {
     hud.pot_cooldown -= time.delta_secs();
@@ -566,7 +566,7 @@ fn hud_update_system(
 /// 死亡遮罩显隐 + 复活按钮（#46）
 fn death_overlay_system(
     mut hud: ResMut<HudState>,
-    net: Res<crate::network::NetworkContext>,
+    net: Res<crate::network::NetConnection>,
     mut overlay: Query<&mut Visibility, With<DeathOverlay>>,
     revive_btns: Query<&UiButton, With<DeathReviveBtn>>,
 ) {

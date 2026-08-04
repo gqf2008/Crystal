@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use mir2_shared::{MirClass, MirGender};
 
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
@@ -487,7 +487,7 @@ pub fn spawn_new_character_dialog(
 #[allow(clippy::too_many_arguments)]
 fn new_char_ui_system(
     mut keys: MessageReader<KeyboardInput>,
-    net: ResMut<NetworkContext>,
+    net: ResMut<NetConnection>,
     mut state: ResMut<NewCharState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,

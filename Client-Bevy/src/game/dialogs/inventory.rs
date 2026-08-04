@@ -16,7 +16,7 @@ use crate::game::dialogs::character;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use mir2_shared::enums::MirGridType;
@@ -652,7 +652,7 @@ fn inv_tooltip_text_system(
 }
 
 /// 使用/装备物品（原版 C# MirItemCell.UseItem：右键/双击触发）
-fn use_or_equip(item: &InvItem, net: &NetworkContext) {
+fn use_or_equip(item: &InvItem, net: &NetConnection) {
     if item.is_equipment() {
         if let Some(to) = item.equip_slot() {
             net.send_packet(&mir2_shared::packets::client::item::EquipItem {
@@ -722,7 +722,7 @@ fn spawn_inv_confirm(
 fn inv_confirm_system(
     mut confirm: ResMut<InvDropConfirm>,
     mut click: ResMut<InvClickState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mut widgets: Query<&mut Visibility, With<InvConfirmWidget>>,
     yes: Query<&UiButton, (With<InvConfirmYes>, Without<InvConfirmNo>)>,
     no: Query<&UiButton, (With<InvConfirmNo>, Without<InvConfirmYes>)>,
@@ -769,7 +769,7 @@ fn inv_item_action_system(
     hud: Res<HudState>,
     mut mgr: ResMut<DialogManager>,
     mut click: ResMut<InvClickState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,

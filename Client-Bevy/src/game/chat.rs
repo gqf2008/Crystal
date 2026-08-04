@@ -11,7 +11,7 @@ use bevy::prelude::*;
 
 use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::scenes::AppState;
 use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
 use crate::ui::sprite_ui::{spawn_ui_text, UiEntity, UiFont};
@@ -135,7 +135,7 @@ fn chat_input_system(
     mut ime: ResMut<PinyinIme>,
     mut focus: ResMut<ImeFocus>,
     mut chat: ResMut<ChatState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     net_mode: Res<crate::network::NetMode>,
     hud: Res<HudState>,
 ) {

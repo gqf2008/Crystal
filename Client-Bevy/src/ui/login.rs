@@ -7,7 +7,7 @@ use bevy::prelude::MessageReader;
 use bevy::prelude::*;
 
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
@@ -21,6 +21,7 @@ pub struct LoginPlugin;
 impl Plugin for LoginPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LoginState>();
+        app.init_resource::<AuthFeedback>();
         app.init_resource::<LoginAnim>();
         app.init_resource::<CursorBlink>();
         app.init_resource::<UiImageCache>();
@@ -50,6 +51,23 @@ pub struct LoginState {
     /// 屏幕提示（登录错误/断线/注册结果），is_error=true 时红色显示
     pub status_msg: String,
     pub status_error: bool,
+}
+
+/// 认证反馈（#66：登录/注册/改密的 UI 提示字段，从 NetConnection 移回登录界面模块）
+#[derive(Resource, Default)]
+pub struct AuthFeedback {
+    /// 登录错误信息（登录失败 / 连接失败 / 断线）
+    pub login_error: Option<String>,
+    /// 登录成功标志（LoginScene 播放 ChrSel 动画后进选角）
+    pub login_success: bool,
+    /// 注册新账号错误信息
+    pub new_account_error: Option<String>,
+    /// 注册新账号成功（UI 关闭对话框并提示）
+    pub new_account_success: bool,
+    /// 修改密码错误信息
+    pub change_password_error: Option<String>,
+    /// 修改密码成功
+    pub change_password_success: bool,
 }
 
 /// 登录界面底部状态文本标记
@@ -747,7 +765,8 @@ fn cleanup_login_ui(mut commands: Commands, root: Query<Entity, With<UiEntity>>)
 
 fn login_ui_system(
     mut keys: MessageReader<KeyboardInput>,
-    mut net: ResMut<NetworkContext>,
+    mut net: ResMut<NetConnection>,
+    mut auth: ResMut<AuthFeedback>,
     mut login: ResMut<LoginState>,
     mut cursor: ResMut<CursorBlink>,
     time: Res<Time>,
@@ -933,7 +952,7 @@ fn login_ui_system(
                         login.status_error = true;
                     } else {
                         net.state = crate::network::NetState::LoggingIn;
-                        net.login_error = None;
+                        auth.login_error = None;
                         login.status_msg = String::new();
                         net.send_packet(&mir2_shared::packets::client::account::Login {
                             account_id: account,
@@ -961,8 +980,8 @@ fn login_ui_system(
                     login.show_new_account = false;
                     login.status_msg = "注册请求已发送…".to_string();
                     login.status_error = false;
-                    net.new_account_error = None;
-                    net.new_account_success = false;
+                    auth.new_account_error = None;
+                    auth.new_account_success = false;
                     net.send_packet(&mir2_shared::packets::client::account::NewAccount {
                         account_id: v[0].clone(),
                         password: v[1].clone(),
@@ -995,8 +1014,8 @@ fn login_ui_system(
                     login.show_change_password = false;
                     login.status_msg = "修改密码请求已发送…".to_string();
                     login.status_error = false;
-                    net.change_password_error = None;
-                    net.change_password_success = false;
+                    auth.change_password_error = None;
+                    auth.change_password_success = false;
                     net.send_packet(&mir2_shared::packets::client::account::ChangePassword {
                         account_id: v[0].clone(),
                         current_password: v[1].clone(),
@@ -1016,24 +1035,25 @@ fn login_ui_system(
 
 /// 网络状态提示（登录错误/断线/注册结果）显示到底部状态文本
 fn login_status_system(
-    mut net: ResMut<NetworkContext>,
+    mut net: ResMut<NetConnection>,
+    mut auth: ResMut<AuthFeedback>,
     login: ResMut<LoginState>,
     mut texts: Query<(&mut Text2d, &mut TextColor), With<LoginStatusText>>,
 ) {
     // 优先级：断线 > 注册/改密结果 > 登录错误 > 本地校验消息
     let (msg, is_error) = if let Some(d) = &net.disconnected {
         (format!("与服务器断开连接：{}", d), true)
-    } else if let Some(e) = &net.new_account_error {
+    } else if let Some(e) = &auth.new_account_error {
         (e.clone(), true)
-    } else if net.new_account_success {
-        net.new_account_success = false;
+    } else if auth.new_account_success {
+        auth.new_account_success = false;
         ("注册成功，请登录".to_string(), false)
-    } else if let Some(e) = &net.change_password_error {
+    } else if let Some(e) = &auth.change_password_error {
         (e.clone(), true)
-    } else if net.change_password_success {
-        net.change_password_success = false;
+    } else if auth.change_password_success {
+        auth.change_password_success = false;
         ("密码修改成功".to_string(), false)
-    } else if let Some(e) = &net.login_error {
+    } else if let Some(e) = &auth.login_error {
         (e.clone(), true)
     } else {
         (login.status_msg.clone(), login.status_error)
@@ -1054,14 +1074,14 @@ fn login_status_system(
 
 fn login_anim_system(
     mut anim: ResMut<LoginAnim>,
-    mut net: ResMut<NetworkContext>,
+    mut auth: ResMut<AuthFeedback>,
     mut next: ResMut<NextState<AppState>>,
     time: Res<Time>,
     mut bg: Query<&mut Sprite, With<LoginBg>>,
 ) {
     if !anim.playing {
-        if net.login_success {
-            net.login_success = false;
+        if auth.login_success {
+            auth.login_success = false;
             anim.playing = true;
             anim.frame = 0;
             anim.timer = 0.0;

@@ -11,7 +11,7 @@ use bevy::prelude::*;
 
 use crate::game::dialogs::DialogRoot;
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -116,7 +116,7 @@ fn npc_ui_system(
     mut sell_panel: ResMut<crate::game::dialogs::sell_panel::SellPanelState>,
     mut storage: ResMut<crate::game::dialogs::storage::StorageState>,
     mut mgr: ResMut<crate::game::dialogs::DialogManager>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     close: Query<&UiButton, With<NpcClose>>,

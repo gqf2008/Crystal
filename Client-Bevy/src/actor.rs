@@ -386,7 +386,7 @@ fn spawn_net_objects_when_ready(
     mut commands: Commands,
     data: Res<GameData>,
     mut spawns: MessageReader<NetObject>,
-    net: Res<crate::network::NetworkContext>,
+    session: Res<crate::network::SessionState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
@@ -404,13 +404,13 @@ fn spawn_net_objects_when_ready(
         return;
     }
     // mock 模式没有 UserInformation → local_player_id=None，第一个 ObjectPlayer 视为本地
-    let mut local_spawned = net.local_player_id.is_some();
+    let mut local_spawned = session.local_player_id.is_some();
     for obj in &pending {
         let is_local = match obj {
             NetObject::Player { object_id, .. } => {
-                if net.local_player_id == Some(*object_id) {
+                if session.local_player_id == Some(*object_id) {
                     true
-                } else if net.local_player_id.is_none() && !local_spawned {
+                } else if session.local_player_id.is_none() && !local_spawned {
                     local_spawned = true;
                     true
                 } else {

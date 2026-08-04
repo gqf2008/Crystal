@@ -17,7 +17,7 @@ use crate::game::dialogs::inventory::{inv_slot_at, InvClickState, InvItem};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -299,7 +299,7 @@ fn storage_action_system(
     mut state: ResMut<StorageState>,
     mut inv_click: ResMut<InvClickState>,
     _hud: Res<HudState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
 ) {

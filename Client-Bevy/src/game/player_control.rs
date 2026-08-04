@@ -15,7 +15,7 @@ use crate::game::hud::HudState;
 use crate::game::movement::{direction_from_delta, world_to_tile, LocalMove};
 use crate::game::pathfinding;
 use crate::map_renderer::{GameData, GameLibraries};
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiButton;
 
@@ -103,7 +103,7 @@ fn player_input_system(
     mut commands: Commands,
     time: Res<Time>,
     mut control: ResMut<ControlState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     game_data: Res<GameData>,
     mut libs: ResMut<GameLibraries>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -276,7 +276,7 @@ fn player_input_system(
 /// 拾取到达：寻路结束后自动 PickUp（原版 C# 点击物品 → 移动 → 拾取）
 fn pickup_arrival_system(
     mut control: ResMut<ControlState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     items: Query<(&NetObjectId, &Transform), (With<GroundItem>, Without<LocalPlayer>)>,
     players: Query<(&Transform, Option<&LocalMove>), (With<LocalPlayer>, With<NetObjectId>)>,
     hud: Res<HudState>,
@@ -313,7 +313,7 @@ fn auto_attack_system(
     mut commands: Commands,
     time: Res<Time>,
     mut control: ResMut<ControlState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     sound_bank: Res<crate::game::sound::SoundBank>,
     mut audio_assets: ResMut<Assets<AudioSource>>,
     players: Query<&Transform, (With<LocalPlayer>, With<NetObjectId>)>,

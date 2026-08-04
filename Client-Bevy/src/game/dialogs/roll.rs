@@ -12,7 +12,7 @@ use bevy::prelude::*;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -111,7 +111,7 @@ fn spawn_roll(
 fn roll_ui_system(
     time: Res<Time>,
     mut state: ResMut<RollState>,
-    net: ResMut<NetworkContext>,
+    net: ResMut<NetConnection>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,

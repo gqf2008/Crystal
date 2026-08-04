@@ -11,7 +11,7 @@ use bevy::prelude::*;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -144,7 +144,7 @@ fn spawn_fishing(
 fn fishing_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<FishingState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     close: Query<&UiButton, With<FishingClose>>,
     cast_btn: Query<&UiButton, With<FishingCast>>,
     autocast_btn: Query<&UiButton, With<FishingAutocast>>,

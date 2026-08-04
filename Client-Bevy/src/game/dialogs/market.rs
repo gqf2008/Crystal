@@ -15,7 +15,7 @@ use bevy::prelude::*;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -293,7 +293,7 @@ fn spawn_market_input(
 fn market_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut market: ResMut<MarketState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
     close: Query<&UiButton, With<MarketClose>>,
     refresh_btn: Query<&UiButton, With<MarketRefreshBtn>>,
@@ -411,7 +411,7 @@ fn market_ui_system(
 fn market_action_system(
     mgr: Res<DialogManager>,
     mut market: ResMut<MarketState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
     hud: Res<crate::game::hud::HudState>,
     inv_click: Res<crate::game::dialogs::inventory::InvClickState>,
