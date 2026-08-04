@@ -40,7 +40,6 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             /// 死亡怪物重生计时（3 秒后）
             let mut respawn: HashMap<u32, std::time::Instant> = HashMap::new();
             let mut last_monster_ai = std::time::Instant::now();
-            let mut monster_died_ever = false;
             loop {
                 match from_client.recv_timeout(std::time::Duration::from_millis(100)) {
                     Ok(payload) => {
@@ -308,7 +307,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                 }
                                 x if x == ClientPacketIds::PickUp as i16 => {
                                     // 拾取第一个地面物品 → 移除
-                                    if let Ok(_) = client::item::PickUp::read_body(&mut cur) {
+                                    if client::item::PickUp::read_body(&mut cur).is_ok() {
                                         if let Some((id, _, _)) = ground_items.first().copied() {
                                             ground_items.retain(|(i, _, _)| *i != id);
                                             send(&to_client, &server::objects::ObjectRemove { object_id: id });
