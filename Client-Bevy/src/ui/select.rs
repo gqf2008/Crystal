@@ -8,6 +8,7 @@ use crate::map_renderer::GameLibraries;
 use crate::network::{NetConnection, SessionState};
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
+use crate::ui::credits::{credits_update_system, CreditsState};
 use crate::ui::modal_box::{spawn_modal_box, ModalKind, ModalState};
 use crate::ui::new_character::{spawn_new_character_dialog, NewCharState};
 use crate::ui::sprite_ui::{
@@ -22,6 +23,7 @@ impl Plugin for SelectPlugin {
         app.init_resource::<SelectAnim>();
         app.init_resource::<UiImageCache>();
         app.init_resource::<UiFont>();
+        app.init_resource::<CreditsState>();
         app.add_systems(OnEnter(AppState::Select), setup_select_ui);
         app.add_systems(OnEnter(AppState::Select), spawn_ui_camera);
         app.add_systems(OnExit(AppState::Select), cleanup_select_ui);
@@ -31,6 +33,7 @@ impl Plugin for SelectPlugin {
                 select_ui_system,
                 select_anim_system,
                 ui_button_system,
+                credits_update_system,
                 select_reload_system,
                 auto_create_system,
             )
@@ -569,6 +572,7 @@ fn select_ui_system(
     mut cache: ResMut<UiImageCache>,
     mut new_char: ResMut<NewCharState>,
     mut modal: ResMut<ModalState>,
+    mut credits: ResMut<CreditsState>,
     mut char_btns: Query<(&CharButton, &mut Sprite), (Without<PreviewImg>, Without<PreviewBlend>)>,
     mut last_access_texts: Query<&mut Text2d, With<LastAccessText>>,
     bottom: Query<(&UiButton, &BottomButton)>,
@@ -661,9 +665,14 @@ fn select_ui_system(
             }
         }
     }
+    // #85：CREDITS 弹窗打开时屏蔽底层底部按钮（点击任意处由 credits_update_system 关闭）
+    let credits_open = credits.visible;
     for (btn, bb) in bottom.iter() {
         let (x, y, w, h) = btn.rect;
         let over = mx >= x && mx <= x + w && my >= y && my <= y + h;
+        if credits_open {
+            continue;
+        }
         if lclick && over {
             match bb.0 {
                 BottomBtn::Start => {
@@ -687,10 +696,11 @@ fn select_ui_system(
                     modal.error = None;
                 }
                 BottomBtn::Credits => {
-                    // 原版 SelectScene 的 CreditsButton.Click 为空 → 不做任何弹窗
+                    // #85：打开 CREDITS 制作名单弹窗（参考 macroquad credits_dialog）
                     new_char.visible = false;
                     modal.kind = ModalKind::None;
                     modal.error = None;
+                    credits.visible = true;
                 }
             }
         }
