@@ -260,7 +260,21 @@ fn shop_server_events(
     for ev in events.read() {
         match ev {
             ServerEvent::ShopCatalog { items, gold } => {
-                shop.items = items.clone();
+                shop.items = items
+                    .iter()
+                    .map(|(item_index, gold_price, credit_price, category, stock)| ShopItem {
+                        item_index: *item_index,
+                        name: shop
+                            .item_names
+                            .get(item_index)
+                            .cloned()
+                            .unwrap_or_default(),
+                        gold_price: *gold_price,
+                        credit_price: *credit_price,
+                        category: category.clone(),
+                        stock: *stock,
+                    })
+                    .collect();
                 shop.gold = *gold;
             }
             ServerEvent::ShopStock { item_id, stock } => {

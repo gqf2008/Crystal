@@ -62,8 +62,8 @@ pub enum ServerEvent {
         members: Vec<GuildMember>,
         gold: u32,
     },
-    /// GuildStorageList：行会仓库物品
-    GuildStorage { items: Vec<Option<StorageItem>> },
+    /// GuildStorageList：行会仓库物品（unique_id, item_index, count, info_name）
+    GuildStorage { items: Vec<(u64, i32, u16, String)> },
     /// GroupMembersMap：组队成员全量
     GroupMembers { members: Vec<GroupMember> },
     /// GroupInvite：收到组队邀请
@@ -138,16 +138,16 @@ pub enum ServerEvent {
     RentalCancelled,
     /// NPCMarket：市场页数
     MarketPages { pages: usize },
-    /// NPCMarketPage：市场列表
-    MarketListings { listings: Vec<MarketItem> },
+    /// NPCMarketPage：市场列表（auction_id, unique_id, item_index, count, info_name, seller, price）
+    MarketListings { listings: Vec<(u64, u64, i32, u16, String, String, u32)> },
     /// ConsignItem：寄售结果
     MarketConsign { uid: u64, success: bool },
     /// MarketSuccess：市场成功消息
     MarketSuccess { message: String },
     /// MarketFail：市场失败
     MarketFail { reason: u8 },
-    /// GameShopInfo：商城目录
-    ShopCatalog { items: Vec<ShopItem>, gold: u32 },
+    /// GameShopInfo：商城目录（item_index, gold_price, credit_price, category, stock）
+    ShopCatalog { items: Vec<(i32, u32, u32, String, i32)>, gold: u32 },
     /// GameShopStock：商品库存更新
     ShopStock { item_id: i32, stock: i32 },
     /// GuildTerritoryPage：领地列表
@@ -227,10 +227,8 @@ use mir2_shared::data::client_data::ClientMagic;
 
 use crate::game::dialogs::mail::{MailDetail, MailEntry};
 
-use crate::game::dialogs::game_shop::ShopItem;
 use crate::game::dialogs::guild_territory::TerritoryRow;
 
-use crate::game::dialogs::market::MarketItem;
 
 use crate::game::dialogs::buff::BuffEntry;
 use crate::game::dialogs::creature::CreatureEntry;
@@ -242,7 +240,7 @@ use crate::game::dialogs::ranking::RankEntry;
 
 use crate::game::dialogs::group::GroupMember;
 
-use crate::game::dialogs::guild::{GuildMember, StorageItem};
+use crate::game::dialogs::guild::GuildMember;
 use crate::game::dialogs::inventory::InvItem;
 
 /// 从已解码的服务端包构造 ServerEvent（便于各分支统一发送）

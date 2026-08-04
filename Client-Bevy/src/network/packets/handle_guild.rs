@@ -8,51 +8,19 @@ use super::*;
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
 
 #[allow(clippy::too_many_arguments, unused_variables)]
-pub(crate) fn handle_guild(
-    net: &mut NetConnection,
+pub(crate) fn handle_guild(    net: &mut NetConnection,
     session: &mut SessionState,
     auth: &mut AuthFeedback,
     game_data: &mut GameData,
     net_objects: &mut MessageWriter<NetObject>,
     net_removals: &mut MessageWriter<NetObjectRemoved>,
     motions: &mut MessageWriter<NetMotion>,
-    chat: &mut ChatState,
-    npc_goods: &mut NpcGoodsState,
     combat_evt: &mut MessageWriter<CombatEvent>,
-    weather: &mut WeatherState,
-    storage: &mut StorageState,
-    sell_panel: &mut SellPanelState,
-    group: &mut GroupState,
-    mail: &mut MailState,
-    trade: &mut TradeState,
-    friend: &mut FriendState,
-    guild: &mut GuildState,
-    ranking: &mut RankingState,
-    mentor: &mut MentorState,
-    market: &mut MarketState,
-    shop: &mut GameShopState,
-    territory: &mut GuildTerritoryState,
     effects: &mut MessageWriter<PendingEffect>,
     server_events: &mut MessageWriter<ServerEvent>,
     control: &mut ControlState,
-    fishing: &mut FishingState,
-    refine: &mut RefineState,
-    craft: &mut CraftState,
-    rental: &mut ItemRentalState,
-    quest_log: &mut QuestLogState,
-    buff: &mut BuffState,
-    report: &mut ReportState,
-    inspect: &mut InspectState,
-    creature: &mut CreatureState,
-    hero: &mut HeroState,
-    relationship: &mut RelationshipState,
-    big_map: &mut crate::game::dialogs::big_map::BigMapState,
-    awake: &mut crate::game::dialogs::npc_awake::NpcAwakeState,
-    roll: &mut crate::game::dialogs::roll::RollState,
-    mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
-    payload: &[u8],
-) -> bool {
+    payload: &[u8],) -> bool {
     use mir2_shared::packets::server::*;
 
     let mut cur = std::io::Cursor::new(payload);
@@ -136,26 +104,22 @@ pub(crate) fn handle_guild(
             let mut cur = std::io::Cursor::new(body);
             match mir2_shared::packets::server::guild::GuildStorageList::read_body(&mut cur) {
                 Ok(p) => {
-                    let items: Vec<Option<StorageItem>> = p
+                    let items: Vec<(u64, i32, u16, String)> = p
                         .items
                         .iter()
                         .take(100)
-                        .map(|opt| {
-                            opt.as_ref().map(|gsi| StorageItem {
-                                unique_id: gsi.item.unique_id,
-                                item_index: gsi.item.item_index,
-                                name: gsi
-                                    .item
-                                    .info
-                                    .as_ref()
-                                    .map(|i| i.name.clone())
-                                    .or_else(|| guild.item_names.get(&gsi.item.item_index).cloned())
-                                    .unwrap_or_default(),
-                                count: gsi.item.count,
+                        .filter_map(|opt| {
+                            opt.as_ref().map(|gsi| {
+                                (
+                                    gsi.item.unique_id,
+                                    gsi.item.item_index,
+                                    gsi.item.count,
+                                    gsi.item.info.as_ref().map(|i| i.name.clone()).unwrap_or_default(),
+                                )
                             })
                         })
                         .collect();
-                    let count = items.iter().filter_map(|s| s.as_ref()).count();
+                    let count = items.len();
                     let total = items.len();
                     server_events.write(ServerEvent::GuildStorage { items });
                     tracing::info!("🏰 仓库物品列表: {} 格（{} 件）", total, count);
@@ -214,21 +178,20 @@ pub(crate) fn handle_guild(
                     Ok(v) => v,
                     Err(_) => { ok = false; break; }
                 };
-                let name = item
+                let info_name = item
                     .info
                     .as_ref()
                     .map(|i| i.name.clone())
-                    .or_else(|| market.item_names.get(&item.item_index).cloned())
-                    .unwrap_or_else(|| format!("#{}", item.item_index));
-                listings.push(MarketItem {
+                    .unwrap_or_default();
+                listings.push((
                     auction_id,
-                    unique_id: item.unique_id,
-                    name,
-                    item_index: item.item_index,
-                    count: item.count,
+                    item.unique_id,
+                    item.item_index,
+                    item.count,
+                    info_name,
                     seller,
                     price,
-                });
+                ));
             }
             if ok {
                 let listing_count = listings.len();
@@ -290,8 +253,7 @@ pub(crate) fn handle_guild(
                 let stock = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
                 let _is_bought = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
                 let _deal = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let name = shop.item_names.get(&item_index).cloned().unwrap_or_default();
-                items.push(UiShopItem { item_index, name, gold_price, credit_price, category, stock });
+                items.push((item_index, gold_price, credit_price, category, stock));
             }
             if ok {
                 let _credit = cur.read_u32::<LittleEndian>().unwrap_or(0);

@@ -935,7 +935,26 @@ fn guild_server_events(
                 guild.gold = *gold;
             }
             ServerEvent::GuildStorage { items } => {
-                guild.storage_items = items.clone();
+                guild.storage_items = items
+                    .iter()
+                    .map(|(unique_id, item_index, count, info_name)| {
+                        let name = if !info_name.is_empty() {
+                            info_name.clone()
+                        } else {
+                            guild
+                                .item_names
+                                .get(item_index)
+                                .cloned()
+                                .unwrap_or_default()
+                        };
+                        Some(StorageItem {
+                            unique_id: *unique_id,
+                            item_index: *item_index,
+                            name,
+                            count: *count,
+                        })
+                    })
+                    .collect();
                 guild.storage_received = true;
             }
             ServerEvent::GuildNotice { notice } => {

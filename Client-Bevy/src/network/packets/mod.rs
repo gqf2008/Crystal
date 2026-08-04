@@ -20,51 +20,19 @@ use handle_social::handle_social;
 // 网络包解码分派（#72 拆分）：handle_packet 调度器按 opcode 分发到类别处理函数。
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn handle_packet(
-    net: &mut NetConnection,
+pub(crate) fn handle_packet(    net: &mut NetConnection,
     session: &mut SessionState,
     auth: &mut AuthFeedback,
     game_data: &mut GameData,
     net_objects: &mut MessageWriter<NetObject>,
     net_removals: &mut MessageWriter<NetObjectRemoved>,
     motions: &mut MessageWriter<NetMotion>,
-    chat: &mut ChatState,
-    npc_goods: &mut NpcGoodsState,
     combat_evt: &mut MessageWriter<CombatEvent>,
-    weather: &mut WeatherState,
-    storage: &mut StorageState,
-    sell_panel: &mut SellPanelState,
-    group: &mut GroupState,
-    mail: &mut MailState,
-    trade: &mut TradeState,
-    friend: &mut FriendState,
-    guild: &mut GuildState,
-    ranking: &mut RankingState,
-    mentor: &mut MentorState,
-    market: &mut MarketState,
-    shop: &mut GameShopState,
-    territory: &mut GuildTerritoryState,
     effects: &mut MessageWriter<PendingEffect>,
     server_events: &mut MessageWriter<ServerEvent>,
     control: &mut ControlState,
-    fishing: &mut FishingState,
-    refine: &mut RefineState,
-    craft: &mut CraftState,
-    rental: &mut ItemRentalState,
-    quest_log: &mut QuestLogState,
-    buff: &mut BuffState,
-    report: &mut ReportState,
-    inspect: &mut InspectState,
-    creature: &mut CreatureState,
-    hero: &mut HeroState,
-    relationship: &mut RelationshipState,
-    big_map: &mut crate::game::dialogs::big_map::BigMapState,
-    awake: &mut crate::game::dialogs::npc_awake::NpcAwakeState,
-    roll: &mut crate::game::dialogs::roll::RollState,
-    mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
-    payload: &[u8],
-) {
+    payload: &[u8],) {
     use mir2_shared::packets::server::*;
 
     let mut cur = std::io::Cursor::new(payload);
@@ -72,19 +40,19 @@ pub(crate) fn handle_packet(
         return;
     };
     let opcode = header.opcode;
-    if handle_auth(net, session, auth, game_data, net_objects, net_removals, motions, chat, npc_goods, combat_evt, weather, storage, sell_panel, group, mail, trade, friend, guild, ranking, mentor, market, shop, territory, effects, server_events, control, fishing, refine, craft, rental, quest_log, buff, report, inspect, creature, hero, relationship, big_map, awake, roll, mgr, next, payload) {
+    if handle_auth(net, session, auth, game_data, net_objects, net_removals, motions, combat_evt, effects, server_events, control, next, payload) {
         return;
     }
-    if handle_npc_items(net, session, auth, game_data, net_objects, net_removals, motions, chat, npc_goods, combat_evt, weather, storage, sell_panel, group, mail, trade, friend, guild, ranking, mentor, market, shop, territory, effects, server_events, control, fishing, refine, craft, rental, quest_log, buff, report, inspect, creature, hero, relationship, big_map, awake, roll, mgr, next, payload) {
+    if handle_npc_items(net, session, auth, game_data, net_objects, net_removals, motions, combat_evt, effects, server_events, control, next, payload) {
         return;
     }
-    if handle_guild(net, session, auth, game_data, net_objects, net_removals, motions, chat, npc_goods, combat_evt, weather, storage, sell_panel, group, mail, trade, friend, guild, ranking, mentor, market, shop, territory, effects, server_events, control, fishing, refine, craft, rental, quest_log, buff, report, inspect, creature, hero, relationship, big_map, awake, roll, mgr, next, payload) {
+    if handle_guild(net, session, auth, game_data, net_objects, net_removals, motions, combat_evt, effects, server_events, control, next, payload) {
         return;
     }
     if handle_progress(server_events, payload) {
         return;
     }
-    if handle_social(net, session, auth, game_data, net_objects, net_removals, motions, chat, npc_goods, combat_evt, weather, storage, sell_panel, group, mail, trade, friend, guild, ranking, mentor, market, shop, territory, effects, server_events, control, fishing, refine, craft, rental, quest_log, buff, report, inspect, creature, hero, relationship, big_map, awake, roll, mgr, next, payload) {
+    if handle_social(net, session, auth, game_data, net_objects, net_removals, motions, combat_evt, effects, server_events, control, next, payload) {
         return;
     }
     tracing::debug!("未处理服务器包 opcode {:04X}", opcode);

@@ -521,7 +521,29 @@ fn market_server_events(
                 market.pages = *pages;
             }
             ServerEvent::MarketListings { listings } => {
-                market.listings = listings.clone();
+                market.listings = listings
+                    .iter()
+                    .map(|(auction_id, unique_id, item_index, count, info_name, seller, price)| {
+                        let name = if !info_name.is_empty() {
+                            info_name.clone()
+                        } else {
+                            market
+                                .item_names
+                                .get(item_index)
+                                .cloned()
+                                .unwrap_or_else(|| format!("#{}", item_index))
+                        };
+                        MarketItem {
+                            auction_id: *auction_id,
+                            unique_id: *unique_id,
+                            name,
+                            item_index: *item_index,
+                            count: *count,
+                            seller: seller.clone(),
+                            price: *price,
+                        }
+                    })
+                    .collect();
             }
             ServerEvent::MarketConsign { uid, success } => {
                 if *success {
