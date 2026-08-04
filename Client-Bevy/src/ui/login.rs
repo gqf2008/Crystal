@@ -28,6 +28,7 @@ impl Plugin for LoginPlugin {
         app.init_resource::<UiFont>();
         app.init_resource::<LoginValidation>();
         app.add_systems(OnEnter(AppState::Login), setup_login_ui);
+        app.add_systems(OnEnter(AppState::Login), spawn_ui_camera);
         app.add_systems(OnExit(AppState::Login), cleanup_login_ui);
         app.add_systems(
             Update,

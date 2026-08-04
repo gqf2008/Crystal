@@ -30,53 +30,6 @@ pub struct UiImageCache {
 #[derive(Component)]
 pub struct UiEntity;
 
-/// UI 根节点：所有 UI 实体的父级，每帧跟随地图相机反平移，
-/// 使 UI 实体按屏幕坐标（0..1024 x 0..768，y 向下）固定显示。
-///
-/// 背景：Bevy 0.19 + DX12 下，地图相机（order 0）场景较重时，
-/// 第二个 UI 相机（order 1）的输出会丢失（画面只有地图没有 UI）。
-/// 改为单相机：地图相机渲染一切，UI 作为根节点的子实体随相机反平移。
-#[derive(Component)]
-pub struct UiRoot;
-
-/// 单相机 UI 跟随系统（每帧）：
-/// 1. 把 UiRoot 平移到 (cam.x - 512, cam.y + 384, 0)，使子 UI 世界坐标 = 屏幕坐标 + 相机偏移
-/// 2. 把尚无父级的 UiEntity 挂到 UiRoot 下（幂等）
-pub fn ui_follow_camera(
-    mut commands: Commands,
-    camera: Query<&Transform, (With<Camera2d>, Without<UiEntity>)>,
-    mut roots: Query<(Entity, &mut Transform), (With<UiRoot>, Without<Camera2d>)>,
-    ui_entities: Query<(Entity, Option<&ChildOf>), (With<UiEntity>, Without<UiRoot>)>,
-) {
-    let Ok(cam) = camera.single() else { return };
-    let root_entity = match roots.single_mut() {
-        Ok((e, mut tf)) => {
-            tf.translation = Vec3::new(cam.translation.x - 512.0, cam.translation.y + 384.0, 0.0);
-            e
-        }
-        Err(bevy::ecs::query::QuerySingleError::NoEntities(_)) => {
-            commands
-                .spawn((
-                    UiRoot,
-                    Transform::from_xyz(
-                        cam.translation.x - 512.0,
-                        cam.translation.y + 384.0,
-                        0.0,
-                    ),
-                ))
-                .id()
-        }
-        Err(bevy::ecs::query::QuerySingleError::MultipleEntities(_)) => return,
-    };
-    for (e, parent) in ui_entities.iter() {
-        if parent.is_none() {
-            commands.entity(e).try_insert(ChildOf(root_entity));
-        }
-    }
-}
-
-
-
 /// 给所有 UI 实体加渲染层 1（只被 UI 相机渲染，避免 UI 相机重画地图）
 pub fn mark_ui_render_layers(
     q: Query<Entity, Added<UiEntity>>,
