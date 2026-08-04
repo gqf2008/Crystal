@@ -50,7 +50,7 @@ impl Plugin for ActorPlugin {
         );
         app.add_systems(
             Update,
-            (demo_drive, sync_actor_depth, log_player_walk)
+            (demo_drive, sync_actor_depth, sync_player_equipment, log_player_walk)
                 .run_if(in_state(crate::scenes::AppState::Game)),
         );
     }
@@ -1328,6 +1328,47 @@ fn sync_actor_depth(mut actors: Query<&mut Transform, With<ActorAppearance>>) {
     for mut tf in &mut actors {
         // translation.y = -世界Y（Bevy y 向上）
         tf.translation.z = depth_z(-tf.translation.y);
+    }
+}
+
+/// 穿戴装备后同步本地玩家外观层（SpriteLayer slot ← HudState.equipment）
+/// 槽位：0=武器(CWeapon) 1=衣服(CArmour) 2=头盔 3=项链 ... 与 ServerRust EquipmentSlot 一致
+fn sync_player_equipment(
+    hud: Res<crate::game::hud::HudState>,
+    players: Query<(Entity, &Children), (With<LocalPlayer>, With<ActorAppearance>)>,
+    mut layers: Query<&mut SpriteLayer>,
+) {
+    let Ok((_, children)) = players.single() else { return };
+    let armour_slot = hud
+        .equipment
+        .get(1)
+        .and_then(|s| s.as_ref())
+        .map(|i| i.item_index.max(0) as u32)
+        .unwrap_or(0);
+    let weapon_slot = hud
+        .equipment
+        .get(0)
+        .and_then(|s| s.as_ref())
+        .map(|i| i.item_index.max(0) as u32)
+        .unwrap_or(0);
+    for child in children.iter() {
+        if let Ok(mut layer) = layers.get_mut(child) {
+            match layer.lib {
+                ArrayLibType::CArmours => {
+                    if layer.slot != armour_slot {
+                        layer.slot = armour_slot;
+                        layer.frame = 0;
+                    }
+                }
+                ArrayLibType::CWeapons => {
+                    if layer.slot != weapon_slot {
+                        layer.slot = weapon_slot;
+                        layer.frame = 0;
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 }
 

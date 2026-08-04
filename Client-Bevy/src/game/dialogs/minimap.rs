@@ -110,7 +110,7 @@ fn spawn_minimap(
     commands.spawn((
         UiEntity,
         DialogRoot(DialogKind::Minimap),
-        MiniMapWidget,
+        // 注意：不能带 MiniMapWidget —— minimap_ui_system 的 dot 查询用 Without<MiniMapWidget> 排除
         MiniMapPlayerDot,
         Sprite {
             image: red,

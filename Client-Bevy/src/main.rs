@@ -302,6 +302,18 @@ fn main() {
     }
     // F12: 保存当前帧截图到 ../../tools/bevy_shot_N.png（开发调试用）
     app.add_systems(Update, debug_screenshot);
+    // --auto-pickup: 进图后自动拾取最近的 GroundItem（验证拾取闭环，无需鼠标）
+    if std::env::args().any(|a| a == "--auto-pickup") {
+        app.add_systems(Update, auto_pickup_system);
+    }
+    // --auto-cast: 进图后自动施放 F1 技能（验证技能链路）
+    if std::env::args().any(|a| a == "--auto-cast") {
+        app.add_systems(Update, auto_cast_system);
+    }
+    // --auto-equip: 进图后自动装备背包第一件可装备物品（验证穿戴→外观）
+    if std::env::args().any(|a| a == "--auto-equip") {
+        app.add_systems(Update, auto_equip_system);
+    }
     // --auto-walk <up|down|left|right>: 调试 chunk 流式（每帧驱动玩家平移）
     {
         let dir = std::env::args()
@@ -4384,5 +4396,113 @@ fn auto_walk_system(
             return;
         }
         tf.translation += step;
+    }
+}
+
+/// --auto-pickup：每 2.5s 自动拾取最近的 GroundItem（复用 player_input 的拾取逻辑）
+fn auto_pickup_system(
+    mut commands: Commands,
+    mut timer: Local<f32>,
+    time: Res<Time>,
+    net: Res<client_bevy::network::NetworkContext>,
+    mut control: ResMut<client_bevy::game::player_control::ControlState>,
+    game_data: Res<client_bevy::map_renderer::GameData>,
+    players: Query<(Entity, &Transform), With<client_bevy::actor::LocalPlayer>>,
+    items: Query<(&client_bevy::actor::NetObjectId, &Transform), (With<client_bevy::actor::GroundItem>, Without<client_bevy::actor::LocalPlayer>)>,
+) {
+    *timer += time.delta_secs();
+    if *timer < 2.5 {
+        return;
+    }
+    *timer = 0.0;
+    let Ok((pe, ptf)) = players.single() else { return };
+    let from_tile = client_bevy::game::movement::world_to_tile(ptf.translation.x, ptf.translation.y);
+    let mut best: Option<(u32, f32)> = None;
+    for (id, tf) in &items {
+        let d = Vec2::new(tf.translation.x - ptf.translation.x, tf.translation.y - ptf.translation.y).length();
+        if best.map(|(_, bd)| d < bd).unwrap_or(true) {
+            best = Some((id.0, d));
+        }
+    }
+    let Some((item_id, _)) = best else { return };
+    let item_tile = items
+        .iter()
+        .find(|(id, _)| id.0 == item_id)
+        .map(|(_, tf)| client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y));
+    let Some(item_tile) = item_tile else { return };
+    let adjacent = (item_tile.0 - from_tile.0).abs() <= 1 && (item_tile.1 - from_tile.1).abs() <= 1;
+    if adjacent {
+        net.send_packet(&mir2_shared::packets::client::item::PickUp {});
+        control.attack_target = None;
+        tracing::info!("🎒 [AUTO] 拾取地面物品 id={}", item_id);
+    } else if let Some(map) = &game_data.map {
+        if let Some(p) = client_bevy::game::pathfinding::find_path(map, from_tile, item_tile) {
+            if !p.is_empty() {
+                let len = p.len();
+                commands.entity(pe).insert(client_bevy::game::movement::LocalMove {
+                    path: p.into(),
+                    step_timer_ms: 0.0,
+                    run: false,
+                    last: None,
+                    turn_acc: 0.0,
+                });
+                control.pickup_target = Some(item_id);
+                tracing::info!("🚶 [AUTO] 走向物品 id={}（{} 格）", item_id, len);
+            }
+        }
+    }
+}
+
+/// --auto-cast：进图后施放一次 F1 技能（验证 客户端→mock→回显 链路）
+fn auto_cast_system(
+    mut timer: Local<f32>,
+    mut fired: Local<bool>,
+    time: Res<Time>,
+    net: Res<client_bevy::network::NetworkContext>,
+    magics: Res<client_bevy::game::skills::MagicsState>,
+) {
+    *timer += time.delta_secs();
+    if *fired || *timer < 6.0 || magics.magics.is_empty() {
+        return; // 等 UserInformation（技能）就绪
+    }
+    *fired = true;
+    let Some(m) = magics.by_key(1) else {
+        tracing::info!("[AUTO] 无技能 key=1");
+        return;
+    };
+    net.send_packet(&mir2_shared::packets::client::combat::Magic {
+        spell: m.spell,
+        direction: mir2_shared::enums::MirDirection::Up,
+        target_id: 101,
+        location: mir2_shared::map::Point { x: 0, y: 0 },
+    });
+    tracing::info!("🪄 [AUTO] 施放 {}", m.name);
+}
+
+/// --auto-equip：进图后自动装备背包第一件可装备物品（验证 EquipItem 闭环 + 外观刷新）
+fn auto_equip_system(
+    mut timer: Local<f32>,
+    mut fired: Local<bool>,
+    time: Res<Time>,
+    net: Res<client_bevy::network::NetworkContext>,
+    hud: Res<client_bevy::game::hud::HudState>,
+) {
+    if *fired {
+        return;
+    }
+    *timer += time.delta_secs();
+    if *timer < 6.0 || hud.inventory.items.iter().flatten().count() == 0 {
+        return;
+    }
+    *fired = true;
+    if let Some(item) = hud.inventory.items.iter().flatten().find(|i| i.is_equipment()) {
+        if let Some(to) = item.equip_slot() {
+            net.send_packet(&mir2_shared::packets::client::item::EquipItem {
+                grid: mir2_shared::enums::MirGridType::Inventory,
+                unique_id: item.unique_id,
+                to,
+            });
+            tracing::info!("⚔️ [AUTO] 装备 {} -> 槽 {}", item.name, to);
+        }
     }
 }
