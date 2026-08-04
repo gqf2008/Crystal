@@ -43,6 +43,8 @@ pub struct LocalMove {
     pub run: bool,
     /// 当前路径段离开的节点（到达节点时更新；用于稳定方向，避免滑行中方向抖动）
     pub last: Option<(i32, i32)>,
+    /// 路径起点（首帧固定；防止滑行中 cur 越过瓦片边界导致首格误判已到达而不发包，#77）
+    pub step_origin: Option<(i32, i32)>,
     /// 转向计时器（固定角速度：每 125ms 转 1 个方向）
     pub turn_acc: f32,
 }
@@ -149,7 +151,14 @@ fn apply_self_position(
     // 本地玩家同时带 NetObjectId（此前误用 Without<NetObjectId> 把玩家自己排除，
     // 服务器 UserLocation 校正永不生效 → 客户端位置漂移（#57 实测）
     mut players: Query<&mut Transform, (With<LocalPlayer>, With<NetObjectId>)>,
+    local_moves: Query<(), (With<LocalPlayer>, With<LocalMove>)>,
 ) {
+    // 本地移动中：服务器位置必然滞后于客户端（网络往返），瞬移校正会与 LocalMove 每帧拉扯，
+    // 导致路径永远走不完（#77 实测：客户端 10 格路径只发 1 个 Run，服务器坐标停在出生点附近）。
+    // 不消费该校正值，等移动结束后下一帧再应用。
+    if !local_moves.is_empty() {
+        return;
+    }
     let Some((tx, ty, _dir)) = net.self_position.take() else {
         return;
     };
@@ -282,15 +291,25 @@ fn advance_local_move(
         return;
     }
 
-    // run 模式跨 2 格（C# 跑步每步 2 格；服务器 Run=2 格/次——#59：
-    // 之前客户端每 1 格节点发 Run，服务器走 2 格导致走过头）
-    let run_step2 = lm.run && lm.path.len() >= 2;
-    let target = if run_step2 {
-        *lm.path.get(1).unwrap()
-    } else {
-        *lm.path.front().unwrap()
-    };
-    tracing::debug!("🚶 move: run_step2={} path_len={} target=({},{})", run_step2, lm.path.len(), target.0, target.1);
+    // 步进决策（#77 修复）：只有 2 格同向直线才跨 2 格发 Run（服务器 Run=2 格/次），
+    // 转弯/斜线段逐格发 Walk——此前 run_step2 对斜线段整段不发包（direction_from_delta 返回
+    // None），服务器坐标滞后于客户端，近战永远打不到目标（实测 10 格路径只发 1 个 Run）。
+    let cur = world_to_tile(tf.translation.x, tf.translation.y);
+    // 首帧固定路径起点（此后 cur 随滑动漂移，不能作为段起点——否则首格会被误判已到达）
+    if lm.last.is_none() && lm.step_origin.is_none() {
+        lm.step_origin = Some(cur);
+    }
+    let from = lm.last.or(lm.step_origin).unwrap_or(cur);
+    let first = *lm.path.front().unwrap();
+    let d1 = (first.0 - from.0, first.1 - from.1);
+    let mut use_run = lm.run && lm.path.len() >= 2 && d1.0.abs() + d1.1.abs() == 1;
+    if use_run {
+        let second = *lm.path.get(1).unwrap();
+        let d2 = (second.0 - first.0, second.1 - first.1);
+        use_run = d1 == d2; // 仅同向直线
+    }
+    let target = if use_run { *lm.path.get(1).unwrap() } else { first };
+    tracing::debug!("🚶 move: use_run={} path_len={} target=({},{})", use_run, lm.path.len(), target.0, target.1);
     let target_world = tile_to_world(target.0, target.1);
     let dx = target_world.x - tf.translation.x;
     let dy = target_world.y - tf.translation.y;
@@ -298,19 +317,14 @@ fn advance_local_move(
     let speed = if lm.run { RUN_SPEED } else { WALK_SPEED };
     let step = speed * dt;
 
-    // 动画：走路/跑步 + 方向（run 跨格用段方向；walk 向前看 2 个节点避免方向乱跳）
-    let cur = world_to_tile(tf.translation.x, tf.translation.y);
-    let desired = if run_step2 {
-        if let Some(last) = lm.last {
-            direction_from_delta(target.0 - last.0, target.1 - last.1)
-        } else {
-            direction_from_delta(target.0 - cur.0, target.1 - cur.1)
-        }
+    // 动画：走路/跑步 + 方向（walk 向前看 2 个节点避免方向乱跳）
+    let desired = if use_run {
+        direction_from_delta(d1.0, d1.1)
     } else if let Some(last) = lm.last {
         lookahead_direction(last, &lm.path)
-            .or_else(|| direction_from_delta(target.0 - last.0, target.1 - last.1))
+            .or_else(|| direction_from_delta(first.0 - last.0, first.1 - last.1))
     } else {
-        direction_from_delta(target.0 - cur.0, target.1 - cur.1)
+        direction_from_delta(first.0 - cur.0, first.1 - cur.1)
     }
     .unwrap_or(mir2_shared::enums::MirDirection::Up) as u8;
     // 固定角速度转向：每 125ms 转 1 个方向（8 方向/秒，平滑不抖动）
@@ -328,16 +342,11 @@ fn advance_local_move(
     };
 
     if dist <= step || dist < ARRIVAL {
-        // 到达目标格：对齐并推进（先发包用段方向，再更新 last）
-        let seg_dir = if let Some(last) = lm.last {
-            direction_from_delta(target.0 - last.0, target.1 - last.1)
-        } else {
-            direction_from_delta(target.0 - cur.0, target.1 - cur.1)
-        };
+        // 到达目标格：对齐并推进（seg_dir 用单格步进方向，保证任意 8 方向都能发包）
+        let seg_dir = direction_from_delta(d1.0, d1.1);
         tf.translation.x = target_world.x;
         tf.translation.y = target_world.y;
-        // run 跨 2 格：pop 两个节点发 Run；最后 1 格（或 walk）pop 1 个发 Walk
-        if run_step2 {
+        if use_run {
             lm.path.pop_front();
             lm.path.pop_front();
         } else {
@@ -345,11 +354,14 @@ fn advance_local_move(
         }
         lm.last = Some(target);
         if let Some(d) = seg_dir {
-            if run_step2 {
+            tracing::debug!("🚶 到达发包: from=({},{}) target=({},{}) dir={:?} run={}", from.0, from.1, target.0, target.1, d, use_run);
+            if use_run {
                 net.send_packet(&mir2_shared::packets::client::movement::Run { direction: d });
             } else {
                 net.send_packet(&mir2_shared::packets::client::movement::Walk { direction: d });
             }
+        } else {
+            tracing::debug!("🚶 到达跳过发包: from=({},{}) target=({},{}) seg_dir=None run={}", from.0, from.1, target.0, target.1, use_run);
         }
     } else {
         // 平滑滑向目标

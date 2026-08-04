@@ -4478,6 +4478,7 @@ fn auto_pickup_system(
                     step_timer_ms: 0.0,
                     run: false,
                     last: None,
+                    step_origin: None,
                     turn_acc: 0.0,
                 });
                 control.pickup_target = Some(item_id);
@@ -4778,6 +4779,7 @@ fn real_verify_system(
         &Transform,
         &client_bevy::actor::ActorAppearance,
     )>,
+    monster_names: Query<(&client_bevy::actor::NetObjectId, &client_bevy::actor::MonsterName)>,
     players: Query<
         (Entity, &Transform),
         (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>),
@@ -4827,8 +4829,19 @@ fn real_verify_system(
             let (px, py) =
                 client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
             let mut best: Option<(u32, i32, i32, i32)> = None;
+            let mut saw_monster = false;
+            let mut saw_guard = false;
             for (id, tf, app) in &actors {
                 if !matches!(app, client_bevy::actor::ActorAppearance::Monster { .. }) {
+                    continue;
+                }
+                saw_monster = true;
+                // 守卫是友好 NPC，攻击会被反杀（#77 实测打死玩家）；不作为猎杀目标
+                if monster_names
+                    .iter()
+                    .any(|(mid, mn)| mid.0 == id.0 && mn.0.to_lowercase().contains("guard"))
+                {
+                    saw_guard = true;
                     continue;
                 }
                 // 排除已尝试但未命中的目标（#57 远程怪够不着）
@@ -4843,7 +4856,9 @@ fn real_verify_system(
                 }
             }
             let Some((oid, mx, my, d)) = best else {
-                if s.tried.is_empty() {
+                if saw_guard && !saw_monster {
+                    tracing::warn!("[REAL] ❌ 图上只有守卫类目标（已跳过），无猎杀目标");
+                } else if s.tried.is_empty() {
                     tracing::warn!("[REAL] ❌ 全图无怪物");
                 } else {
                     tracing::warn!("[REAL] ❌ 已尝试 {} 个目标后无剩余怪物（近战命中验证不通过）", s.tried.len());
@@ -4851,7 +4866,15 @@ fn real_verify_system(
                 s.stage = 9;
                 return;
             };
-            tracing::info!("[REAL] 🎯 最近怪物 id={} @ ({},{}) 距离={}（已试 {} 个）", oid, mx, my, d, s.tried.len());
+            let mon_name = monster_names
+                .iter()
+                .find(|(mid, _)| mid.0 == oid)
+                .map(|(_, n)| n.0.clone())
+                .unwrap_or_default();
+            tracing::info!(
+                "[REAL] 🎯 最近怪物 id={} {} @ ({},{}) 距离={}（已试 {} 个）",
+                oid, mon_name, mx, my, d, s.tried.len()
+            );
             s.target = Some(oid);
             s.target_tile = Some((mx, my));
             if d <= 1 {
@@ -4895,6 +4918,7 @@ fn real_verify_system(
                         step_timer_ms: 0.0,
                         run: true,
                         last: None,
+                        step_origin: None,
                         turn_acc: 0.0,
                     });
                     tracing::info!("[REAL] 🚶 寻路到怪物旁（{} 格，run，目标 {},{}）", len, t2.0, t2.1);
@@ -5030,6 +5054,7 @@ fn real_verify_system(
                         step_timer_ms: 0.0,
                         run: true,
                         last: None,
+                        step_origin: None,
                         turn_acc: 0.0,
                     });
                     tracing::info!("[REAL] 🚶 寻路到 NPC（{} 格，run）", len);
