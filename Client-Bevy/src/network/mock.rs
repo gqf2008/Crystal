@@ -29,7 +29,12 @@ struct MockPlayerStats {
 
 impl MockPlayerStats {
     fn new() -> Self {
-        Self { level: 30, exp: 12000, max_exp: Self::max_exp_for(30), hp: 850, mp: 420 }
+        // MOCK_START_MP 可调初始魔法值（默认 420；设小可快速验证 蓝不足拒绝）
+        let mp = std::env::var("MOCK_START_MP")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(420);
+        Self { level: 30, exp: 12000, max_exp: Self::max_exp_for(30), hp: 850, mp }
     }
     /// 经验上限（C# Globals.Experience 近似：level^2*100/3，30 级 = 30000）
     fn max_exp_for(level: u16) -> i64 {
@@ -48,6 +53,25 @@ struct MockQuest {
 const QUEST_ID: i32 = 1;
 const QUEST_KILL_TARGET: u32 = 3;
 
+/// 怪物属性（#49：差异化 HP/伤害/经验/是否主动）
+struct MonsterDef {
+    hp_max: i32,
+    damage: u32,
+    exp: u32,
+    aggressive: bool,
+}
+
+fn monster_def(id: u32) -> MonsterDef {
+    match id {
+        // 稻草人：被动挨打（首个练手怪）
+        101 => MonsterDef { hp_max: 100, damage: 0, exp: 2000, aggressive: false },
+        // 多钩猫：追击 + 邻接攻击
+        102 => MonsterDef { hp_max: 120, damage: 40, exp: 2500, aggressive: true },
+        // 半兽人：追击 + 邻接攻击（更强）
+        _ => MonsterDef { hp_max: 150, damage: 60, exp: 3000, aggressive: true },
+    }
+}
+
 pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
     std::thread::Builder::new()
         .name("mock-server".into())
@@ -56,15 +80,19 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             let mut characters: Vec<SelectInfo> = Vec::new();
             let mut last_ping = std::time::Instant::now();
             // ---- 玩法闭环状态（#next：战斗/掉落/拾取/技能/怪物AI/装备）----
-            let mut monster_hp: HashMap<u32, i32> =
-                [(101u32, 100), (102, 120), (103, 80)].into_iter().collect();
+            let mut monster_hp: HashMap<u32, i32> = [101u32, 102, 103]
+                .into_iter()
+                .map(|id| (id, monster_def(id).hp_max))
+                .collect();
             let mut monster_pos: HashMap<u32, (i32, i32)> = [
                 (101u32, (353, 352)),
-                (102, (354, 351)),
-                (103, (353, 353)),
+                (102, (356, 350)),
+                (103, (351, 355)),
             ]
             .into_iter()
             .collect();
+            /// 怪物最后受击时刻（#49 脱战回血）
+            let mut monster_last_hit: HashMap<u32, std::time::Instant> = HashMap::new();
             /// 地面掉落物品（id, x, y）
             let mut ground_items: Vec<(u32, i32, i32)> = Vec::new();
             let mut next_item_id = 200u32;
@@ -88,11 +116,11 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             let mut player_equipment: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 12];
             let mut player_dead = false;
             let mut player_dead_since: Option<std::time::Instant> = None;
-            // 怪物 103 攻击伤害（默认 60；MOCK_PLAYER_DAMAGE 可调大，测死亡/复活闭环）
+            // 怪物攻击伤害覆盖（默认 0 = 用怪物自身伤害；MOCK_PLAYER_DAMAGE 可调大测死亡/复活闭环）
             let player_damage = std::env::var("MOCK_PLAYER_DAMAGE")
                 .ok()
                 .and_then(|v| v.parse::<u32>().ok())
-                .unwrap_or(60);
+                .unwrap_or(0);
             loop {
                 match from_client.recv_timeout(std::time::Duration::from_millis(100)) {
                     Ok(payload) => {
@@ -268,9 +296,10 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     if let Ok(p) = client::Attack::read_body(&mut cur) {
                                         tracing::info!("[MOCK] 攻击 dir={:?}", p.direction);
                                         let target = 101u32; // 第一个怪物
-                                        let hp = monster_hp.entry(target).or_insert(100);
+                                        let hp = monster_hp.entry(target).or_insert(monster_def(target).hp_max);
                                         let damage = player_attack_damage(&player_equipment);
                                         *hp -= damage as i32;
+                                        monster_last_hit.insert(target, std::time::Instant::now());
                                         send(
                                             &to_client,
                                             &server::combat::ObjectStruck {
@@ -291,9 +320,6 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         );
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
-                                            let item_id = next_item_id;
-                                            next_item_id += 1;
-                                            ground_items.push((item_id, ix, iy));
                                             send(
                                                 &to_client,
                                                 &server::combat::ObjectDied {
@@ -304,20 +330,63 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                     death_type: 0,
                                                 },
                                             );
-                                            // 掉落：金创药（可拾取）
-                                            send(
-                                                &to_client,
-                                                &server::drops::ObjectItem {
-                                                    object_id: item_id,
-                                                    item: potion_item(1),
-                                                    location_x: ix,
-                                                    location_y: iy,
-                                                },
-                                            );
+                                            // 掉落：40% 金币 / 30% 药水 / 20% 装备 / 10% 无（#50）
+                                            // 伪随机：时间微秒 + 击杀序号混合（毫秒级时间戳下 subsec_micros 末位仍有变化）
+                                            let roll = (std::time::SystemTime::now()
+                                                .duration_since(std::time::UNIX_EPOCH)
+                                                .map(|d| d.subsec_micros())
+                                                .unwrap_or(0)
+                                                + next_item_id)
+                                                % 10;
+                                            next_item_id += 1;
+                                            if roll < 4 {
+                                                let g = 20 + (next_item_id % 5) * 20;
+                                                player_gold += g;
+                                                send(&to_client, &server::drops::GainedGold { gold: g });
+                                                send(
+                                                    &to_client,
+                                                    &server::chat::Chat {
+                                                        message: format!("获得 {} 金币", g),
+                                                        chat_type: ChatType::System,
+                                                    },
+                                                );
+                                                tracing::info!("💰 [MOCK] 怪物 {} 掉落金币 +{}（余额 {}）", target, g, player_gold);
+                                            } else if roll < 7 {
+                                                let item_id = next_item_id;
+                                                next_item_id += 1;
+                                                ground_items.push((item_id, ix, iy));
+                                                send(
+                                                    &to_client,
+                                                    &server::drops::ObjectItem {
+                                                        object_id: item_id,
+                                                        item: potion_item(1),
+                                                        location_x: ix,
+                                                        location_y: iy,
+                                                    },
+                                                );
+                                                tracing::info!("💊 [MOCK] 怪物 {} 掉落药水 #{}", target, item_id);
+                                            } else if roll < 9 {
+                                                let item_id = next_item_id;
+                                                next_item_id += 1;
+                                                let equip = if next_item_id % 2 == 0 { 5 } else { 10 };
+                                                ground_items.push((item_id, ix, iy));
+                                                send(
+                                                    &to_client,
+                                                    &server::drops::ObjectItem {
+                                                        object_id: item_id,
+                                                        item: potion_item(equip),
+                                                        location_x: ix,
+                                                        location_y: iy,
+                                                    },
+                                                );
+                                                tracing::info!("⚔️ [MOCK] 怪物 {} 掉落装备 #{} (index {})", target, item_id, equip);
+                                            } else {
+                                                tracing::info!("🍃 [MOCK] 怪物 {} 无掉落", target);
+                                            }
                                             send(&to_client, &server::objects::ObjectRemove { object_id: target });
                                             respawn.insert(target, std::time::Instant::now());
-                                            on_kill_reward(&to_client, &mut player_stats, &mut quest);
-                                            tracing::info!("💀 怪物 {} 死亡，掉落物品 #{}", target, item_id);
+                                            on_kill_reward(&to_client, target, &mut player_stats, &mut quest);
+                                            tracing::info!("💀 怪物 {} 死亡", target);
                                         }
                                     }
                                 }
@@ -329,6 +398,27 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     }
                                     if let Ok(p) = client::combat::Magic::read_body(&mut cur) {
                                         tracing::info!("[MOCK] 魔法 spell={:?}", p.spell);
+                                        // 耗蓝：施法扣 5 MP，不足拒绝（#51）
+                                        const MAGIC_COST: u32 = 5;
+                                        if player_stats.mp < MAGIC_COST {
+                                            send(
+                                                &to_client,
+                                                &server::chat::Chat {
+                                                    message: "魔法值不足".into(),
+                                                    chat_type: ChatType::System,
+                                                },
+                                            );
+                                            tracing::info!("🔮 [MOCK] 施法被拒：MP 不足（{}/{}）", player_stats.mp, MAGIC_COST);
+                                            continue;
+                                        }
+                                        player_stats.mp -= MAGIC_COST;
+                                        send(
+                                            &to_client,
+                                            &server::combat::HealthChanged {
+                                                hp: player_stats.hp,
+                                                mp: player_stats.mp,
+                                            },
+                                        );
                                         send(
                                             &to_client,
                                             &server::magic_combat::MagicCast {
@@ -336,8 +426,9 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             },
                                         );
                                         let target = if p.target_id != 0 { p.target_id } else { 101u32 };
-                                        let hp = monster_hp.entry(target).or_insert(100);
+                                        let hp = monster_hp.entry(target).or_insert(monster_def(target).hp_max);
                                         *hp -= 20;
+                                        monster_last_hit.insert(target, std::time::Instant::now());
                                         send(
                                             &to_client,
                                             &server::combat::DamageIndicator {
@@ -348,9 +439,6 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         );
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
-                                            let item_id = next_item_id;
-                                            next_item_id += 1;
-                                            ground_items.push((item_id, ix, iy));
                                             send(
                                                 &to_client,
                                                 &server::combat::ObjectDied {
@@ -361,18 +449,62 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                     death_type: 0,
                                                 },
                                             );
-                                            send(
-                                                &to_client,
-                                                &server::drops::ObjectItem {
-                                                    object_id: item_id,
-                                                    item: potion_item(1),
-                                                    location_x: ix,
-                                                    location_y: iy,
-                                                },
-                                            );
+                                            // 掉落：40% 金币 / 30% 药水 / 20% 装备 / 10% 无（#50）
+                                            // 伪随机：时间微秒 + 击杀序号混合（毫秒级时间戳下 subsec_micros 末位仍有变化）
+                                            let roll = (std::time::SystemTime::now()
+                                                .duration_since(std::time::UNIX_EPOCH)
+                                                .map(|d| d.subsec_micros())
+                                                .unwrap_or(0)
+                                                + next_item_id)
+                                                % 10;
+                                            next_item_id += 1;
+                                            if roll < 4 {
+                                                let g = 20 + (next_item_id % 5) * 20;
+                                                player_gold += g;
+                                                send(&to_client, &server::drops::GainedGold { gold: g });
+                                                send(
+                                                    &to_client,
+                                                    &server::chat::Chat {
+                                                        message: format!("获得 {} 金币", g),
+                                                        chat_type: ChatType::System,
+                                                    },
+                                                );
+                                                tracing::info!("💰 [MOCK] 怪物 {} 掉落金币 +{}（余额 {}）", target, g, player_gold);
+                                            } else if roll < 7 {
+                                                let item_id = next_item_id;
+                                                next_item_id += 1;
+                                                ground_items.push((item_id, ix, iy));
+                                                send(
+                                                    &to_client,
+                                                    &server::drops::ObjectItem {
+                                                        object_id: item_id,
+                                                        item: potion_item(1),
+                                                        location_x: ix,
+                                                        location_y: iy,
+                                                    },
+                                                );
+                                                tracing::info!("💊 [MOCK] 怪物 {} 掉落药水 #{}", target, item_id);
+                                            } else if roll < 9 {
+                                                let item_id = next_item_id;
+                                                next_item_id += 1;
+                                                let equip = if next_item_id % 2 == 0 { 5 } else { 10 };
+                                                ground_items.push((item_id, ix, iy));
+                                                send(
+                                                    &to_client,
+                                                    &server::drops::ObjectItem {
+                                                        object_id: item_id,
+                                                        item: potion_item(equip),
+                                                        location_x: ix,
+                                                        location_y: iy,
+                                                    },
+                                                );
+                                                tracing::info!("⚔️ [MOCK] 怪物 {} 掉落装备 #{} (index {})", target, item_id, equip);
+                                            } else {
+                                                tracing::info!("🍃 [MOCK] 怪物 {} 无掉落", target);
+                                            }
                                             send(&to_client, &server::objects::ObjectRemove { object_id: target });
                                             respawn.insert(target, std::time::Instant::now());
-                                            on_kill_reward(&to_client, &mut player_stats, &mut quest);
+                                            on_kill_reward(&to_client, target, &mut player_stats, &mut quest);
                                         }
                                     }
                                 }
@@ -496,10 +628,14 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         if let Some(idx) = idx {
                                             if let Some(item) = player_inventory[idx].take() {
                                                 send(&to_client, &server::item_operations::UseItem { unique_id: p.unique_id });
-                                                player_stats.hp = 1000;
-                                                player_stats.mp = 500;
+                                                // 魔法药(小) index=2 回蓝，其余回血（#51）
+                                                if item.item_index == 2 {
+                                                    player_stats.mp = (player_stats.mp + 200).min(600);
+                                                } else {
+                                                    player_stats.hp = 1000;
+                                                }
                                                 send(&to_client, &server::combat::HealthChanged { hp: player_stats.hp, mp: player_stats.mp });
-                                                tracing::info!("💊 [MOCK] 使用物品: {} (uid={})", item.info.as_ref().map(|i| i.name.clone()).unwrap_or_default(), p.unique_id);
+                                                tracing::info!("💊 [MOCK] 使用物品: {} (uid={}) hp={} mp={}", item.info.as_ref().map(|i| i.name.clone()).unwrap_or_default(), p.unique_id, player_stats.hp, player_stats.mp);
                                             }
                                         }
                                     }
@@ -657,7 +793,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                 .collect();
                             for id in due {
                                 respawn.remove(&id);
-                                monster_hp.insert(id, if id == 102 { 120 } else { 100 });
+                                monster_hp.insert(id, monster_def(id).hp_max);
                                 let (x, y) = monster_pos.get(&id).copied().unwrap_or((353, 352));
                                 let img = match id { 101 => 1u16, 102 => 5, _ => 9 };
                                 send(
@@ -686,73 +822,98 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                 );
                                 tracing::info!("♻️ 怪物 {} 重生", id);
                             }
-                            // 怪物 102 向玩家方向走 1 格
-                            if !respawn.contains_key(&102) {
-                                let (mx, my) = monster_pos.get_mut(&102).copied().unwrap_or((354, 351));
-                                let (dir, nx, ny) = if my > 352 {
-                                    (MirDirection::Up, mx, my - 1)
-                                } else if my < 352 {
-                                    (MirDirection::Down, mx, my + 1)
-                                } else if mx > 354 {
-                                    (MirDirection::Left, mx - 1, my)
-                                } else {
-                                    (MirDirection::Right, mx + 1, my)
-                                };
-                                monster_pos.insert(102, (nx, ny));
-                                tracing::info!("🚶 怪物 102 移动到 ({},{}) {:?}", nx, ny, dir);
-                                send(
-                                    &to_client,
-                                    &server::objects::ObjectWalk {
-                                        object_id: 102,
-                                        location_x: nx,
-                                        location_y: ny,
-                                        direction: dir,
-                                    },
-                                );
-                            }
-                            // 怪物 103 攻击玩家：扣血（防御减免）+ 伤害飘字 + 死亡判定（#46/#47）
-                            if !respawn.contains_key(&103) && !player_dead {
-                                let defence = player_defence(&player_equipment);
-                                let dmg = player_damage.saturating_sub(defence).max(1);
-                                player_stats.hp = player_stats.hp.saturating_sub(dmg);
-                                send(
-                                    &to_client,
-                                    &server::combat::ObjectStruck {
-                                        object_id: 100,
-                                        attacker_id: 103,
-                                        location_x: 354,
-                                        location_y: 352,
-                                        direction: 4,
-                                    },
-                                );
-                                send(
-                                    &to_client,
-                                    &server::combat::DamageIndicator {
-                                        damage: dmg as i32,
-                                        damage_type: 0,
-                                        object_id: 100,
-                                    },
-                                );
-                                send(
-                                    &to_client,
-                                    &server::combat::HealthChanged {
-                                        hp: player_stats.hp,
-                                        mp: player_stats.mp,
-                                    },
-                                );
-                                tracing::info!("🗡️ 怪物 103 攻击玩家 -{}（防御 {}）hp={}", dmg, defence, player_stats.hp);
-                                if player_stats.hp == 0 {
-                                    player_dead = true;
-                                    player_dead_since = Some(std::time::Instant::now());
+                            // 怪物 AI（#49）：脱战回血 + 追击 + 邻接攻击
+                            for id in [101u32, 102, 103] {
+                                if respawn.contains_key(&id) {
+                                    continue;
+                                }
+                                let def = monster_def(id);
+                                // 脱战回血：8s 未受击 → 回满
+                                if let Some(last) = monster_last_hit.get(&id) {
+                                    if last.elapsed() >= std::time::Duration::from_secs(8) {
+                                        if let Some(hp) = monster_hp.get_mut(&id) {
+                                            if *hp < def.hp_max {
+                                                *hp = def.hp_max;
+                                                tracing::info!("💚 [MOCK] 怪物 {} 脱战回血（8s 未受击）", id);
+                                            }
+                                        }
+                                    }
+                                }
+                                if !def.aggressive || player_dead {
+                                    continue;
+                                }
+                                let (mx, my) = monster_pos.get(&id).copied().unwrap_or((353, 352));
+                                let (px, py): (i32, i32) = (354, 352);
+                                // 邻接攻击（切比雪夫距离 <=1）
+                                if (mx - px).abs().max((my - py).abs()) <= 1 {
+                                    let defence = player_defence(&player_equipment);
+                                    let base = if player_damage > 0 { player_damage } else { def.damage };
+                                    let dmg = base.saturating_sub(defence).max(1);
+                                    player_stats.hp = player_stats.hp.saturating_sub(dmg);
                                     send(
                                         &to_client,
-                                        &server::combat::Death {
-                                            location_x: 354,
-                                            location_y: 352,
-                                            direction: 0,
+                                        &server::combat::ObjectStruck {
+                                            object_id: 100,
+                                            attacker_id: id,
+                                            location_x: px as u32,
+                                            location_y: py as u32,
+                                            direction: 4,
                                         },
                                     );
-                                    tracing::info!("💀 [MOCK] 玩家死亡，等待复活（10s 自动）");
+                                    send(
+                                        &to_client,
+                                        &server::combat::DamageIndicator {
+                                            damage: dmg as i32,
+                                            damage_type: 0,
+                                            object_id: 100,
+                                        },
+                                    );
+                                    send(
+                                        &to_client,
+                                        &server::combat::HealthChanged {
+                                            hp: player_stats.hp,
+                                            mp: player_stats.mp,
+                                        },
+                                    );
+                                    tracing::info!("🗡️ 怪物 {} 攻击玩家 -{}（防御 {}）hp={}", id, dmg, defence, player_stats.hp);
+                                    if player_stats.hp == 0 {
+                                        player_dead = true;
+                                        player_dead_since = Some(std::time::Instant::now());
+                                        send(
+                                            &to_client,
+                                            &server::combat::Death {
+                                                location_x: px as u32,
+                                                location_y: py as u32,
+                                                direction: 0,
+                                            },
+                                        );
+                                        tracing::info!("💀 [MOCK] 玩家死亡，等待复活（10s 自动）");
+                                    }
+                                } else {
+                                    // 追击 1 格（8 方向）
+                                    let (dx, dy) = ((px - mx).signum(), (py - my).signum());
+                                    let (nx, ny) = (mx + dx, my + dy);
+                                    monster_pos.insert(id, (nx, ny));
+                                    let dir = match (dx, dy) {
+                                        (-1, -1) => MirDirection::UpLeft,
+                                        (0, -1) => MirDirection::Up,
+                                        (1, -1) => MirDirection::UpRight,
+                                        (-1, 0) => MirDirection::Left,
+                                        (1, 0) => MirDirection::Right,
+                                        (-1, 1) => MirDirection::DownLeft,
+                                        (0, 1) => MirDirection::Down,
+                                        _ => MirDirection::DownRight,
+                                    };
+                                    tracing::info!("🚶 怪物 {} 追击玩家 ({},{})->({},{}) {:?}", id, mx, my, nx, ny, dir);
+                                    send(
+                                        &to_client,
+                                        &server::objects::ObjectWalk {
+                                            object_id: id,
+                                            location_x: nx,
+                                            location_y: ny,
+                                            direction: dir,
+                                        },
+                                    );
                                 }
                             }
                         }
@@ -813,13 +974,14 @@ fn grant_exp(to_client: &Sender<Vec<u8>>, stats: &mut MockPlayerStats, amount: u
     }
 }
 
-/// 击杀奖励：经验 + 任务计数/完成（#43/#44）
+/// 击杀奖励：经验（按怪物 #49）+ 任务计数/完成（#43/#44）
 fn on_kill_reward(
     to_client: &Sender<Vec<u8>>,
+    target: u32,
     stats: &mut MockPlayerStats,
     quest: &mut MockQuest,
 ) {
-    grant_exp(to_client, stats, 5000);
+    grant_exp(to_client, stats, monster_def(target).exp);
     if !quest.taken || quest.completed {
         return;
     }

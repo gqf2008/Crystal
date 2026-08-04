@@ -1963,8 +1963,10 @@ fn handle_packet(
             }
         }
         x if x == ServerPacketIds::GainedGold as i16 => {
+            // GainedGold 是增量（击杀掉落），累加到余额
             if let Ok(p) = drops::GainedGold::read_body(&mut cur) {
-                hud.gold = p.gold;
+                hud.gold = hud.gold.saturating_add(p.gold);
+                tracing::info!("💰 获得金币 +{}（余额 {}）", p.gold, hud.gold);
             }
         }
         x if x == ServerPacketIds::GainExperience as i16 => {
