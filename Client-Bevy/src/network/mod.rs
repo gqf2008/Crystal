@@ -269,6 +269,7 @@ impl NetworkContext {
         if let Some(tx) = &self.to_server {
             let mut inner = Vec::new();
             if mir2_shared::packets::base::serialize_packet(&mut inner, packet).is_ok() {
+                tracing::debug!("📤 send_packet opcode={} len={}", P::OPCODE, inner.len());
                 let _ = tx.send(inner);
             }
         }

@@ -4736,6 +4736,12 @@ struct RealVerifyState {
     attack_elapsed: f32,
     /// 到达邻接后等待服务器位置同步的计时（客户端本地移动超前，需等 UserLocation 校正）
     arrived_wait: f32,
+    /// NPC 对话目标（stage 3 记录，stage 4 使用）
+    npc_id: Option<u32>,
+    /// 是否已发送 CallNPC（防止重复）
+    npc_sent: bool,
+    /// NPC 到达后等待服务器位置同步的计时
+    npc_wait: f32,
 }
 
 /// --real-verify：真实服务器交互闭环（#55）
@@ -4968,11 +4974,15 @@ fn real_verify_system(
                 return;
             };
             tracing::info!("[REAL] 🧙 最近 NPC id={} @ ({},{}) 距离={}", nid, nx, ny, d);
+            s.npc_id = Some(nid);
+            s.npc_sent = false;
+            s.npc_wait = 0.0;
             if d <= 2 {
                 net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
                     object_id: nid,
                     key: "[@Main]".to_string(),
                 });
+                s.npc_sent = true;
                 tracing::info!("[REAL] 🧙 发送 CallNPC [@Main]");
                 s.stage = 4;
                 s.t = 0.0;
@@ -5000,6 +5010,7 @@ fn real_verify_system(
             match path {
                 Some(p) if !p.is_empty() => {
                     let len = p.len();
+                    s.target_tile = Some((nx, ny));
                     commands.entity(pe).insert(client_bevy::game::movement::LocalMove {
                         path: p.into(),
                         step_timer_ms: 0.0,
@@ -5023,8 +5034,28 @@ fn real_verify_system(
                 s.stage = 9;
                 return;
             }
-            if s.t >= 20.0 {
-                tracing::warn!("[REAL] ⚠️ 20s 未收到 NPCResponse（可能仍距离太远/该 NPC 无 @Main 页）");
+            // 到达 NPC 旁且服务器位置同步后发送 CallNPC（本地移动超前，需等校正）
+            if !s.npc_sent {
+                let nid = s.npc_id.unwrap_or(0);
+                let Ok((_, pf)) = players.single() else { return };
+                let (px, py) =
+                    client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+                let (mx, my) = s.target_tile.unwrap_or((0, 0));
+                let d = (mx - px).abs() + (my - py).abs();
+                if d <= 2 {
+                    s.npc_wait += time.delta_secs();
+                    if s.npc_wait >= 2.0 {
+                        s.npc_sent = true;
+                        net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                            object_id: nid,
+                            key: "[@Main]".to_string(),
+                        });
+                        tracing::info!("[REAL] 🧙 服务器位置同步后发送 CallNPC [@Main]");
+                    }
+                }
+            }
+            if s.t >= 25.0 {
+                tracing::warn!("[REAL] ⚠️ 25s 未收到 NPCResponse（可能该 NPC 无 @Main 页）");
                 s.stage = 9;
             }
         }

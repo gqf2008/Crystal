@@ -210,7 +210,9 @@ fn load_type_1(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
         ));
     }
 
-    let cell_size: usize = 14;
+    // C# MapCode.cs LoadMapType1 实际每 cell 15 字节（BackImage 4 + Middle 2 + Front 2 + 7×1），
+    // 文件大小 54 + 700*700*15 = 7350054 验证过；此前误用 14 导致所有 cell 偏移错位（#61 实测）
+    let cell_size: usize = 15;
     let total_cells = (width as usize) * (height as usize);
     if bytes.len() < offset + total_cells * cell_size {
         return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Type 1 file truncated"));
@@ -361,6 +363,17 @@ fn resolve_map_path(file_name: &str, data_dir: &Path) -> io::Result<PathBuf> {
         return Ok(path);
     }
 
+    // Try {data_dir}/Maps/{file_name}.map（ServerRust 地图实际目录：#61 实测缺此候选导致 0.map 加载失败）
+    let mut path3 = data_dir.join("Maps");
+    if !file_name.ends_with(".map") {
+        path3.push(format!("{}.map", file_name));
+    } else {
+        path3.push(file_name);
+    }
+    if path3.exists() {
+        return Ok(path3);
+    }
+
     // Try {data_dir}/{file_name}.map
     let mut path2 = data_dir.to_path_buf();
     if !file_name.ends_with(".map") {
@@ -417,6 +430,46 @@ mod tests {
         assert_eq!(map.height, 1);
         assert!(map.is_walkable(0, 0));
         assert!(!map.is_walkable(1, 0));
+    }
+
+    #[test]
+    fn test_type_1_map_parsing() {
+        // Map 2010 Ver 1.0: 0x10 "Map 2010 Ver 1.0" + XOR 尺寸 + 15B/cell
+        // 验证 cell_size=15（14 会错位导致 walkable 判定错误，#61）
+        let mut bytes = vec![0x10, b'M', b'a', b'p', b' ', b'2', b'0', b'1', b'0', b' ', b'V', b'e', b'r', b' ', b'1', b'.', b'0'];
+        bytes.resize(21, 0u8);
+        // offset 21: w, xor, h
+        let xor: i16 = 0x1234;
+        let w: i16 = 3 ^ xor;
+        let h: i16 = 2 ^ xor;
+        bytes.extend_from_slice(&w.to_le_bytes());
+        bytes.extend_from_slice(&xor.to_le_bytes());
+        bytes.extend_from_slice(&h.to_le_bytes());
+        bytes.resize(54, 0u8);
+        // 3x2 cells * 15B = 90B；第一个 cell back_image = 0x20000000 ^ 0xAA38AA38（不可走）
+        // (0,0) 不可走：back_raw ^ XOR = 0x20000000（障碍位）
+        let mut blocked = vec![0u8; 15];
+        let back_b = (0x2000_0000i32 ^ 0xAA38_AA38u32 as i32).to_le_bytes();
+        blocked[0..4].copy_from_slice(&back_b);
+        bytes.extend_from_slice(&blocked);
+        // 其余 cell 可走：back_raw = 0xAA38AA38（XOR 后 0，无障碍位）
+        for _ in 1..6 {
+            let mut cell = vec![0u8; 15];
+            cell[0..4].copy_from_slice(&(0xAA38_AA38u32 as i32).to_le_bytes());
+            bytes.extend_from_slice(&cell);
+        }
+        let fmt = detect_format(&bytes).expect("detect");
+        assert!(matches!(fmt, MapFormat::Type1), "expected Type1, got {:?}", fmt);
+        let map = load_type_1(&bytes, "test.map").expect("parse Type1");
+        eprintln!("map {}x{} cells[1][0] walkable={} back=0x{:08X} cells[2][1] walkable={} back=0x{:08X}",
+            map.width, map.height, map.cells[1][0].walkable, map.cells[1][0].back_image as u32,
+            map.cells[2][1].walkable, map.cells[2][1].back_image as u32);
+        eprintln!("bytes[84..92]={:02X?}", &bytes[84..92]);
+        assert_eq!(map.width, 3);
+        assert_eq!(map.height, 2);
+        assert!(!map.is_walkable(0, 0), "(0,0) should be blocked");
+        assert!(map.is_walkable(1, 0), "(1,0) should be walkable");
+        assert!(map.is_walkable(2, 1), "(2,1) should be walkable");
     }
 
     #[test]
