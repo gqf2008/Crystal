@@ -69,12 +69,14 @@ pub fn find_path(map: &LoadedMap, from: (i32, i32), to: (i32, i32)) -> Option<Ve
         f: heuristic(from.0, from.1, to.0, to.1),
     });
 
-    const MAX_STEPS: usize = 2000;
+    // 步数上限按地图大小自适应（700x700 绕行可能超过 2000 节点，
+    // 固定 2000 会把大量可达路径误判为不可达——#27）
+    let max_steps = (map.width as usize * map.height as usize).clamp(1, 2_000_000);
     let mut visited = 0usize;
 
     while let Some(node) = open.pop() {
         visited += 1;
-        if visited > MAX_STEPS {
+        if visited > max_steps {
             return None;
         }
         if (node.x, node.y) == to {
@@ -181,6 +183,73 @@ mod tests {
     fn test_same_tile_returns_empty() {
         let map = test_map(5, 5, &[]);
         assert_eq!(find_path(&map, (2, 2), (2, 2)).unwrap().len(), 0);
+    }
+
+    /// 斜穿墙角规则：对角邻格被正交格挡住时不允许斜切（macroquad 同款）
+    #[test]
+    fn test_corner_cut_rejected() {
+        // 右侧 (3,2) 是障碍 → 从 (2,2) 到 (3,3) 不能直接斜切，必须先正交走到 (2,3)
+        let map = test_map(6, 6, &[(3, 2)]);
+        let p = find_path(&map, (2, 2), (3, 3)).unwrap();
+        assert_eq!(p[0], (2, 3), "右格障碍时第一步应向下而非斜切");
+        // 两个正交格都可走 → 允许一步对角
+        let map3 = test_map(6, 6, &[]);
+        let p = find_path(&map3, (2, 2), (3, 3)).unwrap();
+        assert_eq!(p, vec![(3, 3)]);
+        // 左/右都堵死、下方可走 → 绕行，不斜切
+        let map4 = test_map(6, 6, &[(3, 2), (1, 2)]);
+        let p = find_path(&map4, (2, 2), (3, 3)).unwrap();
+        assert!(p.windows(2).all(|w| {
+            let (dx, dy) = (w[1].0 - w[0].0, w[1].1 - w[0].1);
+            !(dx != 0 && dy != 0) || (map4.is_walkable(w[0].0 + dx, w[0].1) && map4.is_walkable(w[0].0, w[0].1 + dy))
+        }), "路径中不允许斜穿墙角");
+    }
+
+    /// 纯 45° 直线路径应保持单一对角方向（smooth_path 不应合成锯齿）
+    #[test]
+    fn test_diagonal_path_stays_diagonal() {
+        let map = test_map(20, 20, &[]);
+        let p = find_path(&map, (2, 2), (8, 8)).unwrap();
+        assert_eq!(p.len(), 6);
+        for (i, node) in p.iter().enumerate() {
+            assert_eq!(*node, (2 + i as i32 + 1, 2 + i as i32 + 1), "应为纯对角");
+        }
+    }
+
+    /// 大图（700x700）寻路性能：开放地图对角寻路应远快于 500ms
+    #[test]
+    fn test_large_map_perf() {
+        let map = test_map(700, 700, &[]);
+        let t0 = std::time::Instant::now();
+        let p = find_path(&map, (0, 0), (699, 699)).unwrap();
+        let dt = t0.elapsed();
+        assert_eq!(p.len(), 699);
+        assert!(
+            dt.as_secs_f64() < 0.5,
+            "700x700 开放地图寻路应 < 500ms，实际 {:?}",
+            dt
+        );
+    }
+
+    /// 绕障碍时方向应稳定：路径中 45° 对角步占多数（不来回横跳）
+    #[test]
+    fn test_around_obstacle_uses_diagonals() {
+        // 障碍列挡路，玩家需绕行；路径应尽量使用对角步保持方向
+        let map = test_map(12, 12, &[(6, 2), (6, 3), (6, 4), (6, 5), (6, 6)]);
+        let p = find_path(&map, (2, 2), (9, 7)).unwrap();
+        assert!(p.iter().all(|n| map.is_walkable(n.0, n.1)));
+        assert_eq!(p.last(), Some(&(9, 7)));
+        // 计算方向变化次数：相邻两步方向不同的次数应很少（<=1 或 2）
+        let dirs: Vec<(i32, i32)> = p
+            .iter()
+            .scan((2, 2), |prev, n| {
+                let d = (n.0 - prev.0, n.1 - prev.1);
+                *prev = *n;
+                Some(d)
+            })
+            .collect();
+        let changes = dirs.windows(2).filter(|w| w[0] != w[1]).count();
+        assert!(changes <= 2, "绕障碍方向变化应稳定，实际 {} 次：{:?}", changes, dirs);
     }
 }
 

@@ -1522,3 +1522,58 @@ mod tests {
         std::fs::remove_file(temp_path).unwrap();
     }
 }
+
+#[cfg(test)]
+mod cellinfo_tests {
+    use super::*;
+
+    /// 碰撞标志位语义（C# MapControl.ValidPoint：back_image & 0x20000000）
+    #[test]
+    fn test_is_walkable_flag_semantics() {
+        let mut c = CellInfo::new();
+        assert!(c.is_walkable(), "默认格子应可行走");
+        c.back_image = 0x20000000;
+        assert!(!c.is_walkable(), "0x20000000 应标记障碍");
+        c.back_image = 0x60000000; // 多个高位同时置位仍算障碍
+        assert!(!c.is_walkable());
+        c = CellInfo::new();
+        c.front_image = 0x7FFF;
+        c.middle_image = 123;
+        assert!(c.is_walkable(), "front/middle 图片装饰不应阻挡移动");
+        c = CellInfo::new();
+        c.back_image = 0x1FFFFFFF;
+        assert!(c.is_walkable(), "无 0x20000000 位即可行走");
+    }
+
+    #[test]
+    fn test_back_tile_accessor() {
+        let mut c = CellInfo::new();
+        assert_eq!(c.back_tile(), None, "back_image=0 时无瓦片");
+        c.back_image = 0x20000000 | 5; // index=4
+        c.back_index = 7;
+        assert_eq!(c.back_tile(), Some((7, 4)));
+        // back_image=1 → 图片索引 0（第一帧图，合法）
+        c.back_image = 1;
+        assert_eq!(c.back_tile(), Some((7, 0)));
+    }
+
+    #[test]
+    fn test_middle_tile_accessor() {
+        let mut c = CellInfo::new();
+        assert_eq!(c.middle_tile(), None, "middle_image<=1 时无瓦片");
+        c.middle_image = 6;
+        c.middle_index = 3;
+        assert_eq!(c.middle_tile(), Some((3, 5)));
+    }
+
+    #[test]
+    fn test_front_tile_accessor() {
+        let mut c = CellInfo::new();
+        assert_eq!(c.front_tile(), None, "front_image=0 时无瓦片");
+        c.front_image = 0x8000 | 9;
+        c.front_index = 4;
+        assert_eq!(c.front_tile(), Some((4, 8)));
+        c.front_index = 200;
+        assert_eq!(c.front_tile(), None);
+    }
+}
