@@ -142,6 +142,10 @@ pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            hud_server_events.run_if(in_state(crate::scenes::AppState::Game)),
+        );
         app.add_systems(OnEnter(AppState::Game), spawn_hud);
         app.add_systems(OnExit(AppState::Game), cleanup_hud);
         app.add_systems(
@@ -583,6 +587,36 @@ fn death_overlay_system(
             tracing::info!("⛪ 点击复活（TownRevive）");
             // 乐观清除，服务端 Revived 会再次确认
             hud.dead = false;
+        }
+    }
+}
+
+
+/// 消费服务端事件更新 HUD 状态（网络层只发 ServerEvent，不再直接改 HudState）
+fn hud_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut hud: ResMut<HudState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::HealthChanged { hp, mp } => {
+                hud.hp = *hp;
+                hud.mp = *mp;
+            }
+            ServerEvent::GoldGained { gold } => {
+                hud.gold = hud.gold.saturating_add(*gold);
+            }
+            ServerEvent::ExperienceGained { amount } => {
+                hud.exp += *amount;
+                tracing::info!("✨ 获得经验 +{}（当前 {}/{}）", amount, hud.exp, hud.max_exp);
+            }
+            ServerEvent::LevelChanged { level, exp, max_exp } => {
+                hud.level = *level;
+                hud.exp = *exp;
+                hud.max_exp = (*max_exp).max(1);
+                tracing::info!("⬆️ 升级 Lv.{} exp={}/{}", level, exp, max_exp);
+            }
         }
     }
 }
