@@ -69,8 +69,8 @@ async fn async_main() -> anyhow::Result<()> {
     let map_dir = PathBuf::from(&cfg.server.map_data_dir);
     let spawn_dir = PathBuf::from("Data/spawn");
 
-    // 初始化 SQLite 数据库
-    let db_path = PathBuf::from("data/crystal.db");
+    // 初始化 SQLite 数据库（使用配置 database.path，支持绝对路径；#77 worktree 联调发现原硬编码忽略配置）
+    let db_path = PathBuf::from(&cfg.database.path);
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).ok();
     }

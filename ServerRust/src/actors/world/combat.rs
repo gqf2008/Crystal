@@ -75,13 +75,30 @@ impl Message<WorldAttackRequest> for WorldActor {
             let target_x = result.x + MON_DIR_DX[atk_dir];
             let target_y = result.y + MON_DIR_DY[atk_dir];
 
+            // #77 诊断：攻击时打印玩家/目标格与附近怪物，核对客户端-服务端坐标同步
+            debug!(
+                "Attack {} at ({},{}) dir={} target=({},{})",
+                state.name, state.x, state.y, result.direction, target_x, target_y
+            );
+            let nearby: Vec<String> = self
+                .monsters
+                .iter()
+                .filter(|(_, m)| (m.x - state.x).abs() <= 5 && (m.y - state.y).abs() <= 5)
+                .map(|(id, m)| format!("{}#{}@({},{}) hp={}", m.name, id, m.x, m.y, m.hp))
+                .collect();
+            if !nearby.is_empty() {
+                debug!("Attack nearby: {}", nearby.join(", "));
+            }
+
             let mut hit_monster = false;
             // HalfMoon/CrossHalfMoon 溅射目标（循环外应用，避免借用冲突）
             let mut halfmoon_splash: Vec<(u32, i32)> = Vec::new();
             let mut primary_target_oid: u32 = 0; // 主目标 oid（溅射排除用）
             for (oid, monster) in &mut self.monsters {
                 let dist = (monster.x - target_x).abs() + (monster.y - target_y).abs();
-                if dist <= 1 {
+                // 近战只打正前方那一格（C# 语义）：dist==0 才命中。此前 <=1 会把
+                // 攻击格旁边的守卫/怪物一并命中（#77 实测守卫被打死都不掉血挡住击杀）
+                if dist == 0 {
                     // 命中怪物 - 使用完整战斗公式（命中/护甲/暴击/反伤/吸血/负面）
                     let attacker_stats = state.to_combat_stats();
                     let defender_stats = monster.to_combat_stats();

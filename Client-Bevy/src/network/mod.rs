@@ -1973,6 +1973,7 @@ fn handle_packet(
         x if x == ServerPacketIds::GainExperience as i16 => {
             if let Ok(p) = experience::GainExperience::read_body(&mut cur) {
                 hud.exp += p.amount as i64;
+                tracing::info!("✨ 获得经验 +{}（当前 {}/{}）", p.amount, hud.exp, hud.max_exp);
             }
         }
         x if x == ServerPacketIds::LevelChanged as i16 => {
@@ -1980,6 +1981,7 @@ fn handle_packet(
                 hud.level = p.level;
                 hud.exp = p.experience;
                 hud.max_exp = p.max_experience.max(1);
+                tracing::info!("⬆️ 升级 Lv.{} exp={}/{}", p.level, p.experience, p.max_experience);
             }
         }
 

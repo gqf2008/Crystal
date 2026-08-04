@@ -161,6 +161,7 @@ fn player_input_system(
                     step_timer_ms: 0.0,
                     run: control.autorun,
                     last: None,
+                    step_origin: None,
                     turn_acc: 0.0,
                 });
                 tracing::info!("🚶 寻路 {} -> {}（{} 格）", from_tile.0, from_tile.1, len);
@@ -230,6 +231,7 @@ fn player_input_system(
                                     step_timer_ms: 0.0,
                                     run: control.autorun,
                                     last: None,
+                                    step_origin: None,
                                     turn_acc: 0.0,
                                 });
                                 control.attack_target = None;
@@ -453,6 +455,7 @@ fn hold_move_system(
                             step_timer_ms: 0.0,
                             run,
                             last: None,
+                            step_origin: None,
                             turn_acc: 0.0,
                         });
                     }
