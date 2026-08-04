@@ -299,6 +299,12 @@ fn debug_screenshot(
 }
 
 fn capture_shot(commands: &mut Commands, counter: &mut u32) {
+    // #71：截图目录不存在时自动创建（tools/ 位于仓库根，随 CWD 变化）
+    if let Ok(dir) = std::path::Path::new("../tools").canonicalize() {
+        let _ = std::fs::create_dir_all(dir);
+    } else {
+        let _ = std::fs::create_dir_all("../tools");
+    }
     let path = format!("../tools/bevy_shot_{}.png", *counter);
     *counter += 1;
     commands

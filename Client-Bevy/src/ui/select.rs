@@ -23,6 +23,7 @@ impl Plugin for SelectPlugin {
         app.init_resource::<UiImageCache>();
         app.init_resource::<UiFont>();
         app.add_systems(OnEnter(AppState::Select), setup_select_ui);
+        app.add_systems(OnEnter(AppState::Select), spawn_ui_camera);
         app.add_systems(OnExit(AppState::Select), cleanup_select_ui);
         app.add_systems(
             Update,

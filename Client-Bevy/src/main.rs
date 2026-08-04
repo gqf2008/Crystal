@@ -27,6 +27,9 @@ use client_bevy::ui::select::SelectPlugin;
 
 mod auto;
 
+// #71：全局给 UI 实体打 RenderLayers layer 1（由独立 UI 相机渲染，地图相机不重画 UI）
+use client_bevy::ui::sprite_ui::mark_ui_render_layers;
+
 fn main() {
     let mut app = App::new();
     app.add_plugins(
@@ -84,6 +87,7 @@ fn main() {
         ModalBoxPlugin,
         client_bevy::game::GamePlugin,
     ));
+    app.add_systems(Update, mark_ui_render_layers);
     auto::register(&mut app);
     // --no-actors: 只渲染地图（用于纯地图截图验证）
     if std::env::args().any(|a| a == "--no-actors") {
