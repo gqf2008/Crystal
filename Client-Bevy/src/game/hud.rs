@@ -664,7 +664,11 @@ fn hud_server_events(
             | ServerEvent::NpcDialog { .. }
             | ServerEvent::Roll { .. }
             | ServerEvent::AwakeningMaterials { .. }
-            | ServerEvent::AwakeningResult { .. } => {}
+            | ServerEvent::AwakeningResult { .. }
+            | ServerEvent::StorageOpened { .. }
+            | ServerEvent::GuildInGuild { .. }
+            | ServerEvent::GuildData { .. }
+            | ServerEvent::GuildStorage { .. } => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);

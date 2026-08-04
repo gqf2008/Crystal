@@ -148,6 +148,10 @@ impl Plugin for GuildPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_guild);
         app.add_systems(
             Update,
+            guild_server_events.run_if(in_state(AppState::Game)),
+        );
+        app.add_systems(
+            Update,
             (
                 guild_ui_system,
                 guild_storage_system,
@@ -898,5 +902,43 @@ fn guild_invite_system(
         });
         tracing::info!("🏰 行会邀请回复: accept={}", a);
         guild.invite = None;
+    }
+}
+
+
+/// 消费服务端行会事件（网络层只广播 ServerEvent）
+fn guild_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut guild: ResMut<GuildState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::GuildInGuild { in_guild } => {
+                guild.in_guild = *in_guild;
+                if !guild.in_guild {
+                    guild.name.clear();
+                    guild.leader.clear();
+                    guild.members.clear();
+                    guild.notice.clear();
+                    guild.gold = 0;
+                    guild.storage_items.clear();
+                    guild.storage_received = false;
+                }
+            }
+            ServerEvent::GuildData { name, leader, notice, members, gold } => {
+                guild.in_guild = true;
+                guild.name = name.clone();
+                guild.leader = leader.clone();
+                guild.notice = notice.clone();
+                guild.members = members.clone();
+                guild.gold = *gold;
+            }
+            ServerEvent::GuildStorage { items } => {
+                guild.storage_items = items.clone();
+                guild.storage_received = true;
+            }
+            _ => {}
+        }
     }
 }

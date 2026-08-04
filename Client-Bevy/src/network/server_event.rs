@@ -51,7 +51,24 @@ pub enum ServerEvent {
     AwakeningMaterials { materials: Vec<(i32, i32)> },
     /// Awakening：觉醒结果
     AwakeningResult { result: i32, result_text: String },
+    /// UserStorage：仓库物品全量（服务端打开仓库时下发）
+    StorageOpened { items: Vec<Option<InvItem>>, visible: bool },
+    /// GuildStatus（1 字节格式）：是否在行会；false 时消费端清空行会数据
+    GuildInGuild { in_guild: bool },
+    /// GuildStatus（完整格式）：行会全量信息
+    GuildData {
+        name: String,
+        leader: String,
+        notice: Vec<String>,
+        members: Vec<GuildMember>,
+        gold: u32,
+    },
+    /// GuildStorageList：行会仓库物品
+    GuildStorage { items: Vec<Option<StorageItem>> },
 }
+
+use crate::game::dialogs::guild::{GuildMember, StorageItem};
+use crate::game::dialogs::inventory::InvItem;
 
 /// 从已解码的服务端包构造 ServerEvent（便于各分支统一发送）
 pub mod from_packet {

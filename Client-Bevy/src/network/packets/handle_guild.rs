@@ -80,15 +80,8 @@ pub(crate) fn handle_guild(
                         items.len(),
                         items.iter().flatten().count()
                     );
-                    storage.items = items;
-                    storage.visible = true;
-                    // 原版 C#：仓库打开时同时显示背包
-                    if !mgr.is_open(crate::game::dialogs::DialogKind::Storage) {
-                        mgr.open.push(crate::game::dialogs::DialogKind::Storage);
-                    }
-                    if !mgr.is_open(crate::game::dialogs::DialogKind::Inventory) {
-                        mgr.open.push(crate::game::dialogs::DialogKind::Inventory);
-                    }
+                    // 仓库数据/打开对话框逻辑移入 storage 消费端
+                    server_events.write(ServerEvent::StorageOpened { items, visible: true });
                 }
                 Err(e) => tracing::warn!("⚠️ UserStorage 解析失败: {} (len={})", e, payload.len()),
             }
@@ -100,17 +93,9 @@ pub(crate) fn handle_guild(
             // 双格式：1 字节 in_guild / 完整行会信息（服务端 send_guild_info_packet 复用此 opcode）
             let body = &payload[PacketHeader::HEADER_SIZE..];
             if body.len() == 1 {
-                guild.in_guild = body[0] != 0;
-                if !guild.in_guild {
-                    guild.name.clear();
-                    guild.leader.clear();
-                    guild.members.clear();
-                    guild.notice.clear();
-                    guild.gold = 0;
-                    guild.storage_items.clear();
-                    guild.storage_received = false;
-                }
-                tracing::info!("🏰 行会状态: {}", if guild.in_guild { "在行会中" } else { "未加入行会" });
+                let in_guild = body[0] != 0;
+                server_events.write(ServerEvent::GuildInGuild { in_guild });
+                tracing::info!("🏰 行会状态: {}", if in_guild { "在行会中" } else { "未加入行会" });
             } else {
                 let mut cur = std::io::Cursor::new(body);
                 let name = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
@@ -137,19 +122,15 @@ pub(crate) fn handle_guild(
                 } else {
                     0
                 };
-                guild.in_guild = true;
-                guild.name = name;
-                guild.leader = leader;
-                guild.notice = notice;
-                guild.members = members;
-                guild.gold = gold;
-                tracing::info!(
-                    "🏰 行会信息: {}（{}）成员 {} 金币 {}",
-                    guild.name,
-                    guild.leader,
-                    guild.members.len(),
-                    guild.gold
-                );
+                let member_count = members.len();
+                server_events.write(ServerEvent::GuildData {
+                    name,
+                    leader,
+                    notice,
+                    members,
+                    gold,
+                });
+                tracing::info!("🏰 行会信息: 已广播（成员 {}）", member_count);
             }
         }
         // ---- M32: 行会仓库物品列表 ----
@@ -158,7 +139,7 @@ pub(crate) fn handle_guild(
             let mut cur = std::io::Cursor::new(body);
             match mir2_shared::packets::server::guild::GuildStorageList::read_body(&mut cur) {
                 Ok(p) => {
-                    guild.storage_items = p
+                    let items: Vec<Option<StorageItem>> = p
                         .items
                         .iter()
                         .take(100)
@@ -177,12 +158,10 @@ pub(crate) fn handle_guild(
                             })
                         })
                         .collect();
-                    guild.storage_received = true;
-                    tracing::info!(
-                        "🏰 仓库物品列表: {} 格（{} 件）",
-                        guild.storage_items.len(),
-                        guild.storage_items.iter().filter_map(|s| s.as_ref()).count()
-                    );
+                    let count = items.iter().filter_map(|s| s.as_ref()).count();
+                    let total = items.len();
+                    server_events.write(ServerEvent::GuildStorage { items });
+                    tracing::info!("🏰 仓库物品列表: {} 格（{} 件）", total, count);
                 }
                 Err(e) => {
                     tracing::warn!("⚠️ GuildStorageList 解析失败: {} (len={})", e, payload.len())
