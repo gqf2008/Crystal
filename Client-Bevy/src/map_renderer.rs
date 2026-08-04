@@ -106,9 +106,11 @@ pub fn make_light_texture(assets: &mut Assets<Image>, size: u32) -> Handle<Image
             }
             let idx = ((y * size + x) * 4) as usize;
             let v = (a * 255.0).round() as u8;
-            rgba[idx] = v;
-            rgba[idx + 1] = v;
-            rgba[idx + 2] = v;
+            // RGB 恒定白 + alpha 渐变：Bevy 灯光走标准 alpha 混合（Material2d
+            // specialize 自定义 blend 不生效），白心亮、边缘透明，等效 C# ADD 且无暗圈
+            rgba[idx] = 255;
+            rgba[idx + 1] = 255;
+            rgba[idx + 2] = 255;
             rgba[idx + 3] = v;
         }
     }
@@ -494,8 +496,15 @@ fn setup_world(
     // 白色径向渐变 + ADD 混合，z=0.9（场景之上、UI 之下，F 键可开关）
     let light_tex = make_light_texture(&mut assets, 128);
     let mut light_spawned = 0usize;
-    for y in 0..map.height as usize {
-        for x in 0..map.width as usize {
+    // 灯光只生成相机附近窗口（对齐 C# 只画视口 ±24 格）。
+    // 全图生成 + 夜晚全部 Visible 会导致数千个巨大光斑同时渲染 → 卡死/过曝。
+    let lr = radius + 1;
+    let lx0 = ((cam_cx - lr).max(0) * CHUNK_TILES as i32).min(map.width) as usize;
+    let lx1 = ((cam_cx + lr + 1) * CHUNK_TILES as i32).min(map.width) as usize;
+    let ly0 = ((cam_cy - lr).max(0) * CHUNK_TILES as i32).min(map.height) as usize;
+    let ly1 = ((cam_cy + lr + 1) * CHUNK_TILES as i32).min(map.height) as usize;
+    for y in ly0..ly1 {
+        for x in lx0..lx1 {
             let cell = &map.map_cells[x][y];
             let l = cell.light;
             if l == 0 || l >= 10 {
@@ -519,8 +528,10 @@ fn setup_world(
             // C# p.Offset(-(W/2)-24+10, -(H/2)-16-5)，中心=cell_left+off_x-14+W/2, bottom-11
             let cx = cell_left + off_x - 14.0 + lw / 2.0;
             let cy = cell_bottom_world - 11.0;
+            // C# 灯光乘在 darkness 压暗后的背景上（柔和）；Bevy 直接 ADD 全强度会过曝。
+            // 强度取 0.4：夜晚温和提亮、白天隐藏（day_night_system 按 darkness 控制显隐）
             let mat = blend_materials.add(crate::map_tile_anim::MapBlendMaterial {
-                color: bevy::prelude::LinearRgba::WHITE,
+                color: bevy::prelude::LinearRgba::new(0.4, 0.4, 0.4, 1.0),
                 texture: light_tex.clone(),
             });
             commands.spawn((
