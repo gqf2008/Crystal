@@ -321,6 +321,7 @@ fn npc_awake_ui_system(
 /// 渲染：主物品图标/名字 + 材料/结果标签
 #[allow(clippy::too_many_arguments)]
 fn npc_awake_render_system(
+    mgr: Res<crate::game::dialogs::DialogManager>,
     state: Res<NpcAwakeState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
@@ -330,6 +331,9 @@ fn npc_awake_render_system(
     mut mats: Query<&mut Text2d, (With<NpcAwakeMaterialText>, Without<NpcAwakeResultText>, Without<NpcAwakeMainName>, Without<NpcAwakeMainIcon>)>,
     mut res: Query<&mut Text2d, (With<NpcAwakeResultText>, Without<NpcAwakeMaterialText>, Without<NpcAwakeMainName>, Without<NpcAwakeMainIcon>)>,
 ) {
+    if !mgr.is_open(crate::game::dialogs::DialogKind::NpcAwake) {
+        return;
+    }
     for (mut sprite, _) in &mut icon {
         if let Some(item) = &state.selected_item {
             if let Some(h) = ui_image(

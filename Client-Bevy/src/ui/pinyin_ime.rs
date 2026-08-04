@@ -636,7 +636,10 @@ fn pinyin_candidate_ui_system(
             *v = vis;
         }
         for (mut text, mut tf, mut v) in bars.p1().iter_mut() {
-            text.0 = label.clone();
+            // 变化才更新，避免每帧重排文本（ICU4X 报错 + CPU，#31）
+            if text.0 != label {
+                text.0 = label.clone();
+            }
             tf.translation.x = x + 4.0;
             tf.translation.y = -(bar_y + 2.0);
             *v = vis;

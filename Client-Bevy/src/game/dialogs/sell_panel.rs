@@ -194,6 +194,10 @@ fn sell_panel_ui_system(
     >,
     mut info_texts: Query<(&mut Text2d, &SellPanelInfo)>,
 ) {
+    if !state.visible {
+        return;
+    }
+
     for (mut vis, info) in &mut widgets {
         if info.is_some() {
             continue;

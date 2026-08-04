@@ -34,6 +34,7 @@ impl Plugin for GamePlugin {
         // 游戏场景 UI 相机（HUD/聊天共用，先于各 UI 插件创建）
         app.add_systems(OnEnter(AppState::Game), open_minimap_default);
         app.add_systems(Update, crate::ui::sprite_ui::ui_follow_camera);
+
         app.add_plugins((
             hud::HudPlugin,
             chat::ChatPlugin,

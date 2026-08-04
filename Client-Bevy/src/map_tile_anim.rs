@@ -219,24 +219,27 @@ pub fn spawn_anim_tile(
     anchor_y: f32,
     top_anchored: bool,
     z: f32,
-) {
-    if let Some((handle, w, h, _, _)) = tile_image(libs, images, cache, lib, base_index) {
-        let cx = left + w as f32 / 2.0;
-        let cy = if top_anchored {
-            anchor_y - h as f32 / 2.0
-        } else {
-            anchor_y + h as f32 / 2.0
-        };
-        commands.spawn((
-            Sprite::from_image(handle),
-            Transform::from_xyz(cx, cy, z),
-            Visibility::default(),
-            MapTileAnim {
-                kind, lib, base_index, frame_count, tick, blend,
-                left, anchor_y, top_anchored, last_index: base_index,
-            },
-        ));
-    }
+) -> Option<Entity> {
+    let (handle, w, h, _, _) = tile_image(libs, images, cache, lib, base_index)?;
+    let cx = left + w as f32 / 2.0;
+    let cy = if top_anchored {
+        anchor_y - h as f32 / 2.0
+    } else {
+        anchor_y + h as f32 / 2.0
+    };
+    Some(
+        commands
+            .spawn((
+                Sprite::from_image(handle),
+                Transform::from_xyz(cx, cy, z),
+                Visibility::default(),
+                MapTileAnim {
+                    kind, lib, base_index, frame_count, tick, blend,
+                    left, anchor_y, top_anchored, last_index: base_index,
+                },
+            ))
+            .id(),
+    )
 }
 
 /// 生成灯光混合瓦片（Mesh2d + MapBlendMaterial，ADD）
@@ -257,28 +260,31 @@ pub fn spawn_blend_tile(
     anchor_y: f32,
     top_anchored: bool,
     z: f32,
-) {
-    if let Some((handle, w, h, _, _)) = tile_image(libs, images, cache, lib, base_index) {
-        let cx = left + w as f32 / 2.0;
-        let cy = if top_anchored {
-            anchor_y - h as f32 / 2.0
-        } else {
-            anchor_y + h as f32 / 2.0
-        };
-        let mat = materials.add(MapBlendMaterial {
-            color: LinearRgba::WHITE,
-            texture: handle,
-        });
-        commands.spawn((
-            BlendTile,
-            Mesh2d(quad),
-            MeshMaterial2d(mat),
-            Transform::from_xyz(cx, cy, z).with_scale(Vec3::new(w as f32, h as f32, 1.0)),
-            Visibility::default(),
-            MapTileAnim {
-                kind, lib, base_index, frame_count, tick, blend: true,
-                left, anchor_y, top_anchored, last_index: base_index,
-            },
-        ));
-    }
+) -> Option<Entity> {
+    let (handle, w, h, _, _) = tile_image(libs, images, cache, lib, base_index)?;
+    let cx = left + w as f32 / 2.0;
+    let cy = if top_anchored {
+        anchor_y - h as f32 / 2.0
+    } else {
+        anchor_y + h as f32 / 2.0
+    };
+    let mat = materials.add(MapBlendMaterial {
+        color: LinearRgba::WHITE,
+        texture: handle,
+    });
+    Some(
+        commands
+            .spawn((
+                BlendTile,
+                Mesh2d(quad),
+                MeshMaterial2d(mat),
+                Transform::from_xyz(cx, cy, z).with_scale(Vec3::new(w as f32, h as f32, 1.0)),
+                Visibility::default(),
+                MapTileAnim {
+                    kind, lib, base_index, frame_count, tick, blend: true,
+                    left, anchor_y, top_anchored, last_index: base_index,
+                },
+            ))
+            .id(),
+    )
 }

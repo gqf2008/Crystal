@@ -432,6 +432,10 @@ fn character_ui_system(
     mut guild_texts: Query<&mut Text2d, (With<CharGuildText>, Without<CharNameText>, Without<CharStatText>)>,
     mut stat_texts: Query<(&mut Text2d, &CharStatText), (Without<CharNameText>, Without<CharGuildText>)>,
 ) {
+    if !mgr.is_open(crate::game::dialogs::DialogKind::Character) {
+        return;
+    }
+
     let open = mgr.is_open(DialogKind::Character);
     for mut vis in widgets.iter_mut() {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
@@ -590,6 +594,10 @@ fn char_skill_system(
     windows: Query<&Window>,
     mouse: Res<ButtonInput<MouseButton>>,
 ) {
+    if !mgr.is_open(crate::game::dialogs::DialogKind::Character) {
+        return;
+    }
+
     let open = mgr.is_open(DialogKind::Character) && page.0 == 3;
     let cursor = windows.single().ok().and_then(|w| w.cursor_position());
     let mouse_down = mouse.pressed(MouseButton::Left);

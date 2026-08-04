@@ -123,6 +123,10 @@ fn npc_ui_system(
     mut widgets: Query<&mut Visibility, With<NpcDialogWidget>>,
     mut lines: Query<(&mut Text2d, &NpcLine)>,
 ) {
+    if !mgr.is_open(crate::game::dialogs::DialogKind::Npc) {
+        return;
+    }
+
     for mut vis in widgets.iter_mut() {
         *vis = if npc.visible {
             Visibility::Visible

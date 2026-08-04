@@ -121,6 +121,14 @@ pub fn make_light_texture(assets: &mut Assets<Image>, size: u32) -> Handle<Image
 #[derive(Component)]
 pub struct ChunkKey(pub i32, pub i32, pub Layer);
 
+/// Front 层精灵所属 chunk（流式加载/卸载用，#31 性能）
+#[derive(Component)]
+pub struct FrontChunkKey(pub i32, pub i32);
+
+/// Front 贴图去重缓存（跨 chunk 共享 Image 资产，避免重复创建）
+#[derive(Resource, Default)]
+pub struct FrontImageCache(pub std::collections::HashMap<(i16, i32), (Handle<Image>, i16, i16)>);
+
 /// chunk 流式状态
 #[derive(Resource, Default)]
 pub struct ChunkStream {
@@ -206,6 +214,7 @@ impl Plugin for MapRenderPlugin {
         app.add_systems(Startup, spawn_camera);
         app.init_resource::<MapLayerShow>();
         app.init_resource::<ChunkStream>();
+        app.init_resource::<FrontImageCache>();
         app.init_resource::<MapAnimClock>();
         app.init_resource::<TileImageCache>();
         register_blend_material(app);
@@ -254,12 +263,141 @@ fn div_ceil_i32(a: i32, b: i32) -> i32 {
     }
 }
 
+/// 生成一个 chunk 的 Front 层精灵（静态 + 动画 + blend），#31 流式用。
+/// 所有实体打 `FrontChunkKey(cx, cy)` 标记，供 chunk_stream_system 按窗口加载/卸载。
+#[allow(clippy::too_many_arguments)]
+fn spawn_front_chunk(
+    commands: &mut Commands,
+    libraries: &mut Libraries,
+    assets: &mut Assets<Image>,
+    tile_cache: &mut TileImageCache,
+    blend_materials: &mut Assets<MapBlendMaterial>,
+    blend_quad: &Handle<Mesh>,
+    front_images: &mut FrontImageCache,
+    map: &MapReader,
+    cx: i32,
+    cy: i32,
+) -> usize {
+    let mut count = 0usize;
+    let f_start_x = cx * CHUNK_TILES as i32;
+    let f_start_y = cy * CHUNK_TILES as i32;
+    let f_end_x = (f_start_x + CHUNK_TILES as i32).min(map.width);
+    let f_end_y = (f_start_y + CHUNK_TILES as i32).min(map.height);
+    for x in f_start_x..f_end_x {
+        for y in f_start_y..f_end_y {
+            let cell = &map.map_cells[x as usize][y as usize];
+            if cell.front_animation_frame > 0 {
+                // 动画/灯光混合瓦片：单独生成（blend → ADD 混合材质）
+                if let Some((file_index, base_image_index)) = cell.front_tile() {
+                    let mut animation = cell.front_animation_frame;
+                    let blend = (animation & 0x80) > 0;
+                    if blend {
+                        animation &= 0x7F;
+                    }
+                    let tick = cell.front_animation_tick;
+                    let base_y_world = (y + 1) as f32 * TILE_HEIGHT as f32;
+                    let should_apply_offset = if blend {
+                        (100..199).contains(&file_index)
+                    } else {
+                        file_index == 28
+                    };
+                    if let Some(info) = libraries.get_map_image(file_index, base_image_index) {
+                        let off_x = if should_apply_offset { info.offset_x as f32 } else { 0.0 };
+                        let off_y = if should_apply_offset { info.offset_y as f32 } else { 0.0 };
+                        let left = x as f32 * TILE_WIDTH as f32 + off_x;
+                        let (anchor_y, top_anchored) = if blend {
+                            (-(base_y_world - 3.0 * TILE_HEIGHT as f32 + off_y), true)
+                        } else {
+                            (-(base_y_world + off_y), false)
+                        };
+                        if blend {
+                            if let Some(e) = spawn_blend_tile(
+                                commands, libraries, assets, tile_cache,
+                                blend_materials, blend_quad.clone(),
+                                TileAnimKind::Front, file_index, base_image_index,
+                                animation, tick, left, anchor_y, top_anchored,
+                                depth_y(base_y_world),
+                            ) {
+                                commands.entity(e).insert(FrontChunkKey(cx, cy));
+                            }
+                        } else if let Some(e) = spawn_anim_tile(
+                            commands, libraries, assets, tile_cache,
+                            TileAnimKind::Front, file_index, base_image_index,
+                            animation, tick, false, left, anchor_y, top_anchored,
+                            depth_y(base_y_world),
+                        ) {
+                            commands.entity(e).insert(FrontChunkKey(cx, cy));
+                        }
+                    }
+                }
+                count += 1;
+                continue;
+            }
+            let Some((file_index, image_index)) = cell.front_tile() else {
+                continue;
+            };
+            let key = (file_index, image_index);
+            let cached = front_images.0.get(&key).cloned();
+            let (handle, w, h) = match cached {
+                Some(c) => c,
+                None => {
+                    let Some(info) = libraries.get_map_image(file_index, image_index) else {
+                        continue;
+                    };
+                    if info.width <= 0 || info.height <= 0 {
+                        continue;
+                    }
+                    let Some(rgba) = info.rgba.clone() else {
+                        continue;
+                    };
+                    let (w, h) = (info.width, info.height);
+                    let mut img = make_image(rgba, w.max(0) as u32, h.max(0) as u32);
+                    img.sampler = ImageSampler::nearest();
+                    let handle = assets.add(img);
+                    front_images.0.insert(key, (handle.clone(), w, h));
+                    (handle, w, h)
+                }
+            };
+            // 基准 Y = 格子底边 (y+1)*32
+            let base_y = ((y + 1) * TILE_HEIGHT as i32) as f32;
+            let left = (x as f32) * TILE_WIDTH;
+            let top = base_y - h as f32;
+            let center_x = left + w as f32 / 2.0;
+            let (center_y, z) = if (w == TILE_WIDTH as i16 && h == TILE_HEIGHT as i16)
+                || (w == TILE_WIDTH as i16 * 2 && h == TILE_HEIGHT as i16 * 2)
+            {
+                // C# DrawFloor：1x1/2x2 地面贴花左上角对齐，且 z 在地板之上、角色之下
+                (-(y as f32 * TILE_HEIGHT + h as f32 / 2.0), 0.15)
+            } else {
+                // C# DrawObjects：高物件底边对齐，与角色按 Y 交错
+                (-(base_y - h as f32 / 2.0), depth_y(base_y))
+            };
+            commands.spawn((
+                Sprite::from_image(handle),
+                Transform::from_xyz(center_x, center_y, z),
+                Visibility::default(),
+                FrontChunkKey(cx, cy),
+                FrontTile {
+                    base_y,
+                    left,
+                    top,
+                    right: left + w as f32,
+                    bottom: base_y,
+                },
+            ));
+            count += 1;
+        }
+    }
+    count
+}
+
 fn setup_world(
     mut commands: Commands,
     mut assets: ResMut<Assets<Image>>,
     mut game_data: ResMut<GameData>,
     mut game_libs: ResMut<GameLibraries>,
     mut tile_cache: ResMut<TileImageCache>,
+    mut front_images: ResMut<FrontImageCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut blend_materials: ResMut<Assets<MapBlendMaterial>>,
     // 只取地图相机（排除 UI 相机：UiEntity + Camera2d；否则两个相机 single_mut 失败 → 相机停在 (0,0) 显示左上角）
@@ -336,124 +474,21 @@ fn setup_world(
     }
     tracing::info!("🧩 地图块初始窗口生成: {} 个 Sprite", spawned);
 
-    // 3.5 Front 层：逐瓦片精灵，z 按基准 Y（格子底边）与角色交错排序。
-    // 经典传奇遮挡：角色脚底 Y < 瓦片基准 Y → 被建筑/树遮挡；反之在建筑前。
-    // 唯一贴图做去重（同一 (lib,img) 共享一个 Image 资产）。
+    // 3.5 Front 层：按 chunk 窗口流式生成（#31 性能：不再全图 4 万精灵）
+    // 逐瓦片精灵，z 按基准 Y（格子底边）与角色交错排序。
     let mut front_spawned = 0usize;
-    let mut front_images: std::collections::HashMap<(i16, i32), (Handle<Image>, i16, i16)> =
-        std::collections::HashMap::new();
-    for cy in 0..chunks_y {
-        for cx in 0..chunks_x {
-            let f_start_x = cx * CHUNK_TILES as i32;
-            let f_start_y = cy * CHUNK_TILES as i32;
-            let f_end_x = (f_start_x + CHUNK_TILES as i32).min(map.width);
-            let f_end_y = (f_start_y + CHUNK_TILES as i32).min(map.height);
-            for x in f_start_x..f_end_x {
-                for y in f_start_y..f_end_y {
-                    let cell = &map.map_cells[x as usize][y as usize];
-                    if cell.front_animation_frame > 0 {
-                        // 动画/灯光混合瓦片：单独生成（blend → ADD 混合材质）
-                        if let Some((file_index, base_image_index)) = cell.front_tile() {
-                            let mut animation = cell.front_animation_frame;
-                            let blend = (animation & 0x80) > 0;
-                            if blend {
-                                animation &= 0x7F;
-                            }
-                            let tick = cell.front_animation_tick;
-                            let base_y_world = (y + 1) as f32 * TILE_HEIGHT as f32;
-                            let should_apply_offset = if blend {
-                                (100..199).contains(&file_index)
-                            } else {
-                                file_index == 28
-                            };
-                            if let Some(info) = libraries.get_map_image(file_index, base_image_index) {
-                                let off_x = if should_apply_offset { info.offset_x as f32 } else { 0.0 };
-                                let off_y = if should_apply_offset { info.offset_y as f32 } else { 0.0 };
-                                let left = x as f32 * TILE_WIDTH as f32 + off_x;
-                                let (anchor_y, top_anchored) = if blend {
-                                    (-(base_y_world - 3.0 * TILE_HEIGHT as f32 + off_y), true)
-                                } else {
-                                    (-(base_y_world + off_y), false)
-                                };
-                                if blend {
-                                    spawn_blend_tile(
-                                        &mut commands, libraries, &mut assets, &mut tile_cache,
-                                        &mut blend_materials, blend_quad.clone(),
-                                        TileAnimKind::Front, file_index, base_image_index,
-                                        animation, tick, left, anchor_y, top_anchored,
-                                        depth_y(base_y_world),
-                                    );
-                                } else {
-                                    spawn_anim_tile(
-                                        &mut commands, libraries, &mut assets, &mut tile_cache,
-                                        TileAnimKind::Front, file_index, base_image_index,
-                                        animation, tick, false, left, anchor_y, top_anchored,
-                                        depth_y(base_y_world),
-                                    );
-                                }
-                            }
-                        }
-                        continue;
-                    }
-                    let Some((file_index, image_index)) = cell.front_tile() else {
-                        continue;
-                    };
-                    let key = (file_index, image_index);
-                    let cached = front_images.get(&key).cloned();
-                    let (handle, w, h) = match cached {
-                        Some(c) => c,
-                        None => {
-                            let Some(info) = libraries.get_map_image(file_index, image_index) else {
-                                continue;
-                            };
-                            if info.width <= 0 || info.height <= 0 {
-                                continue;
-                            }
-                            let Some(rgba) = info.rgba.clone() else {
-                                continue;
-                            };
-                            let (w, h) = (info.width, info.height);
-                            let mut img =
-                                make_image(rgba, w.max(0) as u32, h.max(0) as u32);
-                            img.sampler = ImageSampler::nearest();
-                            let handle = assets.add(img);
-                            front_images.insert(key, (handle.clone(), w, h));
-                            (handle, w, h)
-                        }
-                    };
-                    // 基准 Y = 格子底边 (y+1)*32
-                    let base_y = ((y + 1) * TILE_HEIGHT as i32) as f32;
-                    let left = (x as f32) * TILE_WIDTH;
-                    let top = base_y - h as f32;
-                    let center_x = left + w as f32 / 2.0;
-                    let (center_y, z) = if (w == TILE_WIDTH as i16 && h == TILE_HEIGHT as i16)
-                        || (w == TILE_WIDTH as i16 * 2 && h == TILE_HEIGHT as i16 * 2)
-                    {
-                        // C# DrawFloor：1x1/2x2 地面贴花左上角对齐，且 z 在地板之上、角色之下
-                        // （不能放 depth_y，否则与角色/建筑同 z 会盖住它们）
-                        (-(y as f32 * TILE_HEIGHT + h as f32 / 2.0), 0.15)
-                    } else {
-                        // C# DrawObjects：高物件底边对齐，与角色按 Y 交错
-                        (-(base_y - h as f32 / 2.0), depth_y(base_y))
-                    };
-                    commands.spawn((
-                        Sprite::from_image(handle),
-                        Transform::from_xyz(center_x, center_y, z),
-                        Visibility::default(),
-                        FrontTile {
-                            base_y,
-                            left,
-                            top,
-                            right: left + w as f32,
-                            bottom: base_y,
-                        },
-                    ));
-                    front_spawned += 1;
-                }
+    for cy in (cam_cy - radius)..=(cam_cy + radius) {
+        for cx in (cam_cx - radius)..=(cam_cx + radius) {
+            if cx < 0 || cy < 0 || cx >= chunks_x || cy >= chunks_y {
+                continue;
             }
+            front_spawned += spawn_front_chunk(
+                &mut commands, libraries, &mut assets, &mut tile_cache,
+                &mut blend_materials, &blend_quad, &mut front_images, &map, cx, cy,
+            );
         }
     }
-    tracing::info!("🌳 Front 瓦片精灵生成完成: {} 个", front_spawned);
+    tracing::info!("🌳 Front 瓦片精灵初始窗口生成: {} 个", front_spawned);
 
     // 3.6 地图灯光（C# DrawLights Map Lights）：cell.Light 1..9 全量生成，
     // 白色径向渐变 + ADD 混合，z=0.9（场景之上、UI 之下，F 键可开关）
@@ -844,6 +879,10 @@ fn chunk_stream_system(
     game_data: Res<GameData>,
     mut game_libs: ResMut<GameLibraries>,
     mut assets: ResMut<Assets<Image>>,
+    mut tile_cache: ResMut<TileImageCache>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut blend_materials: ResMut<Assets<MapBlendMaterial>>,
+    mut front_images: ResMut<FrontImageCache>,
     camera: Query<
         &Transform,
         (
@@ -853,6 +892,7 @@ fn chunk_stream_system(
         ),
     >,
     chunks: Query<(Entity, &ChunkKey)>,
+    front_chunks: Query<(Entity, &FrontChunkKey)>,
 ) {
     let Some(map_reader) = game_data.map_reader.clone() else { return };
     let Ok(cam) = camera.single() else { return };
@@ -915,5 +955,44 @@ fn chunk_stream_system(
     }
     if added > 0 {
         tracing::info!("🧩 chunk 流式加载 {} 个", added);
+    }
+
+    // Front 层流式：同窗口生成/卸载精灵（#31 性能，避免全图 4 万实体常驻）
+    let blend_quad = meshes.add(Rectangle::new(1.0, 1.0));
+    let mut wanted_front = std::collections::HashSet::new();
+    for cy in (cam_cy - radius)..=(cam_cy + radius) {
+        for cx in (cam_cx - radius)..=(cam_cx + radius) {
+            if cx >= 0 && cy >= 0 && cx < chunks_x && cy < chunks_y {
+                wanted_front.insert((cx, cy));
+            }
+        }
+    }
+    let existing_front: std::collections::HashSet<_> =
+        front_chunks.iter().map(|(_, k)| (k.0, k.1)).collect();
+    for (e, k) in front_chunks.iter() {
+        if !wanted_front.contains(&(k.0, k.1)) {
+            commands.entity(e).despawn();
+        }
+    }
+    let mut front_added = 0usize;
+    for (cx, cy) in &wanted_front {
+        if existing_front.contains(&(*cx, *cy)) {
+            continue;
+        }
+        front_added += spawn_front_chunk(
+            &mut commands,
+            &mut game_libs.0,
+            &mut assets,
+            &mut tile_cache,
+            &mut blend_materials,
+            &blend_quad,
+            &mut front_images,
+            &map_reader,
+            *cx,
+            *cy,
+        );
+    }
+    if front_added > 0 {
+        tracing::info!("🌳 front 流式加载 {} 个", front_added);
     }
 }

@@ -356,6 +356,10 @@ fn trade_ui_system(
     >,
     mut invite_texts: Query<(&mut Text2d, &TradeInviteText), (Without<TradeCount>, Without<TradeGoldText>)>,
 ) {
+    if !trade.visible {
+        return;
+    }
+
     for (mut vis, _slot) in &mut widgets {
         *vis = if trade.visible {
             Visibility::Visible
