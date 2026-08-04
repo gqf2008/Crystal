@@ -38,6 +38,8 @@ pub struct HudState {
     pub class: u8,
     /// 自动喝药开关（HP < 35% 自动使用背包药品）
     pub auto_pot_hp: bool,
+    /// 玩家死亡（Death 包置位，Revived 清除；死亡时禁用输入/显示遮罩）
+    pub dead: bool,
     /// 自动喝药冷却（避免连发）
     pub pot_cooldown: f32,
     /// 背包（网络 UserInformation 写入）
@@ -61,6 +63,7 @@ impl Default for HudState {
             player_object_id: None,
             class: 0,
             auto_pot_hp: true,
+            dead: false,
             pot_cooldown: 0.0,
             inventory: Default::default(),
             equipment: vec![None; 12],
@@ -122,6 +125,14 @@ struct GoldText;
 #[derive(Component)]
 struct NameText;
 
+/// 死亡遮罩（全屏半透明 + 文字 + 复活按钮，#46）
+#[derive(Component)]
+struct DeathOverlay;
+#[derive(Component)]
+struct DeathReviveBtn;
+#[derive(Component)]
+struct DeathText;
+
 const ORB_HEIGHT: f32 = 80.0;
 const ORB_TOP: f32 = 30.0;
 const EXP_TOP: f32 = 143.0;
@@ -140,6 +151,7 @@ impl Plugin for HudPlugin {
                 hud_button_system,
                 auto_potion_system,
                 hud_update_system,
+                death_overlay_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -379,6 +391,49 @@ fn spawn_hud(
             .entity(e)
             .insert(HudButton(HudButtonKind::GameShop));
     }
+
+    // 死亡遮罩（#46）：全屏半透明 + 提示 + 复活按钮，默认隐藏
+    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    commands.spawn((
+        UiEntity,
+        DeathOverlay,
+        Sprite {
+            image: white,
+            custom_size: Some(Vec2::new(1024.0, 768.0)),
+            color: Color::srgba(0.0, 0.0, 0.0, 0.65),
+            ..default()
+        },
+        Transform::from_xyz(512.0, -384.0, 10.0),
+        Visibility::Hidden,
+    ));
+    let death_txt = spawn_ui_text(
+        &mut commands,
+        &font,
+        "你已死亡，点击复活返回安全区",
+        262.0,
+        330.0,
+        20.0,
+        Color::srgb(1.0, 0.3, 0.3),
+        11.0,
+    );
+    commands.entity(death_txt).insert((DeathText, DeathOverlay));
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        206,
+        207,
+        208,
+        462.0,
+        380.0,
+        11.0,
+        100.0,
+        30.0,
+    ) {
+        commands.entity(e).insert((DeathReviveBtn, DeathOverlay));
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -403,7 +458,7 @@ fn auto_potion_system(
     time: Res<Time>,
 ) {
     hud.pot_cooldown -= time.delta_secs();
-    if !hud.auto_pot_hp || hud.pot_cooldown > 0.0 {
+    if hud.dead || !hud.auto_pot_hp || hud.pot_cooldown > 0.0 {
         return;
     }
     let pct = hud.hp as f32 / hud.max_hp.max(1) as f32;
@@ -500,6 +555,34 @@ fn hud_update_system(
         };
         if t.0 != new {
             t.0 = new;
+        }
+    }
+}
+
+/// 死亡遮罩显隐 + 复活按钮（#46）
+fn death_overlay_system(
+    mut hud: ResMut<HudState>,
+    net: Res<crate::network::NetworkContext>,
+    mut overlay: Query<&mut Visibility, With<DeathOverlay>>,
+    revive_btns: Query<&UiButton, With<DeathReviveBtn>>,
+) {
+    let show = hud.dead;
+    for mut vis in overlay.iter_mut() {
+        *vis = if show {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    if !show {
+        return;
+    }
+    for btn in &revive_btns {
+        if btn.clicked {
+            net.send_packet(&mir2_shared::packets::client::misc::TownRevive);
+            tracing::info!("⛪ 点击复活（TownRevive）");
+            // 乐观清除，服务端 Revived 会再次确认
+            hud.dead = false;
         }
     }
 }

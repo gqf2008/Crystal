@@ -7,6 +7,7 @@
 use bevy::prelude::*;
 
 use crate::actor::{ActorAnim, NetObjectId};
+use crate::game::hud::HudState;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
 use bevy::sprite::Anchor;
@@ -16,6 +17,7 @@ use bevy::sprite::Anchor;
 pub enum CombatEvent {
     Struck { object_id: u32, direction: u8 },
     Died { object_id: u32, death_type: u8 },
+    Revived { object_id: u32 },
     Damage { object_id: u32, damage: i32, dmg_type: u8 },
 }
 
@@ -51,6 +53,7 @@ impl Plugin for CombatPlugin {
 /// 应用受击/死亡事件 + 生成伤害飘字
 fn apply_combat_events(
     mut commands: Commands,
+    hud: Res<HudState>,
     ui_font: Res<UiFont>,
     sound_bank: Res<crate::game::sound::SoundBank>,
     mut audio_assets: ResMut<Assets<AudioSource>>,
@@ -76,7 +79,21 @@ fn apply_combat_events(
                     if id.0 == *object_id {
                         anim.action = mir2_shared::enums::MirAction::Dead;
                         anim.frame_index = 0;
-                        commands.entity(e).insert(DeathTimer(3.0));
+                        // 本地玩家死亡由 Death 包管理（复活时恢复），不自动 despawn
+                        if hud.player_object_id != Some(*object_id) {
+                            commands.entity(e).insert(DeathTimer(3.0));
+                        }
+                        break;
+                    }
+                }
+            }
+            CombatEvent::Revived { object_id } => {
+                // 复活：恢复站立 + 清除死亡计时（本地玩家由 Revived 包驱动）
+                for (e, id, mut anim) in &mut actors {
+                    if id.0 == *object_id {
+                        anim.action = mir2_shared::enums::MirAction::Standing;
+                        anim.frame_index = 0;
+                        commands.entity(e).remove::<DeathTimer>();
                         break;
                     }
                 }
