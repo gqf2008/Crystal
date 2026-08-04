@@ -48,7 +48,11 @@ pub struct FishingPlugin;
 impl Plugin for FishingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FishingState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_fishing);
+                app.add_systems(
+            Update,
+            fishing_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_fishing);
         app.add_systems(OnExit(AppState::Game), cleanup_fishing);
         app.add_systems(
             Update,
@@ -200,6 +204,32 @@ fn fishing_ui_system(
                 if state.autocast { "开" } else { "关" }
             );
             tracing::info!("🎣 自动钓鱼: {}", state.autocast);
+        }
+    }
+}
+
+
+/// 消费服务端钓鱼事件（网络层只广播 ServerEvent；文案在此构造）
+fn fishing_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut fishing: ResMut<FishingState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::FishingUpdate { progress, success } = ev {
+            fishing.progress = *progress;
+            fishing.success = *success;
+            fishing.message = match progress {
+                1 => "等待中…".to_string(),
+                2 => {
+                    if *success {
+                        "上钩了！".to_string()
+                    } else {
+                        "鱼跑了…".to_string()
+                    }
+                }
+                _ => "钓鱼中".to_string(),
+            };
         }
     }
 }

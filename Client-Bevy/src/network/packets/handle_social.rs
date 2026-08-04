@@ -73,27 +73,9 @@ pub(crate) fn handle_social(
             if body.len() >= 5 {
                 let progress = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
                 let success = body[4] != 0;
-                fishing.progress = progress;
-                fishing.success = success;
-                fishing.message = match progress {
-                    1 => "等待中…".to_string(),
-                    2 => {
-                        if success {
-                            "上钩了！".to_string()
-                        } else {
-                            "鱼跑了…".to_string()
-                        }
-                    }
-                    5 => format!(
-                        "自动钓鱼: {}",
-                        if success { "开" } else { "关" }
-                    ),
-                    _ => format!("进度 {}", progress),
-                };
-                tracing::info!("🎣 FishingUpdate: progress={} success={}", progress, success);
+                server_events.write(ServerEvent::FishingUpdate { progress, success });
             }
         }
-        // ---- M33: 师徒 ----
         x if x == ServerPacketIds::MentorRequest as i16 => {
             // [name dotnet][level u16]（C# S.MentorRequest）
             let body = &payload[PacketHeader::HEADER_SIZE..];
@@ -355,7 +337,7 @@ pub(crate) fn handle_social(
             // 服务端 wire：[amount: u64 LE]
             if payload.len() >= 12 {
                 let amount = u64::from_le_bytes(payload[4..12].try_into().unwrap_or([0; 8]));
-                trade.their_gold = amount;
+                server_events.write(ServerEvent::TradeGold { amount });
                 tracing::info!("💰 对方交易金币: {}", amount);
             }
         }
@@ -385,12 +367,8 @@ pub(crate) fn handle_social(
             }
         }
         x if x == ServerPacketIds::TradeCancel as i16 => {
-            if trade.visible {
-                tracing::info!("🚫 交易已取消/关闭");
-            }
-            trade.visible = false;
-            trade.invite = None;
-            trade.pending_deposit = None;
+            server_events.write(ServerEvent::TradeCancelled);
+            tracing::info!("🚫 交易已取消/关闭");
         }
         x if x == ServerPacketIds::TradeItem as i16 => {
             // 服务端 wire：[uid u64][grid u8][count u16][is_add u8]（对方物品更新）
@@ -449,28 +427,8 @@ pub(crate) fn handle_social(
         x if x == ServerPacketIds::ReceiveMail as i16 => {
             match parse_receive_mail(&payload[PacketHeader::HEADER_SIZE..]) {
                 Some((entry, detail)) => {
-                    // 去重：同 mail_id 已存在则替换（全文包会更新未读标记）
-                    if let Some(existing) = mail.mails.iter_mut().find(|m| m.mail_id == entry.mail_id) {
-                        *existing = entry;
-                    } else {
-                        mail.mails.insert(0, entry);
-                    }
-                    if let Some(d) = detail {
-                        mail.detail = Some(d);
-                        tracing::info!(
-                            "📧 邮件详情: {} - {} 金币={}",
-                            mail.detail.as_ref().map(|x| x.sender.as_str()).unwrap_or("?"),
-                            mail.detail.as_ref().map(|x| x.subject.as_str()).unwrap_or("?"),
-                            mail.detail.as_ref().map(|x| x.gold).unwrap_or(0)
-                        );
-                    } else {
-                        tracing::info!(
-                            "📧 新邮件: {} - {}{}",
-                            mail.mails[0].sender,
-                            mail.mails[0].subject,
-                            if mail.mails[0].unread { "（未读）" } else { "" }
-                        );
-                    }
+                    server_events.write(ServerEvent::MailReceived { entry, detail });
+                    tracing::info!("📧 邮件已广播");
                 }
                 None => tracing::warn!("⚠️ ReceiveMail 解析失败: (len={})", payload.len()),
             }

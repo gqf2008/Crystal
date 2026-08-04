@@ -155,7 +155,17 @@ pub enum ServerEvent {
     TerritoryList { rows: Vec<TerritoryRow> },
     /// GuildRequestWar：宣战确认
     TerritoryWar { guild_name: String },
+    /// TradeGold：对方交易金币
+    TradeGold { amount: u64 },
+    /// TradeCancel：交易关闭/取消
+    TradeCancelled,
+    /// FishingUpdate：钓鱼进度
+    FishingUpdate { progress: i32, success: bool },
+    /// ReceiveMail：邮件（列表条目 + 可选详情）
+    MailReceived { entry: MailEntry, detail: Option<MailDetail> },
 }
+
+use crate::game::dialogs::mail::{MailDetail, MailEntry};
 
 use crate::game::dialogs::game_shop::ShopItem;
 use crate::game::dialogs::guild_territory::TerritoryRow;

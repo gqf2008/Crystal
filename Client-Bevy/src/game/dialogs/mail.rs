@@ -81,7 +81,11 @@ pub struct MailPlugin;
 impl Plugin for MailPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MailState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_mail);
+                app.add_systems(
+            Update,
+            mail_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_mail);
         app.add_systems(OnExit(AppState::Game), cleanup_mail);
         app.add_systems(
             Update,
@@ -404,6 +408,28 @@ fn mail_ui_system(
                     tracing::info!("📧 读取邮件: {} ({})", m.subject, m.mail_id);
                 }
                 break;
+            }
+        }
+    }
+}
+
+
+/// 消费服务端邮件事件（网络层只广播 ServerEvent）
+fn mail_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut mail: ResMut<MailState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::MailReceived { entry, detail } = ev {
+            // 去重：同 mail_id 已存在则替换（全文包会更新未读标记）
+            if let Some(existing) = mail.mails.iter_mut().find(|m| m.mail_id == entry.mail_id) {
+                *existing = entry.clone();
+            } else {
+                mail.mails.insert(0, entry.clone());
+            }
+            if let Some(d) = detail {
+                mail.detail = Some(d.clone());
             }
         }
     }

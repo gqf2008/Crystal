@@ -130,7 +130,11 @@ pub struct TradePlugin;
 impl Plugin for TradePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TradeState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_trade);
+                app.add_systems(
+            Update,
+            trade_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_trade);
         app.add_systems(OnExit(AppState::Game), cleanup_trade);
         app.add_systems(
             Update,
@@ -584,5 +588,27 @@ fn trade_invite_system(
             trade.visible = true;
         }
         trade.invite = None;
+    }
+}
+
+
+/// 消费服务端交易事件（网络层只广播 ServerEvent；关闭/金币由本模块应用）
+fn trade_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut trade: ResMut<TradeState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::TradeGold { amount } => {
+                trade.their_gold = *amount;
+            }
+            ServerEvent::TradeCancelled => {
+                trade.visible = false;
+                trade.invite = None;
+                trade.pending_deposit = None;
+            }
+            _ => {}
+        }
     }
 }
