@@ -596,6 +596,7 @@ fn trade_invite_system(
 fn trade_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut trade: ResMut<TradeState>,
+    hud: Res<crate::game::hud::HudState>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
@@ -607,6 +608,60 @@ fn trade_server_events(
                 trade.visible = false;
                 trade.invite = None;
                 trade.pending_deposit = None;
+            }
+            ServerEvent::TradeRequested { name } => {
+                if trade.visible {
+                    // 打开包（服务器权威 partner）
+                    trade.partner_name = name.clone();
+                } else if trade.is_initiator {
+                    trade.visible = true;
+                    trade.partner_name = name.clone();
+                } else if trade.invite.is_none() {
+                    trade.invite = Some(name.clone());
+                }
+            }
+            ServerEvent::TradeConfirm { a_locked, b_locked } => {
+                if trade.is_initiator {
+                    trade.my_locked = *a_locked;
+                    trade.their_locked = *b_locked;
+                } else {
+                    trade.my_locked = *b_locked;
+                    trade.their_locked = *a_locked;
+                }
+            }
+            ServerEvent::TradeItemUpdate { uid, grid, count, is_add } => {
+                if *is_add {
+                    if let Some(slot) = trade.their_items.get_mut(*grid) {
+                        let prev = slot.take();
+                        *slot = Some(TradeItem {
+                            uid: *uid,
+                            item_index: prev.as_ref().map(|p| p.item_index).unwrap_or(0),
+                            name: prev.as_ref().map(|p| p.name.clone()).unwrap_or_default(),
+                            image: prev.as_ref().map(|p| p.image).unwrap_or(0),
+                            count: *count,
+                        });
+                    }
+                } else {
+                    if let Some(slot) = trade.their_items.get_mut(*grid) {
+                        *slot = None;
+                    }
+                    trade.their_items.retain(|s| s.as_ref().map(|i| i.uid) != Some(*uid));
+                }
+            }
+            ServerEvent::TradeDeposit { from, to, success } => {
+                if *success {
+                    if let Some((from2, to2)) = trade.pending_deposit.take() {
+                        let from = (*from).max(from2 as i32) as usize;
+                        if let Some(item) = hud.inventory.items.get(from).and_then(|s| s.as_ref()) {
+                            if let Some(slot) = trade.my_items.get_mut(to2.max(*to as usize)) {
+                                *slot = Some(TradeItem::from(item));
+                            }
+                        }
+                        trade.my_locked = false;
+                    }
+                } else {
+                    trade.pending_deposit = None;
+                }
             }
             _ => {}
         }

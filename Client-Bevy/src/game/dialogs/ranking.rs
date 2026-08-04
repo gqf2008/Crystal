@@ -166,8 +166,14 @@ fn ranking_server_events(
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
-        if let ServerEvent::Rankings { entries } = ev {
-            ranking.entries = entries.clone();
+        match ev {
+            ServerEvent::Rankings { entries } => {
+                ranking.entries = entries.clone();
+            }
+            ServerEvent::RankingsCleared => {
+                ranking.entries.clear();
+            }
+            _ => {}
         }
     }
 }

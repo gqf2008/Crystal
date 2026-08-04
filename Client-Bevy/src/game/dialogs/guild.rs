@@ -941,6 +941,25 @@ fn guild_server_events(
             ServerEvent::GuildNotice { notice } => {
                 guild.notice = notice.clone();
             }
+            ServerEvent::GuildMemberChanged { name, rank, online, joined, removed } => {
+                if *removed {
+                    guild.members.retain(|m| m.name != *name);
+                } else if *joined {
+                    if !guild.members.iter().any(|m| m.name == *name) {
+                        guild.members.push(GuildMember {
+                            name: name.clone(),
+                            rank: *rank,
+                            online: *online,
+                        });
+                    }
+                } else if let Some(m) = guild.members.iter_mut().find(|m| m.name == *name) {
+                    m.rank = *rank;
+                    m.online = *online;
+                }
+            }
+            ServerEvent::GuildInvited { name } => {
+                guild.invite = Some(name.clone());
+            }
             _ => {}
         }
     }

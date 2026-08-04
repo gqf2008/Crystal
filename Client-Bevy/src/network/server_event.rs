@@ -163,6 +163,26 @@ pub enum ServerEvent {
     FishingUpdate { progress: i32, success: bool },
     /// ReceiveMail：邮件（列表条目 + 可选详情）
     MailReceived { entry: MailEntry, detail: Option<MailDetail> },
+    /// TradeRequest：交易请求/打开（状态机由消费端根据自身状态应用）
+    TradeRequested { name: String },
+    /// TradeConfirm：锁定状态（a=发起者）
+    TradeConfirm { a_locked: bool, b_locked: bool },
+    /// TradeItem：对方物品更新
+    TradeItemUpdate { uid: u64, grid: usize, count: u16, is_add: bool },
+    /// DepositTradeItem：放入交易槽结果
+    TradeDeposit { from: i32, to: i32, success: bool },
+    /// GuildMemberChange：行会成员变化（加入/离开/更新）
+    GuildMemberChanged {
+        name: String,
+        rank: u8,
+        online: bool,
+        joined: bool,
+        removed: bool,
+    },
+    /// GuildInvite：收到行会邀请
+    GuildInvited { name: String },
+    /// Rankings 解析失败：清空排行
+    RankingsCleared,
 }
 
 use crate::game::dialogs::mail::{MailDetail, MailEntry};

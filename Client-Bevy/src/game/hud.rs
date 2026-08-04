@@ -711,7 +711,14 @@ fn hud_server_events(
             | ServerEvent::TradeGold { .. }
             | ServerEvent::TradeCancelled
             | ServerEvent::FishingUpdate { .. }
-            | ServerEvent::MailReceived { .. } => {}
+            | ServerEvent::MailReceived { .. }
+            | ServerEvent::TradeRequested { .. }
+            | ServerEvent::TradeConfirm { .. }
+            | ServerEvent::TradeItemUpdate { .. }
+            | ServerEvent::TradeDeposit { .. }
+            | ServerEvent::GuildMemberChanged { .. }
+            | ServerEvent::GuildInvited { .. }
+            | ServerEvent::RankingsCleared => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);

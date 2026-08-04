@@ -160,11 +160,21 @@ pub(crate) fn handle_social(
                         let joined = body[0] != 0;
                         tracing::info!("🏰 行会成员{}: {}", if joined { "加入" } else { "离开" }, name);
                         if joined {
-                            if !guild.members.iter().any(|m| m.name == name) {
-                                guild.members.push(UiGuildMember { name, rank: 2, online: true });
-                            }
+                            server_events.write(ServerEvent::GuildMemberChanged {
+                                name: name.clone(),
+                                rank: 2,
+                                online: true,
+                                joined: true,
+                                removed: false,
+                            });
                         } else {
-                            guild.members.retain(|m| m.name != name);
+                            server_events.write(ServerEvent::GuildMemberChanged {
+                                name: name.clone(),
+                                rank: 0,
+                                online: false,
+                                joined: false,
+                                removed: true,
+                            });
                         }
                         handled = true;
                     }
@@ -175,10 +185,13 @@ pub(crate) fn handle_social(
                 if let Ok(name) = mir2_shared::binary::read_dotnet_string(&mut cur) {
                     let rank = cur.read_u8().unwrap_or(2);
                     let online = cur.read_u8().unwrap_or(0) != 0;
-                    if let Some(m) = guild.members.iter_mut().find(|m| m.name == name) {
-                        m.rank = rank;
-                        m.online = online;
-                    }
+                    server_events.write(ServerEvent::GuildMemberChanged {
+                        name: name.clone(),
+                        rank,
+                        online,
+                        joined: false,
+                        removed: false,
+                    });
                     tracing::info!("🏰 行会成员更新: {} rank={} online={}", name, rank, online);
                 }
             }
@@ -194,7 +207,7 @@ pub(crate) fn handle_social(
             let _rank_type = cur.read_u8().unwrap_or(0);
             let mut my_rank_buf = [0u8; 4];
             if std::io::Read::read_exact(&mut cur, &mut my_rank_buf).is_err() {
-                ranking.entries.clear();
+                server_events.write(ServerEvent::RankingsCleared);
                 tracing::warn!("⚠️ Rankings 解析失败: (len={})", payload.len());
             } else {
                 let mut count_buf = [0u8; 4];
@@ -238,7 +251,7 @@ pub(crate) fn handle_social(
             let body = &payload[PacketHeader::HEADER_SIZE..];
             match mir2_shared::binary::read_dotnet_string(&mut std::io::Cursor::new(body)) {
                 Ok(name) => {
-                    guild.invite = Some(name.clone());
+                    server_events.write(ServerEvent::GuildInvited { name: name.clone() });
                     tracing::info!("🏰 收到行会邀请: {}", name);
                 }
                 Err(e) => tracing::warn!("⚠️ GuildInvite 解析失败: {} (len={})", e, payload.len()),
@@ -315,20 +328,8 @@ pub(crate) fn handle_social(
             use mir2_shared::binary::read_dotnet_string;
             match read_dotnet_string(&mut cur) {
                 Ok(name) => {
-                    if trade.visible {
-                        // 打开包（服务器权威 partner）
-                        trade.partner_name = name.clone();
-                        tracing::info!("🤝 交易窗口: 与 {} 交易", name);
-                    } else if trade.is_initiator {
-                        // 发起者收到的第一个包就是 open（同 opcode）
-                        trade.visible = true;
-                        trade.partner_name = name.clone();
-                        tracing::info!("🤝 交易窗口已打开（发起者）: {}", name);
-                    } else if trade.invite.is_none() {
-                        // 邀请包
-                        trade.invite = Some(name.clone());
-                        tracing::info!("🤝 收到交易邀请: {}", name);
-                    }
+                    server_events.write(ServerEvent::TradeRequested { name: name.clone() });
+                    tracing::info!("🤝 交易请求: {}", name);
                 }
                 Err(e) => tracing::warn!("⚠️ TradeRequest 解析失败: {} (len={})", e, payload.len()),
             }
@@ -346,13 +347,7 @@ pub(crate) fn handle_social(
             if payload.len() >= 6 {
                 let a = payload[4] != 0;
                 let b = payload[5] != 0;
-                if trade.is_initiator {
-                    trade.my_locked = a;
-                    trade.their_locked = b;
-                } else {
-                    trade.my_locked = b;
-                    trade.their_locked = a;
-                }
+                server_events.write(ServerEvent::TradeConfirm { a_locked: a, b_locked: b });
                 tracing::info!(
                     "🔒 交易锁定状态: 我={} 对方={}",
                     trade.my_locked,
@@ -377,6 +372,12 @@ pub(crate) fn handle_social(
                 let grid = payload[12] as usize;
                 let count = u16::from_le_bytes(payload[13..15].try_into().unwrap_or([0; 2]));
                 let is_add = payload[15] != 0;
+                server_events.write(ServerEvent::TradeItemUpdate {
+                    uid,
+                    grid,
+                    count,
+                    is_add,
+                });
                 if is_add {
                     // 对方新增物品：保留已有条目的显示信息（服务端只发 uid/grid/count）
                     if let Some(slot) = trade.their_items.get_mut(grid) {
@@ -406,18 +407,11 @@ pub(crate) fn handle_social(
             // 服务端响应：[from_slot i32][success u8]
             if payload.len() >= 9 {
                 let success = payload[8] != 0;
+                let from = i32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
+                server_events.write(ServerEvent::TradeDeposit { from, to: 0, success });
                 if success {
-                    if let Some((from, to)) = trade.pending_deposit.take() {
-                        if let Some(item) = hud.inventory.items.get(from).and_then(|s| s.as_ref()) {
-                            if let Some(slot) = trade.my_items.get_mut(to) {
-                                *slot = Some(UiTradeItem::from(item));
-                            }
-                        }
-                        trade.my_locked = false;
-                        tracing::info!("✅ 物品已放入交易槽 {}", to);
-                    }
+                    tracing::info!("✅ 物品已放入交易槽");
                 } else {
-                    trade.pending_deposit = None;
                     tracing::warn!("❌ 放入交易失败");
                 }
             }
