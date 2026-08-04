@@ -9,6 +9,7 @@ use std::collections::VecDeque;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 
+use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetworkContext;
 use crate::scenes::AppState;
@@ -135,6 +136,8 @@ fn chat_input_system(
     mut focus: ResMut<ImeFocus>,
     mut chat: ResMut<ChatState>,
     net: Res<NetworkContext>,
+    net_mode: Res<crate::network::NetMode>,
+    hud: Res<HudState>,
 ) {
     let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
 
@@ -163,7 +166,11 @@ fn chat_input_system(
                         message: msg.clone(),
                         linked_items: Vec::new(),
                     });
-                    // 本地回显（服务器也会广播回来，这里避免重复，交给服务器回显）
+                    // 本地回显（C# MainDialogs 发送时本地加入聊天面板；真实服务器不回发给自己）。
+                    // mock 服务器会回显，只在真实 TCP 模式下本地回显避免重复
+                    if matches!(net_mode.0, crate::network::NetworkMode::Real) {
+                        chat.add_line(format!("[{}]: {}", hud.name, msg), Color::WHITE);
+                    }
                     tracing::info!("💬 发送聊天: {}", msg);
                 }
             } else {

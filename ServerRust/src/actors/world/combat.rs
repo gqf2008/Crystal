@@ -561,6 +561,24 @@ impl Message<TownReviveRequest> for WorldActor {
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &health_body),
         }).await;
 
+        // 发送 Revived 包（C# S.Revived，空 body）：客户端靠它清除死亡状态恢复输入，
+        // 只有 HealthChanged 不够——#55 实测客户端一直处于死亡状态
+        let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Revived as i16, &[]),
+        }).await;
+        // ObjectRevived 广播：其他玩家看到复活动画
+        let mut obj_body = Vec::new();
+        obj_body.extend_from_slice(&state.object_id.to_le_bytes());
+        obj_body.push(1u8); // effect
+        let revived_packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRevived as i16, &obj_body);
+        for sid in self.players.keys() {
+            let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
+                session_id: *sid,
+                data: revived_packet.clone(),
+            }).await;
+        }
+
         debug!("TownRevive: {} revived at ({}, {})", state.name, spawn_x, spawn_y);
     }
 }
