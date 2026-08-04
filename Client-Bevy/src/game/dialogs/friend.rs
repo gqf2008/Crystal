@@ -16,6 +16,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
 };
+use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
 
 /// 好友条目
 #[derive(Debug, Clone, Default)]
@@ -84,10 +85,29 @@ fn spawn_friend(
     // 背景 Title[199]
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 199) {
         let e = spawn_ui_sprite(&mut commands, h, 300.0, 100.0, 6.0, 1.0);
+        // #89 可滚动列表：10 行 × 20px，滚动条在列表右侧
+        let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (508.0, 140.0, 4.0, 200.0), 6.3);
+        commands.entity(track).insert((DialogRoot(DialogKind::Friend), FriendWidget, Visibility::Visible));
+        commands.entity(thumb).insert((
+            DialogRoot(DialogKind::Friend),
+            FriendWidget,
+            Visibility::Visible,
+        ));
         commands.entity(e).insert((
             DialogRoot(DialogKind::Friend),
             FriendWidget,
             Visibility::Hidden,
+            ScrollList {
+                rect_rel: (18.0, 40.0, 190.0, 200.0),
+                row_h: 20.0,
+                visible: 10,
+                total: 0,
+                offset: 0,
+                step: 3,
+                track_rel: (208.0, 40.0, 4.0, 200.0),
+                thumb: Some(thumb),
+                z: 8.0,
+            },
         ));
     }
     // 标题 Title[6]
@@ -134,6 +154,7 @@ fn friend_ui_system(
     close: Query<&UiButton, With<FriendClose>>,
     mut widgets: Query<(&mut Visibility, Option<&FriendLine>), With<FriendWidget>>,
     mut lines: Query<(&mut Text2d, &FriendLine)>,
+    mut scroll: Query<&mut ScrollList, With<FriendWidget>>,
     mut requested: Local<bool>,
 ) {
     let open = mgr.is_open(DialogKind::Friend);
@@ -155,20 +176,25 @@ fn friend_ui_system(
             mgr.close(DialogKind::Friend);
         }
     }
-    // 列表（在线标记，原版 C# 语义）
-    for (mut text, line) in &mut lines {
-        text.0 = match friend.friends.get(line.0) {
-            Some(f) => {
-                let mark = if f.online { "（在线）" } else { "（离线）" };
-                let name = if f.memo.is_empty() {
-                    f.name.clone()
-                } else {
-                    format!("{} ({})", f.name, f.memo)
-                };
-                format!("{}{}", name, mark)
-            }
-            None => String::new(),
-        };
+    // 列表（在线标记，原版 C# 语义）；#89 支持滚轮滚动
+    let mut sl = scroll.single_mut();
+    if let Ok(sl) = sl.as_mut() {
+        sl.set_total(friend.friends.len());
+        for (mut text, line) in &mut lines {
+            let idx = sl.offset + line.0;
+            text.0 = match friend.friends.get(idx) {
+                Some(f) => {
+                    let mark = if f.online { "（在线）" } else { "（离线）" };
+                    let name = if f.memo.is_empty() {
+                        f.name.clone()
+                    } else {
+                        format!("{} ({})", f.name, f.memo)
+                    };
+                    format!("{}{}", name, mark)
+                }
+                None => String::new(),
+            };
+        }
     }
 }
 

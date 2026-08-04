@@ -11,6 +11,7 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::network::NetConnection;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{spawn_ui_text, UiEntity, UiFont};
+use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
 
 /// 排名条目（服务端 Rankings 包）
 #[derive(Debug, Clone, Default)]
@@ -74,20 +75,41 @@ fn spawn_ranking(
 
     // 面板
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    commands.spawn((
-        UiEntity,
+    let panel = commands
+        .spawn((
+            UiEntity,
+            DialogRoot(DialogKind::Ranking),
+            RankingWidget,
+            Sprite {
+                image: white.clone(),
+                color: Color::srgba(0.12, 0.12, 0.16, 0.95),
+                custom_size: Some(Vec2::new(320.0, 380.0)),
+                ..default()
+            },
+            bevy::sprite::Anchor::TOP_LEFT,
+            Transform::from_xyz(200.0, -150.0, 8.0),
+            Visibility::Hidden,
+        ))
+        .id();
+    // #89 可滚动排行列表：10 行 × 28px
+    let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (490.0, 190.0, 4.0, 280.0), 8.3);
+    commands.entity(track).insert((DialogRoot(DialogKind::Ranking), RankingWidget, Visibility::Visible));
+    commands.entity(thumb).insert((
         DialogRoot(DialogKind::Ranking),
         RankingWidget,
-        Sprite {
-            image: white.clone(),
-            color: Color::srgba(0.12, 0.12, 0.16, 0.95),
-            custom_size: Some(Vec2::new(320.0, 380.0)),
-            ..default()
-        },
-        bevy::sprite::Anchor::TOP_LEFT,
-        Transform::from_xyz(200.0, -150.0, 8.0),
-        Visibility::Hidden,
+        Visibility::Visible,
     ));
+    commands.entity(panel).insert(ScrollList {
+        rect_rel: (10.0, 40.0, 280.0, 280.0),
+        row_h: 28.0,
+        visible: 10,
+        total: 0,
+        offset: 0,
+        step: 3,
+        track_rel: (290.0, 40.0, 4.0, 280.0),
+        thumb: Some(thumb),
+        z: 9.0,
+    });
 
     // 标题
     let t = spawn_ui_text(&mut commands, &font, "排行榜", 330.0, 158.0, 16.0, Color::srgb(1.0, 1.0, 0.3), 8.2);
@@ -116,6 +138,7 @@ fn ranking_ui_system(
     windows: Query<&Window>,
     mut widgets: Query<&mut Visibility, With<RankingWidget>>,
     mut lines: Query<(&mut Text2d, &RankingLine)>,
+    mut scroll: Query<&mut ScrollList, With<RankingWidget>>,
     mut requested: Local<bool>,
 ) {
     let open = ranking.visible || mgr.is_open(DialogKind::Ranking);
@@ -132,8 +155,15 @@ fn ranking_ui_system(
         net.send_packet(&mir2_shared::packets::client::misc::GetRanking { rank_index: 0 });
         tracing::info!("🏅 请求排行榜");
     }
+    {
+        let mut sl = scroll.single_mut();
+        if let Ok(sl) = sl.as_mut() {
+            sl.set_total(ranking.entries.len());
+        }
+    }
     for (mut text, line) in &mut lines {
-        text.0 = match ranking.entries.get(line.0) {
+        let idx = scroll.single().map(|s| s.offset + line.0).unwrap_or(line.0);
+        text.0 = match ranking.entries.get(idx) {
             Some(e) => {
                 let class = match e.class {
                     0 => "战士",
