@@ -672,7 +672,12 @@ fn hud_server_events(
             | ServerEvent::GroupMembers { .. }
             | ServerEvent::GroupInvite { .. }
             | ServerEvent::GroupDeleted
-            | ServerEvent::GroupMemberLeft { .. } => {}
+            | ServerEvent::GroupMemberLeft { .. }
+            | ServerEvent::MentorInvite { .. }
+            | ServerEvent::MentorUpdate { .. }
+            | ServerEvent::FriendUpdated { .. }
+            | ServerEvent::Rankings { .. }
+            | ServerEvent::GuildNotice { .. } => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);

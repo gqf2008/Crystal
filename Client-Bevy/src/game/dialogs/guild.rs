@@ -938,6 +938,9 @@ fn guild_server_events(
                 guild.storage_items = items.clone();
                 guild.storage_received = true;
             }
+            ServerEvent::GuildNotice { notice } => {
+                guild.notice = notice.clone();
+            }
             _ => {}
         }
     }

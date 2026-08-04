@@ -106,7 +106,10 @@ pub(crate) fn handle_social(
                     } else {
                         0
                     };
-                    mentor.invite = Some((name.clone(), level));
+                    server_events.write(ServerEvent::MentorInvite {
+                        name: name.clone(),
+                        level,
+                    });
                     tracing::info!("🧑‍🏫 收到拜师邀请: {} Lv.{}", name, level);
                 }
                 Err(e) => {
@@ -133,10 +136,12 @@ pub(crate) fn handle_social(
             } else {
                 0
             };
-            mentor.mentor_name = name.clone();
-            mentor.mentor_level = level;
-            mentor.mentor_online = online;
-            mentor.mentee_exp = exp;
+            server_events.write(ServerEvent::MentorUpdate {
+                name: name.clone(),
+                level,
+                online,
+                mentee_exp: exp,
+            });
             tracing::info!(
                 "🧑‍🏫 师徒更新: {} Lv.{} 在线={} 经验={}",
                 if name.is_empty() { "无" } else { &name },
@@ -158,8 +163,8 @@ pub(crate) fn handle_social(
                     Err(_) => break,
                 }
             }
-            guild.notice = notice;
-            tracing::info!("🏰 行会公告更新: {:?}", guild.notice);
+            server_events.write(ServerEvent::GuildNotice { notice: notice.clone() });
+            tracing::info!("🏰 行会公告更新: {:?}", notice);
         }
         x if x == ServerPacketIds::GuildMemberChange as i16 => {
             use byteorder::{LittleEndian, ReadBytesExt};
@@ -236,8 +241,9 @@ pub(crate) fn handle_social(
                     entries.push(RankEntry { rank, player_name, class, level, experience });
                 }
                 if ok {
-                    ranking.entries = entries;
-                    tracing::info!("🏅 排行榜: {} 条", ranking.entries.len());
+                    let count = entries.len();
+                    server_events.write(ServerEvent::Rankings { entries });
+                    tracing::info!("🏅 排行榜: {} 条", count);
                 } else {
                     tracing::warn!("⚠️ Rankings 解析失败: (len={})", payload.len());
                 }
@@ -307,13 +313,7 @@ pub(crate) fn handle_social(
             }
             match parsed {
                 Some(entries) => {
-                    for e in entries {
-                        if let Some(existing) = friend.friends.iter_mut().find(|f| f.object_id == e.object_id) {
-                            *existing = e.clone();
-                        } else {
-                            friend.friends.push(e.clone());
-                        }
-                    }
+                    server_events.write(ServerEvent::FriendUpdated { entries: entries.clone() });
                     tracing::info!(
                         "👥 好友列表: {}",
                         friend

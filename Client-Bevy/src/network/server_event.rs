@@ -73,7 +73,25 @@ pub enum ServerEvent {
     GroupDeleted,
     /// DeleteMember：成员离开
     GroupMemberLeft { name: String },
+    /// MentorRequest：收到拜师邀请
+    MentorInvite { name: String, level: u16 },
+    /// MentorUpdate：师徒信息更新
+    MentorUpdate {
+        name: String,
+        level: u32,
+        online: bool,
+        mentee_exp: i64,
+    },
+    /// FriendUpdate：好友列表增量（列表或单个）
+    FriendUpdated { entries: Vec<FriendEntry> },
+    /// Rankings：排行榜
+    Rankings { entries: Vec<RankEntry> },
+    /// GuildNoticeChange：行会公告更新
+    GuildNotice { notice: Vec<String> },
 }
+
+use crate::game::dialogs::friend::FriendEntry;
+use crate::game::dialogs::ranking::RankEntry;
 
 use crate::game::dialogs::group::GroupMember;
 
