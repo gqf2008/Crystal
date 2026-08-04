@@ -348,16 +348,9 @@ pub(crate) fn handle_social(
                 let a = payload[4] != 0;
                 let b = payload[5] != 0;
                 server_events.write(ServerEvent::TradeConfirm { a_locked: a, b_locked: b });
-                tracing::info!(
-                    "🔒 交易锁定状态: 我={} 对方={}",
-                    trade.my_locked,
-                    trade.their_locked
-                );
+                tracing::info!("🔒 交易锁定状态: 我={} 对方={}", a, b);
                 if a && b {
                     tracing::info!("🎉 交易完成！");
-                    trade.visible = false;
-                    trade.invite = None;
-                    trade.pending_deposit = None;
                 }
             }
         }
@@ -379,26 +372,8 @@ pub(crate) fn handle_social(
                     is_add,
                 });
                 if is_add {
-                    // 对方新增物品：保留已有条目的显示信息（服务端只发 uid/grid/count）
-                    if let Some(slot) = trade.their_items.get_mut(grid) {
-                        let prev = slot.take();
-                        *slot = Some(UiTradeItem {
-                            uid,
-                            item_index: prev.as_ref().map(|p| p.item_index).unwrap_or(0),
-                            name: prev
-                                .as_ref()
-                                .map(|p| p.name.clone())
-                                .unwrap_or_else(|| format!("#{}", uid)),
-                            image: prev.as_ref().map(|p| p.image).unwrap_or(0),
-                            count: if count > 0 { count } else { 1 },
-                        });
-                    }
                     tracing::info!("📦 对方放入交易物品 uid={} 槽={} x{}", uid, grid, count);
                 } else {
-                    if let Some(slot) = trade.their_items.get_mut(grid) {
-                        *slot = None;
-                    }
-                    trade.their_items.retain(|s| s.as_ref().map(|i| i.uid) != Some(uid));
                     tracing::info!("↩️ 对方取回物品 uid={}", uid);
                 }
             }

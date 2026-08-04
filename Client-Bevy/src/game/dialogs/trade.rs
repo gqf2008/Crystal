@@ -628,6 +628,12 @@ fn trade_server_events(
                     trade.my_locked = *b_locked;
                     trade.their_locked = *a_locked;
                 }
+                if *a_locked && *b_locked {
+                    // 交易完成：关闭窗口
+                    trade.visible = false;
+                    trade.invite = None;
+                    trade.pending_deposit = None;
+                }
             }
             ServerEvent::TradeItemUpdate { uid, grid, count, is_add } => {
                 if *is_add {
