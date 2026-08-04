@@ -1,0 +1,584 @@
+use bevy::prelude::*;
+use mir2_shared::packets::base::{Packet, PacketHeader};
+use crate::network::*;
+use crate::ui::login::AuthFeedback;
+use super::*;
+
+// 网络包解码分派（#72 拆分）：handle_auth 处理 arms_auth.rs 的服务端包分支。
+// 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
+
+#[allow(clippy::too_many_arguments, unused_variables)]
+pub(crate) fn handle_auth(
+    net: &mut NetConnection,
+    session: &mut SessionState,
+    auth: &mut AuthFeedback,
+    game_data: &mut GameData,
+    net_objects: &mut MessageWriter<NetObject>,
+    net_removals: &mut MessageWriter<NetObjectRemoved>,
+    motions: &mut MessageWriter<NetMotion>,
+    hud: &mut HudState,
+    chat: &mut ChatState,
+    npc_dialog: &mut NpcDialogState,
+    npc_goods: &mut NpcGoodsState,
+    combat_evt: &mut MessageWriter<CombatEvent>,
+    weather: &mut WeatherState,
+    magics: &mut MagicsState,
+    storage: &mut StorageState,
+    sell_panel: &mut SellPanelState,
+    group: &mut GroupState,
+    mail: &mut MailState,
+    trade: &mut TradeState,
+    friend: &mut FriendState,
+    guild: &mut GuildState,
+    ranking: &mut RankingState,
+    mentor: &mut MentorState,
+    market: &mut MarketState,
+    shop: &mut GameShopState,
+    territory: &mut GuildTerritoryState,
+    effects: &mut MessageWriter<PendingEffect>,
+    server_events: &mut MessageWriter<ServerEvent>,
+    control: &mut ControlState,
+    fishing: &mut FishingState,
+    refine: &mut RefineState,
+    craft: &mut CraftState,
+    rental: &mut ItemRentalState,
+    quest_log: &mut QuestLogState,
+    buff: &mut BuffState,
+    report: &mut ReportState,
+    inspect: &mut InspectState,
+    creature: &mut CreatureState,
+    hero: &mut HeroState,
+    relationship: &mut RelationshipState,
+    big_map: &mut crate::game::dialogs::big_map::BigMapState,
+    awake: &mut crate::game::dialogs::npc_awake::NpcAwakeState,
+    roll: &mut crate::game::dialogs::roll::RollState,
+    mgr: &mut crate::game::dialogs::DialogManager,
+    next: &mut NextState<AppState>,
+    payload: &[u8],
+) -> bool {
+    use mir2_shared::packets::server::*;
+
+    let mut cur = std::io::Cursor::new(payload);
+    let Ok(header) = PacketHeader::read_from(&mut cur) else {
+        return false;
+    };
+    let opcode = header.opcode;
+    const HANDLED: &[i16] = &[ServerPacketIds::Connected as i16, ServerPacketIds::ClientVersion as i16, ServerPacketIds::NewAccount as i16, ServerPacketIds::ChangePassword as i16, ServerPacketIds::Login as i16, ServerPacketIds::LoginSuccess as i16, ServerPacketIds::StartGame as i16, ServerPacketIds::NewCharacter as i16, ServerPacketIds::NewCharacterSuccess as i16, ServerPacketIds::DeleteCharacter as i16, ServerPacketIds::DeleteCharacterSuccess as i16, ServerPacketIds::MapChanged as i16, ServerPacketIds::NewMapInfo as i16, ServerPacketIds::AwakeningNeedMaterials as i16, ServerPacketIds::AwakeningLockedItem as i16, ServerPacketIds::Awakening as i16, ServerPacketIds::Roll as i16, ServerPacketIds::ObjectPlayer as i16, ServerPacketIds::ObjectMonster as i16, ServerPacketIds::ObjectNpc as i16, ServerPacketIds::ObjectRemove as i16, ServerPacketIds::ObjectItem as i16, ServerPacketIds::UserInformation as i16, ServerPacketIds::HealthChanged as i16, ServerPacketIds::UserLocation as i16, ServerPacketIds::GainedGold as i16, ServerPacketIds::GainExperience as i16, ServerPacketIds::LevelChanged as i16, ServerPacketIds::ObjectTurn as i16, ServerPacketIds::ObjectWalk as i16, ServerPacketIds::ObjectRun as i16, ServerPacketIds::Chat as i16, ServerPacketIds::ObjectChat as i16];
+    let handled = HANDLED.contains(&opcode);
+    match opcode {
+        // ---- M7: 握手 ----
+        x if x == ServerPacketIds::Connected as i16 => {
+            tracing::info!("🔌 服务器已连接（Connected），发送 ClientVersion");
+            if !net.client_version_sent {
+                net.client_version_sent = true;
+                net.send_packet(&mir2_shared::packets::client::connection::ClientVersion {
+                    version_hash: net.client_version_hash.to_vec(),
+                });
+            }
+        }
+        x if x == ServerPacketIds::ClientVersion as i16 => {
+            if let Ok(p) = connection::ClientVersion::read_body(&mut cur) {
+                tracing::info!("🔑 ClientVersion 校验结果: {}", p.result);
+            }
+        }
+
+        // ---- M7: 认证 ----
+        x if x == ServerPacketIds::NewAccount as i16 => {
+            if let Ok(p) = login::NewAccount::read_body(&mut cur) {
+                let msg = match p.result {
+                    8 => {
+                        auth.new_account_success = true;
+                        auth.new_account_error = None;
+                        "注册成功，请登录".to_string()
+                    }
+                    0 => "服务器暂时关闭注册".to_string(),
+                    1 => "账号格式错误（3-15位字母数字）".to_string(),
+                    2 => "密码格式错误（5-15位字母数字）".to_string(),
+                    3 => "邮箱格式错误".to_string(),
+                    4 => "用户名过长".to_string(),
+                    5 => "密保问题过长".to_string(),
+                    6 => "密保答案过长".to_string(),
+                    7 => "账号已存在".to_string(),
+                    _ => format!("注册失败（{}）", p.result),
+                };
+                tracing::info!("📝 NewAccount result={} {}", p.result, msg);
+                if p.result != 8 {
+                    auth.new_account_error = Some(msg);
+                }
+            }
+        }
+        x if x == ServerPacketIds::ChangePassword as i16 => {
+            if let Ok(p) = login::ChangePassword::read_body(&mut cur) {
+                let msg = match p.result {
+                    6 => {
+                        auth.change_password_success = true;
+                        auth.change_password_error = None;
+                        "密码修改成功".to_string()
+                    }
+                    0 => "服务器关闭修改密码".to_string(),
+                    1 => "账号格式错误".to_string(),
+                    2 => "当前密码格式错误".to_string(),
+                    3 => "新密码格式错误".to_string(),
+                    4 => "账号不存在".to_string(),
+                    5 => "当前密码错误".to_string(),
+                    _ => format!("修改密码失败（{}）", p.result),
+                };
+                tracing::info!("🔑 ChangePassword result={} {}", p.result, msg);
+                if p.result != 6 {
+                    auth.change_password_error = Some(msg);
+                }
+            }
+        }
+        x if x == ServerPacketIds::Login as i16 => {
+            if let Ok(p) = login::Login::read_body(&mut cur) {
+                let msg = match p.result {
+                    0 => "服务器禁止登录".to_string(),
+                    1 => "账号格式错误".to_string(),
+                    2 => "密码格式错误".to_string(),
+                    3 => "账号不存在".to_string(),
+                    4 => "密码错误".to_string(),
+                    _ => format!("登录失败（{}）", p.result),
+                };
+                tracing::warn!("⛔ 登录失败 result={} {}", p.result, msg);
+                net.state = NetState::Offline;
+                auth.login_error = Some(msg);
+                net.reconnecting = false;
+            }
+        }
+        x if x == ServerPacketIds::LoginSuccess as i16 => {
+            if let Ok(p) = login::LoginSuccess::read_body(&mut cur) {
+                tracing::info!("✅ 登录成功，角色 {} 个", p.characters.len());
+                session.characters = p.characters;
+                session.select_reload = false;
+                net.state = NetState::Select;
+                auth.login_error = None;
+                auth.login_success = true;
+                // M58：重连成功后自动进入之前的角色
+                if net.reconnecting {
+                    net.reconnecting = false;
+                    let saved = net.saved_character.lock().ok().map(|g| g.clone()).flatten();
+                    if let Some(idx) = saved {
+                        net.send_packet(&mir2_shared::packets::client::account::StartGame {
+                            character_index: idx,
+                        });
+                        tracing::info!("🔌 自动重连成功，自动进入角色 idx={}", idx);
+                    }
+                }
+            }
+        }
+
+        // ---- 角色管理 ----
+        x if x == ServerPacketIds::StartGame as i16 => {
+            if let Ok(p) = login::StartGame::read_body(&mut cur) {
+                tracing::info!("✅ 开始游戏 result={}", p.result);
+                net.state = NetState::InGame;
+            }
+        }
+        x if x == ServerPacketIds::NewCharacter as i16 => {
+            if let Ok(p) = account::NewCharacter::read_body(&mut cur) {
+                tracing::info!("⛔ 新建角色被拒绝 result={}", p.result);
+                session.character_error = Some(match p.result {
+                    4 => "最多只能创建4个角色！".to_string(),
+                    _ => "创建角色失败！".to_string(),
+                });
+            }
+        }
+        x if x == ServerPacketIds::NewCharacterSuccess as i16 => {
+            if let Ok(p) = account::NewCharacterSuccess::read_body(&mut cur) {
+                tracing::info!("✅ 新建角色成功: {}", p.character.name);
+                session.characters.push(SelectInfo {
+                    index: p.character.index,
+                    name: p.character.name.clone(),
+                    level: p.character.level,
+                    class: p.character.class,
+                    gender: p.character.gender,
+                    last_access: p.character.last_access,
+                });
+                session.select_reload = true;
+            }
+        }
+        x if x == ServerPacketIds::DeleteCharacter as i16 => {
+            if let Ok(p) = account::DeleteCharacter::read_body(&mut cur) {
+                tracing::warn!("⛔ 删除角色被拒绝 result={}", p.result);
+                session.character_error = Some(match p.result {
+                    0 => "删除失败：不能删除当前在线角色".to_string(),
+                    1 => "删除失败：角色不存在".to_string(),
+                    _ => format!("删除角色失败（{}）", p.result),
+                });
+            }
+        }
+        x if x == ServerPacketIds::DeleteCharacterSuccess as i16 => {
+            if let Ok(p) = account::DeleteCharacterSuccess::read_body(&mut cur) {
+                tracing::info!("🗑️ 删除角色成功 idx={}", p.character_index);
+                session.characters.retain(|c| c.index != p.character_index);
+                session.selected_index = None;
+                session.select_reload = true;
+            }
+        }
+
+        // ---- 地图与对象 ----
+        x if x == ServerPacketIds::MapChanged as i16 => {
+            if let Ok(p) = map::MapChanged::read_body(&mut cur) {
+                tracing::info!(
+                    "🗺️ MapChanged: {} ({},{})",
+                    p.file_name,
+                    p.location_x,
+                    p.location_y
+                );
+                game_data.desired_map = Some(p.file_name);
+                game_data.player_spawn =
+                    Some((p.location_x as f32, p.location_y as f32, p.direction));
+                weather.code = p.weather;
+                next.set(AppState::Game);
+            }
+        }
+        x if x == ServerPacketIds::NewMapInfo as i16 => {
+            if let Ok(p) = map::NewMapInfo::read_body(&mut cur) {
+                tracing::info!(
+                    "🗺️ NewMapInfo: map={} title={} npcs={}",
+                    p.map_index,
+                    p.title,
+                    p.npcs.len()
+                );
+                big_map.map_index = p.map_index;
+                big_map.title = p.title.clone();
+                big_map.npcs = p
+                    .npcs
+                    .into_iter()
+                    .map(|n| crate::game::dialogs::big_map::NpcRow {
+                        object_id: n.object_id,
+                        name: n.name,
+                        x: n.location_x,
+                        y: n.location_y,
+                        icon: n.icon,
+                        can_teleport_to: n.can_teleport_to,
+                    })
+                    .collect();
+                big_map.selected = None;
+                big_map.top_line = 0;
+            }
+        }
+        x if x == ServerPacketIds::AwakeningNeedMaterials as i16 => {
+            if let Ok(p) = mir2_shared::packets::server::awakening_system::AwakeningNeedMaterials::read_body(
+                &mut cur
+            ) {
+                tracing::info!(
+                    "⚒️ 觉醒材料: item={} materials={:?}",
+                    p.item_id,
+                    p.materials
+                        .iter()
+                        .map(|m| format!("#{}x{}", m.item_id, m.count))
+                        .collect::<Vec<_>>()
+                );
+                awake.materials = p
+                    .materials
+                    .into_iter()
+                    .map(|m| crate::game::dialogs::npc_awake::MaterialRow {
+                        item_id: m.item_id,
+                        count: m.count,
+                    })
+                    .collect();
+            }
+        }
+        x if x == ServerPacketIds::AwakeningLockedItem as i16 => {
+            if let Ok(p) =
+                mir2_shared::packets::server::awakening_system::AwakeningLockedItem::read_body(&mut cur)
+            {
+                tracing::info!("⚒️ 觉醒锁定: uid={} locked={}", p.unique_id, p.locked);
+            }
+        }
+        x if x == ServerPacketIds::Awakening as i16 => {
+            if let Ok(p) = mir2_shared::packets::server::awakening_system::Awakening::read_body(&mut cur) {
+                let msg = match p.result {
+                    1 => "觉醒成功".to_string(),
+                    0 => format!("觉醒失败，物品已损毁 (uid={})", p.remove_id),
+                    -1 => "觉醒失败".to_string(),
+                    -2 => "已达最大觉醒等级".to_string(),
+                    -3 => "金币不足".to_string(),
+                    -4 => "材料不足".to_string(),
+                    _ => format!("未知结果 {}", p.result),
+                };
+                tracing::info!("⚒️ 觉醒结果: {} -> {}", p.result, msg);
+                awake.result = p.result;
+                awake.result_text = msg;
+            }
+        }
+        x if x == ServerPacketIds::Roll as i16 => {
+            if let Ok(p) = mir2_shared::packets::server::ui_events::Roll::read_body(&mut cur) {
+                tracing::info!(
+                    "🎲 Roll: type={} result={} page={} auto={}",
+                    p.r#type,
+                    p.result,
+                    p.page,
+                    p.auto_roll
+                );
+                roll.npc_id = npc_dialog.npc_object_id;
+                roll.r#type = p.r#type;
+                roll.page = p.page;
+                roll.result = p.result;
+                roll.auto_roll = p.auto_roll;
+                roll.visible = true;
+                roll.started_at = 0.0;
+                roll.finished = false;
+            }
+        }
+        x if x == ServerPacketIds::ObjectPlayer as i16 => {
+            match objects::ObjectPlayer::read_body(&mut cur) {
+            Ok(p) => {
+                net_objects.write(NetObject::Player {
+                    object_id: p.object_id,
+                    name: p.name,
+                    class: p.class,
+                    gender: p.gender,
+                    location_x: p.location_x,
+                    location_y: p.location_y,
+                    direction: p.direction as u8,
+                    hair: p.hair,
+                    weapon: p.weapon,
+                    weapon_effect: p.weapon_effect,
+                    armour: p.armour,
+                    wing_effect: p.wing_effect,
+                    mount_type: p.mount_type,
+                    is_mounted: p.riding_mount,
+                });
+            }
+            Err(e) => {
+                tracing::warn!("⚠️ ObjectPlayer 解析失败: {} (len={})", e, payload.len());
+            }
+            }
+        }
+        x if x == ServerPacketIds::ObjectMonster as i16 => {
+            if let Ok(p) = objects::ObjectMonster::read_body(&mut cur) {
+                net_objects.write(NetObject::Monster {
+                    object_id: p.object_id,
+                    name: p.name,
+                    location_x: p.location_x,
+                    location_y: p.location_y,
+                    image: p.image,
+                    direction: p.direction as u8,
+                });
+            }
+        }
+        x if x == ServerPacketIds::ObjectNpc as i16 => {
+            if let Ok(p) = objects::ObjectNpc::read_body(&mut cur) {
+                net_objects.write(NetObject::Npc {
+                    object_id: p.object_id,
+                    name: p.name,
+                    image: p.image,
+                    location_x: p.location_x,
+                    location_y: p.location_y,
+                    direction: p.direction as u8,
+                });
+            }
+        }
+        x if x == ServerPacketIds::ObjectRemove as i16 => {
+            if let Ok(p) = objects::ObjectRemove::read_body(&mut cur) {
+                tracing::debug!("🗑️ ObjectRemove id={}", p.object_id);
+                net_removals.write(NetObjectRemoved(p.object_id));
+            }
+        }
+        x if x == ServerPacketIds::ObjectItem as i16 => {
+            match drops::ObjectItem::read_body(&mut cur) {
+            Ok(p) => {
+                let name = p
+                    .item
+                    .info
+                    .as_ref()
+                    .map(|i| i.name.clone())
+                    .unwrap_or_else(|| format!("#{}", p.item.item_index));
+                tracing::info!(
+                    "📦 地面物品: {} (uid={}) @ ({},{})",
+                    name,
+                    p.item.unique_id,
+                    p.location_x,
+                    p.location_y
+                );
+                net_objects.write(NetObject::GroundItem {
+                    object_id: p.object_id,
+                    item: to_inv_item(&p.item),
+                    location_x: p.location_x,
+                    location_y: p.location_y,
+                });
+            }
+            Err(e) => tracing::warn!("⚠️ ObjectItem 解析失败: {} (len={})", e, payload.len()),
+            }
+        }
+        // ---- M8: 玩家状态 ----
+        x if x == ServerPacketIds::UserInformation as i16 => {
+            match user::UserInformation::read_body(&mut cur) {
+                Ok(p) => {
+                    tracing::info!(
+                        "👤 UserInformation: {} Lv.{} hp={} mp={} exp={}/{} gold={}",
+                        p.name,
+                        p.level,
+                        p.hp,
+                        p.mp,
+                        p.experience,
+                        p.max_experience,
+                        p.gold
+                    );
+                    hud.name = p.name.clone();
+                    hud.level = p.level;
+                    hud.hp = p.hp;
+                    hud.mp = p.mp;
+                    hud.exp = p.experience;
+                    hud.max_exp = p.max_experience.max(1);
+                    hud.gold = p.gold;
+                    hud.class = p.class as u8;
+                    hud.player_object_id = Some(p.object_id);
+                    session.local_player_id = Some(p.object_id);
+                    session.self_position = Some((p.location_x, p.location_y, p.direction as u8));
+
+                    // 技能（MagicsState）：UserInformation 携带已学技能
+                    for m in &p.magics {
+                        magics.upsert(m.clone());
+                    }
+
+                    // 背包（40 格）
+                    if let Some(inv) = &p.inventory {
+                        let items: Vec<Option<InvItem>> = inv
+                            .iter()
+                            .take(40)
+                            .map(|slot| slot.as_ref().map(to_inv_item))
+                            .collect();
+                        hud.inventory.items = items;
+                        hud.inventory.gold = p.gold;
+                        tracing::info!(
+                            "🎒 背包 {} 格（{} 件物品）",
+                            hud.inventory.items.len(),
+                            hud.inventory.items.iter().flatten().count()
+                        );
+                    }
+
+                    // 装备（12 槽）
+                    if let Some(equip) = &p.equipment {
+                        hud.equipment = equip
+                            .iter()
+                            .map(|slot| slot.as_ref().map(to_inv_item))
+                            .collect();
+                    }
+
+                    // 物品名缓存（供仓库等无内嵌 ItemInfo 的列表显示，M32）
+                    if let Some(inv) = &p.inventory {
+                        for slot in inv.iter().filter_map(|s| s.as_ref()) {
+                            if let Some(info) = &slot.info {
+                                guild.item_names.insert(slot.item_index, info.name.clone());
+                            }
+                        }
+                    }
+                    if let Some(eq) = &p.equipment {
+                        for slot in eq.iter().filter_map(|s| s.as_ref()) {
+                            if let Some(info) = &slot.info {
+                                guild.item_names.insert(slot.item_index, info.name.clone());
+                            }
+                        }
+                    }
+
+                    // 市场物品名缓存（M34，与行会缓存同源）
+                    if let Some(inv) = &p.inventory {
+                        for slot in inv.iter().filter_map(|s| s.as_ref()) {
+                            if let Some(info) = &slot.info {
+                                market.item_names.insert(slot.item_index, info.name.clone());
+                            }
+                        }
+                    }
+
+                    // 商城物品名缓存（M35）
+                    if let Some(inv) = &p.inventory {
+                        for slot in inv.iter().filter_map(|s| s.as_ref()) {
+                            if let Some(info) = &slot.info {
+                                shop.item_names.insert(slot.item_index, info.name.clone());
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ UserInformation 解析失败: {} (len={})", e, payload.len())
+                }
+            }
+        }
+        x if x == ServerPacketIds::HealthChanged as i16 => {
+            if let Ok(p) = combat::HealthChanged::read_body(&mut cur) {
+                server_events.write(server_event::from_packet::health_changed(&p));
+            }
+        }
+        x if x == ServerPacketIds::UserLocation as i16 => {
+            match user::UserLocation::read_body(&mut cur) {
+                Ok(p) => {
+                    tracing::info!("📍 UserLocation: ({},{}) dir={:?}", p.location_x, p.location_y, p.direction);
+                    session.self_position = Some((p.location_x, p.location_y, p.direction as u8));
+                }
+                Err(e) => {
+                    tracing::warn!("⚠️ UserLocation 解析失败: {}", e);
+                }
+            }
+        }
+        x if x == ServerPacketIds::GainedGold as i16 => {
+            // GainedGold 是增量（击杀掉落），累加到余额
+            if let Ok(p) = drops::GainedGold::read_body(&mut cur) {
+                server_events.write(server_event::from_packet::gold_gained(&p));
+                tracing::info!("💰 获得金币 +{}", p.gold);
+            }
+        }
+        x if x == ServerPacketIds::GainExperience as i16 => {
+            if let Ok(p) = experience::GainExperience::read_body(&mut cur) {
+                server_events.write(server_event::from_packet::experience_gained(&p));
+                tracing::info!("✨ 获得经验 +{}", p.amount);
+            }
+        }
+        x if x == ServerPacketIds::LevelChanged as i16 => {
+            if let Ok(p) = experience::LevelChanged::read_body(&mut cur) {
+                server_events.write(server_event::from_packet::level_changed(&p));
+                tracing::info!("⬆️ 升级 Lv.{} exp={}/{}", p.level, p.experience, p.max_experience);
+            }
+        }
+
+        // ---- M8: 对象移动与聊天 ----
+        x if x == ServerPacketIds::ObjectTurn as i16 => {
+            if let Ok(p) = objects::ObjectTurn::read_body(&mut cur) {
+                motions.write(NetMotion::Turn {
+                    object_id: p.object_id,
+                    x: p.location_x,
+                    y: p.location_y,
+                    dir: p.direction as u8,
+                });
+            }
+        }
+        x if x == ServerPacketIds::ObjectWalk as i16 => {
+            if let Ok(p) = objects::ObjectWalk::read_body(&mut cur) {
+                tracing::debug!("🚶 ObjectWalk id={} -> ({},{})", p.object_id, p.location_x, p.location_y);
+                motions.write(NetMotion::Walk {
+                    object_id: p.object_id,
+                    x: p.location_x,
+                    y: p.location_y,
+                    dir: p.direction as u8,
+                });
+            }
+        }
+        x if x == ServerPacketIds::ObjectRun as i16 => {
+            if let Ok(p) = objects::ObjectRun::read_body(&mut cur) {
+                motions.write(NetMotion::Run {
+                    object_id: p.object_id,
+                    x: p.location_x,
+                    y: p.location_y,
+                    dir: p.direction as u8,
+                });
+            }
+        }
+        x if x == ServerPacketIds::Chat as i16 => {
+            if let Ok(p) = chat::Chat::read_body(&mut cur) {
+                let color = chat_color(p.chat_type);
+                chat.add_line(p.message, color);
+            }
+        }
+        x if x == ServerPacketIds::ObjectChat as i16 => {
+            if let Ok(p) = chat::ObjectChat::read_body(&mut cur) {
+                let color = chat_color(p.chat_type);
+                chat.add_line(p.text, color);
+            }
+        }
+
+        _ => {}
+    }
+    handled
+}

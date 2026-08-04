@@ -1,0 +1,363 @@
+use bevy::prelude::*;
+use mir2_shared::packets::base::{Packet, PacketHeader};
+use crate::network::*;
+use crate::ui::login::AuthFeedback;
+use super::*;
+
+// 网络包解码分派（#72 拆分）：handle_progress 处理 arms_progress.rs 的服务端包分支。
+// 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
+
+#[allow(clippy::too_many_arguments, unused_variables)]
+pub(crate) fn handle_progress(
+    net: &mut NetConnection,
+    session: &mut SessionState,
+    auth: &mut AuthFeedback,
+    game_data: &mut GameData,
+    net_objects: &mut MessageWriter<NetObject>,
+    net_removals: &mut MessageWriter<NetObjectRemoved>,
+    motions: &mut MessageWriter<NetMotion>,
+    hud: &mut HudState,
+    chat: &mut ChatState,
+    npc_dialog: &mut NpcDialogState,
+    npc_goods: &mut NpcGoodsState,
+    combat_evt: &mut MessageWriter<CombatEvent>,
+    weather: &mut WeatherState,
+    magics: &mut MagicsState,
+    storage: &mut StorageState,
+    sell_panel: &mut SellPanelState,
+    group: &mut GroupState,
+    mail: &mut MailState,
+    trade: &mut TradeState,
+    friend: &mut FriendState,
+    guild: &mut GuildState,
+    ranking: &mut RankingState,
+    mentor: &mut MentorState,
+    market: &mut MarketState,
+    shop: &mut GameShopState,
+    territory: &mut GuildTerritoryState,
+    effects: &mut MessageWriter<PendingEffect>,
+    server_events: &mut MessageWriter<ServerEvent>,
+    control: &mut ControlState,
+    fishing: &mut FishingState,
+    refine: &mut RefineState,
+    craft: &mut CraftState,
+    rental: &mut ItemRentalState,
+    quest_log: &mut QuestLogState,
+    buff: &mut BuffState,
+    report: &mut ReportState,
+    inspect: &mut InspectState,
+    creature: &mut CreatureState,
+    hero: &mut HeroState,
+    relationship: &mut RelationshipState,
+    big_map: &mut crate::game::dialogs::big_map::BigMapState,
+    awake: &mut crate::game::dialogs::npc_awake::NpcAwakeState,
+    roll: &mut crate::game::dialogs::roll::RollState,
+    mgr: &mut crate::game::dialogs::DialogManager,
+    next: &mut NextState<AppState>,
+    payload: &[u8],
+) -> bool {
+    use mir2_shared::packets::server::*;
+
+    let mut cur = std::io::Cursor::new(payload);
+    let Ok(header) = PacketHeader::read_from(&mut cur) else {
+        return false;
+    };
+    let opcode = header.opcode;
+    const HANDLED: &[i16] = &[ServerPacketIds::CraftItem as i16, ServerPacketIds::ItemRentalRequest as i16, ServerPacketIds::UpdateRentalItem as i16, ServerPacketIds::ItemRentalFee as i16, ServerPacketIds::ItemRentalPeriod as i16, ServerPacketIds::DepositRentalItem as i16, ServerPacketIds::RetrieveRentalItem as i16, ServerPacketIds::ItemRentalLock as i16, ServerPacketIds::ItemRentalPartnerLock as i16, ServerPacketIds::CanConfirmItemRental as i16, ServerPacketIds::ConfirmItemRental as i16, ServerPacketIds::CancelItemRental as i16, ServerPacketIds::ChangeQuest as i16, ServerPacketIds::CompleteQuest as i16, ServerPacketIds::AddBuff as i16, ServerPacketIds::RemoveBuff as i16, ServerPacketIds::PlayerInspect as i16, ServerPacketIds::UpdateIntelligentCreatureList as i16, ServerPacketIds::ChangeHero as i16, ServerPacketIds::MarriageRequest as i16, ServerPacketIds::LoverUpdate as i16, ServerPacketIds::DivorceRequest as i16];
+    let handled = HANDLED.contains(&opcode);
+    match opcode {
+        // ---- M41: 合成 ----
+        x if x == ServerPacketIds::CraftItem as i16 => {
+            // 服务端实际 wire：[recipe_id u32][count u16][success u8]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 7 {
+                let recipe_id = u32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
+                let count = u16::from_le_bytes(body[4..6].try_into().unwrap_or([0; 2]));
+                let success = body[6] != 0;
+                craft.last_result = Some((recipe_id, count, success));
+                craft.message = if success {
+                    format!("合成成功！配方 {} ×{}", recipe_id, count)
+                } else {
+                    format!("合成失败（配方 {}）", recipe_id)
+                };
+                tracing::info!("🔧 CraftItem: recipe={} count={} success={}", recipe_id, count, success);
+            }
+        }
+        // ---- M42: 物品租赁 ----
+        x if x == ServerPacketIds::ItemRentalRequest as i16 => {
+            rental.request_received = true;
+            rental.message = "收到租赁请求（物主）".to_string();
+            tracing::info!("📦 收到租赁请求");
+        }
+        x if x == ServerPacketIds::UpdateRentalItem as i16 => {
+            // [hasdata u8][fee u32][period i32]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 9 {
+                rental.has_item = body[0] != 0;
+                rental.fee = u32::from_le_bytes(body[1..5].try_into().unwrap_or([0; 4]));
+                rental.period = i32::from_le_bytes(body[5..9].try_into().unwrap_or([0; 4]));
+                rental.message = format!(
+                    "租赁更新: 物品={} 费用={} 期限={}",
+                    if rental.has_item { "有" } else { "无" },
+                    rental.fee,
+                    rental.period
+                );
+                tracing::info!("📦 UpdateRentalItem: item={} fee={} period={}", rental.has_item, rental.fee, rental.period);
+            }
+        }
+        x if x == ServerPacketIds::ItemRentalFee as i16 => {
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 4 {
+                rental.fee = u32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
+                rental.message = format!("租赁费用更新: {}", rental.fee);
+            }
+        }
+        x if x == ServerPacketIds::ItemRentalPeriod as i16 => {
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 4 {
+                rental.period = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
+                rental.message = format!("租赁期限更新: {} 小时", rental.period);
+            }
+        }
+        x if x == ServerPacketIds::DepositRentalItem as i16 => {
+            // [uid u64][success u8]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 9 {
+                let uid = u64::from_le_bytes(body[0..8].try_into().unwrap_or([0; 8]));
+                let success = body[8] != 0;
+                rental.message = format!("存入租赁物品: {} ({})", uid, if success { "成功" } else { "失败" });
+                tracing::info!("📦 存入租赁物品 uid={} success={}", uid, success);
+            }
+        }
+        x if x == ServerPacketIds::RetrieveRentalItem as i16 => {
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 9 {
+                let uid = u64::from_le_bytes(body[0..8].try_into().unwrap_or([0; 8]));
+                let success = body[8] != 0;
+                rental.message = format!("取回租赁物品: {} ({})", uid, if success { "成功" } else { "失败" });
+                rental.has_item = false;
+            }
+        }
+        x if x == ServerPacketIds::ItemRentalLock as i16 => {
+            rental.message = "锁定状态更新".to_string();
+            tracing::info!("📦 租赁锁定（本侧）");
+        }
+        x if x == ServerPacketIds::ItemRentalPartnerLock as i16 => {
+            rental.message = "对方已锁定".to_string();
+            tracing::info!("📦 租赁锁定（对方）");
+        }
+        x if x == ServerPacketIds::CanConfirmItemRental as i16 => {
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            rental.can_confirm = body.first().copied().unwrap_or(0) != 0;
+            rental.message = if rental.can_confirm {
+                "双方已锁定，可以确认成交".to_string()
+            } else {
+                "尚未可确认".to_string()
+            };
+            tracing::info!("📦 CanConfirmItemRental: {}", rental.can_confirm);
+        }
+        x if x == ServerPacketIds::ConfirmItemRental as i16 => {
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let success = body.first().copied().unwrap_or(0) != 0;
+            rental.confirmed = success;
+            rental.message = if success {
+                "租赁成交！".to_string()
+            } else {
+                "确认失败".to_string()
+            };
+            tracing::info!("📦 ConfirmItemRental: {}", success);
+        }
+        x if x == ServerPacketIds::CancelItemRental as i16 => {
+            rental.request_received = false;
+            rental.has_item = false;
+            rental.can_confirm = false;
+            rental.message = "租赁已取消".to_string();
+            tracing::info!("📦 租赁取消");
+        }
+        // ---- M43: 任务日志 ----
+        x if x == ServerPacketIds::ChangeQuest as i16 => {
+            // [id i32][count i32][task dotnet...][taken u8][completed u8][new u8]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            use byteorder::{LittleEndian, ReadBytesExt};
+            let id = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { tracing::warn!("⚠️ ChangeQuest 解析失败"); return true; } };
+            let count = cur.read_i32::<LittleEndian>().unwrap_or(0).max(0) as usize;
+            let mut tasks = Vec::with_capacity(count);
+            let mut ok = true;
+            for _ in 0..count {
+                match mir2_shared::binary::read_dotnet_string(&mut cur) {
+                    Ok(t) => tasks.push(t),
+                    Err(_) => { ok = false; break; }
+                }
+            }
+            if !ok { tracing::warn!("⚠️ ChangeQuest 任务解析失败"); return true; }
+            let taken = cur.read_u8().unwrap_or(0) != 0;
+            let completed = cur.read_u8().unwrap_or(0) != 0;
+            let is_new = cur.read_u8().unwrap_or(0) != 0;
+            let name = tasks.first().cloned().unwrap_or_else(|| format!("#{}", id));
+            let entry = QuestEntry { id, name, tasks, taken, completed, is_new };
+            // C# 语义：ChangeQuest 只更新进度（含 completed 标记，任务保留待交）；
+            // 从日志移除由 CompleteQuest 负责。
+            if let Some(e) = quest_log.quests.iter_mut().find(|q| q.id == id) {
+                *e = entry;
+            } else {
+                quest_log.quests.push(entry);
+            }
+            quest_log.message = format!("任务更新: {}", quest_log.quests.last().map(|q| q.name.clone()).unwrap_or_default());
+            tracing::info!("📜 ChangeQuest: id={} completed={} 已接任务 {}", id, completed, quest_log.quests.len());
+        }
+        x if x == ServerPacketIds::CompleteQuest as i16 => {
+            // [quest_index i32]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 4 {
+                let id = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
+                quest_log.quests.retain(|q| q.id != id);
+                quest_log.message = format!("任务 {} 完成！", id);
+                tracing::info!("📜 CompleteQuest: {}", id);
+            }
+        }
+        // ---- M44: 状态/Buff ----
+        x if x == ServerPacketIds::AddBuff as i16 => {
+            // [tag u8][remaining_ticks u32]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if body.len() >= 5 {
+                let tag = body[0];
+                let ticks = u32::from_le_bytes(body[1..5].try_into().unwrap_or([0; 4]));
+                if let Some(e) = buff.buffs.iter_mut().find(|b| b.tag == tag) {
+                    e.remaining_ticks = ticks;
+                } else {
+                    buff.buffs.push(BuffEntry { tag, remaining_ticks: ticks });
+                }
+                buff.message = format!(
+                    "获得状态: {}",
+                    crate::game::dialogs::buff::buff_name(tag)
+                );
+                tracing::info!("✨ AddBuff: tag={} ticks={}", tag, ticks);
+            }
+        }
+        x if x == ServerPacketIds::RemoveBuff as i16 => {
+            // [tag u8]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if let Some(tag) = body.first().copied() {
+                buff.buffs.retain(|b| b.tag != tag);
+                buff.message = format!(
+                    "状态消失: {}",
+                    crate::game::dialogs::buff::buff_name(tag)
+                );
+                tracing::info!("✨ RemoveBuff: tag={}", tag);
+            }
+        }
+        // ---- M46: 查看玩家 ----
+        x if x == ServerPacketIds::PlayerInspect as i16 => {
+            // [object_id u32][name dotnet][guild dotnet][level u16][class u8][gender u8]
+            // [count u8][per: uid u64][index i32][dura i32][max_dura i32]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            use byteorder::{LittleEndian, ReadBytesExt};
+            let _oid = match cur.read_u32::<LittleEndian>() { Ok(v) => v, Err(_) => { tracing::warn!("⚠️ PlayerInspect 解析失败"); return true; } };
+            let name = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
+            let guild = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
+            let level = match cur.read_u16::<LittleEndian>() { Ok(v) => v, Err(_) => { tracing::warn!("⚠️ PlayerInspect 解析失败"); return true; } };
+            let class = cur.read_u8().unwrap_or(0);
+            let gender = cur.read_u8().unwrap_or(0);
+            let count = cur.read_u8().unwrap_or(0) as usize;
+            let mut items = Vec::with_capacity(count);
+            let mut ok = true;
+            for _ in 0..count {
+                let unique_id = match cur.read_u64::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let item_index = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let current_dura = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let max_dura = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                items.push(InspectItem { unique_id, item_index, current_dura, max_dura });
+            }
+            if ok {
+                inspect.name = name.clone();
+                inspect.guild = guild;
+                inspect.level = level;
+                inspect.class = class;
+                inspect.gender = gender;
+                inspect.items = items;
+                inspect.message = "查看成功".to_string();
+                tracing::info!(
+                    "🔍 PlayerInspect: {} Lv.{} 装备 {} 件",
+                    name,
+                    level,
+                    inspect.items.len()
+                );
+            } else {
+                tracing::warn!("⚠️ PlayerInspect 装备解析失败");
+            }
+        }
+        // ---- M47: 宠物 ----
+        x if x == ServerPacketIds::UpdateIntelligentCreatureList as i16 => {
+            // [count i32][per: type u8][pickup u8][enabled u8][hunger u8][name dotnet]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            use byteorder::{LittleEndian, ReadBytesExt};
+            let count = cur.read_i32::<LittleEndian>().unwrap_or(0).max(0) as usize;
+            let mut creatures = Vec::with_capacity(count);
+            let mut ok = true;
+            for _ in 0..count {
+                let creature_type = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let pickup_mode = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let enabled = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } } != 0;
+                let hunger = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
+                let name = match mir2_shared::binary::read_dotnet_string(&mut cur) { Ok(v) => v, Err(_) => { ok = false; break; } };
+                creatures.push(CreatureEntry { creature_type, pickup_mode, enabled, hunger, name });
+            }
+            if ok {
+                creature.creatures = creatures;
+                creature.message = "宠物列表已更新".to_string();
+                tracing::info!("🐾 宠物列表: {} 个", creature.creatures.len());
+            } else {
+                tracing::warn!("⚠️ UpdateIntelligentCreatureList 解析失败");
+            }
+        }
+        // ---- M48: 英雄 ----
+        x if x == ServerPacketIds::ChangeHero as i16 => {
+            // [hero_index u8]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let idx = body.first().copied().unwrap_or(0);
+            hero.hero_index = idx;
+            hero.message = if idx == 0 {
+                "已切换主角色".to_string()
+            } else {
+                format!("已切换英雄 {}", idx)
+            };
+            tracing::info!("🦸 ChangeHero: index={}", idx);
+        }
+        // ---- M49: 婚姻/关系 ----
+        x if x == ServerPacketIds::MarriageRequest as i16 => {
+            // [lover dotnet]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let mut cur = std::io::Cursor::new(body);
+            match mir2_shared::binary::read_dotnet_string(&mut cur) {
+                Ok(name) => {
+                    relationship.invite = Some(name.clone());
+                    relationship.message = format!("收到 {} 的求婚", name);
+                    tracing::info!("💍 收到求婚: {}", name);
+                }
+                Err(_) => tracing::warn!("⚠️ MarriageRequest 解析失败"),
+            }
+        }
+        x if x == ServerPacketIds::LoverUpdate as i16 => {
+            // [married u8]
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            let married = body.first().copied().unwrap_or(0) != 0;
+            relationship.married = married;
+            relationship.message = if married {
+                "婚姻关系已建立！".to_string()
+            } else {
+                "婚姻关系已解除".to_string()
+            };
+            tracing::info!("💍 LoverUpdate: married={}", married);
+        }
+        x if x == ServerPacketIds::DivorceRequest as i16 => {
+            relationship.message = "收到离婚请求".to_string();
+            tracing::info!("💔 收到离婚请求");
+        }
+
+        _ => {}
+    }
+    handled
+}
