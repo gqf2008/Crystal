@@ -399,17 +399,22 @@ fn trade_ui_system(
         };
         match item {
             Some(item) if item.count > 1 => {
-                text.0 = format!("{}", item.count);
+                let new = format!("{}", item.count);
+                if text.0 != new {
+                    text.0 = new;
+                }
                 *vis = Visibility::Visible;
             }
             _ => {
-                text.0 = String::new();
+                if !text.0.is_empty() {
+                    text.0 = String::new();
+                }
                 *vis = Visibility::Hidden;
             }
         }
     }
     for (mut t, _) in &mut gold_texts {
-        t.0 = format!(
+        let new = format!(
             "金币: {} | 对方: {}{}",
             trade.my_gold,
             trade.their_gold,
@@ -421,6 +426,9 @@ fn trade_ui_system(
                 ""
             }
         );
+        if t.0 != new {
+            t.0 = new;
+        }
     }
     // 邀请提示
     let has_invite = trade.invite.is_some();
@@ -432,10 +440,13 @@ fn trade_ui_system(
         };
     }
     for (mut text, _) in &mut invite_texts {
-        text.0 = match trade.invite.as_ref() {
+        let new = match trade.invite.as_ref() {
             Some(name) => format!("{} 想与你交易", name),
             None => String::new(),
         };
+        if text.0 != new {
+            text.0 = new;
+        }
     }
 }
 

@@ -191,13 +191,19 @@ fn minimap_ui_system(
                 dot_tf.translation.x = px - 2.0;
                 dot_tf.translation.y = -(py - 2.0);
                 if let Ok(mut t) = pos_texts.single_mut() {
-                    t.0 = format!("{},{}", tx, ty);
+                    let s = format!("{},{}", tx, ty);
+                    if t.0 != s {
+                        t.0 = s; // 变化才更新，避免每帧重排文本（ICU4X/CPU，#31）
+                    }
                 }
             }
         }
     }
 
     if let Ok(mut t) = name_texts.single_mut() {
-        t.0 = game_data.map.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+        let name = game_data.map.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+        if t.0 != name {
+            t.0 = name;
+        }
     }
 }

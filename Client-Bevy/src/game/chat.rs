@@ -211,18 +211,26 @@ fn chat_display_system(
 ) {
     let start = chat.lines.len().saturating_sub(chat.visible_lines);
     for (mut text, mut color, line, input) in &mut texts {
+        // 变化才更新，避免每帧重排文本（ICU4X 报错 + CPU，#31）
         if let Some(line) = line {
-            if let Some((msg, c)) = chat.lines.get(start + line.0) {
-                text.0 = msg.clone();
-                color.0 = *c;
-            } else {
-                text.0 = String::new();
+            let (msg, c) = match chat.lines.get(start + line.0) {
+                Some((m, c)) => (m.clone(), *c),
+                None => (String::new(), Color::WHITE),
+            };
+            if text.0 != msg {
+                text.0 = msg;
+            }
+            if color.0 != c {
+                color.0 = c;
             }
         } else if input.is_some() {
-            if chat.input_active {
-                text.0 = format!("> {}", chat.input_text);
+            let new = if chat.input_active {
+                format!("> {}", chat.input_text)
             } else {
-                text.0 = String::new();
+                String::new()
+            };
+            if text.0 != new {
+                text.0 = new;
             }
         }
     }

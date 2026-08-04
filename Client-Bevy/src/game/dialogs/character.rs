@@ -590,6 +590,10 @@ fn char_skill_system(
     windows: Query<&Window>,
     mouse: Res<ButtonInput<MouseButton>>,
 ) {
+    if !mgr.is_open(crate::game::dialogs::DialogKind::Character) {
+        return;
+    }
+
     let open = mgr.is_open(DialogKind::Character) && page.0 == 3;
     let cursor = windows.single().ok().and_then(|w| w.cursor_position());
     let mouse_down = mouse.pressed(MouseButton::Left);

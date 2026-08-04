@@ -265,6 +265,8 @@ fn send_map_and_objects(to_client: &Sender<Vec<u8>>, char_index: i32) {
         1 => (MirClass::Wizard, MirGender::Female),
         _ => (MirClass::Warrior, MirGender::Male),
     };
+    // MOCK_SHOWCASE=1：表现层验收模式（装备/武器/翅膀/坐骑/光照，供 #28 截图验收）
+    let showcase = std::env::var("MOCK_SHOWCASE").as_deref() == Ok("1");
     send(
         to_client,
         &server::objects::ObjectPlayer {
@@ -285,18 +287,18 @@ fn send_map_and_objects(to_client: &Sender<Vec<u8>>, char_index: i32) {
             location_y: 352,
             direction: MirDirection::Up,
             hair: 0,
-            light: 0,
-            weapon: 0,
-            weapon_effect: 0,
-            armour: 0,
+            light: if showcase { 2 } else { 0 },
+            weapon: if showcase { 20 } else { 0 },
+            weapon_effect: if showcase { 5 } else { 0 },
+            armour: if showcase { 10 } else { 0 },
             poison: PoisonType::empty(),
             dead: false,
             hidden: false,
             effect: SpellEffect::None,
-            wing_effect: 0,
+            wing_effect: if showcase { 3 } else { 0 },
             extra: false,
-            mount_type: 0,
-            riding_mount: false,
+            mount_type: if showcase { 1 } else { 0 },
+            riding_mount: showcase,
             fishing: false,
             transform_type: 0,
             element_orb_effect: 0,

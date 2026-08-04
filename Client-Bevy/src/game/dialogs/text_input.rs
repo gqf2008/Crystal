@@ -148,9 +148,12 @@ fn text_input_system(
         }
     }
 
-    // 显示同步
+    // 显示同步（变化才更新，避免每帧重排文本，#31）
     for (mut text, disp) in &mut displays {
-        text.0 = state.texts.get(disp.0).cloned().unwrap_or_default();
+        let new = state.texts.get(disp.0).cloned().unwrap_or_default();
+        if text.0 != new {
+            text.0 = new;
+        }
     }
 }
 

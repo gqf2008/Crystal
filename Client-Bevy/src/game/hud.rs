@@ -482,18 +482,24 @@ fn hud_update_system(
     }
 
     for (mut t, hp, mp, exp, lv, gold, name) in &mut texts {
-        if hp.is_some() {
-            t.0 = format!("{}", hud.hp);
+        // 值变化才更新，避免每帧重排文本（ICU4X 报错 + CPU 开销，#31）
+        let new = if hp.is_some() {
+            format!("{}", hud.hp)
         } else if mp.is_some() {
-            t.0 = format!("{}", hud.mp);
+            format!("{}", hud.mp)
         } else if exp.is_some() {
-            t.0 = format!("{:.1}%", exp_pct * 100.0);
+            format!("{:.1}%", exp_pct * 100.0)
         } else if lv.is_some() {
-            t.0 = format!("Lv.{}", hud.level);
+            format!("Lv.{}", hud.level)
         } else if gold.is_some() {
-            t.0 = format!("{}", hud.gold);
+            format!("{}", hud.gold)
         } else if name.is_some() {
-            t.0 = hud.name.clone();
+            hud.name.clone()
+        } else {
+            continue;
+        };
+        if t.0 != new {
+            t.0 = new;
         }
     }
 }

@@ -93,6 +93,8 @@ fn chat_notice_system(
         };
     }
     if let Ok(mut t) = texts.single_mut() {
-        t.0 = state.text.clone();
+        if t.0 != state.text {
+            t.0 = state.text.clone();
+        }
     }
 }
