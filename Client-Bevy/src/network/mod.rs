@@ -4,11 +4,13 @@
 
 pub mod codec;
 pub mod mock;
+pub mod server_event;
 pub mod tcp;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender};
+use server_event::ServerEvent;
 use mir2_shared::enums::ServerPacketIds;
 use mir2_shared::packets::base::{Packet, PacketHeader};
 use mir2_shared::SelectInfo;
@@ -1086,6 +1088,7 @@ impl Plugin for NetworkPlugin {
         app.init_resource::<NetworkContext>();
         app.add_message::<NetObject>();
         app.add_message::<NetObjectRemoved>();
+        app.add_message::<ServerEvent>();
         app.add_systems(Startup, setup_network);
         app.add_systems(Update, network_system);
     }
@@ -1163,6 +1166,8 @@ pub(crate) struct NetworkOutbox<'w> {
     motions: MessageWriter<'w, NetMotion>,
     combat: MessageWriter<'w, CombatEvent>,
     effects: MessageWriter<'w, PendingEffect>,
+    /// 服务端事件（HUD/UI 等按需消费，解耦 network_system 直接改 UI State）
+    server_events: MessageWriter<'w, ServerEvent>,
 }
 
 /// 网络系统：拉取服务器数据 → 解析包 → 分发处理
@@ -1249,6 +1254,7 @@ pub(crate) fn network_system(
                         &mut *panels.shop,
                         &mut *panels.territory,
                         &mut outbox.effects,
+                        &mut outbox.server_events,
                         &mut *panels.control,
                         &mut *panels.fishing,
                         &mut *panels.refine,
@@ -1327,6 +1333,7 @@ pub(crate) fn network_system(
                         &mut *panels.shop,
                         &mut *panels.territory,
                         &mut outbox.effects,
+                        &mut outbox.server_events,
                         &mut *panels.control,
                         &mut *panels.fishing,
                         &mut *panels.refine,
@@ -1489,6 +1496,7 @@ fn handle_packet(
     shop: &mut GameShopState,
     territory: &mut GuildTerritoryState,
     effects: &mut MessageWriter<PendingEffect>,
+    server_events: &mut MessageWriter<ServerEvent>,
     control: &mut ControlState,
     fishing: &mut FishingState,
     refine: &mut RefineState,
@@ -1948,8 +1956,7 @@ fn handle_packet(
         }
         x if x == ServerPacketIds::HealthChanged as i16 => {
             if let Ok(p) = combat::HealthChanged::read_body(&mut cur) {
-                hud.hp = p.hp as i32;
-                hud.mp = p.mp as i32;
+                server_events.write(server_event::from_packet::health_changed(&p));
             }
         }
         x if x == ServerPacketIds::UserLocation as i16 => {
@@ -1966,20 +1973,18 @@ fn handle_packet(
         x if x == ServerPacketIds::GainedGold as i16 => {
             // GainedGold 是增量（击杀掉落），累加到余额
             if let Ok(p) = drops::GainedGold::read_body(&mut cur) {
-                hud.gold = hud.gold.saturating_add(p.gold);
-                tracing::info!("💰 获得金币 +{}（余额 {}）", p.gold, hud.gold);
+                server_events.write(server_event::from_packet::gold_gained(&p));
+                tracing::info!("💰 获得金币 +{}", p.gold);
             }
         }
         x if x == ServerPacketIds::GainExperience as i16 => {
             if let Ok(p) = experience::GainExperience::read_body(&mut cur) {
-                hud.exp += p.amount as i64;
+                server_events.write(server_event::from_packet::experience_gained(&p));
             }
         }
         x if x == ServerPacketIds::LevelChanged as i16 => {
             if let Ok(p) = experience::LevelChanged::read_body(&mut cur) {
-                hud.level = p.level;
-                hud.exp = p.experience;
-                hud.max_exp = p.max_experience.max(1);
+                server_events.write(server_event::from_packet::level_changed(&p));
             }
         }
 
