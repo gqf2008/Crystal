@@ -25,8 +25,6 @@ pwsh scripts/pr-review.ps1 -Force
 # 关闭"唤醒 Codex"（只自动回帖）
 pwsh scripts/pr-review.ps1 -Watch -NoWake
 
-# 额外发飞书群通知（需 bot 权限正常）
-pwsh scripts/pr-review.ps1 -Watch -FeishuChatId oc_xxxxxxxx
 ```
 
 ## 行为
@@ -45,7 +43,7 @@ pwsh scripts/pr-review.ps1 -Watch -FeishuChatId oc_xxxxxxxx
    PR 有新提交（SHA 变化）会自动重新评审
 6. **通知闭环**：发现新 PR / 新提交后，默认用
    `codex exec resume <CODEX_THREAD_ID>` 唤醒当前 Codex 会话接管处理（每个 head SHA
-   只唤醒一次；`-NoWake` 关闭）。可选 `-FeishuChatId oc_xxx` 发飞书通知（需 bot 权限正常）
+   只唤醒一次；`-NoWake` 关闭）
 
 ## 说明
 - 评审账号与 PR 作者相同时，GitHub 不允许 approve，脚本自动降级为 comment。

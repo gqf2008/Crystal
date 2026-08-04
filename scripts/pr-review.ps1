@@ -56,13 +56,6 @@
 .PARAMETER NoWake
     关闭"唤醒 Codex"（只回帖 + 记录，不唤醒任何会话）。
 
-.PARAMETER FeishuChatId
-    可选：飞书群/会话 chat_id（oc_xxx），配置后新 PR 会通过 lark-cli 发飞书通知。
-    需要飞书应用 bot 权限正常（当前环境 app secret 无效，默认关闭）。
-
-.PARAMETER WakeCooldownMin
-    同一 PR 两次唤醒的最短间隔分钟数（防刷屏），默认 5。
-
 .EXAMPLE
     # 一轮评审当前所有开放 PR
     pwsh tools/pr-review.ps1 -Repo gqf2008/Crystal
@@ -86,9 +79,7 @@ param(
     [string]$StateFile = "",
     [int]$TimeoutSec = 1800,
     [string]$CodexThreadId = "",
-    [switch]$NoWake,
-    [string]$FeishuChatId = "",
-    [int]$WakeCooldownMin = 5
+    [switch]$NoWake
 )
 
 $ErrorActionPreference = "Stop"
@@ -99,7 +90,7 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw "未找到 gh CLI，请先安装并登录：https://cli.github.com/ （gh auth login）"
 }
 
-# 主仓库根目录（脚本位于 <repo>/tools/ 下）
+# 主仓库根目录（脚本位于 <repo>/scripts/ 下）
 $RepoRoot = git -C $PSScriptRoot rev-parse --show-toplevel
 if ($LASTEXITCODE -ne 0) { throw "无法定位仓库根目录（$PSScriptRoot 不在 git 仓库内）" }
 $RepoRoot = [IO.Path]::GetFullPath($RepoRoot)
@@ -215,8 +206,8 @@ function Invoke-Cmd {
     $p = Start-Process -FilePath $File -ArgumentList $ArgList -WorkingDirectory $Dir `
         -NoNewWindow -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     if (-not $p.WaitForExit($TimeoutSec * 1000)) {
-        try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch { }
-        return @{ Ok = $false; TimedOut = $true; Code = -1; Tail = "超时（>$TimeoutSec 秒）" }
+        try { & taskkill /PID $p.Id /T /F 2>&1 | Out-Null } catch { }
+        return @{ Ok = $false; TimedOut = $true; Code = -1; Tail = "超时（>$TimeoutSec 秒），已强制结束进程树" }
     }
     $code = $p.ExitCode
     $tail = New-Object System.Collections.Generic.List[string]
@@ -368,7 +359,7 @@ function Post-Review($Pr, $Body, $Passed, $Viewer) {
     if ($LASTEXITCODE -ne 0) { Write-Warning "gh pr review #$($Pr.number) 失败（$event）" }
 }
 
-# ---------- 通知：发现新 PR 后唤醒 Codex / 飞书 ----------
+# ---------- 通知：发现新 PR 后唤醒 Codex ----------
 function Send-Notify {
     param($Pr, [string]$CiSummary, [string]$Result, [string]$PrNum, [string]$Sha, $State)
 
@@ -397,16 +388,6 @@ function Send-Notify {
         }
     }
 
-    if ($FeishuChatId) {
-        try {
-            $md = "**PR #$($Pr.number) 需要评审**：$($Pr.title)`n$($Pr.url)`nCI: $CiSummary"
-            lark-cli im +messages-send --as bot --chat-id $FeishuChatId --markdown $md 2>&1 | Out-Null
-            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] 已发送飞书通知（PR #$($Pr.number)）"
-        }
-        catch {
-            Write-Warning "飞书通知失败：$($_.Exception.Message)"
-        }
-    }
 }
 
 # ---------- 主流程 ----------
