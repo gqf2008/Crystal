@@ -85,6 +85,21 @@ pub enum HudButtonKind {
 #[derive(Component)]
 pub struct HudButton(pub HudButtonKind);
 
+/// HUD 显示数据快照（#70 试点：挂 HUD 根实体；值变化时才写组件，
+/// hud_update_system 用 Changed<HudData> 门控，血条/文字只在数据变化帧更新）
+#[derive(Component, Default, PartialEq, Clone)]
+pub struct HudData {
+    pub hp: i32,
+    pub max_hp: i32,
+    pub mp: i32,
+    pub max_mp: i32,
+    pub exp: i64,
+    pub max_exp: i64,
+    pub level: u16,
+    pub gold: u32,
+    pub name: String,
+}
+
 /// HUD 按钮 → 对话框开关（M9：接入 DialogManager）
 fn hud_button_system(mut mgr: ResMut<DialogManager>, buttons: Query<(&UiButton, &HudButton)>) {
     for (btn, kind) in &buttons {
@@ -154,6 +169,7 @@ impl Plugin for HudPlugin {
                 ui_button_system,
                 hud_button_system,
                 auto_potion_system,
+                sync_hud_data,
                 hud_update_system,
                 death_overlay_system,
             )
@@ -193,6 +209,9 @@ fn spawn_hud(
     let (bg_w, bg_h) = bg_info;
     let main_x = (1024.0 - bg_w) / 2.0;
     let main_y = 768.0 - bg_h;
+
+    // #70：HUD 数据根实体（无渲染，仅承载 HudData；值变化时触发 Changed 门控更新）
+    commands.spawn((UiEntity, HudData::default()));
 
     // 背景
     if let Some(h) = ui_image(
@@ -489,8 +508,28 @@ fn auto_potion_system(
 }
 
 /// 每帧按 HudState 更新血/蓝/经验条与文本（单查询避免 Bevy B0001 冲突）
+/// #70：HudState（Resource）→ HudData（组件）快照同步，仅在实际值变化时写组件
+fn sync_hud_data(mut roots: Query<&mut HudData>, hud: Res<HudState>) {
+    let Ok(mut data) = roots.single_mut() else { return };
+    let new = HudData {
+        hp: hud.hp,
+        max_hp: hud.max_hp,
+        mp: hud.mp,
+        max_mp: hud.max_mp,
+        exp: hud.exp,
+        max_exp: hud.max_exp,
+        level: hud.level,
+        gold: hud.gold,
+        name: hud.name.clone(),
+    };
+    if *data != new {
+        *data = new;
+    }
+}
+
 fn hud_update_system(
     hud: Res<HudState>,
+    hud_datas: Query<&HudData, Changed<HudData>>,
     mut fills: Query<(
         &mut Sprite,
         &mut Transform,
@@ -509,6 +548,10 @@ fn hud_update_system(
         Option<&NameText>,
     )>,
 ) {
+    // #70：数据未变化帧直接跳过（Changed<HudData> 门控）
+    if hud_datas.single().is_err() {
+        return;
+    }
     let hp_pct = (hud.hp as f32 / hud.max_hp.max(1) as f32).clamp(0.0, 1.0);
     let mp_pct = (hud.mp as f32 / hud.max_mp.max(1) as f32).clamp(0.0, 1.0);
     let exp_pct = (hud.exp as f32 / hud.max_exp.max(1) as f32).clamp(0.0, 1.0);
