@@ -21,6 +21,12 @@ pwsh scripts/pr-review.ps1 -Repo gqf2008/Crystal -Watch -Approve -IntervalSec 12
 
 # 强制重新评审所有开放 PR（忽略已评审记录）
 pwsh scripts/pr-review.ps1 -Force
+
+# 关闭"唤醒 Codex"（只自动回帖）
+pwsh scripts/pr-review.ps1 -Watch -NoWake
+
+# 额外发飞书群通知（需 bot 权限正常）
+pwsh scripts/pr-review.ps1 -Watch -FeishuChatId oc_xxxxxxxx
 ```
 
 ## 行为
@@ -37,6 +43,9 @@ pwsh scripts/pr-review.ps1 -Force
    - 验证通过 + PR 描述完整 → `--comment`（`-Approve` 时自动 approve）
 5. 记录已评审 head SHA 到 `Crystal-prreview-worktrees/state.json`，避免重复评审；
    PR 有新提交（SHA 变化）会自动重新评审
+6. **通知闭环**：发现新 PR / 新提交后，默认用
+   `codex exec resume <CODEX_THREAD_ID>` 唤醒当前 Codex 会话接管处理（每个 head SHA
+   只唤醒一次；`-NoWake` 关闭）。可选 `-FeishuChatId oc_xxx` 发飞书通知（需 bot 权限正常）
 
 ## 说明
 - 评审账号与 PR 作者相同时，GitHub 不允许 approve，脚本自动降级为 comment。

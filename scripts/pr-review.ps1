@@ -49,6 +49,20 @@
 .PARAMETER TimeoutSec
     单条验证命令超时秒数，默认 1800（30 分钟）。
 
+.PARAMETER CodexThreadId
+    发现新 PR / 新提交后要唤醒的 Codex 会话 ID（默认取 $env:CODEX_THREAD_ID，
+    即 watcher 所在会话；用 `codex exec resume <ID> -` 把评审任务交给 Codex 处理）。
+
+.PARAMETER NoWake
+    关闭"唤醒 Codex"（只回帖 + 记录，不唤醒任何会话）。
+
+.PARAMETER FeishuChatId
+    可选：飞书群/会话 chat_id（oc_xxx），配置后新 PR 会通过 lark-cli 发飞书通知。
+    需要飞书应用 bot 权限正常（当前环境 app secret 无效，默认关闭）。
+
+.PARAMETER WakeCooldownMin
+    同一 PR 两次唤醒的最短间隔分钟数（防刷屏），默认 5。
+
 .EXAMPLE
     # 一轮评审当前所有开放 PR
     pwsh tools/pr-review.ps1 -Repo gqf2008/Crystal
@@ -70,7 +84,11 @@ param(
     [switch]$Force,
     [string]$WorktreesRoot = "",
     [string]$StateFile = "",
-    [int]$TimeoutSec = 1800
+    [int]$TimeoutSec = 1800,
+    [string]$CodexThreadId = "",
+    [switch]$NoWake,
+    [string]$FeishuChatId = "",
+    [int]$WakeCooldownMin = 5
 )
 
 $ErrorActionPreference = "Stop"
@@ -91,6 +109,7 @@ if (-not $WorktreesRoot) { $WorktreesRoot = Join-Path $ParentDir "Crystal-prrevi
 $WorktreesRoot = [IO.Path]::GetFullPath($WorktreesRoot)
 if (-not $StateFile) { $StateFile = Join-Path $WorktreesRoot "state.json" }
 New-Item -ItemType Directory -Force -Path $WorktreesRoot | Out-Null
+if (-not $CodexThreadId) { $CodexThreadId = $env:CODEX_THREAD_ID }
 
 # ---------- 状态文件 ----------
 function Read-State {
@@ -348,6 +367,47 @@ function Post-Review($Pr, $Body, $Passed, $Viewer) {
     if ($LASTEXITCODE -ne 0) { Write-Warning "gh pr review #$($Pr.number) 失败（$event）" }
 }
 
+# ---------- 通知：发现新 PR 后唤醒 Codex / 飞书 ----------
+function Send-Notify {
+    param($Pr, [string]$CiSummary, [string]$Result, [string]$PrNum, [string]$Sha, $State)
+
+    # 同一 head SHA 只唤醒一次（防止 -Force/崩溃重跑导致重复唤醒）
+    if ($State[$PrNum] -and $State[$PrNum].notifiedSha -eq $Sha) { return }
+
+    if (-not $NoWake -and $CodexThreadId) {
+        $prompt = "【PR 实时跟踪】发现需要处理的 GitHub PR #$($Pr.number)：$($Pr.title)`n" +
+            "URL: $($Pr.url)`n" +
+            "分支 $($Pr.headRefName) → $Base，+$($Pr.additions) −$($Pr.deletions)，$($Pr.changedFiles) 个文件`n" +
+            "CI: $CiSummary`n" +
+            "本地验证: $Result（watcher 已按 AGENTS.md 回帖）`n" +
+            "请接管处理：核对评审结论并给出最终意见；如需合并请先与用户确认。"
+        $stamp = Get-Date -Format 'yyyyMMddHHmmss'
+        $pf = Join-Path $WorktreesRoot "wake-$($Pr.number)-$stamp.txt"
+        $wl = Join-Path $WorktreesRoot "wake-$($Pr.number)-$stamp.log"
+        try {
+            Set-Content -LiteralPath $pf -Value $prompt -Encoding UTF8
+            $cmd = "Get-Content -Raw -LiteralPath '$pf' | codex exec resume '$CodexThreadId' -"
+            Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-Command', $cmd) `
+                -WindowStyle Hidden -RedirectStandardOutput $wl -RedirectStandardError "$wl.err" | Out-Null
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] 已唤醒 Codex 处理 PR #$($Pr.number)"
+        }
+        catch {
+            Write-Warning "唤醒 Codex 失败：$($_.Exception.Message)"
+        }
+    }
+
+    if ($FeishuChatId) {
+        try {
+            $md = "**PR #$($Pr.number) 需要评审**：$($Pr.title)`n$($Pr.url)`nCI: $CiSummary"
+            lark-cli im +messages-send --as bot --chat-id $FeishuChatId --markdown $md 2>&1 | Out-Null
+            Write-Host "[$(Get-Date -Format 'HH:mm:ss')] 已发送飞书通知（PR #$($Pr.number)）"
+        }
+        catch {
+            Write-Warning "飞书通知失败：$($_.Exception.Message)"
+        }
+    }
+}
+
 # ---------- 主流程 ----------
 function Invoke-ReviewRound {
     $State = Read-State
@@ -382,7 +442,8 @@ function Invoke-ReviewRound {
             $body = New-ReviewBody -Pr $pr -Validation $validation -CiSummary $ci -Viewer $Viewer
             Post-Review -Pr $pr -Body $body -Passed ($validation.Passed -and $pr.body -and $pr.body.Length -gt 80) -Viewer $Viewer
             $result = if ($validation.Passed) { "passed" } else { "failed" }
-            $State[$prNum] = @{ sha = $sha; result = $result; reviewedAt = (Get-Date -Format 'o'); url = $pr.url }
+            Send-Notify -Pr $pr -CiSummary $ci -Result $result -PrNum $prNum -Sha $sha -State $State
+            $State[$prNum] = @{ sha = $sha; result = $result; reviewedAt = (Get-Date -Format 'o'); url = $pr.url; notifiedSha = $sha }
             Write-State $State
             Write-Host "[$(Get-Date -Format 'HH:mm:ss')] PR #$prNum 评审完成：$result"
         }
