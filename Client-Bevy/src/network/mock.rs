@@ -9,7 +9,7 @@ use mir2_shared::data::client_data::{ClientMagic, ClientQuestProgress, SelectInf
 use mir2_shared::data::item::ItemInfo;
 use mir2_shared::enums::{
     ChatType, ClientPacketIds, HeroBehaviour, ItemType, LevelEffects, MirClass, MirDirection,
-    MirGender, PoisonType, Spell, SpellEffect,
+    MirGender, PoisonType, Spell, SpellEffect, Stat,
 };
 use std::collections::HashMap;
 use mir2_shared::packets::base::{serialize_packet, Packet, PacketHeader};
@@ -84,6 +84,15 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             // 玩家成长/任务状态（#43 经验升级 / #44 任务闭环）
             let mut player_stats = MockPlayerStats::new();
             let mut quest = MockQuest::default();
+            // 装备（12 槽，Weapon=0/Armour=1）与死亡状态（#46/#47）
+            let mut player_equipment: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 12];
+            let mut player_dead = false;
+            let mut player_dead_since: Option<std::time::Instant> = None;
+            // 怪物 103 攻击伤害（默认 60；MOCK_PLAYER_DAMAGE 可调大，测死亡/复活闭环）
+            let player_damage = std::env::var("MOCK_PLAYER_DAMAGE")
+                .ok()
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(60);
             loop {
                 match from_client.recv_timeout(std::time::Duration::from_millis(100)) {
                     Ok(payload) => {
@@ -142,7 +151,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             },
                                         );
                                         active_char_index = p.character_index;
-                        send_map_and_objects(&to_client, p.character_index, &player_inventory, player_gold, player_stats);
+                        send_map_and_objects(&to_client, p.character_index, &player_inventory, &player_equipment, player_gold, player_stats);
                                         in_game = true;
                                     }
                                 }
@@ -252,11 +261,16 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                 }
                                 x if x == ClientPacketIds::Attack as i16 => {
                                     // 攻击反馈：怪物受击动画 + 伤害飘字 + 血量/死亡/掉落
+                                    if player_dead {
+                                        tracing::debug!("[MOCK] 死亡中忽略攻击");
+                                        continue;
+                                    }
                                     if let Ok(p) = client::Attack::read_body(&mut cur) {
                                         tracing::info!("[MOCK] 攻击 dir={:?}", p.direction);
                                         let target = 101u32; // 第一个怪物
                                         let hp = monster_hp.entry(target).or_insert(100);
-                                        *hp -= 15;
+                                        let damage = player_attack_damage(&player_equipment);
+                                        *hp -= damage as i32;
                                         send(
                                             &to_client,
                                             &server::combat::ObjectStruck {
@@ -270,7 +284,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         send(
                                             &to_client,
                                             &server::combat::DamageIndicator {
-                                                damage: 15,
+                                                damage: damage as i32,
                                                 damage_type: 0,
                                                 object_id: target,
                                             },
@@ -309,6 +323,10 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                 }
                                 x if x == ClientPacketIds::Magic as i16 => {
                                     // 技能施放：回显魔法 + 对目标造成伤害
+                                    if player_dead {
+                                        tracing::debug!("[MOCK] 死亡中忽略技能");
+                                        continue;
+                                    }
                                     if let Ok(p) = client::combat::Magic::read_body(&mut cur) {
                                         tracing::info!("[MOCK] 魔法 spell={:?}", p.spell);
                                         send(
@@ -373,18 +391,81 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     }
                                 }
                                 x if x == ClientPacketIds::EquipItem as i16 => {
-                                    // 装备：回成功，客户端本地同步背包→装备槽
+                                    // 装备：背包 → 装备槽（服务端记录，供伤害/防御计算）
                                     if let Ok(p) = client::item::EquipItem::read_body(&mut cur) {
+                                        let to = p.to as usize;
+                                        let from = player_inventory
+                                            .iter()
+                                            .position(|s| s.as_ref().map(|i| i.unique_id) == Some(p.unique_id));
+                                        let ok = if let Some(from) = from {
+                                            if to < player_equipment.len() {
+                                                let item = player_inventory[from].take();
+                                                let old = player_equipment[to].take();
+                                                if let Some(old) = old {
+                                                    if let Some(empty) = player_inventory.iter_mut().find(|s| s.is_none()) {
+                                                        *empty = Some(old);
+                                                    }
+                                                }
+                                                player_equipment[to] = item;
+                                                true
+                                            } else {
+                                                false
+                                            }
+                                        } else {
+                                            false
+                                        };
                                         send(
                                             &to_client,
                                             &server::item_operations::EquipItem {
                                                 grid: p.grid,
                                                 unique_id: p.unique_id,
                                                 to: p.to,
-                                                success: true,
+                                                success: ok,
                                             },
                                         );
-                                        tracing::info!("⚔️ 装备成功 uid={} -> 槽 {}", p.unique_id, p.to);
+                                        if ok {
+                                            send_user_information(&to_client, active_char_index, &player_inventory, &player_equipment, player_gold, player_stats);
+                                            tracing::info!("⚔️ 装备成功 uid={} -> 槽 {}", p.unique_id, p.to);
+                                        } else {
+                                            tracing::warn!("⚠️ 装备失败 uid={} -> 槽 {}", p.unique_id, p.to);
+                                        }
+                                    }
+                                }
+                                x if x == ClientPacketIds::RemoveItem as i16 => {
+                                    // 卸下装备：装备槽 → 背包（服务端记录）
+                                    if let Ok(p) = client::item::RemoveItem::read_body(&mut cur) {
+                                        let slot = player_equipment
+                                            .iter()
+                                            .position(|s| s.as_ref().map(|i| i.unique_id) == Some(p.unique_id));
+                                        let ok = if let Some(slot) = slot {
+                                            let item = player_equipment[slot].take();
+                                            if let Some(item) = item {
+                                                if let Some(empty) = player_inventory.iter_mut().find(|x| x.is_none()) {
+                                                    *empty = Some(item);
+                                                    true
+                                                } else {
+                                                    player_equipment[slot] = Some(item);
+                                                    false
+                                                }
+                                            } else {
+                                                false
+                                            }
+                                        } else {
+                                            false
+                                        };
+                                        send(
+                                            &to_client,
+                                            &server::item_operations::RemoveItem {
+                                                grid: p.grid,
+                                                unique_id: p.unique_id,
+                                                to: p.to,
+                                                success: ok,
+                                            },
+                                        );
+                                        if ok {
+                                            send_user_information(&to_client, active_char_index, &player_inventory, &player_equipment, player_gold, player_stats);
+                                            tracing::info!("🛡️ 卸下装备 uid={}（防御/伤害回落）", p.unique_id);
+                                        }
                                     }
                                 }
                                 x if x == ClientPacketIds::Chat as i16 => {
@@ -440,7 +521,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 }
                                             }
                                             if placed {
-                                                send_user_information(&to_client, active_char_index, &player_inventory, player_gold, player_stats);
+                                                send_user_information(&to_client, active_char_index, &player_inventory, &player_equipment, player_gold, player_stats);
                                                 tracing::info!("🛒 [MOCK] 购买 item={} x{} 花费 {}，剩余金币 {}", p.item_index, p.count, total, player_gold);
                                             } else {
                                                 send(&to_client, &server::chat::Chat { message: "背包已满".into(), chat_type: ChatType::System });
@@ -497,7 +578,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                     chat_type: ChatType::System,
                                                 },
                                             );
-                                            send_user_information(&to_client, active_char_index, &player_inventory, player_gold, player_stats);
+                                            send_user_information(&to_client, active_char_index, &player_inventory, &player_equipment, player_gold, player_stats);
                                             tracing::info!("🎁 [MOCK] 交任务 {} 完成，奖励 100 金币 + 4000 经验", p.quest_index);
                                         } else {
                                             send(
@@ -508,6 +589,26 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 },
                                             );
                                             tracing::info!("📜 [MOCK] 交任务 {} 被拒（未完成）", p.quest_index);
+                                        }
+                                    }
+                                }
+                                x if x == ClientPacketIds::TownRevive as i16 => {
+                                    // 城镇复活（死亡 UI 按钮 / --auto-revive）
+                                    if client::misc::TownRevive::read_body(&mut cur).is_ok() {
+                                        if player_dead {
+                                            revive_player(
+                                                &to_client,
+                                                active_char_index,
+                                                &player_inventory,
+                                                &player_equipment,
+                                                player_gold,
+                                                &mut player_stats,
+                                                &mut player_dead,
+                                                &mut player_dead_since,
+                                            );
+                                            tracing::info!("⛪ [MOCK] 城镇复活");
+                                        } else {
+                                            tracing::debug!("[MOCK] 未死亡忽略 TownRevive");
                                         }
                                     }
                                 }
@@ -530,6 +631,24 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                         // 怪物 AI（每 3s）：死亡怪物重生 + 怪物 102 移动 + 怪物 103 攻击玩家
                         if in_game && last_monster_ai.elapsed() >= std::time::Duration::from_secs(3) {
                             last_monster_ai = std::time::Instant::now();
+                            // 玩家死亡超 10s 自动复活（防卡死；--auto-revive 会更快触发 TownRevive）
+                            if player_dead {
+                                if let Some(since) = player_dead_since {
+                                    if since.elapsed() >= std::time::Duration::from_secs(10) {
+                                        revive_player(
+                                            &to_client,
+                                            active_char_index,
+                                            &player_inventory,
+                                            &player_equipment,
+                                            player_gold,
+                                            &mut player_stats,
+                                            &mut player_dead,
+                                            &mut player_dead_since,
+                                        );
+                                        tracing::info!("💚 [MOCK] 超时自动复活");
+                                    }
+                                }
+                            }
                             // 重生
                             let due: Vec<u32> = respawn
                                 .iter()
@@ -591,9 +710,11 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     },
                                 );
                             }
-                            // 怪物 103 攻击玩家（受击动画 + 掉血）
-                            if !respawn.contains_key(&103) {
-                                tracing::info!("🗡️ 怪物 103 攻击玩家");
+                            // 怪物 103 攻击玩家：扣血（防御减免）+ 伤害飘字 + 死亡判定（#46/#47）
+                            if !respawn.contains_key(&103) && !player_dead {
+                                let defence = player_defence(&player_equipment);
+                                let dmg = player_damage.saturating_sub(defence).max(1);
+                                player_stats.hp = player_stats.hp.saturating_sub(dmg);
                                 send(
                                     &to_client,
                                     &server::combat::ObjectStruck {
@@ -604,6 +725,35 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         direction: 4,
                                     },
                                 );
+                                send(
+                                    &to_client,
+                                    &server::combat::DamageIndicator {
+                                        damage: dmg as i32,
+                                        damage_type: 0,
+                                        object_id: 100,
+                                    },
+                                );
+                                send(
+                                    &to_client,
+                                    &server::combat::HealthChanged {
+                                        hp: player_stats.hp,
+                                        mp: player_stats.mp,
+                                    },
+                                );
+                                tracing::info!("🗡️ 怪物 103 攻击玩家 -{}（防御 {}）hp={}", dmg, defence, player_stats.hp);
+                                if player_stats.hp == 0 {
+                                    player_dead = true;
+                                    player_dead_since = Some(std::time::Instant::now());
+                                    send(
+                                        &to_client,
+                                        &server::combat::Death {
+                                            location_x: 354,
+                                            location_y: 352,
+                                            direction: 0,
+                                        },
+                                    );
+                                    tracing::info!("💀 [MOCK] 玩家死亡，等待复活（10s 自动）");
+                                }
                             }
                         }
                     }
@@ -714,6 +864,56 @@ fn on_kill_reward(
     }
 }
 
+/// 玩家攻击伤害：基础 15 + 武器槽 MinDC..MaxDC 中值（#47）
+fn player_attack_damage(equipment: &[Option<mir2_shared::data::item::UserItem>]) -> u32 {
+    let weapon = equipment.get(0).and_then(|s| s.as_ref());
+    let (min_dc, max_dc) = weapon
+        .and_then(|w| w.info.as_ref())
+        .map(|i| (i.stats.get(Stat::MinDC).max(0) as u32, i.stats.get(Stat::MaxDC).max(0) as u32))
+        .unwrap_or((0, 0));
+    15 + if max_dc > 0 { min_dc + (max_dc - min_dc) / 2 } else { 0 }
+}
+
+/// 玩家防御：护甲槽 MaxAC（#47）
+fn player_defence(equipment: &[Option<mir2_shared::data::item::UserItem>]) -> u32 {
+    equipment
+        .get(1)
+        .and_then(|s| s.as_ref())
+        .and_then(|i| i.info.as_ref())
+        .map(|i| i.stats.get(Stat::MaxAC).max(0) as u32)
+        .unwrap_or(0)
+}
+
+/// 复活玩家：清死亡状态 + Revived/ObjectRevived + 满血 UserInformation + 回安全区
+#[allow(clippy::too_many_arguments)]
+fn revive_player(
+    to_client: &Sender<Vec<u8>>,
+    char_index: i32,
+    inventory: &[Option<mir2_shared::data::item::UserItem>],
+    equipment: &[Option<mir2_shared::data::item::UserItem>],
+    gold: u32,
+    stats: &mut MockPlayerStats,
+    dead: &mut bool,
+    dead_since: &mut Option<std::time::Instant>,
+) {
+    *dead = false;
+    *dead_since = None;
+    stats.hp = 1000;
+    stats.mp = 500;
+    send(to_client, &server::combat::Revived);
+    send(to_client, &server::combat::ObjectRevived { object_id: 100, effect: 1 });
+    send_user_information(to_client, char_index, inventory, equipment, gold, *stats);
+    send(
+        to_client,
+        &server::user::UserLocation {
+            location_x: 354,
+            location_y: 352,
+            direction: MirDirection::Up,
+        },
+    );
+    tracing::info!("💚 [MOCK] 玩家复活（满血）");
+}
+
 /// 构造可拾取/背包物品（金创药等）
 fn potion_item(index: i32) -> mir2_shared::data::item::UserItem {
     mir2_shared::data::item::UserItem {
@@ -737,6 +937,23 @@ fn potion_item(index: i32) -> mir2_shared::data::item::UserItem {
             },
             shape: 0,
             price: 10,
+            stats: {
+                let mut s = mir2_shared::data::stats::Stats::new();
+                match index {
+                    // 木剑：攻击 5-12
+                    5 => {
+                        s.set(Stat::MinDC, 5);
+                        s.set(Stat::MaxDC, 12);
+                    }
+                    // 布衣：防御 2-5
+                    10 => {
+                        s.set(Stat::MinAC, 2);
+                        s.set(Stat::MaxAC, 5);
+                    }
+                    _ => {}
+                }
+                s
+            },
             ..Default::default()
         }),
         current_dura: 0,
@@ -750,6 +967,7 @@ fn send_user_information(
     to_client: &Sender<Vec<u8>>,
     char_index: i32,
     inventory: &[Option<mir2_shared::data::item::UserItem>],
+    equipment: &[Option<mir2_shared::data::item::UserItem>],
     gold: u32,
     stats: MockPlayerStats,
 ) {
@@ -786,7 +1004,7 @@ fn send_user_information(
             has_hero: false,
             hero_behaviour: HeroBehaviour::Follow,
             inventory: Some(inventory.to_vec()),
-            equipment: Some(vec![None; 12]),
+            equipment: Some(equipment.to_vec()),
             quest_inventory: Some(vec![]),
             gold,
             credit: 0,
@@ -846,6 +1064,7 @@ fn send_map_and_objects(
     to_client: &Sender<Vec<u8>>,
     char_index: i32,
     inventory: &[Option<mir2_shared::data::item::UserItem>],
+    equipment: &[Option<mir2_shared::data::item::UserItem>],
     gold: u32,
     stats: MockPlayerStats,
 ) {
@@ -961,7 +1180,7 @@ fn send_map_and_objects(
         },
     );
 
-    send_user_information(to_client, char_index, inventory, gold, stats);
+    send_user_information(to_client, char_index, inventory, equipment, gold, stats);
 
 
     // 初始地面物品（拾取验收用）：金创药 @ (353,352)（玩家左侧 1 格）

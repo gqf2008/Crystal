@@ -7,9 +7,11 @@
 //   - 中键 → AutoRun 切换（跑步）
 // ============================================================================
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use crate::actor::{ActorAnim, ActorAppearance, GroundItem, LocalPlayer, NetObjectId};
+use crate::game::hud::HudState;
 use crate::game::movement::{direction_from_delta, world_to_tile, LocalMove};
 use crate::game::pathfinding;
 use crate::map_renderer::{GameData, GameLibraries};
@@ -88,6 +90,15 @@ fn over_chat_panel(screen: Vec2) -> bool {
     screen.x <= 380.0 && screen.y >= 768.0 - 150.0 - 190.0
 }
 
+/// 物品选中/弹窗打开时屏蔽世界左键点击（原版 C# SelectedCell/Modal）
+/// 合并三个守卫参数，避免系统参数超过 Bevy 16 上限
+#[derive(SystemParam)]
+struct InteractionGuards<'w> {
+    click: Res<'w, crate::game::dialogs::inventory::InvClickState>,
+    amount: Res<'w, crate::game::dialogs::amount_box::AmountBoxState>,
+    confirm: Res<'w, crate::game::dialogs::inventory::InvDropConfirm>,
+}
+
 fn player_input_system(
     mut commands: Commands,
     time: Res<Time>,
@@ -105,11 +116,12 @@ fn player_input_system(
     actors: Query<(&NetObjectId, &Transform, &ActorAppearance)>,
     items: Query<(&NetObjectId, &Transform), (With<GroundItem>, Without<LocalPlayer>)>,
     buttons: Query<&UiButton>,
-    // 物品选中/弹窗打开时屏蔽世界左键点击（原版 C# SelectedCell/Modal）
-    click: Res<crate::game::dialogs::inventory::InvClickState>,
-    amount: Res<crate::game::dialogs::amount_box::AmountBoxState>,
-    confirm: Res<crate::game::dialogs::inventory::InvDropConfirm>,
+    guards: InteractionGuards,
+    hud: Res<HudState>,
 ) {
+    if hud.dead {
+        return;
+    }
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.physical_cursor_position() else { return };
     let Some(cursor_logical) = window.cursor_position() else { return };
@@ -161,9 +173,9 @@ fn player_input_system(
     // 左键：点击 NPC → CallNPC；点击怪物 → 攻击目标
     // （选中物品/数量框/确认框打开时不处理世界点击——丢弃流程由背包系统接管）
     if mouse.just_pressed(MouseButton::Left)
-        && click.selected.is_none()
-        && !amount.visible
-        && !confirm.visible
+        && guards.click.selected.is_none()
+        && !guards.amount.visible
+        && !guards.confirm.visible
         && !over_ui
         && !over_main_dialog(cursor_logical)
         && !over_chat_panel(cursor_logical)
@@ -265,7 +277,11 @@ fn pickup_arrival_system(
     net: Res<NetworkContext>,
     items: Query<(&NetObjectId, &Transform), (With<GroundItem>, Without<LocalPlayer>)>,
     players: Query<(&Transform, Option<&LocalMove>), (With<LocalPlayer>, With<NetObjectId>)>,
+    hud: Res<HudState>,
 ) {
+    if hud.dead {
+        return;
+    }
     let Some(target) = control.pickup_target else { return };
     // 物品已消失（被拾取/过期）→ 清除目标
     let Some((_, item_tf)) = items.iter().find(|(id, _)| id.0 == target) else {
@@ -300,7 +316,11 @@ fn auto_attack_system(
     mut audio_assets: ResMut<Assets<AudioSource>>,
     players: Query<&Transform, (With<LocalPlayer>, With<NetObjectId>)>,
     actors: Query<(&NetObjectId, &Transform)>,
+    hud: Res<HudState>,
 ) {
+    if hud.dead {
+        return;
+    }
     control.last_attack += time.delta_secs();
     let Some(target_id) = control.attack_target else { return };
 
@@ -351,7 +371,11 @@ fn hold_move_system(
     >,
     actors: Query<(&Transform, &ActorAppearance), (Without<LocalPlayer>, Without<GroundItem>)>,
     items: Query<&Transform, (With<GroundItem>, Without<LocalPlayer>)>,
+    hud: Res<HudState>,
 ) {
+    if hud.dead {
+        return;
+    }
     let Some(map) = &game_data.map else { return };
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.physical_cursor_position() else { return };

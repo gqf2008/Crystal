@@ -322,6 +322,10 @@ fn main() {
     if std::env::args().any(|a| a == "--auto-quest") {
         app.add_systems(Update, auto_quest_system);
     }
+    // --auto-revive: 死亡后 1s 自动 TownRevive（验证 死亡→复活 全链路，#46）
+    if std::env::args().any(|a| a == "--auto-revive") {
+        app.add_systems(Update, auto_revive_system);
+    }
     // --auto-walk <up|down|left|right>: 调试 chunk 流式（每帧驱动玩家平移）
     {
         let dir = std::env::args()
@@ -4564,7 +4568,7 @@ fn auto_quest_system(
     net: Res<client_bevy::network::NetworkContext>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
-    mut quest_log: ResMut<client_bevy::game::dialogs::quest_log::QuestLogState>,
+    quest_log: Res<client_bevy::game::dialogs::quest_log::QuestLogState>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
 ) {
@@ -4636,5 +4640,29 @@ fn auto_quest_system(
             }
         }
         _ => {}
+    }
+}
+
+/// --auto-revive：死亡后 1s 自动发 TownRevive（验证 死亡→复活 全链路，#46）
+fn auto_revive_system(
+    net: Res<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    mut t: Local<f32>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    if !hud.dead {
+        *t = 0.0;
+        return;
+    }
+    *t += time.delta_secs();
+    if *t >= 1.0 {
+        *t = 0.0;
+        net.send_packet(&mir2_shared::packets::client::misc::TownRevive);
+        tracing::info!("[REVIVE] 自动复活（TownRevive）");
     }
 }

@@ -2054,6 +2054,29 @@ fn handle_packet(
                 combat_evt.write(CombatEvent::Died { object_id: p.object_id, death_type: p.death_type });
             }
         }
+        // ---- M46: 玩家死亡/复活 ----
+        x if x == ServerPacketIds::Death as i16 => {
+            if let Ok(p) = combat::Death::read_body(&mut cur) {
+                let pid = hud.player_object_id.unwrap_or(100);
+                hud.dead = true;
+                combat_evt.write(CombatEvent::Died { object_id: pid, death_type: 0 });
+                tracing::info!("💀 玩家死亡 ({},{})", p.location_x, p.location_y);
+            }
+        }
+        x if x == ServerPacketIds::Revived as i16 => {
+            if combat::Revived::read_body(&mut cur).is_ok() {
+                let pid = hud.player_object_id.unwrap_or(100);
+                hud.dead = false;
+                combat_evt.write(CombatEvent::Revived { object_id: pid });
+                tracing::info!("💚 玩家复活");
+            }
+        }
+        x if x == ServerPacketIds::ObjectRevived as i16 => {
+            if let Ok(p) = combat::ObjectRevived::read_body(&mut cur) {
+                combat_evt.write(CombatEvent::Revived { object_id: p.object_id });
+                tracing::debug!("💚 对象复活 id={}", p.object_id);
+            }
+        }
         x if x == ServerPacketIds::DamageIndicator as i16 => {
             if let Ok(p) = combat::DamageIndicator::read_body(&mut cur) {
                 combat_evt.write(CombatEvent::Damage { object_id: p.object_id, damage: p.damage, dmg_type: p.damage_type });
