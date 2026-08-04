@@ -152,15 +152,10 @@ pub(crate) fn handle_npc_items(
                                     | mir2_shared::enums::PanelType::Repair
                                     | mir2_shared::enums::PanelType::SpecialRepair
                             ) {
-                                npc_goods.visible = false;
-                                sell_panel.mode = Some(p.panel_type);
-                                sell_panel.target = None;
-                                sell_panel.visible = true;
+                                server_events.write(ServerEvent::NpcSellPanel {
+                                    panel_type: p.panel_type,
+                                });
                                 tracing::info!("🧰 NPC 面板: {:?}", p.panel_type);
-                                // C# NPCDropDialog.Show() 同时打开背包
-                                if !mgr.is_open(crate::game::dialogs::DialogKind::Inventory) {
-                                    mgr.open.push(crate::game::dialogs::DialogKind::Inventory);
-                                }
                                 return true;
                             }
                             let goods: Vec<GoodsEntry> = p
@@ -178,10 +173,9 @@ pub(crate) fn handle_npc_items(
                                     count: item.count,
                                 })
                                 .collect();
-                            tracing::info!("🏪 NPC 商品: {} 件 (rate={})", goods.len(), p.rate);
-                            npc_goods.goods = goods;
-                            npc_goods.selected = None;
-                            npc_goods.visible = true;
+                            let rate = p.rate;
+                            tracing::info!("🏪 NPC 商品: {} 件 (rate={})", goods.len(), rate);
+                            server_events.write(ServerEvent::NpcGoods { goods, rate });
                         }
                         Err(e) => {
                             tracing::warn!("⚠️ NPCGoods 解析失败: {} (len={})", e, payload.len())

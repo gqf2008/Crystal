@@ -722,7 +722,9 @@ fn hud_server_events(
             | ServerEvent::WeatherChanged { .. }
             | ServerEvent::MapInfo { .. }
             | ServerEvent::MagicLearned { .. }
-            | ServerEvent::CraftResult { .. } => {}
+            | ServerEvent::CraftResult { .. }
+            | ServerEvent::NpcGoods { .. }
+            | ServerEvent::NpcSellPanel { .. } => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);

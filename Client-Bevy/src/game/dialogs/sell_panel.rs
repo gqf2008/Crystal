@@ -61,7 +61,11 @@ pub struct SellPanelPlugin;
 impl Plugin for SellPanelPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SellPanelState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_sell_panel);
+                app.add_systems(
+            Update,
+            sell_panel_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_sell_panel);
         app.add_systems(OnExit(AppState::Game), cleanup_sell_panel);
         app.add_systems(
             Update,
@@ -302,6 +306,27 @@ fn sell_panel_action_system(
                 tracing::info!("🔧 面板修理 {} (uid={})", item.name, item.unique_id);
             }
             _ => {}
+        }
+    }
+}
+
+
+/// 消费服务端出售/修理面板事件（网络层只广播 ServerEvent）
+fn sell_panel_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut sell_panel: ResMut<SellPanelState>,
+    mut mgr: ResMut<crate::game::dialogs::DialogManager>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::NpcSellPanel { panel_type } = ev {
+            sell_panel.mode = Some(*panel_type);
+            sell_panel.target = None;
+            sell_panel.visible = true;
+            // C# NPCDropDialog.Show() 同时打开背包
+            if !mgr.is_open(crate::game::dialogs::DialogKind::Inventory) {
+                mgr.open.push(crate::game::dialogs::DialogKind::Inventory);
+            }
         }
     }
 }

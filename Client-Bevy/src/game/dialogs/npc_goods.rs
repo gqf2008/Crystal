@@ -57,7 +57,11 @@ pub struct NpcGoodsPlugin;
 impl Plugin for NpcGoodsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NpcGoodsState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_npc_goods);
+                app.add_systems(
+            Update,
+            npc_goods_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_npc_goods);
         app.add_systems(OnExit(AppState::Game), cleanup_npc_goods);
         app.add_systems(
             Update,
@@ -214,6 +218,22 @@ fn npc_goods_ui_system(
                     }
                 }
             }
+        }
+    }
+}
+
+
+/// 消费服务端 NPC 商品事件（网络层只广播 ServerEvent）
+fn npc_goods_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut npc_goods: ResMut<NpcGoodsState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::NpcGoods { goods, .. } = ev {
+            npc_goods.goods = goods.clone();
+            npc_goods.selected = None;
+            npc_goods.visible = true;
         }
     }
 }

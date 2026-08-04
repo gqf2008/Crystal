@@ -199,7 +199,13 @@ pub enum ServerEvent {
     MagicLearned { magic: ClientMagic },
     /// CraftItem：合成结果
     CraftResult { recipe_id: u32, count: u16, success: bool },
+    /// NPCGoods：商品对话框（Buy/Craft 等）
+    NpcGoods { goods: Vec<GoodsEntry>, rate: f32 },
+    /// NPCGoods（Sell/Repair/SpecialRepair）：出售/修理面板
+    NpcSellPanel { panel_type: mir2_shared::enums::PanelType },
 }
+
+use crate::game::dialogs::npc_goods::GoodsEntry;
 
 use crate::game::dialogs::big_map::NpcRow;
 use mir2_shared::data::client_data::ClientMagic;
