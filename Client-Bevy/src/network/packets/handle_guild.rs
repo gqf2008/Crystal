@@ -184,8 +184,9 @@ pub(crate) fn handle_guild(
                     break;
                 }
             }
-            market.pages = pages.max(1);
-            tracing::info!("🏪 市场页数: {}", market.pages);
+            let pages = pages.max(1);
+            server_events.write(ServerEvent::MarketPages { pages });
+            tracing::info!("🏪 市场页数: {}", pages);
         }
         x if x == ServerPacketIds::NPCMarketPage as i16 => {
             // [count i32][per listing: auction_id u64][UserItem][7-bit seller][price u32][date i64]
@@ -233,11 +234,9 @@ pub(crate) fn handle_guild(
                 });
             }
             if ok {
-                market.listings = listings;
-                tracing::info!(
-                    "🏪 市场列表: {} 件",
-                    market.listings.len()
-                );
+                let listing_count = listings.len();
+                server_events.write(ServerEvent::MarketListings { listings });
+                tracing::info!("🏪 市场列表: {} 条", listing_count);
             } else {
                 tracing::warn!("⚠️ NPCMarketPage 解析失败: (len={})", payload.len());
             }
@@ -250,11 +249,10 @@ pub(crate) fn handle_guild(
             if let Ok(uid) = cur.read_u64::<LittleEndian>() {
                 let ok = cur.read_u8().unwrap_or(0) != 0;
                 if ok {
-                    market.consign_ok = Some(uid);
-                    market.message = format!("寄售成功 uid={}", uid);
+                    server_events.write(ServerEvent::MarketConsign { uid, success: true });
                     tracing::info!("🏪 寄售成功: uid={}", uid);
                 } else {
-                    market.message = "寄售失败".to_string();
+                    server_events.write(ServerEvent::MarketConsign { uid, success: false });
                     tracing::warn!("🏪 寄售失败: uid={}", uid);
                 }
             }
@@ -264,7 +262,7 @@ pub(crate) fn handle_guild(
             let mut cur = std::io::Cursor::new(body);
             match mir2_shared::binary::read_dotnet_string(&mut cur) {
                 Ok(msg) => {
-                    market.message = msg.clone();
+                    server_events.write(ServerEvent::MarketSuccess { message: msg.clone() });
                     tracing::info!("🏪 市场成功: {}", msg);
                 }
                 Err(e) => tracing::warn!("⚠️ MarketSuccess 解析失败: {} (len={})", e, payload.len()),
@@ -272,7 +270,7 @@ pub(crate) fn handle_guild(
         }
         x if x == ServerPacketIds::MarketFail as i16 => {
             let reason = payload.get(PacketHeader::HEADER_SIZE).copied().unwrap_or(0);
-            market.message = format!("市场操作失败（原因 {}）", reason);
+            server_events.write(ServerEvent::MarketFail { reason });
             tracing::warn!("🏪 市场失败原因: {}", reason);
         }
         // ---- M35: 商城 ----

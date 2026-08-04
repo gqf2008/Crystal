@@ -95,7 +95,11 @@ pub struct MarketPlugin;
 impl Plugin for MarketPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MarketState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_market);
+                app.add_systems(
+            Update,
+            market_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_market);
         app.add_systems(OnExit(AppState::Game), cleanup_market);
         app.add_systems(
             Update,
@@ -504,3 +508,36 @@ fn market_action_system(
     }
 }
 
+
+/// 消费服务端市场事件（网络层只广播 ServerEvent；文案在此构造）
+fn market_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut market: ResMut<MarketState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::MarketPages { pages } => {
+                market.pages = *pages;
+            }
+            ServerEvent::MarketListings { listings } => {
+                market.listings = listings.clone();
+            }
+            ServerEvent::MarketConsign { uid, success } => {
+                if *success {
+                    market.consign_ok = Some(*uid);
+                    market.message = format!("寄售成功 uid={}", uid);
+                } else {
+                    market.message = "寄售失败".to_string();
+                }
+            }
+            ServerEvent::MarketSuccess { message } => {
+                market.message = message.clone();
+            }
+            ServerEvent::MarketFail { reason } => {
+                market.message = format!("市场操作失败（原因 {}）", reason);
+            }
+            _ => {}
+        }
+    }
+}

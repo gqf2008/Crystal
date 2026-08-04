@@ -137,7 +137,19 @@ pub enum ServerEvent {
     RentalConfirmed { success: bool },
     /// CancelItemRental：取消
     RentalCancelled,
+    /// NPCMarket：市场页数
+    MarketPages { pages: usize },
+    /// NPCMarketPage：市场列表
+    MarketListings { listings: Vec<MarketItem> },
+    /// ConsignItem：寄售结果
+    MarketConsign { uid: u64, success: bool },
+    /// MarketSuccess：市场成功消息
+    MarketSuccess { message: String },
+    /// MarketFail：市场失败
+    MarketFail { reason: u8 },
 }
+
+use crate::game::dialogs::market::MarketItem;
 
 use crate::game::dialogs::buff::BuffEntry;
 use crate::game::dialogs::creature::CreatureEntry;

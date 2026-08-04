@@ -698,7 +698,12 @@ fn hud_server_events(
             | ServerEvent::RentalPartnerLocked
             | ServerEvent::RentalCanConfirm { .. }
             | ServerEvent::RentalConfirmed { .. }
-            | ServerEvent::RentalCancelled => {}
+            | ServerEvent::RentalCancelled
+            | ServerEvent::MarketPages { .. }
+            | ServerEvent::MarketListings { .. }
+            | ServerEvent::MarketConsign { .. }
+            | ServerEvent::MarketSuccess { .. }
+            | ServerEvent::MarketFail { .. } => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);
