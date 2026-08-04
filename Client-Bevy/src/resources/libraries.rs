@@ -271,7 +271,9 @@ impl Libraries {
                 self.loaded += 1;
             }
             Err(e) => {
-                tracing::warn!("✗ MapLibs[{}] = {} 失败: {}", index, path_ref.display(), e);
+                // 缺失的地图库为可选项（真实服务器 400 个地图配置，客户端不加载全部）
+                // 降为 debug 避免刷屏；汇总行 "x/400 已加载" 已给出整体情况
+                tracing::debug!("✗ MapLibs[{}] = {} 失败: {}", index, path_ref.display(), e);
                 self.map_libs[index] = None;
             }
         }
@@ -382,7 +384,9 @@ impl Libraries {
                 Some(())
             }
             Err(e) => {
-                tracing::warn!("✗ {}[{}] = {} 失败: {}", ty, index, path.display(), e);
+                // 缺失的资源库降为 debug：真实服务器对象（武器/护甲索引）本地 Data 可能没有，
+                // 缺库时该层不渲染即可，避免每帧重复 warn 刷屏
+                tracing::debug!("✗ {}[{}] = {} 失败: {}", ty, index, path.display(), e);
                 None
             }
         }
