@@ -145,8 +145,9 @@ pub(crate) fn setup_world(
             //   p.Offset(-LightW/2 - 24 + 10, -LightH/2 - 16 - 5)
             //   => 纹理左上角 = (格左+off_x - W/2 - 14, 格底+off_y - H/2 - 21)
             //   => 中心 = (格左+off_x - 14, 格底+off_y - 21)（屏幕 y 向下）
-            // Bevy 世界 y 取负：世界中心 = (cell_left+off_x-14, -(格底+off_y-21))
-            let cx = cell_left + off_x - 14.0;
+            // Bevy 世界 y 取负：世界中心 = (cell_left+off_x-14+OffSetX, -(格底+off_y-21))
+            // OffSetX=10：C# DrawLights p.X 比 DrawObjects drawX 多 OffSetX，光斑需右移对齐路灯（#88）
+            let cx = cell_left + off_x - 14.0 + LIGHT_SCREEN_OFFSET_X;
             let cy = cell_bottom_world - off_y + 21.0;
             // C# 灯光颜色按 Light/10：1=白 2=蓝 3=橙 4=绿，默认白
             let (cr, cg, cb) = match l / 10 {

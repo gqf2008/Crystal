@@ -91,6 +91,11 @@ pub struct LightChunkKey(pub i32, pub i32);
 #[derive(Resource)]
 pub struct MapLightTexture(pub Handle<Image>);
 
+/// C# DrawLights 的 p.X 比 DrawObjects 的 drawX 多 OffSetX（GameScene.cs:10398），
+/// OffSetX = ScreenWidth / 2 / CellWidth = 1024 / 2 / 48 = 10。
+/// 光斑 x 必须补上 OffSetX 才能与路灯（blend 2723..=2732）精确对齐（#88）。
+pub const LIGHT_SCREEN_OFFSET_X: f32 = 10.0;
+
 /// C# DXManager.Lights[i] = LightSizes[i+1]（径向渐变光斑尺寸，索引 0..9）
 pub const LIGHT_SIZES: [(f32, f32); 10] = [
     (205.0, 156.0),
