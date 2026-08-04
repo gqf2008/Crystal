@@ -5,7 +5,7 @@
 // mock 回包（codec 外帧编码）。仅实现里程碑所需的最小闭环。
 
 use crossbeam_channel::{Receiver, Sender};
-use mir2_shared::data::client_data::{ClientMagic, SelectInfo};
+use mir2_shared::data::client_data::{ClientMagic, ClientQuestProgress, SelectInfo};
 use mir2_shared::data::item::ItemInfo;
 use mir2_shared::enums::{
     ChatType, ClientPacketIds, HeroBehaviour, ItemType, LevelEffects, MirClass, MirDirection,
@@ -16,6 +16,37 @@ use mir2_shared::packets::base::{serialize_packet, Packet, PacketHeader};
 use mir2_shared::packets::{client, server};
 
 use crate::network::codec;
+
+/// 玩家成长状态（#43 经验/升级闭环）
+#[derive(Clone, Copy)]
+struct MockPlayerStats {
+    level: u16,
+    exp: i64,
+    max_exp: i64,
+    hp: u32,
+    mp: u32,
+}
+
+impl MockPlayerStats {
+    fn new() -> Self {
+        Self { level: 30, exp: 12000, max_exp: Self::max_exp_for(30), hp: 850, mp: 420 }
+    }
+    /// 经验上限（C# Globals.Experience 近似：level^2*100/3，30 级 = 30000）
+    fn max_exp_for(level: u16) -> i64 {
+        (level as i64 * level as i64 * 100) / 3
+    }
+}
+
+/// 任务状态（#44 任务闭环：击杀 稻草人 x3）
+#[derive(Default)]
+struct MockQuest {
+    taken: bool,
+    kills: u32,
+    completed: bool,
+}
+
+const QUEST_ID: i32 = 1;
+const QUEST_KILL_TARGET: u32 = 3;
 
 pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
     std::thread::Builder::new()
@@ -50,6 +81,9 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             };
             let mut player_gold: u32 = 10000;
             let mut active_char_index: i32 = 0;
+            // 玩家成长/任务状态（#43 经验升级 / #44 任务闭环）
+            let mut player_stats = MockPlayerStats::new();
+            let mut quest = MockQuest::default();
             loop {
                 match from_client.recv_timeout(std::time::Duration::from_millis(100)) {
                     Ok(payload) => {
@@ -108,7 +142,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             },
                                         );
                                         active_char_index = p.character_index;
-                        send_map_and_objects(&to_client, p.character_index, &player_inventory, player_gold);
+                        send_map_and_objects(&to_client, p.character_index, &player_inventory, player_gold, player_stats);
                                         in_game = true;
                                     }
                                 }
@@ -198,10 +232,16 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 "[@BUY] 购买".to_string(),
                                                 "[@MAIN] 返回".to_string(),
                                             ],
+                                            "[@QUEST]" => vec![
+                                                "任务：击杀 3 只稻草人（怪物 101）".to_string(),
+                                                "完成后回来交任务，奖励 100 金币 + 4000 经验".to_string(),
+                                                "[@MAIN] 返回".to_string(),
+                                            ],
                                             "[@CLOSE]" => vec![],
                                             _ => vec![
                                                 "欢迎来到传奇 2（MOCK NPC）".to_string(),
                                                 "[@SHOP] 商店".to_string(),
+                                                "[@QUEST] 任务".to_string(),
                                                 "[@CLOSE] 关闭".to_string(),
                                             ],
                                         };
@@ -262,6 +302,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             );
                                             send(&to_client, &server::objects::ObjectRemove { object_id: target });
                                             respawn.insert(target, std::time::Instant::now());
+                                            on_kill_reward(&to_client, &mut player_stats, &mut quest);
                                             tracing::info!("💀 怪物 {} 死亡，掉落物品 #{}", target, item_id);
                                         }
                                     }
@@ -313,6 +354,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             );
                                             send(&to_client, &server::objects::ObjectRemove { object_id: target });
                                             respawn.insert(target, std::time::Instant::now());
+                                            on_kill_reward(&to_client, &mut player_stats, &mut quest);
                                         }
                                     }
                                 }
@@ -373,7 +415,9 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         if let Some(idx) = idx {
                                             if let Some(item) = player_inventory[idx].take() {
                                                 send(&to_client, &server::item_operations::UseItem { unique_id: p.unique_id });
-                                                send(&to_client, &server::combat::HealthChanged { hp: 850, mp: 420 });
+                                                player_stats.hp = 1000;
+                                                player_stats.mp = 500;
+                                                send(&to_client, &server::combat::HealthChanged { hp: player_stats.hp, mp: player_stats.mp });
                                                 tracing::info!("💊 [MOCK] 使用物品: {} (uid={})", item.info.as_ref().map(|i| i.name.clone()).unwrap_or_default(), p.unique_id);
                                             }
                                         }
@@ -396,13 +440,74 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 }
                                             }
                                             if placed {
-                                                send_user_information(&to_client, active_char_index, &player_inventory, player_gold);
+                                                send_user_information(&to_client, active_char_index, &player_inventory, player_gold, player_stats);
                                                 tracing::info!("🛒 [MOCK] 购买 item={} x{} 花费 {}，剩余金币 {}", p.item_index, p.count, total, player_gold);
                                             } else {
                                                 send(&to_client, &server::chat::Chat { message: "背包已满".into(), chat_type: ChatType::System });
                                             }
                                         } else {
                                             send(&to_client, &server::chat::Chat { message: "金币不足".into(), chat_type: ChatType::System });
+                                        }
+                                    }
+                                }
+                                x if x == ClientPacketIds::AcceptQuest as i16 => {
+                                    // 接受任务：回 ChangeQuest（任务：击杀 稻草人 x3）
+                                    if let Ok(p) = client::quest::AcceptQuest::read_body(&mut cur) {
+                                        quest.taken = true;
+                                        quest.kills = 0;
+                                        quest.completed = false;
+                                        send(
+                                            &to_client,
+                                            &server::quest::ChangeQuest {
+                                                quest: ClientQuestProgress {
+                                                    id: QUEST_ID,
+                                                    task_list: vec![format!("击杀 稻草人 0/{}", QUEST_KILL_TARGET)],
+                                                    taken: true,
+                                                    completed: false,
+                                                    new: true,
+                                                },
+                                            },
+                                        );
+                                        tracing::info!("📜 [MOCK] 接受任务 {} (npc={})", p.quest_index, p.npc_index);
+                                    }
+                                }
+                                x if x == ClientPacketIds::AbandonQuest as i16 => {
+                                    // 放弃任务：清空任务状态
+                                    if let Ok(p) = client::quest::AbandonQuest::read_body(&mut cur) {
+                                        quest.taken = false;
+                                        quest.kills = 0;
+                                        quest.completed = false;
+                                        tracing::info!("📜 [MOCK] 放弃任务 {}", p.quest_index);
+                                    }
+                                }
+                                x if x == ClientPacketIds::FinishQuest as i16 => {
+                                    // 交任务：完成后发 CompleteQuest + 奖励（金币/经验）
+                                    if let Ok(p) = client::quest::FinishQuest::read_body(&mut cur) {
+                                        if quest.taken && quest.completed {
+                                            quest.taken = false;
+                                            quest.completed = false;
+                                            quest.kills = 0;
+                                            send(&to_client, &server::miscellaneous::CompleteQuest { quest_id: QUEST_ID });
+                                            player_gold += 100;
+                                            grant_exp(&to_client, &mut player_stats, 4000);
+                                            send(
+                                                &to_client,
+                                                &server::chat::Chat {
+                                                    message: "🎁 任务完成奖励：100 金币 + 4000 经验".into(),
+                                                    chat_type: ChatType::System,
+                                                },
+                                            );
+                                            send_user_information(&to_client, active_char_index, &player_inventory, player_gold, player_stats);
+                                            tracing::info!("🎁 [MOCK] 交任务 {} 完成，奖励 100 金币 + 4000 经验", p.quest_index);
+                                        } else {
+                                            send(
+                                                &to_client,
+                                                &server::chat::Chat {
+                                                    message: "任务尚未完成".into(),
+                                                    chat_type: ChatType::System,
+                                                },
+                                            );
+                                            tracing::info!("📜 [MOCK] 交任务 {} 被拒（未完成）", p.quest_index);
                                         }
                                     }
                                 }
@@ -519,6 +624,96 @@ fn send<P: Packet>(to_client: &Sender<Vec<u8>>, packet: &P) {
     }
 }
 
+/// 发放经验：GainExperience + 升级检测（LevelChanged/ObjectLeveled/聊天）
+fn grant_exp(to_client: &Sender<Vec<u8>>, stats: &mut MockPlayerStats, amount: u32) {
+    stats.exp += amount as i64;
+    send(to_client, &server::experience::GainExperience { amount });
+    send(
+        to_client,
+        &server::chat::Chat {
+            message: format!("获得 {} 经验", amount),
+            chat_type: ChatType::System,
+        },
+    );
+    tracing::info!("⭐ [MOCK] 获得经验 {}，当前 {}/{}", amount, stats.exp, stats.max_exp);
+
+    while stats.exp >= stats.max_exp {
+        stats.exp -= stats.max_exp;
+        stats.level += 1;
+        stats.max_exp = MockPlayerStats::max_exp_for(stats.level);
+        stats.hp = 1000;
+        stats.mp = 500;
+        send(
+            to_client,
+            &server::experience::LevelChanged {
+                level: stats.level,
+                experience: stats.exp,
+                max_experience: stats.max_exp,
+            },
+        );
+        send(to_client, &server::experience::ObjectLeveled { object_id: 100, level: stats.level });
+        send(
+            to_client,
+            &server::chat::Chat {
+                message: format!("🎉 恭喜升级！当前等级 {}", stats.level),
+                chat_type: ChatType::System,
+            },
+        );
+        tracing::info!("⬆️ [MOCK] 升级到 {} 级", stats.level);
+    }
+}
+
+/// 击杀奖励：经验 + 任务计数/完成（#43/#44）
+fn on_kill_reward(
+    to_client: &Sender<Vec<u8>>,
+    stats: &mut MockPlayerStats,
+    quest: &mut MockQuest,
+) {
+    grant_exp(to_client, stats, 5000);
+    if !quest.taken || quest.completed {
+        return;
+    }
+    quest.kills += 1;
+    tracing::info!("📜 [MOCK] 任务击杀计数 {}/{}", quest.kills, QUEST_KILL_TARGET);
+    let task = format!("击杀 稻草人 {}/{}", quest.kills, QUEST_KILL_TARGET);
+    if quest.kills >= QUEST_KILL_TARGET {
+        quest.completed = true;
+        send(
+            to_client,
+            &server::quest::ChangeQuest {
+                quest: ClientQuestProgress {
+                    id: QUEST_ID,
+                    task_list: vec![task],
+                    taken: true,
+                    completed: true,
+                    new: false,
+                },
+            },
+        );
+        send(
+            to_client,
+            &server::chat::Chat {
+                message: "任务完成！找 NPC 交任务领取奖励".into(),
+                chat_type: ChatType::System,
+            },
+        );
+        tracing::info!("🎯 [MOCK] 任务 {} 完成（等待交任务）", QUEST_ID);
+    } else {
+        send(
+            to_client,
+            &server::quest::ChangeQuest {
+                quest: ClientQuestProgress {
+                    id: QUEST_ID,
+                    task_list: vec![task],
+                    taken: true,
+                    completed: false,
+                    new: false,
+                },
+            },
+        );
+    }
+}
+
 /// 构造可拾取/背包物品（金创药等）
 fn potion_item(index: i32) -> mir2_shared::data::item::UserItem {
     mir2_shared::data::item::UserItem {
@@ -556,6 +751,7 @@ fn send_user_information(
     char_index: i32,
     inventory: &[Option<mir2_shared::data::item::UserItem>],
     gold: u32,
+    stats: MockPlayerStats,
 ) {
     let (class, gender) = match char_index {
         1 => (MirClass::Wizard, MirGender::Female),
@@ -577,15 +773,15 @@ fn send_user_information(
             name_colour: 0,
             class,
             gender,
-            level: 30,
+            level: stats.level,
             location_x: 354,
             location_y: 352,
             direction: MirDirection::Up,
             hair: 0,
-            hp: 850,
-            mp: 420,
-            experience: 12000,
-            max_experience: 30000,
+            hp: stats.hp as i32,
+            mp: stats.mp as i32,
+            experience: stats.exp,
+            max_experience: stats.max_exp,
             level_effects: LevelEffects::NONE,
             has_hero: false,
             hero_behaviour: HeroBehaviour::Follow,
@@ -642,7 +838,7 @@ fn send_user_information(
             observer: false,
         },
     );
-    send(to_client, &server::combat::HealthChanged { hp: 850, mp: 420 });
+    send(to_client, &server::combat::HealthChanged { hp: stats.hp, mp: stats.mp });
 }
 
 /// 进图：MapChanged(n0) + 本地玩家 + 怪物/NPC
@@ -651,6 +847,7 @@ fn send_map_and_objects(
     char_index: i32,
     inventory: &[Option<mir2_shared::data::item::UserItem>],
     gold: u32,
+    stats: MockPlayerStats,
 ) {
     // 地图：新手村 n0，出生点附近
     send(
@@ -693,7 +890,7 @@ fn send_map_and_objects(
             name_colour: 0,
             class,
             gender,
-            level: 30,
+            level: stats.level,
             location_x: 354,
             location_y: 352,
             direction: MirDirection::Up,
@@ -764,7 +961,7 @@ fn send_map_and_objects(
         },
     );
 
-    send_user_information(to_client, char_index, inventory, gold);
+    send_user_information(to_client, char_index, inventory, gold, stats);
 
 
     // 初始地面物品（拾取验收用）：金创药 @ (353,352)（玩家左侧 1 格）
