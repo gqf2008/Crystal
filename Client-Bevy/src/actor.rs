@@ -60,25 +60,41 @@ impl Plugin for ActorPlugin {
 // 组件
 // ============================================================================
 
-/// 角色外观（决定用哪套库）
+/// 角色类型标签（#69：查询用 With<Player> 等过滤，替代 enum 判别）
+#[derive(Component, Default)]
+pub struct Player;
+
+/// 怪物类型标签
+#[derive(Component, Default)]
+pub struct Monster;
+
+/// NPC 类型标签
+#[derive(Component, Default)]
+pub struct Npc;
+
+/// 玩家外观数据（决定用哪套库）
 #[derive(Component, Clone)]
-pub enum ActorAppearance {
-    Player {
-        class: MirClass,
-        gender: MirGender,
-        armour: u16,
-        hair: u8,
-        weapon: i16,
-        weapon_effect: i16,
-        wing_effect: u8,
-    },
-    Monster {
-        monster_type: u16,
-        stage: u8,
-    },
-    Npc {
-        npc_index: u16,
-    },
+pub struct ActorAppearance {
+    pub class: MirClass,
+    pub gender: MirGender,
+    pub armour: u16,
+    pub hair: u8,
+    pub weapon: i16,
+    pub weapon_effect: i16,
+    pub wing_effect: u8,
+}
+
+/// 怪物外观数据
+#[derive(Component, Clone)]
+pub struct MonsterAppearance {
+    pub monster_type: u16,
+    pub stage: u8,
+}
+
+/// NPC 外观数据
+#[derive(Component, Clone)]
+pub struct NpcAppearance {
+    pub npc_index: u16,
 }
 
 /// 本地玩家标记（用于遮挡 ghost 效果）
@@ -214,19 +230,24 @@ pub enum DemoBehavior {
 // 帧表 + 精灵图缓存
 // ============================================================================
 
-/// 取角色当前动作对应的帧定义
-fn actor_frame(app: &ActorAppearance, anim: &ActorAnim) -> Option<&'static Frame> {
-    match app {
-        ActorAppearance::Player { .. } => get_player_frame(anim.action),
-        ActorAppearance::Monster {
-            monster_type,
-            stage,
-        } => {
-            let dir = MirDirection::try_from(anim.direction).unwrap_or(MirDirection::Up);
-            get_monster_frame(*monster_type, anim.action, dir, *stage)
-        }
-        ActorAppearance::Npc { .. } => get_default_npc_frame(anim.action),
+/// 取角色当前动作对应的帧定义（按实体带的外观数据组件分派）
+fn actor_frame(
+    player: Option<&ActorAppearance>,
+    monster: Option<&MonsterAppearance>,
+    npc: Option<&NpcAppearance>,
+    anim: &ActorAnim,
+) -> Option<&'static Frame> {
+    if let Some(_p) = player {
+        return get_player_frame(anim.action);
     }
+    if let Some(m) = monster {
+        let dir = MirDirection::try_from(anim.direction).unwrap_or(MirDirection::Up);
+        return get_monster_frame(m.monster_type, anim.action, dir, m.stage);
+    }
+    if let Some(_n) = npc {
+        return get_default_npc_frame(anim.action);
+    }
+    None
 }
 
 /// 缓存的精灵图（Bevy Image 句柄 + 绘制元数据）
@@ -250,12 +271,19 @@ pub struct ActorImageCache {
 /// 动画推进：按帧表 interval 推进 frame_index，并把各层的绘制帧号写回
 fn advance_actor_animations(
     time: Res<Time>,
-    mut actors: Query<(&ActorAppearance, &mut ActorAnim, &Children, Option<&MountState>)>,
+    mut actors: Query<(
+        Option<&ActorAppearance>,
+        Option<&MonsterAppearance>,
+        Option<&NpcAppearance>,
+        &mut ActorAnim,
+        &Children,
+        Option<&MountState>,
+    )>,
     mut layers: Query<&mut SpriteLayer>,
 ) {
     let dt_ms = time.delta_secs() * 1000.0;
-    for (app, mut anim, children, mounted) in &mut actors {
-        let Some(frame) = actor_frame(app, &anim) else {
+    for (player, monster, npc, mut anim, children, mounted) in &mut actors {
+        let Some(frame) = actor_frame(player, monster, npc, &anim) else {
             continue;
         };
         let draw_frame = frame.start + (anim.direction as i32) * frame.offset() + anim.frame_index;
@@ -766,7 +794,8 @@ fn spawn_player_with(
     let root = commands
         .spawn((
             LocalPlayer,
-            ActorAppearance::Player {
+            Player,
+            ActorAppearance {
                 class,
                 gender,
                 armour: armour.max(0) as u16,
@@ -899,7 +928,8 @@ fn spawn_local_player_with(
         .spawn((
             LocalPlayer,
             NetObjectId(object_id),
-            ActorAppearance::Player {
+            Player,
+            ActorAppearance {
                 class,
                 gender,
                 armour: armour.max(0) as u16,
@@ -942,7 +972,8 @@ fn spawn_remote_player_with(
     let root = commands
         .spawn((
             NetObjectId(object_id),
-            ActorAppearance::Player {
+            Player,
+            ActorAppearance {
                 class,
                 gender,
                 armour: armour.max(0) as u16,
@@ -1081,7 +1112,8 @@ fn spawn_monster(commands: &mut Commands, monster_type: u16, x: f32, y: f32, dir
     let z = depth_z(-y); // y 是 Bevy 负坐标
     let root = commands
         .spawn((
-            ActorAppearance::Monster {
+            Monster,
+            MonsterAppearance {
                 monster_type,
                 stage: 0,
             },
@@ -1129,7 +1161,8 @@ fn spawn_npc(commands: &mut Commands, npc_index: u16, x: f32, y: f32, direction:
     let z = depth_z(-y); // y 是 Bevy 负坐标
     let root = commands
         .spawn((
-            ActorAppearance::Npc { npc_index },
+            Npc,
+            NpcAppearance { npc_index },
             ActorAnim {
                 action: MirAction::Standing,
                 direction,
@@ -1163,7 +1196,12 @@ fn spawn_npc(commands: &mut Commands, npc_index: u16, x: f32, y: f32, direction:
 
 /// 调试：输出角色 z、玩家平滑移动进度与 ghost 遮挡瓦片数（帧 30 一次）
 fn dump_depth_debug(
-    actors: Query<(&ActorAppearance, &Transform)>,
+    actors: Query<(
+        Option<&ActorAppearance>,
+        Option<&MonsterAppearance>,
+        Option<&NpcAppearance>,
+        &Transform,
+    )>,
     front: Query<(&Transform, &crate::map_renderer::FrontTile)>,
     ghosts: Query<&Visibility, With<GhostLayer>>,
     local: Query<&Transform, (With<LocalPlayer>, Without<GhostLayer>)>,
@@ -1178,11 +1216,15 @@ fn dump_depth_debug(
         return;
     }
     let mut lines = String::from("depth debug\n");
-    for (app, tf) in &actors {
-        let label = match app {
-            ActorAppearance::Player { .. } => "player",
-            ActorAppearance::Monster { .. } => "monster",
-            ActorAppearance::Npc { .. } => "npc",
+    for (player, monster, npc, tf) in &actors {
+        let label = if player.is_some() {
+            "player"
+        } else if monster.is_some() {
+            "monster"
+        } else if npc.is_some() {
+            "npc"
+        } else {
+            continue;
         };
         lines.push_str(&format!(
             "  actor {} at world_y={:.0} z={:.4}\n",
@@ -1211,8 +1253,8 @@ fn dump_depth_debug(
     // ghost 统计：玩家前方遮挡瓦片数（本地玩家）
     let player_y = actors
         .iter()
-        .filter(|(app, _)| matches!(app, ActorAppearance::Player { .. }))
-        .map(|(_, tf)| -tf.translation.y)
+        .filter(|(player, _, _, _)| player.is_some())
+        .map(|(_, _, _, tf)| -tf.translation.y)
         .next();
     if let Some(foot_y) = player_y {
         let occluding = front
@@ -1332,7 +1374,12 @@ fn log_player_walk(local: Query<&Transform, With<LocalPlayer>>, mut frames: Loca
 }
 
 /// 角色 z 与脚底世界 Y 保持同步（移动/转向时深度正确）
-fn sync_actor_depth(mut actors: Query<&mut Transform, With<ActorAppearance>>) {
+fn sync_actor_depth(
+    mut actors: Query<
+        &mut Transform,
+        Or<(With<Player>, With<Monster>, With<Npc>)>,
+    >,
+) {
     for mut tf in &mut actors {
         // translation.y = -世界Y（Bevy y 向上）
         tf.translation.z = depth_z(-tf.translation.y);
@@ -1343,7 +1390,7 @@ fn sync_actor_depth(mut actors: Query<&mut Transform, With<ActorAppearance>>) {
 /// 槽位：0=武器(CWeapon) 1=衣服(CArmour) 2=头盔 3=项链 ... 与 ServerRust EquipmentSlot 一致
 fn sync_player_equipment(
     hud: Res<crate::game::hud::HudState>,
-    players: Query<(Entity, &Children), (With<LocalPlayer>, With<ActorAppearance>)>,
+    players: Query<(Entity, &Children), (With<LocalPlayer>, With<Player>)>,
     mut layers: Query<&mut SpriteLayer>,
 ) {
     let Ok((_, children)) = players.single() else { return };
