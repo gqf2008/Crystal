@@ -84,3 +84,25 @@ jobs:
       - name: test
         working-directory: Client-Macroquad
         run: cargo test --lib
+
+  client-bevy:
+    name: Client-Bevy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Install system deps (bevy needs)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev pkg-config libgl1-mesa-dev libfreetype6-dev libwayland-dev libxkbcommon-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: Client-Bevy
+      - name: check
+        working-directory: Client-Bevy
+        run: cargo check
+      - name: test (lib)
+        working-directory: Client-Bevy
+        run: cargo test --lib
