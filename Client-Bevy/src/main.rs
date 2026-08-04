@@ -326,6 +326,10 @@ fn main() {
     if std::env::args().any(|a| a == "--auto-revive") {
         app.add_systems(Update, auto_revive_system);
     }
+    // --auto-cast-loop: 每秒连发 F1 技能（验证耗蓝/蓝不足拒绝，#51）
+    if std::env::args().any(|a| a == "--auto-cast-loop") {
+        app.add_systems(Update, auto_cast_loop_system);
+    }
     // --auto-walk <up|down|left|right>: 调试 chunk 流式（每帧驱动玩家平移）
     {
         let dir = std::env::args()
@@ -4665,4 +4669,48 @@ fn auto_revive_system(
         net.send_packet(&mir2_shared::packets::client::misc::TownRevive);
         tracing::info!("[REVIVE] 自动复活（TownRevive）");
     }
+}
+
+/// --auto-cast-loop：每秒连发 F1 技能（验证 耗蓝递减 → 蓝不足拒绝 → 魔法药回蓝，#51）
+fn auto_cast_loop_system(
+    mut timer: Local<f32>,
+    mut last_cast: Local<f32>,
+    time: Res<Time>,
+    net: Res<client_bevy::network::NetworkContext>,
+    magics: Res<client_bevy::game::skills::MagicsState>,
+    hud: Res<client_bevy::game::hud::HudState>,
+) {
+    *timer += time.delta_secs();
+    if *timer < 6.0 || magics.magics.is_empty() {
+        return;
+    }
+    if *timer - *last_cast < 1.0 {
+        return;
+    }
+    *last_cast = *timer;
+    // 蓝不足时喝魔法药(小)
+    if hud.mp < 10 {
+        if let Some(potion) = hud
+            .inventory
+            .items
+            .iter()
+            .flatten()
+            .find(|i| i.item_index == 2)
+        {
+            net.send_packet(&mir2_shared::packets::client::item::UseItem {
+                unique_id: potion.unique_id,
+            });
+            tracing::info!("🔮 [CASTLOOP] MP 低，喝魔法药 uid={}", potion.unique_id);
+        }
+    }
+    let Some(m) = magics.by_key(1) else {
+        return;
+    };
+    net.send_packet(&mir2_shared::packets::client::combat::Magic {
+        spell: m.spell,
+        direction: mir2_shared::enums::MirDirection::Up,
+        target_id: 101,
+        location: mir2_shared::map::Point { x: 0, y: 0 },
+    });
+    tracing::info!("🔮 [CASTLOOP] 施放 {}（MP {}/{}）", m.name, hud.mp, hud.max_mp);
 }
