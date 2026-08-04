@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -220,7 +220,7 @@ fn spawn_npc_awake(
 fn npc_awake_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<NpcAwakeState>,
-    net: ResMut<NetworkContext>,
+    net: ResMut<NetConnection>,
     hud: Res<crate::game::hud::HudState>,
     close: Query<&UiButton, With<NpcAwakeClose>>,
     upgrade: Query<&UiButton, With<NpcAwakeUpgrade>>,

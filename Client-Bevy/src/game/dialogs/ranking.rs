@@ -8,7 +8,7 @@
 use bevy::prelude::*;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{spawn_ui_text, UiEntity, UiFont};
 
@@ -107,7 +107,7 @@ fn spawn_ranking(
 fn ranking_ui_system(
     mut mgr: ResMut<DialogManager>,
     ranking: Res<RankingState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut widgets: Query<&mut Visibility, With<RankingWidget>>,

@@ -5,7 +5,7 @@
 use bevy::prelude::*;
 
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::{NetConnection, SessionState};
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::modal_box::{spawn_modal_box, ModalKind, ModalState};
@@ -191,7 +191,7 @@ fn setup_select_ui(
     mut ui_font: ResMut<UiFont>,
     mut new_char: ResMut<NewCharState>,
     mut modal: ResMut<ModalState>,
-    mut net: ResMut<NetworkContext>,
+    mut session: ResMut<SessionState>,
 ) {
     new_char.visible = false;
     new_char.name.clear();
@@ -203,7 +203,7 @@ fn setup_select_ui(
     // 调试：BEVY_SELECT_INDEX=n 预选第 n 个角色（live 截屏验证预览用）
     if let Ok(v) = std::env::var("BEVY_SELECT_INDEX") {
         if let Ok(i) = v.parse::<i32>() {
-            net.selected_index = Some(i);
+            session.selected_index = Some(i);
         }
     }
     // 调试：BEVY_OPEN_MODAL=delete/delete_confirm 打开对应模态框（live 截屏验证用）
@@ -220,7 +220,7 @@ fn setup_select_ui(
         &mut anim,
         &mut cache,
         &mut ui_font,
-        &net,
+        &session,
         &mut new_char,
         &mut modal,
     );
@@ -235,7 +235,7 @@ fn build_select_ui(
     anim: &mut SelectAnim,
     cache: &mut UiImageCache,
     ui_font: &mut UiFont,
-    net: &NetworkContext,
+    session: &SessionState,
     new_char: &mut NewCharState,
     _modal: &mut ModalState,
 ) {
@@ -277,10 +277,10 @@ fn build_select_ui(
 
     // 角色预览（初始）
     // 角色预览（初始，带帧偏移，对齐 C# UseOffSet=true；优先选中的角色）
-    let preview_char = net
+    let preview_char = session
         .selected_index
-        .and_then(|i| net.characters.iter().find(|c| c.index == i))
-        .or_else(|| net.characters.first());
+        .and_then(|i| session.characters.iter().find(|c| c.index == i))
+        .or_else(|| session.characters.first());
     if let Some(c) = preview_char {
         load_preview(
             &mut *libs,
@@ -314,7 +314,7 @@ fn build_select_ui(
         Color::WHITE,
         2.0,
     );
-    if let Some(c) = net.characters.first() {
+    if let Some(c) = session.characters.first() {
         let e = spawn_ui_text(
             &mut *commands,
             &font,
@@ -336,9 +336,9 @@ fn build_select_ui(
         (637.0, 506.0),
     ];
     for (i, (x, y)) in positions.iter().enumerate() {
-        if let Some(c) = net.characters.get(i) {
+        if let Some(c) = session.characters.get(i) {
             let slot = class_slot(c);
-            let selected = net.selected_index == Some(i as i32);
+            let selected = session.selected_index == Some(i as i32);
             let frame = if selected { slot + 5 } else { slot };
             if let Some(h) = ui_image(
                 &mut *libs,
@@ -507,7 +507,7 @@ fn cleanup_select_ui(mut commands: Commands, root: Query<Entity, With<UiEntity>>
 #[allow(clippy::too_many_arguments)]
 fn select_reload_system(
     mut commands: Commands,
-    mut net: ResMut<NetworkContext>,
+    mut session: ResMut<SessionState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
@@ -518,11 +518,11 @@ fn select_reload_system(
     mut modal: ResMut<ModalState>,
     ui_entities: Query<Entity, With<UiEntity>>,
 ) {
-    if !net.select_reload {
+    if !session.select_reload {
         return;
     }
-    net.select_reload = false;
-    tracing::info!("[SELECT] 重建选角 UI（角色数={}）", net.characters.len());
+    session.select_reload = false;
+    tracing::info!("[SELECT] 重建选角 UI（角色数={}）", session.characters.len());
     for e in ui_entities.iter() {
         commands.entity(e).despawn();
     }
@@ -536,7 +536,7 @@ fn select_reload_system(
     // 调试：BEVY_SELECT_INDEX=n 预选第 n 个角色（live 截屏验证预览用）
     if let Ok(v) = std::env::var("BEVY_SELECT_INDEX") {
         if let Ok(i) = v.parse::<i32>() {
-            net.selected_index = Some(i);
+            session.selected_index = Some(i);
         }
     }
     // 调试：BEVY_OPEN_MODAL=delete/delete_confirm 打开对应模态框（live 截屏验证用）
@@ -553,14 +553,15 @@ fn select_reload_system(
         &mut anim,
         &mut cache,
         &mut ui_font,
-        &net,
+        &session,
         &mut new_char,
         &mut modal,
     );
 }
 
 fn select_ui_system(
-    mut net: ResMut<NetworkContext>,
+    mut net: ResMut<NetConnection>,
+    mut session: ResMut<SessionState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut anim: ResMut<SelectAnim>,
@@ -588,7 +589,7 @@ fn select_ui_system(
     let lclick = mouse.just_pressed(MouseButton::Left);
 
     // 桥接网络层的新建角色错误提示
-    if let Some(err) = net.character_error.take() {
+    if let Some(err) = session.character_error.take() {
         new_char.error = Some(err);
         new_char.visible = true;
         new_char.name_focused = true;
@@ -599,9 +600,9 @@ fn select_ui_system(
     for (cb, mut sprite) in char_btns.iter_mut() {
         let (x, y, w, h) = cb.rect;
         let hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
-        let selected = net.selected_index == Some(cb.index);
+        let selected = session.selected_index == Some(cb.index);
         if lclick && hovered && !selected {
-            net.selected_index = Some(cb.index);
+            session.selected_index = Some(cb.index);
             selection_changed = true;
         }
         // 选中或悬停都显示高亮帧（原版选中帧 660+slot+5）
@@ -624,9 +625,9 @@ fn select_ui_system(
     }
     // 边框：原版仅靠选中/悬停的精灵帧（Title[660+slot+5]）表示高亮，无自绘边框
     if selection_changed {
-        if let Some(c) = net
+        if let Some(c) = session
             .selected_index
-            .and_then(|i| net.characters.iter().find(|c| c.index == i))
+            .and_then(|i| session.characters.iter().find(|c| c.index == i))
         {
             load_preview(
                 &mut libs,
@@ -665,7 +666,7 @@ fn select_ui_system(
         if lclick && over {
             match bb.0 {
                 BottomBtn::Start => {
-                    if let Some(idx) = net.selected_index {
+                    if let Some(idx) = session.selected_index {
                         net.send_packet(&mir2_shared::packets::client::account::StartGame {
                             character_index: idx,
                         });
@@ -696,14 +697,18 @@ fn select_ui_system(
 }
 
 /// 调试：BEVY_AUTO_CREATE=1 进入选角后自动创建角色（验证 新建→列表刷新 链路）
-fn auto_create_system(net: ResMut<NetworkContext>, mut done: Local<bool>) {
+fn auto_create_system(
+    mut net: ResMut<NetConnection>,
+    mut session: ResMut<SessionState>,
+    mut done: Local<bool>,
+) {
     if *done {
         return;
     }
     if std::env::var("BEVY_AUTO_CREATE").as_deref() != Ok("1") {
         return;
     }
-    if net.characters.is_empty() {
+    if session.characters.is_empty() {
         return;
     }
     *done = true;

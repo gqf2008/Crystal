@@ -11,7 +11,7 @@
 use bevy::prelude::*;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -255,7 +255,7 @@ fn group_ui_system(
 /// 邀请提示：Yes/No → C.GroupInvite{accept}
 fn group_invite_system(
     mut group: ResMut<GroupState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     yes: Query<&UiButton, With<GroupInviteYes>>,
     no: Query<&UiButton, With<GroupInviteNo>>,
 ) {
@@ -289,7 +289,7 @@ fn group_invite_system(
 /// 允许组队开关 → C.SwitchGroup{allow_group}
 fn group_switch_system(
     mut group: ResMut<GroupState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     btns: Query<&UiButton, With<GroupSwitch>>,
 ) {
     for btn in &btns {
@@ -306,7 +306,7 @@ fn group_switch_system(
 /// 右键点击远端玩家 → 组队邀请（原版 C# MainDialogs 右键玩家 → 组队邀请 → C.AddMember{Name}）
 #[allow(clippy::too_many_arguments)]
 fn group_invite_player_system(
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     camera: Query<&Transform, With<Camera2d>>,

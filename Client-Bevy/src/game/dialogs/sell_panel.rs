@@ -16,7 +16,7 @@ use crate::game::dialogs::inventory::{InvClickState, InvItem};
 use crate::game::dialogs::{DialogKind, DialogRoot};
 use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -246,7 +246,7 @@ fn sell_panel_action_system(
     mut state: ResMut<SellPanelState>,
     mut inv_click: ResMut<InvClickState>,
     hud: Res<HudState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     confirm_btns: Query<&UiButton, With<SellPanelConfirm>>,

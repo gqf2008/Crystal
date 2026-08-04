@@ -17,7 +17,7 @@ use bevy::prelude::*;
 use mir2_shared::SelectInfo;
 
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::{NetConnection, SessionState};
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
@@ -318,7 +318,8 @@ pub fn spawn_modal_box(
 
 fn modal_ui_system(
     mut keys: MessageReader<KeyboardInput>,
-    net: ResMut<NetworkContext>,
+    net: ResMut<NetConnection>,
+    session: ResMut<SessionState>,
     mut state: ResMut<ModalState>,
     time: Res<Time>,
     windows: Query<&Window>,
@@ -375,9 +376,9 @@ fn modal_ui_system(
     let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
 
     // 当前选中角色（删除确认用）
-    let selected: Option<SelectInfo> = net
+    let selected: Option<SelectInfo> = session
         .selected_index
-        .and_then(|i| net.characters.iter().find(|c| c.index == i))
+        .and_then(|i| session.characters.iter().find(|c| c.index == i))
         .cloned();
 
     // 主文本（询问框 / 输入框各自的 ModalText 分别更新）
@@ -465,7 +466,7 @@ fn modal_ui_system(
 
     // 提交删除（第二步 MirInputBox OK / 回车）
     let submit_delete =
-        |net: &NetworkContext, state: &mut ModalState, selected: &Option<SelectInfo>| {
+        |net: &NetConnection, state: &mut ModalState, selected: &Option<SelectInfo>| {
             if let Some(c) = selected {
                 if state.name_input.trim() == c.name {
                     net.send_packet(&mir2_shared::packets::client::DeleteCharacter {

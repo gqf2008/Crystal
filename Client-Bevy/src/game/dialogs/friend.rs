@@ -10,7 +10,7 @@ use bevy::prelude::*;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -126,7 +126,7 @@ fn spawn_friend(
 fn friend_ui_system(
     mut mgr: ResMut<DialogManager>,
     friend: Res<FriendState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     close: Query<&UiButton, With<FriendClose>>,
     mut widgets: Query<(&mut Visibility, Option<&FriendLine>), With<FriendWidget>>,
     mut lines: Query<(&mut Text2d, &FriendLine)>,

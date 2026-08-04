@@ -10,7 +10,7 @@ use bevy::prelude::*;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -169,7 +169,7 @@ fn spawn_report_input(
 fn report_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<ReportState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
     close: Query<&UiButton, With<ReportClose>>,
     submit_btn: Query<&UiButton, With<ReportSubmit>>,

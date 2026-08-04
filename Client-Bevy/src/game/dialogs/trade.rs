@@ -17,7 +17,7 @@ use crate::game::dialogs::inventory::{inv_slot_at, InvItem};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -455,7 +455,7 @@ fn trade_ui_system(
 fn trade_action_system(
     mut trade: ResMut<TradeState>,
     hud: Res<HudState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     close: Query<&UiButton, With<TradeClose>>,
@@ -553,7 +553,7 @@ fn trade_action_system(
 /// 邀请提示 Yes/No → C.TradeReply；接受后本地开窗
 fn trade_invite_system(
     mut trade: ResMut<TradeState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     yes: Query<&UiButton, With<TradeInviteYes>>,
     no: Query<&UiButton, With<TradeInviteNo>>,
 ) {

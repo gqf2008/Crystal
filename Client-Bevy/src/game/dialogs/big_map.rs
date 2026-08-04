@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::movement::world_to_tile;
 use crate::map_renderer::{GameData, GameLibraries};
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::resources::map_reader::{resolve_map_path, MapReader};
 use crate::scenes::AppState;
@@ -353,7 +353,7 @@ fn spawn_big_map(
 fn big_map_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<BigMapState>,
-    net: ResMut<NetworkContext>,
+    net: ResMut<NetConnection>,
     close: Query<&UiButton, With<BigMapClose>>,
     scroll_up: Query<&UiButton, With<BigMapScrollUp>>,
     scroll_down: Query<&UiButton, With<BigMapScrollDown>>,

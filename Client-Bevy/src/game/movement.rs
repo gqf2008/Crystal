@@ -12,7 +12,7 @@ use mir2_shared::enums::MirDirection;
 
 use crate::actor::{depth_z, ActorAnim, LocalPlayer, NetObjectId};
 use crate::map_renderer::{TILE_HEIGHT, TILE_WIDTH};
-use crate::network::NetworkContext;
+use crate::network::{NetConnection, SessionState};
 use crate::scenes::AppState;
 
 /// 服务器对象移动事件（网络 handler 发送，移动系统消费）
@@ -147,7 +147,7 @@ impl Plugin for MovementPlugin {
 
 /// 服务器权威位置（UserLocation）：距离超过 2 格时瞬移校正
 fn apply_self_position(
-    mut net: ResMut<NetworkContext>,
+    mut session: ResMut<SessionState>,
     // 本地玩家同时带 NetObjectId（此前误用 Without<NetObjectId> 把玩家自己排除，
     // 服务器 UserLocation 校正永不生效 → 客户端位置漂移（#57 实测）
     mut players: Query<&mut Transform, (With<LocalPlayer>, With<NetObjectId>)>,
@@ -159,7 +159,7 @@ fn apply_self_position(
     if !local_moves.is_empty() {
         return;
     }
-    let Some((tx, ty, _dir)) = net.self_position.take() else {
+    let Some((tx, ty, _dir)) = session.self_position.take() else {
         return;
     };
     let Ok(mut tf) = players.single_mut() else {
@@ -269,7 +269,7 @@ fn advance_move_tweens(
 fn advance_local_move(
     mut commands: Commands,
     time: Res<Time>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     mut players: Query<(Entity, &mut LocalMove, &mut Transform, &mut ActorAnim), With<LocalPlayer>>,
 ) {
     // 与动画帧率同步（C#：走 1 格/6 帧/100ms，跑 2 格/6 帧/100ms）

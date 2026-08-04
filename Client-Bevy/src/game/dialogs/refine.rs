@@ -11,7 +11,7 @@ use bevy::prelude::*;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
-use crate::network::NetworkContext;
+use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
@@ -163,7 +163,7 @@ fn spawn_refine(
 fn refine_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<RefineState>,
-    net: Res<NetworkContext>,
+    net: Res<NetConnection>,
     hud: Res<crate::game::hud::HudState>,
     inv_click: Res<crate::game::dialogs::inventory::InvClickState>,
     close: Query<&UiButton, With<RefineClose>>,
