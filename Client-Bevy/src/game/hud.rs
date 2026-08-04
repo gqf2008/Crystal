@@ -718,7 +718,11 @@ fn hud_server_events(
             | ServerEvent::TradeDeposit { .. }
             | ServerEvent::GuildMemberChanged { .. }
             | ServerEvent::GuildInvited { .. }
-            | ServerEvent::RankingsCleared => {}
+            | ServerEvent::RankingsCleared
+            | ServerEvent::WeatherChanged { .. }
+            | ServerEvent::MapInfo { .. }
+            | ServerEvent::MagicLearned { .. }
+            | ServerEvent::CraftResult { .. } => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);
@@ -762,6 +766,12 @@ fn hud_server_events(
                         *empty = Some(item);
                     }
                 }
+            }
+            ServerEvent::PlayerDied => {
+                hud.dead = true;
+            }
+            ServerEvent::PlayerRevived => {
+                hud.dead = false;
             }
             ServerEvent::ItemUsed { unique_id } => {
                 let idx = hud

@@ -183,7 +183,26 @@ pub enum ServerEvent {
     GuildInvited { name: String },
     /// Rankings 解析失败：清空排行
     RankingsCleared,
+    /// MapChanged：天气更新
+    WeatherChanged { code: u16 },
+    /// NewMapInfo：地图信息（大地图）
+    MapInfo {
+        map_index: i32,
+        title: String,
+        npcs: Vec<NpcRow>,
+    },
+    /// Death：本地玩家死亡
+    PlayerDied,
+    /// Revived：本地玩家复活
+    PlayerRevived,
+    /// NewMagic：学会技能
+    MagicLearned { magic: ClientMagic },
+    /// CraftItem：合成结果
+    CraftResult { recipe_id: u32, count: u16, success: bool },
 }
+
+use crate::game::dialogs::big_map::NpcRow;
+use mir2_shared::data::client_data::ClientMagic;
 
 use crate::game::dialogs::mail::{MailDetail, MailEntry};
 

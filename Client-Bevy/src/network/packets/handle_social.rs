@@ -470,7 +470,7 @@ pub(crate) fn handle_social(
         x if x == ServerPacketIds::NewMagic as i16 => {
             if let Ok(p) = magic::NewMagic::read_body(&mut cur) {
                 if !p.hero {
-                    magics.upsert(p.magic.clone());
+                    server_events.write(ServerEvent::MagicLearned { magic: p.magic.clone() });
                     tracing::info!(
                         "📖 学会技能: {} ({:?}) key={}",
                         p.magic.name,

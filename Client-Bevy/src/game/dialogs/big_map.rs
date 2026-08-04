@@ -35,7 +35,7 @@ const DOT_POOL: usize = 64;
 const MAX_ROWS: usize = 18;
 
 /// 大地图 NPC 行
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct NpcRow {
     pub object_id: u32,
     pub name: String,
@@ -111,7 +111,11 @@ pub struct BigMapPlugin;
 impl Plugin for BigMapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BigMapState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_big_map);
+                app.add_systems(
+            Update,
+            big_map_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_big_map);
         app.add_systems(OnExit(AppState::Game), cleanup_big_map);
         app.add_systems(
             Update,
@@ -657,4 +661,22 @@ fn tile_avg_color(
     let c = [(r / n) as u8, (g / n) as u8, (b / n) as u8, 255];
     cache.insert((lib, img), c);
     Some(c)
+}
+
+
+/// 消费服务端大地图信息事件（网络层只广播 ServerEvent）
+fn big_map_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut big_map: ResMut<BigMapState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::MapInfo { map_index, title, npcs } = ev {
+            big_map.map_index = *map_index;
+            big_map.title = title.clone();
+            big_map.npcs = npcs.clone();
+            big_map.selected = None;
+            big_map.top_line = 0;
+        }
+    }
 }

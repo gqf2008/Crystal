@@ -74,12 +74,7 @@ pub(crate) fn handle_progress(
                 let recipe_id = u32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
                 let count = u16::from_le_bytes(body[4..6].try_into().unwrap_or([0; 2]));
                 let success = body[6] != 0;
-                craft.last_result = Some((recipe_id, count, success));
-                craft.message = if success {
-                    format!("合成成功！配方 {} ×{}", recipe_id, count)
-                } else {
-                    format!("合成失败（配方 {}）", recipe_id)
-                };
+                server_events.write(ServerEvent::CraftResult { recipe_id, count, success });
                 tracing::info!("🔧 CraftItem: recipe={} count={} success={}", recipe_id, count, success);
             }
         }

@@ -68,7 +68,11 @@ pub struct CraftPlugin;
 impl Plugin for CraftPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CraftState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_craft);
+                app.add_systems(
+            Update,
+            craft_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_craft);
         app.add_systems(OnExit(AppState::Game), cleanup_craft);
         app.add_systems(
             Update,
@@ -222,6 +226,25 @@ fn craft_ui_system(
             } else {
                 state.message = "请先点击选中一个配方".to_string();
             }
+        }
+    }
+}
+
+
+/// 消费服务端合成事件（网络层只广播 ServerEvent；文案在此构造）
+fn craft_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut craft: ResMut<CraftState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::CraftResult { recipe_id, count, success } = ev {
+            craft.last_result = Some((*recipe_id, *count, *success));
+            craft.message = if *success {
+                format!("合成成功！配方 {} ×{}", recipe_id, count)
+            } else {
+                format!("合成失败（配方 {}）", recipe_id)
+            };
         }
     }
 }

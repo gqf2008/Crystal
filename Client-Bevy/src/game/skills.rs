@@ -66,7 +66,11 @@ pub struct SkillsPlugin;
 impl Plugin for SkillsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MagicsState>();
-        app.add_systems(Update, skill_bar_system.run_if(in_state(AppState::Game)));
+                app.add_systems(
+            Update,
+            skills_server_events.run_if(in_state(crate::scenes::AppState::Game)),
+        );
+app.add_systems(Update, skill_bar_system.run_if(in_state(AppState::Game)));
     }
 }
 
@@ -197,5 +201,19 @@ mod tests {
         let old = s.assign_key(Spell::Slaying, 5);
         assert_eq!(old, None);
         assert_eq!(s.by_spell(Spell::Fencing).unwrap().key, 1);
+    }
+}
+
+
+/// 消费服务端技能事件（网络层只广播 ServerEvent）
+fn skills_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut magics: ResMut<MagicsState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::MagicLearned { magic } = ev {
+            magics.upsert(magic.clone());
+        }
     }
 }

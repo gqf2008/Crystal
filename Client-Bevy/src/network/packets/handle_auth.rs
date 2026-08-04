@@ -228,7 +228,7 @@ pub(crate) fn handle_auth(
                 game_data.desired_map = Some(p.file_name);
                 game_data.player_spawn =
                     Some((p.location_x as f32, p.location_y as f32, p.direction));
-                weather.code = p.weather;
+                server_events.write(ServerEvent::WeatherChanged { code: p.weather });
                 next.set(AppState::Game);
             }
         }
@@ -240,9 +240,7 @@ pub(crate) fn handle_auth(
                     p.title,
                     p.npcs.len()
                 );
-                big_map.map_index = p.map_index;
-                big_map.title = p.title.clone();
-                big_map.npcs = p
+                let npcs: Vec<crate::game::dialogs::big_map::NpcRow> = p
                     .npcs
                     .into_iter()
                     .map(|n| crate::game::dialogs::big_map::NpcRow {
@@ -254,8 +252,11 @@ pub(crate) fn handle_auth(
                         can_teleport_to: n.can_teleport_to,
                     })
                     .collect();
-                big_map.selected = None;
-                big_map.top_line = 0;
+                server_events.write(ServerEvent::MapInfo {
+                    map_index: p.map_index,
+                    title: p.title.clone(),
+                    npcs,
+                });
             }
         }
         x if x == ServerPacketIds::AwakeningNeedMaterials as i16 => {
