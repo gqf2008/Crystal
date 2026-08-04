@@ -65,7 +65,17 @@ pub enum ServerEvent {
     },
     /// GuildStorageList：行会仓库物品
     GuildStorage { items: Vec<Option<StorageItem>> },
+    /// GroupMembersMap：组队成员全量
+    GroupMembers { members: Vec<GroupMember> },
+    /// GroupInvite：收到组队邀请
+    GroupInvite { inviter_name: String, inviter_id: u64 },
+    /// DeleteGroup：组队解散
+    GroupDeleted,
+    /// DeleteMember：成员离开
+    GroupMemberLeft { name: String },
 }
+
+use crate::game::dialogs::group::GroupMember;
 
 use crate::game::dialogs::guild::{GuildMember, StorageItem};
 use crate::game::dialogs::inventory::InvItem;

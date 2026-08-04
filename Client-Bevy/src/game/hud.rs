@@ -668,7 +668,11 @@ fn hud_server_events(
             | ServerEvent::StorageOpened { .. }
             | ServerEvent::GuildInGuild { .. }
             | ServerEvent::GuildData { .. }
-            | ServerEvent::GuildStorage { .. } => {}
+            | ServerEvent::GuildStorage { .. }
+            | ServerEvent::GroupMembers { .. }
+            | ServerEvent::GroupInvite { .. }
+            | ServerEvent::GroupDeleted
+            | ServerEvent::GroupMemberLeft { .. } => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);

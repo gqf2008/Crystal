@@ -71,7 +71,11 @@ pub struct GroupPlugin;
 impl Plugin for GroupPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GroupState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_group);
+                app.add_systems(
+            Update,
+            group_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_group);
         app.add_systems(OnExit(AppState::Game), cleanup_group);
         app.add_systems(
             Update,
@@ -339,5 +343,35 @@ fn group_invite_player_system(
     if let Some(name) = target {
         net.send_packet(&mir2_shared::packets::client::group::AddMember { name: name.clone() });
         tracing::info!("👥 邀请组队: {}", name);
+    }
+}
+
+
+/// 消费服务端组队事件（网络层只广播 ServerEvent）
+fn group_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut group: ResMut<GroupState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::GroupMembers { members } => {
+                group.members = members.clone();
+            }
+            ServerEvent::GroupInvite { inviter_name, inviter_id } => {
+                group.invite = Some(GroupInviteInfo {
+                    inviter_name: inviter_name.clone(),
+                    inviter_id: *inviter_id,
+                });
+            }
+            ServerEvent::GroupDeleted => {
+                group.members.clear();
+                group.invite = None;
+            }
+            ServerEvent::GroupMemberLeft { name } => {
+                group.members.retain(|m| m.name != *name);
+            }
+            _ => {}
+        }
     }
 }

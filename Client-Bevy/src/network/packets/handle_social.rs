@@ -480,20 +480,11 @@ pub(crate) fn handle_social(
         x if x == ServerPacketIds::GroupMembersMap as i16 => {
             match group::GroupMembersMap::read_body(&mut cur) {
                 Ok(p) => {
-                    group.members = p.members;
-                    tracing::info!(
-                        "👥 组队成员: {}",
-                        group
-                            .members
-                            .iter()
-                            .map(|m| format!(
-                                "{}{}",
-                                if m.is_leader { "★" } else { "" },
-                                m.name
-                            ))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    );
+                    let member_count = p.members.len();
+                    server_events.write(ServerEvent::GroupMembers {
+                        members: p.members,
+                    });
+                    tracing::info!("👥 组队成员已广播: {} 人", member_count);
                 }
                 Err(e) => {
                     tracing::warn!("⚠️ GroupMembersMap 解析失败: {} (len={})", e, payload.len())
@@ -503,7 +494,7 @@ pub(crate) fn handle_social(
         x if x == ServerPacketIds::GroupInvite as i16 => {
             match group::GroupInvite::read_body(&mut cur) {
                 Ok(p) => {
-                    group.invite = Some(crate::game::dialogs::group::GroupInviteInfo {
+                    server_events.write(ServerEvent::GroupInvite {
                         inviter_name: p.name.clone(),
                         inviter_id: p.inviter_id,
                     });
@@ -515,13 +506,12 @@ pub(crate) fn handle_social(
             }
         }
         x if x == ServerPacketIds::DeleteGroup as i16 => {
-            group.members.clear();
-            group.invite = None;
+            server_events.write(ServerEvent::GroupDeleted);
             tracing::info!("👥 组队已解散");
         }
         x if x == ServerPacketIds::DeleteMember as i16 => {
             if let Ok(p) = group::DeleteMember::read_body(&mut cur) {
-                group.members.retain(|m| m.name != p.name);
+                server_events.write(ServerEvent::GroupMemberLeft { name: p.name.clone() });
                 tracing::info!("👥 成员离开: {}", p.name);
             }
         }
