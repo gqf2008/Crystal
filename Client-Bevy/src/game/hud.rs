@@ -687,7 +687,18 @@ fn hud_server_events(
             | ServerEvent::HeroChanged { .. }
             | ServerEvent::MarriageInvite { .. }
             | ServerEvent::MarriageStatus { .. }
-            | ServerEvent::DivorceRequest => {}
+            | ServerEvent::DivorceRequest
+            | ServerEvent::RentalRequestReceived
+            | ServerEvent::RentalItemUpdate { .. }
+            | ServerEvent::RentalFee { .. }
+            | ServerEvent::RentalPeriod { .. }
+            | ServerEvent::RentalDeposit { .. }
+            | ServerEvent::RentalRetrieve { .. }
+            | ServerEvent::RentalLocked
+            | ServerEvent::RentalPartnerLocked
+            | ServerEvent::RentalCanConfirm { .. }
+            | ServerEvent::RentalConfirmed { .. }
+            | ServerEvent::RentalCancelled => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);

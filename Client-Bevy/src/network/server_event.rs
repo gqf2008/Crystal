@@ -115,6 +115,28 @@ pub enum ServerEvent {
     MarriageStatus { married: bool },
     /// DivorceRequest：离婚请求
     DivorceRequest,
+    /// ItemRentalRequest：收到租赁请求（物主）
+    RentalRequestReceived,
+    /// UpdateRentalItem：租赁物品更新
+    RentalItemUpdate { has_item: bool, fee: u32, period: i32 },
+    /// ItemRentalFee：费用更新
+    RentalFee { fee: u32 },
+    /// ItemRentalPeriod：期限更新
+    RentalPeriod { period: i32 },
+    /// DepositRentalItem：存入租赁物品
+    RentalDeposit { uid: u64, success: bool },
+    /// RetrieveRentalItem：取回租赁物品
+    RentalRetrieve { uid: u64, success: bool },
+    /// ItemRentalLock：本侧锁定
+    RentalLocked,
+    /// ItemRentalPartnerLock：对方锁定
+    RentalPartnerLocked,
+    /// CanConfirmItemRental：可确认状态
+    RentalCanConfirm { can_confirm: bool },
+    /// ConfirmItemRental：确认结果
+    RentalConfirmed { success: bool },
+    /// CancelItemRental：取消
+    RentalCancelled,
 }
 
 use crate::game::dialogs::buff::BuffEntry;

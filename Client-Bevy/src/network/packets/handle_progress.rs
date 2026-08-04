@@ -85,38 +85,32 @@ pub(crate) fn handle_progress(
         }
         // ---- M42: 物品租赁 ----
         x if x == ServerPacketIds::ItemRentalRequest as i16 => {
-            rental.request_received = true;
-            rental.message = "收到租赁请求（物主）".to_string();
+            server_events.write(ServerEvent::RentalRequestReceived);
             tracing::info!("📦 收到租赁请求");
         }
         x if x == ServerPacketIds::UpdateRentalItem as i16 => {
             // [hasdata u8][fee u32][period i32]
             let body = &payload[PacketHeader::HEADER_SIZE..];
             if body.len() >= 9 {
-                rental.has_item = body[0] != 0;
-                rental.fee = u32::from_le_bytes(body[1..5].try_into().unwrap_or([0; 4]));
-                rental.period = i32::from_le_bytes(body[5..9].try_into().unwrap_or([0; 4]));
-                rental.message = format!(
-                    "租赁更新: 物品={} 费用={} 期限={}",
-                    if rental.has_item { "有" } else { "无" },
-                    rental.fee,
-                    rental.period
-                );
-                tracing::info!("📦 UpdateRentalItem: item={} fee={} period={}", rental.has_item, rental.fee, rental.period);
+                let has_item = body[0] != 0;
+                let fee = u32::from_le_bytes(body[1..5].try_into().unwrap_or([0; 4]));
+                let period = i32::from_le_bytes(body[5..9].try_into().unwrap_or([0; 4]));
+                server_events.write(ServerEvent::RentalItemUpdate { has_item, fee, period });
+                tracing::info!("📦 UpdateRentalItem: item={} fee={} period={}", has_item, fee, period);
             }
         }
         x if x == ServerPacketIds::ItemRentalFee as i16 => {
             let body = &payload[PacketHeader::HEADER_SIZE..];
             if body.len() >= 4 {
-                rental.fee = u32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
-                rental.message = format!("租赁费用更新: {}", rental.fee);
+                let fee = u32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
+                server_events.write(ServerEvent::RentalFee { fee });
             }
         }
         x if x == ServerPacketIds::ItemRentalPeriod as i16 => {
             let body = &payload[PacketHeader::HEADER_SIZE..];
             if body.len() >= 4 {
-                rental.period = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
-                rental.message = format!("租赁期限更新: {} 小时", rental.period);
+                let period = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
+                server_events.write(ServerEvent::RentalPeriod { period });
             }
         }
         x if x == ServerPacketIds::DepositRentalItem as i16 => {
@@ -125,7 +119,7 @@ pub(crate) fn handle_progress(
             if body.len() >= 9 {
                 let uid = u64::from_le_bytes(body[0..8].try_into().unwrap_or([0; 8]));
                 let success = body[8] != 0;
-                rental.message = format!("存入租赁物品: {} ({})", uid, if success { "成功" } else { "失败" });
+                server_events.write(ServerEvent::RentalDeposit { uid, success });
                 tracing::info!("📦 存入租赁物品 uid={} success={}", uid, success);
             }
         }
@@ -134,44 +128,31 @@ pub(crate) fn handle_progress(
             if body.len() >= 9 {
                 let uid = u64::from_le_bytes(body[0..8].try_into().unwrap_or([0; 8]));
                 let success = body[8] != 0;
-                rental.message = format!("取回租赁物品: {} ({})", uid, if success { "成功" } else { "失败" });
-                rental.has_item = false;
+                server_events.write(ServerEvent::RentalRetrieve { uid, success });
             }
         }
         x if x == ServerPacketIds::ItemRentalLock as i16 => {
-            rental.message = "锁定状态更新".to_string();
+            server_events.write(ServerEvent::RentalLocked);
             tracing::info!("📦 租赁锁定（本侧）");
         }
         x if x == ServerPacketIds::ItemRentalPartnerLock as i16 => {
-            rental.message = "对方已锁定".to_string();
+            server_events.write(ServerEvent::RentalPartnerLocked);
             tracing::info!("📦 租赁锁定（对方）");
         }
         x if x == ServerPacketIds::CanConfirmItemRental as i16 => {
             let body = &payload[PacketHeader::HEADER_SIZE..];
-            rental.can_confirm = body.first().copied().unwrap_or(0) != 0;
-            rental.message = if rental.can_confirm {
-                "双方已锁定，可以确认成交".to_string()
-            } else {
-                "尚未可确认".to_string()
-            };
-            tracing::info!("📦 CanConfirmItemRental: {}", rental.can_confirm);
+            let can_confirm = body.first().copied().unwrap_or(0) != 0;
+            server_events.write(ServerEvent::RentalCanConfirm { can_confirm });
+            tracing::info!("📦 CanConfirmItemRental: {}", can_confirm);
         }
         x if x == ServerPacketIds::ConfirmItemRental as i16 => {
             let body = &payload[PacketHeader::HEADER_SIZE..];
             let success = body.first().copied().unwrap_or(0) != 0;
-            rental.confirmed = success;
-            rental.message = if success {
-                "租赁成交！".to_string()
-            } else {
-                "确认失败".to_string()
-            };
+            server_events.write(ServerEvent::RentalConfirmed { success });
             tracing::info!("📦 ConfirmItemRental: {}", success);
         }
         x if x == ServerPacketIds::CancelItemRental as i16 => {
-            rental.request_received = false;
-            rental.has_item = false;
-            rental.can_confirm = false;
-            rental.message = "租赁已取消".to_string();
+            server_events.write(ServerEvent::RentalCancelled);
             tracing::info!("📦 租赁取消");
         }
         // ---- M43: 任务日志 ----
