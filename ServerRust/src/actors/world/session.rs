@@ -177,11 +177,23 @@ impl Message<StartGameRequest> for WorldActor {
         loaded_state.object_id = object_id;
         loaded_state.session_id = msg.session_id;
 
-        // If position is (0,0), place at map safe zone spawn point
-        if loaded_state.x == 0 && loaded_state.y == 0 {
+        // 位置为 (0,0) 或不可走时，放回地图安全区出生点（#57：
+        // Type1 地图解析修正前保存的坐标可能是墙内孤岛，导致玩家无法移动/寻路）
+        let pos_walkable = self
+            .maps
+            .get(&map_slot)
+            .map(|m| m.is_valid(loaded_state.x, loaded_state.y) && m.is_walkable(loaded_state.x, loaded_state.y))
+            .unwrap_or(false);
+        if (loaded_state.x == 0 && loaded_state.y == 0) || !pos_walkable {
             if let Some(mi) = self.map_infos.get(&(map_index as i32)) {
                 if let Some(sz) = mi.safe_zones.iter().find(|s| s.start_point) {
-                    info!("Placing {} at safe zone spawn ({}, {})", player_name, sz.x, sz.y);
+                    info!(
+                        "Placing {} at safe zone spawn ({}, {}){}",
+                        player_name,
+                        sz.x,
+                        sz.y,
+                        if pos_walkable { "" } else { "（原位置不可走）" }
+                    );
                     loaded_state.x = sz.x;
                     loaded_state.y = sz.y;
                 }

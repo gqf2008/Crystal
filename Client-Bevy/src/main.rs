@@ -4728,6 +4728,14 @@ struct RealVerifyState {
     target_tile: Option<(i32, i32)>,
     chat_sent: bool,
     chat_echo: bool,
+    /// 已尝试但未命中的目标（远程怪够不着时换目标）
+    tried: Vec<u32>,
+    /// 进入攻击阶段时的命中计数基线
+    hits_at_start: u32,
+    /// 当前目标累计攻击时间（到邻接后才计时）
+    attack_elapsed: f32,
+    /// 到达邻接后等待服务器位置同步的计时（客户端本地移动超前，需等 UserLocation 校正）
+    arrived_wait: f32,
 }
 
 /// --real-verify：真实服务器交互闭环（#55）
@@ -4744,6 +4752,7 @@ fn real_verify_system(
     mut chat: ResMut<client_bevy::game::chat::ChatState>,
     hud: Res<client_bevy::game::hud::HudState>,
     npc_dialog: Res<client_bevy::game::dialogs::npc::NpcDialogState>,
+    probe: Res<client_bevy::game::combat::RealHitProbe>,
     actors: Query<(
         &client_bevy::actor::NetObjectId,
         &Transform,
@@ -4802,6 +4811,10 @@ fn real_verify_system(
                 if !matches!(app, client_bevy::actor::ActorAppearance::Monster { .. }) {
                     continue;
                 }
+                // 排除已尝试但未命中的目标（#57 远程怪够不着）
+                if s.tried.contains(&id.0) {
+                    continue;
+                }
                 let (mx, my) =
                     client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
                 let d = (mx - px).abs() + (my - py).abs();
@@ -4810,11 +4823,15 @@ fn real_verify_system(
                 }
             }
             let Some((oid, mx, my, d)) = best else {
-                tracing::warn!("[REAL] ❌ 全图无怪物");
+                if s.tried.is_empty() {
+                    tracing::warn!("[REAL] ❌ 全图无怪物");
+                } else {
+                    tracing::warn!("[REAL] ❌ 已尝试 {} 个目标后无剩余怪物（近战命中验证不通过）", s.tried.len());
+                }
                 s.stage = 9;
                 return;
             };
-            tracing::info!("[REAL] 🎯 最近怪物 id={} @ ({},{}) 距离={}", oid, mx, my, d);
+            tracing::info!("[REAL] 🎯 最近怪物 id={} @ ({},{}) 距离={}（已试 {} 个）", oid, mx, my, d, s.tried.len());
             s.target = Some(oid);
             s.target_tile = Some((mx, my));
             if d <= 1 {
@@ -4830,35 +4847,46 @@ fn real_verify_system(
                 return;
             };
             let Ok((pe, _)) = players.single() else { return };
-            let path = client_bevy::game::pathfinding::find_path(map, (px, py), (mx, my));
-            let path = path.or_else(|| {
-                for (ox, oy) in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
-                    let t2 = (mx + ox, my + oy);
-                    if let Some(p) = client_bevy::game::pathfinding::find_path(map, (px, py), t2) {
-                        if !p.is_empty() {
-                            s.target_tile = Some(t2);
-                            return Some(p);
-                        }
+            // 近战需在怪物相邻格（而非重叠）：寻路目标选怪物 8 邻中可达且路径最短的格
+            let mut best_path: Option<(Vec<(i32, i32)>, (i32, i32))> = None;
+            for (ox, oy) in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                let t2 = (mx + ox, my + oy);
+                if !map.in_bounds(t2.0, t2.1) || !map.is_walkable(t2.0, t2.1) {
+                    continue;
+                }
+                if let Some(p) = client_bevy::game::pathfinding::find_path(map, (px, py), t2) {
+                    if !p.is_empty()
+                        && best_path
+                            .as_ref()
+                            .map(|(bp, _)| p.len() < bp.len())
+                            .unwrap_or(true)
+                    {
+                        best_path = Some((p, t2));
                     }
                 }
-                None
-            });
-            match path {
-                Some(p) if !p.is_empty() => {
+            }
+            match best_path {
+                Some((p, t2)) => {
                     let len = p.len();
+                    s.target_tile = Some(t2);
+                    // 用 walk 模式（1 格/步）验证：Run 包在服务器语义是 2 格/次，
+                    // 客户端按路径节点逐格发 Run 会走过头（#58 单独修）
                     commands.entity(pe).insert(client_bevy::game::movement::LocalMove {
                         path: p.into(),
                         step_timer_ms: 0.0,
-                        run: true,
+                        run: false,
                         last: None,
                         turn_acc: 0.0,
                     });
-                    tracing::info!("[REAL] 🚶 寻路到怪物（{} 格，run）", len);
+                    tracing::info!("[REAL] 🚶 寻路到怪物旁（{} 格，walk，目标 {},{}）", len, t2.0, t2.1);
                     s.stage = 2;
                     s.t = 0.0;
                 }
                 _ => {
-                    tracing::warn!("[REAL] ❌ 无法寻路到怪物 ({},{})", mx, my);
+                    tracing::warn!(
+                        "[REAL] ❌ 无法寻路到怪物 ({},{}) 旁（from=({},{}) from_walkable={}）",
+                        mx, my, px, py, map.is_walkable(px, py)
+                    );
                     s.stage = 9;
                 }
             }
@@ -4870,7 +4898,7 @@ fn real_verify_system(
             let Some(tid) = s.target else { s.stage = 9; return };
             let alive = actors.iter().any(|(id, _, _)| id.0 == tid);
             if !alive {
-                tracing::info!("[REAL] ✅ 目标怪物已死亡（实体移除）——战斗闭环通过");
+                tracing::info!("[REAL] ✅ 目标怪物已死亡（实体移除）——战斗闭环通过（命中 {} 次）", probe.hits);
                 s.stage = 3;
                 s.t = 0.0;
                 return;
@@ -4884,10 +4912,34 @@ fn real_verify_system(
             let (mx, my) = s.target_tile.unwrap_or((0, 0));
             let d = (mx - px).abs() + (my - py).abs();
             if d <= 1 && control.attack_target != Some(tid) {
+                // 客户端本地移动超前于服务器位置（UserLocation 校正有延迟），
+                // 到达邻接后等 2s 让服务器位置同步（apply_self_position 会校正），再攻击
+                s.arrived_wait += time.delta_secs();
+                if s.arrived_wait < 2.0 {
+                    return;
+                }
+                s.arrived_wait = 0.0;
                 control.attack_target = Some(tid);
-                tracing::info!("[REAL] ⚔️ 到达邻接，开始自动攻击 {}", tid);
+                // 命中基线：从开始攻击时记录
+                s.hits_at_start = probe.hits;
+                s.attack_elapsed = 0.0;
+                tracing::info!("[REAL] ⚔️ 服务器位置已同步，开始自动攻击 {}（命中基线 {}）", tid, s.hits_at_start);
             }
-            if s.t >= 90.0 {
+            if control.attack_target == Some(tid) {
+                s.attack_elapsed += time.delta_secs();
+                // 20s 攻击零命中 → 目标够不着（远程怪/位置漂移），换下一个最近怪物
+                if s.attack_elapsed >= 20.0 && probe.hits == s.hits_at_start {
+                    tracing::warn!("[REAL] ⚠️ 攻击 {} 20s 零命中（共命中 {}），换目标", tid, probe.hits);
+                    s.tried.push(tid);
+                    control.attack_target = None;
+                    s.target = None;
+                    s.target_tile = None;
+                    s.stage = 1;
+                    s.t = 0.0;
+                    return;
+                }
+            }
+            if s.attack_elapsed >= 90.0 {
                 tracing::warn!("[REAL] ⚠️ 90s 内未击杀目标（可能打不过/怪物跑远）");
                 s.stage = 9;
             }
@@ -4949,14 +5001,15 @@ fn real_verify_system(
             match path {
                 Some(p) if !p.is_empty() => {
                     let len = p.len();
+                    // walk 模式（Run 语义不匹配见 #58）
                     commands.entity(pe).insert(client_bevy::game::movement::LocalMove {
                         path: p.into(),
                         step_timer_ms: 0.0,
-                        run: true,
+                        run: false,
                         last: None,
                         turn_acc: 0.0,
                     });
-                    tracing::info!("[REAL] 🚶 寻路到 NPC（{} 格，run）", len);
+                    tracing::info!("[REAL] 🚶 寻路到 NPC（{} 格，walk）", len);
                     s.stage = 4;
                     s.t = 0.0;
                 }

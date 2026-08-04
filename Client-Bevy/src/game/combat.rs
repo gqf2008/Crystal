@@ -21,6 +21,13 @@ pub enum CombatEvent {
     Damage { object_id: u32, damage: i32, dmg_type: u8 },
 }
 
+/// 真实服务器命中探测（#57）：DamageIndicator（非本地玩家）计数，
+/// 供 --real-verify 判断攻击是否命中（远程怪够不着时无增长 → 换目标）
+#[derive(Resource, Default)]
+pub struct RealHitProbe {
+    pub hits: u32,
+}
+
 /// 伤害飘字
 #[derive(Component)]
 pub struct DamageText {
@@ -40,6 +47,7 @@ pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<RealHitProbe>();
         app.add_message::<CombatEvent>();
         app.add_systems(
             Update,
@@ -54,6 +62,7 @@ impl Plugin for CombatPlugin {
 fn apply_combat_events(
     mut commands: Commands,
     hud: Res<HudState>,
+    mut probe: ResMut<RealHitProbe>,
     ui_font: Res<UiFont>,
     sound_bank: Res<crate::game::sound::SoundBank>,
     mut audio_assets: ResMut<Assets<AudioSource>>,
@@ -100,6 +109,10 @@ fn apply_combat_events(
             }
             // 伤害飘字（挂到目标实体上自动跟随）
             CombatEvent::Damage { object_id, damage, .. } => {
+                // 命中探测：非本地玩家的伤害事件 = 玩家攻击命中目标（#57）
+                if hud.player_object_id != Some(*object_id) {
+                    probe.hits += 1;
+                }
                 if !ui_font.0.is_strong() {
                     continue;
                 }

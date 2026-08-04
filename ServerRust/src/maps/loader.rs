@@ -76,6 +76,7 @@ pub fn parse_map_bytes(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
     match format {
         MapFormat::Type100 => load_type_100(bytes, file_name),
         MapFormat::Type0 => load_type_0(bytes, file_name),
+        MapFormat::Type1 => load_type_1(bytes, file_name),
     }
 }
 
@@ -83,6 +84,7 @@ pub fn parse_map_bytes(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
 enum MapFormat {
     Type100,
     Type0,
+    Type1,
 }
 
 /// 检测地图格式
@@ -94,6 +96,12 @@ fn detect_format(bytes: &[u8]) -> io::Result<MapFormat> {
     // Type 100: magic "C#" at offset 2-3
     if bytes.len() >= 24 && bytes[2] == 0x43 && bytes[3] == 0x23 {
         return Ok(MapFormat::Type100);
+    }
+
+    // Map 2010 Ver 1.0（Daneo1989 服务器地图）：0x10 "Map 2010 Ver 1.0"，14 bytes/cell
+    // 之前被误判为 Type 0（12 bytes/cell）→ 尺寸/单元/障碍位全错（#57 实测）
+    if bytes.len() >= 20 && bytes[0] == 0x10 && bytes[2] == 0x61 && bytes[7] == 0x31 && bytes[14] == 0x31 {
+        return Ok(MapFormat::Type1);
     }
 
     // Type 0: fallback
@@ -172,6 +180,84 @@ fn load_type_100(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
         title,
         width,
         height,
+        cells,
+        safe_zone_rects: Vec::new(),
+    })
+}
+
+/// 解析 Map 2010 Ver 1.0 格式（14 bytes/cell，尺寸 XOR 加密）
+/// 对齐 Client-Bevy map_reader load_map_type_1（参考 C# MapCode.cs）
+#[allow(clippy::needless_range_loop)]
+fn load_type_1(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
+    if bytes.len() < 54 {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Type 1 header too short"));
+    }
+
+    let mut offset = 21usize;
+    let w = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+    offset += 2;
+    let xor = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+    offset += 2;
+    let h = i16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+    let width = (w ^ xor) as i32;
+    let height = (h ^ xor) as i32;
+    offset = 54;
+
+    if width <= 0 || height <= 0 || width > 10000 || height > 10000 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Type 1 invalid map dimensions: {}x{}", width, height),
+        ));
+    }
+
+    let cell_size: usize = 14;
+    let total_cells = (width as usize) * (height as usize);
+    if bytes.len() < offset + total_cells * cell_size {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Type 1 file truncated"));
+    }
+
+    let mut cells = vec![
+        vec![
+            CellInfo {
+                back_image: 0,
+                walkable: true,
+            };
+            height as usize
+        ];
+        width as usize
+    ];
+
+    const OBSTACLE_BIT: i32 = 0x2000_0000;
+    const BACK_XOR: i32 = 0xAA38_AA38u32 as i32;
+
+    for x in 0..width as usize {
+        for y in 0..height as usize {
+            let o = offset + (x * height as usize + y) * cell_size;
+            let back_raw = i32::from_le_bytes([
+                bytes[o],
+                bytes[o + 1],
+                bytes[o + 2],
+                bytes[o + 3],
+            ]);
+            let back_image = back_raw ^ BACK_XOR;
+            let walkable = (back_image & OBSTACLE_BIT) == 0;
+            cells[x][y] = CellInfo {
+                back_image,
+                walkable,
+            };
+        }
+    }
+
+    let title = Path::new(file_name)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| file_name.to_string());
+
+    Ok(MapData {
+        file_name: file_name.to_string(),
+        title,
+        width: width as i16,
+        height: height as i16,
         cells,
         safe_zone_rects: Vec::new(),
     })
