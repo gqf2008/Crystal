@@ -45,7 +45,7 @@ fn main() {
             })
             .set(LogPlugin {
                 filter:
-                    "info,bevy_render=warn,bevy_asset=warn,bevy_log=warn,bevy_diagnostic=warn,wgpu_hal=warn,naga=warn"
+                    "info,bevy_render=warn,bevy_asset=warn,bevy_log=warn,bevy_diagnostic=warn,wgpu_hal=warn,naga=warn,icu4x=error,icu_segmenter=error"
                         .into(),
                 ..default()
             })
