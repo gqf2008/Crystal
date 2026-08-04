@@ -194,10 +194,6 @@ fn sell_panel_ui_system(
     >,
     mut info_texts: Query<(&mut Text2d, &SellPanelInfo)>,
 ) {
-    if !state.visible {
-        return;
-    }
-
     for (mut vis, info) in &mut widgets {
         if info.is_some() {
             continue;
@@ -209,11 +205,14 @@ fn sell_panel_ui_system(
         };
     }
     for (mut text, _) in &mut info_texts {
-        text.0 = match state.mode {
+        let new = match state.mode {
             Some(PanelType::Repair) | Some(PanelType::SpecialRepair) => "放入物品后点确认修理",
             _ => "放入物品后点确认出售",
         }
         .to_string();
+        if text.0 != new {
+            text.0 = new;
+        }
     }
 
     // 目标物品图标

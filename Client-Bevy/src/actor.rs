@@ -358,6 +358,15 @@ fn actor_sprite_render(
                 );
             }
             None => {
+                // #28：帧号无效 → 默认图会渲染成白块；记日志便于排查
+                if std::env::var_os("ACTOR_DEBUG").is_some() {
+                    tracing::warn!(
+                        "[ACTOR] 无效帧 lib={} slot={} idx={}",
+                        layer.lib,
+                        layer.slot,
+                        idx
+                    );
+                }
                 sprite.image = Handle::default();
             }
         }
