@@ -2687,9 +2687,9 @@ fn handle_packet(
             let is_new = cur.read_u8().unwrap_or(0) != 0;
             let name = tasks.first().cloned().unwrap_or_else(|| format!("#{}", id));
             let entry = QuestEntry { id, name, tasks, taken, completed, is_new };
-            if completed {
-                quest_log.quests.retain(|q| q.id != id);
-            } else if let Some(e) = quest_log.quests.iter_mut().find(|q| q.id == id) {
+            // C# 语义：ChangeQuest 只更新进度（含 completed 标记，任务保留待交）；
+            // 从日志移除由 CompleteQuest 负责。
+            if let Some(e) = quest_log.quests.iter_mut().find(|q| q.id == id) {
                 *e = entry;
             } else {
                 quest_log.quests.push(entry);

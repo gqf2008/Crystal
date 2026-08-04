@@ -318,6 +318,10 @@ fn main() {
     if std::env::args().any(|a| a == "--auto-life") {
         app.add_systems(Update, auto_life_system);
     }
+    // --auto-quest: 任务闭环（接受任务1 → 自动击杀 → 完成 → 交任务 → 验证奖励）
+    if std::env::args().any(|a| a == "--auto-quest") {
+        app.add_systems(Update, auto_quest_system);
+    }
     // --auto-walk <up|down|left|right>: 调试 chunk 流式（每帧驱动玩家平移）
     {
         let dir = std::env::args()
@@ -4548,6 +4552,87 @@ fn auto_life_system(
                 tracing::info!("💊 [LIFE] 使用药水 uid={}", potion.unique_id);
             } else {
                 tracing::info!("💊 [LIFE] 背包无药水");
+            }
+        }
+        _ => {}
+    }
+}
+
+/// --auto-quest：任务闭环自动化（#44）
+/// 阶段：0 接受任务1 → 1 等 ChangeQuest → 2 自动击杀怪物101 直到完成 → 3 交任务验证 CompleteQuest
+fn auto_quest_system(
+    net: Res<client_bevy::network::NetworkContext>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut quest_log: ResMut<client_bevy::game::dialogs::quest_log::QuestLogState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::quest::AcceptQuest {
+                npc_index: 110,
+                quest_index: 1,
+            });
+            tracing::info!("[AUTOQUEST] 接受任务 1");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t >= 10.0 {
+                tracing::warn!("[AUTOQUEST] ❌ 未收到任务更新（ChangeQuest）");
+                *stage = 9;
+                return;
+            }
+            if quest_log.quests.iter().any(|q| q.id == 1) {
+                tracing::info!("[AUTOQUEST] ✅ 任务 1 已显示，开始自动击杀怪物 101");
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            // 每 0.5s 攻击一次（7 刀杀死怪物 101，含 3s 重生 ≈ 每轮 6.5s，3 轮完成）
+            if *t < 0.5 {
+                return;
+            }
+            *t = 0.0;
+            net.send_packet(&mir2_shared::packets::client::combat::Attack {
+                direction: mir2_shared::enums::MirDirection::Up,
+                spell: mir2_shared::enums::Spell::None,
+            });
+            let completed = quest_log
+                .quests
+                .iter()
+                .find(|q| q.id == 1)
+                .map(|q| q.completed)
+                .unwrap_or(false);
+            if completed {
+                tracing::info!("[AUTOQUEST] ✅ 任务完成（计数 3/3），交任务");
+                net.send_packet(&mir2_shared::packets::client::quest::FinishQuest {
+                    quest_index: 1,
+                    selected_item_index: -1,
+                });
+                *stage = 3;
+                *t = 0.0;
+            }
+        }
+        3 => {
+            if *t >= 10.0 {
+                tracing::warn!("[AUTOQUEST] ❌ 未收到 CompleteQuest / 任务未从日志移除");
+                *stage = 9;
+                return;
+            }
+            if !quest_log.quests.iter().any(|q| q.id == 1) {
+                tracing::info!("[AUTOQUEST] ✅ 任务已从日志移除（CompleteQuest 生效），全链路完成");
+                *stage = 9;
             }
         }
         _ => {}
