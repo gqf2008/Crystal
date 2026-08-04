@@ -7,3 +7,4 @@ pub mod sprite_ui;
 pub mod theme;
 pub mod new_character;
 pub mod modal_box;
+pub mod credits;
