@@ -121,14 +121,15 @@ function Read-State {
 }
 
 function Write-State([hashtable]$State) {
+    # 动态序列化所有字段（含 notifiedSha 等扩展字段），避免丢状态
     $obj = [ordered]@{}
     foreach ($k in ($State.Keys | Sort-Object)) {
-        $obj[$k] = [ordered]@{
-            sha        = [string]$State[$k].sha
-            result     = [string]$State[$k].result
-            reviewedAt = [string]$State[$k].reviewedAt
-            url        = [string]$State[$k].url
+        $entry = [ordered]@{}
+        $rec = $State[$k]
+        foreach ($fk in $rec.Keys) {
+            if ($null -ne $rec[$fk]) { $entry[$fk] = [string]$rec[$fk] }
         }
+        $obj[$k] = $entry
     }
     $tmp = "$StateFile.tmp"
     $obj | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $tmp -Encoding UTF8
@@ -380,7 +381,7 @@ function Send-Notify {
             "分支 $($Pr.headRefName) → $Base，+$($Pr.additions) −$($Pr.deletions)，$($Pr.changedFiles) 个文件`n" +
             "CI: $CiSummary`n" +
             "本地验证: $Result（watcher 已按 AGENTS.md 回帖）`n" +
-            "请接管处理：核对评审结论并给出最终意见；如需合并请先与用户确认。"
+            "请不要调用任何工具，仅回复：已收到 PR #$($Pr.number)，等待主会话处理。"
         $stamp = Get-Date -Format 'yyyyMMddHHmmss'
         $pf = Join-Path $WorktreesRoot "wake-$($Pr.number)-$stamp.txt"
         $wl = Join-Path $WorktreesRoot "wake-$($Pr.number)-$stamp.log"
