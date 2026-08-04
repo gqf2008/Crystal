@@ -196,23 +196,15 @@ pub(crate) fn handle_progress(
             let is_new = cur.read_u8().unwrap_or(0) != 0;
             let name = tasks.first().cloned().unwrap_or_else(|| format!("#{}", id));
             let entry = QuestEntry { id, name, tasks, taken, completed, is_new };
-            // C# 语义：ChangeQuest 只更新进度（含 completed 标记，任务保留待交）；
-            // 从日志移除由 CompleteQuest 负责。
-            if let Some(e) = quest_log.quests.iter_mut().find(|q| q.id == id) {
-                *e = entry;
-            } else {
-                quest_log.quests.push(entry);
-            }
-            quest_log.message = format!("任务更新: {}", quest_log.quests.last().map(|q| q.name.clone()).unwrap_or_default());
-            tracing::info!("📜 ChangeQuest: id={} completed={} 已接任务 {}", id, completed, quest_log.quests.len());
+            server_events.write(ServerEvent::QuestChanged { entry });
+            tracing::info!("📜 ChangeQuest: id={} completed={}", id, completed);
         }
         x if x == ServerPacketIds::CompleteQuest as i16 => {
             // [quest_index i32]
             let body = &payload[PacketHeader::HEADER_SIZE..];
             if body.len() >= 4 {
                 let id = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
-                quest_log.quests.retain(|q| q.id != id);
-                quest_log.message = format!("任务 {} 完成！", id);
+                server_events.write(ServerEvent::QuestCompleted { id });
                 tracing::info!("📜 CompleteQuest: {}", id);
             }
         }
@@ -223,15 +215,7 @@ pub(crate) fn handle_progress(
             if body.len() >= 5 {
                 let tag = body[0];
                 let ticks = u32::from_le_bytes(body[1..5].try_into().unwrap_or([0; 4]));
-                if let Some(e) = buff.buffs.iter_mut().find(|b| b.tag == tag) {
-                    e.remaining_ticks = ticks;
-                } else {
-                    buff.buffs.push(BuffEntry { tag, remaining_ticks: ticks });
-                }
-                buff.message = format!(
-                    "获得状态: {}",
-                    crate::game::dialogs::buff::buff_name(tag)
-                );
+                server_events.write(ServerEvent::BuffAdded { tag, ticks });
                 tracing::info!("✨ AddBuff: tag={} ticks={}", tag, ticks);
             }
         }
@@ -239,11 +223,7 @@ pub(crate) fn handle_progress(
             // [tag u8]
             let body = &payload[PacketHeader::HEADER_SIZE..];
             if let Some(tag) = body.first().copied() {
-                buff.buffs.retain(|b| b.tag != tag);
-                buff.message = format!(
-                    "状态消失: {}",
-                    crate::game::dialogs::buff::buff_name(tag)
-                );
+                server_events.write(ServerEvent::BuffRemoved { tag });
                 tracing::info!("✨ RemoveBuff: tag={}", tag);
             }
         }
@@ -271,18 +251,20 @@ pub(crate) fn handle_progress(
                 items.push(InspectItem { unique_id, item_index, current_dura, max_dura });
             }
             if ok {
-                inspect.name = name.clone();
-                inspect.guild = guild;
-                inspect.level = level;
-                inspect.class = class;
-                inspect.gender = gender;
-                inspect.items = items;
-                inspect.message = "查看成功".to_string();
+                let item_count = items.len();
+                server_events.write(ServerEvent::InspectPlayer {
+                    name: name.clone(),
+                    guild,
+                    level,
+                    class,
+                    gender,
+                    items,
+                });
                 tracing::info!(
                     "🔍 PlayerInspect: {} Lv.{} 装备 {} 件",
                     name,
                     level,
-                    inspect.items.len()
+                    item_count
                 );
             } else {
                 tracing::warn!("⚠️ PlayerInspect 装备解析失败");
@@ -306,9 +288,9 @@ pub(crate) fn handle_progress(
                 creatures.push(CreatureEntry { creature_type, pickup_mode, enabled, hunger, name });
             }
             if ok {
-                creature.creatures = creatures;
-                creature.message = "宠物列表已更新".to_string();
-                tracing::info!("🐾 宠物列表: {} 个", creature.creatures.len());
+                let count = creatures.len();
+                server_events.write(ServerEvent::CreatureList { creatures });
+                tracing::info!("🐾 宠物列表: {} 个", count);
             } else {
                 tracing::warn!("⚠️ UpdateIntelligentCreatureList 解析失败");
             }
@@ -318,12 +300,7 @@ pub(crate) fn handle_progress(
             // [hero_index u8]
             let body = &payload[PacketHeader::HEADER_SIZE..];
             let idx = body.first().copied().unwrap_or(0);
-            hero.hero_index = idx;
-            hero.message = if idx == 0 {
-                "已切换主角色".to_string()
-            } else {
-                format!("已切换英雄 {}", idx)
-            };
+            server_events.write(ServerEvent::HeroChanged { index: idx });
             tracing::info!("🦸 ChangeHero: index={}", idx);
         }
         // ---- M49: 婚姻/关系 ----
@@ -333,8 +310,7 @@ pub(crate) fn handle_progress(
             let mut cur = std::io::Cursor::new(body);
             match mir2_shared::binary::read_dotnet_string(&mut cur) {
                 Ok(name) => {
-                    relationship.invite = Some(name.clone());
-                    relationship.message = format!("收到 {} 的求婚", name);
+                    server_events.write(ServerEvent::MarriageInvite { name: name.clone() });
                     tracing::info!("💍 收到求婚: {}", name);
                 }
                 Err(_) => tracing::warn!("⚠️ MarriageRequest 解析失败"),
@@ -344,16 +320,11 @@ pub(crate) fn handle_progress(
             // [married u8]
             let body = &payload[PacketHeader::HEADER_SIZE..];
             let married = body.first().copied().unwrap_or(0) != 0;
-            relationship.married = married;
-            relationship.message = if married {
-                "婚姻关系已建立！".to_string()
-            } else {
-                "婚姻关系已解除".to_string()
-            };
+            server_events.write(ServerEvent::MarriageStatus { married });
             tracing::info!("💍 LoverUpdate: married={}", married);
         }
         x if x == ServerPacketIds::DivorceRequest as i16 => {
-            relationship.message = "收到离婚请求".to_string();
+            server_events.write(ServerEvent::DivorceRequest);
             tracing::info!("💔 收到离婚请求");
         }
 

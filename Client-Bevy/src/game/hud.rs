@@ -677,7 +677,17 @@ fn hud_server_events(
             | ServerEvent::MentorUpdate { .. }
             | ServerEvent::FriendUpdated { .. }
             | ServerEvent::Rankings { .. }
-            | ServerEvent::GuildNotice { .. } => {}
+            | ServerEvent::GuildNotice { .. }
+            | ServerEvent::QuestChanged { .. }
+            | ServerEvent::QuestCompleted { .. }
+            | ServerEvent::BuffAdded { .. }
+            | ServerEvent::BuffRemoved { .. }
+            | ServerEvent::InspectPlayer { .. }
+            | ServerEvent::CreatureList { .. }
+            | ServerEvent::HeroChanged { .. }
+            | ServerEvent::MarriageInvite { .. }
+            | ServerEvent::MarriageStatus { .. }
+            | ServerEvent::DivorceRequest => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);

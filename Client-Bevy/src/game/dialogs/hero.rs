@@ -44,7 +44,11 @@ pub struct HeroPlugin;
 impl Plugin for HeroPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HeroState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_hero);
+                app.add_systems(
+            Update,
+            hero_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_hero);
         app.add_systems(OnExit(AppState::Game), cleanup_hero);
         app.add_systems(
             Update,
@@ -183,6 +187,25 @@ fn hero_ui_system(
             net.send_packet(&crate::network::ChangeHeroWire { hero_index: 1 });
             state.message = "切换英雄 1…".to_string();
             tracing::info!("🦸 切换英雄 1");
+        }
+    }
+}
+
+
+/// 消费服务端英雄切换事件（网络层只广播 ServerEvent）
+fn hero_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut hero: ResMut<HeroState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::HeroChanged { index } = ev {
+            hero.hero_index = *index;
+            hero.message = if *index == 0 {
+                "已切换主角色".to_string()
+            } else {
+                format!("已切换英雄 {}", index)
+            };
         }
     }
 }

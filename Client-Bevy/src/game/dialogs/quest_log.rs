@@ -54,7 +54,11 @@ pub struct QuestLogPlugin;
 impl Plugin for QuestLogPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<QuestLogState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_quest_log);
+                app.add_systems(
+            Update,
+            quest_log_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_quest_log);
         app.add_systems(OnExit(AppState::Game), cleanup_quest_log);
         app.add_systems(
             Update,
@@ -218,6 +222,36 @@ fn quest_log_ui_system(
             } else {
                 state.message = "请先选中一个任务".to_string();
             }
+        }
+    }
+}
+
+
+/// 消费服务端任务事件（网络层只广播 ServerEvent）
+fn quest_log_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut quest_log: ResMut<QuestLogState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::QuestChanged { entry } => {
+                // C# 语义：只更新进度，移除由 CompleteQuest 负责
+                if let Some(e) = quest_log.quests.iter_mut().find(|q| q.id == entry.id) {
+                    *e = entry.clone();
+                } else {
+                    quest_log.quests.push(entry.clone());
+                }
+                quest_log.message = format!(
+                    "任务更新: {}",
+                    quest_log.quests.last().map(|q| q.name.clone()).unwrap_or_default()
+                );
+            }
+            ServerEvent::QuestCompleted { id } => {
+                quest_log.quests.retain(|q| q.id != *id);
+                quest_log.message = format!("任务 {} 完成！", id);
+            }
+            _ => {}
         }
     }
 }

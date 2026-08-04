@@ -64,7 +64,11 @@ pub struct RelationshipPlugin;
 impl Plugin for RelationshipPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RelationshipState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_relationship);
+                app.add_systems(
+            Update,
+            relationship_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_relationship);
         app.add_systems(OnExit(AppState::Game), cleanup_relationship);
         app.add_systems(
             Update,
@@ -319,5 +323,34 @@ fn marriage_invite_system(
         });
         tracing::info!("💍 婚姻邀请回复: accept={}", a);
         state.invite = None;
+    }
+}
+
+
+/// 消费服务端婚姻/关系事件（网络层只广播 ServerEvent）
+fn relationship_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut relationship: ResMut<RelationshipState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::MarriageInvite { name } => {
+                relationship.invite = Some(name.clone());
+                relationship.message = format!("收到 {} 的求婚", name);
+            }
+            ServerEvent::MarriageStatus { married } => {
+                relationship.married = *married;
+                relationship.message = if *married {
+                    "婚姻关系已建立！".to_string()
+                } else {
+                    "婚姻关系已解除".to_string()
+                };
+            }
+            ServerEvent::DivorceRequest => {
+                relationship.message = "收到离婚请求".to_string();
+            }
+            _ => {}
+        }
     }
 }

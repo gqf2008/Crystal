@@ -88,7 +88,39 @@ pub enum ServerEvent {
     Rankings { entries: Vec<RankEntry> },
     /// GuildNoticeChange：行会公告更新
     GuildNotice { notice: Vec<String> },
+    /// ChangeQuest：任务进度更新（C# 语义：仅更新，移除由 CompleteQuest 负责）
+    QuestChanged { entry: QuestEntry },
+    /// CompleteQuest：任务完成（从日志移除）
+    QuestCompleted { id: i32 },
+    /// AddBuff：获得/刷新状态
+    BuffAdded { tag: u8, ticks: u32 },
+    /// RemoveBuff：状态消失
+    BuffRemoved { tag: u8 },
+    /// PlayerInspect：查看玩家
+    InspectPlayer {
+        name: String,
+        guild: String,
+        level: u16,
+        class: u8,
+        gender: u8,
+        items: Vec<InspectItem>,
+    },
+    /// UpdateIntelligentCreatureList：宠物列表
+    CreatureList { creatures: Vec<CreatureEntry> },
+    /// ChangeHero：切换英雄
+    HeroChanged { index: u8 },
+    /// MarriageRequest：求婚邀请
+    MarriageInvite { name: String },
+    /// LoverUpdate：婚姻状态
+    MarriageStatus { married: bool },
+    /// DivorceRequest：离婚请求
+    DivorceRequest,
 }
+
+use crate::game::dialogs::buff::BuffEntry;
+use crate::game::dialogs::creature::CreatureEntry;
+use crate::game::dialogs::inspect::InspectItem;
+use crate::game::dialogs::quest_log::QuestEntry;
 
 use crate::game::dialogs::friend::FriendEntry;
 use crate::game::dialogs::ranking::RankEntry;
