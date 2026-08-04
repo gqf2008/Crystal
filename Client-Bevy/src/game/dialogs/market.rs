@@ -21,6 +21,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
 };
+use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
 
 /// 市场商品条目（NPCMarketPage 写入）
 #[derive(Debug, Clone, Default)]
@@ -132,10 +133,29 @@ fn spawn_market(
 
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 170) {
         let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
+        // #89 市场列表滚轮翻页：1 格 = 1 页（10 行）
+        let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (495.0, 120.0, 4.0, 180.0), 6.3);
+        commands.entity(track).insert((DialogRoot(DialogKind::Market), MarketWidget, Visibility::Visible));
+        commands.entity(thumb).insert((
+            DialogRoot(DialogKind::Market),
+            MarketWidget,
+            Visibility::Visible,
+        ));
         commands.entity(e).insert((
             DialogRoot(DialogKind::Market),
             MarketWidget,
             Visibility::Hidden,
+            ScrollList {
+                rect_rel: (15.0, 40.0, 200.0, 180.0),
+                row_h: 18.0,
+                visible: 10,
+                total: 0,
+                offset: 0,
+                step: 10,
+                track_rel: (215.0, 40.0, 4.0, 180.0),
+                thumb: Some(thumb),
+                z: 8.0,
+            },
         ));
     }
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
@@ -308,6 +328,7 @@ fn market_ui_system(
     windows: Query<&Window>,
     mut widgets: Query<&mut Visibility, With<MarketWidget>>,
     mut lines: Query<(&mut Text2d, &MarketLine)>,
+    mut scroll: Query<&mut ScrollList, With<MarketWidget>>,
     mut requested: Local<bool>,
 ) {
     let open = mgr.is_open(DialogKind::Market);
@@ -329,7 +350,25 @@ fn market_ui_system(
             mgr.close(DialogKind::Market);
         }
     }
-    // 渲染
+    // 渲染（#89 滚轮翻页：scroll.offset 行号 ↔ market.page 同步）
+    {
+        let mut sl = scroll.single_mut();
+        if let Ok(sl) = sl.as_mut() {
+            sl.set_total(market.pages.max(1) * 10);
+            let want = market.page * 10;
+            if sl.offset != want {
+                sl.offset = want; // 翻页按钮驱动 → 同步滚动条
+            }
+            let new_page = sl.offset / 10;
+            if new_page != market.page {
+                // 滚轮驱动 → 翻页并请求服务器
+                market.page = new_page;
+                net.send_packet(&crate::network::MarketPageWire {
+                    page: new_page as u32,
+                });
+            }
+        }
+    }
     for (mut text, line) in &mut lines {
         text.0 = match line.0 {
             i if i < 10 => {

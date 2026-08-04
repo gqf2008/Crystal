@@ -17,6 +17,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
 };
+use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
 
 /// 行会成员
 #[derive(Debug, Clone, Default)]
@@ -187,10 +188,29 @@ fn spawn_guild(
     // 背景 Prguse[956]
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 956) {
         let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
+        // #89 可滚动成员列表：10 行 × 20px
+        let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (498.0, 140.0, 4.0, 200.0), 6.3);
+        commands.entity(track).insert((DialogRoot(DialogKind::Guild), GuildWidget, Visibility::Visible));
+        commands.entity(thumb).insert((
+            DialogRoot(DialogKind::Guild),
+            GuildWidget,
+            Visibility::Visible,
+        ));
         commands.entity(e).insert((
             DialogRoot(DialogKind::Guild),
             GuildWidget,
             Visibility::Hidden,
+            ScrollList {
+                rect_rel: (18.0, 60.0, 200.0, 200.0),
+                row_h: 20.0,
+                visible: 10,
+                total: 0,
+                offset: 0,
+                step: 3,
+                track_rel: (218.0, 60.0, 4.0, 200.0),
+                thumb: Some(thumb),
+                z: 8.0,
+            },
         ));
     }
     // 标题 Title[15]
@@ -555,15 +575,24 @@ fn guild_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut widgets: Query<
-        (&mut Visibility, Option<&GuildLine>, Option<&GuildNameField>),
+        (
+            &mut Visibility,
+            Option<&GuildLine>,
+            Option<&GuildNameField>,
+            Option<&mut ScrollList>,
+        ),
         (With<GuildWidget>, Without<GuildCreateBtn>),
     >,
     mut lines: Query<(&mut Text2d, &GuildLine)>,
     mut requested: Local<bool>,
 ) {
     let open = mgr.is_open(DialogKind::Guild);
-    for (mut vis, _line, _field) in &mut widgets {
+    for (mut vis, _line, _field, sl) in &mut widgets {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+        if let Some(mut sl) = sl {
+            // #89 成员列表行数（滚动夹紧）
+            sl.set_total(if guild.in_guild { guild.members.len() } else { 0 });
+        }
     }
     if !open {
         *requested = false;
@@ -582,7 +611,11 @@ fn guild_ui_system(
             mgr.close(DialogKind::Guild);
         }
     }
-    // 渲染
+    // 渲染（#89 成员列表支持滚轮滚动）
+    let scroll_offset = widgets
+        .iter()
+        .find_map(|(_, _, _, sl)| sl.map(|s| s.offset))
+        .unwrap_or(0);
     for (mut text, line) in &mut lines {
         text.0 = match line.0 {
             0 => {
@@ -608,7 +641,9 @@ fn guild_ui_system(
                     "未加入行会".to_string()
                 }
             }
-            i if (1..=10).contains(&i) => match guild.members.get(i - 1) {
+            i if (1..=10).contains(&i) => {
+                let idx = scroll_offset + i - 1;
+                match guild.members.get(idx) {
                 Some(m) => {
                     let rank = match m.rank {
                         0 => "会长",
@@ -623,6 +658,7 @@ fn guild_ui_system(
                     )
                 }
                 None => String::new(),
+            }
             },
             i if (11..=18).contains(&i) => {
                 let slot = guild.storage_page * 8 + (i - 11);

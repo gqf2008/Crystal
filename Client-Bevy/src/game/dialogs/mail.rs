@@ -19,6 +19,7 @@ use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
     UiImageCache,
 };
+use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
 
 /// 邮件列表条目
 #[derive(Debug, Clone, Default)]
@@ -188,10 +189,29 @@ fn spawn_mail(
 
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 956) {
         let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
+        // #89 可滚动邮件列表：8 行 × 22px
+        let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (610.0, 140.0, 4.0, 176.0), 6.3);
+        commands.entity(track).insert((DialogRoot(DialogKind::Mail), MailWidget, Visibility::Visible));
+        commands.entity(thumb).insert((
+            DialogRoot(DialogKind::Mail),
+            MailWidget,
+            Visibility::Visible,
+        ));
         commands.entity(e).insert((
             DialogRoot(DialogKind::Mail),
             MailWidget,
             Visibility::Hidden,
+            ScrollList {
+                rect_rel: (18.0, 60.0, 300.0, 176.0),
+                row_h: 22.0,
+                visible: 8,
+                total: 0,
+                offset: 0,
+                step: 3,
+                track_rel: (330.0, 60.0, 4.0, 176.0),
+                thumb: Some(thumb),
+                z: 8.0,
+            },
         ));
     }
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 20) {
@@ -352,6 +372,7 @@ fn mail_ui_system(
     >,
     mut lines: Query<(&mut Text2d, &MailLine), Without<MailDetailText>>,
     mut detail_texts: Query<(&mut Text2d, &MailDetailText), Without<MailLine>>,
+    mut scroll: Query<&mut ScrollList, With<MailWidget>>,
 ) {
     let open = mgr.is_open(DialogKind::Mail);
     for (mut vis, line, _det) in &mut widgets {
@@ -368,15 +389,20 @@ fn mail_ui_system(
             mgr.close(DialogKind::Mail);
         }
     }
-    // 列表
-    for (mut text, line) in &mut lines {
-        text.0 = match mail.mails.get(line.0) {
-            Some(m) => {
-                let mark = if m.unread { "（未读）" } else { "" };
-                format!("{} - {}{}", m.sender, m.subject, mark)
-            }
-            None => String::new(),
-        };
+    // 列表（#89 支持滚轮滚动）
+    let mut sl = scroll.single_mut();
+    if let Ok(sl) = sl.as_mut() {
+        sl.set_total(mail.mails.len());
+        for (mut text, line) in &mut lines {
+            let idx = sl.offset + line.0;
+            text.0 = match mail.mails.get(idx) {
+                Some(m) => {
+                    let mark = if m.unread { "（未读）" } else { "" };
+                    format!("{} - {}{}", m.sender, m.subject, mark)
+                }
+                None => String::new(),
+            };
+        }
     }
     // 内容区
     for (mut text, _) in &mut detail_texts {
@@ -394,14 +420,15 @@ fn mail_ui_system(
             None => "点击上方邮件查看内容".to_string(),
         };
     }
-    // 点击列表项 → ReadMail
+    // 点击列表项 → ReadMail（#89：行号 = 滚动偏移 + 可视槽位）
     if mouse.just_pressed(MouseButton::Left) {
         let Ok(window) = windows.single() else { return };
         let Some(cursor) = window.cursor_position() else { return };
+        let off = scroll.single().map(|s| s.offset).unwrap_or(0);
         for i in 0..8usize {
             let y = 140.0 + i as f32 * 22.0;
             if cursor.x >= 298.0 && cursor.x <= 600.0 && cursor.y >= y && cursor.y <= y + 20.0 {
-                if let Some(m) = mail.mails.get(i) {
+                if let Some(m) = mail.mails.get(off + i) {
                     net.send_packet(&mir2_shared::packets::client::mail::ReadMail {
                         mail_id: m.mail_id,
                     });
