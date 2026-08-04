@@ -8,8 +8,8 @@ use crossbeam_channel::{Receiver, Sender};
 use mir2_shared::data::client_data::{ClientMagic, SelectInfo};
 use mir2_shared::data::item::ItemInfo;
 use mir2_shared::enums::{
-    ClientPacketIds, HeroBehaviour, ItemType, LevelEffects, MirClass, MirDirection, MirGender,
-    PoisonType, Spell, SpellEffect,
+    ChatType, ClientPacketIds, HeroBehaviour, ItemType, LevelEffects, MirClass, MirDirection,
+    MirGender, PoisonType, Spell, SpellEffect,
 };
 use std::collections::HashMap;
 use mir2_shared::packets::base::{serialize_packet, Packet, PacketHeader};
@@ -40,6 +40,16 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             /// 死亡怪物重生计时（3 秒后）
             let mut respawn: HashMap<u32, std::time::Instant> = HashMap::new();
             let mut last_monster_ai = std::time::Instant::now();
+            // 玩家背包/金币（购买/使用/拾取后更新）
+            let mut player_inventory: Vec<Option<mir2_shared::data::item::UserItem>> = {
+                let mut inv: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 40];
+                inv[0] = Some(potion_item(5)); // 木剑
+                inv[1] = Some(potion_item(10)); // 布衣
+                inv[2] = Some(potion_item(1)); // 金创药（可喝）
+                inv
+            };
+            let mut player_gold: u32 = 10000;
+            let mut active_char_index: i32 = 0;
             loop {
                 match from_client.recv_timeout(std::time::Duration::from_millis(100)) {
                     Ok(payload) => {
@@ -97,7 +107,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 resolution: 0,
                                             },
                                         );
-                                        send_map_and_objects(&to_client, p.character_index);
+                                        active_char_index = p.character_index;
+                        send_map_and_objects(&to_client, p.character_index, &player_inventory, player_gold);
                                         in_game = true;
                                     }
                                 }
@@ -334,6 +345,67 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         tracing::info!("⚔️ 装备成功 uid={} -> 槽 {}", p.unique_id, p.to);
                                     }
                                 }
+                                x if x == ClientPacketIds::Chat as i16 => {
+                                    // 聊天：服务器回显（广播）
+                                    if let Ok(p) = client::chat::Chat::read_body(&mut cur) {
+                                        let name = match active_char_index {
+                                            1 => "法师",
+                                            2 => "道士",
+                                            3 => "刺客",
+                                            _ => "刀客",
+                                        };
+                                        send(
+                                            &to_client,
+                                            &server::chat::Chat {
+                                                message: format!("[{}] {}", name, p.message),
+                                                chat_type: ChatType::Normal,
+                                            },
+                                        );
+                                        tracing::info!("💬 [MOCK] 聊天: {}", p.message);
+                                    }
+                                }
+                                x if x == ClientPacketIds::UseItem as i16 => {
+                                    // 使用物品：金创药回血
+                                    if let Ok(p) = client::item::UseItem::read_body(&mut cur) {
+                                        let idx = player_inventory
+                                            .iter()
+                                            .position(|s| s.as_ref().map(|i| i.unique_id) == Some(p.unique_id));
+                                        if let Some(idx) = idx {
+                                            if let Some(item) = player_inventory[idx].take() {
+                                                send(&to_client, &server::item_operations::UseItem { unique_id: p.unique_id });
+                                                send(&to_client, &server::combat::HealthChanged { hp: 850, mp: 420 });
+                                                tracing::info!("💊 [MOCK] 使用物品: {} (uid={})", item.info.as_ref().map(|i| i.name.clone()).unwrap_or_default(), p.unique_id);
+                                            }
+                                        }
+                                    }
+                                }
+                                x if x == ClientPacketIds::BuyItem as i16 => {
+                                    // 商店购买：扣金币 + 背包加物品 + 重发 UserInformation
+                                    if let Ok(p) = client::npc::BuyItem::read_body(&mut cur) {
+                                        let price = match p.item_index { 1 => 10, 2 => 10, 3 => 100, _ => 10 };
+                                        let total = price * p.count as u32;
+                                        if player_gold >= total {
+                                            player_gold -= total;
+                                            // 放入背包第一个空位
+                                            let mut placed = false;
+                                            for slot in player_inventory.iter_mut() {
+                                                if slot.is_none() {
+                                                    *slot = Some(potion_item(p.item_index as i32));
+                                                    placed = true;
+                                                    break;
+                                                }
+                                            }
+                                            if placed {
+                                                send_user_information(&to_client, active_char_index, &player_inventory, player_gold);
+                                                tracing::info!("🛒 [MOCK] 购买 item={} x{} 花费 {}，剩余金币 {}", p.item_index, p.count, total, player_gold);
+                                            } else {
+                                                send(&to_client, &server::chat::Chat { message: "背包已满".into(), chat_type: ChatType::System });
+                                            }
+                                        } else {
+                                            send(&to_client, &server::chat::Chat { message: "金币不足".into(), chat_type: ChatType::System });
+                                        }
+                                    }
+                                }
                                 x if x == ClientPacketIds::KeepAlive as i16 => {
                                     // 客户端心跳回应，无需处理
                                 }
@@ -478,8 +550,108 @@ fn potion_item(index: i32) -> mir2_shared::data::item::UserItem {
     }
 }
 
+/// 发送玩家属性（UserInformation + HealthChanged）——购买/拾取后刷新用
+fn send_user_information(
+    to_client: &Sender<Vec<u8>>,
+    char_index: i32,
+    inventory: &[Option<mir2_shared::data::item::UserItem>],
+    gold: u32,
+) {
+    let (class, gender) = match char_index {
+        1 => (MirClass::Wizard, MirGender::Female),
+        _ => (MirClass::Warrior, MirGender::Male),
+    };
+    send(
+        to_client,
+        &server::user::UserInformation {
+            object_id: 100,
+            real_id: 100,
+            name: match char_index {
+                1 => "法师".to_string(),
+                2 => "道士".to_string(),
+                3 => "刺客".to_string(),
+                _ => "刀客".to_string(),
+            },
+            guild_name: String::new(),
+            guild_rank: String::new(),
+            name_colour: 0,
+            class,
+            gender,
+            level: 30,
+            location_x: 354,
+            location_y: 352,
+            direction: MirDirection::Up,
+            hair: 0,
+            hp: 850,
+            mp: 420,
+            experience: 12000,
+            max_experience: 30000,
+            level_effects: LevelEffects::NONE,
+            has_hero: false,
+            hero_behaviour: HeroBehaviour::Follow,
+            inventory: Some(inventory.to_vec()),
+            equipment: Some(vec![None; 12]),
+            quest_inventory: Some(vec![]),
+            gold,
+            credit: 0,
+            has_expanded_storage: false,
+            expanded_storage_expiry_time: 0,
+            magics: vec![
+                ClientMagic {
+                    name: "攻杀剑术".to_string(),
+                    spell: Spell::Slaying,
+                    base_cost: 3,
+                    level_cost: 1,
+                    icon: 0,
+                    level1: 1,
+                    level2: 2,
+                    level3: 3,
+                    need1: 0,
+                    need2: 0,
+                    need3: 0,
+                    level: 1,
+                    key: 1,
+                    experience: 0,
+                    delay: 0,
+                    range: 1,
+                    cast_time: 0,
+                },
+                ClientMagic {
+                    name: "刺杀剑术".to_string(),
+                    spell: Spell::Fencing,
+                    base_cost: 3,
+                    level_cost: 1,
+                    icon: 0,
+                    level1: 1,
+                    level2: 2,
+                    level3: 3,
+                    need1: 0,
+                    need2: 0,
+                    need3: 0,
+                    level: 1,
+                    key: 2,
+                    experience: 0,
+                    delay: 0,
+                    range: 1,
+                    cast_time: 0,
+                },
+            ],
+            summoned_creature_type: 0,
+            creature_summoned: false,
+            allow_observe: false,
+            observer: false,
+        },
+    );
+    send(to_client, &server::combat::HealthChanged { hp: 850, mp: 420 });
+}
+
 /// 进图：MapChanged(n0) + 本地玩家 + 怪物/NPC
-fn send_map_and_objects(to_client: &Sender<Vec<u8>>, char_index: i32) {
+fn send_map_and_objects(
+    to_client: &Sender<Vec<u8>>,
+    char_index: i32,
+    inventory: &[Option<mir2_shared::data::item::UserItem>],
+    gold: u32,
+) {
     // 地图：新手村 n0，出生点附近
     send(
         to_client,
@@ -592,95 +764,8 @@ fn send_map_and_objects(to_client: &Sender<Vec<u8>>, char_index: i32) {
         },
     );
 
-    // UserInformation：玩家属性（HP/MP/等级/金币 → HUD 血蓝球/经验/金币）
-    send(
-        to_client,
-        &server::user::UserInformation {
-            object_id: 100,
-            real_id: 100,
-            name: match char_index {
-                1 => "法师".to_string(),
-                2 => "道士".to_string(),
-                3 => "刺客".to_string(),
-                _ => "刀客".to_string(),
-            },
-            guild_name: String::new(),
-            guild_rank: String::new(),
-            name_colour: 0,
-            class,
-            gender,
-            level: 30,
-            location_x: 354,
-            location_y: 352,
-            direction: MirDirection::Up,
-            hair: 0,
-            hp: 850,
-            mp: 420,
-            experience: 12000,
-            max_experience: 30000,
-            level_effects: LevelEffects::NONE,
-            has_hero: false,
-            hero_behaviour: HeroBehaviour::Follow,
-            inventory: Some({
-                let mut inv: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 40];
-                inv[0] = Some(potion_item(5)); // 木剑（可装备）
-                inv[1] = Some(potion_item(10)); // 布衣（可装备）
-                inv
-            }),
-            equipment: Some(vec![None; 12]),
-            quest_inventory: Some(vec![]),
-            gold: 10000,
-            credit: 0,
-            has_expanded_storage: false,
-            expanded_storage_expiry_time: 0,
-            magics: vec![
-                ClientMagic {
-                    name: "攻杀剑术".to_string(),
-                    spell: Spell::Slaying,
-                    base_cost: 3,
-                    level_cost: 1,
-                    icon: 0,
-                    level1: 1,
-                    level2: 2,
-                    level3: 3,
-                    need1: 0,
-                    need2: 0,
-                    need3: 0,
-                    level: 1,
-                    key: 1,
-                    experience: 0,
-                    delay: 0,
-                    range: 1,
-                    cast_time: 0,
-                },
-                ClientMagic {
-                    name: "刺杀剑术".to_string(),
-                    spell: Spell::Fencing,
-                    base_cost: 3,
-                    level_cost: 1,
-                    icon: 0,
-                    level1: 1,
-                    level2: 2,
-                    level3: 3,
-                    need1: 0,
-                    need2: 0,
-                    need3: 0,
-                    level: 1,
-                    key: 2,
-                    experience: 0,
-                    delay: 0,
-                    range: 1,
-                    cast_time: 0,
-                },
-            ],
-            summoned_creature_type: 0,
-            creature_summoned: false,
-            allow_observe: false,
-            observer: false,
-        },
-    );
-    // HealthChanged：血蓝实时值（mock 直接发满值）
-    send(to_client, &server::combat::HealthChanged { hp: 850, mp: 420 });
+    send_user_information(to_client, char_index, inventory, gold);
+
 
     // 初始地面物品（拾取验收用）：金创药 @ (353,352)（玩家左侧 1 格）
     send(
