@@ -86,6 +86,18 @@ async fn async_main() -> anyhow::Result<()> {
         }
     };
 
+    // 初始化邮件 ID 计数器（DB 最大 mail_id+1，避免重启后新邮件 UNIQUE 冲突，#73 实测）
+    match sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(mail_id), 0) + 1 FROM mail")
+        .fetch_one(&db_pool)
+        .await
+    {
+        Ok(max_id) => {
+            crystal_server::actors::mail::init_mail_id(max_id as u64);
+            info!("Mail ID counter initialized to {}", max_id);
+        }
+        Err(e) => warn!("Failed to init mail ID counter: {}", e),
+    }
+
     // WorldActor 启动，携带 GateActor 引用 + 地图目录 + 刷怪目录 + 数据库
     // SocialActor 先启动，WorldActor 依赖它。
     // 共享 cfg:social 字段(guild_creation_cost_gold)透传到 SocialActorConfig
