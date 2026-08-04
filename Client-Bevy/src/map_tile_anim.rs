@@ -19,7 +19,7 @@ use bevy::render::render_resource::{
 };
 use bevy::shader::ShaderRef;
 use bevy::mesh::Mesh2d;
-use bevy::sprite_render::{Material2d, Material2dKey, Material2dPlugin, MeshMaterial2d};
+use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dKey, Material2dPlugin, MeshMaterial2d};
 
 use crate::map_renderer::{make_image, GameLibraries};
 use crate::resources::libraries::Libraries;
@@ -68,6 +68,13 @@ pub struct MapBlendMaterial {
 impl Material2d for MapBlendMaterial {
     fn fragment_shader() -> ShaderRef {
         "shaders/map_blend.wgsl".into()
+    }
+
+    /// 关键：Bevy 0.19 Material2d 默认 alpha_mode=Opaque，会走不透明管线
+    /// （blend=None），灯光/动画瓦片的黑背景（美术按 ADD 设计的）会变成不透明
+    /// 黑块、白心外露。必须声明 Blend 走透明管线，再在 specialize 里改成 ADD。
+    fn alpha_mode(&self) -> AlphaMode2d {
+        AlphaMode2d::Blend
     }
 
     fn specialize(
