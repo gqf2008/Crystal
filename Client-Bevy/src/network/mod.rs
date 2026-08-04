@@ -1877,6 +1877,11 @@ fn handle_packet(
                     net.local_player_id = Some(p.object_id);
                     net.self_position = Some((p.location_x, p.location_y, p.direction as u8));
 
+                    // 技能（MagicsState）：UserInformation 携带已学技能
+                    for m in &p.magics {
+                        magics.upsert(m.clone());
+                    }
+
                     // 背包（40 格）
                     if let Some(inv) = &p.inventory {
                         let items: Vec<Option<InvItem>> = inv

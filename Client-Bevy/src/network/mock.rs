@@ -5,10 +5,13 @@
 // mock 回包（codec 外帧编码）。仅实现里程碑所需的最小闭环。
 
 use crossbeam_channel::{Receiver, Sender};
-use mir2_shared::data::client_data::SelectInfo;
+use mir2_shared::data::client_data::{ClientMagic, SelectInfo};
+use mir2_shared::data::item::ItemInfo;
 use mir2_shared::enums::{
-    ClientPacketIds, HeroBehaviour, LevelEffects, MirClass, MirDirection, MirGender, PoisonType, SpellEffect,
+    ClientPacketIds, HeroBehaviour, ItemType, LevelEffects, MirClass, MirDirection, MirGender,
+    PoisonType, Spell, SpellEffect,
 };
+use std::collections::HashMap;
 use mir2_shared::packets::base::{serialize_packet, Packet, PacketHeader};
 use mir2_shared::packets::{client, server};
 
@@ -21,6 +24,23 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             let mut in_game = false;
             let mut characters: Vec<SelectInfo> = Vec::new();
             let mut last_ping = std::time::Instant::now();
+            // ---- 玩法闭环状态（#next：战斗/掉落/拾取/技能/怪物AI/装备）----
+            let mut monster_hp: HashMap<u32, i32> =
+                [(101u32, 100), (102, 120), (103, 80)].into_iter().collect();
+            let mut monster_pos: HashMap<u32, (i32, i32)> = [
+                (101u32, (353, 352)),
+                (102, (354, 351)),
+                (103, (353, 353)),
+            ]
+            .into_iter()
+            .collect();
+            /// 地面掉落物品（id, x, y）
+            let mut ground_items: Vec<(u32, i32, i32)> = Vec::new();
+            let mut next_item_id = 200u32;
+            /// 死亡怪物重生计时（3 秒后）
+            let mut respawn: HashMap<u32, std::time::Instant> = HashMap::new();
+            let mut last_monster_ai = std::time::Instant::now();
+            let mut monster_died_ever = false;
             loop {
                 match from_client.recv_timeout(std::time::Duration::from_millis(100)) {
                     Ok(payload) => {
@@ -181,17 +201,19 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     }
                                 }
                                 x if x == ClientPacketIds::Attack as i16 => {
-                                    // 攻击反馈：怪物受击动画 + 伤害飘字
+                                    // 攻击反馈：怪物受击动画 + 伤害飘字 + 血量/死亡/掉落
                                     if let Ok(p) = client::Attack::read_body(&mut cur) {
                                         tracing::info!("[MOCK] 攻击 dir={:?}", p.direction);
                                         let target = 101u32; // 第一个怪物
+                                        let hp = monster_hp.entry(target).or_insert(100);
+                                        *hp -= 15;
                                         send(
                                             &to_client,
                                             &server::combat::ObjectStruck {
                                                 object_id: target,
                                                 attacker_id: 100,
-                                                location_x: 353,
-                                                location_y: 352,
+                                                location_x: monster_pos.get(&target).map(|v| v.0 as u32).unwrap_or(353),
+                                                location_y: monster_pos.get(&target).map(|v| v.1 as u32).unwrap_or(352),
                                                 direction: p.direction as u8,
                                             },
                                         );
@@ -203,6 +225,114 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 object_id: target,
                                             },
                                         );
+                                        if *hp <= 0 && !respawn.contains_key(&target) {
+                                            let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
+                                            let item_id = next_item_id;
+                                            next_item_id += 1;
+                                            ground_items.push((item_id, ix, iy));
+                                            send(
+                                                &to_client,
+                                                &server::combat::ObjectDied {
+                                                    object_id: target,
+                                                    location_x: ix as u32,
+                                                    location_y: iy as u32,
+                                                    direction: 0,
+                                                    death_type: 0,
+                                                },
+                                            );
+                                            // 掉落：金创药（可拾取）
+                                            send(
+                                                &to_client,
+                                                &server::drops::ObjectItem {
+                                                    object_id: item_id,
+                                                    item: potion_item(1),
+                                                    location_x: ix,
+                                                    location_y: iy,
+                                                },
+                                            );
+                                            send(&to_client, &server::objects::ObjectRemove { object_id: target });
+                                            respawn.insert(target, std::time::Instant::now());
+                                            tracing::info!("💀 怪物 {} 死亡，掉落物品 #{}", target, item_id);
+                                        }
+                                    }
+                                }
+                                x if x == ClientPacketIds::Magic as i16 => {
+                                    // 技能施放：回显魔法 + 对目标造成伤害
+                                    if let Ok(p) = client::combat::Magic::read_body(&mut cur) {
+                                        tracing::info!("[MOCK] 魔法 spell={:?}", p.spell);
+                                        send(
+                                            &to_client,
+                                            &server::magic_combat::MagicCast {
+                                                spell: p.spell,
+                                            },
+                                        );
+                                        let target = if p.target_id != 0 { p.target_id } else { 101u32 };
+                                        let hp = monster_hp.entry(target).or_insert(100);
+                                        *hp -= 20;
+                                        send(
+                                            &to_client,
+                                            &server::combat::DamageIndicator {
+                                                damage: 20,
+                                                damage_type: 0,
+                                                object_id: target,
+                                            },
+                                        );
+                                        if *hp <= 0 && !respawn.contains_key(&target) {
+                                            let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
+                                            let item_id = next_item_id;
+                                            next_item_id += 1;
+                                            ground_items.push((item_id, ix, iy));
+                                            send(
+                                                &to_client,
+                                                &server::combat::ObjectDied {
+                                                    object_id: target,
+                                                    location_x: ix as u32,
+                                                    location_y: iy as u32,
+                                                    direction: 0,
+                                                    death_type: 0,
+                                                },
+                                            );
+                                            send(
+                                                &to_client,
+                                                &server::drops::ObjectItem {
+                                                    object_id: item_id,
+                                                    item: potion_item(1),
+                                                    location_x: ix,
+                                                    location_y: iy,
+                                                },
+                                            );
+                                            send(&to_client, &server::objects::ObjectRemove { object_id: target });
+                                            respawn.insert(target, std::time::Instant::now());
+                                        }
+                                    }
+                                }
+                                x if x == ClientPacketIds::PickUp as i16 => {
+                                    // 拾取第一个地面物品 → 移除
+                                    if let Ok(_) = client::item::PickUp::read_body(&mut cur) {
+                                        if let Some((id, _, _)) = ground_items.first().copied() {
+                                            ground_items.retain(|(i, _, _)| *i != id);
+                                            send(&to_client, &server::objects::ObjectRemove { object_id: id });
+                                            tracing::info!("🎒 拾取地面物品 #{}", id);
+                                        } else {
+                                            // 初始物品 300（无战斗掉落时）
+                                            send(&to_client, &server::objects::ObjectRemove { object_id: 300 });
+                                            tracing::info!("🎒 拾取初始地面物品 #300");
+                                        }
+                                    }
+                                }
+                                x if x == ClientPacketIds::EquipItem as i16 => {
+                                    // 装备：回成功，客户端本地同步背包→装备槽
+                                    if let Ok(p) = client::item::EquipItem::read_body(&mut cur) {
+                                        send(
+                                            &to_client,
+                                            &server::item_operations::EquipItem {
+                                                grid: p.grid,
+                                                unique_id: p.unique_id,
+                                                to: p.to,
+                                                success: true,
+                                            },
+                                        );
+                                        tracing::info!("⚔️ 装备成功 uid={} -> 槽 {}", p.unique_id, p.to);
                                     }
                                 }
                                 x if x == ClientPacketIds::KeepAlive as i16 => {
@@ -221,6 +351,85 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                             last_ping = std::time::Instant::now();
                             send(&to_client, &server::connection::KeepAlive { time: 0 });
                         }
+                        // 怪物 AI（每 3s）：死亡怪物重生 + 怪物 102 移动 + 怪物 103 攻击玩家
+                        if in_game && last_monster_ai.elapsed() >= std::time::Duration::from_secs(3) {
+                            last_monster_ai = std::time::Instant::now();
+                            // 重生
+                            let due: Vec<u32> = respawn
+                                .iter()
+                                .filter(|(_, t)| t.elapsed() >= std::time::Duration::from_secs(3))
+                                .map(|(id, _)| *id)
+                                .collect();
+                            for id in due {
+                                respawn.remove(&id);
+                                monster_hp.insert(id, if id == 102 { 120 } else { 100 });
+                                let (x, y) = monster_pos.get(&id).copied().unwrap_or((353, 352));
+                                let img = match id { 101 => 1u16, 102 => 5, _ => 9 };
+                                send(
+                                    &to_client,
+                                    &server::objects::ObjectMonster {
+                                        object_id: id,
+                                        name: format!("怪物{}", img),
+                                        name_colour: 0,
+                                        location_x: x,
+                                        location_y: y,
+                                        image: img,
+                                        direction: MirDirection::Up,
+                                        effect: 0,
+                                        ai: 0,
+                                        light: 0,
+                                        dead: false,
+                                        skeleton: false,
+                                        poison: PoisonType::empty(),
+                                        hidden: false,
+                                        shock_time: 0,
+                                        binding_shot_center: false,
+                                        extra: false,
+                                        extra_byte: 0,
+                                        buffs: vec![],
+                                    },
+                                );
+                                tracing::info!("♻️ 怪物 {} 重生", id);
+                            }
+                            // 怪物 102 向玩家方向走 1 格
+                            if !respawn.contains_key(&102) {
+                                let (mx, my) = monster_pos.get_mut(&102).copied().unwrap_or((354, 351));
+                                let (dir, nx, ny) = if my > 352 {
+                                    (MirDirection::Up, mx, my - 1)
+                                } else if my < 352 {
+                                    (MirDirection::Down, mx, my + 1)
+                                } else if mx > 354 {
+                                    (MirDirection::Left, mx - 1, my)
+                                } else {
+                                    (MirDirection::Right, mx + 1, my)
+                                };
+                                monster_pos.insert(102, (nx, ny));
+                                tracing::info!("🚶 怪物 102 移动到 ({},{}) {:?}", nx, ny, dir);
+                                send(
+                                    &to_client,
+                                    &server::objects::ObjectWalk {
+                                        object_id: 102,
+                                        location_x: nx,
+                                        location_y: ny,
+                                        direction: dir,
+                                    },
+                                );
+                            }
+                            // 怪物 103 攻击玩家（受击动画 + 掉血）
+                            if !respawn.contains_key(&103) {
+                                tracing::info!("🗡️ 怪物 103 攻击玩家");
+                                send(
+                                    &to_client,
+                                    &server::combat::ObjectStruck {
+                                        object_id: 100,
+                                        attacker_id: 103,
+                                        location_x: 354,
+                                        location_y: 352,
+                                        direction: 4,
+                                    },
+                                );
+                            }
+                        }
                     }
                     Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
                 }
@@ -236,6 +445,37 @@ fn send<P: Packet>(to_client: &Sender<Vec<u8>>, packet: &P) {
         let mut framed = Vec::new();
         codec::encode(&inner, &mut framed);
         let _ = to_client.send(framed);
+    }
+}
+
+/// 构造可拾取/背包物品（金创药等）
+fn potion_item(index: i32) -> mir2_shared::data::item::UserItem {
+    mir2_shared::data::item::UserItem {
+        unique_id: 9000 + index as u64,
+        item_index: index,
+        count: 1,
+        info: Some(ItemInfo {
+            index,
+            name: match index {
+                1 => "金创药(小)".to_string(),
+                2 => "魔法药(小)".to_string(),
+                5 => "木剑".to_string(),
+                10 => "布衣".to_string(),
+                _ => format!("#{}", index),
+            },
+            image: index as u16,
+            item_type: match index {
+                5 => ItemType::Weapon,
+                10 => ItemType::Armour,
+                _ => ItemType::Potion,
+            },
+            shape: 0,
+            price: 10,
+            ..Default::default()
+        }),
+        current_dura: 0,
+        max_dura: 0,
+        ..Default::default()
     }
 }
 
@@ -382,7 +622,133 @@ fn send_map_and_objects(to_client: &Sender<Vec<u8>>, char_index: i32) {
             level_effects: LevelEffects::NONE,
             has_hero: false,
             hero_behaviour: HeroBehaviour::Follow,
-            inventory: Some(vec![None; 40]),
+            inventory: Some({
+                let mut inv: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 40];
+                inv[0] = Some(potion_item(5)); // 木剑（可装备）
+                inv[1] = Some(potion_item(10)); // 布衣（可装备）
+                inv
+            }),
+            equipment: Some(vec![None; 12]),
+            quest_inventory: Some(vec![]),
+            gold: 10000,
+            credit: 0,
+            has_expanded_storage: false,
+            expanded_storage_expiry_time: 0,
+            magics: vec![
+                ClientMagic {
+                    name: "攻杀剑术".to_string(),
+                    spell: Spell::Slaying,
+                    base_cost: 3,
+                    level_cost: 1,
+                    icon: 0,
+                    level1: 1,
+                    level2: 2,
+                    level3: 3,
+                    need1: 0,
+                    need2: 0,
+                    need3: 0,
+                    level: 1,
+                    key: 1,
+                    experience: 0,
+                    delay: 0,
+                    range: 1,
+                    cast_time: 0,
+                },
+                ClientMagic {
+                    name: "刺杀剑术".to_string(),
+                    spell: Spell::Fencing,
+                    base_cost: 3,
+                    level_cost: 1,
+                    icon: 0,
+                    level1: 1,
+                    level2: 2,
+                    level3: 3,
+                    need1: 0,
+                    need2: 0,
+                    need3: 0,
+                    level: 1,
+                    key: 2,
+                    experience: 0,
+                    delay: 0,
+                    range: 1,
+                    cast_time: 0,
+                },
+            ],
+            summoned_creature_type: 0,
+            creature_summoned: false,
+            allow_observe: false,
+            observer: false,
+        },
+    );
+    // HealthChanged：血蓝实时值（mock 直接发满值）
+    send(to_client, &server::combat::HealthChanged { hp: 850, mp: 420 });
+
+    // 初始地面物品（拾取验收用）：金创药 @ (353,352)（玩家左侧 1 格）
+    send(
+        to_client,
+        &server::drops::ObjectItem {
+            object_id: 300,
+            item: potion_item(1),
+            location_x: 353,
+            location_y: 352,
+        },
+    );
+}
+
+
+#[cfg(test)]
+mod roundtrip_tests {
+    use super::*;
+    use std::io::Cursor;
+
+    fn rt(index: i32) {
+        let item = potion_item(index);
+        let mut buf = Vec::new();
+        item.write_to_with_info(&mut buf).unwrap();
+        let mut cur = Cursor::new(&buf);
+        let read = mir2_shared::data::item::UserItem::read_from_with_info(&mut cur).unwrap();
+        let info = read.info.as_ref().expect("info");
+        assert_eq!(info.item_type, item.info.as_ref().unwrap().item_type, "item_type mismatch for index {}", index);
+    }
+
+    #[test]
+    fn test_potion_item_roundtrip() {
+        rt(1);
+        rt(2);
+        rt(5);
+        rt(10);
+    }
+
+    #[test]
+    fn test_user_information_roundtrip_with_inventory() {
+        use mir2_shared::enums::{MirClass, MirGender, MirDirection, HeroBehaviour, LevelEffects};
+        let info = server::user::UserInformation {
+            object_id: 100,
+            real_id: 100,
+            name: "刀客".to_string(),
+            guild_name: String::new(),
+            guild_rank: String::new(),
+            name_colour: 0,
+            class: MirClass::Warrior,
+            gender: MirGender::Male,
+            level: 30,
+            location_x: 354,
+            location_y: 352,
+            direction: MirDirection::Up,
+            hair: 0,
+            hp: 850,
+            mp: 420,
+            experience: 12000,
+            max_experience: 30000,
+            level_effects: LevelEffects::NONE,
+            has_hero: false,
+            hero_behaviour: HeroBehaviour::Follow,
+            inventory: Some({
+                let mut inv: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 40];
+                inv[0] = Some(potion_item(5));
+                inv[1] = Some(potion_item(10));
+                inv
+            }),
             equipment: Some(vec![None; 12]),
             quest_inventory: Some(vec![]),
             gold: 10000,
@@ -394,9 +760,13 @@ fn send_map_and_objects(to_client: &Sender<Vec<u8>>, char_index: i32) {
             creature_summoned: false,
             allow_observe: false,
             observer: false,
-        },
-    );
-    // HealthChanged：血蓝实时值（mock 直接发满值）
-    send(to_client, &server::combat::HealthChanged { hp: 850, mp: 420 });
+        };
+        let mut buf = Vec::new();
+        info.write_body(&mut buf).unwrap();
+        let mut cur = Cursor::new(&buf);
+        let read = server::user::UserInformation::read_body(&mut cur).unwrap();
+        let inv = read.inventory.unwrap();
+        assert!(inv[0].is_some(), "slot0 should have item");
+        assert!(inv[1].is_some(), "slot1 should have item");
+    }
 }
-
