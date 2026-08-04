@@ -148,10 +148,10 @@ fn day_night_system(
     let light_alpha = if light_on { 1.0 } else { 0.0 };
     for mat_handle in lights.iter() {
         if let Some(mut mat) = blend_materials.get_mut(&mat_handle.0) {
-            // 强度 0.4 在 map_renderer 灯光生成时设定；这里只控制 alpha 显隐
+            // 强度/颜色在 map_renderer 灯光生成时设定（含 C# 蓝/橙/绿灯光类型）；
+            // 这里只控制 alpha 显隐，保留 RGB（此前把 RGB 全部压成 R 通道 → 彩色灯光失效）
             let arr = mat.color.to_f32_array();
-            let base = arr[0].clamp(0.0, 1.0);
-            mat.color = LinearRgba::new(base, base, base, light_alpha);
+            mat.color = LinearRgba::new(arr[0], arr[1], arr[2], light_alpha);
         }
     }
 }

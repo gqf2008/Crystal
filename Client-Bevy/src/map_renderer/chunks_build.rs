@@ -107,6 +107,8 @@ pub(crate) fn setup_world(
     // 3.6 地图灯光（C# DrawLights Map Lights）：cell.Light 1..9 全量生成，
     // 白色径向渐变 + ADD 混合，z=0.9（场景之上、UI 之下，F 键可开关）
     let light_tex = make_light_texture(&mut assets, 128);
+    // #88：灯光纹理共享给 chunk 流式（灯光随相机加载/卸载）
+    commands.insert_resource(MapLightTexture(light_tex.clone()));
     let mut light_spawned = 0usize;
     // 灯光只生成相机附近窗口（对齐 C# 只画视口 ±24 格）。
     // 全图生成 + 夜晚全部 Visible 会导致数千个巨大光斑同时渲染 → 卡死/过曝。
@@ -137,17 +139,31 @@ pub(crate) fn setup_world(
             }
             let cell_left = x as f32 * TILE_WIDTH as f32;
             let cell_bottom_world = -((y + 1) as f32 * TILE_HEIGHT as f32);
-            // C# p.Offset(-(W/2)-24+10, -(H/2)-16-5)，中心=cell_left+off_x-14+W/2, bottom-11
-            let cx = cell_left + off_x - 14.0 + lw / 2.0;
-            let cy = cell_bottom_world - 11.0;
+            // C# GameScene.DrawLights（Map Lights）：
+            //   p = 格左缘 x*CellW、格底缘 (y+1)*CellH（+32）
+            //   front 动画格再叠加库偏移 (off_x, off_y)
+            //   p.Offset(-LightW/2 - 24 + 10, -LightH/2 - 16 - 5)
+            //   => 纹理左上角 = (格左+off_x - W/2 - 14, 格底+off_y - H/2 - 21)
+            //   => 中心 = (格左+off_x - 14, 格底+off_y - 21)（屏幕 y 向下）
+            // Bevy 世界 y 取负：世界中心 = (cell_left+off_x-14, -(格底+off_y-21))
+            let cx = cell_left + off_x - 14.0;
+            let cy = cell_bottom_world - off_y + 21.0;
+            // C# 灯光颜色按 Light/10：1=白 2=蓝 3=橙 4=绿，默认白
+            let (cr, cg, cb) = match l / 10 {
+                2 => (120.0, 180.0, 255.0),
+                3 => (255.0, 180.0, 120.0),
+                4 => (22.0, 160.0, 5.0),
+                _ => (255.0, 255.0, 255.0),
+            };
             // C# 灯光乘在 darkness 压暗后的背景上（柔和）；Bevy 直接 ADD 全强度会过曝。
-            // 强度取 0.4：夜晚温和提亮、白天隐藏（day_night_system 按 darkness 控制显隐）
+            // 强度取 0.4：夜晚温和提亮、白天隐藏（day_night_system 按 darkness 控制 alpha）
             let mat = blend_materials.add(crate::map_tile_anim::MapBlendMaterial {
-                color: bevy::prelude::LinearRgba::new(0.4, 0.4, 0.4, 1.0),
+                color: bevy::prelude::LinearRgba::new(cr * 0.4 / 255.0, cg * 0.4 / 255.0, cb * 0.4 / 255.0, 1.0),
                 texture: light_tex.clone(),
             });
             commands.spawn((
                 MapLight,
+                LightChunkKey((x / CHUNK_TILES as usize) as i32, (y / CHUNK_TILES as usize) as i32),
                 bevy::prelude::Mesh2d(blend_quad.clone()),
                 bevy::prelude::MeshMaterial2d(mat),
                 Transform::from_xyz(cx, cy, 0.9)

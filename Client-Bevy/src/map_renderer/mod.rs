@@ -83,6 +83,14 @@ pub struct MapFloorMark(pub Layer);
 #[derive(Component)]
 pub struct MapLight;
 
+/// 灯光所属 chunk（#88：灯光随相机流式加载/卸载，与 front 瓦片一致）
+#[derive(Component, Clone, Copy)]
+pub struct LightChunkKey(pub i32, pub i32);
+
+/// 灯光径向渐变纹理（setup_world 创建一次，流式生成复用）
+#[derive(Resource)]
+pub struct MapLightTexture(pub Handle<Image>);
+
 /// C# DXManager.Lights[i] = LightSizes[i+1]（径向渐变光斑尺寸，索引 0..9）
 pub const LIGHT_SIZES: [(f32, f32); 10] = [
     (205.0, 156.0),
