@@ -314,6 +314,10 @@ fn main() {
     if std::env::args().any(|a| a == "--auto-equip") {
         app.add_systems(Update, auto_equip_system);
     }
+    // --auto-life: 依次验证 聊天回显 → 商店购买 → 使用药水
+    if std::env::args().any(|a| a == "--auto-life") {
+        app.add_systems(Update, auto_life_system);
+    }
     // --auto-walk <up|down|left|right>: 调试 chunk 流式（每帧驱动玩家平移）
     {
         let dir = std::env::args()
@@ -4504,5 +4508,48 @@ fn auto_equip_system(
             });
             tracing::info!("⚔️ [AUTO] 装备 {} -> 槽 {}", item.name, to);
         }
+    }
+}
+
+/// --auto-life：进图后依次 聊天(6s) → 购买(9s) → 喝药(12s)
+fn auto_life_system(
+    mut timer: Local<f32>,
+    mut phase: Local<u8>,
+    time: Res<Time>,
+    net: Res<client_bevy::network::NetworkContext>,
+    hud: Res<client_bevy::game::hud::HudState>,
+) {
+    *timer += time.delta_secs();
+    let t = *timer;
+    match *phase {
+        0 if t >= 6.0 => {
+            *phase = 1;
+            net.send_packet(&mir2_shared::packets::client::chat::Chat {
+                message: "你好，传奇世界！".to_string(),
+                linked_items: vec![],
+            });
+            tracing::info!("💬 [LIFE] 发送聊天");
+        }
+        1 if t >= 9.0 => {
+            *phase = 2;
+            net.send_packet(&mir2_shared::packets::client::npc::BuyItem {
+                item_index: 1,
+                count: 1,
+                panel_type: mir2_shared::enums::PanelType::Buy,
+            });
+            tracing::info!("🛒 [LIFE] 发送购买请求");
+        }
+        2 if t >= 12.0 => {
+            *phase = 3;
+            if let Some(potion) = hud.inventory.items.iter().flatten().find(|i| i.item_index == 1) {
+                net.send_packet(&mir2_shared::packets::client::item::UseItem {
+                    unique_id: potion.unique_id,
+                });
+                tracing::info!("💊 [LIFE] 使用药水 uid={}", potion.unique_id);
+            } else {
+                tracing::info!("💊 [LIFE] 背包无药水");
+            }
+        }
+        _ => {}
     }
 }
