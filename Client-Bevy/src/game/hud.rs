@@ -142,11 +142,11 @@ pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-                app.add_systems(
+        app.add_systems(
             Update,
             hud_server_events.run_if(in_state(crate::scenes::AppState::Game)),
         );
-app.add_systems(OnEnter(AppState::Game), spawn_hud);
+        app.add_systems(OnEnter(AppState::Game), spawn_hud);
         app.add_systems(OnExit(AppState::Game), cleanup_hud);
         app.add_systems(
             Update,
@@ -609,11 +609,13 @@ fn hud_server_events(
             }
             ServerEvent::ExperienceGained { amount } => {
                 hud.exp += *amount;
+                tracing::info!("✨ 获得经验 +{}（当前 {}/{}）", amount, hud.exp, hud.max_exp);
             }
             ServerEvent::LevelChanged { level, exp, max_exp } => {
                 hud.level = *level;
                 hud.exp = *exp;
                 hud.max_exp = (*max_exp).max(1);
+                tracing::info!("⬆️ 升级 Lv.{} exp={}/{}", level, exp, max_exp);
             }
         }
     }

@@ -99,6 +99,10 @@ pub struct GroundItem {
 #[derive(Component)]
 pub struct NpcName(pub String);
 
+/// 怪物名称（测试驱动/调试用；real-verify 用于排除守卫等非猎杀目标）
+#[derive(Component)]
+pub struct MonsterName(pub String);
+
 /// 玩家名称（右键邀请组队/交易等交互用）
 #[derive(Component)]
 pub struct PlayerName(pub String);
@@ -551,7 +555,7 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
         }
         NetObject::Monster {
             object_id,
-            name: _,
+            name,
             location_x,
             location_y,
             image,
@@ -564,7 +568,9 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
                 wy(*location_y),
                 *direction,
             );
-            commands.entity(e).insert(NetObjectId(*object_id));
+            commands
+                .entity(e)
+                .insert((NetObjectId(*object_id), MonsterName(name.clone())));
         }
         NetObject::Npc {
             object_id,

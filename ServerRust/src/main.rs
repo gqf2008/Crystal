@@ -69,8 +69,8 @@ async fn async_main() -> anyhow::Result<()> {
     let map_dir = PathBuf::from(&cfg.server.map_data_dir);
     let spawn_dir = PathBuf::from("Data/spawn");
 
-    // 初始化 SQLite 数据库
-    let db_path = PathBuf::from("data/crystal.db");
+    // 初始化 SQLite 数据库（使用配置 database.path，支持绝对路径；#77 worktree 联调发现原硬编码忽略配置）
+    let db_path = PathBuf::from(&cfg.database.path);
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
@@ -85,6 +85,18 @@ async fn async_main() -> anyhow::Result<()> {
             db::init_db(&PathBuf::from(":memory:")).await.expect("in-memory DB should always work")
         }
     };
+
+    // 初始化邮件 ID 计数器（DB 最大 mail_id+1，避免重启后新邮件 UNIQUE 冲突，#73 实测）
+    match sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(mail_id), 0) + 1 FROM mail")
+        .fetch_one(&db_pool)
+        .await
+    {
+        Ok(max_id) => {
+            crystal_server::actors::mail::init_mail_id(max_id as u64);
+            info!("Mail ID counter initialized to {}", max_id);
+        }
+        Err(e) => warn!("Failed to init mail ID counter: {}", e),
+    }
 
     // WorldActor 启动，携带 GateActor 引用 + 地图目录 + 刷怪目录 + 数据库
     // SocialActor 先启动，WorldActor 依赖它。

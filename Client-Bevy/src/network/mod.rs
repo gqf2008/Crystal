@@ -1980,11 +1980,13 @@ fn handle_packet(
         x if x == ServerPacketIds::GainExperience as i16 => {
             if let Ok(p) = experience::GainExperience::read_body(&mut cur) {
                 server_events.write(server_event::from_packet::experience_gained(&p));
+                tracing::info!("✨ 获得经验 +{}", p.amount);
             }
         }
         x if x == ServerPacketIds::LevelChanged as i16 => {
             if let Ok(p) = experience::LevelChanged::read_body(&mut cur) {
                 server_events.write(server_event::from_packet::level_changed(&p));
+                tracing::info!("⬆️ 升级 Lv.{} exp={}/{}", p.level, p.experience, p.max_experience);
             }
         }
 
