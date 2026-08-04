@@ -55,6 +55,10 @@ impl Plugin for RollPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_roll);
         app.add_systems(
             Update,
+            roll_server_events.run_if(in_state(AppState::Game)),
+        );
+        app.add_systems(
+            Update,
             roll_ui_system.run_if(in_state(AppState::Game)),
         );
     }
@@ -178,5 +182,36 @@ fn roll_ui_system(
         tracing::info!("🎲 掷骰完成，回调 NPC {} 页 [{}]", state.npc_id, state.page);
         state.visible = false;
         state.started_at = 0.0;
+    }
+}
+
+
+/// 消费服务端 Roll 事件（网络层只广播 ServerEvent）
+fn roll_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut roll: ResMut<RollState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::Roll {
+            npc_id,
+            r#type,
+            page,
+            result,
+            auto_roll,
+            visible,
+            started_at,
+            finished,
+        } = ev
+        {
+            roll.npc_id = *npc_id;
+            roll.r#type = *r#type;
+            roll.page = page.clone();
+            roll.result = *result;
+            roll.auto_roll = *auto_roll;
+            roll.visible = *visible;
+            roll.started_at = *started_at;
+            roll.finished = *finished;
+        }
     }
 }

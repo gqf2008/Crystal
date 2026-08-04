@@ -660,7 +660,11 @@ fn hud_server_events(
                 hud.max_exp = (*max_exp).max(1);
                 tracing::info!("⬆️ 升级 Lv.{} exp={}/{}", level, exp, max_exp);
             }
-            ServerEvent::Chat { .. } | ServerEvent::NpcDialog { .. } => {}
+            ServerEvent::Chat { .. }
+            | ServerEvent::NpcDialog { .. }
+            | ServerEvent::Roll { .. }
+            | ServerEvent::AwakeningMaterials { .. }
+            | ServerEvent::AwakeningResult { .. } => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);

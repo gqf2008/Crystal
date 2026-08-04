@@ -270,14 +270,13 @@ pub(crate) fn handle_auth(
                         .map(|m| format!("#{}x{}", m.item_id, m.count))
                         .collect::<Vec<_>>()
                 );
-                awake.materials = p
-                    .materials
-                    .into_iter()
-                    .map(|m| crate::game::dialogs::npc_awake::MaterialRow {
-                        item_id: m.item_id,
-                        count: m.count,
-                    })
-                    .collect();
+                server_events.write(ServerEvent::AwakeningMaterials {
+                    materials: p
+                        .materials
+                        .into_iter()
+                        .map(|m| (m.item_id as i32, m.count))
+                        .collect(),
+                });
             }
         }
         x if x == ServerPacketIds::AwakeningLockedItem as i16 => {
@@ -299,8 +298,10 @@ pub(crate) fn handle_auth(
                     _ => format!("未知结果 {}", p.result),
                 };
                 tracing::info!("⚒️ 觉醒结果: {} -> {}", p.result, msg);
-                awake.result = p.result;
-                awake.result_text = msg;
+                server_events.write(ServerEvent::AwakeningResult {
+                    result: p.result,
+                    result_text: msg,
+                });
             }
         }
         x if x == ServerPacketIds::Roll as i16 => {
@@ -312,14 +313,16 @@ pub(crate) fn handle_auth(
                     p.page,
                     p.auto_roll
                 );
-                roll.npc_id = npc_dialog.npc_object_id;
-                roll.r#type = p.r#type;
-                roll.page = p.page;
-                roll.result = p.result;
-                roll.auto_roll = p.auto_roll;
-                roll.visible = true;
-                roll.started_at = 0.0;
-                roll.finished = false;
+                server_events.write(ServerEvent::Roll {
+                    npc_id: npc_dialog.npc_object_id,
+                    r#type: p.r#type,
+                    page: p.page,
+                    result: p.result,
+                    auto_roll: p.auto_roll,
+                    visible: true,
+                    started_at: 0.0,
+                    finished: false,
+                });
             }
         }
         x if x == ServerPacketIds::ObjectPlayer as i16 => {

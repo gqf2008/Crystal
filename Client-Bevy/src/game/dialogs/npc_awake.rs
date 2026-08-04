@@ -76,6 +76,10 @@ impl Plugin for NpcAwakePlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_npc_awake);
         app.add_systems(
             Update,
+            awake_server_events.run_if(in_state(AppState::Game)),
+        );
+        app.add_systems(
+            Update,
             (npc_awake_ui_system, npc_awake_render_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -365,5 +369,32 @@ fn npc_awake_render_system(
     }
     for mut text in &mut res {
         text.0 = state.result_text.clone();
+    }
+}
+
+
+/// 消费服务端觉醒事件（网络层只广播 ServerEvent）
+fn awake_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut awake: ResMut<NpcAwakeState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::AwakeningMaterials { materials } => {
+                awake.materials = materials
+                    .iter()
+                    .map(|(item_id, count)| MaterialRow {
+                        item_id: *item_id,
+                        count: *count,
+                    })
+                    .collect();
+            }
+            ServerEvent::AwakeningResult { result, result_text } => {
+                awake.result = *result;
+                awake.result_text = result_text.clone();
+            }
+            _ => {}
+        }
     }
 }

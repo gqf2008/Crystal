@@ -36,6 +36,21 @@ pub enum ServerEvent {
     ItemRemoved { unique_id: u64 },
     /// UseItem：使用成功（背包计数减一/移除）
     ItemUsed { unique_id: u64 },
+    /// Roll：骰子/尤茨结果
+    Roll {
+        npc_id: u32,
+        r#type: i32,
+        page: String,
+        result: i32,
+        auto_roll: bool,
+        visible: bool,
+        started_at: f32,
+        finished: bool,
+    },
+    /// AwakeningNeedMaterials：觉醒材料需求（item_id, count）
+    AwakeningMaterials { materials: Vec<(i32, i32)> },
+    /// Awakening：觉醒结果
+    AwakeningResult { result: i32, result_text: String },
 }
 
 /// 从已解码的服务端包构造 ServerEvent（便于各分支统一发送）
