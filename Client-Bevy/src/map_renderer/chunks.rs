@@ -36,8 +36,15 @@ pub(crate) fn spawn_front_chunk(
                     }
                     let tick = cell.front_animation_tick;
                     let base_y_world = (y + 1) as f32 * TILE_HEIGHT as f32;
+                    // C# DrawObjects / macroquad：blend 瓦片分两类
+                    //  - fileIndex 14/27/100..199：3 格上 + 顶对齐 + 偏移
+                    //  - 其他 blend（含路灯 image 2723..=2732）：底边对齐 + 偏移
+                    // Bevy 原实现对所有 blend 统一 3 格上且漏了 2723..=2732 → 路灯位置错位（#88）
+                    let is_3cell_anchor = file_index == 14
+                        || file_index == 27
+                        || (100..199).contains(&file_index);
                     let should_apply_offset = if blend {
-                        (100..199).contains(&file_index)
+                        is_3cell_anchor || (2723..=2732).contains(&base_image_index)
                     } else {
                         file_index == 28
                     };
@@ -46,7 +53,11 @@ pub(crate) fn spawn_front_chunk(
                         let off_y = if should_apply_offset { info.offset_y as f32 } else { 0.0 };
                         let left = x as f32 * TILE_WIDTH as f32 + off_x;
                         let (anchor_y, top_anchored) = if blend {
-                            (-(base_y_world - 3.0 * TILE_HEIGHT as f32 + off_y), true)
+                            if is_3cell_anchor {
+                                (-(base_y_world - 3.0 * TILE_HEIGHT as f32 + off_y), true)
+                            } else {
+                                (-(base_y_world + off_y), false)
+                            }
                         } else {
                             (-(base_y_world + off_y), false)
                         };
@@ -132,6 +143,72 @@ pub(crate) fn spawn_front_chunk(
 }
 
 
+/// #88：生成一个 chunk 的地图灯光（C# DrawLights Map Lights 公式/颜色）
+pub(crate) fn spawn_light_chunk(
+    commands: &mut Commands,
+    libraries: &mut Libraries,
+    blend_materials: &mut Assets<MapBlendMaterial>,
+    blend_quad: &Handle<Mesh>,
+    light_tex: &Handle<Image>,
+    map: &MapReader,
+    cx: i32,
+    cy: i32,
+) -> usize {
+    let mut count = 0usize;
+    let x0 = (cx * CHUNK_TILES as i32).max(0) as usize;
+    let y0 = (cy * CHUNK_TILES as i32).max(0) as usize;
+    let x1 = ((cx + 1) * CHUNK_TILES as i32).min(map.width) as usize;
+    let y1 = ((cy + 1) * CHUNK_TILES as i32).min(map.height) as usize;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let cell = &map.map_cells[x][y];
+            let l = cell.light;
+            if l == 0 || l >= 10 {
+                continue;
+            }
+            let li = ((l as usize % 10) * 3).min(9);
+            let (lw, lh) = LIGHT_SIZES[li];
+            // C#：front 动画格叠加库偏移
+            let mut off_x = 0.0f32;
+            let mut off_y = 0.0f32;
+            if cell.front_animation_frame > 0 {
+                if let Some((file_index, image_index)) = cell.front_tile() {
+                    if let Some(info) = libraries.get_map_image(file_index, image_index) {
+                        off_x = info.offset_x as f32;
+                        off_y = info.offset_y as f32;
+                    }
+                }
+            }
+            // C# DrawLights 中心 = (格左+off_x-14+OffSetX, 格底+off_y-21)（屏幕 y 向下）→ Bevy 世界 y 取负
+            // OffSetX=10：C# DrawLights p.X 比 DrawObjects drawX 多 OffSetX，光斑需右移对齐路灯（#88）
+            let cx_w = x as f32 * TILE_WIDTH + off_x - 14.0 + LIGHT_SCREEN_OFFSET_X;
+            let cy_w = -((y + 1) as f32 * TILE_HEIGHT + off_y - 21.0);
+            // C# 灯光颜色按 Light/10：1=白 2=蓝 3=橙 4=绿，默认白；强度 0.4 避免过曝
+            let (cr, cg, cb) = match l / 10 {
+                2 => (120.0, 180.0, 255.0),
+                3 => (255.0, 180.0, 120.0),
+                4 => (22.0, 160.0, 5.0),
+                _ => (255.0, 255.0, 255.0),
+            };
+            let mat = blend_materials.add(crate::map_tile_anim::MapBlendMaterial {
+                color: bevy::prelude::LinearRgba::new(cr * 0.4 / 255.0, cg * 0.4 / 255.0, cb * 0.4 / 255.0, 1.0),
+                texture: light_tex.clone(),
+            });
+            commands.spawn((
+                MapLight,
+                LightChunkKey(cx, cy),
+                bevy::prelude::Mesh2d(blend_quad.clone()),
+                bevy::prelude::MeshMaterial2d(mat),
+                Transform::from_xyz(cx_w, cy_w, 0.9)
+                    .with_scale(Vec3::new(lw, lh, 1.0)),
+                Visibility::default(),
+            ));
+            count += 1;
+        }
+    }
+    count
+}
+
 pub(crate) fn chunk_stream_system(
     mut commands: Commands,
     mut stream: ResMut<ChunkStream>,
@@ -152,6 +229,8 @@ pub(crate) fn chunk_stream_system(
     >,
     chunks: Query<(Entity, &ChunkKey)>,
     front_chunks: Query<(Entity, &FrontChunkKey)>,
+    light_tex: Res<MapLightTexture>,
+    lights: Query<(Entity, &LightChunkKey)>,
 ) {
     let Some(map_reader) = game_data.map_reader.clone() else { return };
     let Ok(cam) = camera.single() else { return };
@@ -253,5 +332,42 @@ pub(crate) fn chunk_stream_system(
     }
     if front_added > 0 {
         tracing::info!("🌳 front 流式加载 {} 个", front_added);
+    }
+
+    // #88：灯光流式——随相机窗口生成/卸载（与 front 一致；此前只在 setup 生成一次，
+    // 玩家出生点远离地图中心时灯光全在地图中心，位置不对）
+    let mut wanted_light = std::collections::HashSet::new();
+    for cy in (cam_cy - 3)..=(cam_cy + 3) {
+        for cx in (cam_cx - 3)..=(cam_cx + 3) {
+            if cx >= 0 && cy >= 0 && cx < chunks_x && cy < chunks_y {
+                wanted_light.insert((cx, cy));
+            }
+        }
+    }
+    let existing_light: std::collections::HashSet<_> =
+        lights.iter().map(|(_, k)| (k.0, k.1)).collect();
+    for (e, k) in lights.iter() {
+        if !wanted_light.contains(&(k.0, k.1)) {
+            commands.entity(e).despawn();
+        }
+    }
+    let mut light_added = 0usize;
+    for (cx, cy) in &wanted_light {
+        if existing_light.contains(&(*cx, *cy)) {
+            continue;
+        }
+        light_added += spawn_light_chunk(
+            &mut commands,
+            &mut game_libs.0,
+            &mut blend_materials,
+            &blend_quad,
+            &light_tex.0,
+            &map_reader,
+            *cx,
+            *cy,
+        );
+    }
+    if light_added > 0 {
+        tracing::info!("💡 灯光流式加载 {} 个", light_added);
     }
 }
