@@ -198,12 +198,8 @@ pub(crate) fn handle_npc_items(
         x if x == ServerPacketIds::MoveItem as i16 => {
             if let Ok(p) = item_operations::MoveItem::read_body(&mut cur) {
                 if p.success && p.grid == mir2_shared::enums::MirGridType::Inventory {
-                    let from = p.from as usize;
-                    let to = p.to as usize;
-                    if from < hud.inventory.items.len() && to < hud.inventory.items.len() {
-                        hud.inventory.items.swap(from, to);
-                        tracing::info!("📦 移动物品 {} -> {}", p.from, p.to);
-                    }
+                    server_events.write(crate::network::server_event::from_packet::move_item(&p));
+                    tracing::info!("📦 移动物品 {} -> {}", p.from, p.to);
                 }
             }
         }
@@ -212,75 +208,22 @@ pub(crate) fn handle_npc_items(
         x if x == ServerPacketIds::EquipItem as i16 => {
             if let Ok(p) = item_operations::EquipItem::read_body(&mut cur) {
                 if p.success {
-                    let to = p.to as usize;
-                    // 从背包移除并放入装备槽
-                    let from_idx = hud
-                        .inventory
-                        .items
-                        .iter()
-                        .position(|s| s.as_ref().map(|it| it.unique_id) == Some(p.unique_id));
-                    if let Some(from_idx) = from_idx {
-                        let item = hud.inventory.items[from_idx].take();
-                        if let Some(item) = item {
-                            let name = item.name.clone();
-                            if to < hud.equipment.len() {
-                                let old = hud.equipment[to].take();
-                                hud.equipment[to] = Some(item);
-                                // 旧装备放回背包空格
-                                if let Some(old) = old {
-                                    if let Some(empty) = hud.inventory.items.iter_mut().find(|s| s.is_none()) {
-                                        *empty = Some(old);
-                                    }
-                                }
-                            }
-                            tracing::info!("⚔️ 装备成功: {} -> 槽 {}", name, p.to);
-                        }
-                    }
+                    server_events.write(crate::network::server_event::from_packet::equip_item(&p));
+                    tracing::info!("⚔️ 装备成功 uid={} -> 槽 {}", p.unique_id, p.to);
                 }
             }
         }
         x if x == ServerPacketIds::RemoveItem as i16 => {
             if let Ok(p) = item_operations::RemoveItem::read_body(&mut cur) {
                 if p.success {
-                    let item = hud
-                        .equipment
-                        .iter_mut()
-                        .flatten()
-                        .find(|it| it.unique_id == p.unique_id)
-                        .cloned();
-                    if let Some(item) = item {
-                        for slot in hud.equipment.iter_mut() {
-                            if slot.as_ref().map(|it| it.unique_id) == Some(p.unique_id) {
-                                *slot = None;
-                                break;
-                            }
-                        }
-                        if let Some(empty) = hud.inventory.items.iter_mut().find(|s| s.is_none()) {
-                            *empty = Some(item);
-                        }
-                        tracing::info!("🛡️ 卸下装备 uid={}", p.unique_id);
-                    }
+                    server_events.write(crate::network::server_event::from_packet::remove_item(&p));
+                    tracing::info!("🛡️ 卸下装备 uid={}", p.unique_id);
                 }
             }
         }
         x if x == ServerPacketIds::UseItem as i16 => {
             if let Ok(p) = item_operations::UseItem::read_body(&mut cur) {
-                let idx = hud
-                    .inventory
-                    .items
-                    .iter()
-                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(p.unique_id));
-                if let Some(idx) = idx {
-                    let count = hud.inventory.items[idx].as_ref().map(|it| it.count).unwrap_or(0);
-                    if count > 1 {
-                        if let Some(it) = hud.inventory.items[idx].as_mut() {
-                            it.count -= 1;
-                        }
-                    } else {
-                        hud.inventory.items[idx] = None;
-                    }
-                    tracing::info!("💊 使用物品 uid={} 剩余 {}", p.unique_id, count.saturating_sub(1));
-                }
+                server_events.write(crate::network::server_event::from_packet::use_item(&p));
             }
         }
         x if x == ServerPacketIds::SplitItem as i16 => {

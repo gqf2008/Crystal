@@ -7,7 +7,7 @@
 // 使用：`events.write(ServerEvent::...)`；消费方 `EventReader<ServerEvent>`。
 
 use bevy::prelude::*;
-use mir2_shared::packets::server::{chat, combat, drops, experience, npc_interaction};
+use mir2_shared::packets::server::{chat, combat, drops, experience, item_operations, npc_interaction};
 
 /// 服务端事件（按包类型组织；字段为消费方需要的最终值）
 /// Bevy 0.19：Message（替代旧 EventReader/EventWriter）
@@ -28,6 +28,14 @@ pub enum ServerEvent {
     },
     /// NPCResponse：NPC 对话页（行 + 可见）
     NpcDialog { lines: Vec<String>, visible: bool },
+    /// MoveItem：背包内交换（仅 Inventory grid 成功响应）
+    InventoryMoved { from: usize, to: usize },
+    /// EquipItem：装备成功（背包→装备槽，旧装备放回背包）
+    ItemEquipped { unique_id: u64, to: usize },
+    /// RemoveItem：卸下装备（装备槽→背包）
+    ItemRemoved { unique_id: u64 },
+    /// UseItem：使用成功（背包计数减一/移除）
+    ItemUsed { unique_id: u64 },
 }
 
 /// 从已解码的服务端包构造 ServerEvent（便于各分支统一发送）
@@ -58,5 +66,17 @@ pub mod from_packet {
     }
     pub fn npc_dialog(p: &npc_interaction::NPCResponse) -> ServerEvent {
         ServerEvent::NpcDialog { lines: p.page.clone(), visible: true }
+    }
+    pub fn move_item(p: &item_operations::MoveItem) -> ServerEvent {
+        ServerEvent::InventoryMoved { from: p.from as usize, to: p.to as usize }
+    }
+    pub fn equip_item(p: &item_operations::EquipItem) -> ServerEvent {
+        ServerEvent::ItemEquipped { unique_id: p.unique_id as u64, to: p.to as usize }
+    }
+    pub fn remove_item(p: &item_operations::RemoveItem) -> ServerEvent {
+        ServerEvent::ItemRemoved { unique_id: p.unique_id as u64 }
+    }
+    pub fn use_item(p: &item_operations::UseItem) -> ServerEvent {
+        ServerEvent::ItemUsed { unique_id: p.unique_id as u64 }
     }
 }

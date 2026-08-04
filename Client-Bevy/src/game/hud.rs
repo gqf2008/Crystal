@@ -661,6 +661,68 @@ fn hud_server_events(
                 tracing::info!("⬆️ 升级 Lv.{} exp={}/{}", level, exp, max_exp);
             }
             ServerEvent::Chat { .. } | ServerEvent::NpcDialog { .. } => {}
+            ServerEvent::InventoryMoved { from, to } => {
+                if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
+                    hud.inventory.items.swap(*from, *to);
+                }
+            }
+            ServerEvent::ItemEquipped { unique_id, to } => {
+                // 从背包移除并放入装备槽；旧装备放回背包空格
+                let from_idx = hud
+                    .inventory
+                    .items
+                    .iter()
+                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(*unique_id));
+                if let Some(from_idx) = from_idx {
+                    let item = hud.inventory.items[from_idx].take();
+                    if let Some(item) = item {
+                        if *to < hud.equipment.len() {
+                            let old = hud.equipment[*to].take();
+                            hud.equipment[*to] = Some(item);
+                            if let Some(old) = old {
+                                if let Some(empty) =
+                                    hud.inventory.items.iter_mut().find(|s| s.is_none())
+                                {
+                                    *empty = Some(old);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            ServerEvent::ItemRemoved { unique_id } => {
+                // 卸下装备：清空装备槽并放回背包空格
+                let mut item = None;
+                for slot in hud.equipment.iter_mut() {
+                    if slot.as_ref().map(|it| it.unique_id) == Some(*unique_id) {
+                        item = slot.take();
+                        break;
+                    }
+                }
+                if let Some(item) = item {
+                    if let Some(empty) = hud.inventory.items.iter_mut().find(|s| s.is_none()) {
+                        *empty = Some(item);
+                    }
+                }
+            }
+            ServerEvent::ItemUsed { unique_id } => {
+                let idx = hud
+                    .inventory
+                    .items
+                    .iter()
+                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(*unique_id));
+                if let Some(idx) = idx {
+                    let count = hud.inventory.items[idx].as_ref().map(|it| it.count).unwrap_or(0);
+                    if count > 1 {
+                        if let Some(it) = hud.inventory.items[idx].as_mut() {
+                            it.count -= 1;
+                        }
+                    } else {
+                        hud.inventory.items[idx] = None;
+                    }
+                    tracing::info!("💊 使用物品 uid={} 剩余 {}", unique_id, count.saturating_sub(1));
+                }
+            }
         }
     }
 }
