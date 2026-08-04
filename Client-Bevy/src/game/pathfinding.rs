@@ -88,6 +88,10 @@ pub fn find_path(map: &LoadedMap, from: (i32, i32), to: (i32, i32)) -> Option<Ve
                 cur = *prev;
             }
             path.reverse();
+            // 直线可达优先（对角优先）：A* 展开顺序可能先横后斜，路线偏离鼠标指向（#95）
+            if let Some(straight) = straight_path(map, from, to) {
+                return Some(straight);
+            }
             // 路径平滑：把 (1,0)+(0,1) 等直线对合成 (1,1) 对角，消除 45° 锯齿
             return Some(smooth_path(map, from, path));
         }
@@ -256,6 +260,58 @@ mod tests {
 
 /// 路径平滑：将锯齿状直线对 (1,0)+(0,1) 或 (0,1)+(1,0) 合并为对角步 (1,1)，
 /// 让 45° 斜向移动保持单一方向（消除 A* 等代价路径的任意 tie-break 造成的抖动）。
+/// 直线可达检测：从 from 到 to 沿"对角优先"直线每步检查可走（含防斜穿墙）。
+/// 用于空地对角移动——A* 的展开顺序可能产生"先横后斜"路径，玩家路线呈 L 形
+/// 偏离鼠标指向；直线路径让玩家直接朝目标方向走（#95）。
+fn straight_path(map: &LoadedMap, from: (i32, i32), to: (i32, i32)) -> Option<Vec<(i32, i32)>> {
+    let dx = to.0 - from.0;
+    let dy = to.1 - from.1;
+    if dx == 0 && dy == 0 {
+        return Some(Vec::new());
+    }
+    let sx = dx.signum();
+    let sy = dy.signum();
+    let diag = dx.abs().min(dy.abs());
+    let mut path = Vec::with_capacity((dx.abs() + dy.abs()) as usize);
+    let mut cur = from;
+    // 对角段优先（朝目标方向）
+    for _ in 0..diag {
+        let nx = cur.0 + sx;
+        let ny = cur.1 + sy;
+        if !map.in_bounds(nx, ny)
+            || !map.is_walkable(nx, ny)
+            || !map.is_walkable(cur.0 + sx, cur.1)
+            || !map.is_walkable(cur.0, cur.1 + sy)
+        {
+            return None;
+        }
+        cur = (nx, ny);
+        path.push(cur);
+    }
+    // 剩余水平/垂直段
+    for _ in 0..(dx.abs() - diag) {
+        let nx = cur.0 + sx;
+        if !map.in_bounds(nx, cur.1) || !map.is_walkable(nx, cur.1) {
+            return None;
+        }
+        cur = (nx, cur.1);
+        path.push(cur);
+    }
+    for _ in 0..(dy.abs() - diag) {
+        let ny = cur.1 + sy;
+        if !map.in_bounds(cur.0, ny) || !map.is_walkable(cur.0, ny) {
+            return None;
+        }
+        cur = (cur.0, ny);
+        path.push(cur);
+    }
+    if cur == to {
+        Some(path)
+    } else {
+        None
+    }
+}
+
 fn smooth_path(map: &LoadedMap, from: (i32, i32), path: Vec<(i32, i32)>) -> Vec<(i32, i32)> {
     let mut out: Vec<(i32, i32)> = Vec::with_capacity(path.len());
     let mut prev = from;

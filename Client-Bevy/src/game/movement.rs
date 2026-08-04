@@ -318,13 +318,15 @@ fn advance_local_move(
     let step = speed * dt;
 
     // 动画：走路/跑步 + 方向（walk 向前看 2 个节点避免方向乱跳）
+    // 首段用稳定段起点（from=last/step_origin）而非实时 cur——滑行中 cur 会在瓦片
+    // 边界漂移，若用 first-cur 计算方向会在 8 方向间乱跳（对角移动方向抖动根因）
     let desired = if use_run {
         direction_from_delta(d1.0, d1.1)
     } else if let Some(last) = lm.last {
         lookahead_direction(last, &lm.path)
             .or_else(|| direction_from_delta(first.0 - last.0, first.1 - last.1))
     } else {
-        direction_from_delta(first.0 - cur.0, first.1 - cur.1)
+        direction_from_delta(first.0 - from.0, first.1 - from.1)
     }
     .unwrap_or(mir2_shared::enums::MirDirection::Up) as u8;
     // 固定角速度转向：每 125ms 转 1 个方向（8 方向/秒，平滑不抖动）
@@ -426,3 +428,129 @@ mod tests {
         assert_eq!(anim.action, mir2_shared::enums::MirAction::Standing);
     }
 }
+
+    /// 诊断：模拟对角直线 + 转弯路径的逐段方向序列（验证方向是否抖动）
+    #[test]
+    fn diag_diagonal_direction_sequence() {
+        use std::collections::VecDeque;
+        // 场景：玩家 (0,0)，点击对角远处 (5,3) → 3 对角 + 2 直线
+        let path: VecDeque<(i32, i32)> =
+            [(1, 1), (2, 2), (3, 3), (4, 3), (5, 3)].into_iter().collect();
+        let mut last: Option<(i32, i32)> = None;
+        let mut dir: u8 = 0; // 初始 Up
+        let mut seq: Vec<u8> = Vec::new();
+        let mut p = path.clone();
+        // 模拟"到达"序列：每到达一格记录稳定后的方向
+        while let Some(&first) = p.front() {
+            let from = last.unwrap_or((0, 0));
+            let desired = if let Some(l) = last {
+                lookahead_direction(l, &p)
+                    .or_else(|| direction_from_delta(first.0 - l.0, first.1 - l.1))
+                    .unwrap_or(mir2_shared::enums::MirDirection::Up) as u8
+            } else {
+                direction_from_delta(first.0 - from.0, first.1 - from.1)
+                    .unwrap_or(mir2_shared::enums::MirDirection::Up) as u8
+            };
+            // 逐步转向到 desired（最多 8 步，模拟足够时间转到位）
+            for _ in 0..8 {
+                dir = step_towards_direction(dir, desired, 1);
+            }
+            seq.push(dir);
+            last = Some(first);
+            p.pop_front();
+        }
+        // 期望：对角段稳定 DownRight(3)，直线段稳定 Right(1)，无来回跳
+        eprintln!("方向序列: {:?}", seq);
+        // 抖动检查：相邻方向差 <= 1（不允许来回大幅摆动）
+        for w in seq.windows(2) {
+            let diff = (w[1] as i32 - w[0] as i32).rem_euclid(8);
+            assert!(diff <= 2 || diff >= 6, "方向抖动: {} -> {}", w[0], w[1]);
+        }
+    }
+
+    /// 集成实测：advance_local_move 对角路径移动，检查 anim.direction 是否抖动
+    #[test]
+    fn diag_advance_local_move_direction_stability() {
+        use std::time::Duration;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(crate::network::NetConnection::default());
+        app.add_systems(Update, advance_local_move);
+
+        // 对角路径（3 对角 + 2 直线）
+        let path: std::collections::VecDeque<(i32, i32)> =
+            [(1, 1), (2, 2), (3, 3), (4, 3), (5, 3)].into_iter().collect();
+        app.world_mut().spawn((
+            crate::actor::LocalPlayer,
+            LocalMove {
+                path,
+                step_timer_ms: 0.0,
+                run: false,
+                last: None,
+                step_origin: None,
+                turn_acc: 0.0,
+            },
+            Transform::from_translation(tile_to_world(0, 0).extend(0.0)),
+            crate::actor::ActorAnim::default(),
+        ));
+
+        let mut dirs: Vec<u8> = Vec::new();
+        let mut prev_tf: Option<f32> = None;
+        let mut moved = false;
+        for _ in 0..240 {
+            app.world_mut().resource_mut::<Time>().advance_by(Duration::from_millis(16));
+            app.update();
+            let world = app.world_mut();
+            let mut q = world.query::<(&crate::actor::ActorAnim, &Transform)>();
+            let (anim, tf) = q.single(&*world).unwrap();
+            dirs.push(anim.direction);
+            if prev_tf.map(|p| (tf.translation.x - p).abs() > 0.01).unwrap_or(false) {
+                moved = true;
+            }
+            prev_tf = Some(tf.translation.x);
+        }
+        eprintln!("移动发生: {}", moved);
+        eprintln!("方向序列(前 40): {:?}", &dirs[..40.min(dirs.len())]);
+        eprintln!("方向集合: {:?}", dirs.iter().collect::<std::collections::HashSet<_>>());
+        // 抖动检查：连续帧方向差（环形）>1 的次数应很少（转向期间允许短暂过渡）
+        let mut flips = 0;
+        for w in dirs.windows(2) {
+            let diff = (w[1] as i32 - w[0] as i32).rem_euclid(8);
+            if diff != 0 && diff != 1 && diff != 7 {
+                flips += 1;
+            }
+        }
+        eprintln!("大跳变帧数: {}", flips);
+        assert!(flips <= 4, "方向抖动过大: flips={}", flips);
+    }
+
+    /// 诊断：find_path 对角目标是否产生平滑直线（无锯齿 = 路线不偏离）
+    #[test]
+    fn diag_find_path_diagonal_smooth() {
+        let map = crate::map_renderer::LoadedMap {
+            name: "test".into(),
+            width: 20,
+            height: 20,
+            walkable: vec![vec![true; 20]; 20],
+        };
+        let path = crate::game::pathfinding::find_path(&map, (0, 0), (5, 3)).unwrap();
+        let mut deltas = Vec::new();
+        let mut prev = (0, 0);
+        for &n in &path {
+            deltas.push((n.0 - prev.0, n.1 - prev.1));
+            prev = n;
+        }
+        eprintln!("path: {:?}", path);
+        eprintln!("deltas: {:?}", deltas);
+        // 理论最短：max(|dx|,|dy|)=5 步（3 对角 + 2 直）
+        assert!(path.len() <= 6, "路径过长(锯齿/绕路): {:?}", path);
+        // 无锯齿：delta 不应出现 "横→竖→横" 交替（如 (1,0),(0,1),(1,0)）
+        for w in deltas.windows(3) {
+            let a = (w[0].0.abs(), w[0].1.abs());
+            let b = (w[1].0.abs(), w[1].1.abs());
+            let c = (w[2].0.abs(), w[2].1.abs());
+            let zigzag = a == (1, 0) && b == (0, 1) && c == (1, 0)
+                || a == (0, 1) && b == (1, 0) && c == (0, 1);
+            assert!(!zigzag, "锯齿路径: {:?}", deltas);
+        }
+    }
