@@ -72,8 +72,7 @@ pub(crate) fn handle_npc_items(
             match npc_interaction::NPCResponse::read_body(&mut cur) {
             Ok(p) => {
                 tracing::info!("🧙 NPC 对话: {} 行", p.page.len());
-                npc_dialog.lines = p.page;
-                npc_dialog.visible = true;
+                server_events.write(crate::network::server_event::from_packet::npc_dialog(&p));
             }
             Err(e) => tracing::warn!("⚠️ NPCResponse 解析失败: {} (len={})", e, payload.len()),
             }

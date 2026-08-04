@@ -7,7 +7,7 @@
 // 使用：`events.write(ServerEvent::...)`；消费方 `EventReader<ServerEvent>`。
 
 use bevy::prelude::*;
-use mir2_shared::packets::server::{chat, combat, drops, experience};
+use mir2_shared::packets::server::{chat, combat, drops, experience, npc_interaction};
 
 /// 服务端事件（按包类型组织；字段为消费方需要的最终值）
 /// Bevy 0.19：Message（替代旧 EventReader/EventWriter）
@@ -26,6 +26,8 @@ pub enum ServerEvent {
         text: String,
         chat_type: mir2_shared::enums::ChatType,
     },
+    /// NPCResponse：NPC 对话页（行 + 可见）
+    NpcDialog { lines: Vec<String>, visible: bool },
 }
 
 /// 从已解码的服务端包构造 ServerEvent（便于各分支统一发送）
@@ -53,5 +55,8 @@ pub mod from_packet {
     }
     pub fn object_chat(p: &chat::ObjectChat) -> ServerEvent {
         ServerEvent::Chat { text: p.text.clone(), chat_type: p.chat_type }
+    }
+    pub fn npc_dialog(p: &npc_interaction::NPCResponse) -> ServerEvent {
+        ServerEvent::NpcDialog { lines: p.page.clone(), visible: true }
     }
 }

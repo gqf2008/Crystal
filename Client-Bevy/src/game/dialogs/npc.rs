@@ -44,6 +44,10 @@ impl Plugin for NpcDialogPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_npc_dialog);
         app.add_systems(
             Update,
+            npc_dialog_server_events.run_if(in_state(AppState::Game)),
+        );
+        app.add_systems(
+            Update,
             (npc_ui_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -203,5 +207,20 @@ pub fn extract_npc_key(line: &str) -> String {
         format!("[@{}]", &rest[..end])
     } else {
         t.to_string()
+    }
+}
+
+
+/// 消费服务端 NPC 对话事件（网络层只广播 ServerEvent）
+fn npc_dialog_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut npc: ResMut<NpcDialogState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::NpcDialog { lines, visible } = ev {
+            npc.lines = lines.clone();
+            npc.visible = *visible;
+        }
     }
 }

@@ -660,7 +660,7 @@ fn hud_server_events(
                 hud.max_exp = (*max_exp).max(1);
                 tracing::info!("⬆️ 升级 Lv.{} exp={}/{}", level, exp, max_exp);
             }
-            ServerEvent::Chat { .. } => {}
+            ServerEvent::Chat { .. } | ServerEvent::NpcDialog { .. } => {}
         }
     }
 }
