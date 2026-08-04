@@ -2355,7 +2355,7 @@ fn auto_combat_test(
     actors: Query<(
         &client_bevy::actor::NetObjectId,
         &Transform,
-        &client_bevy::actor::ActorAppearance,
+        Has<client_bevy::actor::Monster>,
     )>,
     items: Query<(&client_bevy::actor::NetObjectId, &client_bevy::actor::GroundItem)>,
     players: Query<
@@ -2381,8 +2381,8 @@ fn auto_combat_test(
                 client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
             // 找 10 格内最近的怪物
             let mut best: Option<(u32, i32, i32, i32)> = None;
-            for (id, tf, app) in &actors {
-                if !matches!(app, client_bevy::actor::ActorAppearance::Monster { .. }) {
+            for (id, tf, monster) in &actors {
+                if !monster {
                     continue;
                 }
                 let (mx, my) =
@@ -2396,8 +2396,8 @@ fn auto_combat_test(
                 // 探测：附近 40 格内怪物数量与最近距离
                 let mut total = 0usize;
                 let mut nearest = i32::MAX;
-                for (_, tf, app) in &actors {
-                    if !matches!(app, client_bevy::actor::ActorAppearance::Monster { .. }) {
+                for (_, tf, monster) in &actors {
+                    if !monster {
                         continue;
                     }
                     total += 1;
@@ -4696,7 +4696,8 @@ fn real_verify_system(
     actors: Query<(
         &client_bevy::actor::NetObjectId,
         &Transform,
-        &client_bevy::actor::ActorAppearance,
+        Has<client_bevy::actor::Monster>,
+        Has<client_bevy::actor::Npc>,
     )>,
     monster_names: Query<(&client_bevy::actor::NetObjectId, &client_bevy::actor::MonsterName)>,
     players: Query<
@@ -4750,8 +4751,8 @@ fn real_verify_system(
             let mut best: Option<(u32, i32, i32, i32)> = None;
             let mut saw_monster = false;
             let mut saw_guard = false;
-            for (id, tf, app) in &actors {
-                if !matches!(app, client_bevy::actor::ActorAppearance::Monster { .. }) {
+            for (id, tf, monster, _npc) in &actors {
+                if !monster {
                     continue;
                 }
                 saw_monster = true;
@@ -4858,7 +4859,7 @@ fn real_verify_system(
             let (px, py) =
                 client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
             let Some(tid) = s.target else { s.stage = 9; return };
-            let alive = actors.iter().any(|(id, _, _)| id.0 == tid);
+            let alive = actors.iter().any(|(id, _, _, _)| id.0 == tid);
             if !alive {
                 tracing::info!("[REAL] ✅ 目标怪物已死亡（实体移除）——战斗闭环通过（命中 {} 次）", probe.hits);
                 s.stage = 3;
@@ -4914,8 +4915,8 @@ fn real_verify_system(
             let (px, py) =
                 client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
             let mut best: Option<(u32, i32, i32, i32)> = None;
-            for (id, tf, app) in &actors {
-                if !matches!(app, client_bevy::actor::ActorAppearance::Npc { .. }) {
+            for (id, tf, _monster, npc) in &actors {
+                if !npc {
                     continue;
                 }
                 let (nx, ny) =

@@ -10,7 +10,7 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
-use crate::actor::{ActorAnim, ActorAppearance, GroundItem, LocalPlayer, NetObjectId};
+use crate::actor::{ActorAnim, GroundItem, LocalPlayer, Monster, NetObjectId, Npc, Player};
 use crate::game::hud::HudState;
 use crate::game::movement::{direction_from_delta, world_to_tile, LocalMove};
 use crate::game::pathfinding;
@@ -113,7 +113,7 @@ fn player_input_system(
         (Entity, &Transform, &mut ActorAnim),
         (With<LocalPlayer>, With<NetObjectId>),
     >,
-    actors: Query<(&NetObjectId, &Transform, &ActorAppearance)>,
+    actors: Query<(&NetObjectId, &Transform, Has<Npc>)>,
     items: Query<(&NetObjectId, &Transform), (With<GroundItem>, Without<LocalPlayer>)>,
     buttons: Query<&UiButton>,
     guards: InteractionGuards,
@@ -249,7 +249,7 @@ fn player_input_system(
             let is_npc = actors
                 .iter()
                 .find(|(id, _, _)| id.0 == object_id)
-                .map(|(_, _, app)| matches!(app, ActorAppearance::Npc { .. }))
+                .map(|(_, _, is_npc)| is_npc)
                 .unwrap_or(false);
             if is_npc {
                 net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
@@ -375,7 +375,14 @@ fn hold_move_system(
         (Entity, &Transform, &mut LocalMove, &mut ActorAnim),
         (With<LocalPlayer>, With<NetObjectId>),
     >,
-    actors: Query<(&Transform, &ActorAppearance), (Without<LocalPlayer>, Without<GroundItem>)>,
+    actors: Query<
+        &Transform,
+        (
+            Without<LocalPlayer>,
+            Without<GroundItem>,
+            Or<(With<Player>, With<Monster>, With<Npc>)>,
+        ),
+    >,
     items: Query<&Transform, (With<GroundItem>, Without<LocalPlayer>)>,
     hud: Res<HudState>,
 ) {
@@ -395,7 +402,7 @@ fn hold_move_system(
         // 左键按住：鼠标下有可交互对象时交给点击交互，不做移动
         let near_actor = actors
             .iter()
-            .any(|(tf, _)| Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length() < 45.0)
+            .any(|tf| Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length() < 45.0)
             || items
                 .iter()
                 .any(|tf| Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length() < 40.0);
