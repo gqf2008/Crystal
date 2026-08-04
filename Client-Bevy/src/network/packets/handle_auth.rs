@@ -567,14 +567,12 @@ pub(crate) fn handle_auth(
         }
         x if x == ServerPacketIds::Chat as i16 => {
             if let Ok(p) = chat::Chat::read_body(&mut cur) {
-                let color = chat_color(p.chat_type);
-                chat.add_line(p.message, color);
+                server_events.write(crate::network::server_event::from_packet::chat(&p));
             }
         }
         x if x == ServerPacketIds::ObjectChat as i16 => {
             if let Ok(p) = chat::ObjectChat::read_body(&mut cur) {
-                let color = chat_color(p.chat_type);
-                chat.add_line(p.text, color);
+                server_events.write(crate::network::server_event::from_packet::object_chat(&p));
             }
         }
 

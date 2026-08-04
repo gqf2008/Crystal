@@ -7,7 +7,7 @@
 // 使用：`events.write(ServerEvent::...)`；消费方 `EventReader<ServerEvent>`。
 
 use bevy::prelude::*;
-use mir2_shared::packets::server::{combat, drops, experience};
+use mir2_shared::packets::server::{chat, combat, drops, experience};
 
 /// 服务端事件（按包类型组织；字段为消费方需要的最终值）
 /// Bevy 0.19：Message（替代旧 EventReader/EventWriter）
@@ -21,6 +21,11 @@ pub enum ServerEvent {
     ExperienceGained { amount: i64 },
     /// LevelChanged：新等级 + 经验（原实现一并更新 exp/max_exp）
     LevelChanged { level: u16, exp: i64, max_exp: i64 },
+    /// Chat / ObjectChat：聊天消息（颜色映射由消费端 chat.rs 负责）
+    Chat {
+        text: String,
+        chat_type: mir2_shared::enums::ChatType,
+    },
 }
 
 /// 从已解码的服务端包构造 ServerEvent（便于各分支统一发送）
@@ -42,5 +47,11 @@ pub mod from_packet {
             exp: p.experience,
             max_exp: p.max_experience,
         }
+    }
+    pub fn chat(p: &chat::Chat) -> ServerEvent {
+        ServerEvent::Chat { text: p.message.clone(), chat_type: p.chat_type }
+    }
+    pub fn object_chat(p: &chat::ObjectChat) -> ServerEvent {
+        ServerEvent::Chat { text: p.text.clone(), chat_type: p.chat_type }
     }
 }

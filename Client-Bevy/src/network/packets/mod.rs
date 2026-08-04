@@ -194,27 +194,4 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
     parse_content(payload).or_else(|| parse_entry(payload))
 }
 
-/// 处理单个内层包
-
-fn chat_color(t: mir2_shared::enums::ChatType) -> bevy::prelude::Color {
-    use mir2_shared::enums::ChatType;
-    match t {
-        ChatType::Normal => bevy::prelude::Color::WHITE,
-        ChatType::Shout | ChatType::Shout2 | ChatType::Shout3 => {
-            bevy::prelude::Color::srgb(1.0, 0.75, 0.3)
-        }
-        ChatType::System | ChatType::System2 | ChatType::Announcement => {
-            bevy::prelude::Color::srgb(1.0, 0.95, 0.4)
-        }
-        ChatType::Hint => bevy::prelude::Color::srgb(0.4, 1.0, 0.4),
-        ChatType::Group => bevy::prelude::Color::srgb(0.5, 0.9, 1.0),
-        ChatType::WhisperIn | ChatType::WhisperOut => bevy::prelude::Color::srgb(1.0, 0.5, 1.0),
-        ChatType::Guild => bevy::prelude::Color::srgb(0.8, 0.6, 1.0),
-        ChatType::LevelUp => bevy::prelude::Color::srgb(1.0, 0.9, 0.2),
-        ChatType::Mentor | ChatType::Trainer | ChatType::Relationship => {
-            bevy::prelude::Color::srgb(0.6, 1.0, 0.8)
-        }
-        _ => bevy::prelude::Color::WHITE,
-    }
-}
 
