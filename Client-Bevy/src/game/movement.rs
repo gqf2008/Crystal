@@ -280,7 +280,14 @@ fn advance_local_move(
         return;
     }
 
-    let target = *lm.path.front().unwrap();
+    // run 模式跨 2 格（C# 跑步每步 2 格；服务器 Run=2 格/次——#59：
+    // 之前客户端每 1 格节点发 Run，服务器走 2 格导致走过头）
+    let run_step2 = lm.run && lm.path.len() >= 2;
+    let target = if run_step2 {
+        *lm.path.get(1).unwrap()
+    } else {
+        *lm.path.front().unwrap()
+    };
     let target_world = tile_to_world(target.0, target.1);
     let dx = target_world.x - tf.translation.x;
     let dy = target_world.y - tf.translation.y;
@@ -288,9 +295,15 @@ fn advance_local_move(
     let speed = if lm.run { RUN_SPEED } else { WALK_SPEED };
     let step = speed * dt;
 
-    // 动画：走路/跑步 + 方向（向前看 2 个节点取平均方向，避免短锯齿路径导致方向乱跳）
+    // 动画：走路/跑步 + 方向（run 跨格用段方向；walk 向前看 2 个节点避免方向乱跳）
     let cur = world_to_tile(tf.translation.x, tf.translation.y);
-    let desired = if let Some(last) = lm.last {
+    let desired = if run_step2 {
+        if let Some(last) = lm.last {
+            direction_from_delta(target.0 - last.0, target.1 - last.1)
+        } else {
+            direction_from_delta(target.0 - cur.0, target.1 - cur.1)
+        }
+    } else if let Some(last) = lm.last {
         lookahead_direction(last, &lm.path)
             .or_else(|| direction_from_delta(target.0 - last.0, target.1 - last.1))
     } else {
@@ -312,7 +325,7 @@ fn advance_local_move(
     };
 
     if dist <= step || dist < ARRIVAL {
-        // 到达节点：对齐并推进（先发包用段方向，再更新 last）
+        // 到达目标格：对齐并推进（先发包用段方向，再更新 last）
         let seg_dir = if let Some(last) = lm.last {
             direction_from_delta(target.0 - last.0, target.1 - last.1)
         } else {
@@ -320,10 +333,16 @@ fn advance_local_move(
         };
         tf.translation.x = target_world.x;
         tf.translation.y = target_world.y;
-        lm.path.pop_front();
+        // run 跨 2 格：pop 两个节点发 Run；最后 1 格（或 walk）pop 1 个发 Walk
+        if run_step2 {
+            lm.path.pop_front();
+            lm.path.pop_front();
+        } else {
+            lm.path.pop_front();
+        }
         lm.last = Some(target);
         if let Some(d) = seg_dir {
-            if lm.run {
+            if run_step2 {
                 net.send_packet(&mir2_shared::packets::client::movement::Run { direction: d });
             } else {
                 net.send_packet(&mir2_shared::packets::client::movement::Walk { direction: d });

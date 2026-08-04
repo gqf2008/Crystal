@@ -4869,16 +4869,15 @@ fn real_verify_system(
                 Some((p, t2)) => {
                     let len = p.len();
                     s.target_tile = Some(t2);
-                    // 用 walk 模式（1 格/步）验证：Run 包在服务器语义是 2 格/次，
-                    // 客户端按路径节点逐格发 Run 会走过头（#58 单独修）
+                    // run 模式（客户端跨 2 格发一个 Run，#59 已修）
                     commands.entity(pe).insert(client_bevy::game::movement::LocalMove {
                         path: p.into(),
                         step_timer_ms: 0.0,
-                        run: false,
+                        run: true,
                         last: None,
                         turn_acc: 0.0,
                     });
-                    tracing::info!("[REAL] 🚶 寻路到怪物旁（{} 格，walk，目标 {},{}）", len, t2.0, t2.1);
+                    tracing::info!("[REAL] 🚶 寻路到怪物旁（{} 格，run，目标 {},{}）", len, t2.0, t2.1);
                     s.stage = 2;
                     s.t = 0.0;
                 }
@@ -5001,15 +5000,14 @@ fn real_verify_system(
             match path {
                 Some(p) if !p.is_empty() => {
                     let len = p.len();
-                    // walk 模式（Run 语义不匹配见 #58）
                     commands.entity(pe).insert(client_bevy::game::movement::LocalMove {
                         path: p.into(),
                         step_timer_ms: 0.0,
-                        run: false,
+                        run: true,
                         last: None,
                         turn_acc: 0.0,
                     });
-                    tracing::info!("[REAL] 🚶 寻路到 NPC（{} 格，walk）", len);
+                    tracing::info!("[REAL] 🚶 寻路到 NPC（{} 格，run）", len);
                     s.stage = 4;
                     s.t = 0.0;
                 }
