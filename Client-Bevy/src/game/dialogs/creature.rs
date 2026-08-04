@@ -51,7 +51,11 @@ pub struct CreaturePlugin;
 impl Plugin for CreaturePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CreatureState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_creature);
+                app.add_systems(
+            Update,
+            creature_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_creature);
         app.add_systems(OnExit(AppState::Game), cleanup_creature);
         app.add_systems(
             Update,
@@ -182,6 +186,20 @@ fn creature_ui_system(
             net.send_packet(&crate::network::CreatureRequestWire { request: true });
             state.message = "已请求刷新".to_string();
             tracing::info!("🐾 刷新宠物列表");
+        }
+    }
+}
+
+
+/// 消费服务端宠物列表事件（网络层只广播 ServerEvent）
+fn creature_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut creature: ResMut<CreatureState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::CreatureList { creatures } = ev {
+            creature.creatures = creatures.clone();
         }
     }
 }

@@ -8,54 +8,19 @@ use super::*;
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
 
 #[allow(clippy::too_many_arguments, unused_variables)]
-pub(crate) fn handle_auth(
-    net: &mut NetConnection,
+pub(crate) fn handle_auth(    net: &mut NetConnection,
     session: &mut SessionState,
     auth: &mut AuthFeedback,
     game_data: &mut GameData,
     net_objects: &mut MessageWriter<NetObject>,
     net_removals: &mut MessageWriter<NetObjectRemoved>,
     motions: &mut MessageWriter<NetMotion>,
-    hud: &mut HudState,
-    chat: &mut ChatState,
-    npc_dialog: &mut NpcDialogState,
-    npc_goods: &mut NpcGoodsState,
     combat_evt: &mut MessageWriter<CombatEvent>,
-    weather: &mut WeatherState,
-    magics: &mut MagicsState,
-    storage: &mut StorageState,
-    sell_panel: &mut SellPanelState,
-    group: &mut GroupState,
-    mail: &mut MailState,
-    trade: &mut TradeState,
-    friend: &mut FriendState,
-    guild: &mut GuildState,
-    ranking: &mut RankingState,
-    mentor: &mut MentorState,
-    market: &mut MarketState,
-    shop: &mut GameShopState,
-    territory: &mut GuildTerritoryState,
     effects: &mut MessageWriter<PendingEffect>,
     server_events: &mut MessageWriter<ServerEvent>,
     control: &mut ControlState,
-    fishing: &mut FishingState,
-    refine: &mut RefineState,
-    craft: &mut CraftState,
-    rental: &mut ItemRentalState,
-    quest_log: &mut QuestLogState,
-    buff: &mut BuffState,
-    report: &mut ReportState,
-    inspect: &mut InspectState,
-    creature: &mut CreatureState,
-    hero: &mut HeroState,
-    relationship: &mut RelationshipState,
-    big_map: &mut crate::game::dialogs::big_map::BigMapState,
-    awake: &mut crate::game::dialogs::npc_awake::NpcAwakeState,
-    roll: &mut crate::game::dialogs::roll::RollState,
-    mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
-    payload: &[u8],
-) -> bool {
+    payload: &[u8],) -> bool {
     use mir2_shared::packets::server::*;
 
     let mut cur = std::io::Cursor::new(payload);
@@ -228,7 +193,7 @@ pub(crate) fn handle_auth(
                 game_data.desired_map = Some(p.file_name);
                 game_data.player_spawn =
                     Some((p.location_x as f32, p.location_y as f32, p.direction));
-                weather.code = p.weather;
+                server_events.write(ServerEvent::WeatherChanged { code: p.weather });
                 next.set(AppState::Game);
             }
         }
@@ -240,9 +205,7 @@ pub(crate) fn handle_auth(
                     p.title,
                     p.npcs.len()
                 );
-                big_map.map_index = p.map_index;
-                big_map.title = p.title.clone();
-                big_map.npcs = p
+                let npcs: Vec<crate::game::dialogs::big_map::NpcRow> = p
                     .npcs
                     .into_iter()
                     .map(|n| crate::game::dialogs::big_map::NpcRow {
@@ -254,8 +217,11 @@ pub(crate) fn handle_auth(
                         can_teleport_to: n.can_teleport_to,
                     })
                     .collect();
-                big_map.selected = None;
-                big_map.top_line = 0;
+                server_events.write(ServerEvent::MapInfo {
+                    map_index: p.map_index,
+                    title: p.title.clone(),
+                    npcs,
+                });
             }
         }
         x if x == ServerPacketIds::AwakeningNeedMaterials as i16 => {
@@ -270,14 +236,13 @@ pub(crate) fn handle_auth(
                         .map(|m| format!("#{}x{}", m.item_id, m.count))
                         .collect::<Vec<_>>()
                 );
-                awake.materials = p
-                    .materials
-                    .into_iter()
-                    .map(|m| crate::game::dialogs::npc_awake::MaterialRow {
-                        item_id: m.item_id,
-                        count: m.count,
-                    })
-                    .collect();
+                server_events.write(ServerEvent::AwakeningMaterials {
+                    materials: p
+                        .materials
+                        .into_iter()
+                        .map(|m| (m.item_id as i32, m.count))
+                        .collect(),
+                });
             }
         }
         x if x == ServerPacketIds::AwakeningLockedItem as i16 => {
@@ -299,8 +264,10 @@ pub(crate) fn handle_auth(
                     _ => format!("未知结果 {}", p.result),
                 };
                 tracing::info!("⚒️ 觉醒结果: {} -> {}", p.result, msg);
-                awake.result = p.result;
-                awake.result_text = msg;
+                server_events.write(ServerEvent::AwakeningResult {
+                    result: p.result,
+                    result_text: msg,
+                });
             }
         }
         x if x == ServerPacketIds::Roll as i16 => {
@@ -312,14 +279,15 @@ pub(crate) fn handle_auth(
                     p.page,
                     p.auto_roll
                 );
-                roll.npc_id = npc_dialog.npc_object_id;
-                roll.r#type = p.r#type;
-                roll.page = p.page;
-                roll.result = p.result;
-                roll.auto_roll = p.auto_roll;
-                roll.visible = true;
-                roll.started_at = 0.0;
-                roll.finished = false;
+                server_events.write(ServerEvent::Roll {
+                    r#type: p.r#type,
+                    page: p.page,
+                    result: p.result,
+                    auto_roll: p.auto_roll,
+                    visible: true,
+                    started_at: 0.0,
+                    finished: false,
+                });
             }
         }
         x if x == ServerPacketIds::ObjectPlayer as i16 => {
@@ -417,80 +385,55 @@ pub(crate) fn handle_auth(
                         p.max_experience,
                         p.gold
                     );
-                    hud.name = p.name.clone();
-                    hud.level = p.level;
-                    hud.hp = p.hp;
-                    hud.mp = p.mp;
-                    hud.exp = p.experience;
-                    hud.max_exp = p.max_experience.max(1);
-                    hud.gold = p.gold;
-                    hud.class = p.class as u8;
-                    hud.player_object_id = Some(p.object_id);
+                    // ---- 会话状态（网络层保留直写） ----
                     session.local_player_id = Some(p.object_id);
                     session.self_position = Some((p.location_x, p.location_y, p.direction as u8));
 
-                    // 技能（MagicsState）：UserInformation 携带已学技能
-                    for m in &p.magics {
-                        magics.upsert(m.clone());
-                    }
-
-                    // 背包（40 格）
-                    if let Some(inv) = &p.inventory {
-                        let items: Vec<Option<InvItem>> = inv
-                            .iter()
-                            .take(40)
-                            .map(|slot| slot.as_ref().map(to_inv_item))
-                            .collect();
-                        hud.inventory.items = items;
-                        hud.inventory.gold = p.gold;
-                        tracing::info!(
-                            "🎒 背包 {} 格（{} 件物品）",
-                            hud.inventory.items.len(),
-                            hud.inventory.items.iter().flatten().count()
-                        );
-                    }
-
-                    // 装备（12 槽）
-                    if let Some(equip) = &p.equipment {
-                        hud.equipment = equip
-                            .iter()
-                            .map(|slot| slot.as_ref().map(to_inv_item))
-                            .collect();
-                    }
-
-                    // 物品名缓存（供仓库等无内嵌 ItemInfo 的列表显示，M32）
-                    if let Some(inv) = &p.inventory {
-                        for slot in inv.iter().filter_map(|s| s.as_ref()) {
+                    // ---- UI 数据：广播 ServerEvent，由各模块消费 ----
+                    let magics: Vec<mir2_shared::data::client_data::ClientMagic> = p.magics.clone();
+                    let inventory: Vec<Option<InvItem>> = p
+                        .inventory
+                        .as_ref()
+                        .map(|inv| {
+                            inv.iter()
+                                .take(40)
+                                .map(|slot| slot.as_ref().map(to_inv_item))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let equipment: Vec<Option<InvItem>> = p
+                        .equipment
+                        .as_ref()
+                        .map(|eq| eq.iter().map(|slot| slot.as_ref().map(to_inv_item)).collect())
+                        .unwrap_or_default();
+                    let mut item_names: Vec<(i32, String)> = Vec::new();
+                    for slot in p
+                        .inventory
+                        .iter()
+                        .flat_map(|inv| inv.iter())
+                        .chain(p.equipment.iter().flat_map(|eq| eq.iter()))
+                    {
+                        if let Some(slot) = slot {
                             if let Some(info) = &slot.info {
-                                guild.item_names.insert(slot.item_index, info.name.clone());
+                                item_names.push((slot.item_index, info.name.clone()));
                             }
                         }
                     }
-                    if let Some(eq) = &p.equipment {
-                        for slot in eq.iter().filter_map(|s| s.as_ref()) {
-                            if let Some(info) = &slot.info {
-                                guild.item_names.insert(slot.item_index, info.name.clone());
-                            }
-                        }
-                    }
-
-                    // 市场物品名缓存（M34，与行会缓存同源）
-                    if let Some(inv) = &p.inventory {
-                        for slot in inv.iter().filter_map(|s| s.as_ref()) {
-                            if let Some(info) = &slot.info {
-                                market.item_names.insert(slot.item_index, info.name.clone());
-                            }
-                        }
-                    }
-
-                    // 商城物品名缓存（M35）
-                    if let Some(inv) = &p.inventory {
-                        for slot in inv.iter().filter_map(|s| s.as_ref()) {
-                            if let Some(info) = &slot.info {
-                                shop.item_names.insert(slot.item_index, info.name.clone());
-                            }
-                        }
-                    }
+                    server_events.write(ServerEvent::UserInformation {
+                        name: p.name.clone(),
+                        level: p.level,
+                        hp: p.hp,
+                        mp: p.mp,
+                        exp: p.experience,
+                        max_exp: p.max_experience.max(1),
+                        gold: p.gold,
+                        class: p.class as u8,
+                        object_id: p.object_id,
+                        magics,
+                        inventory,
+                        equipment,
+                        item_names,
+                    });
                 }
                 Err(e) => {
                     tracing::warn!("⚠️ UserInformation 解析失败: {} (len={})", e, payload.len())
@@ -567,14 +510,12 @@ pub(crate) fn handle_auth(
         }
         x if x == ServerPacketIds::Chat as i16 => {
             if let Ok(p) = chat::Chat::read_body(&mut cur) {
-                let color = chat_color(p.chat_type);
-                chat.add_line(p.message, color);
+                server_events.write(crate::network::server_event::from_packet::chat(&p));
             }
         }
         x if x == ServerPacketIds::ObjectChat as i16 => {
             if let Ok(p) = chat::ObjectChat::read_body(&mut cur) {
-                let color = chat_color(p.chat_type);
-                chat.add_line(p.text, color);
+                server_events.write(crate::network::server_event::from_packet::object_chat(&p));
             }
         }
 

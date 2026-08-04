@@ -42,7 +42,11 @@ pub struct RankingPlugin;
 impl Plugin for RankingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RankingState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_ranking);
+                app.add_systems(
+            Update,
+            ranking_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_ranking);
         app.add_systems(OnExit(AppState::Game), cleanup_ranking);
         app.add_systems(
             Update,
@@ -150,6 +154,26 @@ fn ranking_ui_system(
         let y = 150.0 + 4.0;
         if cursor.x >= x && cursor.x <= x + 20.0 && cursor.y >= y && cursor.y <= y + 20.0 {
             mgr.close(DialogKind::Ranking);
+        }
+    }
+}
+
+
+/// 消费服务端排行榜事件（网络层只广播 ServerEvent）
+fn ranking_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut ranking: ResMut<RankingState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::Rankings { entries } => {
+                ranking.entries = entries.clone();
+            }
+            ServerEvent::RankingsCleared => {
+                ranking.entries.clear();
+            }
+            _ => {}
         }
     }
 }

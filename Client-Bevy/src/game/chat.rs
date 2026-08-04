@@ -69,7 +69,8 @@ impl Plugin for ChatPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_chat);
         app.add_systems(
             Update,
-            (chat_input_system, chat_display_system).run_if(in_state(AppState::Game)),
+            (chat_input_system, chat_display_system, chat_server_events)
+                .run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -239,6 +240,42 @@ fn chat_display_system(
             if text.0 != new {
                 text.0 = new;
             }
+        }
+    }
+}
+
+
+/// 聊天颜色映射（从网络层移入：展示逻辑归 UI 模块，网络只发 ServerEvent）
+pub fn chat_color(t: mir2_shared::enums::ChatType) -> Color {
+    use mir2_shared::enums::ChatType;
+    match t {
+        ChatType::Normal => Color::WHITE,
+        ChatType::Shout | ChatType::Shout2 | ChatType::Shout3 => Color::srgb(1.0, 0.75, 0.3),
+        ChatType::System | ChatType::System2 | ChatType::Announcement => {
+            Color::srgb(1.0, 0.95, 0.4)
+        }
+        ChatType::Hint => Color::srgb(0.4, 1.0, 0.4),
+        ChatType::Group => Color::srgb(0.5, 0.9, 1.0),
+        ChatType::WhisperIn | ChatType::WhisperOut => Color::srgb(1.0, 0.5, 1.0),
+        ChatType::Guild => Color::srgb(0.8, 0.6, 1.0),
+        ChatType::LevelUp => Color::srgb(1.0, 0.9, 0.2),
+        ChatType::Mentor | ChatType::Trainer | ChatType::Relationship => {
+            Color::srgb(0.6, 1.0, 0.8)
+        }
+        _ => Color::WHITE,
+    }
+}
+
+/// 消费服务端聊天事件更新 ChatState（网络层只广播 ServerEvent）
+fn chat_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut chat: ResMut<ChatState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::Chat { text, chat_type } = ev {
+            let color = chat_color(*chat_type);
+            chat.add_line(text.clone(), color);
         }
     }
 }

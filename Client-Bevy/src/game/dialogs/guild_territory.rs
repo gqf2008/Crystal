@@ -72,7 +72,11 @@ pub struct GuildTerritoryPlugin;
 impl Plugin for GuildTerritoryPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GuildTerritoryState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_guild_territory);
+                app.add_systems(
+            Update,
+            territory_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_guild_territory);
         app.add_systems(OnExit(AppState::Game), cleanup_guild_territory);
         app.add_systems(
             Update,
@@ -381,6 +385,26 @@ fn guild_territory_ui_system(
                 input.texts[7].clear();
                 input.active = None;
             }
+        }
+    }
+}
+
+
+/// 消费服务端领地事件（网络层只广播 ServerEvent；文案在此构造）
+fn territory_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut territory: ResMut<GuildTerritoryState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::TerritoryList { rows } => {
+                territory.rows = rows.clone();
+            }
+            ServerEvent::TerritoryWar { guild_name } => {
+                territory.war_message = format!("已向 {} 行会宣战", guild_name);
+            }
+            _ => {}
         }
     }
 }

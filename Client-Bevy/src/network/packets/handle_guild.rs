@@ -8,54 +8,19 @@ use super::*;
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
 
 #[allow(clippy::too_many_arguments, unused_variables)]
-pub(crate) fn handle_guild(
-    net: &mut NetConnection,
+pub(crate) fn handle_guild(    net: &mut NetConnection,
     session: &mut SessionState,
     auth: &mut AuthFeedback,
     game_data: &mut GameData,
     net_objects: &mut MessageWriter<NetObject>,
     net_removals: &mut MessageWriter<NetObjectRemoved>,
     motions: &mut MessageWriter<NetMotion>,
-    hud: &mut HudState,
-    chat: &mut ChatState,
-    npc_dialog: &mut NpcDialogState,
-    npc_goods: &mut NpcGoodsState,
     combat_evt: &mut MessageWriter<CombatEvent>,
-    weather: &mut WeatherState,
-    magics: &mut MagicsState,
-    storage: &mut StorageState,
-    sell_panel: &mut SellPanelState,
-    group: &mut GroupState,
-    mail: &mut MailState,
-    trade: &mut TradeState,
-    friend: &mut FriendState,
-    guild: &mut GuildState,
-    ranking: &mut RankingState,
-    mentor: &mut MentorState,
-    market: &mut MarketState,
-    shop: &mut GameShopState,
-    territory: &mut GuildTerritoryState,
     effects: &mut MessageWriter<PendingEffect>,
     server_events: &mut MessageWriter<ServerEvent>,
     control: &mut ControlState,
-    fishing: &mut FishingState,
-    refine: &mut RefineState,
-    craft: &mut CraftState,
-    rental: &mut ItemRentalState,
-    quest_log: &mut QuestLogState,
-    buff: &mut BuffState,
-    report: &mut ReportState,
-    inspect: &mut InspectState,
-    creature: &mut CreatureState,
-    hero: &mut HeroState,
-    relationship: &mut RelationshipState,
-    big_map: &mut crate::game::dialogs::big_map::BigMapState,
-    awake: &mut crate::game::dialogs::npc_awake::NpcAwakeState,
-    roll: &mut crate::game::dialogs::roll::RollState,
-    mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
-    payload: &[u8],
-) -> bool {
+    payload: &[u8],) -> bool {
     use mir2_shared::packets::server::*;
 
     let mut cur = std::io::Cursor::new(payload);
@@ -80,15 +45,8 @@ pub(crate) fn handle_guild(
                         items.len(),
                         items.iter().flatten().count()
                     );
-                    storage.items = items;
-                    storage.visible = true;
-                    // 原版 C#：仓库打开时同时显示背包
-                    if !mgr.is_open(crate::game::dialogs::DialogKind::Storage) {
-                        mgr.open.push(crate::game::dialogs::DialogKind::Storage);
-                    }
-                    if !mgr.is_open(crate::game::dialogs::DialogKind::Inventory) {
-                        mgr.open.push(crate::game::dialogs::DialogKind::Inventory);
-                    }
+                    // 仓库数据/打开对话框逻辑移入 storage 消费端
+                    server_events.write(ServerEvent::StorageOpened { items, visible: true });
                 }
                 Err(e) => tracing::warn!("⚠️ UserStorage 解析失败: {} (len={})", e, payload.len()),
             }
@@ -100,17 +58,9 @@ pub(crate) fn handle_guild(
             // 双格式：1 字节 in_guild / 完整行会信息（服务端 send_guild_info_packet 复用此 opcode）
             let body = &payload[PacketHeader::HEADER_SIZE..];
             if body.len() == 1 {
-                guild.in_guild = body[0] != 0;
-                if !guild.in_guild {
-                    guild.name.clear();
-                    guild.leader.clear();
-                    guild.members.clear();
-                    guild.notice.clear();
-                    guild.gold = 0;
-                    guild.storage_items.clear();
-                    guild.storage_received = false;
-                }
-                tracing::info!("🏰 行会状态: {}", if guild.in_guild { "在行会中" } else { "未加入行会" });
+                let in_guild = body[0] != 0;
+                server_events.write(ServerEvent::GuildInGuild { in_guild });
+                tracing::info!("🏰 行会状态: {}", if in_guild { "在行会中" } else { "未加入行会" });
             } else {
                 let mut cur = std::io::Cursor::new(body);
                 let name = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
@@ -137,19 +87,15 @@ pub(crate) fn handle_guild(
                 } else {
                     0
                 };
-                guild.in_guild = true;
-                guild.name = name;
-                guild.leader = leader;
-                guild.notice = notice;
-                guild.members = members;
-                guild.gold = gold;
-                tracing::info!(
-                    "🏰 行会信息: {}（{}）成员 {} 金币 {}",
-                    guild.name,
-                    guild.leader,
-                    guild.members.len(),
-                    guild.gold
-                );
+                let member_count = members.len();
+                server_events.write(ServerEvent::GuildData {
+                    name,
+                    leader,
+                    notice,
+                    members,
+                    gold,
+                });
+                tracing::info!("🏰 行会信息: 已广播（成员 {}）", member_count);
             }
         }
         // ---- M32: 行会仓库物品列表 ----
@@ -158,31 +104,25 @@ pub(crate) fn handle_guild(
             let mut cur = std::io::Cursor::new(body);
             match mir2_shared::packets::server::guild::GuildStorageList::read_body(&mut cur) {
                 Ok(p) => {
-                    guild.storage_items = p
+                    let items: Vec<(u64, i32, u16, String)> = p
                         .items
                         .iter()
                         .take(100)
-                        .map(|opt| {
-                            opt.as_ref().map(|gsi| StorageItem {
-                                unique_id: gsi.item.unique_id,
-                                item_index: gsi.item.item_index,
-                                name: gsi
-                                    .item
-                                    .info
-                                    .as_ref()
-                                    .map(|i| i.name.clone())
-                                    .or_else(|| guild.item_names.get(&gsi.item.item_index).cloned())
-                                    .unwrap_or_default(),
-                                count: gsi.item.count,
+                        .filter_map(|opt| {
+                            opt.as_ref().map(|gsi| {
+                                (
+                                    gsi.item.unique_id,
+                                    gsi.item.item_index,
+                                    gsi.item.count,
+                                    gsi.item.info.as_ref().map(|i| i.name.clone()).unwrap_or_default(),
+                                )
                             })
                         })
                         .collect();
-                    guild.storage_received = true;
-                    tracing::info!(
-                        "🏰 仓库物品列表: {} 格（{} 件）",
-                        guild.storage_items.len(),
-                        guild.storage_items.iter().filter_map(|s| s.as_ref()).count()
-                    );
+                    let count = items.len();
+                    let total = items.len();
+                    server_events.write(ServerEvent::GuildStorage { items });
+                    tracing::info!("🏰 仓库物品列表: {} 格（{} 件）", total, count);
                 }
                 Err(e) => {
                     tracing::warn!("⚠️ GuildStorageList 解析失败: {} (len={})", e, payload.len())
@@ -205,8 +145,9 @@ pub(crate) fn handle_guild(
                     break;
                 }
             }
-            market.pages = pages.max(1);
-            tracing::info!("🏪 市场页数: {}", market.pages);
+            let pages = pages.max(1);
+            server_events.write(ServerEvent::MarketPages { pages });
+            tracing::info!("🏪 市场页数: {}", pages);
         }
         x if x == ServerPacketIds::NPCMarketPage as i16 => {
             // [count i32][per listing: auction_id u64][UserItem][7-bit seller][price u32][date i64]
@@ -237,28 +178,25 @@ pub(crate) fn handle_guild(
                     Ok(v) => v,
                     Err(_) => { ok = false; break; }
                 };
-                let name = item
+                let info_name = item
                     .info
                     .as_ref()
                     .map(|i| i.name.clone())
-                    .or_else(|| market.item_names.get(&item.item_index).cloned())
-                    .unwrap_or_else(|| format!("#{}", item.item_index));
-                listings.push(MarketItem {
+                    .unwrap_or_default();
+                listings.push((
                     auction_id,
-                    unique_id: item.unique_id,
-                    name,
-                    item_index: item.item_index,
-                    count: item.count,
+                    item.unique_id,
+                    item.item_index,
+                    item.count,
+                    info_name,
                     seller,
                     price,
-                });
+                ));
             }
             if ok {
-                market.listings = listings;
-                tracing::info!(
-                    "🏪 市场列表: {} 件",
-                    market.listings.len()
-                );
+                let listing_count = listings.len();
+                server_events.write(ServerEvent::MarketListings { listings });
+                tracing::info!("🏪 市场列表: {} 条", listing_count);
             } else {
                 tracing::warn!("⚠️ NPCMarketPage 解析失败: (len={})", payload.len());
             }
@@ -271,11 +209,10 @@ pub(crate) fn handle_guild(
             if let Ok(uid) = cur.read_u64::<LittleEndian>() {
                 let ok = cur.read_u8().unwrap_or(0) != 0;
                 if ok {
-                    market.consign_ok = Some(uid);
-                    market.message = format!("寄售成功 uid={}", uid);
+                    server_events.write(ServerEvent::MarketConsign { uid, success: true });
                     tracing::info!("🏪 寄售成功: uid={}", uid);
                 } else {
-                    market.message = "寄售失败".to_string();
+                    server_events.write(ServerEvent::MarketConsign { uid, success: false });
                     tracing::warn!("🏪 寄售失败: uid={}", uid);
                 }
             }
@@ -285,7 +222,7 @@ pub(crate) fn handle_guild(
             let mut cur = std::io::Cursor::new(body);
             match mir2_shared::binary::read_dotnet_string(&mut cur) {
                 Ok(msg) => {
-                    market.message = msg.clone();
+                    server_events.write(ServerEvent::MarketSuccess { message: msg.clone() });
                     tracing::info!("🏪 市场成功: {}", msg);
                 }
                 Err(e) => tracing::warn!("⚠️ MarketSuccess 解析失败: {} (len={})", e, payload.len()),
@@ -293,7 +230,7 @@ pub(crate) fn handle_guild(
         }
         x if x == ServerPacketIds::MarketFail as i16 => {
             let reason = payload.get(PacketHeader::HEADER_SIZE).copied().unwrap_or(0);
-            market.message = format!("市场操作失败（原因 {}）", reason);
+            server_events.write(ServerEvent::MarketFail { reason });
             tracing::warn!("🏪 市场失败原因: {}", reason);
         }
         // ---- M35: 商城 ----
@@ -316,19 +253,14 @@ pub(crate) fn handle_guild(
                 let stock = match cur.read_i32::<LittleEndian>() { Ok(v) => v, Err(_) => { ok = false; break; } };
                 let _is_bought = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
                 let _deal = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
-                let name = shop.item_names.get(&item_index).cloned().unwrap_or_default();
-                items.push(UiShopItem { item_index, name, gold_price, credit_price, category, stock });
+                items.push((item_index, gold_price, credit_price, category, stock));
             }
             if ok {
                 let _credit = cur.read_u32::<LittleEndian>().unwrap_or(0);
                 let gold = cur.read_u32::<LittleEndian>().unwrap_or(0);
-                shop.items = items;
-                shop.gold = gold;
-                tracing::info!(
-                    "🛒 商城目录: {} 件，金币 {}",
-                    shop.items.len(),
-                    shop.gold
-                );
+                let item_count = items.len();
+                server_events.write(ServerEvent::ShopCatalog { items, gold });
+                tracing::info!("🛒 商城目录: {} 件，金币 {}", item_count, gold);
             } else {
                 tracing::warn!("⚠️ GameShopInfo 解析失败: (len={})", payload.len());
             }
@@ -339,10 +271,7 @@ pub(crate) fn handle_guild(
             if body.len() >= 8 {
                 let item_id = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
                 let stock = i32::from_le_bytes(body[4..8].try_into().unwrap_or([0; 4]));
-                shop.message = format!("商品 #{} 库存剩余 {}", item_id, stock);
-                if let Some(it) = shop.items.iter_mut().find(|i| i.item_index == item_id) {
-                    it.stock = stock;
-                }
+                server_events.write(ServerEvent::ShopStock { item_id, stock });
                 tracing::info!("🛒 商城库存: #{} 剩余 {}", item_id, stock);
             }
         }
@@ -363,12 +292,10 @@ pub(crate) fn handle_guild(
                 rows.push(TerritoryRow { id, map_index, owner, state });
             }
             if ok {
-                territory.rows = rows;
-                tracing::info!(
-                    "🏯 领地列表: {} 个（无主 {}）",
-                    territory.rows.len(),
-                    territory.rows.iter().filter(|r| r.owner.is_empty()).count()
-                );
+                let row_count = rows.len();
+                let unowned = rows.iter().filter(|r| r.owner.is_empty()).count();
+                server_events.write(ServerEvent::TerritoryList { rows });
+                tracing::info!("🏯 领地列表: {} 个（无主 {}）", row_count, unowned);
             } else {
                 tracing::warn!("⚠️ GuildTerritoryPage 解析失败: (len={})", payload.len());
             }
@@ -379,7 +306,7 @@ pub(crate) fn handle_guild(
             let mut cur = std::io::Cursor::new(body);
             match mir2_shared::binary::read_dotnet_string(&mut cur) {
                 Ok(name) => {
-                    territory.war_message = format!("已向 {} 行会宣战", name);
+                    server_events.write(ServerEvent::TerritoryWar { guild_name: name.clone() });
                     tracing::info!("🏯 宣战确认: {}", name);
                 }
                 Err(e) => {

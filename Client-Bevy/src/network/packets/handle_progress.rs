@@ -8,54 +8,8 @@ use super::*;
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
 
 #[allow(clippy::too_many_arguments, unused_variables)]
-pub(crate) fn handle_progress(
-    net: &mut NetConnection,
-    session: &mut SessionState,
-    auth: &mut AuthFeedback,
-    game_data: &mut GameData,
-    net_objects: &mut MessageWriter<NetObject>,
-    net_removals: &mut MessageWriter<NetObjectRemoved>,
-    motions: &mut MessageWriter<NetMotion>,
-    hud: &mut HudState,
-    chat: &mut ChatState,
-    npc_dialog: &mut NpcDialogState,
-    npc_goods: &mut NpcGoodsState,
-    combat_evt: &mut MessageWriter<CombatEvent>,
-    weather: &mut WeatherState,
-    magics: &mut MagicsState,
-    storage: &mut StorageState,
-    sell_panel: &mut SellPanelState,
-    group: &mut GroupState,
-    mail: &mut MailState,
-    trade: &mut TradeState,
-    friend: &mut FriendState,
-    guild: &mut GuildState,
-    ranking: &mut RankingState,
-    mentor: &mut MentorState,
-    market: &mut MarketState,
-    shop: &mut GameShopState,
-    territory: &mut GuildTerritoryState,
-    effects: &mut MessageWriter<PendingEffect>,
-    server_events: &mut MessageWriter<ServerEvent>,
-    control: &mut ControlState,
-    fishing: &mut FishingState,
-    refine: &mut RefineState,
-    craft: &mut CraftState,
-    rental: &mut ItemRentalState,
-    quest_log: &mut QuestLogState,
-    buff: &mut BuffState,
-    report: &mut ReportState,
-    inspect: &mut InspectState,
-    creature: &mut CreatureState,
-    hero: &mut HeroState,
-    relationship: &mut RelationshipState,
-    big_map: &mut crate::game::dialogs::big_map::BigMapState,
-    awake: &mut crate::game::dialogs::npc_awake::NpcAwakeState,
-    roll: &mut crate::game::dialogs::roll::RollState,
-    mgr: &mut crate::game::dialogs::DialogManager,
-    next: &mut NextState<AppState>,
-    payload: &[u8],
-) -> bool {
+pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>,
+    payload: &[u8],) -> bool {
     use mir2_shared::packets::server::*;
 
     let mut cur = std::io::Cursor::new(payload);
@@ -74,49 +28,38 @@ pub(crate) fn handle_progress(
                 let recipe_id = u32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
                 let count = u16::from_le_bytes(body[4..6].try_into().unwrap_or([0; 2]));
                 let success = body[6] != 0;
-                craft.last_result = Some((recipe_id, count, success));
-                craft.message = if success {
-                    format!("合成成功！配方 {} ×{}", recipe_id, count)
-                } else {
-                    format!("合成失败（配方 {}）", recipe_id)
-                };
+                server_events.write(ServerEvent::CraftResult { recipe_id, count, success });
                 tracing::info!("🔧 CraftItem: recipe={} count={} success={}", recipe_id, count, success);
             }
         }
         // ---- M42: 物品租赁 ----
         x if x == ServerPacketIds::ItemRentalRequest as i16 => {
-            rental.request_received = true;
-            rental.message = "收到租赁请求（物主）".to_string();
+            server_events.write(ServerEvent::RentalRequestReceived);
             tracing::info!("📦 收到租赁请求");
         }
         x if x == ServerPacketIds::UpdateRentalItem as i16 => {
             // [hasdata u8][fee u32][period i32]
             let body = &payload[PacketHeader::HEADER_SIZE..];
             if body.len() >= 9 {
-                rental.has_item = body[0] != 0;
-                rental.fee = u32::from_le_bytes(body[1..5].try_into().unwrap_or([0; 4]));
-                rental.period = i32::from_le_bytes(body[5..9].try_into().unwrap_or([0; 4]));
-                rental.message = format!(
-                    "租赁更新: 物品={} 费用={} 期限={}",
-                    if rental.has_item { "有" } else { "无" },
-                    rental.fee,
-                    rental.period
-                );
-                tracing::info!("📦 UpdateRentalItem: item={} fee={} period={}", rental.has_item, rental.fee, rental.period);
+                let has_item = body[0] != 0;
+                let fee = u32::from_le_bytes(body[1..5].try_into().unwrap_or([0; 4]));
+                let period = i32::from_le_bytes(body[5..9].try_into().unwrap_or([0; 4]));
+                server_events.write(ServerEvent::RentalItemUpdate { has_item, fee, period });
+                tracing::info!("📦 UpdateRentalItem: item={} fee={} period={}", has_item, fee, period);
             }
         }
         x if x == ServerPacketIds::ItemRentalFee as i16 => {
             let body = &payload[PacketHeader::HEADER_SIZE..];
             if body.len() >= 4 {
-                rental.fee = u32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
-                rental.message = format!("租赁费用更新: {}", rental.fee);
+                let fee = u32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
+                server_events.write(ServerEvent::RentalFee { fee });
             }
         }
         x if x == ServerPacketIds::ItemRentalPeriod as i16 => {
             let body = &payload[PacketHeader::HEADER_SIZE..];
             if body.len() >= 4 {
-                rental.period = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
-                rental.message = format!("租赁期限更新: {} 小时", rental.period);
+                let period = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
+                server_events.write(ServerEvent::RentalPeriod { period });
             }
         }
         x if x == ServerPacketIds::DepositRentalItem as i16 => {
@@ -125,7 +68,7 @@ pub(crate) fn handle_progress(
             if body.len() >= 9 {
                 let uid = u64::from_le_bytes(body[0..8].try_into().unwrap_or([0; 8]));
                 let success = body[8] != 0;
-                rental.message = format!("存入租赁物品: {} ({})", uid, if success { "成功" } else { "失败" });
+                server_events.write(ServerEvent::RentalDeposit { uid, success });
                 tracing::info!("📦 存入租赁物品 uid={} success={}", uid, success);
             }
         }
@@ -134,44 +77,31 @@ pub(crate) fn handle_progress(
             if body.len() >= 9 {
                 let uid = u64::from_le_bytes(body[0..8].try_into().unwrap_or([0; 8]));
                 let success = body[8] != 0;
-                rental.message = format!("取回租赁物品: {} ({})", uid, if success { "成功" } else { "失败" });
-                rental.has_item = false;
+                server_events.write(ServerEvent::RentalRetrieve { uid, success });
             }
         }
         x if x == ServerPacketIds::ItemRentalLock as i16 => {
-            rental.message = "锁定状态更新".to_string();
+            server_events.write(ServerEvent::RentalLocked);
             tracing::info!("📦 租赁锁定（本侧）");
         }
         x if x == ServerPacketIds::ItemRentalPartnerLock as i16 => {
-            rental.message = "对方已锁定".to_string();
+            server_events.write(ServerEvent::RentalPartnerLocked);
             tracing::info!("📦 租赁锁定（对方）");
         }
         x if x == ServerPacketIds::CanConfirmItemRental as i16 => {
             let body = &payload[PacketHeader::HEADER_SIZE..];
-            rental.can_confirm = body.first().copied().unwrap_or(0) != 0;
-            rental.message = if rental.can_confirm {
-                "双方已锁定，可以确认成交".to_string()
-            } else {
-                "尚未可确认".to_string()
-            };
-            tracing::info!("📦 CanConfirmItemRental: {}", rental.can_confirm);
+            let can_confirm = body.first().copied().unwrap_or(0) != 0;
+            server_events.write(ServerEvent::RentalCanConfirm { can_confirm });
+            tracing::info!("📦 CanConfirmItemRental: {}", can_confirm);
         }
         x if x == ServerPacketIds::ConfirmItemRental as i16 => {
             let body = &payload[PacketHeader::HEADER_SIZE..];
             let success = body.first().copied().unwrap_or(0) != 0;
-            rental.confirmed = success;
-            rental.message = if success {
-                "租赁成交！".to_string()
-            } else {
-                "确认失败".to_string()
-            };
+            server_events.write(ServerEvent::RentalConfirmed { success });
             tracing::info!("📦 ConfirmItemRental: {}", success);
         }
         x if x == ServerPacketIds::CancelItemRental as i16 => {
-            rental.request_received = false;
-            rental.has_item = false;
-            rental.can_confirm = false;
-            rental.message = "租赁已取消".to_string();
+            server_events.write(ServerEvent::RentalCancelled);
             tracing::info!("📦 租赁取消");
         }
         // ---- M43: 任务日志 ----
@@ -196,23 +126,15 @@ pub(crate) fn handle_progress(
             let is_new = cur.read_u8().unwrap_or(0) != 0;
             let name = tasks.first().cloned().unwrap_or_else(|| format!("#{}", id));
             let entry = QuestEntry { id, name, tasks, taken, completed, is_new };
-            // C# 语义：ChangeQuest 只更新进度（含 completed 标记，任务保留待交）；
-            // 从日志移除由 CompleteQuest 负责。
-            if let Some(e) = quest_log.quests.iter_mut().find(|q| q.id == id) {
-                *e = entry;
-            } else {
-                quest_log.quests.push(entry);
-            }
-            quest_log.message = format!("任务更新: {}", quest_log.quests.last().map(|q| q.name.clone()).unwrap_or_default());
-            tracing::info!("📜 ChangeQuest: id={} completed={} 已接任务 {}", id, completed, quest_log.quests.len());
+            server_events.write(ServerEvent::QuestChanged { entry });
+            tracing::info!("📜 ChangeQuest: id={} completed={}", id, completed);
         }
         x if x == ServerPacketIds::CompleteQuest as i16 => {
             // [quest_index i32]
             let body = &payload[PacketHeader::HEADER_SIZE..];
             if body.len() >= 4 {
                 let id = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
-                quest_log.quests.retain(|q| q.id != id);
-                quest_log.message = format!("任务 {} 完成！", id);
+                server_events.write(ServerEvent::QuestCompleted { id });
                 tracing::info!("📜 CompleteQuest: {}", id);
             }
         }
@@ -223,15 +145,7 @@ pub(crate) fn handle_progress(
             if body.len() >= 5 {
                 let tag = body[0];
                 let ticks = u32::from_le_bytes(body[1..5].try_into().unwrap_or([0; 4]));
-                if let Some(e) = buff.buffs.iter_mut().find(|b| b.tag == tag) {
-                    e.remaining_ticks = ticks;
-                } else {
-                    buff.buffs.push(BuffEntry { tag, remaining_ticks: ticks });
-                }
-                buff.message = format!(
-                    "获得状态: {}",
-                    crate::game::dialogs::buff::buff_name(tag)
-                );
+                server_events.write(ServerEvent::BuffAdded { tag, ticks });
                 tracing::info!("✨ AddBuff: tag={} ticks={}", tag, ticks);
             }
         }
@@ -239,11 +153,7 @@ pub(crate) fn handle_progress(
             // [tag u8]
             let body = &payload[PacketHeader::HEADER_SIZE..];
             if let Some(tag) = body.first().copied() {
-                buff.buffs.retain(|b| b.tag != tag);
-                buff.message = format!(
-                    "状态消失: {}",
-                    crate::game::dialogs::buff::buff_name(tag)
-                );
+                server_events.write(ServerEvent::BuffRemoved { tag });
                 tracing::info!("✨ RemoveBuff: tag={}", tag);
             }
         }
@@ -271,18 +181,20 @@ pub(crate) fn handle_progress(
                 items.push(InspectItem { unique_id, item_index, current_dura, max_dura });
             }
             if ok {
-                inspect.name = name.clone();
-                inspect.guild = guild;
-                inspect.level = level;
-                inspect.class = class;
-                inspect.gender = gender;
-                inspect.items = items;
-                inspect.message = "查看成功".to_string();
+                let item_count = items.len();
+                server_events.write(ServerEvent::InspectPlayer {
+                    name: name.clone(),
+                    guild,
+                    level,
+                    class,
+                    gender,
+                    items,
+                });
                 tracing::info!(
                     "🔍 PlayerInspect: {} Lv.{} 装备 {} 件",
                     name,
                     level,
-                    inspect.items.len()
+                    item_count
                 );
             } else {
                 tracing::warn!("⚠️ PlayerInspect 装备解析失败");
@@ -306,9 +218,9 @@ pub(crate) fn handle_progress(
                 creatures.push(CreatureEntry { creature_type, pickup_mode, enabled, hunger, name });
             }
             if ok {
-                creature.creatures = creatures;
-                creature.message = "宠物列表已更新".to_string();
-                tracing::info!("🐾 宠物列表: {} 个", creature.creatures.len());
+                let count = creatures.len();
+                server_events.write(ServerEvent::CreatureList { creatures });
+                tracing::info!("🐾 宠物列表: {} 个", count);
             } else {
                 tracing::warn!("⚠️ UpdateIntelligentCreatureList 解析失败");
             }
@@ -318,12 +230,7 @@ pub(crate) fn handle_progress(
             // [hero_index u8]
             let body = &payload[PacketHeader::HEADER_SIZE..];
             let idx = body.first().copied().unwrap_or(0);
-            hero.hero_index = idx;
-            hero.message = if idx == 0 {
-                "已切换主角色".to_string()
-            } else {
-                format!("已切换英雄 {}", idx)
-            };
+            server_events.write(ServerEvent::HeroChanged { index: idx });
             tracing::info!("🦸 ChangeHero: index={}", idx);
         }
         // ---- M49: 婚姻/关系 ----
@@ -333,8 +240,7 @@ pub(crate) fn handle_progress(
             let mut cur = std::io::Cursor::new(body);
             match mir2_shared::binary::read_dotnet_string(&mut cur) {
                 Ok(name) => {
-                    relationship.invite = Some(name.clone());
-                    relationship.message = format!("收到 {} 的求婚", name);
+                    server_events.write(ServerEvent::MarriageInvite { name: name.clone() });
                     tracing::info!("💍 收到求婚: {}", name);
                 }
                 Err(_) => tracing::warn!("⚠️ MarriageRequest 解析失败"),
@@ -344,16 +250,11 @@ pub(crate) fn handle_progress(
             // [married u8]
             let body = &payload[PacketHeader::HEADER_SIZE..];
             let married = body.first().copied().unwrap_or(0) != 0;
-            relationship.married = married;
-            relationship.message = if married {
-                "婚姻关系已建立！".to_string()
-            } else {
-                "婚姻关系已解除".to_string()
-            };
+            server_events.write(ServerEvent::MarriageStatus { married });
             tracing::info!("💍 LoverUpdate: married={}", married);
         }
         x if x == ServerPacketIds::DivorceRequest as i16 => {
-            relationship.message = "收到离婚请求".to_string();
+            server_events.write(ServerEvent::DivorceRequest);
             tracing::info!("💔 收到离婚请求");
         }
 

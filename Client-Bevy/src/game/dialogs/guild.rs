@@ -148,6 +148,10 @@ impl Plugin for GuildPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_guild);
         app.add_systems(
             Update,
+            guild_server_events.run_if(in_state(AppState::Game)),
+        );
+        app.add_systems(
+            Update,
             (
                 guild_ui_system,
                 guild_storage_system,
@@ -898,5 +902,89 @@ fn guild_invite_system(
         });
         tracing::info!("🏰 行会邀请回复: accept={}", a);
         guild.invite = None;
+    }
+}
+
+
+/// 消费服务端行会事件（网络层只广播 ServerEvent）
+fn guild_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut guild: ResMut<GuildState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::GuildInGuild { in_guild } => {
+                guild.in_guild = *in_guild;
+                if !guild.in_guild {
+                    guild.name.clear();
+                    guild.leader.clear();
+                    guild.members.clear();
+                    guild.notice.clear();
+                    guild.gold = 0;
+                    guild.storage_items.clear();
+                    guild.storage_received = false;
+                }
+            }
+            ServerEvent::GuildData { name, leader, notice, members, gold } => {
+                guild.in_guild = true;
+                guild.name = name.clone();
+                guild.leader = leader.clone();
+                guild.notice = notice.clone();
+                guild.members = members.clone();
+                guild.gold = *gold;
+            }
+            ServerEvent::GuildStorage { items } => {
+                guild.storage_items = items
+                    .iter()
+                    .map(|(unique_id, item_index, count, info_name)| {
+                        let name = if !info_name.is_empty() {
+                            info_name.clone()
+                        } else {
+                            guild
+                                .item_names
+                                .get(item_index)
+                                .cloned()
+                                .unwrap_or_default()
+                        };
+                        Some(StorageItem {
+                            unique_id: *unique_id,
+                            item_index: *item_index,
+                            name,
+                            count: *count,
+                        })
+                    })
+                    .collect();
+                guild.storage_received = true;
+            }
+            ServerEvent::GuildNotice { notice } => {
+                guild.notice = notice.clone();
+            }
+            ServerEvent::GuildMemberChanged { name, rank, online, joined, removed } => {
+                if *removed {
+                    guild.members.retain(|m| m.name != *name);
+                } else if *joined {
+                    if !guild.members.iter().any(|m| m.name == *name) {
+                        guild.members.push(GuildMember {
+                            name: name.clone(),
+                            rank: *rank,
+                            online: *online,
+                        });
+                    }
+                } else if let Some(m) = guild.members.iter_mut().find(|m| m.name == *name) {
+                    m.rank = *rank;
+                    m.online = *online;
+                }
+            }
+            ServerEvent::GuildInvited { name } => {
+                guild.invite = Some(name.clone());
+            }
+            ServerEvent::UserInformation { item_names, .. } => {
+                for (idx, name) in item_names {
+                    guild.item_names.insert(*idx, name.clone());
+                }
+            }
+            _ => {}
+        }
     }
 }

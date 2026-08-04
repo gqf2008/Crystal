@@ -69,6 +69,10 @@ impl Plugin for StoragePlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_storage);
         app.add_systems(
             Update,
+            storage_server_events.run_if(in_state(AppState::Game)),
+        );
+        app.add_systems(
+            Update,
             (storage_ui_system, storage_action_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -356,5 +360,28 @@ fn storage_action_system(
     // 4) 点背包物品格：交给背包系统（选中）；这里仅清掉仓库选择
     if inv_slot.is_some() {
         state.selected = None;
+    }
+}
+
+
+/// 消费服务端仓库事件（网络层只广播 ServerEvent；仓库/背包打开逻辑归本模块）
+fn storage_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut storage: ResMut<StorageState>,
+    mut mgr: ResMut<DialogManager>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::StorageOpened { items, visible } = ev {
+            storage.items = items.clone();
+            storage.visible = *visible;
+            // 原版 C#：仓库打开时同时显示背包
+            if !mgr.is_open(DialogKind::Storage) {
+                mgr.open.push(DialogKind::Storage);
+            }
+            if !mgr.is_open(DialogKind::Inventory) {
+                mgr.open.push(DialogKind::Inventory);
+            }
+        }
     }
 }

@@ -52,7 +52,11 @@ pub struct InspectPlugin;
 impl Plugin for InspectPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<InspectState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_inspect);
+                app.add_systems(
+            Update,
+            inspect_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_inspect);
         app.add_systems(OnExit(AppState::Game), cleanup_inspect);
         app.add_systems(
             Update,
@@ -158,5 +162,25 @@ fn inspect_ui_system(
             9 => state.message.clone(),
             _ => String::new(),
         };
+    }
+}
+
+
+/// 消费服务端查看事件（网络层只广播 ServerEvent）
+fn inspect_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut inspect: ResMut<InspectState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::InspectPlayer { name, guild, level, class, gender, items } = ev {
+            inspect.name = name.clone();
+            inspect.guild = guild.clone();
+            inspect.level = *level;
+            inspect.class = *class;
+            inspect.gender = *gender;
+            inspect.items = items.clone();
+            inspect.message = "查看成功".to_string();
+        }
     }
 }

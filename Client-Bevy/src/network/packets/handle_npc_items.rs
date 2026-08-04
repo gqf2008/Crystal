@@ -8,54 +8,19 @@ use super::*;
 // 由 packets.rs::handle_packet 调度器按 opcode 调用；返回 true 表示已处理。
 
 #[allow(clippy::too_many_arguments, unused_variables)]
-pub(crate) fn handle_npc_items(
-    net: &mut NetConnection,
+pub(crate) fn handle_npc_items(    net: &mut NetConnection,
     session: &mut SessionState,
     auth: &mut AuthFeedback,
     game_data: &mut GameData,
     net_objects: &mut MessageWriter<NetObject>,
     net_removals: &mut MessageWriter<NetObjectRemoved>,
     motions: &mut MessageWriter<NetMotion>,
-    hud: &mut HudState,
-    chat: &mut ChatState,
-    npc_dialog: &mut NpcDialogState,
-    npc_goods: &mut NpcGoodsState,
     combat_evt: &mut MessageWriter<CombatEvent>,
-    weather: &mut WeatherState,
-    magics: &mut MagicsState,
-    storage: &mut StorageState,
-    sell_panel: &mut SellPanelState,
-    group: &mut GroupState,
-    mail: &mut MailState,
-    trade: &mut TradeState,
-    friend: &mut FriendState,
-    guild: &mut GuildState,
-    ranking: &mut RankingState,
-    mentor: &mut MentorState,
-    market: &mut MarketState,
-    shop: &mut GameShopState,
-    territory: &mut GuildTerritoryState,
     effects: &mut MessageWriter<PendingEffect>,
     server_events: &mut MessageWriter<ServerEvent>,
     control: &mut ControlState,
-    fishing: &mut FishingState,
-    refine: &mut RefineState,
-    craft: &mut CraftState,
-    rental: &mut ItemRentalState,
-    quest_log: &mut QuestLogState,
-    buff: &mut BuffState,
-    report: &mut ReportState,
-    inspect: &mut InspectState,
-    creature: &mut CreatureState,
-    hero: &mut HeroState,
-    relationship: &mut RelationshipState,
-    big_map: &mut crate::game::dialogs::big_map::BigMapState,
-    awake: &mut crate::game::dialogs::npc_awake::NpcAwakeState,
-    roll: &mut crate::game::dialogs::roll::RollState,
-    mgr: &mut crate::game::dialogs::DialogManager,
     next: &mut NextState<AppState>,
-    payload: &[u8],
-) -> bool {
+    payload: &[u8],) -> bool {
     use mir2_shared::packets::server::*;
 
     let mut cur = std::io::Cursor::new(payload);
@@ -72,8 +37,7 @@ pub(crate) fn handle_npc_items(
             match npc_interaction::NPCResponse::read_body(&mut cur) {
             Ok(p) => {
                 tracing::info!("🧙 NPC 对话: {} 行", p.page.len());
-                npc_dialog.lines = p.page;
-                npc_dialog.visible = true;
+                server_events.write(crate::network::server_event::from_packet::npc_dialog(&p));
             }
             Err(e) => tracing::warn!("⚠️ NPCResponse 解析失败: {} (len={})", e, payload.len()),
             }
@@ -107,15 +71,15 @@ pub(crate) fn handle_npc_items(
                 loc = (p.location_x, p.location_y);
                 parsed = true;
             }
-            let pid = hud.player_object_id.unwrap_or(100);
-            hud.dead = true;
+            let pid = session.local_player_id.unwrap_or(100);
+            server_events.write(ServerEvent::PlayerDied);
             combat_evt.write(CombatEvent::Died { object_id: pid, death_type: 0 });
             tracing::info!("💀 玩家死亡 ({},{}){}", loc.0, loc.1, if parsed { "" } else { "（空 body 容错）" });
         }
         x if x == ServerPacketIds::Revived as i16 => {
             if combat::Revived::read_body(&mut cur).is_ok() {
-                let pid = hud.player_object_id.unwrap_or(100);
-                hud.dead = false;
+                let pid = session.local_player_id.unwrap_or(100);
+                server_events.write(ServerEvent::PlayerRevived);
                 combat_evt.write(CombatEvent::Revived { object_id: pid });
                 tracing::info!("💚 玩家复活");
             }
@@ -153,15 +117,10 @@ pub(crate) fn handle_npc_items(
                                     | mir2_shared::enums::PanelType::Repair
                                     | mir2_shared::enums::PanelType::SpecialRepair
                             ) {
-                                npc_goods.visible = false;
-                                sell_panel.mode = Some(p.panel_type);
-                                sell_panel.target = None;
-                                sell_panel.visible = true;
+                                server_events.write(ServerEvent::NpcSellPanel {
+                                    panel_type: p.panel_type,
+                                });
                                 tracing::info!("🧰 NPC 面板: {:?}", p.panel_type);
-                                // C# NPCDropDialog.Show() 同时打开背包
-                                if !mgr.is_open(crate::game::dialogs::DialogKind::Inventory) {
-                                    mgr.open.push(crate::game::dialogs::DialogKind::Inventory);
-                                }
                                 return true;
                             }
                             let goods: Vec<GoodsEntry> = p
@@ -179,10 +138,9 @@ pub(crate) fn handle_npc_items(
                                     count: item.count,
                                 })
                                 .collect();
-                            tracing::info!("🏪 NPC 商品: {} 件 (rate={})", goods.len(), p.rate);
-                            npc_goods.goods = goods;
-                            npc_goods.selected = None;
-                            npc_goods.visible = true;
+                            let rate = p.rate;
+                            tracing::info!("🏪 NPC 商品: {} 件 (rate={})", goods.len(), rate);
+                            server_events.write(ServerEvent::NpcGoods { goods, rate });
                         }
                         Err(e) => {
                             tracing::warn!("⚠️ NPCGoods 解析失败: {} (len={})", e, payload.len())
@@ -199,12 +157,8 @@ pub(crate) fn handle_npc_items(
         x if x == ServerPacketIds::MoveItem as i16 => {
             if let Ok(p) = item_operations::MoveItem::read_body(&mut cur) {
                 if p.success && p.grid == mir2_shared::enums::MirGridType::Inventory {
-                    let from = p.from as usize;
-                    let to = p.to as usize;
-                    if from < hud.inventory.items.len() && to < hud.inventory.items.len() {
-                        hud.inventory.items.swap(from, to);
-                        tracing::info!("📦 移动物品 {} -> {}", p.from, p.to);
-                    }
+                    server_events.write(crate::network::server_event::from_packet::move_item(&p));
+                    tracing::info!("📦 移动物品 {} -> {}", p.from, p.to);
                 }
             }
         }
@@ -213,75 +167,22 @@ pub(crate) fn handle_npc_items(
         x if x == ServerPacketIds::EquipItem as i16 => {
             if let Ok(p) = item_operations::EquipItem::read_body(&mut cur) {
                 if p.success {
-                    let to = p.to as usize;
-                    // 从背包移除并放入装备槽
-                    let from_idx = hud
-                        .inventory
-                        .items
-                        .iter()
-                        .position(|s| s.as_ref().map(|it| it.unique_id) == Some(p.unique_id));
-                    if let Some(from_idx) = from_idx {
-                        let item = hud.inventory.items[from_idx].take();
-                        if let Some(item) = item {
-                            let name = item.name.clone();
-                            if to < hud.equipment.len() {
-                                let old = hud.equipment[to].take();
-                                hud.equipment[to] = Some(item);
-                                // 旧装备放回背包空格
-                                if let Some(old) = old {
-                                    if let Some(empty) = hud.inventory.items.iter_mut().find(|s| s.is_none()) {
-                                        *empty = Some(old);
-                                    }
-                                }
-                            }
-                            tracing::info!("⚔️ 装备成功: {} -> 槽 {}", name, p.to);
-                        }
-                    }
+                    server_events.write(crate::network::server_event::from_packet::equip_item(&p));
+                    tracing::info!("⚔️ 装备成功 uid={} -> 槽 {}", p.unique_id, p.to);
                 }
             }
         }
         x if x == ServerPacketIds::RemoveItem as i16 => {
             if let Ok(p) = item_operations::RemoveItem::read_body(&mut cur) {
                 if p.success {
-                    let item = hud
-                        .equipment
-                        .iter_mut()
-                        .flatten()
-                        .find(|it| it.unique_id == p.unique_id)
-                        .cloned();
-                    if let Some(item) = item {
-                        for slot in hud.equipment.iter_mut() {
-                            if slot.as_ref().map(|it| it.unique_id) == Some(p.unique_id) {
-                                *slot = None;
-                                break;
-                            }
-                        }
-                        if let Some(empty) = hud.inventory.items.iter_mut().find(|s| s.is_none()) {
-                            *empty = Some(item);
-                        }
-                        tracing::info!("🛡️ 卸下装备 uid={}", p.unique_id);
-                    }
+                    server_events.write(crate::network::server_event::from_packet::remove_item(&p));
+                    tracing::info!("🛡️ 卸下装备 uid={}", p.unique_id);
                 }
             }
         }
         x if x == ServerPacketIds::UseItem as i16 => {
             if let Ok(p) = item_operations::UseItem::read_body(&mut cur) {
-                let idx = hud
-                    .inventory
-                    .items
-                    .iter()
-                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(p.unique_id));
-                if let Some(idx) = idx {
-                    let count = hud.inventory.items[idx].as_ref().map(|it| it.count).unwrap_or(0);
-                    if count > 1 {
-                        if let Some(it) = hud.inventory.items[idx].as_mut() {
-                            it.count -= 1;
-                        }
-                    } else {
-                        hud.inventory.items[idx] = None;
-                    }
-                    tracing::info!("💊 使用物品 uid={} 剩余 {}", p.unique_id, count.saturating_sub(1));
-                }
+                server_events.write(crate::network::server_event::from_packet::use_item(&p));
             }
         }
         x if x == ServerPacketIds::SplitItem as i16 => {

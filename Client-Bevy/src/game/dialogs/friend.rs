@@ -46,7 +46,11 @@ pub struct FriendPlugin;
 impl Plugin for FriendPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FriendState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_friend);
+                app.add_systems(
+            Update,
+            friend_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_friend);
         app.add_systems(OnExit(AppState::Game), cleanup_friend);
         app.add_systems(
             Update,
@@ -165,5 +169,25 @@ fn friend_ui_system(
             }
             None => String::new(),
         };
+    }
+}
+
+
+/// 消费服务端好友事件（网络层只广播 ServerEvent）
+fn friend_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut friend: ResMut<FriendState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::FriendUpdated { entries } = ev {
+            for e in entries {
+                if let Some(existing) = friend.friends.iter_mut().find(|f| f.object_id == e.object_id) {
+                    *existing = e.clone();
+                } else {
+                    friend.friends.push(e.clone());
+                }
+            }
+        }
     }
 }

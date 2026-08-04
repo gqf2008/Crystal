@@ -71,7 +71,11 @@ pub struct BuffPlugin;
 impl Plugin for BuffPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BuffState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_buff);
+                app.add_systems(
+            Update,
+            buff_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_buff);
         app.add_systems(OnExit(AppState::Game), cleanup_buff);
         app.add_systems(
             Update,
@@ -170,5 +174,31 @@ fn buff_ui_system(
             9 => state.message.clone(),
             _ => String::new(),
         };
+    }
+}
+
+
+/// 消费服务端状态事件（网络层只广播 ServerEvent）
+fn buff_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut buff: ResMut<BuffState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::BuffAdded { tag, ticks } => {
+                if let Some(e) = buff.buffs.iter_mut().find(|b| b.tag == *tag) {
+                    e.remaining_ticks = *ticks;
+                } else {
+                    buff.buffs.push(BuffEntry { tag: *tag, remaining_ticks: *ticks });
+                }
+                buff.message = format!("获得状态: {}", buff_name(*tag));
+            }
+            ServerEvent::BuffRemoved { tag } => {
+                buff.buffs.retain(|b| b.tag != *tag);
+                buff.message = format!("状态消失: {}", buff_name(*tag));
+            }
+            _ => {}
+        }
     }
 }

@@ -78,7 +78,11 @@ pub struct MentorPlugin;
 impl Plugin for MentorPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MentorState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_mentor);
+                app.add_systems(
+            Update,
+            mentor_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_mentor);
         app.add_systems(OnExit(AppState::Game), cleanup_mentor);
         app.add_systems(
             Update,
@@ -410,5 +414,28 @@ fn mentor_invite_system(
         });
         tracing::info!("🧑‍🏫 拜师邀请回复: accept={}", a);
         state.invite = None;
+    }
+}
+
+
+/// 消费服务端师徒事件（网络层只广播 ServerEvent）
+fn mentor_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut mentor: ResMut<MentorState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::MentorInvite { name, level } => {
+                mentor.invite = Some((name.clone(), *level));
+            }
+            ServerEvent::MentorUpdate { name, level, online, mentee_exp } => {
+                mentor.mentor_name = name.clone();
+                mentor.mentor_level = *level;
+                mentor.mentor_online = *online;
+                mentor.mentee_exp = *mentee_exp;
+            }
+            _ => {}
+        }
     }
 }

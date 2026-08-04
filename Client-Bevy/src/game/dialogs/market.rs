@@ -95,7 +95,11 @@ pub struct MarketPlugin;
 impl Plugin for MarketPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MarketState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_market);
+                app.add_systems(
+            Update,
+            market_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_market);
         app.add_systems(OnExit(AppState::Game), cleanup_market);
         app.add_systems(
             Update,
@@ -504,3 +508,63 @@ fn market_action_system(
     }
 }
 
+
+/// 消费服务端市场事件（网络层只广播 ServerEvent；文案在此构造）
+fn market_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut market: ResMut<MarketState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::MarketPages { pages } => {
+                market.pages = *pages;
+            }
+            ServerEvent::MarketListings { listings } => {
+                market.listings = listings
+                    .iter()
+                    .map(|(auction_id, unique_id, item_index, count, info_name, seller, price)| {
+                        let name = if !info_name.is_empty() {
+                            info_name.clone()
+                        } else {
+                            market
+                                .item_names
+                                .get(item_index)
+                                .cloned()
+                                .unwrap_or_else(|| format!("#{}", item_index))
+                        };
+                        MarketItem {
+                            auction_id: *auction_id,
+                            unique_id: *unique_id,
+                            name,
+                            item_index: *item_index,
+                            count: *count,
+                            seller: seller.clone(),
+                            price: *price,
+                        }
+                    })
+                    .collect();
+            }
+            ServerEvent::MarketConsign { uid, success } => {
+                if *success {
+                    market.consign_ok = Some(*uid);
+                    market.message = format!("寄售成功 uid={}", uid);
+                } else {
+                    market.message = "寄售失败".to_string();
+                }
+            }
+            ServerEvent::MarketSuccess { message } => {
+                market.message = message.clone();
+            }
+            ServerEvent::MarketFail { reason } => {
+                market.message = format!("市场操作失败（原因 {}）", reason);
+            }
+            ServerEvent::UserInformation { item_names, .. } => {
+                for (idx, name) in item_names {
+                    market.item_names.insert(*idx, name.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+}

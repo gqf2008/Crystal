@@ -660,6 +660,166 @@ fn hud_server_events(
                 hud.max_exp = (*max_exp).max(1);
                 tracing::info!("⬆️ 升级 Lv.{} exp={}/{}", level, exp, max_exp);
             }
+            ServerEvent::Chat { .. }
+            | ServerEvent::NpcDialog { .. }
+            | ServerEvent::Roll { .. }
+            | ServerEvent::AwakeningMaterials { .. }
+            | ServerEvent::AwakeningResult { .. }
+            | ServerEvent::StorageOpened { .. }
+            | ServerEvent::GuildInGuild { .. }
+            | ServerEvent::GuildData { .. }
+            | ServerEvent::GuildStorage { .. }
+            | ServerEvent::GroupMembers { .. }
+            | ServerEvent::GroupInvite { .. }
+            | ServerEvent::GroupDeleted
+            | ServerEvent::GroupMemberLeft { .. }
+            | ServerEvent::MentorInvite { .. }
+            | ServerEvent::MentorUpdate { .. }
+            | ServerEvent::FriendUpdated { .. }
+            | ServerEvent::Rankings { .. }
+            | ServerEvent::GuildNotice { .. }
+            | ServerEvent::QuestChanged { .. }
+            | ServerEvent::QuestCompleted { .. }
+            | ServerEvent::BuffAdded { .. }
+            | ServerEvent::BuffRemoved { .. }
+            | ServerEvent::InspectPlayer { .. }
+            | ServerEvent::CreatureList { .. }
+            | ServerEvent::HeroChanged { .. }
+            | ServerEvent::MarriageInvite { .. }
+            | ServerEvent::MarriageStatus { .. }
+            | ServerEvent::DivorceRequest
+            | ServerEvent::RentalRequestReceived
+            | ServerEvent::RentalItemUpdate { .. }
+            | ServerEvent::RentalFee { .. }
+            | ServerEvent::RentalPeriod { .. }
+            | ServerEvent::RentalDeposit { .. }
+            | ServerEvent::RentalRetrieve { .. }
+            | ServerEvent::RentalLocked
+            | ServerEvent::RentalPartnerLocked
+            | ServerEvent::RentalCanConfirm { .. }
+            | ServerEvent::RentalConfirmed { .. }
+            | ServerEvent::RentalCancelled
+            | ServerEvent::MarketPages { .. }
+            | ServerEvent::MarketListings { .. }
+            | ServerEvent::MarketConsign { .. }
+            | ServerEvent::MarketSuccess { .. }
+            | ServerEvent::MarketFail { .. }
+            | ServerEvent::ShopCatalog { .. }
+            | ServerEvent::ShopStock { .. }
+            | ServerEvent::TerritoryList { .. }
+            | ServerEvent::TerritoryWar { .. }
+            | ServerEvent::TradeGold { .. }
+            | ServerEvent::TradeCancelled
+            | ServerEvent::FishingUpdate { .. }
+            | ServerEvent::MailReceived { .. }
+            | ServerEvent::TradeRequested { .. }
+            | ServerEvent::TradeConfirm { .. }
+            | ServerEvent::TradeItemUpdate { .. }
+            | ServerEvent::TradeDeposit { .. }
+            | ServerEvent::GuildMemberChanged { .. }
+            | ServerEvent::GuildInvited { .. }
+            | ServerEvent::RankingsCleared
+            | ServerEvent::WeatherChanged { .. }
+            | ServerEvent::MapInfo { .. }
+            | ServerEvent::MagicLearned { .. }
+            | ServerEvent::CraftResult { .. }
+            | ServerEvent::NpcGoods { .. }
+            | ServerEvent::NpcSellPanel { .. } => {}
+            ServerEvent::InventoryMoved { from, to } => {
+                if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
+                    hud.inventory.items.swap(*from, *to);
+                }
+            }
+            ServerEvent::ItemEquipped { unique_id, to } => {
+                // 从背包移除并放入装备槽；旧装备放回背包空格
+                let from_idx = hud
+                    .inventory
+                    .items
+                    .iter()
+                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(*unique_id));
+                if let Some(from_idx) = from_idx {
+                    let item = hud.inventory.items[from_idx].take();
+                    if let Some(item) = item {
+                        if *to < hud.equipment.len() {
+                            let old = hud.equipment[*to].take();
+                            hud.equipment[*to] = Some(item);
+                            if let Some(old) = old {
+                                if let Some(empty) =
+                                    hud.inventory.items.iter_mut().find(|s| s.is_none())
+                                {
+                                    *empty = Some(old);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            ServerEvent::ItemRemoved { unique_id } => {
+                // 卸下装备：清空装备槽并放回背包空格
+                let mut item = None;
+                for slot in hud.equipment.iter_mut() {
+                    if slot.as_ref().map(|it| it.unique_id) == Some(*unique_id) {
+                        item = slot.take();
+                        break;
+                    }
+                }
+                if let Some(item) = item {
+                    if let Some(empty) = hud.inventory.items.iter_mut().find(|s| s.is_none()) {
+                        *empty = Some(item);
+                    }
+                }
+            }
+            ServerEvent::UserInformation {
+                name,
+                level,
+                hp,
+                mp,
+                exp,
+                max_exp,
+                gold,
+                class,
+                object_id,
+                inventory,
+                equipment,
+                ..
+            } => {
+                hud.name = name.clone();
+                hud.level = *level;
+                hud.hp = *hp;
+                hud.mp = *mp;
+                hud.exp = *exp;
+                hud.max_exp = (*max_exp).max(1);
+                hud.gold = *gold;
+                hud.class = *class;
+                hud.player_object_id = Some(*object_id);
+                hud.inventory.items = inventory.clone();
+                hud.inventory.gold = *gold;
+                hud.equipment = equipment.clone();
+            }
+            ServerEvent::PlayerDied => {
+                hud.dead = true;
+            }
+            ServerEvent::PlayerRevived => {
+                hud.dead = false;
+            }
+            ServerEvent::ItemUsed { unique_id } => {
+                let idx = hud
+                    .inventory
+                    .items
+                    .iter()
+                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(*unique_id));
+                if let Some(idx) = idx {
+                    let count = hud.inventory.items[idx].as_ref().map(|it| it.count).unwrap_or(0);
+                    if count > 1 {
+                        if let Some(it) = hud.inventory.items[idx].as_mut() {
+                            it.count -= 1;
+                        }
+                    } else {
+                        hud.inventory.items[idx] = None;
+                    }
+                    tracing::info!("💊 使用物品 uid={} 剩余 {}", unique_id, count.saturating_sub(1));
+                }
+            }
         }
     }
 }

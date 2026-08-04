@@ -14,6 +14,7 @@ use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
+use crate::game::dialogs::npc::NpcDialogState;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_image, UiFont, UiImageCache,
@@ -53,6 +54,10 @@ impl Plugin for RollPlugin {
         app.init_resource::<RollState>();
         app.add_systems(OnEnter(AppState::Game), spawn_roll);
         app.add_systems(OnExit(AppState::Game), cleanup_roll);
+        app.add_systems(
+            Update,
+            roll_server_events.run_if(in_state(AppState::Game)),
+        );
         app.add_systems(
             Update,
             roll_ui_system.run_if(in_state(AppState::Game)),
@@ -178,5 +183,37 @@ fn roll_ui_system(
         tracing::info!("🎲 掷骰完成，回调 NPC {} 页 [{}]", state.npc_id, state.page);
         state.visible = false;
         state.started_at = 0.0;
+    }
+}
+
+
+/// 消费服务端 Roll 事件（网络层只广播 ServerEvent）
+fn roll_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut roll: ResMut<RollState>,
+    npc_dialog: Res<NpcDialogState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::Roll {
+            r#type,
+            page,
+            result,
+            auto_roll,
+            visible,
+            started_at,
+            finished,
+        } = ev
+        {
+            // npc_id 来自当前 NPC 对话框（原网络层直读，现由数据所有者提供）
+            roll.npc_id = npc_dialog.npc_object_id;
+            roll.r#type = *r#type;
+            roll.page = page.clone();
+            roll.result = *result;
+            roll.auto_roll = *auto_roll;
+            roll.visible = *visible;
+            roll.started_at = *started_at;
+            roll.finished = *finished;
+        }
     }
 }

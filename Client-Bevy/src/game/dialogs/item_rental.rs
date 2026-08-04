@@ -85,7 +85,11 @@ pub struct ItemRentalPlugin;
 impl Plugin for ItemRentalPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ItemRentalState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_item_rental);
+                app.add_systems(
+            Update,
+            rental_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_item_rental);
         app.add_systems(OnExit(AppState::Game), cleanup_item_rental);
         app.add_systems(
             Update,
@@ -423,6 +427,87 @@ fn item_rental_action_system(
             net.send_packet(&mir2_shared::packets::client::item::CancelItemRental);
             state.message = "已发送取消".to_string();
             tracing::info!("📦 取消租赁");
+        }
+    }
+}
+
+
+/// 消费服务端租赁事件（网络层只广播 ServerEvent；文案在此构造）
+fn rental_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut rental: ResMut<ItemRentalState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::RentalRequestReceived => {
+                rental.request_received = true;
+                rental.message = "收到租赁请求（物主）".to_string();
+            }
+            ServerEvent::RentalItemUpdate { has_item, fee, period } => {
+                rental.has_item = *has_item;
+                rental.fee = *fee;
+                rental.period = *period;
+                rental.message = format!(
+                    "租赁更新: 物品={} 费用={} 期限={}",
+                    if rental.has_item { "有" } else { "无" },
+                    rental.fee,
+                    rental.period
+                );
+            }
+            ServerEvent::RentalFee { fee } => {
+                rental.fee = *fee;
+                rental.message = format!("租赁费用更新: {}", rental.fee);
+            }
+            ServerEvent::RentalPeriod { period } => {
+                rental.period = *period;
+                rental.message = format!("租赁期限更新: {} 小时", rental.period);
+            }
+            ServerEvent::RentalDeposit { uid, success } => {
+                rental.deposit_uid = Some(*uid);
+                rental.message = format!(
+                    "存入租赁物品: {} ({})",
+                    uid,
+                    if *success { "成功" } else { "失败" }
+                );
+            }
+            ServerEvent::RentalRetrieve { uid, success } => {
+                rental.message = format!(
+                    "取回租赁物品: {} ({})",
+                    uid,
+                    if *success { "成功" } else { "失败" }
+                );
+                rental.has_item = false;
+            }
+            ServerEvent::RentalLocked => {
+                rental.message = "锁定状态更新".to_string();
+            }
+            ServerEvent::RentalPartnerLocked => {
+                rental.message = "对方已锁定".to_string();
+            }
+            ServerEvent::RentalCanConfirm { can_confirm } => {
+                rental.can_confirm = *can_confirm;
+                rental.message = if rental.can_confirm {
+                    "双方已锁定，可以确认成交".to_string()
+                } else {
+                    "尚未可确认".to_string()
+                };
+            }
+            ServerEvent::RentalConfirmed { success } => {
+                rental.confirmed = *success;
+                rental.message = if *success {
+                    "租赁成交！".to_string()
+                } else {
+                    "确认失败".to_string()
+                };
+            }
+            ServerEvent::RentalCancelled => {
+                rental.request_received = false;
+                rental.has_item = false;
+                rental.can_confirm = false;
+                rental.message = "租赁已取消".to_string();
+            }
+            _ => {}
         }
     }
 }
