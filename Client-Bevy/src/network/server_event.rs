@@ -147,7 +147,18 @@ pub enum ServerEvent {
     MarketSuccess { message: String },
     /// MarketFail：市场失败
     MarketFail { reason: u8 },
+    /// GameShopInfo：商城目录
+    ShopCatalog { items: Vec<ShopItem>, gold: u32 },
+    /// GameShopStock：商品库存更新
+    ShopStock { item_id: i32, stock: i32 },
+    /// GuildTerritoryPage：领地列表
+    TerritoryList { rows: Vec<TerritoryRow> },
+    /// GuildRequestWar：宣战确认
+    TerritoryWar { guild_name: String },
 }
+
+use crate::game::dialogs::game_shop::ShopItem;
+use crate::game::dialogs::guild_territory::TerritoryRow;
 
 use crate::game::dialogs::market::MarketItem;
 

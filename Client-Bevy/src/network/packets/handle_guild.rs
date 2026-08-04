@@ -299,13 +299,9 @@ pub(crate) fn handle_guild(
             if ok {
                 let _credit = cur.read_u32::<LittleEndian>().unwrap_or(0);
                 let gold = cur.read_u32::<LittleEndian>().unwrap_or(0);
-                shop.items = items;
-                shop.gold = gold;
-                tracing::info!(
-                    "🛒 商城目录: {} 件，金币 {}",
-                    shop.items.len(),
-                    shop.gold
-                );
+                let item_count = items.len();
+                server_events.write(ServerEvent::ShopCatalog { items, gold });
+                tracing::info!("🛒 商城目录: {} 件，金币 {}", item_count, gold);
             } else {
                 tracing::warn!("⚠️ GameShopInfo 解析失败: (len={})", payload.len());
             }
@@ -316,10 +312,7 @@ pub(crate) fn handle_guild(
             if body.len() >= 8 {
                 let item_id = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4]));
                 let stock = i32::from_le_bytes(body[4..8].try_into().unwrap_or([0; 4]));
-                shop.message = format!("商品 #{} 库存剩余 {}", item_id, stock);
-                if let Some(it) = shop.items.iter_mut().find(|i| i.item_index == item_id) {
-                    it.stock = stock;
-                }
+                server_events.write(ServerEvent::ShopStock { item_id, stock });
                 tracing::info!("🛒 商城库存: #{} 剩余 {}", item_id, stock);
             }
         }
@@ -340,12 +333,10 @@ pub(crate) fn handle_guild(
                 rows.push(TerritoryRow { id, map_index, owner, state });
             }
             if ok {
-                territory.rows = rows;
-                tracing::info!(
-                    "🏯 领地列表: {} 个（无主 {}）",
-                    territory.rows.len(),
-                    territory.rows.iter().filter(|r| r.owner.is_empty()).count()
-                );
+                let row_count = rows.len();
+                let unowned = rows.iter().filter(|r| r.owner.is_empty()).count();
+                server_events.write(ServerEvent::TerritoryList { rows });
+                tracing::info!("🏯 领地列表: {} 个（无主 {}）", row_count, unowned);
             } else {
                 tracing::warn!("⚠️ GuildTerritoryPage 解析失败: (len={})", payload.len());
             }
@@ -356,7 +347,7 @@ pub(crate) fn handle_guild(
             let mut cur = std::io::Cursor::new(body);
             match mir2_shared::binary::read_dotnet_string(&mut cur) {
                 Ok(name) => {
-                    territory.war_message = format!("已向 {} 行会宣战", name);
+                    server_events.write(ServerEvent::TerritoryWar { guild_name: name.clone() });
                     tracing::info!("🏯 宣战确认: {}", name);
                 }
                 Err(e) => {

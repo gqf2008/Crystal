@@ -703,7 +703,11 @@ fn hud_server_events(
             | ServerEvent::MarketListings { .. }
             | ServerEvent::MarketConsign { .. }
             | ServerEvent::MarketSuccess { .. }
-            | ServerEvent::MarketFail { .. } => {}
+            | ServerEvent::MarketFail { .. }
+            | ServerEvent::ShopCatalog { .. }
+            | ServerEvent::ShopStock { .. }
+            | ServerEvent::TerritoryList { .. }
+            | ServerEvent::TerritoryWar { .. } => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);

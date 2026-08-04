@@ -58,7 +58,11 @@ pub struct GameShopPlugin;
 impl Plugin for GameShopPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GameShopState>();
-        app.add_systems(OnEnter(AppState::Game), spawn_game_shop);
+                app.add_systems(
+            Update,
+            shop_server_events.run_if(in_state(AppState::Game)),
+        );
+app.add_systems(OnEnter(AppState::Game), spawn_game_shop);
         app.add_systems(OnExit(AppState::Game), cleanup_game_shop);
         app.add_systems(
             Update,
@@ -242,6 +246,30 @@ fn game_shop_ui_system(
             } else {
                 shop.message = "请先点击选中一个商品".to_string();
             }
+        }
+    }
+}
+
+
+/// 消费服务端商城事件（网络层只广播 ServerEvent；文案在此构造）
+fn shop_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut shop: ResMut<GameShopState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::ShopCatalog { items, gold } => {
+                shop.items = items.clone();
+                shop.gold = *gold;
+            }
+            ServerEvent::ShopStock { item_id, stock } => {
+                shop.message = format!("商品 #{} 库存剩余 {}", item_id, stock);
+                if let Some(it) = shop.items.iter_mut().find(|i| i.item_index == *item_id) {
+                    it.stock = *stock;
+                }
+            }
+            _ => {}
         }
     }
 }
