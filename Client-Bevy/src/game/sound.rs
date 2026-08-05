@@ -78,11 +78,48 @@ pub fn play_sound(
     ));
 }
 
+/// 音效缓存（#91：UI 高频点击音效复用 AudioSource，避免每次读盘）
+#[derive(Resource, Default)]
+pub struct SoundCache {
+    pub map: HashMap<u32, Handle<AudioSource>>,
+}
+
+/// 播放音效（带缓存；未命中时读盘一次并缓存）
+pub fn play_sound_cached(
+    commands: &mut Commands,
+    assets: &mut Assets<AudioSource>,
+    bank: &SoundBank,
+    cache: &mut SoundCache,
+    id: u32,
+) {
+    let handle = if let Some(h) = cache.map.get(&id) {
+        h.clone()
+    } else {
+        let Some(path) = bank.file_for(id) else {
+            return;
+        };
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let source = AudioSource {
+            bytes: Arc::from(bytes),
+        };
+        let h = assets.add(source);
+        cache.map.insert(id, h.clone());
+        h
+    };
+    commands.spawn((
+        AudioPlayer(handle),
+        PlaybackSettings::DESPAWN,
+    ));
+}
+
 pub struct SoundPlugin;
 
 impl Plugin for SoundPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SoundBank>();
+        app.init_resource::<SoundCache>();
         app.add_systems(Startup, load_sound_bank);
     }
 }

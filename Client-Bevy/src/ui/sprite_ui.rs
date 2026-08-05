@@ -215,3 +215,53 @@ pub fn ui_button_system(
 
 
 
+
+
+/// 按钮点击音效覆盖（#91）：默认 ButtonB=10104，可指定 C# SoundList 音效 id
+#[derive(Component)]
+pub struct ButtonSound(pub u32);
+
+/// 按钮悬停进入音效（#91，可选挂载；C# MirButton 默认只有点击音效）
+#[derive(Component)]
+pub struct ButtonHoverSound(pub u32);
+
+/// UI 按钮音效系统（#91）：
+/// - 点击：播放 ButtonSound 覆盖或默认 ButtonB(10104)（对齐 C# MirControl.OnMouseClick）
+/// - 悬停进入：仅对挂了 ButtonHoverSound 的按钮播放一次
+pub fn ui_button_sound_system(
+    mut commands: Commands,
+    mut assets: ResMut<Assets<bevy::audio::AudioSource>>,
+    bank: Res<crate::game::sound::SoundBank>,
+    mut cache: ResMut<crate::game::sound::SoundCache>,
+    windows: Query<&Window>,
+    buttons: Query<(Entity, &UiButton, Option<&ButtonSound>, Option<&ButtonHoverSound>)>,
+    mut hovered_prev: Local<std::collections::HashSet<Entity>>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+
+    let mut hovered_now = std::collections::HashSet::new();
+    for (e, btn, sound, hover_sound) in &buttons {
+        let (x, y, w, h) = btn.rect;
+        let over = cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h;
+        if over {
+            hovered_now.insert(e);
+        }
+        // 点击音效
+        if btn.clicked {
+            let id = sound.map(|s| s.0).unwrap_or(10104); // C# SoundList.ButtonB
+            crate::game::sound::play_sound_cached(&mut commands, &mut assets, &bank, &mut cache, id);
+        }
+        // 悬停进入音效（可选）
+        if over && !hovered_prev.contains(&e) {
+            if let Some(hs) = hover_sound {
+                crate::game::sound::play_sound_cached(&mut commands, &mut assets, &bank, &mut cache, hs.0);
+            }
+        }
+    }
+    *hovered_prev = hovered_now;
+}

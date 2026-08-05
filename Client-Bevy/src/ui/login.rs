@@ -271,7 +271,11 @@ fn setup_login_ui(
         48.0,
         48.0,
     ) {
-        commands.entity(e).insert(UiButtonKind(ButtonKind::LoginOk));
+        commands.entity(e).insert((
+            UiButtonKind(ButtonKind::LoginOk),
+            // #91 悬停音效（C# ButtonA 语义：主要按钮悬停/点击都有反馈）
+            crate::ui::sprite_ui::ButtonHoverSound(10104),
+        ));
     }
     if let Some(e) = spawn_ui_button(
         &mut commands,

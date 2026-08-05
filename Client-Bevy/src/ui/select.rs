@@ -498,6 +498,10 @@ fn spawn_bottom_btn(
         25.0,
     ) {
         commands.entity(e).insert(BottomButton(kind));
+        // #91 开始游戏按钮悬停音效
+        if let BottomBtn::Start = kind {
+            commands.entity(e).insert(crate::ui::sprite_ui::ButtonHoverSound(10104));
+        }
     }
 }
 
