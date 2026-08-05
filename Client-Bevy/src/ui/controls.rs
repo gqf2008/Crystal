@@ -498,7 +498,7 @@ pub fn scrolling_label_system(
 
 // ============================================================================
 // ItemCell - 通用物品格（MirItemCell 简化版）
-// 结构：格子实体（ItemCell{slot} + ItemCellData）→ 子实体 ItemCellIcon/ItemCellCount
+// 结构：格子实体（ItemCell{slot} + ItemCellData）→ 子实体 ItemCellIcon/ItemCellCount/ItemCellDura
 // 渲染由 item_cell_system 统一处理；对话框只需写 ItemCellData。
 // ============================================================================
 
@@ -509,6 +509,8 @@ pub struct ItemCellData {
     pub icon: Option<Handle<Image>>,
     /// 堆叠数量（None 或 1 不显示数字）
     pub count: Option<u32>,
+    /// 耐久比例 0.0-1.0（装备显示耐久条；None 不显示，C# MirItemCell DrawDurability）
+    pub dura_ratio: Option<f32>,
 }
 
 /// 物品格（槽位）
@@ -525,7 +527,11 @@ pub struct ItemCellIcon(pub usize);
 #[derive(Component)]
 pub struct ItemCellCount(pub usize);
 
-/// 生成通用物品格（底格 + 图标 + 数量），返回格子实体
+/// 耐久条子实体（装备显示，红色随耐久缩短）
+#[derive(Component)]
+pub struct ItemCellDura(pub usize, pub f32);
+
+/// 生成通用物品格（底格 + 图标 + 数量 + 耐久条），返回格子实体
 pub fn spawn_item_cell(
     commands: &mut Commands,
     images: &mut Assets<Image>,
@@ -579,15 +585,45 @@ pub fn spawn_item_cell(
             Transform::from_xyz(cell_w - 16.0, -(cell_h - 13.0), z + 0.2),
             Visibility::Hidden,
         ));
+        // 耐久条（C# MirItemCell DrawDurability：装备显示，红色随耐久缩短）
+        p.spawn((
+            ItemCellDura(slot, cell_w - 4.0),
+            Sprite {
+                image: white.clone(),
+                color: Color::srgb(1.0, 0.2, 0.2),
+                custom_size: Some(Vec2::new(cell_w - 4.0, 2.0)),
+                ..default()
+            },
+            bevy::sprite::Anchor::TOP_LEFT,
+            Transform::from_xyz(2.0, -(cell_h - 4.0), z + 0.3),
+            Visibility::Hidden,
+        ));
     });
     cell
 }
 
-/// 物品格渲染系统：按 ItemCellData 刷新图标/数量
+/// 耐久条宽度（C# MirItemCell DrawDurability：满耐久=整格宽度，随比例缩短，最小 1px）
+fn dura_width(full: f32, ratio: f32) -> f32 {
+    (full * ratio).max(1.0)
+}
+/// 物品格渲染系统：按 ItemCellData 刷新图标/数量/耐久条
 pub fn item_cell_system(
-    cells: Query<&ItemCellData, (With<ItemCell>, Without<ItemCellIcon>, Without<ItemCellCount>)>,
-    mut icons: Query<(&ChildOf, &mut Sprite, &mut Visibility, &ItemCellIcon), Without<ItemCellCount>>,
-    mut counts: Query<(&ChildOf, &mut Text2d, &mut Visibility, &ItemCellCount), Without<ItemCellIcon>>,
+    cells: Query<
+        &ItemCellData,
+        (With<ItemCell>, Without<ItemCellIcon>, Without<ItemCellCount>, Without<ItemCellDura>),
+    >,
+    mut icons: Query<
+        (&ChildOf, &mut Sprite, &mut Visibility, &ItemCellIcon),
+        (Without<ItemCellCount>, Without<ItemCellDura>),
+    >,
+    mut counts: Query<
+        (&ChildOf, &mut Text2d, &mut Visibility, &ItemCellCount),
+        (Without<ItemCellIcon>, Without<ItemCellDura>),
+    >,
+    mut duras: Query<
+        (&ChildOf, &mut Sprite, &mut Visibility, &ItemCellDura),
+        (Without<ItemCellIcon>, Without<ItemCellCount>),
+    >,
 ) {
     for (child_of, mut sprite, mut vis, _icon) in &mut icons {
         let data = cells.get(child_of.parent()).ok();
@@ -612,12 +648,26 @@ pub fn item_cell_system(
         }
         *vis = if show { Visibility::Visible } else { Visibility::Hidden };
     }
+
+
+    for (child_of, mut sprite, mut vis, dura) in &mut duras {
+        let data = cells.get(child_of.parent()).ok();
+        match data.and_then(|d| d.dura_ratio) {
+            Some(ratio) if (0.0..=1.0).contains(&ratio) => {
+                let w = dura_width(dura.1, ratio);
+                let cur = sprite.custom_size.unwrap_or(Vec2::new(dura.1, 2.0));
+                if (cur.x - w).abs() > 0.1 {
+                    sprite.custom_size = Some(Vec2::new(w, 2.0));
+                }
+                *vis = Visibility::Visible;
+            }
+            _ => *vis = Visibility::Hidden,
+        }
+    }
 }
-
-
 #[cfg(test)]
 mod tests {
-    use super::{strip_color_tags, AnimatedButton};
+    use super::{dura_width, strip_color_tags, AnimatedButton};
     use bevy::prelude::*;
 
     fn ab(frames: usize, delay: f32, looping: bool) -> AnimatedButton {
@@ -672,5 +722,13 @@ mod tests {
         b.playing = false;
         b.tick(1.0);
         assert_eq!(b.frame, 0);
+    }
+
+    #[test]
+    fn item_cell_dura_width_scales_and_clamps() {
+        assert_eq!(dura_width(32.0, 1.0), 32.0);
+        assert_eq!(dura_width(32.0, 0.5), 16.0);
+        assert_eq!(dura_width(32.0, 0.0), 1.0);
+        assert_eq!(dura_width(32.0, 0.01), 1.0);
     }
 }

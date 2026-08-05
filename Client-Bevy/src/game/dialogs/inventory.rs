@@ -9,7 +9,6 @@
 // ============================================================================
 
 use bevy::prelude::*;
-use bevy::sprite::Anchor;
 
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
 use crate::game::dialogs::character;
@@ -21,8 +20,9 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use mir2_shared::enums::MirGridType;
 
+use crate::ui::controls::{spawn_item_cell, ItemCellData};
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
+    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont,
     UiImageCache,
 };
 
@@ -293,75 +293,22 @@ fn spawn_inventory_dialog(
         DialogWidget,
     ));
 
-    // 格子背景（40 格，8x5），每格带物品图标 + 堆叠数量
-    let white = images.add(crate::map_renderer::make_image(
-        vec![255, 255, 255, 255],
-        1,
-        1,
-    ));
+    // 格子背景（40 格，8x5）：通用 ItemCell（底格 + 图标 + 数量 + 耐久条，#90 续）
+    // 渲染由 item_cell_system 统一处理；这里只挂 InvSlot 标记供交互查询
     for i in 0..(GRID_COLS * GRID_ROWS) {
         let x = i % GRID_COLS;
         let y = i / GRID_COLS;
         let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
         let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
-        let slot = commands
-            .spawn((
-                UiEntity,
-                DialogRoot(DialogKind::Inventory),
-                DialogWidget,
-                InvSlot(i),
-                Sprite {
-                    image: white.clone(),
-                    color: Color::srgba(0.0, 0.0, 0.0, 0.18),
-                    custom_size: Some(Vec2::new(CELL_W, CELL_H)),
-                    ..default()
-                },
-                Anchor::TOP_LEFT,
-                Transform::from_xyz(sx, -sy, 6.5),
-                Visibility::Hidden,
-            ))
-            .id();
-        commands.entity(slot).with_children(|p| {
-            // 物品图标（数据驱动：按 InvItem.image 从 Items 库取帧）
-            p.spawn((
-                InvIcon(i),
-                Sprite {
-                    image: white.clone(),
-                    custom_size: Some(Vec2::new(CELL_W - 4.0, CELL_H - 4.0)),
-                    ..default()
-                },
-                Anchor::TOP_LEFT,
-                Transform::from_xyz(2.0, -2.0, 6.6),
-                Visibility::Hidden,
-            ));
-            // 堆叠数量（右下角小字）
-            p.spawn((
-                InvCount(i),
-                Text2d::new(String::new()),
-                Anchor::TOP_LEFT,
-                TextFont {
-                    font: FontSource::Handle(font.clone()),
-                    font_size: FontSize::Px(10.0),
-                    ..default()
-                },
-                TextColor(Color::srgb(1.0, 1.0, 0.6)),
-                Transform::from_xyz(CELL_W - 16.0, -(CELL_H - 13.0), 6.7),
-                Visibility::Hidden,
-            ));
-            // 耐久条（底部，装备显示，红色随耐久缩短）
-            p.spawn((
-                InvDura(i),
-                Sprite {
-                    image: white.clone(),
-                    color: Color::srgb(1.0, 0.2, 0.2),
-                    custom_size: Some(Vec2::new(CELL_W - 4.0, 2.0)),
-                    ..default()
-                },
-                Anchor::TOP_LEFT,
-                Transform::from_xyz(2.0, -(CELL_H - 4.0), 6.8),
-                Visibility::Hidden,
-            ));
-        });
+        let cell = spawn_item_cell(
+            &mut commands, &mut images, &font,
+            sx, sy, 6.5, CELL_W, CELL_H, i,
+        );
+        commands.entity(cell).insert((
+            DialogRoot(DialogKind::Inventory),
+            DialogWidget,
+            InvSlot(i),
+        ));
     }
 }
 
@@ -385,18 +332,6 @@ pub fn inv_slot_at(cx: f32, cy: f32) -> Option<usize> {
 /// 背包格子索引（0..39）
 #[derive(Component, Clone, Copy)]
 pub struct InvSlot(pub usize);
-/// 物品图标（格子子实体）
-#[derive(Component, Clone, Copy)]
-pub struct InvIcon(pub usize);
-
-/// 堆叠数量文本（格子子实体）
-#[derive(Component, Clone, Copy)]
-pub struct InvCount(pub usize);
-
-/// 耐久条（格子子实体，装备显示，C# MirItemCell DrawDurability 对齐）
-#[derive(Component, Clone, Copy)]
-pub struct InvDura(pub usize);
-
 /// 双击检测（记录最近一次左键点击的格子与时间）
 #[derive(Resource, Default)]
 pub struct InvClickState {
@@ -448,31 +383,7 @@ fn inventory_ui_system(
             Without<InvWeightText>,
         ),
     >,
-    mut icons: Query<
-        (&mut Sprite, &mut Visibility, &InvIcon),
-        (Without<DialogWidget>, Without<InvSlot>, Without<InvCount>, Without<InvDura>),
-    >,
-    mut duras: Query<
-        (&mut Sprite, &mut Visibility, &InvDura),
-        (
-            Without<DialogWidget>,
-            Without<InvSlot>,
-            Without<InvIcon>,
-            Without<InvCount>,
-            Without<InvGoldText>,
-            Without<InvWeightText>,
-        ),
-    >,
-    mut counts: Query<
-        (&mut Text2d, &mut Visibility, &InvCount),
-        (
-            Without<DialogWidget>,
-            Without<InvSlot>,
-            Without<InvIcon>,
-            Without<InvGoldText>,
-            Without<InvWeightText>,
-        ),
-    >,
+    mut cells_data: Query<(&InvSlot, &mut ItemCellData)>,
     buttons: Query<
         (&UiButton, Option<&InvTab>),
         (
@@ -492,7 +403,7 @@ fn inventory_ui_system(
         (
             With<DialogWidget>,
             Or<(With<InvGoldText>, With<InvWeightText>)>,
-            Without<InvCount>,
+
             Without<InvSlot>,
         ),
     >,
@@ -510,9 +421,9 @@ fn inventory_ui_system(
         return;
     }
 
-    // 物品图标（Items 库 item.image 帧）+ 堆叠数量
-    for (mut sprite, mut vis, icon) in &mut icons {
-        let item = inv.items.get(icon.0).and_then(|s| s.as_ref());
+    // 物品数据 → 通用 ItemCell（图标/数量/耐久条由 item_cell_system 渲染，#90 续）
+    for (slot, mut data) in &mut cells_data {
+        let item = inv.items.get(slot.0).and_then(|s| s.as_ref());
         match item {
             Some(item) => {
                 let handle = ui_image(
@@ -522,32 +433,21 @@ fn inventory_ui_system(
                     crate::resources::libraries::LibraryName::Items,
                     item.image as usize,
                 );
-                match handle {
-                    Some(h) if sprite.image != h => sprite.image = h,
-                    None => *vis = Visibility::Hidden,
-                    _ => {}
-                }
-                if sprite.image.is_strong() {
-                    *vis = Visibility::Visible;
-                }
+                data.icon = handle;
+                data.count = if item.count > 1 { Some(item.count as u32) } else { None };
+                data.dura_ratio = if item.is_equipment() && item.max_dura > 0 {
+                    Some((item.current_dura as f32 / item.max_dura as f32).clamp(0.0, 1.0))
+                } else {
+                    None
+                };
             }
-            None => *vis = Visibility::Hidden,
-        }
-    }
-    for (mut text, mut vis, count) in &mut counts {
-        let item = inv.items.get(count.0).and_then(|s| s.as_ref());
-        match item {
-            Some(item) if item.count > 1 => {
-                text.0 = format!("{}", item.count);
-                *vis = Visibility::Visible;
-            }
-            _ => {
-                text.0 = String::new();
-                *vis = Visibility::Hidden;
+            None => {
+                data.icon = None;
+                data.count = None;
+                data.dura_ratio = None;
             }
         }
     }
-
     // 标签页切换 / 关闭按钮
     for (btn, tab) in &buttons {
         if btn.clicked {
@@ -567,22 +467,6 @@ fn inventory_ui_system(
             t.0 = format!("{}/{}", inv.weight, inv.max_weight);
         }
     }
-    // 耐久条（#144 C# MirItemCell DrawDurability：装备显示，红色随耐久缩短）
-    for (mut sprite, mut vis, dura) in &mut duras {
-        let item = inv.items.get(dura.0).and_then(|s| s.as_ref());
-        match item {
-            Some(item) if item.is_equipment() && item.max_dura > 0 => {
-                let ratio = (item.current_dura as f32 / item.max_dura as f32).clamp(0.0, 1.0);
-                let w = ((CELL_W - 4.0) * ratio).max(1.0);
-                let cur = sprite.custom_size.unwrap_or(Vec2::new(CELL_W - 4.0, 2.0));
-                if (cur.x - w).abs() > 0.1 {
-                    sprite.custom_size = Some(Vec2::new(w, 2.0));
-                }
-                *vis = Visibility::Visible;
-            }
-            _ => *vis = Visibility::Hidden,
-        }
-    }
 }
 
 /// 悬停提示系统（#93/#106 通用 Tooltip）：物品格上显示 名称 + 类型/数量/耐久
@@ -590,7 +474,7 @@ fn inv_tooltip_system(
     inv: Res<crate::game::hud::HudState>,
     mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
     windows: Query<&Window>,
-    slots: Query<&InvSlot, Without<InvIcon>>,
+    slots: Query<&InvSlot>,
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
@@ -672,7 +556,7 @@ pub fn item_type_name(t: u8) -> &'static str {
 /// 选中格子高亮（原版 C# SelectedCell 黄色边框语义：用黄色半透明覆盖表示）
 fn inv_selection_system(
     click: Res<InvClickState>,
-    mut slots: Query<(&mut Sprite, &InvSlot), Without<InvIcon>>,
+    mut slots: Query<(&mut Sprite, &InvSlot)>,
 ) {
     for (mut sprite, slot) in &mut slots {
         let selected = click.selected == Some(slot.0);
