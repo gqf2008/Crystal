@@ -227,10 +227,14 @@ pub(crate) fn chunk_stream_system(
             Without<crate::actor::LocalPlayer>,
         ),
     >,
-    chunks: Query<(Entity, &ChunkKey)>,
-    front_chunks: Query<(Entity, &FrontChunkKey)>,
+    chunks: Query<(Entity, &ChunkKey, &Sprite)>,
+    front_chunks: Query<(Entity, &FrontChunkKey, Option<&MeshMaterial2d<crate::map_tile_anim::MapBlendMaterial>>)>,
     light_tex: Res<MapLightTexture>,
-    lights: Query<(Entity, &LightChunkKey)>,
+    lights: Query<(
+        Entity,
+        &LightChunkKey,
+        Option<&MeshMaterial2d<crate::map_tile_anim::MapBlendMaterial>>,
+    )>,
 ) {
     let Some(map_reader) = game_data.map_reader.clone() else { return };
     let Ok(cam) = camera.single() else { return };
@@ -255,11 +259,13 @@ pub(crate) fn chunk_stream_system(
         }
     }
     let existing: std::collections::HashSet<_> =
-        chunks.iter().map(|(_, k)| (k.0, k.1, k.2)).collect();
+        chunks.iter().map(|(_, k, _)| (k.0, k.1, k.2)).collect();
 
-    // 卸载窗口外
-    for (e, k) in chunks.iter() {
+    // 卸载窗口外（#113 内存：同时释放 chunk 纹理资产——此前只 despawn 实体，
+    // 纹理句柄永久留在 Assets，玩家移动时内存无限增长）
+    for (e, k, sprite) in chunks.iter() {
         if !wanted.contains(&(k.0, k.1, k.2)) {
+            assets.remove(&sprite.image);
             commands.entity(e).despawn();
         }
     }
@@ -306,9 +312,13 @@ pub(crate) fn chunk_stream_system(
         }
     }
     let existing_front: std::collections::HashSet<_> =
-        front_chunks.iter().map(|(_, k)| (k.0, k.1)).collect();
-    for (e, k) in front_chunks.iter() {
+        front_chunks.iter().map(|(_, k, _)| (k.0, k.1)).collect();
+    for (e, k, mat) in front_chunks.iter() {
         if !wanted_front.contains(&(k.0, k.1)) {
+            // #113 内存：混合瓦片材质随 chunk 卸载释放（共享贴图仍在 FrontImageCache）
+            if let Some(mat) = mat {
+                blend_materials.remove(&mat.0);
+            }
             commands.entity(e).despawn();
         }
     }
@@ -345,9 +355,13 @@ pub(crate) fn chunk_stream_system(
         }
     }
     let existing_light: std::collections::HashSet<_> =
-        lights.iter().map(|(_, k)| (k.0, k.1)).collect();
-    for (e, k) in lights.iter() {
+        lights.iter().map(|(_, k, _)| (k.0, k.1)).collect();
+    for (e, k, mat) in lights.iter() {
         if !wanted_light.contains(&(k.0, k.1)) {
+            // #113 内存：灯光材质随 chunk 卸载释放
+            if let Some(mat) = mat {
+                blend_materials.remove(&mat.0);
+            }
             commands.entity(e).despawn();
         }
     }
