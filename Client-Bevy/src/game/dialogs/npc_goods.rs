@@ -18,6 +18,7 @@ use crate::ui::sprite_ui::{
     UiImageCache,
 };
 use crate::ui::controls::{spawn_item_cell, ItemCellData, ItemCell};
+use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
 
 /// 商品条目
 #[derive(Debug, Clone)]
@@ -106,10 +107,33 @@ fn spawn_npc_goods(
     // 背景 Prguse[1000] 在 (0,224)
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 1000) {
         let e = spawn_ui_sprite(&mut commands, h, 0.0, 224.0, 6.0, 1.0);
+        // #124 长商品列表滚轮滚动
+        let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (500.0, 240.0, 4.0, 176.0), 6.3);
+        commands.entity(track).insert((
+            DialogRoot(crate::game::dialogs::DialogKind::NpcGoods),
+            NpcGoodsWidget,
+            Visibility::Visible,
+        ));
+        commands.entity(thumb).insert((
+            DialogRoot(crate::game::dialogs::DialogKind::NpcGoods),
+            NpcGoodsWidget,
+            Visibility::Visible,
+        ));
         commands.entity(e).insert((
             DialogRoot(crate::game::dialogs::DialogKind::NpcGoods),
             NpcGoodsWidget,
             Visibility::Hidden,
+            ScrollList {
+                rect_rel: (12.0, 16.0, 470.0, 176.0),
+                row_h: 22.0,
+                visible: 8,
+                total: 0,
+                offset: 0,
+                step: 3,
+                track_rel: (500.0, 16.0, 4.0, 176.0),
+                thumb: Some(thumb),
+                z: 8.0,
+            },
         ));
     }
 
@@ -172,6 +196,7 @@ fn npc_goods_ui_system(
     mut widgets: Query<&mut Visibility, With<NpcGoodsWidget>>,
     mut lines: Query<(&mut Text2d, &NpcGoodsLine)>,
     mut cells: Query<(&mut ItemCellData, &NpcGoodsCell)>,
+    mut scroll: Query<&mut ScrollList, With<NpcGoodsWidget>>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
@@ -188,9 +213,16 @@ fn npc_goods_ui_system(
         return;
     }
 
-    // 商品行（名称 + 价格）
+    // 商品行（名称 + 价格，#124 支持滚轮滚动）
+    {
+        let mut sl = scroll.single_mut();
+        if let Ok(sl) = sl.as_mut() {
+            sl.set_total(state.goods.len());
+        }
+    }
+    let off = scroll.single().map(|s| s.offset).unwrap_or(0);
     for (mut text, line) in &mut lines {
-        if let Some(g) = state.goods.get(line.0) {
+        if let Some(g) = state.goods.get(off + line.0) {
             text.0 = format!("{} x{}  {} 金", g.name, g.count, g.price);
         } else {
             text.0 = String::new();
@@ -199,7 +231,7 @@ fn npc_goods_ui_system(
 
     // 商品图标（#110 通用 ItemCell 数据驱动渲染）
     for (mut data, cell) in &mut cells {
-        let g = state.goods.get(cell.0);
+        let g = state.goods.get(off + cell.0);
         let icon = g.and_then(|g| {
             ui_image(
                 &mut libs,
@@ -226,7 +258,7 @@ fn npc_goods_ui_system(
     for i in 0..8usize {
         let y = 240.0 + i as f32 * 22.0;
         if cursor.x >= 12.0 && cursor.x <= 480.0 && cursor.y >= y && cursor.y <= y + 18.0 {
-            hovered = state.goods.get(i);
+            hovered = state.goods.get(off + i);
             break;
         }
     }
@@ -250,9 +282,10 @@ fn npc_goods_ui_system(
         for i in 0..8usize {
             let y = 240.0 + i as f32 * 22.0;
             if cursor.x >= 12.0 && cursor.x <= 480.0 && cursor.y >= y && cursor.y <= y + 18.0 {
-                if i < state.goods.len() {
-                    state.selected = Some(i);
-                    tracing::debug!("🏪 选中商品: {}", state.goods[i].name);
+                let idx = off + i;
+                if idx < state.goods.len() {
+                    state.selected = Some(idx);
+                    tracing::debug!("🏪 选中商品: {}", state.goods[idx].name);
                 }
                 break;
             }
