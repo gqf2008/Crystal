@@ -291,6 +291,7 @@ pub enum ServerEvent {
         max_exp: i64,
         inventory: Vec<Option<InvItem>>,
         equipment: Vec<Option<InvItem>>,
+        magics: Vec<ClientMagic>,
         auto_pot: bool,
         auto_hp_percent: u8,
         auto_mp_percent: u8,

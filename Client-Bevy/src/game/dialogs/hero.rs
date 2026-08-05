@@ -43,6 +43,8 @@ pub struct HeroState {
     /// 英雄背包/装备（C# S.HeroInformation，#203）
     pub inventory: Vec<Option<crate::game::dialogs::inventory::InvItem>>,
     pub equipment: Vec<Option<crate::game::dialogs::inventory::InvItem>>,
+    /// 英雄魔法（#218）
+    pub magics: Vec<mir2_shared::data::client_data::ClientMagic>,
     pub hero_hp: i32,
     pub hero_mp: i32,
     pub hero_exp: i64,
@@ -68,6 +70,7 @@ impl Default for HeroState {
             auto_pot_mp: 0,
             inventory: Vec::new(),
             equipment: Vec::new(),
+            magics: Vec::new(),
             hero_hp: 0,
             hero_mp: 0,
             hero_exp: 0,
@@ -98,6 +101,10 @@ pub struct HeroOpenInventory;
 /// 打开英雄装备（#206）
 #[derive(Component)]
 pub struct HeroOpenEquipment;
+
+/// 打开英雄技能（#218）
+#[derive(Component)]
+pub struct HeroOpenSkill;
 
 #[derive(Component)]
 pub struct HeroLine(usize);
@@ -316,6 +323,17 @@ fn spawn_hero(
         DialogRoot(DialogKind::Hero),
         HeroWidget,
     ));
+    // 英雄技能按钮（#218：打开 HeroSkillDialog）
+    let skill_btn = spawn_ui_text(&mut commands, &font, "英雄技能", 300.0, 360.0, 12.0, Color::srgb(0.8, 0.9, 1.0), 8.3);
+    commands.entity(skill_btn).insert((
+        HeroOpenSkill,
+        UiButton {
+            rect: (300.0, 360.0, 90.0, 18.0),
+            clicked: false,
+        },
+        DialogRoot(DialogKind::Hero),
+        HeroWidget,
+    ));
     // 创建面板
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     commands.spawn((
@@ -499,7 +517,7 @@ fn hero_button_system(
     close: Query<&UiButton, With<HeroClose>>,
     main_btn: Query<&UiButton, With<HeroSwitchMain>>,
     hero1_btn: Query<&UiButton, With<HeroSwitch1>>,
-    nav_btns: Query<(&UiButton, Option<&HeroOpenInventory>, Option<&HeroOpenEquipment>)>,
+    nav_btns: Query<(&UiButton, Option<&HeroOpenInventory>, Option<&HeroOpenEquipment>, Option<&HeroOpenSkill>)>,
     create_btn: Query<&UiButton, With<HeroCreateBtn>>,
     class_btn: Query<&UiButton, With<HeroClassCycle>>,
     gender_btn: Query<&UiButton, With<HeroGenderCycle>>,
@@ -531,7 +549,7 @@ fn hero_button_system(
             tracing::info!("🦸 切换英雄 1");
         }
     }
-    for (btn, inv, eq) in &nav_btns {
+    for (btn, inv, eq, skill) in &nav_btns {
         if btn.clicked {
             if inv.is_some() {
                 mgr.toggle(DialogKind::HeroInventory);
@@ -539,6 +557,9 @@ fn hero_button_system(
             } else if eq.is_some() {
                 mgr.toggle(DialogKind::HeroEquipment);
                 tracing::info!("🦸 英雄装备: {}", if mgr.is_open(DialogKind::HeroEquipment) { "打开" } else { "关闭" });
+            } else if skill.is_some() {
+                mgr.toggle(DialogKind::HeroSkill);
+                tracing::info!("🦸 英雄技能: {}", if mgr.is_open(DialogKind::HeroSkill) { "打开" } else { "关闭" });
             }
         }
     }
@@ -700,6 +721,7 @@ fn hero_server_events(
             ServerEvent::HeroInformation {
                 inventory,
                 equipment,
+                magics,
                 hp,
                 mp,
                 exp,
@@ -713,6 +735,7 @@ fn hero_server_events(
             } => {
                 hero.inventory = inventory.clone();
                 hero.equipment = equipment.clone();
+                hero.magics = magics.clone();
                 hero.hero_hp = *hp;
                 hero.hero_mp = *mp;
                 hero.hero_exp = *exp;

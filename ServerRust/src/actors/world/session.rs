@@ -1626,6 +1626,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         auto_pot_hp_item: 0,
         auto_pot_mp_item: 0,
         hero_inventory: PlayerInventory::new(),
+        hero_magics: Vec::new(),
         refine_log: RefineLog::new(),
         is_fishing: false,
         fishing_autocast: false,

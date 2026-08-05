@@ -203,6 +203,8 @@ pub struct PlayerState {
     pub auto_pot_mp_item: i32,
     /// 英雄背包
     pub hero_inventory: crate::actors::inventory::PlayerInventory,
+    /// 英雄已学习的魔法/技能（#218）
+    pub hero_magics: Vec<PlayerMagic>,
     /// 精炼日志
     pub refine_log: RefineLog,
     /// 是否在钓鱼
@@ -472,6 +474,7 @@ impl PlayerActor {
                 auto_pot_hp_item: 0,
                 auto_pot_mp_item: 0,
                 hero_inventory: PlayerInventory::new(),
+                hero_magics: Vec::new(),
                 refine_log: RefineLog::new(),
                 is_fishing: false,
                 is_mounted: false,
@@ -1526,6 +1529,89 @@ impl Message<ConsumeItem> for PlayerActor {
         } else {
             false
         }
+    }
+}
+
+/// 装备物品
+/// 获取英雄背包物品信息（#218）
+pub struct GetHeroItemInfo {
+    pub unique_id: u64,
+}
+
+impl Message<GetHeroItemInfo> for PlayerActor {
+    type Reply = Option<mir2_shared::data::item::UserItem>;
+
+    async fn handle(
+        &mut self,
+        msg: GetHeroItemInfo,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state
+            .hero_inventory
+            .backpack
+            .iter()
+            .flatten()
+            .find(|s| s.item.unique_id == msg.unique_id)
+            .map(|s| s.item.clone())
+    }
+}
+
+/// 消耗英雄背包物品（#218）
+pub struct ConsumeHeroItem {
+    pub unique_id: u64,
+}
+
+impl Message<ConsumeHeroItem> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(
+        &mut self,
+        msg: ConsumeHeroItem,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        for slot in self.state.hero_inventory.backpack.iter_mut() {
+            if let Some(s) = slot {
+                if s.item.unique_id == msg.unique_id {
+                    *slot = None;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
+/// 英雄是否已学习技能（#218）
+pub struct IsHeroMagicLearned {
+    pub spell: i32,
+}
+
+impl Message<IsHeroMagicLearned> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(
+        &mut self,
+        msg: IsHeroMagicLearned,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.hero_magics.iter().any(|m| m.spell == msg.spell)
+    }
+}
+
+/// 英雄学习技能（#218）
+pub struct LearnHeroMagic {
+    pub spell: i32,
+}
+
+impl Message<LearnHeroMagic> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(
+        &mut self,
+        msg: LearnHeroMagic,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.hero_learn_magic(msg.spell)
     }
 }
 
@@ -2838,6 +2924,15 @@ impl PlayerState {
         self.magics.push(PlayerMagic::new(spell));
         true
     }
+
+    /// 英雄学习技能（#218）：未学习则加入英雄魔法列表
+    pub fn hero_learn_magic(&mut self, spell: i32) -> bool {
+        if self.hero_magics.iter().any(|m| m.spell == spell) {
+            return false;
+        }
+        self.hero_magics.push(PlayerMagic::new(spell));
+        true
+    }
 }
 
 /// 是否已学习技能
@@ -3316,6 +3411,7 @@ mod tests {
             creature_log: CreatureLog::new(),
             hero_index: 0,
             hero_inventory: PlayerInventory::new(),
+            hero_magics: Vec::new(),
             refine_log: RefineLog::new(),
             is_fishing: false,
             is_mounted: false,
@@ -3466,6 +3562,16 @@ mod tests {
     }
 
 
+
+    // ---- #218 英雄技能 ----
+    #[test]
+    fn test_hero_learn_magic_adds_once() {
+        let mut s = make_state();
+        assert!(s.hero_magics.is_empty());
+        assert!(s.hero_learn_magic(31)); // FireBall C#
+        assert_eq!(s.hero_magics.len(), 1);
+        assert!(!s.hero_learn_magic(31));
+    }
     // ---- #214 技能升级 ----
     #[test]
     fn test_gain_spell_exp_levels_up() {

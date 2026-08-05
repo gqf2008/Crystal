@@ -95,7 +95,16 @@ pub(crate) async fn send_hero_information_packet(&self, session_id: u64) {
         max_experience: 100,
         inventory: Some(inventory),
         equipment: Some(equipment),
-        magics: Vec::new(),
+        // #218：英雄魔法（DB C# 编号 → 客户端 +3）
+        magics: state
+            .hero_magics
+            .iter()
+            .filter_map(|m| {
+                self.magic_infos
+                    .get(&(m.spell as u32))
+                    .map(|info| super::build_client_magic(info, m))
+            })
+            .collect(),
         auto_pot: state.auto_pot_hp > 0 || state.auto_pot_mp > 0,
         auto_hp_percent: state.auto_pot_hp.min(100) as u8,
         auto_mp_percent: state.auto_pot_mp.min(100) as u8,

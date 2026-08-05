@@ -329,6 +329,7 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                     max_exp: p.max_experience.max(1),
                     inventory,
                     equipment,
+                    magics: p.magics.clone(),
                     auto_pot: p.auto_pot,
                     auto_hp_percent: p.auto_hp_percent,
                     auto_mp_percent: p.auto_mp_percent,

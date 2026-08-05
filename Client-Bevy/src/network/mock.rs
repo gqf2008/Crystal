@@ -120,11 +120,14 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             let mut mock_hero_inventory: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 40];
             mock_hero_inventory[0] = Some(potion_item(2)); // 金创药(中)
             mock_hero_inventory[1] = Some(potion_item(10)); // 布衣
+            mock_hero_inventory[2] = Some(book_item(37)); // 英雄技能书：GreatFireBall（#218，SharedRust=37，uid 与玩家书区分）
             // 英雄装备（12 槽，服务端 EquipmentSlot::COUNT；#206）
             let mut mock_hero_equipment: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 12];
             let mut mock_hero_active = false;
             // #212：技能书学习的技能（UserInformation 已带初始技能，这里追加）
             let mut mock_learned_magics: Vec<ClientMagic> = Vec::new();
+            // #218：英雄技能书学习的技能
+            let mut mock_hero_learned_magics: Vec<ClientMagic> = Vec::new();
             let mut player_dead_since: Option<std::time::Instant> = None;
             // 怪物攻击伤害覆盖（默认 0 = 用怪物自身伤害；MOCK_PLAYER_DAMAGE 可调大测死亡/复活闭环）
             let player_damage = std::env::var("MOCK_PLAYER_DAMAGE")
@@ -588,7 +591,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 false
                                             };
                                             if ok {
-                                                send_hero_information(&to_client, &mock_hero_inventory, &mock_hero_equipment, true, 30, 20, 1, 2);
+                                                send_hero_information(&to_client, &mock_hero_inventory, &mock_hero_equipment, &mock_hero_learned_magics, true, 30, 20, 1, 2);
                                                 tracing::info!("🦸 [MOCK] 英雄装备成功 uid={} -> 槽 {}", p.unique_id, p.to);
                                             } else {
                                                 tracing::warn!("⚠️ [MOCK] 英雄装备失败 uid={} -> 槽 {}", p.unique_id, p.to);
@@ -658,7 +661,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 false
                                             };
                                             if ok {
-                                                send_hero_information(&to_client, &mock_hero_inventory, &mock_hero_equipment, true, 30, 20, 1, 2);
+                                                send_hero_information(&to_client, &mock_hero_inventory, &mock_hero_equipment, &mock_hero_learned_magics, true, 30, 20, 1, 2);
                                                 tracing::info!("🦸 [MOCK] 英雄卸下成功 uid={}", p.unique_id);
                                             } else {
                                                 tracing::warn!("⚠️ [MOCK] 英雄卸下失败 uid={}", p.unique_id);
@@ -781,6 +784,58 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 send(&to_client, &server::combat::HealthChanged { hp: player_stats.hp, mp: player_stats.mp });
                                                 tracing::info!("💊 [MOCK] 使用物品: {} (uid={}) hp={} mp={}", item.info.as_ref().map(|i| i.name.clone()).unwrap_or_default(), p.unique_id, player_stats.hp, player_stats.mp);
                                             }
+                                        } else {
+                                            // #218：英雄背包技能书学习
+                                            let hidx = mock_hero_inventory
+                                                .iter()
+                                                .position(|s| s.as_ref().map(|i| i.unique_id) == Some(p.unique_id));
+                                            if let Some(hidx) = hidx {
+                                                if let Some(item) = mock_hero_inventory[hidx].take() {
+                                                    if item.info.as_ref().map(|i| i.item_type) == Some(ItemType::Book) {
+                                                        let spell = item.info.as_ref().map(|i| i.shape).unwrap_or(0) as u8;
+                                                        if !mock_hero_learned_magics.iter().any(|m| m.spell as u8 == spell) {
+                                                            let cm = ClientMagic {
+                                                                name: format!("英雄技能#{}", spell),
+                                                                spell: mir2_shared::enums::Spell::try_from(spell).unwrap_or(Spell::None),
+                                                                base_cost: 3,
+                                                                level_cost: 1,
+                                                                icon: 0,
+                                                                level1: 1,
+                                                                level2: 2,
+                                                                level3: 3,
+                                                                need1: 0,
+                                                                need2: 0,
+                                                                need3: 0,
+                                                                level: 0,
+                                                                key: 0,
+                                                                experience: 0,
+                                                                delay: 0,
+                                                                range: 1,
+                                                                cast_time: 0,
+                                                            };
+                                                            mock_hero_learned_magics.push(cm.clone());
+                                                            send(&to_client, &server::magic::NewMagic { magic: cm, hero: true });
+                                                            send(
+                                                                &to_client,
+                                                                &server::chat::Chat {
+                                                                    message: "英雄学会了技能！".into(),
+                                                                    chat_type: ChatType::System,
+                                                                },
+                                                            );
+                                                            send_hero_information(&to_client, &mock_hero_inventory, &mock_hero_equipment, &mock_hero_learned_magics, true, 30, 20, 1, 2);
+                                                            tracing::info!("🦸 [MOCK] 英雄学会技能 spell={}", spell);
+                                                        } else {
+                                                            send(
+                                                                &to_client,
+                                                                &server::chat::Chat {
+                                                                    message: "英雄已经学会这个技能".into(),
+                                                                    chat_type: ChatType::System,
+                                                                },
+                                                            );
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -900,7 +955,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     tracing::info!("[MOCK] 切换英雄 index={}", index);
                                     send(&to_client, &server::miscellaneous::ChangeHero { success: mock_hero_active });
                                     if mock_hero_active {
-                                        send_hero_information(&to_client, &mock_hero_inventory, &mock_hero_equipment, true, 30, 20, 1, 2);
+                                        send_hero_information(&to_client, &mock_hero_inventory, &mock_hero_equipment, &mock_hero_learned_magics, true, 30, 20, 1, 2);
                                     }
                                 }
                                 x if x == ClientPacketIds::TakeBackHeroItem as i16 => {
@@ -920,7 +975,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 }
                                                 tracing::info!("[MOCK] 英雄取回 {} -> 主背包 {}", from, to);
                                                 send_user_information(&to_client, active_char_index, &player_inventory, &player_equipment, player_gold, player_stats);
-                                                send_hero_information(&to_client, &mock_hero_inventory, &mock_hero_equipment, true, 30, 20, 1, 2);
+                                                send_hero_information(&to_client, &mock_hero_inventory, &mock_hero_equipment, &mock_hero_learned_magics, true, 30, 20, 1, 2);
                                             }
                                         }
                                     }
@@ -942,7 +997,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 }
                                                 tracing::info!("[MOCK] 转移 主背包{} -> 英雄 {}", from, to);
                                                 send_user_information(&to_client, active_char_index, &player_inventory, &player_equipment, player_gold, player_stats);
-                                                send_hero_information(&to_client, &mock_hero_inventory, &mock_hero_equipment, true, 30, 20, 1, 2);
+                                                send_hero_information(&to_client, &mock_hero_inventory, &mock_hero_equipment, &mock_hero_learned_magics, true, 30, 20, 1, 2);
                                             }
                                         }
                                     }
@@ -1468,6 +1523,7 @@ fn send_hero_information(
     to_client: &Sender<Vec<u8>>,
     inventory: &[Option<mir2_shared::data::item::UserItem>],
     equipment: &[Option<mir2_shared::data::item::UserItem>],
+    magics: &[ClientMagic],
     auto_pot: bool,
     auto_hp_percent: u8,
     auto_mp_percent: u8,
@@ -1489,7 +1545,7 @@ fn send_hero_information(
             max_experience: 30000,
             inventory: Some(inventory.to_vec()),
             equipment: Some(equipment.to_vec()),
-            magics: Vec::new(),
+            magics: magics.to_vec(),
             auto_pot,
             auto_hp_percent,
             auto_mp_percent,

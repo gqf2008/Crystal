@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // auto：自动化验证/调试系统（--auto-* / --real-verify / F12 截图等）
 // ============================================================================
 // 从 main.rs 迁出（#68）：主 bin 只保留 App 组装；调试系统按 CLI flag 在此注册。
@@ -3356,6 +3356,36 @@ fn auto_hero_test(
             }
             if hero.equipment.get(1).and_then(|s| s.as_ref()).is_none() {
                 tracing::info!("[HEROTEST] ✅ 英雄卸下成功");
+                // #218：英雄技能书（英雄背包槽 2）→ UseItem → 等 NewMagic(hero)
+                let book_uid = hero
+                    .inventory
+                    .get(2)
+                    .and_then(|s| s.as_ref())
+                    .map(|i| i.unique_id);
+                match book_uid {
+                    Some(uid) => {
+                        net.send_packet(&mir2_shared::packets::client::item::UseItem { unique_id: uid });
+                        tracing::info!("[HEROTEST] 英雄使用技能书 uid={}", uid);
+                        *stage = 5;
+                        *t = 0.0;
+                    }
+                    None => {
+                        tracing::warn!("[HEROTEST] ⚠️ 英雄背包槽 2 无技能书，跳过");
+                        net.send_packet(&client_bevy::network::ChangeHeroWire { hero_index: 0 });
+                        *stage = 2;
+                        *t = 0.0;
+                    }
+                }
+            }
+        }
+        5 => {
+            if *t >= 8.0 {
+                tracing::warn!("[HEROTEST] ❌ 英雄未学会技能");
+                *stage = 9;
+                return;
+            }
+            if hero.magics.iter().any(|m| m.spell == mir2_shared::enums::Spell::GreatFireBall) {
+                tracing::info!("[HEROTEST] ✅ 英雄学会 GreatFireBall（{} 个技能）", hero.magics.len());
                 net.send_packet(&client_bevy::network::ChangeHeroWire { hero_index: 0 });
                 tracing::info!("[HEROTEST] 切回主角色");
                 *stage = 2;
