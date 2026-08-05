@@ -28,7 +28,7 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::UserStorage as i16, ServerPacketIds::GuildStatus as i16, ServerPacketIds::GuildStorageList as i16, ServerPacketIds::NPCMarket as i16, ServerPacketIds::NPCMarketPage as i16, ServerPacketIds::ConsignItem as i16, ServerPacketIds::MarketSuccess as i16, ServerPacketIds::MarketFail as i16, ServerPacketIds::GameShopInfo as i16, ServerPacketIds::GameShopStock as i16, ServerPacketIds::GuildTerritoryPage as i16, ServerPacketIds::GuildRequestWar as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::UserStorage as i16, ServerPacketIds::GuildStatus as i16, ServerPacketIds::GuildStorageList as i16, ServerPacketIds::NPCMarket as i16, ServerPacketIds::NPCMarketPage as i16, ServerPacketIds::ConsignItem as i16, ServerPacketIds::MarketSuccess as i16, ServerPacketIds::MarketFail as i16, ServerPacketIds::GameShopInfo as i16, ServerPacketIds::GameShopStock as i16, ServerPacketIds::GuildTerritoryPage as i16, ServerPacketIds::GuildRequestWar as i16, ServerPacketIds::StoragePasswordResult as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M18: 仓库 ----
@@ -52,6 +52,13 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
             }
         }
 
+        // ---- M18: 仓库密码 ----
+        x if x == ServerPacketIds::StoragePasswordResult as i16 => {
+            if let Ok(p) = storage::StoragePasswordResult::read_body(&mut cur) {
+                server_events.write(ServerEvent::StoragePasswordResult { result: p.result });
+                tracing::info!("🔒 仓库密码结果: {}", p.result);
+            }
+        }
         // ---- M27: 行会 ----
         x if x == ServerPacketIds::GuildStatus as i16 => {
             use byteorder::{LittleEndian, ReadBytesExt};

@@ -23,6 +23,8 @@ pub enum ServerEvent {
     TimeOfDay { light: mir2_shared::enums::LightSetting },
     /// ObjectColourChanged：对象名字颜色（C# PK 红名）
     ObjectColourChanged { object_id: u32, name_colour_argb: i32 },
+    /// StoragePasswordResult：仓库密码设置/移除结果（C# result：4=成功 2=当前密码错误 5=未设置）
+    StoragePasswordResult { result: u8 },
     /// GainExperience：经验增量
     ExperienceGained { amount: i64 },
     /// LevelChanged：新等级 + 经验（原实现一并更新 exp/max_exp）
