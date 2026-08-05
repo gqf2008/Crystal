@@ -95,6 +95,10 @@ pub struct HeroSwitch1;
 #[derive(Component)]
 pub struct HeroOpenInventory;
 
+/// 打开英雄装备（#206）
+#[derive(Component)]
+pub struct HeroOpenEquipment;
+
 #[derive(Component)]
 pub struct HeroLine(usize);
 
@@ -301,6 +305,17 @@ fn spawn_hero(
         DialogRoot(DialogKind::Hero),
         HeroWidget,
     ));
+    // 英雄装备按钮（#206：打开 HeroEquipmentDialog）
+    let eq_btn = spawn_ui_text(&mut commands, &font, "英雄装备", 410.0, 330.0, 12.0, Color::srgb(0.8, 0.9, 1.0), 8.3);
+    commands.entity(eq_btn).insert((
+        HeroOpenEquipment,
+        UiButton {
+            rect: (410.0, 330.0, 90.0, 18.0),
+            clicked: false,
+        },
+        DialogRoot(DialogKind::Hero),
+        HeroWidget,
+    ));
     // 创建面板
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     commands.spawn((
@@ -484,7 +499,7 @@ fn hero_button_system(
     close: Query<&UiButton, With<HeroClose>>,
     main_btn: Query<&UiButton, With<HeroSwitchMain>>,
     hero1_btn: Query<&UiButton, With<HeroSwitch1>>,
-    inv_btn: Query<&UiButton, With<HeroOpenInventory>>,
+    nav_btns: Query<(&UiButton, Option<&HeroOpenInventory>, Option<&HeroOpenEquipment>)>,
     create_btn: Query<&UiButton, With<HeroCreateBtn>>,
     class_btn: Query<&UiButton, With<HeroClassCycle>>,
     gender_btn: Query<&UiButton, With<HeroGenderCycle>>,
@@ -516,10 +531,15 @@ fn hero_button_system(
             tracing::info!("🦸 切换英雄 1");
         }
     }
-    for btn in &inv_btn {
+    for (btn, inv, eq) in &nav_btns {
         if btn.clicked {
-            mgr.toggle(DialogKind::HeroInventory);
-            tracing::info!("🎒 英雄背包: {}", if mgr.is_open(DialogKind::HeroInventory) { "打开" } else { "关闭" });
+            if inv.is_some() {
+                mgr.toggle(DialogKind::HeroInventory);
+                tracing::info!("🎒 英雄背包: {}", if mgr.is_open(DialogKind::HeroInventory) { "打开" } else { "关闭" });
+            } else if eq.is_some() {
+                mgr.toggle(DialogKind::HeroEquipment);
+                tracing::info!("🦸 英雄装备: {}", if mgr.is_open(DialogKind::HeroEquipment) { "打开" } else { "关闭" });
+            }
         }
     }
     for btn in &create_btn {

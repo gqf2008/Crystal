@@ -3303,6 +3303,55 @@ fn auto_hero_test(
             }
             if hero.hero_index == 1 {
                 tracing::info!("[HEROTEST] ✅ 英雄切换成功: {}", hero.message);
+                // #206：英雄背包 布衣(槽1) 双击装备 → 装备槽 1
+                let uid = hero.inventory.get(1).and_then(|s| s.as_ref()).map(|i| i.unique_id);
+                match uid {
+                    Some(uid) => {
+                        net.send_packet(&mir2_shared::packets::client::item::EquipItem {
+                            grid: mir2_shared::enums::MirGridType::HeroInventory,
+                            unique_id: uid,
+                            to: 1,
+                        });
+                        tracing::info!("[HEROTEST] 英雄装备 uid={} -> 槽 1", uid);
+                        *stage = 3;
+                        *t = 0.0;
+                    }
+                    None => {
+                        tracing::warn!("[HEROTEST] ⚠️ 英雄背包槽 1 无物品，跳过装备验证");
+                        net.send_packet(&client_bevy::network::ChangeHeroWire { hero_index: 0 });
+                        *stage = 2;
+                        *t = 0.0;
+                    }
+                }
+            }
+        }
+        3 => {
+            if *t >= 8.0 {
+                tracing::warn!("[HEROTEST] ❌ 英雄装备未生效");
+                *stage = 9;
+                return;
+            }
+            if hero.equipment.get(1).and_then(|s| s.as_ref()).is_some() {
+                tracing::info!("[HEROTEST] ✅ 英雄装备成功: {:?}", hero.equipment.get(1).and_then(|s| s.as_ref()).map(|i| i.name.clone()));
+                let uid = hero.equipment[1].as_ref().unwrap().unique_id;
+                net.send_packet(&mir2_shared::packets::client::item::RemoveItem {
+                    grid: mir2_shared::enums::MirGridType::HeroEquipment,
+                    unique_id: uid,
+                    to: 0,
+                });
+                tracing::info!("[HEROTEST] 英雄卸下 uid={}", uid);
+                *stage = 4;
+                *t = 0.0;
+            }
+        }
+        4 => {
+            if *t >= 8.0 {
+                tracing::warn!("[HEROTEST] ❌ 英雄卸下未生效");
+                *stage = 9;
+                return;
+            }
+            if hero.equipment.get(1).and_then(|s| s.as_ref()).is_none() {
+                tracing::info!("[HEROTEST] ✅ 英雄卸下成功");
                 net.send_packet(&client_bevy::network::ChangeHeroWire { hero_index: 0 });
                 tracing::info!("[HEROTEST] 切回主角色");
                 *stage = 2;

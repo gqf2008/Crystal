@@ -25,6 +25,7 @@ pub mod guild_territory;
 pub mod help;
 pub mod hero;
 pub mod hero_inventory;
+pub mod hero_equipment;
 pub mod inspect;
 pub mod inventory;
 pub mod item_rental;
@@ -84,6 +85,7 @@ pub enum DialogKind {
     Report,
     Hero,
     HeroInventory,
+    HeroEquipment,
     Creature,
     TrustMerchant,
     ItemRental,
@@ -220,7 +222,8 @@ impl Plugin for DialogsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DialogManager>();
         app.init_resource::<DialogDrag>();
-        app.add_systems(Update, dialog_drag_system.run_if(in_state(AppState::Game)));
+        app.add_plugins(hero_equipment::HeroEquipmentPlugin);
+                app.add_systems(Update, dialog_drag_system.run_if(in_state(AppState::Game)));
         // #182 登出：清理对话框与会话状态
         app.add_systems(Update, logout_server_events.run_if(in_state(AppState::Game)));
         app.add_systems(Update, crate::ui::scroll_list::scroll_list_system.run_if(in_state(AppState::Game)));

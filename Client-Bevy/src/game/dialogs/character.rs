@@ -149,7 +149,7 @@ pub struct CharacterDialogPlugin;
 
 /// ServerRust equipment 槽位(0..10) → C# EQUIP_SLOTS 位置索引
 /// 服务端: 0Weapon 1Armour 2Helmet 3Necklace 4BraceletL 5BraceletR 6RingL 7RingR 8Shoes 9Pendant 10Mount
-const SERVER_SLOT_TO_POS: [usize; 12] = [0, 1, 2, 4, 5, 6, 7, 8, 11, 9, 13, 13];
+pub(crate) const SERVER_SLOT_TO_POS: [usize; 12] = [0, 1, 2, 4, 5, 6, 7, 8, 11, 9, 13, 13];
 
 impl Plugin for CharacterDialogPlugin {
     fn build(&self, app: &mut App) {
