@@ -11,6 +11,7 @@ pub mod effects;
 pub mod dialogs;
 pub mod hud;
 pub mod movement;
+pub mod player_menu;
 pub mod pathfinding;
 pub mod player_control;
 pub mod skills;
@@ -41,6 +42,7 @@ impl Plugin for GamePlugin {
             chat::ChatPlugin,
             dialogs::DialogsPlugin,
             movement::MovementPlugin,
+            player_menu::PlayerMenuPlugin,
             player_control::PlayerControlPlugin,
             skills::SkillsPlugin,
             combat::CombatPlugin,
