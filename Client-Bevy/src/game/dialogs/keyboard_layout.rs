@@ -71,7 +71,7 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("向下移动", "移动", KeyCode::KeyS),
         KeyBinding::new("向右移动", "移动", KeyCode::KeyD),
         KeyBinding::new("攻击", "战斗", KeyCode::KeyQ),
-        KeyBinding::new("切换攻击模式", "战斗", KeyCode::AltLeft),
+        KeyBinding::new("切换攻击模式", "战斗", KeyCode::KeyH), // C# Ctrl+H
         KeyBinding::new("拾取", "交互", KeyCode::Space),
         KeyBinding::new("聊天", "交互", KeyCode::Enter),
         KeyBinding::new("背包", "界面", KeyCode::KeyB),
