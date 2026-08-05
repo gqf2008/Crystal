@@ -6,6 +6,15 @@
 
 use bevy::prelude::*;
 use mir2_shared::data::client_data::ClientMagic;
+
+use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::map_renderer::GameLibraries;
+use crate::resources::libraries::LibraryName;
+use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
+use crate::ui::sprite_ui::{
+    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
+    UiImageCache,
+};
 use mir2_shared::enums::Spell;
 
 use crate::network::{NetConnection, SessionState};
@@ -61,11 +70,27 @@ impl MagicsState {
     }
 }
 
+#[derive(Component)]
+pub struct SkillsWidget;
+
+#[derive(Component)]
+pub struct SkillsClose;
+
+#[derive(Component)]
+pub struct SkillsLine(usize);
+
 pub struct SkillsPlugin;
 
 impl Plugin for SkillsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MagicsState>();
+        app.add_systems(OnEnter(AppState::Game), spawn_skills_window);
+        app.add_systems(OnExit(AppState::Game), cleanup_skills_window);
+        app.add_systems(
+            Update,
+            (skills_toggle_system, skills_window_system, ui_button_system)
+                .run_if(in_state(AppState::Game)),
+        );
                 app.add_systems(
             Update,
             skills_server_events.run_if(in_state(crate::scenes::AppState::Game)),
@@ -223,5 +248,144 @@ fn skills_server_events(
             }
             _ => {}
         }
+    }
+}
+
+
+// ============================================================================
+// 技能窗口（#136 C# MagicWindow）：显示已学技能列表（名称/等级/快捷键）
+// ============================================================================
+
+const SKILLS_DX: f32 = 360.0;
+const SKILLS_DY: f32 = 180.0;
+
+fn spawn_skills_window(
+    mut commands: Commands,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    mut fonts: ResMut<Assets<Font>>,
+    mut ui_font: ResMut<UiFont>,
+) {
+    libs.0.ensure_initialized();
+    if !ui_font.0.is_strong() {
+        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+    }
+    let font = ui_font.0.clone();
+
+    // 面板（半透明深色）
+    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let panel = commands
+        .spawn((
+            UiEntity,
+            DialogRoot(DialogKind::Skills),
+            SkillsWidget,
+            Sprite {
+                image: white.clone(),
+                color: Color::srgba(0.12, 0.12, 0.16, 0.95),
+                custom_size: Some(Vec2::new(300.0, 360.0)),
+                ..default()
+            },
+            bevy::sprite::Anchor::TOP_LEFT,
+            Transform::from_xyz(SKILLS_DX, -SKILLS_DY, 6.0),
+            Visibility::Hidden,
+        ))
+        .id();
+    // 标题
+    let t = spawn_ui_text(&mut commands, &font, "技能", SKILLS_DX + 12.0, SKILLS_DY + 8.0, 15.0, Color::srgb(1.0, 0.9, 0.3), 6.2);
+    commands.entity(t).insert((DialogRoot(DialogKind::Skills), SkillsWidget));
+    // 关闭
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Prguse2, 360, 361, 362,
+        SKILLS_DX + 272.0, SKILLS_DY + 3.0, 6.3, 20.0, 20.0,
+    ) {
+        commands.entity(e).insert((SkillsClose, DialogRoot(DialogKind::Skills), SkillsWidget));
+    }
+    // 列表（10 行 × 20px + 滚动条）
+    let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (SKILLS_DX + 288.0, SKILLS_DY + 36.0, 4.0, 200.0), 6.3);
+    commands.entity(track).insert((DialogRoot(DialogKind::Skills), SkillsWidget, Visibility::Visible));
+    commands.entity(thumb).insert((DialogRoot(DialogKind::Skills), SkillsWidget, Visibility::Visible));
+    commands.entity(panel).insert(ScrollList {
+        rect_rel: (12.0, 36.0, 270.0, 200.0),
+        row_h: 20.0,
+        visible: 10,
+        total: 0,
+        offset: 0,
+        step: 3,
+        track_rel: (288.0, 36.0, 4.0, 200.0),
+        thumb: Some(thumb),
+        z: 8.0,
+    });
+    for i in 0..10usize {
+        let e = spawn_ui_text(
+            &mut commands, &font, "",
+            SKILLS_DX + 12.0, SKILLS_DY + 36.0 + i as f32 * 20.0,
+            12.0, Color::WHITE, 8.0,
+        );
+        commands.entity(e).insert((
+            SkillsLine(i),
+            DialogRoot(DialogKind::Skills),
+            SkillsWidget,
+        ));
+    }
+}
+
+fn cleanup_skills_window(mut commands: Commands, roots: Query<Entity, With<DialogRoot>>) {
+    for e in roots.iter() {
+        commands.entity(e).despawn();
+    }
+}
+
+/// K 键开关技能窗口（C# KeybindOptions.Magic）
+fn skills_toggle_system(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut mgr: ResMut<DialogManager>,
+) {
+    if keys.just_pressed(KeyCode::KeyK) {
+        mgr.toggle(DialogKind::Skills);
+    }
+}
+
+/// 显示/隐藏 + 技能列表渲染 + 关闭
+fn skills_window_system(
+    mut mgr: ResMut<DialogManager>,
+    magics: Res<MagicsState>,
+    close: Query<&UiButton, With<SkillsClose>>,
+    mut widgets: Query<&mut Visibility, With<SkillsWidget>>,
+    mut lines: Query<(&mut Text2d, &SkillsLine)>,
+    mut scroll: Query<&mut ScrollList, With<SkillsWidget>>,
+) {
+    let open = mgr.is_open(DialogKind::Skills);
+    for mut vis in &mut widgets {
+        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+    }
+    if !open {
+        return;
+    }
+    for btn in &close {
+        if btn.clicked {
+            mgr.close(DialogKind::Skills);
+        }
+    }
+    {
+        let mut sl = scroll.single_mut();
+        if let Ok(sl) = sl.as_mut() {
+            sl.set_total(magics.magics.len());
+        }
+    }
+    let off = scroll.single().map(|s| s.offset).unwrap_or(0);
+    for (mut text, line) in &mut lines {
+        text.0 = match magics.magics.get(off + line.0) {
+            Some(m) => {
+                let key = if m.key >= 1 && m.key <= 8 {
+                    format!(" [F{}]", m.key)
+                } else {
+                    String::new()
+                };
+                format!("{} Lv.{}{}", m.name, m.level, key)
+            }
+            None => String::new(),
+        };
     }
 }

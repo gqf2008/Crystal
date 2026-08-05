@@ -108,7 +108,7 @@ fn hud_button_system(mut mgr: ResMut<DialogManager>, buttons: Query<(&UiButton, 
             match kind.0 {
                 HudButtonKind::Inventory => mgr.toggle(DialogKind::Inventory),
                 HudButtonKind::Character => mgr.toggle(DialogKind::Character),
-                HudButtonKind::Skills => mgr.toggle(DialogKind::Character),
+                HudButtonKind::Skills => mgr.toggle(DialogKind::Skills),
                 HudButtonKind::QuestLog => mgr.toggle(DialogKind::QuestLog),
                 HudButtonKind::Option => mgr.toggle(DialogKind::Settings),
                 HudButtonKind::Menu => mgr.toggle(DialogKind::Menu),
