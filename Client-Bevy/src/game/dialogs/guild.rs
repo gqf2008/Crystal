@@ -583,7 +583,7 @@ fn guild_ui_system(
         ),
         (With<GuildWidget>, Without<GuildCreateBtn>),
     >,
-    mut lines: Query<(&mut Text2d, &GuildLine)>,
+    mut lines: Query<(&mut Text2d, &mut TextColor, &GuildLine)>,
     mut requested: Local<bool>,
 ) {
     let open = mgr.is_open(DialogKind::Guild);
@@ -616,7 +616,7 @@ fn guild_ui_system(
         .iter()
         .find_map(|(_, _, _, sl)| sl.map(|s| s.offset))
         .unwrap_or(0);
-    for (mut text, line) in &mut lines {
+    for (mut text, mut color, line) in &mut lines {
         text.0 = match line.0 {
             0 => {
                 if guild.in_guild {
@@ -675,6 +675,17 @@ fn guild_ui_system(
             19 => format!("仓库 第{}/13页", guild.storage_page + 1),
             _ => String::new(),
         };
+        // #140 成员选中行高亮（踢出目标可见）
+        let selected = matches!(line.0, 1..=10)
+            && guild.selected_member == Some(scroll_offset + line.0 - 1);
+        let c = if selected {
+            Color::srgb(1.0, 0.9, 0.3)
+        } else {
+            Color::WHITE
+        };
+        if color.0 != c {
+            color.0 = c;
+        }
     }
     // 创建按钮 → GuildNameReturn（原版 C#：输入行会名 → 创建）
     for btn in &create_btn {
