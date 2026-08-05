@@ -2470,42 +2470,34 @@ impl Message<GainSpellExp> for PlayerActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: GainSpellExp, _ctx: &mut Context<Self, Self::Reply>) {
+        // #214：combat 传入 SharedRust +3 spell；先更新 cast_time（C# 编号匹配）
+        let spell_cs = msg.spell.saturating_sub(3) as i32;
         for magic in &mut self.state.magics {
-            if magic.spell == msg.spell as i32 {
+            if magic.spell == spell_cs {
                 magic.cast_time = msg.cast_time;
-                if magic.level < 3 {
-                    magic.experience = magic.experience.saturating_add(msg.amount);
-                    // Level up check: each level needs ~1000 XP
-                    let xp_needed = (magic.level as u16 + 1) * 1000u16;
-                    if magic.experience >= xp_needed && magic.level < 3 {
-                        magic.level += 1;
-                        magic.experience = 0;
-                        // Send MagicLeveled packet (C# S.MagicLeveled: ObjectID u32 + Spell byte + Level byte + Experience u16)
-                        let Ok(spell) = mir2_shared::enums::Spell::try_from(magic.spell as u8) else {
-                            debug!("GainSpellExp: 未知 spell {}", magic.spell);
-                            return;
-                        };
-                        let packet = mir2_shared::packets::server::magic::MagicLeveled {
-                            object_id: self.state.object_id,
-                            spell,
-                            level: magic.level,
-                            experience: magic.experience,
-                        };
-                        let mut body = Vec::new();
-                        if let Err(e) = packet.write_body(&mut body) {
-                            warn!("Failed to serialize MagicLeveled: {}", e);
-                            return;
-                        }
-                        let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
-                            session_id: self.state.session_id,
-                            data: crate::util::wire::build_packet_bytes(
-                                mir2_shared::enums::ServerPacketIds::MagicLeveled as i16, &body,
-                            ),
-                        }).await;
-                    }
-                }
                 break;
             }
+        }
+        if let Some((spell, level, experience)) = self.state.gain_spell_exp(msg.spell, msg.amount) {
+            // Send MagicLeveled packet (C# S.MagicLeveled: ObjectID u32 + Spell byte + Level byte + Experience u16)
+            let packet = mir2_shared::packets::server::magic::MagicLeveled {
+                object_id: self.state.object_id,
+                spell,
+                level,
+                experience,
+            };
+            let mut body = Vec::new();
+            if let Err(e) = packet.write_body(&mut body) {
+                warn!("Failed to serialize MagicLeveled: {}", e);
+                return;
+            }
+            let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
+                session_id: self.state.session_id,
+                data: crate::util::wire::build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::MagicLeveled as i16, &body,
+                ),
+            }).await;
+            debug!("GainSpellExp: {} leveled spell={:?} -> {}", self.state.name, spell, level);
         }
     }
 }
@@ -2808,6 +2800,32 @@ impl PlayerState {
         } else {
             false
         }
+    }
+}
+/// 技能经验/升级（#214）
+impl PlayerState {
+    /// 施法获得技能经验（入参为 SharedRust +3 spell，内部转 C# 编号匹配）
+    /// 返回 (SharedRust Spell, 新等级, 经验)——仅升级时返回 Some
+    pub fn gain_spell_exp(
+        &mut self,
+        spell_shared: u8,
+        amount: u16,
+    ) -> Option<(mir2_shared::enums::Spell, u8, u16)> {
+        let spell_cs = spell_shared.saturating_sub(3) as i32;
+        let magic = self.magics.iter_mut().find(|m| m.spell == spell_cs)?;
+        if magic.level >= 3 {
+            return None;
+        }
+        magic.experience = magic.experience.saturating_add(amount);
+        let xp_needed = (magic.level as u16 + 1) * 1000;
+        if magic.experience >= xp_needed && magic.level < 3 {
+            magic.level += 1;
+            magic.experience = 0;
+            let spell = mir2_shared::enums::Spell::try_from(spell_shared)
+                .unwrap_or(mir2_shared::enums::Spell::None);
+            return Some((spell, magic.level, magic.experience));
+        }
+        None
     }
 }
 /// 技能学习（#212）
@@ -3447,15 +3465,45 @@ mod tests {
             .any(|s| s.as_ref().is_some_and(|s| s.item.unique_id == 9102)));
     }
 
+
+    // ---- #214 技能升级 ----
+    #[test]
+    fn test_gain_spell_exp_levels_up() {
+        let mut s = make_state();
+        assert!(s.learn_magic(31)); // FireBall C#
+        // SharedRust +3 = 34；1000 经验升 1 级
+        let r = s.gain_spell_exp(34, 1000);
+        assert!(r.is_some());
+        let (spell, level, exp) = r.unwrap();
+        assert_eq!(spell, mir2_shared::enums::Spell::FireBall);
+        assert_eq!(level, 1);
+        assert_eq!(exp, 0);
+        // 再升 2 级需 2000
+        let r2 = s.gain_spell_exp(34, 2000);
+        assert!(r2.is_some());
+        assert_eq!(r2.unwrap().1, 2);
+        // 3 级封顶后不再给经验
+        let r3 = s.gain_spell_exp(34, 10000);
+        assert!(r3.is_some());
+        assert_eq!(r3.unwrap().1, 3);
+        assert!(s.gain_spell_exp(34, 10000).is_none());
+    }
+
+    #[test]
+    fn test_gain_spell_exp_unlearned_ignored() {
+        let mut s = make_state();
+        assert!(s.gain_spell_exp(34, 1000).is_none());
+        assert!(s.gain_spell_exp(0, 1000).is_none()); // 基础攻击（未学）忽略
+    }
     // ---- #212 技能书学习 ----
     #[test]
     fn test_learn_magic_adds_once() {
         let mut s = make_state();
         assert!(s.magics.is_empty());
-        assert!(s.learn_magic(34)); // FireBall（C# 编号）
+        assert!(s.learn_magic(31)); // FireBall（C# 编号 = 31，SharedRust = 34）
         assert_eq!(s.magics.len(), 1);
-        assert!(!s.learn_magic(34)); // 重复学习失败
-        assert!(s.learn_magic(4)); // Fencing
+        assert!(!s.learn_magic(31)); // 重复学习失败
+        assert!(s.learn_magic(1)); // Fencing（C# 编号 = 1，SharedRust = 4）
         assert_eq!(s.magics.len(), 2);
     }
 }
