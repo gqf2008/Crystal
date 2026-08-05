@@ -2914,7 +2914,7 @@ impl PlayerState {
         None
     }
 }
-/// 技能学习（#212）
+/// 技能学习（#212 / #218 / #220）
 impl PlayerState {
     /// 学习技能：未学习则加入（C# PlayerObject.UseItem Book 语义）
     pub fn learn_magic(&mut self, spell: i32) -> bool {
@@ -2932,6 +2932,48 @@ impl PlayerState {
         }
         self.hero_magics.push(PlayerMagic::new(spell));
         true
+    }
+
+    /// 英雄施法获得技能经验（#220）：入参为 SharedRust +3 spell，内部转 C# 编号匹配
+    /// 返回 (SharedRust Spell, 新等级, 经验)——仅升级时返回 Some
+    pub fn gain_hero_spell_exp(
+        &mut self,
+        spell_shared: u8,
+        amount: u16,
+    ) -> Option<(mir2_shared::enums::Spell, u8, u16)> {
+        let spell_cs = spell_shared.saturating_sub(3) as i32;
+        let magic = self.hero_magics.iter_mut().find(|m| m.spell == spell_cs)?;
+        if magic.level >= 3 {
+            return None;
+        }
+        magic.experience = magic.experience.saturating_add(amount);
+        let xp_needed = (magic.level as u16 + 1) * 1000;
+        if magic.experience >= xp_needed && magic.level < 3 {
+            magic.level += 1;
+            magic.experience = 0;
+            let spell = mir2_shared::enums::Spell::try_from(spell_shared)
+                .unwrap_or(mir2_shared::enums::Spell::None);
+            return Some((spell, magic.level, magic.experience));
+        }
+        None
+    }
+}
+
+/// 英雄施法技能经验（#220：返回升级信息，由 WorldActor 发送 S.MagicLeveled）
+pub struct GainHeroSpellExp {
+    pub spell_shared: u8,
+    pub amount: u16,
+}
+
+impl Message<GainHeroSpellExp> for PlayerActor {
+    type Reply = Option<(mir2_shared::enums::Spell, u8, u16)>;
+
+    async fn handle(
+        &mut self,
+        msg: GainHeroSpellExp,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.gain_hero_spell_exp(msg.spell_shared, msg.amount)
     }
 }
 
@@ -3561,8 +3603,6 @@ mod tests {
             .any(|s| s.as_ref().is_some_and(|s| s.item.unique_id == 9102)));
     }
 
-
-
     // ---- #218 英雄技能 ----
     #[test]
     fn test_hero_learn_magic_adds_once() {
@@ -3572,12 +3612,35 @@ mod tests {
         assert_eq!(s.hero_magics.len(), 1);
         assert!(!s.hero_learn_magic(31));
     }
+
+    // ---- #220 英雄技能升级 ----
+    #[test]
+    fn test_gain_hero_spell_exp_levels_up() {
+        let mut s = make_state();
+        assert!(s.hero_learn_magic(31)); // FireBall C#
+        let r = s.gain_hero_spell_exp(34, 1000);
+        assert!(r.is_some());
+        let (spell, level, exp) = r.unwrap();
+        assert_eq!(spell, mir2_shared::enums::Spell::FireBall);
+        assert_eq!(level, 1);
+        assert_eq!(exp, 0);
+        // 3 级封顶后不再给经验
+        let _ = s.gain_hero_spell_exp(34, 3000);
+        let _ = s.gain_hero_spell_exp(34, 10000);
+        assert!(s.gain_hero_spell_exp(34, 10000).is_none());
+        assert_eq!(s.hero_magics[0].level, 3);
+    }
+
+    #[test]
+    fn test_gain_hero_spell_exp_unlearned_ignored() {
+        let mut s = make_state();
+        assert!(s.gain_hero_spell_exp(34, 1000).is_none());
+    }
     // ---- #214 技能升级 ----
     #[test]
     fn test_gain_spell_exp_levels_up() {
         let mut s = make_state();
         assert!(s.learn_magic(31)); // FireBall C#
-        // SharedRust +3 = 34；1000 经验升 1 级
         let r = s.gain_spell_exp(34, 1000);
         assert!(r.is_some());
         let (spell, level, exp) = r.unwrap();

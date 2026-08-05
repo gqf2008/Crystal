@@ -785,6 +785,40 @@ impl WorldActor {
                     .unwrap_or(10),
                 spell_level: 1,
             });
+            // #220：英雄施法技能经验（spell 为 SharedRust 值，升级发 S.MagicLeveled）
+            if let Some(record) = self.players.get(session_id) {
+                if let Some((spell_enum, level, experience)) = record
+                    .actor_ref
+                    .ask(crate::actors::player::GainHeroSpellExp {
+                        spell_shared: *spell,
+                        amount: 1,
+                    })
+                    .await
+                    .unwrap_or(None)
+                {
+                    let hero_oid = record.object_id.wrapping_add(HERO_OID_OFFSET);
+                    let leveled = mir2_shared::packets::server::magic::MagicLeveled {
+                        object_id: hero_oid,
+                        spell: spell_enum,
+                        level,
+                        experience,
+                    };
+                    let mut body = Vec::new();
+                    if leveled.write_body(&mut body).is_ok() {
+                        let _ = self
+                            .gate_ref
+                            .tell(SendToClient {
+                                session_id: *session_id,
+                                data: build_packet_bytes(
+                                    mir2_shared::enums::ServerPacketIds::MagicLeveled as i16,
+                                    &body,
+                                ),
+                            })
+                            .await;
+                    }
+                    debug!("Hero magic leveled: spell={:?} -> Lv.{}", spell_enum, level);
+                }
+            }
         }
 
         // 3d. 广播近战 ObjectAttack（带 spell_id）+ 道士治疗

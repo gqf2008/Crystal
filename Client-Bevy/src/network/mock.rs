@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 // Mock 服务器（本地模拟，打通 登录→选角→进游戏→对象 协议流程）
 // ============================================================================
 // 与真实服务端同构：客户端内层包(PacketHeader+body) → mock 处理 →
@@ -822,6 +822,13 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                                     chat_type: ChatType::System,
                                                                 },
                                                             );
+                                                            // #220：模拟英雄施法升级（验证 MagicLeveled 路由到英雄技能面板）
+                                                            send(&to_client, &server::magic::MagicLeveled {
+                                                                object_id: 0x1000_0100,
+                                                                spell: mir2_shared::enums::Spell::try_from(spell).unwrap_or(Spell::None),
+                                                                level: 1,
+                                                                experience: 0,
+                                                            });
                                                             send_hero_information(&to_client, &mock_hero_inventory, &mock_hero_equipment, &mock_hero_learned_magics, true, 30, 20, 1, 2);
                                                             tracing::info!("🦸 [MOCK] 英雄学会技能 spell={}", spell);
                                                         } else {
