@@ -10,7 +10,7 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
-use crate::actor::LocalPlayer;
+use crate::actor::{LocalPlayer, Monster, Npc};
 use crate::game::movement::world_to_tile;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::{GameData, GameLibraries};
@@ -38,6 +38,10 @@ pub struct MiniMapPlayerDot;
 
 #[derive(Component)]
 pub struct MiniMapNameText;
+
+/// 对象光点（玩家白/NPC 绿/怪物红；2x2 点，C# RadarTexture 语义）
+#[derive(Component)]
+pub struct MiniMapActorDot(pub usize);
 
 #[derive(Component)]
 pub struct MiniMapPosText;
@@ -105,16 +109,16 @@ fn spawn_minimap(
         Visibility::Hidden,
     ));
 
-    // 玩家位置点（红点）
-    let red = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    // 玩家位置点（C# 玩家为白点 4x4）
+    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     commands.spawn((
         UiEntity,
         DialogRoot(DialogKind::Minimap),
         // 注意：不能带 MiniMapWidget —— minimap_ui_system 的 dot 查询用 Without<MiniMapWidget> 排除
         MiniMapPlayerDot,
         Sprite {
-            image: red,
-            color: Color::srgb(1.0, 0.1, 0.1),
+            image: white.clone(),
+            color: Color::WHITE,
             custom_size: Some(Vec2::new(4.0, 4.0)),
             ..default()
         },
@@ -122,6 +126,23 @@ fn spawn_minimap(
         Transform::from_xyz(MINIMAP_X + MAP_RECT.0, -(MINIMAP_Y + MAP_RECT.1), 5.2),
         Visibility::Hidden,
     ));
+
+    // 对象光点（最多 24 个：玩家/怪物/NPC，#120 C# MiniMap RadarTexture 2x2）
+    for i in 0..24usize {
+        commands.spawn((
+            UiEntity,
+            MiniMapActorDot(i),
+            Sprite {
+                image: white.clone(),
+                custom_size: Some(Vec2::new(2.0, 2.0)),
+                color: Color::WHITE,
+                ..default()
+            },
+            Anchor::TOP_LEFT,
+            Transform::from_xyz(-999.0, -999.0, 5.2),
+            Visibility::Hidden,
+        ));
+    }
 
     // 地图名（居中）
     let name = spawn_ui_text(
@@ -163,8 +184,20 @@ fn minimap_ui_system(
     mgr: Res<DialogManager>,
     game_data: Res<GameData>,
     players: Query<&Transform, (With<LocalPlayer>, Without<MiniMapPlayerDot>)>,
+    actors: Query<
+        (&Transform, Option<&Monster>, Option<&Npc>),
+        (
+            Without<MiniMapPlayerDot>,
+            Without<MiniMapActorDot>,
+            Without<LocalPlayer>,
+        ),
+    >,
     mut widgets: Query<&mut Visibility, (With<MiniMapWidget>, Without<MiniMapPlayerDot>)>,
     mut dot: Query<(&mut Visibility, &mut Transform), (With<MiniMapPlayerDot>, Without<MiniMapWidget>)>,
+    mut actor_dots: Query<
+        (&mut Transform, &mut Sprite, &mut Visibility, &MiniMapActorDot),
+        (Without<MiniMapWidget>, Without<MiniMapPlayerDot>, Without<LocalPlayer>),
+    >,
     mut name_texts: Query<&mut Text2d, (With<MiniMapNameText>, Without<MiniMapPosText>)>,
     mut pos_texts: Query<&mut Text2d, (With<MiniMapPosText>, Without<MiniMapNameText>)>,
 ) {
@@ -197,6 +230,43 @@ fn minimap_ui_system(
                     }
                 }
             }
+        }
+    }
+
+    // 对象光点（#120 C# RadarTexture）：玩家白/NPC 绿/怪物红
+    if open {
+        let mut points: Vec<(f32, f32, Color)> = actors
+            .iter()
+            .map(|(tf, mon, npc)| {
+                let (tx, ty) = world_to_tile(tf.translation.x, tf.translation.y);
+                let px = MINIMAP_X + MAP_RECT.0 + (tx as f32 / map_w) * MAP_RECT.2;
+                let py = MINIMAP_Y + MAP_RECT.1 + (ty as f32 / map_h) * MAP_RECT.3;
+                let color = if npc.is_some() {
+                    Color::srgb(0.0, 1.0, 0.2)
+                } else if mon.is_some() {
+                    Color::srgb(1.0, 0.1, 0.1)
+                } else {
+                    Color::WHITE // 其他玩家
+                };
+                (px, py, color)
+            })
+            .collect();
+        for (mut tf, mut sp, mut vis, idx) in &mut actor_dots {
+            match points.get(idx.0) {
+                Some((px, py, color)) => {
+                    tf.translation.x = px - 1.0;
+                    tf.translation.y = -(py - 1.0);
+                    if sp.color != *color {
+                        sp.color = *color;
+                    }
+                    *vis = Visibility::Visible;
+                }
+                None => *vis = Visibility::Hidden,
+            }
+        }
+    } else {
+        for (_, _, mut vis, _) in &mut actor_dots {
+            *vis = Visibility::Hidden;
         }
     }
 
