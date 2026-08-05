@@ -56,6 +56,15 @@ impl ScrollList {
 #[derive(Component)]
 pub struct ScrollThumb;
 
+/// 滚动条拖动状态（#128 C# MirScrollBar movable）
+#[derive(Resource, Default)]
+pub struct ScrollDrag {
+    /// 正在拖动的滑块实体
+    pub dragging: Option<Entity>,
+    /// 按下点相对滑块顶部的偏移
+    pub grab_offset: f32,
+}
+
 /// 生成滚动条（轨道 + 滑块），返回滑块实体。
 /// 轨道挂 DialogRoot 由拖动系统整体移动；滑块不挂，由 scroll_list_system 定位。
 /// images 参数用于创建 1x1 白色纹理（轨道/滑块着色矩形）。
@@ -104,6 +113,8 @@ pub fn spawn_scroll_bar(
 pub fn scroll_list_system(
     mut wheels: MessageReader<MouseWheel>,
     windows: Query<&Window>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut drag: ResMut<ScrollDrag>,
     mut lists: Query<(Entity, &mut ScrollList, &Transform), Without<ScrollThumb>>,
     mut thumbs: Query<(&mut Transform, &mut Sprite, &ScrollThumb)>,
 ) {
@@ -113,6 +124,55 @@ pub fn scroll_list_system(
     let Some(cursor) = window.cursor_position() else {
         return;
     };
+
+    // #128 滚动条拖动（C# MirScrollBar movable）
+    // 命中滑块按下 → 开始拖动；拖动中按滑块位置换算 offset；松开结束
+    if mouse.just_pressed(MouseButton::Left) && drag.dragging.is_none() {
+        for (_, list, tf) in lists.iter() {
+            let Some(thumb) = list.thumb else { continue };
+            let total = list.total.max(list.visible);
+            let (tx, ty, tw, th) = list.track_rel;
+            let thumb_h = (th * (list.visible as f32 / total as f32)).clamp(14.0, th);
+            let max_off = list.max_offset();
+            let ratio = if max_off == 0 { 0.0 } else { list.offset as f32 / max_off as f32 };
+            let thumb_y = -tf.translation.y + ty + ratio * (th - thumb_h);
+            if cursor.x >= -tf.translation.x + tx
+                && cursor.x <= -tf.translation.x + tx + tw
+                && cursor.y >= thumb_y
+                && cursor.y <= thumb_y + thumb_h
+            {
+                drag.dragging = Some(thumb);
+                drag.grab_offset = cursor.y - thumb_y;
+                break;
+            }
+        }
+    }
+    if let Some(thumb_e) = drag.dragging {
+        if !mouse.pressed(MouseButton::Left) {
+            drag.dragging = None;
+        } else {
+            // 找对应列表，换算 offset
+            for (_, mut list, tf) in lists.iter_mut() {
+                if list.thumb != Some(thumb_e) {
+                    continue;
+                }
+                let total = list.total.max(list.visible);
+                let (_, ty, _, th) = list.track_rel;
+                let thumb_h = (th * (list.visible as f32 / total as f32)).clamp(14.0, th);
+                let track_top = -tf.translation.y + ty;
+                let max_off = list.max_offset();
+                if max_off == 0 {
+                    list.offset = 0;
+                    break;
+                }
+                let ty_clamped = (cursor.y - drag.grab_offset)
+                    .clamp(track_top, track_top + th - thumb_h);
+                let ratio = ((ty_clamped - track_top) / (th - thumb_h)).clamp(0.0, 1.0);
+                list.offset = (ratio * max_off as f32).round() as usize;
+                break;
+            }
+        }
+    }
 
     // 汇总本帧滚轮增量（行）。像素滚动按 ~20px/行折算。
     let mut scroll_y = 0.0f32;
