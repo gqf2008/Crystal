@@ -2810,6 +2810,51 @@ impl PlayerState {
         }
     }
 }
+/// 技能学习（#212）
+impl PlayerState {
+    /// 学习技能：未学习则加入（C# PlayerObject.UseItem Book 语义）
+    pub fn learn_magic(&mut self, spell: i32) -> bool {
+        if self.magics.iter().any(|m| m.spell == spell) {
+            return false;
+        }
+        self.magics.push(PlayerMagic::new(spell));
+        true
+    }
+}
+
+/// 是否已学习技能
+pub struct IsMagicLearned {
+    pub spell: i32,
+}
+
+impl Message<IsMagicLearned> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(
+        &mut self,
+        msg: IsMagicLearned,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.magics.iter().any(|m| m.spell == msg.spell)
+    }
+}
+
+/// 学习技能（#212）
+pub struct LearnMagic {
+    pub spell: i32,
+}
+
+impl Message<LearnMagic> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(
+        &mut self,
+        msg: LearnMagic,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.learn_magic(msg.spell)
+    }
+}
 /// 英雄装备/卸下（#206）
 impl PlayerState {
     /// 英雄背包格 → 英雄装备槽（C# C.EquipItem Grid=HeroInventory）
@@ -3400,5 +3445,17 @@ mod tests {
             .backpack
             .iter()
             .any(|s| s.as_ref().is_some_and(|s| s.item.unique_id == 9102)));
+    }
+
+    // ---- #212 技能书学习 ----
+    #[test]
+    fn test_learn_magic_adds_once() {
+        let mut s = make_state();
+        assert!(s.magics.is_empty());
+        assert!(s.learn_magic(34)); // FireBall（C# 编号）
+        assert_eq!(s.magics.len(), 1);
+        assert!(!s.learn_magic(34)); // 重复学习失败
+        assert!(s.learn_magic(4)); // Fencing
+        assert_eq!(s.magics.len(), 2);
     }
 }

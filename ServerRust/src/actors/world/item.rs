@@ -441,6 +441,66 @@ impl Message<UseItemRequest> for WorldActor {
                         send_system_message(&self.gate_ref, msg.session_id, "很遗憾，你没有中奖。");
                     }
                 }
+                // Book（技能书，#212：C# UseItem Book → magic = (Spell)item.Info.Shape）
+                t if t == mir2_shared::enums::ItemType::Book as i32 => {
+                    let spell_cs = db.shape;
+                    if self.magic_infos.contains_key(&(spell_cs as u32)) {
+                        let learned = record
+                            .actor_ref
+                            .ask(crate::actors::player::IsMagicLearned { spell: spell_cs })
+                            .await
+                            .unwrap_or(false);
+                        if learned {
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                "你已经学会这个技能",
+                            );
+                        } else {
+                            let ok = record
+                                .actor_ref
+                                .ask(crate::actors::player::LearnMagic { spell: spell_cs })
+                                .await
+                                .unwrap_or(false);
+                            if ok {
+                                if let Some(info) = self.magic_infos.get(&(spell_cs as u32)) {
+                                    let pm = crate::actors::player::PlayerMagic::new(spell_cs);
+                                    let client_magic = super::build_client_magic(info, &pm);
+                                    let new_magic = mir2_shared::packets::server::magic::NewMagic {
+                                        magic: client_magic,
+                                        hero: false,
+                                    };
+                                    let mut body = Vec::new();
+                                    if new_magic.write_body(&mut body).is_ok() {
+                                        let _ = self
+                                            .gate_ref
+                                            .tell(SendToClient {
+                                                session_id: msg.session_id,
+                                                data: build_packet_bytes(
+                                                    mir2_shared::enums::ServerPacketIds::NewMagic
+                                                        as i16,
+                                                    &body,
+                                                ),
+                                            })
+                                            .await;
+                                    }
+                                }
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "你学会了技能！",
+                                );
+                                tracing::info!(
+                                    "📖 {} 学会技能 spell={}",
+                                    player_state.name,
+                                    spell_cs
+                                );
+                            }
+                        }
+                    } else {
+                        send_system_message(&self.gate_ref, msg.session_id, "这本技能书无法使用");
+                    }
+                }
                 _ => {}
             }
         }

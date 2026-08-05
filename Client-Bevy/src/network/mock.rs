@@ -105,6 +105,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                 inv[0] = Some(potion_item(5)); // 木剑
                 inv[1] = Some(potion_item(10)); // 布衣
                 inv[2] = Some(potion_item(1)); // 金创药（可喝）
+                inv[3] = Some(book_item(34)); // 技能书：FireBall（#212）
                 inv
             };
             let mut player_gold: u32 = 10000;
@@ -122,6 +123,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             // 英雄装备（12 槽，服务端 EquipmentSlot::COUNT；#206）
             let mut mock_hero_equipment: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 12];
             let mut mock_hero_active = false;
+            // #212：技能书学习的技能（UserInformation 已带初始技能，这里追加）
+            let mut mock_learned_magics: Vec<ClientMagic> = Vec::new();
             let mut player_dead_since: Option<std::time::Instant> = None;
             // 怪物攻击伤害覆盖（默认 0 = 用怪物自身伤害；MOCK_PLAYER_DAMAGE 可调大测死亡/复活闭环）
             let player_damage = std::env::var("MOCK_PLAYER_DAMAGE")
@@ -725,6 +728,50 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         if let Some(idx) = idx {
                                             if let Some(item) = player_inventory[idx].take() {
                                                 send(&to_client, &server::item_operations::UseItem { unique_id: p.unique_id });
+                                                // #212：技能书 → 学习（shape = Spell）
+                                                if item.info.as_ref().map(|i| i.item_type) == Some(ItemType::Book) {
+                                                    let spell = item.info.as_ref().map(|i| i.shape).unwrap_or(0) as u8;
+                                                    if !mock_learned_magics.iter().any(|m| m.spell as u8 == spell) {
+                                                        let cm = ClientMagic {
+                                                            name: format!("技能#{}", spell),
+                                                            spell: mir2_shared::enums::Spell::try_from(spell).unwrap_or(Spell::None),
+                                                            base_cost: 3,
+                                                            level_cost: 1,
+                                                            icon: 0,
+                                                            level1: 1,
+                                                            level2: 2,
+                                                            level3: 3,
+                                                            need1: 0,
+                                                            need2: 0,
+                                                            need3: 0,
+                                                            level: 0,
+                                                            key: 0,
+                                                            experience: 0,
+                                                            delay: 0,
+                                                            range: 1,
+                                                            cast_time: 0,
+                                                        };
+                                                        mock_learned_magics.push(cm.clone());
+                                                        send(&to_client, &server::magic::NewMagic { magic: cm, hero: false });
+                                                        send(
+                                                            &to_client,
+                                                            &server::chat::Chat {
+                                                                message: "你学会了技能！".into(),
+                                                                chat_type: ChatType::System,
+                                                            },
+                                                        );
+                                                        tracing::info!("📖 [MOCK] 学会技能 spell={}", spell);
+                                                    } else {
+                                                        send(
+                                                            &to_client,
+                                                            &server::chat::Chat {
+                                                                message: "你已经学会这个技能".into(),
+                                                                chat_type: ChatType::System,
+                                                            },
+                                                        );
+                                                    }
+                                                    continue;
+                                                }
                                                 // 魔法药(小) index=2 回蓝，其余回血（#51）
                                                 if item.item_index == 2 {
                                                     player_stats.mp = (player_stats.mp + 200).min(600);
@@ -1272,6 +1319,25 @@ fn potion_item(index: i32) -> mir2_shared::data::item::UserItem {
         }),
         current_dura: 0,
         max_dura: 0,
+        ..Default::default()
+    }
+}
+
+/// 技能书物品（#212：Book 类型，shape = Spell）
+fn book_item(spell: u8) -> mir2_shared::data::item::UserItem {
+    mir2_shared::data::item::UserItem {
+        unique_id: 9200 + spell as u64,
+        item_index: 1000 + spell as i32,
+        count: 1,
+        info: Some(ItemInfo {
+            index: 1000 + spell as i32,
+            name: format!("技能书#{}", spell),
+            image: 1,
+            item_type: ItemType::Book,
+            shape: spell as i16,
+            price: 100,
+            ..Default::default()
+        }),
         ..Default::default()
     }
 }
