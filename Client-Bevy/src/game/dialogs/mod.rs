@@ -222,7 +222,7 @@ impl Plugin for DialogsPlugin {
         // #182 登出：清理对话框与会话状态
         app.add_systems(Update, logout_server_events.run_if(in_state(AppState::Game)));
         app.add_systems(Update, crate::ui::scroll_list::scroll_list_system.run_if(in_state(AppState::Game)));
-        app.add_systems(Update, (crate::ui::controls::checkbox_system, crate::ui::controls::dropdown_system, crate::ui::controls::scrolling_label_system, crate::ui::controls::item_cell_system).run_if(in_state(AppState::Game)));
+        app.add_systems(Update, (crate::ui::controls::checkbox_system, crate::ui::controls::dropdown_system, crate::ui::controls::scrolling_label_system, crate::ui::controls::item_cell_system, crate::ui::controls::animated_button_system).run_if(in_state(AppState::Game)));
         app.init_resource::<crate::ui::keyboard_nav::KeyboardNav>();
         app.init_resource::<crate::ui::scroll_list::ScrollDrag>();
         app.add_systems(Update, (crate::ui::keyboard_nav::esc_close_dialogs_system, crate::ui::keyboard_nav::keyboard_scroll_lists_system, crate::ui::keyboard_nav::tab_focus_system).run_if(in_state(AppState::Game)));

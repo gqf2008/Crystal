@@ -9,7 +9,7 @@
 
 use bevy::prelude::*;
 
-use crate::game::dialogs::DialogRoot;
+use crate::game::dialogs::{DialogKind, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -35,6 +35,9 @@ pub struct NpcClose;
 
 #[derive(Component)]
 pub struct NpcLine(usize);
+
+#[derive(Component)]
+pub struct NpcQuest;
 
 pub struct NpcDialogPlugin;
 
@@ -122,6 +125,40 @@ fn spawn_npc_dialog(
         ));
     }
 
+    // 任务按钮（#90 续：MirAnimatedButton，C# NPCDialog QuestButton
+    // Title[530..539] 10 帧 130ms 循环 + 悬停 284 / 按下 286，点击切换任务日志）
+    {
+        let bg_h = libs
+            .0
+            .get_image(LibraryName::Prguse, 384)
+            .map(|i| i.height.max(0) as f32)
+            .unwrap_or(210.0);
+        if let Some(e) = crate::ui::controls::spawn_animated_button(
+            &mut commands,
+            &mut libs,
+            &mut images,
+            &mut cache,
+            LibraryName::Title,
+            530,
+            10,
+            Some(284),
+            Some(286),
+            172.0,
+            bg_h - 30.0,
+            8.5,
+            96.0,
+            25.0,
+            0.13,
+            true,
+        ) {
+            commands.entity(e).insert((
+                NpcQuest,
+                DialogRoot(crate::game::dialogs::DialogKind::Npc),
+                Visibility::Hidden,
+            ));
+        }
+    }
+
     // 8 行文本
     for i in 0..8usize {
         let e = spawn_ui_text(
@@ -149,6 +186,7 @@ fn npc_ui_system(
     windows: Query<&Window>,
     close: Query<&UiButton, With<NpcClose>>,
     mut widgets: Query<&mut Visibility, With<NpcDialogWidget>>,
+    mut quest_btns: Query<(&UiButton, &mut Visibility), (With<NpcQuest>, Without<NpcDialogWidget>)>,
     mut lines: Query<(&mut Text2d, &mut TextColor, &NpcLine)>,
     mut scroll: Query<&mut ScrollList, With<NpcDialogWidget>>,
 ) {
@@ -158,6 +196,22 @@ fn npc_ui_system(
         } else {
             Visibility::Hidden
         };
+    }
+
+    // 任务按钮（C# CheckQuestButtonDisplay：NPC 有可用任务才显示）
+    let has_quest = npc
+        .lines
+        .iter()
+        .any(|l| l.contains("可接受任务") || l.contains("可完成任务"));
+    for (btn, mut vis) in &mut quest_btns {
+        *vis = if npc.visible && has_quest {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if btn.clicked && npc.visible && has_quest {
+            mgr.toggle(DialogKind::QuestLog);
+        }
     }
     if !npc.visible {
         // C# 语义：NPC 对话框关闭时联动隐藏商店/出售/仓库面板

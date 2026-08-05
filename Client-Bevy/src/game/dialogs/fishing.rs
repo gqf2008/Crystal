@@ -117,11 +117,25 @@ fn spawn_fishing(
             FishingWidget,
         ));
     }
-    // 抛竿按钮
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        300.0, 220.0, 8.3, 76.0, 25.0,
+    // 抛竿按钮（#90 续：MirAnimatedButton，C# FishingDialog FishButton
+    // Title[170..179] 10 帧 130ms 循环 + 按下帧 142）
+    if let Some(e) = crate::ui::controls::spawn_animated_button(
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        170,
+        10,
+        None,
+        Some(142),
+        300.0,
+        220.0,
+        8.3,
+        76.0,
+        25.0,
+        0.13,
+        true,
     ) {
         commands.entity(e).insert((
             FishingCast,

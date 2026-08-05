@@ -13,7 +13,8 @@ use bevy::prelude::*;
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::ui::sprite_ui::{
-    spawn_ui_button, spawn_ui_text, ui_image, ButtonFrames, UiButton, UiEntity, UiImageCache,
+    spawn_ui_button, spawn_ui_sprite, spawn_ui_text, ui_image, ButtonFrames, UiButton, UiEntity,
+    UiImageCache,
 };
 
 /// 勾选框（MirCheckBox）：checked 状态 + 两套三态帧
@@ -89,6 +90,136 @@ pub fn checkbox_system(
     }
 }
 
+/// 动画按钮（MirAnimatedButton）：帧序列按间隔自动轮播 + 可选悬停/按下帧
+/// 参考：C# Client/MirControls/MirAnimatedButton.cs（UpdateOffSet 循环帧）
+#[derive(Component)]
+pub struct AnimatedButton {
+    /// 轮播帧（已预载图柄）
+    pub frames: Vec<Handle<Image>>,
+    /// 悬停帧（None 则显示当前轮播帧）
+    pub hover: Option<Handle<Image>>,
+    /// 按下帧（None 则显示当前轮播帧）
+    pub pressed: Option<Handle<Image>>,
+    /// 当前帧下标
+    pub frame: usize,
+    /// 帧间隔（秒）
+    pub delay: f32,
+    /// 累计时间
+    pub timer: f32,
+    /// 是否循环（false 播完停在最后一帧）
+    pub looping: bool,
+    /// 是否播放（C# Animated）
+    pub playing: bool,
+}
+
+impl AnimatedButton {
+    /// 帧步进纯逻辑：按 dt 推进帧下标（C# UpdateOffSet 语义）
+    /// - 未播放 / 帧数 <=1 / 间隔 <=0：不动
+    /// - 循环：播完回到 0
+    /// - 单次：播完停在最后一帧并停止播放
+    pub fn tick(&mut self, dt: f32) {
+        if !self.playing || self.frames.len() <= 1 || self.delay <= 0.0 || dt <= 0.0 {
+            return;
+        }
+        self.timer += dt;
+        while self.timer >= self.delay {
+            self.timer -= self.delay;
+            if self.frame + 1 < self.frames.len() {
+                self.frame += 1;
+            } else if self.looping {
+                self.frame = 0;
+            } else {
+                self.playing = false;
+                break;
+            }
+        }
+    }
+}
+
+/// 生成动画按钮：frames 为连续帧索引 [base_idx, base_idx+count)，hover/pressed 可选
+/// （C# MirAnimatedButton：Index 为起始帧，OffSet 在 [0, AnimationCount) 内轮播）
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_animated_button(
+    commands: &mut Commands,
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    cache: &mut UiImageCache,
+    name: LibraryName,
+    base_idx: usize,
+    count: usize,
+    hover_idx: Option<usize>,
+    pressed_idx: Option<usize>,
+    x: f32,
+    y: f32,
+    z: f32,
+    w: f32,
+    h: f32,
+    delay: f32,
+    looping: bool,
+) -> Option<Entity> {
+    let mut frames = Vec::with_capacity(count);
+    for i in 0..count {
+        frames.push(ui_image(libs, images, cache, name, base_idx + i)?);
+    }
+    let hover = match hover_idx {
+        Some(i) => Some(ui_image(libs, images, cache, name, i)?),
+        None => None,
+    };
+    let pressed = match pressed_idx {
+        Some(i) => Some(ui_image(libs, images, cache, name, i)?),
+        None => None,
+    };
+    let e = spawn_ui_sprite(commands, frames[0].clone(), x, y, z, 1.0);
+    commands.entity(e).insert((
+        UiButton {
+            rect: (x, y, w, h),
+            clicked: false,
+        },
+        AnimatedButton {
+            frames,
+            hover,
+            pressed,
+            frame: 0,
+            delay,
+            timer: 0.0,
+            looping,
+            playing: true,
+        },
+    ));
+    Some(e)
+}
+
+/// 动画按钮系统：时间步进 + 状态帧（按下 > 悬停 > 轮播帧）
+/// 依赖 ui_button_system 先运行（UiButton.clicked/rect；Bevy 会自动排序冲突系统）
+pub fn animated_button_system(
+    mut btns: Query<(&UiButton, &mut AnimatedButton, &mut Sprite)>,
+    time: Res<Time>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+) {
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    let down = mouse.pressed(MouseButton::Left);
+    for (btn, mut ab, mut sprite) in &mut btns {
+        let (x, y, w, h) = btn.rect;
+        let over = cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h;
+        ab.tick(time.delta_secs());
+        let img = if down && over {
+            ab.pressed.as_ref().or_else(|| ab.frames.get(ab.frame))
+        } else if over {
+            ab.hover.as_ref().or_else(|| ab.frames.get(ab.frame))
+        } else {
+            ab.frames.get(ab.frame)
+        };
+        if let Some(h) = img {
+            if sprite.image != *h {
+                sprite.image = h.clone();
+            }
+        }
+    }
+}
 /// 下拉框（MirDropDownBox 简化版）：闭合框 + 弹出选项
 #[derive(Component)]
 pub struct DropDown {
@@ -486,12 +617,60 @@ pub fn item_cell_system(
 
 #[cfg(test)]
 mod tests {
-    use super::strip_color_tags;
+    use super::{strip_color_tags, AnimatedButton};
+    use bevy::prelude::*;
+
+    fn ab(frames: usize, delay: f32, looping: bool) -> AnimatedButton {
+        AnimatedButton {
+            frames: vec![Handle::default(); frames],
+            hover: None,
+            pressed: None,
+            frame: 0,
+            delay,
+            timer: 0.0,
+            looping,
+            playing: true,
+        }
+    }
 
     #[test]
     fn strip_tags_removes_color_segments() {
         assert_eq!(strip_color_tags("你好{世界/red}！"), "你好世界！");
         assert_eq!(strip_color_tags("纯文本"), "纯文本");
         assert_eq!(strip_color_tags("{a/b}{c/d}"), "ac");
+    }
+
+    #[test]
+    fn animated_button_advances_by_delay() {
+        let mut b = ab(10, 0.1, true);
+        b.tick(0.25); // 2 个间隔
+        assert_eq!(b.frame, 2);
+        assert!(b.playing);
+    }
+
+    #[test]
+    fn animated_button_loops_back_to_zero() {
+        let mut b = ab(3, 0.1, true);
+        b.tick(0.3); // 3 个间隔 → 回到 0
+        assert_eq!(b.frame, 0);
+        assert!(b.playing);
+    }
+
+    #[test]
+    fn animated_button_one_shot_stops_at_last() {
+        let mut b = ab(3, 0.1, false);
+        b.tick(0.35);
+        assert_eq!(b.frame, 2);
+        assert!(!b.playing);
+        b.tick(10.0);
+        assert_eq!(b.frame, 2);
+    }
+
+    #[test]
+    fn animated_button_paused_does_not_move() {
+        let mut b = ab(10, 0.1, true);
+        b.playing = false;
+        b.tick(1.0);
+        assert_eq!(b.frame, 0);
     }
 }
