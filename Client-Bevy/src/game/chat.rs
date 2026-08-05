@@ -183,6 +183,8 @@ pub struct ChatState {
     pub visible_lines: usize,
     /// 历史回看滚动（0=最新；C# ChatPanel StartIndex）
     pub scroll_up: usize,
+    /// 窗口尺寸档（0/1/2 → 行数 4/7/11，C# ChangeSize）
+    pub size: usize,
 }
 
 impl Default for ChatState {
@@ -194,6 +196,7 @@ impl Default for ChatState {
             input_text: String::new(),
             visible_lines: 8,
             scroll_up: 0,
+            size: 1,
         }
     }
 }
@@ -234,6 +237,10 @@ struct ChatBarBtn(&'static str, &'static str);
 #[derive(Component)]
 struct ChatSettingsBtn;
 
+/// 窗口尺寸切换按钮（C# ChatPanel SizeButton）
+#[derive(Component)]
+struct ChatSizeBtn;
+
 /// 聊天设置面板背景（透明开关改 alpha）
 #[derive(Component)]
 struct ChatPanelBg;
@@ -260,7 +267,7 @@ impl Plugin for ChatPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_chat);
         app.add_systems(
             Update,
-            (chat_tab_system, chat_option_system, chat_wheel_system, chat_input_system, chat_display_system, chat_server_events)
+            (chat_tab_system, chat_option_system, chat_size_system, chat_wheel_system, chat_input_system, chat_display_system, chat_server_events)
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -379,6 +386,47 @@ fn spawn_chat(
             clicked: false,
         },
     ));
+    // 窗口尺寸切换（C# ChatPanel SizeButton）
+    let size_btn = spawn_ui_text(
+        &mut commands, &font, "尺寸",
+        panel_x + 360.0 - 66.0, panel_y + 2.0,
+        11.0, Color::srgb(0.8, 0.9, 1.0), 2.2,
+    );
+    commands.entity(size_btn).insert((
+        ChatSizeBtn,
+        UiButton {
+            rect: (panel_x + 360.0 - 66.0, panel_y + 2.0, 30.0, 14.0),
+            clicked: false,
+        },
+    ));
+}
+
+/// 窗口尺寸切换（#160 C# ChatPanel ChangeSize：4/8/11 行三档）
+fn chat_size_system(
+    mut chat: ResMut<ChatState>,
+    size_btn: Query<&UiButton, With<ChatSizeBtn>>,
+    mut bg: Query<&mut Sprite, (With<ChatPanelBg>, Without<ChatOptionWidget>)>,
+    mut input: Query<&mut Transform, (With<ChatInputText>, Without<ChatLine>)>,
+) {
+    const PANEL_Y: f32 = 428.0;
+    for btn in &size_btn {
+        if btn.clicked {
+            chat.size = (chat.size + 1) % 3;
+            let lines = [4usize, 8, 11][chat.size];
+            chat.visible_lines = lines;
+            let panel_h = 20.0 + lines as f32 * 16.0 + 24.0;
+            for mut sp in &mut bg {
+                if let Some(cs) = sp.custom_size.as_mut() {
+                    *cs = Vec2::new(360.0, panel_h);
+                }
+            }
+            let input_y = 20.0 + lines as f32 * 16.0 + 6.0;
+            for mut tf in &mut input {
+                tf.translation.y = -(PANEL_Y + input_y);
+            }
+            tracing::info!("💬 聊天窗口尺寸 -> {} 行", lines);
+        }
+    }
 }
 
 /// 聊天设置面板（过滤 + 透明，C# ChatOptionDialog）
