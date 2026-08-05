@@ -13,6 +13,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_image, UiFont, UiImageCache,
 };
+use crate::ui::controls::{strip_color_tags, ScrollingLabel};
 
 /// 屏幕通知状态（网络 ChatNotice 写入）
 #[derive(Resource, Default)]
@@ -69,7 +70,12 @@ fn spawn_chat_notice(
         commands.entity(e).insert((ChatNoticeWidget, Visibility::Hidden));
     }
     let t = spawn_ui_text(&mut commands, &font, "", 350.0, 90.0, 14.0, Color::srgb(1.0, 0.9, 0.4), 9.2);
-    commands.entity(t).insert((ChatNoticeText, ChatNoticeWidget));
+    commands.entity(t).insert((
+        ChatNoticeText,
+        ChatNoticeWidget,
+        // #90 ScrollingLabel：剥离 {text/color} 标签，支持多行
+        ScrollingLabel { visible_lines: 4, text: String::new() },
+    ));
 }
 
 /// 显示/计时消失
@@ -93,8 +99,15 @@ fn chat_notice_system(
         };
     }
     if let Ok(mut t) = texts.single_mut() {
-        if t.0 != state.text {
-            t.0 = state.text.clone();
+        // #90：标签剥离 + 多行
+        let stripped: Vec<String> = state
+            .text
+            .split('\n')
+            .map(strip_color_tags)
+            .collect();
+        let joined = stripped.join("\n");
+        if t.0 != joined {
+            t.0 = joined;
         }
     }
 }

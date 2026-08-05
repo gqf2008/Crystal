@@ -219,6 +219,7 @@ impl Plugin for DialogsPlugin {
         app.init_resource::<DialogDrag>();
         app.add_systems(Update, dialog_drag_system.run_if(in_state(AppState::Game)));
         app.add_systems(Update, crate::ui::scroll_list::scroll_list_system.run_if(in_state(AppState::Game)));
+        app.add_systems(Update, (crate::ui::controls::checkbox_system, crate::ui::controls::dropdown_system, crate::ui::controls::scrolling_label_system, crate::ui::controls::item_cell_system).run_if(in_state(AppState::Game)));
         app.init_resource::<inventory::InventoryState>();
         app.add_plugins(text_input::TextInputPlugin);
         app.init_resource::<character::CharacterState>();
