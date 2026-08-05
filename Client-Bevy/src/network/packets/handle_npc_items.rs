@@ -136,6 +136,13 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
                                         .unwrap_or_else(|| format!("#{}", item.item_index)),
                                     price: item.info.as_ref().map(|i| i.price).unwrap_or(0),
                                     count: item.count,
+                                    image: item.info.as_ref().map(|i| i.image).unwrap_or(0),
+                                    item_type: item
+                                        .info
+                                        .as_ref()
+                                        .map(|i| i.item_type as u8)
+                                        .unwrap_or(0),
+                                    tool_tip: item.info.as_ref().and_then(|i| i.tool_tip.clone()),
                                 })
                                 .collect();
                             let rate = p.rate;

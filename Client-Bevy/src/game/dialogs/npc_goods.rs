@@ -17,6 +17,7 @@ use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont,
     UiImageCache,
 };
+use crate::ui::controls::{spawn_item_cell, ItemCellData, ItemCell};
 
 /// 商品条目
 #[derive(Debug, Clone)]
@@ -27,6 +28,12 @@ pub struct GoodsEntry {
     pub name: String,
     pub price: u32,
     pub count: u16,
+    /// Items 库图标帧（ItemInfo.image）
+    pub image: u16,
+    /// 物品类型（ItemType 枚举值，Tooltip 用）
+    pub item_type: u8,
+    /// 服务端物品描述（ItemInfo.tool_tip）
+    pub tool_tip: Option<String>,
 }
 
 /// NPC 商店状态
@@ -51,6 +58,10 @@ pub struct NpcGoodsBuy;
 
 #[derive(Component)]
 pub struct NpcGoodsLine(usize);
+
+/// 商品图标格（通用 ItemCell，带行号）
+#[derive(Component)]
+pub struct NpcGoodsCell(usize);
 
 pub struct NpcGoodsPlugin;
 
@@ -128,11 +139,18 @@ fn spawn_npc_goods(
         ));
     }
 
-    // 8 行商品
+    // 8 行商品（#110：左侧通用 ItemCell 图标 + 右侧名称/价格文本，对齐 C# MirGoodsCell）
     for i in 0..8usize {
+        let y = 240.0 + i as f32 * 22.0;
+        let cell = spawn_item_cell(&mut commands, &mut images, &font, 12.0, y, 7.8, 32.0, 20.0, i);
+        commands.entity(cell).insert((
+            NpcGoodsCell(i),
+            DialogRoot(crate::game::dialogs::DialogKind::NpcGoods),
+            NpcGoodsWidget,
+        ));
         let e = spawn_ui_text(
             &mut commands, &font, "",
-            12.0, 240.0 + i as f32 * 22.0,
+            50.0, y + 2.0,
             12.0, Color::WHITE, 8.0,
         );
         commands.entity(e).insert((
@@ -153,6 +171,11 @@ fn npc_goods_ui_system(
     buy: Query<&UiButton, (With<NpcGoodsBuy>, Without<NpcGoodsClose>)>,
     mut widgets: Query<&mut Visibility, With<NpcGoodsWidget>>,
     mut lines: Query<(&mut Text2d, &NpcGoodsLine)>,
+    mut cells: Query<(&mut ItemCellData, &NpcGoodsCell)>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
 ) {
     for mut vis in widgets.iter_mut() {
         *vis = if state.visible {
@@ -172,6 +195,45 @@ fn npc_goods_ui_system(
         } else {
             text.0 = String::new();
         }
+    }
+
+    // 商品图标（#110 通用 ItemCell 数据驱动渲染）
+    for (mut data, cell) in &mut cells {
+        let g = state.goods.get(cell.0);
+        data.icon = g.and_then(|g| {
+            ui_image(
+                &mut libs,
+                &mut images,
+                &mut cache,
+                LibraryName::Items,
+                g.image as usize,
+            )
+        });
+        data.count = g.map(|g| g.count.max(1) as u32);
+    }
+
+    // 悬停商品行 → 通用 Tooltip（#110）
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    let mut hovered: Option<&GoodsEntry> = None;
+    for i in 0..8usize {
+        let y = 240.0 + i as f32 * 22.0;
+        if cursor.x >= 12.0 && cursor.x <= 480.0 && cursor.y >= y && cursor.y <= y + 18.0 {
+            hovered = state.goods.get(i);
+            break;
+        }
+    }
+    if let Some(g) = hovered {
+        let mut lines = vec![format!("价格: {} 金", g.price)];
+        lines.push(format!("类型: {}", crate::game::dialogs::inventory::item_type_name(g.item_type)));
+        if let Some(t) = &g.tool_tip {
+            if !t.is_empty() {
+                lines.push(t.clone());
+            }
+        }
+        tooltip.update(5, true, g.name.clone(), lines, cursor.x, cursor.y);
+    } else {
+        tooltip.update(5, false, String::new(), Vec::new(), cursor.x, cursor.y);
     }
 
     // 点击行选中
