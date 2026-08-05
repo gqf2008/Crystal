@@ -344,11 +344,9 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
                         }
                     }
                 }
-                NetworkEvent::MagicLeveledUp { spell, level, hero } => {
-                    tracing::debug!("📈 Magic leveled up: {:?} level={} hero={}", spell, level, hero);
-                    if *hero {
-                        hero_magic_leveled_up.push((*spell as u8, *level));
-                    } else if let Some(e) = local_player_entity {
+                NetworkEvent::MagicLeveledUp { spell, level, experience: _ } => {
+                    tracing::debug!("📈 Magic leveled up: {:?} level={}", spell, level);
+                    if let Some(e) = local_player_entity {
                         if let Ok(mut magic_list) = ctx.world.get::<&mut crate::components::spell::MagicList>(e) {
                             NetworkApplySystem::update_magic_level(&mut magic_list, *spell as u8, *level);
                         }

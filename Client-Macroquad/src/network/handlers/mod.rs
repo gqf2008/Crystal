@@ -417,7 +417,7 @@ pub enum NetworkEvent {
     MagicListReceived { spell: mir2_shared::enums::Spell, target_id: u32, target_x: i32, target_y: i32, cast: bool, level: u8 },
     MagicLearned { magic: mir2_shared::data::client_data::ClientMagic, hero: bool },
     MagicRemoved { spell: mir2_shared::enums::Spell, hero: bool },
-    MagicLeveledUp { spell: mir2_shared::enums::Spell, level: u8, hero: bool },
+    MagicLeveledUp { spell: mir2_shared::enums::Spell, level: u8, experience: u16 },
     MagicDelayReceived { object_id: u32, spell: mir2_shared::enums::Spell, delay: u32 },
     MagicCastEvent { spell: mir2_shared::enums::Spell },
     ObjectMagicCast { object_id: u32, location_x: i32, location_y: i32, direction: mir2_shared::enums::MirDirection, spell: mir2_shared::enums::Spell, target_id: u32, target_x: i32, target_y: i32, cast: bool, level: u8 },
@@ -924,3 +924,4 @@ pub trait PacketHandler {
     /// Process a packet and generate events
     fn handle(&self, header: &PacketHeader, payload: &[u8]) -> Vec<NetworkEvent>;
 }
+

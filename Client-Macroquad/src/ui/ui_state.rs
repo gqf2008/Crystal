@@ -335,7 +335,7 @@ pub enum UiCommand {
 
     // Magic/Spells
     MagicLearned { spell: u8, name: String, level: u8, icon: u8, hero: bool },
-    MagicLeveledUp { spell: u8, level: u8, hero: bool },
+    MagicLeveledUp { spell: u8, level: u8, experience: u16 },
     MagicRemoved { spell: u8, hero: bool },
     SpellToggled { spell: u8, can_use: bool, hero: bool },
 
@@ -509,3 +509,4 @@ impl UiState {
         world.query::<&UiState>().iter().next().map(|s| f(&s.borrow()))
     }
 }
+

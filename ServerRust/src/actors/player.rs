@@ -17,6 +17,7 @@ use crate::actors::refine::RefineLog;
 use crate::gate::actor::{GateActor, SendToClient};
 use crate::maps::loader::MapData;
 use crate::util::wire::{build_packet_bytes, write_dotnet_string};
+use mir2_shared::packets::Packet;
 
 /// 玩家已学习的魔法/技能
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -2479,10 +2480,22 @@ impl Message<GainSpellExp> for PlayerActor {
                     if magic.experience >= xp_needed && magic.level < 3 {
                         magic.level += 1;
                         magic.experience = 0;
-                        // Send MagicLeveled packet
+                        // Send MagicLeveled packet (C# S.MagicLeveled: ObjectID u32 + Spell byte + Level byte + Experience u16)
+                        let Ok(spell) = mir2_shared::enums::Spell::try_from(magic.spell as u8) else {
+                            debug!("GainSpellExp: 未知 spell {}", magic.spell);
+                            return;
+                        };
+                        let packet = mir2_shared::packets::server::magic::MagicLeveled {
+                            object_id: self.state.object_id,
+                            spell,
+                            level: magic.level,
+                            experience: magic.experience,
+                        };
                         let mut body = Vec::new();
-                        body.extend_from_slice(&(magic.spell as i32).to_le_bytes());
-                        body.push(magic.level);
+                        if let Err(e) = packet.write_body(&mut body) {
+                            warn!("Failed to serialize MagicLeveled: {}", e);
+                            return;
+                        }
                         let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
                             session_id: self.state.session_id,
                             data: crate::util::wire::build_packet_bytes(
