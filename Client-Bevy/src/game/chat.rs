@@ -14,7 +14,9 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::scenes::AppState;
 use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
-use crate::ui::sprite_ui::{spawn_ui_text, UiButton, UiEntity, UiFont};
+use crate::resources::libraries::LibraryName;
+use crate::ui::controls::spawn_checkbox;
+use crate::ui::sprite_ui::{spawn_ui_text, UiButton, UiEntity, UiFont, UiImageCache};
 
 /// 聊天频道（主话框页签，对齐 C# MainDialogs ChatPanel）
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -56,6 +58,102 @@ pub const CHAT_TABS: [ChatChannel; 6] = [
     ChatChannel::Group,
     ChatChannel::Whisper,
 ];
+
+/// 聊天过滤项（C# ChatOptionDialog Filter 页签）
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ChatFilterKind {
+    All,
+    Normal,
+    Whisper,
+    Shout,
+    System,
+    Lover,
+    Mentor,
+    Group,
+    Guild,
+}
+
+/// 聊天过滤设置（C# Settings.Filter*Chat）
+#[derive(Resource)]
+pub struct ChatFilter {
+    pub normal: bool,
+    pub whisper: bool,
+    pub shout: bool,
+    pub system: bool,
+    pub lover: bool,
+    pub mentor: bool,
+    pub group: bool,
+    pub guild: bool,
+    /// 聊天面板透明（C# Settings.TransparentChat）
+    pub transparent: bool,
+    /// 聊天设置对话框可见
+    pub visible: bool,
+}
+
+impl Default for ChatFilter {
+    fn default() -> Self {
+        Self {
+            normal: false,
+            whisper: false,
+            shout: false,
+            system: false,
+            lover: false,
+            mentor: false,
+            group: false,
+            guild: false,
+            transparent: false,
+            visible: false,
+        }
+    }
+}
+
+impl ChatFilter {
+    pub fn get(&self, k: ChatFilterKind) -> bool {
+        match k {
+            ChatFilterKind::All => true,
+            ChatFilterKind::Normal => self.normal,
+            ChatFilterKind::Whisper => self.whisper,
+            ChatFilterKind::Shout => self.shout,
+            ChatFilterKind::System => self.system,
+            ChatFilterKind::Lover => self.lover,
+            ChatFilterKind::Mentor => self.mentor,
+            ChatFilterKind::Group => self.group,
+            ChatFilterKind::Guild => self.guild,
+        }
+    }
+    pub fn set(&mut self, k: ChatFilterKind, v: bool) {
+        match k {
+            ChatFilterKind::All => {}
+            ChatFilterKind::Normal => self.normal = v,
+            ChatFilterKind::Whisper => self.whisper = v,
+            ChatFilterKind::Shout => self.shout = v,
+            ChatFilterKind::System => self.system = v,
+            ChatFilterKind::Lover => self.lover = v,
+            ChatFilterKind::Mentor => self.mentor = v,
+            ChatFilterKind::Group => self.group = v,
+            ChatFilterKind::Guild => self.guild = v,
+        }
+    }
+}
+
+/// 服务端 ChatType → 对应过滤项
+pub fn chat_filter_kind(t: mir2_shared::enums::ChatType) -> ChatFilterKind {
+    use mir2_shared::enums::ChatType;
+    match t {
+        ChatType::Guild => ChatFilterKind::Guild,
+        ChatType::Group => ChatFilterKind::Group,
+        ChatType::WhisperIn | ChatType::WhisperOut => ChatFilterKind::Whisper,
+        ChatType::Shout | ChatType::Shout2 | ChatType::Shout3 => ChatFilterKind::Shout,
+        ChatType::Mentor | ChatType::Trainer => ChatFilterKind::Mentor,
+        ChatType::Relationship => ChatFilterKind::Lover,
+        ChatType::System
+        | ChatType::System2
+        | ChatType::Announcement
+        | ChatType::Hint
+        | ChatType::LevelUp => ChatFilterKind::System,
+        _ => ChatFilterKind::Normal,
+    }
+}
 
 /// 页签显示名
 pub fn chat_tab_name(tab: ChatChannel) -> &'static str {
@@ -125,21 +223,46 @@ struct ChatTabBtn(ChatChannel);
 #[derive(Component)]
 struct ChatBarBtn(&'static str, &'static str);
 
+/// 聊天设置按钮（打开 ChatOptionDialog）
+#[derive(Component)]
+struct ChatSettingsBtn;
+
+/// 聊天设置面板背景（透明开关改 alpha）
+#[derive(Component)]
+struct ChatPanelBg;
+
+/// 聊天设置面板（过滤/透明）
+#[derive(Component)]
+struct ChatOptionWidget;
+
+/// 过滤勾选框
+#[derive(Component)]
+struct ChatFilterBox(ChatFilterKind);
+
+/// 透明开关按钮（true=透明）
+#[derive(Component)]
+struct ChatTranspBtn(bool);
+
 pub struct ChatPlugin;
 
 impl Plugin for ChatPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<ChatFilter>();
         app.add_systems(OnEnter(AppState::Game), spawn_chat);
+        app.add_systems(OnEnter(AppState::Game), spawn_chat_option_panel);
         app.add_systems(OnExit(AppState::Game), cleanup_chat);
         app.add_systems(
             Update,
-            (chat_tab_system, chat_input_system, chat_display_system, chat_server_events)
+            (chat_tab_system, chat_option_system, chat_input_system, chat_display_system, chat_server_events)
                 .run_if(in_state(AppState::Game)),
         );
     }
 }
 
-fn cleanup_chat(mut commands: Commands, roots: Query<Entity, With<ChatPanel>>) {
+fn cleanup_chat(
+    mut commands: Commands,
+    roots: Query<Entity, Or<(With<ChatPanel>, With<ChatOptionWidget>)>>,
+) {
     for e in roots.iter() {
         commands.entity(e).despawn();
     }
@@ -166,6 +289,7 @@ fn spawn_chat(
     commands.spawn((
         UiEntity,
         ChatPanel,
+        ChatPanelBg,
         Sprite {
             image: white,
             custom_size: Some(Vec2::new(360.0, 172.0)),
@@ -235,6 +359,184 @@ fn spawn_chat(
             },
         ));
     }
+    // 聊天设置按钮（打开 C# ChatOptionDialog）
+    let settings = spawn_ui_text(
+        &mut commands, &font, "设置",
+        panel_x + 360.0 - 34.0, panel_y + 2.0,
+        11.0, Color::srgb(0.8, 0.9, 1.0), 2.2,
+    );
+    commands.entity(settings).insert((
+        ChatSettingsBtn,
+        UiButton {
+            rect: (panel_x + 360.0 - 34.0, panel_y + 2.0, 32.0, 14.0),
+            clicked: false,
+        },
+    ));
+}
+
+/// 聊天设置面板（过滤 + 透明，C# ChatOptionDialog）
+fn spawn_chat_option_panel(
+    mut commands: Commands,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    mut fonts: ResMut<Assets<Font>>,
+    mut ui_font: ResMut<UiFont>,
+) {
+    libs.0.ensure_initialized();
+    if !ui_font.0.is_strong() {
+        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+    }
+    let font = ui_font.0.clone();
+    let (dx, dy) = (400.0f32, 300.0f32);
+
+    // 面板背景（半透明深色 + 边框感）
+    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    commands.spawn((
+        UiEntity,
+        ChatOptionWidget,
+        Sprite {
+            image: white.clone(),
+            custom_size: Some(Vec2::new(224.0, 180.0)),
+            color: Color::srgba(0.12, 0.12, 0.16, 0.95),
+            ..default()
+        },
+        bevy::sprite::Anchor::TOP_LEFT,
+        Transform::from_xyz(dx, -dy, 12.0),
+        Visibility::Hidden,
+    ));
+    // 标题
+    let title = spawn_ui_text(&mut commands, &font, "聊天设置", dx + 70.0, dy + 8.0, 13.0, Color::srgb(1.0, 0.9, 0.3), 12.2);
+    commands.entity(title).insert(ChatOptionWidget);
+    // 关闭
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Prguse2, 360, 361, 362,
+        dx + 198.0, dy + 3.0, 12.3, 20.0, 20.0,
+    ) {
+        commands.entity(e).insert(ChatOptionWidget);
+    }
+    // 过滤勾选框（C# Prguse 2070/2071 等：偶数=勾选，奇数=未勾选）
+    let items: [(ChatFilterKind, &str, [usize; 3], [usize; 3], f32, f32); 9] = [
+        (ChatFilterKind::All, "全部", [2087, 2087, 2087], [2086, 2086, 2086], 74.0, 47.0),
+        (ChatFilterKind::Normal, "普通", [2071, 2071, 2071], [2070, 2070, 2070], 40.0, 69.0),
+        (ChatFilterKind::Whisper, "私聊", [2075, 2075, 2075], [2074, 2074, 2074], 40.0, 92.0),
+        (ChatFilterKind::Shout, "喊话", [2073, 2073, 2073], [2072, 2072, 2072], 40.0, 115.0),
+        (ChatFilterKind::System, "系统", [2085, 2085, 2085], [2084, 2084, 2084], 40.0, 138.0),
+        (ChatFilterKind::Lover, "情侣", [2077, 2077, 2077], [2076, 2076, 2076], 135.0, 69.0),
+        (ChatFilterKind::Mentor, "师徒", [2079, 2079, 2079], [2078, 2078, 2078], 135.0, 92.0),
+        (ChatFilterKind::Group, "队伍", [2081, 2081, 2081], [2080, 2080, 2080], 135.0, 115.0),
+        (ChatFilterKind::Guild, "行会", [2083, 2083, 2083], [2082, 2082, 2082], 135.0, 138.0),
+    ];
+    for (kind, label, off, on, rx, ry) in items {
+        if let Some(e) = spawn_checkbox(
+            &mut commands, &mut libs, &mut images, &mut cache,
+            LibraryName::Prguse, off, on,
+            dx + rx, dy + ry, 12.4, 16.0, 12.0,
+            kind == ChatFilterKind::All,
+        ) {
+            commands.entity(e).insert((ChatFilterBox(kind), ChatOptionWidget));
+        }
+        let t = spawn_ui_text(&mut commands, &font, label, dx + rx + 20.0, dy + ry, 12.0, Color::WHITE, 12.4);
+        commands.entity(t).insert(ChatOptionWidget);
+    }
+    // 透明开关（C# Title 471-475）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 471, 472, 470,
+        dx + 45.0, dy + 90.0, 12.4, 40.0, 16.0,
+    ) {
+        commands.entity(e).insert((ChatTranspBtn(false), ChatOptionWidget));
+    }
+    let t = spawn_ui_text(&mut commands, &font, "不透明", dx + 48.0, dy + 91.0, 11.0, Color::WHITE, 12.5);
+    commands.entity(t).insert(ChatOptionWidget);
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 474, 475, 473,
+        dx + 115.0, dy + 90.0, 12.4, 40.0, 16.0,
+    ) {
+        commands.entity(e).insert((ChatTranspBtn(true), ChatOptionWidget));
+    }
+    let t = spawn_ui_text(&mut commands, &font, "透明", dx + 122.0, dy + 91.0, 11.0, Color::WHITE, 12.5);
+    commands.entity(t).insert(ChatOptionWidget);
+}
+
+
+/// 聊天设置面板（#116 C# ChatOptionDialog）：打开/关闭、过滤同步、透明开关
+#[allow(clippy::too_many_arguments)]
+fn chat_option_system(
+    mut filter: ResMut<ChatFilter>,
+    settings: Query<&UiButton, With<ChatSettingsBtn>>,
+    close: Query<&UiButton, (With<ChatOptionWidget>, Without<ChatFilterBox>, Without<ChatTranspBtn>)>,
+    mut boxes: Query<
+        (&mut crate::ui::controls::CheckBox, &mut crate::ui::sprite_ui::ButtonFrames, &mut Sprite, &ChatFilterBox),
+        With<ChatOptionWidget>,
+    >,
+    transp: Query<(&UiButton, &ChatTranspBtn), With<ChatOptionWidget>>,
+    mut widgets: Query<&mut Visibility, With<ChatOptionWidget>>,
+    mut panel_bg: Query<&mut Sprite, (With<ChatPanelBg>, Without<ChatOptionWidget>)>,
+) {
+    // 设置按钮开/关
+    for btn in &settings {
+        if btn.clicked {
+            filter.visible = !filter.visible;
+            tracing::info!("💬 聊天设置: {}", if filter.visible { "打开" } else { "关闭" });
+        }
+    }
+    for btn in &close {
+        if btn.clicked {
+            filter.visible = false;
+        }
+    }
+    // 面板显隐
+    for mut vis in &mut widgets {
+        *vis = if filter.visible { Visibility::Visible } else { Visibility::Hidden };
+    }
+    // 勾选框 ↔ 过滤状态（checked = 屏蔽该频道，C# Filter*Chat 语义）
+    let mut all_checked = false;
+    for (cb, _frames, _sprite, kind) in boxes.iter() {
+        if kind.0 == ChatFilterKind::All {
+            all_checked = cb.checked;
+        }
+    }
+    for (mut cb, mut frames, mut sprite, kind) in &mut boxes {
+        if kind.0 == ChatFilterKind::All {
+            continue;
+        }
+        if all_checked {
+            cb.checked = true;
+        }
+        let v = cb.checked;
+        if filter.get(kind.0) != v {
+            filter.set(kind.0, v);
+        }
+        // 同步帧（外部/All 联动时刷新勾选图）
+        let f = if cb.checked { &cb.on } else { &cb.off };
+        if frames.normal != f[0] {
+            frames.normal = f[0].clone();
+            frames.hover = f[1].clone();
+            frames.pressed = f[2].clone();
+            sprite.image = f[0].clone();
+        }
+    }
+    // 透明开关
+    for (btn, t) in &transp {
+        if btn.clicked && filter.transparent != t.0 {
+            filter.transparent = t.0;
+            tracing::info!("💬 聊天面板透明: {}", t.0);
+        }
+    }
+    // 面板底色透明度
+    for mut sp in &mut panel_bg {
+        let target = if filter.transparent {
+            Color::srgba(0.0, 0.0, 0.0, 0.15)
+        } else {
+            Color::srgba(0.0, 0.0, 0.0, 0.55)
+        };
+        if sp.color != target {
+            sp.color = target;
+        }
+    }
 }
 
 /// 键盘输入：Enter 激活/发送；字符输入；Backspace 删除；内置拼音 IME 中文提交
@@ -246,6 +548,7 @@ fn chat_input_system(
     net: Res<NetConnection>,
     net_mode: Res<crate::network::NetMode>,
     hud: Res<HudState>,
+    filter: Res<ChatFilter>,
 ) {
     let key_list: Vec<KeyboardInput> = keys.read().cloned().collect();
 
@@ -278,7 +581,11 @@ fn chat_input_system(
                     // 指令消息（/w /g /guild /s ! 等）服务器会回发对应频道回显 → 本地不再回显避免重复。
                     // mock 服务器会回显，只在真实 TCP 模式下本地回显避免重复
                     let is_cmd = msg.starts_with('/') || msg.starts_with('!');
-                    if matches!(net_mode.0, crate::network::NetworkMode::Real) && !is_cmd {
+                    // #116 本地回显同样受“普通”过滤控制
+                    if matches!(net_mode.0, crate::network::NetworkMode::Real)
+                        && !is_cmd
+                        && !filter.normal
+                    {
                         chat.add_line(
                             format!("[{}]: {}", hud.name, msg),
                             Color::WHITE,
@@ -427,10 +734,15 @@ pub fn chat_color(t: mir2_shared::enums::ChatType) -> Color {
 fn chat_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut chat: ResMut<ChatState>,
+    filter: Res<ChatFilter>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
         if let ServerEvent::Chat { text, chat_type } = ev {
+            // #116 聊天过滤：屏蔽对应频道
+            if filter.get(chat_filter_kind(*chat_type)) {
+                continue;
+            }
             let color = chat_color(*chat_type);
             chat.add_line(text.clone(), color, chat_channel(*chat_type));
         }
