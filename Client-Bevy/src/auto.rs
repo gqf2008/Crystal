@@ -170,6 +170,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--hero-test") {
         app.add_systems(Update, auto_hero_test);
     }
+    // --book-test: 技能书学习链路（使用技能书 → 等 NewMagic → 校验 MagicsState）
+    if std::env::args().any(|a| a == "--book-test") {
+        app.add_systems(Update, auto_book_test);
+    }
     // --marriage-test: 婚姻链路（求婚 → 结婚 → 离婚，配合 --marriage-accept）
     if std::env::args().any(|a| a == "--marriage-test") {
         app.add_systems(Update, auto_marriage_test);
@@ -5082,3 +5086,61 @@ fn real_verify_system(
     }
 }
 
+/// --book-test：技能书学习（#212：使用背包槽 3 技能书 → 等 S.NewMagic → 校验技能列表）
+#[allow(clippy::too_many_arguments)]
+fn auto_book_test(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    magics: Res<client_bevy::game::skills::MagicsState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            let uid = hud
+                .inventory
+                .items
+                .get(3)
+                .and_then(|s| s.as_ref())
+                .map(|i| i.unique_id);
+            match uid {
+                Some(uid) => {
+                    net.send_packet(&mir2_shared::packets::client::item::UseItem { unique_id: uid });
+                    tracing::info!("[BOOKTEST] 使用技能书 uid={}", uid);
+                    *stage = 1;
+                    *t = 0.0;
+                }
+                None => {
+                    tracing::warn!("[BOOKTEST] ⚠️ 背包槽 3 无技能书");
+                    *stage = 9;
+                }
+            }
+        }
+        1 => {
+            if *t >= 8.0 {
+                tracing::warn!("[BOOKTEST] ❌ 未学会技能");
+                *stage = 9;
+                return;
+            }
+            if magics
+                .magics
+                .iter()
+                .any(|m| m.spell == mir2_shared::enums::Spell::FireBall)
+            {
+                tracing::info!("[BOOKTEST] ✅ 学会 FireBall");
+                *stage = 9;
+            }
+        }
+        _ => {}
+    }
+}

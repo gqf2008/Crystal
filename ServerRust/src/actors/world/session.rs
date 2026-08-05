@@ -470,28 +470,11 @@ impl Message<StartGameRequest> for WorldActor {
         // 发送已学习的技能列表给客户端
         for magic in &loaded_state.magics {
             if let Some(info) = self.magic_infos.get(&(magic.spell as u32)) {
-                let client_magic = mir2_shared::data::client_data::ClientMagic {
-                    name: info.name.clone(),
-                    // DB 用 C# 编号，客户端协议用 SharedRust(+3)
-                    spell: mir2_shared::enums::Spell::try_from(magic.spell as u8 + 3)
-                        .unwrap_or(mir2_shared::enums::Spell::None),
-                    base_cost: info.base_cost as u8,
-                    level_cost: info.level_cost as u8,
-                    icon: info.icon as u8,
-                    level1: info.level1 as u8,
-                    level2: info.level2 as u8,
-                    level3: info.level3 as u8,
-                    need1: info.need1 as u16,
-                    need2: info.need2 as u16,
-                    need3: info.need3 as u16,
-                    level: magic.level,
-                    key: magic.key,
-                    experience: magic.experience,
-                    delay: info.delay_base as i64,
-                    range: info.range as u8,
-                    cast_time: 0,
+                let client_magic = super::build_client_magic(info, magic);
+                let new_magic = mir2_shared::packets::server::magic::NewMagic {
+                    magic: client_magic,
+                    hero: false,
                 };
-                let new_magic = mir2_shared::packets::server::magic::NewMagic { magic: client_magic, hero: false };
                 let mut body = Vec::new();
                 if new_magic.write_body(&mut body).is_ok() {
                     let _ = self.gate_ref.tell(SendToClient {
