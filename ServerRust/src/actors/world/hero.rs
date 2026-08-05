@@ -30,6 +30,12 @@ impl Message<ChangeHeroRequest> for WorldActor {
 
         let _ = record.actor_ref.ask(SetHeroIndex { hero_index: msg.hero_index }).await;
         send_hero_update_packet(&self.gate_ref, msg.session_id, msg.hero_index);
+        // #198：切换后生成/移除英雄对象
+        if msg.hero_index != 0 {
+            self.broadcast_hero_spawn(msg.session_id).await;
+        } else {
+            self.broadcast_hero_remove(record.object_id).await;
+        }
         debug!("Hero switched: {} -> index {}", state.name, msg.hero_index);
     }
 }
@@ -825,5 +831,88 @@ async fn broadcast_hero_attack(
             session_id: *sid,
             data: attack_packet.clone(),
         }).await;
+    }
+}
+
+impl WorldActor {
+    /// #198：广播英雄对象生成（ObjectPlayer，虚拟 oid = owner_oid + HERO_OID_OFFSET）
+    pub(crate) async fn broadcast_hero_spawn(&self, session_id: u64) {
+        let record = match self.players.get(&session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        let owner_oid = record.object_id;
+        let hero_oid = owner_oid.wrapping_add(HERO_OID_OFFSET);
+        let Some(hero) = self
+            .player_heroes
+            .get(&session_id)
+            .and_then(|v| v.iter().find(|h| h.index as u8 == state.hero_index))
+        else {
+            return;
+        };
+        let (hx, hy) = self
+            .hero_ai_states
+            .get(&session_id)
+            .map(|a| (a.x, a.y))
+            .unwrap_or((state.x, state.y.saturating_add(1)));
+        let weapon = state
+            .inventory
+            .get_equipment(EquipmentSlot::Weapon)
+            .and_then(|it| self.item_infos.get(&it.item_index))
+            .map(|i| i.shape as i16)
+            .unwrap_or(-1);
+        let weapon_effect = state
+            .inventory
+            .get_equipment(EquipmentSlot::Weapon)
+            .and_then(|it| self.item_infos.get(&it.item_index))
+            .map(|i| i.effect as i16)
+            .unwrap_or(0);
+        let armor = state
+            .inventory
+            .get_equipment(EquipmentSlot::Armour)
+            .and_then(|it| self.item_infos.get(&it.item_index))
+            .map(|i| i.shape as i16)
+            .unwrap_or(0);
+        let packet = build_object_player_packet(
+            &hero.name,
+            hero_oid,
+            hx,
+            hy,
+            state.direction,
+            hero.level,
+            0,
+            hero.class,
+            hero.gender,
+            state.hair,
+            weapon,
+            weapon_effect,
+            armor,
+            state.mount_type,
+            state.is_mounted,
+        );
+        for sid in self.players.keys() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: *sid,
+                data: packet.clone(),
+            }).await;
+        }
+    }
+
+    /// #198：广播英雄对象移除（ObjectRemove）
+    pub(crate) async fn broadcast_hero_remove(&self, owner_oid: u32) {
+        let hero_oid = owner_oid.wrapping_add(HERO_OID_OFFSET);
+        let mut body = Vec::new();
+        body.extend_from_slice(&hero_oid.to_le_bytes());
+        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &body);
+        for sid in self.players.keys() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: *sid,
+                data: packet.clone(),
+            }).await;
+        }
     }
 }

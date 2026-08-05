@@ -683,6 +683,8 @@ impl Message<NewHeroRequest> for WorldActor {
                 gender: msg.gender,
             });
             let _ = record.actor_ref.ask(SetHeroIndex { hero_index: 1 }).await;
+            // #198：创建成功后生成英雄对象
+            self.broadcast_hero_spawn(msg.session_id).await;
         }
         let body = vec![result];
         let _ = self.gate_ref.tell(SendToClient {
