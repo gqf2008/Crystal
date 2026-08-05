@@ -59,5 +59,10 @@ impl Plugin for ActorPlugin {
             (demo_drive, sync_actor_depth, sync_player_equipment, log_player_walk)
                 .run_if(in_state(crate::scenes::AppState::Game)),
         );
+        // #152 头顶名字（新角色生成时挂载，跟随移动）
+        app.add_systems(
+            Update,
+            render::actor_name_label_system.run_if(in_state(crate::scenes::AppState::Game)),
+        );
     }
 }

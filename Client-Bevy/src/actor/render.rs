@@ -5,7 +5,10 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 use crate::map_renderer::{make_image, GameData, GameLibraries};
+use crate::actor::{LocalPlayer, MonsterName, NpcName, PlayerName};
 use crate::resources::libraries::{ArrayLibType, LibraryName};
+use crate::scenes::AppState;
+use crate::ui::sprite_ui::load_ui_font;
 use crate::ui::sprite_ui::{UiFont, UiImageCache};
 use super::components::*;
 
@@ -89,3 +92,63 @@ pub(crate) fn actor_sprite_render(
     }
 }
 
+
+
+/// 头顶名字标签（#152 C# 玩家/NPC/怪物名字显示）
+#[derive(Component)]
+pub struct ActorNameLabel;
+
+/// 已生成名字标签的父实体标记
+#[derive(Component)]
+pub struct ActorNamed;
+
+/// 为新增角色生成头顶名字（世界空间 Text2d，跟随角色移动）
+pub fn actor_name_label_system(
+    mut commands: Commands,
+    actors: Query<
+        (
+            Entity,
+            Option<&PlayerName>,
+            Option<&MonsterName>,
+            Option<&NpcName>,
+        ),
+        (
+            Without<ActorNamed>,
+            Without<LocalPlayer>,
+            Without<ActorNameLabel>,
+        ),
+    >,
+    mut fonts: ResMut<Assets<Font>>,
+    mut ui_font: ResMut<UiFont>,
+) {
+    if !ui_font.0.is_strong() {
+        ui_font.0 = load_ui_font(&mut fonts);
+    }
+    let font = ui_font.0.clone();
+    for (e, p, m, n) in &actors {
+        let (text, color) = if let Some(n) = n {
+            (n.0.clone(), Color::srgb(0.4, 1.0, 0.4))
+        } else if let Some(m) = m {
+            (m.0.clone(), Color::srgb(1.0, 0.3, 0.3))
+        } else if let Some(p) = p {
+            (p.0.clone(), Color::WHITE)
+        } else {
+            continue;
+        };
+        commands.entity(e).insert(ActorNamed);
+        commands.entity(e).with_children(|p| {
+            p.spawn((
+                ActorNameLabel,
+                Text2d::new(text),
+                bevy::sprite::Anchor::TOP_CENTER,
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(11.0),
+                    ..default()
+                },
+                TextColor(color),
+                Transform::from_xyz(0.0, 28.0, 0.0),
+            ));
+        });
+    }
+}
