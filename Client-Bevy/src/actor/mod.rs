@@ -64,5 +64,12 @@ impl Plugin for ActorPlugin {
             Update,
             render::actor_name_label_system.run_if(in_state(crate::scenes::AppState::Game)),
         );
+        // #178 PK 名字染色（ObjectColourChanged）
+        app.add_systems(
+            Update,
+            (render::object_colour_server_events, render::actor_name_colour_system)
+                .after(crate::network::network_system)
+                .run_if(in_state(crate::scenes::AppState::Game)),
+        );
     }
 }

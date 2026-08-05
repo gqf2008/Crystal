@@ -21,6 +21,8 @@ pub enum ServerEvent {
     GoldLost { amount: u32 },
     /// TimeOfDay：服务端昼夜（C# S.TimeOfDay）
     TimeOfDay { light: mir2_shared::enums::LightSetting },
+    /// ObjectColourChanged：对象名字颜色（C# PK 红名）
+    ObjectColourChanged { object_id: u32, name_colour_argb: i32 },
     /// GainExperience：经验增量
     ExperienceGained { amount: i64 },
     /// LevelChanged：新等级 + 经验（原实现一并更新 exp/max_exp）
