@@ -25,9 +25,19 @@ pub struct TooltipState {
 }
 
 impl TooltipState {
-    /// 写入方更新提示；无目标时调用以清除自己归属的提示
+    /// 写入方更新提示；无目标时调用以清除自己归属的提示。
+    /// 性能（#112）：内容/位置无变化时早退，避免每帧标记 Changed 触发面板重绘。
     pub fn update(&mut self, source: u16, visible: bool, title: String, lines: Vec<String>, x: f32, y: f32) {
         if visible {
+            if self.visible
+                && self.source == source
+                && self.title == title
+                && self.lines == lines
+                && self.x == x
+                && self.y == y
+            {
+                return;
+            }
             self.visible = true;
             self.source = source;
             self.title = title;
@@ -35,6 +45,9 @@ impl TooltipState {
             self.x = x;
             self.y = y;
         } else if self.source == source {
+            if !self.visible {
+                return;
+            }
             self.visible = false;
             self.source = 0;
             self.title.clear();
@@ -125,6 +138,10 @@ pub fn tooltip_panel_system(
     mut title: Query<(&mut Text2d, &mut Transform, &mut Visibility), (With<TooltipTitle>, Without<TooltipBg>, Without<TooltipLine>)>,
     mut lines: Query<(&mut Text2d, &mut Transform, &mut Visibility, &TooltipLine), (Without<TooltipBg>, Without<TooltipTitle>)>,
 ) {
+    // 性能（#112）：TooltipState 未变化（update 已早退）时跳过面板重绘
+    if !state.is_changed() {
+        return;
+    }
     let show = state.visible && (!state.title.is_empty() || !state.lines.is_empty());
     // 估算尺寸：CJK 约 1 字符 = 字号 px
     let mut max_chars = state.title.chars().count().max(1);

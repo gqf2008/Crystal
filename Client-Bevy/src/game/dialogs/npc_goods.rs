@@ -200,7 +200,7 @@ fn npc_goods_ui_system(
     // 商品图标（#110 通用 ItemCell 数据驱动渲染）
     for (mut data, cell) in &mut cells {
         let g = state.goods.get(cell.0);
-        data.icon = g.and_then(|g| {
+        let icon = g.and_then(|g| {
             ui_image(
                 &mut libs,
                 &mut images,
@@ -209,7 +209,14 @@ fn npc_goods_ui_system(
                 g.image as usize,
             )
         });
-        data.count = g.map(|g| g.count.max(1) as u32);
+        let count = g.map(|g| g.count.max(1) as u32);
+        // 性能（#112）：无变化不写
+        if data.icon.as_ref() != icon.as_ref() {
+            data.icon = icon;
+        }
+        if data.count != count {
+            data.count = count;
+        }
     }
 
     // 悬停商品行 → 通用 Tooltip（#110）

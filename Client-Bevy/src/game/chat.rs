@@ -331,6 +331,10 @@ fn chat_display_system(
         Option<&ChatTabBtn>,
     )>,
 ) {
+    // 性能（#112）：只有聊天状态变化才重建文本（每帧重建是 CPU 热点）
+    if !chat.is_changed() {
+        return;
+    }
     // 按页签收集可见行（All 显示全部；否则只显示对应频道）
     let mut visible: Vec<(String, Color)> = chat
         .lines

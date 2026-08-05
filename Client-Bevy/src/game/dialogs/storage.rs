@@ -179,7 +179,7 @@ fn storage_ui_system(
     // 物品图标 + 数量（#90 通用 ItemCell：只写数据，渲染由 item_cell_system 处理）
     for (mut data, cell) in &mut cells {
         let item = state.items.get(cell.slot).and_then(|s| s.as_ref());
-        data.icon = item.and_then(|it| {
+        let icon = item.and_then(|it| {
             ui_image(
                 &mut libs,
                 &mut images,
@@ -188,7 +188,14 @@ fn storage_ui_system(
                 it.image as usize,
             )
         });
-        data.count = item.map(|it| it.count.max(1) as u32);
+        let count = item.map(|it| it.count.max(1) as u32);
+        // 性能（#112）：无变化不写，避免每帧标记 Changed
+        if data.icon.as_ref() != icon.as_ref() {
+            data.icon = icon;
+        }
+        if data.count != count {
+            data.count = count;
+        }
     }
 
     // 选中高亮（原版 C# SelectedCell 黄色语义）

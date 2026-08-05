@@ -69,6 +69,14 @@ fn main() {
             }),
     );
     app.insert_resource(ClearColor(Color::srgb(0.07, 0.08, 0.12)));
+    // 性能（#112）：PresentMode::Immediate 无 vsync 会无限刷帧烧 CPU（基线 ~150% 单核）。
+    // 用 winit Reactive 60Hz 限帧：动画/输入照常（事件唤醒 + 16.6ms 心跳），CPU 大幅下降，
+    // 且不引入 vsync 阻塞（此前 DX12+Vulkan 均出现过 present 冻结）。
+    use std::time::Duration;
+    app.insert_resource(bevy::winit::WinitSettings {
+        focused_mode: bevy::winit::UpdateMode::reactive(Duration::from_secs_f64(1.0 / 60.0)),
+        ..default()
+    });
     app.init_state::<AppState>();
     // --skip-login: 直接从登录界面进入游戏（诊断呈现问题用）
     if std::env::args().any(|a| a == "--skip-login") {

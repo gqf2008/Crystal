@@ -285,7 +285,7 @@ fn trade_ui_system(
         } else {
             trade.their_items.get(slot.1).and_then(|s| s.as_ref())
         };
-        data.icon = item.and_then(|it| {
+        let icon = item.and_then(|it| {
             ui_image(
                 &mut libs,
                 &mut images,
@@ -294,7 +294,14 @@ fn trade_ui_system(
                 it.image as usize,
             )
         });
-        data.count = item.map(|it| it.count.max(1) as u32);
+        let count = item.map(|it| it.count.max(1) as u32);
+        // 性能（#112）：无变化不写
+        if data.icon.as_ref() != icon.as_ref() {
+            data.icon = icon;
+        }
+        if data.count != count {
+            data.count = count;
+        }
     }
     for (mut t, _) in &mut gold_texts {
         let new = format!(
