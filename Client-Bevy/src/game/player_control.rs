@@ -62,7 +62,7 @@ impl Plugin for PlayerControlPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (player_input_system, hold_move_system, auto_attack_system, pickup_arrival_system)
+            (player_input_system, key_pickup_system, hold_move_system, auto_attack_system, pickup_arrival_system)
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -487,5 +487,64 @@ fn hold_move_system(
         control.hold_run = None;
         control.hold_active = false;
         control.hold_pressed_at = None;
+    }
+}
+
+
+/// 按键拾取最近物品（#158 C# KeybindOptions.Pickup：默认空格）
+fn key_pickup_system(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    kb: Res<crate::game::dialogs::keyboard_layout::KeyboardState>,
+    net: Res<NetConnection>,
+    game_data: Res<GameData>,
+    mut control: ResMut<ControlState>,
+    items: Query<(&crate::actor::NetObjectId, &Transform), With<crate::actor::GroundItem>>,
+    players: Query<(Entity, &Transform), (With<LocalPlayer>, Without<crate::actor::GroundItem>)>,
+) {
+    let Some(b) = kb.bindings.iter().find(|b| b.action == "拾取") else { return };
+    if !keys.just_pressed(b.key) {
+        return;
+    }
+    let Ok((pe, ptf)) = players.single() else { return };
+    // 找最近地面物品
+    let mut best: Option<(u32, f32)> = None;
+    for (id, tf) in &items {
+        let d = Vec2::new(tf.translation.x - ptf.translation.x, tf.translation.y - ptf.translation.y).length();
+        if d < 800.0 && best.map(|(_, bd)| d < bd).unwrap_or(true) {
+            best = Some((id.0, d));
+        }
+    }
+    let Some((item_id, _)) = best else { return };
+    let item_tile = items
+        .iter()
+        .find(|(id, _)| id.0 == item_id)
+        .map(|(_, tf)| world_to_tile(tf.translation.x, tf.translation.y));
+    let Some(item_tile) = item_tile else { return };
+    let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
+    let adjacent = (item_tile.0 - from_tile.0).abs() <= 1 && (item_tile.1 - from_tile.1).abs() <= 1;
+    if adjacent {
+        net.send_packet(&mir2_shared::packets::client::item::PickUp {});
+        control.attack_target = None;
+        tracing::info!("🎒 [KEY] 拾取地面物品 id={}", item_id);
+    } else if let Some(map) = &game_data.map {
+        if let Some(p) = pathfinding::find_path(map, from_tile, item_tile) {
+            if p.is_empty() {
+                tracing::debug!("🚫 物品不可达: {:?}", item_tile);
+            } else {
+                let len = p.len();
+                commands.entity(pe).insert(LocalMove {
+                    path: p.into(),
+                    step_timer_ms: 0.0,
+                    run: control.autorun,
+                    last: None,
+                    step_origin: None,
+                    turn_acc: 0.0,
+                });
+                control.attack_target = None;
+                control.pickup_target = Some(item_id);
+                tracing::info!("🚶 [KEY] 走向物品 id={}（{} 格）", item_id, len);
+            }
+        }
     }
 }
