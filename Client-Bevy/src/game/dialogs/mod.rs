@@ -103,6 +103,7 @@ pub enum DialogKind {
     ChatNotice,
     Market,
     Storage,
+    Skills,
 }
 
 /// 对话框管理（打开栈，栈顶在最前）
