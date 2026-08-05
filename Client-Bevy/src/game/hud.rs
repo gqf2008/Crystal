@@ -748,6 +748,7 @@ fn hud_server_events(
             | ServerEvent::WeatherChanged { .. }
             | ServerEvent::MapInfo { .. }
             | ServerEvent::MagicLearned { .. }
+            | ServerEvent::MagicLeveled { .. }
             | ServerEvent::CraftResult { .. }
             | ServerEvent::NpcGoods { .. }
             | ServerEvent::NpcSellPanel { .. } => {}

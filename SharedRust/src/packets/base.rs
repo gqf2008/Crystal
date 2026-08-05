@@ -1519,9 +1519,10 @@ mod tests {
     #[test]
     fn roundtrip_magic_leveled() -> SharedResult<()> {
         let packet = server::magic::MagicLeveled {
+            object_id: 1000,
             spell: Spell::FireBall,
             level: 2,
-            hero: false,
+            experience: 500,
         };
         let mut bytes = Vec::new();
         serialize_packet(&mut bytes, &packet)?;

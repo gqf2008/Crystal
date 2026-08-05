@@ -919,8 +919,8 @@ pub fn pump_network_messages_to_ui(ctx: &mut GameContext) {
                 });
                 sys_chat(&mut cmds, format!("学会技能：{} Lv.{}", magic.name, magic.level));
             }
-            NetworkEvent::MagicLeveledUp { spell, level, hero } => {
-                cmds.push(UiCommand::MagicLeveledUp { spell: *spell as u8, level: *level, hero: *hero });
+            NetworkEvent::MagicLeveledUp { spell, level, experience: _ } => {
+                cmds.push(UiCommand::MagicLeveledUp { spell: *spell as u8, level: *level, experience: 0 });
                 sys_chat(&mut cmds, format!("技能升级：{:?} Lv.{}", spell, level));
             }
             NetworkEvent::MagicRemoved { spell, hero } => {

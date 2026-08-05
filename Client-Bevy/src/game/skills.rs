@@ -255,6 +255,21 @@ fn skills_server_events(
             ServerEvent::MagicLearned { magic } => {
                 magics.upsert(magic.clone());
             }
+            ServerEvent::MagicLeveled {
+                spell,
+                level,
+                experience,
+                ..
+            } => {
+                // C# S.MagicLeveled：更新技能等级/经验（技能窗口即时刷新）
+                if let Some(m) = magics.magics.iter_mut().find(|m| m.spell == *spell) {
+                    if m.level != *level || m.experience != *experience {
+                        m.level = *level;
+                        m.experience = *experience;
+                        tracing::info!("⬆️ 技能 {:?} → Lv.{}", spell, level);
+                    }
+                }
+            }
             ServerEvent::UserInformation { magics: ms, .. } => {
                 for m in ms {
                     magics.upsert(m.clone());

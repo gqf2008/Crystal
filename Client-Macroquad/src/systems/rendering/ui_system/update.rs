@@ -537,8 +537,8 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             UiCommand::MagicLearned { spell, name, level, icon, hero } => {
                 sys.main_dialog.skill_dialog_mut(hero).learn_skill(spell, name, level, icon);
             }
-            UiCommand::MagicLeveledUp { spell, level, hero } => {
-                sys.main_dialog.skill_dialog_mut(hero).level_up_skill(spell, level);
+            UiCommand::MagicLeveledUp { spell, level, experience: _ } => {
+                sys.main_dialog.skill_dialog_mut(false).level_up_skill(spell, level);
             }
             UiCommand::MagicRemoved { spell, hero } => {
                 sys.main_dialog.skill_dialog_mut(hero).remove_skill(spell);

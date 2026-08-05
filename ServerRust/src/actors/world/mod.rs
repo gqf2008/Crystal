@@ -1999,7 +1999,7 @@ impl WorldActor {
                                         let _ = record.actor_ref.ask(SetPlayerState { state: state.clone() }).await;
                                         // 发送 MagicLeveled 包
                                         let spell_enum = mir2_shared::enums::Spell::try_from(spell as u8).unwrap_or(mir2_shared::enums::Spell::None);
-                                        let leveled = mir2_shared::packets::server::magic::MagicLeveled { spell: spell_enum, level: state.magics.iter().find(|m| m.spell == spell).map(|m| m.level).unwrap_or(0), hero: false };
+                                        let leveled = mir2_shared::packets::server::magic::MagicLeveled { object_id: record.object_id, spell: spell_enum, level: state.magics.iter().find(|m| m.spell == spell).map(|m| m.level).unwrap_or(0), experience: 0 };
                                         let mut body = Vec::new();
                                         if leveled.write_body(&mut body).is_ok() {
                                             let _ = self.gate_ref.tell(SendToClient {
@@ -4433,4 +4433,5 @@ mod tests {
 
 #[cfg(test)]
 mod e2e;
+
 

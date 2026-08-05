@@ -389,9 +389,9 @@ impl PacketHandler for CombatHandler {
                     events.push(NetworkEvent::MagicLeveledUp {
                         spell: packet.spell,
                         level: packet.level,
-                        hero: packet.hero,
+                        experience: packet.experience,
                     });
-                    tracing::debug!("📈 Magic leveled up: {:?} level={} (hero={})", packet.spell, packet.level, packet.hero);
+                    tracing::debug!("📈 Magic leveled up: {:?} level={} exp={}", packet.spell, packet.level, packet.experience);
                 }
             }
 

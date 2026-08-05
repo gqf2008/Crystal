@@ -198,6 +198,13 @@ pub enum ServerEvent {
     PlayerRevived,
     /// NewMagic：学会技能
     MagicLearned { magic: ClientMagic },
+    /// MagicLeveled：技能升级（C# S.MagicLeveled）
+    MagicLeveled {
+        object_id: u32,
+        spell: mir2_shared::enums::Spell,
+        level: u8,
+        experience: u16,
+    },
     /// CraftItem：合成结果
     CraftResult { recipe_id: u32, count: u16, success: bool },
     /// NPCGoods：商品对话框（Buy/Craft 等）
