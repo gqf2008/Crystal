@@ -797,3 +797,41 @@ fn chat_server_events(
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mir2_shared::enums::ChatType;
+
+    #[test]
+    fn channel_mapping() {
+        assert_eq!(chat_channel(ChatType::Normal), ChatChannel::Nearby);
+        assert_eq!(chat_channel(ChatType::Shout), ChatChannel::Nearby);
+        assert_eq!(chat_channel(ChatType::System), ChatChannel::System);
+        assert_eq!(chat_channel(ChatType::Guild), ChatChannel::Guild);
+        assert_eq!(chat_channel(ChatType::Group), ChatChannel::Group);
+        assert_eq!(chat_channel(ChatType::WhisperIn), ChatChannel::Whisper);
+        assert_eq!(chat_channel(ChatType::WhisperOut), ChatChannel::Whisper);
+    }
+
+    #[test]
+    fn filter_kind_mapping() {
+        assert_eq!(chat_filter_kind(ChatType::Normal), ChatFilterKind::Normal);
+        assert_eq!(chat_filter_kind(ChatType::Shout), ChatFilterKind::Shout);
+        assert_eq!(chat_filter_kind(ChatType::System), ChatFilterKind::System);
+        assert_eq!(chat_filter_kind(ChatType::Guild), ChatFilterKind::Guild);
+        assert_eq!(chat_filter_kind(ChatType::Group), ChatFilterKind::Group);
+        assert_eq!(chat_filter_kind(ChatType::WhisperIn), ChatFilterKind::Whisper);
+        assert_eq!(chat_filter_kind(ChatType::Mentor), ChatFilterKind::Mentor);
+        assert_eq!(chat_filter_kind(ChatType::Relationship), ChatFilterKind::Lover);
+    }
+
+    #[test]
+    fn filter_get_set() {
+        let mut f = ChatFilter::default();
+        assert!(!f.get(ChatFilterKind::Guild));
+        f.set(ChatFilterKind::Guild, true);
+        assert!(f.get(ChatFilterKind::Guild));
+    }
+}
