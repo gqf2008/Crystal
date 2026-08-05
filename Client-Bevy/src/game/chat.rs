@@ -14,13 +14,68 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::scenes::AppState;
 use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
-use crate::ui::sprite_ui::{spawn_ui_text, UiEntity, UiFont};
+use crate::ui::sprite_ui::{spawn_ui_text, UiButton, UiEntity, UiFont};
+
+/// 聊天频道（主话框页签，对齐 C# MainDialogs ChatPanel）
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ChatChannel {
+    /// 全部（仅页签用，行数据不落此值）
+    All,
+    System,
+    Nearby,
+    Guild,
+    Group,
+    Whisper,
+}
+
+/// 服务端 ChatType → 频道
+pub fn chat_channel(t: mir2_shared::enums::ChatType) -> ChatChannel {
+    use mir2_shared::enums::ChatType;
+    match t {
+        ChatType::Guild => ChatChannel::Guild,
+        ChatType::Group => ChatChannel::Group,
+        ChatType::WhisperIn | ChatType::WhisperOut => ChatChannel::Whisper,
+        ChatType::System
+        | ChatType::System2
+        | ChatType::Announcement
+        | ChatType::Hint
+        | ChatType::LevelUp
+        | ChatType::Mentor
+        | ChatType::Trainer
+        | ChatType::Relationship => ChatChannel::System,
+        _ => ChatChannel::Nearby,
+    }
+}
+
+/// 页签列表（顺序 = 显示顺序）
+pub const CHAT_TABS: [ChatChannel; 6] = [
+    ChatChannel::All,
+    ChatChannel::System,
+    ChatChannel::Nearby,
+    ChatChannel::Guild,
+    ChatChannel::Group,
+    ChatChannel::Whisper,
+];
+
+/// 页签显示名
+pub fn chat_tab_name(tab: ChatChannel) -> &'static str {
+    match tab {
+        ChatChannel::All => "全部",
+        ChatChannel::System => "系统",
+        ChatChannel::Nearby => "附近",
+        ChatChannel::Guild => "行会",
+        ChatChannel::Group => "队伍",
+        ChatChannel::Whisper => "私聊",
+    }
+}
 
 /// 聊天状态（网络 handler 写入，显示系统读取）
 #[derive(Resource)]
 pub struct ChatState {
-    /// (文本, 颜色) 历史，最新在末尾
-    pub lines: VecDeque<(String, Color)>,
+    /// (文本, 颜色, 频道) 历史，最新在末尾
+    pub lines: VecDeque<(String, Color, ChatChannel)>,
+    /// 当前页签
+    pub tab: ChatChannel,
     /// 输入框激活
     pub input_active: bool,
     /// 当前输入文本
@@ -33,6 +88,7 @@ impl Default for ChatState {
     fn default() -> Self {
         Self {
             lines: VecDeque::new(),
+            tab: ChatChannel::All,
             input_active: false,
             input_text: String::new(),
             visible_lines: 8,
@@ -41,8 +97,8 @@ impl Default for ChatState {
 }
 
 impl ChatState {
-    pub fn add_line(&mut self, text: impl Into<String>, color: Color) {
-        self.lines.push_back((text.into(), color));
+    pub fn add_line(&mut self, text: impl Into<String>, color: Color, channel: ChatChannel) {
+        self.lines.push_back((text.into(), color, channel));
         while self.lines.len() > 200 {
             self.lines.pop_front();
         }
@@ -61,6 +117,10 @@ struct ChatLine(usize);
 #[derive(Component)]
 struct ChatInputText;
 
+/// 频道页签按钮
+#[derive(Component)]
+struct ChatTabBtn(ChatChannel);
+
 pub struct ChatPlugin;
 
 impl Plugin for ChatPlugin {
@@ -69,7 +129,7 @@ impl Plugin for ChatPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_chat);
         app.add_systems(
             Update,
-            (chat_input_system, chat_display_system, chat_server_events)
+            (chat_tab_system, chat_input_system, chat_display_system, chat_server_events)
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -104,7 +164,7 @@ fn spawn_chat(
         ChatPanel,
         Sprite {
             image: white,
-            custom_size: Some(Vec2::new(360.0, 150.0)),
+            custom_size: Some(Vec2::new(360.0, 172.0)),
             color: Color::srgba(0.0, 0.0, 0.0, 0.55),
             ..default()
         },
@@ -112,11 +172,28 @@ fn spawn_chat(
         Visibility::default(),
     ));
 
+    // 频道页签（主话框：全部/系统/附近/行会/队伍/私聊）
+    let tab_w = 60.0;
+    for (i, tab) in CHAT_TABS.iter().enumerate() {
+        let tx = panel_x + 2.0 + i as f32 * tab_w;
+        let e = spawn_ui_text(
+            &mut commands, &font, chat_tab_name(*tab),
+            tx, panel_y + 2.0,
+            11.0, Color::srgb(0.8, 0.8, 0.8), 2.2,
+        );
+        commands.entity(e).insert((
+            ChatTabBtn(*tab),
+            UiButton {
+                rect: (tx, panel_y + 2.0, tab_w - 2.0, 14.0),
+                clicked: false,
+            },
+        ));
+    }
     // 消息行（8 行）
     for i in 0..8usize {
         let e = spawn_ui_text(
             &mut commands, &font, "",
-            panel_x + 4.0, panel_y + 4.0 + i as f32 * 16.0,
+            panel_x + 4.0, panel_y + 20.0 + i as f32 * 16.0,
             12.0, Color::WHITE, 2.0,
         );
         commands.entity(e).insert(ChatLine(i));
@@ -124,7 +201,7 @@ fn spawn_chat(
     // 输入行
     let e = spawn_ui_text(
         &mut commands, &font, "",
-        panel_x + 4.0, panel_y + 140.0,
+        panel_x + 4.0, panel_y + 150.0,
         12.0, Color::srgb(0.9, 0.9, 0.4), 2.0,
     );
     commands.entity(e).insert(ChatInputText);
@@ -170,7 +247,11 @@ fn chat_input_system(
                     // 本地回显（C# MainDialogs 发送时本地加入聊天面板；真实服务器不回发给自己）。
                     // mock 服务器会回显，只在真实 TCP 模式下本地回显避免重复
                     if matches!(net_mode.0, crate::network::NetworkMode::Real) {
-                        chat.add_line(format!("[{}]: {}", hud.name, msg), Color::WHITE);
+                        chat.add_line(
+                            format!("[{}]: {}", hud.name, msg),
+                            Color::WHITE,
+                            ChatChannel::Nearby,
+                        );
                     }
                     tracing::info!("💬 发送聊天: {}", msg);
                 }
@@ -207,7 +288,7 @@ fn chat_input_system(
     }
 }
 
-/// 显示：聊天行 + 输入行（单查询避免 B0001）
+/// 显示：按页签过滤聊天行 + 输入行（单查询避免 B0001）
 fn chat_display_system(
     chat: Res<ChatState>,
     mut texts: Query<(
@@ -215,13 +296,21 @@ fn chat_display_system(
         &mut TextColor,
         Option<&ChatLine>,
         Option<&ChatInputText>,
+        Option<&ChatTabBtn>,
     )>,
 ) {
-    let start = chat.lines.len().saturating_sub(chat.visible_lines);
-    for (mut text, mut color, line, input) in &mut texts {
+    // 按页签收集可见行（All 显示全部；否则只显示对应频道）
+    let mut visible: Vec<(String, Color)> = chat
+        .lines
+        .iter()
+        .filter(|(_, _, ch)| chat.tab == ChatChannel::All || *ch == chat.tab)
+        .map(|(m, c, _)| (m.clone(), *c))
+        .collect();
+    let start = visible.len().saturating_sub(chat.visible_lines);
+    for (mut text, mut color, line, input, tab_btn) in &mut texts {
         // 变化才更新，避免每帧重排文本（ICU4X 报错 + CPU，#31）
         if let Some(line) = line {
-            let (msg, c) = match chat.lines.get(start + line.0) {
+            let (msg, c) = match visible.get(start + line.0) {
                 Some((m, c)) => (m.clone(), *c),
                 None => (String::new(), Color::WHITE),
             };
@@ -240,6 +329,30 @@ fn chat_display_system(
             if text.0 != new {
                 text.0 = new;
             }
+        } else if let Some(tab_btn) = tab_btn {
+            // 选中页签高亮
+            let selected = tab_btn.0 == chat.tab;
+            let c = if selected {
+                Color::srgb(1.0, 0.9, 0.3)
+            } else {
+                Color::srgb(0.8, 0.8, 0.8)
+            };
+            if color.0 != c {
+                color.0 = c;
+            }
+        }
+    }
+}
+
+/// 页签点击切换
+fn chat_tab_system(
+    mut chat: ResMut<ChatState>,
+    tabs: Query<(&UiButton, &ChatTabBtn)>,
+) {
+    for (btn, tab) in &tabs {
+        if btn.clicked && chat.tab != tab.0 {
+            chat.tab = tab.0;
+            tracing::info!("💬 聊天页签 -> {:?}", tab.0);
         }
     }
 }
@@ -275,7 +388,7 @@ fn chat_server_events(
     for ev in events.read() {
         if let ServerEvent::Chat { text, chat_type } = ev {
             let color = chat_color(*chat_type);
-            chat.add_line(text.clone(), color);
+            chat.add_line(text.clone(), color, chat_channel(*chat_type));
         }
     }
 }
