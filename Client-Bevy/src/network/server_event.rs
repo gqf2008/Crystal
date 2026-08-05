@@ -38,6 +38,10 @@ pub enum ServerEvent {
     NewHeroResult { result: u8 },
     /// SetHeroBehaviour：英雄行为确认（C# S.SetHeroBehaviour，值 0=攻击 1=反击 2=跟随 3=自定义）
     HeroBehaviourSet { behaviour: u8 },
+    /// SetAutoPotValue：英雄自动药阈值（C# S.SetAutoPotValue；stat 12=HP 13=MP）
+    HeroAutoPotSet { stat: u8, value: u32 },
+    /// SetAutoPotItem：英雄自动药物品（C# S.SetAutoPotItem）
+    HeroAutoPotItemSet { grid: u8, item_index: i32 },
     /// GainExperience：经验增量
     ExperienceGained { amount: i64 },
     /// LevelChanged：新等级 + 经验（原实现一并更新 exp/max_exp）

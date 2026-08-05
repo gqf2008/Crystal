@@ -37,7 +37,7 @@ impl Packet for NewHero {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SetAutoPotValue {
     pub stat: u8, // 0 = HP, 1 = MP
-    pub value: u8, // Percentage threshold
+    pub value: u32, // 阈值百分比（C# uint）
 }
 
 impl Packet for SetAutoPotValue {
@@ -45,13 +45,13 @@ impl Packet for SetAutoPotValue {
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let stat = reader.read_u8()?;
-        let value = reader.read_u8()?;
+        let value = reader.read_u32::<LittleEndian>()?;
         Ok(Self { stat, value })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_u8(self.stat)?;
-        writer.write_u8(self.value)?;
+        writer.write_u32::<LittleEndian>(self.value)?;
         Ok(())
     }
 }
@@ -59,22 +59,22 @@ impl Packet for SetAutoPotValue {
 /// Set hero auto-potion item
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SetAutoPotItem {
-    pub grid: u32,
-    pub item_index: u64,
+    pub grid: u8, // C# MirGridType
+    pub item_index: i32, // C# int ItemIndex
 }
 
 impl Packet for SetAutoPotItem {
     const OPCODE: i16 = ClientPacketIds::SetAutoPotItem as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let grid = reader.read_u32::<LittleEndian>()?;
-        let item_index = reader.read_u64::<LittleEndian>()?;
+        let grid = reader.read_u8()?;
+        let item_index = reader.read_i32::<LittleEndian>()?;
         Ok(Self { grid, item_index })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
-        writer.write_u32::<LittleEndian>(self.grid)?;
-        writer.write_u64::<LittleEndian>(self.item_index)?;
+        writer.write_u8(self.grid)?;
+        writer.write_i32::<LittleEndian>(self.item_index)?;
         Ok(())
     }
 }
@@ -118,3 +118,4 @@ impl Packet for ChangeHero {
         Ok(())
     }
 }
+

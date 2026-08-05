@@ -633,8 +633,8 @@ impl Packet for UnlockHeroAutoPot {
 /// SetAutoPotItem - 设置自动喝药物品 (180)
 #[derive(Debug, Clone)]
 pub struct SetAutoPotItem {
-    pub slot: i32,                  // 槽位
-    pub item_id: i32,               // 物品ID
+    pub grid: u8,                   // C# MirGridType
+    pub item_index: i32,            // 物品 ID
 }
 
 impl Packet for SetAutoPotItem {
@@ -642,18 +642,18 @@ impl Packet for SetAutoPotItem {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        writer.write_i32::<LittleEndian>(self.slot)?;
-        writer.write_i32::<LittleEndian>(self.item_id)?;
+        writer.write_u8(self.grid)?;
+        writer.write_i32::<LittleEndian>(self.item_index)?;
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let slot = reader.read_i32::<LittleEndian>()?;
-        let item_id = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { slot, item_id })
+        use byteorder::ReadBytesExt;
+        let grid = reader.read_u8()?;
+        let item_index = reader.read_i32::<LittleEndian>()?;
+        Ok(Self { grid, item_index })
     }
 }
-
 /// ChangeHero - 切换英雄 (183)
 #[derive(Debug, Clone)]
 pub struct ChangeHero {
@@ -846,5 +846,24 @@ impl Packet for RetrieveTradeItem {
             from_slot,
             success,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn set_auto_pot_item_roundtrip() {
+        // C# S.SetAutoPotItem：Grid byte + ItemIndex int32（5 字节）
+        let pkt = SetAutoPotItem { grid: 5, item_index: 12345 };
+        let mut buf = Vec::new();
+        pkt.write_body(&mut buf).unwrap();
+        assert_eq!(buf.len(), 5, "C# S.SetAutoPotItem 应为 5 字节");
+        let mut cur = Cursor::new(&buf);
+        let read = SetAutoPotItem::read_body(&mut cur).unwrap();
+        assert_eq!(read.grid, 5);
+        assert_eq!(read.item_index, 12345);
     }
 }

@@ -1433,7 +1433,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         NetworkEvent::SetHeroAutoPotValue { pot_type, value } => {
             let packet = client::hero::SetAutoPotValue {
                 stat: pot_type,
-                value: (value as u8).min(100),
+                value: (value as u32).min(100),
             };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 SetAutoPotValue: stat={}, value={}", pot_type, value);
@@ -1442,7 +1442,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         NetworkEvent::SetHeroAutoPotItem { item_id } => {
             let packet = client::hero::SetAutoPotItem {
                 grid: 0,
-                item_index: item_id as u64,
+                item_index: item_id as i32,
             };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 SetAutoPotItem: item_id={}", item_id);

@@ -761,6 +761,8 @@ fn hud_server_events(
             | ServerEvent::HeroManageReceived { .. }
             | ServerEvent::NewHeroResult { .. }
             | ServerEvent::HeroBehaviourSet { .. }
+            | ServerEvent::HeroAutoPotSet { .. }
+            | ServerEvent::HeroAutoPotItemSet { .. }
             | ServerEvent::CraftResult { .. }
             | ServerEvent::NpcGoods { .. }
             | ServerEvent::NpcSellPanel { .. } => {}
