@@ -119,6 +119,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             let mut mock_hero_inventory: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 40];
             mock_hero_inventory[0] = Some(potion_item(2)); // 金创药(中)
             mock_hero_inventory[1] = Some(potion_item(10)); // 布衣
+            // 英雄装备（12 槽，服务端 EquipmentSlot::COUNT；#206）
+            let mut mock_hero_equipment: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 12];
             let mut mock_hero_active = false;
             let mut player_dead_since: Option<std::time::Instant> = None;
             // 怪物攻击伤害覆盖（默认 0 = 用怪物自身伤害；MOCK_PLAYER_DAMAGE 可调大测死亡/复活闭环）
@@ -547,8 +549,50 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     }
                                 }
                                 x if x == ClientPacketIds::EquipItem as i16 => {
-                                    // 装备：背包 → 装备槽（服务端记录，供伤害/防御计算）
+                                    // #206：英雄装备（英雄背包 → 英雄装备槽）
                                     if let Ok(p) = client::item::EquipItem::read_body(&mut cur) {
+                                        if p.grid == mir2_shared::enums::MirGridType::HeroInventory {
+                                            let to = p.to as usize;
+                                            let from = mock_hero_inventory
+                                                .iter()
+                                                .position(|s| s.as_ref().map(|i| i.unique_id) == Some(p.unique_id));
+                                            let ok = if let Some(from) = from {
+                                                if to < mock_hero_equipment.len() {
+                                                    let item = mock_hero_inventory[from].take();
+                                                    let old = mock_hero_equipment[to].take();
+                                                    match (item, old) {
+                                                        (Some(item), None) => {
+                                                            mock_hero_equipment[to] = Some(item);
+                                                            true
+                                                        }
+                                                        (Some(item), Some(old)) => {
+                                                            if let Some(empty) = mock_hero_inventory.iter_mut().find(|s| s.is_none()) {
+                                                                *empty = Some(old);
+                                                                mock_hero_equipment[to] = Some(item);
+                                                                true
+                                                            } else {
+                                                                mock_hero_equipment[to] = Some(old);
+                                                                mock_hero_inventory[from] = Some(item);
+                                                                false
+                                                            }
+                                                        }
+                                                        (None, _) => false,
+                                                    }
+                                                } else {
+                                                    false
+                                                }
+                                            } else {
+                                                false
+                                            };
+                                            if ok {
+                                                send_hero_information(&to_client, &mock_hero_inventory, &mock_hero_equipment, true, 30, 20, 1, 2);
+                                                tracing::info!("🦸 [MOCK] 英雄装备成功 uid={} -> 槽 {}", p.unique_id, p.to);
+                                            } else {
+                                                tracing::warn!("⚠️ [MOCK] 英雄装备失败 uid={} -> 槽 {}", p.unique_id, p.to);
+                                            }
+                                            continue;
+                                        }
+                                        // 玩家装备：背包 → 装备槽（服务端记录，供伤害/防御计算）
                                         let to = p.to as usize;
                                         let from = player_inventory
                                             .iter()
@@ -588,8 +632,37 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     }
                                 }
                                 x if x == ClientPacketIds::RemoveItem as i16 => {
-                                    // 卸下装备：装备槽 → 背包（服务端记录）
+                                    // #206：英雄卸下（英雄装备槽 → 英雄背包）
                                     if let Ok(p) = client::item::RemoveItem::read_body(&mut cur) {
+                                        if p.grid == mir2_shared::enums::MirGridType::HeroEquipment {
+                                            let slot = mock_hero_equipment
+                                                .iter()
+                                                .position(|s| s.as_ref().map(|i| i.unique_id) == Some(p.unique_id));
+                                            let ok = if let Some(slot) = slot {
+                                                let item = mock_hero_equipment[slot].take();
+                                                if let Some(item) = item {
+                                                    if let Some(empty) = mock_hero_inventory.iter_mut().find(|s| s.is_none()) {
+                                                        *empty = Some(item);
+                                                        true
+                                                    } else {
+                                                        mock_hero_equipment[slot] = Some(item);
+                                                        false
+                                                    }
+                                                } else {
+                                                    false
+                                                }
+                                            } else {
+                                                false
+                                            };
+                                            if ok {
+                                                send_hero_information(&to_client, &mock_hero_inventory, &mock_hero_equipment, true, 30, 20, 1, 2);
+                                                tracing::info!("🦸 [MOCK] 英雄卸下成功 uid={}", p.unique_id);
+                                            } else {
+                                                tracing::warn!("⚠️ [MOCK] 英雄卸下失败 uid={}", p.unique_id);
+                                            }
+                                            continue;
+                                        }
+                                        // 玩家卸下装备：装备槽 → 背包（服务端记录）
                                         let slot = player_equipment
                                             .iter()
                                             .position(|s| s.as_ref().map(|i| i.unique_id) == Some(p.unique_id));
@@ -780,7 +853,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     tracing::info!("[MOCK] 切换英雄 index={}", index);
                                     send(&to_client, &server::miscellaneous::ChangeHero { success: mock_hero_active });
                                     if mock_hero_active {
-                                        send_hero_information(&to_client, &mock_hero_inventory, true, 30, 20, 1, 2);
+                                        send_hero_information(&to_client, &mock_hero_inventory, &mock_hero_equipment, true, 30, 20, 1, 2);
                                     }
                                 }
                                 x if x == ClientPacketIds::TakeBackHeroItem as i16 => {
@@ -800,7 +873,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 }
                                                 tracing::info!("[MOCK] 英雄取回 {} -> 主背包 {}", from, to);
                                                 send_user_information(&to_client, active_char_index, &player_inventory, &player_equipment, player_gold, player_stats);
-                                                send_hero_information(&to_client, &mock_hero_inventory, true, 30, 20, 1, 2);
+                                                send_hero_information(&to_client, &mock_hero_inventory, &mock_hero_equipment, true, 30, 20, 1, 2);
                                             }
                                         }
                                     }
@@ -822,7 +895,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 }
                                                 tracing::info!("[MOCK] 转移 主背包{} -> 英雄 {}", from, to);
                                                 send_user_information(&to_client, active_char_index, &player_inventory, &player_equipment, player_gold, player_stats);
-                                                send_hero_information(&to_client, &mock_hero_inventory, true, 30, 20, 1, 2);
+                                                send_hero_information(&to_client, &mock_hero_inventory, &mock_hero_equipment, true, 30, 20, 1, 2);
                                             }
                                         }
                                     }
@@ -1304,6 +1377,7 @@ fn send_user_information(
 fn send_hero_information(
     to_client: &Sender<Vec<u8>>,
     inventory: &[Option<mir2_shared::data::item::UserItem>],
+    equipment: &[Option<mir2_shared::data::item::UserItem>],
     auto_pot: bool,
     auto_hp_percent: u8,
     auto_mp_percent: u8,
@@ -1324,7 +1398,7 @@ fn send_hero_information(
             experience: 8000,
             max_experience: 30000,
             inventory: Some(inventory.to_vec()),
-            equipment: Some(vec![None; 14]),
+            equipment: Some(equipment.to_vec()),
             magics: Vec::new(),
             auto_pot,
             auto_hp_percent,

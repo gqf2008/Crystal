@@ -459,6 +459,29 @@ impl Message<EquipItemRequest> for WorldActor {
             None => return,
         };
 
+        // #206：英雄装备（C.EquipItem Grid=HeroInventory → hero_inventory.equipment）
+        if msg.grid == mir2_shared::enums::MirGridType::HeroInventory as u8 {
+            let slot = match EquipmentSlot::from_i32(msg.slot) {
+                Some(s) => s,
+                None => return,
+            };
+            let ok = record
+                .actor_ref
+                .ask(crate::actors::player::HeroEquipItem {
+                    slot,
+                    unique_id: msg.unique_id,
+                })
+                .await
+                .unwrap_or(false);
+            if ok {
+                self.send_hero_information_packet(msg.session_id).await;
+                tracing::info!("🦸 英雄装备 uid={} -> slot {}", msg.unique_id, msg.slot);
+            } else {
+                send_system_message(&self.gate_ref, msg.session_id, "装备失败");
+            }
+            return;
+        }
+
         let slot = match EquipmentSlot::from_i32(msg.slot) {
             Some(s) => s,
             None => return,
@@ -506,6 +529,24 @@ impl Message<RemoveItemRequest> for WorldActor {
             Some(r) => r,
             None => return,
         };
+
+        // #206：英雄卸下（C.RemoveItem Grid=HeroEquipment → hero_inventory.backpack）
+        if msg.grid == mir2_shared::enums::MirGridType::HeroEquipment as u8 {
+            let ok = record
+                .actor_ref
+                .ask(crate::actors::player::HeroRemoveItem {
+                    unique_id: msg.unique_id,
+                })
+                .await
+                .unwrap_or(false);
+            if ok {
+                self.send_hero_information_packet(msg.session_id).await;
+                tracing::info!("🦸 英雄卸下 uid={}", msg.unique_id);
+            } else {
+                send_system_message(&self.gate_ref, msg.session_id, "背包已满，无法卸下装备");
+            }
+            return;
+        }
 
         // 找到该 uid 在哪个装备槽位
         let mut found_slot = None;

@@ -585,6 +585,8 @@ fn hero_inv_click_system(
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
+    time: Res<Time>,
+    mut last_hero_click: Local<Option<(usize, f64)>>,
 ) {
     if !mgr.is_open(DialogKind::HeroInventory) {
         return;
@@ -603,6 +605,25 @@ fn hero_inv_click_system(
     let Some(i) = hero_slot_at(cursor.x, cursor.y) else {
         return;
     };
+    // #206：双击英雄背包格 → C.EquipItem（C# MirItemCell OnMouseDoubleClick）
+    let now = time.elapsed_secs_f64();
+    if let Some((last_i, last_t)) = *last_hero_click {
+        if last_i == i && now - last_t < 0.4 {
+            *last_hero_click = None;
+            if let Some(item) = hero.inventory.get(i).and_then(|s| s.as_ref()) {
+                if let Some(to) = item.equip_slot() {
+                    net.send_packet(&mir2_shared::packets::client::item::EquipItem {
+                        grid: mir2_shared::enums::MirGridType::HeroInventory,
+                        unique_id: item.unique_id,
+                        to,
+                    });
+                    tracing::info!("🦸 英雄装备 {} (uid={}) -> slot {}", item.name, item.unique_id, to);
+                }
+            }
+            return;
+        }
+    }
+    *last_hero_click = Some((i, now));
     if let Some(main_from) = click.selected {
         net.send_packet(&crate::network::TransferHeroItemWire {
             from: main_from as i32,

@@ -2810,6 +2810,119 @@ impl PlayerState {
         }
     }
 }
+/// 英雄装备/卸下（#206）
+impl PlayerState {
+    /// 英雄背包格 → 英雄装备槽（C# C.EquipItem Grid=HeroInventory）
+    pub fn hero_equip_item(
+        &mut self,
+        slot: crate::actors::inventory::EquipmentSlot,
+        uid: u64,
+    ) -> bool {
+        let Some(idx) = self
+            .hero_inventory
+            .backpack
+            .iter()
+            .position(|s| s.as_ref().is_some_and(|s| s.item.unique_id == uid))
+        else {
+            return false;
+        };
+        let Some(slot_item) = self.hero_inventory.backpack[idx].take() else {
+            return false;
+        };
+        let slot_i = slot as usize;
+        if slot_i >= self.hero_inventory.equipment.len() {
+            self.hero_inventory.backpack[idx] = Some(slot_item);
+            return false;
+        }
+        // 旧装备放回英雄背包（找空位；背包满则换回）
+        if let Some(old) = self.hero_inventory.equipment[slot_i].take() {
+            if let Some((gi, empty)) = self
+                .hero_inventory
+                .backpack
+                .iter_mut()
+                .enumerate()
+                .find(|(_, s)| s.is_none())
+            {
+                *empty = Some(crate::actors::inventory::InventorySlot {
+                    grid: gi as u8,
+                    item: old,
+                });
+            } else {
+                self.hero_inventory.equipment[slot_i] = Some(old);
+                self.hero_inventory.backpack[idx] = Some(slot_item);
+                return false;
+            }
+        }
+        self.hero_inventory.equipment[slot_i] = Some(slot_item.item);
+        true
+    }
+
+    /// 英雄装备槽 → 英雄背包（C# C.RemoveItem Grid=HeroEquipment）
+    pub fn hero_remove_item(&mut self, uid: u64) -> bool {
+        let Some(slot_i) = self
+            .hero_inventory
+            .equipment
+            .iter()
+            .position(|s| s.as_ref().is_some_and(|i| i.unique_id == uid))
+        else {
+            return false;
+        };
+        let Some(item) = self.hero_inventory.equipment[slot_i].take() else {
+            return false;
+        };
+        if let Some((gi, empty)) = self
+            .hero_inventory
+            .backpack
+            .iter_mut()
+            .enumerate()
+            .find(|(_, s)| s.is_none())
+        {
+            *empty = Some(crate::actors::inventory::InventorySlot {
+                grid: gi as u8,
+                item,
+            });
+            true
+        } else {
+            self.hero_inventory.equipment[slot_i] = Some(item);
+            false
+        }
+    }
+}
+
+/// 英雄装备（#206：背包 → 装备槽）
+pub struct HeroEquipItem {
+    pub slot: crate::actors::inventory::EquipmentSlot,
+    pub unique_id: u64,
+}
+
+impl Message<HeroEquipItem> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(
+        &mut self,
+        msg: HeroEquipItem,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.hero_equip_item(msg.slot, msg.unique_id)
+    }
+}
+
+/// 英雄卸下（#206：装备槽 → 背包）
+pub struct HeroRemoveItem {
+    pub unique_id: u64,
+}
+
+impl Message<HeroRemoveItem> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(
+        &mut self,
+        msg: HeroRemoveItem,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.hero_remove_item(msg.unique_id)
+    }
+}
 /// 从英雄背包取回物品到主背包（C# C.TakeBackHeroItem: From=英雄格 To=主背包格，#203）
 pub struct TakeBackHeroItem {
     pub from: i32,
@@ -3194,5 +3307,41 @@ mod tests {
         assert!(!s.transfer_hero_item(0, 999));
         assert!(s.inventory.backpack[0].is_some());
         assert!(!s.take_back_hero_item(999, 0));
+    }
+
+    // ---- #206 英雄装备/卸下 ----
+    #[test]
+    fn test_hero_equip_item_moves_to_slot() {
+        let mut s = make_state();
+        put_item(&mut s.hero_inventory, 2, 9101);
+        assert!(s.hero_equip_item(crate::actors::inventory::EquipmentSlot::Weapon, 9101));
+        assert!(s.hero_inventory.backpack[2].is_none());
+        let eq = s.hero_inventory.equipment
+            [crate::actors::inventory::EquipmentSlot::Weapon as usize]
+            .as_ref()
+            .unwrap();
+        assert_eq!(eq.unique_id, 9101);
+    }
+
+    #[test]
+    fn test_hero_equip_unknown_uid_fails() {
+        let mut s = make_state();
+        assert!(!s.hero_equip_item(crate::actors::inventory::EquipmentSlot::Weapon, 9999));
+    }
+
+    #[test]
+    fn test_hero_remove_item_returns_to_backpack() {
+        let mut s = make_state();
+        put_item(&mut s.hero_inventory, 4, 9102);
+        assert!(s.hero_equip_item(crate::actors::inventory::EquipmentSlot::Armour, 9102));
+        assert!(s.hero_remove_item(9102));
+        assert!(s.hero_inventory.equipment
+            [crate::actors::inventory::EquipmentSlot::Armour as usize]
+            .is_none());
+        assert!(s
+            .hero_inventory
+            .backpack
+            .iter()
+            .any(|s| s.as_ref().is_some_and(|s| s.item.unique_id == 9102)));
     }
 }
