@@ -19,6 +19,8 @@ pub enum ServerEvent {
     GoldGained { gold: u32 },
     /// LoseGold：扣减金额（C# S.LoseGold），消费方负责余额扣减
     GoldLost { amount: u32 },
+    /// TimeOfDay：服务端昼夜（C# S.TimeOfDay）
+    TimeOfDay { light: mir2_shared::enums::LightSetting },
     /// GainExperience：经验增量
     ExperienceGained { amount: i64 },
     /// LevelChanged：新等级 + 经验（原实现一并更新 exp/max_exp）

@@ -753,6 +753,7 @@ fn hud_server_events(
             | ServerEvent::MapInfo { .. }
             | ServerEvent::MagicLearned { .. }
             | ServerEvent::MagicLeveled { .. }
+            | ServerEvent::TimeOfDay { .. }
             | ServerEvent::CraftResult { .. }
             | ServerEvent::NpcGoods { .. }
             | ServerEvent::NpcSellPanel { .. } => {}
