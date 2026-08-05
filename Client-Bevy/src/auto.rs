@@ -1101,6 +1101,7 @@ fn auto_mail_compose_test(
                 "bevy2char".to_string(),
                 "ComposeSubject".to_string(),
                 "邮件正文 M26 测试".to_string(),
+                "100".to_string(),
             ];
             tracing::info!("[MAILCOMPOSE] 打开写邮件界面，填写收件人/主题/正文");
             *stage = 1;
@@ -1111,7 +1112,7 @@ fn auto_mail_compose_test(
                 return;
             }
             // 与发送按钮相同的代码路径
-            client_bevy::game::dialogs::mail::send_composed_mail(&net, &input);
+            client_bevy::game::dialogs::mail::send_composed_mail(&net, &input, 100, &[]);
             mail.compose = false;
             tracing::info!("[MAILCOMPOSE] 发送邮件");
             *stage = 9;
@@ -5031,3 +5032,4 @@ fn real_verify_system(
         _ => {}
     }
 }
+
