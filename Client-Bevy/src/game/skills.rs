@@ -88,7 +88,8 @@ impl Plugin for SkillsPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_skills_window);
         app.add_systems(
             Update,
-            (skills_toggle_system, skills_window_system, ui_button_system)
+            // #148 技能快捷键改由 dialog_hotkey_system 按键位设置处理（可重绑）
+            (skills_window_system, ui_button_system)
                 .run_if(in_state(AppState::Game)),
         );
                 app.add_systems(
@@ -334,16 +335,6 @@ fn spawn_skills_window(
 fn cleanup_skills_window(mut commands: Commands, roots: Query<Entity, With<DialogRoot>>) {
     for e in roots.iter() {
         commands.entity(e).despawn();
-    }
-}
-
-/// K 键开关技能窗口（C# KeybindOptions.Magic）
-fn skills_toggle_system(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut mgr: ResMut<DialogManager>,
-) {
-    if keys.just_pressed(KeyCode::KeyK) {
-        mgr.toggle(DialogKind::Skills);
     }
 }
 

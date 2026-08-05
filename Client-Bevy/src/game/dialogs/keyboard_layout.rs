@@ -222,7 +222,7 @@ impl Plugin for KeyboardPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_keyboard_layout);
         app.add_systems(
             Update,
-            (keyboard_layout_ui_system, ui_button_system)
+            (dialog_hotkey_system, keyboard_layout_ui_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -497,6 +497,31 @@ fn keyboard_layout_ui_system(
             None => {
                 text.0 = String::new();
             }
+        }
+    }
+}
+
+
+/// 快捷键打开/关闭窗口（#148，C# KeybindOptions 对齐；随键位设置可重绑）
+/// 覆盖：背包/角色/技能/行会/小地图/任务/设置
+fn dialog_hotkey_system(
+    keys: Res<ButtonInput<KeyCode>>,
+    kb: Res<KeyboardState>,
+    mut mgr: ResMut<DialogManager>,
+) {
+    let map: [(&str, DialogKind); 7] = [
+        ("背包", DialogKind::Inventory),
+        ("角色", DialogKind::Character),
+        ("技能", DialogKind::Skills),
+        ("行会", DialogKind::Guild),
+        ("小地图", DialogKind::Minimap),
+        ("任务", DialogKind::QuestLog),
+        ("设置", DialogKind::Settings),
+    ];
+    for (action, kind) in map {
+        let Some(b) = kb.bindings.iter().find(|b| b.action == action) else { continue };
+        if keys.just_pressed(b.key) {
+            mgr.toggle(kind);
         }
     }
 }
