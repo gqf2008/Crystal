@@ -737,6 +737,7 @@ fn hud_server_events(
             | ServerEvent::TradeCancelled
             | ServerEvent::FishingUpdate { .. }
             | ServerEvent::MailReceived { .. }
+            | ServerEvent::ParcelCollected { .. }
             | ServerEvent::TradeRequested { .. }
             | ServerEvent::TradeConfirm { .. }
             | ServerEvent::TradeItemUpdate { .. }

@@ -1003,8 +1003,8 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
                 NetworkEvent::MailSentEvent { result } => {
                     tracing::trace!("📬 Mail sent: result={}", result);
                 }
-                NetworkEvent::ParcelCollectedEvent { success } => {
-                    tracing::trace!("📦 Parcel collected: success={}", success);
+                NetworkEvent::ParcelCollectedEvent { result } => {
+                    tracing::trace!("📦 Parcel collected result: {}", result);
                 }
                 NetworkEvent::MailCostReceived { cost } => {
                     tracing::trace!("📬 Mail cost: {}", cost);

@@ -638,12 +638,14 @@ pub fn pump_network_messages_to_ui(ctx: &mut GameContext) {
             NetworkEvent::MailCostReceived { cost } => {
                 sys_chat(&mut cmds, format!("邮件费用: {} 金币", cost));
             }
-            NetworkEvent::ParcelCollectedEvent { success } => {
-                if *success {
-                    sys_chat(&mut cmds, "包裹物品已收集");
-                } else {
-                    sys_chat(&mut cmds, "包裹物品收集失败");
-                }
+            NetworkEvent::ParcelCollectedEvent { result } => {
+                // C# S.ParcelCollected.Result：-1=无可收取包裹 0=已全部收取 1=成功
+                let msg = match *result {
+                    1 => "包裹物品已收取".to_string(),
+                    0 => "包裹已全部收取".to_string(),
+                    _ => "没有可收取的包裹".to_string(),
+                };
+                sys_chat(&mut cmds, &msg);
             }
             // 物品租赁事件
             NetworkEvent::ItemRentalRequested => {

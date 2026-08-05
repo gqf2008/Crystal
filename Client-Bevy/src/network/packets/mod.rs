@@ -96,7 +96,7 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
         let body = read_dotnet_string(&mut cur).ok()?;
         let _timestamp = cur.read_i64::<LittleEndian>().ok()?;
         let read_flag = cur.read_u8().ok()? != 0;
-        let _collected = cur.read_u8().ok()? != 0;
+        let collected = cur.read_u8().ok()? != 0;
         let gold = cur.read_u32::<LittleEndian>().ok()?;
         let item_count = cur.read_u8().ok()? as usize;
         let mut items = Vec::new();
@@ -119,6 +119,7 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
                 subject: subject.clone(),
                 unread: !read_flag,
                 gold,
+                collected,
             },
             Some(MailDetail {
                 mail_id,
@@ -127,6 +128,7 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
                 body,
                 gold,
                 items,
+                collected,
             }),
         ))
     }
@@ -138,7 +140,7 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
         let subject = read_dotnet_string(&mut cur).ok()?;
         let _timestamp = cur.read_i64::<LittleEndian>().ok()?;
         let read_flag = cur.read_u8().ok()? != 0;
-        let _collected = cur.read_u8().ok()? != 0;
+        let collected = cur.read_u8().ok()? != 0;
         let gold = cur.read_u32::<LittleEndian>().ok()?;
         let _item_count = cur.read_u8().ok()?;
         if payload.len() as u64 != cur.position() {
@@ -151,6 +153,7 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
                 subject,
                 unread: !read_flag,
                 gold,
+                collected,
             },
             None,
         ))
@@ -158,5 +161,6 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
 
     parse_content(payload).or_else(|| parse_entry(payload))
 }
+
 
 

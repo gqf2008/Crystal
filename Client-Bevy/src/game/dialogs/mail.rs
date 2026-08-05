@@ -29,6 +29,7 @@ pub struct MailEntry {
     pub subject: String,
     pub unread: bool,
     pub gold: u32,
+    pub collected: bool,
 }
 
 /// 邮件详情（ReadMail 响应全文）
@@ -41,6 +42,7 @@ pub struct MailDetail {
     pub gold: u32,
     /// 附件名列表
     pub items: Vec<String>,
+    pub collected: bool,
 }
 
 /// 邮件状态（网络 ReceiveMail 写入）
@@ -62,6 +64,10 @@ pub struct MailClose;
 
 #[derive(Component)]
 pub struct MailDelete;
+
+/// 收取附件按钮（C# MailReadParcelDialog.CollectButton → C.CollectParcel）
+#[derive(Component)]
+pub struct MailCollect;
 
 #[derive(Component)]
 pub struct MailLine(usize);
@@ -263,6 +269,21 @@ fn spawn_mail(
         ));
     }
     let t = spawn_ui_text(&mut commands, &font, "删除", 534.0, 310.0, 12.0, Color::WHITE, 8.4);
+
+    // 收取附件按钮（#166 C# MailReadParcelDialog.CollectButton → C.CollectParcel）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 206, 207, 208,
+        450.0, 306.0, 8.3, 60.0, 23.0,
+    ) {
+        commands.entity(e).insert((
+            MailCollect,
+            DialogRoot(DialogKind::Mail),
+            MailWidget,
+        ));
+    }
+    let tc = spawn_ui_text(&mut commands, &font, "收取", 464.0, 310.0, 12.0, Color::WHITE, 8.4);
+    commands.entity(tc).insert((DialogRoot(DialogKind::Mail), MailWidget));
     commands.entity(t).insert((DialogRoot(DialogKind::Mail), MailWidget));
 
     // 邮件列表（8 行）
@@ -387,9 +408,10 @@ fn mail_ui_system(
     windows: Query<&Window>,
     close: Query<&UiButton, With<MailClose>>,
     delete_btn: Query<&UiButton, With<MailDelete>>,
+    mut collect_btn: Query<(&UiButton, &mut Visibility), With<MailCollect>>,
     mut widgets: Query<
         (&mut Visibility, Option<&MailLine>, Option<&MailDetailText>),
-        (With<MailWidget>, Without<MailComposeWidget>),
+        (With<MailWidget>, Without<MailComposeWidget>, Without<MailCollect>),
     >,
     mut lines: Query<(&mut Text2d, &mut TextColor, &MailLine), Without<MailDetailText>>,
     mut detail_texts: Query<(&mut Text2d, &MailDetailText), Without<MailLine>>,
@@ -442,6 +464,9 @@ fn mail_ui_system(
                 if d.gold > 0 {
                     s.push_str(&format!("\n金币: {}", d.gold));
                 }
+                if d.collected {
+                    s.push_str("\n（附件已收取）");
+                }
                 if !d.items.is_empty() {
                     s.push_str(&format!("\n附件: {}", d.items.join(", ")));
                 }
@@ -450,6 +475,28 @@ fn mail_ui_system(
             None => "点击上方邮件查看内容".to_string(),
         };
     }
+    // 收取附件（#166 C# MailReadParcelDialog.CollectButton → C.CollectParcel）
+    let can_collect = mail
+        .detail
+        .as_ref()
+        .map(|d| !d.collected && (!d.items.is_empty() || d.gold > 0))
+        .unwrap_or(false);
+    for (btn, mut vis) in &mut collect_btn {
+        *vis = if open && can_collect {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if btn.clicked && can_collect {
+            if let Some(d) = mail.detail.as_ref() {
+                net.send_packet(&mir2_shared::packets::client::mail::CollectParcel {
+                    mail_id: d.mail_id,
+                });
+                tracing::info!("📦 收取附件: mail_id={}", d.mail_id);
+            }
+        }
+    }
+
     // 点击列表项 → ReadMail（#89：行号 = 滚动偏移 + 可视槽位）
     if mouse.just_pressed(MouseButton::Left) {
         let Ok(window) = windows.single() else { return };
@@ -497,6 +544,25 @@ fn mail_server_events(
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
+        if let ServerEvent::ParcelCollected { result } = ev {
+            if *result == 1 {
+                // C# Result=1：收取成功 → 本地标记已收取并清空附件显示
+                if let Some(d) = mail.detail.as_mut() {
+                    d.collected = true;
+                    d.gold = 0;
+                    d.items.clear();
+                }
+                if let Some(idx) = mail.selected {
+                    if let Some(m) = mail.mails.get_mut(idx) {
+                        m.collected = true;
+                        m.gold = 0;
+                    }
+                }
+                tracing::info!("📦 附件已收取");
+            } else {
+                tracing::warn!("📦 收取附件失败: result={}", result);
+            }
+        }
         if let ServerEvent::MailReceived { entry, detail } = ev {
             // 去重：同 mail_id 已存在则替换（全文包会更新未读标记）
             if let Some(existing) = mail.mails.iter_mut().find(|m| m.mail_id == entry.mail_id) {

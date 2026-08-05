@@ -53,8 +53,8 @@ impl PacketHandler for MailHandler {
             // ParcelCollected
             x if x == ServerPacketIds::ParcelCollected as u16 => {
                 if let Ok(packet) = server::ParcelCollected::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ParcelCollectedEvent { success: packet.success });
-                    tracing::debug!("📦 Parcel collected: success={}", packet.success);
+                    events.push(NetworkEvent::ParcelCollectedEvent { result: packet.result });
+                    tracing::debug!("📦 Parcel collected: result={}", packet.result);
                 }
             }
 

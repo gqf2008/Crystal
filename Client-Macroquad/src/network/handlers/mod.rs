@@ -699,7 +699,7 @@ pub enum NetworkEvent {
     MailLockedItemReceived { unique_id: u64, locked: bool },
     MailSendRequestReceived { mail_id: u64 },
     MailSentEvent { result: i8 },
-    ParcelCollectedEvent { success: bool },
+    ParcelCollectedEvent { result: i8 },
     MailCostReceived { cost: u32 },
 
     // 客户端 -> 服务器
