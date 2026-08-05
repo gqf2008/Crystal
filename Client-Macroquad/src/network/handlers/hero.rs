@@ -73,10 +73,10 @@ impl PacketHandler for HeroHandler {
             x if x == ServerPacketIds::SetAutoPotItem as u16 => {
                 if let Ok(packet) = server::SetAutoPotItem::read_body(&mut cursor) {
                     events.push(NetworkEvent::HeroAutoPotItemSet {
-                        slot: packet.slot,
-                        item_id: packet.item_id as u32,
+                        slot: packet.grid as i32,
+                        item_id: packet.item_index as u32,
                     });
-                    tracing::debug!("🦸 Hero auto-pot item set: item_id={}", packet.item_id);
+                    tracing::debug!("🦸 Hero auto-pot item set: item_id={}", packet.item_index);
                 }
             }
 

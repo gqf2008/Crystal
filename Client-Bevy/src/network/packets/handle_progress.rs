@@ -17,7 +17,7 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::CraftItem as i16, ServerPacketIds::ItemRentalRequest as i16, ServerPacketIds::UpdateRentalItem as i16, ServerPacketIds::ItemRentalFee as i16, ServerPacketIds::ItemRentalPeriod as i16, ServerPacketIds::DepositRentalItem as i16, ServerPacketIds::RetrieveRentalItem as i16, ServerPacketIds::ItemRentalLock as i16, ServerPacketIds::ItemRentalPartnerLock as i16, ServerPacketIds::CanConfirmItemRental as i16, ServerPacketIds::ConfirmItemRental as i16, ServerPacketIds::CancelItemRental as i16, ServerPacketIds::ChangeQuest as i16, ServerPacketIds::CompleteQuest as i16, ServerPacketIds::AddBuff as i16, ServerPacketIds::RemoveBuff as i16, ServerPacketIds::PlayerInspect as i16, ServerPacketIds::UpdateIntelligentCreatureList as i16, ServerPacketIds::ChangeHero as i16, ServerPacketIds::MarriageRequest as i16, ServerPacketIds::LoverUpdate as i16, ServerPacketIds::DivorceRequest as i16, ServerPacketIds::ObjectColourChanged as i16, ServerPacketIds::ManageHeroes as i16, ServerPacketIds::NewHero as i16, ServerPacketIds::SetHeroBehaviour as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::CraftItem as i16, ServerPacketIds::ItemRentalRequest as i16, ServerPacketIds::UpdateRentalItem as i16, ServerPacketIds::ItemRentalFee as i16, ServerPacketIds::ItemRentalPeriod as i16, ServerPacketIds::DepositRentalItem as i16, ServerPacketIds::RetrieveRentalItem as i16, ServerPacketIds::ItemRentalLock as i16, ServerPacketIds::ItemRentalPartnerLock as i16, ServerPacketIds::CanConfirmItemRental as i16, ServerPacketIds::ConfirmItemRental as i16, ServerPacketIds::CancelItemRental as i16, ServerPacketIds::ChangeQuest as i16, ServerPacketIds::CompleteQuest as i16, ServerPacketIds::AddBuff as i16, ServerPacketIds::RemoveBuff as i16, ServerPacketIds::PlayerInspect as i16, ServerPacketIds::UpdateIntelligentCreatureList as i16, ServerPacketIds::ChangeHero as i16, ServerPacketIds::MarriageRequest as i16, ServerPacketIds::LoverUpdate as i16, ServerPacketIds::DivorceRequest as i16, ServerPacketIds::ObjectColourChanged as i16, ServerPacketIds::ManageHeroes as i16, ServerPacketIds::NewHero as i16, ServerPacketIds::SetHeroBehaviour as i16, ServerPacketIds::SetAutoPotValue as i16, ServerPacketIds::SetAutoPotItem as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M41: 合成 ----
@@ -290,6 +290,18 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
             if let Ok(p) = hero::SetHeroBehaviour::read_body(&mut cur) {
                 server_events.write(ServerEvent::HeroBehaviourSet { behaviour: p.behaviour as u8 });
                 tracing::info!("🦸 英雄行为确认: {:?}", p.behaviour);
+            }
+        }
+        x if x == ServerPacketIds::SetAutoPotValue as i16 => {
+            if let Ok(p) = hero::SetAutoPotValue::read_body(&mut cur) {
+                server_events.write(ServerEvent::HeroAutoPotSet { stat: p.stat, value: p.value });
+                tracing::debug!("🦸 自动药阈值: stat={} value={}", p.stat, p.value);
+            }
+        }
+        x if x == ServerPacketIds::SetAutoPotItem as i16 => {
+            if let Ok(p) = miscellaneous::SetAutoPotItem::read_body(&mut cur) {
+                server_events.write(ServerEvent::HeroAutoPotItemSet { grid: p.grid, item_index: p.item_index });
+                tracing::debug!("🦸 自动药物品: grid={} item={}", p.grid, p.item_index);
             }
         }
         _ => {}

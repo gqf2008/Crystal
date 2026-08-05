@@ -37,6 +37,9 @@ pub struct HeroState {
     pub create_gender: mir2_shared::enums::MirGender,
     /// 英雄行为（C# HeroBehaviour：0=攻击 1=反击 2=跟随 3=自定义）
     pub behaviour: mir2_shared::enums::HeroBehaviour,
+    /// 英雄自动药阈值（0=关闭；C# HeroInventoryDialog AutoHPPercent）
+    pub auto_pot_hp: u8,
+    pub auto_pot_mp: u8,
 }
 
 impl Default for HeroState {
@@ -51,6 +54,8 @@ impl Default for HeroState {
             create_class: mir2_shared::enums::MirClass::Warrior,
             create_gender: mir2_shared::enums::MirGender::Male,
             behaviour: mir2_shared::enums::HeroBehaviour::Attack,
+            auto_pot_hp: 0,
+            auto_pot_mp: 0,
         }
     }
 }
@@ -73,6 +78,14 @@ pub struct HeroLine(usize);
 /// 创建英雄按钮（C# NewHeroDialog）
 #[derive(Component)]
 pub struct HeroCreateBtn;
+
+/// 自动药阈值按钮（C# HeroInventoryDialog HPButton/MPButton）
+#[derive(Component)]
+pub struct HeroAutoHpCycle;
+#[derive(Component)]
+pub struct HeroAutoMpCycle;
+#[derive(Component)]
+pub struct HeroAutoPotLabel;
 
 /// 英雄行为按钮（C# HeroBehaviourPanel：Prguse 1840..1843）
 #[derive(Component)]
@@ -228,6 +241,32 @@ fn spawn_hero(
         }
     }
 
+    // 自动药阈值（C# HeroInventoryDialog HPButton/MPButton，Title 560/563）
+    let _ = spawn_ui_text(&mut commands, &font, "自动药:", 300.0, 300.0, 12.0, Color::WHITE, 8.4);
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 560, 561, 562,
+        360.0, 296.0, 8.3, 60.0, 25.0,
+    ) {
+        commands.entity(e).insert((
+            HeroAutoHpCycle,
+            DialogRoot(DialogKind::Hero),
+            HeroWidget,
+        ));
+    }
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 563, 564, 565,
+        430.0, 296.0, 8.3, 60.0, 25.0,
+    ) {
+        commands.entity(e).insert((
+            HeroAutoMpCycle,
+            DialogRoot(DialogKind::Hero),
+            HeroWidget,
+        ));
+    }
+    let ap = spawn_ui_text(&mut commands, &font, "", 364.0, 300.0, 12.0, Color::srgb(1.0, 0.9, 0.4), 8.4);
+    commands.entity(ap).insert((HeroAutoPotLabel, DialogRoot(DialogKind::Hero), HeroWidget));
     // 创建面板
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     commands.spawn((
@@ -344,6 +383,7 @@ fn hero_ui_system(
     mut class_label: Query<&mut Text2d, (With<HeroClassLabel>, Without<HeroLine>, Without<HeroGenderLabel>, Without<HeroCreateMsg>)>,
     mut gender_label: Query<&mut Text2d, (With<HeroGenderLabel>, Without<HeroLine>, Without<HeroClassLabel>, Without<HeroCreateMsg>)>,
     mut create_msg: Query<&mut Text2d, (With<HeroCreateMsg>, Without<HeroLine>, Without<HeroClassLabel>, Without<HeroGenderLabel>)>,
+    mut auto_pot_label: Query<&mut Text2d, (With<HeroAutoPotLabel>, Without<HeroLine>, Without<HeroClassLabel>, Without<HeroGenderLabel>, Without<HeroCreateMsg>)>,
 ) {
     let open = mgr.is_open(DialogKind::Hero);
     for mut vis in widgets.iter_mut() {
@@ -387,6 +427,12 @@ fn hero_ui_system(
             t.0 = s;
         }
     }
+    for mut t in &mut auto_pot_label {
+        let s = autopot_text(state.auto_pot_hp, state.auto_pot_mp);
+        if t.0 != s {
+            t.0 = s;
+        }
+    }
     for mut t in &mut create_msg {
         if t.0 != state.create_msg {
             t.0 = state.create_msg.clone();
@@ -410,6 +456,8 @@ fn hero_button_system(
     ok_btn: Query<&UiButton, With<HeroCreateOk>>,
     cancel_btn: Query<&UiButton, With<HeroCreateCancel>>,
     behaviour_btns: Query<(&UiButton, &HeroBehaviourBtn)>,
+    hp_btn: Query<&UiButton, With<HeroAutoHpCycle>>,
+    mp_btn: Query<&UiButton, With<HeroAutoMpCycle>>,
 ) {
     if !mgr.is_open(DialogKind::Hero) {
         return;
@@ -466,6 +514,18 @@ fn hero_button_system(
         }
     }
     for (btn, b) in &behaviour_btns {
+    for btn in &hp_btn {
+        if btn.clicked {
+            state.auto_pot_hp = next_autopot(state.auto_pot_hp);
+            net.send_packet(&mir2_shared::packets::client::hero::SetAutoPotValue { stat: STAT_HP, value: state.auto_pot_hp as u32 });
+        }
+    }
+    for btn in &mp_btn {
+        if btn.clicked {
+            state.auto_pot_mp = next_autopot(state.auto_pot_mp);
+            net.send_packet(&mir2_shared::packets::client::hero::SetAutoPotValue { stat: STAT_MP, value: state.auto_pot_mp as u32 });
+        }
+    }
         if btn.clicked {
             let behaviour = match b.0 {
                 1 => mir2_shared::enums::HeroBehaviour::CounterAttack,
@@ -568,6 +628,14 @@ fn hero_server_events(
                     hero.message = format!("行为: {}", behaviour_name(b));
                 }
             }
+            ServerEvent::HeroAutoPotSet { stat, value } => {
+                if *stat == STAT_HP {
+                    hero.auto_pot_hp = (*value).min(100) as u8;
+                } else if *stat == STAT_MP {
+                    hero.auto_pot_mp = (*value).min(100) as u8;
+                }
+                hero.message = format!("自动药: {}", autopot_text(hero.auto_pot_hp, hero.auto_pot_mp));
+            }
             _ => {}
         }
     }
@@ -585,4 +653,24 @@ fn behaviour_name(b: mir2_shared::enums::HeroBehaviour) -> &'static str {
         Custom => "自定义",
         _ => "未知",
     }
+}
+
+// C# Stat 枚举：HP=12, MP=13（服务端同）
+const STAT_HP: u8 = 12;
+const STAT_MP: u8 = 13;
+
+/// 自动药阈值循环：0 → 30 → 50 → 70 → 90 → 0
+fn next_autopot(v: u8) -> u8 {
+    match v {
+        0 => 30,
+        30 => 50,
+        50 => 70,
+        70 => 90,
+        _ => 0,
+    }
+}
+
+/// 自动药显示文本
+fn autopot_text(hp: u8, mp: u8) -> String {
+    format!("HP {}%  MP {}%", hp, mp)
 }
