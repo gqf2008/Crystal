@@ -17,6 +17,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
 };
+use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
 
 /// NPC 对话框状态（网络写入）
 #[derive(Resource, Default)]
@@ -78,10 +79,33 @@ fn spawn_npc_dialog(
     // 背景 Prguse[384]
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 384) {
         let e = spawn_ui_sprite(&mut commands, h, 0.0, 0.0, 6.0, 1.0);
+        // #118 长对话页滚轮滚动（C# NPC 对话框支持 MouseWheel）
+        let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (420.0, 34.0, 4.0, 144.0), 6.3);
+        commands.entity(track).insert((
+            DialogRoot(crate::game::dialogs::DialogKind::Npc),
+            NpcDialogWidget,
+            Visibility::Visible,
+        ));
+        commands.entity(thumb).insert((
+            DialogRoot(crate::game::dialogs::DialogKind::Npc),
+            NpcDialogWidget,
+            Visibility::Visible,
+        ));
         commands.entity(e).insert((
             DialogRoot(crate::game::dialogs::DialogKind::Npc),
             NpcDialogWidget,
             Visibility::Hidden,
+            ScrollList {
+                rect_rel: (8.0, 34.0, 400.0, 144.0),
+                row_h: 18.0,
+                visible: 8,
+                total: 0,
+                offset: 0,
+                step: 3,
+                track_rel: (420.0, 34.0, 4.0, 144.0),
+                thumb: Some(thumb),
+                z: 8.0,
+            },
         ));
     }
 
@@ -125,7 +149,8 @@ fn npc_ui_system(
     windows: Query<&Window>,
     close: Query<&UiButton, With<NpcClose>>,
     mut widgets: Query<&mut Visibility, With<NpcDialogWidget>>,
-    mut lines: Query<(&mut Text2d, &NpcLine)>,
+    mut lines: Query<(&mut Text2d, &mut TextColor, &NpcLine)>,
+    mut scroll: Query<&mut ScrollList, With<NpcDialogWidget>>,
 ) {
     for mut vis in widgets.iter_mut() {
         *vis = if npc.visible {
@@ -156,24 +181,48 @@ fn npc_ui_system(
         }
     }
 
-    // 渲染行
-    for (mut text, line) in &mut lines {
-        if let Some(l) = npc.lines.get(line.0) {
+    // 滚动偏移 + 总行数（#118）
+    {
+        let mut sl = scroll.single_mut();
+        if let Ok(sl) = sl.as_mut() {
+            sl.set_total(npc.lines.len());
+        }
+    }
+    let off = scroll.single().map(|s| s.offset).unwrap_or(0);
+
+    // 渲染行 + 选项悬停高亮
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    for (mut text, mut color, line) in &mut lines {
+        if let Some(l) = npc.lines.get(off + line.0) {
             text.0 = l.clone();
+            let y = 34.0 + line.0 as f32 * 18.0;
+            let hover = cursor.x >= 8.0 && cursor.x <= 400.0 && cursor.y >= y && cursor.y <= y + 16.0;
+            let c = if is_clickable_npc_line(l) {
+                if hover {
+                    Color::srgb(1.0, 0.95, 0.4)
+                } else {
+                    Color::srgb(1.0, 0.85, 0.3)
+                }
+            } else {
+                Color::WHITE
+            };
+            if color.0 != c {
+                color.0 = c;
+            }
         } else {
             text.0 = String::new();
         }
     }
 
-    // 点击选项行（以 [@ 开头的行）
-    let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
+    // 点击选项行（以 [@ 开头的行，#118 含滚动偏移）
     if !mouse.just_pressed(MouseButton::Left) {
         return;
     }
     for (i, l) in npc.lines.iter().enumerate() {
-        if i < 8 && is_clickable_npc_line(l) {
-            let y = 34.0 + i as f32 * 18.0;
+        if i >= off && i < off + 8 && is_clickable_npc_line(l) {
+            let row = i - off;
+            let y = 34.0 + row as f32 * 18.0;
             if cursor.x >= 8.0 && cursor.x <= 400.0 && cursor.y >= y && cursor.y <= y + 16.0 {
                 let key = extract_npc_key(l);
                 // 菜单类型标记（购买按钮据此区分 BuyItem / BuyItemBack）
