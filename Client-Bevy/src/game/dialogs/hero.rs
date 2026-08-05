@@ -35,6 +35,8 @@ pub struct HeroState {
     /// 创建面板选中的职业/性别
     pub create_class: mir2_shared::enums::MirClass,
     pub create_gender: mir2_shared::enums::MirGender,
+    /// 英雄行为（C# HeroBehaviour：0=攻击 1=反击 2=跟随 3=自定义）
+    pub behaviour: mir2_shared::enums::HeroBehaviour,
 }
 
 impl Default for HeroState {
@@ -48,6 +50,7 @@ impl Default for HeroState {
             create_msg: String::new(),
             create_class: mir2_shared::enums::MirClass::Warrior,
             create_gender: mir2_shared::enums::MirGender::Male,
+            behaviour: mir2_shared::enums::HeroBehaviour::Attack,
         }
     }
 }
@@ -70,6 +73,10 @@ pub struct HeroLine(usize);
 /// 创建英雄按钮（C# NewHeroDialog）
 #[derive(Component)]
 pub struct HeroCreateBtn;
+
+/// 英雄行为按钮（C# HeroBehaviourPanel：Prguse 1840..1843）
+#[derive(Component)]
+pub struct HeroBehaviourBtn(usize);
 
 /// 创建面板
 #[derive(Component)]
@@ -205,6 +212,21 @@ fn spawn_hero(
         ));
     }
     let _ = spawn_ui_text(&mut commands, &font, "创建英雄", 314.0, 266.0, 12.0, Color::WHITE, 8.4);
+    // 英雄行为（C# HeroBehaviourPanel：Prguse 1840..1843，16x17）
+    let _ = spawn_ui_text(&mut commands, &font, "行为:", 410.0, 266.0, 12.0, Color::WHITE, 8.4);
+    for i in 0..4usize {
+        if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+            &mut commands, &mut libs, &mut images, &mut cache,
+            LibraryName::Prguse, 1840 + i, 1840 + i, 1840 + i,
+            440.0 + i as f32 * 18.0, 262.0, 8.3, 16.0, 17.0,
+        ) {
+            commands.entity(e).insert((
+                HeroBehaviourBtn(i),
+                DialogRoot(DialogKind::Hero),
+                HeroWidget,
+            ));
+        }
+    }
 
     // 创建面板
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
@@ -387,6 +409,7 @@ fn hero_button_system(
     gender_btn: Query<&UiButton, With<HeroGenderCycle>>,
     ok_btn: Query<&UiButton, With<HeroCreateOk>>,
     cancel_btn: Query<&UiButton, With<HeroCreateCancel>>,
+    behaviour_btns: Query<(&UiButton, &HeroBehaviourBtn)>,
 ) {
     if !mgr.is_open(DialogKind::Hero) {
         return;
@@ -440,6 +463,19 @@ fn hero_button_system(
             });
             state.create_msg = "创建中…".to_string();
             tracing::info!("🦸 创建英雄: {}", name);
+        }
+    }
+    for (btn, b) in &behaviour_btns {
+        if btn.clicked {
+            let behaviour = match b.0 {
+                1 => mir2_shared::enums::HeroBehaviour::CounterAttack,
+                2 => mir2_shared::enums::HeroBehaviour::Follow,
+                3 => mir2_shared::enums::HeroBehaviour::Custom,
+                _ => mir2_shared::enums::HeroBehaviour::Attack,
+            };
+            net.send_packet(&mir2_shared::packets::client::hero::SetHeroBehaviour { behaviour });
+            state.message = format!("行为: {}", behaviour_name(behaviour));
+            tracing::info!("🦸 设置英雄行为: {:?}", behaviour);
         }
     }
     for btn in &cancel_btn {
@@ -526,9 +562,27 @@ fn hero_server_events(
                 }
                 hero.message = hero.create_msg.clone();
             }
+            ServerEvent::HeroBehaviourSet { behaviour } => {
+                if let Ok(b) = mir2_shared::enums::HeroBehaviour::try_from(*behaviour) {
+                    hero.behaviour = b;
+                    hero.message = format!("行为: {}", behaviour_name(b));
+                }
+            }
             _ => {}
         }
     }
 }
 
 
+
+/// 英雄行为显示名（C# HeroBehaviour）
+fn behaviour_name(b: mir2_shared::enums::HeroBehaviour) -> &'static str {
+    use mir2_shared::enums::HeroBehaviour::*;
+    match b {
+        Attack => "攻击",
+        CounterAttack => "反击",
+        Follow => "跟随",
+        Custom => "自定义",
+        _ => "未知",
+    }
+}
