@@ -24,6 +24,7 @@ use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
     UiImageCache,
 };
+use crate::ui::controls::{spawn_item_cell, ItemCellData, ItemCellIcon, ItemCellCount};
 
 /// 交易物品（槽内显示用）
 #[derive(Debug, Clone)]
@@ -105,12 +106,6 @@ pub struct TradeGoldText;
 /// 交易物品槽（side 0=自己 1=对方, idx 0..20）
 #[derive(Component, Clone, Copy)]
 pub struct TradeSlot(pub usize, pub usize);
-
-#[derive(Component, Clone, Copy)]
-pub struct TradeIcon(pub usize, pub usize);
-
-#[derive(Component, Clone, Copy)]
-pub struct TradeCount(pub usize, pub usize);
 
 // 邀请提示
 #[derive(Component)]
@@ -231,87 +226,21 @@ fn spawn_trade(
         TradeWidget,
     ));
 
-    // 双方物品槽（左 5x4 自己，右 5x4 对方；36x32）
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    // 双方物品槽（左 5x4 自己，右 5x4 对方；36x32，#106 通用 ItemCell）
     for side in 0..2usize {
         let base_x = if side == 0 { 260.0 } else { 250.0 + 280.0 };
         for i in 0..20usize {
             let x = base_x + (i % 5) as f32 * 37.0;
             let y = 140.0 + (i / 5) as f32 * 34.0;
-            let slot = commands
-                .spawn((
-                    UiEntity,
-                    DialogRoot(DialogKind::Trade),
-                    TradeWidget,
-                    TradeSlot(side, i),
-                    Sprite {
-                        image: white.clone(),
-                        color: Color::srgba(0.0, 0.0, 0.0, 0.25),
-                        custom_size: Some(Vec2::new(36.0, 32.0)),
-                        ..default()
-                    },
-                    Anchor::TOP_LEFT,
-                    Transform::from_xyz(x, -y, 6.3),
-                    Visibility::Hidden,
-                ))
-                .id();
-            commands.entity(slot).with_children(|p| {
-                p.spawn((
-                    TradeIcon(side, i),
-                    Sprite {
-                        image: white.clone(),
-                        custom_size: Some(Vec2::new(32.0, 28.0)),
-                        ..default()
-                    },
-                    Anchor::TOP_LEFT,
-                    Transform::from_xyz(2.0, -2.0, 6.4),
-                    Visibility::Hidden,
-                ));
-                p.spawn((
-                    TradeCount(side, i),
-                    Text2d::new(String::new()),
-                    Anchor::TOP_LEFT,
-                    TextFont {
-                        font: FontSource::Handle(font.clone()),
-                        font_size: FontSize::Px(10.0),
-                        ..default()
-                    },
-                    TextColor(Color::srgb(1.0, 1.0, 0.6)),
-                    Transform::from_xyz(20.0, -22.0, 6.5),
-                    Visibility::Hidden,
-                ));
-            });
+            let slot = spawn_item_cell(&mut commands, &mut images, &font, x, y, 6.3, 36.0, 32.0, i);
+            commands.entity(slot).insert((
+                TradeSlot(side, i),
+                DialogRoot(DialogKind::Trade),
+                TradeWidget,
+            ));
         }
     }
-
-    // 邀请提示（MirMessageBox）
-    let (bx, by) = (284.0, 289.0);
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 360) {
-        let e = spawn_ui_sprite(&mut commands, h, bx, by, 9.5, 1.0);
-        commands
-            .entity(e)
-            .insert((TradeInviteWidget, Visibility::Hidden));
-    }
-    let t = spawn_ui_text(
-        &mut commands, &font, "", bx + 35.0, by + 40.0, 12.0, Color::WHITE, 9.6,
-    );
-    commands.entity(t).insert((TradeInviteText, TradeInviteWidget));
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        bx + 240.0, by + 150.0, 9.7, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((TradeInviteYes, TradeInviteWidget));
-    }
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 210, 211, 212,
-        bx + 340.0, by + 150.0, 9.7, 76.0, 25.0,
-    ) {
-        commands.entity(e).insert((TradeInviteNo, TradeInviteWidget));
-    }
 }
-
 /// 显隐 + 槽位物品渲染 + 金币/锁定状态 + 邀请提示
 #[allow(clippy::type_complexity)]
 fn trade_ui_system(
@@ -324,41 +253,23 @@ fn trade_ui_system(
         (
             With<TradeWidget>,
             Without<TradeGoldText>,
-            Without<TradeIcon>,
-            Without<TradeCount>,
+            Without<ItemCellIcon>,
+            Without<ItemCellCount>,
             Without<TradeInviteWidget>,
         ),
     >,
-    mut icons: Query<
-        (&mut Sprite, &mut Visibility, &TradeIcon),
-        (
-            Without<TradeWidget>,
-            Without<TradeSlot>,
-            Without<TradeCount>,
-            Without<TradeInviteWidget>,
-        ),
-    >,
-    mut counts: Query<
-        (&mut Text2d, &mut Visibility, &TradeCount),
-        (
-            Without<TradeWidget>,
-            Without<TradeSlot>,
-            Without<TradeIcon>,
-            Without<TradeGoldText>,
-            Without<TradeInviteText>,
-        ),
-    >,
-    mut gold_texts: Query<(&mut Text2d, &TradeGoldText), (Without<TradeCount>, Without<TradeInviteText>)>,
+    mut cells: Query<(&mut ItemCellData, &TradeSlot)>,
+    mut gold_texts: Query<(&mut Text2d, &TradeGoldText), (Without<ItemCellCount>, Without<TradeInviteText>)>,
     mut invite_widgets: Query<
         &mut Visibility,
         (
             With<TradeInviteWidget>,
             Without<TradeWidget>,
-            Without<TradeIcon>,
-            Without<TradeCount>,
+            Without<ItemCellIcon>,
+            Without<ItemCellCount>,
         ),
     >,
-    mut invite_texts: Query<(&mut Text2d, &TradeInviteText), (Without<TradeCount>, Without<TradeGoldText>)>,
+    mut invite_texts: Query<(&mut Text2d, &TradeInviteText), (Without<ItemCellCount>, Without<TradeGoldText>)>,
 ) {
     for (mut vis, _slot) in &mut widgets {
         *vis = if trade.visible {
@@ -367,55 +278,23 @@ fn trade_ui_system(
             Visibility::Hidden
         };
     }
-    // 物品图标
-    for (mut sprite, mut vis, icon) in &mut icons {
-        let item = if icon.0 == 0 {
-            trade.my_items.get(icon.1).and_then(|s| s.as_ref())
+    // 物品图标 + 数量（#106 通用 ItemCell：只写数据，渲染由 item_cell_system 处理）
+    for (mut data, slot) in &mut cells {
+        let item = if slot.0 == 0 {
+            trade.my_items.get(slot.1).and_then(|s| s.as_ref())
         } else {
-            trade.their_items.get(icon.1).and_then(|s| s.as_ref())
+            trade.their_items.get(slot.1).and_then(|s| s.as_ref())
         };
-        match item {
-            Some(item) => {
-                let handle = ui_image(
-                    &mut libs,
-                    &mut images,
-                    &mut cache,
-                    LibraryName::Items,
-                    item.image as usize,
-                );
-                match handle {
-                    Some(h) if sprite.image != h => sprite.image = h,
-                    None => *vis = Visibility::Hidden,
-                    _ => {}
-                }
-                if sprite.image.is_strong() {
-                    *vis = Visibility::Visible;
-                }
-            }
-            None => *vis = Visibility::Hidden,
-        }
-    }
-    for (mut text, mut vis, count) in &mut counts {
-        let item = if count.0 == 0 {
-            trade.my_items.get(count.1).and_then(|s| s.as_ref())
-        } else {
-            trade.their_items.get(count.1).and_then(|s| s.as_ref())
-        };
-        match item {
-            Some(item) if item.count > 1 => {
-                let new = format!("{}", item.count);
-                if text.0 != new {
-                    text.0 = new;
-                }
-                *vis = Visibility::Visible;
-            }
-            _ => {
-                if !text.0.is_empty() {
-                    text.0 = String::new();
-                }
-                *vis = Visibility::Hidden;
-            }
-        }
+        data.icon = item.and_then(|it| {
+            ui_image(
+                &mut libs,
+                &mut images,
+                &mut cache,
+                LibraryName::Items,
+                it.image as usize,
+            )
+        });
+        data.count = item.map(|it| it.count.max(1) as u32);
     }
     for (mut t, _) in &mut gold_texts {
         let new = format!(
