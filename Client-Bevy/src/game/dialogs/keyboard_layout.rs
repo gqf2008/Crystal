@@ -19,6 +19,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
 };
+use crate::ui::controls::{spawn_checkbox, CheckBox};
 
 /// 单个键位绑定（动作 + 组 + 当前键）
 #[derive(Clone)]
@@ -338,22 +339,17 @@ fn spawn_keyboard_layout(
         ));
     }
 
-    // 严格规则复选框 Prguse[1346] 点击区 (105,406) + 选中标记 Prguse[1347]
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+    // 严格规则复选框（#90 通用 CheckBox：Prguse[1346] 未勾 / [1347] 勾选）
+    if let Some(e) = spawn_checkbox(
         &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Prguse, 1346, 1346, 1346,
+        LibraryName::Prguse,
+        [1346, 1346, 1346],
+        [1347, 1347, 1347],
         px + 105.0, py + 406.0, 7.0, 16.0, 14.0,
+        false,
     ) {
         commands.entity(e).insert((
             KeyboardEnforce,
-            DialogRoot(DialogKind::KeyboardLayout),
-            KeyboardWidget,
-        ));
-    }
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 1347) {
-        let e = spawn_ui_sprite(&mut commands, h, px + 105.0, py + 406.0, 7.0, 1.0);
-        commands.entity(e).insert((
-            KeyboardEnforceCheck,
             DialogRoot(DialogKind::KeyboardLayout),
             KeyboardWidget,
         ));
@@ -390,8 +386,8 @@ fn keyboard_layout_ui_system(
     scroll_up: Query<&UiButton, With<KeyboardScrollUp>>,
     scroll_down: Query<&UiButton, With<KeyboardScrollDown>>,
     reset: Query<&UiButton, With<KeyboardReset>>,
-    enforce: Query<&UiButton, With<KeyboardEnforce>>,
-    mut widgets: Query<(&mut Visibility, Option<&KeyboardEnforceCheck>), With<KeyboardWidget>>,
+    enforce: Query<&CheckBox, With<KeyboardEnforce>>,
+    mut widgets: Query<&mut Visibility, With<KeyboardWidget>>,
     mut pos_bar: Query<(&mut Transform, &KeyboardPositionBar), Without<KeyboardRow>>,
     mut rows: Query<(&mut Text2d, &mut Transform, &KeyboardRow)>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -399,9 +395,8 @@ fn keyboard_layout_ui_system(
     windows: Query<&Window>,
 ) {
     let open = mgr.is_open(DialogKind::KeyboardLayout);
-    for (mut vis, check) in &mut widgets {
-        let show = if check.is_some() { open && state.enforce } else { open };
-        *vis = if show { Visibility::Visible } else { Visibility::Hidden };
+    for mut vis in &mut widgets {
+        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
     if !open {
         state.rebinding = None;
@@ -435,14 +430,9 @@ fn keyboard_layout_ui_system(
             tracing::info!("🎹 键位已重置为默认");
         }
     }
-    for btn in &enforce {
-        if btn.clicked {
-            state.enforce = !state.enforce;
-            tracing::info!(
-                "🎹 规则: {}",
-                if state.enforce { "严格" } else { "宽松" }
-            );
-        }
+    // #90 通用 CheckBox：点击切换由 checkbox_system 处理，这里同步状态
+    if let Ok(cb) = enforce.single() {
+        state.enforce = cb.checked;
     }
 
     // 点击绑定行 → 进入等待重绑（C# KeybindRow.Click）

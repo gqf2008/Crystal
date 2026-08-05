@@ -11,7 +11,6 @@
 // ============================================================================
 
 use bevy::prelude::*;
-use bevy::sprite::Anchor;
 
 use crate::game::dialogs::inventory::{inv_slot_at, InvClickState, InvItem};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
@@ -21,9 +20,9 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
-    spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
-    UiImageCache,
+    spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
 };
+use crate::ui::controls::{spawn_item_cell, ItemCell, ItemCellData, ItemCellIcon};
 
 /// 仓库数据（网络 UserStorage 写入）
 #[derive(Resource, Default)]
@@ -51,14 +50,6 @@ pub struct StorageClose;
 /// 仓库格子索引（0..79）
 #[derive(Component, Clone, Copy)]
 pub struct StorageSlot(pub usize);
-
-/// 物品图标（格子子实体）
-#[derive(Component, Clone, Copy)]
-pub struct StorageIcon(pub usize);
-
-/// 堆叠数量文本（格子子实体）
-#[derive(Component, Clone, Copy)]
-pub struct StorageCount(pub usize);
 
 pub struct StoragePlugin;
 
@@ -138,60 +129,18 @@ fn spawn_storage_dialog(
         .entity(title)
         .insert((DialogRoot(DialogKind::Storage), StorageWidget));
 
-    // 格子底板（80 格，10x8）+ 物品图标 + 堆叠数量
-    let white = images.add(crate::map_renderer::make_image(
-        vec![255, 255, 255, 255],
-        1,
-        1,
-    ));
+    // 格子底板（80 格，10x8）+ 物品图标 + 堆叠数量（#90 通用 ItemCell）
     for i in 0..(COLS * ROWS) {
         let x = i % COLS;
         let y = i / COLS;
         let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
         let sy = DIALOG_Y + 60.0 + y as f32 * (CELL_H + 1.0);
-        let slot = commands
-            .spawn((
-                UiEntity,
-                DialogRoot(DialogKind::Storage),
-                StorageWidget,
-                StorageSlot(i),
-                Sprite {
-                    image: white.clone(),
-                    color: Color::srgba(0.0, 0.0, 0.0, 0.18),
-                    custom_size: Some(Vec2::new(CELL_W, CELL_H)),
-                    ..default()
-                },
-                Anchor::TOP_LEFT,
-                Transform::from_xyz(sx, -sy, 6.5),
-                Visibility::Hidden,
-            ))
-            .id();
-        commands.entity(slot).with_children(|p| {
-            p.spawn((
-                StorageIcon(i),
-                Sprite {
-                    image: white.clone(),
-                    custom_size: Some(Vec2::new(CELL_W - 4.0, CELL_H - 4.0)),
-                    ..default()
-                },
-                Anchor::TOP_LEFT,
-                Transform::from_xyz(2.0, -2.0, 6.6),
-                Visibility::Hidden,
-            ));
-            p.spawn((
-                StorageCount(i),
-                Text2d::new(String::new()),
-                Anchor::TOP_LEFT,
-                TextFont {
-                    font: FontSource::Handle(font.clone()),
-                    font_size: FontSize::Px(10.0),
-                    ..default()
-                },
-                TextColor(Color::srgb(1.0, 1.0, 0.6)),
-                Transform::from_xyz(CELL_W - 16.0, -(CELL_H - 13.0), 6.7),
-                Visibility::Hidden,
-            ));
-        });
+        let slot = spawn_item_cell(&mut commands, &mut images, &font, sx, sy, 6.5, CELL_W, CELL_H, i);
+        commands.entity(slot).insert((
+            StorageSlot(i),
+            DialogRoot(DialogKind::Storage),
+            StorageWidget,
+        ));
     }
 }
 
@@ -218,62 +167,28 @@ fn storage_ui_system(
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
     mut all_vis: Query<(&mut Visibility, Option<&StorageSlot>), With<StorageWidget>>,
-    mut icons: Query<
-        (&mut Sprite, &mut Visibility, &StorageIcon),
-        (Without<StorageWidget>, Without<StorageSlot>, Without<StorageCount>),
-    >,
-    mut counts: Query<
-        (&mut Text2d, &mut Visibility, &StorageCount),
-        (
-            Without<StorageWidget>,
-            Without<StorageSlot>,
-            Without<StorageIcon>,
-        ),
-    >,
+    mut cells: Query<(&mut ItemCellData, &ItemCell), With<StorageSlot>>,
     buttons: Query<(&UiButton, Option<&StorageClose>), With<StorageWidget>>,
-    mut slots: Query<(&mut Sprite, &StorageSlot), Without<StorageIcon>>,
+    mut slots: Query<(&mut Sprite, &StorageSlot), Without<ItemCellIcon>>,
 ) {
     let open = state.visible && mgr.is_open(DialogKind::Storage);
     for (mut vis, _slot) in &mut all_vis {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
 
-    // 物品图标 + 数量
-    for (mut sprite, mut vis, icon) in &mut icons {
-        let item = state.items.get(icon.0).and_then(|s| s.as_ref());
-        match item {
-            Some(item) => {
-                let handle = ui_image(
-                    &mut libs,
-                    &mut images,
-                    &mut cache,
-                    LibraryName::Items,
-                    item.image as usize,
-                );
-                match handle {
-                    Some(h) if sprite.image != h => sprite.image = h,
-                    None => *vis = Visibility::Hidden,
-                    _ => {}
-                }
-                if sprite.image.is_strong() {
-                    *vis = Visibility::Visible;
-                }
-            }
-            None => *vis = Visibility::Hidden,
-        }
-    }
-    for (mut text, mut vis, count) in &mut counts {
-        let item = state.items.get(count.0).and_then(|s| s.as_ref());
-        match item {
-            Some(item) if item.count > 1 => {
-                text.0 = format!("{}", item.count);
-                *vis = Visibility::Visible;
-            }
-            _ => {
-                text.0 = String::new();
-                *vis = Visibility::Hidden;
-            }
-        }
+    // 物品图标 + 数量（#90 通用 ItemCell：只写数据，渲染由 item_cell_system 处理）
+    for (mut data, cell) in &mut cells {
+        let item = state.items.get(cell.slot).and_then(|s| s.as_ref());
+        data.icon = item.and_then(|it| {
+            ui_image(
+                &mut libs,
+                &mut images,
+                &mut cache,
+                LibraryName::Items,
+                it.image as usize,
+            )
+        });
+        data.count = item.map(|it| it.count.max(1) as u32);
     }
 
     // 选中高亮（原版 C# SelectedCell 黄色语义）

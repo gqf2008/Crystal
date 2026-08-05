@@ -16,6 +16,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
 };
+use crate::ui::controls::{spawn_dropdown, DropDown};
 
 /// 举报状态
 #[derive(Resource, Default)]
@@ -34,6 +35,9 @@ pub struct ReportSubmit;
 
 #[derive(Component)]
 pub struct ReportLine(usize);
+
+#[derive(Component)]
+pub struct ReportTypeDrop;
 
 pub struct ReportPlugin;
 
@@ -104,7 +108,21 @@ fn spawn_report(
         ));
     }
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    spawn_report_input(&mut commands, &white, &font, 11, 298.0, 190.0, 80.0);
+    // #90 举报类型下拉（C# ReportType DropDown）
+    let dd = spawn_dropdown(
+        &mut commands, &mut images, &font,
+        vec!["请选择类型".to_string(), "提交BUG".to_string(), "举报玩家".to_string()],
+        None,
+        298.0, 190.0,
+        80.0, 20.0,
+        3,
+        8.1,
+    );
+    commands.entity(dd).insert((
+        ReportTypeDrop,
+        DialogRoot(DialogKind::Report),
+        ReportWidget,
+    ));
     spawn_report_input(&mut commands, &white, &font, 12, 298.0, 222.0, 200.0);
     // 提交按钮
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
@@ -173,6 +191,7 @@ fn report_ui_system(
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
     close: Query<&UiButton, With<ReportClose>>,
     submit_btn: Query<&UiButton, With<ReportSubmit>>,
+    type_dd: Query<&DropDown, With<ReportTypeDrop>>,
     mut widgets: Query<&mut Visibility, With<ReportWidget>>,
     mut lines: Query<(&mut Text2d, &ReportLine)>,
 ) {
@@ -191,23 +210,21 @@ fn report_ui_system(
     for (mut text, line) in &mut lines {
         text.0 = match line.0 {
             0 => "举报（GM）".to_string(),
-            1 => "类型（数字） + 描述".to_string(),
+            1 => "类型 + 描述".to_string(),
             2 => state.message.clone(),
             _ => String::new(),
         };
     }
     for btn in &submit_btn {
         if btn.clicked {
-            let rtype = input
-                .texts
-                .get(11)
-                .cloned()
-                .unwrap_or_default()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or(0);
+            // #90 类型来自下拉（0=未选择）
+            let rtype = type_dd.single().ok().and_then(|dd| dd.selected).unwrap_or(0) as u32;
             let desc = input.texts.get(12).cloned().unwrap_or_default();
             let desc = desc.trim().to_string();
+            if rtype == 0 {
+                state.message = "请选择举报类型".to_string();
+                return;
+            }
             if desc.is_empty() {
                 state.message = "请填写描述".to_string();
                 return;
@@ -218,7 +235,6 @@ fn report_ui_system(
             });
             state.message = "举报已提交，感谢反馈".to_string();
             tracing::info!("📮 举报: type={} desc={}", rtype, desc);
-            input.texts[11].clear();
             input.texts[12].clear();
             input.active = None;
         }

@@ -19,6 +19,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
 };
+use crate::ui::controls::{spawn_dropdown, DropDown};
 
 /// 材料需求行
 #[derive(Clone, Default)]
@@ -53,7 +54,7 @@ pub struct NpcAwakeClose;
 pub struct NpcAwakeUpgrade;
 
 #[derive(Component)]
-pub struct NpcAwakeTypeBtn(pub mir2_shared::enums::AwakeType);
+pub struct NpcAwakeTypeDrop;
 
 #[derive(Component)]
 pub struct NpcAwakeMainIcon;
@@ -150,25 +151,21 @@ fn spawn_npc_awake(
         ));
     }
 
-    // 觉醒类型按钮（C# SelectAwakeType 下拉 (35,141)；此处简化为一排文本按钮）
-    let types = [
-        (mir2_shared::enums::AwakeType::Dc, "攻"),
-        (mir2_shared::enums::AwakeType::Mc, "魔"),
-        (mir2_shared::enums::AwakeType::Sc, "道"),
-    ];
-    for (i, (t, label)) in types.iter().enumerate() {
-        let e = spawn_ui_text(
-            &mut commands, &font, label,
-            px + 35.0 + i as f32 * 34.0, py + 141.0,
-            12.0, Color::srgb(1.0, 0.9, 0.1), 8.0,
-        );
-        commands.entity(e).insert((
-            NpcAwakeTypeBtn(*t),
-            DialogRoot(DialogKind::NpcAwake),
-            NpcAwakeWidget,
-        ));
-        let _ = (e, px, py);
-    }
+    // 觉醒类型下拉（#90 通用 DropDown；C# SelectAwakeType (35,141)）
+    let dd = spawn_dropdown(
+        &mut commands, &mut images, &font,
+        vec!["攻".to_string(), "魔".to_string(), "道".to_string()],
+        None,
+        px + 35.0, py + 141.0,
+        72.0, 18.0,
+        3,
+        8.0,
+    );
+    commands.entity(dd).insert((
+        NpcAwakeTypeDrop,
+        DialogRoot(DialogKind::NpcAwake),
+        NpcAwakeWidget,
+    ));
 
     // 主物品格 (202,91)：图标 + 名字
     let empty = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
@@ -228,10 +225,11 @@ fn npc_awake_ui_system(
     hud: Res<crate::game::hud::HudState>,
     close: Query<&UiButton, With<NpcAwakeClose>>,
     upgrade: Query<&UiButton, With<NpcAwakeUpgrade>>,
-    type_btns: Query<&NpcAwakeTypeBtn>,
+    mut type_dd: Query<(&mut DropDown, &NpcAwakeTypeDrop)>,
     mut widgets: Query<&mut Visibility, With<NpcAwakeWidget>>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
+    mut last_uid: Local<Option<u64>>,
 ) {
     use mir2_shared::packets::client::misc::{Awakening, AwakeningNeedMaterials};
 
@@ -249,25 +247,31 @@ fn npc_awake_ui_system(
         }
     }
 
-    // 类型按钮点击（C# SelectAwakeType.ValueChanged → AwakeningNeedMaterials）
-    if let Ok(window) = windows.single() {
-        if let Some(cursor) = window.cursor_position() {
-            if mouse.just_pressed(MouseButton::Left) {
-                for (i, t) in type_btns.iter().enumerate() {
-                    let x = 35.0 + i as f32 * 34.0;
-                    if cursor.x >= x && cursor.x <= x + 30.0 && cursor.y >= 141.0 && cursor.y <= 155.0 {
-                        if let Some(uid) = state.selected_uid {
-                            state.awake_type = Some(t.0);
-                            net.send_packet(&AwakeningNeedMaterials {
-                                unique_id: uid,
-                                awake_type: t.0,
-                            });
-                            tracing::info!("⚒️ 选择觉醒类型 {:?}，请求材料 uid={}", t.0, uid);
-                            state.result_text = String::new();
-                        }
-                        break;
-                    }
-                }
+    // 觉醒类型下拉（#90 通用 DropDown）：选中变化 → AwakeningNeedMaterials
+    const TYPES: [mir2_shared::enums::AwakeType; 3] = [
+        mir2_shared::enums::AwakeType::Dc,
+        mir2_shared::enums::AwakeType::Mc,
+        mir2_shared::enums::AwakeType::Sc,
+    ];
+    if let Ok((mut dd, _)) = type_dd.single_mut() {
+        // 换了主物品 → 清空类型选择
+        if *last_uid != state.selected_uid {
+            *last_uid = state.selected_uid;
+            dd.selected = None;
+            state.awake_type = None;
+        }
+        let new_type = dd.selected.and_then(|i| TYPES.get(i).copied());
+        if new_type != state.awake_type {
+            if let (Some(uid), Some(t)) = (state.selected_uid, new_type) {
+                state.awake_type = Some(t);
+                net.send_packet(&AwakeningNeedMaterials {
+                    unique_id: uid,
+                    awake_type: t,
+                });
+                tracing::info!("⚒️ 选择觉醒类型 {:?}，请求材料 uid={}", t, uid);
+                state.result_text = String::new();
+            } else {
+                state.awake_type = None;
             }
         }
     }
