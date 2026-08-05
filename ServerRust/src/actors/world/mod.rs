@@ -3878,8 +3878,7 @@ fn build_user_information_packet(
     body.extend_from_slice(&state.max_experience.to_le_bytes()); // max_experience
     body.extend_from_slice(&0u16.to_le_bytes());              // level_effects
     body.push(0u8);                                           // has_hero=false
-    // C# HeroBehaviour(0..3) → SharedRust(3..6)，客户端 try_from 需要有效判别值
-    body.push(state.hero_behaviour.saturating_add(3));        // hero_behaviour
+    body.push(state.hero_behaviour);                // hero_behaviour (C# 0..3)
 
     // 背包（40 格，含 info 供客户端显示名称/图标/类型）
     body.push(1u8);                                           // has_inventory=true

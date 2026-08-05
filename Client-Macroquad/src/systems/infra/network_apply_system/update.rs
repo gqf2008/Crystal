@@ -948,8 +948,8 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
                 NetworkEvent::HeroCreateRequested { can_create_class } => {
                     tracing::trace!("🦸 Hero create requested: {} classes", can_create_class.len());
                 }
-                NetworkEvent::NewHeroCreated { hero_info } => {
-                    tracing::trace!("🦸 New hero created: {}", hero_info);
+                NetworkEvent::NewHeroCreated { result } => {
+                    tracing::trace!("🦸 New hero result: {}", result);
                 }
                 NetworkEvent::HeroInfoReceived { hero_id } => {
                     tracing::trace!("🦸 Hero info received: hero_id={}", hero_id);
@@ -966,8 +966,8 @@ pub fn update(ctx: &mut GameContext, _delay_time: f32) -> GameResult {
                 NetworkEvent::HeroAutoPotItemSet { slot, item_id } => {
                     tracing::trace!("🦸 Hero auto pot item set: slot={} item_id={}", slot, item_id);
                 }
-                NetworkEvent::HeroBehaviourSet { behaviour, pet_mode } => {
-                    tracing::trace!("🦸 Hero behaviour set: behaviour={} pet_mode={}", behaviour, pet_mode);
+                NetworkEvent::HeroBehaviourSet { behaviour } => {
+                    tracing::trace!("🦸 Hero behaviour set: behaviour={}", behaviour);
                     if let Some(e) = local_player_entity {
                         if let Ok(mut hero) = ctx.world.get::<&mut crate::components::HeroState>(e) {
                             hero.behaviour = match *behaviour {

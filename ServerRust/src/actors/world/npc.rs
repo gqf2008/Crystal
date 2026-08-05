@@ -649,10 +649,12 @@ impl Message<DeleteCharacterRequest> for WorldActor {
     }
 }
 
-/// 创建英雄请求
+/// 创建英雄请求（C# C.NewHero：name/gender/class）
 pub struct NewHeroRequest {
     pub session_id: u64,
-    pub hero_type: u8,
+    pub name: String,
+    pub gender: mir2_shared::enums::MirGender,
+    pub class: mir2_shared::enums::MirClass,
 }
 
 impl Message<NewHeroRequest> for WorldActor {
@@ -668,17 +670,14 @@ impl Message<NewHeroRequest> for WorldActor {
             _ => return,
         };
 
-        // 设置英雄索引
-        let hero_index = msg.hero_type;
-        let _ = record.actor_ref.ask(SetHeroIndex { hero_index }).await;
-
-        let body = vec![hero_index, 1u8];
+        // 英雄创建尚未实现：按 C# S.NewHero Result=0（CreatingNewHeroesDisabled）响应
+        let body = vec![0u8];
         let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewHero as i16, &body),
         }).await;
 
-        debug!("NewHero: {} type={}", state.name, msg.hero_type);
+        debug!("NewHero(disabled): {} name={} gender={:?} class={:?}", state.name, msg.name, msg.gender, msg.class);
     }
 }
 

@@ -27,10 +27,8 @@ impl PacketHandler for HeroHandler {
             // NewHero
             x if x == ServerPacketIds::NewHero as u16 => {
                 if let Ok(packet) = server::NewHero::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NewHeroCreated {
-                        hero_info: packet.hero_info.clone(),
-                    });
-                    tracing::debug!("🦸 New hero created: {}", packet.hero_info);
+                    events.push(NetworkEvent::NewHeroCreated { result: packet.result });
+                    tracing::debug!("🦸 New hero result: {}", packet.result);
                 }
             }
 
@@ -86,10 +84,9 @@ impl PacketHandler for HeroHandler {
             x if x == ServerPacketIds::SetHeroBehaviour as u16 => {
                 if let Ok(packet) = server::SetHeroBehaviour::read_body(&mut cursor) {
                     events.push(NetworkEvent::HeroBehaviourSet {
-                        behaviour: packet.attack_mode as u8,
-                        pet_mode: packet.pet_mode as u8,
+                        behaviour: packet.behaviour as u8,
                     });
-                    tracing::debug!("🦸 Hero behaviour set: attack_mode={:?}, pet_mode={:?}", packet.attack_mode, packet.pet_mode);
+                    tracing::debug!("🦸 Hero behaviour set: {:?}", packet.behaviour);
                 }
             }
 

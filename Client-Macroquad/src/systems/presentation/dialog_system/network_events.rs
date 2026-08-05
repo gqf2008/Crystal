@@ -184,8 +184,20 @@ pub fn pump_network_messages_to_ui(ctx: &mut GameContext) {
                     .collect();
                 cmds.push(UiCommand::PushHeroSystemChat(format!("可选职业: {}", classes.join("/"))));
             }
-            NetworkEvent::NewHeroCreated { hero_info } => {
-                cmds.push(UiCommand::PushHeroSystemChat(format!("新英雄已创建: {}", hero_info)));
+            NetworkEvent::NewHeroCreated { result } => {
+                // C# S.NewHero Result：0=禁用 1=名字非法 2=性别非法 3=职业非法 4=已达上限 5=名字已存在 6=背包满 10=成功
+                let msg = match *result {
+                    0 => "英雄创建已禁用".to_string(),
+                    1 => "英雄名字不符合要求".to_string(),
+                    2 => "选择的性别不存在".to_string(),
+                    3 => "选择的职业不存在".to_string(),
+                    4 => "无法创建更多英雄".to_string(),
+                    5 => "英雄名字已存在".to_string(),
+                    6 => "背包空间不足".to_string(),
+                    10 => "英雄创建成功".to_string(),
+                    _ => format!("英雄创建结果: {}", result),
+                };
+                cmds.push(UiCommand::PushHeroSystemChat(msg));
             }
             NetworkEvent::HeroInfoReceived { hero_id } => {
                 cmds.push(UiCommand::HeroInfoReceived { hero_id: *hero_id });
@@ -193,7 +205,7 @@ pub fn pump_network_messages_to_ui(ctx: &mut GameContext) {
             NetworkEvent::HeroSpawnStateUpdated { state } => {
                 cmds.push(UiCommand::UpdateHeroSpawnState { state: *state });
             }
-            NetworkEvent::HeroBehaviourSet { behaviour, pet_mode: _ } => {
+            NetworkEvent::HeroBehaviourSet { behaviour } => {
                 cmds.push(UiCommand::UpdateHeroBehaviour { behaviour: *behaviour });
             }
             NetworkEvent::HeroChanged { success } => {

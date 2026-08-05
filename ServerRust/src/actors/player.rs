@@ -2924,8 +2924,8 @@ impl PlayerActor {
         body.extend_from_slice(&self.state.max_experience.to_le_bytes()); // max_experience
         body.extend_from_slice(&0u16.to_le_bytes());                    // level_effects
         body.push(if self.state.hero_index > 0 { 1u8 } else { 0u8 });  // has_hero
-        // C# HeroBehaviour(0..3) → SharedRust(3..6)，与 build_user_information_packet 一致
-        body.push(self.state.hero_behaviour.saturating_add(3));             // hero_behaviour
+        // hero_behaviour（C# 值 0..3，与 SharedRust HeroBehaviour 一致）
+        body.push(self.state.hero_behaviour);                     // hero_behaviour (C# 0..3)
 
         // 背包/装备数据（简化版：不发送完整物品，客户端通过 ItemChanged 等增量包更新）
         body.push(0u8);                                                 // has_inventory=false
