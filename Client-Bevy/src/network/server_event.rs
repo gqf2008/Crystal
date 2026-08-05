@@ -251,6 +251,20 @@ pub enum ServerEvent {
         inventory: Vec<Option<InvItem>>,
         equipment: Vec<Option<InvItem>>,
         item_names: Vec<(i32, String)>,
+        /// #208：角色面板属性（服务端最终值）
+        max_hp: i32,
+        max_mp: i32,
+        ac: [i32; 2],
+        mac: [i32; 2],
+        dc: [i32; 2],
+        mc: [i32; 2],
+        sc: [i32; 2],
+        critical_rate: i32,
+        critical_damage: i32,
+        attack_speed: i32,
+        accuracy: i32,
+        agility: i32,
+        luck: i32,
     },
     /// HeroInformation：英雄完整信息（C# S.HeroInformation : UserInformation + autopot，#203）
     HeroInformation {

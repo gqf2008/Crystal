@@ -664,6 +664,7 @@ fn death_overlay_system(
 fn hud_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut hud: ResMut<HudState>,
+    mut char_state: ResMut<crate::game::dialogs::character::CharacterState>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
@@ -823,12 +824,27 @@ fn hud_server_events(
                 object_id,
                 inventory,
                 equipment,
+                max_hp,
+                max_mp,
+                ac,
+                mac,
+                dc,
+                mc,
+                sc,
+                critical_rate,
+                critical_damage,
+                attack_speed,
+                accuracy,
+                agility,
+                luck,
                 ..
             } => {
                 hud.name = name.clone();
                 hud.level = *level;
                 hud.hp = *hp;
                 hud.mp = *mp;
+                hud.max_hp = *max_hp;
+                hud.max_mp = *max_mp;
                 hud.exp = *exp;
                 hud.max_exp = (*max_exp).max(1);
                 hud.gold = *gold;
@@ -837,6 +853,20 @@ fn hud_server_events(
                 hud.inventory.items = inventory.clone();
                 hud.inventory.gold = *gold;
                 hud.equipment = equipment.clone();
+                // #208：角色面板属性
+                char_state.name = name.clone();
+                char_state.level = *level;
+                char_state.hp = *hp;
+                char_state.max_hp = *max_hp;
+                char_state.mp = *mp;
+                char_state.max_mp = *max_mp;
+                char_state.stats = [*ac, *mac, *dc, *mc, *sc];
+                char_state.critical_rate = *critical_rate;
+                char_state.critical_damage = *critical_damage;
+                char_state.attack_speed = *attack_speed;
+                char_state.accuracy = *accuracy;
+                char_state.agility = *agility;
+                char_state.luck = *luck;
             }
             ServerEvent::PlayerDied => {
                 hud.dead = true;
