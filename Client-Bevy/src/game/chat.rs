@@ -121,6 +121,10 @@ struct ChatInputText;
 #[derive(Component)]
 struct ChatTabBtn(ChatChannel);
 
+/// 发送频道快捷按钮（C# ChatControlBar）
+#[derive(Component)]
+struct ChatBarBtn(&'static str, &'static str);
+
 pub struct ChatPlugin;
 
 impl Plugin for ChatPlugin {
@@ -205,6 +209,32 @@ fn spawn_chat(
         12.0, Color::srgb(0.9, 0.9, 0.4), 2.0,
     );
     commands.entity(e).insert(ChatInputText);
+    // 发送频道快捷按钮（C# ChatControlBar：附近/喊话/行会/队伍/私聊）
+    // 点击把指令前缀填入输入框（服务端按前缀路由频道）
+    let bar: [(&str, &str); 5] = [
+        ("附近", ""),
+        ("喊话", "/s "),
+        ("行会", "/guild "),
+        ("队伍", "/g "),
+        ("私聊", "/w "),
+    ];
+    for (i, (label, prefix)) in bar.iter().enumerate() {
+        // 频道快捷栏放在面板上方（C# ChatControlBar 为独立条）
+        let bx = panel_x + 4.0 + i as f32 * 72.0;
+        let by = panel_y - 16.0;
+        let t = spawn_ui_text(
+            &mut commands, &font, label,
+            bx, by,
+            11.0, Color::srgb(0.7, 0.9, 1.0), 2.2,
+        );
+        commands.entity(t).insert((
+            ChatBarBtn(label, prefix),
+            UiButton {
+                rect: (bx, by, 70.0, 14.0),
+                clicked: false,
+            },
+        ));
+    }
 }
 
 /// 键盘输入：Enter 激活/发送；字符输入；Backspace 删除；内置拼音 IME 中文提交
@@ -245,8 +275,10 @@ fn chat_input_system(
                         linked_items: Vec::new(),
                     });
                     // 本地回显（C# MainDialogs 发送时本地加入聊天面板；真实服务器不回发给自己）。
+                    // 指令消息（/w /g /guild /s ! 等）服务器会回发对应频道回显 → 本地不再回显避免重复。
                     // mock 服务器会回显，只在真实 TCP 模式下本地回显避免重复
-                    if matches!(net_mode.0, crate::network::NetworkMode::Real) {
+                    let is_cmd = msg.starts_with('/') || msg.starts_with('!');
+                    if matches!(net_mode.0, crate::network::NetworkMode::Real) && !is_cmd {
                         chat.add_line(
                             format!("[{}]: {}", hud.name, msg),
                             Color::WHITE,
@@ -344,15 +376,23 @@ fn chat_display_system(
     }
 }
 
-/// 页签点击切换
+/// 页签点击切换 + 发送频道快捷按钮
 fn chat_tab_system(
     mut chat: ResMut<ChatState>,
     tabs: Query<(&UiButton, &ChatTabBtn)>,
+    bar: Query<(&UiButton, &ChatBarBtn)>,
 ) {
     for (btn, tab) in &tabs {
         if btn.clicked && chat.tab != tab.0 {
             chat.tab = tab.0;
             tracing::info!("💬 聊天页签 -> {:?}", tab.0);
+        }
+    }
+    for (btn, bar_btn) in &bar {
+        if btn.clicked {
+            chat.input_active = true;
+            chat.input_text = bar_btn.1.to_string();
+            tracing::info!("💬 频道快捷: {} -> prefix", bar_btn.0);
         }
     }
 }
