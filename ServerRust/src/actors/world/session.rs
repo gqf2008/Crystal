@@ -241,6 +241,16 @@ impl Message<StartGameRequest> for WorldActor {
               player_name, object_id, msg.session_id);
 
         // #188：下发英雄列表（ManageHeroes）
+        // #194：从 DB 载入英雄（重启不丢）
+        if let Ok(db_heroes) = db::load_heroes(&self.db_pool, &player_name).await {
+            self.player_heroes.insert(msg.session_id, db_heroes.into_iter().map(|h| HeroInfo {
+                index: h.index,
+                name: h.name,
+                level: h.level,
+                class: mir2_shared::enums::MirClass::try_from(h.class).unwrap_or(mir2_shared::enums::MirClass::Warrior),
+                gender: mir2_shared::enums::MirGender::try_from(h.gender).unwrap_or(mir2_shared::enums::MirGender::Male),
+            }).collect());
+        }
         let heroes = self.player_heroes.get(&msg.session_id).cloned().unwrap_or_default();
         send_manage_heroes_packet(&self.gate_ref, msg.session_id, &loaded_state, &heroes);
 
@@ -949,6 +959,19 @@ impl Message<PlayerLogOut> for WorldActor {
                 warn!("Failed to save player {} on logout: {}", record.name, e);
             } else {
                 info!("Player {} saved to database on logout", record.name);
+            }
+
+            // #194：保存英雄列表到 DB（重启不丢）
+            let heroes = self.player_heroes.get(&msg.session_id).cloned().unwrap_or_default();
+            let db_heroes: Vec<db::DbHero> = heroes.iter().map(|h| db::DbHero {
+                index: h.index,
+                name: h.name.clone(),
+                level: h.level,
+                class: h.class as u8,
+                gender: h.gender as u8,
+            }).collect();
+            if let Err(e) = db::save_heroes(&self.db_pool, &record.name, &db_heroes).await {
+                warn!("Failed to save heroes for {} on logout: {}", record.name, e);
             }
 
             // 发送 LogOutSuccess 给客户端（带角色列表，C# SelectScene 用）

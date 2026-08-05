@@ -112,6 +112,16 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             PRIMARY KEY (character_name, grid),
             FOREIGN KEY (character_name) REFERENCES characters(name)
         );
+        CREATE TABLE IF NOT EXISTS heroes (
+            character_name TEXT NOT NULL,
+            hero_index INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            level INTEGER NOT NULL DEFAULT 1,
+            class INTEGER NOT NULL DEFAULT 0,
+            gender INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (character_name, hero_index),
+            FOREIGN KEY (character_name) REFERENCES characters(name)
+        );
         CREATE TABLE IF NOT EXISTS friends (
             character_name TEXT NOT NULL,
             friend_object_id INTEGER NOT NULL,
@@ -695,6 +705,34 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     Ok(pool)
 }
 
+    #[tokio::test]
+    async fn test_save_load_heroes_roundtrip() {
+        let pool = SqlitePool::connect("sqlite::memory:?cache=shared").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE heroes (
+                character_name TEXT NOT NULL,
+                hero_index INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                level INTEGER NOT NULL DEFAULT 1,
+                class INTEGER NOT NULL DEFAULT 0,
+                gender INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (character_name, hero_index)
+            )"
+        ).execute(&pool).await.unwrap();
+        let heroes = vec![
+            DbHero { index: 1, name: "HeroOne".to_string(), level: 3, class: 1, gender: 0 },
+        ];
+        save_heroes(&pool, "TestChar", &heroes).await.unwrap();
+        let loaded = load_heroes(&pool, "TestChar").await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].name, "HeroOne");
+        assert_eq!(loaded[0].level, 3);
+        assert_eq!(loaded[0].class, 1);
+        // 覆盖保存（清空）
+        save_heroes(&pool, "TestChar", &[]).await.unwrap();
+        assert!(load_heroes(&pool, "TestChar").await.unwrap().is_empty());
+    }
+
 /// Initialize the SQLite database from a file path and run migrations
 pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
     let path_str = db_path.display().to_string().replace('\\', "/");
@@ -865,7 +903,7 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     // 若子表仍有引用会触发立即 FK 冲突（尤其是有背包物品的角色）。
     for tbl in [
         "inventory_backpack", "inventory_equipment", "inventory_storage",
-        "hero_inventory_backpack", "friends", "blocked_list", "mail",
+        "hero_inventory_backpack", "heroes", "friends", "blocked_list", "mail",
         "quests", "completed_quests", "player_magics", "player_flags",
         "creatures", "refine_log",
     ] {
@@ -1412,6 +1450,58 @@ async fn load_mail(pool: &DbPool, character_name: &str) -> anyhow::Result<Mailbo
     }
 
     Ok(mailbox)
+}
+
+
+/// 英雄持久化记录（#194：原始 class/gender，转换由调用方完成）
+#[derive(Debug, Clone)]
+pub struct DbHero {
+    pub index: i32,
+    pub name: String,
+    pub level: u16,
+    pub class: u8,
+    pub gender: u8,
+}
+
+/// 保存角色英雄列表（DELETE + INSERT，事务内）
+pub async fn save_heroes(pool: &DbPool, character_name: &str, heroes: &[DbHero]) -> anyhow::Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM heroes WHERE character_name = ?")
+        .bind(character_name)
+        .execute(&mut *tx)
+        .await?;
+    for h in heroes {
+        sqlx::query(
+            r#"INSERT INTO heroes (character_name, hero_index, name, level, class, gender) VALUES (?, ?, ?, ?, ?, ?)"#,
+        )
+        .bind(character_name)
+        .bind(h.index)
+        .bind(&h.name)
+        .bind(h.level as i32)
+        .bind(h.class as i32)
+        .bind(h.gender as i32)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+/// 加载角色英雄列表
+pub async fn load_heroes(pool: &DbPool, character_name: &str) -> anyhow::Result<Vec<DbHero>> {
+    let rows = sqlx::query(
+        "SELECT hero_index, name, level, class, gender FROM heroes WHERE character_name = ? ORDER BY hero_index",
+    )
+    .bind(character_name)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|r| DbHero {
+        index: r.get::<i32, _>("hero_index"),
+        name: r.get::<String, _>("name"),
+        level: r.get::<i32, _>("level") as u16,
+        class: r.get::<i32, _>("class") as u8,
+        gender: r.get::<i32, _>("gender") as u8,
+    }).collect())
 }
 
 /// 插入单封邮件（用于离线玩家收邮件）
