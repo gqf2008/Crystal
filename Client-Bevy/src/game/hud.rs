@@ -756,6 +756,7 @@ fn hud_server_events(
             | ServerEvent::TimeOfDay { .. }
             | ServerEvent::ObjectColourChanged { .. }
             | ServerEvent::StoragePasswordResult { .. }
+            | ServerEvent::LogOutSuccess
             | ServerEvent::CraftResult { .. }
             | ServerEvent::NpcGoods { .. }
             | ServerEvent::NpcSellPanel { .. } => {}
