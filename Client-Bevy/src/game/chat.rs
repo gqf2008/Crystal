@@ -7,6 +7,7 @@
 use std::collections::VecDeque;
 
 use bevy::input::keyboard::{Key, KeyboardInput};
+use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 
 use crate::game::hud::HudState;
@@ -180,6 +181,8 @@ pub struct ChatState {
     pub input_text: String,
     /// 显示行数
     pub visible_lines: usize,
+    /// 历史回看滚动（0=最新；C# ChatPanel StartIndex）
+    pub scroll_up: usize,
 }
 
 impl Default for ChatState {
@@ -190,6 +193,7 @@ impl Default for ChatState {
             input_active: false,
             input_text: String::new(),
             visible_lines: 8,
+            scroll_up: 0,
         }
     }
 }
@@ -200,6 +204,15 @@ impl ChatState {
         while self.lines.len() > 200 {
             self.lines.pop_front();
         }
+        // 新消息到达时回到最新（若已在最新位置）
+        let max_scroll = self.lines.len().saturating_sub(self.visible_lines);
+        self.scroll_up = self.scroll_up.min(max_scroll);
+    }
+
+    /// 当前可见起始行（历史回看）
+    pub fn display_start(&self) -> usize {
+        let newest = self.lines.len().saturating_sub(self.visible_lines);
+        newest.saturating_sub(self.scroll_up)
     }
 }
 
@@ -253,7 +266,7 @@ impl Plugin for ChatPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_chat);
         app.add_systems(
             Update,
-            (chat_tab_system, chat_option_system, chat_input_system, chat_display_system, chat_server_events)
+            (chat_tab_system, chat_option_system, chat_wheel_system, chat_input_system, chat_display_system, chat_server_events)
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -627,6 +640,37 @@ fn chat_input_system(
     }
 }
 
+/// 聊天历史滚轮回看（#126 C# ChatPanel_MouseWheel：StartIndex）
+fn chat_wheel_system(
+    mut wheels: MessageReader<MouseWheel>,
+    mut chat: ResMut<ChatState>,
+    windows: Query<&Window>,
+) {
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    const PANEL: (f32, f32, f32, f32) = (6.0, 428.0, 360.0, 172.0);
+    if cursor.x < PANEL.0
+        || cursor.x > PANEL.0 + PANEL.2
+        || cursor.y < PANEL.1
+        || cursor.y > PANEL.1 + PANEL.3
+    {
+        return;
+    }
+    let mut delta = 0.0f32;
+    for ev in wheels.read() {
+        match ev.unit {
+            MouseScrollUnit::Line => delta += ev.y,
+            MouseScrollUnit::Pixel => delta += ev.y / 20.0,
+        }
+    }
+    if delta == 0.0 {
+        return;
+    }
+    let max_scroll = chat.lines.len().saturating_sub(chat.visible_lines);
+    chat.scroll_up = (chat.scroll_up as i32 + delta.round() as i32)
+        .clamp(0, max_scroll as i32) as usize;
+}
+
 /// 显示：按页签过滤聊天行 + 输入行（单查询避免 B0001）
 fn chat_display_system(
     chat: Res<ChatState>,
@@ -649,7 +693,11 @@ fn chat_display_system(
         .filter(|(_, _, ch)| chat.tab == ChatChannel::All || *ch == chat.tab)
         .map(|(m, c, _)| (m.clone(), *c))
         .collect();
-    let start = visible.len().saturating_sub(chat.visible_lines);
+    // #126 历史回看：从滚动起始行显示
+    let start = visible
+        .len()
+        .saturating_sub(chat.visible_lines)
+        .saturating_sub(chat.scroll_up);
     for (mut text, mut color, line, input, tab_btn) in &mut texts {
         // 变化才更新，避免每帧重排文本（ICU4X 报错 + CPU，#31）
         if let Some(line) = line {
@@ -696,6 +744,7 @@ fn chat_tab_system(
     for (btn, tab) in &tabs {
         if btn.clicked && chat.tab != tab.0 {
             chat.tab = tab.0;
+            chat.scroll_up = 0;
             tracing::info!("💬 聊天页签 -> {:?}", tab.0);
         }
     }
