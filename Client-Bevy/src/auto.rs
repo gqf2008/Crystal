@@ -2572,10 +2572,10 @@ fn auto_fishing_test(
                 .iter()
                 .rev()
                 .take(30)
-                .find(|(text, _)| {
+                .find(|(text, _, _)| {
                     text.contains("钓到了") || text.contains("鱼跑了") || text.contains("需要装备鱼竿")
                 })
-                .map(|(text, _)| text.clone());
+                .map(|(text, _, _)| text.clone());
             match hit {
                 Some(text) => {
                     tracing::info!("[FISHTEST] ✅ 收获消息: {}", text);
@@ -2612,7 +2612,7 @@ fn auto_refine_test(
     *t += time.delta_secs();
     // 聊天辅助：最近 60 条里找子串
     fn chat_has(chat: &client_bevy::game::chat::ChatState, needle: &str) -> bool {
-        chat.lines.iter().rev().take(60).any(|(t, _)| t.contains(needle))
+        chat.lines.iter().rev().take(60).any(|(t, _, _)| t.contains(needle))
     }
     match *stage {
         0 => {
@@ -2738,7 +2738,7 @@ fn auto_craft_test(
     }
     *t += time.delta_secs();
     fn chat_has(chat: &client_bevy::game::chat::ChatState, needle: &str) -> bool {
-        chat.lines.iter().rev().take(60).any(|(t, _)| t.contains(needle))
+        chat.lines.iter().rev().take(60).any(|(t, _, _)| t.contains(needle))
     }
     match *stage {
         0 => {
@@ -3115,7 +3115,7 @@ fn auto_report_test(
     }
     *t += time.delta_secs();
     fn chat_has(chat: &client_bevy::game::chat::ChatState, needle: &str) -> bool {
-        chat.lines.iter().rev().take(60).any(|(t, _)| t.contains(needle))
+        chat.lines.iter().rev().take(60).any(|(t, _, _)| t.contains(needle))
     }
     match *stage {
         0 => {
@@ -4730,10 +4730,14 @@ fn real_verify_system(
                 });
                 // 真实服务器不回发给自己（设计）；本地回显由 chat_input_system 负责（C# 行为），
                 // 这里模拟用户路径 add_line，验证显示链路
-                chat.add_line(format!("[{}]: 真实服务器验证：你好！", hud.name), Color::WHITE);
+                chat.add_line(
+                    format!("[{}]: 真实服务器验证：你好！", hud.name),
+                    Color::WHITE,
+                    client_bevy::game::chat::ChatChannel::Nearby,
+                );
                 tracing::info!("[REAL] 💬 发送聊天（服务器不回显自己属设计，本地回显已修复）");
             }
-            if chat.lines.iter().any(|(l, _)| l.contains("真实服务器验证")) && !s.chat_echo {
+            if chat.lines.iter().any(|(l, _, _)| l.contains("真实服务器验证")) && !s.chat_echo {
                 s.chat_echo = true;
                 tracing::info!("[REAL] ✅ 聊天本地回显收到（显示链路通过）");
             }
