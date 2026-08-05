@@ -541,7 +541,7 @@ fn inventory_ui_system(
     }
 }
 
-/// 悬停提示系统（#93 通用 Tooltip）：光标在物品格上时显示 名称 x数量
+/// 悬停提示系统（#93/#106 通用 Tooltip）：物品格上显示 名称 + 类型/数量/耐久
 fn inv_tooltip_system(
     inv: Res<crate::game::hud::HudState>,
     mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
@@ -550,7 +550,7 @@ fn inv_tooltip_system(
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
-    let mut text = String::new();
+    let mut hit: Option<InvItem> = None;
     for slot in &slots {
         let i = slot.0;
         let x = i % GRID_COLS;
@@ -558,24 +558,70 @@ fn inv_tooltip_system(
         let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
         let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
         if cursor.x >= sx && cursor.x <= sx + CELL_W && cursor.y >= sy && cursor.y <= sy + CELL_H {
-            if let Some(item) = inv.inventory.items.get(i).and_then(|s| s.as_ref()) {
-                if item.count > 1 {
-                    text = format!("{} x{}", item.name, item.count);
-                } else {
-                    text = item.name.clone();
-                }
-            }
+            hit = inv.inventory.items.get(i).and_then(|s| s.as_ref()).cloned();
             break;
         }
     }
-    tooltip.update(
-        2,
-        !text.is_empty(),
-        String::new(),
-        vec![text],
-        cursor.x,
-        cursor.y,
-    );
+    let Some(item) = hit else {
+        tooltip.update(2, false, String::new(), Vec::new(), cursor.x, cursor.y);
+        return;
+    };
+    let mut lines = Vec::new();
+    if item.count > 1 {
+        lines.push(format!("数量: {}", item.count));
+    }
+    lines.push(format!("类型: {}", crate::game::dialogs::inventory::item_type_name(item.item_type)));
+    if item.is_equipment() {
+        lines.push(format!("耐久: {}/{}", item.current_dura, item.max_dura));
+    }
+    tooltip.update(2, true, item.name.clone(), lines, cursor.x, cursor.y);
+}
+
+/// ItemType 枚举 → 中文名（对齐 C# ItemInfo.Type 常见分类）
+pub fn item_type_name(t: u8) -> &'static str {
+    use mir2_shared::enums::ItemType;
+    match ItemType::try_from(t) {
+        Ok(ItemType::Weapon) => "武器",
+        Ok(ItemType::Armour) => "护甲",
+        Ok(ItemType::Helmet) => "头盔",
+        Ok(ItemType::Necklace) => "项链",
+        Ok(ItemType::Bracelet) => "手镯",
+        Ok(ItemType::Ring) => "戒指",
+        Ok(ItemType::Amulet) => "护身符",
+        Ok(ItemType::Belt) => "腰带",
+        Ok(ItemType::Boots) => "靴子",
+        Ok(ItemType::Stone) => "宝石",
+        Ok(ItemType::Torch) => "火把",
+        Ok(ItemType::Potion) => "药水",
+        Ok(ItemType::Ore) => "矿石",
+        Ok(ItemType::Meat) => "肉",
+        Ok(ItemType::CraftingMaterial) => "材料",
+        Ok(ItemType::Scroll) => "卷轴",
+        Ok(ItemType::Gem) => "宝石",
+        Ok(ItemType::Mount) => "坐骑",
+        Ok(ItemType::Book) => "书籍",
+        Ok(ItemType::Script) => "脚本",
+        Ok(ItemType::Reins) => "缰绳",
+        Ok(ItemType::Bells) => "铃铛",
+        Ok(ItemType::Saddle) => "马鞍",
+        Ok(ItemType::Ribbon) => "饰带",
+        Ok(ItemType::Mask) => "面具",
+        Ok(ItemType::Food) => "食物",
+        Ok(ItemType::Hook) => "鱼钩",
+        Ok(ItemType::Float) => "浮漂",
+        Ok(ItemType::Bait) => "鱼饵",
+        Ok(ItemType::Finder) => "探鱼器",
+        Ok(ItemType::Reel) => "渔轮",
+        Ok(ItemType::Fish) => "鱼",
+        Ok(ItemType::Quest) => "任务物品",
+        Ok(ItemType::Awakening) => "觉醒",
+        Ok(ItemType::Pets) => "宠物",
+        Ok(ItemType::Transform) => "变身",
+        Ok(ItemType::Deco) => "装饰",
+        Ok(ItemType::Socket) => "镶嵌",
+        Ok(ItemType::MonsterSpawn) => "召唤",
+        _ => "其他",
+    }
 }
 
 /// 选中格子高亮（原版 C# SelectedCell 黄色边框语义：用黄色半透明覆盖表示）

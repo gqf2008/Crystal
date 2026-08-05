@@ -314,15 +314,24 @@ fn storage_tooltip_system(
     }
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
-    let mut text = String::new();
+    let mut hit: Option<crate::game::dialogs::inventory::InvItem> = None;
     if let Some(i) = storage_slot_at(cursor.x, cursor.y) {
-        if let Some(item) = state.items.get(i).and_then(|s| s.as_ref()) {
-            text = if item.count > 1 {
-                format!("{} x{}", item.name, item.count)
-            } else {
-                item.name.clone()
-            };
-        }
+        hit = state.items.get(i).and_then(|s| s.as_ref()).cloned();
     }
-    tooltip.update(3, !text.is_empty(), String::new(), vec![text], cursor.x, cursor.y);
+    let Some(item) = hit else {
+        tooltip.update(3, false, String::new(), Vec::new(), cursor.x, cursor.y);
+        return;
+    };
+    let mut lines = Vec::new();
+    if item.count > 1 {
+        lines.push(format!("数量: {}", item.count));
+    }
+    lines.push(format!(
+        "类型: {}",
+        crate::game::dialogs::inventory::item_type_name(item.item_type)
+    ));
+    if item.is_equipment() {
+        lines.push(format!("耐久: {}/{}", item.current_dura, item.max_dura));
+    }
+    tooltip.update(3, true, item.name.clone(), lines, cursor.x, cursor.y);
 }
