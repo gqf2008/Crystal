@@ -244,6 +244,9 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                         index,
                                                         name: name.to_string(),
                                                         price,
+                                                        // 与背包物品一致：Items 库帧 = index
+                                                        image: index as u16,
+                                                        tool_tip: Some(format!("{}（商店演示物品）", name)),
                                                         ..Default::default()
                                                     }),
                                                     ..Default::default()
