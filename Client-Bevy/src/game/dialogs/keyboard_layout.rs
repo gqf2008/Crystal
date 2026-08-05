@@ -336,6 +336,8 @@ fn spawn_keyboard_layout(
             KeyboardReset,
             DialogRoot(DialogKind::KeyboardLayout),
             KeyboardWidget,
+            // #93 通用 Tooltip：C# 重置按钮 Hint
+            crate::ui::tooltip::TooltipHint("重置为默认键位".to_string()),
         ));
     }
 

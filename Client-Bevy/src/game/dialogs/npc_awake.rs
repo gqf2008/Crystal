@@ -148,6 +148,8 @@ fn spawn_npc_awake(
             NpcAwakeUpgrade,
             DialogRoot(DialogKind::NpcAwake),
             NpcAwakeWidget,
+            // #93 通用 Tooltip：C# 升级按钮 Hint
+            crate::ui::tooltip::TooltipHint("消耗材料执行觉醒".to_string()),
         ));
     }
 

@@ -11,3 +11,4 @@ pub mod credits;
 pub mod scroll_list;
 pub mod controls;
 pub mod keyboard_nav;
+pub mod tooltip;

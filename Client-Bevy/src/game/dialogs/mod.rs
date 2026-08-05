@@ -222,6 +222,11 @@ impl Plugin for DialogsPlugin {
         app.add_systems(Update, (crate::ui::controls::checkbox_system, crate::ui::controls::dropdown_system, crate::ui::controls::scrolling_label_system, crate::ui::controls::item_cell_system).run_if(in_state(AppState::Game)));
         app.init_resource::<crate::ui::keyboard_nav::KeyboardNav>();
         app.add_systems(Update, (crate::ui::keyboard_nav::esc_close_dialogs_system, crate::ui::keyboard_nav::keyboard_scroll_lists_system, crate::ui::keyboard_nav::tab_focus_system).run_if(in_state(AppState::Game)));
+        // #93 通用 Tooltip
+        app.init_resource::<crate::ui::tooltip::TooltipState>();
+        app.add_systems(OnEnter(AppState::Game), crate::ui::tooltip::spawn_tooltip_panel_system);
+        app.add_systems(OnExit(AppState::Game), crate::ui::tooltip::despawn_tooltip_panel);
+        app.add_systems(Update, (crate::ui::tooltip::tooltip_hint_system, crate::ui::tooltip::tooltip_panel_system).run_if(in_state(AppState::Game)));
         app.init_resource::<inventory::InventoryState>();
         app.add_plugins(text_input::TextInputPlugin);
         app.init_resource::<character::CharacterState>();

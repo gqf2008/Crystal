@@ -64,7 +64,7 @@ impl Plugin for StoragePlugin {
         );
         app.add_systems(
             Update,
-            (storage_ui_system, storage_action_system, ui_button_system)
+            (storage_ui_system, storage_action_system, storage_tooltip_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -299,4 +299,30 @@ fn storage_server_events(
             }
         }
     }
+}
+
+
+/// 悬停提示（#93 通用 Tooltip）：光标在仓库物品格上显示 名称 x数量
+fn storage_tooltip_system(
+    state: Res<StorageState>,
+    mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
+    windows: Query<&Window>,
+) {
+    if !state.visible {
+        tooltip.update(3, false, String::new(), Vec::new(), 0.0, 0.0);
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    let mut text = String::new();
+    if let Some(i) = storage_slot_at(cursor.x, cursor.y) {
+        if let Some(item) = state.items.get(i).and_then(|s| s.as_ref()) {
+            text = if item.count > 1 {
+                format!("{} x{}", item.name, item.count)
+            } else {
+                item.name.clone()
+            };
+        }
+    }
+    tooltip.update(3, !text.is_empty(), String::new(), vec![text], cursor.x, cursor.y);
 }
