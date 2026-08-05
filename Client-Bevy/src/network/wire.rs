@@ -122,6 +122,67 @@ impl Packet for ChangeHeroWire {
     }
 }
 
+/// 英雄→主背包取回（#203：C# [from i32][to i32]，英雄格 → 主背包格）
+#[derive(Debug, Clone, Copy)]
+pub struct TakeBackHeroItemWire {
+    pub from: i32,
+    pub to: i32,
+}
+
+impl Packet for TakeBackHeroItemWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::TakeBackHeroItem as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            from: reader.read_i32::<byteorder::LittleEndian>()?,
+            to: reader.read_i32::<byteorder::LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_i32::<byteorder::LittleEndian>(self.from)?;
+        writer.write_i32::<byteorder::LittleEndian>(self.to)?;
+        Ok(())
+    }
+}
+
+/// 主背包→英雄转移（#203：C# [from i32][to i32]，主背包格 → 英雄格）
+#[derive(Debug, Clone, Copy)]
+pub struct TransferHeroItemWire {
+    pub from: i32,
+    pub to: i32,
+}
+
+impl Packet for TransferHeroItemWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::TransferHeroItem as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            from: reader.read_i32::<byteorder::LittleEndian>()?,
+            to: reader.read_i32::<byteorder::LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_i32::<byteorder::LittleEndian>(self.from)?;
+        writer.write_i32::<byteorder::LittleEndian>(self.to)?;
+        Ok(())
+    }
+}
 /// 婚姻客户端包（M49：SharedRust 为空包，gate 期望 dotnet，手动构造）
 #[derive(Debug, Clone)]
 pub struct MarriageRequestWire {

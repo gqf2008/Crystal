@@ -338,6 +338,8 @@ pub struct InvClickState {
     pub last: Option<(usize, f64)>,
     /// 当前选中格子（原版 C# GameScene.SelectedCell）
     pub selected: Option<usize>,
+    /// 英雄背包选中格（#203：与主背包双向转移共用选择态）
+    pub hero_selected: Option<usize>,
 }
 
 /// 丢弃确认框（原版 C# MirMessageBox YesNo：DropTip）
@@ -780,6 +782,15 @@ fn inv_item_action_system(
     // 单击：选中 → 移动（MoveItem，原版 C# MirItemCell.MoveItem）
     if dbl.is_none() {
         if let Some(i) = single {
+            // #203：英雄背包选中格 → 点击主背包格 = 取回（C.TakeBackHeroItem）
+            if let Some(hero_from) = click.hero_selected {
+                net.send_packet(&crate::network::TakeBackHeroItemWire {
+                    from: hero_from as i32,
+                    to: i as i32,
+                });
+                click.hero_selected = None;
+                tracing::info!("🎒 英雄取回物品 {} -> 背包 {}", hero_from, i);
+            } else {
             match click.selected {
                 Some(from) if from == i => click.selected = None,
                 Some(from) => {
@@ -798,6 +809,7 @@ fn inv_item_action_system(
                         click.selected = Some(i);
                     }
                 }
+            }
             }
         }
     }

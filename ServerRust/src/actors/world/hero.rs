@@ -62,17 +62,23 @@ pub(crate) async fn send_hero_information_packet(&self, session_id: u64) {
     let Some(hero) = hero else { return };
 
     let hero_oid = record.object_id.wrapping_add(HERO_OID_OFFSET);
+    // 内联 ItemInfo（客户端显示名称/图标/类型，与 build_user_information_packet 一致）
+    let mut enrich = |mut item: mir2_shared::data::item::UserItem| {
+        super::enrich_item_info(&mut item, &self.item_infos);
+        item
+    };
     let inventory: Vec<Option<mir2_shared::data::item::UserItem>> = state
         .hero_inventory
         .backpack
         .iter()
-        .map(|s| s.as_ref().map(|s| s.item.clone()))
+        .map(|s| s.as_ref().map(|s| enrich(s.item.clone())))
         .collect();
     let equipment: Vec<Option<mir2_shared::data::item::UserItem>> = state
         .hero_inventory
         .equipment
         .iter()
         .cloned()
+        .map(|s| s.map(|item| enrich(item)))
         .collect();
     let ai_hp = self.hero_ai_states.get(&session_id).map(|ai| ai.hp).unwrap_or(0);
 
@@ -109,11 +115,11 @@ pub(crate) async fn send_hero_information_packet(&self, session_id: u64) {
 }
 
 }
-/// 从英雄背包取回物品
+/// 从英雄背包取回物品（C# C.TakeBackHeroItem: From=英雄格 To=主背包格，#203）
 pub struct TakeBackHeroItemRequest {
     pub session_id: u64,
-    pub grid: u8,
-    pub unique_id: u64,
+    pub from: i32,
+    pub to: i32,
 }
 
 impl Message<TakeBackHeroItemRequest> for WorldActor {
@@ -124,25 +130,23 @@ impl Message<TakeBackHeroItemRequest> for WorldActor {
             Some(r) => r,
             None => return,
         };
-        let state = match record.actor_ref.ask(GetPlayerState).await {
-            Ok(Some(s)) => s,
-            _ => return,
-        };
 
-        // 从英雄背包移除物品并添加到主背包
+        // 从英雄背包取回指定格子物品到主背包
         let _ = record.actor_ref.ask(crate::actors::player::TakeBackHeroItem {
-            grid: msg.grid,
+            from: msg.from,
+            to: msg.to,
         }).await;
-
-        debug!("Hero item taken back: {} grid={} uid={}", state.name, msg.grid, msg.unique_id);
+        // 刷新双方数据：主背包（全量 UserInformation）+ 英雄（S.HeroInformation）
+        self.refresh_hero_item_state(msg.session_id).await;
+        debug!("Hero item taken back: session={} from={} to={}", msg.session_id, msg.from, msg.to);
     }
 }
 
-/// 转移物品到英雄背包
+/// 转移物品到英雄背包（C# C.TransferHeroItem: From=主背包格 To=英雄格，#203）
 pub struct TransferHeroItemRequest {
     pub session_id: u64,
-    pub grid: u8,
-    pub unique_id: u64,
+    pub from: i32,
+    pub to: i32,
 }
 
 impl Message<TransferHeroItemRequest> for WorldActor {
@@ -153,17 +157,34 @@ impl Message<TransferHeroItemRequest> for WorldActor {
             Some(r) => r,
             None => return,
         };
+
+        // 从主背包转移指定格子物品到英雄背包
+        let _ = record.actor_ref.ask(crate::actors::player::TransferHeroItem {
+            from: msg.from,
+            to: msg.to,
+        }).await;
+        self.refresh_hero_item_state(msg.session_id).await;
+        debug!("Hero item transferred: session={} from={} to={}", msg.session_id, msg.from, msg.to);
+    }
+}
+
+impl WorldActor {
+    /// 英雄物品转移后刷新：主背包全量 UserInformation + 英雄 S.HeroInformation
+    async fn refresh_hero_item_state(&self, session_id: u64) {
+        let record = match self.players.get(&session_id) {
+            Some(r) => r,
+            None => return,
+        };
         let state = match record.actor_ref.ask(GetPlayerState).await {
             Ok(Some(s)) => s,
             _ => return,
         };
-
-        // 从主背包移除物品并添加到英雄背包
-        let _ = record.actor_ref.ask(crate::actors::player::TransferHeroItem {
-            grid: msg.grid,
-        }).await;
-
-        debug!("Hero item transferred: {} grid={} uid={}", state.name, msg.grid, msg.unique_id);
+        let packet = super::build_user_information_packet(&state, &self.item_infos);
+        let _ = self.gate_ref.tell(SendToClient {
+            session_id,
+            data: packet,
+        }).try_send();
+        self.send_hero_information_packet(session_id).await;
     }
 }
 

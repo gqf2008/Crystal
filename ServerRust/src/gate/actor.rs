@@ -1922,24 +1922,24 @@ fn handle_change_hero(world_ref: &Option<ActorRef<crate::actors::world::WorldAct
     let _ = world_ref.tell(crate::actors::world::ChangeHeroRequest { session_id, hero_index }).try_send();
 }
 
-/// TakeBackHeroItem: [grid: u8][unique_id: u64]
+/// TakeBackHeroItem: C# [from i32][to i32]（英雄格 → 主背包格，#203）
 fn handle_take_back_hero_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 9 { return; }
-    let grid = payload[0];
-    let uid = u64::from_le_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
-    debug!("TakeBackHeroItem: session={} grid={} uid={}", session_id, grid, uid);
+    if payload.len() < 8 { return; }
+    let from = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    let to = i32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
+    debug!("TakeBackHeroItem: session={} from={} to={}", session_id, from, to);
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::TakeBackHeroItemRequest { session_id, grid, unique_id: uid }).try_send();
+    let _ = world_ref.tell(crate::actors::world::TakeBackHeroItemRequest { session_id, from, to }).try_send();
 }
 
-/// TransferHeroItem: [grid: u8][unique_id: u64]
+/// TransferHeroItem: C# [from i32][to i32]（主背包格 → 英雄格，#203）
 fn handle_transfer_hero_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 9 { return; }
-    let grid = payload[0];
-    let uid = u64::from_le_bytes(payload[1..9].try_into().unwrap_or([0; 8]));
-    debug!("TransferHeroItem: session={} grid={} uid={}", session_id, grid, uid);
+    if payload.len() < 8 { return; }
+    let from = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    let to = i32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
+    debug!("TransferHeroItem: session={} from={} to={}", session_id, from, to);
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::TransferHeroItemRequest { session_id, grid, unique_id: uid }).try_send();
+    let _ = world_ref.tell(crate::actors::world::TransferHeroItemRequest { session_id, from, to }).try_send();
 }
 
 // ============================================================================
