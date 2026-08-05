@@ -618,6 +618,12 @@ fn hero_inv_click_system(
                         to,
                     });
                     tracing::info!("🦸 英雄装备 {} (uid={}) -> slot {}", item.name, item.unique_id, to);
+                } else if item.is_usable() {
+                    // #218：技能书/药品等 → C.UseItem（服务端识别英雄背包物品）
+                    net.send_packet(&mir2_shared::packets::client::item::UseItem {
+                        unique_id: item.unique_id,
+                    });
+                    tracing::info!("🦸 英雄使用 {} (uid={})", item.name, item.unique_id);
                 }
             }
             return;

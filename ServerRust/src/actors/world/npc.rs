@@ -576,6 +576,7 @@ impl Message<NewCharacterRequest> for WorldActor {
                 auto_pot_hp_item: 0,
                 auto_pot_mp_item: 0,
             hero_inventory: PlayerInventory::new(),
+            hero_magics: Vec::new(),
             refine_log: RefineLog::new(),
             is_fishing: false,
             fishing_autocast: false,

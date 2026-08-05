@@ -282,6 +282,83 @@ impl Message<UseItemRequest> for WorldActor {
             }
         }
 
+        // #218：英雄技能书学习（物品在英雄背包）
+        if let Some(hero_item) = record
+            .actor_ref
+            .ask(crate::actors::player::GetHeroItemInfo {
+                unique_id: msg.unique_id,
+            })
+            .await
+            .unwrap_or(None)
+        {
+            if let Some(db) = self.item_infos.get(&hero_item.item_index) {
+                if db.item_type == mir2_shared::enums::ItemType::Book as i32 {
+                    let _ = record
+                        .actor_ref
+                        .ask(crate::actors::player::ConsumeHeroItem {
+                            unique_id: msg.unique_id,
+                        })
+                        .await;
+                    let spell_cs = db.shape;
+                    if self.magic_infos.contains_key(&(spell_cs as u32)) {
+                        let learned = record
+                            .actor_ref
+                            .ask(crate::actors::player::IsHeroMagicLearned { spell: spell_cs })
+                            .await
+                            .unwrap_or(false);
+                        if learned {
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                "英雄已经学会这个技能",
+                            );
+                        } else {
+                            let ok = record
+                                .actor_ref
+                                .ask(crate::actors::player::LearnHeroMagic { spell: spell_cs })
+                                .await
+                                .unwrap_or(false);
+                            if ok {
+                                if let Some(info) = self.magic_infos.get(&(spell_cs as u32)) {
+                                    let pm = crate::actors::player::PlayerMagic::new(spell_cs);
+                                    let cm = super::build_client_magic(info, &pm);
+                                    let new_magic = mir2_shared::packets::server::magic::NewMagic {
+                                        magic: cm,
+                                        hero: true,
+                                    };
+                                    let mut body = Vec::new();
+                                    if new_magic.write_body(&mut body).is_ok() {
+                                        let _ = self
+                                            .gate_ref
+                                            .tell(SendToClient {
+                                                session_id: msg.session_id,
+                                                data: build_packet_bytes(
+                                                    mir2_shared::enums::ServerPacketIds::NewMagic
+                                                        as i16,
+                                                    &body,
+                                                ),
+                                            })
+                                            .await;
+                                    }
+                                }
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    "英雄学会了技能！",
+                                );
+                                tracing::info!(
+                                    "🦸 {} 英雄学会技能 spell={}", player_state.name, spell_cs
+                                );
+                            }
+                        }
+                    } else {
+                        send_system_message(&self.gate_ref, msg.session_id, "这本技能书无法使用");
+                    }
+                }
+            }
+            return;
+        }
+
         // 查询物品信息
         let user_item = record.actor_ref.ask(GetItemInfo { unique_id: msg.unique_id }).await.unwrap_or(None);
         let item_index = match user_item {

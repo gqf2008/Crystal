@@ -26,6 +26,7 @@ pub mod help;
 pub mod hero;
 pub mod hero_inventory;
 pub mod hero_equipment;
+pub mod hero_skills;
 pub mod inspect;
 pub mod inventory;
 pub mod item_rental;
@@ -86,6 +87,7 @@ pub enum DialogKind {
     Hero,
     HeroInventory,
     HeroEquipment,
+    HeroSkill,
     Creature,
     TrustMerchant,
     ItemRental,
@@ -223,6 +225,7 @@ impl Plugin for DialogsPlugin {
         app.init_resource::<DialogManager>();
         app.init_resource::<DialogDrag>();
         app.add_plugins(hero_equipment::HeroEquipmentPlugin);
+        app.add_plugins(hero_skills::HeroSkillPlugin);
                 app.add_systems(Update, dialog_drag_system.run_if(in_state(AppState::Game)));
         // #182 登出：清理对话框与会话状态
         app.add_systems(Update, logout_server_events.run_if(in_state(AppState::Game)));

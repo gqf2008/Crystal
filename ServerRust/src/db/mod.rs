@@ -176,6 +176,16 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             PRIMARY KEY (character_name, spell),
             FOREIGN KEY (character_name) REFERENCES characters(name)
         );
+        CREATE TABLE IF NOT EXISTS hero_magics (
+            character_name TEXT NOT NULL,
+            spell INTEGER NOT NULL,
+            level INTEGER NOT NULL DEFAULT 0,
+            experience INTEGER NOT NULL DEFAULT 0,
+            key INTEGER NOT NULL DEFAULT 0,
+            toggled INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (character_name, spell),
+            FOREIGN KEY (character_name) REFERENCES characters(name)
+        );
         CREATE TABLE IF NOT EXISTS player_flags (
             character_name TEXT NOT NULL,
             flag_key TEXT NOT NULL,
@@ -1005,6 +1015,9 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     // Save magics
     save_magics(&mut *tx, &state.name, &state.magics).await?;
 
+    // Save hero magics (#218)
+    save_hero_magics(&mut *tx, &state.name, &state.hero_magics).await?;
+
     // Save flags
     save_flags(&mut *tx, &state.name, &state.flags).await?;
 
@@ -1037,6 +1050,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
     let magics = load_magics(pool, character_name).await?;
     let flags = load_flags(pool, character_name).await?;
     let hero_inventory = load_hero_inventory(pool, character_name).await?;
+    let hero_magics = load_hero_magics(pool, character_name).await?;
 
     let attack_mode = parse_attack_mode(&row.get::<String, _>("attack_mode"));
     let pet_mode = parse_pet_mode(&row.get::<String, _>("pet_mode"));
@@ -1127,6 +1141,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         auto_pot_hp_item: row.try_get::<i32, _>("auto_pot_hp_item").unwrap_or(0),
         auto_pot_mp_item: row.try_get::<i32, _>("auto_pot_mp_item").unwrap_or(0),
         hero_inventory,
+        hero_magics,
         refine_log,
         is_fishing: row.get::<i32, _>("is_fishing") != 0,
         is_mounted: false,
@@ -1892,6 +1907,55 @@ async fn load_magics(pool: &DbPool, character_name: &str) -> anyhow::Result<Vec<
     Ok(magics)
 }
 
+async fn save_hero_magics(
+    conn: &mut sqlx::sqlite::SqliteConnection,
+    character_name: &str,
+    magics: &[crate::actors::player::PlayerMagic],
+) -> anyhow::Result<()> {
+    // #218：英雄魔法持久化（与 player_magics 同构）
+    sqlx::query("DELETE FROM hero_magics WHERE character_name = ?")
+        .bind(character_name)
+        .execute(&mut *conn)
+        .await?;
+    for magic in magics {
+        sqlx::query(
+            "INSERT INTO hero_magics (character_name, spell, level, experience, key, toggled) VALUES (?, ?, ?, ?, ?, ?)"
+        )
+        .bind(character_name)
+        .bind(magic.spell)
+        .bind(magic.level as i32)
+        .bind(magic.experience as i32)
+        .bind(magic.key as i32)
+        .bind(if magic.toggled { 1i32 } else { 0i32 })
+        .execute(&mut *conn).await?;
+    }
+    Ok(())
+}
+
+async fn load_hero_magics(
+    pool: &DbPool,
+    character_name: &str,
+) -> anyhow::Result<Vec<crate::actors::player::PlayerMagic>> {
+    // #218：读取英雄魔法
+    let rows = sqlx::query(
+        "SELECT spell, level, experience, key, toggled FROM hero_magics WHERE character_name = ?",
+    )
+    .bind(character_name)
+    .fetch_all(pool)
+    .await?;
+    let mut magics = Vec::new();
+    for r in rows {
+        magics.push(crate::actors::player::PlayerMagic {
+            spell: r.get("spell"),
+            level: r.get::<i32, _>("level") as u8,
+            experience: r.get::<i32, _>("experience") as u16,
+            key: r.try_get::<i32, _>("key").unwrap_or(0) as u8,
+            toggled: r.try_get::<i32, _>("toggled").unwrap_or(0) != 0,
+            cast_time: 0,
+        });
+    }
+    Ok(magics)
+}
 async fn save_flags(conn: &mut sqlx::sqlite::SqliteConnection, character_name: &str, flags: &std::collections::HashMap<String, i32>) -> anyhow::Result<()> {
     sqlx::query("DELETE FROM player_flags WHERE character_name = ?")
         .bind(character_name)
