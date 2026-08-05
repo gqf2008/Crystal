@@ -159,6 +159,7 @@ fn spawn_menu_dialog(
 
 fn menu_ui_system(
     mut mgr: ResMut<DialogManager>,
+    net: Res<crate::network::NetConnection>,
     mut widgets: Query<&mut Visibility, With<MenuWidget>>,
     buttons: Query<(&UiButton, &MenuBtn)>,
     mut confirm: Local<bool>,
@@ -196,8 +197,10 @@ fn menu_ui_system(
                     *confirm = true;
                 }
                 MenuAction::Logout => {
-                    tracing::info!("🎮 下线（待接入 LogoutRequest）");
+                    // #182 下线：C.LogOut → S.LogOutSuccess → 返回选角
+                    net.send_packet(&mir2_shared::packets::client::character::LogOut);
                     mgr.close(DialogKind::Menu);
+                    tracing::info!("🎮 发送下线请求");
                 }
                 MenuAction::Mount => {
                     tracing::info!("🐴 打开坐骑面板");

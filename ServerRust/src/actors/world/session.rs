@@ -947,9 +947,24 @@ impl Message<PlayerLogOut> for WorldActor {
                 info!("Player {} saved to database on logout", record.name);
             }
 
-            // 发送 LogOutSuccess 给客户端
+            // 发送 LogOutSuccess 给客户端（带角色列表，C# SelectScene 用）
+            let characters = db::list_character_summaries(&self.db_pool, &record.account_username).await.unwrap_or_default();
             let mut body = Vec::new();
-            body.extend_from_slice(&0i32.to_le_bytes()); // character count = 0
+            body.extend_from_slice(&(characters.len() as i32).to_le_bytes());
+            let now_secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            for (i, c) in characters.iter().enumerate() {
+                body.extend_from_slice(&(i as i32).to_le_bytes()); // index
+                crate::util::wire::write_dotnet_string(&mut body, &c.name);
+                body.extend_from_slice(&c.level.to_le_bytes());
+                body.push(c.class);
+                body.push(c.gender);
+                // .NET DateTime ticks（last_access 未存 DB → 用当前时间）
+                let ticks = 621355968000000000i64 + now_secs * 10_000_000;
+                body.extend_from_slice(&ticks.to_le_bytes());
+            }
             let _ = self.gate_ref.tell(SendToClient {
                 session_id: msg.session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LogOutSuccess as i16, &body),

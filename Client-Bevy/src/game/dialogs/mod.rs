@@ -219,6 +219,8 @@ impl Plugin for DialogsPlugin {
         app.init_resource::<DialogManager>();
         app.init_resource::<DialogDrag>();
         app.add_systems(Update, dialog_drag_system.run_if(in_state(AppState::Game)));
+        // #182 登出：清理对话框与会话状态
+        app.add_systems(Update, logout_server_events.run_if(in_state(AppState::Game)));
         app.add_systems(Update, crate::ui::scroll_list::scroll_list_system.run_if(in_state(AppState::Game)));
         app.add_systems(Update, (crate::ui::controls::checkbox_system, crate::ui::controls::dropdown_system, crate::ui::controls::scrolling_label_system, crate::ui::controls::item_cell_system).run_if(in_state(AppState::Game)));
         app.init_resource::<crate::ui::keyboard_nav::KeyboardNav>();
@@ -291,5 +293,23 @@ impl Plugin for DialogsPlugin {
                 sell_panel::SellPanelPlugin,
             ),
         ));
+    }
+}
+
+/// #182 登出成功：清理对话框与会话状态（返回选角前）
+fn logout_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut mgr: ResMut<DialogManager>,
+    mut session: ResMut<crate::network::SessionState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::LogOutSuccess = ev {
+            mgr.open.clear();
+            session.self_position = None;
+            session.local_player_id = None;
+            session.selected_index = None;
+            tracing::info!("🧹 登出：已清理对话框/会话");
+        }
     }
 }
