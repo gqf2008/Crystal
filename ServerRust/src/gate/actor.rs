@@ -268,7 +268,8 @@ impl Message<ShutdownAll> for GateActor {
         for sid in &session_ids {
             let disconnect_data = crate::util::wire::build_packet_bytes(
                 mir2_shared::enums::ServerPacketIds::Disconnect as i16,
-                &[],
+                // C# S.Disconnect.Reason：0=Server Closing（1 字节）
+                &[0u8],
             );
             let _ = ctx.actor_ref().tell(SendToClient {
                 session_id: *sid,
