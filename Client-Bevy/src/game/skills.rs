@@ -79,17 +79,30 @@ pub struct SkillsClose;
 #[derive(Component)]
 pub struct SkillsLine(usize);
 
+/// 技能快捷栏（F1-F8 图标）
+#[derive(Component)]
+pub struct SkillBarSlot(pub usize);
+
+/// 技能快捷栏图标（子实体）
+#[derive(Component)]
+pub struct SkillBarIcon(pub usize);
+
+/// 技能快捷栏按键标签（子实体）
+#[derive(Component)]
+pub struct SkillBarKey(pub usize);
+
 pub struct SkillsPlugin;
 
 impl Plugin for SkillsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MagicsState>();
         app.add_systems(OnEnter(AppState::Game), spawn_skills_window);
+        app.add_systems(OnEnter(AppState::Game), spawn_skill_bar);
         app.add_systems(OnExit(AppState::Game), cleanup_skills_window);
         app.add_systems(
             Update,
             // #148 技能快捷键改由 dialog_hotkey_system 按键位设置处理（可重绑）
-            (skills_window_system, ui_button_system)
+            (skills_window_system, skill_bar_icon_system, ui_button_system)
                 .run_if(in_state(AppState::Game)),
         );
                 app.add_systems(
@@ -378,5 +391,106 @@ fn skills_window_system(
             }
             None => String::new(),
         };
+    }
+}
+
+
+// ============================================================================
+// 技能快捷栏（#150 C# MagicBar 对齐）：底部 F1-F8 图标 + 按键标签
+// ============================================================================
+
+const SKILL_BAR_Y: f32 = 768.0 - 42.0;
+const SKILL_SLOT_W: f32 = 34.0;
+const SKILL_SLOT_H: f32 = 28.0;
+
+fn spawn_skill_bar(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    mut fonts: ResMut<Assets<Font>>,
+    mut ui_font: ResMut<UiFont>,
+) {
+    if !ui_font.0.is_strong() {
+        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+    }
+    let font = ui_font.0.clone();
+    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    for i in 0..8usize {
+        let x = 1024.0 / 2.0 - 4.0 * (SKILL_SLOT_W + 4.0) + i as f32 * (SKILL_SLOT_W + 4.0);
+        let slot = commands
+            .spawn((
+                UiEntity,
+                SkillBarSlot(i),
+                Sprite {
+                    image: white.clone(),
+                    color: Color::srgba(0.0, 0.0, 0.0, 0.45),
+                    custom_size: Some(Vec2::new(SKILL_SLOT_W, SKILL_SLOT_H)),
+                    ..default()
+                },
+                bevy::sprite::Anchor::TOP_LEFT,
+                Transform::from_xyz(x, -SKILL_BAR_Y, 2.5),
+                Visibility::Visible,
+            ))
+            .id();
+        commands.entity(slot).with_children(|p| {
+            // 技能图标（MagIcon[m.icon]）
+            p.spawn((
+                SkillBarIcon(i),
+                Sprite {
+                    image: white.clone(),
+                    custom_size: Some(Vec2::new(SKILL_SLOT_W - 4.0, SKILL_SLOT_H - 4.0)),
+                    ..default()
+                },
+                bevy::sprite::Anchor::TOP_LEFT,
+                Transform::from_xyz(2.0, -2.0, 2.6),
+                Visibility::Hidden,
+            ));
+            // F 键标签
+            p.spawn((
+                SkillBarKey(i),
+                Text2d::new(format!("F{}", i + 1)),
+                bevy::sprite::Anchor::TOP_LEFT,
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(9.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(1.0, 0.9, 0.4)),
+                Transform::from_xyz(1.0, -1.0, 2.7),
+            ));
+        });
+    }
+}
+
+/// 技能快捷栏更新：显示绑定技能图标
+fn skill_bar_icon_system(
+    magics: Res<MagicsState>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    mut icons: Query<(&mut Sprite, &mut Visibility, &SkillBarIcon)>,
+) {
+    for (mut sprite, mut vis, slot) in &mut icons {
+        let magic = magics.by_key(slot.0 as u8 + 1);
+        match magic {
+            Some(m) => {
+                let handle = ui_image(
+                    &mut libs,
+                    &mut images,
+                    &mut cache,
+                    LibraryName::MagIcon,
+                    m.icon as usize,
+                );
+                match handle {
+                    Some(h) => {
+                        if sprite.image != h {
+                            sprite.image = h;
+                        }
+                        *vis = Visibility::Visible;
+                    }
+                    None => *vis = Visibility::Hidden,
+                }
+            }
+            None => *vis = Visibility::Hidden,
+        }
     }
 }
