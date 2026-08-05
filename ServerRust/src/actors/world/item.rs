@@ -724,7 +724,7 @@ impl Message<DropGoldRequest> for WorldActor {
             });
 
             // 通知客户端金币变化
-            send_gold_changed_packet(&self.gate_ref, msg.session_id, state.inventory.gold - amount);
+            send_gold_changed_packet(&self.gate_ref, msg.session_id, amount);
             debug!("DropGold: {} dropped {} gold", state.name, msg.amount);
         }
     }
@@ -1491,4 +1491,3 @@ impl Message<DisassembleItemRequest> for WorldActor {
         debug!("DisassembleItem: {} disassembled {} into {} x{}", state.name, item_name, mat_name, mat_count);
     }
 }
-

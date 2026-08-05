@@ -526,10 +526,11 @@ pub fn send_take_back_item_packet(gate_ref: &ActorRef<GateActor>, session_id: u6
     }).try_send();
 }
 
-/// Send gold changed notification to a client.
-pub fn send_gold_changed_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, new_gold: u64) {
+/// Send gold lost notification to a client.
+/// C# S.LoseGold.Gold = 扣减金额（客户端 Gold -= Gold），不是扣后总额。
+pub fn send_gold_changed_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, amount: u64) {
     let mut body = Vec::new();
-    body.extend_from_slice(&(new_gold as u32).to_le_bytes());
+    body.extend_from_slice(&(amount as u32).to_le_bytes());
     let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LoseGold as i16, &body),

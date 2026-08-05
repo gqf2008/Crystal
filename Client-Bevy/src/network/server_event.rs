@@ -17,6 +17,8 @@ pub enum ServerEvent {
     HealthChanged { hp: i32, mp: i32 },
     /// GainedGold：增量（击杀掉落等），消费方负责累加余额
     GoldGained { gold: u32 },
+    /// LoseGold：扣减金额（C# S.LoseGold），消费方负责余额扣减
+    GoldLost { amount: u32 },
     /// GainExperience：经验增量
     ExperienceGained { amount: i64 },
     /// LevelChanged：新等级 + 经验（原实现一并更新 exp/max_exp）
@@ -261,6 +263,9 @@ pub mod from_packet {
     }
     pub fn gold_gained(p: &drops::GainedGold) -> ServerEvent {
         ServerEvent::GoldGained { gold: p.gold }
+    }
+    pub fn gold_lost(p: &drops::LoseGold) -> ServerEvent {
+        ServerEvent::GoldLost { amount: p.gold }
     }
     pub fn experience_gained(p: &experience::GainExperience) -> ServerEvent {
         ServerEvent::ExperienceGained { amount: p.amount as i64 }
