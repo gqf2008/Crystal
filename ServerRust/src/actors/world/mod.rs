@@ -777,7 +777,31 @@ pub struct WorldActor {
     pub(crate) guild_wars: HashMap<String, std::collections::HashSet<String>>,
     /// 英雄战斗 AI 运行时状态（按主人 session_id 索引）
     pub(crate) hero_ai_states: HashMap<u64, HeroCombatAI>,
+    /// 玩家英雄列表（按主人 session_id 索引；内存态，#188，DB 持久化后续批次）
+    pub(crate) player_heroes: HashMap<u64, Vec<HeroInfo>>,
 }
+
+/// 英雄信息（#188：C# ClientHeroInformation 语义，内存态）
+
+/// 英雄创建结果码（C# S.NewHero.Result：1=BadName 4=MaxHeroes 10=Success）
+pub(crate) fn hero_create_result(name: &str, has_hero: bool) -> u8 {
+    if has_hero {
+        4
+    } else if name.trim().is_empty() {
+        1
+    } else {
+        10
+    }
+}
+#[derive(Debug, Clone)]
+pub struct HeroInfo {
+    pub index: i32,
+    pub name: String,
+    pub level: u16,
+    pub class: mir2_shared::enums::MirClass,
+    pub gender: mir2_shared::enums::MirGender,
+}
+
 
 /// 租赁会话状态
 #[derive(Debug, Clone)]
@@ -875,6 +899,7 @@ impl WorldActor {
             siege_structures: HashMap::new(),
             guild_wars: HashMap::new(),
             hero_ai_states: HashMap::new(),
+            player_heroes: HashMap::new(),
         }
     }
 
@@ -2962,6 +2987,7 @@ impl Actor for WorldActor {
             siege_structures: HashMap::new(),
             guild_wars: HashMap::new(),
             hero_ai_states: HashMap::new(),
+            player_heroes: HashMap::new(),
         })
     }
 }
@@ -3611,6 +3637,39 @@ fn send_gold_changed_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, amo
     let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LoseGold as i16, &body),
+    }).try_send();
+}
+
+/// 下发 S.ManageHeroes（C# ManageHeroes：max_count + current_hero + heroes，#188）
+pub(crate) fn send_manage_heroes_packet(
+    gate_ref: &ActorRef<GateActor>,
+    session_id: u64,
+    state: &PlayerState,
+    heroes: &[HeroInfo],
+) {
+    let to_info = |h: &HeroInfo| mir2_shared::data::client_data::ClientHeroInformation {
+        index: h.index,
+        name: h.name.clone(),
+        level: h.level,
+        class: h.class,
+        gender: h.gender,
+    };
+    let current_hero = heroes.iter().find(|h| h.index as u8 == state.hero_index).map(to_info);
+    let list: Vec<mir2_shared::data::client_data::ClientHeroInformation> =
+        heroes.iter().map(to_info).collect();
+    let packet = mir2_shared::packets::server::hero::ManageHeroes {
+        max_count: 1,
+        current_hero,
+        heroes: list,
+    };
+    let mut body = Vec::new();
+    if packet.write_body(&mut body).is_err() {
+        warn!("Failed to serialize ManageHeroes");
+        return;
+    }
+    let _ = gate_ref.tell(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ManageHeroes as i16, &body),
     }).try_send();
 }
 
@@ -4436,3 +4495,17 @@ mod tests {
 mod e2e;
 
 
+
+#[cfg(test)]
+mod hero_tests {
+    use super::*;
+
+    #[test]
+    fn hero_create_result_codes() {
+        // C# S.NewHero.Result：1=BadName 4=MaxHeroes 10=Success
+        assert_eq!(hero_create_result("", false), 1);
+        assert_eq!(hero_create_result("   ", false), 1);
+        assert_eq!(hero_create_result("Hero", true), 4);
+        assert_eq!(hero_create_result("Hero", false), 10);
+    }
+}
