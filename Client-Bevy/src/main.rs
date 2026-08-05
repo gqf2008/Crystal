@@ -94,6 +94,7 @@ fn main() {
         NewCharacterPlugin,
         ModalBoxPlugin,
         client_bevy::game::GamePlugin,
+        client_bevy::ui::client_settings::ClientSettingsPlugin,
     ));
     app.add_systems(Update, mark_ui_render_layers);
     // #91 UI 按钮交互音效（全场景：登录/选角/游戏）
