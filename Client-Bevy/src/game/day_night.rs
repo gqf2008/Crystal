@@ -25,6 +25,8 @@ pub struct DayNight {
     pub enabled: bool,
     /// 当前暗度 0..0.55（白天 0，夜晚最深；灯光按此显隐/渐显）
     pub darkness: f32,
+    /// 服务端下发的最新灯光（C# S.TimeOfDay；小地图图标按此切换）
+    pub light: mir2_shared::enums::LightSetting,
 }
 
 impl Default for DayNight {
@@ -38,6 +40,7 @@ impl Default for DayNight {
             day_length_secs: 24.0 * 60.0, // 24 分钟一天
             enabled: true,
             darkness: 0.0,
+            light: mir2_shared::enums::LightSetting::Normal,
         }
     }
 }
@@ -76,7 +79,7 @@ impl Plugin for DayNightPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_overlay);
         app.add_systems(
             Update,
-            day_night_system.run_if(in_state(AppState::Game)),
+            (day_night_system, day_night_server_events).run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -152,6 +155,34 @@ fn day_night_system(
             // 这里只控制 alpha 显隐，保留 RGB（此前把 RGB 全部压成 R 通道 → 彩色灯光失效）
             let arr = mat.color.to_f32_array();
             mat.color = LinearRgba::new(arr[0], arr[1], arr[2], light_alpha);
+        }
+    }
+}
+
+impl DayNight {
+    /// 应用服务端下发的灯光（C# S.TimeOfDay）：把本地时间设为对应时段
+    pub fn apply_server_light(&mut self, light: mir2_shared::enums::LightSetting) {
+        use mir2_shared::enums::LightSetting;
+        self.light = light;
+        self.time_minutes = match light {
+            LightSetting::Dawn => 6.0 * 60.0,
+            LightSetting::Evening => 18.0 * 60.0,
+            LightSetting::Night => 22.0 * 60.0,
+            _ => 12.0 * 60.0, // Day / Normal
+        };
+    }
+}
+
+/// 消费服务端 TimeOfDay（C# S.TimeOfDay）：同步昼夜与灯光
+fn day_night_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut dn: ResMut<DayNight>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::TimeOfDay { light } = ev {
+            dn.apply_server_light(*light);
+            tracing::info!("🌗 服务端昼夜: {:?}", light);
         }
     }
 }

@@ -71,9 +71,14 @@ pub struct MiniMapMailButton;
 #[derive(Component)]
 pub struct MiniMapBigMapButton;
 
-/// 灯光状态指示（C# LightSetting Prguse[2093] (102, y)，默认 Normal）
+/// 灯光状态指示（C# LightSetting：Prguse[2093] Normal/Day、[2095] Dawn、[2094] Evening、[2092] Night）
 #[derive(Component)]
-pub struct MiniMapLightSetting;
+pub struct MiniMapLightSetting {
+    pub normal: Handle<Image>,
+    pub dawn: Handle<Image>,
+    pub evening: Handle<Image>,
+    pub night: Handle<Image>,
+}
 
 /// 地图区域底色
 #[derive(Component)]
@@ -257,11 +262,16 @@ fn spawn_minimap(
         ));
     }
 
-    // 灯光状态指示（C# LightSetting Prguse[2093] (102, bottom_y)，默认 Normal）
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2093) {
-        let e = spawn_ui_sprite(&mut commands, h, MINIMAP_X + 102.0, MINIMAP_Y + BOTTOM_Y_BIG, 5.4, 1.0);
+    // 灯光状态指示（C# LightSetting：Prguse[2093] Normal/Day、[2095] Dawn、[2094] Evening、[2092] Night）
+    if let (Some(normal), Some(dawn), Some(evening), Some(night)) = (
+        ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2093),
+        ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2095),
+        ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2094),
+        ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2092),
+    ) {
+        let e = spawn_ui_sprite(&mut commands, normal.clone(), MINIMAP_X + 102.0, MINIMAP_Y + BOTTOM_Y_BIG, 5.4, 1.0);
         commands.entity(e).insert((
-            MiniMapLightSetting,
+            MiniMapLightSetting { normal, dawn, evening, night },
             DialogRoot(DialogKind::Minimap),
             MiniMapWidget,
         ));
@@ -320,6 +330,7 @@ fn minimap_toggle_system(
 fn minimap_ui_system(
     mgr: Res<DialogManager>,
     mode: Res<MiniMapMode>,
+    dn: Res<crate::game::day_night::DayNight>,
     game_data: Res<GameData>,
     players: Query<&Transform, (With<LocalPlayer>, Without<MiniMapPlayerDot>)>,
     actors: Query<
@@ -338,7 +349,7 @@ fn minimap_ui_system(
         &mut Visibility,
         (With<MiniMapWidget>, Without<MiniMapMapArea>, Without<MiniMapPlayerDot>),
     >,
-    mut bg: Query<(&mut Sprite, &MiniMapBg), Without<MiniMapMapArea>>,
+    mut bg: Query<(&mut Sprite, &MiniMapBg), (Without<MiniMapMapArea>, Without<MiniMapLightSetting>)>,
     mut map_area: Query<&mut Visibility, (With<MiniMapMapArea>, Without<MiniMapPlayerDot>)>,
     mut dot: Query<
         (&mut Visibility, &mut Transform),
@@ -380,7 +391,7 @@ fn minimap_ui_system(
         ),
     >,
     mut light: Query<
-        &mut Transform,
+        (&mut Transform, &mut Sprite, &MiniMapLightSetting),
         (
             With<MiniMapLightSetting>,
             Without<MiniMapPosText>,
@@ -514,9 +525,18 @@ fn minimap_ui_system(
         }
     }
 
-    // 灯光指示 y（C# SetBigMode/SetSmallMode）
-    for mut tf in &mut light {
+    // 灯光指示 y + 图标（C# GameScene.TimeOfDay：Normal/Day→2093 Dawn→2095 Evening→2094 Night→2092）
+    for (mut tf, mut sp, lset) in &mut light {
         tf.translation.y = -(MINIMAP_Y + bottom_y);
+        let want = match dn.light {
+            mir2_shared::enums::LightSetting::Dawn => lset.dawn.clone(),
+            mir2_shared::enums::LightSetting::Evening => lset.evening.clone(),
+            mir2_shared::enums::LightSetting::Night => lset.night.clone(),
+            _ => lset.normal.clone(),
+        };
+        if sp.image != want {
+            sp.image = want;
+        }
     }
 
     // 底部按钮位置 + 命中矩形（C# MailButton (4,y) / BigMapButton (25,y)）
