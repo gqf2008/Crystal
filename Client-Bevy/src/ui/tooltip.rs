@@ -207,3 +207,36 @@ pub fn despawn_tooltip_panel(mut commands: Commands, q: Query<Entity, With<Toolt
         commands.entity(e).despawn();
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_early_out_on_same_content() {
+        let mut s = TooltipState::default();
+        s.update(2, true, "剑".to_string(), vec!["耐久: 10/10".to_string()], 10.0, 20.0);
+        assert!(s.visible);
+        assert_eq!(s.source, 2);
+        // 相同内容再次写入：不应重复标记（visible/source/title/lines 不变）
+        let before = (s.visible, s.source, s.title.clone(), s.lines.clone());
+        s.update(2, true, "剑".to_string(), vec!["耐久: 10/10".to_string()], 10.0, 20.0);
+        assert_eq!(
+            (s.visible, s.source, s.title.clone(), s.lines.clone()),
+            before
+        );
+    }
+
+    #[test]
+    fn update_clear_only_own_source() {
+        let mut s = TooltipState::default();
+        s.update(3, true, "仓库".to_string(), vec!["物品".to_string()], 0.0, 0.0);
+        // 其他来源清除不影响当前
+        s.update(2, false, String::new(), Vec::new(), 0.0, 0.0);
+        assert!(s.visible);
+        // 归属来源清除生效
+        s.update(3, false, String::new(), Vec::new(), 0.0, 0.0);
+        assert!(!s.visible);
+    }
+}
