@@ -20,9 +20,10 @@ use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
-    spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+    spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont, UiImageCache,
 };
 use crate::ui::controls::{spawn_item_cell, ItemCell, ItemCellData, ItemCellIcon};
+use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect};
 
 /// 仓库数据（网络 UserStorage 写入）
 #[derive(Resource, Default)]
@@ -32,6 +33,10 @@ pub struct StorageState {
     pub visible: bool,
     /// 当前选中仓库格（原版 C# GameScene.SelectedCell）
     pub selected: Option<usize>,
+    /// 仓库密码面板是否打开
+    pub pwd_panel: bool,
+    /// 仓库密码操作结果提示
+    pub pwd_msg: String,
 }
 
 const DIALOG_X: f32 = 600.0;
@@ -46,6 +51,22 @@ pub struct StorageWidget;
 
 #[derive(Component)]
 pub struct StorageClose;
+
+/// 仓库密码按钮（C# StorageDialog ProtectButton）
+#[derive(Component)]
+pub struct StoragePwdBtn;
+
+/// 仓库密码面板
+#[derive(Component)]
+pub struct StoragePwdPanel;
+#[derive(Component)]
+pub struct StoragePwdSet;
+#[derive(Component)]
+pub struct StoragePwdRemove;
+#[derive(Component)]
+pub struct StoragePwdClose;
+#[derive(Component)]
+pub struct StoragePwdMsg;
 
 /// 仓库格子索引（0..79）
 #[derive(Component, Clone, Copy)]
@@ -64,7 +85,7 @@ impl Plugin for StoragePlugin {
         );
         app.add_systems(
             Update,
-            (storage_ui_system, storage_action_system, storage_tooltip_system, ui_button_system)
+            (storage_ui_system, storage_action_system, storage_tooltip_system, storage_pwd_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -129,6 +150,116 @@ fn spawn_storage_dialog(
         .entity(title)
         .insert((DialogRoot(DialogKind::Storage), StorageWidget));
 
+    // 仓库密码按钮（C# StorageDialog ProtectButton）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 206, 207, 208,
+        DIALOG_X + 18.0, DIALOG_Y + 330.0, 7.0, 76.0, 23.0,
+    ) {
+        commands.entity(e).insert((
+            StoragePwdBtn,
+            DialogRoot(DialogKind::Storage),
+            StorageWidget,
+        ));
+    }
+    let pwd_label = spawn_ui_text(&mut commands, &font, "仓库密码", DIALOG_X + 34.0, DIALOG_Y + 334.0, 12.0, Color::WHITE, 8.2);
+    commands.entity(pwd_label).insert((DialogRoot(DialogKind::Storage), StorageWidget));
+
+    // 密码面板（当前密码/新密码 + 设置/移除/关闭 + 结果提示）
+    let white2 = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    commands.spawn((
+        UiEntity,
+        DialogRoot(DialogKind::Storage),
+        StoragePwdPanel,
+        Sprite {
+            image: white2.clone(),
+            color: Color::srgba(0.1, 0.1, 0.15, 0.95),
+            custom_size: Some(Vec2::new(300.0, 150.0)),
+            ..default()
+        },
+        bevy::sprite::Anchor::TOP_LEFT,
+        Transform::from_xyz(DIALOG_X + 18.0, -(DIALOG_Y + 360.0), 9.0),
+        Visibility::Hidden,
+    ));
+    let fields: [(usize, &str, f32); 2] = [
+        (0, "当前密码:", DIALOG_Y + 370.0),
+        (1, "新密码:", DIALOG_Y + 400.0),
+    ];
+    for (id, label, y) in fields {
+        let _ = spawn_ui_text(&mut commands, &font, label, DIALOG_X + 28.0, y, 12.0, Color::WHITE, 9.1);
+        let box_e = commands
+            .spawn((
+                UiEntity,
+                DialogRoot(DialogKind::Storage),
+                StoragePwdPanel,
+                TextInputField(id),
+                TextInputRect(DIALOG_X + 100.0, y, 200.0, 20.0),
+                Sprite {
+                    image: white2.clone(),
+                    color: Color::srgba(0.2, 0.2, 0.25, 0.9),
+                    custom_size: Some(Vec2::new(200.0, 20.0)),
+                    ..default()
+                },
+                bevy::sprite::Anchor::TOP_LEFT,
+                Transform::from_xyz(DIALOG_X + 100.0, -y, 9.1),
+                Visibility::Hidden,
+            ))
+            .id();
+        commands.entity(box_e).with_children(|p| {
+            p.spawn((
+                TextInputDisplay(id),
+                Text2d::new(String::new()),
+                bevy::sprite::Anchor::TOP_LEFT,
+                TextFont {
+                    font: FontSource::Handle(font.clone()),
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+                Transform::from_xyz(4.0, -2.0, 9.2),
+            ));
+        });
+    }
+    // 结果提示
+    let msg = spawn_ui_text(&mut commands, &font, "", DIALOG_X + 28.0, DIALOG_Y + 430.0, 12.0, Color::srgb(1.0, 0.9, 0.4), 9.2);
+    commands.entity(msg).insert((StoragePwdMsg, DialogRoot(DialogKind::Storage), StoragePwdPanel));
+    // 设置/修改 / 移除 / 关闭
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 206, 207, 208,
+        DIALOG_X + 28.0, DIALOG_Y + 455.0, 9.3, 70.0, 23.0,
+    ) {
+        commands.entity(e).insert((
+            StoragePwdSet,
+            DialogRoot(DialogKind::Storage),
+            StoragePwdPanel,
+        ));
+    }
+    let _ = spawn_ui_text(&mut commands, &font, "设置", DIALOG_X + 43.0, DIALOG_Y + 459.0, 12.0, Color::WHITE, 9.4);
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 206, 207, 208,
+        DIALOG_X + 108.0, DIALOG_Y + 455.0, 9.3, 70.0, 23.0,
+    ) {
+        commands.entity(e).insert((
+            StoragePwdRemove,
+            DialogRoot(DialogKind::Storage),
+            StoragePwdPanel,
+        ));
+    }
+    let _ = spawn_ui_text(&mut commands, &font, "移除", DIALOG_X + 123.0, DIALOG_Y + 459.0, 12.0, Color::WHITE, 9.4);
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 210, 211, 212,
+        DIALOG_X + 188.0, DIALOG_Y + 455.0, 9.3, 70.0, 23.0,
+    ) {
+        commands.entity(e).insert((
+            StoragePwdClose,
+            DialogRoot(DialogKind::Storage),
+            StoragePwdPanel,
+        ));
+    }
+    let _ = spawn_ui_text(&mut commands, &font, "关闭", DIALOG_X + 203.0, DIALOG_Y + 459.0, 12.0, Color::WHITE, 9.4);
     // 格子底板（80 格，10x8）+ 物品图标 + 堆叠数量（#90 通用 ItemCell）
     for i in 0..(COLS * ROWS) {
         let x = i % COLS;
@@ -305,6 +436,15 @@ fn storage_server_events(
                 mgr.open.push(DialogKind::Inventory);
             }
         }
+        if let ServerEvent::StoragePasswordResult { result } = ev {
+            // C# result：4=成功 2=当前密码错误 5=未设置密码
+            storage.pwd_msg = match *result {
+                4 => "仓库密码已保存".to_string(),
+                2 => "当前密码错误".to_string(),
+                5 => "未设置仓库密码".to_string(),
+                _ => "仓库密码操作失败".to_string(),
+            };
+        }
     }
 }
 
@@ -341,4 +481,63 @@ fn storage_tooltip_system(
         lines.push(format!("耐久: {}/{}", item.current_dura, item.max_dura));
     }
     tooltip.update(3, true, item.name.clone(), lines, cursor.x, cursor.y);
+}
+
+/// 仓库密码面板：按钮开关 + 设置/移除/关闭 + 结果提示
+fn storage_pwd_system(
+    mut storage: ResMut<StorageState>,
+    net: Res<NetConnection>,
+    mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
+    pwd_btn: Query<&UiButton, With<StoragePwdBtn>>,
+    set_btn: Query<&UiButton, With<StoragePwdSet>>,
+    remove_btn: Query<&UiButton, With<StoragePwdRemove>>,
+    close_btn: Query<&UiButton, With<StoragePwdClose>>,
+    mut panel: Query<&mut Visibility, (With<StoragePwdPanel>, Without<StoragePwdBtn>)>,
+    mut msg: Query<&mut Text2d, With<StoragePwdMsg>>,
+) {
+    let open = storage.pwd_panel;
+    for mut vis in &mut panel {
+        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for mut t in &mut msg {
+        if t.0 != storage.pwd_msg {
+            t.0 = storage.pwd_msg.clone();
+        }
+    }
+    for btn in &pwd_btn {
+        if btn.clicked {
+            storage.pwd_panel = !storage.pwd_panel;
+            storage.pwd_msg.clear();
+            if input.texts.len() < 2 {
+                input.texts.resize(2, String::new());
+            }
+            input.active = None;
+        }
+    }
+    for btn in &set_btn {
+        if btn.clicked && open {
+            let current = input.texts.get(0).cloned().unwrap_or_default();
+            let new = input.texts.get(1).cloned().unwrap_or_default();
+            net.send_packet(&mir2_shared::packets::client::storage::SetStoragePassword {
+                current_password: current,
+                new_password: new,
+            });
+            tracing::info!("🔒 设置仓库密码");
+        }
+    }
+    for btn in &remove_btn {
+        if btn.clicked && open {
+            let current = input.texts.get(0).cloned().unwrap_or_default();
+            net.send_packet(&mir2_shared::packets::client::storage::RemoveStoragePassword {
+                current_password: current,
+            });
+            tracing::info!("🔓 移除仓库密码");
+        }
+    }
+    for btn in &close_btn {
+        if btn.clicked && open {
+            storage.pwd_panel = false;
+            input.active = None;
+        }
+    }
 }
