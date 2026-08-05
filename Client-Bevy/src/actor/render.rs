@@ -152,3 +152,51 @@ pub fn actor_name_label_system(
         });
     }
 }
+
+/// PK 名字染色（#178 C# ObjectColourChanged；None = 默认色）
+#[derive(Component)]
+pub struct ActorNameColour(pub Option<Color>);
+
+/// 按 ActorNameColour 更新头顶名字颜色
+pub fn actor_name_colour_system(
+    actors: Query<(Entity, &ActorNameColour)>,
+    mut labels: Query<(&ChildOf, &mut TextColor, &ActorNameLabel)>,
+) {
+    for (e, colour) in &actors {
+        let Some(c) = colour.0 else { continue };
+        for (child, mut tc, _) in &mut labels {
+            if child.parent() == e && tc.0 != c {
+                tc.0 = c;
+            }
+        }
+    }
+}
+
+/// 消费 S.ObjectColourChanged：给对应角色挂 ActorNameColour
+pub fn object_colour_server_events(
+    mut commands: Commands,
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    actors: Query<(Entity, &NetObjectId)>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::ObjectColourChanged { object_id, name_colour_argb } = ev {
+            let color = if *name_colour_argb != 0 {
+                let argb = *name_colour_argb as u32;
+                Some(Color::srgb(
+                    ((argb >> 16) & 0xFF) as f32 / 255.0,
+                    ((argb >> 8) & 0xFF) as f32 / 255.0,
+                    (argb & 0xFF) as f32 / 255.0,
+                ))
+            } else {
+                None
+            };
+            for (e, id) in &actors {
+                if id.0 == *object_id {
+                    commands.entity(e).insert(ActorNameColour(color));
+                    break;
+                }
+            }
+        }
+    }
+}

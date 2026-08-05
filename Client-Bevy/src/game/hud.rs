@@ -754,6 +754,7 @@ fn hud_server_events(
             | ServerEvent::MagicLearned { .. }
             | ServerEvent::MagicLeveled { .. }
             | ServerEvent::TimeOfDay { .. }
+            | ServerEvent::ObjectColourChanged { .. }
             | ServerEvent::CraftResult { .. }
             | ServerEvent::NpcGoods { .. }
             | ServerEvent::NpcSellPanel { .. } => {}

@@ -17,7 +17,7 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::CraftItem as i16, ServerPacketIds::ItemRentalRequest as i16, ServerPacketIds::UpdateRentalItem as i16, ServerPacketIds::ItemRentalFee as i16, ServerPacketIds::ItemRentalPeriod as i16, ServerPacketIds::DepositRentalItem as i16, ServerPacketIds::RetrieveRentalItem as i16, ServerPacketIds::ItemRentalLock as i16, ServerPacketIds::ItemRentalPartnerLock as i16, ServerPacketIds::CanConfirmItemRental as i16, ServerPacketIds::ConfirmItemRental as i16, ServerPacketIds::CancelItemRental as i16, ServerPacketIds::ChangeQuest as i16, ServerPacketIds::CompleteQuest as i16, ServerPacketIds::AddBuff as i16, ServerPacketIds::RemoveBuff as i16, ServerPacketIds::PlayerInspect as i16, ServerPacketIds::UpdateIntelligentCreatureList as i16, ServerPacketIds::ChangeHero as i16, ServerPacketIds::MarriageRequest as i16, ServerPacketIds::LoverUpdate as i16, ServerPacketIds::DivorceRequest as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::CraftItem as i16, ServerPacketIds::ItemRentalRequest as i16, ServerPacketIds::UpdateRentalItem as i16, ServerPacketIds::ItemRentalFee as i16, ServerPacketIds::ItemRentalPeriod as i16, ServerPacketIds::DepositRentalItem as i16, ServerPacketIds::RetrieveRentalItem as i16, ServerPacketIds::ItemRentalLock as i16, ServerPacketIds::ItemRentalPartnerLock as i16, ServerPacketIds::CanConfirmItemRental as i16, ServerPacketIds::ConfirmItemRental as i16, ServerPacketIds::CancelItemRental as i16, ServerPacketIds::ChangeQuest as i16, ServerPacketIds::CompleteQuest as i16, ServerPacketIds::AddBuff as i16, ServerPacketIds::RemoveBuff as i16, ServerPacketIds::PlayerInspect as i16, ServerPacketIds::UpdateIntelligentCreatureList as i16, ServerPacketIds::ChangeHero as i16, ServerPacketIds::MarriageRequest as i16, ServerPacketIds::LoverUpdate as i16, ServerPacketIds::DivorceRequest as i16, ServerPacketIds::ObjectColourChanged as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M41: 合成 ----
@@ -258,6 +258,16 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
             tracing::info!("💔 收到离婚请求");
         }
 
+        x if x == ServerPacketIds::ObjectColourChanged as i16 => {
+            // C# S.ObjectColourChanged：PK 名字染色（object_id + ARGB）
+            if let Ok(p) = buff::ObjectColourChanged::read_body(&mut cur) {
+                server_events.write(ServerEvent::ObjectColourChanged {
+                    object_id: p.object_id,
+                    name_colour_argb: p.name_colour_argb,
+                });
+                tracing::debug!("🎨 名字染色: obj={} argb={}", p.object_id, p.name_colour_argb);
+            }
+        }
         _ => {}
     }
     handled
