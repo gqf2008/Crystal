@@ -44,6 +44,20 @@ pub struct CharacterState {
     pub accuracy: i32,
     pub agility: i32,
     pub luck: i32,
+    /// #210：State 页数据
+    pub exp: i64,
+    pub max_exp: i64,
+    pub bag_weight: i32,
+    pub wear_weight: i32,
+    pub hand_weight: i32,
+    pub magic_resist: i32,
+    pub poison_resist: i32,
+    pub health_recovery: i32,
+    pub spell_recovery: i32,
+    pub poison_recovery: i32,
+    pub holy: i32,
+    pub freezing: i32,
+    pub poison_atk: i32,
     /// 14 装备槽
     pub equipment: Vec<Option<u32>>,
 }
@@ -65,6 +79,19 @@ impl Default for CharacterState {
             accuracy: 0,
             agility: 0,
             luck: 0,
+            exp: 0,
+            max_exp: 1,
+            bag_weight: 0,
+            wear_weight: 0,
+            hand_weight: 0,
+            magic_resist: 0,
+            poison_resist: 0,
+            health_recovery: 0,
+            spell_recovery: 0,
+            poison_recovery: 0,
+            holy: 0,
+            freezing: 0,
+            poison_atk: 0,
             equipment: vec![None; 14],
         }
     }
@@ -126,6 +153,10 @@ pub struct CharGuildText;
 
 #[derive(Component)]
 pub struct CharStatText(pub usize); // 状态数值标签序号
+
+/// State 页数值标签（#210；挂 CharPageBg(2) 随页显隐）
+#[derive(Component)]
+pub struct CharState2Text(pub usize);
 // ---- 技能页（C# CharacterDialog.MagicButton 7 行 + Next/Back） ----
 const SKILL_ROW_COUNT: usize = 7;
 /// 翻页按钮在 children 可见性查询中的哨兵行号
@@ -331,6 +362,19 @@ fn spawn_character_dialog(
             CharDialogWidget,
         ));
     }
+    // State 页数值标签（#210：Exp%/负重/躲避/恢复/神圣/冻结/中毒攻击，12 项）
+    for (i, y) in stat_ys.iter().take(12).enumerate() {
+        let e = spawn_ui_text(
+            &mut commands, &font, "0",
+            DIALOG_X + PAGE_X + 126.0, DIALOG_Y + PAGE_Y + y - 2.0,
+            11.0, Color::WHITE, 8.0,
+        );
+        commands.entity(e).insert((
+            CharState2Text(i),
+            CharPageBg(2),
+            DialogRoot(DialogKind::Character),
+        ));
+    }
     // 技能页（页 3）：7 行技能按钮（C# MagicButton (8, 8+i*33)，231x33）
     // 行内子控件坐标参考 C# MagicButton：图标 (36,0)、LevelImage Title[516] (73,7)、
     // ExpImage Title[517] (73,19)、KeyLabel (2,2)、LevelLabel (88,2)、NameLabel (109,2)、ExpLabel (109,15)
@@ -441,9 +485,41 @@ fn character_ui_system(
     tabs: Query<(&UiButton, &CharTab)>,
     close: Query<&UiButton, (With<CharClose>, Without<CharTab>)>,
     mut page_bgs: Query<(&mut Visibility, &CharPageBg), Without<CharDialogWidget>>,
-    mut name_texts: Query<&mut Text2d, (With<CharNameText>, Without<CharGuildText>, Without<CharStatText>)>,
-    mut guild_texts: Query<&mut Text2d, (With<CharGuildText>, Without<CharNameText>, Without<CharStatText>)>,
-    mut stat_texts: Query<(&mut Text2d, &CharStatText), (Without<CharNameText>, Without<CharGuildText>)>,
+    mut name_texts: Query<
+        &mut Text2d,
+        (
+            With<CharNameText>,
+            Without<CharGuildText>,
+            Without<CharStatText>,
+            Without<CharState2Text>,
+        ),
+    >,
+    mut guild_texts: Query<
+        &mut Text2d,
+        (
+            With<CharGuildText>,
+            Without<CharNameText>,
+            Without<CharStatText>,
+            Without<CharState2Text>,
+        ),
+    >,
+    mut stat_texts: Query<
+        (&mut Text2d, &CharStatText),
+        (
+            Without<CharNameText>,
+            Without<CharGuildText>,
+            Without<CharState2Text>,
+        ),
+    >,
+    mut state2_texts: Query<
+        (&mut Text2d, &CharState2Text),
+        (
+            Without<CharDialogWidget>,
+            Without<CharNameText>,
+            Without<CharGuildText>,
+            Without<CharStatText>,
+        ),
+    >,
 ) {
     let open = mgr.is_open(DialogKind::Character);
     for mut vis in widgets.iter_mut() {
@@ -498,6 +574,31 @@ fn character_ui_system(
             10 => format!("+{}", state.accuracy),
             11 => format!("+{}", state.agility),
             12 => format!("{}", state.luck),
+            _ => String::new(),
+        };
+    }
+    // State 页（#210）
+    for (mut t, idx) in &mut state2_texts {
+        t.0 = match idx.0 {
+            0 => format!(
+                "{:.2}%",
+                if state.max_exp > 0 {
+                    state.exp as f64 * 100.0 / state.max_exp as f64
+                } else {
+                    0.0
+                }
+            ),
+            1 => format!("{}", state.bag_weight),
+            2 => format!("{}", state.wear_weight),
+            3 => format!("{}", state.hand_weight),
+            4 => format!("+{}", state.magic_resist),
+            5 => format!("+{}", state.poison_resist),
+            6 => format!("+{}", state.health_recovery),
+            7 => format!("+{}", state.spell_recovery),
+            8 => format!("+{}", state.poison_recovery),
+            9 => format!("+{}", state.holy),
+            10 => format!("+{}", state.freezing),
+            11 => format!("+{}", state.poison_atk),
             _ => String::new(),
         };
     }

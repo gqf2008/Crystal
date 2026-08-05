@@ -61,6 +61,18 @@ pub struct UserInformation {
     pub accuracy: i32,
     pub agility: i32,
     pub luck: i32,
+    // ---- #210 角色面板 State 页 ----
+    pub bag_weight: i32,
+    pub wear_weight: i32,
+    pub hand_weight: i32,
+    pub magic_resist: i32,
+    pub poison_resist: i32,
+    pub health_recovery: i32,
+    pub spell_recovery: i32,
+    pub poison_recovery: i32,
+    pub holy: i32,
+    pub freezing: i32,
+    pub poison_atk: i32,
 }
 
 impl Packet for UserInformation {
@@ -204,6 +216,19 @@ impl Packet for UserInformation {
         let agility = reader.read_i32::<LittleEndian>()?;
         let luck = reader.read_i32::<LittleEndian>()?;
 
+        // #210：State 页段（11 x i32）
+        let bag_weight = reader.read_i32::<LittleEndian>()?;
+        let wear_weight = reader.read_i32::<LittleEndian>()?;
+        let hand_weight = reader.read_i32::<LittleEndian>()?;
+        let magic_resist = reader.read_i32::<LittleEndian>()?;
+        let poison_resist = reader.read_i32::<LittleEndian>()?;
+        let health_recovery = reader.read_i32::<LittleEndian>()?;
+        let spell_recovery = reader.read_i32::<LittleEndian>()?;
+        let poison_recovery = reader.read_i32::<LittleEndian>()?;
+        let holy = reader.read_i32::<LittleEndian>()?;
+        let freezing = reader.read_i32::<LittleEndian>()?;
+        let poison_atk = reader.read_i32::<LittleEndian>()?;
+
         Ok(Self {
             object_id,
             real_id,
@@ -250,6 +275,17 @@ impl Packet for UserInformation {
             accuracy,
             agility,
             luck,
+            bag_weight,
+            wear_weight,
+            hand_weight,
+            magic_resist,
+            poison_resist,
+            health_recovery,
+            spell_recovery,
+            poison_recovery,
+            holy,
+            freezing,
+            poison_atk,
         })
     }
 
@@ -366,6 +402,19 @@ impl Packet for UserInformation {
         writer.write_i32::<LittleEndian>(self.accuracy)?;
         writer.write_i32::<LittleEndian>(self.agility)?;
         writer.write_i32::<LittleEndian>(self.luck)?;
+
+        // #210：State 页段
+        writer.write_i32::<LittleEndian>(self.bag_weight)?;
+        writer.write_i32::<LittleEndian>(self.wear_weight)?;
+        writer.write_i32::<LittleEndian>(self.hand_weight)?;
+        writer.write_i32::<LittleEndian>(self.magic_resist)?;
+        writer.write_i32::<LittleEndian>(self.poison_resist)?;
+        writer.write_i32::<LittleEndian>(self.health_recovery)?;
+        writer.write_i32::<LittleEndian>(self.spell_recovery)?;
+        writer.write_i32::<LittleEndian>(self.poison_recovery)?;
+        writer.write_i32::<LittleEndian>(self.holy)?;
+        writer.write_i32::<LittleEndian>(self.freezing)?;
+        writer.write_i32::<LittleEndian>(self.poison_atk)?;
 
         Ok(())
     }
