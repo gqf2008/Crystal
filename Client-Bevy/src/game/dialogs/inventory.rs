@@ -348,6 +348,19 @@ fn spawn_inventory_dialog(
                 Transform::from_xyz(CELL_W - 16.0, -(CELL_H - 13.0), 6.7),
                 Visibility::Hidden,
             ));
+            // 耐久条（底部，装备显示，红色随耐久缩短）
+            p.spawn((
+                InvDura(i),
+                Sprite {
+                    image: white.clone(),
+                    color: Color::srgb(1.0, 0.2, 0.2),
+                    custom_size: Some(Vec2::new(CELL_W - 4.0, 2.0)),
+                    ..default()
+                },
+                Anchor::TOP_LEFT,
+                Transform::from_xyz(2.0, -(CELL_H - 4.0), 6.8),
+                Visibility::Hidden,
+            ));
         });
     }
 }
@@ -379,6 +392,10 @@ pub struct InvIcon(pub usize);
 /// 堆叠数量文本（格子子实体）
 #[derive(Component, Clone, Copy)]
 pub struct InvCount(pub usize);
+
+/// 耐久条（格子子实体，装备显示，C# MirItemCell DrawDurability 对齐）
+#[derive(Component, Clone, Copy)]
+pub struct InvDura(pub usize);
 
 /// 双击检测（记录最近一次左键点击的格子与时间）
 #[derive(Resource, Default)]
@@ -433,7 +450,18 @@ fn inventory_ui_system(
     >,
     mut icons: Query<
         (&mut Sprite, &mut Visibility, &InvIcon),
-        (Without<DialogWidget>, Without<InvSlot>, Without<InvCount>),
+        (Without<DialogWidget>, Without<InvSlot>, Without<InvCount>, Without<InvDura>),
+    >,
+    mut duras: Query<
+        (&mut Sprite, &mut Visibility, &InvDura),
+        (
+            Without<DialogWidget>,
+            Without<InvSlot>,
+            Without<InvIcon>,
+            Without<InvCount>,
+            Without<InvGoldText>,
+            Without<InvWeightText>,
+        ),
     >,
     mut counts: Query<
         (&mut Text2d, &mut Visibility, &InvCount),
@@ -539,6 +567,22 @@ fn inventory_ui_system(
             t.0 = format!("{}/{}", inv.weight, inv.max_weight);
         }
     }
+    // 耐久条（#144 C# MirItemCell DrawDurability：装备显示，红色随耐久缩短）
+    for (mut sprite, mut vis, dura) in &mut duras {
+        let item = inv.items.get(dura.0).and_then(|s| s.as_ref());
+        match item {
+            Some(item) if item.is_equipment() && item.max_dura > 0 => {
+                let ratio = (item.current_dura as f32 / item.max_dura as f32).clamp(0.0, 1.0);
+                let w = ((CELL_W - 4.0) * ratio).max(1.0);
+                let cur = sprite.custom_size.unwrap_or(Vec2::new(CELL_W - 4.0, 2.0));
+                if (cur.x - w).abs() > 0.1 {
+                    sprite.custom_size = Some(Vec2::new(w, 2.0));
+                }
+                *vis = Visibility::Visible;
+            }
+            _ => *vis = Visibility::Hidden,
+        }
+    }
 }
 
 /// 悬停提示系统（#93/#106 通用 Tooltip）：物品格上显示 名称 + 类型/数量/耐久
@@ -622,6 +666,7 @@ pub fn item_type_name(t: u8) -> &'static str {
         Ok(ItemType::MonsterSpawn) => "召唤",
         _ => "其他",
     }
+
 }
 
 /// 选中格子高亮（原版 C# SelectedCell 黄色边框语义：用黄色半透明覆盖表示）
