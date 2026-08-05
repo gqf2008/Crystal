@@ -36,6 +36,8 @@ pub enum ServerEvent {
     },
     /// NewHero：创建英雄结果（C# S.NewHero.Result：1=BadName 4=MaxHeroes 10=Success）
     NewHeroResult { result: u8 },
+    /// SetHeroBehaviour：英雄行为确认（C# S.SetHeroBehaviour，值 0=攻击 1=反击 2=跟随 3=自定义）
+    HeroBehaviourSet { behaviour: u8 },
     /// GainExperience：经验增量
     ExperienceGained { amount: i64 },
     /// LevelChanged：新等级 + 经验（原实现一并更新 exp/max_exp）

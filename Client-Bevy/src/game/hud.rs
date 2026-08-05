@@ -760,6 +760,7 @@ fn hud_server_events(
             | ServerEvent::AttackModeChanged { .. }
             | ServerEvent::HeroManageReceived { .. }
             | ServerEvent::NewHeroResult { .. }
+            | ServerEvent::HeroBehaviourSet { .. }
             | ServerEvent::CraftResult { .. }
             | ServerEvent::NpcGoods { .. }
             | ServerEvent::NpcSellPanel { .. } => {}
