@@ -153,6 +153,10 @@ const ORB_TOP: f32 = 30.0;
 const EXP_TOP: f32 = 143.0;
 const BUTTON_TOP: f32 = 76.0;
 
+/// 攻击模式指示（右下角）
+#[derive(Component)]
+pub struct AttackModeText;
+
 pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
@@ -172,6 +176,7 @@ impl Plugin for HudPlugin {
                 sync_hud_data,
                 hud_update_system,
                 death_overlay_system,
+                attack_mode_text_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -457,6 +462,10 @@ fn spawn_hud(
     ) {
         commands.entity(e).insert((DeathReviveBtn, DeathOverlay));
     }
+
+    // 攻击模式指示（#156，右下角）
+    let am = spawn_ui_text(&mut commands, &font, "模式:和平", 1024.0 - 110.0, 768.0 - 24.0, 12.0, Color::srgb(1.0, 0.9, 0.3), 4.0);
+    commands.entity(am).insert(AttackModeText);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -509,6 +518,22 @@ fn auto_potion_system(
 
 /// 每帧按 HudState 更新血/蓝/经验条与文本（单查询避免 Bevy B0001 冲突）
 /// #70：HudState（Resource）→ HudData（组件）快照同步，仅在实际值变化时写组件
+/// 攻击模式指示更新（#156）
+fn attack_mode_text_system(
+    mode: Res<crate::game::combat::AttackModeState>,
+    mut texts: Query<&mut Text2d, With<AttackModeText>>,
+) {
+    if !mode.is_changed() {
+        return;
+    }
+    let s = format!("模式:{}", crate::game::combat::attack_mode_name(mode.mode));
+    for mut t in &mut texts {
+        if t.0 != s {
+            t.0 = s.clone();
+        }
+    }
+}
+
 fn sync_hud_data(mut roots: Query<&mut HudData>, hud: Res<HudState>) {
     let Ok(mut data) = roots.single_mut() else { return };
     let new = HudData {

@@ -43,11 +43,38 @@ pub struct StruckTimer(pub f32);
 #[derive(Component)]
 pub struct DeathTimer(pub f32);
 
+/// 攻击模式（C# User.AttackMode；Ctrl+H 循环切换）
+#[derive(Resource)]
+pub struct AttackModeState {
+    pub mode: mir2_shared::enums::AttackMode,
+}
+
+impl Default for AttackModeState {
+    fn default() -> Self {
+        Self {
+            mode: mir2_shared::enums::AttackMode::Peace,
+        }
+    }
+}
+
+/// 攻击模式中文名
+pub fn attack_mode_name(mode: mir2_shared::enums::AttackMode) -> &'static str {
+    match mode {
+        mir2_shared::enums::AttackMode::Peace => "和平",
+        mir2_shared::enums::AttackMode::Group => "组队",
+        mir2_shared::enums::AttackMode::Guild => "行会",
+        mir2_shared::enums::AttackMode::EnemyGuild => "敌会",
+        mir2_shared::enums::AttackMode::RedBrown => "红名",
+        mir2_shared::enums::AttackMode::All => "全体",
+    }
+}
+
 pub struct CombatPlugin;
 
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RealHitProbe>();
+        app.init_resource::<AttackModeState>();
         app.add_message::<CombatEvent>();
         app.add_systems(
             Update,
@@ -55,7 +82,34 @@ impl Plugin for CombatPlugin {
                 .after(crate::network::network_system)
                 .run_if(in_state(AppState::Game)),
         );
+        app.add_systems(
+            Update,
+            attack_mode_system.run_if(in_state(AppState::Game)),
+        );
     }
+}
+
+/// Ctrl+H 循环切换攻击模式（#156 C# KeybindOptions.ChangeAttackmode）
+fn attack_mode_system(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<AttackModeState>,
+    net: Res<crate::network::NetConnection>,
+) {
+    if !(keys.just_pressed(KeyCode::KeyH)
+        && (keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight)))
+    {
+        return;
+    }
+    use mir2_shared::enums::AttackMode;
+    let next = match state.mode {
+        AttackMode::Peace => AttackMode::Group,
+        AttackMode::Group => AttackMode::Guild,
+        AttackMode::Guild => AttackMode::All,
+        _ => AttackMode::Peace,
+    };
+    state.mode = next;
+    net.send_packet(&mir2_shared::packets::client::misc::ChangeAMode { mode: next });
+    tracing::info!("⚔️ 攻击模式 -> {:?}（{}）", next, attack_mode_name(next));
 }
 
 /// 应用受击/死亡事件 + 生成伤害飘字
