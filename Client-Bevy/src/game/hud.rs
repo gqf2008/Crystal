@@ -675,6 +675,10 @@ fn hud_server_events(
             ServerEvent::GoldGained { gold } => {
                 hud.gold = hud.gold.saturating_add(*gold);
             }
+            ServerEvent::GoldLost { amount } => {
+                hud.gold = hud.gold.saturating_sub(*amount);
+                tracing::info!("💸 失去金币 -{}（当前 {}）", amount, hud.gold);
+            }
             ServerEvent::ExperienceGained { amount } => {
                 hud.exp += *amount;
                 tracing::info!("✨ 获得经验 +{}（当前 {}/{}）", amount, hud.exp, hud.max_exp);
