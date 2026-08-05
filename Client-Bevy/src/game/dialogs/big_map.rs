@@ -505,6 +505,7 @@ fn big_map_viewport_system(
         Option<&BigMapDot>,
     ), Without<crate::actor::LocalPlayer>>,
     players: Query<&Transform, (With<crate::actor::LocalPlayer>, Without<BigMapWidget>)>,
+    windows: Query<&Window>,
     mut texts: Query<(&mut Text2d, Option<&BigMapTitleText>, Option<&BigMapCoordText>)>,
 ) {
     let open = mgr.is_open(DialogKind::BigMap);
@@ -579,9 +580,27 @@ fn big_map_viewport_system(
         if title.is_some() {
             text.0 = state.title.clone();
         } else if coord.is_some() {
-            if let Ok(player_tf) = players.single() {
-                let (tx, ty) = world_to_tile(player_tf.translation.x, player_tf.translation.y);
-                text.0 = format!("[ {}, {} ]", tx, ty);
+            // #122 C# MakeCoordinateLabel：鼠标悬停视口显示鼠标坐标，否则显示玩家坐标
+            let mut s = None;
+            if let Ok(window) = windows.single() {
+                if let Some(cursor) = window.cursor_position() {
+                    if cursor.x >= vx && cursor.x <= vx + tw && cursor.y >= vy && cursor.y <= vy + th {
+                        let tx = (((cursor.x - vx) / tw) * mw) as i32;
+                        let ty = (((cursor.y - vy) / th) * mh) as i32;
+                        s = Some(format!("[ {}, {} ]", tx, ty));
+                    }
+                }
+            }
+            if s.is_none() {
+                if let Ok(player_tf) = players.single() {
+                    let (tx, ty) = world_to_tile(player_tf.translation.x, player_tf.translation.y);
+                    s = Some(format!("[ {}, {} ]", tx, ty));
+                }
+            }
+            if let Some(s) = s {
+                if text.0 != s {
+                    text.0 = s;
+                }
             }
         }
     }
