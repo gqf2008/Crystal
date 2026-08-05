@@ -208,9 +208,6 @@ pub struct KeyboardReset;
 pub struct KeyboardEnforce;
 
 #[derive(Component)]
-pub struct KeyboardEnforceCheck;
-
-#[derive(Component)]
 pub struct KeyboardPositionBar(pub f32);
 
 #[derive(Component)]

@@ -208,12 +208,6 @@ impl ChatState {
         let max_scroll = self.lines.len().saturating_sub(self.visible_lines);
         self.scroll_up = self.scroll_up.min(max_scroll);
     }
-
-    /// 当前可见起始行（历史回看）
-    pub fn display_start(&self) -> usize {
-        let newest = self.lines.len().saturating_sub(self.visible_lines);
-        newest.saturating_sub(self.scroll_up)
-    }
 }
 
 /// 聊天面板根标记
