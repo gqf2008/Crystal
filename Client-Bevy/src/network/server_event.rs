@@ -27,6 +27,8 @@ pub enum ServerEvent {
     StoragePasswordResult { result: u8 },
     /// LogOutSuccess：登出成功，返回选角
     LogOutSuccess,
+    /// ChangeAMode：攻击模式确认（C# S.ChangeAMode）
+    AttackModeChanged { mode: mir2_shared::enums::AttackMode },
     /// GainExperience：经验增量
     ExperienceGained { amount: i64 },
     /// LevelChanged：新等级 + 经验（原实现一并更新 exp/max_exp）
