@@ -3109,6 +3109,46 @@ impl PlayerActor {
         body.push(0u8);                                                 // allow_observe=false
         body.push(0u8);                                                 // observer=false
 
+        // #208：角色面板属性段（18 x i32；最终值 = 基础 + 装备加成）
+        body.extend_from_slice(&(self.state.max_hp + self.state.bonus_max_hp).to_le_bytes());
+        body.extend_from_slice(&(self.state.max_mp + self.state.bonus_max_mp).to_le_bytes());
+        for v in [
+            self.state.min_ac + self.state.bonus_min_ac,
+            self.state.max_ac + self.state.bonus_max_ac,
+        ] {
+            body.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in [
+            self.state.min_mac + self.state.bonus_min_mac,
+            self.state.max_mac + self.state.bonus_max_mac,
+        ] {
+            body.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in [
+            self.state.min_attack + self.state.bonus_min_attack,
+            self.state.max_attack + self.state.bonus_max_attack,
+        ] {
+            body.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in [
+            self.state.min_mc + self.state.bonus_min_mc,
+            self.state.max_mc + self.state.bonus_max_mc,
+        ] {
+            body.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in [
+            self.state.min_sc + self.state.bonus_min_sc,
+            self.state.max_sc + self.state.bonus_max_sc,
+        ] {
+            body.extend_from_slice(&v.to_le_bytes());
+        }
+        body.extend_from_slice(&self.state.critical_rate.to_le_bytes());
+        body.extend_from_slice(&self.state.critical_damage.to_le_bytes());
+        body.extend_from_slice(&0i32.to_le_bytes()); // attack_speed（服务端暂缺）
+        body.extend_from_slice(&self.state.accuracy.to_le_bytes());
+        body.extend_from_slice(&self.state.agility.to_le_bytes());
+        body.extend_from_slice(&self.state.luck.to_le_bytes());
+
         let _ = self.gate_ref.tell(SendToClient {
             session_id: self.state.session_id,
             data: build_packet_bytes(ServerPacketIds::UserInformation as i16, &body),

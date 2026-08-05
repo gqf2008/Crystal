@@ -46,6 +46,21 @@ pub struct UserInformation {
     pub creature_summoned: bool,
     pub allow_observe: bool,
     pub observer: bool,
+    // ---- #208 角色面板属性（服务端最终值 = 基础 + 装备加成）----
+    pub max_hp: i32,
+    pub max_mp: i32,
+    /// [min, max] AC / MAC / DC / MC / SC
+    pub ac: [i32; 2],
+    pub mac: [i32; 2],
+    pub dc: [i32; 2],
+    pub mc: [i32; 2],
+    pub sc: [i32; 2],
+    pub critical_rate: i32,
+    pub critical_damage: i32,
+    pub attack_speed: i32,
+    pub accuracy: i32,
+    pub agility: i32,
+    pub luck: i32,
 }
 
 impl Packet for UserInformation {
@@ -174,6 +189,21 @@ impl Packet for UserInformation {
         let allow_observe = reader.read_u8()? != 0;
         let observer = reader.read_u8()? != 0;
 
+        // #208：角色属性段（18 x i32）
+        let max_hp = reader.read_i32::<LittleEndian>()?;
+        let max_mp = reader.read_i32::<LittleEndian>()?;
+        let ac = [reader.read_i32::<LittleEndian>()?, reader.read_i32::<LittleEndian>()?];
+        let mac = [reader.read_i32::<LittleEndian>()?, reader.read_i32::<LittleEndian>()?];
+        let dc = [reader.read_i32::<LittleEndian>()?, reader.read_i32::<LittleEndian>()?];
+        let mc = [reader.read_i32::<LittleEndian>()?, reader.read_i32::<LittleEndian>()?];
+        let sc = [reader.read_i32::<LittleEndian>()?, reader.read_i32::<LittleEndian>()?];
+        let critical_rate = reader.read_i32::<LittleEndian>()?;
+        let critical_damage = reader.read_i32::<LittleEndian>()?;
+        let attack_speed = reader.read_i32::<LittleEndian>()?;
+        let accuracy = reader.read_i32::<LittleEndian>()?;
+        let agility = reader.read_i32::<LittleEndian>()?;
+        let luck = reader.read_i32::<LittleEndian>()?;
+
         Ok(Self {
             object_id,
             real_id,
@@ -207,6 +237,19 @@ impl Packet for UserInformation {
             creature_summoned,
             allow_observe,
             observer,
+            max_hp,
+            max_mp,
+            ac,
+            mac,
+            dc,
+            mc,
+            sc,
+            critical_rate,
+            critical_damage,
+            attack_speed,
+            accuracy,
+            agility,
+            luck,
         })
     }
 
@@ -298,6 +341,31 @@ impl Packet for UserInformation {
         writer.write_u8(self.creature_summoned as u8)?;
         writer.write_u8(self.allow_observe as u8)?;
         writer.write_u8(self.observer as u8)?;
+
+        // #208：角色属性段
+        writer.write_i32::<LittleEndian>(self.max_hp)?;
+        writer.write_i32::<LittleEndian>(self.max_mp)?;
+        for v in self.ac {
+            writer.write_i32::<LittleEndian>(v)?;
+        }
+        for v in self.mac {
+            writer.write_i32::<LittleEndian>(v)?;
+        }
+        for v in self.dc {
+            writer.write_i32::<LittleEndian>(v)?;
+        }
+        for v in self.mc {
+            writer.write_i32::<LittleEndian>(v)?;
+        }
+        for v in self.sc {
+            writer.write_i32::<LittleEndian>(v)?;
+        }
+        writer.write_i32::<LittleEndian>(self.critical_rate)?;
+        writer.write_i32::<LittleEndian>(self.critical_damage)?;
+        writer.write_i32::<LittleEndian>(self.attack_speed)?;
+        writer.write_i32::<LittleEndian>(self.accuracy)?;
+        writer.write_i32::<LittleEndian>(self.agility)?;
+        writer.write_i32::<LittleEndian>(self.luck)?;
 
         Ok(())
     }

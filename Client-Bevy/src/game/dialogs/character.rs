@@ -37,6 +37,13 @@ pub struct CharacterState {
     pub max_mp: i32,
     /// [min, max] AC/MAC/DC/MC/SC
     pub stats: [[i32; 2]; 5],
+    /// #208：暴击率/暴击伤害/攻速/命中/敏捷/幸运
+    pub critical_rate: i32,
+    pub critical_damage: i32,
+    pub attack_speed: i32,
+    pub accuracy: i32,
+    pub agility: i32,
+    pub luck: i32,
     /// 14 装备槽
     pub equipment: Vec<Option<u32>>,
 }
@@ -52,6 +59,12 @@ impl Default for CharacterState {
             mp: 1,
             max_mp: 600,
             stats: [[0; 2]; 5],
+            critical_rate: 0,
+            critical_damage: 0,
+            attack_speed: 0,
+            accuracy: 0,
+            agility: 0,
+            luck: 0,
             equipment: vec![None; 14],
         }
     }
@@ -479,6 +492,12 @@ fn character_ui_system(
             4 => format!("{}-{}", state.stats[2][0], state.stats[2][1]),
             5 => format!("{}-{}", state.stats[3][0], state.stats[3][1]),
             6 => format!("{}-{}", state.stats[4][0], state.stats[4][1]),
+            7 => format!("{}%", state.critical_rate),
+            8 => format!("{}%", state.critical_damage),
+            9 => format!("{}", state.attack_speed),
+            10 => format!("+{}", state.accuracy),
+            11 => format!("+{}", state.agility),
+            12 => format!("{}", state.luck),
             _ => String::new(),
         };
     }
