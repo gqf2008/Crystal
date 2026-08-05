@@ -16,6 +16,10 @@ use bevy::sprite::Anchor;
 #[derive(Message, Debug, Clone, Copy)]
 pub enum CombatEvent {
     Struck { object_id: u32, direction: u8 },
+    /// S.Struck：本地玩家被击中（C# User.Struck 受击动画）
+    PlayerStruck,
+    /// S.ObjectHealth：对象血量百分比（C# 头顶血条）
+    ObjectHealth { object_id: u32, percent: u8, expire: u16 },
     Died { object_id: u32, death_type: u8 },
     Revived { object_id: u32 },
     Damage { object_id: u32, damage: i32, dmg_type: u8 },
@@ -38,6 +42,25 @@ pub struct DamageText {
 /// 受击动画计时（结束后回站立）
 #[derive(Component)]
 pub struct StruckTimer(pub f32);
+
+/// 对象血量（C# S.ObjectHealth：percent + expire 秒）
+#[derive(Component)]
+pub struct ActorHp {
+    pub percent: u8,
+    pub expire: f32,
+}
+
+/// 已生成头顶血条的父实体标记
+#[derive(Component)]
+pub struct ActorHpBar;
+
+/// 头顶血条背景（子实体）
+#[derive(Component)]
+pub struct HpBarBg;
+
+/// 头顶血条红色填充（子实体）
+#[derive(Component)]
+pub struct HpBarFill;
 
 /// 死亡移除计时
 #[derive(Component)]
@@ -78,7 +101,7 @@ impl Plugin for CombatPlugin {
         app.add_message::<CombatEvent>();
         app.add_systems(
             Update,
-            (apply_combat_events, advance_combat_timers, advance_damage_texts)
+            (apply_combat_events, advance_combat_timers, advance_damage_texts, actor_hp_bar_system)
                 .after(crate::network::network_system)
                 .run_if(in_state(AppState::Game)),
         );
@@ -133,6 +156,30 @@ fn apply_combat_events(
                         anim.direction = *direction;
                         anim.frame_index = 0;
                         commands.entity(e).insert(StruckTimer(0.6));
+                        break;
+                    }
+                }
+            }
+            CombatEvent::PlayerStruck => {
+                // C# S.Struck：本地玩家受击动画 + 音效
+                crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, 10060);
+                for (e, id, mut anim) in &mut actors {
+                    if hud.player_object_id == Some(id.0) {
+                        anim.action = mir2_shared::enums::MirAction::Struck;
+                        anim.frame_index = 0;
+                        commands.entity(e).insert(StruckTimer(0.6));
+                        break;
+                    }
+                }
+            }
+            CombatEvent::ObjectHealth { object_id, percent, expire } => {
+                // C# S.ObjectHealth：挂载血量（血条系统渲染/过期）
+                for (e, id, _) in &mut actors {
+                    if id.0 == *object_id {
+                        commands.entity(e).insert(ActorHp {
+                            percent: *percent,
+                            expire: *expire as f32,
+                        });
                         break;
                     }
                 }
@@ -226,6 +273,65 @@ fn advance_damage_texts(
         tf.translation.y += dt.vy * time.delta_secs();
         if dt.life <= 0.0 {
             commands.entity(e).despawn();
+        }
+    }
+}
+
+/// 对象头顶血条（C# S.ObjectHealth）：生成/更新/过期清除
+fn actor_hp_bar_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut images: ResMut<Assets<Image>>,
+    mut actors: Query<(Entity, &mut ActorHp, Option<&ActorHpBar>)>,
+    mut bars: Query<(Entity, &ChildOf, &mut Sprite, &HpBarFill)>,
+) {
+    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    for (e, mut hp, bar) in &mut actors {
+        hp.expire -= time.delta_secs();
+        if hp.expire <= 0.0 {
+            let children: Vec<Entity> = bars
+                .iter()
+                .filter(|(_, c, _, _)| c.parent() == e)
+                .map(|(e2, _, _, _)| e2)
+                .collect();
+            for c in children {
+                commands.entity(c).despawn();
+            }
+            commands.entity(e).remove::<ActorHp>().remove::<ActorHpBar>();
+            continue;
+        }
+        if bar.is_none() {
+            commands.entity(e).insert(ActorHpBar);
+            commands.entity(e).with_children(|p| {
+                p.spawn((
+                    HpBarBg,
+                    Sprite {
+                        image: white.clone(),
+                        color: Color::srgb(0.0, 0.0, 0.0),
+                        custom_size: Some(Vec2::new(30.0, 4.0)),
+                        ..default()
+                    },
+                    bevy::sprite::Anchor::TOP_LEFT,
+                    Transform::from_xyz(-15.0, 18.0, 0.1),
+                ));
+                p.spawn((
+                    HpBarFill,
+                    Sprite {
+                        image: white.clone(),
+                        color: Color::srgb(0.9, 0.1, 0.1),
+                        custom_size: Some(Vec2::new(30.0, 4.0)),
+                        ..default()
+                    },
+                    bevy::sprite::Anchor::TOP_LEFT,
+                    Transform::from_xyz(-15.0, 18.0, 0.2),
+                ));
+            });
+        }
+        let w = 30.0 * (hp.percent.clamp(1, 99) as f32 / 100.0);
+        for (_, c, mut fs, _) in &mut bars {
+            if c.parent() == e {
+                fs.custom_size = Some(Vec2::new(w, 4.0));
+            }
         }
     }
 }

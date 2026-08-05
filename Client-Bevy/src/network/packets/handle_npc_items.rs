@@ -28,7 +28,7 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::NPCResponse as i16, ServerPacketIds::ObjectStruck as i16, ServerPacketIds::ObjectDied as i16, ServerPacketIds::Death as i16, ServerPacketIds::Revived as i16, ServerPacketIds::ObjectRevived as i16, ServerPacketIds::DamageIndicator as i16, ServerPacketIds::NPCGoods as i16, ServerPacketIds::MoveItem as i16, ServerPacketIds::EquipItem as i16, ServerPacketIds::RemoveItem as i16, ServerPacketIds::UseItem as i16, ServerPacketIds::SplitItem as i16, ServerPacketIds::DropItem as i16, ServerPacketIds::MergeItem as i16, ServerPacketIds::SellItem as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::NPCResponse as i16, ServerPacketIds::ObjectStruck as i16, ServerPacketIds::Struck as i16, ServerPacketIds::ObjectHealth as i16, ServerPacketIds::ObjectDied as i16, ServerPacketIds::Death as i16, ServerPacketIds::Revived as i16, ServerPacketIds::ObjectRevived as i16, ServerPacketIds::DamageIndicator as i16, ServerPacketIds::NPCGoods as i16, ServerPacketIds::MoveItem as i16, ServerPacketIds::EquipItem as i16, ServerPacketIds::RemoveItem as i16, ServerPacketIds::UseItem as i16, ServerPacketIds::SplitItem as i16, ServerPacketIds::DropItem as i16, ServerPacketIds::MergeItem as i16, ServerPacketIds::SellItem as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
 
@@ -54,6 +54,23 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
                         color: [1.0, 0.7, 0.2],
                     });
                 }
+            }
+        }
+        x if x == ServerPacketIds::Struck as i16 => {
+            // C# S.Struck：本地玩家被攻击（attacker_id u32）
+            if let Ok(p) = combat::Struck::read_body(&mut cur) {
+                combat_evt.write(CombatEvent::PlayerStruck);
+                tracing::debug!("💥 玩家受击 attacker={}", p.attacker_id);
+            }
+        }
+        x if x == ServerPacketIds::ObjectHealth as i16 => {
+            // C# S.ObjectHealth：对象血量百分比
+            if let Ok(p) = object::ObjectHealth::read_body(&mut cur) {
+                combat_evt.write(CombatEvent::ObjectHealth {
+                    object_id: p.object_id,
+                    percent: p.percent,
+                    expire: p.expire,
+                });
             }
         }
         x if x == ServerPacketIds::ObjectDied as i16 => {

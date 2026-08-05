@@ -168,7 +168,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                     let mut health_body = Vec::new();
                     health_body.extend_from_slice(&monster.object_id.to_le_bytes());
                     health_body.push(percent);
-                    health_body.extend_from_slice(&0u16.to_le_bytes()); // expire
+                    health_body.extend_from_slice(&3u16.to_le_bytes()); // expire（秒，C# ObjectHealth 语义，血条显示 3 秒）
                     let health_packet = build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &health_body);
 
@@ -2197,3 +2197,4 @@ fn best_dir(dx: i32, dy: i32) -> usize {
     }
     best
 }
+
