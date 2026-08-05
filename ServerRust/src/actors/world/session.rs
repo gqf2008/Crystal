@@ -240,6 +240,10 @@ impl Message<StartGameRequest> for WorldActor {
         info!("Player {} entered world (object_id={}, session={})",
               player_name, object_id, msg.session_id);
 
+        // #188：下发英雄列表（ManageHeroes）
+        let heroes = self.player_heroes.get(&msg.session_id).cloned().unwrap_or_default();
+        send_manage_heroes_packet(&self.gate_ref, msg.session_id, &loaded_state, &heroes);
+
         // 通知 SocialActor 玩家上线（组队/好友/行会查询依赖在线表）
         let _ = self.social_ref.tell(crate::actors::social::SocialPlayerJoined {
             session_id: msg.session_id,

@@ -670,17 +670,35 @@ impl Message<NewHeroRequest> for WorldActor {
             _ => return,
         };
 
-        // 英雄创建尚未实现：按 C# S.NewHero Result=0（CreatingNewHeroesDisabled）响应
-        let body = vec![0u8];
+        // #188：真正创建英雄（内存态；DB 持久化后续批次）
+        // C# S.NewHero.Result：1=BadName 4=MaxHeroes 10=Success
+        let has_hero = self.player_heroes.get(&msg.session_id).is_some_and(|v| !v.is_empty());
+        let result = hero_create_result(&msg.name, has_hero);
+        if result == 10 {
+            self.player_heroes.entry(msg.session_id).or_default().push(HeroInfo {
+                index: 1,
+                name: msg.name.clone(),
+                level: 1,
+                class: msg.class,
+                gender: msg.gender,
+            });
+            let _ = record.actor_ref.ask(SetHeroIndex { hero_index: 1 }).await;
+        }
+        let body = vec![result];
         let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewHero as i16, &body),
         }).await;
-
-        debug!("NewHero(disabled): {} name={} gender={:?} class={:?}", state.name, msg.name, msg.gender, msg.class);
+        // 重新下发英雄列表
+        let state_after = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => state.clone(),
+        };
+        let heroes = self.player_heroes.get(&msg.session_id).cloned().unwrap_or_default();
+        send_manage_heroes_packet(&self.gate_ref, msg.session_id, &state_after, &heroes);
+        debug!("NewHero: {} name={} gender={:?} class={:?} result={}", state.name, msg.name, msg.gender, msg.class, result);
     }
 }
-
 // ============================================================
 // 钓鱼系统
 // ============================================================
