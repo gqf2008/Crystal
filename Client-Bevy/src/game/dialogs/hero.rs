@@ -45,6 +45,8 @@ pub struct HeroState {
     pub equipment: Vec<Option<crate::game::dialogs::inventory::InvItem>>,
     /// 英雄魔法（#218）
     pub magics: Vec<mir2_shared::data::client_data::ClientMagic>,
+    /// 英雄对象 id（#220：MagicLeveled 路由）
+    pub object_id: u32,
     pub hero_hp: i32,
     pub hero_mp: i32,
     pub hero_exp: i64,
@@ -71,6 +73,7 @@ impl Default for HeroState {
             inventory: Vec::new(),
             equipment: Vec::new(),
             magics: Vec::new(),
+            object_id: 0,
             hero_hp: 0,
             hero_mp: 0,
             hero_exp: 0,
@@ -78,6 +81,28 @@ impl Default for HeroState {
             auto_pot: false,
             hp_item_index: -1,
             mp_item_index: -1,
+        }
+    }
+}
+
+impl HeroState {
+    /// #220：按 object_id 路由英雄技能升级（匹配才更新，返回是否命中）
+    pub fn apply_magic_leveled(
+        &mut self,
+        object_id: u32,
+        spell: mir2_shared::enums::Spell,
+        level: u8,
+        experience: u16,
+    ) -> bool {
+        if self.object_id != object_id {
+            return false;
+        }
+        if let Some(m) = self.magics.iter_mut().find(|m| m.spell == spell) {
+            m.level = level;
+            m.experience = experience;
+            true
+        } else {
+            false
         }
     }
 }
@@ -718,7 +743,18 @@ fn hero_server_events(
                 }
                 hero.message = format!("自动药: {}", autopot_text(hero.auto_pot_hp, hero.auto_pot_mp));
             }
+            ServerEvent::MagicLeveled {
+                object_id,
+                spell,
+                level,
+                experience,
+            } => {
+                if hero.apply_magic_leveled(*object_id, *spell, *level, *experience) {
+                    hero.message = format!("英雄技能 {:?} 升级 Lv.{}", spell, level);
+                }
+            }
             ServerEvent::HeroInformation {
+                object_id,
                 inventory,
                 equipment,
                 magics,
@@ -736,6 +772,7 @@ fn hero_server_events(
                 hero.inventory = inventory.clone();
                 hero.equipment = equipment.clone();
                 hero.magics = magics.clone();
+                hero.object_id = *object_id;
                 hero.hero_hp = *hp;
                 hero.hero_mp = *mp;
                 hero.hero_exp = *exp;
@@ -795,4 +832,47 @@ pub(crate) fn next_autopot(v: u8) -> u8 {
 /// 自动药显示文本
 fn autopot_text(hp: u8, mp: u8) -> String {
     format!("HP {}%  MP {}%", hp, mp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HeroState;
+    use mir2_shared::data::client_data::ClientMagic;
+    use mir2_shared::enums::Spell;
+
+    fn cm(spell: Spell) -> ClientMagic {
+        ClientMagic {
+            name: format!("{:?}", spell),
+            spell,
+            base_cost: 0,
+            level_cost: 0,
+            icon: 0,
+            level1: 0,
+            level2: 0,
+            level3: 0,
+            need1: 0,
+            need2: 0,
+            need3: 0,
+            level: 0,
+            key: 0,
+            experience: 0,
+            delay: 0,
+            range: 1,
+            cast_time: 0,
+        }
+    }
+
+    #[test]
+    fn hero_magic_leveled_routes_by_object_id() {
+        let mut hero = HeroState::default();
+        hero.object_id = 0x1000_0100;
+        hero.magics.push(cm(Spell::FireBall));
+        // 正确 object_id → 更新
+        assert!(hero.apply_magic_leveled(0x1000_0100, Spell::FireBall, 2, 500));
+        assert_eq!(hero.magics[0].level, 2);
+        assert_eq!(hero.magics[0].experience, 500);
+        // 玩家 object_id → 不命中
+        assert!(!hero.apply_magic_leveled(100, Spell::FireBall, 3, 0));
+        assert_eq!(hero.magics[0].level, 2);
+    }
 }

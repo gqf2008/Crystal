@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // auto：自动化验证/调试系统（--auto-* / --real-verify / F12 截图等）
 // ============================================================================
 // 从 main.rs 迁出（#68）：主 bin 只保留 App 组装；调试系统按 CLI flag 在此注册。
@@ -3386,6 +3386,15 @@ fn auto_hero_test(
             }
             if hero.magics.iter().any(|m| m.spell == mir2_shared::enums::Spell::GreatFireBall) {
                 tracing::info!("[HEROTEST] ✅ 英雄学会 GreatFireBall（{} 个技能）", hero.magics.len());
+                // #220：等待 MagicLeveled 升级路由到英雄技能面板
+                let lv = hero.magics.iter().find(|m| m.spell == mir2_shared::enums::Spell::GreatFireBall).map(|m| m.level).unwrap_or(0);
+                if lv >= 1 {
+                    tracing::info!("[HEROTEST] ✅ 英雄技能升级 Lv.{}（MagicLeveled 路由成功）", lv);
+                    net.send_packet(&client_bevy::network::ChangeHeroWire { hero_index: 0 });
+                    tracing::info!("[HEROTEST] 切回主角色");
+                    *stage = 2;
+                    *t = 0.0;
+                }
                 net.send_packet(&client_bevy::network::ChangeHeroWire { hero_index: 0 });
                 tracing::info!("[HEROTEST] 切回主角色");
                 *stage = 2;
