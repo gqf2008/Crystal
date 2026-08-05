@@ -54,7 +54,8 @@ impl Plugin for MiniMapPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_minimap);
         app.add_systems(
             Update,
-            (minimap_toggle_system, minimap_ui_system, ui_button_system)
+            // #148 小地图快捷键改由 dialog_hotkey_system 按键位设置处理（可重绑）
+            (minimap_ui_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -167,17 +168,6 @@ fn spawn_minimap(
         MiniMapWidget,
         MiniMapPosText,
     ));
-}
-
-/// 显示/隐藏 + 玩家位置点/地图名/坐标更新
-/// M 键切换小地图（原版 KeybindOptions.Minimap）
-fn minimap_toggle_system(
-    mut mgr: ResMut<DialogManager>,
-    keys: Res<ButtonInput<KeyCode>>,
-) {
-    if keys.just_pressed(KeyCode::KeyM) {
-        mgr.toggle(DialogKind::Minimap);
-    }
 }
 
 fn minimap_ui_system(
