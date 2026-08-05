@@ -1850,7 +1850,7 @@ fn forward_dell_member(
 // Hero/宠物
 // ============================================================================
 
-/// NewHero: [hero_type: u8]
+/// NewHero: C# C.NewHero = Name(string) + Gender(u8) + Class(u8)
 fn forward_new_hero(
     world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
     session_id: SessionId,
@@ -1858,9 +1858,17 @@ fn forward_new_hero(
 ) {
     if payload.is_empty() { return; }
     let world_ref = match world_ref { Some(w) => w, None => { return; } };
-    let hero_type = payload[0];
-    debug!("NewHero: session={} type={}", session_id, hero_type);
-    let _ = world_ref.tell(crate::actors::world::NewHeroRequest { session_id, hero_type }).try_send();
+    let Ok(packet) = mir2_shared::packets::client::hero::NewHero::read_body(&mut std::io::Cursor::new(payload)) else {
+        warn!("NewHero: 解析失败 session={} len={}", session_id, payload.len());
+        return;
+    };
+    debug!("NewHero: session={} name={} gender={:?} class={:?}", session_id, packet.name, packet.gender, packet.class);
+    let _ = world_ref.tell(crate::actors::world::NewHeroRequest {
+        session_id,
+        name: packet.name,
+        gender: packet.gender,
+        class: packet.class,
+    }).try_send();
 }
 
 /// SetHeroBehaviour: [behaviour: u8]

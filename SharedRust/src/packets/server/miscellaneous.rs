@@ -566,31 +566,29 @@ impl Packet for GuildRequestWar {
     }
 }
 
-/// NewHero - 新英雄 (175)
-#[derive(Debug, Clone)]
+/// NewHero - 新英雄创建结果 (C# S.NewHero: 1 byte Result)
+/// 0=Disabled 1=BadName 2=BadGender 3=BadClass 4=MaxHeroes 5=NameExists 6=NoBagSpace 10=Success
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NewHero {
-    pub hero_info: String,          // 英雄信息
+    pub result: u8,
 }
 
 impl Packet for NewHero {
     const OPCODE: i16 = ServerPacketIds::NewHero as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use crate::binary::write_dotnet_string;
-        write_dotnet_string(writer, &self.hero_info)?;
+        use byteorder::WriteBytesExt;
+        writer.write_u8(self.result)?;
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let len = reader.read_i32::<LittleEndian>()?;
-        let mut bytes = vec![0u8; len as usize];
-        reader.read_exact(&mut bytes)?;
-        let hero_info = String::from_utf8_lossy(&bytes).to_string();
-        Ok(Self { hero_info })
+        use byteorder::ReadBytesExt;
+        let result = reader.read_u8()?;
+        Ok(Self { result })
     }
 }
 
-/// HeroInformation - 英雄信息 (176)
 #[derive(Debug, Clone)]
 pub struct HeroInformation {
     pub hero_id: u32,               // 英雄ID

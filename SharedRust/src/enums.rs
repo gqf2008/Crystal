@@ -2262,10 +2262,11 @@ pub enum HeroSpawnState {
 )]
 #[repr(u8)]
 pub enum HeroBehaviour {
-    Attack = 3,
-    CounterAttack = 4,
-    Follow = 5,
-    Custom = 6,
+    // C# Shared/Enums.cs: Attack=0, CounterAttack=1, Follow=2, Custom=3
+    Attack = 0,
+    CounterAttack = 1,
+    Follow = 2,
+    Custom = 3,
 }
 
 #[derive(

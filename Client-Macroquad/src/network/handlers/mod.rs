@@ -669,13 +669,13 @@ pub enum NetworkEvent {
 
     // 服务器 -> 客户端
     HeroCreateRequested { can_create_class: Vec<bool> },
-    NewHeroCreated { hero_info: String },
+    NewHeroCreated { result: u8 },
     HeroInfoReceived { hero_id: u32 },
     HeroSpawnStateUpdated { state: u8 },
     HeroAutoPotUnlocked { unlocked: bool },
     HeroAutoPotSet { pot_type: u8, value: u32 },
     HeroAutoPotItemSet { slot: i32, item_id: u32 },
-    HeroBehaviourSet { behaviour: u8, pet_mode: u8 },
+    HeroBehaviourSet { behaviour: u8 },
     HeroManageReceived { heroes: Vec<mir2_shared::data::client_data::ClientHeroInformation> },
     HeroChanged { success: bool },
     HeroBaseStatsReceived { stats: Vec<i32> },
