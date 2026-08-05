@@ -1,27 +1,55 @@
 // ============================================================================
-// 英雄对话框（M48）
-// 参考：C# HeroDialog + ServerRust hero.rs
+// 英雄对话框（M48 + #190 英雄管理 UI）
+// 参考：C# HeroDialog + HeroManageDialog + NewHeroDialog
 // 网络：
-//   C: ChangeHero[hero_index u8]
-//   S: ChangeHero[hero_index u8]（send_hero_update_packet）
+//   S: ManageHeroes（英雄列表）/ NewHero（创建结果）/ ChangeHero（切换）
+//   C: ChangeHero[hero_index u8] / NewHero[name, gender, class]
 // ============================================================================
 
 use bevy::prelude::*;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
+    UiImageCache,
 };
 
 /// 英雄状态
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct HeroState {
     pub hero_index: u8,
     pub message: String,
+    /// 英雄列表（C# S.ManageHeroes）
+    pub heroes: Vec<mir2_shared::data::client_data::ClientHeroInformation>,
+    /// 当前英雄
+    pub current: Option<mir2_shared::data::client_data::ClientHeroInformation>,
+    /// 创建面板是否打开
+    pub creating: bool,
+    /// 创建结果提示
+    pub create_msg: String,
+    /// 创建面板选中的职业/性别
+    pub create_class: mir2_shared::enums::MirClass,
+    pub create_gender: mir2_shared::enums::MirGender,
+}
+
+impl Default for HeroState {
+    fn default() -> Self {
+        Self {
+            hero_index: 0,
+            message: String::new(),
+            heroes: Vec::new(),
+            current: None,
+            creating: false,
+            create_msg: String::new(),
+            create_class: mir2_shared::enums::MirClass::Warrior,
+            create_gender: mir2_shared::enums::MirGender::Male,
+        }
+    }
 }
 
 #[derive(Component)]
@@ -39,20 +67,50 @@ pub struct HeroSwitch1;
 #[derive(Component)]
 pub struct HeroLine(usize);
 
+/// 创建英雄按钮（C# NewHeroDialog）
+#[derive(Component)]
+pub struct HeroCreateBtn;
+
+/// 创建面板
+#[derive(Component)]
+pub struct HeroCreatePanel;
+
+/// 职业/性别循环选择按钮
+#[derive(Component)]
+pub struct HeroClassCycle;
+
+#[derive(Component)]
+pub struct HeroGenderCycle;
+
+#[derive(Component)]
+pub struct HeroClassLabel;
+
+#[derive(Component)]
+pub struct HeroGenderLabel;
+
+#[derive(Component)]
+pub struct HeroCreateOk;
+
+#[derive(Component)]
+pub struct HeroCreateCancel;
+
+#[derive(Component)]
+pub struct HeroCreateMsg;
+
 pub struct HeroPlugin;
 
 impl Plugin for HeroPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HeroState>();
-                app.add_systems(
+        app.add_systems(
             Update,
             hero_server_events.run_if(in_state(AppState::Game)),
         );
-app.add_systems(OnEnter(AppState::Game), spawn_hero);
+        app.add_systems(OnEnter(AppState::Game), spawn_hero);
         app.add_systems(OnExit(AppState::Game), cleanup_hero);
         app.add_systems(
             Update,
-            (hero_ui_system, ui_button_system)
+            (hero_ui_system, hero_button_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -98,10 +156,11 @@ fn spawn_hero(
             HeroWidget,
         ));
     }
-    for i in 0..4usize {
+    // 列表行（0..4）
+    for i in 0..5usize {
         let e = spawn_ui_text(
             &mut commands, &font, "",
-            298.0, 120.0 + i as f32 * 24.0,
+            298.0, 120.0 + i as f32 * 22.0,
             12.0, Color::WHITE, 8.0,
         );
         commands.entity(e).insert((
@@ -133,19 +192,136 @@ fn spawn_hero(
             HeroWidget,
         ));
     }
+    // 创建英雄按钮（C# NewHeroDialog）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 206, 207, 208,
+        300.0, 262.0, 8.3, 90.0, 25.0,
+    ) {
+        commands.entity(e).insert((
+            HeroCreateBtn,
+            DialogRoot(DialogKind::Hero),
+            HeroWidget,
+        ));
+    }
+    let _ = spawn_ui_text(&mut commands, &font, "创建英雄", 314.0, 266.0, 12.0, Color::WHITE, 8.4);
+
+    // 创建面板
+    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    commands.spawn((
+        UiEntity,
+        DialogRoot(DialogKind::Hero),
+        HeroCreatePanel,
+        Sprite {
+            image: white.clone(),
+            color: Color::srgba(0.1, 0.1, 0.15, 0.96),
+            custom_size: Some(Vec2::new(330.0, 200.0)),
+            ..default()
+        },
+        bevy::sprite::Anchor::TOP_LEFT,
+        Transform::from_xyz(280.0, -296.0, 9.0),
+        Visibility::Hidden,
+    ));
+    let _ = spawn_ui_text(&mut commands, &font, "名字:", 290.0, 312.0, 12.0, Color::WHITE, 9.1);
+    let name_box = commands
+        .spawn((
+            UiEntity,
+            DialogRoot(DialogKind::Hero),
+            HeroCreatePanel,
+            TextInputField(0),
+            TextInputRect(330.0, 308.0, 260.0, 20.0),
+            Sprite {
+                image: white.clone(),
+                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
+                custom_size: Some(Vec2::new(260.0, 20.0)),
+                ..default()
+            },
+            bevy::sprite::Anchor::TOP_LEFT,
+            Transform::from_xyz(330.0, -308.0, 9.1),
+            Visibility::Hidden,
+        ))
+        .id();
+    commands.entity(name_box).with_children(|p| {
+        p.spawn((
+            TextInputDisplay(0),
+            Text2d::new(String::new()),
+            bevy::sprite::Anchor::TOP_LEFT,
+            TextFont {
+                font: FontSource::Handle(font.clone()),
+                font_size: FontSize::Px(12.0),
+                ..default()
+            },
+            TextColor(Color::WHITE),
+            Transform::from_xyz(4.0, -2.0, 9.2),
+        ));
+    });
+    // 职业 / 性别 循环选择
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 206, 207, 208,
+        300.0, 340.0, 9.3, 130.0, 22.0,
+    ) {
+        commands.entity(e).insert((
+            HeroClassCycle,
+            DialogRoot(DialogKind::Hero),
+            HeroCreatePanel,
+        ));
+    }
+    let cl = spawn_ui_text(&mut commands, &font, "职业: 战士", 308.0, 344.0, 12.0, Color::WHITE, 9.4);
+    commands.entity(cl).insert((HeroClassLabel, DialogRoot(DialogKind::Hero), HeroCreatePanel));
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 210, 211, 212,
+        450.0, 340.0, 9.3, 100.0, 22.0,
+    ) {
+        commands.entity(e).insert((
+            HeroGenderCycle,
+            DialogRoot(DialogKind::Hero),
+            HeroCreatePanel,
+        ));
+    }
+    let gl = spawn_ui_text(&mut commands, &font, "性别: 男", 458.0, 344.0, 12.0, Color::WHITE, 9.4);
+    commands.entity(gl).insert((HeroGenderLabel, DialogRoot(DialogKind::Hero), HeroCreatePanel));
+    // 确定 / 取消 / 结果提示
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 206, 207, 208,
+        300.0, 376.0, 9.3, 70.0, 23.0,
+    ) {
+        commands.entity(e).insert((
+            HeroCreateOk,
+            DialogRoot(DialogKind::Hero),
+            HeroCreatePanel,
+        ));
+    }
+    let _ = spawn_ui_text(&mut commands, &font, "确定", 315.0, 380.0, 12.0, Color::WHITE, 9.4);
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 210, 211, 212,
+        390.0, 376.0, 9.3, 70.0, 23.0,
+    ) {
+        commands.entity(e).insert((
+            HeroCreateCancel,
+            DialogRoot(DialogKind::Hero),
+            HeroCreatePanel,
+        ));
+    }
+    let _ = spawn_ui_text(&mut commands, &font, "取消", 405.0, 380.0, 12.0, Color::WHITE, 9.4);
+    let msg = spawn_ui_text(&mut commands, &font, "", 300.0, 410.0, 12.0, Color::srgb(1.0, 0.9, 0.4), 9.5);
+    commands.entity(msg).insert((HeroCreateMsg, DialogRoot(DialogKind::Hero), HeroCreatePanel));
 }
 
-/// 显隐 + 渲染 + 切换
+/// 显隐 + 列表渲染（按钮逻辑在 hero_button_system）
 #[allow(clippy::too_many_arguments)]
 fn hero_ui_system(
-    mut mgr: ResMut<DialogManager>,
-    mut state: ResMut<HeroState>,
-    net: Res<NetConnection>,
-    close: Query<&UiButton, With<HeroClose>>,
-    main_btn: Query<&UiButton, With<HeroSwitchMain>>,
-    hero1_btn: Query<&UiButton, With<HeroSwitch1>>,
+    mgr: Res<DialogManager>,
+    state: Res<HeroState>,
     mut widgets: Query<&mut Visibility, With<HeroWidget>>,
-    mut lines: Query<(&mut Text2d, &HeroLine)>,
+    mut panel: Query<&mut Visibility, (With<HeroCreatePanel>, Without<HeroWidget>)>,
+    mut lines: Query<(&mut Text2d, &HeroLine), (Without<HeroClassLabel>, Without<HeroGenderLabel>, Without<HeroCreateMsg>)>,
+    mut class_label: Query<&mut Text2d, (With<HeroClassLabel>, Without<HeroLine>, Without<HeroGenderLabel>, Without<HeroCreateMsg>)>,
+    mut gender_label: Query<&mut Text2d, (With<HeroGenderLabel>, Without<HeroLine>, Without<HeroClassLabel>, Without<HeroCreateMsg>)>,
+    mut create_msg: Query<&mut Text2d, (With<HeroCreateMsg>, Without<HeroLine>, Without<HeroClassLabel>, Without<HeroGenderLabel>)>,
 ) {
     let open = mgr.is_open(DialogKind::Hero);
     for mut vis in widgets.iter_mut() {
@@ -154,26 +330,71 @@ fn hero_ui_system(
     if !open {
         return;
     }
+    for mut vis in &mut panel {
+        *vis = if state.creating { Visibility::Visible } else { Visibility::Hidden };
+    }
+    // 列表
+    let current_name = state
+        .current
+        .as_ref()
+        .map(|h| h.name.clone())
+        .unwrap_or_else(|| "主角色".to_string());
+    for (mut text, line) in &mut lines {
+        text.0 = match line.0 {
+            0 => "英雄管理".to_string(),
+            1 => format!("当前: {}", current_name),
+            2 => state
+                .heroes
+                .first()
+                .map(|h| format!("{}  Lv.{}  {}", h.name, h.level, class_name(h.class)))
+                .unwrap_or_else(|| "（无英雄，点“创建英雄”创建）".to_string()),
+            3 => state.message.clone(),
+            4 => state.create_msg.clone(),
+            _ => String::new(),
+        };
+    }
+    for mut t in &mut class_label {
+        let s = format!("职业: {}", class_name(state.create_class));
+        if t.0 != s {
+            t.0 = s;
+        }
+    }
+    for mut t in &mut gender_label {
+        let s = format!("性别: {}", gender_name(state.create_gender));
+        if t.0 != s {
+            t.0 = s;
+        }
+    }
+    for mut t in &mut create_msg {
+        if t.0 != state.create_msg {
+            t.0 = state.create_msg.clone();
+        }
+    }
+}
+
+/// 英雄按钮点击（关闭/切换/创建面板）
+#[allow(clippy::too_many_arguments)]
+fn hero_button_system(
+    mut mgr: ResMut<DialogManager>,
+    mut state: ResMut<HeroState>,
+    net: Res<NetConnection>,
+    mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
+    close: Query<&UiButton, With<HeroClose>>,
+    main_btn: Query<&UiButton, With<HeroSwitchMain>>,
+    hero1_btn: Query<&UiButton, With<HeroSwitch1>>,
+    create_btn: Query<&UiButton, With<HeroCreateBtn>>,
+    class_btn: Query<&UiButton, With<HeroClassCycle>>,
+    gender_btn: Query<&UiButton, With<HeroGenderCycle>>,
+    ok_btn: Query<&UiButton, With<HeroCreateOk>>,
+    cancel_btn: Query<&UiButton, With<HeroCreateCancel>>,
+) {
+    if !mgr.is_open(DialogKind::Hero) {
+        return;
+    }
     for btn in &close {
         if btn.clicked {
             mgr.close(DialogKind::Hero);
         }
-    }
-    for (mut text, line) in &mut lines {
-        text.0 = match line.0 {
-            0 => "英雄".to_string(),
-            1 => format!(
-                "当前: {}",
-                if state.hero_index == 0 {
-                    "主角色".to_string()
-                } else {
-                    format!("英雄 {}", state.hero_index)
-                }
-            ),
-            2 => state.message.clone(),
-            3 => "切换英雄（服务端响应 ChangeHero）".to_string(),
-            _ => String::new(),
-        };
     }
     for btn in &main_btn {
         if btn.clicked {
@@ -189,23 +410,125 @@ fn hero_ui_system(
             tracing::info!("🦸 切换英雄 1");
         }
     }
+    for btn in &create_btn {
+        if btn.clicked {
+            state.creating = !state.creating;
+            state.create_msg.clear();
+            if input.texts.len() < 1 {
+                input.texts.resize(1, String::new());
+            }
+            input.active = None;
+        }
+    }
+    for btn in &class_btn {
+        if btn.clicked && state.creating {
+            state.create_class = next_class(state.create_class);
+        }
+    }
+    for btn in &gender_btn {
+        if btn.clicked && state.creating {
+            state.create_gender = next_gender(state.create_gender);
+        }
+    }
+    for btn in &ok_btn {
+        if btn.clicked && state.creating {
+            let name = input.texts.get(0).cloned().unwrap_or_default();
+            net.send_packet(&mir2_shared::packets::client::hero::NewHero {
+                name: name.trim().to_string(),
+                gender: state.create_gender,
+                class: state.create_class,
+            });
+            state.create_msg = "创建中…".to_string();
+            tracing::info!("🦸 创建英雄: {}", name);
+        }
+    }
+    for btn in &cancel_btn {
+        if btn.clicked && state.creating {
+            state.creating = false;
+            input.active = None;
+        }
+    }
+}
+/// 职业显示名（C# MirClass 顺序）
+fn class_name(c: mir2_shared::enums::MirClass) -> &'static str {
+    use mir2_shared::enums::MirClass::*;
+    match c {
+        Warrior => "战士",
+        Wizard => "法师",
+        Taoist => "道士",
+        Assassin => "刺客",
+        Archer => "弓箭手",
+        _ => "未知",
+    }
 }
 
+/// 下一个职业（循环）
+fn next_class(c: mir2_shared::enums::MirClass) -> mir2_shared::enums::MirClass {
+    use mir2_shared::enums::MirClass::*;
+    match c {
+        Warrior => Wizard,
+        Wizard => Taoist,
+        Taoist => Assassin,
+        Assassin => Archer,
+        _ => Warrior,
+    }
+}
 
-/// 消费服务端英雄切换事件（网络层只广播 ServerEvent）
+/// 性别显示名
+fn gender_name(g: mir2_shared::enums::MirGender) -> &'static str {
+    use mir2_shared::enums::MirGender::*;
+    match g {
+        Male => "男",
+        Female => "女",
+        _ => "?",
+    }
+}
+
+/// 下一个性别（循环）
+fn next_gender(g: mir2_shared::enums::MirGender) -> mir2_shared::enums::MirGender {
+    use mir2_shared::enums::MirGender::*;
+    match g {
+        Male => Female,
+        _ => Male,
+    }
+}
+
+/// 消费服务端英雄事件（网络层只广播 ServerEvent）
 fn hero_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut hero: ResMut<HeroState>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
-        if let ServerEvent::HeroChanged { index } = ev {
-            hero.hero_index = *index;
-            hero.message = if *index == 0 {
-                "已切换主角色".to_string()
-            } else {
-                format!("已切换英雄 {}", index)
-            };
+        match ev {
+            ServerEvent::HeroChanged { index } => {
+                hero.hero_index = *index;
+                hero.message = if *index == 0 {
+                    "已切换主角色".to_string()
+                } else {
+                    format!("已切换英雄 {}", index)
+                };
+            }
+            ServerEvent::HeroManageReceived { heroes, current } => {
+                hero.heroes = heroes.clone();
+                hero.current = current.clone();
+                hero.message = format!("英雄列表: {} 个", heroes.len());
+            }
+            ServerEvent::NewHeroResult { result } => {
+                hero.create_msg = match *result {
+                    1 => "英雄名字不符合要求".to_string(),
+                    4 => "无法创建更多英雄".to_string(),
+                    10 => "英雄创建成功".to_string(),
+                    _ => format!("创建英雄失败（{}）", result),
+                };
+                if *result == 10 {
+                    hero.creating = false;
+                }
+                hero.message = hero.create_msg.clone();
+            }
+            _ => {}
         }
     }
 }
+
+
