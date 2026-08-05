@@ -757,6 +757,7 @@ fn hud_server_events(
             | ServerEvent::ObjectColourChanged { .. }
             | ServerEvent::StoragePasswordResult { .. }
             | ServerEvent::LogOutSuccess
+            | ServerEvent::AttackModeChanged { .. }
             | ServerEvent::CraftResult { .. }
             | ServerEvent::NpcGoods { .. }
             | ServerEvent::NpcSellPanel { .. } => {}

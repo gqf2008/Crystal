@@ -101,13 +101,11 @@ impl Plugin for CombatPlugin {
         app.add_message::<CombatEvent>();
         app.add_systems(
             Update,
-            (apply_combat_events, advance_combat_timers, advance_damage_texts, actor_hp_bar_system)
-                .after(crate::network::network_system)
-                .run_if(in_state(AppState::Game)),
+            attack_mode_system.run_if(in_state(AppState::Game)),
         );
         app.add_systems(
             Update,
-            attack_mode_system.run_if(in_state(AppState::Game)),
+            attack_mode_server_events.run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -331,6 +329,22 @@ fn actor_hp_bar_system(
         for (_, c, mut fs, _) in &mut bars {
             if c.parent() == e {
                 fs.custom_size = Some(Vec2::new(w, 4.0));
+            }
+        }
+    }
+}
+
+/// 消费 S.ChangeAMode：更新本地攻击模式状态（服务端确认）
+fn attack_mode_server_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut state: ResMut<AttackModeState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::AttackModeChanged { mode } = ev {
+            if state.mode != *mode {
+                state.mode = *mode;
+                tracing::info!("⚔️ 攻击模式（服务端确认）: {:?}", mode);
             }
         }
     }
