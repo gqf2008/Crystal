@@ -91,6 +91,10 @@ pub struct HeroSwitchMain;
 #[derive(Component)]
 pub struct HeroSwitch1;
 
+/// 打开英雄背包（#203）
+#[derive(Component)]
+pub struct HeroOpenInventory;
+
 #[derive(Component)]
 pub struct HeroLine(usize);
 
@@ -286,6 +290,17 @@ fn spawn_hero(
     }
     let ap = spawn_ui_text(&mut commands, &font, "", 364.0, 300.0, 12.0, Color::srgb(1.0, 0.9, 0.4), 8.4);
     commands.entity(ap).insert((HeroAutoPotLabel, DialogRoot(DialogKind::Hero), HeroWidget));
+    // 英雄背包按钮（#203：打开 HeroInventoryDialog）
+    let inv_btn = spawn_ui_text(&mut commands, &font, "英雄背包", 300.0, 330.0, 12.0, Color::srgb(0.8, 0.9, 1.0), 8.3);
+    commands.entity(inv_btn).insert((
+        HeroOpenInventory,
+        UiButton {
+            rect: (300.0, 330.0, 90.0, 18.0),
+            clicked: false,
+        },
+        DialogRoot(DialogKind::Hero),
+        HeroWidget,
+    ));
     // 创建面板
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     commands.spawn((
@@ -469,6 +484,7 @@ fn hero_button_system(
     close: Query<&UiButton, With<HeroClose>>,
     main_btn: Query<&UiButton, With<HeroSwitchMain>>,
     hero1_btn: Query<&UiButton, With<HeroSwitch1>>,
+    inv_btn: Query<&UiButton, With<HeroOpenInventory>>,
     create_btn: Query<&UiButton, With<HeroCreateBtn>>,
     class_btn: Query<&UiButton, With<HeroClassCycle>>,
     gender_btn: Query<&UiButton, With<HeroGenderCycle>>,
@@ -498,6 +514,12 @@ fn hero_button_system(
             net.send_packet(&crate::network::ChangeHeroWire { hero_index: 1 });
             state.message = "切换英雄 1…".to_string();
             tracing::info!("🦸 切换英雄 1");
+        }
+    }
+    for btn in &inv_btn {
+        if btn.clicked {
+            mgr.toggle(DialogKind::HeroInventory);
+            tracing::info!("🎒 英雄背包: {}", if mgr.is_open(DialogKind::HeroInventory) { "打开" } else { "关闭" });
         }
     }
     for btn in &create_btn {
@@ -713,11 +735,11 @@ fn behaviour_name(b: mir2_shared::enums::HeroBehaviour) -> &'static str {
 }
 
 // C# Stat 枚举：HP=12, MP=13（服务端同）
-const STAT_HP: u8 = 12;
-const STAT_MP: u8 = 13;
+pub(crate) const STAT_HP: u8 = 12;
+pub(crate) const STAT_MP: u8 = 13;
 
 /// 自动药阈值循环：0 → 30 → 50 → 70 → 90 → 0
-fn next_autopot(v: u8) -> u8 {
+pub(crate) fn next_autopot(v: u8) -> u8 {
     match v {
         0 => 30,
         30 => 50,

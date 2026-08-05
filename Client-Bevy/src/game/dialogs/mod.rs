@@ -24,6 +24,7 @@ pub mod guild;
 pub mod guild_territory;
 pub mod help;
 pub mod hero;
+pub mod hero_inventory;
 pub mod inspect;
 pub mod inventory;
 pub mod item_rental;
@@ -82,6 +83,7 @@ pub enum DialogKind {
     Mount,
     Report,
     Hero,
+    HeroInventory,
     Creature,
     TrustMerchant,
     ItemRental,
@@ -263,6 +265,7 @@ impl Plugin for DialogsPlugin {
                 mount::MountPlugin,
                 report::ReportPlugin,
                 hero::HeroPlugin,
+                hero_inventory::HeroInventoryPlugin,
                 creature::CreaturePlugin,
                 trust_merchant::TrustMerchantPlugin,
                 item_rental::ItemRentalPlugin,

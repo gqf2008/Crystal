@@ -115,6 +115,11 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             // 装备（12 槽，Weapon=0/Armour=1）与死亡状态（#46/#47）
             let mut player_equipment: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 12];
             let mut player_dead = false;
+            // 英雄背包/出战状态（#203：供 HeroInventoryDialog mock 验证）
+            let mut mock_hero_inventory: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 40];
+            mock_hero_inventory[0] = Some(potion_item(2)); // 金创药(中)
+            mock_hero_inventory[1] = Some(potion_item(10)); // 布衣
+            let mut mock_hero_active = false;
             let mut player_dead_since: Option<std::time::Instant> = None;
             // 怪物攻击伤害覆盖（默认 0 = 用怪物自身伤害；MOCK_PLAYER_DAMAGE 可调大测死亡/复活闭环）
             let player_damage = std::env::var("MOCK_PLAYER_DAMAGE")
@@ -180,6 +185,22 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         );
                                         active_char_index = p.character_index;
                         send_map_and_objects(&to_client, p.character_index, &player_inventory, &player_equipment, player_gold, player_stats);
+                                        // #203：mock 英雄列表（1 个英雄，供 HeroInventoryDialog 验证）
+                                        let hero_info = mir2_shared::data::client_data::ClientHeroInformation {
+                                            index: 1,
+                                            name: "英雄小刀".to_string(),
+                                            level: 30,
+                                            class: MirClass::Warrior,
+                                            gender: MirGender::Male,
+                                        };
+                                        send(
+                                            &to_client,
+                                            &server::hero::ManageHeroes {
+                                                max_count: 2,
+                                                current_hero: None,
+                                                heroes: vec![hero_info],
+                                            },
+                                        );
                                         in_game = true;
                                     }
                                 }
@@ -751,6 +772,61 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         }
                                     }
                                 }
+                                x if x == ClientPacketIds::ChangeHero as i16 => {
+                                    // #203：切换英雄（0=主角色，1=英雄）
+                                    let body = &payload[PacketHeader::HEADER_SIZE.min(payload.len())..];
+                                    let index = body.first().copied().unwrap_or(0);
+                                    mock_hero_active = index != 0;
+                                    tracing::info!("[MOCK] 切换英雄 index={}", index);
+                                    send(&to_client, &server::miscellaneous::ChangeHero { success: mock_hero_active });
+                                    if mock_hero_active {
+                                        send_hero_information(&to_client, &mock_hero_inventory, true, 30, 20, 1, 2);
+                                    }
+                                }
+                                x if x == ClientPacketIds::TakeBackHeroItem as i16 => {
+                                    // 英雄→主背包（C# [from i32][to i32]）
+                                    let body = &payload[PacketHeader::HEADER_SIZE.min(payload.len())..];
+                                    if body.len() >= 8 {
+                                        let from = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4])) as usize;
+                                        let to = i32::from_le_bytes(body[4..8].try_into().unwrap_or([0; 4])) as usize;
+                                        if from < mock_hero_inventory.len() && to < player_inventory.len() {
+                                            if let Some(item) = mock_hero_inventory[from].take() {
+                                                if player_inventory[to].is_none() {
+                                                    player_inventory[to] = Some(item);
+                                                } else if let Some(empty) = player_inventory.iter_mut().find(|s| s.is_none()) {
+                                                    *empty = Some(item);
+                                                } else {
+                                                    mock_hero_inventory[from] = Some(item);
+                                                }
+                                                tracing::info!("[MOCK] 英雄取回 {} -> 主背包 {}", from, to);
+                                                send_user_information(&to_client, active_char_index, &player_inventory, &player_equipment, player_gold, player_stats);
+                                                send_hero_information(&to_client, &mock_hero_inventory, true, 30, 20, 1, 2);
+                                            }
+                                        }
+                                    }
+                                }
+                                x if x == ClientPacketIds::TransferHeroItem as i16 => {
+                                    // 主背包→英雄（C# [from i32][to i32]）
+                                    let body = &payload[PacketHeader::HEADER_SIZE.min(payload.len())..];
+                                    if body.len() >= 8 {
+                                        let from = i32::from_le_bytes(body[0..4].try_into().unwrap_or([0; 4])) as usize;
+                                        let to = i32::from_le_bytes(body[4..8].try_into().unwrap_or([0; 4])) as usize;
+                                        if from < player_inventory.len() && to < mock_hero_inventory.len() {
+                                            if let Some(item) = player_inventory[from].take() {
+                                                if mock_hero_inventory[to].is_none() {
+                                                    mock_hero_inventory[to] = Some(item);
+                                                } else if let Some(empty) = mock_hero_inventory.iter_mut().find(|s| s.is_none()) {
+                                                    *empty = Some(item);
+                                                } else {
+                                                    player_inventory[from] = Some(item);
+                                                }
+                                                tracing::info!("[MOCK] 转移 主背包{} -> 英雄 {}", from, to);
+                                                send_user_information(&to_client, active_char_index, &player_inventory, &player_equipment, player_gold, player_stats);
+                                                send_hero_information(&to_client, &mock_hero_inventory, true, 30, 20, 1, 2);
+                                            }
+                                        }
+                                    }
+                                }
                                 x if x == ClientPacketIds::KeepAlive as i16 => {
                                     // 客户端心跳回应，无需处理
                                 }
@@ -1222,6 +1298,41 @@ fn send_user_information(
         },
     );
     send(to_client, &server::combat::HealthChanged { hp: stats.hp, mp: stats.mp });
+}
+
+/// #203：发送 S.HeroInformation（mock 英雄完整信息）
+fn send_hero_information(
+    to_client: &Sender<Vec<u8>>,
+    inventory: &[Option<mir2_shared::data::item::UserItem>],
+    auto_pot: bool,
+    auto_hp_percent: u8,
+    auto_mp_percent: u8,
+    hp_item_index: i32,
+    mp_item_index: i32,
+) {
+    send(
+        to_client,
+        &server::hero::HeroInformation {
+            object_id: 0x1000_0100,
+            name: "英雄小刀".to_string(),
+            class: MirClass::Warrior,
+            gender: MirGender::Male,
+            level: 30,
+            hair: 0,
+            hp: 600,
+            mp: 100,
+            experience: 8000,
+            max_experience: 30000,
+            inventory: Some(inventory.to_vec()),
+            equipment: Some(vec![None; 14]),
+            magics: Vec::new(),
+            auto_pot,
+            auto_hp_percent,
+            auto_mp_percent,
+            hp_item_index,
+            mp_item_index,
+        },
+    );
 }
 
 /// 进图：MapChanged(n0) + 本地玩家 + 怪物/NPC

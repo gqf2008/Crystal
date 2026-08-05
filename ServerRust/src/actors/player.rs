@@ -2765,35 +2765,76 @@ impl Message<SetFishing> for PlayerActor {
     }
 }
 
-/// 从英雄背包取回物品到主背包
+/// 英雄↔主背包物品转移（纯逻辑，#203）
+impl PlayerState {
+    /// 英雄背包格 → 主背包格（C# TakeBackHeroItem 语义）
+    pub fn take_back_hero_item(&mut self, from: i32, to: i32) -> bool {
+        let from = from as usize;
+        let to = to as usize;
+        if from >= self.hero_inventory.backpack.len() || to >= self.inventory.backpack.len() {
+            return false;
+        }
+        // 目标格空闲则直放，否则走合并/找空位；失败放回英雄背包
+        if let Some(mut slot) = self.hero_inventory.backpack[from].take() {
+            slot.grid = to as u8;
+            if self.inventory.backpack[to].is_none() {
+                self.inventory.backpack[to] = Some(slot);
+            } else if self.inventory.add_item(slot.item.clone()).is_none() {
+                self.hero_inventory.backpack[from] = Some(slot);
+                return false;
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 主背包格 → 英雄背包格（C# TransferHeroItem 语义）
+    pub fn transfer_hero_item(&mut self, from: i32, to: i32) -> bool {
+        let from = from as usize;
+        let to = to as usize;
+        if from >= self.inventory.backpack.len() || to >= self.hero_inventory.backpack.len() {
+            return false;
+        }
+        if let Some(mut slot) = self.inventory.backpack[from].take() {
+            slot.grid = to as u8;
+            if self.hero_inventory.backpack[to].is_none() {
+                self.hero_inventory.backpack[to] = Some(slot);
+            } else if self.hero_inventory.add_item(slot.item.clone()).is_none() {
+                self.inventory.backpack[from] = Some(slot);
+                return false;
+            }
+            true
+        } else {
+            false
+        }
+    }
+}
+/// 从英雄背包取回物品到主背包（C# C.TakeBackHeroItem: From=英雄格 To=主背包格，#203）
 pub struct TakeBackHeroItem {
-    pub grid: u8,
+    pub from: i32,
+    pub to: i32,
 }
 
 impl Message<TakeBackHeroItem> for PlayerActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: TakeBackHeroItem, _ctx: &mut Context<Self, Self::Reply>) {
-        // 从英雄背包移除指定格子的物品并添加到主背包
-        if let Some(slot) = self.state.hero_inventory.backpack[msg.grid as usize].take() {
-            let _ = self.state.inventory.add_item(slot.item);
-        }
+        self.state.take_back_hero_item(msg.from, msg.to);
     }
 }
 
-/// 从主背包转移物品到英雄背包
+/// 从主背包转移物品到英雄背包（C# C.TransferHeroItem: From=主背包格 To=英雄格，#203）
 pub struct TransferHeroItem {
-    pub grid: u8,
+    pub from: i32,
+    pub to: i32,
 }
 
 impl Message<TransferHeroItem> for PlayerActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: TransferHeroItem, _ctx: &mut Context<Self, Self::Reply>) {
-        // 从主背包移除指定格子的物品并添加到英雄背包
-        if let Some(slot) = self.state.inventory.backpack[msg.grid as usize].take() {
-            let _ = self.state.hero_inventory.add_item(slot.item);
-        }
+        self.state.transfer_hero_item(msg.from, msg.to);
     }
 }
 
@@ -3112,5 +3153,46 @@ mod tests {
         s.mentor_name = Some("Master".to_string());
         assert!(s.spouse_name.is_some());
         assert!(s.mentor_name.is_some());
+    }
+
+    // ---- #203 英雄↔主背包转移 ----
+    fn put_item(inv: &mut PlayerInventory, grid: usize, uid: u64) {
+        let mut item = mir2_shared::data::item::UserItem::new(1001);
+        item.unique_id = uid;
+        inv.backpack[grid] = Some(crate::actors::inventory::InventorySlot {
+            grid: grid as u8,
+            item,
+        });
+    }
+
+    #[test]
+    fn test_take_back_hero_item_to_empty_slot() {
+        let mut s = make_state();
+        put_item(&mut s.hero_inventory, 3, 9001);
+        assert!(s.hero_inventory.backpack[3].is_some());
+        assert!(s.take_back_hero_item(3, 5));
+        assert!(s.hero_inventory.backpack[3].is_none());
+        assert!(s.inventory.backpack[5].is_some());
+        assert_eq!(s.inventory.backpack[5].as_ref().unwrap().item.unique_id, 9001);
+        assert_eq!(s.inventory.backpack[5].as_ref().unwrap().grid, 5);
+    }
+
+    #[test]
+    fn test_transfer_hero_item_to_empty_slot() {
+        let mut s = make_state();
+        put_item(&mut s.inventory, 2, 9002);
+        assert!(s.transfer_hero_item(2, 7));
+        assert!(s.inventory.backpack[2].is_none());
+        assert!(s.hero_inventory.backpack[7].is_some());
+        assert_eq!(s.hero_inventory.backpack[7].as_ref().unwrap().item.unique_id, 9002);
+    }
+
+    #[test]
+    fn test_transfer_out_of_range_fails() {
+        let mut s = make_state();
+        put_item(&mut s.inventory, 0, 9003);
+        assert!(!s.transfer_hero_item(0, 999));
+        assert!(s.inventory.backpack[0].is_some());
+        assert!(!s.take_back_hero_item(999, 0));
     }
 }
