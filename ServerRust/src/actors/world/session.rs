@@ -253,6 +253,10 @@ impl Message<StartGameRequest> for WorldActor {
         }
         let heroes = self.player_heroes.get(&msg.session_id).cloned().unwrap_or_default();
         send_manage_heroes_packet(&self.gate_ref, msg.session_id, &loaded_state, &heroes);
+        // #198：有英雄则生成英雄对象
+        if loaded_state.hero_index > 0 {
+            self.broadcast_hero_spawn(msg.session_id).await;
+        }
 
         // 通知 SocialActor 玩家上线（组队/好友/行会查询依赖在线表）
         let _ = self.social_ref.tell(crate::actors::social::SocialPlayerJoined {
@@ -973,6 +977,8 @@ impl Message<PlayerLogOut> for WorldActor {
             if let Err(e) = db::save_heroes(&self.db_pool, &record.name, &db_heroes).await {
                 warn!("Failed to save heroes for {} on logout: {}", record.name, e);
             }
+            // #198：移除英雄对象
+            self.broadcast_hero_remove(record.object_id).await;
 
             // 发送 LogOutSuccess 给客户端（带角色列表，C# SelectScene 用）
             let characters = db::list_character_summaries(&self.db_pool, &record.account_username).await.unwrap_or_default();
