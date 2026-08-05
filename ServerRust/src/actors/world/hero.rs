@@ -33,6 +33,8 @@ impl Message<ChangeHeroRequest> for WorldActor {
         // #198：切换后生成/移除英雄对象
         if msg.hero_index != 0 {
             self.broadcast_hero_spawn(msg.session_id).await;
+            // #203：下发完整英雄信息（背包/装备/自动药）
+            self.send_hero_information_packet(msg.session_id).await;
         } else {
             self.broadcast_hero_remove(record.object_id).await;
         }
@@ -40,6 +42,73 @@ impl Message<ChangeHeroRequest> for WorldActor {
     }
 }
 
+impl WorldActor {
+/// 下发 S.HeroInformation（C# HeroInformation : UserInformation + autopot，#203）
+/// 数据：英雄身份取 player_heroes，背包/装备/自动药取 PlayerState.hero_inventory
+pub(crate) async fn send_hero_information_packet(&self, session_id: u64) {
+    let record = match self.players.get(&session_id) {
+        Some(r) => r,
+        None => return,
+    };
+    let state = match record.actor_ref.ask(GetPlayerState).await {
+        Ok(Some(s)) => s,
+        _ => return,
+    };
+    let hero = self
+        .player_heroes
+        .get(&session_id)
+        .and_then(|hs| hs.iter().find(|h| h.index as u8 == state.hero_index))
+        .cloned();
+    let Some(hero) = hero else { return };
+
+    let hero_oid = record.object_id.wrapping_add(HERO_OID_OFFSET);
+    let inventory: Vec<Option<mir2_shared::data::item::UserItem>> = state
+        .hero_inventory
+        .backpack
+        .iter()
+        .map(|s| s.as_ref().map(|s| s.item.clone()))
+        .collect();
+    let equipment: Vec<Option<mir2_shared::data::item::UserItem>> = state
+        .hero_inventory
+        .equipment
+        .iter()
+        .cloned()
+        .collect();
+    let ai_hp = self.hero_ai_states.get(&session_id).map(|ai| ai.hp).unwrap_or(0);
+
+    let packet = mir2_shared::packets::server::hero::HeroInformation {
+        object_id: hero_oid,
+        name: hero.name.clone(),
+        class: hero.class,
+        gender: hero.gender,
+        level: hero.level,
+        hair: 0,
+        hp: ai_hp,
+        mp: 0,
+        experience: 0,
+        max_experience: 100,
+        inventory: Some(inventory),
+        equipment: Some(equipment),
+        magics: Vec::new(),
+        auto_pot: state.auto_pot_hp > 0 || state.auto_pot_mp > 0,
+        auto_hp_percent: state.auto_pot_hp.min(100) as u8,
+        auto_mp_percent: state.auto_pot_mp.min(100) as u8,
+        hp_item_index: state.auto_pot_hp_item,
+        mp_item_index: state.auto_pot_mp_item,
+    };
+    let mut body = Vec::new();
+    if packet.write_body(&mut body).is_err() {
+        warn!("Failed to serialize HeroInformation");
+        return;
+    }
+    let _ = self.gate_ref.tell(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HeroInformation as i16, &body),
+    }).try_send();
+    info!("🦸 HeroInformation sent: {} (oid={})", hero.name, hero_oid);
+}
+
+}
 /// 从英雄背包取回物品
 pub struct TakeBackHeroItemRequest {
     pub session_id: u64,

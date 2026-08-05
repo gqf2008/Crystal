@@ -7,8 +7,9 @@ use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 use crate::{
     binary::write_dotnet_string,
-    data::client_data::ClientHeroInformation,
-    enums::{HeroBehaviour, HeroSpawnState, ServerPacketIds},
+    data::client_data::{ClientHeroInformation, ClientMagic},
+    data::item::UserItem,
+    enums::{HeroBehaviour, HeroSpawnState, MirClass, MirGender, ServerPacketIds},
 };
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{Read, Write};
@@ -173,6 +174,171 @@ impl Packet for HeroCreateRequest {
     }
 }
 
+/// Full hero information (C# S.HeroInformation : UserInformation + autopot)
+/// 顺序对齐 C# HeroInformation.ReadPacket：
+///   ObjectID u32 / Name string / Class u8 / Gender u8 / Level u16 / Hair u8
+///   HP i32 / MP i32 / Experience i64 / MaxExperience i64
+///   Inventory(bool + count + 每项 bool+UserItem) / Equipment(同)
+///   Magics count i32 + ClientMagic[]
+///   AutoPot bool / AutoHPPercent u8 / AutoMPPercent u8 / HPItemIndex i32 / MPItemIndex i32
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeroInformation {
+    pub object_id: u32,
+    pub name: String,
+    pub class: MirClass,
+    pub gender: MirGender,
+    pub level: u16,
+    pub hair: u8,
+    pub hp: i32,
+    pub mp: i32,
+    pub experience: i64,
+    pub max_experience: i64,
+    /// 英雄背包（None = 无数据，与 C# bool 标志对应）
+    pub inventory: Option<Vec<Option<UserItem>>>,
+    /// 英雄装备（None = 无数据）
+    pub equipment: Option<Vec<Option<UserItem>>>,
+    pub magics: Vec<ClientMagic>,
+    pub auto_pot: bool,
+    pub auto_hp_percent: u8,
+    pub auto_mp_percent: u8,
+    pub hp_item_index: i32,
+    pub mp_item_index: i32,
+}
+
+impl Packet for HeroInformation {
+    const OPCODE: i16 = ServerPacketIds::HeroInformation as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let object_id = reader.read_u32::<LittleEndian>()?;
+        let name = crate::binary::read_dotnet_string(reader)?;
+        let class = MirClass::try_from(reader.read_u8()?)?;
+        let gender = MirGender::try_from(reader.read_u8()?)?;
+        let level = reader.read_u16::<LittleEndian>()?;
+        let hair = reader.read_u8()?;
+        let hp = reader.read_i32::<LittleEndian>()?;
+        let mp = reader.read_i32::<LittleEndian>()?;
+        let experience = reader.read_i64::<LittleEndian>()?;
+        let max_experience = reader.read_i64::<LittleEndian>()?;
+
+        let inventory = if reader.read_u8()? != 0 {
+            let count = reader.read_i32::<LittleEndian>()? as usize;
+            let mut items = Vec::with_capacity(count.min(1000));
+            for _ in 0..count {
+                if reader.read_u8()? != 0 {
+                    items.push(Some(UserItem::read_from_with_info(reader)?));
+                } else {
+                    items.push(None);
+                }
+            }
+            Some(items)
+        } else {
+            None
+        };
+
+        let equipment = if reader.read_u8()? != 0 {
+            let count = reader.read_i32::<LittleEndian>()? as usize;
+            let mut items = Vec::with_capacity(count.min(100));
+            for _ in 0..count {
+                if reader.read_u8()? != 0 {
+                    items.push(Some(UserItem::read_from_with_info(reader)?));
+                } else {
+                    items.push(None);
+                }
+            }
+            Some(items)
+        } else {
+            None
+        };
+
+        let magic_count = reader.read_i32::<LittleEndian>()? as usize;
+        let mut magics = Vec::with_capacity(magic_count.min(100));
+        for _ in 0..magic_count {
+            magics.push(ClientMagic::read_from(reader)?);
+        }
+
+        let auto_pot = reader.read_u8()? != 0;
+        let auto_hp_percent = reader.read_u8()?;
+        let auto_mp_percent = reader.read_u8()?;
+        let hp_item_index = reader.read_i32::<LittleEndian>()?;
+        let mp_item_index = reader.read_i32::<LittleEndian>()?;
+
+        Ok(Self {
+            object_id,
+            name,
+            class,
+            gender,
+            level,
+            hair,
+            hp,
+            mp,
+            experience,
+            max_experience,
+            inventory,
+            equipment,
+            magics,
+            auto_pot,
+            auto_hp_percent,
+            auto_mp_percent,
+            hp_item_index,
+            mp_item_index,
+        })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        write_dotnet_string(writer, &self.name)?;
+        writer.write_u8(self.class as u8)?;
+        writer.write_u8(self.gender as u8)?;
+        writer.write_u16::<LittleEndian>(self.level)?;
+        writer.write_u8(self.hair)?;
+        writer.write_i32::<LittleEndian>(self.hp)?;
+        writer.write_i32::<LittleEndian>(self.mp)?;
+        writer.write_i64::<LittleEndian>(self.experience)?;
+        writer.write_i64::<LittleEndian>(self.max_experience)?;
+
+        if let Some(ref inventory) = self.inventory {
+            writer.write_u8(1)?;
+            writer.write_i32::<LittleEndian>(inventory.len() as i32)?;
+            for item in inventory {
+                if let Some(ref item) = item {
+                    writer.write_u8(1)?;
+                    item.write_to_with_info(writer)?;
+                } else {
+                    writer.write_u8(0)?;
+                }
+            }
+        } else {
+            writer.write_u8(0)?;
+        }
+
+        if let Some(ref equipment) = self.equipment {
+            writer.write_u8(1)?;
+            writer.write_i32::<LittleEndian>(equipment.len() as i32)?;
+            for item in equipment {
+                if let Some(ref item) = item {
+                    writer.write_u8(1)?;
+                    item.write_to_with_info(writer)?;
+                } else {
+                    writer.write_u8(0)?;
+                }
+            }
+        } else {
+            writer.write_u8(0)?;
+        }
+
+        writer.write_i32::<LittleEndian>(self.magics.len() as i32)?;
+        for magic in &self.magics {
+            magic.write_to(writer)?;
+        }
+
+        writer.write_u8(self.auto_pot as u8)?;
+        writer.write_u8(self.auto_hp_percent)?;
+        writer.write_u8(self.auto_mp_percent)?;
+        writer.write_i32::<LittleEndian>(self.hp_item_index)?;
+        writer.write_i32::<LittleEndian>(self.mp_item_index)?;
+        Ok(())
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,6 +403,62 @@ mod tests {
         assert_eq!(read, pkt);
         assert!(read.current_hero.is_none());
         assert!(read.heroes.is_empty());
+    }
+
+    #[test]
+    fn hero_information_roundtrip() {
+        let mut item = UserItem::new(1001);
+        item.unique_id = 9001;
+        item.count = 5;
+        item.current_dura = 10;
+        item.max_dura = 20;
+        let pkt = HeroInformation {
+            object_id: 0x1000_1234,
+            name: "HeroOne".to_string(),
+            class: MirClass::Warrior,
+            gender: MirGender::Male,
+            level: 32,
+            hair: 3,
+            hp: 500,
+            mp: 200,
+            experience: 12345,
+            max_experience: 99999,
+            inventory: Some(vec![Some(item.clone()), None, Some(item.clone())]),
+            equipment: Some(vec![None, Some(item)]),
+            magics: vec![ClientMagic {
+                name: "FireBall".to_string(),
+                spell: crate::enums::Spell::FireBall,
+                base_cost: 2,
+                level_cost: 3,
+                icon: 4,
+                level1: 5,
+                level2: 6,
+                level3: 7,
+                need1: 8,
+                need2: 9,
+                need3: 10,
+                level: 1,
+                key: 0,
+                experience: 100,
+                delay: 11,
+                range: 3,
+                cast_time: 12,
+            }],
+            auto_pot: true,
+            auto_hp_percent: 30,
+            auto_mp_percent: 20,
+            hp_item_index: 42,
+            mp_item_index: -1,
+        };
+        let mut buf = Vec::new();
+        pkt.write_body(&mut buf).unwrap();
+        let mut cur = Cursor::new(&buf);
+        let read = HeroInformation::read_body(&mut cur).unwrap();
+        assert_eq!(read, pkt);
+        assert_eq!(read.inventory.as_ref().unwrap().len(), 3);
+        assert_eq!(read.equipment.as_ref().unwrap().len(), 2);
+        assert_eq!(read.magics.len(), 1);
+        assert!(read.auto_pot);
     }
 
     #[test]

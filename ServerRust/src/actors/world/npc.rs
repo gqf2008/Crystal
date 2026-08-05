@@ -685,6 +685,8 @@ impl Message<NewHeroRequest> for WorldActor {
             let _ = record.actor_ref.ask(SetHeroIndex { hero_index: 1 }).await;
             // #198：创建成功后生成英雄对象
             self.broadcast_hero_spawn(msg.session_id).await;
+            // #203：下发完整英雄信息（背包/装备/自动药）
+            self.send_hero_information_packet(msg.session_id).await;
         }
         let body = vec![result];
         let _ = self.gate_ref.tell(SendToClient {

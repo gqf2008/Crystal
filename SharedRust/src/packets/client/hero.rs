@@ -118,4 +118,3 @@ impl Packet for ChangeHero {
         Ok(())
     }
 }
-

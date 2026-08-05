@@ -589,25 +589,7 @@ impl Packet for NewHero {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct HeroInformation {
-    pub hero_id: u32,               // 英雄ID
-}
 
-impl Packet for HeroInformation {
-    const OPCODE: i16 = ServerPacketIds::HeroInformation as i16;
-
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
-        writer.write_u32::<LittleEndian>(self.hero_id)?;
-        Ok(())
-    }
-
-    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let hero_id = reader.read_u32::<LittleEndian>()?;
-        Ok(Self { hero_id })
-    }
-}
 
 /// UnlockHeroAutoPot - 解锁英雄自动喝药 (178)
 #[derive(Debug, Clone)]

@@ -252,6 +252,25 @@ pub enum ServerEvent {
         equipment: Vec<Option<InvItem>>,
         item_names: Vec<(i32, String)>,
     },
+    /// HeroInformation：英雄完整信息（C# S.HeroInformation : UserInformation + autopot，#203）
+    HeroInformation {
+        object_id: u32,
+        name: String,
+        class: u8,
+        gender: u8,
+        level: u16,
+        hp: i32,
+        mp: i32,
+        exp: i64,
+        max_exp: i64,
+        inventory: Vec<Option<InvItem>>,
+        equipment: Vec<Option<InvItem>>,
+        auto_pot: bool,
+        auto_hp_percent: u8,
+        auto_mp_percent: u8,
+        hp_item_index: i32,
+        mp_item_index: i32,
+    },
 }
 
 use crate::game::dialogs::npc_goods::GoodsEntry;
