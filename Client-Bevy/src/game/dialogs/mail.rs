@@ -50,6 +50,8 @@ pub struct MailState {
     pub detail: Option<MailDetail>,
     /// 写邮件界面是否打开（输入框用通用 TextInputState id 0=收件人 1=主题 2=正文）
     pub compose: bool,
+    /// 选中的邮件行（删除用，#132）
+    pub selected: Option<usize>,
 }
 
 #[derive(Component)]
@@ -57,6 +59,9 @@ pub struct MailWidget;
 
 #[derive(Component)]
 pub struct MailClose;
+
+#[derive(Component)]
+pub struct MailDelete;
 
 #[derive(Component)]
 pub struct MailLine(usize);
@@ -245,6 +250,21 @@ fn spawn_mail(
             MailWidget,
         ));
     }
+    // 删除邮件按钮（#132 C# MailListDialog 删除）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 206, 207, 208,
+        520.0, 306.0, 8.3, 60.0, 23.0,
+    ) {
+        commands.entity(e).insert((
+            MailDelete,
+            DialogRoot(DialogKind::Mail),
+            MailWidget,
+        ));
+    }
+    let t = spawn_ui_text(&mut commands, &font, "删除", 534.0, 310.0, 12.0, Color::WHITE, 8.4);
+    commands.entity(t).insert((DialogRoot(DialogKind::Mail), MailWidget));
+
     // 邮件列表（8 行）
     for i in 0..8usize {
         let e = spawn_ui_text(
@@ -361,16 +381,17 @@ fn spawn_mail(
 #[allow(clippy::too_many_arguments)]
 fn mail_ui_system(
     mut mgr: ResMut<DialogManager>,
-    mail: Res<MailState>,
+    mut mail: ResMut<MailState>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     close: Query<&UiButton, With<MailClose>>,
+    delete_btn: Query<&UiButton, With<MailDelete>>,
     mut widgets: Query<
         (&mut Visibility, Option<&MailLine>, Option<&MailDetailText>),
         (With<MailWidget>, Without<MailComposeWidget>),
     >,
-    mut lines: Query<(&mut Text2d, &MailLine), Without<MailDetailText>>,
+    mut lines: Query<(&mut Text2d, &mut TextColor, &MailLine), Without<MailDetailText>>,
     mut detail_texts: Query<(&mut Text2d, &MailDetailText), Without<MailLine>>,
     mut scroll: Query<&mut ScrollList, With<MailWidget>>,
 ) {
@@ -393,8 +414,9 @@ fn mail_ui_system(
     let mut sl = scroll.single_mut();
     if let Ok(sl) = sl.as_mut() {
         sl.set_total(mail.mails.len());
-        for (mut text, line) in &mut lines {
-            let idx = sl.offset + line.0;
+        let off = sl.offset;
+        for (mut text, mut color, line) in &mut lines {
+            let idx = off + line.0;
             text.0 = match mail.mails.get(idx) {
                 Some(m) => {
                     let mark = if m.unread { "（未读）" } else { "" };
@@ -402,6 +424,14 @@ fn mail_ui_system(
                 }
                 None => String::new(),
             };
+            let c = if mail.selected == Some(idx) {
+                Color::srgb(1.0, 0.9, 0.3)
+            } else {
+                Color::WHITE
+            };
+            if color.0 != c {
+                color.0 = c;
+            }
         }
     }
     // 内容区
@@ -429,12 +459,31 @@ fn mail_ui_system(
             let y = 140.0 + i as f32 * 22.0;
             if cursor.x >= 298.0 && cursor.x <= 600.0 && cursor.y >= y && cursor.y <= y + 20.0 {
                 if let Some(m) = mail.mails.get(off + i) {
+                    let mail_id = m.mail_id;
+                    let subject = m.subject.clone();
+                    mail.selected = Some(off + i);
                     net.send_packet(&mir2_shared::packets::client::mail::ReadMail {
-                        mail_id: m.mail_id,
+                        mail_id,
                     });
-                    tracing::info!("📧 读取邮件: {} ({})", m.subject, m.mail_id);
+                    tracing::info!("📧 读取邮件: {} ({})", subject, mail_id);
                 }
                 break;
+            }
+        }
+    }
+    // 删除邮件（#132）
+    for btn in &delete_btn {
+        if btn.clicked {
+            if let Some(idx) = mail.selected {
+                if let Some(m) = mail.mails.get(idx) {
+                    net.send_packet(&mir2_shared::packets::client::mail::DeleteMail {
+                        mail_id: m.mail_id,
+                    });
+                    tracing::info!("📧 删除邮件: {} ({})", m.subject, m.mail_id);
+                    mail.mails.remove(idx);
+                    mail.selected = None;
+                    mail.detail = None;
+                }
             }
         }
     }
