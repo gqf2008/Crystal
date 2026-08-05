@@ -4022,6 +4022,43 @@ fn build_user_information_packet(
     body.extend_from_slice(&state.agility.to_le_bytes());
     body.extend_from_slice(&state.luck.to_le_bytes());
 
+    // #210：State 页段（11 x i32；负重 = 物品 weight × count）
+    let bag_weight: i32 = state
+        .inventory
+        .backpack
+        .iter()
+        .flatten()
+        .map(|s| {
+            item_infos
+                .get(&s.item.item_index)
+                .map(|i| i.weight)
+                .unwrap_or(0)
+                * i32::from(s.item.count)
+        })
+        .sum();
+    let wear_weight: i32 = state
+        .inventory
+        .equipment
+        .iter()
+        .flatten()
+        .map(|i| item_infos.get(&i.item_index).map(|i| i.weight).unwrap_or(0))
+        .sum();
+    for v in [
+        bag_weight,
+        wear_weight,
+        0, // hand_weight（服务端暂缺）
+        state.magic_resist,
+        0, // poison_resist（服务端暂缺）
+        0, // health_recovery（服务端暂缺）
+        0, // spell_recovery（服务端暂缺）
+        state.poison_recovery,
+        state.holy,
+        state.freezing,
+        state.poison_attack,
+    ] {
+        body.extend_from_slice(&v.to_le_bytes());
+    }
+
     build_packet_bytes(ServerPacketIds::UserInformation as i16, &body)
 }
 

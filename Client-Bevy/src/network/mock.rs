@@ -1381,6 +1381,17 @@ fn send_user_information(
             accuracy: 3,
             agility: 2,
             luck: 0,
+            bag_weight: 120,
+            wear_weight: 45,
+            hand_weight: 0,
+            magic_resist: 5,
+            poison_resist: 2,
+            health_recovery: 3,
+            spell_recovery: 1,
+            poison_recovery: 4,
+            holy: 0,
+            freezing: 0,
+            poison_atk: 0,
         },
     );
     send(to_client, &server::combat::HealthChanged { hp: stats.hp, mp: stats.mp });
@@ -1636,6 +1647,17 @@ mod roundtrip_tests {
             accuracy: 3,
             agility: 2,
             luck: 0,
+            bag_weight: 120,
+            wear_weight: 45,
+            hand_weight: 0,
+            magic_resist: 5,
+            poison_resist: 2,
+            health_recovery: 3,
+            spell_recovery: 1,
+            poison_recovery: 4,
+            holy: 0,
+            freezing: 0,
+            poison_atk: 0,
         };
         let mut buf = Vec::new();
         info.write_body(&mut buf).unwrap();

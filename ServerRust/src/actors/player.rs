@@ -3149,6 +3149,23 @@ impl PlayerActor {
         body.extend_from_slice(&self.state.agility.to_le_bytes());
         body.extend_from_slice(&self.state.luck.to_le_bytes());
 
+        // #210：State 页段（轻量刷新无 item_infos，负重暂填 0；全量包由 build_user_information_packet 下发）
+        for v in [
+            0i32, // bag_weight
+            0i32, // wear_weight
+            0i32, // hand_weight
+            self.state.magic_resist,
+            0i32, // poison_resist
+            0i32, // health_recovery
+            0i32, // spell_recovery
+            self.state.poison_recovery,
+            self.state.holy,
+            self.state.freezing,
+            self.state.poison_attack,
+        ] {
+            body.extend_from_slice(&v.to_le_bytes());
+        }
+
         let _ = self.gate_ref.tell(SendToClient {
             session_id: self.state.session_id,
             data: build_packet_bytes(ServerPacketIds::UserInformation as i16, &body),

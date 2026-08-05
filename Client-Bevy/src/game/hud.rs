@@ -837,6 +837,17 @@ fn hud_server_events(
                 accuracy,
                 agility,
                 luck,
+                bag_weight,
+                wear_weight,
+                hand_weight,
+                magic_resist,
+                poison_resist,
+                health_recovery,
+                spell_recovery,
+                poison_recovery,
+                holy,
+                freezing,
+                poison_atk,
                 ..
             } => {
                 hud.name = name.clone();
@@ -867,6 +878,20 @@ fn hud_server_events(
                 char_state.accuracy = *accuracy;
                 char_state.agility = *agility;
                 char_state.luck = *luck;
+                // #210：State 页
+                char_state.exp = *exp;
+                char_state.max_exp = (*max_exp).max(1);
+                char_state.bag_weight = *bag_weight;
+                char_state.wear_weight = *wear_weight;
+                char_state.hand_weight = *hand_weight;
+                char_state.magic_resist = *magic_resist;
+                char_state.poison_resist = *poison_resist;
+                char_state.health_recovery = *health_recovery;
+                char_state.spell_recovery = *spell_recovery;
+                char_state.poison_recovery = *poison_recovery;
+                char_state.holy = *holy;
+                char_state.freezing = *freezing;
+                char_state.poison_atk = *poison_atk;
             }
             ServerEvent::PlayerDied => {
                 hud.dead = true;

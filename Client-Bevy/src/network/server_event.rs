@@ -265,6 +265,18 @@ pub enum ServerEvent {
         accuracy: i32,
         agility: i32,
         luck: i32,
+        /// #210：State 页数据
+        bag_weight: i32,
+        wear_weight: i32,
+        hand_weight: i32,
+        magic_resist: i32,
+        poison_resist: i32,
+        health_recovery: i32,
+        spell_recovery: i32,
+        poison_recovery: i32,
+        holy: i32,
+        freezing: i32,
+        poison_atk: i32,
     },
     /// HeroInformation：英雄完整信息（C# S.HeroInformation : UserInformation + autopot，#203）
     HeroInformation {

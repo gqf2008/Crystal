@@ -464,6 +464,17 @@ pub(crate) fn handle_auth(    net: &mut NetConnection,
                         accuracy: p.accuracy,
                         agility: p.agility,
                         luck: p.luck,
+                        bag_weight: p.bag_weight,
+                        wear_weight: p.wear_weight,
+                        hand_weight: p.hand_weight,
+                        magic_resist: p.magic_resist,
+                        poison_resist: p.poison_resist,
+                        health_recovery: p.health_recovery,
+                        spell_recovery: p.spell_recovery,
+                        poison_recovery: p.poison_recovery,
+                        holy: p.holy,
+                        freezing: p.freezing,
+                        poison_atk: p.poison_atk,
                     });
                 }
                 Err(e) => {
