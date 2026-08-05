@@ -17,7 +17,7 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::CraftItem as i16, ServerPacketIds::ItemRentalRequest as i16, ServerPacketIds::UpdateRentalItem as i16, ServerPacketIds::ItemRentalFee as i16, ServerPacketIds::ItemRentalPeriod as i16, ServerPacketIds::DepositRentalItem as i16, ServerPacketIds::RetrieveRentalItem as i16, ServerPacketIds::ItemRentalLock as i16, ServerPacketIds::ItemRentalPartnerLock as i16, ServerPacketIds::CanConfirmItemRental as i16, ServerPacketIds::ConfirmItemRental as i16, ServerPacketIds::CancelItemRental as i16, ServerPacketIds::ChangeQuest as i16, ServerPacketIds::CompleteQuest as i16, ServerPacketIds::AddBuff as i16, ServerPacketIds::RemoveBuff as i16, ServerPacketIds::PlayerInspect as i16, ServerPacketIds::UpdateIntelligentCreatureList as i16, ServerPacketIds::ChangeHero as i16, ServerPacketIds::MarriageRequest as i16, ServerPacketIds::LoverUpdate as i16, ServerPacketIds::DivorceRequest as i16, ServerPacketIds::ObjectColourChanged as i16, ServerPacketIds::ManageHeroes as i16, ServerPacketIds::NewHero as i16, ServerPacketIds::SetHeroBehaviour as i16, ServerPacketIds::SetAutoPotValue as i16, ServerPacketIds::SetAutoPotItem as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::CraftItem as i16, ServerPacketIds::ItemRentalRequest as i16, ServerPacketIds::UpdateRentalItem as i16, ServerPacketIds::ItemRentalFee as i16, ServerPacketIds::ItemRentalPeriod as i16, ServerPacketIds::DepositRentalItem as i16, ServerPacketIds::RetrieveRentalItem as i16, ServerPacketIds::ItemRentalLock as i16, ServerPacketIds::ItemRentalPartnerLock as i16, ServerPacketIds::CanConfirmItemRental as i16, ServerPacketIds::ConfirmItemRental as i16, ServerPacketIds::CancelItemRental as i16, ServerPacketIds::ChangeQuest as i16, ServerPacketIds::CompleteQuest as i16, ServerPacketIds::AddBuff as i16, ServerPacketIds::RemoveBuff as i16, ServerPacketIds::PlayerInspect as i16, ServerPacketIds::UpdateIntelligentCreatureList as i16, ServerPacketIds::ChangeHero as i16, ServerPacketIds::MarriageRequest as i16, ServerPacketIds::LoverUpdate as i16, ServerPacketIds::DivorceRequest as i16, ServerPacketIds::ObjectColourChanged as i16, ServerPacketIds::ManageHeroes as i16, ServerPacketIds::NewHero as i16, ServerPacketIds::SetHeroBehaviour as i16, ServerPacketIds::SetAutoPotValue as i16, ServerPacketIds::SetAutoPotItem as i16, ServerPacketIds::HeroInformation as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M41: 合成 ----
@@ -304,7 +304,134 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                 tracing::debug!("🦸 自动药物品: grid={} item={}", p.grid, p.item_index);
             }
         }
+        x if x == ServerPacketIds::HeroInformation as i16 => {
+            // C# S.HeroInformation：英雄完整信息（含背包/装备/自动药，#203）
+            if let Ok(p) = hero::HeroInformation::read_body(&mut cur) {
+                let inventory: Vec<Option<InvItem>> = p
+                    .inventory
+                    .as_ref()
+                    .map(|inv| inv.iter().map(|s| s.as_ref().map(to_inv_item)).collect())
+                    .unwrap_or_default();
+                let equipment: Vec<Option<InvItem>> = p
+                    .equipment
+                    .as_ref()
+                    .map(|eq| eq.iter().map(|s| s.as_ref().map(to_inv_item)).collect())
+                    .unwrap_or_default();
+                server_events.write(ServerEvent::HeroInformation {
+                    object_id: p.object_id,
+                    name: p.name.clone(),
+                    class: p.class as u8,
+                    gender: p.gender as u8,
+                    level: p.level,
+                    hp: p.hp,
+                    mp: p.mp,
+                    exp: p.experience,
+                    max_exp: p.max_experience.max(1),
+                    inventory,
+                    equipment,
+                    auto_pot: p.auto_pot,
+                    auto_hp_percent: p.auto_hp_percent,
+                    auto_mp_percent: p.auto_mp_percent,
+                    hp_item_index: p.hp_item_index,
+                    mp_item_index: p.mp_item_index,
+                });
+                tracing::info!(
+                    "🦸 HeroInformation: {} Lv.{} 背包 {} 格 装备 {} 格",
+                    p.name,
+                    p.level,
+                    p.inventory.as_ref().map(|v| v.len()).unwrap_or(0),
+                    p.equipment.as_ref().map(|v| v.len()).unwrap_or(0)
+                );
+            }
+        }
         _ => {}
     }
     handled
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::network::server_event::ServerEvent;
+    use bevy::ecs::message::Messages;
+    use mir2_shared::data::item::UserItem;
+    use mir2_shared::packets::base::{Packet, PacketHeader};
+    use mir2_shared::packets::server::hero::HeroInformation;
+
+    /// 构造 S.HeroInformation 全量包并走 handle_progress 解码（#203）
+    fn build_hero_info_payload() -> Vec<u8> {
+        let mut item = UserItem::new(2001);
+        item.unique_id = 77;
+        item.count = 3;
+        let pkt = HeroInformation {
+            object_id: 0x1000_0001,
+            name: "HeroX".to_string(),
+            class: mir2_shared::enums::MirClass::Wizard,
+            gender: mir2_shared::enums::MirGender::Female,
+            level: 25,
+            hair: 2,
+            hp: 300,
+            mp: 150,
+            experience: 1000,
+            max_experience: 5000,
+            inventory: Some(vec![Some(item.clone()), None]),
+            equipment: Some(vec![Some(item)]),
+            magics: Vec::new(),
+            auto_pot: true,
+            auto_hp_percent: 50,
+            auto_mp_percent: 30,
+            hp_item_index: 5,
+            mp_item_index: 6,
+        };
+        let mut body = Vec::new();
+        pkt.write_body(&mut body).unwrap();
+        let mut payload = Vec::new();
+        PacketHeader::new((4 + body.len()) as u16, HeroInformation::OPCODE)
+            .write_to(&mut payload)
+            .unwrap();
+        payload.extend_from_slice(&body);
+        payload
+    }
+
+    fn decode_system(mut events: MessageWriter<ServerEvent>, mut payload: Local<Option<Vec<u8>>>) {
+        let payload = payload.get_or_insert_with(build_hero_info_payload);
+        let _ = handle_progress(&mut events, payload);
+    }
+
+    #[test]
+    fn hero_information_decode_to_server_event() {
+        let mut app = App::new();
+        app.init_resource::<Messages<ServerEvent>>();
+        app.add_systems(Update, decode_system);
+        app.update();
+
+        let mut messages = app.world_mut().resource_mut::<Messages<ServerEvent>>();
+        let drained: Vec<ServerEvent> = messages.drain().collect();
+        assert_eq!(drained.len(), 1);
+        match &drained[0] {
+            ServerEvent::HeroInformation {
+                name,
+                level,
+                inventory,
+                equipment,
+                auto_hp_percent,
+                auto_mp_percent,
+                hp_item_index,
+                mp_item_index,
+                ..
+            } => {
+                assert_eq!(name, "HeroX");
+                assert_eq!(*level, 25);
+                assert_eq!(inventory.len(), 2);
+                assert!(inventory[0].is_some());
+                assert!(inventory[1].is_none());
+                assert_eq!(equipment.len(), 1);
+                assert_eq!(*auto_hp_percent, 50);
+                assert_eq!(*auto_mp_percent, 30);
+                assert_eq!(*hp_item_index, 5);
+                assert_eq!(*mp_item_index, 6);
+            }
+            other => panic!("unexpected event: {:?}", other),
+        }
+    }
 }

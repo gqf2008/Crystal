@@ -40,6 +40,16 @@ pub struct HeroState {
     /// 英雄自动药阈值（0=关闭；C# HeroInventoryDialog AutoHPPercent）
     pub auto_pot_hp: u8,
     pub auto_pot_mp: u8,
+    /// 英雄背包/装备（C# S.HeroInformation，#203）
+    pub inventory: Vec<Option<crate::game::dialogs::inventory::InvItem>>,
+    pub equipment: Vec<Option<crate::game::dialogs::inventory::InvItem>>,
+    pub hero_hp: i32,
+    pub hero_mp: i32,
+    pub hero_exp: i64,
+    pub hero_max_exp: i64,
+    pub auto_pot: bool,
+    pub hp_item_index: i32,
+    pub mp_item_index: i32,
 }
 
 impl Default for HeroState {
@@ -56,6 +66,15 @@ impl Default for HeroState {
             behaviour: mir2_shared::enums::HeroBehaviour::Attack,
             auto_pot_hp: 0,
             auto_pot_mp: 0,
+            inventory: Vec::new(),
+            equipment: Vec::new(),
+            hero_hp: 0,
+            hero_mp: 0,
+            hero_exp: 0,
+            hero_max_exp: 0,
+            auto_pot: false,
+            hp_item_index: -1,
+            mp_item_index: -1,
         }
     }
 }
@@ -635,6 +654,44 @@ fn hero_server_events(
                     hero.auto_pot_mp = (*value).min(100) as u8;
                 }
                 hero.message = format!("自动药: {}", autopot_text(hero.auto_pot_hp, hero.auto_pot_mp));
+            }
+            ServerEvent::HeroInformation {
+                inventory,
+                equipment,
+                hp,
+                mp,
+                exp,
+                max_exp,
+                auto_pot,
+                auto_hp_percent,
+                auto_mp_percent,
+                hp_item_index,
+                mp_item_index,
+                ..
+            } => {
+                hero.inventory = inventory.clone();
+                hero.equipment = equipment.clone();
+                hero.hero_hp = *hp;
+                hero.hero_mp = *mp;
+                hero.hero_exp = *exp;
+                hero.hero_max_exp = *max_exp;
+                hero.auto_pot = *auto_pot;
+                if *auto_hp_percent > 0 {
+                    hero.auto_pot_hp = *auto_hp_percent;
+                }
+                if *auto_mp_percent > 0 {
+                    hero.auto_pot_mp = *auto_mp_percent;
+                }
+                hero.hp_item_index = *hp_item_index;
+                hero.mp_item_index = *mp_item_index;
+                hero.message = "英雄信息已同步".to_string();
+                tracing::info!(
+                    "🦸 英雄信息: 背包 {} 格 装备 {} 格 HP={} MP={}",
+                    inventory.len(),
+                    equipment.len(),
+                    hp,
+                    mp
+                );
             }
             _ => {}
         }
