@@ -29,6 +29,13 @@ pub enum ServerEvent {
     LogOutSuccess,
     /// ChangeAMode：攻击模式确认（C# S.ChangeAMode）
     AttackModeChanged { mode: mir2_shared::enums::AttackMode },
+    /// ManageHeroes：英雄列表（C# S.ManageHeroes）
+    HeroManageReceived {
+        heroes: Vec<mir2_shared::data::client_data::ClientHeroInformation>,
+        current: Option<mir2_shared::data::client_data::ClientHeroInformation>,
+    },
+    /// NewHero：创建英雄结果（C# S.NewHero.Result：1=BadName 4=MaxHeroes 10=Success）
+    NewHeroResult { result: u8 },
     /// GainExperience：经验增量
     ExperienceGained { amount: i64 },
     /// LevelChanged：新等级 + 经验（原实现一并更新 exp/max_exp）

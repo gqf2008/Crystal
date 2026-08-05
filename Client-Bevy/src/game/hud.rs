@@ -758,6 +758,8 @@ fn hud_server_events(
             | ServerEvent::StoragePasswordResult { .. }
             | ServerEvent::LogOutSuccess
             | ServerEvent::AttackModeChanged { .. }
+            | ServerEvent::HeroManageReceived { .. }
+            | ServerEvent::NewHeroResult { .. }
             | ServerEvent::CraftResult { .. }
             | ServerEvent::NpcGoods { .. }
             | ServerEvent::NpcSellPanel { .. } => {}
