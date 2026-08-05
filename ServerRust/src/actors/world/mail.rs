@@ -183,7 +183,12 @@ impl Message<CollectParcelRequest> for WorldActor {
 
         let result = match record.actor_ref.ask(crate::actors::player::CollectMailAttachment { mail_id: msg.mail_id }).await {
             Ok(Some(r)) => r, _ => {
-                send_system_message(&self.gate_ref, msg.session_id, "收取失败");
+                // C# S.ParcelCollected.Result=-1：无可收取包裹
+                let body = vec![-1i8 as u8];
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ParcelCollected as i16, &body),
+                }).await;
                 return;
             }
         };
@@ -196,7 +201,13 @@ impl Message<CollectParcelRequest> for WorldActor {
             let _ = record.actor_ref.ask(AddItemToInventory { item }).await;
         }
 
-        send_system_message(&self.gate_ref, msg.session_id, "附件已收取");
+        // C# S.ParcelCollected.Result=1：收取成功
+        let body = vec![1i8 as u8];
+        let _ = self.gate_ref.tell(SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ParcelCollected as i16, &body),
+        }).await;
+        debug!("CollectParcel: session={} mail_id={} gold={}", msg.session_id, msg.mail_id, gold);
     }
 }
 

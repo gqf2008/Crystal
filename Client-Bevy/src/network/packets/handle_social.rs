@@ -28,7 +28,7 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::FishingUpdate as i16, ServerPacketIds::MentorRequest as i16, ServerPacketIds::MentorUpdate as i16, ServerPacketIds::GuildNoticeChange as i16, ServerPacketIds::GuildMemberChange as i16, ServerPacketIds::Rankings as i16, ServerPacketIds::GuildInvite as i16, ServerPacketIds::FriendUpdate as i16, ServerPacketIds::TradeRequest as i16, ServerPacketIds::TradeGold as i16, ServerPacketIds::TradeConfirm as i16, ServerPacketIds::TradeCancel as i16, ServerPacketIds::TradeItem as i16, ServerPacketIds::DepositTradeItem as i16, ServerPacketIds::ReceiveMail as i16, ServerPacketIds::GroupMembersMap as i16, ServerPacketIds::GroupInvite as i16, ServerPacketIds::DeleteGroup as i16, ServerPacketIds::DeleteMember as i16, ServerPacketIds::NewMagic as i16, ServerPacketIds::MagicDelay as i16, ServerPacketIds::MagicCast as i16, ServerPacketIds::KeepAlive as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::FishingUpdate as i16, ServerPacketIds::MentorRequest as i16, ServerPacketIds::MentorUpdate as i16, ServerPacketIds::GuildNoticeChange as i16, ServerPacketIds::GuildMemberChange as i16, ServerPacketIds::Rankings as i16, ServerPacketIds::GuildInvite as i16, ServerPacketIds::FriendUpdate as i16, ServerPacketIds::TradeRequest as i16, ServerPacketIds::TradeGold as i16, ServerPacketIds::TradeConfirm as i16, ServerPacketIds::TradeCancel as i16, ServerPacketIds::TradeItem as i16, ServerPacketIds::DepositTradeItem as i16, ServerPacketIds::ReceiveMail as i16, ServerPacketIds::GroupMembersMap as i16, ServerPacketIds::GroupInvite as i16, ServerPacketIds::DeleteGroup as i16, ServerPacketIds::DeleteMember as i16, ServerPacketIds::NewMagic as i16, ServerPacketIds::MagicDelay as i16, ServerPacketIds::MagicCast as i16, ServerPacketIds::KeepAlive as i16, ServerPacketIds::ParcelCollected as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M39: 钓鱼 ----
@@ -367,6 +367,16 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
             }
         }
 
+        // ---- M22: 邮件 ----
+        x if x == ServerPacketIds::ParcelCollected as i16 => {
+            // C# S.ParcelCollected.Result (sbyte)：-1=无可收取 0=已全部收取 1=成功
+            let body = &payload[PacketHeader::HEADER_SIZE..];
+            if let Some(&result) = body.first() {
+                server_events.write(ServerEvent::ParcelCollected { result: result as i8 });
+                tracing::info!("📦 ParcelCollected: result={}", result as i8);
+            }
+        }
+
         // ---- M21: 组队 ----
         x if x == ServerPacketIds::GroupMembersMap as i16 => {
             match group::GroupMembersMap::read_body(&mut cur) {
@@ -445,3 +455,4 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
     }
     handled
 }
+

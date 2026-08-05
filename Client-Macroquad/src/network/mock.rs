@@ -1603,7 +1603,7 @@ impl MockNetwork {
                 });
             }
             NetworkEvent::CollectParcelRequest { mail_id } => {
-                let _ = response_tx.send(NetworkEvent::ParcelCollectedEvent { success: true });
+                let _ = response_tx.send(NetworkEvent::ParcelCollectedEvent { result: 1 });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!("[MOCK] 邮件 #{} 的包裹已领取", mail_id),
                 });

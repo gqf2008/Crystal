@@ -164,10 +164,10 @@ impl Packet for MailSent {
 }
 
 /// ParcelCollected - 包裹已收取 (233)
-/// C# sends only success(bool), no mail_id.
-#[derive(Debug, Clone)]
+/// C# S.ParcelCollected.Result (sbyte)：-1=NoParcelsToCollect 0=AllParcelsCollected 1=成功
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParcelCollected {
-    pub success: bool,
+    pub result: i8,
 }
 
 impl Packet for ParcelCollected {
@@ -175,13 +175,14 @@ impl Packet for ParcelCollected {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        writer.write_u8(self.success as u8)?;
+        writer.write_i8(self.result)?;
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let success = reader.read_u8()? != 0;
-        Ok(Self { success })
+        use byteorder::ReadBytesExt;
+        let result = reader.read_i8()?;
+        Ok(Self { result })
     }
 }
 
@@ -205,5 +206,25 @@ impl Packet for MailCost {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let cost = reader.read_u32::<LittleEndian>()?;
         Ok(Self { cost })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn parcel_collected_roundtrip() {
+        // C# S.ParcelCollected.Result (sbyte)：-1 / 0 / 1
+        for result in [-1i8, 0, 1] {
+            let pkt = ParcelCollected { result };
+            let mut buf = Vec::new();
+            pkt.write_body(&mut buf).unwrap();
+            assert_eq!(buf.len(), 1, "C# S.ParcelCollected 应为 1 字节");
+            let mut cur = Cursor::new(&buf);
+            let read = ParcelCollected::read_body(&mut cur).unwrap();
+            assert_eq!(read.result, result);
+        }
     }
 }
