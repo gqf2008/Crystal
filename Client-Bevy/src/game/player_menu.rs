@@ -148,10 +148,15 @@ fn player_menu_ui_system(
     net: Res<NetConnection>,
     mut chat: ResMut<ChatState>,
     mouse: Res<ButtonInput<MouseButton>>,
+    keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,
     mut options: Query<(&mut Transform, &mut UiButton, &PlayerMenuOption)>,
     mut widgets: Query<(&mut Transform, &mut Visibility), (With<PlayerMenuWidget>, Without<PlayerMenuOption>)>,
 ) {
+    // ESC 关闭（#146）
+    if state.visible && keys.just_pressed(KeyCode::Escape) {
+        state.visible = false;
+    }
     // 点击菜单外关闭
     if state.visible && mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = windows.single() {
