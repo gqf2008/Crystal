@@ -134,6 +134,12 @@ pub enum ServerEvent {
     BaseStats { stats: Vec<i32> },
     /// #272 NPCRequestInput：NPC 请求输入
     NpcInputRequest { npc_id: u32, page_name: String },
+    /// #274 NewIntelligentCreature：获得新宠物
+    CreatureAcquired { creature_type: u8 },
+    /// #274 IntelligentCreatureEnableRename：可重命名
+    CreatureRenameEnabled { can_rename: bool },
+    /// #274 IntelligentCreaturePickup：拾取模式
+    CreaturePickupToggled { enabled: bool },
     /// Roll：骰子/尤茨结果（npc_id 由 roll 消费端从 NpcDialogState 读取）
     Roll {
         r#type: i32,
