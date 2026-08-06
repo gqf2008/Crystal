@@ -1931,8 +1931,14 @@ impl Message<Tick> for WorldActor {
                         } else {
                             // 攻击
                             let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
-                            let damage = ((self.tick_count.wrapping_add(*oid as u64).wrapping_mul(7)) as i32 % dmg_range)
+                            let mut damage = ((self.tick_count.wrapping_add(*oid as u64).wrapping_mul(7)) as i32 % dmg_range)
                                 + monster.min_dmg;
+                            // #306：诅咒减伤（C# Curse 降低 MaxDC/MaxMC/MaxSC 输出百分比）
+                            if let Some((pct, until)) = self.cursed_monsters.get(&monster.object_id) {
+                                if self.tick_count < *until && *pct > 0 {
+                                    damage = (damage * (100 - pct)) / 100;
+                                }
+                            }
                             debug!("Monster '{}' (#{}) attacks Player {} for {} dmg [AI={:?}]", monster.name, *oid, target_session, damage, profile.ai_type);
                             monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
                             monster.ai_state = MonsterAiState::Attack;

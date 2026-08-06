@@ -803,6 +803,89 @@ pub struct MagicRequest {
     pub target_y: i32,
 }
 
+/// #306 HellFire：C# HumanObject.HellFire —— 前向直线 + Lv3 两条对角线，各 4 格
+fn hellfire_cells(cx: i32, cy: i32, dir: u8, level: u8) -> Vec<(i32, i32)> {
+    let dirs: Vec<usize> = if level >= 3 {
+        vec![dir as usize % 8, (dir as usize + 7) % 8, (dir as usize + 1) % 8]
+    } else {
+        vec![dir as usize % 8]
+    };
+    let mut cells = Vec::new();
+    for d in dirs {
+        let mut x = cx;
+        let mut y = cy;
+        for _ in 0..4 {
+            x += MON_DIR_DX[d];
+            y += MON_DIR_DY[d];
+            cells.push((x, y));
+        }
+    }
+    cells
+}
+
+/// #306 IceThrust：C# HumanObject.IceThrust —— 前方 1 格主目标 + 相邻 8 格溅射
+fn icethrust_cells(cx: i32, cy: i32, dir: u8) -> Vec<(i32, i32)> {
+    let d = dir as usize % 8;
+    let (tx, ty) = (cx + MON_DIR_DX[d], cy + MON_DIR_DY[d]);
+    let mut cells = vec![(tx, ty)];
+    for ox in -1..=1 {
+        for oy in -1..=1 {
+            if ox == 0 && oy == 0 {
+                continue;
+            }
+            cells.push((tx + ox, ty + oy));
+        }
+    }
+    cells
+}
+
+/// #306 Curse：C# Map.cs —— 7×7 区域
+fn curse_cells(tx: i32, ty: i32) -> Vec<(i32, i32)> {
+    let mut cells = Vec::new();
+    for x in (tx - 3)..=(tx + 3) {
+        for y in (ty - 3)..=(ty + 3) {
+            cells.push((x, y));
+        }
+    }
+    cells
+}
+
+impl WorldActor {
+    /// #306：广播法术命中（ObjectStruck + DamageIndicator，对齐 C# Attacked() 表现）
+    pub(crate) async fn broadcast_spell_hit(
+        &self,
+        hits: &[(u32, i32, i32, u8, i32)],
+        attacker_id: u32,
+    ) {
+        for (oid, x, y, dir, damage) in hits {
+            let mut struck_body = Vec::new();
+            struck_body.extend_from_slice(&oid.to_le_bytes());
+            struck_body.extend_from_slice(&attacker_id.to_le_bytes());
+            struck_body.extend_from_slice(&(*x as u32).to_le_bytes());
+            struck_body.extend_from_slice(&(*y as u32).to_le_bytes());
+            struck_body.push(*dir);
+            let struck_packet = build_packet_bytes(
+                mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
+            let mut dmg_body = Vec::new();
+            dmg_body.extend_from_slice(&damage.to_le_bytes());
+            dmg_body.push(0u8);
+            dmg_body.extend_from_slice(&oid.to_le_bytes());
+            let dmg_packet = build_packet_bytes(
+                mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
+            for session_id in self.players.keys() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: *session_id,
+                    data: struck_packet.clone(),
+                }).await;
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: *session_id,
+                    data: dmg_packet.clone(),
+                }).await;
+            }
+        }
+    }
+}
+
 impl Message<MagicRequest> for WorldActor {
     type Reply = ();
 
@@ -1385,6 +1468,114 @@ impl Message<MagicRequest> for WorldActor {
                 }
                 debug!("Magic: {} casts ThunderStorm/FlameField (5x5) dmg={}", state.name, raw_damage);
             }
+            // #306：HellFire —— 三向直线 AoE（C# HumanObject.HellFire：Lv3 三向，各 4 格，MAC）
+            SPELL_HELLFIRE => {
+                let raw_damage = if let Some(info) = spell_db {
+                    crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
+                } else { fastrand::i32(8..=20) }.max(1);
+                let attacker_stats = state.to_combat_stats();
+                let level_offset = state.level.min(10) as u16;
+                let cells = hellfire_cells(state.x, state.y, msg.direction, spell_level);
+                let hit_ids: Vec<u32> = self.monsters.iter()
+                    .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y)))
+                    .map(|(id, _)| *id)
+                    .collect();
+                let mut spell_hits: Vec<(u32, i32, i32, u8, i32)> = Vec::new();
+                for mid in hit_ids {
+                    if let Some(monster) = self.monsters.get_mut(&mid) {
+                        let defender_stats = monster.to_combat_stats();
+                        let r = combat_attack::resolve_attack(
+                            &attacker_stats, &defender_stats, raw_damage,
+                            mir2_shared::enums::DefenceType::Mac, level_offset,
+                        );
+                        if r.is_hit && r.damage > 0 {
+                            monster.take_damage(r.damage);
+                            monster.provoked = true;
+                            monster.target_session = Some(msg.session_id);
+                            for p in &r.applied_poisons {
+                                crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
+                            }
+                            spell_hits.push((mid, monster.x, monster.y, monster.direction, r.damage));
+                        }
+                    }
+                }
+                self.broadcast_spell_hit(&spell_hits, object_id).await;
+                debug!("Magic: {} casts HellFire ({} cells) dmg={} hits={}", state.name, cells.len(), raw_damage, spell_hits.len());
+            }
+            // #306：IceThrust —— 前方 1 格幸运暴击 + 60% 溅射（C# HumanObject.IceThrust）
+            SPELL_ICETHRUST => {
+                let mut raw_damage = if let Some(info) = spell_db {
+                    crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
+                } else { fastrand::i32(8..=20) }.max(1);
+                // C#：Random.Next(100) < (1 + Luck) → 伤害翻倍
+                if fastrand::i32(0..100) < (1 + state.luck) {
+                    raw_damage *= 2;
+                }
+                let attacker_stats = state.to_combat_stats();
+                let level_offset = state.level.min(10) as u16;
+                let cells = icethrust_cells(state.x, state.y, msg.direction);
+                let mut spell_hits: Vec<(u32, i32, i32, u8, i32)> = Vec::new();
+                for (i, (cx, cy)) in cells.iter().enumerate() {
+                    let dmg = if i == 0 { raw_damage } else { (raw_damage as f32 * 0.6) as i32 };
+                    let hit: Option<u32> = self.monsters.iter()
+                        .find(|(_, m)| m.x == *cx && m.y == *cy && m.hp > 0)
+                        .map(|(id, _)| *id);
+                    if let Some(mid) = hit {
+                        if let Some(monster) = self.monsters.get_mut(&mid) {
+                            let defender_stats = monster.to_combat_stats();
+                            let r = combat_attack::resolve_attack(
+                                &attacker_stats, &defender_stats, dmg,
+                                mir2_shared::enums::DefenceType::Mac, level_offset,
+                            );
+                            if r.is_hit && r.damage > 0 {
+                                monster.take_damage(r.damage);
+                                monster.provoked = true;
+                                monster.target_session = Some(msg.session_id);
+                                spell_hits.push((mid, monster.x, monster.y, monster.direction, r.damage));
+                            }
+                        }
+                    }
+                }
+                self.broadcast_spell_hit(&spell_hits, object_id).await;
+                debug!("Magic: {} casts IceThrust dmg={} hits={}", state.name, raw_damage, spell_hits.len());
+            }
+            // #306：Curse —— 7×7 区域 40% 概率 Slow 毒 + 减伤（C# Map.cs:1837，value2=1+(Lv+1)*2）
+            SPELL_CURSE => {
+                let value2 = 1 + (spell_level as i32 + 1) * 2;
+                let damage = if let Some(info) = spell_db {
+                    crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
+                } else { fastrand::i32(5..=12) }.max(1);
+                let cells = curse_cells(target_x, target_y);
+                let hit_ids: Vec<u32> = self.monsters.iter()
+                    .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y)))
+                    .map(|(id, _)| *id)
+                    .collect();
+                let candidate_count = hit_ids.len();
+                for mid in hit_ids {
+                    // C#：Envir.Random.Next(10) >= 4 → 跳过（约 40% 命中）
+                    if fastrand::i32(0..10) >= 4 {
+                        continue;
+                    }
+                    if let Some(monster) = self.monsters.get_mut(&mid) {
+                        // Slow 毒（C# Duration=damage 秒，Value=value2）
+                        crate::combat::poison::apply_poison(
+                            &mut monster.poison_list,
+                            crate::combat::poison::Poison::new(
+                                mir2_shared::enums::PoisonType::SLOW,
+                                damage.max(1) as u32,
+                                value2,
+                                1000,
+                            ),
+                        );
+                        monster.provoked = true;
+                        monster.target_session = Some(msg.session_id);
+                        // 减伤：value2%（C# 降低 MaxDC/MaxMC/MaxSC 输出百分比），持续 damage 秒
+                        let until = self.tick_count + (damage.max(1) as u64) * 10;
+                        self.cursed_monsters.insert(mid, (value2, until));
+                    }
+                }
+                debug!("Magic: {} casts Curse (7x7, {} candidates, rate={}%)", state.name, candidate_count, value2);
+            }
             // ===== 弓箭手（Archer）弹道物理系法术 =====
             // StraightShot：单目标弹道，延迟 = 距离×50ms + 500ms，AC 防御（弓箭手物理）
             // DoubleShot：对目标连发 2 次弹道（第二次延迟 +200ms）
@@ -1904,9 +2095,9 @@ impl Message<MagicRequest> for WorldActor {
                 }
                 debug!("Magic: {} casts TurnUndead (killed {} undead)", state.name, killed);
             }
-            // Repulsion：推开周围怪物（对齐 C# WizardObject.Repulsion）
+            // Repulsion/EnergyRepulsor：推开周围怪物（C# 两者共用 Repulsion 方法）
             // 命中 1-2 格内怪物，将其沿反方向推 1-2 格（受 can_push 限制）
-            SPELL_REPULSION => {
+            SPELL_REPULSION | SPELL_ENERGY_REPULSOR => {
                 let push_range = (1 + spell_level as i32 / 2).min(2); // Lv0=1, Lv2+=2
                 // 收集 (怪物id, 推动方向) —— 方向 = 怪物相对施法者
                 let mut pushes: Vec<(u32, usize)> = Vec::new();
@@ -2215,3 +2406,47 @@ fn best_dir(dx: i32, dy: i32) -> usize {
     best
 }
 
+#[cfg(test)]
+mod spell_geometry_tests {
+    use super::*;
+
+    #[test]
+    fn hellfire_lv0_single_line() {
+        // 面朝下（dir=4），从 (10,10) 出发，4 格直线
+        let cells = hellfire_cells(10, 10, 4, 0);
+        assert_eq!(cells.len(), 4);
+        assert_eq!(cells[0], (10, 11));
+        assert_eq!(cells[3], (10, 14));
+    }
+
+    #[test]
+    fn hellfire_lv3_three_lines() {
+        // dir=4（下），Lv3 → 下 + 右下 + 左下，共 12 格
+        let cells = hellfire_cells(10, 10, 4, 3);
+        assert_eq!(cells.len(), 12);
+        // 前 4 格为直线（下）
+        assert_eq!(cells[0], (10, 11));
+        assert_eq!(cells[4], (11, 11)); // 右下
+        assert_eq!(cells[8], (9, 11)); // 左下
+    }
+
+    #[test]
+    fn icethrust_target_and_splash() {
+        let cells = icethrust_cells(10, 10, 2); // 右
+        assert_eq!(cells.len(), 9);
+        assert_eq!(cells[0], (11, 10)); // 主目标
+        // 溅射含 (11,9) (11,11) (10,10) (12,10)
+        assert!(cells.contains(&(11, 9)));
+        assert!(cells.contains(&(11, 11)));
+        assert!(cells.contains(&(10, 10)));
+        assert!(cells.contains(&(12, 10)));
+    }
+
+    #[test]
+    fn curse_area_7x7() {
+        let cells = curse_cells(50, 60);
+        assert_eq!(cells.len(), 49);
+        assert!(cells.contains(&(47, 57)));
+        assert!(cells.contains(&(53, 63)));
+    }
+}

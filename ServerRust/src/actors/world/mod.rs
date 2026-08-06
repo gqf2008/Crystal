@@ -553,10 +553,14 @@ const SPELL_ENTRAPMENT: u8 = mir2_shared::enums::Spell::Entrapment as u8;       
 const SPELL_TURN_UNDEAD: u8 = mir2_shared::enums::Spell::TurnUndead as u8;        // 44 法师·秒杀低级亡灵
 const SPELL_REPULSION: u8 = mir2_shared::enums::Spell::Repulsion as u8;           // 32 法师·推开周围怪物
 const SPELL_ELECTRIC_SHOCK: u8 = mir2_shared::enums::Spell::ElectricShock as u8;  // 33 法师·驯服怪物
+const SPELL_HELLFIRE: u8 = mir2_shared::enums::Spell::HellFire as u8;             // 35 法师·地狱火（三向直线 AoE）
+const SPELL_ICETHRUST: u8 = mir2_shared::enums::Spell::IceThrust as u8;           // 53 法师·冰刺（幸运暴击+溅射）
 const SPELL_MAGIC_BOOSTER: u8 = mir2_shared::enums::Spell::MagicBooster as u8;    // 51 法师·MP 上限提升 buff
 // 道士系
 const SPELL_REVELATION: u8 = mir2_shared::enums::Spell::Revelation as u8;         // 70 道士·显血/反隐
 const SPELL_REINCARNATION: u8 = mir2_shared::enums::Spell::Reincarnation as u8;   // 79 道士·复活死亡玩家
+const SPELL_ENERGY_REPULSOR: u8 = mir2_shared::enums::Spell::EnergyRepulsor as u8; // 72 道士·气功波（同 Repulsion）
+const SPELL_CURSE: u8 = mir2_shared::enums::Spell::Curse as u8;                   // 81 道士·诅咒（区域减攻+减速）
 // 刺客系
 const SPELL_POISON_SWORD: u8 = mir2_shared::enums::Spell::PoisonSword as u8;      // 99 刺客·武器涂毒 buff
 
@@ -688,6 +692,8 @@ pub struct WorldActor {
     pub(crate) next_object_id: u32,
     /// 活跃怪物（按 object_id 索引）
     pub(crate) monsters: HashMap<u32, MonsterState>,
+    /// #306 诅咒状态（怪物 oid → (减伤百分比, 到期 tick)）
+    pub(crate) cursed_monsters: HashMap<u32, (i32, u64)>,
     /// 活跃 NPC（按 object_id 索引）
     pub(crate) npcs: HashMap<u32, NpcState>,
     /// 等待重生的怪物 (object_id → 重生 tick)
@@ -860,6 +866,7 @@ impl WorldActor {
             spawn_dir,
             next_object_id: 1000,
             monsters: HashMap::new(),
+            cursed_monsters: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
@@ -2954,6 +2961,7 @@ impl Actor for WorldActor {
             spawn_dir: args.spawn_dir,
             next_object_id: 1000,
             monsters: HashMap::new(),
+            cursed_monsters: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),

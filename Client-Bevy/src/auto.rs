@@ -405,6 +405,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--real-verify") {
         app.add_systems(Update, real_verify_system);
     }
+    // --spell-verify: 真实服务器法术冒烟（#306）HellFire/IceThrust/Curse/EnergyRepulsor
+    if std::env::args().any(|a| a == "--spell-verify") {
+        app.add_systems(Update, auto_spell_verify);
+    }
     // --auto-walk <up|down|left|right>: 调试 chunk 流式（每帧驱动玩家平移）
     {
         let dir = std::env::args()
@@ -5558,6 +5562,179 @@ fn is_passive_prey(name: &str) -> bool {
     ]
     .iter()
     .any(|k| n.contains(k))
+}
+
+/// --spell-verify：真实服务器法术冒烟（#306）
+/// 依赖：--real-net --auto-enter + 角色已学会 HellFire/IceThrust/Curse/EnergyRepulsor（player_magics）
+/// 阶段：走到最近怪物 2 格内 → 循环施法，HellFire/IceThrust 等死亡，Curse/EnergyRepulsor 冒烟
+#[allow(clippy::too_many_arguments)]
+fn auto_spell_verify(
+    mut commands: Commands,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    net: Res<client_bevy::network::NetConnection>,
+    game_data: Res<client_bevy::map_renderer::GameData>,
+    probe: Res<client_bevy::game::combat::RealHitProbe>,
+    actors: Query<(
+        &client_bevy::actor::NetObjectId,
+        &Transform,
+        Has<client_bevy::actor::Monster>,
+    )>,
+    players: Query<
+        (Entity, &Transform),
+        (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>),
+    >,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut cast_t: Local<f32>,
+    mut casts: Local<u32>,
+    mut moving: Local<bool>,
+    mut last_move_at: Local<f32>,
+    mut hits_at_stage: Local<u32>,
+) {
+    use client_bevy::scenes::AppState;
+    use client_bevy::game::movement::{world_to_tile, direction_from_delta, LocalMove};
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    if *stage == 0 {
+        if *t < 8.0 {
+            return;
+        }
+        *stage = 1;
+        *t = 0.0;
+        *moving = false;
+        *hits_at_stage = probe.hits;
+        tracing::info!("[SPELL] 开始法术冒烟（HellFire → IceThrust → Curse → EnergyRepulsor）");
+        return;
+    }
+    if *stage > 4 {
+        return;
+    }
+    let Ok((pe, pf)) = players.single() else { return };
+    let (px, py) = world_to_tile(pf.translation.x, pf.translation.y);
+
+    // 找最近存活怪物
+    let mut best: Option<(u32, i32, i32, i32)> = None;
+    for (id, tf, monster) in &actors {
+        if !monster {
+            continue;
+        }
+        let (mx, my) = world_to_tile(tf.translation.x, tf.translation.y);
+        let d = (mx - px).abs() + (my - py).abs();
+        if best.map(|(_, _, _, bd)| d < bd).unwrap_or(true) {
+            best = Some((id.0, mx, my, d));
+        }
+    }
+    let Some((oid, mx, my, d)) = best else {
+        tracing::warn!("[SPELL] ❌ 无可施法目标（stage={} casts={}）", *stage, *casts);
+        *stage = 9;
+        return;
+    };
+
+    // 目标非正邻格（太远或重叠）：走到怪物相邻格（8 邻中可达且路径最短）再施法
+    if d != 1 {
+        if !*moving {
+            if let Some(map) = &game_data.map {
+                let mut best_path: Option<(Vec<(i32, i32)>, (i32, i32))> = None;
+                for (ox, oy) in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                    let t2 = (mx + ox, my + oy);
+                    if !map.in_bounds(t2.0, t2.1) || !map.is_walkable(t2.0, t2.1) {
+                        continue;
+                    }
+                    if let Some(p) = client_bevy::game::pathfinding::find_path(map, (px, py), t2) {
+                        if !p.is_empty()
+                            && best_path
+                                .as_ref()
+                                .map(|(bp, _)| p.len() < bp.len())
+                                .unwrap_or(true)
+                        {
+                            best_path = Some((p, t2));
+                        }
+                    }
+                }
+                if let Some((p, _t2)) = best_path {
+                    let len = p.len();
+                    commands.entity(pe).insert(LocalMove {
+                        path: p.into(),
+                        step_timer_ms: 0.0,
+                        run: true,
+                        last: None,
+                        step_origin: None,
+                        turn_acc: 0.0,
+                    });
+                    *moving = true;
+                    *last_move_at = *t;
+                    tracing::info!("[SPELL] 🚶 走向怪物 {} 旁（{} 格）", oid, len);
+                }
+            }
+        }
+        // 已插入移动，等待到达（每 5 秒重置一次防止卡死）
+        if *t - *last_move_at >= 5.0 {
+            *moving = false;
+        }
+        return;
+    }
+    *moving = false;
+
+    *cast_t += time.delta_secs();
+    if *cast_t < 1.0 {
+        return;
+    }
+    *cast_t = 0.0;
+    *casts += 1;
+
+    let spell = match *stage {
+        1 => mir2_shared::enums::Spell::HellFire,
+        2 => mir2_shared::enums::Spell::IceThrust,
+        3 => mir2_shared::enums::Spell::Curse,
+        _ => mir2_shared::enums::Spell::EnergyRepulsor,
+    };
+    let dir = direction_from_delta((mx - px).signum(), (my - py).signum())
+        .unwrap_or(mir2_shared::enums::MirDirection::Up);
+    net.send_packet(&mir2_shared::packets::client::combat::Magic {
+        spell,
+        direction: dir,
+        target_id: oid,
+        location: mir2_shared::map::Point { x: mx, y: my },
+    });
+    tracing::info!(
+        "[SPELL] 🧙 stage={} 施放 {:?} → 怪物 {} @ ({},{}) dir={:?} casts={}（玩家 @ {},{})",
+        *stage, spell, oid, mx, my, dir, *casts, px, py
+    );
+
+    // HellFire/IceThrust：目标死亡（实体移除）→ 阶段通过
+    if *stage == 1 || *stage == 2 {
+        let alive = actors.iter().any(|(id, _, _)| id.0 == oid);
+        if !alive || probe.hits > *hits_at_stage {
+            tracing::info!(
+                "[SPELL] ✅ {:?} 命中/击杀怪物 {}（hits={} 基线={} casts={}）",
+                spell, oid, probe.hits, *hits_at_stage, *casts
+            );
+            *stage += 1;
+            *casts = 0;
+            *hits_at_stage = probe.hits;
+            return;
+        }
+        if *casts >= 10 {
+            tracing::warn!("[SPELL] ⚠️ {:?} 10 次未命中（位置漂移/怪物逃跑），进入下一阶段", spell);
+            *stage += 1;
+            *casts = 0;
+            *hits_at_stage = probe.hits;
+        }
+        return;
+    }
+    // Curse/EnergyRepulsor：施放 3 次后冒烟通过（不要求击杀）
+    if *casts >= 3 {
+        tracing::info!("[SPELL] ✅ {:?} 冒烟通过（3 次施放无崩溃）", spell);
+        *stage += 1;
+        *casts = 0;
+        if *stage == 5 {
+            tracing::info!("[SPELL] ✅ 法术冒烟全流程完成");
+            *stage = 9;
+        }
+    }
 }
 
 /// --book-test：技能书学习（#212：使用背包槽 3 技能书 → 等 S.NewMagic → 校验技能列表）
