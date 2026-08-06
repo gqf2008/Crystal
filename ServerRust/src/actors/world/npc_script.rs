@@ -1172,6 +1172,48 @@ async fn exec_action(
         "GROUPRECALL" | "RECALLGROUP" => {
             let _ = world.social_ref.ask(crate::actors::social::NpcGroupRecall { session_id }).await;
         }
+        // SAVEVALUE <filePath> <header> <key> <value> —— 写 INI 全局变量（对齐 C# ActionType.SaveValue）
+        "SAVEVALUE" => {
+            let file_path = arg0();
+            let header = arg1();
+            let key = arg2();
+            let value = unquote(arg3()).to_string();
+            if file_path.is_empty() || header.is_empty() || key.is_empty() {
+                warn!("NPC SAVEVALUE: missing args (filePath/header/key)");
+            } else {
+                let base = world.script_dir.clone();
+                let path = base.join(file_path);
+                if path.starts_with(&base) {
+                    match ini_write(&path, header, key, &value) {
+                        Ok(()) => debug!("NPC SAVEVALUE: {} [{}] {}={}", file_path, header, key, value),
+                        Err(e) => warn!("NPC SAVEVALUE: failed {}: {}", path.display(), e),
+                    }
+                } else {
+                    warn!("NPC SAVEVALUE: path escape denied: {}", file_path);
+                }
+            }
+        }
+        // LOADVALUE <变量名> <filePath> <header> <key> —— 读 INI 到脚本变量（对齐 C# ActionType.LoadValue）
+        "LOADVALUE" => {
+            let var = normalize_custom_var(arg0());
+            let file_path = arg1();
+            let header = arg2();
+            let key = arg3();
+            if var.is_empty() || file_path.is_empty() || header.is_empty() || key.is_empty() {
+                warn!("NPC LOADVALUE: missing args (var/filePath/header/key)");
+            } else {
+                let base = world.script_dir.clone();
+                let path = base.join(file_path);
+                if path.starts_with(&base) {
+                    if let Some(value) = ini_read(&path, header, key) {
+                        custom_vars.insert(var, value);
+                        debug!("NPC LOADVALUE: {} = {} ({} [{}] {})", arg0(), key, file_path, header, key);
+                    }
+                } else {
+                    warn!("NPC LOADVALUE: path escape denied: {}", file_path);
+                }
+            }
+        }
         // MOV <var> <value>   var 形如 A0/B0/C0...（内部存为 %A0）
         "MOV" => {
             let var = normalize_custom_var(arg0());
@@ -1287,6 +1329,59 @@ fn npc_timer_remaining_secs(now_tick: u64, expire_tick: Option<u64>) -> i64 {
         Some(exp) => exp.saturating_sub(now_tick) as i64 / 10,
         None => 0,
     }
+}
+
+/// 读取 INI 文件 [header] 下 key 的值（对齐 C# InIReader.ReadString；大小写不敏感）
+fn ini_read(path: &std::path::Path, header: &str, key: &str) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let mut in_header = false;
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with('[') && line.ends_with(']') {
+            in_header = line[1..line.len() - 1].eq_ignore_ascii_case(header);
+        } else if in_header {
+            if let Some((k, v)) = line.split_once('=') {
+                if k.trim().eq_ignore_ascii_case(key) {
+                    return Some(v.trim().to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 写入 INI 文件 [header] 下 key=value（存在则更新，否则在块内追加；块不存在则新建）
+fn ini_write(path: &std::path::Path, header: &str, key: &str, value: &str) -> std::io::Result<()> {
+    let content = std::fs::read_to_string(path).unwrap_or_default();
+    let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+    let mut idx = 0usize;
+    while idx < lines.len() {
+        let t = lines[idx].trim();
+        if t.starts_with('[') && t.ends_with(']') {
+            if t[1..t.len() - 1].eq_ignore_ascii_case(header) {
+                idx += 1;
+                while idx < lines.len() && !lines[idx].trim().starts_with('[') {
+                    if let Some((k, _)) = lines[idx].split_once('=') {
+                        if k.trim().eq_ignore_ascii_case(key) {
+                            lines[idx] = format!("{}={}", key, value);
+                            return std::fs::write(path, lines.join("\n"));
+                        }
+                    }
+                    idx += 1;
+                }
+                lines.insert(idx, format!("{}={}", key, value));
+                return std::fs::write(path, lines.join("\n"));
+            }
+        }
+        idx += 1;
+    }
+    // header 不存在：追加新块
+    let mut out = content;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&format!("[{}]\n{}={}\n", header, key, value));
+    std::fs::write(path, out)
 }
 
 /// CHANGEGENDER 性别解析：支持 male/female/0/1（大小写不敏感）
@@ -1918,6 +2013,31 @@ You don't have enough Gold!
         assert_eq!(npc_timer_remaining_secs(100, Some(90)), 0);
         // 正好到点 → 0
         assert_eq!(npc_timer_remaining_secs(100, Some(100)), 0);
+    }
+
+    #[test]
+    fn ini_read_write_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("npc_ini_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.ini");
+        let _ = std::fs::remove_file(&path);
+
+        // 新建
+        ini_write(&path, "Section", "Key", "v1").unwrap();
+        assert_eq!(ini_read(&path, "section", "key").as_deref(), Some("v1"));
+        // 更新
+        ini_write(&path, "Section", "Key", "v2").unwrap();
+        assert_eq!(ini_read(&path, "Section", "Key").as_deref(), Some("v2"));
+        // 同块追加
+        ini_write(&path, "Section", "Other", "x").unwrap();
+        assert_eq!(ini_read(&path, "section", "other").as_deref(), Some("x"));
+        // 新块追加
+        ini_write(&path, "OtherSection", "K", "1").unwrap();
+        assert_eq!(ini_read(&path, "othersection", "k").as_deref(), Some("1"));
+        // 不存在的 key
+        assert_eq!(ini_read(&path, "Section", "Nope"), None);
+
+        let _ = std::fs::remove_file(&path);
     }
 }
 
