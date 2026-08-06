@@ -2908,6 +2908,38 @@ async fn set_player_flag(world: &WorldActor, session_id: u64, key: String, val: 
     }
 }
 
+/// C# ApplyMapEntryRules：地图变更后应用 NoGroup/NoPets/NoIntelligentCreatures/NoHero 规则
+pub(crate) async fn apply_map_entry_rules(world: &mut WorldActor, session_id: u64) {
+    let Some(record) = world.players.get(&session_id).cloned() else { return };
+    let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+    let mi = world.map_infos.get(&(state.map_index as i32));
+    let Some(mi) = mi else { return };
+
+    // NoIntelligentCreatures / NoPets：解散拾取/战斗宠物（Rust 统一 creature_log）
+    if (mi.no_intelligent_creatures || mi.no_pets) && state.creature_log.active_creature.is_some() {
+        let mut st = state.clone();
+        st.creature_log.active_creature = None;
+        let _ = record.actor_ref.ask(crate::actors::player::SetCreature { creature_log: st.creature_log }).await;
+        debug!("MapEntryRules: session={} pet unsummoned (NoIntelligentCreatures/NoPets)", session_id);
+    }
+
+    // NoHero：解除英雄
+    if mi.no_hero && state.hero_index > 0 {
+        let _ = record.actor_ref.ask(crate::actors::player::SetHeroIndex { hero_index: 0 }).await;
+        world.broadcast_hero_remove(state.object_id).await;
+        debug!("MapEntryRules: session={} hero dismissed (NoHero)", session_id);
+    }
+
+    // NoGroup：离开组队（C# DisbandGroup）
+    if mi.no_group && state.group_id.is_some() {
+        let _ = world.social_ref.ask(crate::actors::social::SwitchGroupRequest {
+            session_id,
+            allow_group: false,
+        }).await;
+        debug!("MapEntryRules: session={} left group (NoGroup)", session_id);
+    }
+}
+
 /// 传送：MOVE map_index x y（pub(crate)：NPC 脚本 + 行会领地 TELEPORTGT 共用完整跨图逻辑）
 pub(crate) async fn teleport_player(world: &mut WorldActor, session_id: u64, map_index: u16, x: i32, y: i32) {
     let dest = world.map_infos.get(&(map_index as i32)).cloned();
@@ -2942,6 +2974,9 @@ pub(crate) async fn teleport_player(world: &mut WorldActor, session_id: u64, map
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
         }).await;
     }
+    // C# ApplyMapEntryRules：传送后应用地图进入规则（NoGroup/NoPets/NoIntelligentCreatures/NoHero）
+    apply_map_entry_rules(world, session_id).await;
+
 }
 
 // =============================================================================
