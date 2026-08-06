@@ -128,6 +128,7 @@ async fn async_main() -> anyhow::Result<()> {
         db_pool: db_pool.clone(),
         social_ref: social_ref.clone(),
         conquest_cfg: cfg.conquest.clone(),
+        drop_rate: cfg.server.drop_rate,
     });
     info!("WorldActor spawned (tick={}ms, map_dir={})", cfg.server.tick_ms, cfg.server.map_data_dir);
 
