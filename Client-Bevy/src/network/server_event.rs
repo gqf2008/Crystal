@@ -122,6 +122,10 @@ pub enum ServerEvent {
     },
     /// #260 ShareQuest：共享任务
     QuestShared { quest_id: i32 },
+    /// #262 NewRecipeInfo：学会配方
+    RecipeLearned { recipe_id: i32 },
+    /// #262 PauseBuff：Buff 暂停
+    BuffPaused { buff_type: u8, object_id: u32, paused: bool },
     /// Roll：骰子/尤茨结果（npc_id 由 roll 消费端从 NpcDialogState 读取）
     Roll {
         r#type: i32,

@@ -787,6 +787,27 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             &to_client,
                                             &server::miscellaneous::DeleteQuestItem { item_id: 1002 },
                                         );
+                                        // #262：配方 / Buff 暂停 / 杂项
+                                        send(
+                                            &to_client,
+                                            &server::ui_events::NewRecipeInfo { recipe_id: 1 },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::buff::PauseBuff {
+                                                buff_type: mir2_shared::enums::BuffType::Haste,
+                                                object_id: 100,
+                                                paused: true,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::item::RefreshItem { item: potion_item(1) },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::ui_events::SetBindingShot { enabled: true },
+                                        );
                                         // #256：公告 + 杂项协议
                                         send(
                                             &to_client,
