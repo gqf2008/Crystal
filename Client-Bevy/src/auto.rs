@@ -186,6 +186,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--item-state-test") {
         app.add_systems(Update, auto_item_state_test);
     }
+    // --map-fx-test: 地图特效/音效/计时器（MapEffect/PlaySound/SetTimer/ExpireTimer，#230）
+    if std::env::args().any(|a| a == "--map-fx-test") {
+        app.add_systems(Update, auto_map_fx_test);
+    }
     // --book-test: 技能书学习链路（使用技能书 → 等 NewMagic → 校验 MagicsState）
     if std::env::args().any(|a| a == "--book-test") {
         app.add_systems(Update, auto_book_test);
@@ -5672,6 +5676,133 @@ fn auto_item_state_test(
                     tracing::info!("[ITEMST] ✅ 物品状态同步全部通过");
                 } else {
                     tracing::warn!("[ITEMST] ❌ 部分未通过（获得={} 删除={} 耐久={}）", gained, deleted, dura);
+                }
+                *stage = 9;
+            }
+        }
+        _ => {}
+    }
+}
+
+
+/// --map-fx-test：施法 → mock 回发 MapEffect/PlaySound/SetTimer，4s 后 ExpireTimer，
+/// 断言 特效生成 + 计时器激活 + 计时器关闭（#230）
+#[allow(clippy::too_many_arguments)]
+fn auto_map_fx_test(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    effects: Res<client_bevy::game::effects::EffectsState>,
+    timer: Res<client_bevy::game::dialogs::timer::TimerState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut target: Local<Option<u32>>,
+    mut target_tile: Local<Option<(i32, i32)>>,
+    mut before: Local<u64>,
+    actors: Query<(
+        &client_bevy::actor::NetObjectId,
+        &Transform,
+        Has<client_bevy::actor::Monster>,
+    )>,
+    players: Query<
+        &Transform,
+        (
+            With<client_bevy::actor::LocalPlayer>,
+            With<client_bevy::actor::NetObjectId>,
+        ),
+    >,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 10.0 {
+                return;
+            }
+            let Ok(pf) = players.single() else { return };
+            let (px, py) =
+                client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+            let mut best: Option<(u32, i32, i32)> = None;
+            for (id, tf, monster) in &actors {
+                if !monster {
+                    continue;
+                }
+                let (mx, my) =
+                    client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+                let d = (mx - px).abs() + (my - py).abs();
+                if d <= 40 && best.map(|(_, _, bd)| d < bd).unwrap_or(true) {
+                    best = Some((id.0, mx, my));
+                }
+            }
+            match best {
+                Some((oid, mx, my)) => {
+                    *target = Some(oid);
+                    *target_tile = Some((mx, my));
+                    tracing::info!("[MAPFX] 🎯 目标怪物 id={} @ ({},{})", oid, mx, my);
+                    *stage = 1;
+                    *t = 0.0;
+                }
+                None => {
+                    tracing::warn!("[MAPFX] ❌ 附近没有怪物");
+                    *stage = 9;
+                }
+            }
+        }
+        1 => {
+            if *t < 1.5 {
+                return;
+            }
+            let (mx, my) = target_tile.unwrap_or((0, 0));
+            let Ok(pf) = players.single() else { return };
+            let (px, py) =
+                client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+            let dir = client_bevy::game::movement::direction_from_delta(
+                (mx - px).signum(),
+                (my - py).signum(),
+            )
+            .unwrap_or(mir2_shared::enums::MirDirection::Down);
+            *before = effects.spawned;
+            net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                spell: mir2_shared::enums::Spell::FireBall,
+                direction: dir,
+                target_id: target.unwrap_or(0),
+                location: mir2_shared::Point { x: mx, y: my },
+            });
+            tracing::info!("[MAPFX] 🔥 施法触发地图特效/音效/计时器");
+            *stage = 2;
+            *t = 0.0;
+        }
+        2 => {
+            if *t >= 2.5 {
+                let delta = effects.spawned - *before;
+                let timer_on = timer.active && timer.remaining > 0.0;
+                tracing::info!(
+                    "[MAPFX] 阶段2: 特效增量={} 计时器激活={} 剩余={:.1}",
+                    delta,
+                    timer_on,
+                    timer.remaining
+                );
+                if delta >= 1 && timer_on {
+                    tracing::info!("[MAPFX] ✅ 地图特效/计时器启动通过");
+                } else {
+                    tracing::warn!("[MAPFX] ❌ 启动未通过（特效={} 计时器={}）", delta, timer_on);
+                }
+                *stage = 3;
+                *t = 0.0;
+            }
+        }
+        3 => {
+            // mock t+4s 发 ExpireTimer；倒计时 5s 也会归零——两者任一都会关闭
+            if *t >= 6.0 {
+                let expired = !timer.active;
+                tracing::info!("[MAPFX] 阶段3: 计时器已关闭={}", expired);
+                if expired {
+                    tracing::info!("[MAPFX] ✅ 计时器关闭通过");
+                } else {
+                    tracing::warn!("[MAPFX] ❌ 计时器未关闭（remaining={:.1}）", timer.remaining);
                 }
                 *stage = 9;
             }

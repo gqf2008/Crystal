@@ -17,6 +17,9 @@ use crate::ui::sprite_ui::{
 #[derive(Resource, Default)]
 pub struct TimerState {
     pub message: String,
+    /// #230：网络计时器是否激活（S.SetTimer 启动 / S.ExpireTimer 或倒计时归零关闭）
+    pub active: bool,
+    pub remaining: f32,
 }
 
 #[derive(Component)]
@@ -37,8 +40,9 @@ impl Plugin for TimerPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_timer);
         app.add_systems(
             Update,
-            (timer_ui_system, ui_button_system)
+            (timer_network_events, timer_countdown, timer_ui_system, ui_button_system)
                 .chain()
+                .after(crate::network::network_system)
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -119,7 +123,7 @@ fn timer_ui_system(
     }
     const TIMER_LINES: [&str; 2] = [
         "—— 计时器 ——",
-        "本机运行时间显示（占位）",
+        "服务端计时（S.SetTimer）",
     ];
     for (mut text, line) in &mut lines {
         text.0 = match line.0 {
@@ -128,5 +132,48 @@ fn timer_ui_system(
             _ => String::new(),
         };
     }
-    timer.message = format!("{} 对话框", "计时器");
+    // 无网络计时器时显示占位文案（#230：有倒计时时由 timer_countdown 维护 message）
+    if !timer.active {
+        timer.message = format!("{} 对话框", "计时器");
+    }
+}
+
+/// #230：S.SetTimer / S.ExpireTimer → 打开/关闭计时器对话框
+fn timer_network_events(
+    mut mgr: ResMut<DialogManager>,
+    mut timer: ResMut<TimerState>,
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+) {
+    for ev in events.read() {
+        match ev {
+            crate::network::server_event::ServerEvent::TimerSet { seconds, .. } => {
+                timer.active = true;
+                timer.remaining = (*seconds).max(1) as f32;
+                mgr.open.push(DialogKind::Timer);
+                tracing::info!("⏱️ [TIMER] 启动计时器 {} 秒", seconds);
+            }
+            crate::network::server_event::ServerEvent::TimerExpired { .. } => {
+                timer.active = false;
+                timer.remaining = 0.0;
+                mgr.close(DialogKind::Timer);
+                tracing::info!("⏱️ [TIMER] 计时器关闭");
+            }
+            _ => {}
+        }
+    }
+}
+
+/// #230：倒计时（归零自动关闭）
+fn timer_countdown(time: Res<Time>, mut mgr: ResMut<DialogManager>, mut timer: ResMut<TimerState>) {
+    if !timer.active {
+        return;
+    }
+    timer.remaining -= time.delta_secs();
+    timer.message = format!("剩余 {:.0} 秒", timer.remaining.max(0.0));
+    if timer.remaining <= 0.0 {
+        timer.active = false;
+        timer.message = String::new();
+        mgr.close(DialogKind::Timer);
+        tracing::info!("⏱️ [TIMER] 倒计时归零");
+    }
 }

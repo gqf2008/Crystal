@@ -121,9 +121,32 @@ impl Plugin for SoundPlugin {
         app.init_resource::<SoundBank>();
         app.init_resource::<SoundCache>();
         app.add_systems(Startup, load_sound_bank);
+        // #230：S.PlaySound → 播放服务端指定音效
+        app.add_systems(
+            Update,
+            play_server_sounds
+                .after(crate::network::network_system)
+                .run_if(in_state(crate::scenes::AppState::Game)),
+        );
     }
 }
 
 fn load_sound_bank(mut bank: ResMut<SoundBank>) {
     bank.load();
+}
+
+/// #230：消费 ServerEvent::PlaySound 并播放（带缓存）
+fn play_server_sounds(
+    mut commands: Commands,
+    mut assets: ResMut<Assets<AudioSource>>,
+    bank: Res<SoundBank>,
+    mut cache: ResMut<SoundCache>,
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+) {
+    for ev in events.read() {
+        if let crate::network::server_event::ServerEvent::PlaySound { sound_id } = ev {
+            play_sound_cached(&mut commands, &mut assets, &bank, &mut cache, *sound_id);
+            tracing::debug!("🔊 [SOUND] 播放服务端音效 #{}", sound_id);
+        }
+    }
 }

@@ -28,7 +28,7 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::FishingUpdate as i16, ServerPacketIds::MentorRequest as i16, ServerPacketIds::MentorUpdate as i16, ServerPacketIds::GuildNoticeChange as i16, ServerPacketIds::GuildMemberChange as i16, ServerPacketIds::Rankings as i16, ServerPacketIds::GuildInvite as i16, ServerPacketIds::FriendUpdate as i16, ServerPacketIds::TradeRequest as i16, ServerPacketIds::TradeGold as i16, ServerPacketIds::TradeConfirm as i16, ServerPacketIds::TradeCancel as i16, ServerPacketIds::TradeItem as i16, ServerPacketIds::DepositTradeItem as i16, ServerPacketIds::ReceiveMail as i16, ServerPacketIds::GroupMembersMap as i16, ServerPacketIds::GroupInvite as i16, ServerPacketIds::DeleteGroup as i16, ServerPacketIds::DeleteMember as i16, ServerPacketIds::NewMagic as i16, ServerPacketIds::MagicDelay as i16, ServerPacketIds::MagicCast as i16, ServerPacketIds::MagicLeveled as i16, ServerPacketIds::ObjectMagic as i16, ServerPacketIds::ObjectEffect as i16, ServerPacketIds::ObjectProjectile as i16, ServerPacketIds::SpellToggle as i16, ServerPacketIds::KeepAlive as i16, ServerPacketIds::ParcelCollected as i16, ServerPacketIds::RequestReincarnation as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::FishingUpdate as i16, ServerPacketIds::MentorRequest as i16, ServerPacketIds::MentorUpdate as i16, ServerPacketIds::GuildNoticeChange as i16, ServerPacketIds::GuildMemberChange as i16, ServerPacketIds::Rankings as i16, ServerPacketIds::GuildInvite as i16, ServerPacketIds::FriendUpdate as i16, ServerPacketIds::TradeRequest as i16, ServerPacketIds::TradeGold as i16, ServerPacketIds::TradeConfirm as i16, ServerPacketIds::TradeCancel as i16, ServerPacketIds::TradeItem as i16, ServerPacketIds::DepositTradeItem as i16, ServerPacketIds::ReceiveMail as i16, ServerPacketIds::GroupMembersMap as i16, ServerPacketIds::GroupInvite as i16, ServerPacketIds::DeleteGroup as i16, ServerPacketIds::DeleteMember as i16, ServerPacketIds::NewMagic as i16, ServerPacketIds::MagicDelay as i16, ServerPacketIds::MagicCast as i16, ServerPacketIds::MagicLeveled as i16, ServerPacketIds::ObjectMagic as i16, ServerPacketIds::ObjectEffect as i16, ServerPacketIds::ObjectProjectile as i16, ServerPacketIds::SpellToggle as i16, ServerPacketIds::MapEffect as i16, ServerPacketIds::PlaySound as i16, ServerPacketIds::SetTimer as i16, ServerPacketIds::ExpireTimer as i16, ServerPacketIds::KeepAlive as i16, ServerPacketIds::ParcelCollected as i16, ServerPacketIds::RequestReincarnation as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M39: 钓鱼 ----
@@ -530,6 +530,50 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
                     p.can_use,
                     p.hero
                 );
+            }
+        }
+
+        // #230：地图特效 / 服务端音效 / 游戏内计时器
+        x if x == ServerPacketIds::MapEffect as i16 => {
+            if let Ok(p) = object::MapEffect::read_body(&mut cur) {
+                let pos = crate::game::movement::tile_to_world(p.location.x, p.location.y);
+                effects.write(PendingEffect::BurstAt {
+                    x: pos.x,
+                    y: pos.y,
+                    color: crate::game::effects::spell_effect_color(p.effect as u8),
+                });
+                tracing::info!(
+                    "🌋 地图特效: ({},{}) effect={:?} value={}",
+                    p.location.x,
+                    p.location.y,
+                    p.effect,
+                    p.value
+                );
+            }
+        }
+        x if x == ServerPacketIds::PlaySound as i16 => {
+            if let Ok(p) = ui_events::PlaySound::read_body(&mut cur) {
+                server_events.write(ServerEvent::PlaySound {
+                    sound_id: p.sound_id as u32,
+                });
+                tracing::info!("🔊 服务端音效 #{}", p.sound_id);
+            }
+        }
+        x if x == ServerPacketIds::SetTimer as i16 => {
+            if let Ok(p) = ui_events::SetTimer::read_body(&mut cur) {
+                server_events.write(ServerEvent::TimerSet {
+                    timer_id: p.timer_id,
+                    seconds: p.seconds,
+                });
+                tracing::info!("⏱️ 设置计时器 id={} 秒={}", p.timer_id, p.seconds);
+            }
+        }
+        x if x == ServerPacketIds::ExpireTimer as i16 => {
+            if let Ok(p) = ui_events::ExpireTimer::read_body(&mut cur) {
+                server_events.write(ServerEvent::TimerExpired {
+                    timer_id: p.timer_id,
+                });
+                tracing::info!("⏱️ 计时器到期 id={}", p.timer_id);
             }
         }
 
