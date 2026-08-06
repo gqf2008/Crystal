@@ -754,6 +754,11 @@ impl WorldActor {
             return;
         };
         let Some(hero) = heroes.iter().find(|h| h.index as u8 == state.hero_index).cloned() else { return };
+        // C# SealHero：背包无空位时封印失败（FreeSpace == 0 → return）
+        if !state.inventory.has_space() {
+            send_system_message(&self.gate_ref, session_id, "背包没有空位，无法封印英雄");
+            return;
+        }
         if !hero.sealed {
             if let Some(hs) = self.player_heroes.get_mut(&session_id) {
                 if let Some(h) = hs.iter_mut().find(|h| h.index == hero.index) {
