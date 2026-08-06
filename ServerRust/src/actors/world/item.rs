@@ -1363,7 +1363,13 @@ impl Message<DropItemRequest> for WorldActor {
             count: msg.count,
         }).await.unwrap_or(None);
         if let Some(mut item) = item {
-            let player_pos = (state.x, state.y);
+            // C# HumanObject.DropItem：Meat 落地 current_dura -= 2000
+            if self.item_infos.get(&item.item_index).map(|i| i.item_type == 15 /* Meat */).unwrap_or(false) {
+                item.current_dura = item.current_dura.saturating_sub(2000);
+            }
+            // C#：掉落散落（Settings.DropRange=4）
+            let (dx, dy) = crate::actors::world::scatter_drop_position(self.maps.get(&state.map_index), state.x, state.y, 4);
+            let player_pos = (dx, dy);
 
             debug!("Player session={} dropped item uid={}", msg.session_id, msg.unique_id);
 
