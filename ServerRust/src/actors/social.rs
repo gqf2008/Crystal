@@ -2170,6 +2170,19 @@ impl Message<TradeAddItem> for SocialActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: TradeAddItem, _ctx: &mut Context<Self, Self::Reply>) {
+        // C# CanTradeItem：BindMode.DontTrade(0x10) 物品不可交易
+        if let Some(record) = self.players.get(&msg.session_id) {
+            if let Ok(Some(state)) = record.ask(GetPlayerState).await {
+                let infos = self.config.item_infos.read().await;
+                let bind = state.inventory.get_item(msg.unique_id)
+                    .and_then(|it| infos.get(&it.item_index).map(|i| i.bind_mode))
+                    .unwrap_or(0);
+                if (bind & 0x0010) != 0 {
+                    send_system_message(&self.gate_ref, msg.session_id, "该物品无法交易");
+                    return;
+                }
+            }
+        }
         let trade = match self.find_trade_mut(msg.session_id) {
             Some(t) => t, None => return,
         };
@@ -2953,6 +2966,15 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
 
                 if state.inventory.get_item(msg.unique_id).is_none() {
                     send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
+                    return;
+                }
+                // C#：BindMode.DontStore(0x8) 物品不可存入行会仓库
+                let infos = self.config.item_infos.read().await;
+                let bind = state.inventory.get_item(msg.unique_id)
+                    .and_then(|it| infos.get(&it.item_index).map(|i| i.bind_mode))
+                    .unwrap_or(0);
+                if (bind & 0x0008) != 0 {
+                    send_system_message(&self.gate_ref, msg.session_id, "该物品无法存入仓库");
                     return;
                 }
 

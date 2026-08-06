@@ -1889,6 +1889,12 @@ impl Message<StoreItemRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
             return;
         }
+        // C# StoreItem：BindMode.DontStore(0x8) 物品不可存入仓库
+        let item_idx = state.inventory.backpack[msg.from as usize].as_ref().unwrap().item.item_index;
+        if self.item_infos.get(&item_idx).map(|i| (i.bind_mode & 0x0008) != 0).unwrap_or(false) {
+            send_system_message(&self.gate_ref, msg.session_id, "该物品无法存入仓库");
+            return;
+        }
 
         // 执行存入（目标格优先，占用则找第一个空位）
         let result = record.actor_ref.ask(StoreItemTo {
