@@ -581,11 +581,13 @@ async fn eval_one_check(
                 None => false,
             }
         }
-        // CHECKTIMER <key> <op> <seconds> — 检查计时器剩余秒数（对齐 C# CheckType.CheckTimer；无计时器视为 0）
+        // CHECKTIMER <key> <op> <seconds> — 检查计时器剩余秒数（对齐 C# CheckType.CheckTimer；
+        // 先查全局 Envir.Timers["_-"+key]，再查玩家个人计时器；无计时器视为 0）
         "CHECKTIMER" => {
             let key = arg0().parse::<i32>().unwrap_or(0);
             let (op, want) = parse_op_amount(&args[1..]);
-            let expire = world.npc_timers.get(&session_id).and_then(|m| m.get(&key)).copied();
+            let expire = world.npc_timers.get(&GLOBAL_TIMER_SESSION).and_then(|m| m.get(&key)).copied()
+                .or_else(|| world.npc_timers.get(&session_id).and_then(|m| m.get(&key)).copied());
             let remaining = npc_timer_remaining_secs(world.tick_count, expire);
             compare_i64(remaining, op, want)
         }
@@ -1825,30 +1827,37 @@ async fn exec_action(
                 );
             }
         }
-        // SETTIMER <key> <seconds> [type] [global] —— 注册计时器（对齐 C# ActionType.SetTimer；发 S.SetTimer）
-        // C# timerKey=玩家名-key、global 存 Envir；Rust 简化按 session 维度存 key，到点自动移除
+        // SETTIMER <key> <seconds> [type] [global] —— 注册计时器（对齐 C# ActionType.SetTimer）
+        // C#：global=true 存 Envir.Timers["_-"+key]（全局共享、不发 S.SetTimer）；false 存玩家个人并发 S.SetTimer。
+        // Rust：全局计时器存保留 session（GLOBAL_TIMER_SESSION），tick_npc_timers 正常到期清理。
         "SETTIMER" => {
             let key = arg0().parse::<i32>().unwrap_or(0);
             let secs = arg1().parse::<i64>().unwrap_or(0).max(0);
             let _kind = arg2().parse::<u8>().unwrap_or(0);
-            let _global = arg3().eq_ignore_ascii_case("true") || arg3() == "1";
+            let global = arg3().eq_ignore_ascii_case("true") || arg3() == "1";
             // 世界循环 100ms/tick：1 秒 = 10 ticks
             let expire_tick = world.tick_count.saturating_add(secs as u64 * 10);
-            world.npc_timers.entry(session_id).or_default().insert(key, expire_tick);
-            let packet = mir2_shared::packets::server::ui_events::SetTimer {
-                timer_id: key,
-                seconds: secs as i32,
-            };
-            let mut body = Vec::new();
-            if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
-                let _ = world.gate_ref.tell(SendToClient { session_id, data: body }).await;
+            let owner = if global { GLOBAL_TIMER_SESSION } else { session_id };
+            world.npc_timers.entry(owner).or_default().insert(key, expire_tick);
+            if !global {
+                let packet = mir2_shared::packets::server::ui_events::SetTimer {
+                    timer_id: key,
+                    seconds: secs as i32,
+                };
+                let mut body = Vec::new();
+                if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
+                    let _ = world.gate_ref.tell(SendToClient { session_id, data: body }).await;
+                }
             }
-            debug!("NPC SETTIMER: key={} {}s (expire tick {})", key, secs, expire_tick);
+            debug!("NPC SETTIMER: key={} {}s global={} (expire tick {})", key, secs, global, expire_tick);
         }
-        // EXPIRETIMER <key> —— 移除计时器（对齐 C# ActionType.ExpireTimer；发 S.ExpireTimer）
+        // EXPIRETIMER <key> —— 移除计时器（对齐 C# ActionType.ExpireTimer：全局和个人都移除；发 S.ExpireTimer）
         "EXPIRETIMER" | "CLEARTIMER" => {
             let key = arg0().parse::<i32>().unwrap_or(0);
             if let Some(timers) = world.npc_timers.get_mut(&session_id) {
+                timers.remove(&key);
+            }
+            if let Some(timers) = world.npc_timers.get_mut(&GLOBAL_TIMER_SESSION) {
                 timers.remove(&key);
             }
             let packet = mir2_shared::packets::server::ui_events::ExpireTimer { timer_id: key };
@@ -2244,6 +2253,9 @@ fn npc_timer_remaining_secs(now_tick: u64, expire_tick: Option<u64>) -> i64 {
         None => 0,
     }
 }
+
+/// 全局计时器保留 session（C# Envir.Timers 全局计时器；tick_npc_timers 按值清理）
+const GLOBAL_TIMER_SESSION: u64 = u64::MAX;
 
 /// 当前星期几（C# DayOfWeek 全名，大写；使用服务器本地时间 chrono::Local）
 fn now_weekday_upper() -> String {
