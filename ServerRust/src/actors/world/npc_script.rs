@@ -1303,6 +1303,23 @@ async fn exec_action(
             }
             info!("NPC {}: ROLL type={} result={} page={} auto={}", npc.name, r#type, result, page, auto_roll);
         }
+        // INSTANCEMOVE <map> <instance> <x> <y> —— 副本实例传送（对齐 C# ActionType.InstanceMove；
+        // Rust 暂无独立副本实例，instance 忽略，等同传送到指定地图坐标）
+        "INSTANCEMOVE" => {
+            let map_name = arg0();
+            let _instance = arg1().parse::<i32>().unwrap_or(0);
+            let x = arg2().parse::<i32>().unwrap_or(0);
+            let y = arg3().parse::<i32>().unwrap_or(0);
+            if let Some(map_index) = world.map_infos.values()
+                .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
+                .map(|m| m.index as u16)
+            {
+                teleport_player(world, session_id, map_index, x, y).await;
+                debug!("NPC INSTANCEMOVE: map={} ({},{}) instance={}", map_name, x, y, _instance);
+            } else {
+                warn!("NPC INSTANCEMOVE: map '{}' not found", map_name);
+            }
+        }
         // RECALL —— 传送到当前 NPC 位置（对齐 mod.rs 旧处理器 RECALL）
         "RECALL" => {
             teleport_player(world, session_id, npc.map_index, npc.x, npc.y).await;
