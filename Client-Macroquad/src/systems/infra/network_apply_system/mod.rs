@@ -122,7 +122,9 @@ fn apply_remote_movement(
     direction: crate::components::MirDirection,
     cfg: RemoteMoveConfig,
 ) {
-    use crate::components::{LocalPlayer, MonsterAnimState, Player, Position, PositionInterpolation, RemoteMoveAnim};
+    use crate::components::{
+        LocalPlayer, MonsterAnimState, Player, Position, PositionInterpolation, RemoteMoveAnim,
+    };
     use std::time::Instant;
 
     let Some(e) = entity_index.get(&object_id).copied() else {
@@ -135,19 +137,40 @@ fn apply_remote_movement(
 
     if is_local {
         let has_pos = ctx.world.get::<&Position>(e).is_ok();
-        let dead = ctx.world.get::<&crate::components::Health>(e).ok().map(|hp| hp.current <= 0).unwrap_or(false);
+        let dead = ctx
+            .world
+            .get::<&crate::components::Health>(e)
+            .ok()
+            .map(|hp| hp.current <= 0)
+            .unwrap_or(false);
         let will_apply = ctx.session.server_authoritative_movement || !has_pos || dead;
 
         if NetworkApplySystem::net_recv_diag_enabled() {
-            let before_grid = ctx.world.get::<&Position>(e).ok().map(|p| crate::coord::Coord::world_to_grid(p.x, p.y));
+            let before_grid = ctx
+                .world
+                .get::<&Position>(e)
+                .ok()
+                .map(|p| crate::coord::Coord::world_to_grid(p.x, p.y));
             tracing::info!(
                 "[NETRECV] {:?}(local): id={} loc=({},{}) dir={:?} will_apply={} local_before={:?}",
-                cfg.player_action, object_id, location_x, location_y, direction, will_apply, before_grid
+                cfg.player_action,
+                object_id,
+                location_x,
+                location_y,
+                direction,
+                will_apply,
+                before_grid
             );
         }
 
         if will_apply {
-            NetworkApplySystem::apply_object_move(ctx, entity_index, object_id, location_x, location_y);
+            NetworkApplySystem::apply_object_move(
+                ctx,
+                entity_index,
+                object_id,
+                location_x,
+                location_y,
+            );
         }
     } else {
         let existing_pos = ctx.world.get::<&Position>(e).ok().map(|pos| (pos.x, pos.y));
@@ -161,17 +184,40 @@ fn apply_remote_movement(
 
         let start_grid = crate::coord::Coord::world_to_grid(sx, sy);
         let steps = ((location_x - start_grid.0).abs()).max((location_y - start_grid.1).abs());
-        let interp_dur = if cfg.scale_interp_by_steps { cfg.base_interp_secs * steps as f32 } else { cfg.base_interp_secs };
+        let interp_dur = if cfg.scale_interp_by_steps {
+            cfg.base_interp_secs * steps as f32
+        } else {
+            cfg.base_interp_secs
+        };
 
-        if cfg.base_interp_secs > 0.0 && steps <= cfg.interp_max_steps && ((sx - wx).abs() > 0.01 || (sy - wy).abs() > 0.01) {
+        if cfg.base_interp_secs > 0.0
+            && steps <= cfg.interp_max_steps
+            && ((sx - wx).abs() > 0.01 || (sy - wy).abs() > 0.01)
+        {
             let interp = PositionInterpolation::new(sx, sy, wx, wy, now_secs, interp_dur);
             NetworkApplySystem::upsert_component(ctx, e, interp);
         } else if cfg.base_interp_secs <= 0.0 || steps > cfg.interp_max_steps {
-            NetworkApplySystem::apply_object_move(ctx, entity_index, object_id, location_x, location_y);
+            NetworkApplySystem::apply_object_move(
+                ctx,
+                entity_index,
+                object_id,
+                location_x,
+                location_y,
+            );
         }
 
-        let anim_secs = if cfg.base_interp_secs > 0.0 { interp_dur } else { cfg.fallback_anim_secs };
-        NetworkApplySystem::upsert_component(ctx, e, RemoteMoveAnim { end_time: now_secs + anim_secs as f64 });
+        let anim_secs = if cfg.base_interp_secs > 0.0 {
+            interp_dur
+        } else {
+            cfg.fallback_anim_secs
+        };
+        NetworkApplySystem::upsert_component(
+            ctx,
+            e,
+            RemoteMoveAnim {
+                end_time: now_secs + anim_secs as f64,
+            },
+        );
     }
 
     if let Ok(mut p) = ctx.world.get::<&mut Player>(e) {
@@ -180,16 +226,25 @@ fn apply_remote_movement(
     }
 
     if ctx.world.get::<&crate::components::Monster>(e).is_ok() {
-        NetworkApplySystem::upsert_component(ctx, e, MonsterAnimState {
-            direction, action: crate::components::MirAction::Walking, start_time: Instant::now(),
-        });
+        NetworkApplySystem::upsert_component(
+            ctx,
+            e,
+            MonsterAnimState {
+                direction,
+                action: crate::components::MirAction::Walking,
+                start_time: Instant::now(),
+            },
+        );
     }
 }
 
 impl NetworkApplySystem {
     /// 获取实体的世界坐标（不修改 ECS）。
     fn entity_position(ctx: &GameContext, entity: hecs::Entity) -> Option<(f32, f32)> {
-        ctx.world.get::<&crate::components::Position>(entity).ok().map(|p| (p.x, p.y))
+        ctx.world
+            .get::<&crate::components::Position>(entity)
+            .ok()
+            .map(|p| (p.x, p.y))
     }
 
     /// 按 object_id 从索引查找实体并获取世界坐标（O(1)）。
@@ -199,7 +254,10 @@ impl NetworkApplySystem {
         object_id: u32,
     ) -> Option<(f32, f32)> {
         let e = entity_index.get(&object_id)?;
-        world.get::<&crate::components::Position>(*e).ok().map(|p| (p.x, p.y))
+        world
+            .get::<&crate::components::Position>(*e)
+            .ok()
+            .map(|p| (p.x, p.y))
     }
 
     /// 将物品从源槽位转移到目标槽位（要求源非空、目标为空）。
@@ -222,14 +280,19 @@ impl NetworkApplySystem {
         })
     }
 
-    fn apply_object_player(ctx: &mut GameContext, entity_index: &std::collections::HashMap<u32, hecs::Entity>, packet: mir2_shared::packets::server::ObjectPlayer) {
-        use crate::components::{
-            AnimationFrame, MountState, MountStatus, OtherPlayer, Player, PlayerAction, PlayerAppearance, Position,
-            RemotePlayer,
-        };
+    fn apply_object_player(
+        ctx: &mut GameContext,
+        entity_index: &std::collections::HashMap<u32, hecs::Entity>,
+        packet: mir2_shared::packets::server::ObjectPlayer,
+    ) {
         use crate::components::network::{NetworkObjectType, NetworkSync};
+        use crate::components::{
+            AnimationFrame, MountState, MountStatus, OtherPlayer, Player, PlayerAction,
+            PlayerAppearance, Position, RemotePlayer,
+        };
 
-        let (wx, wy) = crate::coord::Coord::grid_to_world_center(packet.location_x, packet.location_y);
+        let (wx, wy) =
+            crate::coord::Coord::grid_to_world_center(packet.location_x, packet.location_y);
 
         let appearance = PlayerAppearance {
             class: packet.class,
@@ -267,18 +330,29 @@ impl NetworkApplySystem {
             action: PlayerAction::Stand,
         };
 
-        let mount_index_from_packet: Option<usize> = if packet.riding_mount && packet.mount_type >= 0 {
-            Some(packet.mount_type as usize)
-        } else {
-            None
-        };
+        let mount_index_from_packet: Option<usize> =
+            if packet.riding_mount && packet.mount_type >= 0 {
+                Some(packet.mount_type as usize)
+            } else {
+                None
+            };
 
         if let Some(e) = entity_index.get(&packet.object_id).copied() {
             // NetworkSync 只要存在即可；类型不匹配时更新。
-            Self::upsert_component(ctx, e, NetworkSync::new(packet.object_id, NetworkObjectType::Player));
+            Self::upsert_component(
+                ctx,
+                e,
+                NetworkSync::new(packet.object_id, NetworkObjectType::Player),
+            );
 
             // 远程玩家标记
-            Self::upsert_component(ctx, e, RemotePlayer { id: packet.object_id });
+            Self::upsert_component(
+                ctx,
+                e,
+                RemotePlayer {
+                    id: packet.object_id,
+                },
+            );
 
             // 位置
             Self::upsert_component(ctx, e, Position::new(wx, wy));
@@ -305,15 +379,30 @@ impl NetworkApplySystem {
             }
 
             // 坐骑：按服务器 ObjectPlayer 落地（用于行为对齐，如攻击音效选择）
-            Self::upsert_component(ctx, e, MountState { mount_index: mount_index_from_packet });
-            Self::upsert_component(ctx, e, MountStatus {
-                mount_type: packet.mount_type,
-                riding_mount: packet.riding_mount,
-            });
+            Self::upsert_component(
+                ctx,
+                e,
+                MountState {
+                    mount_index: mount_index_from_packet,
+                },
+            );
+            Self::upsert_component(
+                ctx,
+                e,
+                MountStatus {
+                    mount_type: packet.mount_type,
+                    riding_mount: packet.riding_mount,
+                },
+            );
 
             // 基本身份信息（未来做名字/血条会用到）
             Self::upsert_component(ctx, e, {
-                let mut op = OtherPlayer::new(packet.name.clone(), packet.class, packet.gender, packet.level);
+                let mut op = OtherPlayer::new(
+                    packet.name.clone(),
+                    packet.class,
+                    packet.gender,
+                    packet.level,
+                );
                 op.guild_name = if packet.guild_name.is_empty() {
                     None
                 } else {
@@ -324,17 +413,25 @@ impl NetworkApplySystem {
 
             if ctx.world.get::<&crate::components::Health>(e).is_err() {
                 let current = if packet.dead { 0 } else { 100 };
-                let _ = ctx.world.insert_one(e, crate::components::Health { current, max: 100 });
+                let _ = ctx
+                    .world
+                    .insert_one(e, crate::components::Health { current, max: 100 });
             }
 
             if packet.dead && ctx.world.get::<&crate::components::DeathState>(e).is_err() {
-                let _ = ctx.world.insert_one(e, crate::components::DeathState::new());
+                let _ = ctx
+                    .world
+                    .insert_one(e, crate::components::DeathState::new());
             }
 
             Self::upsert_visibility(ctx, e, packet.hidden, packet.dead);
 
             Self::upsert_component(ctx, e, crate::components::NameColor(packet.name_colour));
-            Self::upsert_component(ctx, e, crate::components::LevelEffectsFlags(packet.level_effects));
+            Self::upsert_component(
+                ctx,
+                e,
+                crate::components::LevelEffectsFlags(packet.level_effects),
+            );
 
             if !packet.poison.is_empty() {
                 Self::apply_poison_to_entity(ctx, e, packet.poison);
@@ -345,30 +442,51 @@ impl NetworkApplySystem {
         } else {
             let new_entity = ctx.world.spawn((
                 NetworkSync::new(packet.object_id, NetworkObjectType::Player),
-                RemotePlayer { id: packet.object_id },
+                RemotePlayer {
+                    id: packet.object_id,
+                },
                 player,
                 Position::new(wx, wy),
                 appearance,
                 AnimationFrame::default(),
-                MountState { mount_index: mount_index_from_packet },
+                MountState {
+                    mount_index: mount_index_from_packet,
+                },
                 MountStatus {
                     mount_type: packet.mount_type,
                     riding_mount: packet.riding_mount,
                 },
-                OtherPlayer::new(packet.name.clone(), packet.class, packet.gender, packet.level),
+                OtherPlayer::new(
+                    packet.name.clone(),
+                    packet.class,
+                    packet.gender,
+                    packet.level,
+                ),
             ));
 
             let _ = ctx.world.insert_one(
                 new_entity,
-                crate::components::Visibility { hidden: packet.hidden, dead: packet.dead },
+                crate::components::Visibility {
+                    hidden: packet.hidden,
+                    dead: packet.dead,
+                },
             );
-            let _ = ctx.world.insert_one(new_entity, crate::components::NameColor(packet.name_colour));
-            let _ = ctx.world.insert_one(new_entity, crate::components::LevelEffectsFlags(packet.level_effects));
+            let _ = ctx
+                .world
+                .insert_one(new_entity, crate::components::NameColor(packet.name_colour));
+            let _ = ctx.world.insert_one(
+                new_entity,
+                crate::components::LevelEffectsFlags(packet.level_effects),
+            );
 
             let current = if packet.dead { 0 } else { 100 };
-            let _ = ctx.world.insert_one(new_entity, crate::components::Health { current, max: 100 });
+            let _ = ctx
+                .world
+                .insert_one(new_entity, crate::components::Health { current, max: 100 });
             if packet.dead {
-                let _ = ctx.world.insert_one(new_entity, crate::components::DeathState::new());
+                let _ = ctx
+                    .world
+                    .insert_one(new_entity, crate::components::DeathState::new());
             }
 
             if !packet.poison.is_empty() {
@@ -385,26 +503,46 @@ impl NetworkApplySystem {
         use mir2_shared::enums::Spell;
         let spell_enum = Spell::try_from(spell).ok()?;
         match spell_enum {
-            Spell::FireBall | Spell::GreatFireBall | Spell::HellFire | Spell::FireBang
-            | Spell::FlameDisruptor | Spell::SoulFireBall | Spell::FireBurst => Some(ProjectileType::Fireball),
-            Spell::ThunderBolt | Spell::Lightning | Spell::ThunderStorm | Spell::ElectricShock => Some(ProjectileType::Lightning),
-            Spell::FrostCrunch | Spell::IceStorm | Spell::Blizzard | Spell::IceThrust => Some(ProjectileType::IceBolt),
-            Spell::StraightShot | Spell::DoubleShot | Spell::ElementalShot | Spell::BackStep => Some(ProjectileType::Arrow),
+            Spell::FireBall
+            | Spell::GreatFireBall
+            | Spell::HellFire
+            | Spell::FireBang
+            | Spell::FlameDisruptor
+            | Spell::SoulFireBall
+            | Spell::FireBurst => Some(ProjectileType::Fireball),
+            Spell::ThunderBolt | Spell::Lightning | Spell::ThunderStorm | Spell::ElectricShock => {
+                Some(ProjectileType::Lightning)
+            }
+            Spell::FrostCrunch | Spell::IceStorm | Spell::Blizzard | Spell::IceThrust => {
+                Some(ProjectileType::IceBolt)
+            }
+            Spell::StraightShot | Spell::DoubleShot | Spell::ElementalShot | Spell::BackStep => {
+                Some(ProjectileType::Arrow)
+            }
             _ => None,
         }
     }
 
-    fn apply_user_information(ctx: &mut GameContext, packet: mir2_shared::packets::server::UserInformation) {
+    fn apply_user_information(
+        ctx: &mut GameContext,
+        packet: mir2_shared::packets::server::UserInformation,
+    ) {
         use crate::components::{
             AnimationFrame, CombatStats, Health, LocalPlayer, Mana, MovementVelocity, Path, Player,
             PlayerAction, PlayerAppearance, PlayerInput, Position, RegenTimer,
         };
-        use crate::components::{Currency, Equipment, Experience, Inventory, MagicList, PlayerData, QuestInventory};
-        use crate::components::{GuildInfo, HeroState, LevelEffectsFlags, NameColor, ObserveState, SummonedCreatureState};
+        use crate::components::{
+            Currency, Equipment, Experience, Inventory, MagicList, PlayerData, QuestInventory,
+        };
+        use crate::components::{
+            GuildInfo, HeroState, LevelEffectsFlags, NameColor, ObserveState, SummonedCreatureState,
+        };
 
         // 先找本地玩家实体；如果还没创建，则最小创建一个
         let existing = {
-            ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity()))
+            ctx.world
+                .iter()
+                .find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity()))
         };
         let local_entity = match existing {
             Some(e) => e,
@@ -455,7 +593,8 @@ impl NetworkApplySystem {
         });
 
         // 位置：协议是格子坐标（i32），ECS 用世界像素（f32）
-        let (wx, wy) = crate::coord::Coord::grid_to_world_center(packet.location_x, packet.location_y);
+        let (wx, wy) =
+            crate::coord::Coord::grid_to_world_center(packet.location_x, packet.location_y);
         if let Ok(mut pos) = ctx.world.get::<&mut Position>(local_entity) {
             pos.x = wx;
             pos.y = wy;
@@ -473,18 +612,24 @@ impl NetworkApplySystem {
         }
 
         // 身份卡：PlayerData（UI/逻辑可直接读取）
-        Self::upsert_component(ctx, local_entity, PlayerData {
-            id: packet.real_id,
-            object_id: packet.object_id,
-            name: packet.name.clone(),
-            class: packet.class,
-            gender: packet.gender,
-            level: packet.level,
-        });
+        Self::upsert_component(
+            ctx,
+            local_entity,
+            PlayerData {
+                id: packet.real_id,
+                object_id: packet.object_id,
+                name: packet.name.clone(),
+                class: packet.class,
+                gender: packet.gender,
+                level: packet.level,
+            },
+        );
 
         // 经验值：若缺失则兜底创建
         if ctx.world.get::<&Experience>(local_entity).is_err() {
-            let _ = ctx.world.insert_one(local_entity, Experience::new(packet.level));
+            let _ = ctx
+                .world
+                .insert_one(local_entity, Experience::new(packet.level));
         }
         // 更新经验值（协议携带）
         if let Ok(mut exp) = ctx.world.get::<&mut Experience>(local_entity) {
@@ -514,10 +659,14 @@ impl NetworkApplySystem {
         }
 
         Self::upsert_component(ctx, local_entity, LevelEffectsFlags(packet.level_effects));
-        Self::upsert_component(ctx, local_entity, ObserveState {
-            allow_observe: packet.allow_observe,
-            observer: packet.observer,
-        });
+        Self::upsert_component(
+            ctx,
+            local_entity,
+            ObserveState {
+                allow_observe: packet.allow_observe,
+                observer: packet.observer,
+            },
+        );
 
         // HeroState 只更新部分字段，保留现有 level/experience/hero_object_id
         let has_hero_state = ctx.world.get::<&HeroState>(local_entity).is_ok();
@@ -539,10 +688,14 @@ impl NetworkApplySystem {
             );
         }
 
-        Self::upsert_component(ctx, local_entity, SummonedCreatureState {
-            creature_type: packet.summoned_creature_type,
-            summoned: packet.creature_summoned,
-        });
+        Self::upsert_component(
+            ctx,
+            local_entity,
+            SummonedCreatureState {
+                creature_type: packet.summoned_creature_type,
+                summoned: packet.creature_summoned,
+            },
+        );
 
         // 血蓝：只更新 current，max 目前用"至少不小于 current"的策略避免 UI/逻辑出错
         if let Ok(mut hp) = ctx.world.get::<&mut Health>(local_entity) {
@@ -580,7 +733,14 @@ impl NetworkApplySystem {
         }
 
         // 货币
-        Self::upsert_component(ctx, local_entity, Currency { gold: packet.gold, credit: packet.credit });
+        Self::upsert_component(
+            ctx,
+            local_entity,
+            Currency {
+                gold: packet.gold,
+                credit: packet.credit,
+            },
+        );
 
         // 背包/任务背包/装备
         if let Some(items) = packet.inventory.clone() {
@@ -680,22 +840,35 @@ impl NetworkApplySystem {
                 stats.level = packet.level;
             }
         } else {
-            let _ = ctx
-                .world
-                .insert_one(local_entity, CombatStats { level: packet.level, ..CombatStats::default() });
+            let _ = ctx.world.insert_one(
+                local_entity,
+                CombatStats {
+                    level: packet.level,
+                    ..CombatStats::default()
+                },
+            );
         }
     }
 
-    fn apply_player_inspect(ctx: &mut GameContext, packet: mir2_shared::packets::server::PlayerInspect) {
+    fn apply_player_inspect(
+        ctx: &mut GameContext,
+        packet: mir2_shared::packets::server::PlayerInspect,
+    ) {
         use crate::components::{Equipment, OtherPlayer, PlayerAppearance};
 
         let target_entity = {
-            ctx.world.iter()
-                .find_map(|e| e.get::<&OtherPlayer>().filter(|op| op.name == packet.name).map(|_| e.entity()))
+            ctx.world.iter().find_map(|e| {
+                e.get::<&OtherPlayer>()
+                    .filter(|op| op.name == packet.name)
+                    .map(|_| e.entity())
+            })
         };
 
         let Some(e) = target_entity else {
-            tracing::warn!("[NetworkApplySystem] PlayerInspect for unknown player name={}", packet.name);
+            tracing::warn!(
+                "[NetworkApplySystem] PlayerInspect for unknown player name={}",
+                packet.name
+            );
             return;
         };
 
@@ -732,7 +905,10 @@ impl NetworkApplySystem {
         }
     }
 
-    fn apply_equipment_vec(eq: &mut crate::components::Equipment, items: &[Option<mir2_shared::data::item::UserItem>]) {
+    fn apply_equipment_vec(
+        eq: &mut crate::components::Equipment,
+        items: &[Option<mir2_shared::data::item::UserItem>],
+    ) {
         // C# 侧 Equipment 数组与这里的槽位约定：0..13
         // 0 weapon, 1 armour, 2 helmet, 3 necklace, 4 bracelet_l, 5 bracelet_r, 6 ring_l,
         // 7 ring_r, 8 amulet, 9 belt, 10 boots, 11 stone, 12 torch, 13 mount
@@ -779,7 +955,9 @@ impl NetworkApplySystem {
         }
     }
 
-    fn map_magics(magics: &[mir2_shared::data::client_data::ClientMagic]) -> Vec<crate::components::LearnedMagic> {
+    fn map_magics(
+        magics: &[mir2_shared::data::client_data::ClientMagic],
+    ) -> Vec<crate::components::LearnedMagic> {
         magics
             .iter()
             .filter_map(|m| {
@@ -800,17 +978,26 @@ impl NetworkApplySystem {
         use crate::components::{LocalPlayer, Player, Position, WeatherState};
 
         // 更新天气状态
-        if let Some((_ws_entity, mut ws)) = ctx.world.iter().find_map(|e| e.get::<&mut WeatherState>().map(|w| (e.entity(), w))) {
+        if let Some((_ws_entity, mut ws)) = ctx
+            .world
+            .iter()
+            .find_map(|e| e.get::<&mut WeatherState>().map(|w| (e.entity(), w)))
+        {
             ws.weather_code = packet.weather;
             ws.emitter_entity = None; // 重置发射器，由 WeatherSystem 重建
         }
 
         // MapChanged 里携带了落点与朝向（切图/传送时很关键）
-        let Some((entity, _)) = ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|lp| (e.entity(), lp))) else {
+        let Some((entity, _)) = ctx
+            .world
+            .iter()
+            .find_map(|e| e.get::<&LocalPlayer>().map(|lp| (e.entity(), lp)))
+        else {
             return;
         };
 
-        let (wx, wy) = crate::coord::Coord::grid_to_world_center(packet.location_x, packet.location_y);
+        let (wx, wy) =
+            crate::coord::Coord::grid_to_world_center(packet.location_x, packet.location_y);
         if let Ok(mut pos) = ctx.world.get::<&mut Position>(entity) {
             pos.x = wx;
             pos.y = wy;
@@ -832,8 +1019,8 @@ impl NetworkApplySystem {
         location_x: i32,
         location_y: i32,
     ) {
-        use crate::components::{LibrarySprite, Position};
         use crate::components::network::{NetworkObjectType, NetworkSync};
+        use crate::components::{LibrarySprite, Position};
 
         let obj_type = match object_type {
             crate::network::handlers::ObjectType::Player => NetworkObjectType::Player,
@@ -844,8 +1031,11 @@ impl NetworkApplySystem {
         };
 
         let existing = {
-            ctx.world.iter()
-                .find_map(|e| e.get::<&NetworkSync>().filter(|ns| ns.object_id == object_id).map(|_| e.entity()))
+            ctx.world.iter().find_map(|e| {
+                e.get::<&NetworkSync>()
+                    .filter(|ns| ns.object_id == object_id)
+                    .map(|_| e.entity())
+            })
         };
 
         let (wx, wy) = crate::coord::Coord::grid_to_world_center(location_x, location_y);
@@ -887,8 +1077,11 @@ impl NetworkApplySystem {
         use crate::components::network::NetworkSync;
 
         let entity = {
-            ctx.world.iter()
-                .find_map(|e| e.get::<&NetworkSync>().filter(|ns| ns.object_id == object_id).map(|_| e.entity()))
+            ctx.world.iter().find_map(|e| {
+                e.get::<&NetworkSync>()
+                    .filter(|ns| ns.object_id == object_id)
+                    .map(|_| e.entity())
+            })
         };
 
         if let Some(e) = entity {
@@ -917,8 +1110,12 @@ impl NetworkApplySystem {
     }
 
     /// 辅助：对英雄实体的 MagicList 执行操作（无则静默跳过）。
-    fn with_hero_magic_list<F>(ctx: &mut GameContext, entity_index: &std::collections::HashMap<u32, hecs::Entity>, local_player_entity: Option<hecs::Entity>, f: F)
-    where
+    fn with_hero_magic_list<F>(
+        ctx: &mut GameContext,
+        entity_index: &std::collections::HashMap<u32, hecs::Entity>,
+        local_player_entity: Option<hecs::Entity>,
+        f: F,
+    ) where
         F: FnOnce(&mut crate::components::spell::MagicList),
     {
         let hero_id = local_player_entity
@@ -931,7 +1128,10 @@ impl NetworkApplySystem {
         let Some(hero_entity) = entity_index.get(&hero_id).copied() else {
             return;
         };
-        if let Ok(mut magic_list) = ctx.world.get::<&mut crate::components::spell::MagicList>(hero_entity) {
+        if let Ok(mut magic_list) = ctx
+            .world
+            .get::<&mut crate::components::spell::MagicList>(hero_entity)
+        {
             f(&mut magic_list);
         }
     }
@@ -963,13 +1163,21 @@ impl NetworkApplySystem {
         }
     }
 
-    fn update_magic_level(magic_list: &mut crate::components::spell::MagicList, spell: u8, level: u8) {
+    fn update_magic_level(
+        magic_list: &mut crate::components::spell::MagicList,
+        spell: u8,
+        level: u8,
+    ) {
         if let Some(magic) = Self::find_magic_mut(&mut magic_list.magics, spell) {
             magic.level = level;
         }
     }
 
-    fn update_spell_toggle(magic_list: &mut crate::components::spell::MagicList, spell: u8, can_use: bool) {
+    fn update_spell_toggle(
+        magic_list: &mut crate::components::spell::MagicList,
+        spell: u8,
+        can_use: bool,
+    ) {
         if let Some(m) = Self::find_magic_mut(&mut magic_list.magics, spell) {
             m.can_use = can_use;
         }
@@ -1010,8 +1218,8 @@ impl NetworkApplySystem {
         location_x: i32,
         location_y: i32,
     ) {
-        use crate::components::{LibrarySprite, Position};
         use crate::components::network::NetworkSync;
+        use crate::components::{LibrarySprite, Position};
 
         let (wx, wy) = crate::coord::Coord::grid_to_world_center(location_x, location_y);
 
@@ -1045,7 +1253,11 @@ impl NetworkApplySystem {
         }
     }
 
-    fn apply_object_monster(ctx: &mut GameContext, entity_index: &std::collections::HashMap<u32, hecs::Entity>, packet: mir2_shared::packets::server::ObjectMonster) {
+    fn apply_object_monster(
+        ctx: &mut GameContext,
+        entity_index: &std::collections::HashMap<u32, hecs::Entity>,
+        packet: mir2_shared::packets::server::ObjectMonster,
+    ) {
         use crate::components::network::NetworkObjectType;
         use crate::components::{MirAction, MonsterAnimState, SoundTrigger, SoundType};
         use std::time::Instant;
@@ -1071,7 +1283,10 @@ impl NetworkApplySystem {
             // 先插入；若已存在则更新
             let inserted_monster_component = ctx
                 .world
-                .insert_one(e, crate::components::Monster::new(packet.name.clone(), packet.image))
+                .insert_one(
+                    e,
+                    crate::components::Monster::new(packet.name.clone(), packet.image),
+                )
                 .is_ok();
             if !inserted_monster_component {
                 if let Ok(mut m) = ctx.world.get::<&mut crate::components::Monster>(e) {
@@ -1094,17 +1309,27 @@ impl NetworkApplySystem {
             }
 
             // 动画状态：方向来自包；初始动作为 Standing/Dead（最小集）
-            let initial_action = if packet.dead { MirAction::Dead } else { MirAction::Standing };
-            Self::upsert_component(ctx, e, MonsterAnimState {
-                direction: packet.direction,
-                action: initial_action,
-                start_time: Instant::now(),
-            });
+            let initial_action = if packet.dead {
+                MirAction::Dead
+            } else {
+                MirAction::Standing
+            };
+            Self::upsert_component(
+                ctx,
+                e,
+                MonsterAnimState {
+                    direction: packet.direction,
+                    action: initial_action,
+                    start_time: Instant::now(),
+                },
+            );
 
             // 最小血条支撑：若无服务器 HP 信息，则给一个默认血池，保证可见
             if ctx.world.get::<&crate::components::Health>(e).is_err() {
                 let current = if packet.dead { 0 } else { 100 };
-                let _ = ctx.world.insert_one(e, crate::components::Health { current, max: 100 });
+                let _ = ctx
+                    .world
+                    .insert_one(e, crate::components::Health { current, max: 100 });
             } else if packet.dead {
                 if let Ok(mut h) = ctx.world.get::<&mut crate::components::Health>(e) {
                     h.current = 0;
@@ -1113,7 +1338,9 @@ impl NetworkApplySystem {
 
             // 死亡状态：dead=true 时插入 DeathState（动画已在 MonsterAnimState 中处理）
             if packet.dead && ctx.world.get::<&crate::components::DeathState>(e).is_err() {
-                let _ = ctx.world.insert_one(e, crate::components::DeathState::new());
+                let _ = ctx
+                    .world
+                    .insert_one(e, crate::components::DeathState::new());
             }
 
             Self::upsert_visibility(ctx, e, packet.hidden, packet.dead);
@@ -1130,15 +1357,27 @@ impl NetworkApplySystem {
         }
     }
 
-    fn map_server_buff(buff: mir2_shared::enums::BuffType) -> Option<crate::components::combat::BuffType> {
-        use mir2_shared::enums::BuffType as S;
+    fn map_server_buff(
+        buff: mir2_shared::enums::BuffType,
+    ) -> Option<crate::components::combat::BuffType> {
         use crate::components::combat::BuffType as C;
+        use mir2_shared::enums::BuffType as S;
         match buff {
             S::MagicShield | S::EnergyShield => Some(C::MagicShield),
-            S::SoulShield | S::BlessedArmour | S::ProtectionField | S::UltimateEnhancer
-            | S::ImmortalSkin | S::ElementalBarrier | S::GeneralMeowMeowShield
-            | S::HornedWarriorShield | S::HornedCommanderShield => Some(C::DefenseBoost),
-            S::Fury | S::Rage | S::CounterAttack | S::HornedArcherBuff | S::ColdArcherBuff
+            S::SoulShield
+            | S::BlessedArmour
+            | S::ProtectionField
+            | S::UltimateEnhancer
+            | S::ImmortalSkin
+            | S::ElementalBarrier
+            | S::GeneralMeowMeowShield
+            | S::HornedWarriorShield
+            | S::HornedCommanderShield => Some(C::DefenseBoost),
+            S::Fury
+            | S::Rage
+            | S::CounterAttack
+            | S::HornedArcherBuff
+            | S::ColdArcherBuff
             | S::PowerBeadBuff => Some(C::AttackBoost),
             S::Haste | S::SwiftFeet | S::LightBody => Some(C::SpeedBoost),
             S::Curse | S::RhinoPriestDebuff | S::Blindness | S::PoisonShot => Some(C::Poison),
@@ -1201,12 +1440,7 @@ impl NetworkApplySystem {
         Self::with_component::<crate::components::Visibility>(ctx, entity, |vis| f(vis));
     }
 
-    fn upsert_visibility(
-        ctx: &mut GameContext,
-        entity: hecs::Entity,
-        hidden: bool,
-        dead: bool,
-    ) {
+    fn upsert_visibility(ctx: &mut GameContext, entity: hecs::Entity, hidden: bool, dead: bool) {
         Self::with_visibility(ctx, entity, |vis| {
             vis.hidden = hidden;
             vis.dead = dead;
@@ -1259,7 +1493,11 @@ impl NetworkApplySystem {
         let _ = ctx.world.insert_one(entity, component);
     }
 
-    fn apply_object_npc(ctx: &mut GameContext, entity_index: &std::collections::HashMap<u32, hecs::Entity>, packet: mir2_shared::packets::server::ObjectNpc) {
+    fn apply_object_npc(
+        ctx: &mut GameContext,
+        entity_index: &std::collections::HashMap<u32, hecs::Entity>,
+        packet: mir2_shared::packets::server::ObjectNpc,
+    ) {
         use crate::components::network::NetworkObjectType;
         use crate::components::NameColor;
 
@@ -1283,7 +1521,10 @@ impl NetworkApplySystem {
                 .world
                 .insert_one(
                     e,
-                    crate::components::NPC::new(packet.name.clone(), format!("npc:{}", packet.image)),
+                    crate::components::NPC::new(
+                        packet.name.clone(),
+                        format!("npc:{}", packet.image),
+                    ),
                 )
                 .is_err()
             {
@@ -1297,19 +1538,32 @@ impl NetworkApplySystem {
         }
     }
 
-    fn apply_object_remove(ctx: &mut GameContext, entity_index: &std::collections::HashMap<u32, hecs::Entity>, object_id: u32) {
+    fn apply_object_remove(
+        ctx: &mut GameContext,
+        entity_index: &std::collections::HashMap<u32, hecs::Entity>,
+        object_id: u32,
+    ) {
         if let Some(e) = entity_index.get(&object_id).copied() {
             // 对齐原版：不要因为 ObjectRemove 把本地玩家实体删掉。
             // 服务器可能在切图/传送等边界广播 ObjectRemove；本地玩家应由 UserInformation/MapChanged 重建位置。
             if ctx.world.get::<&crate::components::LocalPlayer>(e).is_ok() {
-                tracing::warn!("[NETRECV] Ignored ObjectRemove for LocalPlayer: object_id={}", object_id);
+                tracing::warn!(
+                    "[NETRECV] Ignored ObjectRemove for LocalPlayer: object_id={}",
+                    object_id
+                );
                 return;
             }
             let _ = ctx.world.despawn(e);
         }
     }
 
-    fn apply_object_move(ctx: &mut GameContext, entity_index: &std::collections::HashMap<u32, hecs::Entity>, object_id: u32, x: i32, y: i32) {
+    fn apply_object_move(
+        ctx: &mut GameContext,
+        entity_index: &std::collections::HashMap<u32, hecs::Entity>,
+        object_id: u32,
+        x: i32,
+        y: i32,
+    ) {
         use crate::components::{LocalPlayer, Position};
 
         let Some(e) = entity_index.get(&object_id).copied() else {
@@ -1348,7 +1602,11 @@ impl NetworkApplySystem {
         }
     }
 
-    fn apply_object_turn(ctx: &mut GameContext, entity_index: &std::collections::HashMap<u32, hecs::Entity>, packet: mir2_shared::packets::server::ObjectTurn) {
+    fn apply_object_turn(
+        ctx: &mut GameContext,
+        entity_index: &std::collections::HashMap<u32, hecs::Entity>,
+        packet: mir2_shared::packets::server::ObjectTurn,
+    ) {
         use crate::components::{MonsterAnimState, Player};
         use std::time::Instant;
 
@@ -1410,7 +1668,13 @@ impl NetworkApplySystem {
             }
 
             if will_apply {
-                Self::apply_object_move(ctx, entity_index, packet.object_id, packet.location_x, packet.location_y);
+                Self::apply_object_move(
+                    ctx,
+                    entity_index,
+                    packet.object_id,
+                    packet.location_x,
+                    packet.location_y,
+                );
             }
         }
 
@@ -1432,17 +1696,26 @@ impl NetworkApplySystem {
                     },
                 )
                 .is_err()
-            {
-                if let Ok(mut s) = ctx.world.get::<&mut MonsterAnimState>(e) {
-                    s.direction = packet.direction;
-                    // 仅转向不重置 start_time，避免站立动画跳帧
-                }
+        {
+            if let Ok(mut s) = ctx.world.get::<&mut MonsterAnimState>(e) {
+                s.direction = packet.direction;
+                // 仅转向不重置 start_time，避免站立动画跳帧
             }
+        }
     }
 
-    fn apply_object_walk(ctx: &mut GameContext, entity_index: &std::collections::HashMap<u32, hecs::Entity>, packet: mir2_shared::packets::server::ObjectWalk) {
-        apply_remote_movement(ctx, entity_index,
-            packet.object_id, packet.location_x, packet.location_y, packet.direction,
+    fn apply_object_walk(
+        ctx: &mut GameContext,
+        entity_index: &std::collections::HashMap<u32, hecs::Entity>,
+        packet: mir2_shared::packets::server::ObjectWalk,
+    ) {
+        apply_remote_movement(
+            ctx,
+            entity_index,
+            packet.object_id,
+            packet.location_x,
+            packet.location_y,
+            packet.direction,
             RemoteMoveConfig {
                 player_action: crate::components::PlayerAction::Walk,
                 base_interp_secs: ctx.session.remote_player_walk_interp_secs,
@@ -1453,9 +1726,18 @@ impl NetworkApplySystem {
         );
     }
 
-    fn apply_object_run(ctx: &mut GameContext, entity_index: &std::collections::HashMap<u32, hecs::Entity>, packet: mir2_shared::packets::server::ObjectRun) {
-        apply_remote_movement(ctx, entity_index,
-            packet.object_id, packet.location_x, packet.location_y, packet.direction,
+    fn apply_object_run(
+        ctx: &mut GameContext,
+        entity_index: &std::collections::HashMap<u32, hecs::Entity>,
+        packet: mir2_shared::packets::server::ObjectRun,
+    ) {
+        apply_remote_movement(
+            ctx,
+            entity_index,
+            packet.object_id,
+            packet.location_x,
+            packet.location_y,
+            packet.direction,
             RemoteMoveConfig {
                 player_action: crate::components::PlayerAction::Run,
                 base_interp_secs: ctx.session.remote_player_run_interp_secs,
@@ -1466,8 +1748,16 @@ impl NetworkApplySystem {
         );
     }
 
-    fn apply_object_attack(ctx: &mut GameContext, entity_index: &std::collections::HashMap<u32, hecs::Entity>, object_id: u32, data: ObjectAttackData) {
-        use crate::components::{AttackState, LocalPlayer, MirAction, Monster, MonsterAnimState, Player, PlayerAction, Position};
+    fn apply_object_attack(
+        ctx: &mut GameContext,
+        entity_index: &std::collections::HashMap<u32, hecs::Entity>,
+        object_id: u32,
+        data: ObjectAttackData,
+    ) {
+        use crate::components::{
+            AttackState, LocalPlayer, MirAction, Monster, MonsterAnimState, Player, PlayerAction,
+            Position,
+        };
         use std::time::Instant;
         let Some(e) = entity_index.get(&object_id).copied() else {
             return;
@@ -1478,10 +1768,21 @@ impl NetworkApplySystem {
         let is_local = ctx.world.get::<&LocalPlayer>(e).is_ok();
         if is_local {
             let has_pos = ctx.world.get::<&Position>(e).is_ok();
-            let dead = ctx.world.get::<&crate::components::Health>(e).ok().map(|hp| hp.current <= 0).unwrap_or(false);
+            let dead = ctx
+                .world
+                .get::<&crate::components::Health>(e)
+                .ok()
+                .map(|hp| hp.current <= 0)
+                .unwrap_or(false);
             let will_apply = ctx.session.server_authoritative_movement || !has_pos || dead;
             if will_apply {
-                Self::apply_object_move(ctx, entity_index, object_id, data.location_x as i32, data.location_y as i32);
+                Self::apply_object_move(
+                    ctx,
+                    entity_index,
+                    object_id,
+                    data.location_x as i32,
+                    data.location_y as i32,
+                );
             }
         } else {
             let should_apply_pos = match ctx.world.get::<&Position>(e) {
@@ -1494,7 +1795,13 @@ impl NetworkApplySystem {
                 Err(_) => true,
             };
             if should_apply_pos {
-                Self::apply_object_move(ctx, entity_index, object_id, data.location_x as i32, data.location_y as i32);
+                Self::apply_object_move(
+                    ctx,
+                    entity_index,
+                    object_id,
+                    data.location_x as i32,
+                    data.location_y as i32,
+                );
             }
         }
 
@@ -1603,8 +1910,8 @@ impl LogicSystem for NetworkApplySystem {
 mod e2e_tests {
     use super::*;
     use crate::components::{
-        Currency, Equipment, Experience, Health, Inventory, LocalPlayer,
-        Mana, PlayerData, Position, PositionInterpolation,
+        Currency, Equipment, Experience, Health, Inventory, LocalPlayer, Mana, PlayerData,
+        Position, PositionInterpolation,
     };
     use crate::network::handlers::NetworkEvent;
     use mir2_shared::enums::{HeroBehaviour, MirClass, MirDirection, MirGender};
@@ -1620,7 +1927,12 @@ mod e2e_tests {
             .unwrap()
     }
 
-    fn make_user_info(object_id: u32, name: &str, hp: i32, mp: i32) -> mir2_shared::packets::server::UserInformation {
+    fn make_user_info(
+        object_id: u32,
+        name: &str,
+        hp: i32,
+        mp: i32,
+    ) -> mir2_shared::packets::server::UserInformation {
         mir2_shared::packets::server::UserInformation {
             object_id,
             real_id: object_id,
@@ -1662,7 +1974,8 @@ mod e2e_tests {
         let (mut ctx, mut sys) = setup();
 
         let packet = make_user_info(1001, "TestHero", 500, 300);
-        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        ctx.events_mut()
+            .send_network(NetworkEvent::UserInformation { packet });
         sys.update(&mut ctx, 0.016).unwrap();
 
         let local_entity = find_local_entity(&ctx);
@@ -1689,13 +2002,16 @@ mod e2e_tests {
         let (mut ctx, mut sys) = setup();
 
         let packet = make_user_info(1001, "TestHero", 500, 300);
-        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        ctx.events_mut()
+            .send_network(NetworkEvent::UserInformation { packet });
         sys.update(&mut ctx, 0.016).unwrap();
 
         let local_entity = find_local_entity(&ctx);
 
-
-        ctx.events_mut().send_network(NetworkEvent::HealthChanged { current: 250, max: 600 });
+        ctx.events_mut().send_network(NetworkEvent::HealthChanged {
+            current: 250,
+            max: 600,
+        });
         sys.update(&mut ctx, 0.016).unwrap();
 
         let health = ctx.world.get::<&Health>(local_entity).unwrap();
@@ -1740,7 +2056,8 @@ mod e2e_tests {
             buffs: Vec::new(),
             level_effects: mir2_shared::LevelEffects::empty(),
         };
-        ctx.events_mut().send_network(NetworkEvent::ObjectPlayer { packet: player });
+        ctx.events_mut()
+            .send_network(NetworkEvent::ObjectPlayer { packet: player });
         sys.update(&mut ctx, 0.016).unwrap();
 
         let walk = mir2_shared::packets::server::ObjectWalk {
@@ -1749,7 +2066,8 @@ mod e2e_tests {
             location_y: 21,
             direction: MirDirection::Right,
         };
-        ctx.events_mut().send_network(NetworkEvent::ObjectWalk { packet: walk });
+        ctx.events_mut()
+            .send_network(NetworkEvent::ObjectWalk { packet: walk });
         sys.update(&mut ctx, 0.016).unwrap();
 
         let entity = ctx
@@ -1777,7 +2095,8 @@ mod e2e_tests {
 
         let mut packet = make_user_info(1001, "TestHero", 100, 50);
         packet.inventory = Some(vec![None; 40]);
-        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        ctx.events_mut()
+            .send_network(NetworkEvent::UserInformation { packet });
         sys.update(&mut ctx, 0.016).unwrap();
 
         let local_entity = find_local_entity(&ctx);
@@ -1788,13 +2107,16 @@ mod e2e_tests {
             count: 5,
             ..Default::default()
         };
-        ctx.events_mut().send_network(NetworkEvent::ItemGained { item });
+        ctx.events_mut()
+            .send_network(NetworkEvent::ItemGained { item });
         sys.update(&mut ctx, 0.016).unwrap();
 
         let inv = ctx.world.get::<&Inventory>(local_entity).unwrap();
         // Assert
         let found = inv.items.iter().any(|slot| {
-            slot.as_ref().map(|it| it.unique_id == 999 && it.count == 5).unwrap_or(false)
+            slot.as_ref()
+                .map(|it| it.unique_id == 999 && it.count == 5)
+                .unwrap_or(false)
         });
         assert!(found, "背包中应存在刚获得的物品");
     }
@@ -1804,7 +2126,8 @@ mod e2e_tests {
         let (mut ctx, mut sys) = setup();
 
         let packet = make_user_info(1001, "TestHero", 500, 300);
-        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        ctx.events_mut()
+            .send_network(NetworkEvent::UserInformation { packet });
         sys.update(&mut ctx, 0.016).unwrap();
 
         let monster = mir2_shared::packets::server::ObjectMonster {
@@ -1828,7 +2151,8 @@ mod e2e_tests {
             extra_byte: 0,
             buffs: vec![],
         };
-        ctx.events_mut().send_network(NetworkEvent::ObjectMonster { packet: monster });
+        ctx.events_mut()
+            .send_network(NetworkEvent::ObjectMonster { packet: monster });
         sys.update(&mut ctx, 0.016).unwrap();
 
         let monster_entity = ctx
@@ -1844,13 +2168,17 @@ mod e2e_tests {
             })
             .expect("怪物实体应存在");
 
-        assert!(ctx.world.get::<&crate::components::Position>(monster_entity).is_ok());
+        assert!(ctx
+            .world
+            .get::<&crate::components::Position>(monster_entity)
+            .is_ok());
 
-        ctx.events_mut().send_network(NetworkEvent::ObjectHealthPercent {
-            object_id: 3001,
-            percent: 50,
-            expire: 0,
-        });
+        ctx.events_mut()
+            .send_network(NetworkEvent::ObjectHealthPercent {
+                object_id: 3001,
+                percent: 50,
+                expire: 0,
+            });
         sys.update(&mut ctx, 0.016).unwrap();
 
         // ObjectHealthPercent should create a Health component
@@ -1858,18 +2186,16 @@ mod e2e_tests {
             assert!(health.current > 0, "怪物血量应 > 0");
         }
 
-        ctx.events_mut().send_network(NetworkEvent::ObjectRemove { object_id: 3001 });
+        ctx.events_mut()
+            .send_network(NetworkEvent::ObjectRemove { object_id: 3001 });
         sys.update(&mut ctx, 0.016).unwrap();
 
-        let still_alive = ctx
-            .world
-            .iter()
-            .any(|e| {
-                if let Some(sync) = e.get::<&crate::components::network::NetworkSync>() {
-                    return sync.object_id == 3001;
-                }
-                false
-            });
+        let still_alive = ctx.world.iter().any(|e| {
+            if let Some(sync) = e.get::<&crate::components::network::NetworkSync>() {
+                return sync.object_id == 3001;
+            }
+            false
+        });
         assert!(!still_alive, "怪物实体应被移除");
     }
 
@@ -1878,12 +2204,14 @@ mod e2e_tests {
         let (mut ctx, mut sys) = setup();
 
         let packet = make_user_info(1001, "TestHero", 500, 300);
-        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        ctx.events_mut()
+            .send_network(NetworkEvent::UserInformation { packet });
         sys.update(&mut ctx, 0.016).unwrap();
 
         let local_entity = find_local_entity(&ctx);
 
-        ctx.events_mut().send_network(NetworkEvent::ExperienceGained { amount: 50 });
+        ctx.events_mut()
+            .send_network(NetworkEvent::ExperienceGained { amount: 50 });
         sys.update(&mut ctx, 0.016).unwrap();
 
         {
@@ -1891,7 +2219,8 @@ mod e2e_tests {
             assert_eq!(exp.current, 50, "经验应增长到 50");
         }
 
-        ctx.events_mut().send_network(NetworkEvent::LevelUp { new_level: 2 });
+        ctx.events_mut()
+            .send_network(NetworkEvent::LevelUp { new_level: 2 });
         sys.update(&mut ctx, 0.016).unwrap();
 
         {
@@ -1905,12 +2234,16 @@ mod e2e_tests {
         let (mut ctx, mut sys) = setup();
 
         let packet = make_user_info(1001, "TestHero", 500, 300);
-        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        ctx.events_mut()
+            .send_network(NetworkEvent::UserInformation { packet });
         sys.update(&mut ctx, 0.016).unwrap();
 
         let local_entity = find_local_entity(&ctx);
 
-        ctx.events_mut().send_network(NetworkEvent::ManaChanged { current: 200, max: 350 });
+        ctx.events_mut().send_network(NetworkEvent::ManaChanged {
+            current: 200,
+            max: 350,
+        });
         sys.update(&mut ctx, 0.016).unwrap();
 
         {
@@ -1926,12 +2259,14 @@ mod e2e_tests {
 
         let mut packet = make_user_info(1001, "TestHero", 500, 300);
         packet.gold = 100;
-        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        ctx.events_mut()
+            .send_network(NetworkEvent::UserInformation { packet });
         sys.update(&mut ctx, 0.016).unwrap();
 
         let local_entity = find_local_entity(&ctx);
 
-        ctx.events_mut().send_network(NetworkEvent::GoldChanged { delta: 50 });
+        ctx.events_mut()
+            .send_network(NetworkEvent::GoldChanged { delta: 50 });
         sys.update(&mut ctx, 0.016).unwrap();
 
         {
@@ -1945,7 +2280,8 @@ mod e2e_tests {
         let (mut ctx, mut sys) = setup();
 
         let packet = make_user_info(1001, "TestHero", 500, 300);
-        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        ctx.events_mut()
+            .send_network(NetworkEvent::UserInformation { packet });
         sys.update(&mut ctx, 0.016).unwrap();
 
         // 地面掉落物品
@@ -1961,19 +2297,17 @@ mod e2e_tests {
             location_x: 55,
             location_y: 65,
         };
-        ctx.events_mut().send_network(NetworkEvent::GroundItem { packet: ground });
+        ctx.events_mut()
+            .send_network(NetworkEvent::GroundItem { packet: ground });
         sys.update(&mut ctx, 0.016).unwrap();
 
         // 验证地面物品实体存在
-        let found = ctx
-            .world
-            .iter()
-            .any(|e| {
-                if let Some(gi) = e.get::<&crate::components::GroundItem>() {
-                    return gi.object_id == 9001;
-                }
-                false
-            });
+        let found = ctx.world.iter().any(|e| {
+            if let Some(gi) = e.get::<&crate::components::GroundItem>() {
+                return gi.object_id == 9001;
+            }
+            false
+        });
         assert!(found, "地面物品实体应存在");
     }
 
@@ -1985,7 +2319,8 @@ mod e2e_tests {
         let mut packet = make_user_info(1001, "TestHero", 100, 50);
         packet.inventory = Some(vec![None; 40]);
         packet.equipment = Some(vec![None; 14]);
-        ctx.events_mut().send_network(NetworkEvent::UserInformation { packet });
+        ctx.events_mut()
+            .send_network(NetworkEvent::UserInformation { packet });
         sys.update(&mut ctx, 0.016).unwrap();
 
         let local_entity = find_local_entity(&ctx);
@@ -1997,14 +2332,17 @@ mod e2e_tests {
             count: 1,
             ..Default::default()
         };
-        ctx.events_mut().send_network(NetworkEvent::ItemGained { item });
+        ctx.events_mut()
+            .send_network(NetworkEvent::ItemGained { item });
         sys.update(&mut ctx, 0.016).unwrap();
 
         // 验证物品已在背包中
         {
             let inv = ctx.world.get::<&Inventory>(local_entity).unwrap();
             assert!(
-                inv.items.iter().any(|s| s.as_ref().map(|it| it.unique_id == 100).unwrap_or(false)),
+                inv.items
+                    .iter()
+                    .any(|s| s.as_ref().map(|it| it.unique_id == 100).unwrap_or(false)),
                 "物品应在背包中"
             );
         }

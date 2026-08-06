@@ -9,10 +9,10 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
+use super::native_ui_utils::DragHelper;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
-use super::native_ui_utils::DragHelper;
+use macroquad::prelude::*;
 
 /// 钓鱼状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,11 +27,11 @@ pub enum FishingState {
 /// 钓鱼槽位
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FishingSlot {
-    Hook = 0,    // 鱼钩
-    Float = 1,   // 浮标
-    Bait = 2,    // 鱼饵
-    Finder = 3,  // 探鱼器
-    Reel = 4,    // 鱼轮
+    Hook = 0,   // 鱼钩
+    Float = 1,  // 浮标
+    Bait = 2,   // 鱼饵
+    Finder = 3, // 探鱼器
+    Reel = 4,   // 鱼轮
 }
 
 impl FishingSlot {
@@ -212,13 +212,24 @@ impl FishingDialogHybrid {
     fn draw_equip_dialog(&mut self, mouse_pos: Vec2) {
         // 背景
         if let Some(tex) = &self.equip_bg_texture {
-            draw_texture_ex(tex, self.position.x, self.position.y, WHITE, DrawTextureParams::default());
+            draw_texture_ex(
+                tex,
+                self.position.x,
+                self.position.y,
+                WHITE,
+                DrawTextureParams::default(),
+            );
         }
 
         // 标题 - 鱼竿名称
         if !self.rod_name.is_empty() {
-            draw_text_cn(&self.rod_name, self.position.x + 60.0, self.position.y + 12.0, 14.0,
-                Color::from_rgba(255, 255, 200, 255));
+            draw_text_cn(
+                &self.rod_name,
+                self.position.x + 60.0,
+                self.position.y + 12.0,
+                14.0,
+                Color::from_rgba(255, 255, 200, 255),
+            );
         }
 
         // 5 个装备槽
@@ -240,7 +251,14 @@ impl FishingDialogHybrid {
             } else {
                 Color::from_rgba(100, 100, 100, 200)
             };
-            draw_rectangle_lines(slot_rect.x, slot_rect.y, slot_rect.w, slot_rect.h, 1.0, border_color);
+            draw_rectangle_lines(
+                slot_rect.x,
+                slot_rect.y,
+                slot_rect.w,
+                slot_rect.h,
+                1.0,
+                border_color,
+            );
 
             // 槽位标签
             let slot = match i {
@@ -250,7 +268,13 @@ impl FishingDialogHybrid {
                 3 => FishingSlot::Finder,
                 _ => FishingSlot::Reel,
             };
-            draw_text_cn(slot.label(), slot_rect.x + 2.0, slot_rect.y + 40.0, 8.0, GRAY);
+            draw_text_cn(
+                slot.label(),
+                slot_rect.x + 2.0,
+                slot_rect.y + 40.0,
+                8.0,
+                GRAY,
+            );
         }
 
         // 关闭按钮
@@ -260,7 +284,13 @@ impl FishingDialogHybrid {
     fn draw_status_dialog(&mut self, mouse_pos: Vec2) {
         // 背景
         if let Some(tex) = &self.status_bg_texture {
-            draw_texture_ex(tex, self.position.x, self.position.y, WHITE, DrawTextureParams::default());
+            draw_texture_ex(
+                tex,
+                self.position.x,
+                self.position.y,
+                WHITE,
+                DrawTextureParams::default(),
+            );
         }
 
         let bar_x = self.position.x + 20.0;
@@ -269,13 +299,27 @@ impl FishingDialogHybrid {
         let bar_h = 14.0;
 
         // 成功率条
-        self.draw_bar(bar_x, bar_y, bar_w, bar_h, self.chance_percent,
-            Color::from_rgba(60, 200, 60, 200), "几率");
+        self.draw_bar(
+            bar_x,
+            bar_y,
+            bar_w,
+            bar_h,
+            self.chance_percent,
+            Color::from_rgba(60, 200, 60, 200),
+            "几率",
+        );
 
         // 进度条
         let progress_y = bar_y + 24.0;
-        self.draw_bar(bar_x, progress_y, bar_w, bar_h, self.progress_percent,
-            Color::from_rgba(60, 60, 200, 200), "进度");
+        self.draw_bar(
+            bar_x,
+            progress_y,
+            bar_w,
+            bar_h,
+            self.progress_percent,
+            Color::from_rgba(60, 60, 200, 200),
+            "进度",
+        );
 
         // 自动抛竿复选框
         let checkbox_x = self.position.x + 20.0;
@@ -289,7 +333,13 @@ impl FishingDialogHybrid {
             &self.auto_cast_unchecked
         };
         if let Some(tex) = checkbox_tex {
-            draw_texture_ex(tex, checkbox_x, checkbox_y, WHITE, DrawTextureParams::default());
+            draw_texture_ex(
+                tex,
+                checkbox_x,
+                checkbox_y,
+                WHITE,
+                DrawTextureParams::default(),
+            );
         } else {
             let check_color = if self.auto_cast_enabled {
                 Color::from_rgba(60, 200, 60, 255)
@@ -308,7 +358,8 @@ impl FishingDialogHybrid {
         }
 
         // 收线按钮（咬钩或收线状态时显示）
-        if self.fishing_state == FishingState::Biting || self.fishing_state == FishingState::Reeling {
+        if self.fishing_state == FishingState::Biting || self.fishing_state == FishingState::Reeling
+        {
             let fish_btn_x = self.position.x + 80.0;
             let fish_btn_y = self.position.y + 120.0;
             let fish_btn_w = 100.0;
@@ -325,10 +376,21 @@ impl FishingDialogHybrid {
                 Color::from_rgba(80, 100, 40, 255)
             };
             draw_rectangle(fish_btn_x, fish_btn_y, fish_btn_w, fish_btn_h, fish_color);
-            draw_rectangle_lines(fish_btn_x, fish_btn_y, fish_btn_w, fish_btn_h, 2.0,
-                Color::from_rgba(200, 200, 100, 255));
-            draw_text_cn("收线!", fish_btn_x + 25.0, fish_btn_y + 18.0, 14.0,
-                Color::from_rgba(255, 255, 200, 255));
+            draw_rectangle_lines(
+                fish_btn_x,
+                fish_btn_y,
+                fish_btn_w,
+                fish_btn_h,
+                2.0,
+                Color::from_rgba(200, 200, 100, 255),
+            );
+            draw_text_cn(
+                "收线!",
+                fish_btn_x + 25.0,
+                fish_btn_y + 18.0,
+                14.0,
+                Color::from_rgba(255, 255, 200, 255),
+            );
         }
 
         // 关闭按钮

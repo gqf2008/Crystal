@@ -6,5 +6,5 @@
 // | `DebugSystem` | 9020 | 開發 | 調試信息、可視化 |
 // | `RecordSystem` | 9030 | 開發 | 操作錄製、回放 |
 
-mod debug_system; 
+mod debug_system;
 pub use debug_system::DebugSystem;

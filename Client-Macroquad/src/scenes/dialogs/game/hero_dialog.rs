@@ -15,11 +15,11 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
+use super::character_dialog::SkillInfo;
+use super::native_ui_utils::DragHelper;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
-use super::native_ui_utils::DragHelper;
-use super::character_dialog::SkillInfo;
+use macroquad::prelude::*;
 
 /// 英雄行为模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,7 +300,13 @@ impl HeroDialogHybrid {
             existing.icon_index = icon as usize;
             return;
         }
-        self.skills.push(SkillInfo { spell_id, name, level, icon_index: icon as usize, can_use: true });
+        self.skills.push(SkillInfo {
+            spell_id,
+            name,
+            level,
+            icon_index: icon as usize,
+            can_use: true,
+        });
     }
 
     /// 英雄技能升级
@@ -449,26 +455,35 @@ impl HeroDialogHybrid {
         let bar_x = self.position.x + 95.0 + 57.0;
         let bar_y = self.position.y + 48.0 + 26.0;
         self.draw_bar(
-            bar_x, bar_y,
-            info.max_hp as i64, info.current_hp as i64,
+            bar_x,
+            bar_y,
+            info.max_hp as i64,
+            info.current_hp as i64,
             "HP",
         );
 
         // MP bar
         let mp_y = bar_y + 18.0;
         self.draw_bar(
-            bar_x, mp_y,
-            info.max_mp as i64, info.current_mp as i64,
+            bar_x,
+            mp_y,
+            info.max_mp as i64,
+            info.current_mp as i64,
             "MP",
         );
 
         // Exp bar
         let exp_y = mp_y + 18.0;
         self.draw_bar(
-            bar_x, exp_y,
+            bar_x,
+            exp_y,
             {
                 let m = info.max_exp;
-                if m == 0 { 1 } else { m }
+                if m == 0 {
+                    1
+                } else {
+                    m
+                }
             },
             info.current_exp,
             "EXP",
@@ -497,7 +512,11 @@ impl HeroDialogHybrid {
     fn draw_bar(&self, x: f32, y: f32, max_val: i64, current_val: i64, label: &str) {
         let bar_w = 120.0;
         let bar_h = 14.0;
-        let pct = if max_val > 0 { current_val as f32 / max_val as f32 } else { 0.0 };
+        let pct = if max_val > 0 {
+            current_val as f32 / max_val as f32
+        } else {
+            0.0
+        };
         let draw_w = (bar_w * pct).clamp(0.0, bar_w);
         draw_rectangle(x, y, bar_w, bar_h, Color::from_rgba(40, 40, 40, 200));
         if draw_w > 0.0 {
@@ -510,7 +529,14 @@ impl HeroDialogHybrid {
             };
             draw_rectangle(x, y, draw_w, bar_h, color);
         }
-        draw_rectangle_lines(x, y, bar_w, bar_h, 1.0, Color::from_rgba(100, 100, 100, 200));
+        draw_rectangle_lines(
+            x,
+            y,
+            bar_w,
+            bar_h,
+            1.0,
+            Color::from_rgba(100, 100, 100, 200),
+        );
 
         // 标签文字
         let label_color = if label == "HP" {
@@ -528,7 +554,12 @@ impl HeroDialogHybrid {
         let btn_spacing = 40.0;
         // PR #1148: labels 现在由 HeroBehaviour::to_localized_string() 动态生成,
         // (master C# 走 `Hint = GameLanguage.ClientTextMap.GetLocalization(HeroBehaviourFormat, hb.ToLocalizedString())`)
-        let behaviours = [HeroBehaviour::Attack, HeroBehaviour::CounterAttack, HeroBehaviour::Follow, HeroBehaviour::Custom];
+        let behaviours = [
+            HeroBehaviour::Attack,
+            HeroBehaviour::CounterAttack,
+            HeroBehaviour::Follow,
+            HeroBehaviour::Custom,
+        ];
         let labels: Vec<String> = behaviours.iter().map(|b| b.to_localized_string()).collect();
 
         let mut clicked: Option<HeroBehaviour> = None;
@@ -550,7 +581,14 @@ impl HeroDialogHybrid {
                 Color::from_rgba(50, 50, 70, 255)
             };
             draw_rectangle(btn_x, btn_y, 36.0, 20.0, bg_color);
-            draw_rectangle_lines(btn_x, btn_y, 36.0, 20.0, 1.0, Color::from_rgba(100, 100, 120, 200));
+            draw_rectangle_lines(
+                btn_x,
+                btn_y,
+                36.0,
+                20.0,
+                1.0,
+                Color::from_rgba(100, 100, 120, 200),
+            );
 
             draw_text_cn(&labels[i], btn_x + 6.0, btn_y + 13.0, 10.0, WHITE);
 

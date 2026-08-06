@@ -1,9 +1,9 @@
 // 物品操作相关的服务器数据包
 
+use super::super::base::Packet;
 use crate::data::item::UserItem;
 use crate::data::stats::SharedResult;
 use crate::enums::{MirGridType, ServerPacketIds};
-use super::super::base::Packet;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{Read, Write};
 
@@ -11,9 +11,9 @@ use std::io::{Read, Write};
 #[derive(Debug, Clone)]
 pub struct MoveItem {
     pub grid: MirGridType, // 物品网格类型（背包、装备、仓库等）
-    pub from: i32,          // 源位置
-    pub to: i32,            // 目标位置
-    pub success: bool,      // 是否成功
+    pub from: i32,         // 源位置
+    pub to: i32,           // 目标位置
+    pub success: bool,     // 是否成功
 }
 
 impl Packet for MoveItem {
@@ -440,11 +440,11 @@ impl Packet for ItemUpgraded {
 /// 装备槽位物品
 #[derive(Debug, Clone)]
 pub struct EquipSlotItem {
-    pub grid: MirGridType, // 网格类型
-    pub unique_id: u64,    // 物品唯一 ID
-    pub to: i32,           // 目标位置
+    pub grid: MirGridType,    // 网格类型
+    pub unique_id: u64,       // 物品唯一 ID
+    pub to: i32,              // 目标位置
     pub grid_to: MirGridType, // 目标网格类型
-    pub success: bool,     // 是否成功
+    pub success: bool,        // 是否成功
 }
 
 impl Packet for EquipSlotItem {

@@ -8,27 +8,27 @@
 //
 // ============================================================================
 
-use std::time::Instant;
 use crate::components::Position;
+use std::time::Instant;
 
 /// 客户端预测组件
 #[derive(Debug, Clone)]
 pub struct Prediction {
     /// 客户端预测的位置
     pub predicted_position: Position,
-    
+
     /// 最后一次服务器确认的位置
     pub server_position: Position,
-    
+
     /// 最后一次同步时间
     pub last_sync_time: Instant,
-    
+
     /// 是否正在预测
     pub is_predicting: bool,
-    
+
     /// 预测误差（用于判断是否需要纠正）
     pub error_threshold: f32,
-    
+
     /// 最后一次输入序列号（用于防止过期数据）
     pub last_input_sequence: u32,
 }
@@ -44,25 +44,25 @@ impl Prediction {
             last_input_sequence: 0,
         }
     }
-    
+
     /// 计算预测误差
     pub fn calculate_error(&self) -> f32 {
         let dx = self.predicted_position.x - self.server_position.x;
         let dy = self.predicted_position.y - self.server_position.y;
         (dx * dx + dy * dy).sqrt()
     }
-    
+
     /// 是否需要纠正
     pub fn needs_reconciliation(&self) -> bool {
         self.calculate_error() > self.error_threshold
     }
-    
+
     /// 更新服务器权威位置
     pub fn update_server_position(&mut self, pos: Position) {
         self.server_position = pos;
         self.last_sync_time = Instant::now();
     }
-    
+
     /// 更新预测位置
     pub fn update_predicted_position(&mut self, pos: Position) {
         self.predicted_position = pos;

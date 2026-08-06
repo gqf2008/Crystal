@@ -10,7 +10,7 @@ use std::io::Read;
 /// ReceiveMail - 接收邮件 (229)
 #[derive(Debug, Clone)]
 pub struct ReceiveMail {
-    pub mail_list: Vec<MailInfo>,  // 邮件列表
+    pub mail_list: Vec<MailInfo>, // 邮件列表
 }
 
 #[derive(Debug, Clone)]
@@ -31,8 +31,8 @@ impl Packet for ReceiveMail {
     const OPCODE: i16 = ServerPacketIds::ReceiveMail as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::{LittleEndian, WriteBytesExt};
         use crate::binary::write_dotnet_string;
+        use byteorder::{LittleEndian, WriteBytesExt};
 
         writer.write_i32::<LittleEndian>(self.mail_list.len() as i32)?;
 
@@ -121,7 +121,7 @@ impl Packet for MailLockedItem {
 /// MailSendRequest - 邮件发送请求 (231)
 #[derive(Debug, Clone)]
 pub struct MailSendRequest {
-    pub mail_id: u64,              // 邮件ID
+    pub mail_id: u64, // 邮件ID
 }
 
 impl Packet for MailSendRequest {
@@ -129,9 +129,9 @@ impl Packet for MailSendRequest {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         writer.write_u64::<LittleEndian>(self.mail_id)?;
-        
+
         Ok(())
     }
 
@@ -189,7 +189,7 @@ impl Packet for ParcelCollected {
 /// MailCost - 邮件费用 (234)
 #[derive(Debug, Clone)]
 pub struct MailCost {
-    pub cost: u32,                  // 邮寄费用
+    pub cost: u32, // 邮寄费用
 }
 
 impl Packet for MailCost {
@@ -197,9 +197,9 @@ impl Packet for MailCost {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         writer.write_u32::<LittleEndian>(self.cost)?;
-        
+
         Ok(())
     }
 

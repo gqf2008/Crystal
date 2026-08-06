@@ -44,7 +44,7 @@ async fn main() -> GameResult {
             last_access: "2024-01-16 18:45".to_string(),
         },
     ];
-    
+
     // 创建初始场景 (Box both variants to keep enum small)
     enum LocalScene {
         Select(Box<SelectScene>),
@@ -55,14 +55,14 @@ async fn main() -> GameResult {
     if let LocalScene::Select(s) = &mut scene {
         s.on_enter()?;
     }
-    
+
     let mut last_time = get_time();
-    
+
     loop {
         let current_time = get_time();
         let dt = (current_time - last_time) as f32;
         last_time = current_time;
-        
+
         // 更新 + 切换
         match &mut scene {
             LocalScene::Select(s) => {
@@ -93,10 +93,10 @@ async fn main() -> GameResult {
             LocalScene::Select(s) => s.render()?,
             LocalScene::Game(g) => g.render()?,
         }
-        
+
         next_frame().await;
     }
-    
+
     match &mut scene {
         LocalScene::Select(s) => {
             s.on_exit()?;
@@ -105,6 +105,6 @@ async fn main() -> GameResult {
             g.on_exit()?;
         }
     }
-    
+
     Ok(())
 }

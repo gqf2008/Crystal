@@ -2,14 +2,16 @@
 //!
 //! Packets related to user state, inventory, and location.
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::data::stats::{SharedResult, SharedError};
-use crate::binary::{read_dotnet_string, write_dotnet_string};
-use crate::data::item::UserItem;
-use crate::data::client_data::ClientMagic;
-use crate::enums::{ServerPacketIds, MirClass, MirGender, MirDirection, HeroBehaviour, LevelEffects};
 use super::super::base::Packet;
+use crate::binary::{read_dotnet_string, write_dotnet_string};
+use crate::data::client_data::ClientMagic;
+use crate::data::item::UserItem;
+use crate::data::stats::{SharedError, SharedResult};
+use crate::enums::{
+    HeroBehaviour, LevelEffects, MirClass, MirDirection, MirGender, ServerPacketIds,
+};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// UserInformation packet - complete user state information
 #[derive(Debug, Clone)]
@@ -188,7 +190,10 @@ impl Packet for UserInformation {
         let creature_count = reader.read_i32::<LittleEndian>()?;
         const MAX_CREATURE_COUNT: i32 = 100;
         if !(0..=MAX_CREATURE_COUNT).contains(&creature_count) {
-            eprintln!("[UserInformation] Invalid creature_count: {}", creature_count);
+            eprintln!(
+                "[UserInformation] Invalid creature_count: {}",
+                creature_count
+            );
             return Err(SharedError::PacketTooLarge(creature_count as usize));
         }
         for _ in 0..creature_count {
@@ -204,11 +209,26 @@ impl Packet for UserInformation {
         // #208：角色属性段（18 x i32）
         let max_hp = reader.read_i32::<LittleEndian>()?;
         let max_mp = reader.read_i32::<LittleEndian>()?;
-        let ac = [reader.read_i32::<LittleEndian>()?, reader.read_i32::<LittleEndian>()?];
-        let mac = [reader.read_i32::<LittleEndian>()?, reader.read_i32::<LittleEndian>()?];
-        let dc = [reader.read_i32::<LittleEndian>()?, reader.read_i32::<LittleEndian>()?];
-        let mc = [reader.read_i32::<LittleEndian>()?, reader.read_i32::<LittleEndian>()?];
-        let sc = [reader.read_i32::<LittleEndian>()?, reader.read_i32::<LittleEndian>()?];
+        let ac = [
+            reader.read_i32::<LittleEndian>()?,
+            reader.read_i32::<LittleEndian>()?,
+        ];
+        let mac = [
+            reader.read_i32::<LittleEndian>()?,
+            reader.read_i32::<LittleEndian>()?,
+        ];
+        let dc = [
+            reader.read_i32::<LittleEndian>()?,
+            reader.read_i32::<LittleEndian>()?,
+        ];
+        let mc = [
+            reader.read_i32::<LittleEndian>()?,
+            reader.read_i32::<LittleEndian>()?,
+        ];
+        let sc = [
+            reader.read_i32::<LittleEndian>()?,
+            reader.read_i32::<LittleEndian>()?,
+        ];
         let critical_rate = reader.read_i32::<LittleEndian>()?;
         let critical_damage = reader.read_i32::<LittleEndian>()?;
         let attack_speed = reader.read_i32::<LittleEndian>()?;
@@ -435,7 +455,11 @@ impl Packet for UserLocation {
         let location_x = reader.read_i32::<LittleEndian>()?;
         let location_y = reader.read_i32::<LittleEndian>()?;
         let direction = MirDirection::try_from(reader.read_u8()?)?;
-        Ok(Self { location_x, location_y, direction })
+        Ok(Self {
+            location_x,
+            location_y,
+            direction,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -487,7 +511,10 @@ impl Packet for UserSlotsRefresh {
             None
         };
 
-        Ok(Self { inventory, equipment })
+        Ok(Self {
+            inventory,
+            equipment,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {

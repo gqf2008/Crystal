@@ -2,15 +2,15 @@
 //!
 //! This module contains all guild-related packet definitions and parsers.
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::{
-    data::client_data::{GuildRank, GuildStorageItem},
-    enums::ServerPacketIds,
-    binary::{read_dotnet_string, write_dotnet_string},
-};
 use super::super::base::Packet;
 use crate::data::stats::SharedResult;
+use crate::{
+    binary::{read_dotnet_string, write_dotnet_string},
+    data::client_data::{GuildRank, GuildStorageItem},
+    enums::ServerPacketIds,
+};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 // ============================================================================
 // Packet Structures & PacketMessage Implementations
@@ -28,7 +28,7 @@ impl Packet for GuildStorageList {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let count = reader.read_i32::<LittleEndian>()? as usize;
         let mut items = Vec::with_capacity(count);
-        
+
         for _ in 0..count {
             let has_item = reader.read_u8()? != 0;
             if has_item {
@@ -38,13 +38,13 @@ impl Packet for GuildStorageList {
                 items.push(None);
             }
         }
-        
+
         Ok(Self { items })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_i32::<LittleEndian>(self.items.len() as i32)?;
-        
+
         for item_opt in &self.items {
             if let Some(item) = item_opt {
                 writer.write_u8(1)?;
@@ -53,7 +53,7 @@ impl Packet for GuildStorageList {
                 writer.write_u8(0)?;
             }
         }
-        
+
         Ok(())
     }
 }
@@ -70,21 +70,21 @@ impl Packet for GuildNoticeChange {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let count = reader.read_i32::<LittleEndian>()? as usize;
         let mut notice = Vec::with_capacity(count);
-        
+
         for _ in 0..count {
             notice.push(read_dotnet_string(reader)?);
         }
-        
+
         Ok(Self { notice })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_i32::<LittleEndian>(self.notice.len() as i32)?;
-        
+
         for line in &self.notice {
             write_dotnet_string(writer, line)?;
         }
-        
+
         Ok(())
     }
 }
@@ -105,7 +105,7 @@ impl Packet for GuildMemberChange {
         let name = read_dotnet_string(reader)?;
         let rank_index = reader.read_u8()?;
         let status = reader.read_u8()?;
-        
+
         let mut ranks = Vec::new();
         // Only read ranks if status > 5 (based on C# code)
         if status > 5 {
@@ -114,7 +114,7 @@ impl Packet for GuildMemberChange {
                 ranks.push(GuildRank::read_from(reader, false)?);
             }
         }
-        
+
         Ok(Self {
             name,
             rank_index,
@@ -127,7 +127,7 @@ impl Packet for GuildMemberChange {
         write_dotnet_string(writer, &self.name)?;
         writer.write_u8(self.rank_index)?;
         writer.write_u8(self.status)?;
-        
+
         if self.status > 5 {
             writer.write_i32::<LittleEndian>(self.ranks.len() as i32)?;
             // Note: GuildRank doesn't have write_to method yet, need to implement
@@ -146,7 +146,7 @@ impl Packet for GuildMemberChange {
                 }
             }
         }
-        
+
         Ok(())
     }
 }

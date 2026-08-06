@@ -158,17 +158,20 @@ pub use ecs_macros::{LogicSystem, RenderSystem};
 // 重新导出各层系统（保持向后兼容）
 // 注意：新代码应使用 update:: 和 render:: 模块
 
-pub use input::{AutoPotionSystem, LocalPlayerAiSystem, PlayerControlSystem};
-pub use infra::NetworkSystem;
-pub use infra::NetworkApplySystem;
-pub use infra::{FrameEndSystem, TimeTickSystem};
 pub use infra::MapBootstrapSystem;
+pub use infra::NetworkApplySystem;
+pub use infra::NetworkSystem;
+pub use infra::{FrameEndSystem, TimeTickSystem};
+pub use input::{AutoPotionSystem, LocalPlayerAiSystem, PlayerControlSystem};
 pub use logic::combat::{
-    BufSystem, CombatResult, CombatSystem, DamageType, HealthRegenSystem, SkillSystem, SpellInputSystem,
+    BufSystem, CombatResult, CombatSystem, DamageType, HealthRegenSystem, SkillSystem,
+    SpellInputSystem,
 };
-pub use logic::lifetime_cleanup_system::LifetimeCleanupSystem;
 pub use logic::decision::{MonsterAISystem, NpcAISystem, NpcDialogueSystem};
-pub use logic::physics::{CollisionSystem, MapLoadSystem, MapManager, MovementSystem, PathfindingSystem};
+pub use logic::lifetime_cleanup_system::LifetimeCleanupSystem;
+pub use logic::physics::{
+    CollisionSystem, MapLoadSystem, MapManager, MovementSystem, PathfindingSystem,
+};
 pub use presentation::{
     AnimationSystem, CameraBoundsSystem, CameraFollowSystem, CameraSpaceGateSystem, CameraSystem,
     FloatingTextSystem, MountStateSyncSystem, ParticleSystem, PositionInterpolationSystem,
@@ -328,7 +331,11 @@ pub trait LogicSystem {
         true
     }
     /// 更新方法，每帧在逻辑阶段调用
-    fn update(&mut self, ctx: &mut crate::game::GameContext, delay_time: f32) -> crate::game::GameResult;
+    fn update(
+        &mut self,
+        ctx: &mut crate::game::GameContext,
+        delay_time: f32,
+    ) -> crate::game::GameResult;
 }
 
 pub trait RenderSystem {
@@ -343,12 +350,16 @@ pub trait RenderSystem {
     }
 
     /// 更新方法，每帧在逻辑阶段调用（可选实现）
-    fn update(&mut self, _ctx: &mut crate::game::GameContext, _delay_time: f32) -> crate::game::GameResult {
+    fn update(
+        &mut self,
+        _ctx: &mut crate::game::GameContext,
+        _delay_time: f32,
+    ) -> crate::game::GameResult {
         Ok(())
     }
 
     /// 绘制方法，每帧在渲染阶段调用（必须实现）
-    /// 
+    ///
     /// macroquad 使用全局函数渲染，不需要 ctx 和 canvas 参数
     /// 使用 macroquad::prelude::* 中的函数：
     /// - draw_texture()
@@ -582,7 +593,11 @@ impl SystemScheduler {
     }
 
     /// 逻辑更新阶段 - 按优先级统一调度所有系统的 update
-    pub fn update(&mut self, ctx: &mut crate::game::GameContext, delay_time: f32) -> crate::game::GameResult {
+    pub fn update(
+        &mut self,
+        ctx: &mut crate::game::GameContext,
+        delay_time: f32,
+    ) -> crate::game::GameResult {
         for entry in &mut self.systems {
             if !entry.is_enabled() {
                 continue;
@@ -596,17 +611,14 @@ impl SystemScheduler {
                 }
                 SystemEntry::Hybrid { system, .. } => {
                     system.update(ctx, delay_time)?;
-                } 
+                }
             }
         }
 
         Ok(())
     }
 
-    pub fn draw(
-        &mut self,
-        world: &hecs::World,
-    ) -> crate::game::GameResult {
+    pub fn draw(&mut self, world: &hecs::World) -> crate::game::GameResult {
         tracing::trace!("🎨 Starting draw phase");
 
         let stage = world
@@ -628,9 +640,7 @@ impl SystemScheduler {
                 //     tracing::trace!("✅ System draw completed: {}", system.name());
                 // }
                 SystemEntry::Hybrid {
-                    system,
-                    draw_mask,
-                    ..
+                    system, draw_mask, ..
                 } => {
                     if !draw_mask.contains(stage) {
                         continue;

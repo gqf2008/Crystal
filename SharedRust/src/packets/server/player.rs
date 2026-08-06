@@ -2,16 +2,16 @@
 //!
 //! This module contains all player status-related packet definitions and parsers.
 
-use std::io::{Read, Write};
+use super::super::base::Packet;
+use crate::{
+    binary::{read_dotnet_string, write_dotnet_string},
+    data::item::UserItem,
+    data::stats::{SharedError, SharedResult},
+    enums::{AttackMode, MirClass, MirGender, PetMode, ServerPacketIds},
+};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{TimeZone, Utc};
-use crate::{
-    data::item::UserItem,
-    enums::{AttackMode, MirClass, MirGender, PetMode, ServerPacketIds},
-    binary::{read_dotnet_string, write_dotnet_string},
-    data::stats::{SharedResult, SharedError},
-};
-use super::super::base::Packet;
+use std::io::{Read, Write};
 
 // ============================================================================
 // Packet Structures
@@ -179,7 +179,7 @@ impl Packet for LogOutSuccess {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let count = reader.read_i32::<LittleEndian>()? as usize;
         let mut characters = Vec::with_capacity(count);
-        
+
         for _ in 0..count {
             // Inline CharacterSummary parsing
             let index = reader.read_i32::<LittleEndian>()?;
@@ -189,12 +189,13 @@ impl Packet for LogOutSuccess {
             let class = MirClass::try_from(class_byte)?;
             let gender_byte = reader.read_u8()?;
             let gender = MirGender::try_from(gender_byte)?;
-            
+
             // Read .NET DateTime ticks and convert
             let ticks = reader.read_i64::<LittleEndian>()?;
             let unix_epoch_ticks = 621355968000000000i64;
             let unix_seconds = (ticks - unix_epoch_ticks) / 10000000;
-            let last_access = Utc.timestamp_opt(unix_seconds, 0)
+            let last_access = Utc
+                .timestamp_opt(unix_seconds, 0)
                 .single()
                 .ok_or(SharedError::InvalidDateTime)?;
 
@@ -207,26 +208,26 @@ impl Packet for LogOutSuccess {
                 last_access,
             });
         }
-        
+
         Ok(LogOutSuccess { characters })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_i32::<LittleEndian>(self.characters.len() as i32)?;
-        
+
         for char in &self.characters {
             writer.write_i32::<LittleEndian>(char.index)?;
             write_dotnet_string(writer, &char.name)?;
             writer.write_u16::<LittleEndian>(char.level)?;
             writer.write_u8(char.class as u8)?;
             writer.write_u8(char.gender as u8)?;
-            
+
             // Convert chrono DateTime to .NET ticks
             let unix_epoch_ticks = 621355968000000000i64;
             let ticks = unix_epoch_ticks + (char.last_access.timestamp() * 10000000);
             writer.write_i64::<LittleEndian>(ticks)?;
         }
-        
+
         Ok(())
     }
 }
@@ -299,7 +300,7 @@ impl Packet for UserStorage {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let count = reader.read_i32::<LittleEndian>()? as usize;
         let mut storage = Vec::with_capacity(count);
-        
+
         for _ in 0..count {
             let has_item = reader.read_u8()? != 0;
             if has_item {
@@ -309,13 +310,13 @@ impl Packet for UserStorage {
                 storage.push(None);
             }
         }
-        
+
         Ok(UserStorage { storage })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_i32::<LittleEndian>(self.storage.len() as i32)?;
-        
+
         for item_opt in &self.storage {
             if let Some(item) = item_opt {
                 writer.write_u8(1)?;
@@ -324,7 +325,7 @@ impl Packet for UserStorage {
                 writer.write_u8(0)?;
             }
         }
-        
+
         Ok(())
     }
 }

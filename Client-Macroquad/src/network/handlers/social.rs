@@ -1,8 +1,8 @@
 // Social Handler - 婚姻/师徒/社交数据包处理
 
-use mir2_shared::packets::{PacketHeader, Packet, server};
-use mir2_shared::enums::ServerPacketIds;
 use crate::network::handlers::{NetworkEvent, PacketHandler};
+use mir2_shared::enums::ServerPacketIds;
+use mir2_shared::packets::{server, Packet, PacketHeader};
 use std::io::Cursor;
 
 pub struct SocialHandler;
@@ -50,7 +50,11 @@ impl PacketHandler for SocialHandler {
                         lover_name: packet.lover_name.clone(),
                         date: packet.date,
                     });
-                    tracing::debug!("💕 Lover updated: {} (date: {})", packet.lover_name, packet.date);
+                    tracing::debug!(
+                        "💕 Lover updated: {} (date: {})",
+                        packet.lover_name,
+                        packet.date
+                    );
                 }
             }
 
@@ -62,13 +66,19 @@ impl PacketHandler for SocialHandler {
                         mentor_level: packet.mentor_level,
                         mentor_online: packet.mentor_online,
                     });
-                    tracing::debug!("🎓 Mentor updated: {} (Lv.{})", packet.mentor_name, packet.mentor_level);
+                    tracing::debug!(
+                        "🎓 Mentor updated: {} (Lv.{})",
+                        packet.mentor_name,
+                        packet.mentor_level
+                    );
                 }
             }
 
             _ => {
                 tracing::debug!("⚠️ SocialHandler: Unknown opcode {:04X}", header.opcode);
-                events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                events.push(NetworkEvent::UnhandledPacket {
+                    opcode: header.opcode,
+                });
             }
         }
 

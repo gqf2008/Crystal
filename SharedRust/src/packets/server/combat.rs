@@ -2,14 +2,10 @@
 //!
 //! This module contains all combat-related packet definitions.
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::{
-    enums::ServerPacketIds,
-    data::stats::SharedResult,
-};
 use super::super::base::Packet;
-
+use crate::{data::stats::SharedResult, enums::ServerPacketIds};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 #[derive(Debug, Clone)]
 pub struct ObjectAttack {

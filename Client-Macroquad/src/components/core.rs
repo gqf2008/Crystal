@@ -2,8 +2,8 @@
 // 核心组件 - 所有实体的基础组件
 // ============================================================================
 
-pub use mir2_shared::{MirDirection as Direction, MirAction, MirClass, MirGender};
 use crate::resources::LibraryName;
+pub use mir2_shared::{MirAction, MirClass, MirDirection as Direction, MirGender};
 
 /// 混合模式（简化版）
 #[derive(Debug, Clone, Copy)]
@@ -20,8 +20,8 @@ pub struct Dead;
 /// 统一使用 f32 坐标系统，支持平滑移动和精确渲染
 #[derive(Debug, Clone, Copy)]
 pub struct Position {
-    pub x: f32,      // 世界坐标 X（像素）
-    pub y: f32,      // 世界坐标 Y（像素）
+    pub x: f32, // 世界坐标 X（像素）
+    pub y: f32, // 世界坐标 Y（像素）
 }
 
 impl Position {
@@ -31,7 +31,7 @@ impl Position {
         let y = if y.is_finite() { y } else { 0.0 };
         Self { x, y }
     }
-    
+
     /// 从整数格子坐标创建（48x32像素单元格）
     pub fn from_grid(grid_x: i32, grid_y: i32) -> Self {
         Self {
@@ -58,12 +58,23 @@ pub struct PositionInterpolation {
 }
 
 impl PositionInterpolation {
-    pub fn new(start_x: f32, start_y: f32, target_x: f32, target_y: f32, start_time: f64, duration: f32) -> Self {
+    pub fn new(
+        start_x: f32,
+        start_y: f32,
+        target_x: f32,
+        target_y: f32,
+        start_time: f64,
+        duration: f32,
+    ) -> Self {
         let start_x = if start_x.is_finite() { start_x } else { 0.0 };
         let start_y = if start_y.is_finite() { start_y } else { 0.0 };
         let target_x = if target_x.is_finite() { target_x } else { 0.0 };
         let target_y = if target_y.is_finite() { target_y } else { 0.0 };
-        let duration = if duration.is_finite() && duration > 0.0 { duration } else { 0.1 };
+        let duration = if duration.is_finite() && duration > 0.0 {
+            duration
+        } else {
+            0.1
+        };
         Self {
             start_x,
             start_y,
@@ -103,16 +114,15 @@ impl Velocity {
     }
 }
 
-
 /// 动画帧插值组件 - 实现原版C#的OffSetMove机制
 /// 参考: Client/MirObjects/PlayerObject.cs Line 864-1000
-/// 
+///
 /// 精灵渲染组件 - 可渲染实体必备
 #[derive(Debug, Clone)]
 pub struct Sprite {
-    pub library: i32,      // MLibrary 索引 (0=Tiles, 1=SmTiles, 2=Objects, etc.)
-    pub index: i32,        // 贴图索引
-    pub frame: i32,        // 当前帧
+    pub library: i32, // MLibrary 索引 (0=Tiles, 1=SmTiles, 2=Objects, etc.)
+    pub index: i32,   // 贴图索引
+    pub frame: i32,   // 当前帧
     pub blend_mode: SpriteBlendMode, // 混合模式
 }
 
@@ -163,7 +173,12 @@ impl Sprite {
     }
 
     pub fn with_blend(library: i32, index: i32, blend_mode: SpriteBlendMode) -> Self {
-        Self { library, index, frame: 0, blend_mode }
+        Self {
+            library,
+            index,
+            frame: 0,
+            blend_mode,
+        }
     }
 }
 
@@ -180,22 +195,18 @@ pub struct TimeTracker {
 /// 资源初始化状态（单例）
 ///
 /// 用于在渲染系统中决定是否显示“加载中”等覆盖层，避免在 Scene 内直接绘制。
-#[derive(Debug, Clone, Copy)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ResourceInitState {
     pub initialized: bool,
 }
 
-
 /// 场景退出阻塞（单例）
 ///
 /// 由 UI 系统写入，Scene 只读取结果，避免 Scene 直接查询 UiState 细节。
-#[derive(Debug, Clone, Copy)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct SceneExitBlock {
     pub block_escape_exit: bool,
 }
-
 
 impl Default for TimeTracker {
     fn default() -> Self {
@@ -210,11 +221,11 @@ impl Default for TimeTracker {
 }
 
 /// 动画帧组件 - 存储由 AnimationSystem 计算的当前动画帧索引
-/// 
+///
 /// **设计原则**: 分离动画逻辑和渲染逻辑
 /// - AnimationSystem (逻辑层): 计算当前帧索引，更新此组件
 /// - SpriteRenderSystem (渲染层): 读取此组件，渲染对应精灵
-/// 
+///
 /// **数据流**:
 /// ```
 /// AnimationSystem 更新 → AnimationFrame.current_frame

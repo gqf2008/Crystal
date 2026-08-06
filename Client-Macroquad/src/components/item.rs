@@ -18,7 +18,7 @@ pub struct ItemDrop {
 pub struct GroundItem {
     pub object_id: u32,
     pub item: mir2_shared::data::item::UserItem,
-    pub gold_amount: u32,  // 如果是金币，这里是数量
+    pub gold_amount: u32, // 如果是金币，这里是数量
 }
 
 /// 背包组件 - 存储玩家的物品
@@ -53,7 +53,7 @@ impl Inventory {
             max_weight: 100,
         }
     }
-    
+
     /// 添加物品到背包
     pub fn add_item(&mut self, item: mir2_shared::data::item::UserItem) -> bool {
         // 查找空格子
@@ -65,7 +65,7 @@ impl Inventory {
         }
         false // 背包已满
     }
-    
+
     /// 移除指定格子的物品
     pub fn remove_item(&mut self, slot_index: usize) -> Option<mir2_shared::data::item::UserItem> {
         if slot_index < self.items.len() {
@@ -89,7 +89,10 @@ impl Inventory {
         &mut self,
         unique_id: u64,
     ) -> Option<&mut mir2_shared::data::item::UserItem> {
-        self.items.iter_mut().flatten().find(|item| item.unique_id == unique_id)
+        self.items
+            .iter_mut()
+            .flatten()
+            .find(|item| item.unique_id == unique_id)
     }
 
     /// 按 unique_id 查找并扣减/移除物品
@@ -115,40 +118,42 @@ impl Inventory {
     /// 按 unique_id 查找并取出完整物品
     ///
     /// 用于装备/移动等需要拿到完整物品数据的场景。
-    pub fn take_by_unique_id(&mut self, unique_id: u64) -> Option<mir2_shared::data::item::UserItem> {
+    pub fn take_by_unique_id(
+        &mut self,
+        unique_id: u64,
+    ) -> Option<mir2_shared::data::item::UserItem> {
         let pos = self.items.iter().position(|slot| {
-            slot.as_ref().is_some_and(|item| item.unique_id == unique_id)
+            slot.as_ref()
+                .is_some_and(|item| item.unique_id == unique_id)
         })?;
         self.items[pos].take()
     }
 }
 
 /// 装备栏组件
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Equipment {
-    pub weapon: Option<mir2_shared::data::item::UserItem>,       // 武器
-    pub armour: Option<mir2_shared::data::item::UserItem>,       // 衣服
-    pub helmet: Option<mir2_shared::data::item::UserItem>,       // 头盔
-    pub necklace: Option<mir2_shared::data::item::UserItem>,     // 项链
-    pub bracelet_l: Option<mir2_shared::data::item::UserItem>,   // 左手镯
-    pub bracelet_r: Option<mir2_shared::data::item::UserItem>,   // 右手镯
-    pub ring_l: Option<mir2_shared::data::item::UserItem>,       // 左戒指
-    pub ring_r: Option<mir2_shared::data::item::UserItem>,       // 右戒指
-    pub amulet: Option<mir2_shared::data::item::UserItem>,       // 护身符
-    pub belt: Option<mir2_shared::data::item::UserItem>,         // 腰带
-    pub boots: Option<mir2_shared::data::item::UserItem>,        // 鞋子
-    pub stone: Option<mir2_shared::data::item::UserItem>,        // 宝石
-    pub torch: Option<mir2_shared::data::item::UserItem>,        // 火把
-    pub mount: Option<mir2_shared::data::item::UserItem>,        // 坐骑
+    pub weapon: Option<mir2_shared::data::item::UserItem>, // 武器
+    pub armour: Option<mir2_shared::data::item::UserItem>, // 衣服
+    pub helmet: Option<mir2_shared::data::item::UserItem>, // 头盔
+    pub necklace: Option<mir2_shared::data::item::UserItem>, // 项链
+    pub bracelet_l: Option<mir2_shared::data::item::UserItem>, // 左手镯
+    pub bracelet_r: Option<mir2_shared::data::item::UserItem>, // 右手镯
+    pub ring_l: Option<mir2_shared::data::item::UserItem>, // 左戒指
+    pub ring_r: Option<mir2_shared::data::item::UserItem>, // 右戒指
+    pub amulet: Option<mir2_shared::data::item::UserItem>, // 护身符
+    pub belt: Option<mir2_shared::data::item::UserItem>,   // 腰带
+    pub boots: Option<mir2_shared::data::item::UserItem>,  // 鞋子
+    pub stone: Option<mir2_shared::data::item::UserItem>,  // 宝石
+    pub torch: Option<mir2_shared::data::item::UserItem>,  // 火把
+    pub mount: Option<mir2_shared::data::item::UserItem>,  // 坐骑
 }
-
 
 impl Equipment {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// 根据装备类型获取对应槽位
     pub fn get_slot_for_type(&self, item_type: ItemType) -> Option<u8> {
         match item_type {
@@ -167,9 +172,13 @@ impl Equipment {
             _ => None,
         }
     }
-    
+
     /// 装备物品到指定槽位
-    pub fn equip(&mut self, slot: u8, item: mir2_shared::data::item::UserItem) -> Option<mir2_shared::data::item::UserItem> {
+    pub fn equip(
+        &mut self,
+        slot: u8,
+        item: mir2_shared::data::item::UserItem,
+    ) -> Option<mir2_shared::data::item::UserItem> {
         let slot_ref = match slot {
             0 => &mut self.weapon,
             1 => &mut self.armour,
@@ -187,11 +196,11 @@ impl Equipment {
             13 => &mut self.mount,
             _ => return None,
         };
-        
+
         // 返回旧装备
         slot_ref.replace(item)
     }
-    
+
     /// 卸下指定槽位的装备
     pub fn unequip(&mut self, slot: u8) -> Option<mir2_shared::data::item::UserItem> {
         let slot_ref = match slot {
@@ -217,17 +226,25 @@ impl Equipment {
 
     fn slots_mut(&mut self) -> [&mut Option<mir2_shared::data::item::UserItem>; 14] {
         [
-            &mut self.weapon, &mut self.armour, &mut self.helmet, &mut self.necklace,
-            &mut self.bracelet_l, &mut self.bracelet_r, &mut self.ring_l, &mut self.ring_r,
-            &mut self.amulet, &mut self.belt, &mut self.boots, &mut self.stone,
-            &mut self.torch, &mut self.mount,
+            &mut self.weapon,
+            &mut self.armour,
+            &mut self.helmet,
+            &mut self.necklace,
+            &mut self.bracelet_l,
+            &mut self.bracelet_r,
+            &mut self.ring_l,
+            &mut self.ring_r,
+            &mut self.amulet,
+            &mut self.belt,
+            &mut self.boots,
+            &mut self.stone,
+            &mut self.torch,
+            &mut self.mount,
         ]
     }
 
     /// 遍历所有装备槽位，对每个存在的物品执行回调
-    pub fn for_each_mut(&mut self,
-        mut f: impl FnMut(&mut mir2_shared::data::item::UserItem),
-    ) {
+    pub fn for_each_mut(&mut self, mut f: impl FnMut(&mut mir2_shared::data::item::UserItem)) {
         for item in self.slots_mut().into_iter().flatten() {
             f(item);
         }
@@ -238,14 +255,14 @@ impl Equipment {
         &mut self,
         unique_id: u64,
     ) -> Option<&mut mir2_shared::data::item::UserItem> {
-        self.slots_mut().into_iter().flatten().find(|item| item.unique_id == unique_id)
+        self.slots_mut()
+            .into_iter()
+            .flatten()
+            .find(|item| item.unique_id == unique_id)
     }
 
     /// 按 unique_id 卸下装备（移除并返回）
-    pub fn remove_by_id(
-        &mut self,
-        unique_id: u64,
-    ) -> Option<mir2_shared::data::item::UserItem> {
+    pub fn remove_by_id(&mut self, unique_id: u64) -> Option<mir2_shared::data::item::UserItem> {
         for slot in self.slots_mut().into_iter() {
             if let Some(ref item) = *slot {
                 if item.unique_id == unique_id {
@@ -279,7 +296,7 @@ impl Storage {
             capacity,
         }
     }
-    
+
     /// 添加物品到仓库
     pub fn add_item(&mut self, item: mir2_shared::data::item::UserItem) -> bool {
         for slot in &mut self.items {
@@ -290,7 +307,7 @@ impl Storage {
         }
         false
     }
-    
+
     /// 移除指定格子的物品
     pub fn remove_item(&mut self, slot_index: usize) -> Option<mir2_shared::data::item::UserItem> {
         if slot_index < self.items.len() {
@@ -299,7 +316,7 @@ impl Storage {
             None
         }
     }
-    
+
     /// 获取指定格子的物品引用
     pub fn get_item(&self, slot_index: usize) -> Option<&mir2_shared::data::item::UserItem> {
         if slot_index < self.items.len() {
@@ -332,7 +349,7 @@ impl QuestInventory {
             capacity,
         }
     }
-    
+
     /// 添加任务物品
     pub fn add_item(&mut self, item: mir2_shared::data::item::UserItem) -> bool {
         for slot in &mut self.items {
@@ -343,7 +360,7 @@ impl QuestInventory {
         }
         false
     }
-    
+
     /// 移除指定格子的任务物品
     pub fn remove_item(&mut self, slot_index: usize) -> Option<mir2_shared::data::item::UserItem> {
         if slot_index < self.items.len() {
@@ -352,7 +369,7 @@ impl QuestInventory {
             None
         }
     }
-    
+
     /// 获取指定格子的任务物品引用
     pub fn get_item(&self, slot_index: usize) -> Option<&mir2_shared::data::item::UserItem> {
         if slot_index < self.items.len() {

@@ -9,15 +9,15 @@ use std::io::Read;
 /// GetRentedItems - 获取租赁物品 (252)
 #[derive(Debug, Clone)]
 pub struct GetRentedItems {
-    pub items: Vec<RentalItemInfo>,  // 租赁物品列表
+    pub items: Vec<RentalItemInfo>, // 租赁物品列表
 }
 
 #[derive(Debug, Clone)]
 pub struct RentalItemInfo {
-    pub item: UserItem,             // 物品
-    pub rental_fee: u32,            // 租金
-    pub rental_period: i32,         // 租赁期限(小时)
-    pub expiry_date: i64,           // 到期日期
+    pub item: UserItem,     // 物品
+    pub rental_fee: u32,    // 租金
+    pub rental_period: i32, // 租赁期限(小时)
+    pub expiry_date: i64,   // 到期日期
 }
 
 impl Packet for GetRentedItems {
@@ -25,29 +25,29 @@ impl Packet for GetRentedItems {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         writer.write_i32::<LittleEndian>(self.items.len() as i32)?;
-        
+
         for info in &self.items {
             info.item.write_to(writer)?;
             writer.write_u32::<LittleEndian>(info.rental_fee)?;
             writer.write_i32::<LittleEndian>(info.rental_period)?;
             writer.write_i64::<LittleEndian>(info.expiry_date)?;
         }
-        
+
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let count = reader.read_i32::<LittleEndian>()?;
         let mut items = Vec::with_capacity(count as usize);
-        
+
         for _ in 0..count {
             let item = UserItem::read_from(reader, i32::MAX, i32::MAX)?;
             let rental_fee = reader.read_u32::<LittleEndian>()?;
             let rental_period = reader.read_i32::<LittleEndian>()?;
             let expiry_date = reader.read_i64::<LittleEndian>()?;
-            
+
             items.push(RentalItemInfo {
                 item,
                 rental_fee,
@@ -55,7 +55,7 @@ impl Packet for GetRentedItems {
                 expiry_date,
             });
         }
-        
+
         Ok(Self { items })
     }
 }
@@ -82,7 +82,7 @@ impl Packet for ItemRentalRequest {
 /// ItemRentalFee - 物品租赁费用 (254)
 #[derive(Debug, Clone)]
 pub struct ItemRentalFee {
-    pub fee: u32,                   // 租赁费用
+    pub fee: u32, // 租赁费用
 }
 
 impl Packet for ItemRentalFee {
@@ -90,9 +90,9 @@ impl Packet for ItemRentalFee {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         writer.write_u32::<LittleEndian>(self.fee)?;
-        
+
         Ok(())
     }
 
@@ -105,7 +105,7 @@ impl Packet for ItemRentalFee {
 /// ItemRentalPeriod - 物品租赁期限 (255)
 #[derive(Debug, Clone)]
 pub struct ItemRentalPeriod {
-    pub period: i32,                // 租赁期限(小时)
+    pub period: i32, // 租赁期限(小时)
 }
 
 impl Packet for ItemRentalPeriod {
@@ -113,10 +113,10 @@ impl Packet for ItemRentalPeriod {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         // Note: C# uses Days(u32), but Rust uses period(i32)
         writer.write_i32::<LittleEndian>(self.period)?;
-        
+
         Ok(())
     }
 
@@ -129,8 +129,8 @@ impl Packet for ItemRentalPeriod {
 /// DepositRentalItem - 存入租赁物品 (256)
 #[derive(Debug, Clone)]
 pub struct DepositRentalItem {
-    pub unique_id: u64,             // 物品唯一ID
-    pub success: bool,              // 是否成功
+    pub unique_id: u64, // 物品唯一ID
+    pub success: bool,  // 是否成功
 }
 
 impl Packet for DepositRentalItem {
@@ -138,11 +138,11 @@ impl Packet for DepositRentalItem {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         // Note: C# uses From/To(i32), but Rust uses unique_id(u64)
         writer.write_u64::<LittleEndian>(self.unique_id)?;
         writer.write_u8(if self.success { 1 } else { 0 })?;
-        
+
         Ok(())
     }
 
@@ -156,8 +156,8 @@ impl Packet for DepositRentalItem {
 /// RetrieveRentalItem - 取回租赁物品 (257)
 #[derive(Debug, Clone)]
 pub struct RetrieveRentalItem {
-    pub unique_id: u64,             // 物品唯一ID
-    pub success: bool,              // 是否成功
+    pub unique_id: u64, // 物品唯一ID
+    pub success: bool,  // 是否成功
 }
 
 impl Packet for RetrieveRentalItem {
@@ -165,11 +165,11 @@ impl Packet for RetrieveRentalItem {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         // Note: C# uses From/To(i32), but Rust uses unique_id(u64)
         writer.write_u64::<LittleEndian>(self.unique_id)?;
         writer.write_u8(if self.success { 1 } else { 0 })?;
-        
+
         Ok(())
     }
 
@@ -183,9 +183,9 @@ impl Packet for RetrieveRentalItem {
 /// UpdateRentalItem - 更新租赁物品 (258)
 #[derive(Debug, Clone)]
 pub struct UpdateRentalItem {
-    pub item: UserItem,             // 更新的物品
-    pub rental_fee: u32,            // 租金
-    pub rental_period: i32,         // 租赁期限
+    pub item: UserItem,     // 更新的物品
+    pub rental_fee: u32,    // 租金
+    pub rental_period: i32, // 租赁期限
 }
 
 impl Packet for UpdateRentalItem {
@@ -193,14 +193,14 @@ impl Packet for UpdateRentalItem {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         // Note: Rust always has item, C# can be null
         // Writing as if always present
         writer.write_u8(1)?; // HasData = true
         self.item.write_to(writer)?;
         writer.write_u32::<LittleEndian>(self.rental_fee)?;
         writer.write_i32::<LittleEndian>(self.rental_period)?;
-        
+
         Ok(())
     }
 
@@ -219,8 +219,8 @@ impl Packet for UpdateRentalItem {
 /// CancelItemRental - 取消物品租赁 (259)
 #[derive(Debug, Clone)]
 pub struct CancelItemRental {
-    pub unique_id: u64,             // 物品唯一ID
-    pub success: bool,              // 是否成功
+    pub unique_id: u64, // 物品唯一ID
+    pub success: bool,  // 是否成功
 }
 
 impl Packet for CancelItemRental {
@@ -228,11 +228,11 @@ impl Packet for CancelItemRental {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         // Note: C# is empty, but Rust has unique_id + success
         writer.write_u64::<LittleEndian>(self.unique_id)?;
         writer.write_u8(if self.success { 1 } else { 0 })?;
-        
+
         Ok(())
     }
 
@@ -246,8 +246,8 @@ impl Packet for CancelItemRental {
 /// ItemRentalLock - 物品租赁锁定 (260)
 #[derive(Debug, Clone)]
 pub struct ItemRentalLock {
-    pub unique_id: u64,             // 物品唯一ID
-    pub locked: bool,               // 是否锁定
+    pub unique_id: u64, // 物品唯一ID
+    pub locked: bool,   // 是否锁定
 }
 
 impl Packet for ItemRentalLock {
@@ -255,11 +255,11 @@ impl Packet for ItemRentalLock {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         // Note: C# has Success/GoldLocked/ItemLocked, Rust has unique_id/locked
         writer.write_u64::<LittleEndian>(self.unique_id)?;
         writer.write_u8(if self.locked { 1 } else { 0 })?;
-        
+
         Ok(())
     }
 
@@ -273,8 +273,8 @@ impl Packet for ItemRentalLock {
 /// ItemRentalPartnerLock - 物品租赁伙伴锁定 (261)
 #[derive(Debug, Clone)]
 pub struct ItemRentalPartnerLock {
-    pub unique_id: u64,             // 物品唯一ID
-    pub locked: bool,               // 是否锁定
+    pub unique_id: u64, // 物品唯一ID
+    pub locked: bool,   // 是否锁定
 }
 
 impl Packet for ItemRentalPartnerLock {
@@ -282,11 +282,11 @@ impl Packet for ItemRentalPartnerLock {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         // Note: C# has GoldLocked/ItemLocked, Rust has unique_id/locked
         writer.write_u64::<LittleEndian>(self.unique_id)?;
         writer.write_u8(if self.locked { 1 } else { 0 })?;
-        
+
         Ok(())
     }
 
@@ -300,7 +300,7 @@ impl Packet for ItemRentalPartnerLock {
 /// CanConfirmItemRental - 可确认物品租赁 (262)
 #[derive(Debug, Clone)]
 pub struct CanConfirmItemRental {
-    pub can_confirm: bool,          // 是否可以确认
+    pub can_confirm: bool, // 是否可以确认
 }
 
 impl Packet for CanConfirmItemRental {
@@ -308,10 +308,10 @@ impl Packet for CanConfirmItemRental {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         // Note: C# is empty, but Rust has can_confirm
         writer.write_u8(if self.can_confirm { 1 } else { 0 })?;
-        
+
         Ok(())
     }
 
@@ -324,7 +324,7 @@ impl Packet for CanConfirmItemRental {
 /// ConfirmItemRental - 确认物品租赁 (263)
 #[derive(Debug, Clone)]
 pub struct ConfirmItemRental {
-    pub success: bool,              // 是否成功
+    pub success: bool, // 是否成功
 }
 
 impl Packet for ConfirmItemRental {
@@ -332,10 +332,10 @@ impl Packet for ConfirmItemRental {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         // Note: C# is empty, but Rust has success
         writer.write_u8(if self.success { 1 } else { 0 })?;
-        
+
         Ok(())
     }
 

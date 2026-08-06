@@ -64,13 +64,13 @@
 //! - PathfindingSystem 的计算结果会被 AI 系统使用
 // ============================================================================
 
-pub mod pathfinding_system;
-pub mod movement_system;
 pub mod collision_system;
-pub mod map_update_system;
 pub mod map_load_system;
-pub use pathfinding_system::PathfindingSystem;
-pub use movement_system::MovementSystem;
+pub mod map_update_system;
+pub mod movement_system;
+pub mod pathfinding_system;
 pub use collision_system::CollisionSystem;
-pub use map_update_system::{MapUpdateSystem, MapSwitchRequest};
 pub use map_load_system::{MapLoadSystem, MapManager};
+pub use map_update_system::{MapSwitchRequest, MapUpdateSystem};
+pub use movement_system::MovementSystem;
+pub use pathfinding_system::PathfindingSystem;

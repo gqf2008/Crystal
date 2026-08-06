@@ -1,10 +1,10 @@
 //! Item Management Packets (Client → Server)
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::enums::{ClientPacketIds, MirGridType};
 use super::super::base::Packet;
 use crate::data::stats::SharedResult;
+use crate::enums::{ClientPacketIds, MirGridType};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// Client requests to move an item
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,7 +95,12 @@ impl Packet for MergeItem {
         let grid_to = MirGridType::try_from(reader.read_u8()?).unwrap_or(MirGridType::Inventory);
         let id_from = reader.read_u64::<LittleEndian>()?;
         let id_to = reader.read_u64::<LittleEndian>()?;
-        Ok(Self { grid_from, grid_to, id_from, id_to })
+        Ok(Self {
+            grid_from,
+            grid_to,
+            id_from,
+            id_to,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -122,7 +127,11 @@ impl Packet for EquipItem {
         let grid = MirGridType::try_from(reader.read_u8()?).unwrap_or(MirGridType::Inventory);
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let to = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { grid, unique_id, to })
+        Ok(Self {
+            grid,
+            unique_id,
+            to,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -148,7 +157,11 @@ impl Packet for RemoveItem {
         let grid = MirGridType::try_from(reader.read_u8()?).unwrap_or(MirGridType::Equipment);
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let to = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { grid, unique_id, to })
+        Ok(Self {
+            grid,
+            unique_id,
+            to,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -176,7 +189,12 @@ impl Packet for RemoveSlotItem {
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let to = reader.read_i32::<LittleEndian>()?;
         let from_slot = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { grid, unique_id, to, from_slot })
+        Ok(Self {
+            grid,
+            unique_id,
+            to,
+            from_slot,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -203,7 +221,11 @@ impl Packet for SplitItem {
         let grid = MirGridType::try_from(reader.read_u8()?).unwrap_or(MirGridType::Inventory);
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let count = reader.read_u32::<LittleEndian>()?;
-        Ok(Self { grid, unique_id, count })
+        Ok(Self {
+            grid,
+            unique_id,
+            count,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -249,7 +271,11 @@ impl Packet for DropItem {
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let count = reader.read_u32::<LittleEndian>()?;
         let hero_inventory = reader.read_u8()? != 0;
-        Ok(Self { unique_id, count, hero_inventory })
+        Ok(Self {
+            unique_id,
+            count,
+            hero_inventory,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {

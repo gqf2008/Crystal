@@ -1,8 +1,8 @@
 // Movement Handler - 移动相关数据包处理
 
-use mir2_shared::packets::{PacketHeader, Packet, server};
-use mir2_shared::enums::ServerPacketIds;
 use crate::network::handlers::{NetworkEvent, PacketHandler};
+use mir2_shared::enums::ServerPacketIds;
+use mir2_shared::packets::{server, Packet, PacketHeader};
 use std::io::Cursor;
 
 pub struct MovementHandler;
@@ -11,7 +11,7 @@ impl PacketHandler for MovementHandler {
     fn handle(&self, header: &PacketHeader, payload: &[u8]) -> Vec<NetworkEvent> {
         let mut events = Vec::new();
         let mut cursor = Cursor::new(payload);
-        
+
         match header.opcode as u16 {
             // MapInformation
             x if x == ServerPacketIds::MapInformation as u16 => {
@@ -48,8 +48,11 @@ impl PacketHandler for MovementHandler {
                         x: packet.location_x,
                         y: packet.location_y,
                     });
-                    tracing::trace!("📍 User location updated: ({}, {})", 
-                        packet.location_x, packet.location_y);
+                    tracing::trace!(
+                        "📍 User location updated: ({}, {})",
+                        packet.location_x,
+                        packet.location_y
+                    );
                 }
             }
 
@@ -97,7 +100,9 @@ impl PacketHandler for MovementHandler {
             // ===== Object lifecycle =====
             x if x == ServerPacketIds::ObjectRemove as u16 => {
                 if let Ok(packet) = server::ObjectRemove::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ObjectRemove { object_id: packet.object_id });
+                    events.push(NetworkEvent::ObjectRemove {
+                        object_id: packet.object_id,
+                    });
                 }
             }
 
@@ -137,13 +142,18 @@ impl PacketHandler for MovementHandler {
             x if x == ServerPacketIds::ObjectHide as u16 => {
                 if let Ok(packet) = server::ObjectHide::read_body(&mut cursor) {
                     tracing::trace!("👻 ObjectHidden: id={}", packet.object_id);
-                    events.push(NetworkEvent::ObjectHidden { object_id: packet.object_id, hidden: true });
+                    events.push(NetworkEvent::ObjectHidden {
+                        object_id: packet.object_id,
+                        hidden: true,
+                    });
                 }
             }
             x if x == ServerPacketIds::ObjectShow as u16 => {
                 if let Ok(packet) = server::ObjectShow::read_body(&mut cursor) {
                     tracing::trace!("👁️ ObjectShown: id={}", packet.object_id);
-                    events.push(NetworkEvent::ObjectShown { object_id: packet.object_id });
+                    events.push(NetworkEvent::ObjectShown {
+                        object_id: packet.object_id,
+                    });
                 }
             }
 
@@ -152,16 +162,21 @@ impl PacketHandler for MovementHandler {
                 if let Ok(packet) = server::ObjectTeleportOut::read_body(&mut cursor) {
                     tracing::trace!(
                         "✨ ObjectTeleportingOut: id={} type={}",
-                        packet.object_id, packet.teleport_type
+                        packet.object_id,
+                        packet.teleport_type
                     );
-                    events.push(NetworkEvent::ObjectTeleportingOut { object_id: packet.object_id, teleport_type: packet.teleport_type });
+                    events.push(NetworkEvent::ObjectTeleportingOut {
+                        object_id: packet.object_id,
+                        teleport_type: packet.teleport_type,
+                    });
                 }
             }
             x if x == ServerPacketIds::ObjectTeleportIn as u16 => {
                 if let Ok(packet) = server::ObjectTeleportIn::read_body(&mut cursor) {
                     tracing::trace!(
                         "✨ ObjectTeleportingIn: id={} type={}",
-                        packet.object_id, packet.teleport_type
+                        packet.object_id,
+                        packet.teleport_type
                     );
                     events.push(NetworkEvent::ObjectTeleportingIn {
                         object_id: packet.object_id,
@@ -179,7 +194,11 @@ impl PacketHandler for MovementHandler {
             // ===== BackStep =====
             x if x == ServerPacketIds::UserBackStep as u16 => {
                 if let Ok(packet) = server::UserBackStep::read_body(&mut cursor) {
-                    tracing::trace!("🔙 PlayerBackStepped: loc=({}, {})", packet.location_x, packet.location_y);
+                    tracing::trace!(
+                        "🔙 PlayerBackStepped: loc=({}, {})",
+                        packet.location_x,
+                        packet.location_y
+                    );
                     events.push(NetworkEvent::PlayerBackStepped {
                         x: packet.location_x,
                         y: packet.location_y,
@@ -190,7 +209,10 @@ impl PacketHandler for MovementHandler {
                 if let Ok(packet) = server::ObjectBackStep::read_body(&mut cursor) {
                     tracing::trace!(
                         "🔙 ObjectBackStepped: id={} loc=({}, {}) dist={}",
-                        packet.object_id, packet.location_x, packet.location_y, packet.distance
+                        packet.object_id,
+                        packet.location_x,
+                        packet.location_y,
+                        packet.distance
                     );
                     events.push(NetworkEvent::ObjectBackStepped {
                         object_id: packet.object_id,
@@ -205,7 +227,11 @@ impl PacketHandler for MovementHandler {
             // ===== Dash =====
             x if x == ServerPacketIds::UserDash as u16 => {
                 if let Ok(packet) = server::UserDash::read_body(&mut cursor) {
-                    tracing::trace!("💨 PlayerDashing: loc=({}, {})", packet.location_x, packet.location_y);
+                    tracing::trace!(
+                        "💨 PlayerDashing: loc=({}, {})",
+                        packet.location_x,
+                        packet.location_y
+                    );
                     events.push(NetworkEvent::PlayerDashing {
                         x: packet.location_x as i32,
                         y: packet.location_y as i32,
@@ -216,7 +242,9 @@ impl PacketHandler for MovementHandler {
                 if let Ok(packet) = server::ObjectDash::read_body(&mut cursor) {
                     tracing::trace!(
                         "💨 ObjectDashing: id={} loc=({}, {})",
-                        packet.object_id, packet.location_x, packet.location_y
+                        packet.object_id,
+                        packet.location_x,
+                        packet.location_y
                     );
                     events.push(NetworkEvent::ObjectDashing {
                         object_id: packet.object_id,
@@ -230,7 +258,8 @@ impl PacketHandler for MovementHandler {
                 if let Ok(packet) = server::UserDashFail::read_body(&mut cursor) {
                     tracing::trace!(
                         "❌ PlayerDashFailed: loc=({}, {})",
-                        packet.location_x, packet.location_y
+                        packet.location_x,
+                        packet.location_y
                     );
                     events.push(NetworkEvent::PlayerDashFailed {
                         location_x: packet.location_x,
@@ -243,7 +272,9 @@ impl PacketHandler for MovementHandler {
                 if let Ok(packet) = server::ObjectDashFail::read_body(&mut cursor) {
                     tracing::trace!(
                         "❌ ObjectDashFailed: id={} loc=({}, {})",
-                        packet.object_id, packet.location_x, packet.location_y
+                        packet.object_id,
+                        packet.location_x,
+                        packet.location_y
                     );
                     events.push(NetworkEvent::ObjectDashFailed {
                         object_id: packet.object_id,
@@ -259,7 +290,9 @@ impl PacketHandler for MovementHandler {
                 if let Ok(packet) = server::ObjectSitDown::read_body(&mut cursor) {
                     tracing::trace!(
                         "🪑 ObjectSatDown: id={} loc=({:?}) dir={}",
-                        packet.object_id, packet.location, packet.direction
+                        packet.object_id,
+                        packet.location,
+                        packet.direction
                     );
                     events.push(NetworkEvent::ObjectSatDown {
                         object_id: packet.object_id,
@@ -274,8 +307,12 @@ impl PacketHandler for MovementHandler {
                 if let Ok(packet) = server::NewMapInfo::read_body(&mut cursor) {
                     tracing::info!(
                         "🗺️ NewMapInfo: idx={} title={} size={}x{} movements={} npcs={}",
-                        packet.map_index, packet.title, packet.width, packet.height,
-                        packet.movements.len(), packet.npcs.len()
+                        packet.map_index,
+                        packet.title,
+                        packet.width,
+                        packet.height,
+                        packet.movements.len(),
+                        packet.npcs.len()
                     );
                     events.push(NetworkEvent::NewMapInfoReceived { packet });
                 }
@@ -286,14 +323,18 @@ impl PacketHandler for MovementHandler {
                         "🌍 WorldMapSetupReceived: {} map icons",
                         packet.world_maps.len()
                     );
-                    events.push(NetworkEvent::WorldMapSetupReceived { icons: packet.world_maps });
+                    events.push(NetworkEvent::WorldMapSetupReceived {
+                        icons: packet.world_maps,
+                    });
                 }
             }
             x if x == ServerPacketIds::SearchMapResult as u16 => {
                 if let Ok(packet) = server::SearchMapResult::read_body(&mut cursor) {
                     tracing::info!(
                         "🔍 SearchMapResultReceived: map={} loc=({}, {})",
-                        packet.map_index, packet.location_x, packet.location_y
+                        packet.map_index,
+                        packet.location_x,
+                        packet.location_y
                     );
                     events.push(NetworkEvent::SearchMapResultReceived {
                         map_index: packet.map_index,
@@ -305,16 +346,20 @@ impl PacketHandler for MovementHandler {
             x if x == ServerPacketIds::TimeOfDay as u16 => {
                 if let Ok(packet) = server::TimeOfDay::read_body(&mut cursor) {
                     tracing::trace!("🌗 TimeOfDayChanged: lights={}", packet.lights);
-                    events.push(NetworkEvent::TimeOfDayChanged { time_of_day: packet.lights });
+                    events.push(NetworkEvent::TimeOfDayChanged {
+                        time_of_day: packet.lights,
+                    });
                 }
             }
 
             _ => {
                 tracing::debug!("⚠️ MovementHandler: Unknown opcode {:04X}", header.opcode);
-                events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                events.push(NetworkEvent::UnhandledPacket {
+                    opcode: header.opcode,
+                });
             }
         }
-        
+
         events
     }
 }

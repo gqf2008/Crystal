@@ -2,15 +2,15 @@
 //!
 //! This module contains group/party-related packet definitions and parsers.
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::{
-    map::Point,
-    enums::ServerPacketIds,
-    binary::{read_dotnet_string, write_dotnet_string},
-};
 use super::super::base::Packet;
 use crate::data::stats::SharedResult;
+use crate::{
+    binary::{read_dotnet_string, write_dotnet_string},
+    enums::ServerPacketIds,
+    map::Point,
+};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 // ============================================================================
 // Packet Structures & PacketMessage Implementations
@@ -60,7 +60,11 @@ impl Packet for GroupMembersMap {
             let name = read_dotnet_string(reader)?;
             let is_leader = reader.read_u8()? != 0;
             let online = reader.read_u8()? != 0;
-            members.push(GroupMember { name, is_leader, online });
+            members.push(GroupMember {
+                name,
+                is_leader,
+                online,
+            });
         }
         Ok(Self { members })
     }
@@ -91,7 +95,7 @@ impl Packet for SendMemberLocation {
         let x = reader.read_i32::<LittleEndian>()?;
         let y = reader.read_i32::<LittleEndian>()?;
         let location = Point { x, y };
-        
+
         Ok(Self {
             member_name,
             location,

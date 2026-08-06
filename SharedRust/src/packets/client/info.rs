@@ -2,11 +2,11 @@
 //!
 //! PR #1126 — KR NPC/Quest Linking. Clients request detailed info for tooltips.
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::enums::ClientPacketIds;
 use super::super::base::Packet;
 use crate::data::stats::SharedResult;
+use crate::enums::ClientPacketIds;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// Client requests detailed monster info (used for tooltip when hovering <$MONSTER:IDX>).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

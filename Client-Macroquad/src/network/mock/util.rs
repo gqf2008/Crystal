@@ -52,7 +52,10 @@ impl MockNetwork {
         }
     }
 
-    pub(super) fn send_object_player_update(response_tx: &Sender<NetworkEvent>, rp: &MockRemotePlayerState) {
+    pub(super) fn send_object_player_update(
+        response_tx: &Sender<NetworkEvent>,
+        rp: &MockRemotePlayerState,
+    ) {
         let _ = response_tx.send(NetworkEvent::ObjectPlayer {
             packet: mir2_shared::packets::server::ObjectPlayer {
                 object_id: rp.id,
@@ -136,10 +139,9 @@ impl MockNetwork {
         if x < 0 || y < 0 {
             return false;
         }
-        if map_width > 0 && map_height > 0
-            && (x >= map_width || y >= map_height) {
-                return false;
-            }
+        if map_width > 0 && map_height > 0 && (x >= map_width || y >= map_height) {
+            return false;
+        }
         if map_walkable.is_empty() || map_width <= 0 || map_height <= 0 {
             // 未缓存碰撞：退化为“全部可走”
             return true;
@@ -384,10 +386,12 @@ impl MockNetwork {
         if x < 0 || y < 0 {
             return false;
         }
-        if state.map_width > 0 && state.map_height > 0
-            && (x >= state.map_width || y >= state.map_height) {
-                return false;
-            }
+        if state.map_width > 0
+            && state.map_height > 0
+            && (x >= state.map_width || y >= state.map_height)
+        {
+            return false;
+        }
         if state.map_walkable.is_empty() || state.map_width <= 0 || state.map_height <= 0 {
             // 未加载碰撞：退化为“全部可走”
             return true;

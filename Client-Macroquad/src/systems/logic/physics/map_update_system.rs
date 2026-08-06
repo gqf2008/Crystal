@@ -5,7 +5,7 @@
 //! - 执行地图加载和世界重置
 //! - 重新创建所有必要的实体（相机、玩家、配置等）
 
-use crate::game::{GameResult, Coord, MapUtils, MapLoader};
+use crate::game::{Coord, GameResult, MapLoader, MapUtils};
 use crate::resources::MapReader; // ✅ MapReader 已在 resources/map_reader.rs 中实现
 use rfd::FileDialog;
 use std::time::Instant;
@@ -60,7 +60,8 @@ impl MapUpdateSystem {
             tracing::info!("🗺️  MapUpdateSystem: 正在加载地图 {}", new_path);
 
             // 保存相机位置和状态（不访问 network/settings，直接从组件获取）
-            let (camera_pos, camera_zoom, screen_width, screen_height) = ctx.world
+            let (camera_pos, camera_zoom, screen_width, screen_height) = ctx
+                .world
                 .query::<(&Position, &Camera)>()
                 .into_iter()
                 .next()
@@ -73,9 +74,7 @@ impl MapUpdateSystem {
                 Ok(reader) => {
                     println!(
                         "✅ 地图读取成功: {} ({}x{})",
-                        resolved_path,
-                        reader.width,
-                        reader.height
+                        resolved_path, reader.width, reader.height
                     );
 
                     // 清空世界
@@ -88,10 +87,12 @@ impl MapUpdateSystem {
                     }
 
                     // 找到出生点
-                    let map_data = ctx.world
+                    let map_data = ctx
+                        .world
                         .query_mut::<&MapData>()
                         .into_iter()
-                        .next().cloned()
+                        .next()
+                        .cloned()
                         .expect("地图数据未加载");
 
                     let (spawn_grid_x, spawn_grid_y) =
@@ -156,13 +157,16 @@ impl MapUpdateSystem {
             tracing::info!("📂 用户选择地图: {}", path_str);
 
             // 删除旧的 MapSwitchRequest（如果存在）
-            let to_remove: Vec<_> = world.iter().filter_map(|eref| {
-                if eref.get::<&MapSwitchRequest>().is_some() {
-                    Some(eref.entity())
-                } else {
-                    None
-                }
-            }).collect();
+            let to_remove: Vec<_> = world
+                .iter()
+                .filter_map(|eref| {
+                    if eref.get::<&MapSwitchRequest>().is_some() {
+                        Some(eref.entity())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
             for entity in to_remove {
                 let _ = world.despawn(entity);
             }

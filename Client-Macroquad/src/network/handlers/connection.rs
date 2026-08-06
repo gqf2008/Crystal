@@ -1,10 +1,10 @@
 // Connection Handler - 连接相关数据包处理
-// 
+//
 // 处理连接、断开、心跳等基础网络事件
 
-use mir2_shared::packets::{PacketHeader, Packet, server};
-use mir2_shared::enums::ServerPacketIds;
 use crate::network::handlers::{NetworkEvent, PacketHandler};
+use mir2_shared::enums::ServerPacketIds;
+use mir2_shared::packets::{server, Packet, PacketHeader};
 use std::io::Cursor;
 
 /// Connection handler - processes connection-related packets
@@ -14,7 +14,7 @@ impl PacketHandler for ConnectionHandler {
     fn handle(&self, header: &PacketHeader, payload: &[u8]) -> Vec<NetworkEvent> {
         let mut events = Vec::new();
         let mut cursor = Cursor::new(payload);
-        
+
         // Determine packet type by opcode (using ServerPacketIds)
         match header.opcode as u16 {
             x if x == ServerPacketIds::Connected as u16 => {
@@ -23,10 +23,12 @@ impl PacketHandler for ConnectionHandler {
                     tracing::info!("✅ Connected to server");
                 }
             }
-            
+
             x if x == ServerPacketIds::ClientVersion as u16 => {
                 if let Ok(packet) = server::ClientVersion::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ClientVersionResponse { result: packet.result });
+                    events.push(NetworkEvent::ClientVersionResponse {
+                        result: packet.result,
+                    });
                     if packet.result == 1 {
                         tracing::info!("✅ ClientVersion accepted by server");
                     } else {
@@ -34,32 +36,36 @@ impl PacketHandler for ConnectionHandler {
                     }
                 }
             }
-            
+
             x if x == ServerPacketIds::Disconnect as u16 => {
                 if let Ok(packet) = server::Disconnect::read_body(&mut cursor) {
                     let reason = format!("Disconnect reason: {}", packet.reason);
-                    events.push(NetworkEvent::Disconnected { reason: reason.clone() });
+                    events.push(NetworkEvent::Disconnected {
+                        reason: reason.clone(),
+                    });
                     tracing::warn!("🔌 Disconnected: {}", reason);
                 } else {
-                    events.push(NetworkEvent::Disconnected { 
-                        reason: "Server disconnected".to_string() 
+                    events.push(NetworkEvent::Disconnected {
+                        reason: "Server disconnected".to_string(),
                     });
                 }
             }
-            
+
             x if x == ServerPacketIds::KeepAlive as u16 => {
                 if let Ok(packet) = server::KeepAlive::read_body(&mut cursor) {
                     events.push(NetworkEvent::KeepAliveReceived { time: packet.time });
                     tracing::trace!("💓 KeepAlive received: time={}", packet.time);
                 }
             }
-            
+
             _ => {
                 tracing::warn!("⚠️ ConnectionHandler: Unknown opcode {:04X}", header.opcode);
-                events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                events.push(NetworkEvent::UnhandledPacket {
+                    opcode: header.opcode,
+                });
             }
         }
-        
+
         events
     }
 }
@@ -67,11 +73,13 @@ impl PacketHandler for ConnectionHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_connection_handler_creation() {
         let handler = ConnectionHandler;
         // opcode 0x0001 = ClientVersion, needs 1-byte payload (result)
-        assert!(!handler.handle(&PacketHeader::new(5, 0x0001), &[1]).is_empty());
+        assert!(!handler
+            .handle(&PacketHeader::new(5, 0x0001), &[1])
+            .is_empty());
     }
 }

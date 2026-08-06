@@ -3,11 +3,11 @@
 //! PR #1169 — KR Mir2 Warehouse password feature. The server's response to
 //! UnlockStorage / SetStoragePassword / RemoveStoragePassword requests.
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 use crate::enums::ServerPacketIds;
-use super::super::base::Packet;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// Result of an UnlockStorage request.
 ///
@@ -29,7 +29,10 @@ impl Packet for StorageUnlockResult {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let result = reader.read_u8()?;
         let has_password = reader.read_u8()? != 0;
-        Ok(Self { result, has_password })
+        Ok(Self {
+            result,
+            has_password,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -64,7 +67,12 @@ impl Packet for StoragePasswordResult {
         let removing = reader.read_u8()? != 0;
         let has_password = reader.read_u8()? != 0;
         let last_set_time = reader.read_i64::<LittleEndian>()?;
-        Ok(Self { result, removing, has_password, last_set_time })
+        Ok(Self {
+            result,
+            removing,
+            has_password,
+            last_set_time,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {

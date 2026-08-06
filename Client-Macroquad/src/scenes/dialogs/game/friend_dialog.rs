@@ -11,10 +11,10 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
+use super::native_ui_utils::DragHelper;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
-use super::native_ui_utils::DragHelper;
+use macroquad::prelude::*;
 
 /// 好友信息
 #[derive(Debug, Clone)]
@@ -372,7 +372,14 @@ impl FriendDialogHybrid {
                 Color::from_rgba(60, 70, 80, 255)
             };
             draw_rectangle(btn_x, btn_y, btn_w, btn_h, btn_color);
-            draw_rectangle_lines(btn_x, btn_y, btn_w, btn_h, 1.0, Color::from_rgba(100, 100, 120, 255));
+            draw_rectangle_lines(
+                btn_x,
+                btn_y,
+                btn_w,
+                btn_h,
+                1.0,
+                Color::from_rgba(100, 100, 120, 255),
+            );
 
             let text_color = if is_disabled { GRAY } else { WHITE };
             draw_text_cn(label, btn_x + 10.0, btn_y + 16.0, 12.0, text_color);

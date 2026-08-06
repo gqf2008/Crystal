@@ -13,8 +13,8 @@
 // - 解析并渲染可点击选项：<text/@Action> 和 <<text/@Action>>
 // - 点击 @Exit 关闭；其他 action 交给上层发送 CallNPC key
 
-use macroquad::prelude::*;
 use hecs::World;
+use macroquad::prelude::*;
 
 use crate::resources::LibraryName;
 use crate::scenes::dialogs::game::native_ui_utils::{ButtonState, ButtonTextures};
@@ -27,9 +27,13 @@ pub enum NpcDialogAction {
     None,
     Close,
     /// action 形如 "@Shop"，上层需要格式化成 key: "[@Shop]" 并发给服务器
-    ClickAction { action: String },
+    ClickAction {
+        action: String,
+    },
     /// 链接：对齐 C# 的 ((text/url))
-    OpenLink { url: String },
+    OpenLink {
+        url: String,
+    },
     // ===== PR #1169: Warehouse password actions =====
     /// 玩家在 NPC 对话框里点击了"输入仓库密码"按钮。
     /// 上层需要弹出 ShowTextInput(TextInputKind::UnlockStorage)。
@@ -42,9 +46,18 @@ pub enum NpcDialogAction {
 #[derive(Debug, Clone)]
 enum Segment {
     Plain(String),
-    Action { text: String, action: String },
-    Colored { text: String, color_name: String },
-    Link { text: String, url: String },
+    Action {
+        text: String,
+        action: String,
+    },
+    Colored {
+        text: String,
+        color_name: String,
+    },
+    Link {
+        text: String,
+        url: String,
+    },
     // PR #1126: KR-style NPC link (master C# 解析 `[MONSTER:idx|Name]`,
     // `[NPC:idx|Name]`, `[ITEM:idx|Name]` 格式 — 服务器 LinkFormatter 把
     // `<$MONSTER:5>` 转成 `[MONSTER:5|Beetle]` 后客户端显示)
@@ -204,7 +217,10 @@ impl NpcDialogHybrid {
             up_btn: ButtonTextures::load_from_library(LibraryName::Prguse2, 197),
             down_btn: ButtonTextures::load_from_library(LibraryName::Prguse2, 207),
 
-            scroll_bar_btn: ButtonTextures::load_from_indices(LibraryName::Prguse2, [205, 206, 206]),
+            scroll_bar_btn: ButtonTextures::load_from_indices(
+                LibraryName::Prguse2,
+                [205, 206, 206],
+            ),
             scroll_dragging: false,
             scroll_drag_offset_y: 0.0,
 
@@ -268,10 +284,7 @@ impl NpcDialogHybrid {
 
     pub fn new_dialog(&mut self, dialog: impl AsRef<str>) {
         let dialog = dialog.as_ref();
-        let raw_lines: Vec<String> = dialog
-            .split('\n')
-            .map(|x| x.trim().to_string())
-            .collect();
+        let raw_lines: Vec<String> = dialog.split('\n').map(|x| x.trim().to_string()).collect();
 
         let (lines, big_buttons) = Self::extract_big_buttons(raw_lines);
         self.lines = lines;
@@ -328,11 +341,7 @@ impl NpcDialogHybrid {
         // 对齐 C#：背景块若干行 + footer
         // 这里按纹理高度累加；若纹理缺失，使用近似值。
         let count = self.big_panel_row_count();
-        let row_h = self
-            .big_bg_mid
-            .as_ref()
-            .map(|t| t.height())
-            .unwrap_or(40.0);
+        let row_h = self.big_bg_mid.as_ref().map(|t| t.height()).unwrap_or(40.0);
         let footer_h = self
             .big_bg_footer
             .as_ref()
@@ -643,7 +652,11 @@ impl NpcDialogHybrid {
     ///
     /// 用途：当窗口被其他 dialog 覆盖时，避免“看起来在下面但仍能吃输入”。
     /// `world` 参数供 tooltip 从 UiState cache 读 NewMonsterInfo / NewNPCInfo 数据。
-    pub fn update_and_draw_with_input(&mut self, input_enabled: bool, _world: &World) -> NpcDialogAction {
+    pub fn update_and_draw_with_input(
+        &mut self,
+        input_enabled: bool,
+        _world: &World,
+    ) -> NpcDialogAction {
         if !self.visible {
             return NpcDialogAction::None;
         }
@@ -712,15 +725,25 @@ impl NpcDialogHybrid {
 
         // 背景
         let bg = if self.has_scroll() {
-            self.bg_texture_scroll.as_ref().or(self.bg_texture_small.as_ref())
+            self.bg_texture_scroll
+                .as_ref()
+                .or(self.bg_texture_small.as_ref())
         } else {
-            self.bg_texture_small.as_ref().or(self.bg_texture_scroll.as_ref())
+            self.bg_texture_small
+                .as_ref()
+                .or(self.bg_texture_scroll.as_ref())
         };
 
         if let Some(bg) = bg {
             draw_texture(bg, rect.x, rect.y, WHITE);
         } else {
-            draw_rectangle(rect.x, rect.y, rect.w, rect.h, Color::new(0.0, 0.0, 0.0, 0.75));
+            draw_rectangle(
+                rect.x,
+                rect.y,
+                rect.w,
+                rect.h,
+                Color::new(0.0, 0.0, 0.0, 0.75),
+            );
         }
 
         // 关闭按钮
@@ -731,7 +754,8 @@ impl NpcDialogHybrid {
             self.close_btn.size.y,
         );
         let close_state = ButtonState::from_mouse(close_rect, mouse_pos);
-        self.close_btn.draw(vec2(close_rect.x, close_rect.y), close_state);
+        self.close_btn
+            .draw(vec2(close_rect.x, close_rect.y), close_state);
         if input_enabled && ButtonState::is_clicked(close_rect, mouse_pos) {
             self.hide();
             return NpcDialogAction::Close;
@@ -747,10 +771,9 @@ impl NpcDialogHybrid {
             );
             let up_state = ButtonState::from_mouse(up_rect, mouse_pos);
             self.up_btn.draw(vec2(up_rect.x, up_rect.y), up_state);
-            if input_enabled && ButtonState::is_clicked(up_rect, mouse_pos)
-                && self.index > 0 {
-                    self.index -= 1;
-                }
+            if input_enabled && ButtonState::is_clicked(up_rect, mouse_pos) && self.index > 0 {
+                self.index -= 1;
+            }
 
             let down_rect = Rect::new(
                 rect.x + Self::DOWN_X,
@@ -759,11 +782,14 @@ impl NpcDialogHybrid {
                 self.down_btn.size.y,
             );
             let down_state = ButtonState::from_mouse(down_rect, mouse_pos);
-            self.down_btn.draw(vec2(down_rect.x, down_rect.y), down_state);
-            if input_enabled && ButtonState::is_clicked(down_rect, mouse_pos)
-                && self.index + self.maximum_lines < self.lines.len() {
-                    self.index += 1;
-                }
+            self.down_btn
+                .draw(vec2(down_rect.x, down_rect.y), down_state);
+            if input_enabled
+                && ButtonState::is_clicked(down_rect, mouse_pos)
+                && self.index + self.maximum_lines < self.lines.len()
+            {
+                self.index += 1;
+            }
 
             // PositionBar（可拖拽）
             let bar_y = rect.y + self.scroll_bar_y_from_index();
@@ -783,15 +809,16 @@ impl NpcDialogHybrid {
                 self.scroll_drag_offset_y = mouse_pos.y - bar_rect.y;
             }
             // 结束拖拽
-            if self.scroll_dragging && (!input_enabled || !is_mouse_button_down(MouseButton::Left)) {
+            if self.scroll_dragging && (!input_enabled || !is_mouse_button_down(MouseButton::Left))
+            {
                 self.scroll_dragging = false;
             }
 
             let mut draw_bar_rect = bar_rect;
             if self.scroll_dragging {
                 let desired_y = mouse_pos.y - self.scroll_drag_offset_y;
-                let desired_local_y = (desired_y - rect.y)
-                    .clamp(Self::SCROLL_BAR_MIN_Y, Self::SCROLL_BAR_MAX_Y);
+                let desired_local_y =
+                    (desired_y - rect.y).clamp(Self::SCROLL_BAR_MIN_Y, Self::SCROLL_BAR_MAX_Y);
                 self.index = self.index_from_scroll_bar_y(desired_local_y);
                 self.clamp_index();
                 draw_bar_rect.y = rect.y + desired_local_y;
@@ -825,7 +852,8 @@ impl NpcDialogHybrid {
                     }
                     Segment::Action { text, action } => {
                         let dims = measure_text_cn(&text, Self::FONT_SIZE);
-                        let span_rect = Rect::new(x, y, dims.width, dims.height.max(Self::LINE_STEP_Y));
+                        let span_rect =
+                            Rect::new(x, y, dims.width, dims.height.max(Self::LINE_STEP_Y));
 
                         let hovered = span_rect.contains(mouse_pos);
                         let color = if hovered { RED } else { YELLOW };
@@ -845,7 +873,8 @@ impl NpcDialogHybrid {
                     }
                     Segment::Link { text, url } => {
                         let dims = measure_text_cn(&text, Self::FONT_SIZE);
-                        let span_rect = Rect::new(x, y, dims.width, dims.height.max(Self::LINE_STEP_Y));
+                        let span_rect =
+                            Rect::new(x, y, dims.width, dims.height.max(Self::LINE_STEP_Y));
                         let hovered = span_rect.contains(mouse_pos);
                         let color = if hovered { RED } else { YELLOW };
                         draw_text_cn(&text, x, y + 14.0, Self::FONT_SIZE, color);
@@ -855,12 +884,21 @@ impl NpcDialogHybrid {
                         x += dims.width;
                     }
                     // PR #1126: KR NPC link 渲染 (黄色/红色 hover 颜色 + tooltip)
-                    Segment::KrLink { link_type, index, display_name } => {
+                    Segment::KrLink {
+                        link_type,
+                        index,
+                        display_name,
+                    } => {
                         let label = format!("[{}:{}]", link_type.label(), display_name);
                         let dims = measure_text_cn(&label, Self::FONT_SIZE);
-                        let span_rect = Rect::new(x, y, dims.width, dims.height.max(Self::LINE_STEP_Y));
+                        let span_rect =
+                            Rect::new(x, y, dims.width, dims.height.max(Self::LINE_STEP_Y));
                         let hovered = span_rect.contains(mouse_pos);
-                        let color = if hovered { RED } else { Color::from_rgba(255, 200, 100, 255) };
+                        let color = if hovered {
+                            RED
+                        } else {
+                            Color::from_rgba(255, 200, 100, 255)
+                        };
                         draw_text_cn(&label, x, y + 14.0, Self::FONT_SIZE, color);
                         // Track hovered link for tooltip rendering
                         if hovered {
@@ -886,11 +924,7 @@ impl NpcDialogHybrid {
                 .unwrap_or(rect.w);
 
             let rows = self.big_panel_row_count();
-            let row_h = self
-                .big_bg_mid
-                .as_ref()
-                .map(|t| t.height())
-                .unwrap_or(40.0);
+            let row_h = self.big_bg_mid.as_ref().map(|t| t.height()).unwrap_or(40.0);
             let footer_h = self
                 .big_bg_footer
                 .as_ref()
@@ -921,7 +955,13 @@ impl NpcDialogHybrid {
             if let Some(tex) = self.big_bg_footer.as_ref() {
                 draw_texture(tex, panel_x - 1.0, footer_y, WHITE);
             } else {
-                draw_rectangle(panel_x - 1.0, footer_y, panel_w, footer_h, Color::new(0.0, 0.0, 0.0, 0.55));
+                draw_rectangle(
+                    panel_x - 1.0,
+                    footer_y,
+                    panel_w,
+                    footer_h,
+                    Color::new(0.0, 0.0, 0.0, 0.55),
+                );
             }
 
             let panel_h = (rows as f32) * row_h + footer_h;
@@ -937,9 +977,10 @@ impl NpcDialogHybrid {
                             self.big_scroll_offset -= 1;
                         }
                     } else if count < 0
-                        && self.big_scroll_offset + Self::BIG_MAX_ROWS < self.big_buttons.len() {
-                            self.big_scroll_offset += 1;
-                        }
+                        && self.big_scroll_offset + Self::BIG_MAX_ROWS < self.big_buttons.len()
+                    {
+                        self.big_scroll_offset += 1;
+                    }
                 }
             }
 
@@ -953,10 +994,12 @@ impl NpcDialogHybrid {
                 );
                 let up_state = ButtonState::from_mouse(up_rect, mouse_pos);
                 self.up_btn.draw(vec2(up_rect.x, up_rect.y), up_state);
-                if input_enabled && ButtonState::is_clicked(up_rect, mouse_pos)
-                    && self.big_scroll_offset > 0 {
-                        self.big_scroll_offset -= 1;
-                    }
+                if input_enabled
+                    && ButtonState::is_clicked(up_rect, mouse_pos)
+                    && self.big_scroll_offset > 0
+                {
+                    self.big_scroll_offset -= 1;
+                }
 
                 let down_rect = Rect::new(
                     panel_x + panel_w - 26.0,
@@ -965,11 +1008,14 @@ impl NpcDialogHybrid {
                     self.down_btn.size.y,
                 );
                 let down_state = ButtonState::from_mouse(down_rect, mouse_pos);
-                self.down_btn.draw(vec2(down_rect.x, down_rect.y), down_state);
-                if input_enabled && ButtonState::is_clicked(down_rect, mouse_pos)
-                    && self.big_scroll_offset + Self::BIG_MAX_ROWS < self.big_buttons.len() {
-                        self.big_scroll_offset += 1;
-                    }
+                self.down_btn
+                    .draw(vec2(down_rect.x, down_rect.y), down_state);
+                if input_enabled
+                    && ButtonState::is_clicked(down_rect, mouse_pos)
+                    && self.big_scroll_offset + Self::BIG_MAX_ROWS < self.big_buttons.len()
+                {
+                    self.big_scroll_offset += 1;
+                }
             }
 
             // 绘制按钮本体
@@ -1037,8 +1083,10 @@ impl NpcDialogHybrid {
                     if let Some(info) = read_monster_info_from_cache(_world, index) {
                         tip_lines.push(format!("  等级: {}", info.level));
                         tip_lines.push(format!("  HP: ?  经验: {}", info.experience));
-                        tip_lines.push(format!("  AI:{} 攻击:{} 移动:{}",
-                            info.ai, info.attack_speed, info.move_speed));
+                        tip_lines.push(format!(
+                            "  AI:{} 攻击:{} 移动:{}",
+                            info.ai, info.attack_speed, info.move_speed
+                        ));
                     } else {
                         tip_lines.push("  加载中...".to_string());
                     }
@@ -1047,10 +1095,14 @@ impl NpcDialogHybrid {
                     tip_lines.push(format!("NPC: {} (#{})", display_name, index));
                     // cache key 是 npc.object_id
                     if let Some(info) = read_npc_info_from_cache(_world, index) {
-                        tip_lines.push(format!("  位置: ({}, {})",
-                            info.location.x, info.location.y));
-                        tip_lines.push(format!("  图标: {}  可传送: {}",
-                            info.icon, info.can_teleport_to));
+                        tip_lines.push(format!(
+                            "  位置: ({}, {})",
+                            info.location.x, info.location.y
+                        ));
+                        tip_lines.push(format!(
+                            "  图标: {}  可传送: {}",
+                            info.icon, info.can_teleport_to
+                        ));
                     } else {
                         tip_lines.push("  加载中...".to_string());
                     }
@@ -1063,14 +1115,20 @@ impl NpcDialogHybrid {
             }
             let tip_x = mouse_pos.x + 16.0;
             let tip_y = mouse_pos.y + 16.0;
-            let w = tip_lines.iter()
+            let w = tip_lines
+                .iter()
                 .map(|l| l.chars().count() as f32 * 8.0 + 8.0)
                 .fold(0.0_f32, f32::max);
             let h = (tip_lines.len() as f32) * 16.0 + 8.0;
             draw_rectangle(tip_x, tip_y, w, h, Color::from_rgba(0, 0, 0, 220));
             for (i, line) in tip_lines.iter().enumerate() {
-                draw_text_cn(line, tip_x + 4.0, tip_y + 4.0 + (i as f32) * 16.0, 12.0,
-                    Color::from_rgba(255, 220, 140, 255));
+                draw_text_cn(
+                    line,
+                    tip_x + 4.0,
+                    tip_y + 4.0 + (i as f32) * 16.0,
+                    12.0,
+                    Color::from_rgba(255, 220, 140, 255),
+                );
             }
         }
 

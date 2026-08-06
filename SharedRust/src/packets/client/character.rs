@@ -1,17 +1,17 @@
 //! Character Management Packets (Client → Server)
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::binary::{read_dotnet_string, write_dotnet_string};
-use crate::enums::{ClientPacketIds, MirClass, MirGender};
 use super::super::base::Packet;
+use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::data::stats::SharedResult;
+use crate::enums::{ClientPacketIds, MirClass, MirGender};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// Client requests to create a new character
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewCharacter {
     pub name: String,
-    pub gender: MirGender,  // C# 顺序: Name, Gender, Class
+    pub gender: MirGender, // C# 顺序: Name, Gender, Class
     pub class: MirClass,
 }
 
@@ -21,15 +21,15 @@ impl Packet for NewCharacter {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         Ok(Self {
             name: read_dotnet_string(reader)?,
-            gender: MirGender::try_from(reader.read_u8()?).unwrap_or(MirGender::Male),  // 先读gender
-            class: MirClass::try_from(reader.read_u8()?).unwrap_or(MirClass::Warrior),   // 再读class
+            gender: MirGender::try_from(reader.read_u8()?).unwrap_or(MirGender::Male), // 先读gender
+            class: MirClass::try_from(reader.read_u8()?).unwrap_or(MirClass::Warrior), // 再读class
         })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         write_dotnet_string(writer, &self.name)?;
-        writer.write_u8(self.gender as u8)?;  // 先写gender
-        writer.write_u8(self.class as u8)?;   // 再写class
+        writer.write_u8(self.gender as u8)?; // 先写gender
+        writer.write_u8(self.class as u8)?; // 再写class
         Ok(())
     }
 }

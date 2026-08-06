@@ -120,7 +120,13 @@ pub fn draw_message_box(message_text: &str) {
     let box_y = (screen_h - box_h) / 2.0;
 
     // 背景
-    draw_rectangle(box_x, box_y, box_w, box_h, Color::from_rgba(40, 40, 50, 240));
+    draw_rectangle(
+        box_x,
+        box_y,
+        box_w,
+        box_h,
+        Color::from_rgba(40, 40, 50, 240),
+    );
     draw_rectangle_lines(
         box_x,
         box_y,
@@ -131,7 +137,13 @@ pub fn draw_message_box(message_text: &str) {
     );
 
     // 标题
-    draw_text_cn("提示", box_x + box_w / 2.0 - 15.0, box_y + 30.0, 18.0, WHITE);
+    draw_text_cn(
+        "提示",
+        box_x + box_w / 2.0 - 15.0,
+        box_y + 30.0,
+        18.0,
+        WHITE,
+    );
 
     // 消息文本
     let text_width = measure_text_cn(message_text, 14.0).width;
@@ -154,7 +166,13 @@ pub fn draw_message_box_compact(message_text: &str, dialog_w: f32, dialog_h: f32
     let dialog_y = dialog.y;
 
     // 背景
-    draw_rectangle(dialog_x, dialog_y, dialog_w, dialog_h, Color::from_rgba(40, 40, 50, 240));
+    draw_rectangle(
+        dialog_x,
+        dialog_y,
+        dialog_w,
+        dialog_h,
+        Color::from_rgba(40, 40, 50, 240),
+    );
     draw_rectangle_lines(
         dialog_x,
         dialog_y,
@@ -220,9 +238,7 @@ pub fn draw_mir_message_box_ok(message_text: &str) -> bool {
             draw_texture(
                 tex,
                 // ClientRust message_box 使用 draw_sprite_at（不应用 offset）
-                dialog_x,
-                dialog_y,
-                WHITE,
+                dialog_x, dialog_y, WHITE,
             );
         } else {
             draw_dialog_panel(
@@ -272,7 +288,12 @@ pub fn compact_message_box_rect(dialog_w: f32, dialog_h: f32) -> Rect {
 /// SelectScene 的紧凑消息框 OK 按钮 Rect。
 pub fn compact_message_box_ok_button_rect(dialog: Rect) -> Rect {
     // 与历史实现一致：按钮宽高 80x30；x=dialog_center-40；y=dialog_bottom-45
-    Rect::new(dialog.x + dialog.w / 2.0 - 40.0, dialog.y + dialog.h - 45.0, 80.0, 30.0)
+    Rect::new(
+        dialog.x + dialog.w / 2.0 - 40.0,
+        dialog.y + dialog.h - 45.0,
+        80.0,
+        30.0,
+    )
 }
 
 pub fn draw_text_input_box(
@@ -298,7 +319,14 @@ pub fn draw_text_input_box(
     if is_focused && cursor_visible {
         let text_width = measure_text_cn(text, font_size).width;
         let cursor_x = x + 5.0 + text_width;
-        draw_line(cursor_x, y + 3.0, cursor_x, y + height - 3.0, 1.0, cursor_color);
+        draw_line(
+            cursor_x,
+            y + 3.0,
+            cursor_x,
+            y + height - 3.0,
+            1.0,
+            cursor_color,
+        );
     }
 }
 
@@ -321,11 +349,19 @@ pub fn draw_rect_text_button(
     let hovered = enabled && mx >= x && mx <= x + width && my >= y && my <= y + height;
 
     let fill = if enabled {
-        if hovered { hover_color } else { normal_color }
+        if hovered {
+            hover_color
+        } else {
+            normal_color
+        }
     } else {
         disabled_color
     };
-    let tcolor = if enabled { text_color } else { disabled_text_color };
+    let tcolor = if enabled {
+        text_color
+    } else {
+        disabled_text_color
+    };
 
     draw_rectangle(x, y, width, height, fill);
     draw_rectangle_lines(x, y, width, height, 1.0, border_color);
@@ -339,7 +375,14 @@ pub fn draw_rect_text_button(
     hovered && is_mouse_button_pressed(MouseButton::Left)
 }
 
-pub fn draw_dialog_panel(x: f32, y: f32, width: f32, height: f32, bg_color: Color, border_color: Color) {
+pub fn draw_dialog_panel(
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    bg_color: Color,
+    border_color: Color,
+) {
     draw_rectangle(x, y, width, height, bg_color);
     draw_rectangle_lines(x, y, width, height, 2.0, border_color);
 }

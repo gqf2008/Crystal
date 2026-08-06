@@ -4,9 +4,9 @@
 // 显示游戏帮助信息（快捷键、操作说明等）
 // ============================================================================
 
-use macroquad::prelude::*;
-use crate::ui::text_renderer::draw_text_cn;
 use super::native_ui_utils::*;
+use crate::ui::text_renderer::draw_text_cn;
+use macroquad::prelude::*;
 
 #[derive(Debug)]
 pub enum HelpDialogAction {
@@ -27,7 +27,9 @@ pub struct HelpDialogHybrid {
 }
 
 impl Default for HelpDialogHybrid {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HelpDialogHybrid {
@@ -64,7 +66,8 @@ impl HelpDialogHybrid {
     }
 
     pub fn contains(&self, pos: Vec2) -> bool {
-        self.visible && Rect::new(self.position.x, self.position.y, self.size.x, self.size.y).contains(pos)
+        self.visible
+            && Rect::new(self.position.x, self.position.y, self.size.x, self.size.y).contains(pos)
     }
 
     pub fn take_action(&mut self) -> HelpDialogAction {
@@ -83,24 +86,61 @@ impl HelpDialogHybrid {
         self.drag_helper.apply(drag_area, &mut self.position);
 
         // 关闭按钮
-        self.hovered_close = Rect::new(self.position.x + self.size.x - 24.0, self.position.y + 4.0, 20.0, 20.0).contains(mouse);
+        self.hovered_close = Rect::new(
+            self.position.x + self.size.x - 24.0,
+            self.position.y + 4.0,
+            20.0,
+            20.0,
+        )
+        .contains(mouse);
         if is_mouse_button_pressed(MouseButton::Left) && self.hovered_close {
             self.close();
             return;
         }
 
         // 背景
-        draw_rectangle(self.position.x, self.position.y, self.size.x, self.size.y, Color::from_rgba(25, 25, 35, 245));
-        draw_rectangle_lines(self.position.x, self.position.y, self.size.x, self.size.y, 1.0, Color::from_rgba(100, 100, 120, 255));
+        draw_rectangle(
+            self.position.x,
+            self.position.y,
+            self.size.x,
+            self.size.y,
+            Color::from_rgba(25, 25, 35, 245),
+        );
+        draw_rectangle_lines(
+            self.position.x,
+            self.position.y,
+            self.size.x,
+            self.size.y,
+            1.0,
+            Color::from_rgba(100, 100, 120, 255),
+        );
 
         // 标题
-        draw_text_cn("操作帮助", self.position.x + 150.0, self.position.y + 8.0, 16.0, YELLOW);
+        draw_text_cn(
+            "操作帮助",
+            self.position.x + 150.0,
+            self.position.y + 8.0,
+            16.0,
+            YELLOW,
+        );
 
         // 内容区域
         let content_y = self.position.y + 35.0;
         let content_h = self.size.y - (content_y - self.position.y) - 10.0;
-        let content_rect = Rect::new(self.position.x + 10.0, content_y, self.size.x - 20.0, content_h);
-        draw_rectangle_lines(content_rect.x, content_rect.y, content_rect.w, content_rect.h, 1.0, Color::from_rgba(80, 80, 100, 255));
+        let content_rect = Rect::new(
+            self.position.x + 10.0,
+            content_y,
+            self.size.x - 20.0,
+            content_h,
+        );
+        draw_rectangle_lines(
+            content_rect.x,
+            content_rect.y,
+            content_rect.w,
+            content_rect.h,
+            1.0,
+            Color::from_rgba(80, 80, 100, 255),
+        );
 
         // 滚动
         let total_lines = Self::help_lines().len() as f32;
@@ -126,12 +166,20 @@ impl HelpDialogHybrid {
 
         // 关闭按钮
         if let Some(ref tex) = self.close_btn.textures[0] {
-            draw_texture(tex, self.position.x + self.size.x - 22.0, self.position.y + 4.0, WHITE);
+            draw_texture(
+                tex,
+                self.position.x + self.size.x - 22.0,
+                self.position.y + 4.0,
+                WHITE,
+            );
         }
     }
 
     pub fn load_textures(&mut self) {
-        if let Some(tex) = crate::resources::LibraryName::Prguse2.get_texture(360).and_then(|i| i.image) {
+        if let Some(tex) = crate::resources::LibraryName::Prguse2
+            .get_texture(360)
+            .and_then(|i| i.image)
+        {
             self.close_btn.textures[0] = Some(tex);
         }
     }

@@ -13,8 +13,8 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
 use crate::resources::LibraryName;
+use macroquad::prelude::*;
 
 /// 聊天频道类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,7 +81,7 @@ impl ChatControlBarHybrid {
     pub fn new(main_dialog_x: f32, screen_height: f32, resolution_index: usize) -> Self {
         // 位置：MainDialog.X + 230, ScreenHeight - 112
         let position = vec2(main_dialog_x + 230.0, screen_height - 112.0);
-        
+
         // 默认尺寸
         let default_width = if resolution_index == 0 { 372.0 } else { 596.0 };
 
@@ -153,9 +153,13 @@ impl ChatControlBarHybrid {
     }
 
     /// 异步加载纹理
-    pub  fn load_textures(&mut self) {
+    pub fn load_textures(&mut self) {
         // 预加载背景纹理
-        let bg_index = if self.resolution_index == 0 { 2035 } else { 2034 };
+        let bg_index = if self.resolution_index == 0 {
+            2035
+        } else {
+            2034
+        };
         if let Some(texture) = LibraryName::Prguse.get_texture(bg_index) {
             self.current_size = vec2(texture.width as f32, texture.height as f32);
             if let Some(tex) = texture.image {
@@ -192,7 +196,11 @@ impl ChatControlBarHybrid {
         let mouse_pos = vec2(mouse_position().0, mouse_position().1);
 
         // 获取背景纹理
-        let bg_index = if self.resolution_index == 0 { 2035 } else { 2034 };
+        let bg_index = if self.resolution_index == 0 {
+            2035
+        } else {
+            2034
+        };
         if let Some(texture) = LibraryName::Prguse.get_texture(bg_index) {
             self.current_size = vec2(texture.width as f32, texture.height as f32);
             if let Some(tex) = texture.image {
@@ -262,7 +270,11 @@ impl ChatControlBarHybrid {
 
         // ReportButton - 对齐 C#：默认 Visible=false
         if self.report_visible {
-            let report_x = if self.resolution_index != 0 { 552.0 } else { 328.0 };
+            let report_x = if self.resolution_index != 0 {
+                552.0
+            } else {
+                328.0
+            };
             self.draw_button(mouse_pos, report_x, 1.0, 2063, false);
         }
     }
@@ -271,18 +283,33 @@ impl ChatControlBarHybrid {
     /// 返回：(size_button_clicked, settings_button_clicked)
     fn draw_function_buttons(&self, mouse_pos: Vec2) -> (bool, bool) {
         // SizeButton - 位置根据分辨率变化
-        let size_btn_x = if self.resolution_index != 0 { 574.0 } else { 350.0 };
+        let size_btn_x = if self.resolution_index != 0 {
+            574.0
+        } else {
+            350.0
+        };
         let size_clicked = self.draw_button(mouse_pos, size_btn_x, 1.0, 2057, false);
 
         // SettingsButton - 位置根据分辨率变化
-        let settings_btn_x = if self.resolution_index != 0 { 596.0 } else { 372.0 };
+        let settings_btn_x = if self.resolution_index != 0 {
+            596.0
+        } else {
+            372.0
+        };
         let settings_clicked = self.draw_button(mouse_pos, settings_btn_x, 1.0, 2060, false);
 
         (size_clicked, settings_clicked)
     }
 
     /// 绘制可点击按钮（返回是否被点击）
-    fn draw_button(&self, mouse_pos: Vec2, x_offset: f32, y_offset: f32, base_index: usize, is_selected: bool) -> bool {
+    fn draw_button(
+        &self,
+        mouse_pos: Vec2,
+        x_offset: f32,
+        y_offset: f32,
+        base_index: usize,
+        is_selected: bool,
+    ) -> bool {
         let btn_pos = vec2(self.position.x + x_offset, self.position.y + y_offset);
 
         // 获取按钮纹理尺寸

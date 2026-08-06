@@ -19,7 +19,9 @@ use macroquad::prelude::*;
 
 use std::time::{Duration, Instant};
 
-use crate::components::{Camera, FrontOcclusion, LocalPlayer, Position, RenderConfig, RenderPass, RenderStage};
+use crate::components::{
+    Camera, FrontOcclusion, LocalPlayer, Position, RenderConfig, RenderPass, RenderStage,
+};
 use crate::game::{GameContext, GameResult};
 use crate::map_renderer::MeshMapRenderer;
 use crate::resources::MapReader;
@@ -81,13 +83,20 @@ impl MapRenderSystem {
 
     fn update_front_occlusion(ctx: &mut GameContext, occluded: bool) {
         // 约定：FrontOcclusion 挂在 RenderPass 单例实体上。
-        if let Some(o) = ctx.world.query_mut::<&mut FrontOcclusion>().into_iter().next() {
+        if let Some(o) = ctx
+            .world
+            .query_mut::<&mut FrontOcclusion>()
+            .into_iter()
+            .next()
+        {
             o.local_player_occluded = occluded;
             return;
         }
 
         // 兜底：若未挂载，动态创建一个（避免初始化顺序导致不可用）。
-        ctx.world.spawn((FrontOcclusion { local_player_occluded: occluded },));
+        ctx.world.spawn((FrontOcclusion {
+            local_player_occluded: occluded,
+        },));
     }
 }
 
@@ -110,14 +119,23 @@ impl RenderSystem for MapRenderSystem {
                 let map_path = crate::resources::map_reader::resolve_map_path(&file);
                 match MapReader::new(&map_path) {
                     Ok(reader) => {
-                        tracing::info!("🗺️ MapRenderSystem: loaded map {} ({}x{})", map_path, reader.width, reader.height);
+                        tracing::info!(
+                            "🗺️ MapRenderSystem: loaded map {} ({}x{})",
+                            map_path,
+                            reader.width,
+                            reader.height
+                        );
                         Self::update_minimap_world_size(ctx, reader.width, reader.height);
                         Self::update_big_map_name(ctx, file.clone());
                         self.map_reader = Some(reader);
                         self.loaded_map_file = Some(file);
                     }
                     Err(e) => {
-                        tracing::warn!("⚠️ MapRenderSystem: failed to load map {}: {}", map_path, e);
+                        tracing::warn!(
+                            "⚠️ MapRenderSystem: failed to load map {}: {}",
+                            map_path,
+                            e
+                        );
                         self.map_reader = None;
                         self.loaded_map_file = None;
                     }
@@ -155,8 +173,10 @@ impl RenderSystem for MapRenderSystem {
                         const OCCLUSION_MOVE_EPS_PX: f32 = 2.0;
 
                         let now = Instant::now();
-                        let moved = (vec2(px, py) - self.last_occlusion_pos).length() > OCCLUSION_MOVE_EPS_PX;
-                        let due = now.duration_since(self.last_occlusion_check) >= OCCLUSION_CHECK_INTERVAL;
+                        let moved = (vec2(px, py) - self.last_occlusion_pos).length()
+                            > OCCLUSION_MOVE_EPS_PX;
+                        let due = now.duration_since(self.last_occlusion_check)
+                            >= OCCLUSION_CHECK_INTERVAL;
                         let use_cache = !moved && !due;
 
                         if use_cache {
@@ -213,7 +233,8 @@ impl RenderSystem for MapRenderSystem {
         let pass = world
             .query::<&RenderPass>()
             .iter()
-            .next().copied()
+            .next()
+            .copied()
             .unwrap_or_default();
 
         if pass.stage == RenderStage::Ui {
@@ -223,7 +244,8 @@ impl RenderSystem for MapRenderSystem {
         let cfg = world
             .query::<&RenderConfig>()
             .iter()
-            .next().cloned()
+            .next()
+            .cloned()
             .unwrap_or_default();
 
         let Some(map) = self.map_reader.as_ref() else {
@@ -267,17 +289,7 @@ impl RenderSystem for MapRenderSystem {
                     self.renderer.bottom_margin = old_bottom_margin.max(420.0);
 
                     let _ = self.renderer.render_front_layer_with_focus(
-                        map,
-                        snapped_x,
-                        snapped_y,
-                        sw,
-                        sh,
-                        zoom,
-                        WHITE,
-                        None,
-                        0,
-                        0,
-                        1.0,
+                        map, snapped_x, snapped_y, sw, sh, zoom, WHITE, None, 0, 0, 1.0,
                     );
 
                     self.renderer.bottom_margin = old_bottom_margin;

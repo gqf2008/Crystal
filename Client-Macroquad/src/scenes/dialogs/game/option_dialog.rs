@@ -23,20 +23,20 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
-use crate::resources::LibraryName;
 use super::native_ui_utils::DragHelper;
+use crate::resources::LibraryName;
+use macroquad::prelude::*;
 
 /// 选项对话框设置
 #[derive(Debug, Clone)]
 pub struct OptionSettings {
-    pub skill_mode_ctrl: bool,      // true = Ctrl模式, false = ~模式
+    pub skill_mode_ctrl: bool, // true = Ctrl模式, false = ~模式
     pub skill_bar_visible: bool,
     pub effect_enabled: bool,
     pub drop_view_enabled: bool,
     pub name_view_enabled: bool,
-    pub hp_view_mode1: bool,        // HP显示模式
-    pub sound_volume: f32,          // 0.0 - 1.0
+    pub hp_view_mode1: bool, // HP显示模式
+    pub sound_volume: f32,   // 0.0 - 1.0
     pub music_volume: f32,
     pub allow_observe: bool,
     pub new_move_style: bool,
@@ -168,7 +168,7 @@ impl OptionDialogHybrid {
                 self.bg_texture = Some(tex);
             }
         }
-        
+
         // 关闭按钮 - Prguse2[360/361/362]
         for (i, idx) in [360, 361, 362].iter().enumerate() {
             if let Some(texture) = LibraryName::Prguse2.get_texture(*idx) {
@@ -177,14 +177,14 @@ impl OptionDialogHybrid {
                 }
             }
         }
-        
+
         // 音量条纹理 - Prguse2[468]
         if let Some(texture) = LibraryName::Prguse2.get_texture(468) {
             if let Some(tex) = texture.image {
                 self.sound_bar_texture = Some(tex);
             }
         }
-        
+
         // 音量指示器 - Prguse[20]
         if let Some(texture) = LibraryName::Prguse.get_texture(20) {
             if let Some(tex) = texture.image {
@@ -236,30 +236,41 @@ impl OptionDialogHybrid {
         // 注：C# 的 Y 坐标可能需要微调
         self.draw_single_volume_bar(
             self.position.x + 159.0,
-            self.position.y + 218.0,  // bar_y 上移
-            self.position.y + 211.0,  // indicator_y 上移
+            self.position.y + 218.0, // bar_y 上移
+            self.position.y + 211.0, // indicator_y 上移
             mouse_pos,
             true, // is_sound
         );
-        
+
         // 音乐音量条 - MusicSoundBar at (159, 251), MusicVolumeBar at (155, 244)
         self.draw_single_volume_bar(
             self.position.x + 159.0,
-            self.position.y + 244.0,  // bar_y 上移
-            self.position.y + 237.0,  // indicator_y 上移
+            self.position.y + 244.0, // bar_y 上移
+            self.position.y + 237.0, // indicator_y 上移
             mouse_pos,
             false, // is_music
         );
     }
 
-    fn draw_single_volume_bar(&mut self, bar_x: f32, bar_y: f32, indicator_base_y: f32, mouse_pos: Vec2, is_sound: bool) {
+    fn draw_single_volume_bar(
+        &mut self,
+        bar_x: f32,
+        bar_y: f32,
+        indicator_base_y: f32,
+        mouse_pos: Vec2,
+        is_sound: bool,
+    ) {
         // 音量条背景 - Prguse2[468]
         if let Some(bar_tex) = &self.sound_bar_texture {
             let bar_rect = Rect::new(bar_x, bar_y, bar_tex.width(), bar_tex.height());
-            
+
             // 获取当前音量
-            let volume = if is_sound { self.settings.sound_volume } else { self.settings.music_volume };
-            
+            let volume = if is_sound {
+                self.settings.sound_volume
+            } else {
+                self.settings.music_volume
+            };
+
             // C# 绘制填充部分: Size = (SoundBar.Size.Width - 2) * percent
             let fill_width = (bar_tex.width() - 2.0) * volume;
             if fill_width > 0.0 {
@@ -274,7 +285,7 @@ impl OptionDialogHybrid {
                     },
                 );
             }
-            
+
             // 音量指示器 - Prguse[20]
             // C# 位置: VolumeBar.Location = new Point(159 + fill_width, 218)
             if let Some(indicator) = &self.volume_indicator_texture {
@@ -287,7 +298,7 @@ impl OptionDialogHybrid {
                     DrawTextureParams::default(),
                 );
             }
-            
+
             // 交互
             if bar_rect.contains(mouse_pos) && is_mouse_button_down(MouseButton::Left) {
                 let new_volume = ((mouse_pos.x - bar_x) / bar_tex.width()).clamp(0.0, 1.0);
@@ -304,12 +315,12 @@ impl OptionDialogHybrid {
     fn draw_close_button(&mut self, mouse_pos: Vec2) {
         let close_x = self.position.x + self.size.x - 26.0;
         let close_y = self.position.y + 5.0;
-        
+
         if let Some(normal) = &self.close_textures[0] {
             let btn_rect = Rect::new(close_x, close_y, normal.width(), normal.height());
             let is_hovered = btn_rect.contains(mouse_pos);
             let is_pressed = is_hovered && is_mouse_button_down(MouseButton::Left);
-            
+
             let texture = if is_pressed {
                 self.close_textures[2].as_ref().unwrap_or(normal)
             } else if is_hovered {
@@ -317,9 +328,15 @@ impl OptionDialogHybrid {
             } else {
                 normal
             };
-            
-            draw_texture_ex(texture, close_x, close_y, WHITE, DrawTextureParams::default());
-            
+
+            draw_texture_ex(
+                texture,
+                close_x,
+                close_y,
+                WHITE,
+                DrawTextureParams::default(),
+            );
+
             if is_hovered && is_mouse_button_pressed(MouseButton::Left) {
                 self.close();
             }

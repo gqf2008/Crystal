@@ -9,7 +9,7 @@ use std::io::Read;
 /// CompleteQuest - 完成任务 (200)
 #[derive(Debug, Clone)]
 pub struct CompleteQuest {
-    pub quest_id: i32,              // 任务ID
+    pub quest_id: i32, // 任务ID
 }
 
 impl Packet for CompleteQuest {
@@ -30,7 +30,7 @@ impl Packet for CompleteQuest {
 /// ShareQuest - 分享任务 (201)
 #[derive(Debug, Clone)]
 pub struct ShareQuest {
-    pub quest_id: i32,              // 任务ID
+    pub quest_id: i32, // 任务ID
 }
 
 impl Packet for ShareQuest {
@@ -51,7 +51,7 @@ impl Packet for ShareQuest {
 /// GainedQuestItem - 获得任务物品 (203)
 #[derive(Debug, Clone)]
 pub struct GainedQuestItem {
-    pub item_id: i32,               // 物品ID
+    pub item_id: i32, // 物品ID
 }
 
 impl Packet for GainedQuestItem {
@@ -72,7 +72,7 @@ impl Packet for GainedQuestItem {
 /// DeleteQuestItem - 删除任务物品 (204)
 #[derive(Debug, Clone)]
 pub struct DeleteQuestItem {
-    pub item_id: i32,               // 物品ID
+    pub item_id: i32, // 物品ID
 }
 
 impl Packet for DeleteQuestItem {
@@ -130,7 +130,7 @@ impl Packet for RequestReincarnation {
 #[derive(Debug, Clone)]
 pub struct MountUpdate {
     pub object_id: u32,
-    pub mount_type: i16,            // 坐骑类型
+    pub mount_type: i16, // 坐骑类型
     pub riding_mount: bool,
 }
 
@@ -160,8 +160,8 @@ impl Packet for MountUpdate {
 /// FishingUpdate - 钓鱼更新 (198)
 #[derive(Debug, Clone)]
 pub struct FishingUpdate {
-    pub fishing_progress: i32,      // 钓鱼进度
-    pub fishing_success: bool,      // 是否成功
+    pub fishing_progress: i32, // 钓鱼进度
+    pub fishing_success: bool, // 是否成功
 }
 
 impl Packet for FishingUpdate {
@@ -187,9 +187,9 @@ impl Packet for FishingUpdate {
 /// ObjectSitDown - 对象坐下 (158)
 #[derive(Debug, Clone)]
 pub struct ObjectSitDown {
-    pub object_id: u32,             // 对象ID
-    pub direction: u8,              // 方向
-    pub location: (i32, i32),       // 位置
+    pub object_id: u32,       // 对象ID
+    pub direction: u8,        // 方向
+    pub location: (i32, i32), // 位置
 }
 
 impl Packet for ObjectSitDown {
@@ -220,7 +220,7 @@ impl Packet for ObjectSitDown {
 /// InTrapRock - 在陷阱岩石中 (159)
 #[derive(Debug, Clone)]
 pub struct InTrapRock {
-    pub in_trap: bool,              // 是否在陷阱中
+    pub in_trap: bool, // 是否在陷阱中
 }
 
 impl Packet for InTrapRock {
@@ -241,7 +241,7 @@ impl Packet for InTrapRock {
 /// BaseStatsInfo - 基础属性信息 (160)
 #[derive(Debug, Clone)]
 pub struct BaseStatsInfo {
-    pub stats: Vec<i32>,            // 属性值列表
+    pub stats: Vec<i32>, // 属性值列表
 }
 
 impl Packet for BaseStatsInfo {
@@ -269,7 +269,7 @@ impl Packet for BaseStatsInfo {
 /// HeroBaseStatsInfo - 英雄基础属性信息 (161)
 #[derive(Debug, Clone)]
 pub struct HeroBaseStatsInfo {
-    pub stats: Vec<i32>,            // 属性值列表
+    pub stats: Vec<i32>, // 属性值列表
 }
 
 impl Packet for HeroBaseStatsInfo {
@@ -297,8 +297,8 @@ impl Packet for HeroBaseStatsInfo {
 /// UserName - 用户名称 (162)
 #[derive(Debug, Clone)]
 pub struct UserName {
-    pub object_id: u32,             // 对象ID
-    pub name: String,               // 名称
+    pub object_id: u32, // 对象ID
+    pub name: String,   // 名称
 }
 
 impl Packet for UserName {
@@ -351,8 +351,8 @@ impl Packet for ChatItemStats {
     const OPCODE: i16 = ServerPacketIds::ChatItemStats as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
         use crate::binary::write_dotnet_string;
+        use byteorder::WriteBytesExt;
         writer.write_u64::<LittleEndian>(self.unique_id)?;
         write_dotnet_string(writer, &self.stats)?;
         Ok(())
@@ -394,8 +394,8 @@ impl Packet for GuildStatus {
     const OPCODE: i16 = ServerPacketIds::GuildStatus as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::{LittleEndian, WriteBytesExt};
         use crate::binary::write_dotnet_string;
+        use byteorder::{LittleEndian, WriteBytesExt};
         write_dotnet_string(writer, &self.guild_name)?;
         write_dotnet_string(writer, &self.rank_name)?;
         writer.write_u8(self.level)?;
@@ -414,8 +414,8 @@ impl Packet for GuildStatus {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        use byteorder::{LittleEndian, ReadBytesExt};
         use crate::binary::read_dotnet_string;
+        use byteorder::{LittleEndian, ReadBytesExt};
         let guild_name = read_dotnet_string(reader)?;
         let rank_name = read_dotnet_string(reader)?;
         let level = reader.read_u8()?;
@@ -452,7 +452,7 @@ impl Packet for GuildStatus {
 /// GuildInvite - 公会邀请 (167)
 #[derive(Debug, Clone)]
 pub struct GuildInvite {
-    pub guild_name: String,         // 公会名称
+    pub guild_name: String, // 公会名称
 }
 
 impl Packet for GuildInvite {
@@ -474,7 +474,7 @@ impl Packet for GuildInvite {
 /// GuildExpGain - 公会经验获得 (168)
 #[derive(Debug, Clone)]
 pub struct GuildExpGain {
-    pub amount: u32,                // 经验数量
+    pub amount: u32, // 经验数量
 }
 
 impl Packet for GuildExpGain {
@@ -522,8 +522,8 @@ impl Packet for GuildStorageGoldChange {
     const OPCODE: i16 = ServerPacketIds::GuildStorageGoldChange as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
         use crate::binary::write_dotnet_string;
+        use byteorder::WriteBytesExt;
         writer.write_u32::<LittleEndian>(self.amount)?;
         writer.write_u8(self.change_type)?;
         write_dotnet_string(writer, &self.name)?;
@@ -535,7 +535,11 @@ impl Packet for GuildStorageGoldChange {
         let amount = reader.read_u32::<LittleEndian>()?;
         let change_type = reader.read_u8()?;
         let name = read_dotnet_string(reader)?;
-        Ok(Self { amount, change_type, name })
+        Ok(Self {
+            amount,
+            change_type,
+            name,
+        })
     }
 }
 
@@ -582,14 +586,20 @@ impl Packet for GuildStorageItemChange {
         } else {
             None
         };
-        Ok(Self { change_type, to, from, user, item })
+        Ok(Self {
+            change_type,
+            to,
+            from,
+            user,
+            item,
+        })
     }
 }
 
 /// GuildRequestWar - 公会请求战争 (173)
 #[derive(Debug, Clone)]
 pub struct GuildRequestWar {
-    pub guild_name: String,         // 公会名称
+    pub guild_name: String, // 公会名称
 }
 
 impl Packet for GuildRequestWar {
@@ -631,12 +641,10 @@ impl Packet for NewHero {
     }
 }
 
-
-
 /// UnlockHeroAutoPot - 解锁英雄自动喝药 (178)
 #[derive(Debug, Clone)]
 pub struct UnlockHeroAutoPot {
-    pub unlocked: bool,             // 是否解锁
+    pub unlocked: bool, // 是否解锁
 }
 
 impl Packet for UnlockHeroAutoPot {
@@ -657,8 +665,8 @@ impl Packet for UnlockHeroAutoPot {
 /// SetAutoPotItem - 设置自动喝药物品 (180)
 #[derive(Debug, Clone)]
 pub struct SetAutoPotItem {
-    pub grid: u8,                   // C# MirGridType
-    pub item_index: i32,            // 物品 ID
+    pub grid: u8,        // C# MirGridType
+    pub item_index: i32, // 物品 ID
 }
 
 impl Packet for SetAutoPotItem {
@@ -681,7 +689,7 @@ impl Packet for SetAutoPotItem {
 /// ChangeHero - 切换英雄 (183)
 #[derive(Debug, Clone)]
 pub struct ChangeHero {
-    pub success: bool,              // 是否成功
+    pub success: bool, // 是否成功
 }
 
 impl Packet for ChangeHero {
@@ -702,9 +710,9 @@ impl Packet for ChangeHero {
 /// TakeBackHeroItem - 取回英雄物品 (52)
 #[derive(Debug, Clone)]
 pub struct TakeBackHeroItem {
-    pub from: i32,                  // 来源槽位
-    pub to: i32,                    // 目标槽位
-    pub success: bool,              // 是否成功
+    pub from: i32,     // 来源槽位
+    pub to: i32,       // 目标槽位
+    pub success: bool, // 是否成功
 }
 
 impl Packet for TakeBackHeroItem {
@@ -729,9 +737,9 @@ impl Packet for TakeBackHeroItem {
 /// TransferHeroItem - 转移英雄物品 (53)
 #[derive(Debug, Clone)]
 pub struct TransferHeroItem {
-    pub from: i32,                  // 来源槽位
-    pub to: i32,                    // 目标槽位
-    pub success: bool,              // 是否成功
+    pub from: i32,     // 来源槽位
+    pub to: i32,       // 目标槽位
+    pub success: bool, // 是否成功
 }
 
 impl Packet for TransferHeroItem {
@@ -753,11 +761,10 @@ impl Packet for TransferHeroItem {
     }
 }
 
-
 /// NewHeroInfo - 新英雄信息 (33)
 #[derive(Debug, Clone)]
 pub struct NewHeroInfo {
-    pub info: String,               // 信息
+    pub info: String, // 信息
 }
 
 impl Packet for NewHeroInfo {
@@ -779,7 +786,7 @@ impl Packet for NewHeroInfo {
 /// AllowObserve - 允许观察 (140)
 #[derive(Debug, Clone)]
 pub struct AllowObserve {
-    pub allowed: bool,              // 是否允许
+    pub allowed: bool, // 是否允许
 }
 
 impl Packet for AllowObserve {
@@ -800,8 +807,8 @@ impl Packet for AllowObserve {
 /// DepositTradeItem - 存入交易物品 (48)
 #[derive(Debug, Clone)]
 pub struct DepositTradeItem {
-    pub from_slot: i32,             // 来源槽位
-    pub success: bool,              // 是否成功
+    pub from_slot: i32, // 来源槽位
+    pub success: bool,  // 是否成功
 }
 
 impl Packet for DepositTradeItem {
@@ -817,18 +824,15 @@ impl Packet for DepositTradeItem {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let from_slot = reader.read_i32::<LittleEndian>()?;
         let success = reader.read_u8()? != 0;
-        Ok(Self {
-            from_slot,
-            success,
-        })
+        Ok(Self { from_slot, success })
     }
 }
 
 /// RetrieveTradeItem - 取回交易物品 (49)
 #[derive(Debug, Clone)]
 pub struct RetrieveTradeItem {
-    pub from_slot: i32,             // 来源槽位
-    pub success: bool,              // 是否成功
+    pub from_slot: i32, // 来源槽位
+    pub success: bool,  // 是否成功
 }
 
 impl Packet for RetrieveTradeItem {
@@ -844,10 +848,7 @@ impl Packet for RetrieveTradeItem {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let from_slot = reader.read_i32::<LittleEndian>()?;
         let success = reader.read_u8()? != 0;
-        Ok(Self {
-            from_slot,
-            success,
-        })
+        Ok(Self { from_slot, success })
     }
 }
 
@@ -859,7 +860,10 @@ mod tests {
     #[test]
     fn set_auto_pot_item_roundtrip() {
         // C# S.SetAutoPotItem：Grid byte + ItemIndex int32（5 字节）
-        let pkt = SetAutoPotItem { grid: 5, item_index: 12345 };
+        let pkt = SetAutoPotItem {
+            grid: 5,
+            item_index: 12345,
+        };
         let mut buf = Vec::new();
         pkt.write_body(&mut buf).unwrap();
         assert_eq!(buf.len(), 5, "C# S.SetAutoPotItem 应为 5 字节");

@@ -1,8 +1,8 @@
 // Hero Handler - 英雄相关数据包处理
 
-use mir2_shared::packets::{PacketHeader, Packet, server};
-use mir2_shared::enums::ServerPacketIds;
 use crate::network::handlers::{NetworkEvent, PacketHandler};
+use mir2_shared::enums::ServerPacketIds;
+use mir2_shared::packets::{server, Packet, PacketHeader};
 use std::io::Cursor;
 
 pub struct HeroHandler;
@@ -27,7 +27,9 @@ impl PacketHandler for HeroHandler {
             // NewHero
             x if x == ServerPacketIds::NewHero as u16 => {
                 if let Ok(packet) = server::NewHero::read_body(&mut cursor) {
-                    events.push(NetworkEvent::NewHeroCreated { result: packet.result });
+                    events.push(NetworkEvent::NewHeroCreated {
+                        result: packet.result,
+                    });
                     tracing::debug!("🦸 New hero result: {}", packet.result);
                 }
             }
@@ -35,7 +37,9 @@ impl PacketHandler for HeroHandler {
             // HeroInformation
             x if x == ServerPacketIds::HeroInformation as u16 => {
                 if let Ok(packet) = server::HeroInformation::read_body(&mut cursor) {
-                    events.push(NetworkEvent::HeroInfoReceived { hero_id: packet.hero_id });
+                    events.push(NetworkEvent::HeroInfoReceived {
+                        hero_id: packet.hero_id,
+                    });
                     tracing::debug!("🦸 Hero information: hero_id={}", packet.hero_id);
                 }
             }
@@ -53,7 +57,9 @@ impl PacketHandler for HeroHandler {
             // UnlockHeroAutoPot
             x if x == ServerPacketIds::UnlockHeroAutoPot as u16 => {
                 if let Ok(packet) = server::UnlockHeroAutoPot::read_body(&mut cursor) {
-                    events.push(NetworkEvent::HeroAutoPotUnlocked { unlocked: packet.unlocked });
+                    events.push(NetworkEvent::HeroAutoPotUnlocked {
+                        unlocked: packet.unlocked,
+                    });
                     tracing::debug!("🦸 Hero auto-pot unlock: {}", packet.unlocked);
                 }
             }
@@ -65,7 +71,11 @@ impl PacketHandler for HeroHandler {
                         pot_type: packet.stat,
                         value: packet.value,
                     });
-                    tracing::debug!("🦸 Hero auto-pot set: stat={}, value={}", packet.stat, packet.value);
+                    tracing::debug!(
+                        "🦸 Hero auto-pot set: stat={}, value={}",
+                        packet.stat,
+                        packet.value
+                    );
                 }
             }
 
@@ -94,7 +104,9 @@ impl PacketHandler for HeroHandler {
             x if x == ServerPacketIds::ManageHeroes as u16 => {
                 if let Ok(packet) = server::ManageHeroes::read_body(&mut cursor) {
                     let count = packet.heroes.len();
-                    events.push(NetworkEvent::HeroManageReceived { heroes: packet.heroes });
+                    events.push(NetworkEvent::HeroManageReceived {
+                        heroes: packet.heroes,
+                    });
                     tracing::debug!("🦸 Hero manage received: {} heroes", count);
                 }
             }
@@ -102,7 +114,9 @@ impl PacketHandler for HeroHandler {
             // ChangeHero
             x if x == ServerPacketIds::ChangeHero as u16 => {
                 if let Ok(packet) = server::ChangeHero::read_body(&mut cursor) {
-                    events.push(NetworkEvent::HeroChanged { success: packet.success });
+                    events.push(NetworkEvent::HeroChanged {
+                        success: packet.success,
+                    });
                     tracing::debug!("🦸 Hero changed: success={}", packet.success);
                 }
             }
@@ -111,14 +125,18 @@ impl PacketHandler for HeroHandler {
             x if x == ServerPacketIds::HeroBaseStatsInfo as u16 => {
                 if let Ok(packet) = server::HeroBaseStatsInfo::read_body(&mut cursor) {
                     let count = packet.stats.len();
-                    events.push(NetworkEvent::HeroBaseStatsReceived { stats: packet.stats });
+                    events.push(NetworkEvent::HeroBaseStatsReceived {
+                        stats: packet.stats,
+                    });
                     tracing::debug!("🦸 Hero base stats received: {} values", count);
                 }
             }
 
             _ => {
                 tracing::debug!("⚠️ HeroHandler: Unknown opcode {:04X}", header.opcode);
-                events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                events.push(NetworkEvent::UnhandledPacket {
+                    opcode: header.opcode,
+                });
             }
         }
 

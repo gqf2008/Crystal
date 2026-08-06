@@ -2,8 +2,8 @@
 // 怪物/NPC 等游戏角色组件
 // ============================================================================
 
-pub use mir2_shared::{MirClass, MirGender};
 pub use mir2_shared::{MirAction, MirDirection};
+pub use mir2_shared::{MirClass, MirGender};
 use std::time::Instant;
 
 /// AI 状态组件
@@ -14,8 +14,8 @@ pub struct AIState {
     pub target_entity: Option<hecs::Entity>, // 目标实体
     pub target_pos: Option<(f32, f32)>,      // 目标位置
     pub last_action_time: u64,
-    pub patrol_points: Vec<(f32, f32)>,      // 巡逻路径点
-    pub current_patrol_index: usize,         // 当前巡逻点索引
+    pub patrol_points: Vec<(f32, f32)>, // 巡逻路径点
+    pub current_patrol_index: usize,    // 当前巡逻点索引
 }
 
 impl Default for AIState {
@@ -43,11 +43,11 @@ pub enum AIMode {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AIAction {
-    Idle,      // 闲置
-    Patrol,    // 巡逻
-    Chase,     // 追击
-    Attack,    // 攻击
-    Retreat,   // 后退
+    Idle,    // 闲置
+    Patrol,  // 巡逻
+    Chase,   // 追击
+    Attack,  // 攻击
+    Retreat, // 后退
 }
 
 /// NPC 数据组件
@@ -55,12 +55,12 @@ pub enum AIAction {
 pub struct NPCData {
     pub id: u32,
     pub name: String,
-    pub npc_index: u16,      // 也可称为 image (NPC外观索引)
+    pub npc_index: u16, // 也可称为 image (NPC外观索引)
     pub dialogue_id: u32,
-    pub colour: i32,         // NPC颜色染色 (ARGB格式)
-    pub action_timer: u32,   // 动作切换计时器(毫秒)
-    pub next_action_delay: u32,  // 下次切换延迟(毫秒)
-    pub direction: u8,       // ➕ 朝向 (0-7 八方向)
+    pub colour: i32,            // NPC颜色染色 (ARGB格式)
+    pub action_timer: u32,      // 动作切换计时器(毫秒)
+    pub next_action_delay: u32, // 下次切换延迟(毫秒)
+    pub direction: u8,          // ➕ 朝向 (0-7 八方向)
 }
 
 impl NPCData {
@@ -73,10 +73,10 @@ impl NPCData {
 /// NPC任务标识
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum QuestIcon {
-    None,           // 无任务
-    Available,      // 可接任务(黄色感叹号)
-    Complete,       // 可交任务(黄色问号)
-    Incomplete,     // 进行中任务(灰色问号)
+    None,       // 无任务
+    Available,  // 可接任务(黄色感叹号)
+    Complete,   // 可交任务(黄色问号)
+    Incomplete, // 进行中任务(灰色问号)
 }
 
 /// 任务标记组件

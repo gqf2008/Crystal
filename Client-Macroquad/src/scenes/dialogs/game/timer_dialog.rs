@@ -10,8 +10,8 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
 use crate::ui::text_renderer::draw_text_cn;
+use macroquad::prelude::*;
 
 /// 单个计时器条目
 #[derive(Debug, Clone)]
@@ -100,10 +100,38 @@ impl TimerDialogHybrid {
 
         // 边框
         let border_color = Color::from_rgba(150, 120, 50, 200);
-        draw_line(base_x, base_y, base_x + item_width, base_y, 1.0, border_color);
-        draw_line(base_x + item_width, base_y, base_x + item_width, base_y + total_height, 1.0, border_color);
-        draw_line(base_x + item_width, base_y + total_height, base_x, base_y + total_height, 1.0, border_color);
-        draw_line(base_x, base_y + total_height, base_x, base_y, 1.0, border_color);
+        draw_line(
+            base_x,
+            base_y,
+            base_x + item_width,
+            base_y,
+            1.0,
+            border_color,
+        );
+        draw_line(
+            base_x + item_width,
+            base_y,
+            base_x + item_width,
+            base_y + total_height,
+            1.0,
+            border_color,
+        );
+        draw_line(
+            base_x + item_width,
+            base_y + total_height,
+            base_x,
+            base_y + total_height,
+            1.0,
+            border_color,
+        );
+        draw_line(
+            base_x,
+            base_y + total_height,
+            base_x,
+            base_y,
+            1.0,
+            border_color,
+        );
 
         // 每个计时器
         for (i, entry) in self.timers.iter().enumerate() {

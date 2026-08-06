@@ -11,9 +11,9 @@
 // PoisonBuffDialog 结构类似，使用 Prguse2[40] 背景
 // ============================================================================
 
-use macroquad::prelude::*;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
+use macroquad::prelude::*;
 
 /// 单个 Buff 数据
 #[derive(Debug, Clone)]
@@ -96,7 +96,11 @@ impl BuffDialogHybrid {
 
     /// 添加或更新 Buff
     pub fn add_buff(&mut self, entry: BuffEntry) {
-        if let Some(existing) = self.buffs.iter_mut().find(|b| b.buff_type == entry.buff_type) {
+        if let Some(existing) = self
+            .buffs
+            .iter_mut()
+            .find(|b| b.buff_type == entry.buff_type)
+        {
             *existing = entry;
         } else {
             self.buffs.push(entry);
@@ -173,7 +177,13 @@ impl BuffDialogHybrid {
         // 绘制背景
         let bg_count = self.buffs.len().min(14);
         if let Some(tex) = &self.bg_textures[bg_count.saturating_sub(1)] {
-            draw_texture_ex(tex, self.position.x, self.position.y, tint, DrawTextureParams::default());
+            draw_texture_ex(
+                tex,
+                self.position.x,
+                self.position.y,
+                tint,
+                DrawTextureParams::default(),
+            );
         }
 
         // 展开/折叠按钮
@@ -184,9 +194,13 @@ impl BuffDialogHybrid {
         let is_expand_pressed = is_expand_hovered && is_mouse_button_down(MouseButton::Left);
 
         let expand_tex = if is_expand_pressed {
-            self.pressed_expand_texture.as_ref().or(self.expand_texture.as_ref())
+            self.pressed_expand_texture
+                .as_ref()
+                .or(self.expand_texture.as_ref())
         } else if is_expand_hovered {
-            self.hover_expand_texture.as_ref().or(self.expand_texture.as_ref())
+            self.hover_expand_texture
+                .as_ref()
+                .or(self.expand_texture.as_ref())
         } else {
             self.expand_texture.as_ref()
         };
@@ -205,12 +219,14 @@ impl BuffDialogHybrid {
         for (i, buff) in self.buffs.iter().enumerate().take(max_icons) {
             let col = i % Self::ICONS_PER_ROW;
             let row = i / Self::ICONS_PER_ROW;
-            let icon_x = self.position.x + 8.0 + col as f32 * (Self::ICON_SIZE + Self::ICON_PADDING);
+            let icon_x =
+                self.position.x + 8.0 + col as f32 * (Self::ICON_SIZE + Self::ICON_PADDING);
             let icon_y = start_y + row as f32 * (Self::ICON_SIZE + Self::ICON_PADDING);
 
             // 获取图标纹理
             let _icon_idx = self.resolve_buff_icon(buff.icon_index);
-            let is_flashing = buff.remaining_secs > 0.0 && buff.remaining_secs < 5.0
+            let is_flashing = buff.remaining_secs > 0.0
+                && buff.remaining_secs < 5.0
                 && (get_time() as u32).is_multiple_of(2);
 
             let icon_alpha = if is_flashing {
@@ -221,30 +237,59 @@ impl BuffDialogHybrid {
             let icon_tint = Color::new(1.0, 1.0, 1.0, icon_alpha);
 
             // 绘制图标边框
-            draw_rectangle_lines(icon_x, icon_y, Self::ICON_SIZE, Self::ICON_SIZE, 1.0,
-                Color::from_rgba(100, 100, 100, alpha));
+            draw_rectangle_lines(
+                icon_x,
+                icon_y,
+                Self::ICON_SIZE,
+                Self::ICON_SIZE,
+                1.0,
+                Color::from_rgba(100, 100, 100, alpha),
+            );
 
             // 尝试加载并绘制图标
             if let Some(texture) = LibraryName::BuffIcon.get_texture(buff.icon_index as usize) {
                 if let Some(tex) = &texture.image {
-                    draw_texture_ex(tex, icon_x + 2.0, icon_y + 2.0, icon_tint,
+                    draw_texture_ex(
+                        tex,
+                        icon_x + 2.0,
+                        icon_y + 2.0,
+                        icon_tint,
                         DrawTextureParams {
-                            dest_size: Some(Vec2::new(Self::ICON_SIZE - 4.0, Self::ICON_SIZE - 4.0)),
+                            dest_size: Some(Vec2::new(
+                                Self::ICON_SIZE - 4.0,
+                                Self::ICON_SIZE - 4.0,
+                            )),
                             ..Default::default()
-                        });
+                        },
+                    );
                 } else if is_flashing {
-                    draw_text_cn("?", icon_x + 12.0, icon_y + 20.0, 16.0,
-                        Color::from_rgba(255, 200, 100, alpha));
+                    draw_text_cn(
+                        "?",
+                        icon_x + 12.0,
+                        icon_y + 20.0,
+                        16.0,
+                        Color::from_rgba(255, 200, 100, alpha),
+                    );
                 }
             } else if is_flashing {
-                draw_text_cn("?", icon_x + 12.0, icon_y + 20.0, 16.0,
-                    Color::from_rgba(255, 200, 100, alpha));
+                draw_text_cn(
+                    "?",
+                    icon_x + 12.0,
+                    icon_y + 20.0,
+                    16.0,
+                    Color::from_rgba(255, 200, 100, alpha),
+                );
             }
 
             // 暂停标记
             if buff.is_paused {
-                draw_text_cn("⏸", icon_x + 10.0, icon_y + 10.0, 10.0,
-                    Color::from_rgba(200, 200, 200, alpha));
+                draw_text_cn(
+                    "⏸",
+                    icon_x + 10.0,
+                    icon_y + 10.0,
+                    10.0,
+                    Color::from_rgba(200, 200, 200, alpha),
+                );
             }
 
             // 悬停时显示 tooltip

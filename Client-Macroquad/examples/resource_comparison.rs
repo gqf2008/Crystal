@@ -64,7 +64,10 @@ fn main() {
     println!("  resources::set_cache_size(1000);  // 设置容量");
     println!("  let stats = resources::cache_stats();  // 监控");
     let stats = resources::cache_stats();
-    println!("  ✓ 缓存统计: {}/{} 个纹理", stats.texture_cache_size, stats.texture_cache_capacity);
+    println!(
+        "  ✓ 缓存统计: {}/{} 个纹理",
+        stats.texture_cache_size, stats.texture_cache_capacity
+    );
 
     println!("\nLRU 自动内存管理 🎯");
 

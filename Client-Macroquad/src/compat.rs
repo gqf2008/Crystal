@@ -13,15 +13,14 @@
 // 核心类型重导出
 // ============================================================================
 
-pub use crate::network::handlers::NetworkEvent;
 pub use crate::coord::{Coord, MapUtils};
+pub use crate::network::handlers::NetworkEvent;
 
 /// GameResult 类型别名 (替代 ggez::GameResult)
 pub type GameResult<T = ()> = Result<T, GameError>;
 
 /// GameError 类型 (替代 ggez::GameError)
 pub use crate::core::GameError;
-
 
 // ============================================================================
 // ggez 图形类型的 macroquad 映射
@@ -35,7 +34,10 @@ pub struct GraphicsContext;
 
 impl GraphicsContext {
     pub fn drawable_size(&self) -> (f32, f32) {
-        (macroquad::prelude::screen_width(), macroquad::prelude::screen_height())
+        (
+            macroquad::prelude::screen_width(),
+            macroquad::prelude::screen_height(),
+        )
     }
 }
 
@@ -137,7 +139,7 @@ impl PathFinder {
             is_blocking: Box::new(is_blocking),
         }
     }
-    
+
     pub fn find_path(
         &self,
         start: (usize, usize),
@@ -293,4 +295,3 @@ impl PathFinder {
 // ============================================================================
 // 系统 Trait 已移到 systems/mod.rs
 // ============================================================================
-

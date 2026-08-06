@@ -31,11 +31,16 @@ impl Particle {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs_f32();
-        
+
         Self {
             position: crate::components::core::Position::new(x, y),
             velocity: crate::components::core::Position::new(vx, vy),
-            color: ParticleColor { r: 255, g: 255, b: 255, a: 255 },
+            color: ParticleColor {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255,
+            },
             size: 1.0,
             alive_until: current_time + lifetime,
             blend_mode: BlendMode::Normal,

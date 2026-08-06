@@ -12,7 +12,9 @@ pub struct RemoteMoveAnimSystem;
 
 impl LogicSystem for RemoteMoveAnimSystem {
     fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
-        use crate::components::{AttackState, DeathState, Player, PlayerAction, PositionInterpolation, RemoteMoveAnim};
+        use crate::components::{
+            AttackState, DeathState, Player, PlayerAction, PositionInterpolation, RemoteMoveAnim,
+        };
 
         let now = get_time();
         let mut done: Vec<hecs::Entity> = Vec::new();

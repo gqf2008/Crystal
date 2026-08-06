@@ -1,10 +1,10 @@
 //! Trade System Packets (Client → Server)
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::enums::ClientPacketIds;
 use super::super::base::Packet;
 use crate::data::stats::SharedResult;
+use crate::enums::ClientPacketIds;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// Request trade with another player
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

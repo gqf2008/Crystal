@@ -2,12 +2,15 @@
 //!
 //! Packets for spawning and managing game objects (players, monsters, NPCs).
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::data::stats::SharedResult;
-use crate::binary::{read_dotnet_string, write_dotnet_string};
-use crate::enums::{ServerPacketIds, MirClass, MirGender, MirDirection, PoisonType, SpellEffect, LevelEffects, BuffType};
 use super::super::base::Packet;
+use crate::binary::{read_dotnet_string, write_dotnet_string};
+use crate::data::stats::SharedResult;
+use crate::enums::{
+    BuffType, LevelEffects, MirClass, MirDirection, MirGender, PoisonType, ServerPacketIds,
+    SpellEffect,
+};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// ObjectPlayer packet - spawns a player object
 #[derive(Debug, Clone)]
@@ -394,7 +397,12 @@ impl Packet for ObjectTurn {
         let location_x = reader.read_i32::<LittleEndian>()?;
         let location_y = reader.read_i32::<LittleEndian>()?;
         let direction = MirDirection::try_from(reader.read_u8()?)?;
-        Ok(Self { object_id, location_x, location_y, direction })
+        Ok(Self {
+            object_id,
+            location_x,
+            location_y,
+            direction,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -423,7 +431,12 @@ impl Packet for ObjectWalk {
         let location_x = reader.read_i32::<LittleEndian>()?;
         let location_y = reader.read_i32::<LittleEndian>()?;
         let direction = MirDirection::try_from(reader.read_u8()?)?;
-        Ok(Self { object_id, location_x, location_y, direction })
+        Ok(Self {
+            object_id,
+            location_x,
+            location_y,
+            direction,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -452,7 +465,12 @@ impl Packet for ObjectRun {
         let location_x = reader.read_i32::<LittleEndian>()?;
         let location_y = reader.read_i32::<LittleEndian>()?;
         let direction = MirDirection::try_from(reader.read_u8()?)?;
-        Ok(Self { object_id, location_x, location_y, direction })
+        Ok(Self {
+            object_id,
+            location_x,
+            location_y,
+            direction,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -481,7 +499,12 @@ impl Packet for ObjectHarvest {
         let location_x = reader.read_i32::<LittleEndian>()?;
         let location_y = reader.read_i32::<LittleEndian>()?;
         let direction = MirDirection::try_from(reader.read_u8()?)?;
-        Ok(Self { object_id, location_x, location_y, direction })
+        Ok(Self {
+            object_id,
+            location_x,
+            location_y,
+            direction,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -510,7 +533,12 @@ impl Packet for ObjectHarvested {
         let location_x = reader.read_i32::<LittleEndian>()?;
         let location_y = reader.read_i32::<LittleEndian>()?;
         let direction = MirDirection::try_from(reader.read_u8()?)?;
-        Ok(Self { object_id, location_x, location_y, direction })
+        Ok(Self {
+            object_id,
+            location_x,
+            location_y,
+            direction,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {

@@ -14,8 +14,8 @@ use anyhow::Result;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use std::io::{Read, Write};
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 static OUT_WALK_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -35,7 +35,6 @@ static OUT_MOVE_DROPPED: AtomicU64 = AtomicU64::new(0);
 /// 此结构体本身不存储任何数据，只提供静态的 `new()` 方法来创建网络连接。
 /// 实际的网络 IO 由内部启动的两个线程处理，通过 channels 与游戏线程通信。
 pub struct Network;
-
 
 impl Network {
     /// 创建并启动网络客户端
@@ -198,7 +197,11 @@ Check server console for 'Too many connections' / 'Invalid packet' / 'Large amou
 /// 写线程：持续接收 NetworkEvent 并转换为 packet
 ///
 /// 自动心跳机制: 如果超过 5 秒没有发送任何包,自动发送 KeepAlive 防止服务器超时断开
-fn write_loop<S: Write + Send>(mut stream: S, rx: Receiver<NetworkEvent>, shutdown: Arc<AtomicBool>) {
+fn write_loop<S: Write + Send>(
+    mut stream: S,
+    rx: Receiver<NetworkEvent>,
+    shutdown: Arc<AtomicBool>,
+) {
     let heartbeat_interval = Duration::from_secs(5); // 5秒发送一次心跳 (服务器超时是10秒)
 
     loop {
@@ -393,9 +396,7 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
         }
 
         // ===== Player =====
-        x if x == SP::PlayerInspect as u16 => {
-            PlayerHandler.handle(header, payload)
-        }
+        x if x == SP::PlayerInspect as u16 => PlayerHandler.handle(header, payload),
 
         // ===== Items & Inventory =====
         x if x == SP::NewItemInfo as u16
@@ -583,9 +584,7 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
         }
 
         // ===== Friend =====
-        x if x == SP::FriendUpdate as u16 => {
-            FriendHandler.handle(header, payload)
-        }
+        x if x == SP::FriendUpdate as u16 => FriendHandler.handle(header, payload),
 
         // ===== Social (Marriage/Mentor/Lover) =====
         x if x == SP::MarriageRequest as u16
@@ -598,14 +597,10 @@ fn decode_packet(header: &mir2_shared::packets::PacketHeader, payload: &[u8]) ->
         }
 
         // ===== Fishing =====
-        x if x == SP::FishingUpdate as u16 => {
-            UiEventsHandler.handle(header, payload)
-        }
+        x if x == SP::FishingUpdate as u16 => UiEventsHandler.handle(header, payload),
 
         // ===== Reincarnation =====
-        x if x == SP::CancelReincarnation as u16
-            || x == SP::RequestReincarnation as u16 =>
-        {
+        x if x == SP::CancelReincarnation as u16 || x == SP::RequestReincarnation as u16 => {
             CharacterHandler.handle(header, payload)
         }
 
@@ -869,7 +864,12 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
 
             let n = OUT_ATTACK_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
             if n == 1 || n.is_multiple_of(10) {
-                tracing::info!("📤 Sent Attack x{} dir={:?} spell={:?}", n, packet.direction, packet.spell);
+                tracing::info!(
+                    "📤 Sent Attack x{} dir={:?} spell={:?}",
+                    n,
+                    packet.direction,
+                    packet.spell
+                );
             }
         }
 
@@ -1124,7 +1124,6 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         // ===== 物品操作扩展 =====
-
         NetworkEvent::EquipItemRequest { unique_id } => {
             use mir2_shared::enums::MirGridType;
             let packet = client::item::EquipItem {
@@ -1183,21 +1182,21 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         NetworkEvent::StoreItemRequest { unique_id } => {
-            let packet = client::item::StoreItem {
-                from: 0,
-                to: 0,
-            };
+            let packet = client::item::StoreItem { from: 0, to: 0 };
             serialize_packet(stream, &packet)?;
-            tracing::debug!("📤 StoreItem: unique_id={} (slot mapping not available)", unique_id);
+            tracing::debug!(
+                "📤 StoreItem: unique_id={} (slot mapping not available)",
+                unique_id
+            );
         }
 
         NetworkEvent::TakeBackItemRequest { unique_id } => {
-            let packet = client::item::TakeBackItem {
-                from: 0,
-                to: 0,
-            };
+            let packet = client::item::TakeBackItem { from: 0, to: 0 };
             serialize_packet(stream, &packet)?;
-            tracing::debug!("📤 TakeBackItem: unique_id={} (slot mapping not available)", unique_id);
+            tracing::debug!(
+                "📤 TakeBackItem: unique_id={} (slot mapping not available)",
+                unique_id
+            );
         }
 
         NetworkEvent::DropGoldRequest { amount } => {
@@ -1240,7 +1239,6 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         // ===== 魔法/技能 =====
-
         NetworkEvent::MagicKeySet => {
             use mir2_shared::enums::Spell;
             let packet = client::combat::MagicKey {
@@ -1253,7 +1251,6 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         // ===== 好友 =====
-
         NetworkEvent::AddFriendRequest { name } => {
             let packet = client::friend::AddFriend {
                 name: name.clone(),
@@ -1287,7 +1284,6 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         // ===== 公会扩展 =====
-
         NetworkEvent::EditGuildMember { member_name, rank } => {
             let packet = client::guild::EditGuildMember {
                 change_type: 0,
@@ -1296,7 +1292,11 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
                 rank_name: String::new(),
             };
             serialize_packet(stream, &packet)?;
-            tracing::debug!("📤 EditGuildMember: member_name={}, rank={}", member_name, rank);
+            tracing::debug!(
+                "📤 EditGuildMember: member_name={}, rank={}",
+                member_name,
+                rank
+            );
         }
 
         NetworkEvent::EditGuildNotice { notice } => {
@@ -1308,17 +1308,13 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         NetworkEvent::GuildNameReturn { name } => {
-            let packet = client::guild::GuildNameReturn {
-                name: name.clone(),
-            };
+            let packet = client::guild::GuildNameReturn { name: name.clone() };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 GuildNameReturn: {}", name);
         }
 
         NetworkEvent::RequestGuildInfo => {
-            let packet = client::guild::RequestGuildInfo {
-                info_type: 0,
-            };
+            let packet = client::guild::RequestGuildInfo { info_type: 0 };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 RequestGuildInfo");
         }
@@ -1360,7 +1356,6 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         // ===== NPC 扩展 =====
-
         NetworkEvent::LogOutRequest => {
             let packet = client::LogOut;
             serialize_packet(stream, &packet)?;
@@ -1392,17 +1387,13 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         NetworkEvent::CheckRefineRequest => {
-            let packet = client::CheckRefine {
-                unique_id: 0,
-            };
+            let packet = client::CheckRefine { unique_id: 0 };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 CheckRefine (unique_id not available)");
         }
 
         NetworkEvent::ReplaceWedRingRequest => {
-            let packet = client::ReplaceWedRing {
-                unique_id: 0,
-            };
+            let packet = client::ReplaceWedRing { unique_id: 0 };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 ReplaceWedRing (unique_id not available)");
         }
@@ -1418,7 +1409,6 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         // ===== 英雄 =====
-
         NetworkEvent::CreateHeroRequest { name } => {
             use mir2_shared::enums::{MirClass, MirGender};
             let packet = client::hero::NewHero {
@@ -1466,7 +1456,6 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         // ===== 邮件 =====
-
         NetworkEvent::SendMailRequest { to, subject, body } => {
             let packet = client::mail::SendMail {
                 name: to.clone(),
@@ -1507,7 +1496,6 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         // ===== 市场/寄售 =====
-
         NetworkEvent::ConsignItemRequest { item_id, price } => {
             use mir2_shared::enums::MarketPanelType;
             let packet = client::market::ConsignItem {
@@ -1520,7 +1508,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         NetworkEvent::MarketSearchRequest { query } => {
-            use mir2_shared::enums::{MarketPanelType, ItemType};
+            use mir2_shared::enums::{ItemType, MarketPanelType};
             let packet = client::market::MarketSearch {
                 match_text: query,
                 item_type: ItemType::Nothing,
@@ -1572,7 +1560,6 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         // ===== 智能宠物 =====
-
         NetworkEvent::UpdateIntelligentCreatureRequest => {
             let packet = client::UpdateIntelligentCreature {
                 summon_me: false,
@@ -1594,15 +1581,12 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         NetworkEvent::RequestIntelligentCreatureUpdates => {
-            let packet = client::RequestIntelligentCreatureUpdates {
-                update: true,
-            };
+            let packet = client::RequestIntelligentCreatureUpdates { update: true };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 RequestIntelligentCreatureUpdates");
         }
 
         // ===== 社交（婚姻/师徒）=====
-
         NetworkEvent::MarriageRequestSend { target: _ } => {
             let packet = client::MarriageRequest;
             serialize_packet(stream, &packet)?;
@@ -1666,7 +1650,6 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         // ===== 租赁 =====
-
         NetworkEvent::GetRentedItemsRequest => {
             let packet = client::item::GetRentedItems;
             serialize_packet(stream, &packet)?;
@@ -1674,13 +1657,19 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         NetworkEvent::RentalItemDepositRequest { from_slot, to_slot } => {
-            let packet = client::item::DepositRentalItem { from: from_slot, to: to_slot };
+            let packet = client::item::DepositRentalItem {
+                from: from_slot,
+                to: to_slot,
+            };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 DepositRentalItem: from={} to={}", from_slot, to_slot);
         }
 
         NetworkEvent::RentalItemRetrieveRequest { from_slot, to_slot } => {
-            let packet = client::item::RetrieveRentalItem { from: from_slot, to: to_slot };
+            let packet = client::item::RetrieveRentalItem {
+                from: from_slot,
+                to: to_slot,
+            };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 RetrieveRentalItem: from={} to={}", from_slot, to_slot);
         }
@@ -1697,7 +1686,11 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             tracing::debug!("📤 CancelItemRental");
         }
 
-        NetworkEvent::CraftItemRequest { recipe_unique_id, count, slots } => {
+        NetworkEvent::CraftItemRequest {
+            recipe_unique_id,
+            count,
+            slots,
+        } => {
             let slots_clone = slots.clone();
             let packet = client::CraftItem {
                 unique_id: recipe_unique_id,
@@ -1705,23 +1698,23 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
                 slots,
             };
             serialize_packet(stream, &packet)?;
-            tracing::debug!("📤 CraftItemRequest: unique_id={}, count={}, slots={:?}", recipe_unique_id, count, slots_clone);
+            tracing::debug!(
+                "📤 CraftItemRequest: unique_id={}, count={}, slots={:?}",
+                recipe_unique_id,
+                count,
+                slots_clone
+            );
         }
 
         // ===== 钓鱼 =====
-
         NetworkEvent::FishingCastRequest => {
-            let packet = client::FishingCast {
-                cast_out: true,
-            };
+            let packet = client::FishingCast { cast_out: true };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 FishingCast");
         }
 
         NetworkEvent::FishingAutocastToggle { enabled } => {
-            let packet = client::FishingChangeAutocast {
-                auto_cast: enabled,
-            };
+            let packet = client::FishingChangeAutocast { auto_cast: enabled };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 FishingChangeAutocast: enabled={}", enabled);
         }
@@ -1730,14 +1723,16 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         // 注意：真实服务器协议无独立坐骑发包，坐骑通过 NPC 对话或物品使用触发。
         // Mock 模式由 mock.rs handle_game_event 处理（返回 MountUpdated）。
         NetworkEvent::MountRideRequest { mount_type } => {
-            tracing::debug!("🐴 MountRideRequest (type={}) - 真实协议不支持独立坐骑发包，使用 Mock 模式", mount_type);
+            tracing::debug!(
+                "🐴 MountRideRequest (type={}) - 真实协议不支持独立坐骑发包，使用 Mock 模式",
+                mount_type
+            );
         }
         NetworkEvent::MountDismountRequest => {
             tracing::debug!("🐴 MountDismountRequest - 真实协议不支持独立坐骑发包，使用 Mock 模式");
         }
 
         // ===== 转生 =====
-
         NetworkEvent::AcceptReincarnationRequest => {
             let packet = client::AcceptReincarnation;
             serialize_packet(stream, &packet)?;
@@ -1751,7 +1746,6 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         // ===== 游戏商店/排名/报告 =====
-
         NetworkEvent::GameShopBuyRequest { item_id, count } => {
             let packet = client::GameshopBuy {
                 g_index: item_id as i32,
@@ -1763,9 +1757,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         NetworkEvent::ReportIssueRequest { issue } => {
-            let packet = client::ReportIssue {
-                message: issue,
-            };
+            let packet = client::ReportIssue { message: issue };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 ReportIssue");
         }
@@ -1779,7 +1771,6 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         // ===== 门/地图 =====
-
         NetworkEvent::OpenDoorRequest { door_id } => {
             let packet = client::Opendoor {
                 door_index: (door_id as u8),
@@ -1789,9 +1780,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         NetworkEvent::RequestMapInfoRequest => {
-            let packet = client::npc::RequestMapInfo {
-                map_index: 0,
-            };
+            let packet = client::npc::RequestMapInfo { map_index: 0 };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 RequestMapInfo (map_index not available)");
         }
@@ -1801,21 +1790,20 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
                 object_id: 0, // npc_name needs resolution to object_id
             };
             serialize_packet(stream, &packet)?;
-            tracing::debug!("📤 TeleportToNPC: npc_name={} (object_id not resolved)", npc_name);
+            tracing::debug!(
+                "📤 TeleportToNPC: npc_name={} (object_id not resolved)",
+                npc_name
+            );
         }
 
         NetworkEvent::SearchMapRequest { query } => {
-            let packet = client::npc::SearchMap {
-                text: query,
-            };
+            let packet = client::npc::SearchMap { text: query };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 SearchMap");
         }
 
         NetworkEvent::ObserveRequest { target } => {
-            let packet = client::Observe {
-                name: target,
-            };
+            let packet = client::Observe { name: target };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 Observe");
         }
@@ -1827,18 +1815,25 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
             tracing::debug!("📤 GuildTerritoryPage: page={}", page);
         }
         NetworkEvent::PurchaseGuildTerritoryRequest { owner } => {
-            let packet = client::guild::PurchaseGuildTerritory { owner: owner.clone() };
+            let packet = client::guild::PurchaseGuildTerritory {
+                owner: owner.clone(),
+            };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 PurchaseGuildTerritory: owner={}", owner);
         }
 
         // ===== PR #1169: Warehouse password (client -> server) =====
         NetworkEvent::UnlockStorageRequest { password } => {
-            let packet = client::storage::UnlockStorage { password: password.clone() };
+            let packet = client::storage::UnlockStorage {
+                password: password.clone(),
+            };
             serialize_packet(stream, &packet)?;
             tracing::info!("🔐 UnlockStorage: password=****");
         }
-        NetworkEvent::SetStoragePasswordRequest { current_password, new_password } => {
+        NetworkEvent::SetStoragePasswordRequest {
+            current_password,
+            new_password,
+        } => {
             let packet = client::storage::SetStoragePassword {
                 current_password: current_password.clone(),
                 new_password: new_password.clone(),
@@ -1964,20 +1959,42 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         // ===== 物品觉醒 =====
-        NetworkEvent::AwakeningNeedMaterialsRequest { unique_id, awake_type } => {
-            let packet = client::misc::AwakeningNeedMaterials { unique_id, awake_type };
+        NetworkEvent::AwakeningNeedMaterialsRequest {
+            unique_id,
+            awake_type,
+        } => {
+            let packet = client::misc::AwakeningNeedMaterials {
+                unique_id,
+                awake_type,
+            };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 AwakeningNeedMaterials: unique_id={}", unique_id);
         }
         NetworkEvent::AwakeningLockedItemRequest { unique_id, locked } => {
             let packet = client::misc::AwakeningLockedItem { unique_id, locked };
             serialize_packet(stream, &packet)?;
-            tracing::debug!("📤 AwakeningLockedItem: unique_id={} locked={}", unique_id, locked);
+            tracing::debug!(
+                "📤 AwakeningLockedItem: unique_id={} locked={}",
+                unique_id,
+                locked
+            );
         }
-        NetworkEvent::AwakeningRequest { unique_id, awake_type, position_idx } => {
-            let packet = client::misc::Awakening { unique_id, awake_type, position_idx };
+        NetworkEvent::AwakeningRequest {
+            unique_id,
+            awake_type,
+            position_idx,
+        } => {
+            let packet = client::misc::Awakening {
+                unique_id,
+                awake_type,
+                position_idx,
+            };
             serialize_packet(stream, &packet)?;
-            tracing::debug!("📤 Awakening: unique_id={} type={:?}", unique_id, awake_type);
+            tracing::debug!(
+                "📤 Awakening: unique_id={} type={:?}",
+                unique_id,
+                awake_type
+            );
         }
         NetworkEvent::DisassembleItemRequest { unique_id } => {
             let packet = client::misc::DisassembleItem { unique_id };
@@ -1999,10 +2016,22 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         NetworkEvent::MailLockedItemRequest { unique_id, locked } => {
             let packet = client::mail::MailLockedItem { unique_id, locked };
             serialize_packet(stream, &packet)?;
-            tracing::debug!("📤 MailLockedItem: unique_id={} locked={}", unique_id, locked);
+            tracing::debug!(
+                "📤 MailLockedItem: unique_id={} locked={}",
+                unique_id,
+                locked
+            );
         }
-        NetworkEvent::MailCostRequest { gold, items_idx, stamped } => {
-            let packet = client::mail::MailCost { gold, items_idx, stamped };
+        NetworkEvent::MailCostRequest {
+            gold,
+            items_idx,
+            stamped,
+        } => {
+            let packet = client::mail::MailCost {
+                gold,
+                items_idx,
+                stamped,
+            };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 MailCost: gold={}", gold);
         }

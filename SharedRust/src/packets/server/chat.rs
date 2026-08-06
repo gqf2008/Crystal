@@ -1,11 +1,11 @@
 //! Chat System Packets (Server → Client)
 
-use std::io::{Read, Write};
-use byteorder::ReadBytesExt;
-use crate::binary::{read_dotnet_string, write_dotnet_string};
-use crate::enums::{ServerPacketIds, ChatType};
 use super::super::base::Packet;
+use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::data::stats::SharedResult;
+use crate::enums::{ChatType, ServerPacketIds};
+use byteorder::ReadBytesExt;
+use std::io::{Read, Write};
 
 /// Chat message from server
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,17 +43,21 @@ impl Packet for ObjectChat {
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         use byteorder::{LittleEndian, ReadBytesExt};
-        
+
         let object_id = reader.read_u32::<LittleEndian>()?;
         let text = read_dotnet_string(reader)?;
         let chat_type = ChatType::try_from(reader.read_u8()?)?;
-        
-        Ok(Self { object_id, text, chat_type })
+
+        Ok(Self {
+            object_id,
+            text,
+            chat_type,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
-        
+
         writer.write_u32::<LittleEndian>(self.object_id)?;
         write_dotnet_string(writer, &self.text)?;
         writer.write_all(&[self.chat_type as u8])?;

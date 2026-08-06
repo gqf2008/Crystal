@@ -23,7 +23,12 @@ impl SelectScene {
         // 背景纹理 Prguse[360]
         if let Some(info) = LibraryName::Prguse.get_texture(360) {
             if let Some(ref tex) = info.image {
-                draw_texture(tex, dialog_x + info.offset_x as f32, dialog_y + info.offset_y as f32, WHITE);
+                draw_texture(
+                    tex,
+                    dialog_x + info.offset_x as f32,
+                    dialog_y + info.offset_y as f32,
+                    WHITE,
+                );
             }
         }
 

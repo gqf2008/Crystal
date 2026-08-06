@@ -3,11 +3,11 @@
 //! PR #1169 — KR Mir2 Warehouse password feature.
 //! These packets are sent from the client to unlock or manage the warehouse password.
 
-use std::io::{Read, Write};
-use crate::binary::{read_dotnet_string, write_dotnet_string};
-use crate::enums::ClientPacketIds;
 use super::super::base::Packet;
+use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::data::stats::SharedResult;
+use crate::enums::ClientPacketIds;
+use std::io::{Read, Write};
 
 /// Client requests to unlock the warehouse with a password
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

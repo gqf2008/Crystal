@@ -13,16 +13,14 @@ impl SelectScene {
                 continue;
             }
 
-            if self.show_new_character
-                && self.new_char_name.chars().count() < 16 {
-                    self.new_char_name.push(ch);
-                }
+            if self.show_new_character && self.new_char_name.chars().count() < 16 {
+                self.new_char_name.push(ch);
+            }
         }
 
-        if is_key_pressed(KeyCode::Backspace)
-            && self.show_new_character {
-                self.new_char_name.pop();
-            }
+        if is_key_pressed(KeyCode::Backspace) && self.show_new_character {
+            self.new_char_name.pop();
+        }
     }
 
     pub(super) fn handle_scene_input(&mut self) -> GameResult {

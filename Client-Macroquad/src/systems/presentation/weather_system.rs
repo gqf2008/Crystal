@@ -27,7 +27,9 @@ impl Default for WeatherSystem {
 
 impl WeatherSystem {
     pub fn new() -> Self {
-        Self { last_weather_code: u16::MAX }
+        Self {
+            last_weather_code: u16::MAX,
+        }
     }
 
     /// 将天气码映射为粒子类型
@@ -70,15 +72,15 @@ impl WeatherSystem {
 }
 
 impl crate::systems::LogicSystem for WeatherSystem {
-    fn update(
-        &mut self,
-        ctx: &mut crate::game::GameContext,
-        _dt: f32,
-    ) -> crate::game::GameResult {
+    fn update(&mut self, ctx: &mut crate::game::GameContext, _dt: f32) -> crate::game::GameResult {
         use crate::components::{Position, WeatherState};
 
         // 查找 WeatherState 组件
-        let Some(weather_state) = ctx.world.iter().find_map(|e| e.get::<&WeatherState>().map(|w| (e.entity(), *w))) else {
+        let Some(weather_state) = ctx
+            .world
+            .iter()
+            .find_map(|e| e.get::<&WeatherState>().map(|w| (e.entity(), *w)))
+        else {
             return Ok(());
         };
 
@@ -88,7 +90,11 @@ impl crate::systems::LogicSystem for WeatherSystem {
         // 获取相机位置（天气粒子需要跟随相机）
         let cam_pos = {
             let mut cam_pos = None;
-            for (cam, pos) in ctx.world.query::<(&crate::components::Camera, &Position)>().iter() {
+            for (cam, pos) in ctx
+                .world
+                .query::<(&crate::components::Camera, &Position)>()
+                .iter()
+            {
                 cam_pos = Some(*pos);
                 let _ = (cam,); // suppress unused warning
                 break;
@@ -99,7 +105,10 @@ impl crate::systems::LogicSystem for WeatherSystem {
         // 天气未变化，但需要更新发射器位置跟随相机
         if current_code == self.last_weather_code {
             if let Some(emitter_entity) = state.emitter_entity {
-                if let Ok(mut emitter) = ctx.world.get::<&mut crate::components::ParticleEmitter>(emitter_entity) {
+                if let Ok(mut emitter) = ctx
+                    .world
+                    .get::<&mut crate::components::ParticleEmitter>(emitter_entity)
+                {
                     emitter.emitter_location = cam_pos;
                 }
             }

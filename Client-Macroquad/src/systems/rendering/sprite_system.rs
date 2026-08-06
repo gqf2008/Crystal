@@ -84,10 +84,7 @@ impl SpriteRenderSystem {
 }
 
 impl RenderSystem for SpriteRenderSystem {
-    fn draw(
-        &mut self,
-        world: &hecs::World,
-    ) -> crate::game::GameResult {
+    fn draw(&mut self, world: &hecs::World) -> crate::game::GameResult {
         // 诊断：如果连红点都没有，优先确认：
         // 1) SpriteRenderSystem 是否被调度到；2) 世界里是否存在 Player/LocalPlayer；3) 是否有 Camera。
         // 默认关闭（避免影响帧率），需要时用环境变量 CRYSTAL_SPRITE_DIAG=1 打开。
@@ -100,7 +97,8 @@ impl RenderSystem for SpriteRenderSystem {
         let pass = world
             .query::<&RenderPass>()
             .iter()
-            .next().copied()
+            .next()
+            .copied()
             .unwrap_or_default();
 
         if Self::sprite_diag_enabled() {
@@ -132,7 +130,10 @@ impl RenderSystem for SpriteRenderSystem {
         // 诊断：确认 PostFront pass 是否执行。
         if Self::sprite_diag_enabled() && pass.stage == RenderStage::PostFront {
             let player_count = world.query::<&crate::components::Player>().iter().count();
-            let local_player_count = world.query::<&crate::components::LocalPlayer>().iter().count();
+            let local_player_count = world
+                .query::<&crate::components::LocalPlayer>()
+                .iter()
+                .count();
             let occluded = world
                 .query::<&crate::components::FrontOcclusion>()
                 .iter()

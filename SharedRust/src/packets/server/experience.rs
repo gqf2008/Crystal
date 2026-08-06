@@ -2,11 +2,11 @@
 //!
 //! Packets related to gaining experience and leveling up.
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 use crate::enums::ServerPacketIds;
-use super::super::base::Packet;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// GainExperience packet - experience gained notification
 #[derive(Debug, Clone)]
@@ -63,7 +63,11 @@ impl Packet for LevelChanged {
         let level = reader.read_u16::<LittleEndian>()?;
         let experience = reader.read_i64::<LittleEndian>()?;
         let max_experience = reader.read_i64::<LittleEndian>()?;
-        Ok(Self { level, experience, max_experience })
+        Ok(Self {
+            level,
+            experience,
+            max_experience,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -89,7 +93,11 @@ impl Packet for HeroLevelChanged {
         let level = reader.read_u16::<LittleEndian>()?;
         let experience = reader.read_i64::<LittleEndian>()?;
         let max_experience = reader.read_i64::<LittleEndian>()?;
-        Ok(Self { level, experience, max_experience })
+        Ok(Self {
+            level,
+            experience,
+            max_experience,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -136,7 +144,10 @@ impl Packet for DuraChanged {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let current_dura = reader.read_u16::<LittleEndian>()?;
-        Ok(Self { unique_id, current_dura })
+        Ok(Self {
+            unique_id,
+            current_dura,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {

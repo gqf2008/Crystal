@@ -14,10 +14,10 @@
 //
 // ============================================================================
 
+use crate::components::{AIState, InteractionHint, LocalPlayer, Position, NPC};
 use crate::game::GameContext;
-use crate::systems::LogicSystem;
-use crate::components::{Position, NPC, AIState, LocalPlayer, InteractionHint};
 use crate::game::GameResult;
+use crate::systems::LogicSystem;
 use hecs::World;
 
 /// 可交互距离阈值（格子）
@@ -66,7 +66,8 @@ impl NpcAISystem {
         }
 
         // 第二遍：更新 NPC AI 状态
-        for (npc, pos, mut ai_state) in world.query_mut::<(&NPC, &Position, Option<&mut AIState>)>() {
+        for (npc, pos, mut ai_state) in world.query_mut::<(&NPC, &Position, Option<&mut AIState>)>()
+        {
             // 1. 检测玩家是否靠近（可以对话）
             if let Some((px, py)) = player_pos {
                 let distance = Self::calculate_distance((pos.x, pos.y), (px, py));
@@ -100,27 +101,28 @@ impl NpcAISystem {
             }
         }
     }
-    
+
     /// 查找玩家位置
     fn find_player_position(world: &World) -> Option<(f32, f32)> {
-        world.query::<(&LocalPlayer, &Position)>()
+        world
+            .query::<(&LocalPlayer, &Position)>()
             .iter()
             .next()
             .map(|(_local, pos)| (pos.x, pos.y))
     }
-    
+
     /// 计算距离
     fn calculate_distance(pos1: (f32, f32), pos2: (f32, f32)) -> f32 {
         let dx = pos2.0 - pos1.0;
         let dy = pos2.1 - pos1.1;
         (dx * dx + dy * dy).sqrt()
     }
-    
+
     /// 计算方向（0-7，八方向）
     fn calculate_direction(dx: f32, dy: f32) -> u8 {
         let angle = dy.atan2(dx);
         let deg = angle.to_degrees();
-        
+
         // 转换为0-7的八方向
         let direction = ((deg + 22.5) / 45.0).floor() as i32;
         ((direction + 8) % 8) as u8
@@ -128,10 +130,7 @@ impl NpcAISystem {
 }
 
 impl LogicSystem for NpcAISystem {
-
-   
-
-    fn update(&mut self,  ctx:&mut GameContext, _delay_time: f32) -> GameResult {
+    fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
         Self::update_npc_ai(&mut ctx.world);
         Ok(())
     }

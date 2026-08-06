@@ -128,7 +128,11 @@ impl LogicSystem for CameraSystem {
 
         let scroll_y = {
             let (_, y) = ctx.input().mouse_wheel();
-            if y != 0.0 { Some(y) } else { None }
+            if y != 0.0 {
+                Some(y)
+            } else {
+                None
+            }
         };
 
         // 🔍 调试:检查是否收到滚轮事件 (已禁用,可按需开启)

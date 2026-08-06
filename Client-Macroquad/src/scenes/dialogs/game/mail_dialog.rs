@@ -10,11 +10,11 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
+use super::native_ui_utils::DragHelper;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
 use crate::ui::ui_state::MailEntry;
-use super::native_ui_utils::DragHelper;
+use macroquad::prelude::*;
 
 /// 标签页
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,10 +28,20 @@ pub enum MailTab {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MailDialogAction {
     None,
-    ReadMail { mail_id: u64 },
-    CollectParcel { mail_id: u64 },
-    DeleteMail { mail_id: u64 },
-    SendMail { to: String, subject: String, body: String },
+    ReadMail {
+        mail_id: u64,
+    },
+    CollectParcel {
+        mail_id: u64,
+    },
+    DeleteMail {
+        mail_id: u64,
+    },
+    SendMail {
+        to: String,
+        subject: String,
+        body: String,
+    },
 }
 
 pub struct MailDialogHybrid {
@@ -238,7 +248,14 @@ impl MailDialogHybrid {
                 Color::from_rgba(40, 45, 55, 200)
             };
             draw_rectangle(tab_x, tab_y, tab_w, tab_h, tab_color);
-            draw_rectangle_lines(tab_x, tab_y, tab_w, tab_h, 1.0, Color::from_rgba(100, 100, 120, 255));
+            draw_rectangle_lines(
+                tab_x,
+                tab_y,
+                tab_w,
+                tab_h,
+                1.0,
+                Color::from_rgba(100, 100, 120, 255),
+            );
 
             draw_text_cn(label, tab_x + 12.0, tab_y + 15.0, 11.0, WHITE);
 
@@ -291,7 +308,11 @@ impl MailDialogHybrid {
                 }
 
                 // 未读标记
-                let name_color = if mail.is_read { WHITE } else { Color::from_rgba(100, 200, 255, 255) };
+                let name_color = if mail.is_read {
+                    WHITE
+                } else {
+                    Color::from_rgba(100, 200, 255, 255)
+                };
                 let prefix = if !mail.is_read { "[新] " } else { "" };
 
                 draw_text_cn(
@@ -303,11 +324,23 @@ impl MailDialogHybrid {
                 );
 
                 // 主题
-                draw_text_cn(&mail.subject, list_x + 80.0, item_rect.y + 14.0, 11.0, Color::from_rgba(200, 200, 200, 255));
+                draw_text_cn(
+                    &mail.subject,
+                    list_x + 80.0,
+                    item_rect.y + 14.0,
+                    11.0,
+                    Color::from_rgba(200, 200, 200, 255),
+                );
 
                 // 包裹标记
                 if mail.has_parcel {
-                    draw_text_cn("[包裹]", list_x + 250.0, item_rect.y + 14.0, 10.0, Color::from_rgba(255, 200, 50, 255));
+                    draw_text_cn(
+                        "[包裹]",
+                        list_x + 250.0,
+                        item_rect.y + 14.0,
+                        10.0,
+                        Color::from_rgba(255, 200, 50, 255),
+                    );
                 }
 
                 if is_hovered && is_mouse_button_pressed(MouseButton::Left) {
@@ -316,7 +349,9 @@ impl MailDialogHybrid {
 
                 // 双击读取邮件
                 if is_hovered && is_mouse_button_down(MouseButton::Left) {
-                    self.pending_action = MailDialogAction::ReadMail { mail_id: mail.mail_id };
+                    self.pending_action = MailDialogAction::ReadMail {
+                        mail_id: mail.mail_id,
+                    };
                 }
             }
 
@@ -344,7 +379,13 @@ impl MailDialogHybrid {
     fn draw_compose(&self, _mouse_pos: Vec2) {
         let content_y = self.position.y + Self::CONTENT_START_Y;
         let content_x = self.position.x + 15.0;
-        draw_text_cn("写信功能需要文本输入支持", content_x, content_y + 30.0, 12.0, GRAY);
+        draw_text_cn(
+            "写信功能需要文本输入支持",
+            content_x,
+            content_y + 30.0,
+            12.0,
+            GRAY,
+        );
     }
 
     fn draw_buttons(&mut self, mouse_pos: Vec2) {
@@ -355,19 +396,26 @@ impl MailDialogHybrid {
 
         // 根据当前选中邮件和标签页显示不同按钮
         let has_selection = self.selected_mail.is_some() && self.active_tab == MailTab::Inbox;
-        let has_parcel = self.selected_mail
+        let has_parcel = self
+            .selected_mail
             .and_then(|i| self.mails.get(i))
             .map(|m| m.has_parcel)
             .unwrap_or(false);
 
         let buttons: Vec<(&str, MailDialogAction)> = if has_selection {
-            let mut btns = vec![("删除邮件", MailDialogAction::DeleteMail {
-                mail_id: self.get_selected_mail_id().unwrap_or(0),
-            })];
-            if has_parcel {
-                btns.push(("领取包裹", MailDialogAction::CollectParcel {
+            let mut btns = vec![(
+                "删除邮件",
+                MailDialogAction::DeleteMail {
                     mail_id: self.get_selected_mail_id().unwrap_or(0),
-                }));
+                },
+            )];
+            if has_parcel {
+                btns.push((
+                    "领取包裹",
+                    MailDialogAction::CollectParcel {
+                        mail_id: self.get_selected_mail_id().unwrap_or(0),
+                    },
+                ));
             }
             btns
         } else {
@@ -396,7 +444,14 @@ impl MailDialogHybrid {
                 Color::from_rgba(60, 70, 80, 255)
             };
             draw_rectangle(btn_x, btn_y, btn_w, btn_h, btn_color);
-            draw_rectangle_lines(btn_x, btn_y, btn_w, btn_h, 1.0, Color::from_rgba(100, 100, 120, 255));
+            draw_rectangle_lines(
+                btn_x,
+                btn_y,
+                btn_w,
+                btn_h,
+                1.0,
+                Color::from_rgba(100, 100, 120, 255),
+            );
 
             draw_text_cn(label, btn_x + 10.0, btn_y + 16.0, 12.0, WHITE);
 

@@ -1,7 +1,10 @@
 use super::*;
 
 impl MockNetwork {
-    pub(super) fn tick_monster_combat(response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState) {
+    pub(super) fn tick_monster_combat(
+        response_tx: &Sender<NetworkEvent>,
+        state: &mut MockWorldState,
+    ) {
         // 这些 sound_id 来自 Sound/SoundList.lst（映射到实际 wav 文件）。
         const SFX_PLAYER_DIED: i32 = 10100; // 100.wav
 
@@ -61,7 +64,11 @@ impl MockNetwork {
                 continue;
             }
 
-            let zone_is_boss = state.zones.get(m.zone_idx).map(|z| z.is_boss).unwrap_or(false);
+            let zone_is_boss = state
+                .zones
+                .get(m.zone_idx)
+                .map(|z| z.is_boss)
+                .unwrap_or(false);
             if zone_is_boss && !state.mock_cfg.boss_enabled {
                 continue;
             }
@@ -145,7 +152,13 @@ impl MockNetwork {
                 if state.player_hp_current <= 0 {
                     // 同一 tick 可能多只怪同时攻击；用 player_dead_since 去重，避免重复死亡事件/音效。
                     if state.player_dead_since.is_none() {
-                        let _ = response_tx.send(NetworkEvent::ObjectDied { object_id: player_id, location_x: 0, location_y: 0, direction: 0, death_type: 0 });
+                        let _ = response_tx.send(NetworkEvent::ObjectDied {
+                            object_id: player_id,
+                            location_x: 0,
+                            location_y: 0,
+                            direction: 0,
+                            death_type: 0,
+                        });
                         let _ = response_tx.send(NetworkEvent::PlaySound {
                             sound_id: SFX_PLAYER_DIED,
                         });
@@ -388,7 +401,10 @@ impl MockNetwork {
         }
     }
 
-    pub(super) fn tick_monster_wander(response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState) {
+    pub(super) fn tick_monster_wander(
+        response_tx: &Sender<NetworkEvent>,
+        state: &mut MockWorldState,
+    ) {
         if state.last_monster_wander_tick.elapsed() < Duration::from_millis(900) {
             return;
         }
@@ -412,7 +428,8 @@ impl MockNetwork {
             }
 
             // 离玩家很近时不随机游荡，让追击逻辑接管
-            let dist_to_player = (m.pos.0 - state.player_grid.0).abs() + (m.pos.1 - state.player_grid.1).abs();
+            let dist_to_player =
+                (m.pos.0 - state.player_grid.0).abs() + (m.pos.1 - state.player_grid.1).abs();
             if dist_to_player <= 8 {
                 continue;
             }

@@ -5,9 +5,9 @@
 // Windows: Release 模式不弹控制台（Debug 仍保留控制台便于调试）
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use macroquad::prelude::*;
-use client_macroquad::resources::{set_data_path, preload_libraries, LibraryName};
+use client_macroquad::resources::{preload_libraries, set_data_path, LibraryName};
 use client_macroquad::scenes::dialogs::game::InventoryDialogHybrid;
+use macroquad::prelude::*;
 
 fn window_conf() -> Conf {
     Conf {
@@ -35,7 +35,7 @@ async fn main() {
     println!("  - 双击物品 → 使用");
     println!("  - 滚轮 → 滚动");
     println!("==========================================");
-    
+
     // 初始化资源
     set_data_path("./Data/");
     preload_libraries(&[
@@ -44,39 +44,79 @@ async fn main() {
         LibraryName::Prguse2,
         LibraryName::Items,
     ]);
-    
+
     // 创建背包
     let mut inventory = InventoryDialogHybrid::new();
     inventory.load_textures();
     inventory.set_position(vec2(100.0, 100.0));
     inventory.open();
-    
+
     loop {
         clear_background(Color::from_rgba(30, 30, 40, 255));
-        
+
         // 背景网格
         for x in (0..screen_width() as i32).step_by(50) {
-            draw_line(x as f32, 0.0, x as f32, screen_height(), 1.0, Color::from_rgba(50, 50, 60, 100));
+            draw_line(
+                x as f32,
+                0.0,
+                x as f32,
+                screen_height(),
+                1.0,
+                Color::from_rgba(50, 50, 60, 100),
+            );
         }
         for y in (0..screen_height() as i32).step_by(50) {
-            draw_line(0.0, y as f32, screen_width(), y as f32, 1.0, Color::from_rgba(50, 50, 60, 100));
+            draw_line(
+                0.0,
+                y as f32,
+                screen_width(),
+                y as f32,
+                1.0,
+                Color::from_rgba(50, 50, 60, 100),
+            );
         }
-        
-        draw_text("[I] Toggle | [1/2/3] Tabs | Drag=Swap | Drag out=Drop | Double-click=Use", 10.0, 30.0, 18.0, WHITE);
-        draw_text("Hybrid: Native drawing + mqui Group::draggable()", 10.0, 55.0, 16.0, GRAY);
-        
+
+        draw_text(
+            "[I] Toggle | [1/2/3] Tabs | Drag=Swap | Drag out=Drop | Double-click=Use",
+            10.0,
+            30.0,
+            18.0,
+            WHITE,
+        );
+        draw_text(
+            "Hybrid: Native drawing + mqui Group::draggable()",
+            10.0,
+            55.0,
+            16.0,
+            GRAY,
+        );
+
         // 快捷键
-        if is_key_pressed(KeyCode::I) { inventory.toggle(); }
-        if is_key_pressed(KeyCode::Escape) { break; }
-        
+        if is_key_pressed(KeyCode::I) {
+            inventory.toggle();
+        }
+        if is_key_pressed(KeyCode::Escape) {
+            break;
+        }
+
         // 更新绘制
         inventory.update_and_draw();
-        
+
         // 状态
-        let status = if inventory.is_visible() { "背包: 打开" } else { "背包: 关闭 (按I打开)" };
+        let status = if inventory.is_visible() {
+            "背包: 打开"
+        } else {
+            "背包: 关闭 (按I打开)"
+        };
         draw_text(status, 10.0, screen_height() - 40.0, 18.0, GREEN);
-        draw_text(&format!("FPS: {}", get_fps()), screen_width() - 100.0, 30.0, 20.0, GREEN);
-        
+        draw_text(
+            &format!("FPS: {}", get_fps()),
+            screen_width() - 100.0,
+            30.0,
+            20.0,
+            GREEN,
+        );
+
         next_frame().await;
     }
 }

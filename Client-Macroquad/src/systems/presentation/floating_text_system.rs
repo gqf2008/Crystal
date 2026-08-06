@@ -31,7 +31,13 @@ impl LogicSystem for FloatingTextSystem {
         let mut to_spawn: Vec<FloatingTextSpawn> = Vec::new();
         for event in ctx.events().presentation_events() {
             match event {
-                crate::event_bus::PresentationEvent::FloatingText { text, position, color, font_size: _, duration } => {
+                crate::event_bus::PresentationEvent::FloatingText {
+                    text,
+                    position,
+                    color,
+                    font_size: _,
+                    duration,
+                } => {
                     to_spawn.push(FloatingTextSpawn {
                         x: position.0,
                         y: position.1,
@@ -66,7 +72,10 @@ impl LogicSystem for FloatingTextSystem {
         }
         for spawn in to_spawn {
             let _ = ctx.world.spawn((
-                Position { x: spawn.x, y: spawn.y },
+                Position {
+                    x: spawn.x,
+                    y: spawn.y,
+                },
                 FloatingText {
                     text: spawn.text,
                     start_time: now,
@@ -80,7 +89,9 @@ impl LogicSystem for FloatingTextSystem {
         let mut to_remove: Vec<hecs::Entity> = Vec::new();
 
         for eref in ctx.world.iter() {
-            let (Some(mut pos), Some(ft)) = (eref.get::<&mut Position>(), eref.get::<&FloatingText>()) else {
+            let (Some(mut pos), Some(ft)) =
+                (eref.get::<&mut Position>(), eref.get::<&FloatingText>())
+            else {
                 continue;
             };
             // 过期清理

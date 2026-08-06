@@ -9,19 +9,19 @@ use std::fmt;
 pub enum GameError {
     /// 地图加载错误
     MapLoadError(String),
-    
+
     /// 图形资源加载错误
     GraphicsError(String),
-    
+
     /// 资源加载错误（兼容 ggez）
     ResourceLoadError(String),
-    
+
     /// 网络错误
     NetworkError(String),
-    
+
     /// IO 错误
     IoError(std::io::Error),
-    
+
     /// 通用错误
     Other(String),
 }

@@ -1,14 +1,13 @@
 //! Account Management Packets (Client → Server)
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::binary::{read_dotnet_string, write_dotnet_string};
-use crate::enums::ClientPacketIds;
 use super::super::base::Packet;
+use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::data::stats::SharedResult;
+use crate::enums::ClientPacketIds;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct NewAccount {
     pub account_id: String,
     pub password: String,
@@ -18,7 +17,6 @@ pub struct NewAccount {
     pub secret_answer: String,
     pub email_address: String,
 }
-
 
 impl Packet for NewAccount {
     const OPCODE: i16 = ClientPacketIds::NewAccount as i16;
@@ -47,14 +45,12 @@ impl Packet for NewAccount {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ChangePassword {
     pub account_id: String,
     pub current_password: String,
     pub new_password: String,
 }
-
 
 impl Packet for ChangePassword {
     const OPCODE: i16 = ClientPacketIds::ChangePassword as i16;
@@ -75,13 +71,11 @@ impl Packet for ChangePassword {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Login {
     pub account_id: String,
     pub password: String,
 }
-
 
 impl Packet for Login {
     const OPCODE: i16 = ClientPacketIds::Login as i16;

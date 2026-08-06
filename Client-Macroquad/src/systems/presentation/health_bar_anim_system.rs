@@ -51,7 +51,9 @@ impl LogicSystem for HealthBarAnimSystem {
 
             // 掉血动画：以 max*6/秒 的速度下降（满血到 0 大约 0.17s）。
             let drop_speed = (max * 6.0).max(60.0);
-            anim.displayed = (anim.displayed - drop_speed * dt).max(target).clamp(0.0, max);
+            anim.displayed = (anim.displayed - drop_speed * dt)
+                .max(target)
+                .clamp(0.0, max);
         }
 
         Ok(())

@@ -1,7 +1,7 @@
 // ============================================================================
 // 角色选择场景 - 纯 Native 版本 (无 egui)
 // ============================================================================
-// 
+//
 // 【渲染架构说明】
 // 本场景采用纯 macroquad 原生渲染，无 egui 依赖
 //
@@ -35,28 +35,28 @@ pub struct SelectScene {
     // 角色数据
     characters: Vec<CharacterInfo>,
     selected_index: Option<usize>,
-    
+
     // 对话框状态
     show_new_character: bool,
     show_delete_character: bool,
     show_message_box: bool,
     message_text: String,
-    
+
     // 新建角色表单
     new_char_name: String,
     new_char_class: u8,
     new_char_gender: u8,
-    
+
     // 删除角色确认
     delete_char_name: String,
     delete_char_index: i32,
     delete_confirm_input: String,
-    
+
     // 角色预览动画
     animation_frame: usize,
     animation_timer: f32,
     animation_delay: f32,
-    
+
     // 光标闪烁
     cursor_visible: bool,
     cursor_timer: f32,
@@ -76,29 +76,33 @@ pub struct SelectScene {
 
 impl SelectScene {
     pub fn new(characters: Vec<CharacterInfo>) -> GameResult<Self> {
-        let selected_index = if !characters.is_empty() { Some(0) } else { None };
-        
+        let selected_index = if !characters.is_empty() {
+            Some(0)
+        } else {
+            None
+        };
+
         Ok(Self {
             characters,
             selected_index,
-            
+
             show_new_character: false,
             show_delete_character: false,
             show_message_box: false,
             message_text: String::new(),
-            
+
             new_char_name: String::new(),
             new_char_class: 0,
             new_char_gender: 0,
-            
+
             delete_char_name: String::new(),
             delete_char_index: -1,
             delete_confirm_input: String::new(),
-            
+
             animation_frame: 0,
             animation_timer: 0.0,
             animation_delay: 0.25,
-            
+
             cursor_visible: true,
             cursor_timer: 0.0,
 
@@ -132,7 +136,11 @@ impl SelectScene {
         self.selected_index = if self.characters.is_empty() {
             None
         } else {
-            Some(self.selected_index.unwrap_or(0).min(self.characters.len() - 1))
+            Some(
+                self.selected_index
+                    .unwrap_or(0)
+                    .min(self.characters.len() - 1),
+            )
         };
     }
 
@@ -220,13 +228,18 @@ impl SelectScene {
                 }
                 NetworkEvent::CharacterDeleted { index } => {
                     // 服务器可能不会立即发全量列表，这里先本地移除；若后续收到 LoginSuccess 会再覆盖
-                    if let Some(pos) = self.characters.iter().position(|c| c.index == index as i32) {
+                    if let Some(pos) = self.characters.iter().position(|c| c.index == index as i32)
+                    {
                         self.characters.remove(pos);
                     }
                     self.selected_index = if self.characters.is_empty() {
                         None
                     } else {
-                        Some(self.selected_index.unwrap_or(0).min(self.characters.len() - 1))
+                        Some(
+                            self.selected_index
+                                .unwrap_or(0)
+                                .min(self.characters.len() - 1),
+                        )
                     };
                     self.show_message(&format!("角色已删除: index={index}"));
                     self.character_op_in_flight = false;
@@ -272,7 +285,7 @@ impl SelectScene {
 
         None
     }
-    
+
     /// 显示消息框
     fn show_message(&mut self, message: &str) {
         self.message_text = message.to_string();
@@ -295,11 +308,11 @@ impl Scene for SelectScene {
 
         Ok(())
     }
-    
+
     fn on_exit(&mut self) -> GameResult {
         Ok(())
     }
-    
+
     fn update(&mut self, dt: f32) -> GameResult<SceneTransition> {
         // 更新角色预览动画
         self.animation_timer += dt;
@@ -307,7 +320,7 @@ impl Scene for SelectScene {
             self.animation_timer = 0.0;
             self.animation_frame = (self.animation_frame + 1) % 16;
         }
-        
+
         // 更新光标闪烁
         self.cursor_timer += dt;
         if self.cursor_timer >= 0.5 {
@@ -323,7 +336,9 @@ impl Scene for SelectScene {
             self.start_game_requested = false;
             self.ensure_network();
 
-            if let (Some(net), Some(character_index)) = (self.net.as_ref(), self.start_game_character_index) {
+            if let (Some(net), Some(character_index)) =
+                (self.net.as_ref(), self.start_game_character_index)
+            {
                 if !self.start_game_in_flight {
                     if let Err(e) = net.send(NetworkEvent::StartGameRequest { character_index }) {
                         self.show_message(&format!("发送 StartGameRequest 失败: {e}"));
@@ -338,10 +353,10 @@ impl Scene for SelectScene {
         if let Some(t) = self.pump_network_for_start_game() {
             return Ok(t);
         }
-        
+
         Ok(SceneTransition::None)
     }
-    
+
     fn render(&mut self) -> GameResult {
         self.render_scene()
     }

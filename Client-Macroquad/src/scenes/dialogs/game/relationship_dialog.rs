@@ -10,10 +10,10 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
+use super::native_ui_utils::DragHelper;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
-use super::native_ui_utils::DragHelper;
+use macroquad::prelude::*;
 
 /// 婚姻/伴侣信息
 #[derive(Debug, Clone, Default)]
@@ -221,10 +221,26 @@ impl RelationshipDialogHybrid {
 
         if self.relationship.married && !self.relationship.partner_name.is_empty() {
             // 已婚
-            draw_text_cn("已婚", content_x, content_y, 14.0, Color::from_rgba(255, 150, 150, 255));
+            draw_text_cn(
+                "已婚",
+                content_x,
+                content_y,
+                14.0,
+                Color::from_rgba(255, 150, 150, 255),
+            );
 
-            draw_text_cn("配偶：", content_x, content_y + line_h, 12.0, Color::from_rgba(200, 200, 200, 255));
-            let partner_color = if self.relationship.partner_online { WHITE } else { GRAY };
+            draw_text_cn(
+                "配偶：",
+                content_x,
+                content_y + line_h,
+                12.0,
+                Color::from_rgba(200, 200, 200, 255),
+            );
+            let partner_color = if self.relationship.partner_online {
+                WHITE
+            } else {
+                GRAY
+            };
             draw_text_cn(
                 &self.relationship.partner_name,
                 content_x + 50.0,
@@ -238,9 +254,24 @@ impl RelationshipDialogHybrid {
 
             // 亲密度（仅当服务器提供数据时显示）
             if self.relationship.intimacy > 0 || self.relationship.max_intimacy > 0 {
-                draw_text_cn("亲密度：", content_x, content_y + line_h * 2.0, 12.0, Color::from_rgba(200, 200, 200, 255));
-                let intimacy_text = format!("{}/{}", self.relationship.intimacy, self.relationship.max_intimacy);
-                draw_text_cn(&intimacy_text, content_x + 60.0, content_y + line_h * 2.0, 12.0, Color::from_rgba(255, 180, 200, 255));
+                draw_text_cn(
+                    "亲密度：",
+                    content_x,
+                    content_y + line_h * 2.0,
+                    12.0,
+                    Color::from_rgba(200, 200, 200, 255),
+                );
+                let intimacy_text = format!(
+                    "{}/{}",
+                    self.relationship.intimacy, self.relationship.max_intimacy
+                );
+                draw_text_cn(
+                    &intimacy_text,
+                    content_x + 60.0,
+                    content_y + line_h * 2.0,
+                    12.0,
+                    Color::from_rgba(255, 180, 200, 255),
+                );
 
                 // 亲密度条
                 let bar_x = content_x;
@@ -248,23 +279,54 @@ impl RelationshipDialogHybrid {
                 let bar_w = self.size.x - 30.0;
                 let bar_h = 8.0;
                 let ratio = if self.relationship.max_intimacy > 0 {
-                    (self.relationship.intimacy as f32 / self.relationship.max_intimacy as f32).clamp(0.0, 1.0)
+                    (self.relationship.intimacy as f32 / self.relationship.max_intimacy as f32)
+                        .clamp(0.0, 1.0)
                 } else {
                     0.0
                 };
-                draw_rectangle(bar_x, bar_y, bar_w, bar_h, Color::from_rgba(40, 40, 50, 255));
-                draw_rectangle(bar_x, bar_y, bar_w * ratio, bar_h, Color::from_rgba(255, 130, 170, 200));
+                draw_rectangle(
+                    bar_x,
+                    bar_y,
+                    bar_w,
+                    bar_h,
+                    Color::from_rgba(40, 40, 50, 255),
+                );
+                draw_rectangle(
+                    bar_x,
+                    bar_y,
+                    bar_w * ratio,
+                    bar_h,
+                    Color::from_rgba(255, 130, 170, 200),
+                );
 
                 if !self.relationship.wedding_date.is_empty() {
-                    draw_text_cn("结婚日期：", content_x, content_y + line_h * 4.0, 11.0, Color::from_rgba(180, 180, 180, 255));
-                    draw_text_cn(&self.relationship.wedding_date, content_x + 70.0, content_y + line_h * 4.0, 11.0, Color::from_rgba(180, 180, 180, 255));
+                    draw_text_cn(
+                        "结婚日期：",
+                        content_x,
+                        content_y + line_h * 4.0,
+                        11.0,
+                        Color::from_rgba(180, 180, 180, 255),
+                    );
+                    draw_text_cn(
+                        &self.relationship.wedding_date,
+                        content_x + 70.0,
+                        content_y + line_h * 4.0,
+                        11.0,
+                        Color::from_rgba(180, 180, 180, 255),
+                    );
                 }
             } else {
                 // 协议未提供亲密度数据，跳过显示
             }
         } else {
             draw_text_cn("未婚", content_x, content_y + line_h, 14.0, GRAY);
-            draw_text_cn("当前没有婚姻关系", content_x, content_y + line_h * 2.0, 12.0, Color::from_rgba(150, 150, 150, 200));
+            draw_text_cn(
+                "当前没有婚姻关系",
+                content_x,
+                content_y + line_h * 2.0,
+                12.0,
+                Color::from_rgba(150, 150, 150, 200),
+            );
         }
     }
 
@@ -276,9 +338,7 @@ impl RelationshipDialogHybrid {
 
         let buttons: Vec<(&str, RelationshipDialogAction)> = if !self.relationship.married {
             if self.relationship.pending_marriage_requester.is_empty() {
-                vec![
-                    ("求婚", RelationshipDialogAction::RequestMarriage),
-                ]
+                vec![("求婚", RelationshipDialogAction::RequestMarriage)]
             } else {
                 vec![
                     ("接受", RelationshipDialogAction::AcceptMarriage),
@@ -286,9 +346,7 @@ impl RelationshipDialogHybrid {
                 ]
             }
         } else {
-            vec![
-                ("离婚", RelationshipDialogAction::RequestDivorce),
-            ]
+            vec![("离婚", RelationshipDialogAction::RequestDivorce)]
         };
 
         if buttons.is_empty() {
@@ -313,7 +371,14 @@ impl RelationshipDialogHybrid {
                 Color::from_rgba(120, 40, 40, 255)
             };
             draw_rectangle(btn_x, btn_y, btn_w, btn_h, btn_color);
-            draw_rectangle_lines(btn_x, btn_y, btn_w, btn_h, 1.0, Color::from_rgba(200, 80, 80, 255));
+            draw_rectangle_lines(
+                btn_x,
+                btn_y,
+                btn_w,
+                btn_h,
+                1.0,
+                Color::from_rgba(200, 80, 80, 255),
+            );
 
             draw_text_cn(label, btn_x + 15.0, btn_y + 16.0, 12.0, WHITE);
 

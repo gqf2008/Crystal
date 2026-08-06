@@ -2,15 +2,15 @@
 //!
 //! This module contains all trade-related packet definitions and parsers.
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::{
-    data::item::UserItem,
-    enums::ServerPacketIds,
-    binary::{read_dotnet_string, write_dotnet_string},
-};
 use super::super::base::Packet;
 use crate::data::stats::SharedResult;
+use crate::{
+    binary::{read_dotnet_string, write_dotnet_string},
+    data::item::UserItem,
+    enums::ServerPacketIds,
+};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 // ==================== 数据结构 & PacketMessage 实现 ====================
 
@@ -82,7 +82,7 @@ impl Packet for TradeItem {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let count = reader.read_i32::<LittleEndian>()? as usize;
         let mut trade_items = Vec::with_capacity(count);
-        
+
         for _ in 0..count {
             let has_item = reader.read_u8()? != 0;
             if has_item {
@@ -98,7 +98,7 @@ impl Packet for TradeItem {
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_i32::<LittleEndian>(self.trade_items.len() as i32)?;
-        
+
         for item_opt in &self.trade_items {
             if let Some(item) = item_opt {
                 writer.write_u8(1)?;

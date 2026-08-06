@@ -9,8 +9,8 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
 use crate::ui::text_renderer::draw_text_cn;
+use macroquad::prelude::*;
 
 /// 行会领地购买动作
 #[derive(Debug, Clone)]
@@ -84,8 +84,14 @@ impl GuildTerritoryDialogHybrid {
     }
 
     /// 处理鼠标和绘制
-    pub fn draw(&mut self, screen_w: f32, screen_h: f32, mouse_pos: Vec2,
-                mouse_wheel: f32, left_clicked: bool) -> bool {
+    pub fn draw(
+        &mut self,
+        screen_w: f32,
+        screen_h: f32,
+        mouse_pos: Vec2,
+        mouse_wheel: f32,
+        left_clicked: bool,
+    ) -> bool {
         if !self.visible {
             return false;
         }
@@ -96,14 +102,18 @@ impl GuildTerritoryDialogHybrid {
         let page_bar_h = 30.0;
         let dialog_w = 400.0;
         let max_items = 6;
-        let dialog_h = title_h + (max_items.min(self.entries.len()) as f32) * item_h
-            + page_bar_h + padding * 3.0;
+        let dialog_h = title_h
+            + (max_items.min(self.entries.len()) as f32) * item_h
+            + page_bar_h
+            + padding * 3.0;
 
         let dialog_x = (screen_w - dialog_w) / 2.0;
         let dialog_y = (screen_h - dialog_h) / 2.0;
 
-        let mouse_over = mouse_pos.x >= dialog_x && mouse_pos.x <= dialog_x + dialog_w
-            && mouse_pos.y >= dialog_y && mouse_pos.y <= dialog_y + dialog_h;
+        let mouse_over = mouse_pos.x >= dialog_x
+            && mouse_pos.x <= dialog_x + dialog_w
+            && mouse_pos.y >= dialog_y
+            && mouse_pos.y <= dialog_y + dialog_h;
 
         // 滚动
         if mouse_over && mouse_wheel != 0.0 {
@@ -111,11 +121,22 @@ impl GuildTerritoryDialogHybrid {
         }
 
         // 背景
-        draw_rectangle(dialog_x, dialog_y, dialog_w, dialog_h, Color::from_rgba(25, 25, 35, 230));
+        draw_rectangle(
+            dialog_x,
+            dialog_y,
+            dialog_w,
+            dialog_h,
+            Color::from_rgba(25, 25, 35, 230),
+        );
 
         // 标题
-        draw_text_cn("行会领地管理", dialog_x + 15.0, dialog_y + 10.0, 16.0,
-            Color::from_rgba(255, 220, 100, 255));
+        draw_text_cn(
+            "行会领地管理",
+            dialog_x + 15.0,
+            dialog_y + 10.0,
+            16.0,
+            Color::from_rgba(255, 220, 100, 255),
+        );
 
         // 领地列表
         let content_y = dialog_y + title_h + padding;
@@ -126,15 +147,32 @@ impl GuildTerritoryDialogHybrid {
             }
 
             // 领地信息
-            let status = if entry.is_purchased { "已占领" } else { &entry.owner };
+            let status = if entry.is_purchased {
+                "已占领"
+            } else {
+                &entry.owner
+            };
             let line1 = format!("{} - {}", entry.name, entry.map_name);
             let line2 = format!("状态: {} | 价格: {}", status, entry.price);
 
-            draw_text_cn(&line1, dialog_x + 15.0, y + 5.0, 13.0,
-                if entry.is_purchased { Color::from_rgba(100, 200, 100, 255) }
-                else { Color::from_rgba(200, 200, 200, 255) });
-            draw_text_cn(&line2, dialog_x + 15.0, y + 20.0, 11.0,
-                Color::from_rgba(150, 150, 150, 255));
+            draw_text_cn(
+                &line1,
+                dialog_x + 15.0,
+                y + 5.0,
+                13.0,
+                if entry.is_purchased {
+                    Color::from_rgba(100, 200, 100, 255)
+                } else {
+                    Color::from_rgba(200, 200, 200, 255)
+                },
+            );
+            draw_text_cn(
+                &line2,
+                dialog_x + 15.0,
+                y + 20.0,
+                11.0,
+                Color::from_rgba(150, 150, 150, 255),
+            );
 
             // 未占领的领地在右侧显示"购买"按钮
             if !entry.is_purchased {
@@ -169,8 +207,10 @@ impl GuildTerritoryDialogHybrid {
 
         // 关闭按钮
         let close_x = dialog_x + dialog_w - 70.0;
-        let mouse_over_close = mouse_pos.x >= close_x && mouse_pos.x <= close_x + 55.0
-            && mouse_pos.y >= page_y && mouse_pos.y <= page_y + 25.0;
+        let mouse_over_close = mouse_pos.x >= close_x
+            && mouse_pos.x <= close_x + 55.0
+            && mouse_pos.y >= page_y
+            && mouse_pos.y <= page_y + 25.0;
         let close_color = if mouse_over_close {
             Color::from_rgba(150, 50, 50, 255)
         } else {

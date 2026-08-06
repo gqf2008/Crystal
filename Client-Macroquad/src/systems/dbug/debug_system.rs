@@ -1,6 +1,6 @@
 use crate::components::{
-    AttackState, LocalPlayer, MountState, Movement, MovementVelocity, Path, Player, PlayerData,
-    Position, RenderConfig, RenderPass, RenderStage, Velocity, Camera, MapData,
+    AttackState, Camera, LocalPlayer, MapData, MountState, Movement, MovementVelocity, Path,
+    Player, PlayerData, Position, RenderConfig, RenderPass, RenderStage, Velocity,
 };
 use crate::systems::logic::physics::MapUpdateSystem;
 use crate::systems::RenderSystem;
@@ -229,7 +229,11 @@ impl DebugSystem {
 }
 
 impl RenderSystem for DebugSystem {
-    fn update(&mut self, ctx: &mut crate::game::GameContext, _delay_time: f32) -> crate::game::GameResult {
+    fn update(
+        &mut self,
+        ctx: &mut crate::game::GameContext,
+        _delay_time: f32,
+    ) -> crate::game::GameResult {
         if !cfg!(debug_assertions) {
             return Ok(());
         }
@@ -271,10 +275,7 @@ impl RenderSystem for DebugSystem {
         Ok(())
     }
 
-    fn draw(
-        &mut self,
-        world: &hecs::World,
-    ) -> crate::game::GameResult {
+    fn draw(&mut self, world: &hecs::World) -> crate::game::GameResult {
         let stage = world
             .query::<&RenderPass>()
             .iter()
@@ -557,7 +558,10 @@ impl DebugSystem {
 
         let mut lines: Vec<String> = Vec::with_capacity(10);
         if let Some(pd) = player_data.as_deref() {
-            lines.push(format!("Player: {} (real_id={} object_id={})", pd.name, pd.id, pd.object_id));
+            lines.push(format!(
+                "Player: {} (real_id={} object_id={})",
+                pd.name, pd.id, pd.object_id
+            ));
         } else {
             lines.push("Player: <no PlayerData>".to_string());
         }
@@ -610,13 +614,7 @@ impl DebugSystem {
         let x = 12.0;
         let mut y = 58.0;
         for line in lines {
-            draw_text(
-                &line,
-                x,
-                y,
-                font_size,
-                Color::from_rgba(255, 255, 255, 220),
-            );
+            draw_text(&line, x, y, font_size, Color::from_rgba(255, 255, 255, 220));
             y += line_height;
         }
     }

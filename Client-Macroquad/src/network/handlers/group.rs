@@ -1,8 +1,8 @@
 // Group Handler - 组队相关数据包处理
 
-use mir2_shared::packets::{PacketHeader, Packet, server};
-use mir2_shared::enums::ServerPacketIds;
 use crate::network::handlers::{NetworkEvent, PacketHandler};
+use mir2_shared::enums::ServerPacketIds;
+use mir2_shared::packets::{server, Packet, PacketHeader};
 use std::io::Cursor;
 
 pub struct GroupHandler;
@@ -70,7 +70,8 @@ impl PacketHandler for GroupHandler {
                     });
                     tracing::info!(
                         "👥 Group member '{}' on map '{}'",
-                        packet.player_name, packet.player_map
+                        packet.player_name,
+                        packet.player_map
                     );
                 }
             }
@@ -83,13 +84,20 @@ impl PacketHandler for GroupHandler {
                         x: packet.location.x,
                         y: packet.location.y,
                     });
-                    tracing::debug!("👥 Group member {} at ({}, {})", packet.member_name, packet.location.x, packet.location.y);
+                    tracing::debug!(
+                        "👥 Group member {} at ({}, {})",
+                        packet.member_name,
+                        packet.location.x,
+                        packet.location.y
+                    );
                 }
             }
 
             _ => {
                 tracing::warn!("⚠️ GroupHandler: Unknown opcode {:04X}", header.opcode);
-                events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                events.push(NetworkEvent::UnhandledPacket {
+                    opcode: header.opcode,
+                });
             }
         }
 

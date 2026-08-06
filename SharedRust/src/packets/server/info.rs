@@ -8,10 +8,10 @@
 
 use std::io::{Read, Write};
 
+use super::super::base::Packet;
 use crate::data::client_data::{ClientMonsterInfo, ClientNPCInfo};
 use crate::data::stats::SharedResult;
 use crate::enums::ServerPacketIds;
-use super::super::base::Packet;
 
 /// Server response to `RequestMonsterInfo`: detailed monster info for tooltip.
 #[derive(Debug, Clone)]

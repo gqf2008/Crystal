@@ -11,21 +11,21 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
+use super::native_ui_utils::DragHelper;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
-use super::native_ui_utils::DragHelper;
+use macroquad::prelude::*;
 
 /// 队伍成员
 #[derive(Debug, Clone)]
 pub struct GroupMember {
     pub name: String,
-    pub hp_percent: f32,   // 0.0 - 1.0
+    pub hp_percent: f32, // 0.0 - 1.0
     pub online: bool,
     pub is_leader: bool,
-    pub map_name: String,   // 成员所在地图名称
-    pub x: i32,             // 地图坐标X
-    pub y: i32,             // 地图坐标Y
+    pub map_name: String, // 成员所在地图名称
+    pub x: i32,           // 地图坐标X
+    pub y: i32,           // 地图坐标Y
 }
 
 /// 组队对话框动作
@@ -36,7 +36,11 @@ pub enum GroupDialogAction {
     Invite,
     Leave,
     KickSelected,
-    ViewMemberDetail { name: String, hp_percent: f32, is_leader: bool },
+    ViewMemberDetail {
+        name: String,
+        hp_percent: f32,
+        is_leader: bool,
+    },
 }
 
 pub struct GroupDialogHybrid {
@@ -179,7 +183,9 @@ impl GroupDialogHybrid {
         if self.local_player_name.is_empty() {
             return false;
         }
-        self.members.iter().any(|m| m.is_leader && m.name == self.local_player_name)
+        self.members
+            .iter()
+            .any(|m| m.is_leader && m.name == self.local_player_name)
     }
 
     /// 获取待处理动作
@@ -272,7 +278,11 @@ impl GroupDialogHybrid {
         }
 
         // 允许加入状态指示
-        let status_text = if self.allow_join { "允许加入" } else { "拒绝加入" };
+        let status_text = if self.allow_join {
+            "允许加入"
+        } else {
+            "拒绝加入"
+        };
         let status_color = if self.allow_join { GREEN } else { RED };
         draw_text_cn(
             status_text,
@@ -334,22 +344,26 @@ impl GroupDialogHybrid {
                 }
 
                 // 名称
-                let name_x = if member.is_leader { item_rect.x + 40.0 } else { item_rect.x };
+                let name_x = if member.is_leader {
+                    item_rect.x + 40.0
+                } else {
+                    item_rect.x
+                };
                 let name_color = if member.online { WHITE } else { GRAY };
-                draw_text_cn(
-                    &member.name,
-                    name_x,
-                    item_rect.y + 14.0,
-                    12.0,
-                    name_color,
-                );
+                draw_text_cn(&member.name, name_x, item_rect.y + 14.0, 12.0, name_color);
 
                 // 血条
                 let hp_bar_x = item_rect.x + 150.0;
                 let hp_bar_y = item_rect.y + 8.0;
                 let hp_bar_w = 80.0;
                 let hp_bar_h = 8.0;
-                draw_rectangle(hp_bar_x, hp_bar_y, hp_bar_w, hp_bar_h, Color::from_rgba(40, 40, 50, 255));
+                draw_rectangle(
+                    hp_bar_x,
+                    hp_bar_y,
+                    hp_bar_w,
+                    hp_bar_h,
+                    Color::from_rgba(40, 40, 50, 255),
+                );
                 let hp_fill_w = (hp_bar_w * member.hp_percent).clamp(0.0, hp_bar_w);
                 let hp_color = if member.hp_percent > 0.6 {
                     Color::from_rgba(80, 200, 80, 200)
@@ -428,7 +442,14 @@ impl GroupDialogHybrid {
                 Color::from_rgba(60, 70, 80, 255)
             };
             draw_rectangle(btn_x, btn_y, btn_w, btn_h, btn_color);
-            draw_rectangle_lines(btn_x, btn_y, btn_w, btn_h, 1.0, Color::from_rgba(100, 100, 120, 255));
+            draw_rectangle_lines(
+                btn_x,
+                btn_y,
+                btn_w,
+                btn_h,
+                1.0,
+                Color::from_rgba(100, 100, 120, 255),
+            );
 
             // 按钮文字
             draw_text_cn(label, btn_x + 10.0, btn_y + 16.0, 12.0, WHITE);
@@ -455,7 +476,14 @@ impl GroupDialogHybrid {
                         Color::from_rgba(120, 40, 40, 255)
                     };
                     draw_rectangle(kick_btn_x, btn_y, btn_w, btn_h, kick_color);
-                    draw_rectangle_lines(kick_btn_x, btn_y, btn_w, btn_h, 1.0, Color::from_rgba(200, 80, 80, 255));
+                    draw_rectangle_lines(
+                        kick_btn_x,
+                        btn_y,
+                        btn_w,
+                        btn_h,
+                        1.0,
+                        Color::from_rgba(200, 80, 80, 255),
+                    );
 
                     draw_text_cn("踢出", kick_btn_x + 15.0, btn_y + 16.0, 12.0, WHITE);
 

@@ -1,6 +1,7 @@
 use crate::components::{
-    FloatingText, Health, HealthBarAnim, HoverHighlight, LibrarySprite, Monster, NameColor, NPC,
+    FloatingText, Health, HealthBarAnim, HoverHighlight, LibrarySprite, Monster, NameColor,
     NetworkObjectType, NetworkSync, Particle, Position, RenderPass, RenderStage, SpriteBlendMode,
+    NPC,
 };
 use crate::game::GameResult;
 use crate::systems::RenderSystem;
@@ -49,14 +50,15 @@ fn draw_world_overlays(world: &hecs::World, alpha: f32) {
         x >= view_left && x <= view_right && y >= view_top && y <= view_bottom
     };
 
-    let draw_text_outline_world = |text: &str, x: f32, y: f32, font_size: f32, color: Color, outline: Color| {
-        let d = (1.0 / cam_zoom).max(0.35 / cam_zoom);
-        let offsets = [vec2(-d, 0.0), vec2(d, 0.0), vec2(0.0, -d), vec2(0.0, d)];
-        for off in offsets {
-            draw_text_cn(text, x + off.x, y + off.y, font_size, outline);
-        }
-        draw_text_cn(text, x, y, font_size, color);
-    };
+    let draw_text_outline_world =
+        |text: &str, x: f32, y: f32, font_size: f32, color: Color, outline: Color| {
+            let d = (1.0 / cam_zoom).max(0.35 / cam_zoom);
+            let offsets = [vec2(-d, 0.0), vec2(d, 0.0), vec2(0.0, -d), vec2(0.0, d)];
+            for off in offsets {
+                draw_text_cn(text, x + off.x, y + off.y, font_size, outline);
+            }
+            draw_text_cn(text, x, y, font_size, color);
+        };
 
     let (hovered_npc_object_id, hovered_monster_object_id) = world
         .query::<&HoverHighlight>()
@@ -66,7 +68,10 @@ fn draw_world_overlays(world: &hecs::World, alpha: f32) {
         .unwrap_or((None, None));
 
     if let Some(hover_oid) = hovered_npc_object_id {
-        for (spr, pos, sync) in world.query::<(&LibrarySprite, &Position, &NetworkSync)>().iter() {
+        for (spr, pos, sync) in world
+            .query::<(&LibrarySprite, &Position, &NetworkSync)>()
+            .iter()
+        {
             if sync.object_type != NetworkObjectType::NPC || sync.object_id != hover_oid {
                 continue;
             }
@@ -92,14 +97,19 @@ fn draw_world_overlays(world: &hecs::World, alpha: f32) {
                     base_x + off.x,
                     base_y + off.y,
                     outline,
-                    DrawTextureParams { ..Default::default() },
+                    DrawTextureParams {
+                        ..Default::default()
+                    },
                 );
             }
         }
     }
 
     if let Some(hover_oid) = hovered_monster_object_id {
-        for (spr, pos, sync) in world.query::<(&LibrarySprite, &Position, &NetworkSync)>().iter() {
+        for (spr, pos, sync) in world
+            .query::<(&LibrarySprite, &Position, &NetworkSync)>()
+            .iter()
+        {
             if sync.object_type != NetworkObjectType::Monster || sync.object_id != hover_oid {
                 continue;
             }
@@ -125,7 +135,9 @@ fn draw_world_overlays(world: &hecs::World, alpha: f32) {
                     base_x + off.x,
                     base_y + off.y,
                     outline,
-                    DrawTextureParams { ..Default::default() },
+                    DrawTextureParams {
+                        ..Default::default()
+                    },
                 );
             }
         }
@@ -310,7 +322,8 @@ impl RenderSystem for EffectRenderSystem {
         let pass = _world
             .query::<&RenderPass>()
             .iter()
-            .next().copied()
+            .next()
+            .copied()
             .unwrap_or_default();
 
         // ghost pass 只画本地玩家，不画特效/叠加层
@@ -331,24 +344,27 @@ impl RenderSystem for EffectRenderSystem {
             return Ok(());
         }
 
-        let draw_layer = |lib_sprite: &LibrarySprite, pos: &Position, tint: Color, offset: Vec2| -> bool {
-            let Some(info) = lib_sprite.library.get_texture(lib_sprite.texture_index()) else {
-                return false;
+        let draw_layer =
+            |lib_sprite: &LibrarySprite, pos: &Position, tint: Color, offset: Vec2| -> bool {
+                let Some(info) = lib_sprite.library.get_texture(lib_sprite.texture_index()) else {
+                    return false;
+                };
+                let Some(tex) = info.image else {
+                    return false;
+                };
+                let draw_x = pos.x + info.offset_x as f32 + offset.x;
+                let draw_y = pos.y + info.offset_y as f32 + offset.y;
+                draw_texture_ex(
+                    &tex,
+                    draw_x,
+                    draw_y,
+                    tint,
+                    DrawTextureParams {
+                        ..Default::default()
+                    },
+                );
+                true
             };
-            let Some(tex) = info.image else {
-                return false;
-            };
-            let draw_x = pos.x + info.offset_x as f32 + offset.x;
-            let draw_y = pos.y + info.offset_y as f32 + offset.y;
-            draw_texture_ex(
-                &tex,
-                draw_x,
-                draw_y,
-                tint,
-                DrawTextureParams { ..Default::default() },
-            );
-            true
-        };
 
         for (spr, pos) in _world.query::<(&LibrarySprite, &Position)>().iter() {
             let tint = Color::new(1.0, 1.0, 1.0, alpha);
@@ -407,12 +423,22 @@ fn draw_particles(world: &hecs::World, alpha: f32) {
 
         let c = &particle.color;
         let a = (c.a as f32 / 255.0) * alpha * particle.blend_rate;
-        let tint = Color::new(c.r as f32 / 255.0, c.g as f32 / 255.0, c.b as f32 / 255.0, a);
+        let tint = Color::new(
+            c.r as f32 / 255.0,
+            c.g as f32 / 255.0,
+            c.b as f32 / 255.0,
+            a,
+        );
         let size = particle.size / cam_zoom;
 
         if size < 0.5 {
             // 极小粒子：用像素点
-            draw_circle(particle.position.x, particle.position.y, 1.0 / cam_zoom, tint);
+            draw_circle(
+                particle.position.x,
+                particle.position.y,
+                1.0 / cam_zoom,
+                tint,
+            );
         } else {
             draw_circle(particle.position.x, particle.position.y, size, tint);
         }

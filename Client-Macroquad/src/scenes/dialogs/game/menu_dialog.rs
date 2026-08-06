@@ -9,27 +9,27 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
+use super::native_ui_utils::DragHelper;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
-use super::native_ui_utils::DragHelper;
+use macroquad::prelude::*;
 
 /// 菜单项类型
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MenuAction {
-    Exit,        // 退出游戏
-    Logout,      // 下线
-    Help,        // 帮助
-    Keyboard,    // 键盘设置
-    Ranking,     // 排名
-    Creature,    // 宠物
-    Mount,       // 坐骑
-    Fishing,     // 钓鱼
-    Friends,     // 好友
-    Mentor,      // 师徒
-    Relationship,// 关系
-    Group,       // 组队
-    Guild,       // 行会
+    Exit,         // 退出游戏
+    Logout,       // 下线
+    Help,         // 帮助
+    Keyboard,     // 键盘设置
+    Ranking,      // 排名
+    Creature,     // 宠物
+    Mount,        // 坐骑
+    Fishing,      // 钓鱼
+    Friends,      // 好友
+    Mentor,       // 师徒
+    Relationship, // 关系
+    Group,        // 组队
+    Guild,        // 行会
 }
 
 /// 菜单按钮数据
@@ -68,27 +68,107 @@ impl MenuDialogHybrid {
     /// 菜单按钮配置 (基于 C# 源码)
     const MENU_BUTTONS: &'static [MenuButton] = &[
         // C#: ExitButton: Index=633, Location=(3, 12), Library=Title
-        MenuButton { action: MenuAction::Exit, label: "退出", normal_idx: 633, hover_idx: 634, pressed_idx: 635, library: LibraryName::Title, y_offset: 12.0 },
+        MenuButton {
+            action: MenuAction::Exit,
+            label: "退出",
+            normal_idx: 633,
+            hover_idx: 634,
+            pressed_idx: 635,
+            library: LibraryName::Title,
+            y_offset: 12.0,
+        },
         // C#: LogOutButton: Index=636, Location=(3, 31), Library=Title
-        MenuButton { action: MenuAction::Logout, label: "下线", normal_idx: 636, hover_idx: 637, pressed_idx: 638, library: LibraryName::Title, y_offset: 31.0 },
+        MenuButton {
+            action: MenuAction::Logout,
+            label: "下线",
+            normal_idx: 636,
+            hover_idx: 637,
+            pressed_idx: 638,
+            library: LibraryName::Title,
+            y_offset: 31.0,
+        },
         // C#: HelpButton: Index=1970, Location=(3, 50), Library=Prguse
-        MenuButton { action: MenuAction::Help, label: "帮助", normal_idx: 1970, hover_idx: 1971, pressed_idx: 1972, library: LibraryName::Prguse, y_offset: 50.0 },
+        MenuButton {
+            action: MenuAction::Help,
+            label: "帮助",
+            normal_idx: 1970,
+            hover_idx: 1971,
+            pressed_idx: 1972,
+            library: LibraryName::Prguse,
+            y_offset: 50.0,
+        },
         // C#: KeyboardLayoutButton: Index=1973, Location=(3, 69), Library=Prguse
-        MenuButton { action: MenuAction::Keyboard, label: "键盘", normal_idx: 1973, hover_idx: 1974, pressed_idx: 1975, library: LibraryName::Prguse, y_offset: 69.0 },
+        MenuButton {
+            action: MenuAction::Keyboard,
+            label: "键盘",
+            normal_idx: 1973,
+            hover_idx: 1974,
+            pressed_idx: 1975,
+            library: LibraryName::Prguse,
+            y_offset: 69.0,
+        },
         // C#: RankingButton: Index=2000, Location=(3, 88), Library=Prguse
-        MenuButton { action: MenuAction::Ranking, label: "排名", normal_idx: 2000, hover_idx: 2001, pressed_idx: 2002, library: LibraryName::Prguse, y_offset: 88.0 },
+        MenuButton {
+            action: MenuAction::Ranking,
+            label: "排名",
+            normal_idx: 2000,
+            hover_idx: 2001,
+            pressed_idx: 2002,
+            library: LibraryName::Prguse,
+            y_offset: 88.0,
+        },
         // C#: IntelligentCreatureButton: Index=431, Location=(3, 126), Library=Prguse2
-        MenuButton { action: MenuAction::Creature, label: "宠物", normal_idx: 431, hover_idx: 432, pressed_idx: 433, library: LibraryName::Prguse2, y_offset: 126.0 },
+        MenuButton {
+            action: MenuAction::Creature,
+            label: "宠物",
+            normal_idx: 431,
+            hover_idx: 432,
+            pressed_idx: 433,
+            library: LibraryName::Prguse2,
+            y_offset: 126.0,
+        },
         // C#: RideButton: Index=1976, Location=(3, 145), Library=Prguse
-        MenuButton { action: MenuAction::Mount, label: "坐骑", normal_idx: 1976, hover_idx: 1977, pressed_idx: 1978, library: LibraryName::Prguse, y_offset: 145.0 },
+        MenuButton {
+            action: MenuAction::Mount,
+            label: "坐骑",
+            normal_idx: 1976,
+            hover_idx: 1977,
+            pressed_idx: 1978,
+            library: LibraryName::Prguse,
+            y_offset: 145.0,
+        },
         // C#: FishingButton: Index=1979, Location=(3, 164), Library=Prguse
-        MenuButton { action: MenuAction::Fishing, label: "钓鱼", normal_idx: 1979, hover_idx: 1980, pressed_idx: 1981, library: LibraryName::Prguse, y_offset: 164.0 },
+        MenuButton {
+            action: MenuAction::Fishing,
+            label: "钓鱼",
+            normal_idx: 1979,
+            hover_idx: 1980,
+            pressed_idx: 1981,
+            library: LibraryName::Prguse,
+            y_offset: 164.0,
+        },
         // C#: FriendButton: Index=1982, Location=(3, 183), Library=Prguse
-        MenuButton { action: MenuAction::Friends, label: "好友", normal_idx: 1982, hover_idx: 1983, pressed_idx: 1984, library: LibraryName::Prguse, y_offset: 183.0 },
+        MenuButton {
+            action: MenuAction::Friends,
+            label: "好友",
+            normal_idx: 1982,
+            hover_idx: 1983,
+            pressed_idx: 1984,
+            library: LibraryName::Prguse,
+            y_offset: 183.0,
+        },
         // C#: MentorButton: Index=1985, Location=(3, 202), Library=Prguse
-        MenuButton { action: MenuAction::Mentor, label: "师徒", normal_idx: 1985, hover_idx: 1986, pressed_idx: 1987, library: LibraryName::Prguse, y_offset: 202.0 },
+        MenuButton {
+            action: MenuAction::Mentor,
+            label: "师徒",
+            normal_idx: 1985,
+            hover_idx: 1986,
+            pressed_idx: 1987,
+            library: LibraryName::Prguse,
+            y_offset: 202.0,
+        },
     ];
-    
+
     pub fn new() -> Self {
         // 初始位置将在显示时根据屏幕计算
         Self {
@@ -161,7 +241,7 @@ impl MenuDialogHybrid {
             self.size = vec2(texture.width as f32, texture.height as f32);
             self.bg_texture = texture.image;
         }
-        
+
         // 预加载所有按钮纹理
         for btn in Self::MENU_BUTTONS {
             let _ = btn.library.get_texture(btn.normal_idx);
@@ -186,7 +266,6 @@ impl MenuDialogHybrid {
         self.draw_background();
 
         // 绘制菜单按钮并检测点击
-        
 
         self.draw_menu_buttons(mouse_pos)
     }
@@ -218,7 +297,13 @@ impl MenuDialogHybrid {
                 2.0,
                 Color::from_rgba(100, 100, 100, 255),
             );
-            draw_text_cn("菜单", self.position.x + 5.0, self.position.y + 15.0, 12.0, WHITE);
+            draw_text_cn(
+                "菜单",
+                self.position.x + 5.0,
+                self.position.y + 15.0,
+                12.0,
+                WHITE,
+            );
         }
     }
 
@@ -232,14 +317,14 @@ impl MenuDialogHybrid {
             // C#: Location = new Point(3, y_offset)
             let btn_x = self.position.x + 3.0;
             let btn_y = self.position.y + btn.y_offset;
-            
+
             // 获取按钮尺寸
             let btn_size = if let Some(tex_info) = btn.library.get_texture(btn.normal_idx) {
                 vec2(tex_info.width as f32, tex_info.height as f32)
             } else {
                 vec2(38.0, 19.0) // 默认按钮尺寸
             };
-            
+
             let btn_rect = Rect::new(btn_x, btn_y, btn_size.x, btn_size.y);
             let is_hovered = btn_rect.contains(mouse_pos);
             let is_pressed = is_hovered && mouse_down;

@@ -21,7 +21,7 @@
 
 use macroquad::prelude::*;
 
-use client_macroquad::resources::{set_data_path, preload_libraries, LibraryName};
+use client_macroquad::resources::{preload_libraries, set_data_path, LibraryName};
 use client_macroquad::scenes::dialogs::game::BeltDialogHybrid;
 
 fn window_conf() -> Conf {
@@ -50,30 +50,27 @@ async fn main() {
     println!("  - 拖动物品到窗口外 → 丢弃");
     println!("  - 双击物品 → 使用");
     println!("==========================================");
-    
+
     // 初始化资源
     println!("🔄 正在加载纹理资源...");
     set_data_path("./Data/");
-    preload_libraries(&[
-        LibraryName::Prguse,
-        LibraryName::Items,
-    ]);
+    preload_libraries(&[LibraryName::Prguse, LibraryName::Items]);
     println!("✅ 纹理库加载完成");
-    
+
     // 创建混合版快捷栏
     let mut belt_dialog = BeltDialogHybrid::new();
     belt_dialog.load_textures();
     belt_dialog.set_position(vec2(
         screen_width() / 2.0 - belt_dialog.get_size().x / 2.0,
-        screen_height() - 100.0
+        screen_height() - 100.0,
     ));
     belt_dialog.open();
-    
+
     println!("🎒 混合版快捷栏已创建");
-    
+
     loop {
         clear_background(Color::from_rgba(30, 30, 40, 255));
-        
+
         // 绘制背景网格
         let grid_color = Color::from_rgba(50, 50, 60, 100);
         for x in (0..screen_width() as i32).step_by(50) {
@@ -82,44 +79,62 @@ async fn main() {
         for y in (0..screen_height() as i32).step_by(50) {
             draw_line(0.0, y as f32, screen_width(), y as f32, 1.0, grid_color);
         }
-        
+
         // 绘制说明
         draw_text(
             "[B] Toggle | [R] Rotate | [1-6] Use | Drag to swap/drop | Double-click to use",
-            10.0, 30.0, 18.0, WHITE
+            10.0,
+            30.0,
+            18.0,
+            WHITE,
         );
-        
+
         // 显示版本信息
         draw_text(
             "Hybrid Version: Native drawing + mqui Group::draggable()",
-            10.0, 55.0, 16.0, GRAY
+            10.0,
+            55.0,
+            16.0,
+            GRAY,
         );
-        
+
         // 处理快捷键
         if is_key_pressed(KeyCode::B) {
             belt_dialog.toggle();
         }
-        
+
         if is_key_pressed(KeyCode::R) && belt_dialog.is_visible() {
             belt_dialog.flip_layout();
         }
-        
+
         // 数字键使用物品
-        if is_key_pressed(KeyCode::Key1) { belt_dialog.use_item(0); }
-        if is_key_pressed(KeyCode::Key2) { belt_dialog.use_item(1); }
-        if is_key_pressed(KeyCode::Key3) { belt_dialog.use_item(2); }
-        if is_key_pressed(KeyCode::Key4) { belt_dialog.use_item(3); }
-        if is_key_pressed(KeyCode::Key5) { belt_dialog.use_item(4); }
-        if is_key_pressed(KeyCode::Key6) { belt_dialog.use_item(5); }
-        
+        if is_key_pressed(KeyCode::Key1) {
+            belt_dialog.use_item(0);
+        }
+        if is_key_pressed(KeyCode::Key2) {
+            belt_dialog.use_item(1);
+        }
+        if is_key_pressed(KeyCode::Key3) {
+            belt_dialog.use_item(2);
+        }
+        if is_key_pressed(KeyCode::Key4) {
+            belt_dialog.use_item(3);
+        }
+        if is_key_pressed(KeyCode::Key5) {
+            belt_dialog.use_item(4);
+        }
+        if is_key_pressed(KeyCode::Key6) {
+            belt_dialog.use_item(5);
+        }
+
         // ESC 退出
         if is_key_pressed(KeyCode::Escape) {
             break;
         }
-        
+
         // 更新和绘制快捷栏
         belt_dialog.update_and_draw();
-        
+
         // 显示状态
         let status = if belt_dialog.is_visible() {
             "快捷栏: 打开".to_string()
@@ -127,15 +142,18 @@ async fn main() {
             "快捷栏: 关闭 (按 B 打开)".to_string()
         };
         draw_text(&status, 10.0, screen_height() - 40.0, 18.0, GREEN);
-        
+
         // 绘制 FPS
         draw_text(
             &format!("FPS: {}", get_fps()),
-            screen_width() - 100.0, 30.0, 20.0, GREEN
+            screen_width() - 100.0,
+            30.0,
+            20.0,
+            GREEN,
         );
-        
+
         next_frame().await;
     }
-    
+
     println!("👋 程序退出");
 }

@@ -55,11 +55,7 @@ impl LogicSystem for BufSystem {
         // 本地玩家的 Buff 计时更新
         let mut expired_buff_ids: Vec<u32> = Vec::new();
         let mut local_player_buffs_changed = false;
-        for (buff_list, _local) in ctx
-            .world
-            .query::<(&mut BuffList, &LocalPlayer)>()
-            .iter()
-        {
+        for (buff_list, _local) in ctx.world.query::<(&mut BuffList, &LocalPlayer)>().iter() {
             let before_count = buff_list.active_buffs.len();
             let expired = Self::update_buff_list(buff_list, delta_ms);
             if !expired.is_empty() || buff_list.active_buffs.len() != before_count {
@@ -83,7 +79,9 @@ impl LogicSystem for BufSystem {
                 if let Some(ui) = ctx.world.query::<&UiState>().iter().next() {
                     let mut state = ui.borrow_mut();
                     for buff_id in &expired_buff_ids {
-                        state.pending_commands.push(UiCommand::RemoveBuff { buff_type: *buff_id });
+                        state.pending_commands.push(UiCommand::RemoveBuff {
+                            buff_type: *buff_id,
+                        });
                     }
                 }
             }

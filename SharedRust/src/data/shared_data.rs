@@ -34,9 +34,9 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use serde::{Deserialize, Serialize};
 
 use crate::binary::{read_bool, read_dotnet_string, write_bool, write_dotnet_string};
+use crate::data::stats::{SharedError, SharedResult};
 use crate::enums::{DoorState, MirClass};
 use crate::map::Point;
-use crate::data::stats::{SharedError, SharedResult};
 
 use std::convert::TryFrom;
 

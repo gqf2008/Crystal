@@ -2,16 +2,16 @@
 // Scene System - 游戏场景管理系统（enum_dispatch 静态分发）
 // ============================================================================
 
-pub mod dialogs;  // 公共对话框组件
-pub mod login_scene;
-pub mod select_scene;  // 新的角色选择场景
+pub mod dialogs; // 公共对话框组件
 pub mod game_scene;
 pub mod loading_scene;
+pub mod login_scene;
+pub mod select_scene; // 新的角色选择场景
 
-pub use login_scene::LoginScene;
-pub use select_scene::{CharacterInfo, SelectScene};  // 新的角色选择场景
 pub use game_scene::GameScene;
 pub use loading_scene::LoadingScene;
+pub use login_scene::LoginScene;
+pub use select_scene::{CharacterInfo, SelectScene}; // 新的角色选择场景
 
 use crate::game::GameResult;
 use enum_dispatch::enum_dispatch;
@@ -46,4 +46,3 @@ pub enum SceneKind {
     Game(GameScene),
     Loading(LoadingScene),
 }
-

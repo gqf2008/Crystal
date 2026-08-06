@@ -54,14 +54,9 @@ pub enum NpcGoodsDialogAction {
         use_pearls: bool,
     },
     /// 请求出售物品
-    RequestSell {
-        unique_id: u64,
-        count: u32,
-    },
+    RequestSell { unique_id: u64, count: u32 },
     /// 请求修理装备
-    RequestRepair {
-        unique_id: u64,
-    },
+    RequestRepair { unique_id: u64 },
     /// 请求存取仓库
     RequestStorage {
         unique_id: u64,
@@ -79,10 +74,10 @@ enum HoverTarget {
 /// NPC 商店对话框模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NpcGoodsMode {
-    Buy,       // 购买模式
-    Sell,      // 出售模式
-    Repair,    // 修理模式
-    Storage,   // 仓库模式
+    Buy,     // 购买模式
+    Sell,    // 出售模式
+    Repair,  // 修理模式
+    Storage, // 仓库模式
 }
 
 pub struct NpcGoodsDialogHybrid {
@@ -235,7 +230,10 @@ impl NpcGoodsDialogHybrid {
 
             scroll_up_btn: ButtonTextures::load_from_library(LibraryName::Prguse2, 197),
             scroll_down_btn: ButtonTextures::load_from_library(LibraryName::Prguse2, 207),
-            scroll_bar_btn: ButtonTextures::load_from_indices(LibraryName::Prguse2, [205, 206, 206]),
+            scroll_bar_btn: ButtonTextures::load_from_indices(
+                LibraryName::Prguse2,
+                [205, 206, 206],
+            ),
 
             title_label: LibraryName::Title.get_texture(27).and_then(|i| i.image),
             title_label_craft: LibraryName::Title.get_texture(12).and_then(|i| i.image),
@@ -271,7 +269,12 @@ impl NpcGoodsDialogHybrid {
     }
 
     pub fn rect(&self) -> Rect {
-        Rect::new(self.pos.x, self.pos.y, self.bg_size.x.max(235.0), self.bg_size.y.max(340.0))
+        Rect::new(
+            self.pos.x,
+            self.pos.y,
+            self.bg_size.x.max(235.0),
+            self.bg_size.y.max(340.0),
+        )
     }
 
     fn title_drag_rect(&self) -> Rect {
@@ -299,7 +302,14 @@ impl NpcGoodsDialogHybrid {
         self.visible && self.rect().contains(mouse_pos)
     }
 
-    pub fn new_goods(&mut self, list: Vec<UserItem>, rate: f32, panel_type: PanelType, hide_added_stats: bool, use_pearls: bool) {
+    pub fn new_goods(
+        &mut self,
+        list: Vec<UserItem>,
+        rate: f32,
+        panel_type: PanelType,
+        hide_added_stats: bool,
+        use_pearls: bool,
+    ) {
         self.dialog_mode = NpcGoodsMode::Buy;
         self.ptype = panel_type;
         self.npc_rate = rate;
@@ -348,7 +358,12 @@ impl NpcGoodsDialogHybrid {
     }
 
     /// 显示仓库存取列表（双面板：左侧仓库 + 右侧背包）
-    pub fn show_storage_mode(&mut self, storage_items: Vec<UserItem>, inventory_items: Vec<UserItem>, rate: f32) {
+    pub fn show_storage_mode(
+        &mut self,
+        storage_items: Vec<UserItem>,
+        inventory_items: Vec<UserItem>,
+        rate: f32,
+    ) {
         self.dialog_mode = NpcGoodsMode::Storage;
         self.ptype = PanelType::BuySub;
         self.npc_rate = rate;
@@ -392,10 +407,14 @@ impl NpcGoodsDialogHybrid {
     /// 添加出售物品（用于拖拽添加）
     pub fn add_sell_item(&mut self, item: UserItem) {
         if self.dialog_mode == NpcGoodsMode::Sell
-            && !self.display_goods.iter().any(|x| x.unique_id == item.unique_id) {
-                self.inventory_goods.push(item.clone());
-                self.display_goods.push(item);
-            }
+            && !self
+                .display_goods
+                .iter()
+                .any(|x| x.unique_id == item.unique_id)
+        {
+            self.inventory_goods.push(item.clone());
+            self.display_goods.push(item);
+        }
     }
 
     fn add_goods(&mut self, list: Vec<UserItem>) {
@@ -504,7 +523,12 @@ impl NpcGoodsDialogHybrid {
         let bar_h = self.scroll_bar_btn.size.y.max(1.0);
 
         if self.display_goods.len() <= Self::CELL_ROWS {
-            return Rect::new(self.pos.x + Self::SCROLL_X, self.pos.y + Self::SCROLL_BAR_MIN_Y, self.scroll_bar_btn.size.x, bar_h);
+            return Rect::new(
+                self.pos.x + Self::SCROLL_X,
+                self.pos.y + Self::SCROLL_BAR_MIN_Y,
+                self.scroll_bar_btn.size.x,
+                bar_h,
+            );
         }
 
         // 对齐 C#：h = 233 - bar_h; pos = 49 + (h/(count-8))*StartIndex
@@ -514,7 +538,12 @@ impl NpcGoodsDialogHybrid {
         let offset = (track_h / steps) * self.start_index as f32;
         let y = Self::SCROLL_BAR_MIN_Y + offset;
 
-        Rect::new(self.pos.x + Self::SCROLL_X, self.pos.y + y, self.scroll_bar_btn.size.x, bar_h)
+        Rect::new(
+            self.pos.x + Self::SCROLL_X,
+            self.pos.y + y,
+            self.scroll_bar_btn.size.x,
+            bar_h,
+        )
     }
 
     fn can_scroll(&self) -> bool {
@@ -548,7 +577,10 @@ impl NpcGoodsDialogHybrid {
         if self.storage_inventory_goods.len() <= Self::CELL_ROWS {
             self.storage_inventory_start_index = 0;
         } else {
-            let max_start = self.storage_inventory_goods.len().saturating_sub(Self::CELL_ROWS);
+            let max_start = self
+                .storage_inventory_goods
+                .len()
+                .saturating_sub(Self::CELL_ROWS);
             if self.storage_inventory_start_index > max_start {
                 self.storage_inventory_start_index = max_start;
             }
@@ -567,16 +599,22 @@ impl NpcGoodsDialogHybrid {
         if is_left {
             if self.storage_goods.len() > Self::CELL_ROWS {
                 if delta < 0 {
-                    self.storage_start_index = self.storage_start_index.saturating_sub((-delta) as usize);
+                    self.storage_start_index =
+                        self.storage_start_index.saturating_sub((-delta) as usize);
                 } else {
-                    self.storage_start_index = self.storage_start_index.saturating_add(delta as usize);
+                    self.storage_start_index =
+                        self.storage_start_index.saturating_add(delta as usize);
                 }
             }
         } else if self.storage_inventory_goods.len() > Self::CELL_ROWS {
             if delta < 0 {
-                self.storage_inventory_start_index = self.storage_inventory_start_index.saturating_sub((-delta) as usize);
+                self.storage_inventory_start_index = self
+                    .storage_inventory_start_index
+                    .saturating_sub((-delta) as usize);
             } else {
-                self.storage_inventory_start_index = self.storage_inventory_start_index.saturating_add(delta as usize);
+                self.storage_inventory_start_index = self
+                    .storage_inventory_start_index
+                    .saturating_add(delta as usize);
             }
         }
         self.clamp_storage_start_index();
@@ -684,7 +722,14 @@ impl NpcGoodsDialogHybrid {
         });
     }
 
-    fn draw_cell(&self, row: usize, item: &UserItem, selected: bool, hovered: bool, multiple_available: bool) {
+    fn draw_cell(
+        &self,
+        row: usize,
+        item: &UserItem,
+        selected: bool,
+        hovered: bool,
+        multiple_available: bool,
+    ) {
         let rect = self.cell_rect(row);
 
         // 边框（对齐 C#：BorderColour=Color.Lime，并在 x=40 处有分割线）
@@ -695,15 +740,31 @@ impl NpcGoodsDialogHybrid {
         };
 
         draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 1.0, border_color);
-        draw_line(rect.x + Self::ICON_W, rect.y, rect.x + Self::ICON_W, rect.y + rect.h, 1.0, border_color);
+        draw_line(
+            rect.x + Self::ICON_W,
+            rect.y,
+            rect.x + Self::ICON_W,
+            rect.y + rect.h,
+            1.0,
+            border_color,
+        );
 
         if hovered {
-            draw_rectangle(rect.x, rect.y, rect.w, rect.h, Color::new(1.0, 1.0, 1.0, 0.06));
+            draw_rectangle(
+                rect.x,
+                rect.y,
+                rect.w,
+                rect.h,
+                Color::new(1.0, 1.0, 1.0, 0.06),
+            );
         }
 
         // 图标：优先使用 item.info.image；否则留空
         if let Some(info) = item.info.as_ref() {
-            if let Some(img) = LibraryName::Items.get_texture(info.image as usize).and_then(|i| i.image) {
+            if let Some(img) = LibraryName::Items
+                .get_texture(info.image as usize)
+                .and_then(|i| i.image)
+            {
                 let icon_w = img.width();
                 let icon_h = img.height();
                 let off_x = rect.x + (Self::ICON_W - icon_w) / 2.0;
@@ -747,9 +808,7 @@ impl NpcGoodsDialogHybrid {
                     "Click to repair".to_string()
                 }
             }
-            NpcGoodsMode::Storage => {
-                "Storage item".to_string()
-            }
+            NpcGoodsMode::Storage => "Storage item".to_string(),
         };
         draw_text_cn(&info_text, rect.x + 44.0, rect.y + 28.0, 14.0, WHITE);
 
@@ -770,7 +829,12 @@ impl NpcGoodsDialogHybrid {
     }
 
     /// 绘制仓库模式双面板（左侧仓库 + 右侧背包）
-    fn draw_storage_panels(&mut self, _consumed: &mut bool, child_input_enabled: bool, mouse_pos: Vec2) -> bool {
+    fn draw_storage_panels(
+        &mut self,
+        _consumed: &mut bool,
+        child_input_enabled: bool,
+        mouse_pos: Vec2,
+    ) -> bool {
         let mut local_consumed = false;
 
         let panel_w = 205.0;
@@ -783,7 +847,13 @@ impl NpcGoodsDialogHybrid {
 
         // 面板标题
         draw_text_cn("仓库", left_panel_x + 70.0, self.pos.y + 14.0, 14.0, YELLOW);
-        draw_text_cn("背包", right_panel_x + 70.0, self.pos.y + 14.0, 14.0, YELLOW);
+        draw_text_cn(
+            "背包",
+            right_panel_x + 70.0,
+            self.pos.y + 14.0,
+            14.0,
+            YELLOW,
+        );
 
         // 左侧面板：仓库物品
         let storage_goods_clone = self.storage_goods.clone();
@@ -836,9 +906,28 @@ impl NpcGoodsDialogHybrid {
             } else {
                 Color::from_rgba(50, 100, 50, 255)
             };
-            draw_rectangle(deposit_rect.x, deposit_rect.y, deposit_rect.w, deposit_rect.h, dep_color);
-            draw_rectangle_lines(deposit_rect.x, deposit_rect.y, deposit_rect.w, deposit_rect.h, 1.0, Color::from_rgba(100, 180, 100, 255));
-            draw_text_cn("存入", deposit_rect.x + 20.0, deposit_rect.y + 17.0, 13.0, WHITE);
+            draw_rectangle(
+                deposit_rect.x,
+                deposit_rect.y,
+                deposit_rect.w,
+                deposit_rect.h,
+                dep_color,
+            );
+            draw_rectangle_lines(
+                deposit_rect.x,
+                deposit_rect.y,
+                deposit_rect.w,
+                deposit_rect.h,
+                1.0,
+                Color::from_rgba(100, 180, 100, 255),
+            );
+            draw_text_cn(
+                "存入",
+                deposit_rect.x + 20.0,
+                deposit_rect.y + 17.0,
+                13.0,
+                WHITE,
+            );
             if dep_hovered && is_mouse_button_pressed(MouseButton::Left) {
                 if let Some(id) = self.storage_inventory_selected {
                     self.pending_action = Some(NpcGoodsDialogAction::RequestStorage {
@@ -859,9 +948,28 @@ impl NpcGoodsDialogHybrid {
             } else {
                 Color::from_rgba(100, 50, 50, 255)
             };
-            draw_rectangle(retrieve_rect.x, retrieve_rect.y, retrieve_rect.w, retrieve_rect.h, ret_color);
-            draw_rectangle_lines(retrieve_rect.x, retrieve_rect.y, retrieve_rect.w, retrieve_rect.h, 1.0, Color::from_rgba(180, 100, 100, 255));
-            draw_text_cn("取出", retrieve_rect.x + 20.0, retrieve_rect.y + 17.0, 13.0, WHITE);
+            draw_rectangle(
+                retrieve_rect.x,
+                retrieve_rect.y,
+                retrieve_rect.w,
+                retrieve_rect.h,
+                ret_color,
+            );
+            draw_rectangle_lines(
+                retrieve_rect.x,
+                retrieve_rect.y,
+                retrieve_rect.w,
+                retrieve_rect.h,
+                1.0,
+                Color::from_rgba(180, 100, 100, 255),
+            );
+            draw_text_cn(
+                "取出",
+                retrieve_rect.x + 20.0,
+                retrieve_rect.y + 17.0,
+                13.0,
+                WHITE,
+            );
             if ret_hovered && is_mouse_button_pressed(MouseButton::Left) {
                 if let Some(id) = self.storage_selected {
                     self.pending_action = Some(NpcGoodsDialogAction::RequestStorage {
@@ -905,12 +1013,19 @@ impl NpcGoodsDialogHybrid {
             let is_selected = *selected == Some(item_unique_id);
 
             // 边框
-            let border_color = if is_selected { YELLOW } else { Color::new(0.0, 1.0, 0.0, 1.0) };
+            let border_color = if is_selected {
+                YELLOW
+            } else {
+                Color::new(0.0, 1.0, 0.0, 1.0)
+            };
             draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 1.0, border_color);
 
             // 图标
             if let Some(info) = item.info.as_ref() {
-                if let Some(img) = LibraryName::Items.get_texture(info.image as usize).and_then(|i| i.image) {
+                if let Some(img) = LibraryName::Items
+                    .get_texture(info.image as usize)
+                    .and_then(|i| i.image)
+                {
                     let _icon_w = img.width();
                     let icon_h = img.height();
                     let off_x = rect.x + 4.0;
@@ -920,12 +1035,22 @@ impl NpcGoodsDialogHybrid {
             }
 
             // 名称
-            let name_text = item.info.as_ref().map(|i| i.name.clone()).unwrap_or_else(|| format!("Item #{}", item.item_index));
+            let name_text = item
+                .info
+                .as_ref()
+                .map(|i| i.name.clone())
+                .unwrap_or_else(|| format!("Item #{}", item.item_index));
             draw_text_cn(&name_text, rect.x + 44.0, rect.y + 12.0, 14.0, WHITE);
 
             // 数量
             if item.count > 1 {
-                draw_text_cn(&format!("x{}", item.count), rect.x + 23.0, rect.y + 28.0, 14.0, YELLOW);
+                draw_text_cn(
+                    &format!("x{}", item.count),
+                    rect.x + 23.0,
+                    rect.y + 28.0,
+                    14.0,
+                    YELLOW,
+                );
             }
 
             if child_input_enabled && hovered {
@@ -945,7 +1070,11 @@ impl NpcGoodsDialogHybrid {
         self.update_and_draw_with_input(net, true)
     }
 
-    pub fn update_and_draw_with_input(&mut self, net: Option<&NetContext>, input_enabled: bool) -> bool {
+    pub fn update_and_draw_with_input(
+        &mut self,
+        net: Option<&NetContext>,
+        input_enabled: bool,
+    ) -> bool {
         if !self.visible {
             return false;
         }
@@ -991,7 +1120,13 @@ impl NpcGoodsDialogHybrid {
         if let Some(bg) = self.bg_texture.as_ref() {
             draw_texture(bg, self.pos.x, self.pos.y, WHITE);
         } else {
-            draw_rectangle(self.pos.x, self.pos.y, self.bg_size.x, self.bg_size.y, Color::new(0.0, 0.0, 0.0, 0.6));
+            draw_rectangle(
+                self.pos.x,
+                self.pos.y,
+                self.bg_size.x,
+                self.bg_size.y,
+                Color::new(0.0, 0.0, 0.0, 0.6),
+            );
         }
 
         // 标题
@@ -1001,7 +1136,12 @@ impl NpcGoodsDialogHybrid {
             self.title_label.as_ref()
         };
         if let Some(tex) = label_tex {
-            draw_texture(tex, self.pos.x + Self::LABEL_X, self.pos.y + Self::LABEL_Y, WHITE);
+            draw_texture(
+                tex,
+                self.pos.x + Self::LABEL_X,
+                self.pos.y + Self::LABEL_Y,
+                WHITE,
+            );
         }
 
         // 关闭按钮
@@ -1038,7 +1178,8 @@ impl NpcGoodsDialogHybrid {
             // PositionBar 拖动
             let bar_rect = self.scroll_bar_rect();
             let bar_state = ButtonState::from_mouse(bar_rect, mouse_pos);
-            self.scroll_bar_btn.draw(vec2(bar_rect.x, bar_rect.y), bar_state);
+            self.scroll_bar_btn
+                .draw(vec2(bar_rect.x, bar_rect.y), bar_state);
 
             if is_mouse_button_pressed(MouseButton::Left) && bar_rect.contains(mouse_pos) {
                 self.scroll_dragging = true;
@@ -1063,7 +1204,8 @@ impl NpcGoodsDialogHybrid {
                 if count > Self::CELL_ROWS {
                     let track_h = 233.0 - bar_h;
                     let steps = (count - Self::CELL_ROWS) as f32;
-                    let new_start = ((y - Self::SCROLL_BAR_MIN_Y) / (track_h / steps)).round() as i32;
+                    let new_start =
+                        ((y - Self::SCROLL_BAR_MIN_Y) / (track_h / steps)).round() as i32;
                     let new_start = new_start.clamp(0, (count - Self::CELL_ROWS) as i32) as usize;
                     if new_start != self.start_index {
                         self.start_index = new_start;
@@ -1083,7 +1225,11 @@ impl NpcGoodsDialogHybrid {
                 let left_panel_x = self.pos.x + 5.0;
                 let right_panel_x = left_panel_x + panel_w + 5.0;
                 let rect_contains = |x: f32| -> bool {
-                    let rx = if x < right_panel_x { left_panel_x } else { right_panel_x };
+                    let rx = if x < right_panel_x {
+                        left_panel_x
+                    } else {
+                        right_panel_x
+                    };
                     Rect::new(rx, self.pos.y, panel_w, self.bg_size.y).contains(mouse_pos)
                 };
                 if rect_contains(mouse_pos.x) {
@@ -1105,106 +1251,114 @@ impl NpcGoodsDialogHybrid {
             // 商品列表（非仓库模式）
             self.hover = None;
 
-        for row in 0..Self::CELL_ROWS {
-            let idx = self.start_index + row;
-            if idx >= self.display_goods.len() {
-                continue;
-            }
-
-            let mut trigger_buy = false;
-
-            let item_unique_id = self.display_goods[idx].unique_id;
-            let item_index = self.display_goods[idx].item_index;
-            let rect = self.cell_rect(row);
-            let hovered = rect.contains(mouse_pos);
-            let selected = self.selected_unique_id == Some(item_unique_id);
-
-            // 对齐 C#：MultipleAvailable = matchingGoods.Count()>1 && matchingGoods.Any(!IsShopItem)
-            let multiple_available = if self.ptype == PanelType::Buy && !self.use_pearls {
-                let mut count = 0usize;
-                let mut any_not_shop = false;
-                for g in self.goods.iter().filter(|g| g.item_index == item_index) {
-                    count += 1;
-                    if !g.is_shop_item {
-                        any_not_shop = true;
-                    }
-                }
-                count > 1 && any_not_shop
-            } else {
-                false
-            };
-
-            if child_input_enabled && hovered {
-                self.hover = Some(HoverTarget::Cell(row));
-
-                // 单击选择 + 双击购买（Craft 模式下单击即触发配方选择）
-                if is_mouse_button_released(MouseButton::Left) {
-                    let now = get_time();
-                    let is_double = self.last_click_row == Some(row)
-                        && (now - self.last_click_time) <= Self::DOUBLE_CLICK_TIME;
-
-                    self.selected_unique_id = Some(item_unique_id);
-
-                    if self.ptype == PanelType::Craft {
-                        // Craft 模式：单击即选择配方
-                        self.queue_action();
-                        consumed = true;
-                    } else if is_double {
-                        trigger_buy = true;
-                        consumed = true;
-                    }
-
-                    self.last_click_time = now;
-                    self.last_click_row = Some(row);
+            for row in 0..Self::CELL_ROWS {
+                let idx = self.start_index + row;
+                if idx >= self.display_goods.len() {
+                    continue;
                 }
 
-                // 悬停提示：根据模式显示不同内容
-                let item = &self.display_goods[idx];
-                let title = item
-                    .info
-                    .as_ref()
-                    .map(|i| i.name.clone())
-                    .unwrap_or_else(|| format!("Item #{}", item.item_index));
-                let tip = match self.dialog_mode {
-                    NpcGoodsMode::Buy => {
-                        let base_price = item.info.as_ref().map(|i| i.price).unwrap_or(0) as f32;
-                        let price = (base_price * self.npc_rate).round() as u32;
-                        if self.use_pearls {
-                            format!("{}\nPrice: {} pearl", title, price)
-                        } else {
-                            format!("{}\nPrice: {} gold", title, price)
+                let mut trigger_buy = false;
+
+                let item_unique_id = self.display_goods[idx].unique_id;
+                let item_index = self.display_goods[idx].item_index;
+                let rect = self.cell_rect(row);
+                let hovered = rect.contains(mouse_pos);
+                let selected = self.selected_unique_id == Some(item_unique_id);
+
+                // 对齐 C#：MultipleAvailable = matchingGoods.Count()>1 && matchingGoods.Any(!IsShopItem)
+                let multiple_available = if self.ptype == PanelType::Buy && !self.use_pearls {
+                    let mut count = 0usize;
+                    let mut any_not_shop = false;
+                    for g in self.goods.iter().filter(|g| g.item_index == item_index) {
+                        count += 1;
+                        if !g.is_shop_item {
+                            any_not_shop = true;
                         }
                     }
-                    NpcGoodsMode::Sell => {
-                        let base_price = item.info.as_ref().map(|i| i.price).unwrap_or(0) as f32;
-                        let sell_price = (base_price * 0.5).round() as u32;
-                        format!("{}\nSell: {} gold", title, sell_price)
-                    }
-                    NpcGoodsMode::Repair => {
-                        let max_dur = item.info.as_ref().map(|i| i.durability).unwrap_or(0);
-                        let cur_dur = item.current_dura;
-                        format!("{}\nDurability: {}/{}\nClick to repair", title, cur_dur, max_dur)
-                    }
-                    NpcGoodsMode::Storage => {
-                        format!("{}\nStorage item", title)
-                    }
+                    count > 1 && any_not_shop
+                } else {
+                    false
                 };
-                draw_tooltip_at_mouse(&tip, vec2(14.0, 14.0));
-            }
 
-            {
-                let item = &self.display_goods[idx];
-                self.draw_cell(row, item, selected, hovered, multiple_available);
-            }
+                if child_input_enabled && hovered {
+                    self.hover = Some(HoverTarget::Cell(row));
 
-            if child_input_enabled && trigger_buy {
-                self.queue_action();
-            }
-        } // end of 商品列表
+                    // 单击选择 + 双击购买（Craft 模式下单击即触发配方选择）
+                    if is_mouse_button_released(MouseButton::Left) {
+                        let now = get_time();
+                        let is_double = self.last_click_row == Some(row)
+                            && (now - self.last_click_time) <= Self::DOUBLE_CLICK_TIME;
+
+                        self.selected_unique_id = Some(item_unique_id);
+
+                        if self.ptype == PanelType::Craft {
+                            // Craft 模式：单击即选择配方
+                            self.queue_action();
+                            consumed = true;
+                        } else if is_double {
+                            trigger_buy = true;
+                            consumed = true;
+                        }
+
+                        self.last_click_time = now;
+                        self.last_click_row = Some(row);
+                    }
+
+                    // 悬停提示：根据模式显示不同内容
+                    let item = &self.display_goods[idx];
+                    let title = item
+                        .info
+                        .as_ref()
+                        .map(|i| i.name.clone())
+                        .unwrap_or_else(|| format!("Item #{}", item.item_index));
+                    let tip = match self.dialog_mode {
+                        NpcGoodsMode::Buy => {
+                            let base_price =
+                                item.info.as_ref().map(|i| i.price).unwrap_or(0) as f32;
+                            let price = (base_price * self.npc_rate).round() as u32;
+                            if self.use_pearls {
+                                format!("{}\nPrice: {} pearl", title, price)
+                            } else {
+                                format!("{}\nPrice: {} gold", title, price)
+                            }
+                        }
+                        NpcGoodsMode::Sell => {
+                            let base_price =
+                                item.info.as_ref().map(|i| i.price).unwrap_or(0) as f32;
+                            let sell_price = (base_price * 0.5).round() as u32;
+                            format!("{}\nSell: {} gold", title, sell_price)
+                        }
+                        NpcGoodsMode::Repair => {
+                            let max_dur = item.info.as_ref().map(|i| i.durability).unwrap_or(0);
+                            let cur_dur = item.current_dura;
+                            format!(
+                                "{}\nDurability: {}/{}\nClick to repair",
+                                title, cur_dur, max_dur
+                            )
+                        }
+                        NpcGoodsMode::Storage => {
+                            format!("{}\nStorage item", title)
+                        }
+                    };
+                    draw_tooltip_at_mouse(&tip, vec2(14.0, 14.0));
+                }
+
+                {
+                    let item = &self.display_goods[idx];
+                    self.draw_cell(row, item, selected, hovered, multiple_available);
+                }
+
+                if child_input_enabled && trigger_buy {
+                    self.queue_action();
+                }
+            } // end of 商品列表
         } // end of else (非仓库模式)
 
         // Buy 按钮（Craft/Storage 隐藏）
-        if child_input_enabled && self.ptype != PanelType::Craft && self.dialog_mode != NpcGoodsMode::Storage {
+        if child_input_enabled
+            && self.ptype != PanelType::Craft
+            && self.dialog_mode != NpcGoodsMode::Storage
+        {
             let buy_rect = self.buy_rect();
             if self.buy_btn.draw_button(buy_rect, mouse_pos) {
                 self.queue_action();

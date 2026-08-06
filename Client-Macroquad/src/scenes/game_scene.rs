@@ -17,10 +17,11 @@ use crate::{
         RenderPass, RenderStage, ResourceInitState, SceneExitBlock, TimeTracker,
     },
     systems::{
-        priority, AnimationSystem, CameraBoundsSystem, CameraFollowSystem, CameraSpaceGateSystem,
-        CameraSystem, CollisionSystem, CombatSystem, FrameEndSystem, HealthRegenSystem,
-        AutoPotionSystem, LocalPlayerAiSystem, MountStateSyncSystem, MovementSystem, PathfindingSystem, PlayerControlSystem, SkillSystem,
-        SystemScheduler, TimeTickSystem, NpcAISystem, NpcDialogueSystem, BufSystem,
+        priority, AnimationSystem, AutoPotionSystem, BufSystem, CameraBoundsSystem,
+        CameraFollowSystem, CameraSpaceGateSystem, CameraSystem, CollisionSystem, CombatSystem,
+        FrameEndSystem, HealthRegenSystem, LocalPlayerAiSystem, MountStateSyncSystem,
+        MovementSystem, NpcAISystem, NpcDialogueSystem, PathfindingSystem, PlayerControlSystem,
+        SkillSystem, SystemScheduler, TimeTickSystem,
     },
 };
 use macroquad::prelude::*;
@@ -71,7 +72,12 @@ impl GameScene {
     }
 
     fn take_scene_transition_request(&self) -> Option<SceneTransition> {
-        for ui_state in self.ecs_ctx.world.query::<&crate::ui::ui_state::UiState>().iter() {
+        for ui_state in self
+            .ecs_ctx
+            .world
+            .query::<&crate::ui::ui_state::UiState>()
+            .iter()
+        {
             let mut data = ui_state.borrow_mut();
             if data.request_scene_transition.is_some() {
                 return data.request_scene_transition.take();
@@ -104,15 +110,9 @@ impl GameScene {
                 crate::systems::RenderStageMask::UI,
             )
             .add_system(crate::systems::NetworkSystem, priority::NETWORK)
-            .add_system(
-                crate::systems::NetworkApplySystem,
-                priority::NETWORK_APPLY,
-            )
+            .add_system(crate::systems::NetworkApplySystem, priority::NETWORK_APPLY)
             .add_system(AutoPotionSystem::default(), priority::AUTO_POTION)
-            .add_system(
-                crate::systems::MapBootstrapSystem,
-                priority::MAP_BOOTSTRAP,
-            )
+            .add_system(crate::systems::MapBootstrapSystem, priority::MAP_BOOTSTRAP)
             .add_system(crate::systems::MapLoadSystem, priority::MAP_LOAD)
             .add_system(TimeTickSystem::default(), priority::GAME_EVENT)
             .add_system(LocalPlayerAiSystem::default(), priority::LOCAL_PLAYER_AI)
@@ -152,19 +152,16 @@ impl GameScene {
                 priority::HEALTH_BAR_ANIM,
             )
             .add_system(crate::systems::ParticleSystem::new(), priority::PARTICLE)
-            .add_system(crate::systems::presentation::WeatherSystem::new(), priority::WEATHER)
+            .add_system(
+                crate::systems::presentation::WeatherSystem::new(),
+                priority::WEATHER,
+            )
             .add_system(
                 crate::systems::presentation::SoundSystem::default(),
                 priority::SOUND,
             )
-            .add_system(
-                crate::systems::FloatingTextSystem,
-                priority::FLOATING_TEXT,
-            )
-            .add_system(
-                CameraSpaceGateSystem,
-                priority::CAMERA_SPACE_GATE,
-            )
+            .add_system(crate::systems::FloatingTextSystem, priority::FLOATING_TEXT)
+            .add_system(CameraSpaceGateSystem, priority::CAMERA_SPACE_GATE)
             .add_system(CameraFollowSystem, priority::CAMERA_FOLLOW)
             .add_system(CameraSystem::new(), priority::CAMERA)
             .add_system(CameraBoundsSystem, priority::CAMERA_BOUNDS)
@@ -324,7 +321,12 @@ impl GameScene {
 
         // 6) 本地玩家：由网络（真服/MockNetwork）落地；这里仅做”发现并缓存”，避免重复生成。
         if self.ecs_local_player_entity.is_none() {
-            if let Some(e) = self.ecs_ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity())) {
+            if let Some(e) = self
+                .ecs_ctx
+                .world
+                .iter()
+                .find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity()))
+            {
                 self.ecs_local_player_entity = Some(e);
             }
         }
@@ -409,10 +411,12 @@ impl Scene for GameScene {
         if let Some(net) = crate::network::take_global_net() {
             self.ecs_ctx.set_net(net);
 
-			// 从 config.ini 同步运行时手感参数（例如远程插值时长）
-			let cfg = crate::network::load_network_runtime_config();
-			self.ecs_ctx.session.remote_player_walk_interp_secs = (cfg.remote_interp_walk_ms as f32) / 1000.0;
-			self.ecs_ctx.session.remote_player_run_interp_secs = (cfg.remote_interp_run_ms as f32) / 1000.0;
+            // 从 config.ini 同步运行时手感参数（例如远程插值时长）
+            let cfg = crate::network::load_network_runtime_config();
+            self.ecs_ctx.session.remote_player_walk_interp_secs =
+                (cfg.remote_interp_walk_ms as f32) / 1000.0;
+            self.ecs_ctx.session.remote_player_run_interp_secs =
+                (cfg.remote_interp_run_ms as f32) / 1000.0;
 
             // 目前本地玩家移动仍由客户端 MovementSystem 驱动；开启 server_authoritative_movement
             // 会导致“本地移动 + 服务器回包纠偏”双重驱动，从而出现抖动/乱跳（坐骑更明显）。
@@ -433,9 +437,11 @@ impl Scene for GameScene {
                 {
                     self.ecs_ctx.set_net(net);
 
-					// 从 config.ini 同步远程插值时长（用于 multi-remote AI）
-					self.ecs_ctx.session.remote_player_walk_interp_secs = (cfg.remote_interp_walk_ms as f32) / 1000.0;
-					self.ecs_ctx.session.remote_player_run_interp_secs = (cfg.remote_interp_run_ms as f32) / 1000.0;
+                    // 从 config.ini 同步远程插值时长（用于 multi-remote AI）
+                    self.ecs_ctx.session.remote_player_walk_interp_secs =
+                        (cfg.remote_interp_walk_ms as f32) / 1000.0;
+                    self.ecs_ctx.session.remote_player_run_interp_secs =
+                        (cfg.remote_interp_run_ms as f32) / 1000.0;
 
                     // Mock 场景下默认使用本地移动（避免双驱动抖动）。
                     self.ecs_ctx.session.server_authoritative_movement = false;
@@ -488,10 +494,9 @@ impl Scene for GameScene {
         // 快捷键交由 UIRenderSystem 统一处理（避免 GameScene 直连 UI 组件）
 
         // ESC 且没有打开的对话框 = 返回角色选择
-        if is_key_pressed(KeyCode::Escape)
-            && self.can_escape_exit() {
-                return Ok(SceneTransition::CharacterSelect);
-            }
+        if is_key_pressed(KeyCode::Escape) && self.can_escape_exit() {
+            return Ok(SceneTransition::CharacterSelect);
+        }
 
         Ok(SceneTransition::None)
     }

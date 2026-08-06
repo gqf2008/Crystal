@@ -1,4 +1,4 @@
-use crate::components::{Equipment, MountState, movement::MovementVelocity};
+use crate::components::{movement::MovementVelocity, Equipment, MountState};
 use crate::game::{GameContext, GameResult};
 use crate::systems::LogicSystem;
 use mir2_shared::enums::ItemType;
@@ -52,11 +52,10 @@ impl MountStateSyncSystem {
 
 impl LogicSystem for MountStateSyncSystem {
     fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
-        for (equipment, mount_state, velocity) in ctx.world.query_mut::<(
-            &Equipment,
-            &mut MountState,
-            &mut MovementVelocity,
-        )>() {
+        for (equipment, mount_state, velocity) in
+            ctx.world
+                .query_mut::<(&Equipment, &mut MountState, &mut MovementVelocity)>()
+        {
             let prev = mount_state.mount_index;
             if let Some(derived) = Self::derive_mount_index(equipment) {
                 mount_state.mount_index = derived;

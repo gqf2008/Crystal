@@ -1,8 +1,8 @@
 // Quest Handler - 任务相关数据包处理
 
-use mir2_shared::packets::{PacketHeader, Packet, server};
-use mir2_shared::enums::ServerPacketIds;
 use crate::network::handlers::{NetworkEvent, PacketHandler};
+use mir2_shared::enums::ServerPacketIds;
+use mir2_shared::packets::{server, Packet, PacketHeader};
 use std::io::Cursor;
 
 pub struct QuestHandler;
@@ -25,10 +25,7 @@ impl PacketHandler for QuestHandler {
                         tracing::debug!("📜 Quest completed: {}", quest_id);
                     } else {
                         let progress = packet.quest.task_list.join("; ");
-                        events.push(NetworkEvent::QuestProgressUpdated {
-                            quest_id,
-                            progress,
-                        });
+                        events.push(NetworkEvent::QuestProgressUpdated { quest_id, progress });
                         tracing::debug!("📜 Quest progress updated: {}", quest_id);
                     }
                 }
@@ -60,7 +57,12 @@ impl PacketHandler for QuestHandler {
                     let quest_id = packet.quest.index as u32;
                     let name = packet.quest.name.clone();
                     let group = packet.quest.group.clone();
-                    let description = packet.quest.description.first().cloned().unwrap_or_default();
+                    let description = packet
+                        .quest
+                        .description
+                        .first()
+                        .cloned()
+                        .unwrap_or_default();
                     let level_req = packet.quest.min_level_needed as u32;
                     let reward_exp = packet.quest.reward_exp as u64;
                     let reward_gold = packet.quest.reward_gold;
@@ -81,7 +83,9 @@ impl PacketHandler for QuestHandler {
             // GainedQuestItem - 获得任务物品
             x if x == ServerPacketIds::GainedQuestItem as u16 => {
                 if let Ok(packet) = server::GainedQuestItem::read_body(&mut cursor) {
-                    events.push(NetworkEvent::QuestItemGained { item_id: packet.item_id });
+                    events.push(NetworkEvent::QuestItemGained {
+                        item_id: packet.item_id,
+                    });
                     tracing::debug!("📜 Gained quest item: {}", packet.item_id);
                 }
             }
@@ -98,7 +102,9 @@ impl PacketHandler for QuestHandler {
 
             _ => {
                 tracing::debug!("⚠️ QuestHandler: Unknown opcode {:04X}", header.opcode);
-                events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                events.push(NetworkEvent::UnhandledPacket {
+                    opcode: header.opcode,
+                });
             }
         }
 

@@ -200,7 +200,13 @@ impl MockNetwork {
                     (Self::rng_next_u32(&mut state.rng) as i32 % (jitter_r * 2 + 1)) - jitter_r;
                 let jx = (c.0 + ox).clamp(0, map_w_eff.saturating_sub(1).max(0));
                 let jy = (c.1 + oy).clamp(0, map_h_eff.saturating_sub(1).max(0));
-                if Self::map_is_walkable_raw(state.map_width, state.map_height, &state.map_walkable, jx, jy) {
+                if Self::map_is_walkable_raw(
+                    state.map_width,
+                    state.map_height,
+                    &state.map_walkable,
+                    jx,
+                    jy,
+                ) {
                     (jx, jy, None)
                 } else {
                     (c.0, c.1, None)
@@ -277,7 +283,9 @@ impl MockNetwork {
                                         direction: 0,
                                         death_type: 0,
                                     });
-                                    let _ = response_tx.send(NetworkEvent::ObjectRemove { object_id: target.id });
+                                    let _ = response_tx.send(NetworkEvent::ObjectRemove {
+                                        object_id: target.id,
+                                    });
                                 }
                             }
                         }
@@ -304,7 +312,13 @@ impl MockNetwork {
                     if nx < 0 || ny < 0 || nx >= map_w_eff || ny >= map_h_eff {
                         continue;
                     }
-                    if !Self::map_is_walkable_raw(state.map_width, state.map_height, &state.map_walkable, nx, ny) {
+                    if !Self::map_is_walkable_raw(
+                        state.map_width,
+                        state.map_height,
+                        &state.map_walkable,
+                        nx,
+                        ny,
+                    ) {
                         continue;
                     }
                     if occupied.contains(&(nx, ny)) {
@@ -335,7 +349,13 @@ impl MockNetwork {
                         if nx < 0 || ny < 0 || nx >= map_w_eff || ny >= map_h_eff {
                             continue;
                         }
-                        if !Self::map_is_walkable_raw(state.map_width, state.map_height, &state.map_walkable, nx, ny) {
+                        if !Self::map_is_walkable_raw(
+                            state.map_width,
+                            state.map_height,
+                            &state.map_walkable,
+                            nx,
+                            ny,
+                        ) {
                             continue;
                         }
                         if occupied.contains(&(nx, ny)) {
@@ -429,7 +449,13 @@ impl MockNetwork {
                         if nx < 0 || ny < 0 || nx >= map_w_eff || ny >= map_h_eff {
                             continue;
                         }
-                        if !Self::map_is_walkable_raw(state.map_width, state.map_height, &state.map_walkable, nx, ny) {
+                        if !Self::map_is_walkable_raw(
+                            state.map_width,
+                            state.map_height,
+                            &state.map_walkable,
+                            nx,
+                            ny,
+                        ) {
                             continue;
                         }
                         if occupied.contains(&(nx, ny)) {
@@ -440,7 +466,10 @@ impl MockNetwork {
                     }
                     if let Some((nx, ny)) = moved {
                         occupied.remove(&a.grid);
-                        a.direction = Self::dir_from_delta((nx - a.grid.0).signum(), (ny - a.grid.1).signum());
+                        a.direction = Self::dir_from_delta(
+                            (nx - a.grid.0).signum(),
+                            (ny - a.grid.1).signum(),
+                        );
                         a.grid = (nx, ny);
                         occupied.insert(a.grid);
                         let _ = response_tx.send(NetworkEvent::ObjectWalk {

@@ -8,7 +8,7 @@ use client_macroquad::game::GameState;
 #[macroquad::main("场景系统演示")]
 async fn main() {
     println!("🚀 启动场景系统演示...");
-    
+
     match GameState::new().await {
         Ok(game_state) => {
             if let Err(e) = game_state.run().await {
@@ -19,6 +19,6 @@ async fn main() {
             eprintln!("❌ 初始化失败: {:?}", e);
         }
     }
-    
+
     println!("✅ 程序退出");
 }

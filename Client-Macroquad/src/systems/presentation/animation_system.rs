@@ -23,16 +23,17 @@
 //
 // ============================================================================
 
-use crate::game::{GameResult, GameContext};
-use std::time::Instant;
+use crate::game::{GameContext, GameResult};
+use crate::objects::frames::{get_default_monster_frame, get_player_frame};
+use crate::systems::logic::combat::CombatSystem;
 use crate::{
     components::{
-        AnimationFrame, AttackSoundPlayed, AttackState, DeathPhase, DeathState, MountState, MountStatus, Player, PlayerAction, PlayerAppearance, SoundTrigger, SoundType, TimeTracker,
+        AnimationFrame, AttackSoundPlayed, AttackState, DeathPhase, DeathState, MountState,
+        MountStatus, Player, PlayerAction, PlayerAppearance, SoundTrigger, SoundType, TimeTracker,
     },
     systems::LogicSystem,
 };
-use crate::objects::frames::{get_default_monster_frame, get_player_frame};
-use crate::systems::logic::combat::CombatSystem;
+use std::time::Instant;
 
 #[derive(ecs_macros::LogicSystem)]
 pub struct AnimationSystem;
@@ -51,7 +52,7 @@ impl AnimationSystem {
 
 impl AnimationSystem {
     /// 更新所有动画帧
-    /// 
+    ///
     /// **职责**: 计算并更新实体的动画帧索引
     /// - 角色身体动画帧
     /// - 武器动画帧
@@ -61,30 +62,34 @@ impl AnimationSystem {
             .world
             .query::<&TimeTracker>()
             .iter()
-            .next().cloned()
+            .next()
+            .cloned()
             .unwrap_or_default();
 
         let now = Instant::now();
 
         // 更新所有角色的动画帧
-        for (player, mount_state, attack_state, death_state, anim_frame) in ctx
-            .world
-            .query_mut::<(
-                &Player,
-                Option<&MountState>,
-                Option<&AttackState>,
-                Option<&mut DeathState>,
-                &mut AnimationFrame,
-            )>()
-        {
+        for (player, mount_state, attack_state, death_state, anim_frame) in ctx.world.query_mut::<(
+            &Player,
+            Option<&MountState>,
+            Option<&AttackState>,
+            Option<&mut DeathState>,
+            &mut AnimationFrame,
+        )>() {
             // C# 原版核心：
             // - DrawFrame = Frame.Start + Frame.OffSet * Direction + FrameIndex
             // - DrawWingFrame = Frame.EffectStart + Frame.EffectOffSet * Direction + EffectFrameIndex
             // - 角色骑乘时 CurrentAction 会切到 Mount*，从而同时影响 DrawFrame/DrawWingFrame
 
             let mounted = mount_state.and_then(|m| m.mount_index).is_some();
-            let (draw_frame, effect_frame, frame_index) =
-                Self::calculate_frames(player, &time_tracker, mounted, now, attack_state.copied(), death_state);
+            let (draw_frame, effect_frame, frame_index) = Self::calculate_frames(
+                player,
+                &time_tracker,
+                mounted,
+                now,
+                attack_state.copied(),
+                death_state,
+            );
 
             anim_frame.character_frame = draw_frame;
             // 武器/武器特效：C# 用同一套 DrawFrame，只是在取纹理时叠加 WeaponOffSet
@@ -99,7 +104,7 @@ impl AnimationSystem {
     /// 计算角色动画帧索引
     ///
     /// **重构说明**: 现在从 `objects/frames.rs` 的 `PLAYER_FRAMES` 读取配置
-    /// 
+    ///
     /// C# 逻辑参考: PlayerObject.cs DrawBody()
     /// ```csharp
     /// int index = BaseIndex + (Direction * FrameCount) + CurrentFrame
@@ -112,7 +117,14 @@ impl AnimationSystem {
         attack_state: Option<AttackState>,
         death_state: Option<&mut DeathState>,
     ) -> (i32, i32, i32) {
-        Self::calculate_frames_with_attack(player, time_tracker, mounted, now, attack_state, death_state)
+        Self::calculate_frames_with_attack(
+            player,
+            time_tracker,
+            mounted,
+            now,
+            attack_state,
+            death_state,
+        )
     }
 
     fn calculate_frames_with_attack(
@@ -265,7 +277,12 @@ impl AnimationSystem {
         for (entity, start_time, sound_id) in triggers {
             if ctx
                 .world
-                .insert_one(entity, AttackSoundPlayed { attack_start_time: start_time })
+                .insert_one(
+                    entity,
+                    AttackSoundPlayed {
+                        attack_start_time: start_time,
+                    },
+                )
                 .is_err()
             {
                 if let Ok(mut played) = ctx.world.get::<&mut AttackSoundPlayed>(entity) {
@@ -343,7 +360,10 @@ impl AnimationSystem {
 
     /// 怪物 SwingSound（BaseSound+4）按攻击动作帧触发
     pub fn update_monster_swing_sounds(&mut self, ctx: &mut GameContext) -> GameResult {
-        use crate::components::{AttackState, LibrarySprite, Monster, MonsterAnimState, SoundTrigger, SoundType, SwingSoundPlayed};
+        use crate::components::{
+            AttackState, LibrarySprite, Monster, MonsterAnimState, SoundTrigger, SoundType,
+            SwingSoundPlayed,
+        };
 
         // 对齐 C# 原版（Client/MirObjects/MonsterObject.cs）：
         // - 近战 Attack1/Attack2：FrameIndex == 3 时 PlaySwingSound()
@@ -407,7 +427,12 @@ impl AnimationSystem {
         for (entity, start_time, sound_id) in triggers {
             if ctx
                 .world
-                .insert_one(entity, SwingSoundPlayed { attack_start_time: start_time })
+                .insert_one(
+                    entity,
+                    SwingSoundPlayed {
+                        attack_start_time: start_time,
+                    },
+                )
                 .is_err()
             {
                 if let Ok(mut played) = ctx.world.get::<&mut SwingSoundPlayed>(entity) {
@@ -429,7 +454,9 @@ impl AnimationSystem {
     /// 对齐 C#：MonsterObject.SetAction() 进入 Attack*/AttackRange* 时立即播放对应音效。
     /// 这里不依赖怪物帧表（DefaultMonster 只有 Attack1），避免特殊怪物/帧集导致音效不触发。
     pub fn update_monster_attack_sounds(&mut self, ctx: &mut GameContext) -> GameResult {
-        use crate::components::{AttackSoundPlayed, AttackState, Monster, MonsterAnimState, SoundTrigger, SoundType};
+        use crate::components::{
+            AttackSoundPlayed, AttackState, Monster, MonsterAnimState, SoundTrigger, SoundType,
+        };
         use mir2_shared::enums::{MirAction, Monster as MonsterKind};
 
         fn third_attack_offset(monster_type: u16) -> Option<i32> {
@@ -616,7 +643,12 @@ impl AnimationSystem {
         for (entity, start_time, sound_id) in triggers {
             if ctx
                 .world
-                .insert_one(entity, AttackSoundPlayed { attack_start_time: start_time })
+                .insert_one(
+                    entity,
+                    AttackSoundPlayed {
+                        attack_start_time: start_time,
+                    },
+                )
                 .is_err()
             {
                 if let Ok(mut played) = ctx.world.get::<&mut AttackSoundPlayed>(entity) {
@@ -638,10 +670,10 @@ impl AnimationSystem {
 
     pub fn update_attack_animation(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
         let now = Instant::now();
-        
+
         // 收集需要移除 AttackState 的实体
         let mut finished_attacks = Vec::new();
-        
+
         for eref in ctx.world.iter() {
             let (Some(attack_state), mount_state, monster) = (
                 eref.get::<&AttackState>(),
@@ -671,12 +703,15 @@ impl AnimationSystem {
                 (frame.count * frame.interval) as u64
             } else {
                 // 后备：默认600ms (6帧 * 100ms)
-                tracing::warn!("⚠️ 未找到攻击动画配置: {:?}, 使用默认时长", attack_state.attack_type);
+                tracing::warn!(
+                    "⚠️ 未找到攻击动画配置: {:?}, 使用默认时长",
+                    attack_state.attack_type
+                );
                 600
             };
-            
+
             let elapsed = now.duration_since(attack_state.start_time).as_millis() as u64;
-            
+
             if elapsed >= duration_ms {
                 finished_attacks.push(entity);
                 tracing::debug!(
@@ -686,14 +721,16 @@ impl AnimationSystem {
                 );
             }
         }
-        
+
         // 移除完成的攻击状态并恢复 Stand
         for entity in finished_attacks {
             // 移除 AttackState 组件
             let _ = ctx.world.remove_one::<AttackState>(entity);
             let _ = ctx.world.remove_one::<AttackSoundPlayed>(entity);
-            let _ = ctx.world.remove_one::<crate::components::SwingSoundPlayed>(entity);
-            
+            let _ = ctx
+                .world
+                .remove_one::<crate::components::SwingSoundPlayed>(entity);
+
             // 恢复到站立状态
             if let Ok(player) = ctx.world.query_one_mut::<&mut Player>(entity) {
                 player.action = PlayerAction::Stand;
@@ -701,12 +738,15 @@ impl AnimationSystem {
             }
 
             // Monster：攻击结束回到 Standing
-            if let Ok(mut s) = ctx.world.get::<&mut crate::components::MonsterAnimState>(entity) {
+            if let Ok(mut s) = ctx
+                .world
+                .get::<&mut crate::components::MonsterAnimState>(entity)
+            {
                 s.action = crate::components::MirAction::Standing;
                 s.start_time = Instant::now();
             }
         }
-        
+
         Ok(())
     }
 }
@@ -727,10 +767,10 @@ impl LogicSystem for AnimationSystem {
 
         // 4. 怪物 SwingSound 按帧触发
         self.update_monster_swing_sounds(ctx)?;
-        
+
         // 5. 检测攻击动画完成
         self.update_attack_animation(ctx, dt)?;
-        
+
         Ok(())
     }
 }
@@ -749,9 +789,16 @@ mod tests {
         let time_tracker = TimeTracker::default();
 
         // mounted=true 会将 Stand 映射为 MountStanding
-        let (draw_frame, effect_frame, _idx) =
-            AnimationSystem::calculate_frames(&player, &time_tracker, true, Instant::now(), None, None);
-        let frame = get_player_frame(mir2_shared::enums::MirAction::MountStanding).expect("mount standing frame");
+        let (draw_frame, effect_frame, _idx) = AnimationSystem::calculate_frames(
+            &player,
+            &time_tracker,
+            true,
+            Instant::now(),
+            None,
+            None,
+        );
+        let frame = get_player_frame(mir2_shared::enums::MirAction::MountStanding)
+            .expect("mount standing frame");
 
         let dir = player.direction as u8 as i32;
         let expected_draw = frame.start + dir * frame.offset();
@@ -762,4 +809,3 @@ mod tests {
         assert!(frame.effect_count > 0);
     }
 }
-

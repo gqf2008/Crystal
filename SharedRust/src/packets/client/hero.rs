@@ -1,11 +1,11 @@
 //! Hero System Packets (Client → Server)
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::binary::{read_dotnet_string, write_dotnet_string};
-use crate::enums::{ClientPacketIds, MirGender, MirClass, HeroBehaviour};
-use crate::data::stats::SharedResult;
 use super::super::base::Packet;
+use crate::binary::{read_dotnet_string, write_dotnet_string};
+use crate::data::stats::SharedResult;
+use crate::enums::{ClientPacketIds, HeroBehaviour, MirClass, MirGender};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// Create new hero
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,7 +22,11 @@ impl Packet for NewHero {
         let name = read_dotnet_string(reader)?;
         let gender = MirGender::try_from(reader.read_u8()?)?;
         let class = MirClass::try_from(reader.read_u8()?)?;
-        Ok(Self { name, gender, class })
+        Ok(Self {
+            name,
+            gender,
+            class,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -36,7 +40,7 @@ impl Packet for NewHero {
 /// Set hero auto-potion value (HP/MP threshold)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SetAutoPotValue {
-    pub stat: u8, // 0 = HP, 1 = MP
+    pub stat: u8,   // 0 = HP, 1 = MP
     pub value: u32, // 阈值百分比（C# uint）
 }
 
@@ -59,7 +63,7 @@ impl Packet for SetAutoPotValue {
 /// Set hero auto-potion item
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SetAutoPotItem {
-    pub grid: u8, // C# MirGridType
+    pub grid: u8,        // C# MirGridType
     pub item_index: i32, // C# int ItemIndex
 }
 

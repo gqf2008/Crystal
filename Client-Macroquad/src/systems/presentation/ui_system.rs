@@ -4,8 +4,7 @@ use crate::{
 };
 
 #[derive(ecs_macros::LogicSystem)]
-pub struct UISystem {
-}
+pub struct UISystem {}
 
 impl Default for UISystem {
     fn default() -> Self {

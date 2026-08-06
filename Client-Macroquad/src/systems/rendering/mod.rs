@@ -71,16 +71,14 @@
 //! - 深度排序在 EntityRenderSystem 中按 Y 坐标处理
 //! - 特效使用 ADD 混合模式（在 Sprite 组件中指定）
 // ============================================================================
-pub mod sprite_system;
 pub mod effect_system;
 pub mod map_system;
+pub mod sprite_system;
 
 pub mod ui_system;
 
-pub use sprite_system::SpriteRenderSystem;
 pub use effect_system::EffectRenderSystem;
 pub use map_system::MapRenderSystem;
+pub use sprite_system::SpriteRenderSystem;
 
 pub use ui_system::UIRenderSystem;
-
-

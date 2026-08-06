@@ -4,9 +4,7 @@ use chrono::{Datelike, TimeZone, Utc};
 
 use crate::network::NetworkEvent;
 use crate::resources::LibraryName;
-use crate::ui::widgets::{
-    begin_modal, draw_button, draw_input_box, draw_multiline_text_cn,
-};
+use crate::ui::widgets::{begin_modal, draw_button, draw_input_box, draw_multiline_text_cn};
 
 use super::LoginScene;
 
@@ -95,9 +93,10 @@ impl LoginScene {
             return false;
         }
         if !self.na_birth_date.trim().is_empty()
-            && Self::parse_birth_date_to_dotnet_binary(&self.na_birth_date).is_none() {
-                return false;
-            }
+            && Self::parse_birth_date_to_dotnet_binary(&self.na_birth_date).is_none()
+        {
+            return false;
+        }
 
         true
     }
@@ -240,10 +239,9 @@ impl LoginScene {
             };
         }
 
-        if is_key_pressed(KeyCode::Enter)
-            && self.can_submit_new_account() {
-                self.submit_new_account();
-            }
+        if is_key_pressed(KeyCode::Enter) && self.can_submit_new_account() {
+            self.submit_new_account();
+        }
     }
 
     pub(super) fn draw_new_account_dialog(&mut self) {
@@ -389,7 +387,13 @@ impl LoginScene {
         let desc_y = dialog_y + 340.0;
         let desc_w = 300.0;
         let desc_h = 70.0;
-        draw_rectangle(desc_x, desc_y, desc_w, desc_h, Color::from_rgba(20, 20, 25, 160));
+        draw_rectangle(
+            desc_x,
+            desc_y,
+            desc_w,
+            desc_h,
+            Color::from_rgba(20, 20, 25, 160),
+        );
         draw_rectangle_lines(
             desc_x,
             desc_y,

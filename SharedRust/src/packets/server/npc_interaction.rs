@@ -1,10 +1,10 @@
 // NPC 交互相关的服务器数据包
 
+use super::super::base::Packet;
 use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::data::item::UserItem;
 use crate::data::stats::SharedResult;
 use crate::enums::{PanelType, ServerPacketIds};
-use super::super::base::Packet;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{Read, Write};
 
@@ -38,9 +38,9 @@ impl Packet for NPCResponse {
 /// NPC 商品列表
 #[derive(Debug, Clone)]
 pub struct NPCGoods {
-    pub list: Vec<UserItem>,  // 商品列表
-    pub rate: f32,             // 价格倍率
-    pub panel_type: PanelType, // 面板类型（购买、出售、修理等）
+    pub list: Vec<UserItem>,    // 商品列表
+    pub rate: f32,              // 价格倍率
+    pub panel_type: PanelType,  // 面板类型（购买、出售、修理等）
     pub hide_added_stats: bool, // 是否隐藏附加属性
 }
 
@@ -107,8 +107,8 @@ impl Packet for NPCUpdate {
 /// NPC 图像更新
 #[derive(Debug, Clone)]
 pub struct NPCImageUpdate {
-    pub npc_id: u32,  // NPC ID
-    pub image: u16,   // 新图像
+    pub npc_id: u32, // NPC ID
+    pub image: u16,  // 新图像
 }
 
 impl Packet for NPCImageUpdate {
@@ -130,7 +130,7 @@ impl Packet for NPCImageUpdate {
 /// 默认 NPC 触发
 #[derive(Debug, Clone)]
 pub struct DefaultNPC {
-    pub object_id: u32, // 对象 ID
+    pub object_id: u32,    // 对象 ID
     pub page: Vec<String>, // NPC 页面内容
 }
 
@@ -156,4 +156,3 @@ impl Packet for DefaultNPC {
         Ok(())
     }
 }
-
