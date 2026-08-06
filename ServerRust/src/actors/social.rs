@@ -320,6 +320,17 @@ impl Message<NpcIsGroupLeader> for SocialActor {
     }
 }
 
+/// WorldActor -> SocialActor: 查询是否允许删除角色（C# Settings.AllowDeleteCharacter）
+pub struct NpcGetAllowDeleteCharacter;
+
+impl Message<NpcGetAllowDeleteCharacter> for SocialActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, _msg: NpcGetAllowDeleteCharacter, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.config.allow_delete_character
+    }
+}
+
 /// WorldActor -> SocialActor: 查询是否允许创建角色（C# Settings.AllowNewCharacter）
 pub struct NpcGetAllowNewCharacter;
 
@@ -570,6 +581,8 @@ pub struct SocialActorConfig {
     pub newbie_guild: String,
     /// 是否允许创建角色（C# Settings.AllowNewCharacter）
     pub allow_new_character: bool,
+    /// 是否允许删除角色（C# Settings.AllowDeleteCharacter）
+    pub allow_delete_character: bool,
     /// 行会宣战费用（C# Settings.Guild_WarCost = 3000）
     pub guild_war_cost: u32,
     /// 行会战争时长（秒，C# Settings.Guild_WarTime = 180）
@@ -587,6 +600,7 @@ impl Default for SocialActorConfig {
             guild_required_level: 22,
             newbie_guild: "NewbieGuild".to_string(),
             allow_new_character: true,
+            allow_delete_character: true,
             guild_war_cost: 3000,
             guild_war_time: 180,
         }
