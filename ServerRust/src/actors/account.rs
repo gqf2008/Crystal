@@ -83,6 +83,8 @@ pub struct AccountInfo {
     pub wrong_password_count: u32,
     /// 封禁到期时间（unix 秒；0 = 未封禁，C# Account.ExpiryDate）
     pub banned_until: i64,
+    /// 是否强制改密（C# AccountInfo.RequirePasswordChange；登录返回 Result=5）
+    pub require_password_change: bool,
 }
 
 impl AccountInfo {
@@ -127,6 +129,7 @@ impl AccountActor {
                 credit: 0,
                 wrong_password_count: 0,
                 banned_until: 0,
+                require_password_change: false,
             },
         );
 
@@ -151,6 +154,7 @@ impl AccountActor {
                 credit: 0,
                 wrong_password_count: 0,
                 banned_until: 0,
+                require_password_change: false,
             },
         );
 
@@ -186,6 +190,11 @@ impl AccountActor {
             if needs_migration {
                 account.password_hash = hash_password(password);
                 info!("Password hash migrated to Argon2 for account: {}", username);
+            }
+            // C#：RequirePasswordChange=true → 登录返回 Result=5，不置在线
+            if account.require_password_change {
+                warn!("Account '{}' requires password change", username);
+                return (false, false);
             }
             if account.is_online {
                 warn!("Account already online: {}", username);
@@ -374,6 +383,9 @@ impl Message<LoginRequest> for AccountActor {
     ) -> Self::Reply {
         let (success, _needs_db_save) = self.login(&msg.username, &msg.password);
         let banned_until = if success { None } else { self.banned_until(&msg.username) };
+        // C# RequirePasswordChange：密码正确但需强制改密（login 返回 false 且未封禁）
+        let require_password_change = !success && banned_until.is_none()
+            && self.accounts.get(&msg.username).map(|a| a.require_password_change).unwrap_or(false);
 
         // 同步到数据库
         if success {
@@ -407,6 +419,7 @@ impl Message<LoginRequest> for AccountActor {
                 username: msg.username.clone(),
                 characters,
                 banned_until,
+                require_password_change,
             })
             .await;
     }
@@ -613,10 +626,15 @@ impl Message<AccountChangePassword> for AccountActor {
             return;
         }
         account.password_hash = hash_password(&msg.new_password);
+        // C# ChangePassword：成功后 RequirePasswordChange = false
+        account.require_password_change = false;
         if let Err(e) = db::change_password(&self.db_pool, &msg.username, &account.password_hash).await {
             warn!("Failed to change password for '{}': {}", msg.username, e);
         } else {
             info!("Password changed for account: {}", msg.username);
+        }
+        if let Err(e) = db::save_account(&self.db_pool, account).await {
+            warn!("Failed to persist require_password_change reset: {}", e);
         }
         // C#：成功 → Result=6
         send_result(6).await;

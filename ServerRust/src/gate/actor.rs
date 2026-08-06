@@ -212,6 +212,8 @@ pub struct LoginResult {
     pub characters: Vec<crate::db::CharacterSummary>,
     /// 封禁到期时间（unix 秒；Some 时发 S.LoginBanned，C# WrongPasswordCount>=5 封 2 分钟）
     pub banned_until: Option<i64>,
+    /// 需要强制改密（C# AccountInfo.RequirePasswordChange → S.Login{Result=5}）
+    pub require_password_change: bool,
 }
 
 /// 设置 AccountActor 引用
@@ -1122,6 +1124,15 @@ impl Message<LoginResult> for GateActor {
             }
             let response_data = build_packet_bytes(ServerPacketIds::LoginSuccess as i16, &body);
 
+            let gate_ref = ctx.actor_ref().clone();
+            let _ = gate_ref
+                .tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: response_data,
+                }).await;
+        } else if msg.require_password_change {
+            // C#：RequirePasswordChange=true → S.Login { Result = 5 }
+            let response_data = build_packet_bytes(ServerPacketIds::Login as i16, &[5u8]);
             let gate_ref = ctx.actor_ref().clone();
             let _ = gate_ref
                 .tell(SendToClient {
