@@ -1783,6 +1783,61 @@ impl Message<FeedMount> for PlayerActor {
     }
 }
 
+/// 修改武器幸运（C# TryLuckWeapon：AddedStats[Stat.Luck] ±1，刷新装备）
+pub struct AddWeaponLuck {
+    pub delta: i32,
+}
+
+impl Message<AddWeaponLuck> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: AddWeaponLuck, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let slot = crate::actors::inventory::EquipmentSlot::Weapon as usize;
+        let Some(w) = self.state.inventory.equipment.get_mut(slot).and_then(|s| s.as_mut()) else {
+            return false;
+        };
+        use mir2_shared::enums::Stat;
+        let new_luck = (w.added_stats.get(Stat::Luck) + msg.delta).clamp(-7, 7);
+        w.added_stats.set(Stat::Luck, new_luck);
+        self.send_equipment_changed();
+        true
+    }
+}
+
+/// 修理武器（C# UseItem Scroll shape 4/5：RepairOil/WarGodOil；返回 (uid, max_dura, current_dura)）
+pub struct RepairWeapon {
+    pub full: bool,
+}
+
+impl Message<RepairWeapon> for PlayerActor {
+    type Reply = Option<(u64, u16, u16)>;
+
+    async fn handle(&mut self, msg: RepairWeapon, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let result = {
+            let slot = crate::actors::inventory::EquipmentSlot::Weapon as usize;
+            let Some(w) = self.state.inventory.equipment.get_mut(slot).and_then(|s| s.as_mut()) else {
+                return None;
+            };
+            if w.max_dura == 0 || w.current_dura >= w.max_dura {
+                return None;
+            }
+            if msg.full {
+                // C# WarGodOil：CurrentDura = MaxDura
+                w.current_dura = w.max_dura;
+            } else {
+                // C# RepairOil：MaxDura -= min(5000, MaxDura-CurrentDura)/30；CurrentDura += 5000（cap MaxDura）
+                let missing = (w.max_dura as u32 - w.current_dura as u32).min(5000);
+                w.max_dura = ((w.max_dura as u32).saturating_sub(missing / 30)).max(0) as u16;
+                w.current_dura = (w.current_dura as u32 + 5000).min(w.max_dura as u32) as u16;
+            }
+            w.dura_changed = true;
+            Some((w.unique_id, w.max_dura, w.current_dura))
+        };
+        self.send_equipment_changed();
+        result
+    }
+}
+
 /// 标记物品已鉴定（C# NeedIdentify 使用/装备时自动鉴定 + S.RefreshItem）
 pub struct SetItemIdentified {
     pub unique_id: u64,

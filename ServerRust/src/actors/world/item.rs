@@ -355,7 +355,7 @@ impl Message<UseItemRequest> for WorldActor {
             .unwrap_or(None)
         {
             if let Some(db) = self.item_infos.get(&hero_item.item_index) {
-                if db.item_type == mir2_shared::enums::ItemType::Book as i32 {
+                if db.item_type == 20 { // Book（C# ItemType.Book=20）
                     let _ = record
                         .actor_ref
                         .ask(crate::actors::player::ConsumeHeroItem {
@@ -441,39 +441,25 @@ impl Message<UseItemRequest> for WorldActor {
             }).await;
         }
 
-        // C# UseItem：仅可处理类型才消耗（Potion/Scroll/Book/Food/彩票）；未处理类型不消耗
+        // C# UseItem：仅可处理类型才消耗（Potion=13/Scroll=17/Book=20/Food=27/彩票=Scroll shape 12）；
+        // 未处理类型不消耗（C# PlayerObject.cs UseItem default: return;）
+        // 注意：DB item_type 为 C# 原始值（SharedRust 枚举 +3，不可用于 DB 比较）
         let item_type = item_db.as_ref().map(|i| i.item_type).unwrap_or(-1);
-        let usable = item_index == 4
-            || item_type == mir2_shared::enums::ItemType::Potion as i32
-            || item_type == mir2_shared::enums::ItemType::Scroll as i32
-            || item_type == mir2_shared::enums::ItemType::Book as i32
-            || item_type == mir2_shared::enums::ItemType::Food as i32;
+        let item_shape = item_db.as_ref().map(|i| i.shape).unwrap_or(-1);
+        let usable = item_type == 13 // Potion
+            || item_type == 17 // Scroll
+            || item_type == 20 // Book
+            || item_type == 27 // Food
+            || (item_type == 17 && item_shape == 12); // LotteryTicket（C# Scroll shape 12）
         if !usable {
             send_system_message(&self.gate_ref, msg.session_id, "该物品无法使用");
             send_use_item_response(&self.gate_ref, msg.session_id, msg.unique_id);
             return;
         }
 
-        // 消耗品：扣减 count 或移除
-        let consumed = record.actor_ref.ask(ConsumeItem { unique_id: msg.unique_id }).await.unwrap_or(false);
-        if !consumed {
-            send_system_message(&self.gate_ref, msg.session_id, "使用物品失败");
-            return;
-        }
-
         debug!("Player session={} used item uid={} index={}", msg.session_id, msg.unique_id, item_index);
 
-        // 特殊物品：双倍经验卷（不依赖 item_type）
-        if item_index == 4 {
-            let duration_ticks = 6000; // 10分钟 = 6000 ticks @ 100ms
-            let end_tick = self.tick_count + duration_ticks;
-            let _ = record.actor_ref.ask(SetExpMultiplier {
-                multiplier: 2.0,
-                end_tick,
-            }).await;
-            send_system_message(&self.gate_ref, msg.session_id, "双倍经验效果已启动，持续10分钟！");
-            debug!("DoubleExpScroll: {} activated 2x exp for 10 min", player_state.name);
-        }
+        // C#：经验药水为 Potion shape 4（EXP Buff），另行实现；此处不再按 item_index 特判
 
         // 根据物品类型执行效果
         if let Some(ref db) = item_db {
@@ -538,112 +524,209 @@ impl Message<UseItemRequest> for WorldActor {
                         }
                     }
                 }
-                // Scroll (回城卷 / 随机传送卷)
+                // Scroll（C# UseItem Scroll：按 item.Info.Shape 分支，shape=0~6/12）
                 17 => {
-                    if let Some(mi) = self.map_infos.get(&(player_state.map_index as i32)) {
-                        if mi.no_escape {
-                            send_system_message(&self.gate_ref, msg.session_id, "该地图无法使用传送卷");
+                    let shape = db.shape;
+                    match shape {
+                        // 0 DungeonEscape（C# TeleportEscape(20)：传回绑定点±100）
+                        // 1 TownTeleport（C# Teleport(BindMap, BindLocation)）
+                        // Rust 暂无绑定点系统，回退到当前地图安全区中心
+                        0 | 1 => {
+                            let (tx, ty) = self.maps.get(&player_state.map_index)
+                                .and_then(|m| m.safe_zone_rects.first())
+                                .map(|(x1, y1, x2, y2)| ((x1 + x2) / 2, (y1 + y2) / 2))
+                                .unwrap_or((330, 330));
+                            let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                                x: tx,
+                                y: ty,
+                                direction: player_state.direction,
+                                map_index: None,
+                                is_mounted: None,
+                            }).await;
+                            send_system_message(&self.gate_ref, msg.session_id,
+                                if shape == 0 { "已脱离迷宫，返回安全区" } else { "已返回安全区" });
+                            debug!("Scroll: {} shape={} teleported to safe zone ({}, {})", player_state.name, shape, tx, ty);
+                        }
+                        // 2 RandomTeleport（C# TeleportRandom(200, Durability)：随机可行走格）
+                        2 => {
+                            if let Some(map) = self.maps.get(&player_state.map_index) {
+                                let (max_x, max_y) = (map.width as i32, map.height as i32);
+                                let mut attempts = 0;
+                                let mut rx = player_state.x;
+                                let mut ry = player_state.y;
+                                while attempts < 20 {
+                                    let cx = fastrand::i32(0..max_x);
+                                    let cy = fastrand::i32(0..max_y);
+                                    if map.is_walkable(cx, cy) {
+                                        rx = cx;
+                                        ry = cy;
+                                        break;
+                                    }
+                                    attempts += 1;
+                                }
+                                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                                    x: rx,
+                                    y: ry,
+                                    direction: player_state.direction,
+                                    map_index: None,
+                                    is_mounted: None,
+                                }).await;
+                                send_system_message(&self.gate_ref, msg.session_id, "随机传送完成");
+                                debug!("RandomScroll: {} teleported to ({}, {})", player_state.name, rx, ry);
+                            }
+                        }
+                        // 3 BenedictionOil（C# TryLuckWeapon：武器幸运赌博）
+                        3 => {
+                            use mir2_shared::enums::Stat;
+                            let weapon = record.actor_ref.ask(crate::actors::player::GetEquipmentInfo {
+                                slot: crate::actors::inventory::EquipmentSlot::Weapon,
+                            }).await.unwrap_or(None);
+                            let Some(weapon) = weapon else {
+                                send_system_message(&self.gate_ref, msg.session_id, "没有装备武器");
+                                return;
+                            };
+                            let luck = weapon.added_stats.get(Stat::Luck);
+                            if luck >= 7 {
+                                send_system_message(&self.gate_ref, msg.session_id, "武器幸运已达上限");
+                                return;
+                            }
+                            // C# BindMode.DontUpgrade = 0x40（绑定禁止升级）
+                            let dont_upgrade = self.item_infos.get(&weapon.item_index)
+                                .map(|i| (i.bind_mode & 0x40) != 0).unwrap_or(false);
+                            if dont_upgrade {
+                                send_system_message(&self.gate_ref, msg.session_id, "该武器无法使用祝福油");
+                                return;
+                            }
+                            // C#：20% 诅咒（Luck > -MaxLuck 且 random(20)==0）；否则 Luck<=0 或 random(10*Luck)==0 时 +1
+                            let delta = if luck > -7 && fastrand::i32(..20) == 0 {
+                                -1
+                            } else if luck <= 0 || fastrand::i32(..(10 * luck.max(1))) == 0 {
+                                1
+                            } else {
+                                0
+                            };
+                            if delta != 0 {
+                                let _ = record.actor_ref.ask(crate::actors::player::AddWeaponLuck { delta }).await;
+                                send_system_message(&self.gate_ref, msg.session_id,
+                                    if delta > 0 { "武器幸运提升！" } else { "武器受到诅咒，幸运下降！" });
+                            } else {
+                                send_system_message(&self.gate_ref, msg.session_id, "武器没有变化");
+                            }
+                        }
+                        // 4 RepairOil（C#：武器部分修理，MaxDura 少量下降）
+                        4 => {
+                            let weapon = record.actor_ref.ask(crate::actors::player::GetEquipmentInfo {
+                                slot: crate::actors::inventory::EquipmentSlot::Weapon,
+                            }).await.unwrap_or(None);
+                            let Some(weapon) = weapon else {
+                                send_system_message(&self.gate_ref, msg.session_id, "没有装备武器");
+                                return;
+                            };
+                            if weapon.current_dura >= weapon.max_dura {
+                                send_system_message(&self.gate_ref, msg.session_id, "武器无需修理");
+                                return;
+                            }
+                            // C# BindMode.DontRepair = 0x20
+                            let dont_repair = self.item_infos.get(&weapon.item_index)
+                                .map(|i| (i.bind_mode & 0x20) != 0).unwrap_or(false);
+                            if dont_repair {
+                                send_system_message(&self.gate_ref, msg.session_id, "该武器无法修理");
+                                return;
+                            }
+                            let repaired = record.actor_ref.ask(crate::actors::player::RepairWeapon { full: false }).await.unwrap_or(None);
+                            if let Some((uid, max_dura, cur_dura)) = repaired {
+                                let packet = mir2_shared::packets::server::item::ItemRepaired { unique_id: uid, max_dura, current_dura: cur_dura };
+                                let mut body = Vec::new();
+                                if packet.write_body(&mut body).is_ok() {
+                                    let _ = self.gate_ref.tell(SendToClient {
+                                        session_id: msg.session_id,
+                                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ItemRepaired as i16, &body),
+                                    }).await;
+                                }
+                                send_system_message(&self.gate_ref, msg.session_id, "武器已部分修复");
+                            }
+                        }
+                        // 5 WarGodOil（C#：武器完全修理，禁止 DontRepair/NoSRepair）
+                        5 => {
+                            let weapon = record.actor_ref.ask(crate::actors::player::GetEquipmentInfo {
+                                slot: crate::actors::inventory::EquipmentSlot::Weapon,
+                            }).await.unwrap_or(None);
+                            let Some(weapon) = weapon else {
+                                send_system_message(&self.gate_ref, msg.session_id, "没有装备武器");
+                                return;
+                            };
+                            if weapon.current_dura >= weapon.max_dura {
+                                send_system_message(&self.gate_ref, msg.session_id, "武器无需修理");
+                                return;
+                            }
+                            // C# BindMode.DontRepair = 0x20 / NoSRepair = 0x400
+                            let no_repair = self.item_infos.get(&weapon.item_index)
+                                .map(|i| (i.bind_mode & (0x20 | 0x400)) != 0).unwrap_or(false);
+                            if no_repair {
+                                send_system_message(&self.gate_ref, msg.session_id, "该武器无法修理");
+                                return;
+                            }
+                            let repaired = record.actor_ref.ask(crate::actors::player::RepairWeapon { full: true }).await.unwrap_or(None);
+                            if let Some((uid, max_dura, cur_dura)) = repaired {
+                                let packet = mir2_shared::packets::server::item::ItemRepaired { unique_id: uid, max_dura, current_dura: cur_dura };
+                                let mut body = Vec::new();
+                                if packet.write_body(&mut body).is_ok() {
+                                    let _ = self.gate_ref.tell(SendToClient {
+                                        session_id: msg.session_id,
+                                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ItemRepaired as i16, &body),
+                                    }).await;
+                                }
+                                send_system_message(&self.gate_ref, msg.session_id, "武器已完全修复");
+                            }
+                        }
+                        // 6 ResurrectionScroll（C#：NoReincarnation 地图禁用；死亡时 MP/HP 回满复活）
+                        6 => {
+                            if let Some(mi) = self.map_infos.get(&(player_state.map_index as i32)) {
+                                if mi.no_reincarnation {
+                                    send_system_message(&self.gate_ref, msg.session_id, "该地图无法使用复活卷");
+                                    return;
+                                }
+                            }
+                            if player_state.is_dead {
+                                let _ = record.actor_ref.ask(crate::actors::player::Revive).await;
+                                send_system_message(&self.gate_ref, msg.session_id, "你已复活！");
+                                debug!("ResurrectionScroll: {} revived", player_state.name);
+                            }
+                        }
+                        // 12 LotteryTicket（C# Scroll shape 12：按 Effect 概率中奖）
+                        12 => {
+                            let effect = db.effect.max(1) as usize;
+                            let prizes: [(&str, i64); 6] = [
+                                ("一等奖！获得 1,000,000 金币", 1_000_000),
+                                ("二等奖！获得 200,000 金币", 200_000),
+                                ("三等奖！获得 100,000 金币", 100_000),
+                                ("四等奖！获得 10,000 金币", 10_000),
+                                ("五等奖！获得 1,000 金币", 1_000),
+                                ("六等奖！获得 500 金币", 500),
+                            ];
+                            let mut won = false;
+                            for (i, (msg_text, gold)) in prizes.iter().enumerate() {
+                                if fastrand::usize(..effect * (i + 1)) == 0 {
+                                    let _ = record.actor_ref.ask(crate::actors::player::AddGold {
+                                        amount: *gold as u64,
+                                    }).await;
+                                    send_system_message(&self.gate_ref, msg.session_id, msg_text);
+                                    won = true;
+                                    break;
+                                }
+                            }
+                            if !won {
+                                send_system_message(&self.gate_ref, msg.session_id, "很遗憾，你没有中奖。");
+                            }
+                        }
+                        _ => {
+                            send_system_message(&self.gate_ref, msg.session_id, "该卷轴无法使用");
                             return;
                         }
-                        match item_index {
-                            // 回城卷 -> 传送到当前地图安全区
-                            2 => {
-                                if mi.no_town_teleport {
-                                    send_system_message(&self.gate_ref, msg.session_id, "该地图无法使用回城卷");
-                                    return;
-                                }
-                                let (tx, ty) = self.maps.get(&player_state.map_index)
-                                    .and_then(|m| m.safe_zone_rects.first())
-                                    .map(|(x1, y1, x2, y2)| ((x1 + x2) / 2, (y1 + y2) / 2))
-                                    .unwrap_or((330, 330));
-                                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
-                                    x: tx,
-                                    y: ty,
-                                    direction: player_state.direction,
-                                    map_index: None,
-                                    is_mounted: None,
-                                }).await;
-                                send_system_message(&self.gate_ref, msg.session_id, "已返回安全区");
-                                debug!("Scroll: {} teleported to safe zone ({}, {})", player_state.name, tx, ty);
-                            }
-                            // 随机传送卷 -> 传送到当前地图随机可行走位置
-                            3 => {
-                                if mi.no_random {
-                                    send_system_message(&self.gate_ref, msg.session_id, "该地图无法使用随机传送卷");
-                                    return;
-                                }
-                                if let Some(map) = self.maps.get(&player_state.map_index) {
-                                    let (max_x, max_y) = (map.width as i32, map.height as i32);
-                                    let mut attempts = 0;
-                                    let mut rx = player_state.x;
-                                    let mut ry = player_state.y;
-                                    while attempts < 20 {
-                                        let cx = fastrand::i32(0..max_x);
-                                        let cy = fastrand::i32(0..max_y);
-                                        if map.is_walkable(cx, cy) {
-                                            rx = cx;
-                                            ry = cy;
-                                            break;
-                                        }
-                                        attempts += 1;
-                                    }
-                                    let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
-                                        x: rx,
-                                        y: ry,
-                                        direction: player_state.direction,
-                                        map_index: None,
-                                        is_mounted: None,
-                                    }).await;
-                                    send_system_message(&self.gate_ref, msg.session_id, "随机传送完成");
-                                    debug!("RandomScroll: {} teleported to ({}, {})", player_state.name, rx, ry);
-                                }
-                            }
-                            _ => {
-                                // 未知卷轴 -> 默认回城行为
-                                let (tx, ty) = self.maps.get(&player_state.map_index)
-                                    .and_then(|m| m.safe_zone_rects.first())
-                                    .map(|(x1, y1, x2, y2)| ((x1 + x2) / 2, (y1 + y2) / 2))
-                                    .unwrap_or((330, 330));
-                                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
-                                    x: tx,
-                                    y: ty,
-                                    direction: player_state.direction,
-                                    map_index: None,
-                                    is_mounted: None,
-                                }).await;
-                                send_system_message(&self.gate_ref, msg.session_id, "已返回安全区");
-                            }
-                        }
-                    }
-                }
-                // LotteryTicket (item_type=12, per C# PlayerObject)
-                12 => {
-                    let effect = db.effect.max(1) as usize;
-                    let prizes: [(&str, i64); 6] = [
-                        ("一等奖！获得 1,000,000 金币", 1_000_000),
-                        ("二等奖！获得 200,000 金币", 200_000),
-                        ("三等奖！获得 100,000 金币", 100_000),
-                        ("四等奖！获得 10,000 金币", 10_000),
-                        ("五等奖！获得 1,000 金币", 1_000),
-                        ("六等奖！获得 500 金币", 500),
-                    ];
-                    let mut won = false;
-                    for (i, (msg_text, gold)) in prizes.iter().enumerate() {
-                        if fastrand::usize(..effect * (i + 1)) == 0 {
-                            let _ = record.actor_ref.ask(crate::actors::player::AddGold {
-                                amount: *gold as u64,
-                            }).await;
-                            send_system_message(&self.gate_ref, msg.session_id, msg_text);
-                            won = true;
-                            break;
-                        }
-                    }
-                    if !won {
-                        send_system_message(&self.gate_ref, msg.session_id, "很遗憾，你没有中奖。");
                     }
                 }
                 // Food（喂坐骑：恢复坐骑耐久 + S.ItemRepaired，C# UseItem Food）
-                t if t == mir2_shared::enums::ItemType::Food as i32 => {
+                t if t == 27 => { // Food（C# ItemType.Food=27；喂坐骑恢复耐久 + S.ItemRepaired）
                     let fed = record.actor_ref.ask(crate::actors::player::FeedMount {
                         amount: db.durability as u16,
                     }).await.unwrap_or(None);
@@ -667,7 +750,7 @@ impl Message<UseItemRequest> for WorldActor {
                     }
                 }
                 // Book（技能书，#212：C# UseItem Book → magic = (Spell)item.Info.Shape）
-                t if t == mir2_shared::enums::ItemType::Book as i32 => {
+                t if t == 20 => { // Book（C# ItemType.Book=20；SharedRust 枚举 +3 不可用）
                     let spell_cs = db.shape;
                     if self.magic_infos.contains_key(&(spell_cs as u32)) {
                         let learned = record
@@ -730,6 +813,13 @@ impl Message<UseItemRequest> for WorldActor {
             }
         }
 
+        // C# UseItem：switch 成功后统一消耗（item.Count>1 ? Count-- : 移除；失败分支已提前 return 不消耗）
+        let consumed = record.actor_ref.ask(ConsumeItem { unique_id: msg.unique_id }).await.unwrap_or(false);
+        if !consumed {
+            send_system_message(&self.gate_ref, msg.session_id, "使用物品失败");
+            return;
+        }
+
         // 发送 UseItem 响应
         send_use_item_response(&self.gate_ref, msg.session_id, msg.unique_id);
     }
@@ -738,19 +828,20 @@ impl Message<UseItemRequest> for WorldActor {
 /// 装备校验（对齐 C# HumanObject.CanEquipItem：槽位类型/性别/职业/RequiredType）
 fn can_equip_item(item_info: &db::ItemInfo, slot: crate::actors::inventory::EquipmentSlot, state: &crate::actors::player::PlayerState) -> bool {
     use crate::actors::inventory::EquipmentSlot;
-    use mir2_shared::enums::ItemType;
+    // C# ItemType 枚举值（DB 落库 C# 原始值）：Weapon=1 Armour=2 Helmet=4 Necklace=5 Bracelet=6
+    // Ring=7 Amulet=8 Boots=10 Mount=19（SharedRust 枚举 +3，不可用于 DB 比较）
     let type_ok = match slot {
-        EquipmentSlot::Weapon => item_info.item_type == ItemType::Weapon as i32,
-        EquipmentSlot::Armour => item_info.item_type == ItemType::Armour as i32,
-        EquipmentSlot::Helmet => item_info.item_type == ItemType::Helmet as i32,
-        EquipmentSlot::Necklace => item_info.item_type == ItemType::Necklace as i32,
-        EquipmentSlot::BraceletL => item_info.item_type == ItemType::Bracelet as i32,
-        EquipmentSlot::BraceletR => item_info.item_type == ItemType::Bracelet as i32
-            || item_info.item_type == ItemType::Amulet as i32,
-        EquipmentSlot::RingL | EquipmentSlot::RingR => item_info.item_type == ItemType::Ring as i32,
-        EquipmentSlot::Shoes => item_info.item_type == ItemType::Boots as i32,
-        EquipmentSlot::Pendant => item_info.item_type == ItemType::Amulet as i32,
-        EquipmentSlot::Mount => item_info.item_type == ItemType::Mount as i32,
+        EquipmentSlot::Weapon => item_info.item_type == 1,
+        EquipmentSlot::Armour => item_info.item_type == 2,
+        EquipmentSlot::Helmet => item_info.item_type == 4,
+        EquipmentSlot::Necklace => item_info.item_type == 5,
+        EquipmentSlot::BraceletL => item_info.item_type == 6,
+        EquipmentSlot::BraceletR => item_info.item_type == 6
+            || item_info.item_type == 8,
+        EquipmentSlot::RingL | EquipmentSlot::RingR => item_info.item_type == 7,
+        EquipmentSlot::Shoes => item_info.item_type == 10,
+        EquipmentSlot::Pendant => item_info.item_type == 8,
+        EquipmentSlot::Mount => item_info.item_type == 19,
         _ => false,
     };
     if !type_ok {
