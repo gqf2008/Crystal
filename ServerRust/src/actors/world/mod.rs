@@ -1129,6 +1129,8 @@ impl WorldActor {
 
     /// 发送 ObjectPlayer 给同地图其他玩家，使该玩家重新出现在他人视野中
     pub(crate) async fn reveal_player_to_others(&self, session_id: u64, state: &crate::actors::player::PlayerState) {
+        // C#：Hidden=false 广播（客户端取消隐身显示）
+        self.broadcast_object_hidden(state.object_id, false, state.map_index).await;
         let weapon = state.inventory.get_equipment(EquipmentSlot::Weapon)
             .and_then(|item| self.item_infos.get(&item.item_index))
             .map(|info| info.shape as i16).unwrap_or(-1);
@@ -1207,6 +1209,24 @@ impl WorldActor {
         self.players.values()
             .filter(|r| r.session_id != exclude_session)
             .collect()
+    }
+
+    /// C# Hidden 属性：向同图其他玩家广播 S.ObjectHidden（隐身/现身）
+    pub(crate) async fn broadcast_object_hidden(&self, object_id: u32, hidden: bool, map_index: u16) {
+        let packet = mir2_shared::packets::server::object::ObjectHidden { object_id, hidden };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            for (sid, record) in &self.players {
+                if let Ok(Some(os)) = record.actor_ref.ask(GetPlayerState).await {
+                    if os.map_index == map_index {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *sid,
+                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectHidden as i16, &body.clone()),
+                        }).await;
+                    }
+                }
+            }
+        }
     }
 
     /// C# Teleport/Knockback：向自身发 UserLocation + 同图其他玩家 BroadcastMovement
