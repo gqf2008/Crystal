@@ -1315,6 +1315,83 @@ impl Message<ChatRequest> for WorldActor {
             }
         }
 
+        // C# GM 命令（@ 前缀，仅 GM；C# PlayerObject Chat @level/@gold/@teleport/@make/@monster）
+        if let Some(cmd_rest) = message.strip_prefix('@') {
+            let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
+            if !parts.is_empty() {
+                let cmd = parts[0].to_uppercase();
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "TELEPORT" | "MAKE" | "MONSTER") {
+                    let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
+                    if !is_gm {
+                        send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
+                        return;
+                    }
+                    match cmd.as_str() {
+                        // @level <n>
+                        "LEVEL" => {
+                            let lv = parts.get(1).and_then(|s| s.parse::<u16>().ok()).unwrap_or(1).min(200);
+                            let _ = record.actor_ref.ask(crate::actors::player::ChangeLevel { level: lv }).await;
+                            send_system_message(&self.gate_ref, msg.session_id, &format!("等级已设置为 {}", lv));
+                        }
+                        // @gold <n>
+                        "GOLD" => {
+                            let g = parts.get(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                            let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount: g }).await;
+                            send_system_message(&self.gate_ref, msg.session_id, &format!("已获得 {} 金币", g));
+                        }
+                        // @teleport <x> <y>
+                        "TELEPORT" => {
+                            let x = parts.get(1).and_then(|s| s.parse::<i32>().ok());
+                            let y = parts.get(2).and_then(|s| s.parse::<i32>().ok());
+                            if let (Some(x), Some(y)) = (x, y) {
+                                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                                    x, y, direction: 4, map_index: None, is_mounted: None,
+                                }).await;
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("已传送至 ({}, {})", x, y));
+                            } else {
+                                send_system_message(&self.gate_ref, msg.session_id, "用法：@teleport <x> <y>");
+                            }
+                        }
+                        // @make <物品名> [数量]
+                        "MAKE" => {
+                            let name = parts.get(1).copied().unwrap_or("");
+                            let count = parts.get(2).and_then(|s| s.parse::<u16>().ok()).unwrap_or(1).max(1);
+                            let item_idx = self.item_infos.iter().find(|(_, i)| i.name.eq_ignore_ascii_case(name)).map(|(k, _)| *k);
+                            if let Some(idx) = item_idx {
+                                let mut item = crate::actors::inventory::make_item(idx, count);
+                                if let Some(info) = self.item_infos.get(&idx) {
+                                    item.max_dura = info.durability as u16;
+                                    item.current_dura = info.durability as u16;
+                                }
+                                let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("已生成 {} x{}", name, count));
+                            } else {
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("未找到物品：{}", name));
+                            }
+                        }
+                        // @monster <怪物名> [数量]
+                        "MONSTER" => {
+                            let name = parts.get(1).copied().unwrap_or("");
+                            let count = parts.get(2).and_then(|s| s.parse::<u32>().ok()).unwrap_or(1).max(1);
+                            let state = match record.actor_ref.ask(GetPlayerState).await {
+                                Ok(Some(s)) => s,
+                                _ => return,
+                            };
+                            let spawned = self.spawn_monster_named(name, state.x, state.y, count, state.map_index).await;
+                            let msg_text = if spawned > 0 {
+                                format!("已召唤 {} x{}", name, spawned)
+                            } else {
+                                format!("未找到怪物：{}", name)
+                            };
+                            send_system_message(&self.gate_ref, msg.session_id, &msg_text);
+                        }
+                        _ => {}
+                    }
+                    return;
+                }
+            }
+        }
+
         // Check for social chat commands and forward to SocialActor
         let parts: Vec<&str> = message.split_whitespace().collect();
         // 去掉前导 @（C# 客户端命令如 @ride 均带 @）
