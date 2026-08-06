@@ -14,6 +14,11 @@ use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
+use bevy::sprite::Anchor;
+
+use crate::game::dialogs::text_input::{
+    TextInputDisplay, TextInputField, TextInputRect, TextInputState, TextInputSubmit,
+};
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
 };
@@ -39,6 +44,22 @@ pub struct NpcLine(usize);
 #[derive(Component)]
 pub struct NpcQuest;
 
+/// #272 NPC 输入状态（S.NPCRequestInput）
+#[derive(Resource, Default)]
+pub struct NpcInputState {
+    pub npc_id: u32,
+    pub page_name: String,
+    pub active: bool,
+}
+
+/// #272 NPC 输入覆盖层根
+#[derive(Component)]
+pub struct NpcInputRoot;
+
+/// #272 NPC 输入确定按钮
+#[derive(Component)]
+pub struct NpcInputOk;
+
 pub struct NpcDialogPlugin;
 
 impl Plugin for NpcDialogPlugin {
@@ -49,6 +70,13 @@ impl Plugin for NpcDialogPlugin {
         app.add_systems(
             Update,
             npc_dialog_server_events.run_if(in_state(AppState::Game)),
+        );
+        app.init_resource::<NpcInputState>();
+        app.add_systems(
+            Update,
+            npc_input_overlay
+                .after(crate::network::network_system)
+                .run_if(in_state(AppState::Game)),
         );
         app.add_systems(
             Update,
@@ -325,5 +353,168 @@ fn npc_dialog_server_events(
             npc.lines = lines.clone();
             npc.visible = *visible;
         }
+    }
+}
+
+
+/// #272：NPC 输入覆盖层——S.NPCRequestInput → 弹输入框；确定/Enter → C.NPCConfirmInput
+#[allow(clippy::too_many_arguments)]
+fn npc_input_overlay(
+    mut commands: Commands,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    mut fonts: ResMut<Assets<Font>>,
+    mut ui_font: ResMut<UiFont>,
+    net: Res<NetConnection>,
+    mut state: ResMut<NpcInputState>,
+    mut text_state: ResMut<TextInputState>,
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut submits: MessageReader<TextInputSubmit>,
+    ok_btns: Query<&UiButton, With<NpcInputOk>>,
+    mut roots: Query<&mut Visibility, With<NpcInputRoot>>,
+) {
+    use crate::network::server_event::ServerEvent;
+
+    for ev in events.read() {
+        if let ServerEvent::NpcInputRequest { npc_id, page_name } = ev {
+            state.npc_id = *npc_id;
+            state.page_name = page_name.clone();
+            state.active = true;
+            text_state.texts.resize(1, String::new());
+            text_state.texts[0].clear();
+            text_state.active = Some(0);
+            if roots.iter_mut().count() == 0 {
+                spawn_npc_input_overlay(
+                    &mut commands,
+                    &mut libs,
+                    &mut images,
+                    &mut cache,
+                    &mut fonts,
+                    &mut ui_font,
+                    page_name,
+                );
+            }
+            for mut vis in roots.iter_mut() {
+                *vis = Visibility::Visible;
+            }
+            tracing::info!("⌨️ [NPC] 输入框打开 npc={} page={}", npc_id, page_name);
+        }
+    }
+
+    let submitted = submits.read().any(|s| s.0 == 0);
+    let ok_clicked = ok_btns.iter().any(|b| b.clicked);
+    if state.active && (submitted || ok_clicked) {
+        let value = text_state.texts.first().cloned().unwrap_or_default();
+        net.send_packet(&mir2_shared::packets::client::npc::NPCConfirmInput {
+            npc_id: state.npc_id,
+            page_name: state.page_name.clone(),
+            value,
+        });
+        tracing::info!(
+            "⌨️ [NPC] 提交输入 -> npc={} page={}",
+            state.npc_id,
+            state.page_name
+        );
+        state.active = false;
+        text_state.active = None;
+        for mut vis in roots.iter_mut() {
+            *vis = Visibility::Hidden;
+        }
+    }
+}
+
+/// 生成输入覆盖层（面板 + 提示 + 输入框 + 确定）
+#[allow(clippy::too_many_arguments)]
+fn spawn_npc_input_overlay(
+    commands: &mut Commands,
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    cache: &mut UiImageCache,
+    fonts: &mut Assets<Font>,
+    ui_font: &mut UiFont,
+    page_name: &str,
+) {
+    libs.0.ensure_initialized();
+    if !ui_font.0.is_strong() {
+        ui_font.0 = crate::ui::sprite_ui::load_ui_font(fonts);
+    }
+    let font = ui_font.0.clone();
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
+
+    // 面板
+    let root = if let Some(h) = ui_image(libs, images, cache, LibraryName::Prguse, 170) {
+        let e = spawn_ui_sprite(commands, h, 280.0, 80.0, 6.0, 1.0);
+        commands
+            .entity(e)
+            .insert((NpcInputRoot, Visibility::Hidden));
+        e
+    } else {
+        commands
+            .spawn((
+                NpcInputRoot,
+                Sprite {
+                    image: white.clone(),
+                    color: Color::srgba(0.1, 0.1, 0.14, 0.95),
+                    custom_size: Some(Vec2::new(360.0, 140.0)),
+                    ..default()
+                },
+                Anchor::TOP_LEFT,
+                Transform::from_xyz(280.0, -80.0, 6.0),
+                Visibility::Hidden,
+            ))
+            .id()
+    };
+    let _ = root;
+
+    // 提示
+    let prompt = spawn_ui_text(
+        commands, &font, &format!("请输入（{}）:", page_name),
+        300.0, 100.0, 14.0, Color::WHITE, 8.1,
+    );
+    commands.entity(prompt).insert(NpcInputRoot);
+
+    // 输入框
+    let field = commands
+        .spawn((
+            NpcInputRoot,
+            TextInputField(0),
+            TextInputRect(300.0, 130.0, 280.0, 22.0),
+            Sprite {
+                image: white.clone(),
+                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
+                custom_size: Some(Vec2::new(280.0, 22.0)),
+                ..default()
+            },
+            Anchor::TOP_LEFT,
+            Transform::from_xyz(300.0, -130.0, 8.1),
+        ))
+        .id();
+    commands.entity(field).with_children(|p| {
+        p.spawn((
+            TextInputDisplay(0),
+            Text2d::new(String::new()),
+            Anchor::TOP_LEFT,
+            TextFont {
+                font: FontSource::Handle(font.clone()),
+                font_size: FontSize::Px(13.0),
+                ..default()
+            },
+            TextColor(Color::WHITE),
+            Transform::from_xyz(3.0, -3.0, 8.2),
+        ));
+    });
+
+    // 确定
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        commands, libs, images, cache,
+        LibraryName::Prguse2, 360, 361, 362,
+        560.0, 175.0, 8.2, 50.0, 22.0,
+    ) {
+        commands.entity(e).insert(NpcInputOk);
     }
 }
