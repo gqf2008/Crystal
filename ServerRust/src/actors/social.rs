@@ -231,6 +231,46 @@ pub struct SocialPlayerLeft {
     pub session_id: u64,
 }
 
+/// WorldActor(NPC 脚本) -> SocialActor: 强制离婚（对齐 C# ActionType.ForceDivorce：NPCDivorce）
+pub struct NpcForceDivorce {
+    pub session_id: u64,
+}
+
+impl Message<NpcForceDivorce> for SocialActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: NpcForceDivorce, _ctx: &mut Context<Self, Self::Reply>) {
+        let state = match self.players.get(&msg.session_id) {
+            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return },
+            None => return,
+        };
+        let Some(spouse_name) = state.spouse_name.clone() else {
+            send_system_message(&self.gate_ref, msg.session_id, "你还没有结婚");
+            return;
+        };
+        // 清除自己婚姻状态
+        if let Some(record) = self.players.get(&msg.session_id) {
+            let _ = record.ask(SetSpouse { spouse_name: None }).await;
+        }
+        // 配偶在线则同步清除
+        let online: Vec<u64> = self.players.keys().copied().collect();
+        for sid in online {
+            if sid == msg.session_id { continue; }
+            if let Some(record) = self.players.get(&sid) {
+                if let Ok(Some(os)) = record.ask(GetPlayerState).await {
+                    if os.name.eq_ignore_ascii_case(&spouse_name) {
+                        let _ = record.ask(SetSpouse { spouse_name: None }).await;
+                        send_system_message(&self.gate_ref, sid, &format!("你已与 {} 强制离婚", state.name));
+                        break;
+                    }
+                }
+            }
+        }
+        send_system_message(&self.gate_ref, msg.session_id, &format!("你已与 {} 强制离婚", spouse_name));
+        debug!("NPC ForceDivorce: {} <- {}", state.name, spouse_name);
+    }
+}
+
 /// WorldActor(NPC 脚本) -> SocialActor: NPC 直接加入行会（对齐 C# ActionType.AddToGuild：自动接受邀请）
 pub struct NpcAddToGuild {
     pub session_id: u64,

@@ -2451,6 +2451,35 @@ impl Message<SetSpouse> for PlayerActor {
     }
 }
 
+/// NPC 脚本 MAKEWEDDINGRING：将左戒指标记为结婚戒指（对齐 C# PlayerObject.MakeWeddingRing）
+pub struct MakeWeddingRing;
+
+impl Message<MakeWeddingRing> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, _msg: MakeWeddingRing, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        // 对齐 C# CheckMakeWeddingRing：需已婚
+        if self.state.spouse_name.is_none() {
+            return false;
+        }
+        let Some(ring) = self.state.inventory.equipment
+            .get_mut(crate::actors::inventory::EquipmentSlot::RingL as usize)
+        else {
+            return false;
+        };
+        let Some(ring) = ring.as_mut() else { return false };
+        // Rust 约定：0 = 未绑定（社交召回检查 wedding_ring == 0）
+        if ring.wedding_ring != 0 {
+            return false;
+        }
+        ring.wedding_ring = 1;
+        self.send_equipment_changed();
+        debug!("Player {} wedding ring bound", self.state.name);
+        true
+    }
+}
+
+
 /// 设置是否允许拜师
 pub struct SetAllowMentor {
     pub allow: bool,

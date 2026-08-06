@@ -901,6 +901,21 @@ async fn exec_action(
                 }
             }
         }
+        // MAKEWEDDINGRING —— 制作结婚戒指（对齐 C# ActionType.MakeWeddingRing）
+        "MAKEWEDDINGRING" => {
+            let ok = if let Some(record) = world.players.get(&session_id) {
+                record.actor_ref.ask(crate::actors::player::MakeWeddingRing).await.unwrap_or(false)
+            } else {
+                false
+            };
+            if !ok {
+                send_system_message(&world.gate_ref, session_id, "需要已婚并佩戴未绑定的左戒指才能制作结婚戒指");
+            }
+        }
+        // FORCEDIVORCE —— 强制离婚（对齐 C# ActionType.ForceDivorce）
+        "FORCEDIVORCE" => {
+            let _ = world.social_ref.ask(crate::actors::social::NpcForceDivorce { session_id }).await;
+        }
         // CHANGEGENDER <male|female|0|1> —— 修改性别（对齐 C# ActionType.ChangeGender）
         "CHANGEGENDER" => {
             if let Some(gender) = parse_gender(arg0()) {
@@ -1171,6 +1186,32 @@ async fn exec_action(
         // GROUPRECALL —— 组队召回（对齐 C# ActionType.GroupRecall：NPC 版无限制，直接召回组员到玩家位置）
         "GROUPRECALL" | "RECALLGROUP" => {
             let _ = world.social_ref.ask(crate::actors::social::NpcGroupRecall { session_id }).await;
+        }
+        // GETRANDOMTEXT <filePath> <变量名> —— 从文本文件随机选一行写入脚本变量（对齐 C# ActionType.GetRandomText）
+        "GETRANDOMTEXT" => {
+            let file_path = arg0();
+            let var = normalize_custom_var(arg1());
+            if file_path.is_empty() || var.is_empty() {
+                warn!("NPC GETRANDOMTEXT: missing args (filePath/var)");
+            } else {
+                let base = world.script_dir.clone();
+                let path = base.join(file_path);
+                if path.starts_with(&base) {
+                    match std::fs::read_to_string(&path) {
+                        Ok(content) => {
+                            let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
+                            if !lines.is_empty() {
+                                let idx = fastrand::usize(0..lines.len());
+                                custom_vars.insert(var, lines[idx].to_string());
+                                debug!("NPC GETRANDOMTEXT: {} -> line {}", file_path, idx);
+                            }
+                        }
+                        Err(e) => warn!("NPC GETRANDOMTEXT: failed {}: {}", path.display(), e),
+                    }
+                } else {
+                    warn!("NPC GETRANDOMTEXT: path escape denied: {}", file_path);
+                }
+            }
         }
         // SAVEVALUE <filePath> <header> <key> <value> —— 写 INI 全局变量（对齐 C# ActionType.SaveValue）
         "SAVEVALUE" => {
