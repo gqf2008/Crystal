@@ -748,8 +748,8 @@ async fn eval_one_check(
                 dx * dx + dy * dy <= range * range
             }
         }
-        // CHECKMAPLIGHT <Day|Night|Dawn|Evening> — 全局昼夜状态（对齐 C# CheckType.CheckMapLight / Envir.Lights）
-        "CHECKMAPLIGHT" => {
+        // CHECKMAPLIGHT / MAPLIGHT <Day|Night|Dawn|Evening> — 全局昼夜状态（对齐 C# CheckType.CheckMapLight / Envir.Lights；C# 命令名为 MAPLIGHT）
+        "CHECKMAPLIGHT" | "MAPLIGHT" => {
             let want = arg0().trim().to_uppercase();
             let cur = format!("{:?}", world.current_light).to_uppercase();
             !want.is_empty() && cur == want
@@ -1494,8 +1494,8 @@ async fn exec_action(
                 world.npc_gt_sale(session_id, price).await;
             }
         }
-        // GTCANCELSALE —— 取消挂售（对齐 C# ActionType.GTCancelSale）
-        "GTCANCELSALE" => {
+        // GTCANCELSALE / CANCELGTSALE —— 取消挂售（对齐 C# ActionType.GTCancelSale；C# 命令名为 CANCELGTSALE）
+        "GTCANCELSALE" | "CANCELGTSALE" => {
             world.npc_gt_cancel_sale(session_id).await;
         }
         // ENTERMAP —— 传送到 NeedMove 暂存传送点（对齐 C# ActionType.EnterMap + NPCData["NPCMoveMap"]）
@@ -2095,8 +2095,8 @@ async fn exec_action(
                 }
             }
         }
-        // DELGUILDNAME <file> —— 从名单删除行会名（对齐 C# ActionType.DelGuildNameList）
-        "DELGUILDNAME" => {
+        // DELGUILDNAME / DELGUILDNAMELIST <file> —— 从名单删除行会名（对齐 C# ActionType.DelGuildNameList；C# 命令名为 DELGUILDNAMELIST）
+        "DELGUILDNAME" | "DELGUILDNAMELIST" => {
             let file_path = arg0();
             if file_path.is_empty() { warn!("NPC DELGUILDNAME: missing file"); }
             else if let Some(st) = current_player_state(world, session_id).await {
@@ -2115,7 +2115,7 @@ async fn exec_action(
             }
         }
         // CLEARGUILDNAME <file> —— 清空名单（对齐 C# ActionType.ClearGuildNameList；需在行会）
-        "CLEARGUILDNAME" => {
+        "CLEARGUILDNAME" | "CLEARGUILDNAMELIST" => {
             let file_path = arg0();
             if file_path.is_empty() { warn!("NPC CLEARGUILDNAME: missing file"); }
             else if let Some(st) = current_player_state(world, session_id).await {
