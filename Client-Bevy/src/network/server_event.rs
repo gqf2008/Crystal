@@ -29,6 +29,35 @@ pub enum ServerEvent {
     StorageUnlockResult { result: u8, has_password: bool },
     /// #200 NPCStorage：仓库对话框打开信号（有密码时客户端先弹解锁框，C# S.NPCStorage）
     StoragePrompt,
+    /// #279 PlayerUpdate：玩家外观刷新（换装/光照，C# S.PlayerUpdate）
+    PlayerUpdate {
+        object_id: u32,
+        light: u8,
+        weapon: i16,
+        weapon_effect: i16,
+        armor: i16,
+        wings_effect: u8,
+    },
+    /// #279 NewMonsterInfo：怪物信息（名称/形象，C# S.NewMonsterInfo）
+    MonsterInfo { info: mir2_shared::data::client_data::ClientMonsterInfo },
+    /// #279 NewNPCInfo：NPC 信息（C# S.NewNPCInfo）
+    NpcInfo { info: mir2_shared::data::client_data::ClientNPCInfo },
+    /// #279 StoreItem：存入仓库回执（C# S.StoreItem）
+    ItemStored { from: i32, to: i32, success: bool },
+    /// #279 TakeBackItem：取出仓库回执（C# S.TakeBackItem）
+    ItemTakenBack { from: i32, to: i32, success: bool },
+    /// #279 RemoveSlotItem：槽位物品移除回执（C# S.RemoveSlotItem）
+    SlotItemRemoved {
+        grid: mir2_shared::enums::MirGridType,
+        grid_to: mir2_shared::enums::MirGridType,
+        unique_id: u64,
+        to: i32,
+        success: bool,
+    },
+    /// #279 RetrieveTradeItem：交易取回回执（C# S.RetrieveTradeItem）
+    TradeItemRetrieved { from_slot: i32, success: bool },
+    /// #279 AllowObserve：允许观察（C# S.AllowObserve）
+    ObserveAllowed { allowed: bool },
     /// LogOutSuccess：登出成功，返回选角
     LogOutSuccess,
     /// ChangeAMode：攻击模式确认（C# S.ChangeAMode）
