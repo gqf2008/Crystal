@@ -294,9 +294,13 @@ pub(crate) fn sync_player_equipment(
 }
 
 /// 演示驱动：玩家绕方块行走；怪物/NPC 原地转向；部分怪物周期性攻击
+/// #573：坐下的对象（Sitting）不参与演示驱动，保持坐姿不自动转向
 pub(crate) fn demo_drive(
     time: Res<Time>,
-    mut actors: Query<(&mut ActorAnim, &mut Transform, &mut DemoBehavior)>,
+    mut actors: Query<
+        (&mut ActorAnim, &mut Transform, &mut DemoBehavior),
+        Without<crate::actor::Sitting>,
+    >,
 ) {
     let dt = time.delta_secs();
 

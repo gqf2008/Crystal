@@ -6954,7 +6954,7 @@ fn auto_mana_test(
 }
 
 
-/// --repair-test：施法 → mock 回发 ItemRepaired(9005: 12/8) + ItemSlotSizeChanged(1)，
+/// --repair-test：施法 → mock 回发 ItemRepaired(9007: 12/8) + ItemSlotSizeChanged(1)，
 /// 断言背包物品耐久/最大耐久/槽位数更新（#240）
 #[allow(clippy::too_many_arguments)]
 fn auto_repair_test(
@@ -7048,7 +7048,7 @@ fn auto_repair_test(
                     .items
                     .iter()
                     .flatten()
-                    .find(|it| it.unique_id == 9005);
+                    .find(|it| it.unique_id == 9007);
                 let dura = item
                     .map(|it| it.current_dura == 8 && it.max_dura == 12)
                     .unwrap_or(false);

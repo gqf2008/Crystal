@@ -136,6 +136,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             let mut mock_storage: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 80];
             // #557：本地坐骑状态（@ride 切换）
             let mut mock_riding = false;
+            // #573：钓鱼收获计时（FishingCast 后 5s 回发系统聊天）
+            let mut mock_fishing: Option<std::time::Instant> = None;
             // #283：首次击杀触发本地升级演示（LevelChanged + ObjectLeveled）
             let mut mock_leveled_up = false;
             // #297：精炼流程状态（(物品 uid, 是否已开始)）
@@ -737,6 +739,20 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         );
                                     }
                                 }
+                                // #573：钓鱼抛竿（wire [fishing_type u8]）→ FishingUpdate + 5s 后收获
+                                x if x == ClientPacketIds::FishingCast as i16 => {
+                                    use byteorder::ReadBytesExt;
+                                    let _fishing_type = cur.read_u8().unwrap_or(0);
+                                    send(
+                                        &to_client,
+                                        &server::miscellaneous::FishingUpdate {
+                                            fishing_progress: 1,
+                                            fishing_success: false,
+                                        },
+                                    );
+                                    mock_fishing = Some(std::time::Instant::now());
+                                    tracing::info!("🎣 [MOCK] 抛竿成功，5s 后收获");
+                                }
                                 x if x == ClientPacketIds::Attack as i16 => {
                                     // 攻击反馈：怪物受击动画 + 伤害飘字 + 血量/死亡/掉落
                                     if player_dead {
@@ -1132,6 +1148,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         let mut upgraded = potion_item(5);
                                         upgraded.unique_id = 9005;
                                         upgraded.item_index = 6; // 升级后物品索引变化
+                                        upgraded.current_dura = 3; // 保持 #228 耐久链路最终值 3（--item-state-test）
                                         send(
                                             &to_client,
                                             &server::item_operations::ItemUpgraded {
@@ -1142,7 +1159,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         send(
                                             &to_client,
                                             &server::item::ItemRepaired {
-                                                unique_id: 9005,
+                                                unique_id: 9007,
                                                 max_dura: 12,
                                                 current_dura: 8,
                                             },
@@ -1150,7 +1167,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         send(
                                             &to_client,
                                             &server::item::ItemSlotSizeChanged {
-                                                unique_id: 9005,
+                                                unique_id: 9007,
                                                 slot_size: 1,
                                             },
                                         );
@@ -2308,17 +2325,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             direction: 2,
                                         },
                                     );
-                                    send(
-                                        &to_client,
-                                        &server::movement::ObjectBackStep {
-                                            object_id: 101,
-                                            location_x: 352,
-                                            location_y: 352,
-                                            direction: mir2_shared::enums::MirDirection::Down,
-                                            distance: 1,
-                                        },
-                                    );
-                                    tracing::info!("🌀 [MOCK] 对象状态: 隐藏102/击退103/坐下101 + 冲刺/后跳");
+                                    tracing::info!("🌀 [MOCK] 对象状态: 隐藏102/击退103/坐下101 + 冲刺");
                                     object_state_stage = 2;
                                 }
                                 2 => {
@@ -2328,6 +2335,17 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         &server::map::ObjectTeleportOut {
                                             object_id: 103,
                                             teleport_type: 0,
+                                        },
+                                    );
+                                    // #234：对象后跳（放 t+4s，避免与 #226 坐下同一对象同一时刻冲突）
+                                    send(
+                                        &to_client,
+                                        &server::movement::ObjectBackStep {
+                                            object_id: 101,
+                                            location_x: 352,
+                                            location_y: 352,
+                                            direction: mir2_shared::enums::MirDirection::Down,
+                                            distance: 1,
                                         },
                                     );
                                     // #230：计时器到期（SetTimer 5s 后服务端主动关闭）
@@ -2368,6 +2386,22 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                 }
                                 _ => {}
                             }
+                        }
+                    }
+                }
+                // #573：钓鱼收获计时（FishingCast 后 5s 回发系统聊天）
+                if in_game {
+                    if let Some(t0) = mock_fishing {
+                        if t0.elapsed() >= std::time::Duration::from_secs(5) {
+                            mock_fishing = None;
+                            send(
+                                &to_client,
+                                &server::chat::Chat {
+                                    message: "🎣 钓到了：金创药(小) x1".to_string(),
+                                    chat_type: ChatType::System,
+                                },
+                            );
+                            tracing::info!("🎣 [MOCK] 钓鱼收获消息回发");
                         }
                     }
                 }
