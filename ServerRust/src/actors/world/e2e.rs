@@ -198,6 +198,30 @@ fn e2e_start_game_flow() {
 
         let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
 
+        // C# 流程：先 NewCharacter 再 StartGame（StartGame 不再隐式建号）
+        let nc_body = {
+            let mut b = Vec::new();
+            let _ = mir2_shared::binary::write_dotnet_string(&mut b, "TestChar");
+            b.push(0u8); // gender = Male
+            b.push(0u8); // class = Warrior
+            b
+        };
+        let nc_packet = build_packet_bytes(mir2_shared::enums::ClientPacketIds::NewCharacter as i16, &nc_body);
+        let _ = gate_ref.ask(ClientData { session_id, data: nc_packet }).await;
+        let nc_success_opcode = mir2_shared::enums::ServerPacketIds::NewCharacterSuccess as i16;
+        loop {
+            let data = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .expect("rx.recv timed out waiting NewCharacterSuccess")
+                .expect("channel closed");
+            if data.len() >= 4 {
+                let opcode = i16::from_le_bytes([data[2], data[3]]);
+                if opcode == nc_success_opcode {
+                    break;
+                }
+            }
+        }
+
         // Send StartGame
         let sg_body = 0i32.to_le_bytes().to_vec();
         let sg_packet = build_packet_bytes(mir2_shared::enums::ClientPacketIds::StartGame as i16, &sg_body);

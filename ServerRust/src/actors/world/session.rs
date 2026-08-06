@@ -130,12 +130,21 @@ impl Message<StartGameRequest> for WorldActor {
             }
         }
 
-        // 如果加载失败，创建默认角色
-        let state = if let Some(s) = state {
-            s
-        } else {
-            info!("Creating default character for account '{}'", msg.account_username);
-            create_default_player_state(msg.session_id, self.alloc_object_id())
+        // C#：找不到角色 → S.StartGame { Result = 2 }（不再隐式创建默认角色，避免绕过角色上限）
+        let state = match state {
+            Some(s) => s,
+            None => {
+                let packet = mir2_shared::packets::server::login::StartGame { result: 2, resolution: 0 };
+                let mut body = Vec::new();
+                if packet.write_body(&mut body).is_ok() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::StartGame as i16, &body),
+                    }).await;
+                }
+                warn!("StartGame rejected: character_index {} not found for account {}", msg.character_index, msg.account_username);
+                return;
+            }
         };
 
         let object_id = self.alloc_object_id();
