@@ -466,9 +466,22 @@ impl Message<NewCharacterRequest> for WorldActor {
 
     async fn handle(&mut self, msg: NewCharacterRequest, _ctx: &mut Context<Self, Self::Reply>) {
         debug!("NewCharacterRequest handler entered: {}", msg.name);
-        // 验证角色名称
-        if msg.name.is_empty() || msg.name.len() > 20 {
-            send_system_message(&self.gate_ref, msg.session_id, "角色名称无效");
+        // C# 规则（Globals.MinCharacterNameLength=3 / MaxCharacterNameLength=15 / Envir.CharacterReg）：
+        // 名称 3..15 字符，仅中文/下划线/ASCII 字母数字
+        let name_len = msg.name.chars().count();
+        let valid_name = (3..=15).contains(&name_len)
+            && msg.name.chars().all(|c| c == '_' || c.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fa5}').contains(&c));
+        if !valid_name {
+            send_system_message(&self.gate_ref, msg.session_id, "角色名称无效（3-15 个中英文字符/数字/下划线）");
+            return;
+        }
+        // C# Globals.MaxCharacterCount = 4：账号角色数上限
+        let existing_count = db::list_character_summaries(&self.db_pool, &msg.account_username)
+            .await
+            .unwrap_or_default()
+            .len();
+        if existing_count >= 4 {
+            send_system_message(&self.gate_ref, msg.session_id, "账号角色已满（最多 4 个）");
             return;
         }
         // 检查名称是否已被使用（在线玩家）
