@@ -28,7 +28,7 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::FishingUpdate as i16, ServerPacketIds::MentorRequest as i16, ServerPacketIds::MentorUpdate as i16, ServerPacketIds::GuildNoticeChange as i16, ServerPacketIds::GuildMemberChange as i16, ServerPacketIds::Rankings as i16, ServerPacketIds::GuildInvite as i16, ServerPacketIds::FriendUpdate as i16, ServerPacketIds::TradeRequest as i16, ServerPacketIds::TradeGold as i16, ServerPacketIds::TradeConfirm as i16, ServerPacketIds::TradeCancel as i16, ServerPacketIds::TradeItem as i16, ServerPacketIds::DepositTradeItem as i16, ServerPacketIds::ReceiveMail as i16, ServerPacketIds::GroupMembersMap as i16, ServerPacketIds::GroupInvite as i16, ServerPacketIds::DeleteGroup as i16, ServerPacketIds::DeleteMember as i16, ServerPacketIds::NewMagic as i16, ServerPacketIds::MagicDelay as i16, ServerPacketIds::MagicCast as i16, ServerPacketIds::MagicLeveled as i16, ServerPacketIds::ObjectMagic as i16, ServerPacketIds::ObjectEffect as i16, ServerPacketIds::ObjectProjectile as i16, ServerPacketIds::SpellToggle as i16, ServerPacketIds::MapEffect as i16, ServerPacketIds::PlaySound as i16, ServerPacketIds::SetTimer as i16, ServerPacketIds::ExpireTimer as i16, ServerPacketIds::KeepAlive as i16, ServerPacketIds::ParcelCollected as i16, ServerPacketIds::RequestReincarnation as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::FishingUpdate as i16, ServerPacketIds::MentorRequest as i16, ServerPacketIds::MentorUpdate as i16, ServerPacketIds::GuildNoticeChange as i16, ServerPacketIds::GuildMemberChange as i16, ServerPacketIds::Rankings as i16, ServerPacketIds::GuildInvite as i16, ServerPacketIds::FriendUpdate as i16, ServerPacketIds::TradeRequest as i16, ServerPacketIds::TradeGold as i16, ServerPacketIds::TradeConfirm as i16, ServerPacketIds::TradeCancel as i16, ServerPacketIds::TradeItem as i16, ServerPacketIds::DepositTradeItem as i16, ServerPacketIds::ReceiveMail as i16, ServerPacketIds::GroupMembersMap as i16, ServerPacketIds::GroupInvite as i16, ServerPacketIds::DeleteGroup as i16, ServerPacketIds::DeleteMember as i16, ServerPacketIds::NewMagic as i16, ServerPacketIds::MagicDelay as i16, ServerPacketIds::MagicCast as i16, ServerPacketIds::MagicLeveled as i16, ServerPacketIds::ObjectMagic as i16, ServerPacketIds::ObjectEffect as i16, ServerPacketIds::ObjectProjectile as i16, ServerPacketIds::SpellToggle as i16, ServerPacketIds::MapEffect as i16, ServerPacketIds::PlaySound as i16, ServerPacketIds::SetTimer as i16, ServerPacketIds::ExpireTimer as i16, ServerPacketIds::SetCompass as i16, ServerPacketIds::KeepAlive as i16, ServerPacketIds::ParcelCollected as i16, ServerPacketIds::RequestReincarnation as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M39: 钓鱼 ----
@@ -578,6 +578,17 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
                     timer_id: p.timer_id,
                 });
                 tracing::info!("⏱️ 计时器到期 id={}", p.timer_id);
+            }
+        }
+
+        // #250：罗盘目标（C# S.SetCompass）
+        x if x == ServerPacketIds::SetCompass as i16 => {
+            if let Ok(p) = ui_events::SetCompass::read_body(&mut cur) {
+                server_events.write(ServerEvent::CompassTarget {
+                    x: p.location.0,
+                    y: p.location.1,
+                });
+                tracing::info!("🧭 罗盘目标 ({},{})", p.location.0, p.location.1);
             }
         }
 

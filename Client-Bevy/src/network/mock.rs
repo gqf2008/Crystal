@@ -666,6 +666,13 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             &to_client,
                                             &server::drops::GainedCredit { credit: 50 },
                                         );
+                                        // #250：罗盘目标
+                                        send(
+                                            &to_client,
+                                            &server::ui_events::SetCompass {
+                                                location: (354, 350),
+                                            },
+                                        );
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
                                             send(
