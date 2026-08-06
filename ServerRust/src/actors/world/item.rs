@@ -807,8 +807,11 @@ impl Message<UseItemRequest> for WorldActor {
                 }
                 // Food（喂坐骑：恢复坐骑耐久 + S.ItemRepaired，C# UseItem Food）
                 t if t == 27 => { // Food（C# ItemType.Food=27；喂坐骑恢复耐久 + S.ItemRepaired）
+                    // C#：temp.CurrentDura += item.CurrentDura（食物自身耐久，非 DB durability）
+                    let feed_amount = user_item.as_ref().map(|u| u.current_dura).unwrap_or(db.durability as u16);
                     let fed = record.actor_ref.ask(crate::actors::player::FeedMount {
-                        amount: db.durability as u16,
+                        amount: feed_amount,
+                        shape: db.shape,
                     }).await.unwrap_or(None);
                     if let Some((uid, max_dura, cur_dura)) = fed {
                         let packet = mir2_shared::packets::server::item::ItemRepaired {
@@ -826,7 +829,9 @@ impl Message<UseItemRequest> for WorldActor {
                         send_system_message(&self.gate_ref, msg.session_id, "坐骑吃饱了！");
                         debug!("FeedMount: {} fed mount (uid={} dura={}/{})", player_state.name, uid, cur_dura, max_dura);
                     } else {
+                        // C#：坐骑为空或已满 → Enqueue(p) 后 return（不消耗）
                         send_system_message(&self.gate_ref, msg.session_id, "没有可喂养的坐骑或坐骑已满");
+                        return;
                     }
                 }
                 // Book（技能书，#212：C# UseItem Book → magic = (Spell)item.Info.Shape）
