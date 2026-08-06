@@ -34,7 +34,7 @@
 use super::*;
 use crate::actors::player::{
     AddExperience, AddGold, AddItemToInventory, ChangeClass, CheckQuestState, DeductGold,
-    GetPlayerState, HasItem, HasItemSpace, RemoveItemByIndex, SetHair, SetPlayerPosition,
+    GetPlayerState, HasItem, HasItemSpace, RemoveItemByIndexWithDura, SetHair, SetPlayerPosition,
     SetPlayerState,
 };
 use mir2_shared::enums::MirClass;
@@ -1018,11 +1018,13 @@ async fn exec_action(
                 give_item(world, session_id, idx, cnt).await;
             }
         }
-        // TAKEITEM <name|index> <count>
+        // TAKEITEM <name|index> <count> [dura] — 移除背包物品（对齐 C# ActionType.TakeItem；
+        // dura 存在且可解析时只移除 current_dura >= dura*1000 的物品）
         "TAKEITEM" => {
             let (idx, cnt) = parse_item_count_action(args, world);
             if idx > 0 {
-                take_item(world, session_id, idx, cnt).await;
+                let min_dura = args.get(2).and_then(|s| s.parse::<u32>().ok());
+                take_item(world, session_id, idx, cnt, min_dura).await;
             }
         }
         // SETPKPOINT <points> —— 设置 PK 值（对齐 C# ActionType.SetPkPoint）
@@ -2608,11 +2610,11 @@ async fn give_item(world: &WorldActor, session_id: u64, item_index: i32, count: 
     }
 }
 
-async fn take_item(world: &WorldActor, session_id: u64, item_index: i32, count: u16) {
+async fn take_item(world: &WorldActor, session_id: u64, item_index: i32, count: u16, min_dura: Option<u32>) {
     let Some(record) = world.players.get(&session_id) else { return };
     let _ = record
         .actor_ref
-        .ask(RemoveItemByIndex { item_index, count })
+        .ask(RemoveItemByIndexWithDura { item_index, count, min_dura })
         .await;
 }
 
