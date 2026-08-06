@@ -1664,13 +1664,32 @@ async fn exec_action(
                 send_system_message(&world.gate_ref, session_id, "你没有召唤宠物");
             }
         }
-        // REMOVEPET —— 移除宠物（对齐 C# ActionType.RemovePet）
+        // REMOVEPET [宠物名] —— 移除宠物（对齐 C# ActionType.RemovePet：按名字大小写不敏感匹配；
+        // 无参时保留旧行为移除当前激活宠物；有参时先匹配 active，再匹配 owned_creatures）
         "REMOVEPET" => {
             if let Some(mut st) = current_player_state(world, session_id).await {
-                if st.creature_log.active_creature.is_some() {
-                    st.creature_log.active_creature = None;
+                let name = arg0().trim();
+                let removed = if name.is_empty() {
+                    st.creature_log.active_creature.take().is_some()
+                } else {
+                    let want = name.to_lowercase();
+                    let pet_matches = |c: &crate::actors::creature::IntelligentCreature| {
+                        c.custom_name.as_deref().map(|n| n.to_lowercase() == want).unwrap_or(false)
+                            || format!("{:?}", c.creature_type).to_lowercase() == want
+                    };
+                    let active_removed = st.creature_log.active_creature.as_ref().map(|c| pet_matches(c)).unwrap_or(false);
+                    if active_removed {
+                        st.creature_log.active_creature = None;
+                        true
+                    } else {
+                        let before = st.creature_log.owned_creatures.len();
+                        st.creature_log.owned_creatures.retain(|c| !pet_matches(c));
+                        st.creature_log.owned_creatures.len() < before
+                    }
+                };
+                if removed {
                     send_player_msg(world, session_id, crate::actors::player::SetCreature { creature_log: st.creature_log }).await;
-                    debug!("NPC REMOVEPET: pet removed");
+                    debug!("NPC REMOVEPET: pet removed (name='{}')", name);
                 }
             }
         }
