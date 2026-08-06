@@ -35,6 +35,29 @@ pub struct RemoveItemRequest {
 }
 
 /// 丢弃物品
+/// 客户端删除物品（C# C.DeleteItem）
+pub struct DeleteItemRequest {
+    pub session_id: u64,
+    pub unique_id: u64,
+    pub count: u16,
+    pub hero: bool,
+}
+
+impl Message<DeleteItemRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: DeleteItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r, None => return,
+        };
+        let _ = record.actor_ref.ask(crate::actors::player::DeleteItemFromInventory {
+            unique_id: msg.unique_id,
+            count: msg.count,
+            hero: msg.hero,
+        }).await;
+    }
+}
+
 pub struct DropItemRequest {
     pub session_id: u64,
     pub unique_id: u64,
