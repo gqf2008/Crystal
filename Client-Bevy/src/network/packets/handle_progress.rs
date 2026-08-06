@@ -17,7 +17,7 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::CraftItem as i16, ServerPacketIds::ItemRentalRequest as i16, ServerPacketIds::UpdateRentalItem as i16, ServerPacketIds::ItemRentalFee as i16, ServerPacketIds::ItemRentalPeriod as i16, ServerPacketIds::DepositRentalItem as i16, ServerPacketIds::RetrieveRentalItem as i16, ServerPacketIds::ItemRentalLock as i16, ServerPacketIds::ItemRentalPartnerLock as i16, ServerPacketIds::CanConfirmItemRental as i16, ServerPacketIds::ConfirmItemRental as i16, ServerPacketIds::CancelItemRental as i16, ServerPacketIds::GetRentedItems as i16, ServerPacketIds::ChangeQuest as i16, ServerPacketIds::CompleteQuest as i16, ServerPacketIds::NewQuestInfo as i16, ServerPacketIds::ShareQuest as i16, ServerPacketIds::GainedQuestItem as i16, ServerPacketIds::DeleteQuestItem as i16, ServerPacketIds::NewRecipeInfo as i16, ServerPacketIds::PauseBuff as i16, ServerPacketIds::RefreshItem as i16, ServerPacketIds::SetBindingShot as i16, ServerPacketIds::BaseStatsInfo as i16, ServerPacketIds::HeroBaseStatsInfo as i16, ServerPacketIds::NPCDisassemble as i16, ServerPacketIds::NPCDowngrade as i16, ServerPacketIds::NPCReset as i16, ServerPacketIds::GuildBuffList as i16, ServerPacketIds::NPCPearlGoods as i16, ServerPacketIds::NPCRequestInput as i16, ServerPacketIds::HeroHealthChanged as i16, ServerPacketIds::GainHeroExperience as i16, ServerPacketIds::HeroLevelChanged as i16, ServerPacketIds::NewIntelligentCreature as i16, ServerPacketIds::IntelligentCreatureEnableRename as i16, ServerPacketIds::IntelligentCreaturePickup as i16, ServerPacketIds::ResizeInventory as i16, ServerPacketIds::ResizeStorage as i16, ServerPacketIds::AddBuff as i16, ServerPacketIds::RemoveBuff as i16, ServerPacketIds::PlayerInspect as i16, ServerPacketIds::UpdateIntelligentCreatureList as i16, ServerPacketIds::ChangeHero as i16, ServerPacketIds::MarriageRequest as i16, ServerPacketIds::LoverUpdate as i16, ServerPacketIds::DivorceRequest as i16, ServerPacketIds::ObjectColourChanged as i16, ServerPacketIds::ManageHeroes as i16, ServerPacketIds::NewHero as i16, ServerPacketIds::SetHeroBehaviour as i16, ServerPacketIds::SetAutoPotValue as i16, ServerPacketIds::SetAutoPotItem as i16, ServerPacketIds::HeroInformation as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::CraftItem as i16, ServerPacketIds::ItemRentalRequest as i16, ServerPacketIds::UpdateRentalItem as i16, ServerPacketIds::ItemRentalFee as i16, ServerPacketIds::ItemRentalPeriod as i16, ServerPacketIds::DepositRentalItem as i16, ServerPacketIds::RetrieveRentalItem as i16, ServerPacketIds::ItemRentalLock as i16, ServerPacketIds::ItemRentalPartnerLock as i16, ServerPacketIds::CanConfirmItemRental as i16, ServerPacketIds::ConfirmItemRental as i16, ServerPacketIds::CancelItemRental as i16, ServerPacketIds::GetRentedItems as i16, ServerPacketIds::ChangeQuest as i16, ServerPacketIds::CompleteQuest as i16, ServerPacketIds::NewQuestInfo as i16, ServerPacketIds::ShareQuest as i16, ServerPacketIds::GainedQuestItem as i16, ServerPacketIds::DeleteQuestItem as i16, ServerPacketIds::NewRecipeInfo as i16, ServerPacketIds::PauseBuff as i16, ServerPacketIds::RefreshItem as i16, ServerPacketIds::SetBindingShot as i16, ServerPacketIds::BaseStatsInfo as i16, ServerPacketIds::HeroBaseStatsInfo as i16, ServerPacketIds::NPCDisassemble as i16, ServerPacketIds::NPCDowngrade as i16, ServerPacketIds::NPCReset as i16, ServerPacketIds::GuildBuffList as i16, ServerPacketIds::NPCPearlGoods as i16, ServerPacketIds::NPCRequestInput as i16, ServerPacketIds::HeroHealthChanged as i16, ServerPacketIds::GainHeroExperience as i16, ServerPacketIds::HeroLevelChanged as i16, ServerPacketIds::NewIntelligentCreature as i16, ServerPacketIds::IntelligentCreatureEnableRename as i16, ServerPacketIds::IntelligentCreaturePickup as i16, ServerPacketIds::ResizeInventory as i16, ServerPacketIds::ResizeStorage as i16, ServerPacketIds::PlayerUpdate as i16, ServerPacketIds::NewMonsterInfo as i16, ServerPacketIds::NewNPCInfo as i16, ServerPacketIds::StoreItem as i16, ServerPacketIds::TakeBackItem as i16, ServerPacketIds::RemoveSlotItem as i16, ServerPacketIds::RetrieveTradeItem as i16, ServerPacketIds::AllowObserve as i16, ServerPacketIds::AddBuff as i16, ServerPacketIds::RemoveBuff as i16, ServerPacketIds::PlayerInspect as i16, ServerPacketIds::UpdateIntelligentCreatureList as i16, ServerPacketIds::ChangeHero as i16, ServerPacketIds::MarriageRequest as i16, ServerPacketIds::LoverUpdate as i16, ServerPacketIds::DivorceRequest as i16, ServerPacketIds::ObjectColourChanged as i16, ServerPacketIds::ManageHeroes as i16, ServerPacketIds::NewHero as i16, ServerPacketIds::SetHeroBehaviour as i16, ServerPacketIds::SetAutoPotValue as i16, ServerPacketIds::SetAutoPotItem as i16, ServerPacketIds::HeroInformation as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M41: 合成 ----
@@ -138,6 +138,68 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                     size: p.size.max(0) as usize,
                 });
                 tracing::info!("🎒 背包扩容: {}", p.size);
+            }
+        }
+        // #279：玩家外观刷新（换装/光照）
+        x if x == ServerPacketIds::PlayerUpdate as i16 => {
+            if let Ok(p) = player::PlayerUpdate::read_body(&mut cur) {
+                server_events.write(ServerEvent::PlayerUpdate {
+                    object_id: p.object_id,
+                    light: p.light,
+                    weapon: p.weapon,
+                    weapon_effect: p.weapon_effect,
+                    armor: p.armor,
+                    wings_effect: p.wings_effect,
+                });
+                tracing::info!("🧍 PlayerUpdate id={} weapon={} armor={}", p.object_id, p.weapon, p.armor);
+            }
+        }
+        // #279：怪物/NPC 信息缓存
+        x if x == ServerPacketIds::NewMonsterInfo as i16 => {
+            if let Ok(p) = info::NewMonsterInfo::read_body(&mut cur) {
+                server_events.write(ServerEvent::MonsterInfo { info: p.info });
+            }
+        }
+        x if x == ServerPacketIds::NewNPCInfo as i16 => {
+            if let Ok(p) = info::NewNPCInfo::read_body(&mut cur) {
+                server_events.write(ServerEvent::NpcInfo { info: p.info });
+            }
+        }
+        // #279：仓库存取/槽位移除/交易取回/观察许可 回执
+        x if x == ServerPacketIds::StoreItem as i16 => {
+            if let Ok(p) = item_operations::StoreItem::read_body(&mut cur) {
+                server_events.write(ServerEvent::ItemStored { from: p.from, to: p.to, success: p.success });
+                tracing::info!("📦 StoreItem {} -> {} success={}", p.from, p.to, p.success);
+            }
+        }
+        x if x == ServerPacketIds::TakeBackItem as i16 => {
+            if let Ok(p) = item_operations::TakeBackItem::read_body(&mut cur) {
+                server_events.write(ServerEvent::ItemTakenBack { from: p.from, to: p.to, success: p.success });
+                tracing::info!("📦 TakeBackItem {} -> {} success={}", p.from, p.to, p.success);
+            }
+        }
+        x if x == ServerPacketIds::RemoveSlotItem as i16 => {
+            if let Ok(p) = item_operations::RemoveSlotItem::read_body(&mut cur) {
+                server_events.write(ServerEvent::SlotItemRemoved {
+                    grid: p.grid,
+                    grid_to: p.grid_to,
+                    unique_id: p.unique_id,
+                    to: p.to,
+                    success: p.success,
+                });
+                tracing::info!("🗑️ RemoveSlotItem uid={} -> {} success={}", p.unique_id, p.to, p.success);
+            }
+        }
+        x if x == ServerPacketIds::RetrieveTradeItem as i16 => {
+            if let Ok(p) = miscellaneous::RetrieveTradeItem::read_body(&mut cur) {
+                server_events.write(ServerEvent::TradeItemRetrieved { from_slot: p.from_slot, success: p.success });
+                tracing::info!("🔄 RetrieveTradeItem slot={} success={}", p.from_slot, p.success);
+            }
+        }
+        x if x == ServerPacketIds::AllowObserve as i16 => {
+            if let Ok(p) = miscellaneous::AllowObserve::read_body(&mut cur) {
+                server_events.write(ServerEvent::ObserveAllowed { allowed: p.allowed });
+                tracing::info!("👀 AllowObserve allowed={}", p.allowed);
             }
         }
 

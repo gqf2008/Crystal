@@ -898,7 +898,15 @@ fn hud_server_events(
             | ServerEvent::CreatureRenameEnabled { .. }
             | ServerEvent::CreaturePickupToggled { .. }
             | ServerEvent::StorageUnlockResult { .. }
-            | ServerEvent::StoragePrompt => {}
+            | ServerEvent::StoragePrompt
+            | ServerEvent::PlayerUpdate { .. }
+            | ServerEvent::MonsterInfo { .. }
+            | ServerEvent::NpcInfo { .. }
+            | ServerEvent::ItemStored { .. }
+            | ServerEvent::ItemTakenBack { .. }
+            | ServerEvent::SlotItemRemoved { .. }
+            | ServerEvent::TradeItemRetrieved { .. }
+            | ServerEvent::ObserveAllowed { .. } => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);

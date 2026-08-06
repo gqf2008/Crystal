@@ -8,8 +8,8 @@
 use bevy::prelude::*;
 
 use crate::actor::{
-    ActorAnim, MonsterName, MountState, NpcAppearance, NpcName, NetObjectId, PlayerName,
-    SpriteLayer,
+    ActorAnim, ActorAppearance, MonsterName, MountState, NpcAppearance, NpcName, NetObjectId,
+    PlayerName, SpriteLayer,
 };
 use crate::game::movement::tile_to_world;
 use crate::network::server_event::ServerEvent;
@@ -17,11 +17,23 @@ use crate::scenes::AppState;
 
 pub struct ObjectStatePlugin;
 
+/// #279：服务端怪物/NPC 信息缓存（NewMonsterInfo / NewNPCInfo）
+#[derive(Resource, Default)]
+pub struct InfoCache {
+    pub monsters: std::collections::HashMap<i32, mir2_shared::data::client_data::ClientMonsterInfo>,
+    pub npcs: std::collections::HashMap<u32, mir2_shared::data::client_data::ClientNPCInfo>,
+}
+
 impl Plugin for ObjectStatePlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<InfoCache>();
         app.add_systems(
             Update,
-            apply_object_state_events
+            (
+                apply_object_state_events,
+                apply_player_update_events,
+                apply_info_cache_events,
+            )
                 .after(crate::network::network_system)
                 .run_if(in_state(AppState::Game)),
         );
@@ -259,6 +271,56 @@ fn apply_object_state_events(
                         tracing::info!("🐴 对象 {} 下马", object_id);
                     }
                 }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// #279：PlayerUpdate → 更新 ActorAppearance（换装/光照；本地玩家外观由 sync_player_equipment 处理）
+fn apply_player_update_events(
+    mut events: MessageReader<ServerEvent>,
+    mut actors: Query<(&NetObjectId, &mut ActorAppearance)>,
+) {
+    for ev in events.read() {
+        if let ServerEvent::PlayerUpdate {
+            object_id,
+            weapon,
+            weapon_effect,
+            armor,
+            wings_effect,
+            ..
+        } = ev
+        {
+            for (id, mut app) in &mut actors {
+                if id.0 == *object_id {
+                    app.weapon = *weapon;
+                    app.weapon_effect = *weapon_effect;
+                    app.armour = (*armor).max(0) as u16;
+                    app.wing_effect = *wings_effect;
+                    tracing::info!(
+                        "🧍 外观更新 id={} weapon={} armor={}",
+                        object_id,
+                        weapon,
+                        armor
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// #279：NewMonsterInfo / NewNPCInfo → 信息缓存（供渲染/查询）
+fn apply_info_cache_events(mut events: MessageReader<ServerEvent>, mut cache: ResMut<InfoCache>) {
+    for ev in events.read() {
+        match ev {
+            ServerEvent::MonsterInfo { info } => {
+                tracing::info!("👹 怪物信息 #{} {}", info.index, info.name);
+                cache.monsters.insert(info.index, info.clone());
+            }
+            ServerEvent::NpcInfo { info } => {
+                tracing::info!("🧙 NPC 信息 id={} {}", info.object_id, info.name);
+                cache.npcs.insert(info.object_id, info.clone());
             }
             _ => {}
         }
