@@ -650,6 +650,82 @@ impl Message<UseItemRequest> for WorldActor {
     }
 }
 
+/// 装备校验（对齐 C# HumanObject.CanEquipItem：槽位类型/性别/职业/RequiredType）
+fn can_equip_item(item_info: &db::ItemInfo, slot: crate::actors::inventory::EquipmentSlot, state: &crate::actors::player::PlayerState) -> bool {
+    use crate::actors::inventory::EquipmentSlot;
+    use mir2_shared::enums::ItemType;
+    let type_ok = match slot {
+        EquipmentSlot::Weapon => item_info.item_type == ItemType::Weapon as i32,
+        EquipmentSlot::Armour => item_info.item_type == ItemType::Armour as i32,
+        EquipmentSlot::Helmet => item_info.item_type == ItemType::Helmet as i32,
+        EquipmentSlot::Necklace => item_info.item_type == ItemType::Necklace as i32,
+        EquipmentSlot::BraceletL => item_info.item_type == ItemType::Bracelet as i32,
+        EquipmentSlot::BraceletR => item_info.item_type == ItemType::Bracelet as i32
+            || item_info.item_type == ItemType::Amulet as i32,
+        EquipmentSlot::RingL | EquipmentSlot::RingR => item_info.item_type == ItemType::Ring as i32,
+        EquipmentSlot::Shoes => item_info.item_type == ItemType::Boots as i32,
+        EquipmentSlot::Pendant => item_info.item_type == ItemType::Amulet as i32,
+        EquipmentSlot::Mount => item_info.item_type == ItemType::Mount as i32,
+        _ => false,
+    };
+    if !type_ok {
+        return false;
+    }
+    // 性别位标志（C# RequiredGender：Male=1 Female=2）
+    let req_gender = item_info.required_gender as u8;
+    if req_gender != 0 {
+        let gender_bit = match state.gender {
+            mir2_shared::enums::MirGender::Male => 0x01,
+            mir2_shared::enums::MirGender::Female => 0x02,
+        };
+        if (req_gender & gender_bit) == 0 {
+            return false;
+        }
+    }
+    // 职业位标志（C# RequiredClass：Warrior=1 Wizard=2 Taoist=4 Assassin=8 Archer=16）
+    let req_class = item_info.required_class as u8;
+    if req_class != 0 {
+        let class_bit = match state.class {
+            mir2_shared::enums::MirClass::Warrior => 0x01,
+            mir2_shared::enums::MirClass::Wizard => 0x02,
+            mir2_shared::enums::MirClass::Taoist => 0x04,
+            mir2_shared::enums::MirClass::Assassin => 0x08,
+            mir2_shared::enums::MirClass::Archer => 0x10,
+        };
+        if (req_class & class_bit) == 0 {
+            return false;
+        }
+    }
+    // RequiredType / RequiredAmount（C# RequiredType：Level/MaxAC/MaxMAC/MaxDC/MaxMC/MaxSC/MaxLevel/Min*）
+    let required = item_info.required_type;
+    if required != 0 {
+        let amount = item_info.required_amount;
+        let value = match mir2_shared::enums::RequiredType::try_from(required as u8) {
+            Ok(mir2_shared::enums::RequiredType::Level) => state.level as i32,
+            Ok(mir2_shared::enums::RequiredType::MaxAc) => state.max_ac,
+            Ok(mir2_shared::enums::RequiredType::MaxMac) => state.max_mac,
+            Ok(mir2_shared::enums::RequiredType::MaxDc) => state.max_attack,
+            Ok(mir2_shared::enums::RequiredType::MaxMc) => state.max_mc,
+            Ok(mir2_shared::enums::RequiredType::MaxSc) => state.max_sc,
+            Ok(mir2_shared::enums::RequiredType::MaxLevel) => state.level as i32,
+            Ok(mir2_shared::enums::RequiredType::MinAc) => state.min_ac,
+            Ok(mir2_shared::enums::RequiredType::MinMac) => state.min_mac,
+            Ok(mir2_shared::enums::RequiredType::MinDc) => state.min_attack,
+            Ok(mir2_shared::enums::RequiredType::MinMc) => state.min_mc,
+            Ok(mir2_shared::enums::RequiredType::MinSc) => state.min_sc,
+            _ => i32::MAX,
+        };
+        if required == mir2_shared::enums::RequiredType::MaxLevel as i32 {
+            if (state.level as i32) > amount {
+                return false;
+            }
+        } else if value < amount {
+            return false;
+        }
+    }
+    true
+}
+
 impl Message<EquipItemRequest> for WorldActor {
     type Reply = ();
 
@@ -665,6 +741,21 @@ impl Message<EquipItemRequest> for WorldActor {
                 Some(s) => s,
                 None => return,
             };
+            // C# CanEquipItem 校验（英雄用主人职业/性别/等级近似）
+            let state = match record.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(s)) => s,
+                _ => return,
+            };
+            let item = state.hero_inventory.backpack.iter().flatten()
+                .find(|s| s.item.unique_id == msg.unique_id)
+                .map(|s| s.item.clone());
+            let equippable = item.as_ref().and_then(|it| self.item_infos.get(&it.item_index))
+                .map(|info| can_equip_item(info, slot, &state))
+                .unwrap_or(false);
+            if !equippable {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品无法装备到此位置");
+                return;
+            }
             let ok = record
                 .actor_ref
                 .ask(crate::actors::player::HeroEquipItem {
@@ -698,6 +789,16 @@ impl Message<EquipItemRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "找不到该物品");
             return;
         };
+
+        // C# CanEquipItem 校验（槽位类型/性别/职业/RequiredType）
+        let equippable = self.item_infos.get(&state.inventory.backpack[grid_idx].as_ref().unwrap().item.item_index)
+            .map(|info| can_equip_item(info, slot, &state))
+            .unwrap_or(false);
+        if !equippable {
+            send_system_message(&self.gate_ref, msg.session_id, "该物品无法装备到此位置");
+            send_equip_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, msg.slot, false);
+            return;
+        }
 
         let result = record.actor_ref.ask(InventoryEquipItem {
             grid: grid_idx as u8,
