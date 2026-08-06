@@ -17,6 +17,24 @@ impl GuildRank {
             _ => Self::Member,
         }
     }
+
+    /// 默认行会权限（C# GuildRankOptions 位标志；简化：Leader 全权限，Officer 部分，Member 无）
+    pub fn default_options(&self) -> u8 {
+        const CAN_CHANGE_RANK: u8 = 1;
+        const CAN_RECRUIT: u8 = 2;
+        const CAN_KICK: u8 = 4;
+        const CAN_STORE_ITEM: u8 = 8;
+        const CAN_RETRIEVE_ITEM: u8 = 16;
+        const CAN_ALTER_ALLIANCE: u8 = 32;
+        const CAN_CHANGE_NOTICE: u8 = 64;
+        const CAN_ACTIVATE_BUFF: u8 = 128;
+        match self {
+            Self::Leader => CAN_CHANGE_RANK | CAN_RECRUIT | CAN_KICK | CAN_STORE_ITEM
+                | CAN_RETRIEVE_ITEM | CAN_ALTER_ALLIANCE | CAN_CHANGE_NOTICE | CAN_ACTIVATE_BUFF,
+            Self::Officer => CAN_RECRUIT | CAN_KICK | CAN_STORE_ITEM | CAN_RETRIEVE_ITEM | CAN_CHANGE_NOTICE,
+            Self::Member => 0,
+        }
+    }
 }
 
 /// 行会成员
