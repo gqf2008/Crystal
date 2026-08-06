@@ -573,6 +573,9 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN storage_password_last_set INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    // #491: 角色最后上线时间（C# LastLogoutDate，safe to re-run）
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN last_access INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     // #480: 密码错误锁定（C# WrongPasswordCount / ExpiryDate，safe to re-run）
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN wrong_password_count INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
@@ -826,7 +829,7 @@ pub async fn list_characters_by_account(pool: &DbPool, account_username: &str) -
 /// 角色摘要列表（含 class/gender/level，登录选角用）
 pub async fn list_character_summaries(pool: &DbPool, account_username: &str) -> anyhow::Result<Vec<CharacterSummary>> {
     let rows = sqlx::query(
-        "SELECT name, class, gender, level FROM characters WHERE account_username = ? ORDER BY name"
+        "SELECT name, class, gender, level, last_access FROM characters WHERE account_username = ? ORDER BY name"
     )
     .bind(account_username)
     .fetch_all(pool)
@@ -837,8 +840,18 @@ pub async fn list_character_summaries(pool: &DbPool, account_username: &str) -> 
         class: r.get::<i32, _>("class") as u8,
         gender: r.get::<i32, _>("gender") as u8,
         level: r.get::<i32, _>("level") as u16,
-        last_access: 0,
+        last_access: r.try_get::<i64, _>("last_access").unwrap_or(0),
     }).collect())
+}
+
+/// 更新角色最后上线时间（unix 秒；C# CharacterInfo.LastLogoutDate）
+pub async fn update_last_access(pool: &DbPool, character_name: &str, now_unix: i64) -> anyhow::Result<()> {
+    sqlx::query("UPDATE characters SET last_access = ? WHERE name = ?")
+        .bind(now_unix)
+        .bind(character_name)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 /// #200：账号是否设置了仓库密码（仓库解锁门）
