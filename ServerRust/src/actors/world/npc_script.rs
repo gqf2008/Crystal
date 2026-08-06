@@ -659,6 +659,12 @@ async fn eval_one_check(
             };
             compare_i64(count, op, want)
         }
+        // PETLEVEL <op> <level> — 宠物等级比较（对齐 C# CheckType.PetLevel；无宠物视为失败）
+        "PETLEVEL" => {
+            let (op, want) = parse_op_amount(&args[1..]);
+            let level = player.creature_log.active_creature.as_ref().map(|c| c.level as i64).unwrap_or(-1);
+            compare_i64(level, op, want)
+        }
         // PETCOUNT <op> <count> — 宠物数量（active + owned，对齐 C# CheckType.PetCount）
         "PETCOUNT" => {
             let (op, want) = parse_op_amount(&args[1..]);
