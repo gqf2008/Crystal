@@ -102,6 +102,9 @@ pub struct SocialConfig {
     /// 是否允许进入游戏（C# Settings.AllowStartGame，默认 false；GM 不受限；这里默认 true 避免破坏现状）
     #[serde(default = "default_true")]
     pub allow_start_game: bool,
+    /// 是否允许修改密码（C# Settings.AllowChangePassword）
+    #[serde(default = "default_true")]
+    pub allow_change_password: bool,
     /// 行会宣战费用（C# Settings.Guild_WarCost = 3000；<$GUILDWARFEE>）
     #[serde(default = "default_guild_war_cost")]
     pub guild_war_cost: u32,
@@ -175,6 +178,7 @@ impl Default for SocialConfig {
             mail_item_insurance_percentage: default_mail_item_insurance_percentage(),
             mail_free_with_stamp: default_true(),
             allow_start_game: default_true(),
+            allow_change_password: default_true(),
             guild_war_cost: default_guild_war_cost(),
             guild_war_time: default_guild_war_time(),
         }

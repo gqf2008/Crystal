@@ -570,21 +570,41 @@ impl Message<AccountChangePassword> for AccountActor {
         msg: AccountChangePassword,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        if let Some(account) = self.accounts.get_mut(&msg.username) {
-            // Verify old password before changing
-            let (ok, _needs_migration) = verify_password(&msg.old_password, &account.password_hash);
-            if !ok {
-                warn!("Old password mismatch for account: {}", msg.username);
-                return;
+        let gate_ref = self.gate_ref.clone();
+        let send_result = |result: u8| async move {
+            let packet = mir2_shared::packets::server::login::ChangePassword { result };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let _ = gate_ref.tell(crate::gate::actor::SendToClient {
+                    session_id: msg.session_id,
+                    data: crate::util::wire::build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ChangePassword as i16,
+                        &body,
+                    ),
+                }).await;
             }
-            account.password_hash = hash_password(&msg.new_password);
-            if let Err(e) = db::change_password(&self.db_pool, &msg.username, &account.password_hash).await {
-                warn!("Failed to change password for '{}': {}", msg.username, e);
-            } else {
-                info!("Password changed for account: {}", msg.username);
-            }
-        } else {
+        };
+
+        let Some(account) = self.accounts.get_mut(&msg.username) else {
+            // C#：账号不存在 → Result=4
             warn!("Account '{}' not found for password change", msg.username);
+            send_result(4).await;
+            return;
+        };
+        // Verify old password before changing（C#：不匹配 → Result=5）
+        let (ok, _needs_migration) = verify_password(&msg.old_password, &account.password_hash);
+        if !ok {
+            warn!("Old password mismatch for account: {}", msg.username);
+            send_result(5).await;
+            return;
         }
+        account.password_hash = hash_password(&msg.new_password);
+        if let Err(e) = db::change_password(&self.db_pool, &msg.username, &account.password_hash).await {
+            warn!("Failed to change password for '{}': {}", msg.username, e);
+        } else {
+            info!("Password changed for account: {}", msg.username);
+        }
+        // C#：成功 → Result=6
+        send_result(6).await;
     }
 }
