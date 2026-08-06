@@ -1123,6 +1123,20 @@ async fn exec_action(
         "SEALHERO" => {
             world.npc_seal_hero(session_id).await;
         }
+        // CONQUESTSIEGE <index> <id> —— 生成攻城器（对齐 C# ActionType.ConquestSiege；id 忽略，每次生成新结构）
+        "CONQUESTSIEGE" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            if index >= 0 {
+                world.npc_spawn_siege_structure(session_id, index, crate::actors::world::conquest::SiegeStructureType::Catapult).await;
+            }
+        }
+        // CONQUESTGUARD <index> <id> —— 生成守卫（对齐 C# ActionType.ConquestGuard；简化生成箭塔结构）
+        "CONQUESTGUARD" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            if index >= 0 {
+                world.npc_spawn_siege_structure(session_id, index, crate::actors::world::conquest::SiegeStructureType::ArcherTower).await;
+            }
+        }
         // CONQUESTGATE <index> <id> —— 修复城门（对齐 C# ActionType.ConquestGate）
         "CONQUESTGATE" => {
             let index = arg0().parse::<i32>().unwrap_or(-1);
