@@ -249,6 +249,26 @@ impl Message<NpcGetGuildGold> for SocialActor {
     }
 }
 
+/// WorldActor(NPC 脚本) -> SocialActor: 查询玩家行会职务权限（对齐 C# CheckType.CheckPermission）
+pub struct NpcGetGuildMemberOptions {
+    pub session_id: u64,
+}
+
+impl Message<NpcGetGuildMemberOptions> for SocialActor {
+    type Reply = u8;
+
+    async fn handle(&mut self, msg: NpcGetGuildMemberOptions, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let state = match self.players.get(&msg.session_id) {
+            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return 0 },
+            None => return 0,
+        };
+        let Some(guild_name) = &state.guild_name else { return 0 };
+        let Some(guild) = self.guilds.get(guild_name) else { return 0 };
+        let Some(member) = guild.members.iter().find(|m| m.name == state.name) else { return 0 };
+        member.rank.default_options()
+    }
+}
+
 /// WorldActor(NPC 脚本) -> SocialActor: 查询玩家是否队长（对齐 C# CheckType.Groupleader）
 pub struct NpcIsGroupLeader {
     pub session_id: u64,

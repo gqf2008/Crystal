@@ -856,6 +856,26 @@ async fn eval_one_check(
                 false
             }
         }
+        // CHECKPERMISSION <GuildRankOptions> — 玩家行会职务权限（对齐 C# CheckType.CheckPermission）
+        "CHECKPERMISSION" => {
+            let bit = match arg0().trim().to_uppercase().as_str() {
+                "CANCHANGERANK" => 1u8,
+                "CANRECRUIT" => 2u8,
+                "CANKICK" => 4u8,
+                "CANSTOREITEM" => 8u8,
+                "CANRETRIEVEITEM" => 16u8,
+                "CANALTERALLIANCE" => 32u8,
+                "CANCHANGENOTICE" => 64u8,
+                "CANACTIVATEBUFF" => 128u8,
+                _ => 0u8,
+            };
+            if bit == 0 {
+                false
+            } else {
+                let options = world.social_ref.ask(crate::actors::social::NpcGetGuildMemberOptions { session_id }).await.unwrap_or(0);
+                options & bit != 0
+            }
+        }
         // CHECKGUILDGOLD <op> <amount> — 行会金币比较（对齐 C# CheckType.CheckGuildGold）
         "CHECKGUILDGOLD" => {
             let (op, want) = parse_op_amount(&args[1..]);
