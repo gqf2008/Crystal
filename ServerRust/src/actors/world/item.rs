@@ -434,6 +434,13 @@ impl Message<UseItemRequest> for WorldActor {
 
         let item_db = self.item_infos.get(&item_index).cloned();
 
+        // C# UseItem：NeedIdentify 且未鉴定 → 自动鉴定（PlayerObject.cs:4960）
+        if item_db.as_ref().map(|i| !i.is_identified()).unwrap_or(false) {
+            let _ = record.actor_ref.ask(crate::actors::player::SetItemIdentified {
+                unique_id: msg.unique_id,
+            }).await;
+        }
+
         // 消耗品：扣减 count 或移除
         let consumed = record.actor_ref.ask(ConsumeItem { unique_id: msg.unique_id }).await.unwrap_or(false);
         if !consumed {
@@ -813,6 +820,15 @@ impl Message<EquipItemRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "该物品无法装备到此位置");
             send_equip_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, msg.slot, false);
             return;
+        }
+
+        // C# EquipItem：NeedIdentify 且未鉴定 → 自动鉴定（PlayerObject.cs:5660）
+        if self.item_infos.get(&state.inventory.backpack[grid_idx].as_ref().unwrap().item.item_index)
+            .map(|i| !i.is_identified()).unwrap_or(false)
+        {
+            let _ = record.actor_ref.ask(crate::actors::player::SetItemIdentified {
+                unique_id: msg.unique_id,
+            }).await;
         }
 
         let result = record.actor_ref.ask(InventoryEquipItem {
