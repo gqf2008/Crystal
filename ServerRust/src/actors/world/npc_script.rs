@@ -1250,6 +1250,108 @@ async fn exec_action(
         "GROUPRECALL" | "RECALLGROUP" => {
             let _ = world.social_ref.ask(crate::actors::social::NpcGroupRecall { session_id }).await;
         }
+        // ADDNAMELIST <file> —— 玩家名追加到名单文件（对齐 C# ActionType.AddNameList）
+        "ADDNAMELIST" => {
+            let file_path = arg0();
+            if file_path.is_empty() { warn!("NPC ADDNAMELIST: missing file"); }
+            else if let Some(st) = current_player_state(world, session_id).await {
+                let base = world.script_dir.clone();
+                let path = base.join(file_path);
+                if path.starts_with(&base) {
+                    name_list_add(&path, &st.name);
+                    debug!("NPC ADDNAMELIST: {} -> {}", st.name, file_path);
+                } else {
+                    warn!("NPC ADDNAMELIST: path escape denied: {}", file_path);
+                }
+            }
+        }
+        // DELNAMELIST <file> —— 从名单文件删除玩家名（对齐 C# ActionType.DelNameList）
+        "DELNAMELIST" => {
+            let file_path = arg0();
+            if file_path.is_empty() { warn!("NPC DELNAMELIST: missing file"); }
+            else if let Some(st) = current_player_state(world, session_id).await {
+                let base = world.script_dir.clone();
+                let path = base.join(file_path);
+                if path.starts_with(&base) {
+                    name_list_remove(&path, &st.name);
+                    debug!("NPC DELNAMELIST: {} <- {}", st.name, file_path);
+                } else {
+                    warn!("NPC DELNAMELIST: path escape denied: {}", file_path);
+                }
+            }
+        }
+        // CLEARNAMELIST <file> —— 清空名单文件（对齐 C# ActionType.ClearNameList）
+        "CLEARNAMELIST" => {
+            let file_path = arg0();
+            if file_path.is_empty() { warn!("NPC CLEARNAMELIST: missing file"); }
+            else {
+                let base = world.script_dir.clone();
+                let path = base.join(file_path);
+                if path.starts_with(&base) {
+                    name_list_clear(&path);
+                    debug!("NPC CLEARNAMELIST: {}", file_path);
+                } else {
+                    warn!("NPC CLEARNAMELIST: path escape denied: {}", file_path);
+                }
+            }
+        }
+        // ADDGUILDNAME <file> —— 行会名追加（对齐 C# ActionType.AddGuildNameList；需在行会）
+        "ADDGUILDNAME" | "ADDGUILDNAMELIST" => {
+            let file_path = arg0();
+            if file_path.is_empty() { warn!("NPC ADDGUILDNAME: missing file"); }
+            else if let Some(st) = current_player_state(world, session_id).await {
+                if let Some(guild_name) = &st.guild_name {
+                    let base = world.script_dir.clone();
+                    let path = base.join(file_path);
+                    if path.starts_with(&base) {
+                        name_list_add(&path, guild_name);
+                        debug!("NPC ADDGUILDNAME: {} -> {}", guild_name, file_path);
+                    } else {
+                        warn!("NPC ADDGUILDNAME: path escape denied: {}", file_path);
+                    }
+                } else {
+                    send_system_message(&world.gate_ref, session_id, "你不在任何行会中");
+                }
+            }
+        }
+        // DELGUILDNAME <file> —— 从名单删除行会名（对齐 C# ActionType.DelGuildNameList）
+        "DELGUILDNAME" => {
+            let file_path = arg0();
+            if file_path.is_empty() { warn!("NPC DELGUILDNAME: missing file"); }
+            else if let Some(st) = current_player_state(world, session_id).await {
+                if let Some(guild_name) = &st.guild_name {
+                    let base = world.script_dir.clone();
+                    let path = base.join(file_path);
+                    if path.starts_with(&base) {
+                        name_list_remove(&path, guild_name);
+                        debug!("NPC DELGUILDNAME: {} <- {}", guild_name, file_path);
+                    } else {
+                        warn!("NPC DELGUILDNAME: path escape denied: {}", file_path);
+                    }
+                } else {
+                    send_system_message(&world.gate_ref, session_id, "你不在任何行会中");
+                }
+            }
+        }
+        // CLEARGUILDNAME <file> —— 清空名单（对齐 C# ActionType.ClearGuildNameList；需在行会）
+        "CLEARGUILDNAME" => {
+            let file_path = arg0();
+            if file_path.is_empty() { warn!("NPC CLEARGUILDNAME: missing file"); }
+            else if let Some(st) = current_player_state(world, session_id).await {
+                if st.guild_name.is_some() {
+                    let base = world.script_dir.clone();
+                    let path = base.join(file_path);
+                    if path.starts_with(&base) {
+                        name_list_clear(&path);
+                        debug!("NPC CLEARGUILDNAME: {}", file_path);
+                    } else {
+                        warn!("NPC CLEARGUILDNAME: path escape denied: {}", file_path);
+                    }
+                } else {
+                    send_system_message(&world.gate_ref, session_id, "你不在任何行会中");
+                }
+            }
+        }
         // GETRANDOMTEXT <filePath> <变量名> —— 从文本文件随机选一行写入脚本变量（对齐 C# ActionType.GetRandomText）
         "GETRANDOMTEXT" => {
             let file_path = arg0();
@@ -1433,6 +1535,33 @@ fn npc_timer_remaining_secs(now_tick: u64, expire_tick: Option<u64>) -> i64 {
         Some(exp) => exp.saturating_sub(now_tick) as i64 / 10,
         None => 0,
     }
+}
+
+/// 名单文件：追加一行（不存在才加，对齐 C# AddNameList 精确匹配）
+fn name_list_add(path: &std::path::Path, name: &str) {
+    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    if existing.lines().any(|l| l == name) {
+        return;
+    }
+    let mut out = existing;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(name);
+    out.push('\n');
+    let _ = std::fs::write(path, out);
+}
+
+/// 名单文件：删除匹配行（对齐 C# DelNameList）
+fn name_list_remove(path: &std::path::Path, name: &str) {
+    let Ok(content) = std::fs::read_to_string(path) else { return };
+    let filtered: Vec<&str> = content.lines().filter(|l| *l != name).collect();
+    let _ = std::fs::write(path, filtered.join("\n") + if filtered.is_empty() { "" } else { "\n" });
+}
+
+/// 名单文件：清空（对齐 C# ClearNameList）
+fn name_list_clear(path: &std::path::Path) {
+    let _ = std::fs::write(path, "");
 }
 
 /// 读取 INI 文件 [header] 下 key 的值（对齐 C# InIReader.ReadString；大小写不敏感）
@@ -2140,6 +2269,32 @@ You don't have enough Gold!
         assert_eq!(ini_read(&path, "othersection", "k").as_deref(), Some("1"));
         // 不存在的 key
         assert_eq!(ini_read(&path, "Section", "Nope"), None);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn name_list_add_remove_clear() {
+        let dir = std::env::temp_dir().join(format!("npc_namelist_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("names.txt");
+        let _ = std::fs::remove_file(&path);
+
+        name_list_add(&path, "Alice");
+        name_list_add(&path, "Bob");
+        // 重复不加
+        name_list_add(&path, "Alice");
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(content.lines().filter(|l| *l == "Alice").count(), 1);
+        assert_eq!(content.lines().filter(|l| *l == "Bob").count(), 1);
+
+        name_list_remove(&path, "Alice");
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(!content.lines().any(|l| l == "Alice"));
+        assert!(content.lines().any(|l| l == "Bob"));
+
+        name_list_clear(&path);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
 
         let _ = std::fs::remove_file(&path);
     }
