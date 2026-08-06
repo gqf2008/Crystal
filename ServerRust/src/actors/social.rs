@@ -231,6 +231,50 @@ pub struct SocialPlayerLeft {
     pub session_id: u64,
 }
 
+/// WorldActor(NPC 脚本) -> SocialActor: 组队召回（对齐 C# ActionType.GroupRecall）
+/// NPC 版无冷却/套装/死亡检查限制，直接召回所有在线组员到该玩家位置
+pub struct NpcGroupRecall {
+    pub session_id: u64,
+}
+
+impl Message<NpcGroupRecall> for SocialActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: NpcGroupRecall, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let Some(group_id) = state.group_id else { return };
+        let Some(group) = self.groups.get(&group_id).cloned() else { return };
+
+        let target_map = state.map_index;
+        let target_x = state.x;
+        let target_y = state.y;
+        for member in &group.members {
+            if member.session_id == msg.session_id { continue; }
+            if !member.online { continue; }
+            if let Some(mem_record) = self.players.get(&member.session_id) {
+                if let Ok(Some(mem_state)) = mem_record.ask(GetPlayerState).await {
+                    let _ = mem_record.ask(SetPlayerPosition {
+                        x: target_x, y: target_y,
+                        direction: mem_state.direction,
+                        map_index: Some(target_map),
+                        is_mounted: None,
+                    }).await;
+                    let mut body = Vec::new();
+                    body.extend_from_slice(&target_x.to_le_bytes());
+                    body.extend_from_slice(&target_y.to_le_bytes());
+                    body.push(mem_state.direction);
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: member.session_id,
+                        data: build_packet_bytes(ServerPacketIds::UserLocation as i16, &body),
+                    }).await;
+                    debug!("NPC GROUPRECALL: {} recalled to ({},{}) map {}", mem_state.name, target_x, target_y, target_map);
+                }
+            }
+        }
+    }
+}
+
 /// WorldActor -> SocialActor: 聊天命令转发（社交类）
 pub struct SocialChatCommand {
     pub session_id: u64,

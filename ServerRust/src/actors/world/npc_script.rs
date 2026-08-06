@@ -105,6 +105,13 @@ pub struct ExecutionResult {
 struct FlowControl {
     break_loop: bool,
     goto: Option<String>,
+    /// MAP/PARAM1/PARAM2/PARAM3 脚本上下文（MONGEN 等指令用，对齐 C# Param1/2/3）
+    map_name: Option<String>,
+    param1: i32,
+    param2: i32,
+    param3: i32,
+    /// COMPOSEMAIL 暂存的邮件草稿（ADDMAILGOLD/ADDMAILITEM/SENDMAIL 链）
+    mail: Option<crate::actors::mail::MailMessage>,
 }
 
 /// 当前正在写入的 SAY/ACT 容器模式（解析器内部状态）
@@ -697,17 +704,62 @@ async fn exec_action(
                 set_player_flag(world, session_id, format!("NPC_FLAG_{}", flag), val).await;
             }
         }
-        // MONGEN <name> <count>  (TODO: 真实刷怪)
+        // MONGEN <name> <count> —— 在目标坐标刷怪（坐标优先 PARAM2/PARAM3，缺省玩家/NPC 位置）
         "MONGEN" | "MAKEMON" | "MONSTER" => {
-            warn!("NPC action MONGEN '{}' not fully implemented (TODO)", arg0());
+            let mob_name = arg0();
+            let count = arg1().parse::<u32>().unwrap_or(1);
+            if mob_name.is_empty() {
+                warn!("NPC action MONGEN: missing monster name");
+            } else {
+                let player_state = current_player_state(world, session_id).await;
+                let (tx, ty) = if flow.param2 > 0 && flow.param3 > 0 {
+                    (flow.param2, flow.param3)
+                } else if let Some(st) = &player_state {
+                    (st.x, st.y)
+                } else {
+                    (npc.x, npc.y)
+                };
+                let map_index = if let Some(map_name) = &flow.map_name {
+                    world.map_infos.values()
+                        .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
+                        .map(|m| m.index as u16)
+                        .unwrap_or(npc.map_index)
+                } else if let Some(st) = &player_state {
+                    st.map_index
+                } else {
+                    npc.map_index
+                };
+                let spawned = world.spawn_monster_named(mob_name, tx, ty, count, map_index).await;
+                debug!("NPC MONGEN: '{}' x{} at ({},{}) map {} spawned={}", mob_name, count, tx, ty, map_index, spawned);
+            }
         }
-        // GIVEBUFF <type> <duration>  (TODO)
+        // GIVEBUFF <type> <duration_seconds> —— 给玩家加 Buff（对齐 C# ActionType.GiveBuff）
         "GIVEBUFF" => {
-            warn!("NPC action GIVEBUFF '{}' not fully implemented (TODO)", arg0());
+            let buff_name = arg0();
+            let secs = arg1().parse::<u32>().unwrap_or(0);
+            if let Some(bt) = parse_buff_type(buff_name) {
+                if secs > 0 {
+                    // 世界循环 100ms/tick：1 秒 = 10 ticks（对齐 C# Settings.Second * duration）
+                    let ticks = secs.saturating_mul(10);
+                    send_player_msg(world, session_id, crate::actors::player::ApplyBuff {
+                        buff: crate::combat::buff::BuffInstance::new(bt, ticks, 1),
+                    }).await;
+                    debug!("NPC GIVEBUFF: '{}' {}s -> {} ticks", buff_name, secs, ticks);
+                }
+            } else {
+                warn!("NPC GIVEBUFF: unknown buff type '{}'", buff_name);
+            }
         }
-        // GIVESKILL <skill_name> <level>  (TODO)
+        // GIVESKILL <skill_name|spell_id> <level> —— 学技能（对齐 C# ActionType.GiveSkill，Level 最多 3）
         "GIVESKILL" => {
-            warn!("NPC action GIVESKILL '{}' not fully implemented (TODO)", arg0());
+            let skill_name = arg0();
+            if let Some(spell) = resolve_magic_id(&world.magic_infos, skill_name) {
+                let level = arg1().parse::<u8>().unwrap_or(0).min(3);
+                send_player_msg(world, session_id, crate::actors::player::LearnMagicWithLevel { spell, level }).await;
+                debug!("NPC GIVESKILL: spell={} level={}", spell, level);
+            } else {
+                warn!("NPC GIVESKILL: unknown skill '{}'", skill_name);
+            }
         }
         // CHANGECLASS <Warrior|...>
         "CHANGECLASS" => {
@@ -726,9 +778,23 @@ async fn exec_action(
             let _kind = arg1().parse::<u8>().unwrap_or(0);
             send_system_message(&world.gate_ref, session_id, &msg);
         }
-        // GROUPRECALL  (TODO: 组队召回)
+        // MAP <map_name> —— 设置 MONGEN 等指令的目标地图（对齐 C# Param1）
+        "MAP" => {
+            flow.map_name = Some(unquote(arg0()).to_string());
+        }
+        // PARAM1/PARAM2/PARAM3 <value> —— 脚本坐标参数（对齐 C# ActionType.Param1/2/3）
+        "PARAM1" => {
+            flow.param1 = arg0().parse::<i32>().unwrap_or(0);
+        }
+        "PARAM2" => {
+            flow.param2 = arg0().parse::<i32>().unwrap_or(0);
+        }
+        "PARAM3" => {
+            flow.param3 = arg0().parse::<i32>().unwrap_or(0);
+        }
+        // GROUPRECALL —— 组队召回（对齐 C# ActionType.GroupRecall：NPC 版无限制，直接召回组员到玩家位置）
         "GROUPRECALL" | "RECALLGROUP" => {
-            warn!("NPC action GROUPRECALL not fully implemented (TODO)");
+            let _ = world.social_ref.ask(crate::actors::social::NpcGroupRecall { session_id }).await;
         }
         // MOV <var> <value>   var 形如 A0/B0/C0...（内部存为 %A0）
         "MOV" => {
@@ -752,9 +818,77 @@ async fn exec_action(
             };
             custom_vars.insert(dst, res.to_string());
         }
-        // COMPOSEMAIL "body" <sender>  (TODO)
+        // COMPOSEMAIL "body" <sender> —— 创建邮件草稿（对齐 C# ComposeMail；配合 ADDMAILGOLD/ADDMAILITEM/SENDMAIL）
         "COMPOSEMAIL" => {
-            warn!("NPC action COMPOSEMAIL not fully implemented (TODO)");
+            let body = unquote(arg0()).to_string();
+            let sender = if arg1().is_empty() { "系统".to_string() } else { arg1().to_string() };
+            flow.mail = Some(crate::actors::mail::MailMessage {
+                mail_id: crate::actors::mail::generate_mail_id(),
+                sender_name: sender,
+                receiver_name: String::new(),
+                subject: "系统邮件".to_string(),
+                body,
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0),
+                read: false,
+                collected: false,
+                locked: false,
+                gold: 0,
+                items: Vec::new(),
+            });
+        }
+        // ADDMAILGOLD <amount> —— 邮件附金币
+        "ADDMAILGOLD" => {
+            let amount = arg0().parse::<u64>().unwrap_or(0);
+            if let Some(m) = flow.mail.as_mut() {
+                m.gold = m.gold.saturating_add(amount);
+            }
+        }
+        // ADDMAILITEM <item_name> <count> —— 邮件附物品（最多 5 个，按 stack_size 拆分，对齐 C# AddMailItem）
+        "ADDMAILITEM" => {
+            let item_name = arg0();
+            let count = arg1().parse::<u16>().unwrap_or(1);
+            if item_name.is_empty() {
+                warn!("NPC ADDMAILITEM: missing item name");
+            } else if let Some(m) = flow.mail.as_mut() {
+                if m.items.len() >= 5 {
+                    warn!("NPC ADDMAILITEM: mail attachments full (max 5)");
+                } else if let Some(info) = world.item_infos.values().find(|i| i.name.eq_ignore_ascii_case(item_name)).cloned() {
+                    let mut remaining = count;
+                    let stack = info.stack_size.max(1) as u16;
+                    while remaining > 0 && m.items.len() < 5 {
+                        let take = remaining.min(stack);
+                        remaining -= take;
+                        m.items.push(mir2_shared::data::item::UserItem {
+                            unique_id: crate::actors::inventory::generate_item_uid(),
+                            item_index: info.index,
+                            count: take,
+                            current_dura: info.durability as u16,
+                            max_dura: info.durability as u16,
+                            identified: info.is_identified(),
+                            ..Default::default()
+                        });
+                    }
+                } else {
+                    warn!("NPC ADDMAILITEM: item '{}' not found", item_name);
+                }
+            }
+        }
+        // SENDMAIL <recipient> —— 发送邮件草稿（对齐 C# SendMail；收件人为任意玩家名）
+        "SENDMAIL" => {
+            let recipient = arg0();
+            if let Some(mut mail) = flow.mail.take() {
+                if recipient.is_empty() {
+                    send_system_message(&world.gate_ref, session_id, "SENDMAIL 缺少收件人");
+                } else {
+                    mail.receiver_name = recipient.to_string();
+                    send_npc_mail(world, session_id, mail).await;
+                }
+            } else {
+                send_system_message(&world.gate_ref, session_id, "请先用 COMPOSEMAIL 撰写邮件");
+            }
         }
         // EXIT / CLOSE / RETURN — 终止对话
         "EXIT" | "CLOSE" | "RETURN" => {
@@ -770,6 +904,66 @@ async fn exec_action(
 // =============================================================================
 // 辅助：玩家消息发送 / 物品 / 传送 / flag
 // =============================================================================
+
+/// GIVEBUFF buff 类型解析：支持 C# BuffType 枚举名（Hiding/SoulShield/...）+ Rust 变体名，大小写不敏感
+fn parse_buff_type(s: &str) -> Option<crate::combat::buff::BuffType> {
+    use crate::combat::buff::BuffType;
+    match s.trim().to_uppercase().as_str() {
+        "HPREGEN" => Some(BuffType::HpRegen { amount_per_tick: 0 }),
+        "MPREGEN" => Some(BuffType::MpRegen { amount_per_tick: 0 }),
+        "ATTACKBOOST" | "FURY" | "ATTACK" => Some(BuffType::AttackBoost { bonus: 0 }),
+        "DEFENSEBOOST" | "DEFENSE" => Some(BuffType::DefenseBoost { bonus: 0 }),
+        "ACDEFENSEBOOST" | "BLESSEDARMOUR" | "BLESSEDARMOR" => Some(BuffType::AcDefenseBoost { bonus: 0 }),
+        "MACDEFENSEBOOST" | "SOULSHIELD" => Some(BuffType::MacDefenseBoost { bonus: 0 }),
+        "DAMAGEREDUCTION" | "MAGICSHIELD" | "ELEMENTALBARRIER" => Some(BuffType::DamageReduction { percent: 0 }),
+        "POISON" | "POISONSHOT" => Some(BuffType::Poison { damage_per_tick: 0 }),
+        "SILENCE" => Some(BuffType::Silence),
+        "STUN" => Some(BuffType::Stun),
+        "INVISIBILITY" | "HIDING" | "MOONLIGHT" | "DARKBODY" => Some(BuffType::Invisibility),
+        "ATTACKSPEEDBOOST" | "HASTE" => Some(BuffType::AttackSpeedBoost { percent: 0 }),
+        "MOVESPEEDBOOST" | "SWIFTFEET" | "LIGHTBODY" => Some(BuffType::MoveSpeedBoost { percent: 0 }),
+        "AGILITYBOOST" => Some(BuffType::AgilityBoost { bonus: 0 }),
+        "CRITICALRATEBOOST" | "RAGE" => Some(BuffType::CriticalRateBoost { bonus: 0 }),
+        "MPREGENBOOST" | "CONCENTRATION" => Some(BuffType::MpRegenBoost { bonus: 0 }),
+        "MAXMPBOOST" | "MAGICBOOSTER" => Some(BuffType::MaxMpBoost { bonus: 0 }),
+        "REFLECT" | "ENERGYSHIELD" => Some(BuffType::Reflect { percent: 0 }),
+        "TAUNT" | "LIONROAR" => Some(BuffType::Taunt),
+        // C# Curse 降低目标输出，Rust 端用 Slow 近似负面效果
+        "SLOW" | "CURSE" => Some(BuffType::Slow { percent: 0 }),
+        "FROZEN" => Some(BuffType::Frozen),
+        _ => None,
+    }
+}
+
+/// GIVESKILL 技能解析：优先数字（C# spell id），否则按 magic_infos.name 大小写不敏感匹配
+fn resolve_magic_id(magic_infos: &HashMap<u32, crate::db::MagicInfo>, s: &str) -> Option<i32> {
+    let s = s.trim();
+    if let Ok(id) = s.parse::<i32>() {
+        return if magic_infos.contains_key(&(id as u32)) { Some(id) } else { None };
+    }
+    magic_infos.values()
+        .find(|m| m.name.eq_ignore_ascii_case(s))
+        .map(|m| m.spell)
+}
+
+/// SENDMAIL：投递邮件（在线直接 AddMail + 通知；离线落库，登录时读回）
+async fn send_npc_mail(world: &WorldActor, session_id: u64, mail: crate::actors::mail::MailMessage) {
+    if let Some(target) = world.find_session_by_name_ignore_case(&mail.receiver_name).await {
+        if let Some(record) = world.players.get(&target) {
+            let _ = record.actor_ref.ask(crate::actors::player::AddMail { mail: mail.clone() }).await;
+            crate::actors::social_packets::send_mail_received_packet(&world.gate_ref, target, &mail);
+            send_system_message(&world.gate_ref, session_id, "邮件已发送");
+            debug!("NPC SENDMAIL delivered online: -> {}", mail.receiver_name);
+            return;
+        }
+    }
+    if let Err(e) = crate::db::insert_mail(&world.db_pool, &mail.receiver_name, &mail).await {
+        warn!("NPC SENDMAIL: failed to save offline mail for {}: {}", mail.receiver_name, e);
+        send_system_message(&world.gate_ref, session_id, "邮件发送失败，请稍后重试");
+    } else {
+        send_system_message(&world.gate_ref, session_id, "邮件已发送（玩家离线，将在登录时收到）");
+    }
+}
 
 async fn send_player_msg<M>(world: &WorldActor, session_id: u64, msg: M)
 where
@@ -1266,6 +1460,50 @@ You don't have enough Gold!
         assert!(x.segments[0].say.iter().any(|l| l.contains("rich")));
         assert_eq!(x.segments[1].checks[0].check_type, "CHECKGOLD");
         assert!(x.segments[1].say.iter().any(|l| l.contains("poor")));
+    }
+
+    #[test]
+    fn buff_type_parse_accepts_csharp_and_rust_names() {
+        use crate::combat::buff::BuffType;
+        assert!(matches!(parse_buff_type("Hiding"), Some(BuffType::Invisibility)));
+        assert!(matches!(parse_buff_type("hiding"), Some(BuffType::Invisibility)));
+        assert!(matches!(parse_buff_type("HpRegen"), Some(BuffType::HpRegen { .. })));
+        assert!(matches!(parse_buff_type("POISON"), Some(BuffType::Poison { .. })));
+        assert!(matches!(parse_buff_type("SoulShield"), Some(BuffType::MacDefenseBoost { .. })));
+        assert!(matches!(parse_buff_type("SwiftFeet"), Some(BuffType::MoveSpeedBoost { .. })));
+        assert!(parse_buff_type("NotABuff").is_none());
+    }
+
+    #[test]
+    fn resolve_magic_id_accepts_numeric_id_and_name() {
+        let mut infos = HashMap::new();
+        infos.insert(4, crate::db::MagicInfo {
+            name: "Fencing".to_string(),
+            spell: 4,
+            base_cost: 0,
+            level_cost: 0,
+            icon: 0,
+            level1: 0,
+            level2: 0,
+            level3: 0,
+            need1: 0,
+            need2: 0,
+            need3: 0,
+            delay_base: 0,
+            delay_reduction: 0,
+            power_base: 0,
+            power_bonus: 0,
+            mpower_base: 0,
+            mpower_bonus: 0,
+            range: 0,
+            multiplier_base: 0.0,
+            multiplier_bonus: 0.0,
+        });
+        assert_eq!(resolve_magic_id(&infos, "4"), Some(4));
+        assert_eq!(resolve_magic_id(&infos, "Fencing"), Some(4));
+        assert_eq!(resolve_magic_id(&infos, "fencing"), Some(4));
+        assert_eq!(resolve_magic_id(&infos, "99"), None);
+        assert_eq!(resolve_magic_id(&infos, "FireBall"), None);
     }
 }
 

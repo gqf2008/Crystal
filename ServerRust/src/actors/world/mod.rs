@@ -3086,6 +3086,109 @@ impl WorldActor {
 
     /// 按名查找在线玩家 session（忽略大小写）。
     /// 用于 NPC SENDMAIL 等需要宽松匹配收件人的场景。
+    /// 按怪物名在指定地图 (x,y) 刷 count 只怪物（NPC 脚本 MONGEN 等用，对齐 C# Envir.GetMonsterInfo + MonsterObject.Spawn）
+    /// 返回成功刷出的数量；怪物名不存在或信息缺失返回 0
+    pub(crate) async fn spawn_monster_named(
+        &mut self,
+        name: &str,
+        x: i32,
+        y: i32,
+        count: u32,
+        map_index: u16,
+    ) -> usize {
+        let Some(&idx) = self.monster_name_index.get(&name.to_lowercase()) else {
+            warn!("spawn_monster_named: monster '{}' not found", name);
+            return 0;
+        };
+        let Some(info) = self.monster_infos.get(&idx).cloned() else {
+            warn!("spawn_monster_named: monster info '{}' missing", name);
+            return 0;
+        };
+        let hp = info.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(50);
+        let min_dmg = info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(5);
+        let max_dmg = info.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(10);
+        let mut spawned = 0usize;
+        for _ in 0..count.min(50) {
+            let oid = self.alloc_object_id();
+            let packet = build_object_monster_packet(
+                &MonsterSpawn {
+                    name: info.name.clone(),
+                    image: info.image as u16,
+                    monster_index: idx,
+                    x,
+                    y,
+                    direction: 0,
+                    hp,
+                    min_dmg,
+                    max_dmg,
+                    xp: info.experience,
+                    map_index,
+                },
+                oid,
+                &info.name,
+            );
+            // 广播给同地图在线玩家（避免跨图玩家看到不该出现的怪）
+            let online: Vec<u64> = self.players.keys().copied().collect();
+            for sid in online {
+                if let Some(record) = self.players.get(&sid) {
+                    if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                        if st.map_index == map_index {
+                            let _ = self.gate_ref.tell(SendToClient { session_id: sid, data: packet.clone() }).await;
+                        }
+                    }
+                }
+            }
+            self.monsters.insert(oid, MonsterState {
+                object_id: oid,
+                name: info.name.clone(),
+                image: info.image as u16,
+                monster_index: idx,
+                x,
+                y,
+                direction: 0,
+                hp,
+                max_hp: hp,
+                min_dmg,
+                max_dmg,
+                xp: info.experience,
+                spawn_x: x,
+                spawn_y: y,
+                map_index,
+                next_attack_tick: 0,
+                next_move_tick: 0,
+                next_summon_tick: 0,
+                ai_profile: MonsterAiProfile::from_info(&info),
+                ai_state: MonsterAiState::Idle,
+                target_session: None,
+                provoked: false,
+                is_elite: false,
+                is_boss: false,
+                min_ac: 0,
+                max_ac: 0,
+                min_mac: 0,
+                max_mac: 0,
+                agility: 0,
+                accuracy: 0,
+                armour_rate: 1.0,
+                damage_rate: 1.0,
+                magic_resist: 0,
+                critical_rate: 0,
+                critical_damage: 0,
+                luck: 0,
+                reflect: 0,
+                damage_reduction_percent: 0,
+                poison_list: Vec::new(),
+                undead: info.undead,
+                master_session: None,
+                recall_at_tick: 0,
+                behavior: ai::make_behavior(&info.name),
+            });
+            spawned += 1;
+        }
+        debug!("spawn_monster_named: '{}' x{} at ({},{}) map {} spawned={}", name, count, x, y, map_index, spawned);
+        spawned
+    }
+
     async fn find_session_by_name_ignore_case(&self, name: &str) -> Option<u64> {
         for (sid, record) in &self.players {
             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
