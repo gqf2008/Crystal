@@ -200,6 +200,8 @@ fn creature_server_events(
     for ev in events.read() {
         if let ServerEvent::CreatureList { creatures } = ev {
             creature.creatures = creatures.clone();
+            // #619：列表更新提示（--creature-test 依赖）
+            creature.message = format!("宠物列表已更新（{} 个）", creatures.len());
         }
         if let ServerEvent::CreatureAcquired { creature_type } = ev {
             // #274：获得新宠物

@@ -753,6 +753,20 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     mock_fishing = Some(std::time::Instant::now());
                                     tracing::info!("🎣 [MOCK] 抛竿成功，5s 后收获");
                                 }
+                                // #619：查看玩家（--inspect-test）
+                                x if x == ClientPacketIds::Inspect as i16 => {
+                                    if let Ok(p) = client::chat::Inspect::read_body(&mut cur) {
+                                        send(&to_client, &MockPlayerInspect { object_id: p.object_id });
+                                        tracing::info!("🔍 [MOCK] 查看玩家 oid={} 回发", p.object_id);
+                                    }
+                                }
+                                // #619：宠物列表请求（--creature-test，wire [request u8]）
+                                x if x == ClientPacketIds::RequestIntelligentCreatureUpdates as i16 => {
+                                    use byteorder::ReadBytesExt;
+                                    let _request = cur.read_u8().unwrap_or(0);
+                                    send(&to_client, &MockCreatureList);
+                                    tracing::info!("🐾 [MOCK] 宠物列表回发");
+                                }
                                 x if x == ClientPacketIds::Attack as i16 => {
                                     // 攻击反馈：怪物受击动画 + 伤害飘字 + 血量/死亡/掉落
                                     if player_dead {
@@ -886,6 +900,11 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     }
                                     if let Ok(p) = client::combat::Magic::read_body(&mut cur) {
                                         tracing::info!("[MOCK] 魔法 spell={:?}", p.spell);
+                                        // #619：Mirroring → AddBuff（--buff-test）
+                                        if p.spell == Spell::Mirroring {
+                                            send(&to_client, &MockAddBuff);
+                                            tracing::info!("✨ [MOCK] 回发 AddBuff（Mirroring）");
+                                        }
                                         // 耗蓝：施法扣 5 MP，不足拒绝（#51）
                                         const MAGIC_COST: u32 = 5;
                                         if player_stats.mp < MAGIC_COST {
@@ -2442,6 +2461,75 @@ impl Packet for MockGameshopMail {
     }
 }
 
+/// #619：AddBuff（客户端格式 [tag u8][ticks u32]）
+struct MockAddBuff;
+
+impl Packet for MockAddBuff {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::AddBuff as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u8(3)?; // tag=3 防御提升
+        writer.write_u32::<LittleEndian>(10)?; // ticks
+        Ok(())
+    }
+}
+
+/// #619：宠物列表（客户端格式 [count i32][per: type u8][pickup u8][enabled u8][hunger u8][name dotnet]）
+struct MockCreatureList;
+
+impl Packet for MockCreatureList {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::UpdateIntelligentCreatureList as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_i32::<LittleEndian>(1)?; // count
+        writer.write_u8(mir2_shared::enums::IntelligentCreatureType::BabyPig as u8)?;
+        writer.write_u8(1)?; // pickup
+        writer.write_u8(1)?; // enabled
+        writer.write_u8(0)?; // hunger
+        mir2_shared::binary::write_dotnet_string(writer, "小猪")?;
+        Ok(())
+    }
+}
+
+/// #619：查看玩家（客户端格式 [oid u32][name dotnet][guild dotnet][level u16][class u8][gender u8][count u8][per: uid u64][idx i32][dura i32][max_dura i32]）
+struct MockPlayerInspect {
+    object_id: u32,
+}
+
+impl Packet for MockPlayerInspect {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::PlayerInspect as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u32::<LittleEndian>(self.object_id)?;
+        mir2_shared::binary::write_dotnet_string(writer, "bevy2char")?;
+        mir2_shared::binary::write_dotnet_string(writer, "测试行会")?;
+        writer.write_u16::<LittleEndian>(30)?; // level
+        writer.write_u8(MirClass::Warrior as u8)?;
+        writer.write_u8(MirGender::Male as u8)?;
+        writer.write_u8(1)?; // 装备数
+        writer.write_u64::<LittleEndian>(8001)?; // uid
+        writer.write_i32::<LittleEndian>(221)?; // idx 木剑
+        writer.write_i32::<LittleEndian>(10)?; // dura
+        writer.write_i32::<LittleEndian>(12)?; // max_dura
+        Ok(())
+    }
+}
+
 fn send<P: Packet>(to_client: &Sender<Vec<u8>>, packet: &P) {
     let mut inner = Vec::new();
     if serialize_packet(&mut inner, packet).is_ok() {
@@ -2955,6 +3043,44 @@ fn send_map_and_objects(
             extra: false,
             mount_type: if showcase { 1 } else { 0 },
             riding_mount: showcase,
+            fishing: false,
+            transform_type: 0,
+            element_orb_effect: 0,
+            element_orb_lvl: 0,
+            element_orb_max: 0,
+            buffs: vec![],
+            level_effects: LevelEffects::NONE,
+        },
+    );
+
+    // #619：远端玩家 bevy2char（--inspect-test 目标）
+    send(
+        to_client,
+        &server::objects::ObjectPlayer {
+            object_id: 120,
+            name: "bevy2char".to_string(),
+            guild_name: "测试行会".to_string(),
+            guild_rank_name: "成员".to_string(),
+            name_colour: 0,
+            class: MirClass::Warrior,
+            gender: MirGender::Male,
+            level: 30,
+            location_x: 355,
+            location_y: 352,
+            direction: MirDirection::Up,
+            hair: 0,
+            light: 0,
+            weapon: 0,
+            weapon_effect: 0,
+            armour: 0,
+            poison: PoisonType::empty(),
+            dead: false,
+            hidden: false,
+            effect: SpellEffect::None,
+            wing_effect: 0,
+            extra: false,
+            mount_type: 0,
+            riding_mount: false,
             fishing: false,
             transform_type: 0,
             element_orb_effect: 0,
