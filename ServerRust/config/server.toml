@@ -15,6 +15,12 @@ drop_rate = 1.0
 item_timeout_secs = 30
 max_drop_gold = 2000
 
+[rarity]
+elite_chance_percent = 3
+elite_hp_multiplier = 2.0
+elite_dmg_multiplier = 1.5
+elite_xp_multiplier = 2.0
+
 # Social / 行会 / 任务系统配置
 # guild_creation_cost_gold = 创建行会所需金币 (master C# Guild_CreationCost)
 # 默认 1_000_000,如果 [social] 段省略则用 default。

@@ -124,6 +124,10 @@ pub struct ServerWorldConfig {
     /// 金币掉落每堆上限（C# Settings.MaxDropGold = 2000）
     #[serde(default = "default_max_drop_gold")]
     pub max_drop_gold: u32,
+    /// 精英怪配置（C# Settings.MonsterRarity* 第一阶段：单级精英，默认保留 Rust 当前值；
+    /// C# Elite 参考：2.25x HP / 75% 掉落加成）
+    #[serde(default)]
+    pub rarity: RarityConfig,
 }
 
 fn default_item_timeout() -> u32 {
@@ -132,6 +136,49 @@ fn default_item_timeout() -> u32 {
 
 fn default_max_drop_gold() -> u32 {
     2000
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct RarityConfig {
+    /// 精英概率百分比（1..=100）
+    #[serde(default = "default_elite_chance")]
+    pub elite_chance_percent: u8,
+    /// 精英 HP 倍率
+    #[serde(default = "default_elite_hp_multiplier")]
+    pub elite_hp_multiplier: f64,
+    /// 精英伤害倍率
+    #[serde(default = "default_elite_dmg_multiplier")]
+    pub elite_dmg_multiplier: f64,
+    /// 精英经验倍率
+    #[serde(default = "default_elite_xp_multiplier")]
+    pub elite_xp_multiplier: f64,
+}
+
+fn default_elite_chance() -> u8 {
+    3
+}
+
+fn default_elite_hp_multiplier() -> f64 {
+    2.0
+}
+
+fn default_elite_dmg_multiplier() -> f64 {
+    1.5
+}
+
+fn default_elite_xp_multiplier() -> f64 {
+    2.0
+}
+
+impl Default for RarityConfig {
+    fn default() -> Self {
+        Self {
+            elite_chance_percent: default_elite_chance(),
+            elite_hp_multiplier: default_elite_hp_multiplier(),
+            elite_dmg_multiplier: default_elite_dmg_multiplier(),
+            elite_xp_multiplier: default_elite_xp_multiplier(),
+        }
+    }
 }
 
 fn default_drop_rate() -> f64 {
@@ -155,6 +202,7 @@ impl Default for ServerConfig {
                 drop_rate: default_drop_rate(),
                 item_timeout_secs: default_item_timeout(),
                 max_drop_gold: default_max_drop_gold(),
+                rarity: RarityConfig::default(),
             },
             social: SocialConfig::default(),
             conquest: ConquestConfig::default(),

@@ -131,6 +131,7 @@ async fn async_main() -> anyhow::Result<()> {
         drop_rate: cfg.server.drop_rate,
         item_timeout_ticks: cfg.server.item_timeout_secs as u64 * 10,
         max_drop_gold: cfg.server.max_drop_gold,
+        rarity_cfg: cfg.server.rarity.clone(),
     });
     info!("WorldActor spawned (tick={}ms, map_dir={})", cfg.server.tick_ms, cfg.server.map_data_dir);
 
