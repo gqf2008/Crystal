@@ -585,6 +585,9 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     // #491: 角色最后上线时间（C# LastLogoutDate，safe to re-run）
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN last_access INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    // #516: 强制改密标记（C# AccountInfo.RequirePasswordChange，safe to re-run）
+    let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN require_password_change INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     // #480: 密码错误锁定（C# WrongPasswordCount / ExpiryDate，safe to re-run）
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN wrong_password_count INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
@@ -794,8 +797,8 @@ pub async fn save_account(pool: &DbPool, account: &AccountInfo) -> anyhow::Resul
     sqlx::query(
         r#"INSERT OR REPLACE INTO accounts
            (username, password_hash, is_online, storage_password_hash, storage_password_last_set,
-            wrong_password_count, banned_until)
-           VALUES (?, ?, ?, ?, ?, ?, ?)"#
+            wrong_password_count, banned_until, require_password_change)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(&account.username)
     .bind(&account.password_hash)
@@ -804,6 +807,7 @@ pub async fn save_account(pool: &DbPool, account: &AccountInfo) -> anyhow::Resul
     .bind(account.storage_password_last_set)
     .bind(account.wrong_password_count as i64)
     .bind(account.banned_until)
+    .bind(if account.require_password_change { 1 } else { 0 })
     .execute(pool)
     .await?;
     Ok(())
@@ -877,7 +881,7 @@ pub async fn load_account(pool: &DbPool, username: &str) -> anyhow::Result<Optio
     let row = sqlx::query(
         "SELECT username, password_hash, is_online,
                 storage_password_hash, storage_password_last_set, credit,
-                wrong_password_count, banned_until
+                wrong_password_count, banned_until, require_password_change
          FROM accounts WHERE username = ?"
     )
     .bind(username)
@@ -893,6 +897,7 @@ pub async fn load_account(pool: &DbPool, username: &str) -> anyhow::Result<Optio
         credit: r.try_get::<i64, _>("credit").unwrap_or(0).max(0) as u64,
         wrong_password_count: r.try_get::<i64, _>("wrong_password_count").unwrap_or(0).max(0) as u32,
         banned_until: r.try_get::<i64, _>("banned_until").unwrap_or(0),
+        require_password_change: r.try_get::<i64, _>("require_password_change").unwrap_or(0) != 0,
     }))
 }
 
@@ -900,7 +905,7 @@ pub async fn load_all_accounts(pool: &DbPool) -> anyhow::Result<Vec<AccountInfo>
     let rows = sqlx::query(
         "SELECT username, password_hash, is_online,
                 storage_password_hash, storage_password_last_set, credit,
-                wrong_password_count, banned_until
+                wrong_password_count, banned_until, require_password_change
          FROM accounts"
     )
     .fetch_all(pool)
@@ -915,6 +920,7 @@ pub async fn load_all_accounts(pool: &DbPool) -> anyhow::Result<Vec<AccountInfo>
         credit: r.try_get::<i64, _>("credit").unwrap_or(0).max(0) as u64,
         wrong_password_count: r.try_get::<i64, _>("wrong_password_count").unwrap_or(0).max(0) as u32,
         banned_until: r.try_get::<i64, _>("banned_until").unwrap_or(0),
+        require_password_change: r.try_get::<i64, _>("require_password_change").unwrap_or(0) != 0,
     }).collect())
 }
 
