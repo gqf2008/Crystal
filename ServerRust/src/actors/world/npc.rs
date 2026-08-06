@@ -951,6 +951,17 @@ impl WorldActor {
     pub(crate) async fn npc_change_credit(&mut self, session_id: u64, delta: i64) {
         let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
         let username = record.account_username.clone();
+        // C# GiveCredit：账户积分上限 uint.MaxValue（正数 delta clamp）
+        let delta = if delta > 0 {
+            let current = db::get_account_credit(&self.db_pool, &username).await.unwrap_or(0);
+            let remaining = (u32::MAX as u64).saturating_sub(current.min(u32::MAX as u64));
+            (delta as u64).min(remaining) as i64
+        } else {
+            delta
+        };
+        if delta == 0 {
+            return;
+        }
         if let Err(e) = db::add_account_credit(&self.db_pool, &username, delta).await {
             warn!("NPC ChangeCredit: failed for {}: {}", username, e);
             return;

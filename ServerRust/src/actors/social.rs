@@ -346,9 +346,11 @@ impl Message<NpcGuildGoldChange> for SocialActor {
                 send_system_message(&self.gate_ref, msg.session_id, &format!("行会仓库减少 {} 金币", amount));
             }
             _ => {
-                guild.gold = guild.gold.saturating_add(msg.amount as u64);
-                self.send_guild_storage_gold_change(msg.session_id, &state.name, msg.amount, 3).await;
-                send_system_message(&self.gate_ref, msg.session_id, &format!("行会仓库增加 {} 金币", msg.amount));
+                // C# GiveGuildGold：行会金币上限 uint.MaxValue
+                let add = (msg.amount as u64).min((u32::MAX as u64).saturating_sub(guild.gold.min(u32::MAX as u64)));
+                guild.gold += add;
+                self.send_guild_storage_gold_change(msg.session_id, &state.name, add as u32, 3).await;
+                send_system_message(&self.gate_ref, msg.session_id, &format!("行会仓库增加 {} 金币", add));
             }
         }
         self.save_guild_to_db(&guild_name).await;
