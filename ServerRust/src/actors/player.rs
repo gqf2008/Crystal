@@ -249,6 +249,10 @@ pub struct PlayerState {
     pub exp_multiplier: f64,
     /// 经验倍率过期时间（WorldActor tick count）
     pub exp_multiplier_end_tick: u64,
+    /// 掉落倍率（1.0 = 正常；Potion shape 5 Drop Buff，C# BuffType.Drop）
+    pub drop_multiplier: f64,
+    /// 掉落倍率过期时间（WorldActor tick count）
+    pub drop_multiplier_end_tick: u64,
 }
 
 impl PlayerState {
@@ -524,6 +528,8 @@ impl PlayerActor {
                 flags: std::collections::HashMap::new(),
                 exp_multiplier: 1.0,
                 exp_multiplier_end_tick: 0,
+            drop_multiplier: 1.0,
+            drop_multiplier_end_tick: 0,
             },
             gate_ref,
             world_ref,
@@ -664,6 +670,25 @@ impl Message<SetExpMultiplier> for PlayerActor {
     ) -> Self::Reply {
         self.state.exp_multiplier = msg.multiplier.max(1.0);
         self.state.exp_multiplier_end_tick = msg.end_tick;
+    }
+}
+
+/// 设置玩家掉落倍率（Potion shape 5 Drop Buff，C# BuffType.Drop）
+pub struct SetDropMultiplier {
+    pub multiplier: f64,
+    pub end_tick: u64,
+}
+
+impl Message<SetDropMultiplier> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetDropMultiplier,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.drop_multiplier = msg.multiplier.max(1.0);
+        self.state.drop_multiplier_end_tick = msg.end_tick;
     }
 }
 
@@ -4057,6 +4082,8 @@ mod tests {
             flags: std::collections::HashMap::new(),
             exp_multiplier: 1.0,
             exp_multiplier_end_tick: 0,
+            drop_multiplier: 1.0,
+            drop_multiplier_end_tick: 0,
             auto_pot_hp: 0,
             auto_pot_mp: 0,
             auto_pot_hp_item: -1,

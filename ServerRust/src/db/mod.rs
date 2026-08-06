@@ -1248,6 +1248,8 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         flags,
         exp_multiplier: 1.0,
         exp_multiplier_end_tick: 0,
+            drop_multiplier: 1.0,
+            drop_multiplier_end_tick: 0,
     };
 
     Ok(Some(state))
@@ -2577,11 +2579,13 @@ pub async fn load_item_infos(pool: &DbPool) -> anyhow::Result<Vec<ItemInfo>> {
     let rows = sqlx::query("SELECT * FROM item_infos ORDER BY idx").fetch_all(pool).await?;
     Ok(rows.into_iter().map(|r| {
         let stats_json: String = r.get("stats_json");
-        let stats: HashMap<u8, i32> = serde_json::from_str(&stats_json)
+        let stats_raw: HashMap<u8, i32> = serde_json::from_str(&stats_json)
             .unwrap_or_else(|e| {
                 tracing::warn!("Failed to parse item stats JSON for index {}: {}", r.get::<i32, _>("idx"), e);
                 HashMap::new()
             });
+        // DB stats_json 使用 C# Stat 枚举值（SharedRust Stat = C# + 3），统一 +3 转换供内部读取
+        let stats: HashMap<u8, i32> = stats_raw.into_iter().map(|(k, v)| (k.saturating_add(3), v)).collect();
         ItemInfo {
             index: r.get("idx"),
             name: r.get("name"),
@@ -2621,11 +2625,13 @@ pub async fn load_monster_infos(pool: &DbPool) -> anyhow::Result<Vec<MonsterInfo
     let rows = sqlx::query("SELECT * FROM monster_infos ORDER BY idx").fetch_all(pool).await?;
     Ok(rows.into_iter().map(|r| {
         let stats_json: String = r.get("stats_json");
-        let stats: HashMap<u8, i32> = serde_json::from_str(&stats_json)
+        let stats_raw: HashMap<u8, i32> = serde_json::from_str(&stats_json)
             .unwrap_or_else(|e| {
                 tracing::warn!("Failed to parse monster stats JSON for index {}: {}", r.get::<i32, _>("idx"), e);
                 HashMap::new()
             });
+        // DB stats_json 使用 C# Stat 枚举值（SharedRust Stat = C# + 3），统一 +3 转换供内部读取
+        let stats: HashMap<u8, i32> = stats_raw.into_iter().map(|(k, v)| (k.saturating_add(3), v)).collect();
         MonsterInfo {
             index: r.get("idx"),
             name: r.get("name"),
@@ -3600,6 +3606,19 @@ mod tests {
         let pool = temp_pool().await;
         let loaded = load_flags(&pool, "Nobody").await.unwrap();
         assert!(loaded.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_load_item_infos_converts_stats_keys() {
+        // DB stats_json 使用 C# Stat key（HP=12/Luck=15），加载时应 +3 转 SharedRust（HP=15/Luck=18）
+        let pool = init_db_pool("sqlite::memory:?cache=shared").await.unwrap();
+        sqlx::query("INSERT INTO item_infos (idx, name, stats_json) VALUES (1, 'TestPotion', '{\"12\":30,\"15\":50}')")
+            .execute(&pool).await.unwrap();
+        let infos = load_item_infos(&pool).await.unwrap();
+        assert_eq!(infos.len(), 1);
+        let info = &infos[0];
+        assert_eq!(info.stats.get(&15), Some(&30)); // C# HP=12 -> SharedRust HP=15
+        assert_eq!(info.stats.get(&18), Some(&50)); // C# Luck=15 -> SharedRust Luck=18
     }
 }
 

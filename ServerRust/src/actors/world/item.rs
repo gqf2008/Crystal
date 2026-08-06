@@ -464,13 +464,58 @@ impl Message<UseItemRequest> for WorldActor {
         // 根据物品类型执行效果
         if let Some(ref db) = item_db {
             match db.item_type {
-                // Potion（C# UseItem：Shape 0/1 回血回蓝；Shape 3 临时属性 Buff）
+                // Potion（C# UseItem：按 item.Info.Shape 分支 0~5；stats 已由 DB 加载层 +3 转 SharedRust key）
                 13 => {
                     use mir2_shared::enums::Stat;
                     use crate::combat::buff::{BuffType, BuffInstance};
                     let shape = db.shape;
                     let get = |stat: Stat| db.stats.get(&(stat as u8)).copied().unwrap_or(0);
-                    if shape == 3 {
+                    match shape {
+                        // 0 NormalPotion（C#：累计 PotHealthAmount/PotManaAmount，每 tick 回复 PerTickRegen = 5 + Level/10）
+                        0 => {
+                            let per_tick = (5 + player_state.level / 10).max(1) as u32;
+                            let hp_pool = get(Stat::HP) as u32;
+                            let mp_pool = get(Stat::MP) as u32;
+                            if hp_pool > 0 {
+                                let ticks = hp_pool.div_ceil(per_tick).max(1);
+                                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff {
+                                    buff: BuffInstance::new(BuffType::HpRegen { amount_per_tick: per_tick as i32 }, ticks, 1),
+                                }).await;
+                            }
+                            if mp_pool > 0 {
+                                let ticks = mp_pool.div_ceil(per_tick).max(1);
+                                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff {
+                                    buff: BuffInstance::new(BuffType::MpRegen { amount_per_tick: per_tick as i32 }, ticks, 1),
+                                }).await;
+                            }
+                            debug!("Potion: {} shape=0 normal potion hp_pool={} mp_pool={}", player_state.name, hp_pool, mp_pool);
+                        }
+                        // 1 SunPotion（C#：立即回血回蓝）
+                        1 => {
+                            let hp_recover = get(Stat::HP);
+                            let mp_recover = get(Stat::MP);
+                            if hp_recover > 0 {
+                                let _ = record.actor_ref.ask(crate::actors::player::Heal {
+                                    amount: hp_recover,
+                                }).await;
+                            }
+                            if mp_recover > 0 {
+                                let _ = record.actor_ref.ask(crate::actors::player::AddMP {
+                                    amount: mp_recover,
+                                }).await;
+                            }
+                            if hp_recover > 0 || mp_recover > 0 {
+                                debug!("Potion: {} recovered hp={} mp={}", player_state.name, hp_recover, mp_recover);
+                            }
+                        }
+                        // 2 MysteryWater（C#：UnlockCurse 解除诅咒锁定；Rust 暂无 Cursed 物品系统）
+                        2 => {
+                            send_system_message(&self.gate_ref, msg.session_id, "神秘水暂不可用");
+                            return;
+                        }
+                        // 3 Buff（C#：临时属性 Buff，时长 = Durability * Settings.Minute）
+                        3 => {
+
                         // C#：Buff 药水，时长 = Durability * Settings.Minute（60000ms → 600 ticks）
                         let ticks = (db.durability.max(1) as u32).saturating_mul(600);
                         let mut applied = false;
@@ -506,24 +551,43 @@ impl Message<UseItemRequest> for WorldActor {
                         if applied {
                             debug!("Potion: {} shape=3 buff potion {} ticks", player_state.name, ticks);
                         }
-                    } else {
-                        let hp_recover = get(Stat::HP);
-                        let mp_recover = get(Stat::MP);
-                        if hp_recover > 0 {
-                            let _ = record.actor_ref.ask(crate::actors::player::Heal {
-                                amount: hp_recover,
-                            }).await;
+                    
                         }
-                        if mp_recover > 0 {
-                            let _ = record.actor_ref.ask(crate::actors::player::AddMP {
-                                amount: mp_recover,
-                            }).await;
+                        // 4 Exp（C#：BuffType.Exp，ExpRatePercent = Luck，时长 Durability 分钟）
+                        4 => {
+                            let luck = get(Stat::Luck);
+                            if luck > 0 {
+                                let duration_ticks = (db.durability.max(1) as u32).saturating_mul(600);
+                                let end_tick = self.tick_count + duration_ticks as u64;
+                                let _ = record.actor_ref.ask(SetExpMultiplier {
+                                    multiplier: 1.0 + luck as f64 / 100.0,
+                                    end_tick,
+                                }).await;
+                                send_system_message(&self.gate_ref, msg.session_id,
+                                    &format!("经验加成已启动：+{}%，持续 {} 分钟", luck, db.durability.max(1)));
+                            }
                         }
-                        if hp_recover > 0 || mp_recover > 0 {
-                            debug!("Potion: {} recovered hp={} mp={}", player_state.name, hp_recover, mp_recover);
+                        // 5 Drop（C#：BuffType.Drop，ItemDropRatePercent = Luck，时长 Durability 分钟）
+                        5 => {
+                            let luck = get(Stat::Luck);
+                            if luck > 0 {
+                                let duration_ticks = (db.durability.max(1) as u32).saturating_mul(600);
+                                let end_tick = self.tick_count + duration_ticks as u64;
+                                let _ = record.actor_ref.ask(crate::actors::player::SetDropMultiplier {
+                                    multiplier: 1.0 + luck as f64 / 100.0,
+                                    end_tick,
+                                }).await;
+                                send_system_message(&self.gate_ref, msg.session_id,
+                                    &format!("掉落加成已启动：+{}%，持续 {} 分钟", luck, db.durability.max(1)));
+                            }
+                        }
+                        // 其他 shape：C# 无分支，无效果但消耗
+                        _ => {
+                            debug!("Potion: {} unknown shape {}", player_state.name, shape);
                         }
                     }
                 }
+
                 // Scroll（C# UseItem Scroll：按 item.Info.Shape 分支，shape=0~6/12）
                 17 => {
                     let shape = db.shape;

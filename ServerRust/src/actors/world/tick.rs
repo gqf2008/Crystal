@@ -136,6 +136,14 @@ impl WorldActor {
                         send_system_message(&self.gate_ref, *session_id, "双倍经验效果已结束");
                         debug!("Exp multiplier expired for session {}", session_id);
                     }
+                    if state.drop_multiplier > 1.0 && self.tick_count >= state.drop_multiplier_end_tick {
+                        let _ = record.actor_ref.ask(SetDropMultiplier {
+                            multiplier: 1.0,
+                            end_tick: 0,
+                        }).await;
+                        send_system_message(&self.gate_ref, *session_id, "掉落加成效果已结束");
+                        debug!("Drop multiplier expired for session {}", session_id);
+                    }
                 }
             }
             // 全局事件过期广播
