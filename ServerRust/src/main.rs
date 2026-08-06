@@ -113,6 +113,8 @@ async fn async_main() -> anyhow::Result<()> {
         allow_delete_character: cfg.social.allow_delete_character,
         allow_create_assassin: cfg.social.allow_create_assassin,
         allow_create_archer: cfg.social.allow_create_archer,
+        allow_new_hero: cfg.social.allow_new_hero,
+        hero_can_create_class: cfg.social.hero_can_create_class.clone(),
         guild_war_cost: cfg.social.guild_war_cost,
         guild_war_time: cfg.social.guild_war_time,
     };

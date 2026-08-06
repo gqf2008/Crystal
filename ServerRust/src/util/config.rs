@@ -84,6 +84,12 @@ pub struct SocialConfig {
     /// 是否允许创建弓箭手（C# Settings.AllowCreateArcher = true）
     #[serde(default = "default_true")]
     pub allow_create_archer: bool,
+    /// 是否允许创建英雄（C# Settings.AllowNewHero = true）
+    #[serde(default = "default_true")]
+    pub allow_new_hero: bool,
+    /// 英雄可创建职业（C# Settings.Hero_CanCreateClass[5]，默认全 true）
+    #[serde(default = "default_hero_can_create_class")]
+    pub hero_can_create_class: Vec<bool>,
     /// 行会宣战费用（C# Settings.Guild_WarCost = 3000；<$GUILDWARFEE>）
     #[serde(default = "default_guild_war_cost")]
     pub guild_war_cost: u32,
@@ -102,6 +108,10 @@ fn default_allow_delete_character() -> bool {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_hero_can_create_class() -> Vec<bool> {
+    vec![true; 5]
 }
 
 fn default_guild_war_cost() -> u32 {
@@ -139,6 +149,8 @@ impl Default for SocialConfig {
             allow_delete_character: default_allow_delete_character(),
             allow_create_assassin: default_true(),
             allow_create_archer: default_true(),
+            allow_new_hero: default_true(),
+            hero_can_create_class: default_hero_can_create_class(),
             guild_war_cost: default_guild_war_cost(),
             guild_war_time: default_guild_war_time(),
         }

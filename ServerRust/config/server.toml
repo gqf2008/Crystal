@@ -33,6 +33,8 @@ allow_new_character = true
 allow_delete_character = true
 allow_create_assassin = true
 allow_create_archer = true
+allow_new_hero = true
+# hero_can_create_class = [true, true, true, true, true]  # 英雄可创建职业（Warrior/Wizard/Taoist/Assassin/Archer）
 guild_war_cost = 3000
 guild_war_time = 180
 

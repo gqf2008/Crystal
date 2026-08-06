@@ -758,6 +758,41 @@ impl Message<NewHeroRequest> for WorldActor {
             _ => return,
         };
 
+        // C# Settings.AllowNewHero → Result=0
+        let (allow_new_hero, can_create_class) = self.social_ref
+            .ask(crate::actors::social::NpcGetHeroCreateOptions)
+            .await
+            .unwrap_or((true, vec![true; 5]));
+        if !allow_new_hero {
+            let body = vec![0u8];
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewHero as i16, &body),
+            }).await;
+            return;
+        }
+        // C# CharacterReg：名称 3..15，中文/下划线/ASCII 字母数字 → Result=1
+        let name_len = msg.name.chars().count();
+        let valid_name = (3..=15).contains(&name_len)
+            && msg.name.chars().all(|c| c == '_' || c.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fa5}').contains(&c));
+        if !valid_name {
+            let body = vec![1u8];
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewHero as i16, &body),
+            }).await;
+            return;
+        }
+        // C# Settings.Hero_CanCreateClass → Result=3
+        let class_idx = msg.class as u8 as usize;
+        if !can_create_class.get(class_idx).copied().unwrap_or(true) {
+            let body = vec![3u8];
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewHero as i16, &body),
+            }).await;
+            return;
+        }
         // #188：真正创建英雄（内存态；DB 持久化后续批次）
         // C# S.NewHero.Result：1=BadName 4=MaxHeroes 10=Success
         let has_hero = self.player_heroes.get(&msg.session_id).is_some_and(|v| !v.is_empty());
