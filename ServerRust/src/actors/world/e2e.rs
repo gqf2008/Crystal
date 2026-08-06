@@ -189,6 +189,7 @@ fn e2e_start_game_flow() {
             quest_dir: std::path::PathBuf::from("."),
             db_pool: db_pool.clone(),
             social_ref,
+            conquest_cfg: crate::util::config::ConquestConfig::default(),
         });
 
         let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
@@ -261,6 +262,7 @@ fn e2e_magic_cast_flow() {
                 quest_dir: std::path::PathBuf::from("."),
                 db_pool: db_pool.clone(),
                 social_ref,
+                conquest_cfg: crate::util::config::ConquestConfig::default(),
             },
         );
         let _ = gate_ref.ask(crate::gate::actor::SetWorldRef { world_ref }).await;
@@ -325,6 +327,7 @@ fn e2e_attack_flow() {
                 quest_dir: std::path::PathBuf::from("."),
                 db_pool: db_pool.clone(),
                 social_ref,
+                conquest_cfg: crate::util::config::ConquestConfig::default(),
             },
         );
         let _ = gate_ref.ask(crate::gate::actor::SetWorldRef { world_ref }).await;

@@ -17,3 +17,9 @@ map_data_dir = "Daneo1989"
 # 默认 1_000_000,如果 [social] 段省略则用 default。
 [social]
 guild_creation_cost_gold = 1000000
+
+# 攻城 / 行会领地（GT）配置（对齐 C# Settings.BuyGTGold / ExtendGT / GTSale 最低价）
+[conquest]
+buy_gold = 1000000
+extend_gold = 500000
+gt_sale_min_price = 2000000

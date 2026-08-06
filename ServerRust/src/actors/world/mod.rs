@@ -79,6 +79,8 @@ pub struct WorldActorArgs {
     pub db_pool: DbPool,
     /// SocialActor 引用（用于转发社交命令）
     pub social_ref: ActorRef<SocialActor>,
+    /// 攻城/GT 配置（对齐 C# Settings.BuyGTGold/ExtendGT）
+    pub conquest_cfg: crate::util::config::ConquestConfig,
 }
 
 /// 世界中的玩家记录
@@ -787,6 +789,8 @@ pub struct WorldActor {
     pub(crate) movement_index: HashMap<(i32, i32, i32), db::MapMovementInfo>,
     /// SocialActor 引用（用于转发社交命令）
     pub(crate) social_ref: ActorRef<SocialActor>,
+    /// 攻城/GT 配置
+    pub(crate) conquest_cfg: crate::util::config::ConquestConfig,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -947,6 +951,7 @@ impl WorldActor {
             game_shop_items: Vec::new(),
             movement_index: HashMap::new(),
             social_ref,
+            conquest_cfg: crate::util::config::ConquestConfig::default(),
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -3051,6 +3056,7 @@ impl Actor for WorldActor {
             game_shop_items,
             movement_index,
             social_ref: args.social_ref,
+            conquest_cfg: args.conquest_cfg,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,

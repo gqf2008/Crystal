@@ -8,6 +8,44 @@ pub struct ServerConfig {
     /// Social / 行会 / 任务系统配置 (PR 收尾工作:把散落的硬编码常量集中到 cfg)
     #[serde(default)]
     pub social: SocialConfig,
+    /// 攻城 / 行会领地（GT）配置（对齐 C# Settings.BuyGTGold/ExtendGT 等）
+    #[serde(default)]
+    pub conquest: ConquestConfig,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ConquestConfig {
+    /// 购买领地所需行会金币（C# Settings.BuyGTGold）
+    #[serde(default = "default_conquest_buy_gold")]
+    pub buy_gold: u64,
+    /// 延长领地租期费用（C# Settings.ExtendGT）
+    #[serde(default = "default_conquest_extend_gold")]
+    pub extend_gold: u64,
+    /// 领地挂售最低价格（C# GTSale 最低 200 万）
+    #[serde(default = "default_conquest_gt_sale_min")]
+    pub gt_sale_min_price: u64,
+}
+
+fn default_conquest_buy_gold() -> u64 {
+    1_000_000
+}
+
+fn default_conquest_extend_gold() -> u64 {
+    500_000
+}
+
+fn default_conquest_gt_sale_min() -> u64 {
+    2_000_000
+}
+
+impl Default for ConquestConfig {
+    fn default() -> Self {
+        Self {
+            buy_gold: default_conquest_buy_gold(),
+            extend_gold: default_conquest_extend_gold(),
+            gt_sale_min_price: default_conquest_gt_sale_min(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -71,6 +109,7 @@ impl Default for ServerConfig {
                 map_data_dir: "Data".to_string(),
             },
             social: SocialConfig::default(),
+            conquest: ConquestConfig::default(),
         }
     }
 }
