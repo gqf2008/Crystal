@@ -1679,6 +1679,7 @@ impl Message<DamageEquipment> for PlayerActor {
         msg: DamageEquipment,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        let mut changed = false;
         let broke = if let Some(ref mut item) = self.state.inventory.equipment[msg.slot as usize] {
             // C# SpecialItemMode.NoDuraLoss = 0x400：装备不掉耐久
             let no_dura_loss = item
@@ -1691,15 +1692,34 @@ impl Message<DamageEquipment> for PlayerActor {
             } else if item.current_dura > msg.amount {
                 item.current_dura -= msg.amount;
                 item.dura_changed = true;
+                changed = true;
                 false
             } else {
                 item.current_dura = 0;
                 item.dura_changed = true;
+                changed = true;
                 true
             }
         } else {
             false
         };
+
+        // C#：装备耐久变化 → S.DuraChanged（HumanObject Process 每 tick 冲刷 DuraChanged 标志）
+        if changed {
+            if let Some(item) = self.state.inventory.equipment[msg.slot as usize].as_ref() {
+                let dc = mir2_shared::packets::server::experience::DuraChanged {
+                    unique_id: item.unique_id,
+                    current_dura: item.current_dura,
+                };
+                let mut body = Vec::new();
+                if dc.write_body(&mut body).is_ok() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: self.state.session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DuraChanged as i16, &body),
+                    }).await;
+                }
+            }
+        }
 
         if broke {
             self.state.inventory.equipment[msg.slot as usize] = None;
