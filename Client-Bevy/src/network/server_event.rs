@@ -130,6 +130,8 @@ pub enum ServerEvent {
     ObjectName { object_id: u32, name: String },
     /// #264 UserName：本地玩家改名
     PlayerNameUpdated { name: String },
+    /// #268 BaseStatsInfo/HeroBaseStatsInfo：基础属性
+    BaseStats { stats: Vec<i32> },
     /// Roll：骰子/尤茨结果（npc_id 由 roll 消费端从 NpcDialogState 读取）
     Roll {
         r#type: i32,
