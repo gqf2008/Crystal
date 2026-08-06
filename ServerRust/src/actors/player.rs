@@ -1757,6 +1757,32 @@ impl Message<InventoryUnequipItem> for PlayerActor {
     }
 }
 
+/// 喂坐骑：恢复坐骑耐久（C# UseItem Food；返回 (uid, max_dura, current_dura)）
+pub struct FeedMount {
+    pub amount: u16,
+}
+
+impl Message<FeedMount> for PlayerActor {
+    type Reply = Option<(u64, u16, u16)>;
+
+    async fn handle(&mut self, msg: FeedMount, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let result = {
+            let slot = crate::actors::inventory::EquipmentSlot::Mount as usize;
+            let Some(m) = self.state.inventory.equipment.get_mut(slot).and_then(|s| s.as_mut()) else {
+                return None;
+            };
+            if m.current_dura >= m.max_dura {
+                return None;
+            }
+            m.current_dura = (m.current_dura as u32 + msg.amount as u32).min(m.max_dura as u32) as u16;
+            m.dura_changed = true;
+            Some((m.unique_id, m.max_dura, m.current_dura))
+        };
+        self.send_equipment_changed();
+        result
+    }
+}
+
 /// 标记物品已鉴定（C# NeedIdentify 使用/装备时自动鉴定 + S.RefreshItem）
 pub struct SetItemIdentified {
     pub unique_id: u64,
