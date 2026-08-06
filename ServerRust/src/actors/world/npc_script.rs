@@ -1736,7 +1736,17 @@ async fn exec_action(
         // MONGEN <name> <count> —— 在目标坐标刷怪（坐标优先 PARAM2/PARAM3，缺省玩家/NPC 位置）
         "MONGEN" | "MAKEMON" | "MONSTER" => {
             let mob_name = arg0();
-            let count = arg1().parse::<u32>().unwrap_or(1);
+            // C# Mongen：count 缺省 1，给定参数必须 byte.TryParse 成功（1..=255），否则不刷怪
+            let count = match args.get(1) {
+                Some(s) => match s.parse::<u8>() {
+                    Ok(c) if c > 0 => c as u32,
+                    _ => {
+                        warn!("NPC MONGEN: invalid count '{}' (must be 1-255)", s);
+                        return;
+                    }
+                },
+                None => 1,
+            };
             if mob_name.is_empty() {
                 warn!("NPC action MONGEN: missing monster name");
             } else {
