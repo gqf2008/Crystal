@@ -1107,6 +1107,19 @@ impl WorldActor {
         }
         let current = db::get_account_credit(&self.db_pool, &username).await.unwrap_or(0);
         send_system_message(&self.gate_ref, session_id, &format!("账户积分变化 {}（当前 {}）", delta, current));
+        // C# GainCredit：S.GainedCredit（客户端积分浮字，仅正向）
+        if delta > 0 {
+            let packet = mir2_shared::packets::server::drops::GainedCredit {
+                credit: delta.min(u32::MAX as i64) as u32,
+            };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainedCredit as i16, &body),
+                }).await;
+            }
+        }
         debug!("NPC ChangeCredit: {} delta={} current={}", username, delta, current);
     }
 }
