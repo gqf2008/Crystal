@@ -698,6 +698,10 @@ async fn exec_action(
             }
             info!("NPC {}: ROLL type={} result={} page={} auto={}", npc.name, r#type, result, page, auto_roll);
         }
+        // RECALL —— 传送到当前 NPC 位置（对齐 mod.rs 旧处理器 RECALL）
+        "RECALL" => {
+            teleport_player(world, session_id, npc.map_index, npc.x, npc.y).await;
+        }
         // MOVE <map_index> <x> <y>（C# 格式）
         "MOVE" | "MAPMOVE" | "TELEPORT" => {
             let map_idx = arg0().parse::<u16>().unwrap_or(0);
@@ -813,6 +817,36 @@ async fn exec_action(
                 send_player_msg(world, session_id, ChangeClass { class: cls }).await;
             }
         }
+        // GIVEPET <type_id> —— 给宠物（对齐 mod.rs 旧处理器 GIVEPET）
+        "GIVEPET" => {
+            let type_id = arg0().parse::<u8>().unwrap_or(0);
+            let creature_type = crate::actors::creature::CreatureType::from(type_id);
+            if creature_type != crate::actors::creature::CreatureType::None {
+                if let Some(mut st) = current_player_state(world, session_id).await {
+                    let mut log = st.creature_log;
+                    let mut creature = crate::actors::creature::IntelligentCreature::new(creature_type);
+                    creature.enabled = true;
+                    log.set_creature(creature);
+                    send_player_msg(world, session_id, crate::actors::player::SetCreature { creature_log: log }).await;
+                    send_system_message(&world.gate_ref, session_id, "获得新宠物！");
+                    debug!("NPC GIVEPET: type={:?}", creature_type);
+                }
+            }
+        }
+        // GIVEPETFOOD <amount> —— 恢复宠物饥饿（对齐 mod.rs 旧处理器 GIVEPETFOOD）
+        "GIVEPETFOOD" => {
+            let amount = arg0().parse::<u8>().unwrap_or(20);
+            let restored = if let Some(record) = world.players.get(&session_id) {
+                record.actor_ref.ask(crate::actors::player::RestoreCreatureHunger { amount }).await.unwrap_or(false)
+            } else {
+                false
+            };
+            if restored {
+                send_system_message(&world.gate_ref, session_id, &format!("宠物吃了食物，饥饿值恢复 {} 点", amount));
+            } else {
+                send_system_message(&world.gate_ref, session_id, "你没有召唤宠物");
+            }
+        }
         // REMOVEPET —— 移除宠物（对齐 C# ActionType.RemovePet）
         "REMOVEPET" => {
             if let Some(mut st) = current_player_state(world, session_id).await {
@@ -862,6 +896,26 @@ async fn exec_action(
             let msg = unquote(arg0()).to_string();
             if !msg.is_empty() {
                 broadcast_system_message(&world.gate_ref, &world.players, &msg);
+            }
+        }
+        // LOCAL <msg> —— 本图系统消息广播（对齐 mod.rs 旧处理器 LOCAL）
+        "LOCAL" => {
+            let msg = unquote(arg0()).to_string();
+            if !msg.is_empty() {
+                if let Some(st) = current_player_state(world, session_id).await {
+                    let map_index = st.map_index;
+                    let mut targets = Vec::new();
+                    for (sid, r) in &world.players {
+                        if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                            if os.map_index == map_index {
+                                targets.push(*sid);
+                            }
+                        }
+                    }
+                    for sid in targets {
+                        send_system_message(&world.gate_ref, sid, &format!("[本地] {}", msg));
+                    }
+                }
             }
         }
         // LOCALMESSAGE "msg" <type>
