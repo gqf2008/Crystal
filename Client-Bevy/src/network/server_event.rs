@@ -96,6 +96,12 @@ pub enum ServerEvent {
         spell: mir2_shared::enums::Spell,
         can_use: bool,
     },
+    /// #248 NPCImageUpdate：NPC 形象变化
+    NpcImageUpdated { npc_id: u32, image: u16 },
+    /// #248 GainedCredit：声望增加
+    CreditGained { credit: u32 },
+    /// #248 LoseCredit：声望减少
+    CreditLost { amount: u32 },
     /// Roll：骰子/尤茨结果（npc_id 由 roll 消费端从 NpcDialogState 读取）
     Roll {
         r#type: i32,

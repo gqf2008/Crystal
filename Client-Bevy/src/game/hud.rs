@@ -31,6 +31,8 @@ pub struct HudState {
     pub max_exp: i64,
     pub level: u16,
     pub gold: u32,
+    /// #248 声望/功勋
+    pub credit: u32,
     pub name: String,
     /// 本地玩家 object_id（UserInformation 提供）
     pub player_object_id: Option<u32>,
@@ -61,6 +63,7 @@ impl Default for HudState {
             max_exp: 100,
             level: 1,
             gold: 0,
+            credit: 0,
             name: String::new(),
             player_object_id: None,
             class: 0,
@@ -749,6 +752,16 @@ fn hud_server_events(
             ServerEvent::GoldGained { gold } => {
                 hud.gold = hud.gold.saturating_add(*gold);
             }
+            ServerEvent::CreditGained { credit } => {
+                // #248：声望增加
+                hud.credit = hud.credit.saturating_add(*credit);
+                tracing::info!("🏅 获得声望 +{}（当前 {}）", credit, hud.credit);
+            }
+            ServerEvent::CreditLost { amount } => {
+                // #248：声望减少
+                hud.credit = hud.credit.saturating_sub(*amount);
+                tracing::info!("🏅 失去声望 -{}（当前 {}）", amount, hud.credit);
+            }
             ServerEvent::GoldLost { amount } => {
                 hud.gold = hud.gold.saturating_sub(*amount);
                 tracing::info!("💸 失去金币 -{}（当前 {}）", amount, hud.gold);
@@ -855,7 +868,8 @@ fn hud_server_events(
             | ServerEvent::ObjectPoisoned { .. }
             | ServerEvent::ItemRepaired { .. }
             | ServerEvent::ItemSlotSizeChanged { .. }
-            | ServerEvent::SpellToggled { .. } => {}
+            | ServerEvent::SpellToggled { .. }
+            | ServerEvent::NpcImageUpdated { .. } => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);

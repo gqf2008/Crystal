@@ -222,6 +222,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--harvest-test") {
         app.add_systems(Update, auto_harvest_test);
     }
+    // --npc-credit-test: NPC 形象更新 + 声望（NPCImageUpdate/GainedCredit，#248）
+    if std::env::args().any(|a| a == "--npc-credit-test") {
+        app.add_systems(Update, auto_npc_credit_test);
+    }
     // --book-test: 技能书学习链路（使用技能书 → 等 NewMagic → 校验 MagicsState）
     if std::env::args().any(|a| a == "--book-test") {
         app.add_systems(Update, auto_book_test);
@@ -6806,6 +6810,121 @@ fn auto_harvest_test(
                     tracing::info!("[HARVEST] ✅ 采集表现通过");
                 } else {
                     tracing::warn!("[HARVEST] ❌ 未观察到采集位移");
+                }
+                *stage = 9;
+            }
+        }
+        _ => {}
+    }
+}
+
+
+/// --npc-credit-test：施法 → mock 回发 NPCImageUpdate(110→2) + GainedCredit(50)，
+/// 断言 NPC 形象变化 + 声望累积（#248）
+#[allow(clippy::too_many_arguments)]
+fn auto_npc_credit_test(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    npcs: Query<(
+        &client_bevy::actor::NetObjectId,
+        &client_bevy::actor::NpcAppearance,
+    )>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut target: Local<Option<u32>>,
+    mut target_tile: Local<Option<(i32, i32)>>,
+    actors: Query<(
+        &client_bevy::actor::NetObjectId,
+        &Transform,
+        Has<client_bevy::actor::Monster>,
+    )>,
+    players: Query<
+        &Transform,
+        (
+            With<client_bevy::actor::LocalPlayer>,
+            With<client_bevy::actor::NetObjectId>,
+        ),
+    >,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 10.0 {
+                return;
+            }
+            let Ok(pf) = players.single() else { return };
+            let (px, py) =
+                client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+            let mut best: Option<(u32, i32, i32)> = None;
+            for (id, tf, monster) in &actors {
+                if !monster {
+                    continue;
+                }
+                let (mx, my) =
+                    client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+                let d = (mx - px).abs() + (my - py).abs();
+                if d <= 40 && best.map(|(_, _, bd)| d < bd).unwrap_or(true) {
+                    best = Some((id.0, mx, my));
+                }
+            }
+            match best {
+                Some((oid, mx, my)) => {
+                    *target = Some(oid);
+                    *target_tile = Some((mx, my));
+                    tracing::info!("[NPCCR] 🎯 目标怪物 id={} @ ({},{})", oid, mx, my);
+                    *stage = 1;
+                    *t = 0.0;
+                }
+                None => {
+                    tracing::warn!("[NPCCR] ❌ 附近没有怪物");
+                    *stage = 9;
+                }
+            }
+        }
+        1 => {
+            if *t < 1.5 {
+                return;
+            }
+            let (mx, my) = target_tile.unwrap_or((0, 0));
+            let Ok(pf) = players.single() else { return };
+            let (px, py) =
+                client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+            let dir = client_bevy::game::movement::direction_from_delta(
+                (mx - px).signum(),
+                (my - py).signum(),
+            )
+            .unwrap_or(mir2_shared::enums::MirDirection::Down);
+            net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                spell: mir2_shared::enums::Spell::FireBall,
+                direction: dir,
+                target_id: target.unwrap_or(0),
+                location: mir2_shared::Point { x: mx, y: my },
+            });
+            tracing::info!("[NPCCR] 🔥 施法触发 NPC/声望");
+            *stage = 2;
+            *t = 0.0;
+        }
+        2 => {
+            if *t >= 2.5 {
+                let npc_updated = npcs
+                    .iter()
+                    .any(|(id, app)| id.0 == 110 && app.npc_index == 2);
+                let credit = hud.credit >= 50;
+                tracing::info!("[NPCCR] NPC形象={} 声望={}", npc_updated, credit);
+                if npc_updated && credit {
+                    tracing::info!("[NPCCR] ✅ NPC 形象/声望通过");
+                } else {
+                    tracing::warn!(
+                        "[NPCCR] ❌ 未通过（NPC形象={} 声望={}）",
+                        npc_updated,
+                        credit
+                    );
                 }
                 *stage = 9;
             }

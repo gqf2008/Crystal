@@ -654,6 +654,18 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 direction: MirDirection::Right,
                                             },
                                         );
+                                        // #248：NPC 形象更新 + 声望增加
+                                        send(
+                                            &to_client,
+                                            &server::npc_interaction::NPCImageUpdate {
+                                                npc_id: 110,
+                                                image: 2,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::drops::GainedCredit { credit: 50 },
+                                        );
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
                                             send(
