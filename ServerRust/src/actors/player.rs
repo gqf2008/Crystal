@@ -128,6 +128,10 @@ pub struct PlayerState {
     pub health_recovery: i32,
     /// 魔法恢复（C# Stat.SpellRecovery，装备提供，用于基础回蓝公式）
     pub spell_recovery: i32,
+    /// 攻击速度（C# Stat.AttackSpeed，装备提供，UserInformation 展示）
+    pub attack_speed: i32,
+    /// 毒抗（C# Stat.PoisonResist，装备提供，UserInformation 展示）
+    pub poison_resist: i32,
     /// 毒物恢复
     pub poison_recovery: i32,
     /// 神圣属性
@@ -491,6 +495,8 @@ impl PlayerActor {
                 poison_attack: 0,
             health_recovery: 0,
             spell_recovery: 0,
+            attack_speed: 0,
+            poison_resist: 0,
                 poison_recovery: 0,
                 holy: 0,
                 accuracy: 0,
@@ -1594,6 +1600,8 @@ pub struct SetStatBonuses {
     pub poison_attack: i32,
     pub health_recovery: i32,
     pub spell_recovery: i32,
+    pub attack_speed: i32,
+    pub poison_resist: i32,
 }
 
 impl Message<SetStatBonuses> for PlayerActor {
@@ -1663,6 +1671,8 @@ impl Message<SetStatBonuses> for PlayerActor {
         self.state.poison_attack = msg.poison_attack;
         self.state.health_recovery = msg.health_recovery;
         self.state.spell_recovery = msg.spell_recovery;
+        self.state.attack_speed = msg.attack_speed;
+        self.state.poison_resist = msg.poison_resist;
     }
 }
 
@@ -4332,6 +4342,8 @@ mod tests {
             poison_attack: 0,
             health_recovery: 0,
             spell_recovery: 0,
+            attack_speed: 0,
+            poison_resist: 0,
             poison_recovery: 0,
             holy: 0,
             accuracy: 0,

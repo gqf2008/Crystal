@@ -295,6 +295,8 @@ impl Message<StartGameRequest> for WorldActor {
         loaded_state.poison_attack = b.poison_attack;
         loaded_state.health_recovery = b.health_recovery;
         loaded_state.spell_recovery = b.spell_recovery;
+        loaded_state.attack_speed = b.attack_speed;
+        loaded_state.poison_resist = b.poison_resist;
 
         // 给装备/背包物品补 ItemInfo（含 special_mode，供复活戒指等逻辑读取）
         for slot in loaded_state.inventory.equipment.iter_mut() {
@@ -1909,6 +1911,8 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         poison_attack: 0,
         health_recovery: 0,
         spell_recovery: 0,
+        attack_speed: 0,
+        poison_resist: 0,
         poison_recovery: 0,
         holy: 0,
         accuracy: 0,
