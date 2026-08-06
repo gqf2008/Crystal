@@ -1880,6 +1880,7 @@ async fn exec_action(
         "CHANGECLASS" => {
             if let Some(cls) = parse_class(arg0()) {
                 send_player_msg(world, session_id, ChangeClass { class: cls }).await;
+                world.refresh_player_appearance(session_id).await;
             }
         }
         // GIVEPET <type_id> —— 给宠物（对齐 mod.rs 旧处理器 GIVEPET）
@@ -1960,6 +1961,7 @@ async fn exec_action(
         "CHANGEGENDER" => {
             if let Some(gender) = parse_gender(arg0()) {
                 send_player_msg(world, session_id, crate::actors::player::SetGender { gender }).await;
+                world.refresh_player_appearance(session_id).await;
                 debug!("NPC CHANGEGENDER: {:?}", gender);
             } else {
                 warn!("NPC CHANGEGENDER: unknown gender '{}'", arg0());
@@ -1969,6 +1971,7 @@ async fn exec_action(
         "CHANGEHAIR" => {
             let h = arg0().parse::<u8>().unwrap_or(0);
             send_player_msg(world, session_id, SetHair { hair: h }).await;
+            world.refresh_player_appearance(session_id).await;
         }
         // PLAYSOUND <sound_id> —— 播放声音（对齐 C# ActionType.PlaySound + S.PlaySound）
         "PLAYSOUND" => {
