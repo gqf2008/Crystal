@@ -204,7 +204,52 @@ impl WorldActor {
         }
     }
 
-    /// PK 值衰减 + 名字颜色广播（每 10 ticks）
+    /// 休息经验加成累积（C# PlayerObject.Process：安全区每秒 _restedCounter++；每 RestedPeriod*60 秒给一次 GiveRestedBonus）
+    /// 同时处理休息加成过期（每 10 ticks = 1 秒）
+    pub(crate) async fn tick_rested(&mut self) {
+        if self.tick_count % 10 != 0 {
+            return;
+        }
+        let cfg = self.rested_cfg.clone();
+        for (session_id, record) in &self.players {
+            let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await else { continue };
+            // 休息加成过期清理
+            if state.rested_exp_percent > 0 {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                if now_ms >= state.rested_exp_end_tick {
+                    let _ = record.actor_ref.ask(crate::actors::player::SetRestedExp { percent: 0, end_tick: 0 }).await;
+                    send_system_message(&self.gate_ref, *session_id, "休息经验加成已结束");
+                    debug!("Rested expired for session {}", session_id);
+                }
+            }
+            // 安全区每秒累积 + 到账（C#：counter 仅在安全区 +1；登录时已按离线分钟初始化）
+            let in_safe = self.maps.get(&state.map_index)
+                .map(|m| m.is_safe_zone(state.x, state.y))
+                .unwrap_or(false);
+            if in_safe || state.rested_counter > 0 {
+                let mut counter = state.rested_counter;
+                if in_safe {
+                    counter = counter.saturating_add(1);
+                }
+                let count = counter / (cfg.period_secs.max(1) * 60);
+                if count > 0 {
+                    let _ = record.actor_ref.ask(crate::actors::player::GiveRestedBonus {
+                        count,
+                        buff_length_minutes: cfg.buff_length_minutes,
+                        exp_bonus_percent: cfg.exp_bonus_percent,
+                        max_bonus: cfg.max_bonus,
+                    }).await;
+                } else if counter != state.rested_counter {
+                    let _ = record.actor_ref.ask(crate::actors::player::SetRestedCounter { counter }).await;
+                }
+            }
+        }
+    }
+
+/// PK 值衰减 + 名字颜色广播（每 10 ticks）
     pub(crate) async fn tick_pk_decay(&mut self) {
         if self.tick_count % 10 == 0 {
             let mut colour_changes = Vec::new();
@@ -2793,6 +2838,7 @@ impl Message<Tick> for WorldActor {
         self.tick_exp_events_and_invisibility().await;
 
         self.tick_pk_decay().await;
+        self.tick_rested().await;
 
         self.tick_fishing().await;
 

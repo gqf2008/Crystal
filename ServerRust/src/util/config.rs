@@ -11,6 +11,9 @@ pub struct ServerConfig {
     /// 攻城 / 行会领地（GT）配置（对齐 C# Settings.BuyGTGold/ExtendGT 等）
     #[serde(default)]
     pub conquest: ConquestConfig,
+    /// 休息经验加成配置（C# Settings.Rested*）
+    #[serde(default)]
+    pub rested: RestedConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -52,6 +55,50 @@ impl Default for ConquestConfig {
             extend_gold: default_conquest_extend_gold(),
             gt_sale_min_price: default_conquest_gt_sale_min(),
             gt_days: default_conquest_gt_days(),
+        }
+    }
+}
+
+/// 休息经验加成（C# Settings.Rested*：安全区/下线累积，BuffType.Rested +ExpRatePercent）
+#[derive(Debug, Deserialize, Clone)]
+pub struct RestedConfig {
+    /// 累积 1 个休息单位所需秒数（C# Settings.RestedPeriod = 60，计数按秒）
+    #[serde(default = "default_rested_period")]
+    pub period_secs: u32,
+    /// 每个休息单位对应的加成时长（分钟，C# Settings.RestedBuffLength = 10）
+    #[serde(default = "default_rested_buff_minutes")]
+    pub buff_length_minutes: u32,
+    /// 休息经验加成百分比（C# Settings.RestedExpBonus = 5）
+    #[serde(default = "default_rested_exp_bonus")]
+    pub exp_bonus_percent: u32,
+    /// 最大可累积加成单位数（C# Settings.RestedMaxBonus = 24）
+    #[serde(default = "default_rested_max_bonus")]
+    pub max_bonus: u32,
+}
+
+fn default_rested_period() -> u32 {
+    60
+}
+
+fn default_rested_buff_minutes() -> u32 {
+    10
+}
+
+fn default_rested_exp_bonus() -> u32 {
+    5
+}
+
+fn default_rested_max_bonus() -> u32 {
+    24
+}
+
+impl Default for RestedConfig {
+    fn default() -> Self {
+        Self {
+            period_secs: default_rested_period(),
+            buff_length_minutes: default_rested_buff_minutes(),
+            exp_bonus_percent: default_rested_exp_bonus(),
+            max_bonus: default_rested_max_bonus(),
         }
     }
 }
@@ -322,6 +369,7 @@ impl Default for ServerConfig {
             },
             social: SocialConfig::default(),
             conquest: ConquestConfig::default(),
+            rested: RestedConfig::default(),
         }
     }
 }

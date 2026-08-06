@@ -81,6 +81,8 @@ pub struct WorldActorArgs {
     pub social_ref: ActorRef<SocialActor>,
     /// 攻城/GT 配置（对齐 C# Settings.BuyGTGold/ExtendGT）
     pub conquest_cfg: crate::util::config::ConquestConfig,
+    /// 休息经验加成配置（C# Settings.Rested*）
+    pub rested_cfg: crate::util::config::RestedConfig,
     /// 全局掉落倍率（C# Settings.DropRate）
     pub drop_rate: f64,
     /// 地面物品超时 ticks（= item_timeout_secs * 10，100ms/tick）
@@ -828,6 +830,8 @@ pub struct WorldActor {
     pub(crate) social_ref: ActorRef<SocialActor>,
     /// 攻城/GT 配置
     pub(crate) conquest_cfg: crate::util::config::ConquestConfig,
+    /// 休息经验加成配置（C# Settings.Rested*）
+    pub(crate) rested_cfg: crate::util::config::RestedConfig,
     /// 全局掉落倍率
     pub(crate) drop_rate: f64,
     /// 地面物品超时 ticks
@@ -1006,6 +1010,7 @@ impl WorldActor {
             movement_index: HashMap::new(),
             social_ref,
             conquest_cfg: crate::util::config::ConquestConfig::default(),
+            rested_cfg: crate::util::config::RestedConfig::default(),
             drop_rate: 1.0,
             item_timeout_ticks: 600,
             max_drop_gold: 2000,
@@ -3151,6 +3156,7 @@ impl Actor for WorldActor {
             movement_index,
             social_ref: args.social_ref,
             conquest_cfg: args.conquest_cfg,
+            rested_cfg: args.rested_cfg,
             drop_rate: args.drop_rate,
             item_timeout_ticks: args.item_timeout_ticks,
             max_drop_gold: args.max_drop_gold,
@@ -3678,7 +3684,7 @@ fn extract_quoted(s: &str) -> Option<String> {
     None
 }
 
-fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: u64, message: &str) {
+pub(crate) fn send_system_message(gate_ref: &ActorRef<GateActor>, session_id: u64, message: &str) {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
     crate::util::wire::write_dotnet_string(&mut body, message);
