@@ -964,6 +964,11 @@ fn hemorrhage_value(max_dc: i32) -> i32 {
     max_dc + 1
 }
 
+/// #377 弓手三连箭：状态持续时间 = 5 + 5*Lv（C# SpecialArrowShot buffTime）
+pub(crate) fn special_shot_buff_time(level: u8) -> i32 {
+    5 + 5 * level as i32
+}
+
 impl WorldActor {
     /// #306：广播法术命中（ObjectStruck + DamageIndicator，对齐 C# Attacked() 表现）
     pub(crate) async fn broadcast_spell_hit(
@@ -1707,7 +1712,8 @@ impl Message<MagicRequest> for WorldActor {
             // BindingShot：弹道 + 命中后 Paralysis（在 complete_projectile_spell 结算）
             // NapalmShot：弹道 + 命中后 3×3 AOE（在 complete_projectile_spell 结算）
             // 伤害基于 DC（物理攻击），用 magic_stat（弓箭手类 = effective_max_attack）
-            SPELL_STRAIGHT_SHOT | SPELL_DOUBLE_SHOT | SPELL_BINDING_SHOT | SPELL_NAPALM_SHOT | SPELL_CAT_TONGUE => {
+            SPELL_STRAIGHT_SHOT | SPELL_DOUBLE_SHOT | SPELL_BINDING_SHOT | SPELL_NAPALM_SHOT | SPELL_CAT_TONGUE
+            | SPELL_VAMPIRE_SHOT | SPELL_POISON_SHOT | SPELL_CRIPPLE_SHOT | SPELL_ELEMENTAL_SHOT => {
                 // 弓箭手弹道伤害：DC × 法术倍率（power_base 近似），最少 1
                 let raw_damage = (magic_stat + (power as i32) / 2).max(1);
 
@@ -2796,5 +2802,11 @@ mod spell_geometry_tests {
         assert_eq!(hemorrhage_duration(3, 6), 7);
         assert_eq!(hemorrhage_duration(0, 0), 0);
         assert_eq!(hemorrhage_value(50), 51);
+    }
+
+    #[test]
+    fn special_shot_buff_time_value() {
+        assert_eq!(special_shot_buff_time(0), 5);
+        assert_eq!(special_shot_buff_time(3), 20);
     }
 }

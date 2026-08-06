@@ -1443,7 +1443,8 @@ impl WorldActor {
                 | Spell::Vampirism
                 // 弓箭手弹道物理系（命中后按 AC 防御结算，BindingShot/NapalmShot 附加效果）
                 | Spell::StraightShot | Spell::DoubleShot
-                | Spell::BindingShot | Spell::NapalmShot => {
+                | Spell::BindingShot | Spell::NapalmShot
+                | Spell::VampireShot | Spell::PoisonShot | Spell::CrippleShot | Spell::ElementalShot => {
                     Self::complete_projectile_spell(
                         self, pending, &caster_state, &attacker_stats, level_offset, spell_enum,
                     ).await;
@@ -1483,7 +1484,8 @@ impl WorldActor {
 
         // 弓箭手弹道走 AC 防御（物理），法师弹道走 MAC（魔法）
         let is_archer = matches!(spell,
-            Spell::StraightShot | Spell::DoubleShot | Spell::BindingShot | Spell::NapalmShot);
+            Spell::StraightShot | Spell::DoubleShot | Spell::BindingShot | Spell::NapalmShot
+            | Spell::VampireShot | Spell::PoisonShot | Spell::CrippleShot | Spell::ElementalShot);
         let defence = if is_archer { DefenceType::Ac } else { DefenceType::Mac };
 
         // 查找目标怪物
@@ -1548,6 +1550,27 @@ impl WorldActor {
                     if spell == Spell::BindingShot {
                         poison::apply_poison(&mut monster.poison_list,
                             poison::Poison::new(PoisonType::PARALYSIS, 3, 0, 1000));
+                    }
+
+                    // #377：弓手三连箭状态（C# SpecialArrowShot，buffTime=5+5*Lv）
+                    if spell == Spell::PoisonShot {
+                        let dur = super::special_shot_buff_time(pending.spell_level).max(1) as u32;
+                        poison::apply_poison(&mut monster.poison_list,
+                            poison::Poison::new(PoisonType::GREEN, dur, (pending.damage / 10).max(1), 1000));
+                        debug!("PoisonShot poisoned monster {} ({}s)", target_id, dur);
+                    }
+                    if spell == Spell::CrippleShot {
+                        let dur = super::special_shot_buff_time(pending.spell_level).max(1) as u32;
+                        poison::apply_poison(&mut monster.poison_list,
+                            poison::Poison::new(PoisonType::SLOW, dur, 0, 1000));
+                        debug!("CrippleShot slowed monster {} ({}s)", target_id, dur);
+                    }
+                    if spell == Spell::VampireShot {
+                        let vamp = (result.damage as f32 * 0.25) as i32;
+                        if vamp > 0 {
+                            self.vamp_heals.push((pending.session_id, vamp));
+                        }
+                        debug!("VampireShot leeched {} HP on monster {}", vamp, target_id);
                     }
 
                     // Vampirism：吸血 = 实伤 × (level+1) × 0.25（C# HumanObject.cs:6011）
@@ -1640,6 +1663,14 @@ impl WorldActor {
                     }
                     if spell == Spell::BindingShot {
                         player_poisons.push(poison::Poison::new(PoisonType::PARALYSIS, 3, 0, 1000));
+                    }
+                    if spell == Spell::PoisonShot {
+                        let dur = super::special_shot_buff_time(pending.spell_level).max(1) as u32;
+                        player_poisons.push(poison::Poison::new(PoisonType::GREEN, dur, (pending.damage / 10).max(1), 1000));
+                    }
+                    if spell == Spell::CrippleShot {
+                        let dur = super::special_shot_buff_time(pending.spell_level).max(1) as u32;
+                        player_poisons.push(poison::Poison::new(PoisonType::SLOW, dur, 0, 1000));
                     }
                     if !player_poisons.is_empty() {
                         let _ = actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
