@@ -148,6 +148,7 @@ async fn async_main() -> anyhow::Result<()> {
         max_drop_gold: cfg.server.max_drop_gold,
         rarity_cfg: cfg.server.rarity.clone(),
         notice_path: cfg.server.notice_path.clone(),
+        death_exp_penalty_percent: cfg.server.death_exp_penalty_percent,
     });
     info!("WorldActor spawned (tick={}ms, map_dir={})", cfg.server.tick_ms, cfg.server.map_data_dir);
 

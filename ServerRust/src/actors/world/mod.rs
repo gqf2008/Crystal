@@ -91,6 +91,8 @@ pub struct WorldActorArgs {
     pub rarity_cfg: crate::util::config::RarityConfig,
     /// 服务器公告文件路径（C# Settings.NoticePath）
     pub notice_path: String,
+    /// 死亡经验惩罚百分比（默认 0=关闭，对齐 C#）
+    pub death_exp_penalty_percent: u32,
 }
 
 /// 世界中的玩家记录
@@ -836,6 +838,8 @@ pub struct WorldActor {
     pub(crate) rarity_cfg: crate::util::config::RarityConfig,
     /// 服务器公告文件路径（C# Settings.NoticePath）
     pub(crate) notice_path: String,
+    /// 死亡经验惩罚百分比（默认 0=关闭，对齐 C#）
+    pub(crate) death_exp_penalty_percent: u32,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -1007,6 +1011,7 @@ impl WorldActor {
             max_drop_gold: 2000,
             rarity_cfg: crate::util::config::RarityConfig::default(),
             notice_path: "Notice.txt".to_string(),
+            death_exp_penalty_percent: 0,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -3133,6 +3138,7 @@ impl Actor for WorldActor {
             max_drop_gold: args.max_drop_gold,
             rarity_cfg: args.rarity_cfg,
             notice_path: args.notice_path.clone(),
+            death_exp_penalty_percent: args.death_exp_penalty_percent,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,

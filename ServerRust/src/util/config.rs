@@ -227,6 +227,9 @@ pub struct ServerWorldConfig {
     /// 服务器公告文件（C# Settings.NoticePath = EnvirPath/Notice.txt；首行 Title=，其余为消息）
     #[serde(default = "default_notice_path")]
     pub notice_path: String,
+    /// 死亡经验惩罚百分比（0=关闭，对齐 C# 无通用死亡惩罚；>0 时按当前等级经验百分比扣除）
+    #[serde(default = "default_death_exp_penalty_percent")]
+    pub death_exp_penalty_percent: u32,
     /// 精英怪配置（C# Settings.MonsterRarity* 第一阶段：单级精英，默认保留 Rust 当前值；
     /// C# Elite 参考：2.25x HP / 75% 掉落加成）
     #[serde(default)]
@@ -243,6 +246,10 @@ fn default_max_drop_gold() -> u32 {
 
 fn default_notice_path() -> String {
     "Notice.txt".to_string()
+}
+
+fn default_death_exp_penalty_percent() -> u32 {
+    0
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -311,6 +318,7 @@ impl Default for ServerConfig {
                 max_drop_gold: default_max_drop_gold(),
                 rarity: RarityConfig::default(),
                 notice_path: default_notice_path(),
+                death_exp_penalty_percent: default_death_exp_penalty_percent(),
             },
             social: SocialConfig::default(),
             conquest: ConquestConfig::default(),

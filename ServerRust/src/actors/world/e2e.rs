@@ -217,6 +217,7 @@ fn e2e_start_game_flow() {
             max_drop_gold: 2000,
             rarity_cfg: crate::util::config::RarityConfig::default(),
             notice_path: "Notice.txt".to_string(),
+            death_exp_penalty_percent: 0,
         });
 
         let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
@@ -319,6 +320,7 @@ fn e2e_magic_cast_flow() {
                 max_drop_gold: 2000,
                 rarity_cfg: crate::util::config::RarityConfig::default(),
             notice_path: "Notice.txt".to_string(),
+            death_exp_penalty_percent: 0,
             },
         );
         let _ = gate_ref.ask(crate::gate::actor::SetWorldRef { world_ref }).await;
@@ -389,6 +391,7 @@ fn e2e_attack_flow() {
                 max_drop_gold: 2000,
                 rarity_cfg: crate::util::config::RarityConfig::default(),
             notice_path: "Notice.txt".to_string(),
+            death_exp_penalty_percent: 0,
             },
         );
         let _ = gate_ref.ask(crate::gate::actor::SetWorldRef { world_ref }).await;

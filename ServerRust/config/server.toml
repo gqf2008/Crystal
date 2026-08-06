@@ -15,6 +15,7 @@ drop_rate = 1.0
 item_timeout_secs = 30
 max_drop_gold = 2000
 notice_path = "Notice.txt"
+death_exp_penalty_percent = 0
 
 [rarity]
 elite_chance_percent = 3
