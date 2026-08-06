@@ -110,6 +110,7 @@ async fn async_main() -> anyhow::Result<()> {
         guild_required_level: cfg.social.guild_required_level,
         newbie_guild: cfg.social.newbie_guild.clone(),
         allow_new_character: cfg.social.allow_new_character,
+        allow_delete_character: cfg.social.allow_delete_character,
         guild_war_cost: cfg.social.guild_war_cost,
         guild_war_time: cfg.social.guild_war_time,
     };

@@ -653,19 +653,56 @@ impl Message<DeleteCharacterRequest> for WorldActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: DeleteCharacterRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        // 从数据库删除角色及相关数据
-        // 注意：当前仅返回成功，后续可加入"需要密码确认"等逻辑
-        let success = true;
+        // C# Settings.AllowDeleteCharacter：关闭时 Result=0
+        if !self.social_ref.ask(crate::actors::social::NpcGetAllowDeleteCharacter).await.unwrap_or(true) {
+            let mut body = Vec::new();
+            body.push(0u8); // Result = 0
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DeleteCharacter as i16, &body),
+            }).await;
+            debug!("DeleteCharacter denied (AllowDeleteCharacter=false): session={}", msg.session_id);
+            return;
+        }
 
+        // 按索引找到属于该账号的角色（C#：按 Account.Characters 索引查找）
+        let chars = match db::list_characters_by_account(&self.db_pool, &msg.account_username).await {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("DeleteCharacter: failed to list characters for {}: {}", msg.account_username, e);
+                return;
+            }
+        };
+        let idx = msg.character_index.max(0) as usize;
+        let Some((char_name, _, _, _)) = chars.get(idx) else {
+            // C#：找不到 → S.DeleteCharacter { Result = 1 }
+            let mut body = Vec::new();
+            body.push(1u8);
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DeleteCharacter as i16, &body),
+            }).await;
+            debug!("DeleteCharacter: index {} not found for account {}", msg.character_index, msg.account_username);
+            return;
+        };
+
+        // 真删（含全部子表数据；C# 软删 Deleted 标记，Rust 直接清除，观察行为一致）
+        if let Err(e) = db::delete_character(&self.db_pool, char_name).await {
+            warn!("DeleteCharacter: failed to delete '{}': {}", char_name, e);
+            return;
+        }
+        // C#：成功 → S.DeleteCharacterSuccess { CharacterIndex }
+        let packet = mir2_shared::packets::server::account::DeleteCharacterSuccess {
+            character_index: msg.character_index,
+        };
         let mut body = Vec::new();
-        body.extend_from_slice(&msg.character_index.to_le_bytes());
-        body.push(if success { 1u8 } else { 0u8 });
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: msg.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DeleteCharacter as i16, &body),
-        }).await;
-
-        debug!("DeleteCharacter: session={} index={}", msg.session_id, msg.character_index);
+        if packet.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DeleteCharacterSuccess as i16, &body),
+            }).await;
+        }
+        debug!("DeleteCharacter: deleted '{}' (index={}) for account {}", char_name, msg.character_index, msg.account_username);
     }
 }
 

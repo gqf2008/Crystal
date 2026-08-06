@@ -30,6 +30,7 @@ wedding_ring_recall_enabled = true
 guild_required_level = 22
 newbie_guild = "NewbieGuild"
 allow_new_character = true
+allow_delete_character = true
 guild_war_cost = 3000
 guild_war_time = 180
 
