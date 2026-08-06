@@ -466,6 +466,11 @@ impl Message<NewCharacterRequest> for WorldActor {
 
     async fn handle(&mut self, msg: NewCharacterRequest, _ctx: &mut Context<Self, Self::Reply>) {
         debug!("NewCharacterRequest handler entered: {}", msg.name);
+        // C# Settings.AllowNewCharacter：全局禁止创建角色
+        if !self.social_ref.ask(crate::actors::social::NpcGetAllowNewCharacter).await.unwrap_or(true) {
+            send_system_message(&self.gate_ref, msg.session_id, "当前服务器不允许创建角色");
+            return;
+        }
         // C# 规则（Globals.MinCharacterNameLength=3 / MaxCharacterNameLength=15 / Envir.CharacterReg）：
         // 名称 3..15 字符，仅中文/下划线/ASCII 字母数字
         let name_len = msg.name.chars().count();

@@ -320,6 +320,17 @@ impl Message<NpcIsGroupLeader> for SocialActor {
     }
 }
 
+/// WorldActor -> SocialActor: 查询是否允许创建角色（C# Settings.AllowNewCharacter）
+pub struct NpcGetAllowNewCharacter;
+
+impl Message<NpcGetAllowNewCharacter> for SocialActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, _msg: NpcGetAllowNewCharacter, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.config.allow_new_character
+    }
+}
+
 /// WorldActor(NPC 脚本) -> SocialActor: 查询行会宣战费用/时长（C# Settings.Guild_WarCost/Guild_WarTime，<$GUILDWARFEE>/<$GUILDWARTIME>）
 pub struct NpcGetGuildWarSettings;
 
@@ -557,6 +568,8 @@ pub struct SocialActorConfig {
     pub guild_required_level: u16,
     /// 新手行会名称（C# Settings.NewbieGuild）
     pub newbie_guild: String,
+    /// 是否允许创建角色（C# Settings.AllowNewCharacter）
+    pub allow_new_character: bool,
     /// 行会宣战费用（C# Settings.Guild_WarCost = 3000）
     pub guild_war_cost: u32,
     /// 行会战争时长（秒，C# Settings.Guild_WarTime = 180）
@@ -573,6 +586,7 @@ impl Default for SocialActorConfig {
             wedding_ring_recall_enabled: true,
             guild_required_level: 22,
             newbie_guild: "NewbieGuild".to_string(),
+            allow_new_character: true,
             guild_war_cost: 3000,
             guild_war_time: 180,
         }

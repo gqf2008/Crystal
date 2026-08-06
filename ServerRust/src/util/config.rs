@@ -72,12 +72,19 @@ pub struct SocialConfig {
     /// 新手行会名称（C# Settings.NewbieGuild，非 GM 禁止创建该名称）
     #[serde(default = "default_newbie_guild")]
     pub newbie_guild: String,
+    /// 是否允许创建角色（C# Settings.AllowNewCharacter = true）
+    #[serde(default = "default_allow_new_character")]
+    pub allow_new_character: bool,
     /// 行会宣战费用（C# Settings.Guild_WarCost = 3000；<$GUILDWARFEE>）
     #[serde(default = "default_guild_war_cost")]
     pub guild_war_cost: u32,
     /// 行会战争时长（秒，C# Settings.Guild_WarTime = 180；<$GUILDWARTIME>）
     #[serde(default = "default_guild_war_time")]
     pub guild_war_time: i64,
+}
+
+fn default_allow_new_character() -> bool {
+    true
 }
 
 fn default_guild_war_cost() -> u32 {
@@ -111,6 +118,7 @@ impl Default for SocialConfig {
             wedding_ring_recall_enabled: default_wedding_ring_recall(),
             guild_required_level: default_guild_required_level(),
             newbie_guild: default_newbie_guild(),
+            allow_new_character: default_allow_new_character(),
             guild_war_cost: default_guild_war_cost(),
             guild_war_time: default_guild_war_time(),
         }
