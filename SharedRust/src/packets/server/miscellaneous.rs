@@ -445,10 +445,8 @@ impl Packet for GuildInvite {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let len = reader.read_i32::<LittleEndian>()?;
-        let mut bytes = vec![0u8; len as usize];
-        reader.read_exact(&mut bytes)?;
-        let guild_name = String::from_utf8_lossy(&bytes).to_string();
+        use crate::binary::read_dotnet_string;
+        let guild_name = read_dotnet_string(reader)?;
         Ok(Self { guild_name })
     }
 }
@@ -556,10 +554,8 @@ impl Packet for GuildRequestWar {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let len = reader.read_i32::<LittleEndian>()?;
-        let mut bytes = vec![0u8; len as usize];
-        reader.read_exact(&mut bytes)?;
-        let guild_name = String::from_utf8_lossy(&bytes).to_string();
+        use crate::binary::read_dotnet_string;
+        let guild_name = read_dotnet_string(reader)?;
         Ok(Self { guild_name })
     }
 }
@@ -746,10 +742,8 @@ impl Packet for NewHeroInfo {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let len = reader.read_i32::<LittleEndian>()?;
-        let mut bytes = vec![0u8; len as usize];
-        reader.read_exact(&mut bytes)?;
-        let info = String::from_utf8_lossy(&bytes).to_string();
+        use crate::binary::read_dotnet_string;
+        let info = read_dotnet_string(reader)?;
         Ok(Self { info })
     }
 }

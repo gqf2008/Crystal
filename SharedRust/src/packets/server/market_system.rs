@@ -48,14 +48,13 @@ impl Packet for NPCMarket {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use crate::binary::read_dotnet_string;
+
         let count = reader.read_i32::<LittleEndian>()?;
         let mut pages = Vec::with_capacity(count as usize);
-        
+
         for _ in 0..count {
-            let len = reader.read_i32::<LittleEndian>()?;
-            let mut bytes = vec![0u8; len as usize];
-            reader.read_exact(&mut bytes)?;
-            pages.push(String::from_utf8_lossy(&bytes).to_string());
+            pages.push(read_dotnet_string(reader)?);
         }
         
         Ok(Self { pages })
@@ -98,6 +97,7 @@ impl Packet for NPCMarketPage {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use crate::binary::read_dotnet_string;
         let count = reader.read_i32::<LittleEndian>()?;
         let mut listings = Vec::with_capacity(count as usize);
         
@@ -105,10 +105,7 @@ impl Packet for NPCMarketPage {
             let auction_id = reader.read_u64::<LittleEndian>()?;
             let item = UserItem::read_from(reader, i32::MAX, i32::MAX)?;
             
-            let name_len = reader.read_i32::<LittleEndian>()?;
-            let mut name_bytes = vec![0u8; name_len as usize];
-            reader.read_exact(&mut name_bytes)?;
-            let seller_name = String::from_utf8_lossy(&name_bytes).to_string();
+            let seller_name = read_dotnet_string(reader)?;
             
             let price = reader.read_u32::<LittleEndian>()?;
             let consignment_date = reader.read_i64::<LittleEndian>()?;
@@ -196,10 +193,8 @@ impl Packet for MarketSuccess {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let len = reader.read_i32::<LittleEndian>()?;
-        let mut bytes = vec![0u8; len as usize];
-        reader.read_exact(&mut bytes)?;
-        let message = String::from_utf8_lossy(&bytes).to_string();
+        use crate::binary::read_dotnet_string;
+        let message = read_dotnet_string(reader)?;
         Ok(Self { message })
     }
 }
