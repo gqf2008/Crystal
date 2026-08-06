@@ -1052,16 +1052,33 @@ async fn exec_action(
     let arg3 = || args.get(3).map(|s| s.as_str()).unwrap_or("");
 
     match act.action_type.as_str() {
-        // GIVEGOLD <amount>
+        // GIVEGOLD <amount>（对齐 C# GiveGold：金币上限 uint.MaxValue）
         "GIVEGOLD" => {
             let amt = arg0().parse::<u64>().unwrap_or(0);
-            send_player_msg(world, session_id, AddGold { amount: amt }).await;
+            if amt > 0 {
+                let cap = u32::MAX as u64;
+                let give = if let Some(st) = current_player_state(world, session_id).await {
+                    amt.min(cap.saturating_sub(st.inventory.gold.min(cap)))
+                } else {
+                    amt.min(cap)
+                };
+                if give > 0 {
+                    send_player_msg(world, session_id, AddGold { amount: give }).await;
+                }
+            }
         }
-        // TAKEGOLD <amount>（无参则不扣，兼容脚本）
+        // TAKEGOLD <amount>（对齐 C# TakeGold：请求超过现有金币时扣光；无参则不扣）
         "TAKEGOLD" => {
             let amt = arg0().parse::<u64>().unwrap_or(0);
             if amt > 0 {
-                send_player_msg(world, session_id, DeductGold { amount: amt }).await;
+                let take = if let Some(st) = current_player_state(world, session_id).await {
+                    amt.min(st.inventory.gold)
+                } else {
+                    amt
+                };
+                if take > 0 {
+                    send_player_msg(world, session_id, DeductGold { amount: take }).await;
+                }
             }
         }
         // GIVEITEM <name|index> <count>
