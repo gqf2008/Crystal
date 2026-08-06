@@ -512,7 +512,10 @@ const SPELL_THRUSTING: u8 = mir2_shared::enums::Spell::Thrusting as u8;        /
 const SPELL_HALFMOON: u8 = mir2_shared::enums::Spell::HalfMoon as u8;          // 7 半月（范围）
 const SPELL_SHOULDER_DASH: u8 = mir2_shared::enums::Spell::ShoulderDash as u8; // 8 野蛮冲撞
 const SPELL_CROSS_HALFMOON: u8 = mir2_shared::enums::Spell::CrossHalfMoon as u8; // 13 十字半月
+const SPELL_FIRE_BURST: u8 = mir2_shared::enums::Spell::FireBurst as u8;             // 97 刺客·火焰爆发（同 Repulsion）
 const SPELL_FLAMING_SWORD: u8 = mir2_shared::enums::Spell::FlamingSword as u8;     // 8 战士·烈焰剑（下一次近战附加火焰加成）
+const SPELL_TWIN_DRAKE_BLADE: u8 = mir2_shared::enums::Spell::TwinDrakeBlade as u8;   // 6 战士·双龙斩（下一次近战双段伤害）
+const SPELL_SLASHING_BURST: u8 = mir2_shared::enums::Spell::SlashingBurst as u8;     // 15 战士·横扫千军（冲锋+伤害）
 #[allow(dead_code)]
 const SPELL_BLADE_AVALANCHE: u8 = mir2_shared::enums::Spell::BladeAvalanche as u8; // 14 冰刀斩（范围）
 // 弓箭手法术（Archer，弹道物理系 + 自身 buff）
@@ -528,6 +531,7 @@ const SPELL_HASTE: u8 = mir2_shared::enums::Spell::Haste as u8;                 
 const SPELL_FLASH_DASH: u8 = mir2_shared::enums::Spell::FlashDash as u8;         // 97 突进
 const SPELL_LIGHT_BODY: u8 = mir2_shared::enums::Spell::LightBody as u8;         // 98 敏捷+
 const SPELL_HEAVENLY_SWORD: u8 = mir2_shared::enums::Spell::HeavenlySword as u8; // 99 直线AoE
+const SPELL_DOUBLE_SLASH: u8 = mir2_shared::enums::Spell::DoubleSlash as u8;         // 92 刺客·双斩（下一次近战双段伤害）
 const SPELL_MOON_LIGHT: u8 = mir2_shared::enums::Spell::MoonLight as u8;         // 103 隐身
 const SPELL_SWIFT_FEET: u8 = mir2_shared::enums::Spell::SwiftFeet as u8;         // 105 移动速度+
 const SPELL_DARK_BODY: u8 = mir2_shared::enums::Spell::DarkBody as u8;           // 106 隐身+攻击
@@ -699,6 +703,8 @@ pub struct WorldActor {
     pub(crate) cursed_monsters: HashMap<u32, (i32, u64)>,
     /// #312 烈焰剑状态（session → (到期 tick, 技能等级)）
     pub(crate) flaming_sword: HashMap<u64, (u64, u8)>,
+    /// #318 双段近战状态（session → (到期 tick, 等级, 类型: 0=双龙斩 1=双斩)）
+    pub(crate) double_hit_melee: HashMap<u64, (u64, u8, u8)>,
     /// 活跃 NPC（按 object_id 索引）
     pub(crate) npcs: HashMap<u32, NpcState>,
     /// 等待重生的怪物 (object_id → 重生 tick)
@@ -873,6 +879,7 @@ impl WorldActor {
             monsters: HashMap::new(),
             cursed_monsters: HashMap::new(),
             flaming_sword: HashMap::new(),
+            double_hit_melee: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
@@ -2969,6 +2976,7 @@ impl Actor for WorldActor {
             monsters: HashMap::new(),
             cursed_monsters: HashMap::new(),
             flaming_sword: HashMap::new(),
+            double_hit_melee: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),

@@ -142,6 +142,18 @@ impl Message<WorldAttackRequest> for WorldActor {
                                    result.object_id, flaming_bonus, monster.name, *oid);
                         }
                     }
+                    // #318：TwinDrakeBlade/DoubleSlash —— 下一次近战攻击双段伤害（C# MultiplierBase=0.8/Bonus=0.1，一次性）
+                    let mut second_hit = 0i32;
+                    if let Some((expire, lv, kind)) = self.double_hit_melee.get(&msg.session_id).copied() {
+                        self.double_hit_melee.remove(&msg.session_id);
+                        if self.tick_count < expire {
+                            second_hit = (damage as f32 * (0.8 + 0.1 * lv as f32)) as i32;
+                            monster.take_damage(second_hit);
+                            let label = if kind == 0 { "TwinDrakeBlade" } else { "DoubleSlash" };
+                            debug!("Player {} {} second hit +{} on '{}' (#{})",
+                                   result.object_id, label, second_hit, monster.name, *oid);
+                        }
+                    }
                     // HalfMoon（半月）/ CrossHalfMoon（十字半月）：学了则溅射周围怪物
                     let halfmoon_lv = state.magics.iter()
                         .find(|m| m.spell == SPELL_HALFMOON as i32 || m.spell == SPELL_CROSS_HALFMOON as i32)
@@ -2116,6 +2128,65 @@ impl Message<MagicRequest> for WorldActor {
                 }
                 debug!("Magic: {} casts TurnUndead (killed {} undead)", state.name, killed);
             }
+            // #318：TwinDrakeBlade —— 施放后 10 秒内下一次近战攻击双段伤害（C# HumanObject.cs:8530）
+            SPELL_TWIN_DRAKE_BLADE => {
+                self.double_hit_melee.insert(msg.session_id, (self.tick_count + 100, spell_level, 0));
+                debug!("Magic: {} casts TwinDrakeBlade (next melee double-hit, 10s)", state.name);
+            }
+            // #318：DoubleSlash —— 同上双段近战（刺客）
+            SPELL_DOUBLE_SLASH => {
+                self.double_hit_melee.insert(msg.session_id, (self.tick_count + 100, spell_level, 1));
+                debug!("Magic: {} casts DoubleSlash (next melee double-hit, 10s)", state.name);
+            }
+            // #318：SlashingBurst —— 当前格 DC 伤害 + 向前冲刺 2 格（C# HumanObject.cs:5159，对齐 ShoulderDash）
+            SPELL_SLASHING_BURST => {
+                let dir = msg.direction as usize % 8;
+                let raw_damage = if let Some(info) = spell_db {
+                    crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
+                } else { fastrand::i32(5..=15) }.max(1);
+                let mut new_x = state.x;
+                let mut new_y = state.y;
+                let mut slashed_damage = 0i32;
+                for step in 0..2 {
+                    let nx = new_x + MON_DIR_DX[dir];
+                    let ny = new_y + MON_DIR_DY[dir];
+                    let walkable = self.maps.get(&state.map_index)
+                        .map(|m| m.is_walkable(nx, ny))
+                        .unwrap_or(false);
+                    if !walkable { break; }
+                    let hit: Option<u32> = self.monsters.iter()
+                        .find(|(_, m)| m.x == nx && m.y == ny && m.hp > 0)
+                        .map(|(id, _)| *id);
+                    if let Some(mid) = hit {
+                        if let Some(m) = self.monsters.get_mut(&mid) {
+                            let attacker_stats = state.to_combat_stats();
+                            let defender_stats = m.to_combat_stats();
+                            let level_offset = state.level.min(10) as u16;
+                            let r = combat_attack::resolve_attack(
+                                &attacker_stats, &defender_stats, raw_damage,
+                                mir2_shared::enums::DefenceType::AcAgility, level_offset,
+                            );
+                            if r.is_hit && r.damage > 0 {
+                                m.take_damage(r.damage);
+                                m.provoked = true;
+                                m.target_session = Some(msg.session_id);
+                                slashed_damage += r.damage;
+                            }
+                        }
+                    }
+                    new_x = nx;
+                    new_y = ny;
+                    let _ = step;
+                }
+                if new_x != state.x || new_y != state.y {
+                    let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                        x: new_x, y: new_y, direction: msg.direction,
+                        map_index: None, is_mounted: None,
+                    }).await;
+                }
+                debug!("Magic: {} casts SlashingBurst (dashed to {},{}, dealt {} dmg)",
+                       state.name, new_x, new_y, slashed_damage);
+            }
             // #312：FlamingSword —— 施放后 10 秒内下一次近战攻击附加火焰加成（C# HumanObject.cs:8538）
             SPELL_FLAMING_SWORD => {
                 self.flaming_sword.insert(msg.session_id, (self.tick_count + 100, spell_level));
@@ -2136,7 +2207,7 @@ impl Message<MagicRequest> for WorldActor {
             }
             // Repulsion/EnergyRepulsor：推开周围怪物（C# 两者共用 Repulsion 方法）
             // 命中 1-2 格内怪物，将其沿反方向推 1-2 格（受 can_push 限制）
-            SPELL_REPULSION | SPELL_ENERGY_REPULSOR => {
+            SPELL_REPULSION | SPELL_ENERGY_REPULSOR | SPELL_FIRE_BURST => {
                 let push_range = (1 + spell_level as i32 / 2).min(2); // Lv0=1, Lv2+=2
                 // 收集 (怪物id, 推动方向) —— 方向 = 怪物相对施法者
                 let mut pushes: Vec<(u32, usize)> = Vec::new();
