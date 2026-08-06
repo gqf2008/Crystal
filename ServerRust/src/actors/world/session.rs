@@ -628,6 +628,14 @@ impl Message<WorldMoveRequest> for WorldActor {
                 let dest_x = mv.dest_x;
                 let dest_y = mv.dest_y;
 
+                // C# NeedMove 语义：暂存传送点（不直接传送），由 NPC 脚本 ENTERMAP 指令执行
+                if mv.need_move {
+                    self.session_last_movement.insert(msg.session_id, (dest_map_index as u16, dest_x, dest_y));
+                    debug!("Movement staged for ENTERMAP: {} ({},{}) -> {} ({},{})",
+                           state.map_index, state.x, state.y, dest_map_index, dest_x, dest_y);
+                    return;
+                }
+
                 // Look up dest map file name from DB-loaded map_infos
                 let dest_map_info = self.map_infos.get(&dest_map_index).cloned();
 

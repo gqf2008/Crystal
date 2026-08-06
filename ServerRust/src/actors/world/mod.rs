@@ -726,6 +726,8 @@ pub struct WorldActor {
     pub(crate) cursed_monsters: HashMap<u32, (i32, u64)>,
     /// NPC 脚本计时器（SETTIMER）：session -> (timer_id, expire_tick)
     pub(crate) npc_timers: HashMap<u64, HashMap<i32, u64>>,
+    /// ENTERMAP 暂存传送点（NeedMove 踩点暂存，C# NPCData["NPCMoveMap"]）：session -> (map, x, y)
+    pub(crate) session_last_movement: HashMap<u64, (u16, i32, i32)>,
     /// NPC 脚本延迟执行（TIMERECALL/DELAYGOTO）：session -> 待执行动作列表
     pub(crate) npc_delayed_actions: HashMap<u64, Vec<DelayedNpcAction>>,
     /// #312 烈焰剑状态（session → (到期 tick, 技能等级)）
@@ -903,6 +905,7 @@ impl WorldActor {
         Self {
             tick_count: 0,
             npc_timers: HashMap::new(),
+            session_last_movement: HashMap::new(),
             npc_delayed_actions: HashMap::new(),
             players: HashMap::new(),
             buyback_items: HashMap::new(),
@@ -3006,6 +3009,7 @@ impl Actor for WorldActor {
         Ok(Self {
             tick_count: 0,
             npc_timers: HashMap::new(),
+            session_last_movement: HashMap::new(),
             npc_delayed_actions: HashMap::new(),
             players: HashMap::new(),
             buyback_items: HashMap::new(),

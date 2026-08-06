@@ -1355,6 +1355,15 @@ async fn exec_action(
         "GTCANCELSALE" => {
             world.npc_gt_cancel_sale(session_id).await;
         }
+        // ENTERMAP —— 传送到 NeedMove 暂存传送点（对齐 C# ActionType.EnterMap + NPCData["NPCMoveMap"]）
+        "ENTERMAP" => {
+            if let Some((map_index, x, y)) = world.session_last_movement.remove(&session_id) {
+                teleport_player(world, session_id, map_index, x, y).await;
+                debug!("NPC ENTERMAP: -> map {} ({},{})", map_index, x, y);
+            } else {
+                send_system_message(&world.gate_ref, session_id, "没有待传送的入口");
+            }
+        }
         // INSTANCEMOVE <map> <instance> <x> <y> —— 副本实例传送（对齐 C# ActionType.InstanceMove；
         // Rust 暂无独立副本实例，instance 忽略，等同传送到指定地图坐标）
         "INSTANCEMOVE" => {
