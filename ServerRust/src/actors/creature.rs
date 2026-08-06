@@ -74,6 +74,13 @@ pub struct IntelligentCreature {
     pub hunger: u8,
     /// 是否启用
     pub enabled: bool,
+    /// 宠物等级（NPC 脚本 PETLEVEL，对齐 C# PetLevel；默认 1，serde 兼容旧存档）
+    #[serde(default = "default_creature_level")]
+    pub level: u8,
+}
+
+fn default_creature_level() -> u8 {
+    1
 }
 
 impl IntelligentCreature {
@@ -84,6 +91,7 @@ impl IntelligentCreature {
             pickup_mode: PickupMode::None,
             hunger: 100,
             enabled: false,
+            level: 1,
         }
     }
 
