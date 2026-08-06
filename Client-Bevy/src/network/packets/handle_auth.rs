@@ -28,7 +28,7 @@ pub(crate) fn handle_auth(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::Connected as i16, ServerPacketIds::Disconnect as i16, ServerPacketIds::ClientVersion as i16, ServerPacketIds::NewAccount as i16, ServerPacketIds::ChangePassword as i16, ServerPacketIds::Login as i16, ServerPacketIds::LoginSuccess as i16, ServerPacketIds::StartGame as i16, ServerPacketIds::NewCharacter as i16, ServerPacketIds::NewCharacterSuccess as i16, ServerPacketIds::DeleteCharacter as i16, ServerPacketIds::DeleteCharacterSuccess as i16, ServerPacketIds::MapChanged as i16, ServerPacketIds::NewMapInfo as i16, ServerPacketIds::AwakeningNeedMaterials as i16, ServerPacketIds::AwakeningLockedItem as i16, ServerPacketIds::Awakening as i16, ServerPacketIds::Roll as i16, ServerPacketIds::ObjectPlayer as i16, ServerPacketIds::ObjectMonster as i16, ServerPacketIds::ObjectNpc as i16, ServerPacketIds::ObjectRemove as i16, ServerPacketIds::ObjectItem as i16, ServerPacketIds::ObjectGold as i16, ServerPacketIds::ObjectHarvest as i16, ServerPacketIds::ObjectHarvested as i16, ServerPacketIds::NPCUpdate as i16, ServerPacketIds::NPCImageUpdate as i16, ServerPacketIds::GainedCredit as i16, ServerPacketIds::LoseCredit as i16, ServerPacketIds::UserInformation as i16, ServerPacketIds::HealthChanged as i16, ServerPacketIds::UserLocation as i16, ServerPacketIds::GainedGold as i16, ServerPacketIds::GainExperience as i16, ServerPacketIds::LoseGold as i16, ServerPacketIds::TimeOfDay as i16, ServerPacketIds::LogOutSuccess as i16, ServerPacketIds::ChangeAMode as i16, ServerPacketIds::ChangePMode as i16, ServerPacketIds::LevelChanged as i16, ServerPacketIds::ObjectTurn as i16, ServerPacketIds::ObjectWalk as i16, ServerPacketIds::ObjectRun as i16, ServerPacketIds::ObjectHide as i16, ServerPacketIds::ObjectShow as i16, ServerPacketIds::ObjectSitDown as i16, ServerPacketIds::Pushed as i16, ServerPacketIds::ObjectPushed as i16, ServerPacketIds::ObjectTeleportOut as i16, ServerPacketIds::ObjectTeleportIn as i16, ServerPacketIds::MountUpdate as i16, ServerPacketIds::ObjectAttack as i16, ServerPacketIds::UserDash as i16, ServerPacketIds::ObjectDash as i16, ServerPacketIds::UserDashFail as i16, ServerPacketIds::ObjectDashFail as i16, ServerPacketIds::UserBackStep as i16, ServerPacketIds::ObjectBackStep as i16, ServerPacketIds::UserAttackMove as i16, ServerPacketIds::Poisoned as i16, ServerPacketIds::ObjectPoisoned as i16, ServerPacketIds::Chat as i16, ServerPacketIds::ObjectChat as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::Connected as i16, ServerPacketIds::Disconnect as i16, ServerPacketIds::ClientVersion as i16, ServerPacketIds::NewAccount as i16, ServerPacketIds::ChangePassword as i16, ServerPacketIds::Login as i16, ServerPacketIds::LoginSuccess as i16, ServerPacketIds::StartGame as i16, ServerPacketIds::NewCharacter as i16, ServerPacketIds::NewCharacterSuccess as i16, ServerPacketIds::DeleteCharacter as i16, ServerPacketIds::DeleteCharacterSuccess as i16, ServerPacketIds::MapChanged as i16, ServerPacketIds::NewMapInfo as i16, ServerPacketIds::AwakeningNeedMaterials as i16, ServerPacketIds::AwakeningLockedItem as i16, ServerPacketIds::Awakening as i16, ServerPacketIds::Roll as i16, ServerPacketIds::ObjectPlayer as i16, ServerPacketIds::ObjectMonster as i16, ServerPacketIds::ObjectNpc as i16, ServerPacketIds::ObjectRemove as i16, ServerPacketIds::ObjectItem as i16, ServerPacketIds::ObjectGold as i16, ServerPacketIds::ObjectHarvest as i16, ServerPacketIds::ObjectHarvested as i16, ServerPacketIds::ObjectSneaking as i16, ServerPacketIds::ObjectLevelEffects as i16, ServerPacketIds::ObjectDeco as i16, ServerPacketIds::NPCUpdate as i16, ServerPacketIds::NPCImageUpdate as i16, ServerPacketIds::GainedCredit as i16, ServerPacketIds::LoseCredit as i16, ServerPacketIds::UserInformation as i16, ServerPacketIds::HealthChanged as i16, ServerPacketIds::UserLocation as i16, ServerPacketIds::GainedGold as i16, ServerPacketIds::GainExperience as i16, ServerPacketIds::LoseGold as i16, ServerPacketIds::TimeOfDay as i16, ServerPacketIds::LogOutSuccess as i16, ServerPacketIds::ChangeAMode as i16, ServerPacketIds::ChangePMode as i16, ServerPacketIds::LevelChanged as i16, ServerPacketIds::ObjectTurn as i16, ServerPacketIds::ObjectWalk as i16, ServerPacketIds::ObjectRun as i16, ServerPacketIds::ObjectHide as i16, ServerPacketIds::ObjectShow as i16, ServerPacketIds::ObjectSitDown as i16, ServerPacketIds::Pushed as i16, ServerPacketIds::ObjectPushed as i16, ServerPacketIds::ObjectTeleportOut as i16, ServerPacketIds::ObjectTeleportIn as i16, ServerPacketIds::MountUpdate as i16, ServerPacketIds::ObjectAttack as i16, ServerPacketIds::UserDash as i16, ServerPacketIds::ObjectDash as i16, ServerPacketIds::UserDashFail as i16, ServerPacketIds::ObjectDashFail as i16, ServerPacketIds::UserBackStep as i16, ServerPacketIds::ObjectBackStep as i16, ServerPacketIds::UserAttackMove as i16, ServerPacketIds::Poisoned as i16, ServerPacketIds::ObjectPoisoned as i16, ServerPacketIds::Chat as i16, ServerPacketIds::ObjectChat as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M7: 握手 ----
@@ -406,6 +406,45 @@ pub(crate) fn handle_auth(    net: &mut NetConnection,
                 });
             }
         }
+        // #252：隐身 / 等级特效 / 装饰
+        x if x == ServerPacketIds::ObjectSneaking as i16 => {
+            if let Ok(p) = movement::ObjectSneaking::read_body(&mut cur) {
+                if p.sneaking {
+                    server_events.write(ServerEvent::ObjectHidden {
+                        object_id: p.object_id,
+                    });
+                } else {
+                    server_events.write(ServerEvent::ObjectShown {
+                        object_id: p.object_id,
+                    });
+                }
+                tracing::info!("🥷 对象潜行 id={} sneaking={}", p.object_id, p.sneaking);
+            }
+        }
+        x if x == ServerPacketIds::ObjectLevelEffects as i16 => {
+            if let Ok(p) = movement::ObjectLevelEffects::read_body(&mut cur) {
+                effects.write(PendingEffect::Burst {
+                    target_id: p.object_id,
+                    color: [1.0, 0.9, 0.3],
+                });
+                tracing::info!(
+                    "✨ 对象等级特效 id={} flags={:04x}",
+                    p.object_id,
+                    p.level_effects
+                );
+            }
+        }
+        x if x == ServerPacketIds::ObjectDeco as i16 => {
+            if let Ok(p) = movement::ObjectDeco::read_body(&mut cur) {
+                tracing::debug!(
+                    "🎀 对象装饰 id={} deco={} remove={}",
+                    p.object_id,
+                    p.deco,
+                    p.remove
+                );
+            }
+        }
+
         // #248：NPC 更新 / 声望
         x if x == ServerPacketIds::NPCUpdate as i16 => {
             if let Ok(p) = npc_interaction::NPCUpdate::read_body(&mut cur) {
