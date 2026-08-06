@@ -846,7 +846,11 @@ fn hud_server_events(
             | ServerEvent::ObjectSitDown { .. }
             | ServerEvent::ObjectPushed { .. }
             | ServerEvent::ObjectTeleportOut { .. }
-            | ServerEvent::ObjectTeleportIn { .. } => {}
+            | ServerEvent::ObjectTeleportIn { .. }
+            | ServerEvent::MapEffect { .. }
+            | ServerEvent::PlaySound { .. }
+            | ServerEvent::TimerSet { .. }
+            | ServerEvent::TimerExpired { .. } => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);

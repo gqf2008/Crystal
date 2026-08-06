@@ -67,6 +67,14 @@ pub enum ServerEvent {
     ItemDeleted { unique_id: u64 },
     /// #228 GainedItem：获得物品入包
     ItemGained { item: InvItem },
+    /// #230 MapEffect：地图范围特效
+    MapEffect { x: i32, y: i32, effect: u8 },
+    /// #230 PlaySound：服务端指定音效
+    PlaySound { sound_id: u32 },
+    /// #230 SetTimer：启动计时器（秒）
+    TimerSet { timer_id: i32, seconds: i32 },
+    /// #230 ExpireTimer：计时器到期/关闭
+    TimerExpired { timer_id: i32 },
     /// Roll：骰子/尤茨结果（npc_id 由 roll 消费端从 NpcDialogState 读取）
     Roll {
         r#type: i32,

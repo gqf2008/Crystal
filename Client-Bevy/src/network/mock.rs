@@ -551,6 +551,26 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 count: 1,
                                             },
                                         );
+                                        // #230：地图特效 + 服务端音效 + 计时器
+                                        send(
+                                            &to_client,
+                                            &server::object::MapEffect {
+                                                location: mir2_shared::Point { x: mx, y: my },
+                                                effect: mir2_shared::enums::SpellEffect::Critical,
+                                                value: 0,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::ui_events::PlaySound { sound_id: 10060 },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::ui_events::SetTimer {
+                                                timer_id: 1,
+                                                seconds: 5,
+                                            },
+                                        );
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
                                             send(
@@ -1324,7 +1344,12 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             teleport_type: 0,
                                         },
                                     );
-                                    tracing::info!("🌀 [MOCK] 对象状态: 显形102/传送消失103");
+                                    // #230：计时器到期（SetTimer 5s 后服务端主动关闭）
+                                    send(
+                                        &to_client,
+                                        &server::ui_events::ExpireTimer { timer_id: 1 },
+                                    );
+                                    tracing::info!("🌀 [MOCK] 对象状态: 显形102/传送消失103 + 计时器到期");
                                     object_state_stage = 3;
                                 }
                                 3 => {

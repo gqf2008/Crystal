@@ -30,6 +30,8 @@ pub enum PendingEffect {
         destination_id: u32,
         color: [f32; 3],
     },
+    /// 地图坐标特效：在指定世界坐标生成爆炸（#230 MapEffect）
+    BurstAt { x: f32, y: f32, color: [f32; 3] },
 }
 
 /// 技能 → 弹道颜色（#224，参考 macroquad network_apply_system 的 Spell 映射）
@@ -175,6 +177,22 @@ fn spawn_pending_effects(
                         to,
                         t: 0.0,
                         dur: 0.35,
+                    },
+                ));
+            }
+            PendingEffect::BurstAt { x, y, color } => {
+                commands.spawn((
+                    Sprite {
+                        image: white.clone(),
+                        color: Color::srgba(color[0], color[1], color[2], 0.9),
+                        custom_size: Some(Vec2::splat(24.0)),
+                        ..default()
+                    },
+                    Transform::from_xyz(x, y, 20.0),
+                    Burst {
+                        t: 0.0,
+                        dur: 0.35,
+                        start_scale: 0.6,
                     },
                 ));
             }
