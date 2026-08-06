@@ -294,20 +294,19 @@ impl Packet for SendOutputMessage {
     const OPCODE: i16 = ServerPacketIds::SendOutputMessage as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
         use crate::binary::write_dotnet_string;
-        
+        use byteorder::WriteBytesExt;
+
         write_dotnet_string(writer, &self.message)?;
         writer.write_u8(self.message_type)?;
-        
+
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let len = reader.read_i32::<LittleEndian>()?;
-        let mut bytes = vec![0u8; len as usize];
-        reader.read_exact(&mut bytes)?;
-        let message = String::from_utf8_lossy(&bytes).to_string();
+        use crate::binary::read_dotnet_string;
+
+        let message = read_dotnet_string(reader)?;
         let message_type = reader.read_u8()?;
         Ok(Self {
             message,

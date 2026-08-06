@@ -242,6 +242,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--notice-test") {
         app.add_systems(Update, auto_notice_test);
     }
+    // --upgrade-test: 合成/升级/技能删除/服务端消息（#258）
+    if std::env::args().any(|a| a == "--upgrade-test") {
+        app.add_systems(Update, auto_upgrade_test);
+    }
     // --book-test: 技能书学习链路（使用技能书 → 等 NewMagic → 校验 MagicsState）
     if std::env::args().any(|a| a == "--book-test") {
         app.add_systems(Update, auto_book_test);
@@ -7376,6 +7380,130 @@ fn auto_notice_test(
                     tracing::info!("[NOTICE] ✅ 服务器公告通过");
                 } else {
                     tracing::warn!("[NOTICE] ❌ 公告未更新");
+                }
+                *stage = 9;
+            }
+        }
+        _ => {}
+    }
+}
+
+
+/// --upgrade-test：施法 → mock 回发 ItemUpgraded/RemoveMagic/SendOutputMessage 等，
+/// 断言 背包物品升级 + 技能移除 + 聊天消息（#258）
+#[allow(clippy::too_many_arguments)]
+fn auto_upgrade_test(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    magics: Res<client_bevy::game::skills::MagicsState>,
+    chat: Res<client_bevy::game::chat::ChatState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut target: Local<Option<u32>>,
+    mut target_tile: Local<Option<(i32, i32)>>,
+    actors: Query<(
+        &client_bevy::actor::NetObjectId,
+        &Transform,
+        Has<client_bevy::actor::Monster>,
+    )>,
+    players: Query<
+        &Transform,
+        (
+            With<client_bevy::actor::LocalPlayer>,
+            With<client_bevy::actor::NetObjectId>,
+        ),
+    >,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 10.0 {
+                return;
+            }
+            let Ok(pf) = players.single() else { return };
+            let (px, py) =
+                client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+            let mut best: Option<(u32, i32, i32)> = None;
+            for (id, tf, monster) in &actors {
+                if !monster {
+                    continue;
+                }
+                let (mx, my) =
+                    client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+                let d = (mx - px).abs() + (my - py).abs();
+                if d <= 40 && best.map(|(_, _, bd)| d < bd).unwrap_or(true) {
+                    best = Some((id.0, mx, my));
+                }
+            }
+            match best {
+                Some((oid, mx, my)) => {
+                    *target = Some(oid);
+                    *target_tile = Some((mx, my));
+                    tracing::info!("[UPG] 🎯 目标怪物 id={} @ ({},{})", oid, mx, my);
+                    *stage = 1;
+                    *t = 0.0;
+                }
+                None => {
+                    tracing::warn!("[UPG] ❌ 附近没有怪物");
+                    *stage = 9;
+                }
+            }
+        }
+        1 => {
+            if *t < 1.5 {
+                return;
+            }
+            let (mx, my) = target_tile.unwrap_or((0, 0));
+            let Ok(pf) = players.single() else { return };
+            let (px, py) =
+                client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+            let dir = client_bevy::game::movement::direction_from_delta(
+                (mx - px).signum(),
+                (my - py).signum(),
+            )
+            .unwrap_or(mir2_shared::enums::MirDirection::Down);
+            net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                spell: mir2_shared::enums::Spell::FireBall,
+                direction: dir,
+                target_id: target.unwrap_or(0),
+                location: mir2_shared::Point { x: mx, y: my },
+            });
+            tracing::info!("[UPG] 🔥 施法触发合成/升级");
+            *stage = 2;
+            *t = 0.0;
+        }
+        2 => {
+            if *t >= 2.5 {
+                let upgraded = hud
+                    .inventory
+                    .items
+                    .iter()
+                    .flatten()
+                    .any(|it| it.unique_id == 9005 && it.item_index == 6);
+                let removed = !magics
+                    .magics
+                    .iter()
+                    .any(|m| m.spell == mir2_shared::enums::Spell::Fencing);
+                let msg = chat
+                    .lines
+                    .iter()
+                    .any(|(text, _, _)| text.contains("测试服务端消息"));
+                tracing::info!("[UPG] 升级={} 技能移除={} 消息={}", upgraded, removed, msg);
+                if upgraded && removed && msg {
+                    tracing::info!("[UPG] ✅ 合成/升级/技能删除/服务端消息通过");
+                } else {
+                    tracing::warn!(
+                        "[UPG] ❌ 未通过（升级={} 技能移除={} 消息={}）",
+                        upgraded,
+                        removed,
+                        msg
+                    );
                 }
                 *stage = 9;
             }

@@ -872,7 +872,9 @@ fn hud_server_events(
             | ServerEvent::NpcImageUpdated { .. }
             | ServerEvent::CompassTarget { .. }
             | ServerEvent::MemberLocation { .. }
-            | ServerEvent::NoticeUpdated { .. } => {}
+            | ServerEvent::NoticeUpdated { .. }
+            | ServerEvent::MagicRemoved { .. }
+            | ServerEvent::ServerMessage { .. } => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);
@@ -1097,6 +1099,27 @@ fn hud_server_events(
                     }
                 }
                 tracing::info!("📐 物品槽位变化 uid={} size={}", unique_id, slot_size);
+            }
+            ServerEvent::ItemUpgraded { item } => {
+                // #258：物品升级 → 按 unique_id 替换背包/装备栏物品
+                let mut updated = false;
+                for slot in hud.inventory.items.iter_mut().flatten() {
+                    if slot.unique_id == item.unique_id {
+                        *slot = item.clone();
+                        updated = true;
+                        break;
+                    }
+                }
+                if !updated {
+                    for slot in hud.equipment.iter_mut().flatten() {
+                        if slot.unique_id == item.unique_id {
+                            *slot = item.clone();
+                            updated = true;
+                            break;
+                        }
+                    }
+                }
+                tracing::info!("⬆️ 物品升级替换: {}", item.name);
             }
             ServerEvent::ItemDeleted { unique_id } => {
                 // #228：背包按 unique_id 删除（消耗/删除）

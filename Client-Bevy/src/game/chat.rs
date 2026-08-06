@@ -837,6 +837,14 @@ fn chat_server_events(
             let color = chat_color(*chat_type);
             chat.add_line(text.clone(), color, chat_channel(*chat_type));
         }
+        if let ServerEvent::ServerMessage { message, .. } = ev {
+            // #258：服务端输出消息（系统提示）
+            chat.add_line(
+                message.clone(),
+                Color::srgb(0.4, 1.0, 0.4),
+                ChatChannel::System,
+            );
+        }
     }
 }
 
