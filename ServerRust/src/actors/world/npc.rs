@@ -1023,8 +1023,16 @@ impl WorldActor {
             return;
         };
         let map_index = self.conquest_instances[gt].map_index as u16;
+        // C# TeleportGT：传送到 GT 地图第一个安全区 SafeZones[0].Location；无安全区回退 (330,330) 并告警
+        let (tx, ty) = self.map_infos.get(&self.conquest_instances[gt].map_index)
+            .and_then(|mi| mi.safe_zones.first())
+            .map(|sz| (sz.x, sz.y))
+            .unwrap_or_else(|| {
+                warn!("NPC TeleportGT: map {} has no safe zone, fallback (330,330)", map_index);
+                (330, 330)
+            });
         // 完整跨图传送（复用 teleport_player：get_or_load_map + SetPlayerPosition + MapChanged + UserLocation）
-        super::npc_script::teleport_player(&mut *self, session_id, map_index, 330, 330).await;
+        super::npc_script::teleport_player(&mut *self, session_id, map_index, tx, ty).await;
         send_system_message(&self.gate_ref, session_id, "已传送至行会领地");
         debug!("NPC TeleportGT: {} -> map {}", guild_name, map_index);
     }
