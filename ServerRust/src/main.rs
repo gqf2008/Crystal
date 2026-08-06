@@ -107,6 +107,8 @@ async fn async_main() -> anyhow::Result<()> {
         item_infos: Arc::new(RwLock::new(HashMap::<i32, db::ItemInfo>::new())),
         guild_creation_cost_gold: cfg.social.guild_creation_cost_gold,
         wedding_ring_recall_enabled: cfg.social.wedding_ring_recall_enabled,
+        guild_required_level: cfg.social.guild_required_level,
+        newbie_guild: cfg.social.newbie_guild.clone(),
     };
     info!("Social config: guild_creation_cost_gold = {}", social_config.guild_creation_cost_gold);
     let social_ref = SocialActor::spawn(SocialActorArgs {

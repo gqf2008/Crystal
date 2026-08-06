@@ -18,6 +18,8 @@ map_data_dir = "Daneo1989"
 [social]
 guild_creation_cost_gold = 1000000
 wedding_ring_recall_enabled = true
+guild_required_level = 22
+newbie_guild = "NewbieGuild"
 
 # 攻城 / 行会领地（GT）配置（对齐 C# Settings.BuyGTGold / ExtendGT / GTSale 最低价）
 [conquest]

@@ -58,10 +58,24 @@ pub struct SocialConfig {
     /// 是否启用配偶（结婚戒指）召回（C# Settings.WeddingRingRecall）
     #[serde(default = "default_wedding_ring_recall")]
     pub wedding_ring_recall_enabled: bool,
+    /// 创建行会所需等级（C# Settings.Guild_RequiredLevel = 22）
+    #[serde(default = "default_guild_required_level")]
+    pub guild_required_level: u16,
+    /// 新手行会名称（C# Settings.NewbieGuild，非 GM 禁止创建该名称）
+    #[serde(default = "default_newbie_guild")]
+    pub newbie_guild: String,
 }
 
 fn default_wedding_ring_recall() -> bool {
     true
+}
+
+fn default_guild_required_level() -> u16 {
+    22
+}
+
+fn default_newbie_guild() -> String {
+    "NewbieGuild".to_string()
 }
 
 fn default_guild_creation_cost() -> u64 {
@@ -73,6 +87,8 @@ impl Default for SocialConfig {
         Self {
             guild_creation_cost_gold: default_guild_creation_cost(),
             wedding_ring_recall_enabled: default_wedding_ring_recall(),
+            guild_required_level: default_guild_required_level(),
+            newbie_guild: default_newbie_guild(),
         }
     }
 }

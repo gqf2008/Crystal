@@ -540,6 +540,10 @@ pub struct SocialActorConfig {
     pub guild_creation_cost_gold: u64,
     /// 是否启用配偶（结婚戒指）召回（C# Settings.WeddingRingRecall）
     pub wedding_ring_recall_enabled: bool,
+    /// 创建行会所需等级（C# Settings.Guild_RequiredLevel）
+    pub guild_required_level: u16,
+    /// 新手行会名称（C# Settings.NewbieGuild）
+    pub newbie_guild: String,
 }
 
 impl Default for SocialActorConfig {
@@ -550,6 +554,8 @@ impl Default for SocialActorConfig {
             // default 与主流程 cfg 路径一致
             guild_creation_cost_gold: 1_000_000,
             wedding_ring_recall_enabled: true,
+            guild_required_level: 22,
+            newbie_guild: "NewbieGuild".to_string(),
         }
     }
 }
@@ -626,15 +632,9 @@ pub struct SocialActor {
 
 const TRADE_RANGE: i32 = 3;
 
-/// 行会创建所需等级（对应 C# Settings.Guild_RequiredLevel）
-const GUILD_REQUIRED_LEVEL: u16 = 7;
-
 /// 行会创建费用：金币（对应 C# Settings.Guild_CreationCostList gold entry）
 // 创建行会所需金币来自 cfg.server.toml (social.guild_creation_cost_gold),
 // 不再需要 hardcoded 常量。config 在 SocialActor.config 字段里。
-
-/// 新手行会名称（对应 C# Settings.NewbieGuild）
-const NEWBIE_GUILD: &str = "新手村";
 
 /// Mir 方向常量（对应 C# MirDirection 0..7）
 const DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
@@ -2338,8 +2338,8 @@ impl Message<CreateGuildRequest> for SocialActor {
         }
 
         // 等级检查（对应 C# Info.Level < Settings.Guild_RequiredLevel）
-        if state.level < GUILD_REQUIRED_LEVEL {
-            send_system_message(&self.gate_ref, msg.session_id, &format!("等级不足，创建行会需要 {} 级", GUILD_REQUIRED_LEVEL));
+        if state.level < self.config.guild_required_level {
+            send_system_message(&self.gate_ref, msg.session_id, &format!("等级不足，创建行会需要 {} 级", self.config.guild_required_level));
             return;
         }
 
@@ -2350,7 +2350,7 @@ impl Message<CreateGuildRequest> for SocialActor {
         }
 
         // 新手行会名称限制（对应 C# !Info.AccountInfo.AdminAccount && guildName == Settings.NewbieGuild）
-        if !state.is_gm && msg.guild_name.eq_ignore_ascii_case(NEWBIE_GUILD) {
+        if !state.is_gm && msg.guild_name.eq_ignore_ascii_case(&self.config.newbie_guild) {
             send_system_message(&self.gate_ref, msg.session_id, "不能创建该名称的行会");
             return;
         }
