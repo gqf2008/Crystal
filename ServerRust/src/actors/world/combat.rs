@@ -969,6 +969,17 @@ pub(crate) fn special_shot_buff_time(level: u8) -> i32 {
     5 + 5 * level as i32
 }
 
+/// #395 幻觉：持续时间 = 随机 10-29 秒（C# HumanObject.cs:6342）
+fn hallucination_duration() -> i32 {
+    10 + fastrand::i32(0..20)
+}
+
+/// #395 幻觉：成功率（C#：roll 范围 Level+20+Lv*5，roll <= target.Level+10 失败；怪物按 Level=0）
+fn hallucination_success(level: u8, caster_level: u16) -> bool {
+    let roll = fastrand::i32(0..(caster_level as i32 + 20 + level as i32 * 5));
+    roll > 10
+}
+
 impl WorldActor {
     /// #306：广播法术命中（ObjectStruck + DamageIndicator，对齐 C# Attacked() 表现）
     pub(crate) async fn broadcast_spell_hit(
@@ -1450,7 +1461,7 @@ impl Message<MagicRequest> for WorldActor {
             // --- 弹道类法术（任务3）：FireBall/GreatFireBall/ThunderBolt/FrostCrunch/Vampirism ---
             // 对齐 C# HumanObject Fireball()/ThunderBolt()/Vampirism()：创建 DelayedAction，延迟后结算
             SPELL_FIREBALL | SPELL_GREAT_FIREBALL | SPELL_THUNDERBOLT
-            | SPELL_FROST_CRUNCH | SPELL_VAMPIRISM => {
+            | SPELL_FROST_CRUNCH | SPELL_VAMPIRISM | SPELL_FLAME_DISRUPTOR => {
                 let raw_damage = if let Some(info) = spell_db {
                     crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
                 } else {
@@ -2385,6 +2396,40 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} casts MoonMist (invisible + 3x3 dmg={} hits={})",
                        state.name, raw_damage, spell_hits.len());
             }
+            // #395：ImmortalSkin —— AC 提升 buff（C# HumanObject.cs:6171，60s+Lv；DC 交换项简化跳过）
+            SPELL_IMMORTAL_SKIN => {
+                let bonus = (state.max_ac as f32 * (0.10 + 0.07 * spell_level as f32)) as i32;
+                let duration_ticks = ((60 + spell_level as i32) as u32) * 10;
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::AcDefenseBoost { bonus: bonus.max(1) },
+                    duration_ticks,
+                    5,
+                );
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                debug!("Magic: {} casts ImmortalSkin (AC +{}, {}s)", state.name, bonus.max(1), 60 + spell_level as i32);
+            }
+            // #395：Hallucination —— 概率成功，怪物 10-29s 失去目标不攻击（C# HumanObject.cs:6342）
+            SPELL_HALLUCINATION => {
+                if hallucination_success(spell_level, state.level) {
+                    let hit: Option<u32> = self.monsters.iter()
+                        .find(|(_, m)| m.x == target_x && m.y == target_y && m.hp > 0)
+                        .map(|(id, _)| *id);
+                    if let Some(mid) = hit {
+                        let dur = hallucination_duration();
+                        let until = self.tick_count + dur as u64 * 10;
+                        self.hallucinated.insert(mid, until);
+                        if let Some(monster) = self.monsters.get_mut(&mid) {
+                            monster.target_session = None;
+                            monster.ai_state = crate::actors::world::MonsterAiState::Idle;
+                        }
+                        debug!("Magic: {} casts Hallucination -> monster {} confused {}s", state.name, mid, dur);
+                    } else {
+                        debug!("Magic: {} casts Hallucination (no target at {},{})", state.name, target_x, target_y);
+                    }
+                } else {
+                    debug!("Magic: {} casts Hallucination (failed)", state.name);
+                }
+            }
             // #312：FlamingSword —— 施放后 10 秒内下一次近战攻击附加火焰加成（C# HumanObject.cs:8538）
             SPELL_FLAMING_SWORD => {
                 self.flaming_sword.insert(msg.session_id, (self.tick_count + 100, spell_level));
@@ -2808,5 +2853,26 @@ mod spell_geometry_tests {
     fn special_shot_buff_time_value() {
         assert_eq!(special_shot_buff_time(0), 5);
         assert_eq!(special_shot_buff_time(3), 20);
+    }
+
+    #[test]
+    fn hallucination_duration_range() {
+        for _ in 0..100 {
+            let d = hallucination_duration();
+            assert!((10..=29).contains(&d), "duration out of range: {}", d);
+        }
+    }
+
+    #[test]
+    fn hallucination_success_high_level() {
+        // 高等级：roll 范围很大，失败阈值 10 → 几乎必成功（10000 次抽样至少成功一次）
+        let mut ok = false;
+        for _ in 0..10000 {
+            if hallucination_success(3, 30) {
+                ok = true;
+                break;
+            }
+        }
+        assert!(ok);
     }
 }
