@@ -1533,7 +1533,9 @@ impl Message<BuyItemBackRequest> for WorldActor {
         let count = (msg.count as u16).min(buyback.item.count.max(1));
         let mut item = buyback.item.clone();
         item.count = count;
-        let cost = buyback.sell_price * msg.count as u64;
+        // C#：按单价收费（sell_price 是整堆 Price()/2，除以原堆数量得到单价）
+        let per_unit = buyback.sell_price / buyback.item.count.max(1) as u64;
+        let cost = per_unit.saturating_mul(count as u64).max(1);
 
         // 检查背包空间
         if !state.inventory.has_space() {
