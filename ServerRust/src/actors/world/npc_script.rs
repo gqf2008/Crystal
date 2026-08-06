@@ -562,10 +562,16 @@ async fn eval_one_check(
             let (op, amount) = parse_op_amount(args);
             compare_i64(player.pk_points as i64, op, amount)
         }
-        // CHECKBUFF <type> — 检查是否拥有任意 buff（BuffType 为枚举+数据，简化为非空判断）
+        // CHECKBUFF <type> — 检查是否拥有指定 Buff（对齐 C# CheckType.CheckBuff：HasBuff；
+        // BuffType 带数据，用 discriminant 比较类型）
         "CHECKBUFF" => {
-            let _want = arg0();
-            !player.buffs.is_empty()
+            match parse_buff_type(arg0()) {
+                Some(want_bt) => {
+                    let want_disc = std::mem::discriminant(&want_bt);
+                    player.buffs.iter().any(|b| std::mem::discriminant(&b.buff_type) == want_disc)
+                }
+                None => false,
+            }
         }
         // CHECKTIMER <key> <op> <seconds> — 检查计时器剩余秒数（对齐 C# CheckType.CheckTimer；无计时器视为 0）
         "CHECKTIMER" => {
