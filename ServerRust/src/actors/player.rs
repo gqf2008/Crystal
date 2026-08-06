@@ -1762,6 +1762,42 @@ pub struct RemoveItemFromInventory {
     pub unique_id: u64,
 }
 
+/// 按数量从背包移除物品（C# SellItem 堆叠拆分：原堆扣减 count，返回被移除部分）
+pub struct RemoveItemFromInventoryCount {
+    pub unique_id: u64,
+    pub count: u16,
+}
+
+impl Message<RemoveItemFromInventoryCount> for PlayerActor {
+    type Reply = Option<mir2_shared::data::item::UserItem>;
+
+    async fn handle(&mut self, msg: RemoveItemFromInventoryCount, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let backpack = &mut self.state.inventory.backpack;
+        for slot in backpack.iter_mut() {
+            let Some(s) = slot else { continue };
+            if s.item.unique_id != msg.unique_id {
+                continue;
+            }
+            let take = msg.count.min(s.item.count);
+            if take == 0 {
+                return None;
+            }
+            if take >= s.item.count {
+                let removed = s.item.clone();
+                *slot = None;
+                self.send_inventory_changed();
+                return Some(removed);
+            }
+            let mut removed = s.item.clone();
+            removed.count = take;
+            s.item.count -= take;
+            self.send_inventory_changed();
+            return Some(removed);
+        }
+        None
+    }
+}
+
 
 /// 客户端删除物品（C# C.DeleteItem）：按 uid 扣减背包/英雄背包数量，发 S.DeleteItem 确认
 pub struct DeleteItemFromInventory {
