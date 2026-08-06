@@ -1189,6 +1189,9 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         freezing: row.try_get("freezing").unwrap_or(0),
         poison_attack: row.try_get("poison_attack").unwrap_or(0),
         poison_recovery: row.try_get("poison_recovery").unwrap_or(0),
+        // C# HealthRecovery/SpellRecovery：登录后由装备加成计算（此处运行时 0）
+        health_recovery: 0,
+        spell_recovery: 0,
         holy: row.try_get("holy").unwrap_or(0),
         accuracy: row.try_get("accuracy").unwrap_or(0),
         agility: row.try_get("agility").unwrap_or(0),

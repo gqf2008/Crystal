@@ -688,8 +688,15 @@ impl WorldActor {
                 let _ = record.actor_ref.ask(TickCreatureHunger { dt_seconds: 10 }).await;
 
                 if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                    let hp_regen = 5;
-                    let mp_regen = 3;
+                    // C# HumanObject.Process（≈1s/次）：healthRegen += maxHP*3% + 1，
+                    // 再叠加 healthRegen * HealthRecovery / Settings.HealthRegenWeight(10)
+                    let hp_base = (state.max_hp * 3 / 100) + 1;
+                    let mp_base = (state.max_mp * 3 / 100) + 1;
+                    let hp_per_sec = hp_base + hp_base * state.health_recovery / 10;
+                    let mp_per_sec = mp_base + mp_base * state.spell_recovery / 10;
+                    // 本 tick 每 10 秒一次
+                    let hp_regen = hp_per_sec * 10;
+                    let mp_regen = mp_per_sec * 10;
                     let new_hp = (state.hp + hp_regen).min(state.max_hp);
                     let new_mp = (state.mp + mp_regen).min(state.max_mp);
 

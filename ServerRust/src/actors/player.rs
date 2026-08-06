@@ -124,6 +124,10 @@ pub struct PlayerState {
     pub freezing: i32,
     /// 毒物攻击
     pub poison_attack: i32,
+    /// 生命恢复（C# Stat.HealthRecovery，装备提供，用于基础回血公式）
+    pub health_recovery: i32,
+    /// 魔法恢复（C# Stat.SpellRecovery，装备提供，用于基础回蓝公式）
+    pub spell_recovery: i32,
     /// 毒物恢复
     pub poison_recovery: i32,
     /// 神圣属性
@@ -485,6 +489,8 @@ impl PlayerActor {
                 bonus_max_sc: 0,
                 freezing: 0,
                 poison_attack: 0,
+            health_recovery: 0,
+            spell_recovery: 0,
                 poison_recovery: 0,
                 holy: 0,
                 accuracy: 0,
@@ -1586,6 +1592,8 @@ pub struct SetStatBonuses {
     pub accuracy: i32,
     pub freezing: i32,
     pub poison_attack: i32,
+    pub health_recovery: i32,
+    pub spell_recovery: i32,
 }
 
 impl Message<SetStatBonuses> for PlayerActor {
@@ -1653,6 +1661,8 @@ impl Message<SetStatBonuses> for PlayerActor {
         self.state.accuracy += msg.accuracy - self.state.accuracy;
         self.state.freezing = msg.freezing;
         self.state.poison_attack = msg.poison_attack;
+        self.state.health_recovery = msg.health_recovery;
+        self.state.spell_recovery = msg.spell_recovery;
     }
 }
 
@@ -2076,7 +2086,8 @@ impl Message<AddWeaponLuck> for PlayerActor {
             return false;
         };
         use mir2_shared::enums::Stat;
-        let new_luck = (w.added_stats.get(Stat::Luck) + msg.delta).clamp(-7, 7);
+        // C# 边界：TryLuckWeapon 上限 7；诅咒下限 -Settings.MaxLuck(-10)
+        let new_luck = (w.added_stats.get(Stat::Luck) + msg.delta).clamp(-10, 7);
         w.added_stats.set(Stat::Luck, new_luck);
         self.send_equipment_changed();
         true
@@ -4306,6 +4317,8 @@ mod tests {
             bonus_max_sc: 0,
             freezing: 0,
             poison_attack: 0,
+            health_recovery: 0,
+            spell_recovery: 0,
             poison_recovery: 0,
             holy: 0,
             accuracy: 0,

@@ -3567,6 +3567,8 @@ impl WorldActor {
             accuracy: b.accuracy,
             freezing: b.freezing,
             poison_attack: b.poison_attack,
+            health_recovery: b.health_recovery,
+            spell_recovery: b.spell_recovery,
         }).await;
         Some(state)
     }
@@ -3945,6 +3947,7 @@ pub struct EquipmentBonuses {
     pub attack_bonus: i32, pub hp_drain_rate_percent: i32,
     pub agility: i32, pub accuracy: i32,
     pub freezing: i32, pub poison_attack: i32,
+    pub health_recovery: i32, pub spell_recovery: i32,
 }
 
 fn calculate_equipment_bonuses(
@@ -3980,6 +3983,8 @@ fn calculate_equipment_bonuses(
             b.accuracy += get(Stat::Accuracy);
             b.freezing += get(Stat::Freezing);
             b.poison_attack += get(Stat::PoisonAttack);
+            b.health_recovery += get(Stat::HealthRecovery);
+            b.spell_recovery += get(Stat::SpellRecovery);
         }
     }
     b
