@@ -35,3 +35,4 @@ newbie_guild = "NewbieGuild"
 buy_gold = 1000000
 extend_gold = 500000
 gt_sale_min_price = 2000000
+gt_days = 30

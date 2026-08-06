@@ -1008,7 +1008,7 @@ impl WorldActor {
             session_id, amount: buy_gold as u32, change_type: 2,
         }).await;
         self.conquest_instances[idx].owner_guild = Some(guild_name.clone());
-        self.conquest_instances[idx].rent_days = 30;
+        self.conquest_instances[idx].rent_days = self.conquest_cfg.gt_days;
         send_system_message(&self.gate_ref, session_id, "领地购买成功");
         debug!("NPC BuyGT: {} bought conquest {}", guild_name, self.conquest_instances[idx].id);
     }
@@ -1029,7 +1029,7 @@ impl WorldActor {
         debug!("NPC TeleportGT: {} -> map {}", guild_name, map_index);
     }
 
-    /// NPC 脚本 EXTENDGT：会长延长领地租期（对齐 C# ActionType.ExtendGT，简化 +7 天）
+    /// NPC 脚本 EXTENDGT：会长延长领地租期（对齐 C# ActionType.ExtendGT：+Settings.GTDays）
     pub(crate) async fn npc_gt_extend(&mut self, session_id: u64) {
         let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
@@ -1051,8 +1051,9 @@ impl WorldActor {
         let _ = self.social_ref.ask(crate::actors::social::NpcGuildGoldChange {
             session_id, amount: extend_gold as u32, change_type: 2,
         }).await;
-        self.conquest_instances[gt].rent_days += 7;
-        send_system_message(&self.gate_ref, session_id, &format!("领地租期延长 7 天（剩余 {} 天）", self.conquest_instances[gt].rent_days));
+        let days = self.conquest_cfg.gt_days;
+        self.conquest_instances[gt].rent_days += days;
+        send_system_message(&self.gate_ref, session_id, &format!("领地租期延长 {} 天（剩余 {} 天）", days, self.conquest_instances[gt].rent_days));
         debug!("NPC ExtendGT: {} +7d", guild_name);
     }
 

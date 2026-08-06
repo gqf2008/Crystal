@@ -24,6 +24,9 @@ pub struct ConquestConfig {
     /// 领地挂售最低价格（C# GTSale 最低 200 万）
     #[serde(default = "default_conquest_gt_sale_min")]
     pub gt_sale_min_price: u64,
+    /// 领地租期天数（C# Settings.GTDays = 30；BuyGT 初始 + ExtendGT 延长）
+    #[serde(default = "default_conquest_gt_days")]
+    pub gt_days: u32,
 }
 
 fn default_conquest_buy_gold() -> u64 {
@@ -38,12 +41,17 @@ fn default_conquest_gt_sale_min() -> u64 {
     2_000_000
 }
 
+fn default_conquest_gt_days() -> u32 {
+    30
+}
+
 impl Default for ConquestConfig {
     fn default() -> Self {
         Self {
             buy_gold: default_conquest_buy_gold(),
             extend_gold: default_conquest_extend_gold(),
             gt_sale_min_price: default_conquest_gt_sale_min(),
+            gt_days: default_conquest_gt_days(),
         }
     }
 }
