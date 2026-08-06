@@ -28,7 +28,7 @@ pub(crate) fn handle_auth(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::Connected as i16, ServerPacketIds::Disconnect as i16, ServerPacketIds::ClientVersion as i16, ServerPacketIds::NewAccount as i16, ServerPacketIds::ChangePassword as i16, ServerPacketIds::Login as i16, ServerPacketIds::LoginSuccess as i16, ServerPacketIds::StartGame as i16, ServerPacketIds::NewCharacter as i16, ServerPacketIds::NewCharacterSuccess as i16, ServerPacketIds::DeleteCharacter as i16, ServerPacketIds::DeleteCharacterSuccess as i16, ServerPacketIds::MapChanged as i16, ServerPacketIds::NewMapInfo as i16, ServerPacketIds::AwakeningNeedMaterials as i16, ServerPacketIds::AwakeningLockedItem as i16, ServerPacketIds::Awakening as i16, ServerPacketIds::Roll as i16, ServerPacketIds::ObjectPlayer as i16, ServerPacketIds::ObjectMonster as i16, ServerPacketIds::ObjectNpc as i16, ServerPacketIds::ObjectRemove as i16, ServerPacketIds::ObjectItem as i16, ServerPacketIds::UserInformation as i16, ServerPacketIds::HealthChanged as i16, ServerPacketIds::UserLocation as i16, ServerPacketIds::GainedGold as i16, ServerPacketIds::GainExperience as i16, ServerPacketIds::LoseGold as i16, ServerPacketIds::TimeOfDay as i16, ServerPacketIds::LogOutSuccess as i16, ServerPacketIds::ChangeAMode as i16, ServerPacketIds::ChangePMode as i16, ServerPacketIds::LevelChanged as i16, ServerPacketIds::ObjectTurn as i16, ServerPacketIds::ObjectWalk as i16, ServerPacketIds::ObjectRun as i16, ServerPacketIds::ObjectHide as i16, ServerPacketIds::ObjectShow as i16, ServerPacketIds::ObjectSitDown as i16, ServerPacketIds::Pushed as i16, ServerPacketIds::ObjectPushed as i16, ServerPacketIds::ObjectTeleportOut as i16, ServerPacketIds::ObjectTeleportIn as i16, ServerPacketIds::MountUpdate as i16, ServerPacketIds::ObjectAttack as i16, ServerPacketIds::UserDash as i16, ServerPacketIds::ObjectDash as i16, ServerPacketIds::UserDashFail as i16, ServerPacketIds::ObjectDashFail as i16, ServerPacketIds::UserBackStep as i16, ServerPacketIds::ObjectBackStep as i16, ServerPacketIds::UserAttackMove as i16, ServerPacketIds::Poisoned as i16, ServerPacketIds::ObjectPoisoned as i16, ServerPacketIds::Chat as i16, ServerPacketIds::ObjectChat as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::Connected as i16, ServerPacketIds::Disconnect as i16, ServerPacketIds::ClientVersion as i16, ServerPacketIds::NewAccount as i16, ServerPacketIds::ChangePassword as i16, ServerPacketIds::Login as i16, ServerPacketIds::LoginSuccess as i16, ServerPacketIds::StartGame as i16, ServerPacketIds::NewCharacter as i16, ServerPacketIds::NewCharacterSuccess as i16, ServerPacketIds::DeleteCharacter as i16, ServerPacketIds::DeleteCharacterSuccess as i16, ServerPacketIds::MapChanged as i16, ServerPacketIds::NewMapInfo as i16, ServerPacketIds::AwakeningNeedMaterials as i16, ServerPacketIds::AwakeningLockedItem as i16, ServerPacketIds::Awakening as i16, ServerPacketIds::Roll as i16, ServerPacketIds::ObjectPlayer as i16, ServerPacketIds::ObjectMonster as i16, ServerPacketIds::ObjectNpc as i16, ServerPacketIds::ObjectRemove as i16, ServerPacketIds::ObjectItem as i16, ServerPacketIds::ObjectGold as i16, ServerPacketIds::UserInformation as i16, ServerPacketIds::HealthChanged as i16, ServerPacketIds::UserLocation as i16, ServerPacketIds::GainedGold as i16, ServerPacketIds::GainExperience as i16, ServerPacketIds::LoseGold as i16, ServerPacketIds::TimeOfDay as i16, ServerPacketIds::LogOutSuccess as i16, ServerPacketIds::ChangeAMode as i16, ServerPacketIds::ChangePMode as i16, ServerPacketIds::LevelChanged as i16, ServerPacketIds::ObjectTurn as i16, ServerPacketIds::ObjectWalk as i16, ServerPacketIds::ObjectRun as i16, ServerPacketIds::ObjectHide as i16, ServerPacketIds::ObjectShow as i16, ServerPacketIds::ObjectSitDown as i16, ServerPacketIds::Pushed as i16, ServerPacketIds::ObjectPushed as i16, ServerPacketIds::ObjectTeleportOut as i16, ServerPacketIds::ObjectTeleportIn as i16, ServerPacketIds::MountUpdate as i16, ServerPacketIds::ObjectAttack as i16, ServerPacketIds::UserDash as i16, ServerPacketIds::ObjectDash as i16, ServerPacketIds::UserDashFail as i16, ServerPacketIds::ObjectDashFail as i16, ServerPacketIds::UserBackStep as i16, ServerPacketIds::ObjectBackStep as i16, ServerPacketIds::UserAttackMove as i16, ServerPacketIds::Poisoned as i16, ServerPacketIds::ObjectPoisoned as i16, ServerPacketIds::Chat as i16, ServerPacketIds::ObjectChat as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M7: 握手 ----
@@ -387,6 +387,23 @@ pub(crate) fn handle_auth(    net: &mut NetConnection,
                 });
             }
             Err(e) => tracing::warn!("⚠️ ObjectItem 解析失败: {} (len={})", e, payload.len()),
+            }
+        }
+        x if x == ServerPacketIds::ObjectGold as i16 => {
+            // #244：地面金币（C# ItemObject.Load(S.ObjectGold)）
+            if let Ok(p) = drops::ObjectGold::read_body(&mut cur) {
+                tracing::info!(
+                    "💰 地面金币: {} @ ({},{})",
+                    p.gold,
+                    p.location_x,
+                    p.location_y
+                );
+                net_objects.write(NetObject::GroundGold {
+                    object_id: p.object_id,
+                    gold: p.gold,
+                    location_x: p.location_x,
+                    location_y: p.location_y,
+                });
             }
         }
         // ---- M8: 玩家状态 ----

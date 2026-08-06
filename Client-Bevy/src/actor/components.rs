@@ -61,6 +61,12 @@ pub struct GroundItem {
     pub name: String,
 }
 
+/// #244 地面金币（ObjectGold）：世界坐标金币堆，随 ObjectRemove 清除
+#[derive(Component)]
+pub struct GroundGold {
+    pub gold: u32,
+}
+
 /// NPC 名称（测试驱动/调试用）
 #[derive(Component)]
 pub struct NpcName(pub String);
