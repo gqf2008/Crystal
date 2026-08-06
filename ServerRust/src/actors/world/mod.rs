@@ -729,6 +729,8 @@ impl MonsterState {
 pub struct BuybackItem {
     pub item: mir2_shared::data::item::UserItem,
     pub sell_price: u64,
+    /// 回购过期时间（Unix 毫秒；C# Settings.GoodsBuyBackTime = 60 分钟）
+    pub expires_at: i64,
 }
 
 /// WorldActor 状态
@@ -1226,7 +1228,12 @@ impl WorldActor {
     }
 
     /// 发送回购列表（C# 语义：原物品 + 原始 unique_id，客户端据此发 BuyItemBack）
-    pub(crate) fn send_buyback_goods(&self, session_id: u64, npc: &NpcState) {
+    pub(crate) fn send_buyback_goods(&mut self, session_id: u64, npc: &NpcState) {
+        // C#：过期回购物品清理（GoodsBuyBackTime = 60 分钟）
+        let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+        if let Some(list) = self.buyback_items.get_mut(&session_id) {
+            list.retain(|b| b.expires_at > now_ms);
+        }
         let items: Vec<mir2_shared::data::item::UserItem> = self
             .buyback_items
             .get(&session_id)
