@@ -4482,10 +4482,38 @@ pub(crate) fn enrich_item_info(
         unique: mir2_shared::enums::SpecialItemMode::from_bits_truncate(info.special_mode as u16),
         shape: info.shape as i16,
         weight: info.weight as u8,
+        light: info.light as u8,
+        required_amount: info.required_amount as u8,
         image: info.image as u16,
         durability: info.durability as u16,
         price: info.price,
         stack_size: info.stack_size as u16,
+        start_item: info.start_item,
+        effect: info.effect as u8,
+        // C# ItemInfo bools 位：0x01 NeedIdentify / 0x02 ShowGroupPickup / 0x04 ClassBased / 0x08 LevelBased / 0x10 CanMine / 0x20 GlobalDropNotify
+        need_identify: (info.bool_flags & 0x01) != 0,
+        show_group_pickup: (info.bool_flags & 0x02) != 0,
+        class_based: (info.bool_flags & 0x04) != 0,
+        level_based: (info.bool_flags & 0x08) != 0,
+        can_mine: (info.bool_flags & 0x10) != 0,
+        global_drop_notify: (info.bool_flags & 0x20) != 0,
+        can_fast_run: info.can_fast_run,
+        can_awakening: info.can_awakening,
+        // C# BindMode 位值与 SharedRust 一致（DontDeathdrop=0x1 等），无需 +3
+        bind: mir2_shared::enums::BindMode::from_bits_truncate(info.bind_mode as u16),
+        random_stats_id: info.random_stats_id as u8,
+        slots: info.slots as u8,
+        tool_tip: info.tool_tip.clone(),
+        // DB stats 已在加载层 +3 转 SharedRust key；转成共享 Stats
+        stats: {
+            let mut s = mir2_shared::data::stats::Stats::new();
+            for (k, v) in &info.stats {
+                if let Ok(stat) = mir2_shared::enums::Stat::try_from(*k) {
+                    s.set(stat, *v);
+                }
+            }
+            s
+        },
         ..Default::default()
     });
 }
