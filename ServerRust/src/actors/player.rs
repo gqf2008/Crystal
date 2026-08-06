@@ -223,6 +223,14 @@ pub struct PlayerState {
     pub unlock_curse: bool,
     /// 上次复活戒指触发时间（Unix 毫秒；C# LastRevivalTime，冷却 300000ms = 5 分钟）
     pub last_revival_time: i64,
+    /// 最后下线时间（Unix 秒；C# CharacterInfo.LastLogoutDate，休息加成用）
+    pub last_access: i64,
+    /// 休息累积计数（C# _restedCounter，安全区每秒 +1；登录时按离线分钟 * 60 初始化）
+    pub rested_counter: u32,
+    /// 休息经验加成百分比（C# BuffType.Rested ExpRatePercent = Settings.RestedExpBonus）
+    pub rested_exp_percent: u32,
+    /// 休息加成到期时间（Unix 毫秒）
+    pub rested_exp_end_tick: u64,
     /// PK 值（>0 = 红名，每杀1人+100，在线 tick 衰减）
     pub pk_points: i32,
     /// 累计击杀玩家数
@@ -519,6 +527,10 @@ impl PlayerActor {
                 is_dead: false,
             unlock_curse: false,
             last_revival_time: 0,
+            last_access: 0,
+            rested_counter: 0,
+            rested_exp_percent: 0,
+            rested_exp_end_tick: 0,
                 pk_points: 0,
                 pk_kill_count: 0,
                 fishing_autocast: false,
@@ -739,6 +751,70 @@ impl Message<SetItemInfo> for PlayerActor {
                 return;
             }
         }
+    }
+}
+
+/// 设置休息累积计数（C# _restedCounter）
+pub struct SetRestedCounter {
+    pub counter: u32,
+}
+
+impl Message<SetRestedCounter> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetRestedCounter, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.rested_counter = msg.counter;
+    }
+}
+
+/// 设置休息经验加成（C# GiveRestedBonus：BuffType.Rested + ExpRatePercent）
+pub struct SetRestedExp {
+    pub percent: u32,
+    pub end_tick: u64,
+}
+
+impl Message<SetRestedExp> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetRestedExp, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.rested_exp_percent = msg.percent;
+        self.state.rested_exp_end_tick = msg.end_tick;
+    }
+}
+
+/// 休息加成到账（C# GiveRestedBonus(count)）：按 count 累加时长（分钟），上限 max_bonus 份
+pub struct GiveRestedBonus {
+    pub count: u32,
+    pub buff_length_minutes: u32,
+    pub exp_bonus_percent: u32,
+    pub max_bonus: u32,
+}
+
+impl Message<GiveRestedBonus> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: GiveRestedBonus, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        if msg.count == 0 {
+            return;
+        }
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let buff_ms = msg.buff_length_minutes.max(1) as i64 * 60_000;
+        let existing = self.state.rested_exp_end_tick.saturating_sub(now_ms.max(0) as u64) as i64;
+        let add = msg.count as i64 * buff_ms;
+        let max_dur = msg.max_bonus.max(1) as i64 * buff_ms;
+        let total = (existing + add).min(max_dur).max(0);
+        self.state.rested_exp_percent = msg.exp_bonus_percent;
+        self.state.rested_exp_end_tick = (now_ms + total).max(0) as u64;
+        self.state.rested_counter = 0;
+        crate::actors::world::send_system_message(
+            &self.gate_ref,
+            self.state.session_id,
+            &format!("休息经验加成已生效：+{}% 经验（剩余 {} 分钟）", msg.exp_bonus_percent, total / 60_000),
+        );
+        debug!("Player {} rested bonus: +{}% for {} min", self.state.name, msg.exp_bonus_percent, total / 60_000);
     }
 }
 
@@ -1104,7 +1180,9 @@ impl Message<AddExperience> for PlayerActor {
             return;
         }
         let base = msg.amount.max(0) as i64;
-        let amount = (base as f64 * self.state.exp_multiplier).round() as i64;
+        // 休息经验加成（C# BuffType.Rested ExpRatePercent 累加到 ExpRatePercent）
+        let rested_mul = 1.0 + self.state.rested_exp_percent as f64 / 100.0;
+        let amount = (base as f64 * self.state.exp_multiplier * rested_mul).round() as i64;
         self.state.experience += amount;
 
         debug!(
@@ -4198,6 +4276,10 @@ mod tests {
             is_dead: false,
             unlock_curse: false,
             last_revival_time: 0,
+            last_access: 0,
+            rested_counter: 0,
+            rested_exp_percent: 0,
+            rested_exp_end_tick: 0,
             pk_points: 0,
             pk_kill_count: 0,
             buffs: Vec::new(),

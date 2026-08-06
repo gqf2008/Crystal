@@ -53,3 +53,10 @@ buy_gold = 1000000
 extend_gold = 500000
 gt_sale_min_price = 2000000
 gt_days = 30
+
+# 休息经验加成（C# Settings.Rested*：安全区/下线累积，BuffType.Rested +ExpRatePercent）
+[rested]
+period_secs = 60
+buff_length_minutes = 10
+exp_bonus_percent = 5
+max_bonus = 24

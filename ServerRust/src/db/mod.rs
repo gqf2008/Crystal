@@ -1017,8 +1017,9 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
             gold, group_id, guild_name, guild_rank,
             spouse_name, allow_mentor, mentor_name, hero_index, hero_behaviour,
             auto_pot_hp, auto_pot_mp, auto_pot_hp_item, auto_pot_mp_item,
-            is_fishing, fishing_autocast, is_dead, pk_points, pk_kill_count, can_gain_exp, pearl_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+            is_fishing, fishing_autocast, is_dead, pk_points, pk_kill_count, can_gain_exp, pearl_count,
+            last_access
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(&state.name)
     .bind(account_username)
@@ -1072,6 +1073,7 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     .bind(state.pk_kill_count as i32)
     .bind(if state.can_gain_exp { 1 } else { 0 })
     .bind(state.pearl_count)
+    .bind(state.last_access)
     .execute(&mut *tx)
     .await?;
 
@@ -1235,6 +1237,23 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         is_dead: row.get::<i32, _>("is_dead") != 0,
         unlock_curse: false, // C# UnlockCurse 运行时状态，不持久化
         last_revival_time: 0, // C# LastRevivalTime 运行时状态，不持久化
+        last_access: row.try_get::<i64, _>("last_access").unwrap_or(0),
+        // C# 登录时 _restedCounter = (int)((Now - LastLogoutDate).TotalMinutes * 60)
+        rested_counter: {
+            let last = row.try_get::<i64, _>("last_access").unwrap_or(0);
+            if last > 0 {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
+                let minutes = ((now - last).max(0) as f64 / 60.0).floor() as u32;
+                minutes.saturating_mul(60)
+            } else {
+                0
+            }
+        },
+        rested_exp_percent: 0,
+        rested_exp_end_tick: 0,
         fishing_autocast: row.get::<i32, _>("fishing_autocast") != 0,
         reincarnation_host: None,
         reincarnation_ready: false,
