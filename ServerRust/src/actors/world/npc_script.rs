@@ -2488,8 +2488,8 @@ async fn set_player_flag(world: &WorldActor, session_id: u64, key: String, val: 
     }
 }
 
-/// 传送：MOVE map_index x y
-async fn teleport_player(world: &mut WorldActor, session_id: u64, map_index: u16, x: i32, y: i32) {
+/// 传送：MOVE map_index x y（pub(crate)：NPC 脚本 + 行会领地 TELEPORTGT 共用完整跨图逻辑）
+pub(crate) async fn teleport_player(world: &mut WorldActor, session_id: u64, map_index: u16, x: i32, y: i32) {
     let dest = world.map_infos.get(&(map_index as i32)).cloned();
     let Some(dest_mi) = dest else {
         // 无地图配置：仍尝试在同图改坐标
