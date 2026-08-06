@@ -40,6 +40,8 @@ pub struct HudState {
     pub auto_pot_hp: bool,
     /// 玩家死亡（Death 包置位，Revived 清除；死亡时禁用输入/显示遮罩）
     pub dead: bool,
+    /// 收到轮回术复活请求（#222）
+    pub reincarnation_offered: bool,
     /// 自动喝药冷却（避免连发）
     pub pot_cooldown: f32,
     /// 背包（网络 UserInformation 写入）
@@ -64,6 +66,7 @@ impl Default for HudState {
             class: 0,
             auto_pot_hp: true,
             dead: false,
+            reincarnation_offered: false,
             pot_cooldown: 0.0,
             inventory: Default::default(),
             equipment: vec![None; 12],
@@ -145,6 +148,14 @@ struct NameText;
 struct DeathOverlay;
 #[derive(Component)]
 struct DeathReviveBtn;
+
+/// 轮回术接受复活按钮（#222）
+#[derive(Component)]
+struct DeathReincAcceptBtn;
+
+/// 轮回术拒绝按钮（#222）
+#[derive(Component)]
+struct DeathReincDeclineBtn;
 #[derive(Component)]
 struct DeathText;
 
@@ -462,6 +473,25 @@ fn spawn_hud(
     ) {
         commands.entity(e).insert((DeathReviveBtn, DeathOverlay));
     }
+    // #222：轮回术接受/拒绝按钮（死亡且有请求时显示）
+    let acc_txt = spawn_ui_text(&mut commands, &font, "接受复活", 300.0, 385.0, 16.0, Color::srgb(0.4, 1.0, 0.4), 11.2);
+    commands.entity(acc_txt).insert((DeathReincAcceptBtn, DeathOverlay, Visibility::Hidden));
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 206, 207, 208,
+        292.0, 380.0, 11.0, 96.0, 30.0,
+    ) {
+        commands.entity(e).insert((DeathReincAcceptBtn, DeathOverlay, Visibility::Hidden));
+    }
+    let dec_txt = spawn_ui_text(&mut commands, &font, "拒绝", 634.0, 385.0, 16.0, Color::srgb(1.0, 0.5, 0.5), 11.2);
+    commands.entity(dec_txt).insert((DeathReincDeclineBtn, DeathOverlay, Visibility::Hidden));
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 206, 207, 208,
+        624.0, 380.0, 11.0, 96.0, 30.0,
+    ) {
+        commands.entity(e).insert((DeathReincDeclineBtn, DeathOverlay, Visibility::Hidden));
+    }
 
     // 攻击模式指示（#156，右下角）
     let am = spawn_ui_text(&mut commands, &font, "模式:和平", 1024.0 - 110.0, 768.0 - 24.0, 12.0, Color::srgb(1.0, 0.9, 0.3), 4.0);
@@ -635,8 +665,23 @@ fn hud_update_system(
 fn death_overlay_system(
     mut hud: ResMut<HudState>,
     net: Res<crate::network::NetConnection>,
-    mut overlay: Query<&mut Visibility, With<DeathOverlay>>,
+    mut overlay: Query<
+        &mut Visibility,
+        (
+            With<DeathOverlay>,
+            Without<DeathReincAcceptBtn>,
+            Without<DeathReincDeclineBtn>,
+        ),
+    >,
     revive_btns: Query<&UiButton, With<DeathReviveBtn>>,
+    mut acc_grp: Query<
+        (&mut Visibility, Option<&UiButton>),
+        (With<DeathReincAcceptBtn>, Without<DeathReincDeclineBtn>),
+    >,
+    mut dec_grp: Query<
+        (&mut Visibility, Option<&UiButton>),
+        (With<DeathReincDeclineBtn>, Without<DeathReincAcceptBtn>),
+    >,
 ) {
     let show = hud.dead;
     for mut vis in overlay.iter_mut() {
@@ -645,6 +690,14 @@ fn death_overlay_system(
         } else {
             Visibility::Hidden
         };
+    }
+    // #222：轮回术确认按钮（仅死亡且有请求时；文本+按钮同标记）
+    let reinc_show = show && hud.reincarnation_offered;
+    for (mut vis, _) in &mut acc_grp {
+        *vis = if reinc_show { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for (mut vis, _) in &mut dec_grp {
+        *vis = if reinc_show { Visibility::Visible } else { Visibility::Hidden };
     }
     if !show {
         return;
@@ -655,6 +708,26 @@ fn death_overlay_system(
             tracing::info!("⛪ 点击复活（TownRevive）");
             // 乐观清除，服务端 Revived 会再次确认
             hud.dead = false;
+            hud.reincarnation_offered = false;
+        }
+    }
+    for (_, ui) in &acc_grp {
+        if let Some(btn) = ui {
+            if btn.clicked && reinc_show {
+                net.send_packet(&mir2_shared::packets::client::misc::AcceptReincarnation);
+                tracing::info!("🌀 接受轮回术复活");
+                hud.dead = false;
+                hud.reincarnation_offered = false;
+            }
+        }
+    }
+    for (_, ui) in &dec_grp {
+        if let Some(btn) = ui {
+            if btn.clicked && reinc_show {
+                net.send_packet(&mir2_shared::packets::client::misc::CancelReincarnation);
+                tracing::info!("🌀 拒绝轮回术复活");
+                hud.reincarnation_offered = false;
+            }
         }
     }
 }
@@ -896,8 +969,14 @@ fn hud_server_events(
             ServerEvent::PlayerDied => {
                 hud.dead = true;
             }
+            ServerEvent::ReincarnationRequested => {
+                if hud.dead {
+                    hud.reincarnation_offered = true;
+                }
+            }
             ServerEvent::PlayerRevived => {
                 hud.dead = false;
+                hud.reincarnation_offered = false;
             }
             ServerEvent::ItemUsed { unique_id } => {
                 let idx = hud

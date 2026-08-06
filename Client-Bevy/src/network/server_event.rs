@@ -219,6 +219,8 @@ pub enum ServerEvent {
     },
     /// Death：本地玩家死亡
     PlayerDied,
+    /// RequestReincarnation：收到轮回术复活请求（#222）
+    ReincarnationRequested,
     /// Revived：本地玩家复活
     PlayerRevived,
     /// NewMagic：学会技能

@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Mock 服务器（本地模拟，打通 登录→选角→进游戏→对象 协议流程）
 // ============================================================================
 // 与真实服务端同构：客户端内层包(PacketHeader+body) → mock 处理 →
@@ -129,6 +129,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             // #218：英雄技能书学习的技能
             let mut mock_hero_learned_magics: Vec<ClientMagic> = Vec::new();
             let mut player_dead_since: Option<std::time::Instant> = None;
+            // #222：轮回术复活请求状态
+            let mut mock_reincarnation_offered = false;
             // 怪物攻击伤害覆盖（默认 0 = 用怪物自身伤害；MOCK_PLAYER_DAMAGE 可调大测死亡/复活闭环）
             let player_damage = std::env::var("MOCK_PLAYER_DAMAGE")
                 .ok()
@@ -1009,6 +1011,27 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         }
                                     }
                                 }
+                                x if x == ClientPacketIds::AcceptReincarnation as i16 => {
+                                    // #222：接受轮回术复活
+                                    if player_dead && mock_reincarnation_offered {
+                                        mock_reincarnation_offered = false;
+                                        revive_player(
+                                            &to_client,
+                                            active_char_index,
+                                            &player_inventory,
+                                            &player_equipment,
+                                            player_gold,
+                                            &mut player_stats,
+                                            &mut player_dead,
+                                            &mut player_dead_since,
+                                        );
+                                        tracing::info!("🌀 [MOCK] 接受轮回术复活");
+                                    }
+                                }
+                                x if x == ClientPacketIds::CancelReincarnation as i16 => {
+                                    mock_reincarnation_offered = false;
+                                    tracing::info!("🌀 [MOCK] 拒绝轮回术复活");
+                                }
                                 x if x == ClientPacketIds::KeepAlive as i16 => {
                                     // 客户端心跳回应，无需处理
                                 }
@@ -1149,6 +1172,9 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             },
                                         );
                                         tracing::info!("💀 [MOCK] 玩家死亡，等待复活（10s 自动）");
+                                        // #222：模拟道士轮回术 offer（S.RequestReincarnation）
+                                        mock_reincarnation_offered = true;
+                                        send(&to_client, &server::miscellaneous::RequestReincarnation {});
                                     }
                                 } else {
                                     // 追击 1 格（8 方向）
