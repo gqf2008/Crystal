@@ -1211,6 +1211,15 @@ impl WorldActor {
             .collect()
     }
 
+    /// NPC 改发型/转职/变性后刷新外观（自身 UserInformation + 同图广播 ObjectPlayer）
+    pub(crate) async fn refresh_player_appearance(&self, session_id: u64) {
+        let Some(record) = self.players.get(&session_id) else { return };
+        let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await else { return };
+        let packet = build_user_information_packet(&state, &self.item_infos);
+        let _ = self.gate_ref.tell(SendToClient { session_id, data: packet }).await;
+        self.broadcast_player_appearance(session_id, &state).await;
+    }
+
     /// C# Hidden 属性：向同图其他玩家广播 S.ObjectHidden（隐身/现身）
     pub(crate) async fn broadcast_object_hidden(&self, object_id: u32, hidden: bool, map_index: u16) {
         let packet = mir2_shared::packets::server::object::ObjectHidden { object_id, hidden };
