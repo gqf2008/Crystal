@@ -634,6 +634,16 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 hero: false,
                                             },
                                         );
+                                        // #244：怪物位置掉金币
+                                        send(
+                                            &to_client,
+                                            &server::drops::ObjectGold {
+                                                object_id: 7001,
+                                                gold: 150,
+                                                location_x: mx,
+                                                location_y: my,
+                                            },
+                                        );
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
                                             send(

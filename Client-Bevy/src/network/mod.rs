@@ -317,6 +317,13 @@ pub enum NetObject {
         location_x: i32,
         location_y: i32,
     },
+    /// 地面金币（#244 ObjectGold）
+    GroundGold {
+        object_id: u32,
+        gold: u32,
+        location_x: i32,
+        location_y: i32,
+    },
 }
 
 /// 服务器对象移除消息（ObjectRemove）

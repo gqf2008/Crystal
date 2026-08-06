@@ -51,6 +51,21 @@ pub(crate) fn spawn_net_objects_when_ready(
             _ => false,
         };
         match obj {
+            NetObject::GroundGold {
+                object_id,
+                gold,
+                location_x,
+                location_y,
+            } => spawn_ground_gold(
+                &mut commands,
+                &mut images,
+                &mut fonts,
+                &mut ui_font,
+                *gold,
+                *location_x,
+                *location_y,
+                *object_id,
+            ),
             NetObject::GroundItem {
                 object_id,
                 item,
@@ -184,6 +199,7 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
             };
             commands.entity(e).insert(PlayerName(name.clone()));
         }
+        NetObject::GroundGold { .. } => {}
         NetObject::Monster {
             object_id,
             name,
@@ -286,6 +302,64 @@ fn spawn_ground_item(
             ));
         });
     }
+}
+
+/// #244 生成地面金币实体：金币块（金色彩块）+ "{N} 金币"标签（原版 ItemObject.Load(S.ObjectGold)）
+fn spawn_ground_gold(
+    commands: &mut Commands,
+    images: &mut Assets<Image>,
+    fonts: &mut Assets<Font>,
+    ui_font: &mut UiFont,
+    gold: u32,
+    tx: i32,
+    ty: i32,
+    object_id: u32,
+) {
+    if !ui_font.0.is_strong() {
+        ui_font.0 = crate::ui::sprite_ui::load_ui_font(fonts);
+    }
+    let font = ui_font.0.clone();
+    let wx = tx as f32 * TILE_WIDTH + TILE_WIDTH / 2.0;
+    let wy = ty as f32 * TILE_HEIGHT + TILE_HEIGHT;
+    let z = depth_z(wy);
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
+    let e = commands
+        .spawn((
+            GroundGold { gold },
+            NetObjectId(object_id),
+            Transform::from_xyz(wx, -wy + 8.0, z),
+            Visibility::default(),
+        ))
+        .id();
+    commands.entity(e).with_children(|p| {
+        // 金币块（金色彩块，占位 FloorItems 图标）
+        p.spawn((
+            Sprite {
+                image: white.clone(),
+                color: Color::srgb(1.0, 0.85, 0.2),
+                custom_size: Some(Vec2::splat(14.0)),
+                ..default()
+            },
+            Anchor::CENTER,
+            Transform::from_xyz(0.0, 0.0, 0.1),
+        ));
+        // 金币标签
+        p.spawn((
+            Text2d::new(format!("{} 金币", gold)),
+            Anchor::TOP_LEFT,
+            TextFont {
+                font: FontSource::Handle(font),
+                font_size: FontSize::Px(10.0),
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 0.9, 0.3)),
+            Transform::from_xyz(-22.0, -22.0, 0.2),
+        ));
+    });
 }
 
 /// 处理 ObjectRemove：按 NetObjectId 删除对应实体
