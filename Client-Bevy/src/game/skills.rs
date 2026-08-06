@@ -20,10 +20,47 @@ use mir2_shared::enums::Spell;
 use crate::network::{NetConnection, SessionState};
 use crate::scenes::AppState;
 
+/// 开关技能列表（#242：C# GameScene UseMagic 的 toggle 分支）
+pub const TOGGLE_SPELLS: [Spell; 4] = [
+    Spell::Thrusting,
+    Spell::HalfMoon,
+    Spell::CrossHalfMoon,
+    Spell::DoubleSlash,
+];
+
+/// 是否开关技能（#242）
+pub fn is_toggle_spell(spell: Spell) -> bool {
+    TOGGLE_SPELLS.contains(&spell)
+}
+
 /// 已学技能列表（NewMagic 包写入）
 #[derive(Resource, Default)]
 pub struct MagicsState {
     pub magics: Vec<ClientMagic>,
+    /// #242 开关技能状态（spell → 开/关，S.SpellToggle 同步；Spell 无 Hash 用 Vec）
+    pub spell_toggles: Vec<(Spell, bool)>,
+}
+
+impl MagicsState {
+    /// 查询开关技能状态（#242）
+    pub fn toggle_state(&self, spell: Spell) -> bool {
+        self.spell_toggles
+            .iter()
+            .find(|(s, _)| *s == spell)
+            .map(|(_, v)| *v)
+            .unwrap_or(false)
+    }
+
+    /// 翻转开关技能状态并返回新状态（#242）
+    pub fn toggle_spell(&mut self, spell: Spell) -> bool {
+        let new = !self.toggle_state(spell);
+        if let Some(entry) = self.spell_toggles.iter_mut().find(|(s, _)| *s == spell) {
+            entry.1 = new;
+        } else {
+            self.spell_toggles.push((spell, new));
+        }
+        new
+    }
 }
 
 impl MagicsState {
@@ -118,10 +155,11 @@ app.add_systems(Update, skill_bar_system.run_if(in_state(AppState::Game)));
 /// 无目标时朝当前朝向施放（fallback）。
 fn skill_bar_system(
     keys: Res<ButtonInput<KeyCode>>,
-    magics: Res<MagicsState>,
+    mut magics: ResMut<MagicsState>,
     net: Res<NetConnection>,
     session: Res<SessionState>,
     control: Res<crate::game::player_control::ControlState>,
+    mut chat: ResMut<crate::game::chat::ChatState>,
     actors: Query<(&crate::actor::NetObjectId, &Transform), Without<crate::actor::LocalPlayer>>,
     players: Query<&Transform, (With<crate::actor::LocalPlayer>, With<crate::actor::NetObjectId>)>,
 ) {
@@ -138,9 +176,30 @@ fn skill_bar_system(
     let Some(slot) = F_KEYS.iter().position(|k| keys.just_pressed(*k)) else {
         return;
     };
-    let Some(magic) = magics.by_key(slot as u8 + 1) else {
+    let Some(magic) = magics.by_key(slot as u8 + 1).cloned() else {
         return;
     };
+    // #242：开关技能（刺杀/半月/十字斩/双斩）→ 本地切换 + C.SpellToggle（C# UseMagic toggle 分支）
+    if is_toggle_spell(magic.spell) {
+        let new_state = magics.toggle_spell(magic.spell);
+        net.send_packet(&mir2_shared::packets::client::combat::SpellToggle {
+            spell: magic.spell,
+            can_use: new_state,
+        });
+        let state_txt = if new_state { "开启" } else { "关闭" };
+        chat.add_line(
+            format!("{} {}", state_txt, magic.name),
+            Color::srgb(0.4, 1.0, 0.4),
+            crate::game::chat::ChatChannel::System,
+        );
+        tracing::info!(
+            "🔄 技能开关 {} {} ({:?})",
+            state_txt,
+            magic.name,
+            magic.spell
+        );
+        return;
+    }
     // 玩家当前瓦片位置（以本地玩家实体 Transform 为准，服务器坐标更稳）
     let (px, py) = players
         .single()
@@ -281,6 +340,18 @@ fn skills_server_events(
                     magics.upsert(m.clone());
                 }
             }
+            ServerEvent::SpellToggled { spell, can_use } => {
+                // #242：S.SpellToggle → 更新开关状态
+                let before = magics.toggle_state(*spell);
+                if let Some(entry) = magics.spell_toggles.iter_mut().find(|(s, _)| *s == *spell) {
+                    entry.1 = *can_use;
+                } else {
+                    magics.spell_toggles.push((*spell, *can_use));
+                }
+                if before != *can_use {
+                    tracing::info!("🔄 技能开关（服务端）{:?} -> {}", spell, can_use);
+                }
+            }
             _ => {}
         }
     }
@@ -408,7 +479,18 @@ fn skills_window_system(
                 } else {
                     String::new()
                 };
-                format!("{} Lv.{}{}", m.name, m.level, key)
+                // #242：开关技能显示当前状态
+                let toggle = if is_toggle_spell(m.spell) {
+                    let on = magics.toggle_state(m.spell);
+                    if on {
+                        "【开】"
+                    } else {
+                        "【关】"
+                    }
+                } else {
+                    ""
+                };
+                format!("{} Lv.{}{}{}", m.name, m.level, key, toggle)
             }
             None => String::new(),
         };

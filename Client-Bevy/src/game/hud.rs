@@ -852,7 +852,10 @@ fn hud_server_events(
             | ServerEvent::TimerSet { .. }
             | ServerEvent::TimerExpired { .. }
             | ServerEvent::MountUpdated { .. }
-            | ServerEvent::ObjectPoisoned { .. } => {}
+            | ServerEvent::ObjectPoisoned { .. }
+            | ServerEvent::ItemRepaired { .. }
+            | ServerEvent::ItemSlotSizeChanged { .. }
+            | ServerEvent::SpellToggled { .. } => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);

@@ -524,6 +524,10 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
         }
         x if x == ServerPacketIds::SpellToggle as i16 => {
             if let Ok(p) = magic::SpellToggle::read_body(&mut cur) {
+                server_events.write(ServerEvent::SpellToggled {
+                    spell: p.spell,
+                    can_use: p.can_use,
+                });
                 tracing::info!(
                     "🔄 技能开关: spell={:?} can_use={} hero={}",
                     p.spell,

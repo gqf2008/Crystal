@@ -91,6 +91,11 @@ pub enum ServerEvent {
     },
     /// #240 ItemSlotSizeChanged：镶嵌槽位数量变化
     ItemSlotSizeChanged { unique_id: u64, slot_size: i32 },
+    /// #242 SpellToggle：开关技能状态同步
+    SpellToggled {
+        spell: mir2_shared::enums::Spell,
+        can_use: bool,
+    },
     /// Roll：骰子/尤茨结果（npc_id 由 roll 消费端从 NpcDialogState 读取）
     Roll {
         r#type: i32,

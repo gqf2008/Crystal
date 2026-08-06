@@ -625,6 +625,15 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 slot_size: 1,
                                             },
                                         );
+                                        // #242：服务端同步开关技能状态（Slaying 开）
+                                        send(
+                                            &to_client,
+                                            &server::magic::SpellToggle {
+                                                spell: Spell::Slaying,
+                                                can_use: true,
+                                                hero: false,
+                                            },
+                                        );
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
                                             send(
@@ -1188,6 +1197,24 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                 }
                                 x if x == ClientPacketIds::KeepAlive as i16 => {
                                     // 客户端心跳回应，无需处理
+                                }
+                                x if x == ClientPacketIds::SpellToggle as i16 => {
+                                    // #242：客户端切换开关技能 → 服务端回显 S.SpellToggle
+                                    if let Ok(p) = client::combat::SpellToggle::read_body(&mut cur) {
+                                        send(
+                                            &to_client,
+                                            &server::magic::SpellToggle {
+                                                spell: p.spell,
+                                                can_use: p.can_use,
+                                                hero: false,
+                                            },
+                                        );
+                                        tracing::info!(
+                                            "🔄 [MOCK] 技能开关回显 {:?} can_use={}",
+                                            p.spell,
+                                            p.can_use
+                                        );
+                                    }
                                 }
                                 x if x == ClientPacketIds::Turn as i16 => {}
                                 x if x == ClientPacketIds::Walk as i16
