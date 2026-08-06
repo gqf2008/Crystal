@@ -584,6 +584,7 @@ fn storage_action_system(
 fn storage_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut storage: ResMut<StorageState>,
+    mut hud: ResMut<HudState>,
     mut mgr: ResMut<DialogManager>,
 ) {
     use crate::network::server_event::ServerEvent;
@@ -630,6 +631,40 @@ fn storage_server_events(
                 2 => storage.unlock_msg = "仓库密码错误".to_string(),
                 3 => storage.unlock_msg = "无法使用仓库".to_string(),
                 _ => storage.unlock_msg = "仓库解锁失败".to_string(),
+            }
+        }
+        if let ServerEvent::ItemStored { from, to, success } = ev {
+            // #512：C# S.StoreItem —— 背包 -> 仓库（success 时移动物品）
+            if *success {
+                let (fi, ti) = (*from as usize, *to as usize);
+                if fi < hud.inventory.items.len() && ti < storage.items.len() {
+                    if let Some(item) = hud.inventory.items[fi].take() {
+                        if storage.items[ti].is_none() {
+                            storage.items[ti] = Some(item);
+                            tracing::info!("📦 存入仓库 {} -> {}（{}）", from, to, "成功");
+                        } else {
+                            hud.inventory.items[fi] = Some(item);
+                            tracing::warn!("📦 存入仓库 {} -> {} 失败：目标格已占用", from, to);
+                        }
+                    }
+                }
+            }
+        }
+        if let ServerEvent::ItemTakenBack { from, to, success } = ev {
+            // #512：C# S.TakeBackItem —— 仓库 -> 背包（success 时移动物品）
+            if *success {
+                let (fi, ti) = (*from as usize, *to as usize);
+                if fi < storage.items.len() && ti < hud.inventory.items.len() {
+                    if let Some(item) = storage.items[fi].take() {
+                        if hud.inventory.items[ti].is_none() {
+                            hud.inventory.items[ti] = Some(item);
+                            tracing::info!("📦 取出仓库 {} -> {}（{}）", from, to, "成功");
+                        } else {
+                            storage.items[fi] = Some(item);
+                            tracing::warn!("📦 取出仓库 {} -> {} 失败：目标格已占用", from, to);
+                        }
+                    }
+                }
             }
         }
     }
