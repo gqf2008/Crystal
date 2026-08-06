@@ -28,7 +28,7 @@ pub(crate) fn handle_auth(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::Connected as i16, ServerPacketIds::Disconnect as i16, ServerPacketIds::ClientVersion as i16, ServerPacketIds::NewAccount as i16, ServerPacketIds::ChangePassword as i16, ServerPacketIds::Login as i16, ServerPacketIds::LoginSuccess as i16, ServerPacketIds::StartGame as i16, ServerPacketIds::NewCharacter as i16, ServerPacketIds::NewCharacterSuccess as i16, ServerPacketIds::DeleteCharacter as i16, ServerPacketIds::DeleteCharacterSuccess as i16, ServerPacketIds::MapChanged as i16, ServerPacketIds::NewMapInfo as i16, ServerPacketIds::AwakeningNeedMaterials as i16, ServerPacketIds::AwakeningLockedItem as i16, ServerPacketIds::Awakening as i16, ServerPacketIds::Roll as i16, ServerPacketIds::ObjectPlayer as i16, ServerPacketIds::ObjectMonster as i16, ServerPacketIds::ObjectNpc as i16, ServerPacketIds::ObjectRemove as i16, ServerPacketIds::ObjectItem as i16, ServerPacketIds::ObjectGold as i16, ServerPacketIds::ObjectHarvest as i16, ServerPacketIds::ObjectHarvested as i16, ServerPacketIds::ObjectSneaking as i16, ServerPacketIds::ObjectLevelEffects as i16, ServerPacketIds::ObjectDeco as i16, ServerPacketIds::TransformUpdate as i16, ServerPacketIds::ObjectName as i16, ServerPacketIds::UserName as i16, ServerPacketIds::ChatItemStats as i16, ServerPacketIds::InTrapRock as i16, ServerPacketIds::NPCUpdate as i16, ServerPacketIds::NPCImageUpdate as i16, ServerPacketIds::GainedCredit as i16, ServerPacketIds::LoseCredit as i16, ServerPacketIds::UserInformation as i16, ServerPacketIds::HealthChanged as i16, ServerPacketIds::UserLocation as i16, ServerPacketIds::GainedGold as i16, ServerPacketIds::GainExperience as i16, ServerPacketIds::LoseGold as i16, ServerPacketIds::TimeOfDay as i16, ServerPacketIds::LogOutSuccess as i16, ServerPacketIds::ChangeAMode as i16, ServerPacketIds::ChangePMode as i16, ServerPacketIds::LevelChanged as i16, ServerPacketIds::ObjectTurn as i16, ServerPacketIds::ObjectWalk as i16, ServerPacketIds::ObjectRun as i16, ServerPacketIds::ObjectHide as i16, ServerPacketIds::ObjectShow as i16, ServerPacketIds::ObjectSitDown as i16, ServerPacketIds::Pushed as i16, ServerPacketIds::ObjectPushed as i16, ServerPacketIds::ObjectTeleportOut as i16, ServerPacketIds::ObjectTeleportIn as i16, ServerPacketIds::MountUpdate as i16, ServerPacketIds::ObjectAttack as i16, ServerPacketIds::UserDash as i16, ServerPacketIds::ObjectDash as i16, ServerPacketIds::UserDashFail as i16, ServerPacketIds::ObjectDashFail as i16, ServerPacketIds::UserBackStep as i16, ServerPacketIds::ObjectBackStep as i16, ServerPacketIds::UserAttackMove as i16, ServerPacketIds::Poisoned as i16, ServerPacketIds::ObjectPoisoned as i16, ServerPacketIds::Chat as i16, ServerPacketIds::ObjectChat as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::Connected as i16, ServerPacketIds::Disconnect as i16, ServerPacketIds::ClientVersion as i16, ServerPacketIds::NewAccount as i16, ServerPacketIds::ChangePassword as i16, ServerPacketIds::Login as i16, ServerPacketIds::LoginSuccess as i16, ServerPacketIds::StartGame as i16, ServerPacketIds::NewCharacter as i16, ServerPacketIds::NewCharacterSuccess as i16, ServerPacketIds::DeleteCharacter as i16, ServerPacketIds::DeleteCharacterSuccess as i16, ServerPacketIds::MapChanged as i16, ServerPacketIds::NewMapInfo as i16, ServerPacketIds::AwakeningNeedMaterials as i16, ServerPacketIds::AwakeningLockedItem as i16, ServerPacketIds::Awakening as i16, ServerPacketIds::Roll as i16, ServerPacketIds::ObjectPlayer as i16, ServerPacketIds::ObjectMonster as i16, ServerPacketIds::ObjectNpc as i16, ServerPacketIds::ObjectRemove as i16, ServerPacketIds::ObjectItem as i16, ServerPacketIds::ObjectGold as i16, ServerPacketIds::ObjectHarvest as i16, ServerPacketIds::ObjectHarvested as i16, ServerPacketIds::ObjectSneaking as i16, ServerPacketIds::ObjectLevelEffects as i16, ServerPacketIds::ObjectDeco as i16, ServerPacketIds::TransformUpdate as i16, ServerPacketIds::ObjectName as i16, ServerPacketIds::UserName as i16, ServerPacketIds::ChatItemStats as i16, ServerPacketIds::InTrapRock as i16, ServerPacketIds::UserDashAttack as i16, ServerPacketIds::ObjectDashAttack as i16, ServerPacketIds::TeleportIn as i16, ServerPacketIds::SetConcentration as i16, ServerPacketIds::SetElemental as i16, ServerPacketIds::ColourChanged as i16, ServerPacketIds::ObjectGuildNameChanged as i16, ServerPacketIds::NPCUpdate as i16, ServerPacketIds::NPCImageUpdate as i16, ServerPacketIds::GainedCredit as i16, ServerPacketIds::LoseCredit as i16, ServerPacketIds::UserInformation as i16, ServerPacketIds::HealthChanged as i16, ServerPacketIds::UserLocation as i16, ServerPacketIds::GainedGold as i16, ServerPacketIds::GainExperience as i16, ServerPacketIds::LoseGold as i16, ServerPacketIds::TimeOfDay as i16, ServerPacketIds::LogOutSuccess as i16, ServerPacketIds::ChangeAMode as i16, ServerPacketIds::ChangePMode as i16, ServerPacketIds::LevelChanged as i16, ServerPacketIds::ObjectTurn as i16, ServerPacketIds::ObjectWalk as i16, ServerPacketIds::ObjectRun as i16, ServerPacketIds::ObjectHide as i16, ServerPacketIds::ObjectShow as i16, ServerPacketIds::ObjectSitDown as i16, ServerPacketIds::Pushed as i16, ServerPacketIds::ObjectPushed as i16, ServerPacketIds::ObjectTeleportOut as i16, ServerPacketIds::ObjectTeleportIn as i16, ServerPacketIds::MountUpdate as i16, ServerPacketIds::ObjectAttack as i16, ServerPacketIds::UserDash as i16, ServerPacketIds::ObjectDash as i16, ServerPacketIds::UserDashFail as i16, ServerPacketIds::ObjectDashFail as i16, ServerPacketIds::UserBackStep as i16, ServerPacketIds::ObjectBackStep as i16, ServerPacketIds::UserAttackMove as i16, ServerPacketIds::Poisoned as i16, ServerPacketIds::ObjectPoisoned as i16, ServerPacketIds::Chat as i16, ServerPacketIds::ObjectChat as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M7: 握手 ----
@@ -406,6 +406,72 @@ pub(crate) fn handle_auth(    net: &mut NetConnection,
                 });
             }
         }
+        // #270：冲刺攻击 / 传送出现 / 状态 / 颜色
+        x if x == ServerPacketIds::UserDashAttack as i16 => {
+            if let Ok(p) = movement::UserDashAttack::read_body(&mut cur) {
+                let pid = session.local_player_id.unwrap_or(100);
+                combat_evt.write(CombatEvent::Attack {
+                    object_id: pid,
+                    direction: p.direction as u8,
+                });
+                server_events.write(ServerEvent::ObjectPushed {
+                    object_id: pid,
+                    x: p.location_x,
+                    y: p.location_y,
+                    direction: p.direction as u8,
+                });
+            }
+        }
+        x if x == ServerPacketIds::ObjectDashAttack as i16 => {
+            if let Ok(p) = movement::ObjectDashAttack::read_body(&mut cur) {
+                combat_evt.write(CombatEvent::Attack {
+                    object_id: p.object_id,
+                    direction: p.direction as u8,
+                });
+                server_events.write(ServerEvent::ObjectPushed {
+                    object_id: p.object_id,
+                    x: p.location_x,
+                    y: p.location_y,
+                    direction: p.direction as u8,
+                });
+                tracing::debug!("💨 对象冲刺攻击 id={}", p.object_id);
+            }
+        }
+        x if x == ServerPacketIds::TeleportIn as i16 => {
+            // 空包：本地玩家传送出现特效
+            let pid = session.local_player_id.unwrap_or(100);
+            effects.write(PendingEffect::Burst {
+                target_id: pid,
+                color: [1.0, 1.0, 1.0],
+            });
+            tracing::info!("🌀 本地传送出现");
+        }
+        x if x == ServerPacketIds::SetConcentration as i16 => {
+            if let Ok(p) = movement::SetConcentration::read_body(&mut cur) {
+                tracing::debug!("🧘 集中 id={} enabled={}", p.object_id, p.enabled);
+            }
+        }
+        x if x == ServerPacketIds::SetElemental as i16 => {
+            if let Ok(p) = movement::SetElemental::read_body(&mut cur) {
+                tracing::debug!(
+                    "⚗️ 元素 id={} el={} value={}",
+                    p.object_id,
+                    p.element,
+                    p.value
+                );
+            }
+        }
+        x if x == ServerPacketIds::ColourChanged as i16 => {
+            if let Ok(p) = buff::ColourChanged::read_body(&mut cur) {
+                tracing::debug!("🎨 名字颜色 {:08x}", p.name_colour_argb);
+            }
+        }
+        x if x == ServerPacketIds::ObjectGuildNameChanged as i16 => {
+            if let Ok(p) = buff::ObjectGuildNameChanged::read_body(&mut cur) {
+                tracing::info!("🏴 对象行会名 id={} -> {}", p.object_id, p.guild_name);
+            }
+        }
+
         // #264：改名 / 杂项
         x if x == ServerPacketIds::ObjectName as i16 => {
             if let Ok(p) = player::ObjectName::read_body(&mut cur) {

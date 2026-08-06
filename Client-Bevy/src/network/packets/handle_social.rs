@@ -28,7 +28,7 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::FishingUpdate as i16, ServerPacketIds::MentorRequest as i16, ServerPacketIds::MentorUpdate as i16, ServerPacketIds::GuildNoticeChange as i16, ServerPacketIds::GuildMemberChange as i16, ServerPacketIds::Rankings as i16, ServerPacketIds::GuildInvite as i16, ServerPacketIds::FriendUpdate as i16, ServerPacketIds::TradeRequest as i16, ServerPacketIds::TradeGold as i16, ServerPacketIds::TradeConfirm as i16, ServerPacketIds::TradeCancel as i16, ServerPacketIds::TradeItem as i16, ServerPacketIds::DepositTradeItem as i16, ServerPacketIds::ReceiveMail as i16, ServerPacketIds::GroupMembersMap as i16, ServerPacketIds::GroupInvite as i16, ServerPacketIds::DeleteGroup as i16, ServerPacketIds::DeleteMember as i16, ServerPacketIds::SendMemberLocation as i16, ServerPacketIds::UpdateNotice as i16, ServerPacketIds::OpenBrowser as i16, ServerPacketIds::Opendoor as i16, ServerPacketIds::RemoveMagic as i16, ServerPacketIds::ObjectSpell as i16, ServerPacketIds::SendOutputMessage as i16, ServerPacketIds::NewMagic as i16, ServerPacketIds::MagicDelay as i16, ServerPacketIds::MagicCast as i16, ServerPacketIds::MagicLeveled as i16, ServerPacketIds::ObjectMagic as i16, ServerPacketIds::ObjectEffect as i16, ServerPacketIds::ObjectProjectile as i16, ServerPacketIds::SpellToggle as i16, ServerPacketIds::MapEffect as i16, ServerPacketIds::PlaySound as i16, ServerPacketIds::SetTimer as i16, ServerPacketIds::ExpireTimer as i16, ServerPacketIds::SetCompass as i16, ServerPacketIds::KeepAlive as i16, ServerPacketIds::ParcelCollected as i16, ServerPacketIds::RequestReincarnation as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::FishingUpdate as i16, ServerPacketIds::MentorRequest as i16, ServerPacketIds::MentorUpdate as i16, ServerPacketIds::GuildNoticeChange as i16, ServerPacketIds::GuildMemberChange as i16, ServerPacketIds::Rankings as i16, ServerPacketIds::GuildInvite as i16, ServerPacketIds::FriendUpdate as i16, ServerPacketIds::TradeRequest as i16, ServerPacketIds::TradeGold as i16, ServerPacketIds::TradeConfirm as i16, ServerPacketIds::TradeCancel as i16, ServerPacketIds::TradeItem as i16, ServerPacketIds::DepositTradeItem as i16, ServerPacketIds::TradeAccept as i16, ServerPacketIds::ReceiveMail as i16, ServerPacketIds::MailLockedItem as i16, ServerPacketIds::MailSendRequest as i16, ServerPacketIds::MailSent as i16, ServerPacketIds::MailCost as i16, ServerPacketIds::GroupMembersMap as i16, ServerPacketIds::GroupInvite as i16, ServerPacketIds::DeleteGroup as i16, ServerPacketIds::DeleteMember as i16, ServerPacketIds::SendMemberLocation as i16, ServerPacketIds::UpdateNotice as i16, ServerPacketIds::OpenBrowser as i16, ServerPacketIds::Opendoor as i16, ServerPacketIds::RemoveMagic as i16, ServerPacketIds::ObjectSpell as i16, ServerPacketIds::SendOutputMessage as i16, ServerPacketIds::RemoveDelayedExplosion as i16, ServerPacketIds::NewMagic as i16, ServerPacketIds::MagicDelay as i16, ServerPacketIds::MagicCast as i16, ServerPacketIds::MagicLeveled as i16, ServerPacketIds::ObjectMagic as i16, ServerPacketIds::ObjectEffect as i16, ServerPacketIds::ObjectProjectile as i16, ServerPacketIds::SpellToggle as i16, ServerPacketIds::MapEffect as i16, ServerPacketIds::PlaySound as i16, ServerPacketIds::SetTimer as i16, ServerPacketIds::ExpireTimer as i16, ServerPacketIds::SetCompass as i16, ServerPacketIds::KeepAlive as i16, ServerPacketIds::ParcelCollected as i16, ServerPacketIds::RequestReincarnation as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M39: 钓鱼 ----
@@ -578,6 +578,38 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
                     timer_id: p.timer_id,
                 });
                 tracing::info!("⏱️ 计时器到期 id={}", p.timer_id);
+            }
+        }
+
+        // #270：交易接受 / 邮件 / 延迟爆炸
+        x if x == ServerPacketIds::TradeAccept as i16 => {
+            if let Ok(p) = trade::TradeAccept::read_body(&mut cur) {
+                tracing::info!("🤝 交易接受: {}", p.name);
+            }
+        }
+        x if x == ServerPacketIds::MailLockedItem as i16 => {
+            if let Ok(p) = mail_system::MailLockedItem::read_body(&mut cur) {
+                tracing::debug!("🔒 邮件物品锁定 uid={} locked={}", p.unique_id, p.locked);
+            }
+        }
+        x if x == ServerPacketIds::MailSendRequest as i16 => {
+            if let Ok(p) = mail_system::MailSendRequest::read_body(&mut cur) {
+                tracing::debug!("📧 邮件发送请求 id={}", p.mail_id);
+            }
+        }
+        x if x == ServerPacketIds::MailSent as i16 => {
+            if let Ok(p) = mail_system::MailSent::read_body(&mut cur) {
+                tracing::debug!("📧 邮件发送结果: {}", p.result);
+            }
+        }
+        x if x == ServerPacketIds::MailCost as i16 => {
+            if let Ok(p) = mail_system::MailCost::read_body(&mut cur) {
+                tracing::debug!("📧 邮寄费用: {}", p.cost);
+            }
+        }
+        x if x == ServerPacketIds::RemoveDelayedExplosion as i16 => {
+            if let Ok(p) = ui_events::RemoveDelayedExplosion::read_body(&mut cur) {
+                tracing::debug!("💥 移除延迟爆炸 id={}", p.object_id);
             }
         }
 
