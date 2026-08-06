@@ -34,6 +34,7 @@ fn apply_object_state_events(
     mut anim: Query<(&NetObjectId, &mut ActorAnim)>,
     mut transforms: Query<(&NetObjectId, &mut Transform)>,
     mounts: Query<(Entity, &NetObjectId, Option<&MountState>)>,
+    poisons: Query<(Entity, &NetObjectId, Option<&crate::actor::PoisonTint>)>,
     children: Query<&Children>,
     layers: Query<&SpriteLayer>,
     mut effects: MessageWriter<crate::game::effects::PendingEffect>,
@@ -131,6 +132,24 @@ fn apply_object_state_events(
                 for (id, mut v) in &mut vis {
                     if id.0 == object_id {
                         *v = Visibility::Visible;
+                        break;
+                    }
+                }
+            }
+            ServerEvent::ObjectPoisoned {
+                object_id,
+                poisoned,
+            } => {
+                // #236：中毒 → 挂 PoisonTint（渲染染绿）；清除 → 移除
+                for (ent, id, tint) in &poisons {
+                    if id.0 == object_id {
+                        if poisoned && tint.is_none() {
+                            commands.entity(ent).insert(crate::actor::PoisonTint);
+                            tracing::info!("☠️ 对象 {} 中毒（绿色染层）", object_id);
+                        } else if !poisoned && tint.is_some() {
+                            commands.entity(ent).remove::<crate::actor::PoisonTint>();
+                            tracing::info!("💚 对象 {} 毒解", object_id);
+                        }
                         break;
                     }
                 }

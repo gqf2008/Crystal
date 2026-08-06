@@ -47,6 +47,10 @@ pub struct NpcAppearance {
 #[derive(Component)]
 pub struct LocalPlayer;
 
+/// #236 中毒染层标记（Poisoned/ObjectPoisoned；渲染时把子图层染绿）
+#[derive(Component)]
+pub struct PoisonTint;
+
 /// 服务器对象 ID（ObjectRemove 用它删除实体）
 #[derive(Component, Clone, Copy)]
 pub struct NetObjectId(pub u32);
