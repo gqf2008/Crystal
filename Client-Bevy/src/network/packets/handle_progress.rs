@@ -17,7 +17,7 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::CraftItem as i16, ServerPacketIds::ItemRentalRequest as i16, ServerPacketIds::UpdateRentalItem as i16, ServerPacketIds::ItemRentalFee as i16, ServerPacketIds::ItemRentalPeriod as i16, ServerPacketIds::DepositRentalItem as i16, ServerPacketIds::RetrieveRentalItem as i16, ServerPacketIds::ItemRentalLock as i16, ServerPacketIds::ItemRentalPartnerLock as i16, ServerPacketIds::CanConfirmItemRental as i16, ServerPacketIds::ConfirmItemRental as i16, ServerPacketIds::CancelItemRental as i16, ServerPacketIds::GetRentedItems as i16, ServerPacketIds::ChangeQuest as i16, ServerPacketIds::CompleteQuest as i16, ServerPacketIds::NewQuestInfo as i16, ServerPacketIds::ShareQuest as i16, ServerPacketIds::GainedQuestItem as i16, ServerPacketIds::DeleteQuestItem as i16, ServerPacketIds::NewRecipeInfo as i16, ServerPacketIds::PauseBuff as i16, ServerPacketIds::RefreshItem as i16, ServerPacketIds::SetBindingShot as i16, ServerPacketIds::BaseStatsInfo as i16, ServerPacketIds::HeroBaseStatsInfo as i16, ServerPacketIds::NPCDisassemble as i16, ServerPacketIds::NPCDowngrade as i16, ServerPacketIds::NPCReset as i16, ServerPacketIds::GuildBuffList as i16, ServerPacketIds::NPCPearlGoods as i16, ServerPacketIds::NPCRequestInput as i16, ServerPacketIds::NewChatItem as i16, ServerPacketIds::HeroHealthChanged as i16, ServerPacketIds::GainHeroExperience as i16, ServerPacketIds::HeroLevelChanged as i16, ServerPacketIds::NewIntelligentCreature as i16, ServerPacketIds::IntelligentCreatureEnableRename as i16, ServerPacketIds::IntelligentCreaturePickup as i16, ServerPacketIds::ResizeInventory as i16, ServerPacketIds::ResizeStorage as i16, ServerPacketIds::PlayerUpdate as i16, ServerPacketIds::NewMonsterInfo as i16, ServerPacketIds::NewNPCInfo as i16, ServerPacketIds::StoreItem as i16, ServerPacketIds::TakeBackItem as i16, ServerPacketIds::RemoveSlotItem as i16, ServerPacketIds::RetrieveTradeItem as i16, ServerPacketIds::AllowObserve as i16, ServerPacketIds::AddBuff as i16, ServerPacketIds::RemoveBuff as i16, ServerPacketIds::PlayerInspect as i16, ServerPacketIds::UpdateIntelligentCreatureList as i16, ServerPacketIds::ChangeHero as i16, ServerPacketIds::MarriageRequest as i16, ServerPacketIds::LoverUpdate as i16, ServerPacketIds::DivorceRequest as i16, ServerPacketIds::ObjectColourChanged as i16, ServerPacketIds::ManageHeroes as i16, ServerPacketIds::NewHero as i16, ServerPacketIds::SetHeroBehaviour as i16, ServerPacketIds::SetAutoPotValue as i16, ServerPacketIds::SetAutoPotItem as i16, ServerPacketIds::HeroInformation as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::CraftItem as i16, ServerPacketIds::ItemRentalRequest as i16, ServerPacketIds::UpdateRentalItem as i16, ServerPacketIds::ItemRentalFee as i16, ServerPacketIds::ItemRentalPeriod as i16, ServerPacketIds::DepositRentalItem as i16, ServerPacketIds::RetrieveRentalItem as i16, ServerPacketIds::ItemRentalLock as i16, ServerPacketIds::ItemRentalPartnerLock as i16, ServerPacketIds::CanConfirmItemRental as i16, ServerPacketIds::ConfirmItemRental as i16, ServerPacketIds::CancelItemRental as i16, ServerPacketIds::GetRentedItems as i16, ServerPacketIds::ChangeQuest as i16, ServerPacketIds::CompleteQuest as i16, ServerPacketIds::NewQuestInfo as i16, ServerPacketIds::ShareQuest as i16, ServerPacketIds::GainedQuestItem as i16, ServerPacketIds::DeleteQuestItem as i16, ServerPacketIds::NewRecipeInfo as i16, ServerPacketIds::PauseBuff as i16, ServerPacketIds::RefreshItem as i16, ServerPacketIds::SetBindingShot as i16, ServerPacketIds::BaseStatsInfo as i16, ServerPacketIds::HeroBaseStatsInfo as i16, ServerPacketIds::NPCDisassemble as i16, ServerPacketIds::NPCDowngrade as i16, ServerPacketIds::NPCReset as i16, ServerPacketIds::GuildBuffList as i16, ServerPacketIds::NPCPearlGoods as i16, ServerPacketIds::NPCRequestInput as i16, ServerPacketIds::NewChatItem as i16, ServerPacketIds::HeroHealthChanged as i16, ServerPacketIds::GainHeroExperience as i16, ServerPacketIds::HeroLevelChanged as i16, ServerPacketIds::NewIntelligentCreature as i16, ServerPacketIds::IntelligentCreatureEnableRename as i16, ServerPacketIds::IntelligentCreaturePickup as i16, ServerPacketIds::ResizeInventory as i16, ServerPacketIds::ResizeStorage as i16, ServerPacketIds::PlayerUpdate as i16, ServerPacketIds::NewMonsterInfo as i16, ServerPacketIds::NewNPCInfo as i16, ServerPacketIds::StoreItem as i16, ServerPacketIds::TakeBackItem as i16, ServerPacketIds::RemoveSlotItem as i16, ServerPacketIds::RetrieveTradeItem as i16, ServerPacketIds::AllowObserve as i16, ServerPacketIds::AddBuff as i16, ServerPacketIds::RemoveBuff as i16, ServerPacketIds::PlayerInspect as i16, ServerPacketIds::UpdateIntelligentCreatureList as i16, ServerPacketIds::ChangeHero as i16, ServerPacketIds::MarriageRequest as i16, ServerPacketIds::LoverUpdate as i16, ServerPacketIds::DivorceRequest as i16, ServerPacketIds::ObjectColourChanged as i16, ServerPacketIds::ManageHeroes as i16, ServerPacketIds::NewHero as i16, ServerPacketIds::SetHeroBehaviour as i16, ServerPacketIds::SetAutoPotValue as i16, ServerPacketIds::SetAutoPotItem as i16, ServerPacketIds::HeroInformation as i16, ServerPacketIds::AddMember as i16, ServerPacketIds::SwitchGroup as i16, ServerPacketIds::CancelReincarnation as i16, ServerPacketIds::GuildStorageGoldChange as i16, ServerPacketIds::GuildStorageItemChange as i16, ServerPacketIds::NewHeroInfo as i16, ServerPacketIds::TakeBackHeroItem as i16, ServerPacketIds::TransferHeroItem as i16, ServerPacketIds::UnlockHeroAutoPot as i16, ServerPacketIds::ChangePasswordBanned as i16, ServerPacketIds::DefaultNPC as i16, ServerPacketIds::DepositRefineItem as i16, ServerPacketIds::RefineCancel as i16, ServerPacketIds::RefineItem as i16, ServerPacketIds::RetrieveRefineItem as i16, ServerPacketIds::HeroCreateRequest as i16, ServerPacketIds::UpdateHeroSpawnState as i16, ServerPacketIds::Magic as i16, ServerPacketIds::MapInformation as i16, ServerPacketIds::SearchMapResult as i16, ServerPacketIds::WorldMapSetup as i16, ServerPacketIds::NPCCheckRefine as i16, ServerPacketIds::NPCCollectRefine as i16, ServerPacketIds::NPCRefine as i16, ServerPacketIds::NPCRepair as i16, ServerPacketIds::NPCReplaceWedRing as i16, ServerPacketIds::NPCSRepair as i16, ServerPacketIds::NPCSell as i16, ServerPacketIds::NewItemInfo as i16, ServerPacketIds::RepairItem as i16, ServerPacketIds::SplitItem1 as i16, ServerPacketIds::ObjectHero as i16, ServerPacketIds::ObjectHidden as i16, ServerPacketIds::UserSlotsRefresh as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M41: 合成 ----
@@ -583,6 +583,214 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                 );
             }
         }
+        // #291：C# 服务端包面收尾（AddMember）
+        x if x == ServerPacketIds::AddMember as i16 => {
+            if group::AddMember::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 AddMember 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（SwitchGroup）
+        x if x == ServerPacketIds::SwitchGroup as i16 => {
+            if group::SwitchGroup::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 SwitchGroup 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（CancelReincarnation）
+        x if x == ServerPacketIds::CancelReincarnation as i16 => {
+            if miscellaneous::CancelReincarnation::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 CancelReincarnation 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（GuildStorageGoldChange）
+        x if x == ServerPacketIds::GuildStorageGoldChange as i16 => {
+            if miscellaneous::GuildStorageGoldChange::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 GuildStorageGoldChange 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（GuildStorageItemChange）
+        x if x == ServerPacketIds::GuildStorageItemChange as i16 => {
+            if miscellaneous::GuildStorageItemChange::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 GuildStorageItemChange 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（NewHeroInfo）
+        x if x == ServerPacketIds::NewHeroInfo as i16 => {
+            if miscellaneous::NewHeroInfo::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 NewHeroInfo 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（TakeBackHeroItem）
+        x if x == ServerPacketIds::TakeBackHeroItem as i16 => {
+            if miscellaneous::TakeBackHeroItem::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 TakeBackHeroItem 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（TransferHeroItem）
+        x if x == ServerPacketIds::TransferHeroItem as i16 => {
+            if miscellaneous::TransferHeroItem::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 TransferHeroItem 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（UnlockHeroAutoPot）
+        x if x == ServerPacketIds::UnlockHeroAutoPot as i16 => {
+            if miscellaneous::UnlockHeroAutoPot::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 UnlockHeroAutoPot 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（ChangePasswordBanned）
+        x if x == ServerPacketIds::ChangePasswordBanned as i16 => {
+            if login::ChangePasswordBanned::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 ChangePasswordBanned 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（DefaultNPC）
+        x if x == ServerPacketIds::DefaultNPC as i16 => {
+            if npc_interaction::DefaultNPC::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 DefaultNPC 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（DepositRefineItem）
+        x if x == ServerPacketIds::DepositRefineItem as i16 => {
+            if item_operations::DepositRefineItem::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 DepositRefineItem 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（RefineCancel）
+        x if x == ServerPacketIds::RefineCancel as i16 => {
+            if item_operations::RefineCancel::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 RefineCancel 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（RefineItem）
+        x if x == ServerPacketIds::RefineItem as i16 => {
+            if item_operations::RefineItem::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 RefineItem 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（RetrieveRefineItem）
+        x if x == ServerPacketIds::RetrieveRefineItem as i16 => {
+            if item_operations::RetrieveRefineItem::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 RetrieveRefineItem 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（HeroCreateRequest）
+        x if x == ServerPacketIds::HeroCreateRequest as i16 => {
+            if hero::HeroCreateRequest::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 HeroCreateRequest 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（UpdateHeroSpawnState）
+        x if x == ServerPacketIds::UpdateHeroSpawnState as i16 => {
+            if hero::UpdateHeroSpawnState::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 UpdateHeroSpawnState 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（Magic）
+        x if x == ServerPacketIds::Magic as i16 => {
+            if magic_combat::Magic::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 Magic 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（MapInformation）
+        x if x == ServerPacketIds::MapInformation as i16 => {
+            if map::MapInformation::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 MapInformation 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（SearchMapResult）
+        x if x == ServerPacketIds::SearchMapResult as i16 => {
+            if map::SearchMapResult::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 SearchMapResult 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（WorldMapSetup → WorldMapSetupInfo）
+        x if x == ServerPacketIds::WorldMapSetup as i16 => {
+            if let Ok(p) = map::WorldMapSetupInfo::read_body(&mut cur) {
+                tracing::info!(
+                    "📦 WorldMapSetup 解码（{} 个世界地图点）",
+                    p.world_maps.len()
+                );
+            }
+        }
+        // #291：C# 服务端包面收尾（NPCCheckRefine）
+        x if x == ServerPacketIds::NPCCheckRefine as i16 => {
+            if npc::NPCCheckRefine::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 NPCCheckRefine 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（NPCCollectRefine）
+        x if x == ServerPacketIds::NPCCollectRefine as i16 => {
+            if npc::NPCCollectRefine::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 NPCCollectRefine 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（NPCRefine）
+        x if x == ServerPacketIds::NPCRefine as i16 => {
+            if npc::NPCRefine::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 NPCRefine 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（NPCRepair）
+        x if x == ServerPacketIds::NPCRepair as i16 => {
+            if npc::NPCRepair::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 NPCRepair 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（NPCReplaceWedRing）
+        x if x == ServerPacketIds::NPCReplaceWedRing as i16 => {
+            if npc::NPCReplaceWedRing::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 NPCReplaceWedRing 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（NPCSRepair）
+        x if x == ServerPacketIds::NPCSRepair as i16 => {
+            if npc::NPCSRepair::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 NPCSRepair 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（NPCSell）
+        x if x == ServerPacketIds::NPCSell as i16 => {
+            if npc::NPCSell::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 NPCSell 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（NewItemInfo）
+        x if x == ServerPacketIds::NewItemInfo as i16 => {
+            if item::NewItemInfo::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 NewItemInfo 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（RepairItem）
+        x if x == ServerPacketIds::RepairItem as i16 => {
+            if item::RepairItem::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 RepairItem 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（SplitItem1）
+        x if x == ServerPacketIds::SplitItem1 as i16 => {
+            if item::SplitItem1::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 SplitItem1 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（ObjectHero）
+        x if x == ServerPacketIds::ObjectHero as i16 => {
+            if objects::ObjectHero::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 ObjectHero 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（ObjectHidden）
+        x if x == ServerPacketIds::ObjectHidden as i16 => {
+            if object::ObjectHidden::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 ObjectHidden 解码");
+            }
+        }
+        // #291：C# 服务端包面收尾（UserSlotsRefresh）
+        x if x == ServerPacketIds::UserSlotsRefresh as i16 => {
+            if user::UserSlotsRefresh::read_body(&mut cur).is_ok() {
+                tracing::info!("📦 UserSlotsRefresh 解码");
+            }
+        }
+
         _ => {}
     }
     handled
