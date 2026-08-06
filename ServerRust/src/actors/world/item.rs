@@ -895,6 +895,23 @@ impl Message<DropItemRequest> for WorldActor {
         };
         if state.is_dead { return; }
 
+        // C# DropItem：NoThrowItem 地图禁止丢弃
+        if self.map_infos.get(&(state.map_index as i32)).map(|m| m.no_throw_item).unwrap_or(false) {
+            send_system_message(&self.gate_ref, msg.session_id, "该地图无法丢弃物品");
+            send_drop_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count as u32, false);
+            return;
+        }
+        // C# DropItem：BindMode.DontDrop 物品不可丢弃（移除前校验）
+        let dont_drop = state.inventory.get_item(msg.unique_id)
+            .and_then(|it| self.item_infos.get(&it.item_index))
+            .map(|i| (i.bind_mode & mir2_shared::enums::BindMode::DONT_DROP.bits() as i32) != 0)
+            .unwrap_or(false);
+        if dont_drop {
+            send_system_message(&self.gate_ref, msg.session_id, "该物品无法丢弃");
+            send_drop_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count as u32, false);
+            return;
+        }
+
         let item = actor_ref.ask(DropInventoryItem {
             unique_id: msg.unique_id,
             count: msg.count,
