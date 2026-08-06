@@ -1023,11 +1023,8 @@ impl WorldActor {
             return;
         };
         let map_index = self.conquest_instances[gt].map_index as u16;
-        // 简化：SetPlayerPosition（跨图 MapChanged 包依赖 teleport_player，此处数据层传送）
-        let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
-            x: 330, y: 330, direction: state.direction,
-            map_index: Some(map_index), is_mounted: None,
-        }).await;
+        // 完整跨图传送（复用 teleport_player：get_or_load_map + SetPlayerPosition + MapChanged + UserLocation）
+        super::npc_script::teleport_player(&mut *self, session_id, map_index, 330, 330).await;
         send_system_message(&self.gate_ref, session_id, "已传送至行会领地");
         debug!("NPC TeleportGT: {} -> map {}", guild_name, map_index);
     }
