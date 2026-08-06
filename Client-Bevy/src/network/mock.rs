@@ -601,6 +601,14 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 poison: PoisonType::GREEN,
                                             },
                                         );
+                                        // #238：对象蓝条（邻接怪物 80%）
+                                        send(
+                                            &to_client,
+                                            &server::object::ObjectMana {
+                                                object_id: 101,
+                                                percent: 80,
+                                            },
+                                        );
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
                                             send(

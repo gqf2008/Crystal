@@ -29,6 +29,8 @@ pub enum CombatEvent {
     RangeAttack { object_id: u32 },
     /// #234 对象近战攻击（S.ObjectAttack）：施法者播 Attack1 动作
     Attack { object_id: u32, direction: u8 },
+    /// #238 对象蓝量（S.ObjectMana）
+    ObjectMana { object_id: u32, percent: u8 },
 }
 
 /// 真实服务器命中探测（#57）：DamageIndicator（非本地玩家）计数，
@@ -67,6 +69,25 @@ pub struct HpBarBg;
 /// 头顶血条红色填充（子实体）
 #[derive(Component)]
 pub struct HpBarFill;
+
+/// #238 对象蓝量（C# S.ObjectMana：percent + 刷新式生命周期）
+#[derive(Component)]
+pub struct ActorMp {
+    pub percent: u8,
+    pub expire: f32,
+}
+
+/// 已生成头顶蓝条的父实体标记
+#[derive(Component)]
+pub struct ActorMpBar;
+
+/// 头顶蓝条背景（子实体）
+#[derive(Component)]
+pub struct MpBarBg;
+
+/// 头顶蓝条蓝色填充（子实体）
+#[derive(Component)]
+pub struct MpBarFill;
 
 /// 死亡移除计时
 #[derive(Component)]
@@ -121,6 +142,7 @@ impl Plugin for CombatPlugin {
                 advance_combat_timers,
                 advance_damage_texts,
                 actor_hp_bar_system,
+                actor_mp_bar_system,
             )
                 .chain()
                 .after(crate::network::network_system)
@@ -196,6 +218,18 @@ fn apply_combat_events(
                         commands.entity(e).insert(ActorHp {
                             percent: *percent,
                             expire: *expire as f32,
+                        });
+                        break;
+                    }
+                }
+            }
+            CombatEvent::ObjectMana { object_id, percent } => {
+                // #238：更新/插入对象蓝条（刷新式 15s 生命周期）
+                for (e, id, _, _) in &mut actors {
+                    if id.0 == *object_id {
+                        commands.entity(e).insert(ActorMp {
+                            percent: *percent,
+                            expire: 15.0,
                         });
                         break;
                     }
@@ -397,6 +431,65 @@ fn actor_hp_bar_system(
             });
         }
         let w = 30.0 * (hp.percent.clamp(1, 99) as f32 / 100.0);
+        for (_, c, mut fs, _) in &mut bars {
+            if c.parent() == e {
+                fs.custom_size = Some(Vec2::new(w, 4.0));
+            }
+        }
+    }
+}
+
+/// #238 对象头顶蓝条（C# S.ObjectMana）：生成/更新/过期清除（血条下方 y=22）
+fn actor_mp_bar_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut images: ResMut<Assets<Image>>,
+    mut actors: Query<(Entity, &mut ActorMp, Option<&ActorMpBar>)>,
+    mut bars: Query<(Entity, &ChildOf, &mut Sprite, &MpBarFill)>,
+) {
+    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    for (e, mut mp, bar) in &mut actors {
+        mp.expire -= time.delta_secs();
+        if mp.expire <= 0.0 {
+            let children: Vec<Entity> = bars
+                .iter()
+                .filter(|(_, c, _, _)| c.parent() == e)
+                .map(|(e2, _, _, _)| e2)
+                .collect();
+            for c in children {
+                commands.entity(c).despawn();
+            }
+            commands.entity(e).remove::<ActorMp>().remove::<ActorMpBar>();
+            continue;
+        }
+        if bar.is_none() {
+            commands.entity(e).insert(ActorMpBar);
+            commands.entity(e).with_children(|p| {
+                p.spawn((
+                    MpBarBg,
+                    Sprite {
+                        image: white.clone(),
+                        color: Color::srgb(0.0, 0.0, 0.0),
+                        custom_size: Some(Vec2::new(30.0, 4.0)),
+                        ..default()
+                    },
+                    bevy::sprite::Anchor::TOP_LEFT,
+                    Transform::from_xyz(-15.0, 22.0, 0.1),
+                ));
+                p.spawn((
+                    MpBarFill,
+                    Sprite {
+                        image: white.clone(),
+                        color: Color::srgb(0.1, 0.4, 1.0),
+                        custom_size: Some(Vec2::new(30.0, 4.0)),
+                        ..default()
+                    },
+                    bevy::sprite::Anchor::TOP_LEFT,
+                    Transform::from_xyz(-15.0, 22.0, 0.2),
+                ));
+            });
+        }
+        let w = 30.0 * (mp.percent.clamp(1, 99) as f32 / 100.0);
         for (_, c, mut fs, _) in &mut bars {
             if c.parent() == e {
                 fs.custom_size = Some(Vec2::new(w, 4.0));

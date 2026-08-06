@@ -28,7 +28,7 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::NPCResponse as i16, ServerPacketIds::ObjectStruck as i16, ServerPacketIds::Struck as i16, ServerPacketIds::ObjectHealth as i16, ServerPacketIds::ObjectDied as i16, ServerPacketIds::Death as i16, ServerPacketIds::Revived as i16, ServerPacketIds::ObjectRevived as i16, ServerPacketIds::DamageIndicator as i16, ServerPacketIds::RangeAttack as i16, ServerPacketIds::ObjectRangeAttack as i16, ServerPacketIds::DuraChanged as i16, ServerPacketIds::DeleteItem as i16, ServerPacketIds::GainedItem as i16, ServerPacketIds::NPCGoods as i16, ServerPacketIds::MoveItem as i16, ServerPacketIds::EquipItem as i16, ServerPacketIds::RemoveItem as i16, ServerPacketIds::UseItem as i16, ServerPacketIds::SplitItem as i16, ServerPacketIds::DropItem as i16, ServerPacketIds::MergeItem as i16, ServerPacketIds::SellItem as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::NPCResponse as i16, ServerPacketIds::ObjectStruck as i16, ServerPacketIds::Struck as i16, ServerPacketIds::ObjectHealth as i16, ServerPacketIds::ObjectMana as i16, ServerPacketIds::ObjectDied as i16, ServerPacketIds::Death as i16, ServerPacketIds::Revived as i16, ServerPacketIds::ObjectRevived as i16, ServerPacketIds::DamageIndicator as i16, ServerPacketIds::RangeAttack as i16, ServerPacketIds::ObjectRangeAttack as i16, ServerPacketIds::DuraChanged as i16, ServerPacketIds::DeleteItem as i16, ServerPacketIds::GainedItem as i16, ServerPacketIds::NPCGoods as i16, ServerPacketIds::MoveItem as i16, ServerPacketIds::EquipItem as i16, ServerPacketIds::RemoveItem as i16, ServerPacketIds::UseItem as i16, ServerPacketIds::SplitItem as i16, ServerPacketIds::DropItem as i16, ServerPacketIds::MergeItem as i16, ServerPacketIds::SellItem as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
 
@@ -71,6 +71,16 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
                     percent: p.percent,
                     expire: p.expire,
                 });
+            }
+        }
+        x if x == ServerPacketIds::ObjectMana as i16 => {
+            // #238：对象蓝量（C# S.ObjectMana）
+            if let Ok(p) = object::ObjectMana::read_body(&mut cur) {
+                combat_evt.write(CombatEvent::ObjectMana {
+                    object_id: p.object_id,
+                    percent: p.percent,
+                });
+                tracing::debug!("💙 对象蓝量 id={} {}%", p.object_id, p.percent);
             }
         }
         x if x == ServerPacketIds::ObjectDied as i16 => {
