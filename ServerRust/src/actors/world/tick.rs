@@ -1440,7 +1440,7 @@ impl WorldActor {
 
             match spell_enum {
                 Spell::FireBall | Spell::GreatFireBall | Spell::ThunderBolt | Spell::FrostCrunch
-                | Spell::Vampirism
+                | Spell::Vampirism | Spell::FlameDisruptor
                 // 弓箭手弹道物理系（命中后按 AC 防御结算，BindingShot/NapalmShot 附加效果）
                 | Spell::StraightShot | Spell::DoubleShot
                 | Spell::BindingShot | Spell::NapalmShot
@@ -1513,6 +1513,12 @@ impl WorldActor {
                 Spell::ThunderBolt => {
                     if let Some(m) = self.monsters.get(&target_id) {
                         if m.undead { (raw_damage as f32 * 1.5) as i32 } else { raw_damage }
+                    } else { raw_damage }
+                }
+                // #395：FlameDisruptor 对非亡灵 +50%（C# HumanObject.cs:4252，与 ThunderBolt 相反）
+                Spell::FlameDisruptor => {
+                    if let Some(m) = self.monsters.get(&target_id) {
+                        if !m.undead { (raw_damage as f32 * 1.5) as i32 } else { raw_damage }
                     } else { raw_damage }
                 }
                 _ => raw_damage,
@@ -1887,7 +1893,11 @@ impl Message<Tick> for WorldActor {
                 };
 
                 if let Some((target_session, px, py, dist)) = nearest {
-                    if is_fleeing && can_move {
+                    // #395：幻觉——期内不攻击/不追击（C# HallucinationTime）
+                    if self.hallucinated.get(&monster.object_id).is_some_and(|u| self.tick_count < *u) {
+                        monster.target_session = None;
+                        monster.ai_state = MonsterAiState::Idle;
+                    } else if is_fleeing && can_move {
                         // 逃跑：远离目标
                         let (nx, ny, dir) = monster.step_away(px, py);
                         if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
