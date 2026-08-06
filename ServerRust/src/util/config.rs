@@ -118,6 +118,13 @@ pub struct ServerWorldConfig {
     /// 全局掉落倍率（C# Settings.DropRate，默认 1.0；影响掉落概率 chance * drop_rate）
     #[serde(default = "default_drop_rate")]
     pub drop_rate: f64,
+    /// 地面物品超时秒数（C# Settings.ItemTimeOut = 30）
+    #[serde(default = "default_item_timeout")]
+    pub item_timeout_secs: u32,
+}
+
+fn default_item_timeout() -> u32 {
+    30
 }
 
 fn default_drop_rate() -> f64 {
@@ -139,6 +146,7 @@ impl Default for ServerConfig {
                 tick_ms: 100,
                 map_data_dir: "Data".to_string(),
                 drop_rate: default_drop_rate(),
+                item_timeout_secs: default_item_timeout(),
             },
             social: SocialConfig::default(),
             conquest: ConquestConfig::default(),
