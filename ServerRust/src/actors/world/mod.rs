@@ -1459,11 +1459,29 @@ impl WorldActor {
         let global_drop_mul = if self.tick_count < self.global_exp_event_end_tick {
             self.global_drop_multiplier
         } else { 1.0 };
+        // 玩家掉落 Buff（Potion shape 5 Drop，C# BuffType.Drop）：按击杀目标 target_session 查找
+        let player_drop_mul: f64 = if let Some(sid) = monster.target_session {
+            if let Some(record) = self.players.get(&sid) {
+                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    if self.tick_count < state.drop_multiplier_end_tick {
+                        state.drop_multiplier
+                    } else {
+                        1.0
+                    }
+                } else {
+                    1.0
+                }
+            } else {
+                1.0
+            }
+        } else {
+            1.0
+        };
 
         for drop in &drops {
             let roll = fastrand::f64();
-            // 全局掉落倍率（C# Settings.DropRate）：chance * drop_rate，上限 1.0
-            let effective_chance = (drop.chance * self.drop_rate).min(1.0);
+            // 全局掉落倍率（C# Settings.DropRate）+ 玩家掉落 Buff：chance * drop_rate * drop_buff，上限 1.0
+            let effective_chance = (drop.chance * self.drop_rate * player_drop_mul).min(1.0);
             if roll > effective_chance {
                 continue;
             }
@@ -1472,7 +1490,7 @@ impl WorldActor {
             } else {
                 drop.min_count.saturating_mul(count_mul)
             };
-            let adjusted = (count as f64 * global_drop_mul).round() as u16;
+            let adjusted = (count as f64 * global_drop_mul * player_drop_mul).round() as u16;
             self.spawn_single_drop(monster, drop.item_index, adjusted.max(1)).await;
         }
 
@@ -1489,7 +1507,7 @@ impl WorldActor {
                 } else {
                     drop.min_count
                 };
-                let adjusted = (count as f64 * global_drop_mul).round() as u16;
+                let adjusted = (count as f64 * global_drop_mul * player_drop_mul).round() as u16;
                 self.spawn_single_drop(monster, drop.item_index, adjusted.max(1)).await;
             }
         }
@@ -1507,7 +1525,7 @@ impl WorldActor {
                 } else {
                     drop.min_count.saturating_mul(2)
                 };
-                let adjusted = (count as f64 * global_drop_mul).round() as u16;
+                let adjusted = (count as f64 * global_drop_mul * player_drop_mul).round() as u16;
                 self.spawn_single_drop(monster, drop.item_index, adjusted.max(1)).await;
             }
         }

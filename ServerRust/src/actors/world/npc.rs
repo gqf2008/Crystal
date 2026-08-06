@@ -647,6 +647,8 @@ impl Message<NewCharacterRequest> for WorldActor {
             flags: std::collections::HashMap::new(),
             exp_multiplier: 1.0,
             exp_multiplier_end_tick: 0,
+            drop_multiplier: 1.0,
+            drop_multiplier_end_tick: 0,
         };
         debug!("NewCharacter: saving '{}' ...", msg.name);
         match db::save_character(&self.db_pool, &default_state, &msg.account_username).await {
