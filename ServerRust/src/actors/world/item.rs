@@ -434,6 +434,15 @@ impl Message<UseItemRequest> for WorldActor {
 
         let item_db = self.item_infos.get(&item_index).cloned();
 
+        // C# UseItem：CanUseItem 校验（性别/职业/RequiredType+Amount，HumanObject.cs）
+        if let Some(ref db) = item_db {
+            if !can_use_item(db, &player_state) {
+                send_system_message(&self.gate_ref, msg.session_id, "无法使用该物品（性别/职业/等级需求不符）");
+                send_use_item_response(&self.gate_ref, msg.session_id, msg.unique_id);
+                return;
+            }
+        }
+
         // C# UseItem：NeedIdentify 且未鉴定 → 自动鉴定（PlayerObject.cs:4960）
         if item_db.as_ref().map(|i| !i.is_identified()).unwrap_or(false) {
             let _ = record.actor_ref.ask(crate::actors::player::SetItemIdentified {
@@ -892,6 +901,62 @@ impl Message<UseItemRequest> for WorldActor {
         // 发送 UseItem 响应
         send_use_item_response(&self.gate_ref, msg.session_id, msg.unique_id);
     }
+}
+
+/// 使用物品校验（对齐 C# HumanObject.CanUseItem：性别/职业/RequiredType+Amount）
+fn can_use_item(item_info: &db::ItemInfo, state: &crate::actors::player::PlayerState) -> bool {
+    // 性别位标志（C# RequiredGender：Male=1 Female=2；DB 无需求=3）
+    let req_gender = item_info.required_gender as u8;
+    if req_gender != 0 {
+        let gender_bit = match state.gender {
+            mir2_shared::enums::MirGender::Male => 0x01,
+            mir2_shared::enums::MirGender::Female => 0x02,
+        };
+        if (req_gender & gender_bit) == 0 {
+            return false;
+        }
+    }
+    // 职业位标志（C# RequiredClass：Warrior=1 Wizard=2 Taoist=4 Assassin=8 Archer=16）
+    let req_class = item_info.required_class as u8;
+    if req_class != 0 {
+        let class_bit = match state.class {
+            mir2_shared::enums::MirClass::Warrior => 0x01,
+            mir2_shared::enums::MirClass::Wizard => 0x02,
+            mir2_shared::enums::MirClass::Taoist => 0x04,
+            mir2_shared::enums::MirClass::Assassin => 0x08,
+            mir2_shared::enums::MirClass::Archer => 0x10,
+        };
+        if (req_class & class_bit) == 0 {
+            return false;
+        }
+    }
+    // RequiredType / RequiredAmount（C# RequiredType：Level=0 MaxAC=1 MaxMAC=2 MaxDC=3 MaxMC=4 MaxSC=5
+    // MaxLevel=6 MinAC=7 MinMAC=8 MinDC=9 MinMC=10 MinSC=11）
+    let required = item_info.required_type;
+    let amount = item_info.required_amount;
+    let value = match required {
+        0 => state.level as i32,   // Level
+        1 => state.max_ac,         // MaxAC
+        2 => state.max_mac,        // MaxMAC
+        3 => state.max_attack,     // MaxDC
+        4 => state.max_mc,         // MaxMC
+        5 => state.max_sc,         // MaxSC
+        6 => state.level as i32,   // MaxLevel
+        7 => state.min_ac,         // MinAC
+        8 => state.min_mac,        // MinMAC
+        9 => state.min_attack,     // MinDC
+        10 => state.min_mc,        // MinMC
+        11 => state.min_sc,        // MinSC
+        _ => i32::MAX,
+    };
+    if required == 6 {
+        if (state.level as i32) > amount {
+            return false;
+        }
+    } else if value < amount {
+        return false;
+    }
+    true
 }
 
 /// 装备校验（对齐 C# HumanObject.CanEquipItem：槽位类型/性别/职业/RequiredType）
