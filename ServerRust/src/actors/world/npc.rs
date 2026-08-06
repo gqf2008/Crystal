@@ -994,10 +994,10 @@ impl WorldActor {
             send_system_message(&self.gate_ref, session_id, "行会已拥有领地");
             return;
         }
-        const BUY_GT_GOLD: u64 = 1_000_000;
+        let buy_gold = self.conquest_cfg.buy_gold;
         let gold = self.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id }).await.unwrap_or(0);
-        if gold < BUY_GT_GOLD {
-            send_system_message(&self.gate_ref, session_id, "行会资金不足（需要 1,000,000）");
+        if gold < buy_gold {
+            send_system_message(&self.gate_ref, session_id, &format!("行会资金不足（需要 {}）", buy_gold));
             return;
         }
         let Some(idx) = self.conquest_instances.iter().position(|c| c.owner_guild.is_none()) else {
@@ -1005,7 +1005,7 @@ impl WorldActor {
             return;
         };
         let _ = self.social_ref.ask(crate::actors::social::NpcGuildGoldChange {
-            session_id, amount: BUY_GT_GOLD as u32, change_type: 2,
+            session_id, amount: buy_gold as u32, change_type: 2,
         }).await;
         self.conquest_instances[idx].owner_guild = Some(guild_name.clone());
         self.conquest_instances[idx].rent_days = 30;
@@ -1045,14 +1045,14 @@ impl WorldActor {
             send_system_message(&self.gate_ref, session_id, "行会未拥有领地");
             return;
         };
-        const EXTEND_GT_GOLD: u64 = 500_000;
+        let extend_gold = self.conquest_cfg.extend_gold;
         let gold = self.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id }).await.unwrap_or(0);
-        if gold < EXTEND_GT_GOLD {
-            send_system_message(&self.gate_ref, session_id, "行会资金不足（需要 500,000）");
+        if gold < extend_gold {
+            send_system_message(&self.gate_ref, session_id, &format!("行会资金不足（需要 {}）", extend_gold));
             return;
         }
         let _ = self.social_ref.ask(crate::actors::social::NpcGuildGoldChange {
-            session_id, amount: EXTEND_GT_GOLD as u32, change_type: 2,
+            session_id, amount: extend_gold as u32, change_type: 2,
         }).await;
         self.conquest_instances[gt].rent_days += 7;
         send_system_message(&self.gate_ref, session_id, &format!("领地租期延长 7 天（剩余 {} 天）", self.conquest_instances[gt].rent_days));
@@ -1139,8 +1139,8 @@ impl WorldActor {
             send_system_message(&self.gate_ref, session_id, "行会未拥有领地");
             return;
         };
-        if price < 2_000_000 {
-            send_system_message(&self.gate_ref, session_id, "挂售价格最低 2,000,000");
+        if price < self.conquest_cfg.gt_sale_min_price {
+            send_system_message(&self.gate_ref, session_id, &format!("挂售价格最低 {}", self.conquest_cfg.gt_sale_min_price));
             return;
         }
         self.conquest_instances[gt].for_sale = true;
