@@ -941,6 +941,17 @@ async fn exec_action(
                 warn!("NPC GROUPTELEPORT: map '{}' not found", map_name);
             }
         }
+        // ADDGUILD <行会名> —— 加入行会（对齐 C# ActionType.AddToGuild：自动接受邀请）
+        "ADDGUILD" | "ADDTOGUILD" => {
+            let guild_name = unquote(arg0()).to_string();
+            if !guild_name.is_empty() {
+                let _ = world.social_ref.ask(crate::actors::social::NpcAddToGuild { session_id, guild_name }).await;
+            }
+        }
+        // REMOVEFROMGUILD —— 离开行会（对齐 C# ActionType.RemoveFromGuild）
+        "REMOVEFROMGUILD" | "REMOVEGUILD" => {
+            let _ = world.social_ref.ask(crate::actors::social::NpcRemoveFromGuild { session_id }).await;
+        }
         // GROUPRECALL —— 组队召回（对齐 C# ActionType.GroupRecall：NPC 版无限制，直接召回组员到玩家位置）
         "GROUPRECALL" | "RECALLGROUP" => {
             let _ = world.social_ref.ask(crate::actors::social::NpcGroupRecall { session_id }).await;

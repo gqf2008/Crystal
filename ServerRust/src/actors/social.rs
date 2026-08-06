@@ -231,6 +231,89 @@ pub struct SocialPlayerLeft {
     pub session_id: u64,
 }
 
+/// WorldActor(NPC 脚本) -> SocialActor: NPC 直接加入行会（对齐 C# ActionType.AddToGuild：自动接受邀请）
+pub struct NpcAddToGuild {
+    pub session_id: u64,
+    pub guild_name: String,
+}
+
+impl Message<NpcAddToGuild> for SocialActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: NpcAddToGuild, _ctx: &mut Context<Self, Self::Reply>) {
+        let guild_name = msg.guild_name.clone();
+        let state = match self.players.get(&msg.session_id) {
+            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return },
+            None => return,
+        };
+        // 已有行会则忽略（对齐 C# player.MyGuild != null return）
+        if state.guild_name.is_some() {
+            send_system_message(&self.gate_ref, msg.session_id, "你已经有行会了");
+            return;
+        }
+        let full = {
+            let Some(guild) = self.guilds.get_mut(&guild_name) else {
+                send_system_message(&self.gate_ref, msg.session_id, &format!("行会 \"{}\" 不存在", guild_name));
+                return;
+            };
+            if guild.member_count() >= GUILD_MAX_MEMBERS {
+                true
+            } else {
+                guild.add_member(state.name.clone(), Some(msg.session_id));
+                false
+            }
+        };
+        if full {
+            send_system_message(&self.gate_ref, msg.session_id, "行会已满");
+            return;
+        }
+        if let Some(record) = self.players.get(&msg.session_id) {
+            let _ = record.ask(SetGuildInfo {
+                guild_name: Some(guild_name.clone()),
+                rank: GuildRank::Member,
+            }).await;
+        }
+        send_guild_status_packet(&self.gate_ref, msg.session_id, true);
+        if let Some(guild) = self.guilds.get(&guild_name) {
+            send_guild_info_packet(&self.gate_ref, msg.session_id, guild);
+        }
+        send_system_message(&self.gate_ref, msg.session_id, &format!("你已加入行会 \"{}\"", guild_name));
+        debug!("NPC AddToGuild: {} -> {}", state.name, guild_name);
+    }
+}
+
+/// WorldActor(NPC 脚本) -> SocialActor: NPC 移除行会成员（对齐 C# ActionType.RemoveFromGuild）
+pub struct NpcRemoveFromGuild {
+    pub session_id: u64,
+}
+
+impl Message<NpcRemoveFromGuild> for SocialActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: NpcRemoveFromGuild, _ctx: &mut Context<Self, Self::Reply>) {
+        let state = match self.players.get(&msg.session_id) {
+            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return },
+            None => return,
+        };
+        let Some(guild_name) = state.guild_name.clone() else {
+            send_system_message(&self.gate_ref, msg.session_id, "你不在任何行会中");
+            return;
+        };
+        let removed = {
+            let Some(guild) = self.guilds.get_mut(&guild_name) else { return };
+            guild.remove_member(&state.name)
+        };
+        if removed {
+            if let Some(record) = self.players.get(&msg.session_id) {
+                let _ = record.ask(SetGuildInfo { guild_name: None, rank: GuildRank::Member }).await;
+            }
+            send_guild_status_packet(&self.gate_ref, msg.session_id, false);
+            send_system_message(&self.gate_ref, msg.session_id, &format!("你已离开行会 \"{}\"", guild_name));
+            debug!("NPC RemoveFromGuild: {} <- {}", state.name, guild_name);
+        }
+    }
+}
+
 /// WorldActor(NPC 脚本) -> SocialActor: 组队召回（对齐 C# ActionType.GroupRecall）
 /// NPC 版无冷却/套装/死亡检查限制，直接召回所有在线组员到该玩家位置
 pub struct NpcGroupRecall {
