@@ -542,12 +542,16 @@ async fn eval_one_check(
                 compare_i64(player.level as i64, op, amount)
             }
         }
-        // CHECKQUEST <index> <state>  state: 1=in progress, 2=completed
+        // CHECKQUEST <index> <ACTIVE|COMPLETE> — 任务状态（对齐 C# CheckType.CheckQuest：
+        // ACTIVE=进行中；其他（如 COMPLETE）=已完成；兼容数字 1=进行中、2=已完成）
         "CHECKQUEST" => {
             let idx = arg0().parse::<i32>().unwrap_or(0);
-            let want = arg1().parse::<u8>().unwrap_or(1);
+            let state = arg1().trim().to_uppercase();
             let actual = quest_state(world, session_id, idx).await;
-            actual == want
+            match state.as_str() {
+                "1" | "ACTIVE" => actual == 1,
+                _ => actual == 2,
+            }
         }
         // CHECK：通用 flag 检查  CHECK [535] 1
         "CHECK" => {
