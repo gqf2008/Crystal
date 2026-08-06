@@ -99,6 +99,8 @@ pub struct WorldActorArgs {
     pub health_regen_weight: u32,
     /// 回蓝权重（C# Settings.ManaRegenWeight）
     pub mana_regen_weight: u32,
+    /// 商店隐藏附加属性（C# Settings.GoodsHideAddedStats）
+    pub goods_hide_added_stats: bool,
 }
 
 /// 世界中的玩家记录
@@ -854,6 +856,8 @@ pub struct WorldActor {
     pub(crate) health_regen_weight: u32,
     /// 回蓝权重（C# Settings.ManaRegenWeight）
     pub(crate) mana_regen_weight: u32,
+    /// 商店隐藏附加属性（C# Settings.GoodsHideAddedStats）
+    pub(crate) goods_hide_added_stats: bool,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -1044,6 +1048,7 @@ impl WorldActor {
             death_exp_penalty_percent: 0,
             health_regen_weight: 10,
             mana_regen_weight: 10,
+            goods_hide_added_stats: true,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -1268,7 +1273,7 @@ impl WorldActor {
             list: items.clone(),
             rate,
             panel_type: mir2_shared::enums::PanelType::Buy,
-            hide_added_stats: false,
+            hide_added_stats: self.goods_hide_added_stats,
         };
 
         let mut body = Vec::new();
@@ -1291,7 +1296,7 @@ impl WorldActor {
             list: Vec::new(),
             rate: 1.0,
             panel_type,
-            hide_added_stats: false,
+            hide_added_stats: self.goods_hide_added_stats,
         };
         let mut body = Vec::new();
         if let Err(e) = mir2_shared::packets::base::serialize_packet(
@@ -3298,6 +3303,7 @@ impl Actor for WorldActor {
             death_exp_penalty_percent: args.death_exp_penalty_percent,
             health_regen_weight: args.health_regen_weight,
             mana_regen_weight: args.mana_regen_weight,
+            goods_hide_added_stats: args.goods_hide_added_stats,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,

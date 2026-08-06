@@ -283,6 +283,9 @@ pub struct ServerWorldConfig {
     /// 回蓝权重（C# Settings.ManaRegenWeight = 10）
     #[serde(default = "default_mana_regen_weight")]
     pub mana_regen_weight: u32,
+    /// 商店隐藏附加属性（C# Settings.GoodsHideAddedStats = true）
+    #[serde(default = "default_goods_hide_added_stats")]
+    pub goods_hide_added_stats: bool,
     /// 精英怪配置（C# Settings.MonsterRarity* 第一阶段：单级精英，默认保留 Rust 当前值；
     /// C# Elite 参考：2.25x HP / 75% 掉落加成）
     #[serde(default)]
@@ -295,6 +298,10 @@ fn default_health_regen_weight() -> u32 {
 
 fn default_mana_regen_weight() -> u32 {
     10
+}
+
+fn default_goods_hide_added_stats() -> bool {
+    true
 }
 
 fn default_item_timeout() -> u32 {
@@ -379,6 +386,7 @@ impl Default for ServerConfig {
                 max_drop_gold: default_max_drop_gold(),
                 health_regen_weight: default_health_regen_weight(),
                 mana_regen_weight: default_mana_regen_weight(),
+                goods_hide_added_stats: default_goods_hide_added_stats(),
                 rarity: RarityConfig::default(),
                 notice_path: default_notice_path(),
                 death_exp_penalty_percent: default_death_exp_penalty_percent(),

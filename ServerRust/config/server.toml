@@ -18,6 +18,7 @@ notice_path = "Notice.txt"
 death_exp_penalty_percent = 0
 health_regen_weight = 10
 mana_regen_weight = 10
+goods_hide_added_stats = true
 
 [rarity]
 elite_chance_percent = 3
