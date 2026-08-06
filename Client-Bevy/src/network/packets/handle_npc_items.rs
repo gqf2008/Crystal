@@ -28,7 +28,7 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::NPCResponse as i16, ServerPacketIds::ObjectStruck as i16, ServerPacketIds::Struck as i16, ServerPacketIds::ObjectHealth as i16, ServerPacketIds::ObjectDied as i16, ServerPacketIds::Death as i16, ServerPacketIds::Revived as i16, ServerPacketIds::ObjectRevived as i16, ServerPacketIds::DamageIndicator as i16, ServerPacketIds::NPCGoods as i16, ServerPacketIds::MoveItem as i16, ServerPacketIds::EquipItem as i16, ServerPacketIds::RemoveItem as i16, ServerPacketIds::UseItem as i16, ServerPacketIds::SplitItem as i16, ServerPacketIds::DropItem as i16, ServerPacketIds::MergeItem as i16, ServerPacketIds::SellItem as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::NPCResponse as i16, ServerPacketIds::ObjectStruck as i16, ServerPacketIds::Struck as i16, ServerPacketIds::ObjectHealth as i16, ServerPacketIds::ObjectDied as i16, ServerPacketIds::Death as i16, ServerPacketIds::Revived as i16, ServerPacketIds::ObjectRevived as i16, ServerPacketIds::DamageIndicator as i16, ServerPacketIds::RangeAttack as i16, ServerPacketIds::ObjectRangeAttack as i16, ServerPacketIds::NPCGoods as i16, ServerPacketIds::MoveItem as i16, ServerPacketIds::EquipItem as i16, ServerPacketIds::RemoveItem as i16, ServerPacketIds::UseItem as i16, ServerPacketIds::SplitItem as i16, ServerPacketIds::DropItem as i16, ServerPacketIds::MergeItem as i16, ServerPacketIds::SellItem as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
 
@@ -110,6 +110,34 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
         x if x == ServerPacketIds::DamageIndicator as i16 => {
             if let Ok(p) = combat::DamageIndicator::read_body(&mut cur) {
                 combat_evt.write(CombatEvent::Damage { object_id: p.object_id, damage: p.damage, dmg_type: p.damage_type });
+            }
+        }
+        // #224：远程攻击（本地玩家 S.RangeAttack / 其他对象 S.ObjectRangeAttack）
+        x if x == ServerPacketIds::RangeAttack as i16 => {
+            if let Ok(p) = combat::RangeAttack::read_body(&mut cur) {
+                effects.write(PendingEffect::Projectile {
+                    target_id: p.target_id,
+                    color: crate::game::effects::spell_color(p.spell as u8),
+                });
+                tracing::info!("🏹 远程攻击: target={} spell={}", p.target_id, p.spell);
+            }
+        }
+        x if x == ServerPacketIds::ObjectRangeAttack as i16 => {
+            if let Ok(p) = combat::ObjectRangeAttack::read_body(&mut cur) {
+                combat_evt.write(CombatEvent::RangeAttack {
+                    object_id: p.object_id,
+                });
+                effects.write(PendingEffect::ProjectileFromTo {
+                    source_id: p.object_id,
+                    destination_id: p.target_id,
+                    color: crate::game::effects::spell_color(p.spell as u8),
+                });
+                tracing::info!(
+                    "🏹 对象远程攻击: id={} target={} spell={}",
+                    p.object_id,
+                    p.target_id,
+                    p.spell
+                );
             }
         }
 

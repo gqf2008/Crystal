@@ -24,6 +24,44 @@ pub enum PendingEffect {
         target_id: u32,
         color: [f32; 3],
     },
+    /// 世界对象弹道：从 source 对象飞向 destination 对象（#224 ObjectProjectile/ObjectMagic/ObjectRangeAttack）
+    ProjectileFromTo {
+        source_id: u32,
+        destination_id: u32,
+        color: [f32; 3],
+    },
+}
+
+/// 技能 → 弹道颜色（#224，参考 macroquad network_apply_system 的 Spell 映射）
+pub(crate) fn spell_color(spell: u8) -> [f32; 3] {
+    use mir2_shared::enums::Spell;
+    match Spell::try_from(spell) {
+        Ok(Spell::FireBall) => [1.0, 0.55, 0.1],
+        Ok(Spell::GreatFireBall) | Ok(Spell::HellFire) => [1.0, 0.2, 0.1],
+        Ok(Spell::ThunderBolt) | Ok(Spell::Lightning) => [0.5, 0.5, 1.0],
+        Ok(Spell::Healing) => [0.3, 1.0, 0.4],
+        Ok(Spell::Poisoning) => [0.6, 0.2, 0.7],
+        Ok(Spell::Teleport) => [1.0, 1.0, 1.0],
+        Ok(Spell::MagicShield) => [0.4, 0.8, 1.0],
+        Ok(Spell::HalfMoon) => [1.0, 1.0, 0.7],
+        Ok(Spell::ShoulderDash) => [0.8, 0.8, 0.8],
+        _ => [1.0, 1.0, 0.4],
+    }
+}
+
+/// SpellEffect → 特效颜色（#224，参考 macroquad 的 暴击/致命/护盾 映射）
+pub(crate) fn spell_effect_color(effect: u8) -> [f32; 3] {
+    use mir2_shared::enums::SpellEffect;
+    match SpellEffect::try_from(effect) {
+        Ok(SpellEffect::Critical) => [1.0, 0.9, 0.2],
+        Ok(SpellEffect::FatalSword) => [1.0, 0.3, 0.3],
+        Ok(SpellEffect::MagicShieldUp) => [0.4, 0.8, 1.0],
+        Ok(SpellEffect::MagicShieldDown) => [1.0, 0.5, 0.2],
+        Ok(SpellEffect::Healing) => [0.3, 1.0, 0.4],
+        Ok(SpellEffect::Teleport) => [1.0, 1.0, 1.0],
+        Ok(SpellEffect::Stunned) => [0.9, 0.9, 0.4],
+        _ => [1.0, 0.8, 0.3],
+    }
 }
 
 /// 特效状态（已生成特效计数，E2E 验证用；待生成特效走 Message<PendingEffect>）
@@ -103,6 +141,40 @@ fn spawn_pending_effects(
                         to,
                         t: 0.0,
                         dur: 0.28,
+                    },
+                ));
+            }
+            PendingEffect::ProjectileFromTo {
+                source_id,
+                destination_id,
+                color,
+            } => {
+                let mut from = None;
+                let mut to = None;
+                for (id, tf) in &actors {
+                    if id.0 == source_id {
+                        from = Some(Vec2::new(tf.translation.x, tf.translation.y));
+                    }
+                    if id.0 == destination_id {
+                        to = Some(Vec2::new(tf.translation.x, tf.translation.y));
+                    }
+                }
+                let (Some(from), Some(to)) = (from, to) else {
+                    continue;
+                };
+                commands.spawn((
+                    Sprite {
+                        image: white.clone(),
+                        color: Color::srgb(color[0], color[1], color[2]),
+                        custom_size: Some(Vec2::splat(14.0)),
+                        ..default()
+                    },
+                    Transform::from_xyz(from.x, from.y, 20.0),
+                    Projectile {
+                        from,
+                        to,
+                        t: 0.0,
+                        dur: 0.35,
                     },
                 ));
             }

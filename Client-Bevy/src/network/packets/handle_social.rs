@@ -28,7 +28,7 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::FishingUpdate as i16, ServerPacketIds::MentorRequest as i16, ServerPacketIds::MentorUpdate as i16, ServerPacketIds::GuildNoticeChange as i16, ServerPacketIds::GuildMemberChange as i16, ServerPacketIds::Rankings as i16, ServerPacketIds::GuildInvite as i16, ServerPacketIds::FriendUpdate as i16, ServerPacketIds::TradeRequest as i16, ServerPacketIds::TradeGold as i16, ServerPacketIds::TradeConfirm as i16, ServerPacketIds::TradeCancel as i16, ServerPacketIds::TradeItem as i16, ServerPacketIds::DepositTradeItem as i16, ServerPacketIds::ReceiveMail as i16, ServerPacketIds::GroupMembersMap as i16, ServerPacketIds::GroupInvite as i16, ServerPacketIds::DeleteGroup as i16, ServerPacketIds::DeleteMember as i16, ServerPacketIds::NewMagic as i16, ServerPacketIds::MagicDelay as i16, ServerPacketIds::MagicCast as i16, ServerPacketIds::MagicLeveled as i16, ServerPacketIds::KeepAlive as i16, ServerPacketIds::ParcelCollected as i16, ServerPacketIds::RequestReincarnation as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::FishingUpdate as i16, ServerPacketIds::MentorRequest as i16, ServerPacketIds::MentorUpdate as i16, ServerPacketIds::GuildNoticeChange as i16, ServerPacketIds::GuildMemberChange as i16, ServerPacketIds::Rankings as i16, ServerPacketIds::GuildInvite as i16, ServerPacketIds::FriendUpdate as i16, ServerPacketIds::TradeRequest as i16, ServerPacketIds::TradeGold as i16, ServerPacketIds::TradeConfirm as i16, ServerPacketIds::TradeCancel as i16, ServerPacketIds::TradeItem as i16, ServerPacketIds::DepositTradeItem as i16, ServerPacketIds::ReceiveMail as i16, ServerPacketIds::GroupMembersMap as i16, ServerPacketIds::GroupInvite as i16, ServerPacketIds::DeleteGroup as i16, ServerPacketIds::DeleteMember as i16, ServerPacketIds::NewMagic as i16, ServerPacketIds::MagicDelay as i16, ServerPacketIds::MagicCast as i16, ServerPacketIds::MagicLeveled as i16, ServerPacketIds::ObjectMagic as i16, ServerPacketIds::ObjectEffect as i16, ServerPacketIds::ObjectProjectile as i16, ServerPacketIds::SpellToggle as i16, ServerPacketIds::KeepAlive as i16, ServerPacketIds::ParcelCollected as i16, ServerPacketIds::RequestReincarnation as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M39: 钓鱼 ----
@@ -460,6 +460,76 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
                         color: [1.0, 0.6, 0.2],
                     });
                 }
+            }
+        }
+
+        // #224：其他玩家/怪物施法、投射物、命中特效、技能开关
+        x if x == ServerPacketIds::ObjectMagic as i16 => {
+            if let Ok(p) = magic_combat::ObjectMagic::read_body(&mut cur) {
+                combat_evt.write(CombatEvent::SpellCast {
+                    object_id: p.object_id,
+                });
+                let color = crate::game::effects::spell_color(p.spell as u8);
+                if p.target_id != 0 {
+                    effects.write(PendingEffect::ProjectileFromTo {
+                        source_id: p.object_id,
+                        destination_id: p.target_id,
+                        color,
+                    });
+                } else {
+                    effects.write(PendingEffect::Burst {
+                        target_id: p.object_id,
+                        color,
+                    });
+                }
+                tracing::info!(
+                    "🔮 对象施法: id={} spell={:?} target={} cast={}",
+                    p.object_id,
+                    p.spell,
+                    p.target_id,
+                    p.cast
+                );
+            }
+        }
+        x if x == ServerPacketIds::ObjectEffect as i16 => {
+            if let Ok(p) = magic_combat::ObjectEffect::read_body(&mut cur) {
+                effects.write(PendingEffect::Burst {
+                    target_id: p.object_id,
+                    color: crate::game::effects::spell_effect_color(p.effect as u8),
+                });
+                tracing::info!(
+                    "✨ 对象特效: id={} effect={:?} type={} delay={} time={}",
+                    p.object_id,
+                    p.effect,
+                    p.effect_type,
+                    p.delay_time,
+                    p.time
+                );
+            }
+        }
+        x if x == ServerPacketIds::ObjectProjectile as i16 => {
+            if let Ok(p) = magic_combat::ObjectProjectile::read_body(&mut cur) {
+                effects.write(PendingEffect::ProjectileFromTo {
+                    source_id: p.source,
+                    destination_id: p.destination,
+                    color: crate::game::effects::spell_color(p.spell as u8),
+                });
+                tracing::info!(
+                    "🎯 对象投射物: spell={:?} src={} dst={}",
+                    p.spell,
+                    p.source,
+                    p.destination
+                );
+            }
+        }
+        x if x == ServerPacketIds::SpellToggle as i16 => {
+            if let Ok(p) = magic::SpellToggle::read_body(&mut cur) {
+                tracing::info!(
+                    "🔄 技能开关: spell={:?} can_use={} hero={}",
+                    p.spell,
+                    p.can_use,
+                    p.hero
+                );
             }
         }
 
