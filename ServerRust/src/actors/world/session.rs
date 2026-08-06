@@ -889,6 +889,14 @@ impl Message<PlayerDisconnected> for WorldActor {
             } else {
                 info!("Player {} saved to database on disconnect", record.name);
             }
+            // C# LastLogoutDate：记录最后下线时间（选角界面/安全区下线加成用）
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            if let Err(e) = db::update_last_access(&self.db_pool, &record.name, now).await {
+                warn!("Failed to update last_access for {} on disconnect: {}", record.name, e);
+            }
 
             // 行会离线状态由 SocialActor 管理
         }
@@ -983,6 +991,14 @@ impl Message<PlayerLogOut> for WorldActor {
                 warn!("Failed to save player {} on logout: {}", record.name, e);
             } else {
                 info!("Player {} saved to database on logout", record.name);
+            }
+            // C# LastLogoutDate：记录最后下线时间
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            if let Err(e) = db::update_last_access(&self.db_pool, &record.name, now).await {
+                warn!("Failed to update last_access for {} on logout: {}", record.name, e);
             }
 
             // #194：保存英雄列表到 DB（重启不丢）

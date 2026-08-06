@@ -1089,7 +1089,8 @@ impl Message<LoginResult> for GateActor {
                         .unwrap_or(mir2_shared::enums::MirClass::Warrior),
                     gender: mir2_shared::enums::MirGender::try_from(ch.gender)
                         .unwrap_or(mir2_shared::enums::MirGender::Male),
-                    last_access: chrono::Utc::now(),
+                    last_access: chrono::DateTime::from_timestamp(ch.last_access, 0)
+                        .unwrap_or_else(|| chrono::Utc::now()),
                 })
                 .collect();
             let mut body = Vec::new();
