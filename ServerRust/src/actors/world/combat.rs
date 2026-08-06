@@ -371,7 +371,14 @@ impl Message<WorldAttackRequest> for WorldActor {
                                     poisons: attack_result.applied_poisons,
                                 }).await;
                             }
-                            if other_actor.ask(TakeDamage {
+                            // C#：PvP 命中广播 ObjectStruck + DamageIndicator 给同图其他玩家
+                    if damage > 0 {
+                        self.broadcast_pvp_hit(
+                            other_state.object_id, result.object_id,
+                            other_state.x, other_state.y, other_state.direction, damage, other_state.map_index,
+                        ).await;
+                    }
+                    if other_actor.ask(TakeDamage {
                                 attacker_id: result.object_id,
                                 attacker_session: msg.session_id,
                                 damage,
@@ -820,7 +827,14 @@ impl Message<RangeAttackRequest> for WorldActor {
                                 poisons: attack_result.applied_poisons,
                             }).await;
                         }
-                        if other.actor_ref.ask(TakeDamage {
+                        // C#：PvP 命中广播 ObjectStruck + DamageIndicator 给同图其他玩家
+                if damage > 0 {
+                    self.broadcast_pvp_hit(
+                        other_state.object_id, object_id,
+                        other_state.x, other_state.y, other_state.direction, damage, other_state.map_index,
+                    ).await;
+                }
+                if other.actor_ref.ask(TakeDamage {
                             attacker_id: object_id,
                             attacker_session: msg.session_id,
                             damage,

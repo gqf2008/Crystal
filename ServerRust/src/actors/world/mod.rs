@@ -1222,6 +1222,30 @@ impl WorldActor {
         self.broadcast_player_appearance(session_id, &state).await;
     }
 
+    /// C# Attacked()：向同图其他玩家广播 ObjectStruck + DamageIndicator（PvP 命中表现）
+    pub(crate) async fn broadcast_pvp_hit(&self, target_oid: u32, attacker_oid: u32, x: i32, y: i32, dir: u8, damage: i32, map_index: u16) {
+        let mut struck_body = Vec::new();
+        struck_body.extend_from_slice(&target_oid.to_le_bytes());
+        struck_body.extend_from_slice(&attacker_oid.to_le_bytes());
+        struck_body.extend_from_slice(&(x as u32).to_le_bytes());
+        struck_body.extend_from_slice(&(y as u32).to_le_bytes());
+        struck_body.push(dir);
+        let struck_packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
+        let mut dmg_body = Vec::new();
+        dmg_body.extend_from_slice(&damage.to_le_bytes());
+        dmg_body.push(0u8); // damage_type = normal
+        dmg_body.extend_from_slice(&target_oid.to_le_bytes());
+        let dmg_packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
+        for (sid, r) in &self.players {
+            if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                if os.map_index == map_index {
+                    let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: struck_packet.clone() }).await;
+                    let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: dmg_packet.clone() }).await;
+                }
+            }
+        }
+    }
+
     /// C# Hidden 属性：向同图其他玩家广播 S.ObjectHidden（隐身/现身）
     pub(crate) async fn broadcast_object_hidden(&self, object_id: u32, hidden: bool, map_index: u16) {
         let packet = mir2_shared::packets::server::object::ObjectHidden { object_id, hidden };
