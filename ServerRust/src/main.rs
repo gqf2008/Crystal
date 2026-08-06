@@ -109,6 +109,8 @@ async fn async_main() -> anyhow::Result<()> {
         wedding_ring_recall_enabled: cfg.social.wedding_ring_recall_enabled,
         guild_required_level: cfg.social.guild_required_level,
         newbie_guild: cfg.social.newbie_guild.clone(),
+        guild_war_cost: cfg.social.guild_war_cost,
+        guild_war_time: cfg.social.guild_war_time,
     };
     info!("Social config: guild_creation_cost_gold = {}", social_config.guild_creation_cost_gold);
     let social_ref = SocialActor::spawn(SocialActorArgs {

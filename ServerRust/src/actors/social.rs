@@ -320,6 +320,17 @@ impl Message<NpcIsGroupLeader> for SocialActor {
     }
 }
 
+/// WorldActor(NPC 脚本) -> SocialActor: 查询行会宣战费用/时长（C# Settings.Guild_WarCost/Guild_WarTime，<$GUILDWARFEE>/<$GUILDWARTIME>）
+pub struct NpcGetGuildWarSettings;
+
+impl Message<NpcGetGuildWarSettings> for SocialActor {
+    type Reply = (u32, i64);
+
+    async fn handle(&mut self, _msg: NpcGetGuildWarSettings, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        (self.config.guild_war_cost, self.config.guild_war_time)
+    }
+}
+
 /// WorldActor(NPC 脚本) -> SocialActor: NPC 直接给/扣行会金币（对齐 C# ActionType.GiveGuildGold/TakeGuildGold）
 pub struct NpcGuildGoldChange {
     pub session_id: u64,
@@ -546,6 +557,10 @@ pub struct SocialActorConfig {
     pub guild_required_level: u16,
     /// 新手行会名称（C# Settings.NewbieGuild）
     pub newbie_guild: String,
+    /// 行会宣战费用（C# Settings.Guild_WarCost = 3000）
+    pub guild_war_cost: u32,
+    /// 行会战争时长（秒，C# Settings.Guild_WarTime = 180）
+    pub guild_war_time: i64,
 }
 
 impl Default for SocialActorConfig {
@@ -558,6 +573,8 @@ impl Default for SocialActorConfig {
             wedding_ring_recall_enabled: true,
             guild_required_level: 22,
             newbie_guild: "NewbieGuild".to_string(),
+            guild_war_cost: 3000,
+            guild_war_time: 180,
         }
     }
 }
