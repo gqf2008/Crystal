@@ -899,6 +899,7 @@ fn hud_server_events(
             | ServerEvent::CreaturePickupToggled { .. }
             | ServerEvent::StorageUnlockResult { .. }
             | ServerEvent::StoragePrompt
+            | ServerEvent::StorageResized { .. }
             | ServerEvent::PlayerUpdate { .. }
             | ServerEvent::MonsterInfo { .. }
             | ServerEvent::NpcInfo { .. }

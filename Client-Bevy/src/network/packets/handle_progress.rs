@@ -129,6 +129,9 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         }
         x if x == ServerPacketIds::ResizeStorage as i16 => {
             if let Ok(p) = ui_events::ResizeStorage::read_body(&mut cur) {
+                server_events.write(ServerEvent::StorageResized {
+                    size: p.size.max(0) as usize,
+                });
                 tracing::info!("📦 仓库扩容: {}", p.size);
             }
         }

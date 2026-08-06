@@ -29,6 +29,8 @@ pub enum ServerEvent {
     StorageUnlockResult { result: u8, has_password: bool },
     /// #200 NPCStorage：仓库对话框打开信号（有密码时客户端先弹解锁框，C# S.NPCStorage）
     StoragePrompt,
+    /// #281 ResizeStorage：仓库扩容（size = 新格数，C# S.ResizeStorage → Array.Resize）
+    StorageResized { size: usize },
     /// #279 PlayerUpdate：玩家外观刷新（换装/光照，C# S.PlayerUpdate）
     PlayerUpdate {
         object_id: u32,
