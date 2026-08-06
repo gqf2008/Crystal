@@ -333,6 +333,20 @@ pub fn clear_storage_password(actor: &mut AccountActor, username: &str, current_
 // 消息定义
 // ============================================================
 
+/// 注册请求（NewAccount 真正创建账号；返回是否成功，false=账号已存在）
+pub struct RegisterAccountRequest {
+    pub username: String,
+    pub password: String,
+}
+
+impl Message<RegisterAccountRequest> for AccountActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: RegisterAccountRequest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.register(&msg.username, &msg.password)
+    }
+}
+
 /// 登录请求
 pub struct LoginRequest {
     pub session_id: u64,

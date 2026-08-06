@@ -36,6 +36,8 @@ pub struct GateActor {
     ip_blocks: HashMap<String, i64>,
     /// 每 IP 创建角色时间戳（unix 秒；C# ConnectionLogs[IP].CharactersMade）
     ip_character_creations: HashMap<String, Vec<i64>>,
+    /// 每 IP 注册账号时间戳（unix 秒；C# ConnectionLogs[IP].AccountsMade，>2/小时封 24h）
+    ip_accounts_made: HashMap<String, Vec<i64>>,
     /// AccountActor 引用
     account_ref: Option<ActorRef<crate::actors::account::AccountActor>>,
     /// WorldActor 引用
@@ -54,6 +56,7 @@ impl GateActor {
             session_ips: HashMap::new(),
             ip_blocks: HashMap::new(),
             ip_character_creations: HashMap::new(),
+            ip_accounts_made: HashMap::new(),
             account_ref: None,
             world_ref: None,
             social_ref: None,
@@ -351,8 +354,7 @@ impl Message<ClientData> for GateActor {
                 handle_client_version(&gate_ref, msg.session_id, payload).await;
             }
             x if x == ClientPacketIds::NewAccount as i16 => {
-                // NewAccount - Phase 1: 自动成功
-                handle_new_account(&gate_ref, msg.session_id).await;
+                self.handle_new_account(ctx.actor_ref(), msg.session_id, payload).await;
             }
             x if x == ClientPacketIds::Login as i16 => {
                 // Login - 转发到 AccountActor (Phase 1.3: 输入验证)
@@ -1211,16 +1213,98 @@ async fn handle_client_version(gate_ref: &ActorRef<GateActor>, session_id: Sessi
         }).await;
 }
 
-/// 处理新账号注册
-async fn handle_new_account(gate_ref: &ActorRef<GateActor>, session_id: SessionId) {
-    debug!("NewAccount request from session {}", session_id);
-    // Phase 1: auto-register, respond success (result=8)
-    let response = build_packet_bytes(ServerPacketIds::NewAccount as i16, &[8u8]);
-    let _ = gate_ref
-        .tell(SendToClient {
-            session_id,
-            data: response,
-        }).await;
+impl GateActor {
+    /// 处理新账号注册（对齐 C# Envir.NewAccount：Result 0-8）
+    async fn handle_new_account(&mut self, gate_ref: &ActorRef<GateActor>, session_id: SessionId, payload: &[u8]) {
+        debug!("NewAccount request from session {}", session_id);
+
+        let send_result = |result: u8| async move {
+            let response = build_packet_bytes(ServerPacketIds::NewAccount as i16, &[result]);
+            let _ = gate_ref.tell(SendToClient { session_id, data: response }).await;
+        };
+
+        // C# Settings.AllowNewAccount → Result=0
+        let allow = if let Some(s) = &self.social_ref {
+            s.ask(crate::actors::social::NpcGetAllowNewAccount).await.unwrap_or(true)
+        } else {
+            true
+        };
+        if !allow {
+            send_result(0).await;
+            return;
+        }
+
+        // C# IP 限流：每小时 >2 个账号 → 封 IP 24h → Result=0
+        let now = gate_unix_now_secs();
+        let ip = self.session_ips.get(&session_id).cloned().unwrap_or_default();
+        if !ip.is_empty() {
+            if self.ip_blocks.get(&ip).map(|&u| u > now).unwrap_or(false) {
+                send_result(0).await;
+                return;
+            }
+            let made = self.ip_accounts_made.entry(ip.clone()).or_default();
+            if made.len() > 2 {
+                self.ip_blocks.insert(ip.clone(), now + 24 * 3600);
+                made.clear();
+                send_result(0).await;
+                return;
+            }
+            made.push(now);
+            made.retain(|&t| t + 3600 >= now);
+        }
+
+        // 解析包
+        let Ok(packet) = mir2_shared::packets::client::account::NewAccount::read_body(&mut std::io::Cursor::new(payload)) else {
+            warn!("NewAccount: parse failed session={}", session_id);
+            return;
+        };
+
+        // C# AccountIDReg / PasswordReg 格式校验
+        if !crate::util::validation::validate_username(&packet.account_id) {
+            send_result(1).await;
+            return;
+        }
+        if !crate::util::validation::validate_password(&packet.password) {
+            send_result(2).await;
+            return;
+        }
+        // 邮箱：非空时需合法且 <=50（C# EMailReg）
+        let email_ok = packet.email_address.trim().is_empty()
+            || (packet.email_address.len() <= 50
+                && packet.email_address.contains('@')
+                && packet.email_address.contains('.'));
+        if !email_ok {
+            send_result(3).await;
+            return;
+        }
+        if packet.user_name.len() > 20 {
+            send_result(4).await;
+            return;
+        }
+        if packet.secret_question.len() > 30 {
+            send_result(5).await;
+            return;
+        }
+        if packet.secret_answer.len() > 30 {
+            send_result(6).await;
+            return;
+        }
+
+        // 真正注册（C#：已存在 → Result=7；成功 → Result=8）
+        let created = if let Some(account_ref) = &self.account_ref {
+            account_ref.ask(crate::actors::account::RegisterAccountRequest {
+                username: packet.account_id,
+                password: packet.password,
+            }).await.unwrap_or(false)
+        } else {
+            false
+        };
+        if created {
+            send_result(8).await;
+        } else {
+            send_result(7).await;
+        }
+    }
 }
 
 /// 解析登录包：account_id (DotNetString) + password (DotNetString)

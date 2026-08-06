@@ -320,6 +320,17 @@ impl Message<NpcIsGroupLeader> for SocialActor {
     }
 }
 
+/// WorldActor -> SocialActor: 查询是否允许注册新账号（C# Settings.AllowNewAccount）
+pub struct NpcGetAllowNewAccount;
+
+impl Message<NpcGetAllowNewAccount> for SocialActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, _msg: NpcGetAllowNewAccount, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.config.allow_new_account
+    }
+}
+
 /// WorldActor -> SocialActor: 查询是否允许修改密码（C# Settings.AllowChangePassword）
 pub struct NpcGetAllowChangePassword;
 
@@ -660,6 +671,8 @@ pub struct SocialActorConfig {
     pub allow_start_game: bool,
     /// 是否允许修改密码（C# Settings.AllowChangePassword）
     pub allow_change_password: bool,
+    /// 是否允许注册新账号（C# Settings.AllowNewAccount）
+    pub allow_new_account: bool,
     /// 行会宣战费用（C# Settings.Guild_WarCost = 3000）
     pub guild_war_cost: u32,
     /// 行会战争时长（秒，C# Settings.Guild_WarTime = 180）
@@ -687,6 +700,7 @@ impl Default for SocialActorConfig {
             mail_free_with_stamp: true,
             allow_start_game: true,
             allow_change_password: true,
+            allow_new_account: true,
             guild_war_cost: 3000,
             guild_war_time: 180,
         }
