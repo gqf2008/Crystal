@@ -308,6 +308,32 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 },
                                             );
                                         }
+                                        // #535：[@SELL] —— 出售面板（C# GameScene.NPCSell → NPCDropDialog）
+                                        if key == "[@SELL]" {
+                                            send(
+                                                &to_client,
+                                                &server::npc_interaction::NPCGoods {
+                                                    list: vec![],
+                                                    rate: 1.0,
+                                                    panel_type: mir2_shared::enums::PanelType::Sell,
+                                                    hide_added_stats: false,
+                                                },
+                                            );
+                                            tracing::info!("🧰 [MOCK] 出售面板打开请求");
+                                        }
+                                        // #535：[@TESTROLL] —— 掷骰（C# RollDialog，自动掷 2 秒后回调 [page]）
+                                        if key == "[@TESTROLL]" {
+                                            send(
+                                                &to_client,
+                                                &server::ui_events::Roll {
+                                                    r#type: 0,
+                                                    page: "TestRoll".to_string(),
+                                                    result: 4,
+                                                    auto_roll: true,
+                                                },
+                                            );
+                                            tracing::info!("🎲 [MOCK] 掷骰结果回发 type=0 result=4");
+                                        }
                                         let page: Vec<String> = match key.as_str() {
                                             "[@SHOP]" => vec![
                                                 "这里是商店（MOCK）".to_string(),
