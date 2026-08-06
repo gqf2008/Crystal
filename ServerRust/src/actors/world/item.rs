@@ -114,6 +114,22 @@ pub struct RepairItemRequest {
     pub special: bool,
 }
 
+/// 物品价值（对齐 C# Shared/Data/ItemData.cs Price()）：
+/// p = floor(p/2 + (p/2)*(CurrentDura/MaxDura) + Price/2)（Durability>0 时），
+/// p *= AddedStats.Count*0.1 + 1，返回 p * Count
+fn compute_item_price(item: &mir2_shared::data::item::UserItem, info: &db::ItemInfo) -> u64 {
+    let mut p = info.price as f64;
+    if info.durability > 0 {
+        let r = (info.price as f64 / 2.0) / info.durability as f64;
+        let max_dura = item.max_dura as f64;
+        let p_base = max_dura * r;
+        let ratio = if item.max_dura > 0 { item.current_dura as f64 / max_dura } else { 0.0 };
+        p = (p_base / 2.0 + (p_base / 2.0) * ratio + info.price as f64 / 2.0).floor();
+    }
+    p *= item.added_stats.len() as f64 * 0.1 + 1.0;
+    (p as u64).saturating_mul(item.count as u64)
+}
+
 /// 计算修理费（对齐 C# Shared/Data/ItemData.cs RepairPrice()）
 /// p = floor(MaxDura * (Price/2 / Durability) + Price/2) * (AddedStats.Count*0.1 + 1)
 /// cost = p * Count - Price；有租赁信息 ×2；特殊修理 ×3
@@ -1092,6 +1108,16 @@ impl Message<SellItemRequest> for WorldActor {
             }
         };
 
+        // C# BindMode.DontSell：不可出售
+        let item_db = self.item_infos.get(&item_data.item_index).cloned();
+        let dont_sell = item_db.as_ref()
+            .map(|i| (i.bind_mode & mir2_shared::enums::BindMode::DONT_SELL.bits() as i32) != 0)
+            .unwrap_or(false);
+        if dont_sell {
+            send_system_message(&self.gate_ref, msg.session_id, "该物品无法出售");
+            return;
+        }
+
         // 移除物品
         let removed = record.actor_ref.ask(RemoveItemFromInventory { unique_id: msg.unique_id }).await.unwrap_or(None);
         if removed.is_none() {
@@ -1099,11 +1125,12 @@ impl Message<SellItemRequest> for WorldActor {
             return;
         }
 
-        // 定价：基于 DB 中物品的 price（卖价通常为买价的一半）
-        let item_db_price = self.item_infos.get(&item_data.item_index)
-            .map(|i| i.price as u64)
-            .unwrap_or(item_data.item_index as u64 * 5);
-        let total_gold = (item_db_price / 2).max(1) * msg.count as u64;
+        // 定价：C# Price() / 2（含耐久比例/附加属性/堆叠数）
+        let total_gold = item_db
+            .as_ref()
+            .map(|info| compute_item_price(&item_data, info) / 2)
+            .unwrap_or_else(|| ((item_data.item_index as u64 * 5) * item_data.count as u64) / 2)
+            .max(1);
 
         let success = record.actor_ref.ask(AddGold { amount: total_gold }).await.unwrap_or(false);
         if success {
