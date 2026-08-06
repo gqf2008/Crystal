@@ -330,6 +330,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--bigmap-test") {
         app.add_systems(Update, auto_bigmap_test);
     }
+    // --worldmap-test: 世界地图（#300）WorldMapSetup → 图标 → RequestMapInfo → NewMapInfo 切换
+    if std::env::args().any(|a| a == "--worldmap-test") {
+        app.add_systems(Update, auto_worldmap_test);
+    }
     // --awake-test: 觉醒对话框验证（选武器 → 类型 → 材料 → 觉醒 → 结果）
     if std::env::args().any(|a| a == "--awake-test") {
         app.add_systems(Update, auto_awake_test);
@@ -4295,6 +4299,102 @@ fn auto_bigmap_test(
 
 /// --keyboard-test：打开键位设置 → 滚动 → 重绑一行 → 重置 → 关闭
 #[allow(clippy::too_many_arguments)]
+/// --worldmap-test：世界地图（#300）WorldMapSetup → 图标 → RequestMapInfo → NewMapInfo 切换
+#[allow(clippy::too_many_arguments)]
+fn auto_worldmap_test(
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut bm: ResMut<client_bevy::game::dialogs::big_map::BigMapState>,
+    net: ResMut<client_bevy::network::NetConnection>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut phase: Local<f32>,
+) {
+    use client_bevy::scenes::AppState;
+    use client_bevy::game::dialogs::DialogKind;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    if *stage == 0 {
+        if !mgr.is_open(DialogKind::BigMap) {
+            mgr.toggle(DialogKind::BigMap);
+            tracing::info!("[WORLDMAP] 打开大地图");
+        }
+        *phase = *t;
+        *stage = 1;
+        return;
+    }
+    if *stage == 1 {
+        if *t - *phase >= 10.0 {
+            tracing::warn!("[WORLDMAP] ❌ WorldMapSetup 超时");
+            *stage = 9;
+            return;
+        }
+        if bm.world_enabled && bm.world_icons.len() >= 3 && bm.teleport_cost == 1000 {
+            tracing::info!(
+                "[WORLDMAP] ✅ WorldMapSetup: enabled={} icons={} cost={}",
+                bm.world_enabled,
+                bm.world_icons.len(),
+                bm.teleport_cost
+            );
+            bm.world_open = true;
+            *phase = *t;
+            *stage = 2;
+        }
+        return;
+    }
+    if *stage == 2 {
+        net.send_packet(&mir2_shared::packets::client::npc::RequestMapInfo { map_index: 1 });
+        tracing::info!("[WORLDMAP] 请求地图 1（比奇省）");
+        *phase = *t;
+        *stage = 3;
+        return;
+    }
+    if *stage == 3 {
+        if *t - *phase >= 8.0 {
+            tracing::warn!("[WORLDMAP] ❌ 地图切换超时 map={} title={} npcs={}", bm.map_index, bm.title, bm.npcs.len());
+            *stage = 9;
+            return;
+        }
+        if bm.map_index == 1 && bm.npcs.len() >= 2 && bm.title == "比奇省" {
+            tracing::info!("[WORLDMAP] ✅ 切换地图: {} {} 个NPC", bm.title, bm.npcs.len());
+            *phase = *t;
+            *stage = 4;
+        }
+        return;
+    }
+    if *stage == 4 {
+        net.send_packet(&mir2_shared::packets::client::npc::RequestMapInfo { map_index: 0 });
+        tracing::info!("[WORLDMAP] 请求地图 0（我的位置）");
+        *phase = *t;
+        *stage = 5;
+        return;
+    }
+    if *stage == 5 {
+        if *t - *phase >= 8.0 {
+            tracing::warn!("[WORLDMAP] ❌ 返回地图超时");
+            *stage = 9;
+            return;
+        }
+        if bm.map_index == 0 && bm.npcs.len() >= 3 && bm.title == "新手村" {
+            tracing::info!("[WORLDMAP] ✅ 回到当前地图: {} {} 个NPC", bm.title, bm.npcs.len());
+            bm.world_open = false;
+            if mgr.is_open(DialogKind::BigMap) {
+                mgr.close(DialogKind::BigMap);
+            }
+            tracing::info!("[WORLDMAP] ✅ 全流程完成");
+            *stage = 9;
+        }
+        return;
+    }
+    if *t >= 45.0 && *stage < 9 {
+        tracing::warn!("[WORLDMAP] ❌ 超时 stage={}", *stage);
+        *stage = 9;
+    }
+}
+
 fn auto_keyboard_test(
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,

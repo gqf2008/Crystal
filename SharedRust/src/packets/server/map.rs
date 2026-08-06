@@ -99,16 +99,18 @@ pub struct TeleportIn;
 
 #[derive(Debug, Clone)]
 pub struct WorldMapSetupInfo {
+    /// C# 线格式：[enabled u8][count i32][(image_index i32)(title dotnet)(map_index i32)]... [teleport_cost i32]
+    pub enabled: bool,
     pub world_maps: Vec<WorldMapIcon>,
+    pub teleport_cost: i32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// 世界地图图标（C# SharedData.WorldMapIcon：ImageIndex/Title/MapIndex）
 pub struct WorldMapIcon {
-    pub icon: u16,
+    pub image_index: i32,
     pub title: String,
     pub map_index: i32,
-    pub location_x: u32,
-    pub location_y: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -369,33 +371,29 @@ impl Packet for WorldMapSetupInfo {
     const OPCODE: i16 = ServerPacketIds::WorldMapSetup as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let enabled = reader.read_u8()? != 0;
         let count = reader.read_i32::<LittleEndian>()? as usize;
         let mut world_maps = Vec::with_capacity(count);
-        
         for _ in 0..count {
             world_maps.push(WorldMapIcon {
-                icon: reader.read_u16::<LittleEndian>()?,
+                image_index: reader.read_i32::<LittleEndian>()?,
                 title: read_dotnet_string(reader)?,
                 map_index: reader.read_i32::<LittleEndian>()?,
-                location_x: reader.read_u32::<LittleEndian>()?,
-                location_y: reader.read_u32::<LittleEndian>()?,
             });
         }
-
-        Ok(WorldMapSetupInfo { world_maps })
+        let teleport_cost = reader.read_i32::<LittleEndian>()?;
+        Ok(WorldMapSetupInfo { enabled, world_maps, teleport_cost })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_all(&[if self.enabled { 1 } else { 0 }])?;
         writer.write_i32::<LittleEndian>(self.world_maps.len() as i32)?;
-        
         for icon in &self.world_maps {
-            writer.write_u16::<LittleEndian>(icon.icon)?;
+            writer.write_i32::<LittleEndian>(icon.image_index)?;
             write_dotnet_string(writer, &icon.title)?;
             writer.write_i32::<LittleEndian>(icon.map_index)?;
-            writer.write_u32::<LittleEndian>(icon.location_x)?;
-            writer.write_u32::<LittleEndian>(icon.location_y)?;
         }
-        
+        writer.write_i32::<LittleEndian>(self.teleport_cost)?;
         Ok(())
     }
 }
@@ -416,5 +414,35 @@ impl Packet for SearchMapResult {
         writer.write_u32::<LittleEndian>(self.location_x)?;
         writer.write_u32::<LittleEndian>(self.location_y)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn world_map_setup_info_roundtrip() {
+        let pkt = WorldMapSetupInfo {
+            enabled: true,
+            world_maps: vec![
+                WorldMapIcon { image_index: 1, title: "比奇省".to_string(), map_index: 0 },
+                WorldMapIcon { image_index: 2, title: "盟重省".to_string(), map_index: 1 },
+            ],
+            teleport_cost: 1000,
+        };
+        let mut buf = Vec::new();
+        pkt.write_body(&mut buf).unwrap();
+        let mut cur = Cursor::new(&buf);
+        let read = WorldMapSetupInfo::read_body(&mut cur).unwrap();
+        assert_eq!(read.enabled, pkt.enabled);
+        assert_eq!(read.world_maps.len(), 2);
+        assert_eq!(read.world_maps[0].image_index, 1);
+        assert_eq!(read.world_maps[0].title, "比奇省");
+        assert_eq!(read.world_maps[0].map_index, 0);
+        assert_eq!(read.world_maps[1].image_index, 2);
+        assert_eq!(read.world_maps[1].map_index, 1);
+        assert_eq!(read.teleport_cost, 1000);
     }
 }

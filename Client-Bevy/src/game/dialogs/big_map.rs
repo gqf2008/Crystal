@@ -31,6 +31,8 @@ const VIEW_W: f32 = 568.0;
 const VIEW_H: f32 = 380.0;
 /// NPC 点池大小（超过部分不绘制）
 const DOT_POOL: usize = 64;
+/// 世界地图图标池大小
+const WORLD_ICON_POOL: usize = 32;
 /// NPC 行数（C# MaximumRows=18）
 const MAX_ROWS: usize = 18;
 
@@ -58,6 +60,12 @@ pub struct BigMapState {
     /// 地形纹理像素尺寸（生成后记录，供坐标换算）
     pub tex_size: (f32, f32),
     pub map_size: (f32, f32),
+    /// #300 世界地图（C# S.WorldMapSetupInfo）
+    pub world_enabled: bool,
+    pub world_icons: Vec<mir2_shared::packets::server::map::WorldMapIcon>,
+    pub teleport_cost: i32,
+    /// 世界地图覆盖层是否打开（C# WorldMapImage.Visible）
+    pub world_open: bool,
 }
 
 #[derive(Component)]
@@ -106,6 +114,16 @@ pub struct BigMapTitleText;
 #[derive(Component)]
 pub struct BigMapCoordText;
 
+#[derive(Component)]
+pub struct BigMapWorldRoot;
+
+#[derive(Component)]
+pub struct BigMapWorldTitle;
+
+/// 世界地图图标（index 对应 state.world_icons 下标）
+#[derive(Component)]
+pub struct BigMapWorldIcon(pub usize);
+
 pub struct BigMapPlugin;
 
 impl Plugin for BigMapPlugin {
@@ -119,7 +137,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_big_map);
         app.add_systems(OnExit(AppState::Game), cleanup_big_map);
         app.add_systems(
             Update,
-            (big_map_ui_system, big_map_viewport_system, ui_button_system)
+            (big_map_ui_system, big_map_world_system, big_map_viewport_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -326,6 +344,45 @@ fn spawn_big_map(
         ));
     }
 
+    // 世界地图覆盖层（C# WorldMapImage：Prguse2[1360] 底 + 1365 云 + 1366 边框，Location=(10,0)）
+    let wm_x = px + 10.0;
+    let wm_y = py;
+    for (idx, z) in [(1360usize, 6.6f32), (1365, 6.7), (1366, 6.8)] {
+        if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse2, idx) {
+            let e = spawn_ui_sprite(&mut commands, h, wm_x, wm_y, z, 1.0);
+            commands.entity(e).insert((
+                BigMapWorldRoot,
+                DialogRoot(DialogKind::BigMap),
+                BigMapWidget,
+                Visibility::Hidden,
+            ));
+        }
+    }
+    // 悬停标题（C# WorldMapImage.TitleLabel：黑底白字，顶部居中）
+    let wt = spawn_ui_text(
+        &mut commands, &font, "",
+        wm_x, wm_y + 8.0, 12.0, Color::WHITE, 6.9,
+    );
+    commands.entity(wt).insert((
+        BigMapWorldTitle,
+        BigMapWorldRoot,
+        DialogRoot(DialogKind::BigMap),
+        BigMapWidget,
+        Visibility::Hidden,
+    ));
+    // 世界地图图标池（MapLinkIcon 帧带 offset，C# UseOffSet=true）
+    let wm_white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    for k in 0..WORLD_ICON_POOL {
+        let e = spawn_ui_sprite(&mut commands, wm_white.clone(), wm_x, wm_y, 7.0, 1.0);
+        commands.entity(e).insert((
+            UiButton { rect: (wm_x, wm_y, 16.0, 16.0), clicked: false },
+            BigMapWorldIcon(k),
+            BigMapWorldRoot,
+            DialogRoot(DialogKind::BigMap),
+            BigMapWidget,
+            Visibility::Hidden,
+        ));
+    }
     // NPC 列表行（x=590, y=50+i*21，右侧）
     for i in 0..MAX_ROWS {
         let e = spawn_ui_text(
@@ -361,7 +418,6 @@ fn big_map_ui_system(
     close: Query<&UiButton, With<BigMapClose>>,
     scroll_up: Query<&UiButton, With<BigMapScrollUp>>,
     scroll_down: Query<&UiButton, With<BigMapScrollDown>>,
-    world_btn: Query<&UiButton, With<BigMapWorld>>,
     myloc_btn: Query<&UiButton, With<BigMapMyLocation>>,
     teleport_btn: Query<&UiButton, With<BigMapTeleport>>,
     search_btn: Query<&UiButton, With<BigMapSearch>>,
@@ -369,7 +425,7 @@ fn big_map_ui_system(
         &mut Visibility,
         Option<&BigMapDot>,
         Option<&BigMapPlayerDot>,
-    ), With<BigMapWidget>>,
+    ), (With<BigMapWidget>, Without<BigMapWorldRoot>, Without<BigMapWorld>)>,
     mut rows: Query<(&mut Text2d, &BigMapRow)>,
     mut pos_bar: Query<&mut Transform, With<BigMapPosBar>>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -381,7 +437,7 @@ fn big_map_ui_system(
         let show = if pdot.is_some() {
             open
         } else if let Some(d) = dot {
-            open && d.0 < npc_count
+            open && !state.world_open && d.0 < npc_count
         } else {
             open
         };
@@ -407,14 +463,15 @@ fn big_map_ui_system(
             state.top_line += 1;
         }
     }
-    for btn in &world_btn {
-        if btn.clicked {
-            tracing::info!("🗺️ 世界地图（WorldMapSetup 待接入）");
-        }
-    }
     for btn in &myloc_btn {
         if btn.clicked {
-            tracing::info!("🗺️ 回到我的位置");
+            state.world_open = false;
+            state.selected = None;
+            state.top_line = 0;
+            net.send_packet(&mir2_shared::packets::client::npc::RequestMapInfo {
+                map_index: state.map_index,
+            });
+            tracing::info!("🗺️ 回到我的位置 map={}", state.map_index);
         }
     }
     for btn in &search_btn {
@@ -490,7 +547,126 @@ fn big_map_ui_system(
     }
 }
 
-/// 视口：地形生成 + 玩家/NPC 点 + 标题/坐标
+/// 世界地图覆盖层（#300）：World 按钮显隐/切换 + 图标同步/悬停/点击
+#[allow(clippy::too_many_arguments)]
+fn big_map_world_system(
+    mgr: Res<DialogManager>,
+    mut state: ResMut<BigMapState>,
+    net: ResMut<NetConnection>,
+    mut world_btn: Query<(&UiButton, &mut Visibility), (With<BigMapWorld>, Without<BigMapWorldRoot>)>,
+    mut world_bg: Query<&mut Visibility, (With<BigMapWorldRoot>, Without<BigMapWorldIcon>, Without<BigMapWorldTitle>, Without<BigMapWorld>)>,
+    mut world_title: Query<(&mut Text2d, &mut Visibility), (With<BigMapWorldTitle>, Without<BigMapWorld>)>,
+    mut world_icons: Query<
+        (&mut Visibility, &mut Sprite, &mut UiButton, &BigMapWorldIcon),
+        (With<BigMapWorldRoot>, Without<BigMapWorldTitle>, Without<BigMapWorld>),
+    >,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    mut prev_open: Local<bool>,
+    windows: Query<&Window>,
+) {
+    let open = mgr.is_open(DialogKind::BigMap);
+    // C# BigMapDialog.Show() → TargetMyLocation()：重新打开时回到当前地图列表
+    if open && !*prev_open {
+        state.world_open = false;
+    }
+    *prev_open = open;
+
+    // 世界按钮仅在 setup.Enabled 时可见（C# WorldMapSetup）
+    for (btn, mut vis) in &mut world_btn {
+        *vis = if open && state.world_enabled {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if btn.clicked && state.world_enabled {
+            state.world_open = !state.world_open;
+            tracing::info!("🗺️ 世界地图 {}", if state.world_open { "打开" } else { "关闭" });
+        }
+    }
+
+    // 覆盖层显隐
+    let world_show = open && state.world_enabled && state.world_open;
+    for mut vis in &mut world_bg {
+        *vis = if world_show { Visibility::Visible } else { Visibility::Hidden };
+    }
+
+    // 图标同步 + 悬停标题 + 点击（C# WorldMapImage.MakeButtons：MapLinkIcon 帧 offset，UseOffSet=true）
+    let (pw, ph) = match libs.0.get_image(LibraryName::Title, 820) {
+        Some(i) => (i.width.max(0) as f32, i.height.max(0) as f32),
+        None => (PANEL_W, PANEL_H),
+    };
+    let px = (1024.0 - pw) / 2.0;
+    let py = (768.0 - ph) / 2.0;
+    let (wm_x, wm_y) = (px + 10.0, py);
+
+    let mut hover_title = String::new();
+    let mut clicked_icon: Option<usize> = None;
+    if world_show {
+        let cursor = windows.single().ok().and_then(|w| w.cursor_position());
+        for (mut vis, mut sprite, mut btn, ic) in &mut world_icons {
+            let k = ic.0;
+            if k >= state.world_icons.len() {
+                *vis = Visibility::Hidden;
+                continue;
+            }
+            let icon = &state.world_icons[k];
+            let idx = icon.image_index.max(0) as usize;
+            let Some(info) = libs.0.get_image(LibraryName::MapLinkIcon, idx) else {
+                *vis = Visibility::Hidden;
+                continue;
+            };
+            let w = info.width.max(0) as f32;
+            let h = info.height.max(0) as f32;
+            let x = wm_x + info.offset_x as f32;
+            let y = wm_y + info.offset_y as f32;
+            let Some(hnd) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::MapLinkIcon, idx) else {
+                *vis = Visibility::Hidden;
+                continue;
+            };
+            sprite.image = hnd;
+            sprite.custom_size = Some(Vec2::new(w, h));
+            btn.rect = (x, y, w, h);
+            *vis = Visibility::Visible;
+            if let Some(cursor) = cursor {
+                if cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h {
+                    hover_title = icon.title.clone();
+                }
+            }
+            if btn.clicked {
+                clicked_icon = Some(k);
+            }
+        }
+    } else {
+        for (mut vis, _, _, _) in &mut world_icons {
+            *vis = Visibility::Hidden;
+        }
+    }
+    for (mut text, mut vis) in &mut world_title {
+        text.0 = hover_title.clone();
+        *vis = if world_show && !hover_title.is_empty() {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+    // 点击图标 → SetTargetMap（C# WorldMapImage button.Click）
+    if let Some(k) = clicked_icon {
+        if let Some(icon) = state.world_icons.get(k).cloned() {
+            state.world_open = false;
+            state.map_index = icon.map_index;
+            state.title = icon.title.clone();
+            state.npcs.clear();
+            state.selected = None;
+            state.top_line = 0;
+            net.send_packet(&mir2_shared::packets::client::npc::RequestMapInfo {
+                map_index: icon.map_index,
+            });
+            tracing::info!("🗺️ 世界地图切换到 {}: {}", icon.map_index, icon.title);
+        }
+    }
+}
 fn big_map_viewport_system(
     mgr: Res<DialogManager>,
     mut state: ResMut<BigMapState>,
@@ -696,6 +872,13 @@ fn big_map_server_events(
             big_map.npcs = npcs.clone();
             big_map.selected = None;
             big_map.top_line = 0;
+        }
+        // #300：世界地图配置（C# S.WorldMapSetupInfo，进图首次下发）
+        if let ServerEvent::WorldMapSetup { enabled, icons, teleport_cost } = ev {
+            big_map.world_enabled = *enabled;
+            big_map.world_icons = icons.clone();
+            big_map.teleport_cost = *teleport_cost;
+            tracing::info!("🗺️ 世界地图配置: enabled={} icons={} cost={}", enabled, icons.len(), teleport_cost);
         }
     }
 }
