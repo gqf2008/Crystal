@@ -1725,14 +1725,16 @@ impl Message<SellItemRequest> for WorldActor {
 
         let success = record.actor_ref.ask(AddGold { amount: total_gold }).await.unwrap_or(false);
         if success {
-            // 记录到回购列表（最多保留 10 个）
+            // 记录到回购列表（C# Settings.GoodsBuyBackMaxStored = 20，GoodsBuyBackTime = 60 分钟）
+            let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
             let buyback = BuybackItem {
                 item: removed.as_ref().cloned().unwrap_or_else(|| item_data.clone()),
                 sell_price: total_gold,
+                expires_at: now_ms + 60 * 60 * 1000,
             };
             let list = self.buyback_items.entry(msg.session_id).or_default();
             list.insert(0, buyback);
-            while list.len() > 10 {
+            while list.len() > 20 {
                 list.pop();
             }
             send_sell_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count, true);
@@ -2176,6 +2178,12 @@ impl Message<BuyItemBackRequest> for WorldActor {
         };
 
         let buyback = list.remove(idx);
+        // C#：回购物品过期（GoodsBuyBackTime）拒绝
+        let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+        if buyback.expires_at <= now_ms {
+            send_system_message(&self.gate_ref, msg.session_id, "该物品已无法回购（已过期）");
+            return;
+        }
         // 数量按回购请求扣减（整件回购时 count 即物品数量）
         let count = (msg.count as u16).min(buyback.item.count.max(1));
         let mut item = buyback.item.clone();
