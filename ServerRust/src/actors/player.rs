@@ -2887,6 +2887,24 @@ impl Message<RestoreCreatureHunger> for PlayerActor {
     }
 }
 
+/// 设置坐骑骑乘状态（C# RidingMount；装备坐骑即骑乘）
+pub struct SetMountState {
+    pub mounted: bool,
+    pub mount_type: i16,
+}
+
+impl Message<SetMountState> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetMountState, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.is_mounted = msg.mounted;
+        if msg.mounted {
+            self.state.mount_type = msg.mount_type;
+        }
+        debug!("Player {} mounted={} type={}", self.state.name, msg.mounted, msg.mount_type);
+    }
+}
+
 /// 设置攻击模式
 pub struct SetAttackMode {
     pub mode: mir2_shared::enums::AttackMode,

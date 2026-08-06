@@ -726,6 +726,21 @@ fn can_equip_item(item_info: &db::ItemInfo, slot: crate::actors::inventory::Equi
     true
 }
 
+/// 广播 S.MountUpdate 给所有玩家（对齐 C# S.MountUpdate）
+async fn broadcast_mount_update(world: &WorldActor, object_id: u32, mount_type: i16, riding: bool) {
+    let packet = mir2_shared::packets::server::miscellaneous::MountUpdate {
+        object_id,
+        mount_type,
+        riding_mount: riding,
+    };
+    let mut body = Vec::new();
+    if packet.write_body(&mut body).is_ok() {
+        for sid in world.players.keys() {
+            let _ = world.gate_ref.tell(SendToClient { session_id: *sid, data: body.clone() }).await;
+        }
+    }
+}
+
 impl Message<EquipItemRequest> for WorldActor {
     type Reply = ();
 
@@ -810,6 +825,15 @@ impl Message<EquipItemRequest> for WorldActor {
                 debug!("Player session={} equipped item uid={} to slot {}", msg.session_id, msg.unique_id, msg.slot);
                 send_equip_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, msg.slot, true);
 
+                // C# 装备坐骑 → 骑乘 + 广播 MountUpdate
+                if slot == crate::actors::inventory::EquipmentSlot::Mount {
+                    let mount_type = self.item_infos.get(&state.inventory.backpack[grid_idx].as_ref().unwrap().item.item_index)
+                        .map(|i| i.shape as i16)
+                        .unwrap_or(0);
+                    let _ = record.actor_ref.ask(crate::actors::player::SetMountState { mounted: true, mount_type }).await;
+                    broadcast_mount_update(self, state.object_id, mount_type, true).await;
+                }
+
                 // 重新计算装备加成 + 广播视觉变化
                 if let Some(state) = self.recalculate_and_set_stat_bonuses(msg.session_id).await {
                     self.broadcast_equipment_visuals(msg.session_id, &state).await;
@@ -869,6 +893,12 @@ impl Message<RemoveItemRequest> for WorldActor {
             Ok(true) => {
                 debug!("Player session={} unequipped item uid={} from slot {:?}", msg.session_id, msg.unique_id, slot);
                 send_remove_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, true);
+
+                // C# 卸下坐骑 → 下马 + 广播 MountUpdate
+                if slot == crate::actors::inventory::EquipmentSlot::Mount {
+                    let _ = record.actor_ref.ask(crate::actors::player::SetMountState { mounted: false, mount_type: 0 }).await;
+                    broadcast_mount_update(self, record.object_id, 0, false).await;
+                }
 
                 // 重新计算装备加成 + 广播视觉变化
                 if let Some(state) = self.recalculate_and_set_stat_bonuses(msg.session_id).await {

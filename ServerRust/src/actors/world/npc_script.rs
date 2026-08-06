@@ -2945,6 +2945,23 @@ pub(crate) async fn apply_map_entry_rules(world: &mut WorldActor, session_id: u6
         debug!("MapEntryRules: session={} hero dismissed (NoHero)", session_id);
     }
 
+    // NoMount：下马 + 广播 MountUpdate
+    if mi.no_mount && state.is_mounted {
+        let _ = record.actor_ref.ask(crate::actors::player::SetMountState { mounted: false, mount_type: 0 }).await;
+        let packet = mir2_shared::packets::server::miscellaneous::MountUpdate {
+            object_id: state.object_id,
+            mount_type: 0,
+            riding_mount: false,
+        };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            for sid in world.players.keys() {
+                let _ = world.gate_ref.tell(SendToClient { session_id: *sid, data: body.clone() }).await;
+            }
+        }
+        debug!("MapEntryRules: session={} dismounted (NoMount)", session_id);
+    }
+
     // NoGroup：离开组队（C# DisbandGroup）
     if mi.no_group && state.group_id.is_some() {
         let _ = world.social_ref.ask(crate::actors::social::SwitchGroupRequest {
