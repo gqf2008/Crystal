@@ -253,10 +253,34 @@ impl Message<NPCCallRequest> for WorldActor {
                         break;
                     }
                     "[@Storage]" => {
-                        dialog_lines = vec![
-                            format!("{}: 请妥善保管你的物品。", npc.name),
-                        ];
-                        self.send_user_storage(msg.session_id, &player_state.inventory.storage);
+                        // #200：仓库密码保护——有密码先解锁（C# StorageKey：SendStorage + NPCStorage，客户端弹解锁框）
+                        let has_pwd = match self.players.get(&msg.session_id) {
+                            Some(r) => db::account_has_storage_password(&self.db_pool, &r.account_username)
+                                .await
+                                .unwrap_or(false),
+                            None => false,
+                        };
+                        if has_pwd {
+                            // 通知客户端弹解锁框；仓库内容等解锁成功后再下发
+                            let mut body = Vec::new();
+                            if mir2_shared::packets::base::serialize_packet(
+                                &mut std::io::Cursor::new(&mut body),
+                                &mir2_shared::packets::server::npc::NPCStorage,
+                            )
+                            .is_err()
+                            {
+                                warn!("Failed to serialize NPCStorage");
+                            } else {
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: msg.session_id,
+                                    data: body,
+                                }).await;
+                            }
+                            dialog_lines = vec![format!("{}: 请输入仓库密码。", npc.name)];
+                        } else {
+                            dialog_lines = vec![format!("{}: 请妥善保管你的物品。", npc.name)];
+                            self.send_user_storage(msg.session_id, &player_state.inventory.storage);
+                        }
                         break;
                     }
                     _ => vec![
@@ -1311,5 +1335,27 @@ impl Message<RequestItemInfoRequest> for WorldActor {
     ) -> Self::Reply {
         debug!("RequestItemInfo: session={} idx={} (no-op until ItemInfo schema is extended)",
             msg.session_id, msg.item_index);
+    }
+}
+
+/// #200：仓库解锁成功后下发仓库内容（GateActor 校验通过后通知）
+pub struct StorageUnlockedRequest {
+    pub session_id: u64,
+}
+
+impl Message<StorageUnlockedRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: StorageUnlockedRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r,
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        self.send_user_storage(msg.session_id, &state.inventory.storage);
+        info!("Storage unlocked for session {}", msg.session_id);
     }
 }

@@ -37,6 +37,10 @@ pub struct StorageState {
     pub pwd_panel: bool,
     /// 仓库密码操作结果提示
     pub pwd_msg: String,
+    /// 仓库解锁面板是否打开（#200：C# StorageDialog PromptStorageUnlock）
+    pub unlock_panel: bool,
+    /// 仓库解锁结果提示（#200）
+    pub unlock_msg: String,
 }
 
 const DIALOG_X: f32 = 600.0;
@@ -68,6 +72,16 @@ pub struct StoragePwdClose;
 #[derive(Component)]
 pub struct StoragePwdMsg;
 
+/// 仓库解锁面板（#200）
+#[derive(Component)]
+pub struct StorageUnlockPanel;
+#[derive(Component)]
+pub struct StorageUnlockOk;
+#[derive(Component)]
+pub struct StorageUnlockCancel;
+#[derive(Component)]
+pub struct StorageUnlockMsg;
+
 /// 仓库格子索引（0..79）
 #[derive(Component, Clone, Copy)]
 pub struct StorageSlot(pub usize);
@@ -85,7 +99,14 @@ impl Plugin for StoragePlugin {
         );
         app.add_systems(
             Update,
-            (storage_ui_system, storage_action_system, storage_tooltip_system, storage_pwd_system, ui_button_system)
+            (
+                storage_ui_system,
+                storage_action_system,
+                storage_tooltip_system,
+                storage_pwd_system,
+                storage_unlock_system,
+                ui_button_system,
+            )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -260,6 +281,141 @@ fn spawn_storage_dialog(
         ));
     }
     let _ = spawn_ui_text(&mut commands, &font, "关闭", DIALOG_X + 203.0, DIALOG_Y + 459.0, 12.0, Color::WHITE, 9.4);
+    // 解锁面板（#200：C# PromptStorageUnlock —— 输入密码 → C.UnlockStorage）
+    commands.spawn((
+        UiEntity,
+        DialogRoot(DialogKind::Storage),
+        StorageUnlockPanel,
+        Sprite {
+            image: white2.clone(),
+            color: Color::srgba(0.1, 0.1, 0.15, 0.95),
+            custom_size: Some(Vec2::new(300.0, 120.0)),
+            ..default()
+        },
+        bevy::sprite::Anchor::TOP_LEFT,
+        Transform::from_xyz(DIALOG_X + 18.0, -(DIALOG_Y + 180.0), 9.5),
+        Visibility::Hidden,
+    ));
+    let _ = spawn_ui_text(
+        &mut commands,
+        &font,
+        "请输入仓库密码",
+        DIALOG_X + 28.0,
+        DIALOG_Y + 190.0,
+        12.0,
+        Color::WHITE,
+        9.6,
+    );
+    let unlock_input = commands
+        .spawn((
+            UiEntity,
+            DialogRoot(DialogKind::Storage),
+            StorageUnlockPanel,
+            TextInputField(2),
+            TextInputRect(DIALOG_X + 100.0, DIALOG_Y + 195.0, 200.0, 20.0),
+            Sprite {
+                image: white2.clone(),
+                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
+                custom_size: Some(Vec2::new(200.0, 20.0)),
+                ..default()
+            },
+            bevy::sprite::Anchor::TOP_LEFT,
+            Transform::from_xyz(DIALOG_X + 100.0, -(DIALOG_Y + 195.0), 9.6),
+            Visibility::Hidden,
+        ))
+        .id();
+    commands.entity(unlock_input).with_children(|p| {
+        p.spawn((
+            TextInputDisplay(2),
+            Text2d::new(String::new()),
+            bevy::sprite::Anchor::TOP_LEFT,
+            TextFont {
+                font: FontSource::Handle(font.clone()),
+                font_size: FontSize::Px(12.0),
+                ..default()
+            },
+            TextColor(Color::WHITE),
+            Transform::from_xyz(4.0, -2.0, 9.7),
+        ));
+    });
+    let unlock_msg = spawn_ui_text(
+        &mut commands,
+        &font,
+        "",
+        DIALOG_X + 28.0,
+        DIALOG_Y + 225.0,
+        12.0,
+        Color::srgb(1.0, 0.6, 0.4),
+        9.6,
+    );
+    commands.entity(unlock_msg).insert((
+        StorageUnlockMsg,
+        DialogRoot(DialogKind::Storage),
+        StorageUnlockPanel,
+    ));
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        206,
+        207,
+        208,
+        DIALOG_X + 100.0,
+        DIALOG_Y + 255.0,
+        9.7,
+        70.0,
+        23.0,
+    ) {
+        commands.entity(e).insert((
+            StorageUnlockOk,
+            DialogRoot(DialogKind::Storage),
+            StorageUnlockPanel,
+        ));
+    }
+    let _ = spawn_ui_text(
+        &mut commands,
+        &font,
+        "确定",
+        DIALOG_X + 115.0,
+        DIALOG_Y + 259.0,
+        12.0,
+        Color::WHITE,
+        9.8,
+    );
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Title,
+        210,
+        211,
+        212,
+        DIALOG_X + 188.0,
+        DIALOG_Y + 255.0,
+        9.7,
+        70.0,
+        23.0,
+    ) {
+        commands.entity(e).insert((
+            StorageUnlockCancel,
+            DialogRoot(DialogKind::Storage),
+            StorageUnlockPanel,
+        ));
+    }
+    let _ = spawn_ui_text(
+        &mut commands,
+        &font,
+        "取消",
+        DIALOG_X + 203.0,
+        DIALOG_Y + 259.0,
+        12.0,
+        Color::WHITE,
+        9.8,
+    );
+
     // 格子底板（80 格，10x8）+ 物品图标 + 堆叠数量（#90 通用 ItemCell）
     for i in 0..(COLS * ROWS) {
         let x = i % COLS;
@@ -450,6 +606,25 @@ fn storage_server_events(
                 _ => "仓库密码操作失败".to_string(),
             };
         }
+        if let ServerEvent::StoragePrompt = ev {
+            // #200：NPCStorage —— 有密码的仓库先弹解锁框（C# StorageDialog.Show → PromptStorageUnlock）
+            storage.unlock_panel = true;
+            storage.unlock_msg.clear();
+        }
+        if let ServerEvent::StorageUnlockResult { result, has_password } = ev {
+            // C# result：0=成功 1=格式错 2=密码错 3=不可用 4=无密码直接解锁
+            let _ = has_password;
+            match *result {
+                0 | 4 => {
+                    storage.unlock_panel = false;
+                    storage.unlock_msg.clear();
+                }
+                1 => storage.unlock_msg = "仓库密码格式不正确".to_string(),
+                2 => storage.unlock_msg = "仓库密码错误".to_string(),
+                3 => storage.unlock_msg = "无法使用仓库".to_string(),
+                _ => storage.unlock_msg = "仓库解锁失败".to_string(),
+            }
+        }
     }
 }
 
@@ -542,6 +717,48 @@ fn storage_pwd_system(
     for btn in &close_btn {
         if btn.clicked && open {
             storage.pwd_panel = false;
+            input.active = None;
+        }
+    }
+}
+
+/// 仓库解锁面板：输入密码 → C.UnlockStorage；取消关闭（#200，C# PromptStorageUnlock）
+fn storage_unlock_system(
+    mut storage: ResMut<StorageState>,
+    net: Res<NetConnection>,
+    mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
+    ok_btn: Query<&UiButton, With<StorageUnlockOk>>,
+    cancel_btn: Query<&UiButton, With<StorageUnlockCancel>>,
+    mut panel: Query<&mut Visibility, With<StorageUnlockPanel>>,
+    mut msg: Query<&mut Text2d, With<StorageUnlockMsg>>,
+) {
+    let open = storage.unlock_panel;
+    for mut vis in &mut panel {
+        *vis = if open { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for mut t in &mut msg {
+        if t.0 != storage.unlock_msg {
+            t.0 = storage.unlock_msg.clone();
+        }
+    }
+    if open && input.texts.len() < 3 {
+        input.texts.resize(3, String::new());
+    }
+    for btn in &ok_btn {
+        if btn.clicked && open {
+            let password = input.texts.get(2).cloned().unwrap_or_default();
+            net.send_packet(&mir2_shared::packets::client::storage::UnlockStorage { password });
+            tracing::info!("🔓 发送仓库解锁请求");
+            if let Some(t) = input.texts.get_mut(2) {
+                t.clear();
+            }
+            input.active = None;
+        }
+    }
+    for btn in &cancel_btn {
+        if btn.clicked && open {
+            storage.unlock_panel = false;
+            storage.unlock_msg.clear();
             input.active = None;
         }
     }

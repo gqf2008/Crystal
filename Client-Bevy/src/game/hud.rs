@@ -896,7 +896,9 @@ fn hud_server_events(
             | ServerEvent::NpcInputRequest { .. }
             | ServerEvent::CreatureAcquired { .. }
             | ServerEvent::CreatureRenameEnabled { .. }
-            | ServerEvent::CreaturePickupToggled { .. } => {}
+            | ServerEvent::CreaturePickupToggled { .. }
+            | ServerEvent::StorageUnlockResult { .. }
+            | ServerEvent::StoragePrompt => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);

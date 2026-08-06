@@ -28,7 +28,7 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::UserStorage as i16, ServerPacketIds::GuildStatus as i16, ServerPacketIds::GuildStorageList as i16, ServerPacketIds::NPCMarket as i16, ServerPacketIds::NPCMarketPage as i16, ServerPacketIds::ConsignItem as i16, ServerPacketIds::MarketSuccess as i16, ServerPacketIds::MarketFail as i16, ServerPacketIds::GameShopInfo as i16, ServerPacketIds::GameShopStock as i16, ServerPacketIds::GuildTerritoryPage as i16, ServerPacketIds::GuildRequestWar as i16, ServerPacketIds::StoragePasswordResult as i16, ServerPacketIds::GuildExpGain as i16, ServerPacketIds::GuildNameRequest as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::UserStorage as i16, ServerPacketIds::GuildStatus as i16, ServerPacketIds::GuildStorageList as i16, ServerPacketIds::NPCMarket as i16, ServerPacketIds::NPCMarketPage as i16, ServerPacketIds::ConsignItem as i16, ServerPacketIds::MarketSuccess as i16, ServerPacketIds::MarketFail as i16, ServerPacketIds::GameShopInfo as i16, ServerPacketIds::GameShopStock as i16, ServerPacketIds::GuildTerritoryPage as i16, ServerPacketIds::GuildRequestWar as i16, ServerPacketIds::StoragePasswordResult as i16, ServerPacketIds::StorageUnlockResult as i16, ServerPacketIds::NPCStorage as i16, ServerPacketIds::GuildExpGain as i16, ServerPacketIds::GuildNameRequest as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // #270：行会经验/行会名请求
@@ -68,6 +68,23 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
             if let Ok(p) = storage::StoragePasswordResult::read_body(&mut cur) {
                 server_events.write(ServerEvent::StoragePasswordResult { result: p.result });
                 tracing::info!("🔒 仓库密码结果: {}", p.result);
+            }
+        }
+        // #200：仓库解锁结果（0=成功 1=格式错 2=密码错 3=不可用 4=无密码）
+        x if x == ServerPacketIds::StorageUnlockResult as i16 => {
+            if let Ok(p) = storage::StorageUnlockResult::read_body(&mut cur) {
+                server_events.write(ServerEvent::StorageUnlockResult {
+                    result: p.result,
+                    has_password: p.has_password,
+                });
+                tracing::info!("🔓 仓库解锁结果: {} (has_pwd={})", p.result, p.has_password);
+            }
+        }
+        // #200：NPCStorage —— 仓库对话框打开信号（有密码时先弹解锁框）
+        x if x == ServerPacketIds::NPCStorage as i16 => {
+            if let Ok(_p) = npc::NPCStorage::read_body(&mut cur) {
+                server_events.write(ServerEvent::StoragePrompt);
+                tracing::info!("🏬 仓库对话框信号（解锁/打开）");
             }
         }
         // ---- M27: 行会 ----

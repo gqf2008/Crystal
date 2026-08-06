@@ -382,7 +382,7 @@ pub struct ValidateStoragePasswordRequest {
 }
 
 impl Message<ValidateStoragePasswordRequest> for AccountActor {
-    type Reply = ();
+    type Reply = bool;
 
     async fn handle(
         &mut self,
@@ -404,6 +404,8 @@ impl Message<ValidateStoragePasswordRequest> for AccountActor {
                 ),
             }).await;
         }
+        // #200：校验成功（0=成功 / 4=无密码直接解锁）→ GateActor 通知 WorldActor 下发仓库
+        result == 0 || result == 4
     }
 }
 

@@ -25,6 +25,10 @@ pub enum ServerEvent {
     ObjectColourChanged { object_id: u32, name_colour_argb: i32 },
     /// StoragePasswordResult：仓库密码设置/移除结果（C# result：4=成功 2=当前密码错误 5=未设置）
     StoragePasswordResult { result: u8 },
+    /// #200 StorageUnlockResult：仓库解锁结果（C# S.StorageUnlockResult；0=成功 1=格式错 2=密码错 3=不可用 4=无密码）
+    StorageUnlockResult { result: u8, has_password: bool },
+    /// #200 NPCStorage：仓库对话框打开信号（有密码时客户端先弹解锁框，C# S.NPCStorage）
+    StoragePrompt,
     /// LogOutSuccess：登出成功，返回选角
     LogOutSuccess,
     /// ChangeAMode：攻击模式确认（C# S.ChangeAMode）

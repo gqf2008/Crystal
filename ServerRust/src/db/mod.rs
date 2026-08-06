@@ -814,6 +814,16 @@ pub async fn list_character_summaries(pool: &DbPool, account_username: &str) -> 
     }).collect())
 }
 
+/// #200：账号是否设置了仓库密码（仓库解锁门）
+pub async fn account_has_storage_password(pool: &DbPool, username: &str) -> anyhow::Result<bool> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT storage_password_hash FROM accounts WHERE username = ?")
+            .bind(username)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.and_then(|r| r.0).is_some_and(|h| !h.is_empty()))
+}
+
 pub async fn load_account(pool: &DbPool, username: &str) -> anyhow::Result<Option<AccountInfo>> {
     let row = sqlx::query(
         "SELECT username, password_hash, is_online,

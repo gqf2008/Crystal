@@ -585,7 +585,14 @@ impl Message<ClientData> for GateActor {
 
             // ===== PR #1169: Warehouse password (client -> server) =====
             x if x == ClientPacketIds::UnlockStorage as i16 => {
-                forward_unlock_storage(&self.account_ref, &self.session_usernames, msg.session_id, payload);
+                forward_unlock_storage(
+                    &self.account_ref,
+                    &self.world_ref,
+                    &self.session_usernames,
+                    msg.session_id,
+                    payload,
+                )
+                .await;
             }
             x if x == ClientPacketIds::SetStoragePassword as i16 => {
                 forward_set_storage_password(&self.account_ref, &self.session_usernames, msg.session_id, payload);
@@ -1636,8 +1643,9 @@ fn forward_change_password(
 // ============================================================================
 
 /// UnlockStorage: [password: DotNetString]
-fn forward_unlock_storage(
+async fn forward_unlock_storage(
     account_ref: &Option<ActorRef<crate::actors::account::AccountActor>>,
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
     session_usernames: &HashMap<SessionId, String>,
     session_id: SessionId,
     payload: &[u8],
@@ -1645,17 +1653,39 @@ fn forward_unlock_storage(
     let password = parse_dotnet_string(payload);
     if let Some(username) = session_usernames.get(&session_id) {
         if let Some(account_ref) = account_ref {
-            debug!("UnlockStorage: session={} user={} pwd_len={}", session_id, username, password.len());
-            let _ = account_ref.tell(crate::actors::account::ValidateStoragePasswordRequest {
+            debug!(
+                "UnlockStorage: session={} user={} pwd_len={}",
                 session_id,
-                username: username.clone(),
-                raw_password: password,
-            }).try_send();
+                username,
+                password.len()
+            );
+            // #200：校验成功 → 通知 WorldActor 下发仓库内容（C# Player.SendStorage）
+            let ok = account_ref
+                .ask(crate::actors::account::ValidateStoragePasswordRequest {
+                    session_id,
+                    username: username.clone(),
+                    raw_password: password,
+                })
+                .await
+                .unwrap_or(false);
+            if ok {
+                if let Some(world_ref) = world_ref {
+                    let _ = world_ref
+                        .tell(crate::actors::world::StorageUnlockedRequest { session_id })
+                        .try_send();
+                }
+            }
         } else {
-            warn!("UnlockStorage: account_ref not available for session={}", session_id);
+            warn!(
+                "UnlockStorage: account_ref not available for session={}",
+                session_id
+            );
         }
     } else {
-        warn!("UnlockStorage: no username mapping for session={}", session_id);
+        warn!(
+            "UnlockStorage: no username mapping for session={}",
+            session_id
+        );
     }
 }
 
