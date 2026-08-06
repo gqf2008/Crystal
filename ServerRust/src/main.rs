@@ -109,6 +109,7 @@ async fn async_main() -> anyhow::Result<()> {
         wedding_ring_recall_enabled: cfg.social.wedding_ring_recall_enabled,
         guild_required_level: cfg.social.guild_required_level,
         newbie_guild: cfg.social.newbie_guild.clone(),
+        allow_new_character: cfg.social.allow_new_character,
         guild_war_cost: cfg.social.guild_war_cost,
         guild_war_time: cfg.social.guild_war_time,
     };
