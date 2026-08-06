@@ -171,8 +171,8 @@ pub fn chat_tab_name(tab: ChatChannel) -> &'static str {
 /// 聊天状态（网络 handler 写入，显示系统读取）
 #[derive(Resource)]
 pub struct ChatState {
-    /// (文本, 颜色, 频道) 历史，最新在末尾
-    pub lines: VecDeque<(String, Color, ChatChannel)>,
+    /// (文本, 颜色, 频道, 物品链接 uid) 历史，最新在末尾；uid=None 表示无物品链接（#287）
+    pub lines: VecDeque<(String, Color, ChatChannel, Option<u64>)>,
     /// 当前页签
     pub tab: ChatChannel,
     /// 输入框激活
@@ -203,7 +203,25 @@ impl Default for ChatState {
 
 impl ChatState {
     pub fn add_line(&mut self, text: impl Into<String>, color: Color, channel: ChatChannel) {
-        self.lines.push_back((text.into(), color, channel));
+        self.lines.push_back((text.into(), color, channel, None));
+        while self.lines.len() > 200 {
+            self.lines.pop_front();
+        }
+        // 新消息到达时回到最新（若已在最新位置）
+        let max_scroll = self.lines.len().saturating_sub(self.visible_lines);
+        self.scroll_up = self.scroll_up.min(max_scroll);
+    }
+
+    /// #287：带物品链接的行（uid 供点击 tooltip）
+    pub fn add_item_line(
+        &mut self,
+        text: impl Into<String>,
+        color: Color,
+        channel: ChatChannel,
+        uid: u64,
+    ) {
+        self.lines
+            .push_back((text.into(), color, channel, Some(uid)));
         while self.lines.len() > 200 {
             self.lines.pop_front();
         }
@@ -277,6 +295,7 @@ impl Plugin for ChatPlugin {
                 chat_display_system,
                 chat_server_events,
                 chat_item_cache_events,
+                chat_item_click_system,
             )
                 .run_if(in_state(AppState::Game)),
         );
@@ -742,8 +761,8 @@ fn chat_display_system(
     let mut visible: Vec<(String, Color)> = chat
         .lines
         .iter()
-        .filter(|(_, _, ch)| chat.tab == ChatChannel::All || *ch == chat.tab)
-        .map(|(m, c, _)| (m.clone(), *c))
+        .filter(|(_, _, ch, _)| chat.tab == ChatChannel::All || *ch == chat.tab)
+        .map(|(m, c, _, _)| (m.clone(), *c))
         .collect();
     // #126 历史回看：从滚动起始行显示
     let start = visible
@@ -844,12 +863,17 @@ fn chat_server_events(
             if filter.get(chat_filter_kind(*chat_type)) {
                 continue;
             }
-            let mut color = chat_color(*chat_type);
-            // #285：含物品链接 `%名字#uid%` 的行用蓝色（C# ChatLink 蓝色链接）
-            if has_item_link(text) {
-                color = Color::srgb(0.3, 0.6, 1.0);
+            // #285/#287：含物品链接 `%名字#uid%` 的行用蓝色并记录 uid（C# ChatLink）
+            if let Some(uid) = first_item_uid(text) {
+                chat.add_item_line(
+                    text.clone(),
+                    Color::srgb(0.3, 0.6, 1.0),
+                    chat_channel(*chat_type),
+                    uid,
+                );
+            } else {
+                chat.add_line(text.clone(), chat_color(*chat_type), chat_channel(*chat_type));
             }
-            chat.add_line(text.clone(), color, chat_channel(*chat_type));
         }
         if let ServerEvent::ServerMessage { message, .. } = ev {
             // #258：服务端输出消息（系统提示）
@@ -892,6 +916,14 @@ mod tests {
     }
 
     #[test]
+    fn parse_item_link_uid() {
+        assert_eq!(first_item_uid("看看 [%金创药(小)#9005%] 这个"), Some(9005));
+        assert_eq!(first_item_uid("没有链接的消息"), None);
+        assert_eq!(first_item_uid("%名字#abc%"), None);
+        assert_eq!(first_item_uid("前文 %a#1% 后文 %b#2%"), Some(1));
+    }
+
+    #[test]
     fn filter_get_set() {
         let mut f = ChatFilter::default();
         assert!(!f.get(ChatFilterKind::Guild));
@@ -906,22 +938,26 @@ pub struct ChatItemCache {
     pub items: std::collections::HashMap<u64, crate::game::dialogs::inventory::InvItem>,
 }
 
-/// 消息是否含 C# 聊天物品链接 `%名字#uid%`
-fn has_item_link(text: &str) -> bool {
+/// 解析消息中第一个 C# 聊天物品链接 `%名字#uid%` 的 uid
+fn first_item_uid(text: &str) -> Option<u64> {
     let bytes = text.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' {
             if let Some(rel) = text[i + 1..].find('%') {
                 let inner = &text[i + 1..i + 1 + rel];
-                if inner.contains('#') {
-                    return true;
+                if let Some(hash) = inner.rfind('#') {
+                    if let Ok(uid) = inner[hash + 1..].trim().parse::<u64>() {
+                        return Some(uid);
+                    }
                 }
+                i += rel + 2;
+                continue;
             }
         }
         i += 1;
     }
-    false
+    None
 }
 
 /// #285：消费 ServerEvent::ChatItemReceived → 写入 ChatItemCache
@@ -935,5 +971,70 @@ fn chat_item_cache_events(
             cache.items.insert(item.unique_id, item.clone());
             tracing::info!("💬 聊天物品缓存: {} (uid={})", item.name, item.unique_id);
         }
+    }
+}
+
+/// #287：点击聊天行（含物品链接）→ 显示物品 tooltip（C# CreateItemLabel 对齐）；
+/// 未缓存则发 C.RequestChatItem 供下次解析
+fn chat_item_click_system(
+    chat: Res<ChatState>,
+    cache: Res<ChatItemCache>,
+    net: Res<NetConnection>,
+    mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+) {
+    if !mouse.just_pressed(MouseButton::Left) {
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+    // 聊天面板区域（panel_x=6, panel_y=428，行高 16，首行 y=panel_y+20）
+    const PANEL_X: f32 = 6.0;
+    const PANEL_Y: f32 = 428.0;
+    const LINE_H: f32 = 16.0;
+    if cursor.x < PANEL_X
+        || cursor.x > PANEL_X + 360.0
+        || cursor.y < PANEL_Y + 20.0
+        || cursor.y > PANEL_Y + 20.0 + chat.visible_lines as f32 * LINE_H
+    {
+        return;
+    }
+    // 可见行 uid 列表（与 chat_display_system 一致）
+    let visible: Vec<Option<u64>> = chat
+        .lines
+        .iter()
+        .filter(|(_, _, ch, _)| chat.tab == ChatChannel::All || *ch == chat.tab)
+        .map(|(_, _, _, uid)| *uid)
+        .collect();
+    let start = visible
+        .len()
+        .saturating_sub(chat.visible_lines)
+        .saturating_sub(chat.scroll_up);
+    let row = ((cursor.y - (PANEL_Y + 20.0)) / LINE_H) as usize;
+    let Some(uid) = visible.get(start + row).copied().flatten() else {
+        return;
+    };
+    if let Some(item) = cache.items.get(&uid) {
+        let mut lines = Vec::new();
+        if item.count > 1 {
+            lines.push(format!("数量: {}", item.count));
+        }
+        lines.push(format!(
+            "类型: {}",
+            crate::game::dialogs::inventory::item_type_name(item.item_type)
+        ));
+        if item.is_equipment() {
+            lines.push(format!("耐久: {}/{}", item.current_dura, item.max_dura));
+        }
+        tooltip.update(2, true, item.name.clone(), lines, cursor.x, cursor.y);
+        tracing::info!("💬 点击聊天物品: {} (uid={})", item.name, uid);
+    } else {
+        net.send_packet(&mir2_shared::packets::client::misc::RequestChatItem {
+            chat_item_id: uid,
+        });
+        tracing::info!("💬 聊天物品 uid={} 未缓存，已请求", uid);
     }
 }

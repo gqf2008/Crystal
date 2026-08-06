@@ -2710,10 +2710,10 @@ fn auto_fishing_test(
                 .iter()
                 .rev()
                 .take(30)
-                .find(|(text, _, _)| {
+                .find(|(text, _, _, _)| {
                     text.contains("钓到了") || text.contains("鱼跑了") || text.contains("需要装备鱼竿")
                 })
-                .map(|(text, _, _)| text.clone());
+                .map(|(text, _, _, _)| text.clone());
             match hit {
                 Some(text) => {
                     tracing::info!("[FISHTEST] ✅ 收获消息: {}", text);
@@ -2750,7 +2750,7 @@ fn auto_refine_test(
     *t += time.delta_secs();
     // 聊天辅助：最近 60 条里找子串
     fn chat_has(chat: &client_bevy::game::chat::ChatState, needle: &str) -> bool {
-        chat.lines.iter().rev().take(60).any(|(t, _, _)| t.contains(needle))
+        chat.lines.iter().rev().take(60).any(|(t, _, _, _)| t.contains(needle))
     }
     match *stage {
         0 => {
@@ -2876,7 +2876,7 @@ fn auto_craft_test(
     }
     *t += time.delta_secs();
     fn chat_has(chat: &client_bevy::game::chat::ChatState, needle: &str) -> bool {
-        chat.lines.iter().rev().take(60).any(|(t, _, _)| t.contains(needle))
+        chat.lines.iter().rev().take(60).any(|(t, _, _, _)| t.contains(needle))
     }
     match *stage {
         0 => {
@@ -3253,7 +3253,7 @@ fn auto_report_test(
     }
     *t += time.delta_secs();
     fn chat_has(chat: &client_bevy::game::chat::ChatState, needle: &str) -> bool {
-        chat.lines.iter().rev().take(60).any(|(t, _, _)| t.contains(needle))
+        chat.lines.iter().rev().take(60).any(|(t, _, _, _)| t.contains(needle))
     }
     match *stage {
         0 => {
@@ -4963,7 +4963,7 @@ fn real_verify_system(
                 );
                 tracing::info!("[REAL] 💬 发送聊天（服务器不回显自己属设计，本地回显已修复）");
             }
-            if chat.lines.iter().any(|(l, _, _)| l.contains("真实服务器验证")) && !s.chat_echo {
+            if chat.lines.iter().any(|(l, _, _, _)| l.contains("真实服务器验证")) && !s.chat_echo {
                 s.chat_echo = true;
                 tracing::info!("[REAL] ✅ 聊天本地回显收到（显示链路通过）");
             }
@@ -7550,7 +7550,7 @@ fn auto_upgrade_test(
                 let msg = chat
                     .lines
                     .iter()
-                    .any(|(text, _, _)| text.contains("测试服务端消息"));
+                    .any(|(text, _, _, _)| text.contains("测试服务端消息"));
                 tracing::info!("[UPG] 升级={} 技能移除={} 消息={}", upgraded, removed, msg);
                 if upgraded && removed && msg {
                     tracing::info!("[UPG] ✅ 合成/升级/技能删除/服务端消息通过");
