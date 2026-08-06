@@ -34,7 +34,7 @@
 use super::*;
 use crate::actors::player::{
     AddExperience, AddGold, AddItemToInventory, ChangeClass, CheckQuestState, DeductGold,
-    GetPlayerState, HasItem, HasItemSpace, RemoveItemByIndexWithDura, SetHair, SetPlayerPosition,
+    GetPlayerState, HasItem, RemoveItemByIndexWithDura, SetHair, SetPlayerPosition,
     SetPlayerState,
 };
 use mir2_shared::enums::MirClass;
@@ -971,8 +971,13 @@ async fn eval_one_check(
             let cnt = player.group_id.map(|_| 1i64).unwrap_or(0);
             compare_i64(cnt, op, amount)
         }
-        // HASBAGSPACE
-        "HASBAGSPACE" => has_item_space(world, session_id).await,
+        // HASBAGSPACE <op> <count> — 背包空格数比较（对齐 C# CheckType.HasBagSpace：
+        // 统计空槽数，按 op 与 count 比较；无参/缺参时按 >= 0 恒真，等价 C# 缺参丢弃检查）
+        "HASBAGSPACE" => {
+            let (op, want) = parse_op_amount(args);
+            let empty = player.inventory.backpack.iter().filter(|s| s.is_none()).count() as i64;
+            compare_i64(empty, op, want)
+        },
         _ => {
             debug!("NPC check '{}' not implemented, treating as PASS", c.check_type);
             true
@@ -2553,18 +2558,6 @@ async fn has_item(world: &WorldActor, session_id: u64, item_index: i32, count: u
         record
             .actor_ref
             .ask(HasItem { item_index, count })
-            .await
-            .unwrap_or(false)
-    } else {
-        false
-    }
-}
-
-async fn has_item_space(world: &WorldActor, session_id: u64) -> bool {
-    if let Some(record) = world.players.get(&session_id) {
-        record
-            .actor_ref
-            .ask(HasItemSpace)
             .await
             .unwrap_or(false)
     } else {
