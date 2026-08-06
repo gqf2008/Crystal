@@ -1414,6 +1414,19 @@ impl Message<TakeBackItemRequest> for WorldActor {
     }
 }
 
+/// 合成失败响应（S.CraftItem { recipe_id, 0, false } + 系统消息）
+async fn send_craft_fail(gate_ref: &kameo::actor::ActorRef<crate::gate::actor::GateActor>, session_id: u64, recipe_id: u32, reason: &str) {
+    send_system_message(gate_ref, session_id, reason);
+    let mut body = Vec::new();
+    body.extend_from_slice(&recipe_id.to_le_bytes());
+    body.extend_from_slice(&0u16.to_le_bytes());
+    body.push(0u8);
+    let _ = gate_ref.tell(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CraftItem as i16, &body),
+    }).await;
+}
+
 impl Message<CraftItemRequest> for WorldActor {
     type Reply = ();
 
@@ -1427,9 +1440,8 @@ impl Message<CraftItemRequest> for WorldActor {
             _ => return,
         };
 
-        // 查找配方
-        let recipes = get_craft_recipes();
-        let recipe = match recipes.iter().find(|r| r.recipe_id == msg.recipe_id) {
+        // 查找配方（DB recipes 表，对齐 C# RecipeInfo）
+        let recipe = match self.recipe_infos.iter().find(|r| r.recipe_id == msg.recipe_id as i32) {
             Some(r) => r.clone(),
             None => {
                 send_system_message(&self.gate_ref, msg.session_id, "未知配方");
@@ -1445,17 +1457,55 @@ impl Message<CraftItemRequest> for WorldActor {
             }
         };
 
+        // 等级/性别/职业/任务/flag 需求（C# RecipeInfo 需求）
+        if let Some(req_level) = recipe.required_level {
+            if (state.level as u16) < req_level {
+                send_craft_fail(&self.gate_ref, msg.session_id, msg.recipe_id, "等级不足").await;
+                return;
+            }
+        }
+        if let Some(req_gender) = recipe.required_gender {
+            if state.gender as u8 != req_gender {
+                send_craft_fail(&self.gate_ref, msg.session_id, msg.recipe_id, "性别不符合要求").await;
+                return;
+            }
+        }
+        if !recipe.required_classes.is_empty() && !recipe.required_classes.contains(&(state.class as u8)) {
+            send_craft_fail(&self.gate_ref, msg.session_id, msg.recipe_id, "职业不符合要求").await;
+            return;
+        }
+        for q in &recipe.required_quests {
+            if !state.quest_log.completed_indices.contains(q) {
+                send_craft_fail(&self.gate_ref, msg.session_id, msg.recipe_id, "任务未完成").await;
+                return;
+            }
+        }
+        for f in &recipe.required_flags {
+            if state.flags.get(&format!("NPC_FLAG_{}", f)).copied().unwrap_or(0) < 1 {
+                send_craft_fail(&self.gate_ref, msg.session_id, msg.recipe_id, "条件未满足").await;
+                return;
+            }
+        }
+        // 工具检查（不消耗）
+        for tool in &recipe.tools {
+            let has = record.actor_ref.ask(crate::actors::player::HasItem { item_index: *tool, count: 1 }).await.unwrap_or(false);
+            if !has {
+                send_craft_fail(&self.gate_ref, msg.session_id, msg.recipe_id, "缺少工具").await;
+                return;
+            }
+        }
+        // 金币费用
+        if recipe.gold_cost > 0 {
+            if state.inventory.gold < recipe.gold_cost as u64 {
+                send_craft_fail(&self.gate_ref, msg.session_id, msg.recipe_id, "金币不足").await;
+                return;
+            }
+            let _ = record.actor_ref.ask(crate::actors::player::DeductGold { amount: recipe.gold_cost as u64 }).await;
+        }
+
         // 检查背包空间
         if !state.inventory.has_space() {
-            send_system_message(&self.gate_ref, msg.session_id, "背包已满");
-            let mut body = Vec::new();
-            body.extend_from_slice(&msg.recipe_id.to_le_bytes());
-            body.extend_from_slice(&0u16.to_le_bytes());
-            body.push(0u8);
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: msg.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::CraftItem as i16, &body),
-            }).await;
+            send_craft_fail(&self.gate_ref, msg.session_id, msg.recipe_id, "背包已满").await;
             return;
         }
 
@@ -1488,15 +1538,15 @@ impl Message<CraftItemRequest> for WorldActor {
         }
 
         // 成功率判定
-        let success = fastrand::u8(0..100) < recipe.success_rate;
+        let success = fastrand::u8(0..100) < recipe.chance;
 
         if success {
             let mut item = mir2_shared::data::item::UserItem {
-                item_index: recipe.product_index,
+                item_index: recipe.product_item_index,
                 count: recipe.product_count,
                 ..Default::default()
             };
-            if let Some(info) = self.item_infos.get(&recipe.product_index) {
+            if let Some(info) = self.item_infos.get(&recipe.product_item_index) {
                 item.max_dura = info.durability as u16;
                 item.current_dura = info.durability as u16;
             }

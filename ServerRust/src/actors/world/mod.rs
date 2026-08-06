@@ -3169,23 +3169,6 @@ fn default_conquest_instances() -> Vec<conquest::ConquestInstance> {
         .collect()
 }
 
-/// 合成材料
-#[derive(Debug, Clone)]
-pub struct CraftIngredient {
-    pub item_index: i32,
-    pub count: u16,
-}
-
-/// 合成配方
-#[derive(Debug, Clone)]
-pub struct CraftRecipe {
-    pub recipe_id: u32,
-    pub product_index: i32,
-    pub product_count: u16,
-    pub success_rate: u8,
-    pub ingredients: Vec<CraftIngredient>,
-}
-
 /// 市场搜索缓存
 #[derive(Debug, Clone)]
 pub(crate) struct MarketSearchCache {
@@ -3629,44 +3612,6 @@ impl Message<PlayerLeveled> for WorldActor {
     }
 }
 
-
-/// 硬编码合成配方表（后续可从 DB 加载）
-fn get_craft_recipes() -> Vec<CraftRecipe> {
-    vec![
-        // recipe_id 1: 铁剑 = 木材 x3 + 铁矿石 x2, 80%
-        CraftRecipe {
-            recipe_id: 1,
-            product_index: 100,
-            product_count: 1,
-            success_rate: 80,
-            ingredients: vec![
-                CraftIngredient { item_index: 1, count: 3 },
-                CraftIngredient { item_index: 2, count: 2 },
-            ],
-        },
-        // recipe_id 2: 治疗药水 = 草药 x2 + 清水 x1, 95%
-        CraftRecipe {
-            recipe_id: 2,
-            product_index: 101,
-            product_count: 1,
-            success_rate: 95,
-            ingredients: vec![
-                CraftIngredient { item_index: 3, count: 2 },
-                CraftIngredient { item_index: 4, count: 1 },
-            ],
-        },
-        // recipe_id 3: 强化石 = 铁矿石 x5, 60%
-        CraftRecipe {
-            recipe_id: 3,
-            product_index: 102,
-            product_count: 1,
-            success_rate: 60,
-            ingredients: vec![
-                CraftIngredient { item_index: 2, count: 5 },
-            ],
-        },
-    ]
-}
 
 // ============================================================
 // 辅助函数
