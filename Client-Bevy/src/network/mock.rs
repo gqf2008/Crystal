@@ -696,6 +696,14 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 remove: false,
                                             },
                                         );
+                                        // #254：小队成员位置
+                                        send(
+                                            &to_client,
+                                            &server::group::SendMemberLocation {
+                                                member_name: "队友A".to_string(),
+                                                location: mir2_shared::Point { x: 356, y: 350 },
+                                            },
+                                        );
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
                                             send(
