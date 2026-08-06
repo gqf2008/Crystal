@@ -1,7 +1,7 @@
 //! Layer 2: AI与决策层 (200-299)
-//! 
+//!
 //! 所有系统都实现 System trait
-//! 
+//!
 //! 优先级顺序：
 //! - MonsterAISystem(200) - 怪物AI
 //! - NpcAISystem(210) - NPC AI  

@@ -2,14 +2,14 @@
 //!
 //! This module contains buff/status effect-related packet definitions and parsers.
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::{
-    enums::{BuffType, PoisonType, ServerPacketIds},
-    binary::{read_dotnet_string, write_dotnet_string},
-};
 use super::super::base::Packet;
 use crate::data::stats::{SharedResult, Stats};
+use crate::{
+    binary::{read_dotnet_string, write_dotnet_string},
+    enums::{BuffType, PoisonType, ServerPacketIds},
+};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 // ClientBuff 结构体
 #[derive(Debug, Clone)]
@@ -42,7 +42,7 @@ impl Packet for AddBuff {
         let infinite = reader.read_u8()? != 0;
         let paused = reader.read_u8()? != 0;
         let stats = Stats::read_from(reader)?;
-        
+
         let values_count = reader.read_i32::<LittleEndian>()? as usize;
         let mut values = Vec::with_capacity(values_count);
         for _ in 0..values_count {
@@ -71,7 +71,7 @@ impl Packet for AddBuff {
         writer.write_u8(if self.buff.infinite { 1 } else { 0 })?;
         writer.write_u8(if self.buff.paused { 1 } else { 0 })?;
         self.buff.stats.write_to(writer)?;
-        
+
         writer.write_i32::<LittleEndian>(self.buff.values.len() as i32)?;
         for value in &self.buff.values {
             writer.write_i32::<LittleEndian>(*value)?;
@@ -92,7 +92,10 @@ impl Packet for RemoveBuff {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let buff_type = BuffType::try_from(reader.read_u8()?)?;
         let object_id = reader.read_u32::<LittleEndian>()?;
-        Ok(Self { buff_type, object_id })
+        Ok(Self {
+            buff_type,
+            object_id,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -116,7 +119,11 @@ impl Packet for PauseBuff {
         let buff_type = BuffType::try_from(reader.read_u8()?)?;
         let object_id = reader.read_u32::<LittleEndian>()?;
         let paused = reader.read_u8()? != 0;
-        Ok(Self { buff_type, object_id, paused })
+        Ok(Self {
+            buff_type,
+            object_id,
+            paused,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -158,7 +165,10 @@ impl Packet for ObjectColourChanged {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let object_id = reader.read_u32::<LittleEndian>()?;
         let name_colour_argb = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { object_id, name_colour_argb })
+        Ok(Self {
+            object_id,
+            name_colour_argb,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -180,7 +190,10 @@ impl Packet for ObjectGuildNameChanged {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let object_id = reader.read_u32::<LittleEndian>()?;
         let guild_name = read_dotnet_string(reader)?;
-        Ok(Self { object_id, guild_name })
+        Ok(Self {
+            object_id,
+            guild_name,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {

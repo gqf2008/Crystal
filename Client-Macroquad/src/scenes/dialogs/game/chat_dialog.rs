@@ -8,15 +8,16 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
+use super::native_ui_utils::DragHelper;
+use super::ChatOptionSettingsHybrid;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::{draw_text_cn, measure_text_cn};
 use crate::utils::ime::{set_ime_enabled, set_ime_position};
-use super::ChatOptionSettingsHybrid;
-use super::native_ui_utils::DragHelper;
+use macroquad::prelude::*;
 
 /// 全局聊天发送桥接：ChatDialog 设置此标志，ui_system 消费并发送网络事件。
-static PENDING_CHAT_MESSAGE: std::sync::OnceLock<std::sync::Mutex<Option<String>>> = std::sync::OnceLock::new();
+static PENDING_CHAT_MESSAGE: std::sync::OnceLock<std::sync::Mutex<Option<String>>> =
+    std::sync::OnceLock::new();
 
 fn pending_chat() -> &'static std::sync::Mutex<Option<String>> {
     PENDING_CHAT_MESSAGE.get_or_init(|| std::sync::Mutex::new(None))
@@ -53,23 +54,45 @@ impl ChatMessage {
     fn draw_with_markup(&self, tokens: &[MarkupToken], y: f32, font_size: f32, mouse_pos: Vec2) {
         for token in tokens {
             match token {
-                MarkupToken::ItemLink { name, x_start, x_end } => {
+                MarkupToken::ItemLink {
+                    name,
+                    x_start,
+                    x_end,
+                } => {
                     let item_color = Color::from_rgba(150, 100, 255, 255);
                     draw_text_cn(name, *x_start, y, font_size, item_color);
                     draw_line(*x_start, y + 1.0, *x_end, y + 1.0, 1.0, item_color);
-                    let item_rect = Rect::new(*x_start, y - font_size + 2.0, x_end - x_start, font_size);
+                    let item_rect =
+                        Rect::new(*x_start, y - font_size + 2.0, x_end - x_start, font_size);
                     if item_rect.contains(mouse_pos) {
-                        draw_rectangle(*x_start, y - font_size + 2.0, x_end - x_start, font_size, Color::from_rgba(150, 100, 255, 40));
+                        draw_rectangle(
+                            *x_start,
+                            y - font_size + 2.0,
+                            x_end - x_start,
+                            font_size,
+                            Color::from_rgba(150, 100, 255, 40),
+                        );
                     }
                 }
-                MarkupToken::CoordLink { coord, x_start, x_end } => {
+                MarkupToken::CoordLink {
+                    coord,
+                    x_start,
+                    x_end,
+                } => {
                     let coord_color = Color::from_rgba(100, 255, 100, 255);
                     let display = format!("[{}]", coord);
                     draw_text_cn(&display, *x_start, y, font_size, coord_color);
                     draw_line(*x_start, y + 1.0, *x_end, y + 1.0, 1.0, coord_color);
-                    let coord_rect = Rect::new(*x_start, y - font_size + 2.0, x_end - x_start, font_size);
+                    let coord_rect =
+                        Rect::new(*x_start, y - font_size + 2.0, x_end - x_start, font_size);
                     if coord_rect.contains(mouse_pos) {
-                        draw_rectangle(*x_start, y - font_size + 2.0, x_end - x_start, font_size, Color::from_rgba(100, 255, 100, 40));
+                        draw_rectangle(
+                            *x_start,
+                            y - font_size + 2.0,
+                            x_end - x_start,
+                            font_size,
+                            Color::from_rgba(100, 255, 100, 40),
+                        );
                     }
                 }
                 MarkupToken::Text { text, x_start, .. } => {
@@ -83,21 +106,48 @@ impl ChatMessage {
     }
 
     /// 检查点击是否命中了消息中的特殊标记
-    fn hit_test_markup(&self, tokens: &[MarkupToken], text_y: f32, font_size: f32, mouse_pos: Vec2) -> Option<ChatLink> {
+    fn hit_test_markup(
+        &self,
+        tokens: &[MarkupToken],
+        text_y: f32,
+        font_size: f32,
+        mouse_pos: Vec2,
+    ) -> Option<ChatLink> {
         for token in tokens {
             match token {
-                MarkupToken::ItemLink { name, x_start, x_end } => {
-                    let item_rect = Rect::new(*x_start, text_y - font_size + 2.0, x_end - x_start, font_size);
+                MarkupToken::ItemLink {
+                    name,
+                    x_start,
+                    x_end,
+                } => {
+                    let item_rect = Rect::new(
+                        *x_start,
+                        text_y - font_size + 2.0,
+                        x_end - x_start,
+                        font_size,
+                    );
                     if item_rect.contains(mouse_pos) {
                         return Some(ChatLink::Item(name.clone()));
                     }
                 }
-                MarkupToken::CoordLink { coord, x_start, x_end } => {
-                    let coord_rect = Rect::new(*x_start, text_y - font_size + 2.0, x_end - x_start, font_size);
+                MarkupToken::CoordLink {
+                    coord,
+                    x_start,
+                    x_end,
+                } => {
+                    let coord_rect = Rect::new(
+                        *x_start,
+                        text_y - font_size + 2.0,
+                        x_end - x_start,
+                        font_size,
+                    );
                     if coord_rect.contains(mouse_pos) {
                         let parts: Vec<&str> = coord.split(',').collect();
                         if parts.len() == 2 {
-                            if let (Ok(x), Ok(y)) = (parts[0].trim().parse::<f32>(), parts[1].trim().parse::<f32>()) {
+                            if let (Ok(x), Ok(y)) = (
+                                parts[0].trim().parse::<f32>(),
+                                parts[1].trim().parse::<f32>(),
+                            ) {
                                 return Some(ChatLink::Coord(x, y));
                             }
                         }
@@ -122,10 +172,26 @@ pub enum ChatLink {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 enum MarkupToken {
-    Text { text: String, x_start: f32, x_end: f32 },
-    ItemLink { name: String, x_start: f32, x_end: f32 },
-    CoordLink { coord: String, x_start: f32, x_end: f32 },
-    Emoji { char: &'static str, x_start: f32, x_end: f32 },
+    Text {
+        text: String,
+        x_start: f32,
+        x_end: f32,
+    },
+    ItemLink {
+        name: String,
+        x_start: f32,
+        x_end: f32,
+    },
+    CoordLink {
+        coord: String,
+        x_start: f32,
+        x_end: f32,
+    },
+    Emoji {
+        char: &'static str,
+        x_start: f32,
+        x_end: f32,
+    },
 }
 
 impl ChatMessage {
@@ -150,28 +216,53 @@ impl ChatMessage {
 
                 if found_close {
                     if tag_content.starts_with("物品:") || tag_content.starts_with("Item:") {
-                        let name = tag_content.split_once(':').map(|x| x.1).unwrap_or("").to_string();
+                        let name = tag_content
+                            .split_once(':')
+                            .map(|x| x.1)
+                            .unwrap_or("")
+                            .to_string();
                         let w = measure_text_cn(&name, font_size).width;
-                        tokens.push(MarkupToken::ItemLink { name, x_start: cursor_x, x_end: cursor_x + w });
+                        tokens.push(MarkupToken::ItemLink {
+                            name,
+                            x_start: cursor_x,
+                            x_end: cursor_x + w,
+                        });
                         cursor_x += w;
                         continue;
-                    } else if tag_content.starts_with("坐标:") || tag_content.starts_with("Coord:") {
-                        let coord = tag_content.split_once(':').map(|x| x.1).unwrap_or("").to_string();
+                    } else if tag_content.starts_with("坐标:") || tag_content.starts_with("Coord:")
+                    {
+                        let coord = tag_content
+                            .split_once(':')
+                            .map(|x| x.1)
+                            .unwrap_or("")
+                            .to_string();
                         let display = format!("[{}]", coord);
                         let w = measure_text_cn(&display, font_size).width;
-                        tokens.push(MarkupToken::CoordLink { coord, x_start: cursor_x, x_end: cursor_x + w });
+                        tokens.push(MarkupToken::CoordLink {
+                            coord,
+                            x_start: cursor_x,
+                            x_end: cursor_x + w,
+                        });
                         cursor_x += w;
                         continue;
                     } else {
                         let full_tag = format!("[{}]", tag_content);
                         let w = measure_text_cn(&full_tag, font_size).width;
-                        tokens.push(MarkupToken::Text { text: full_tag, x_start: cursor_x, x_end: cursor_x + w });
+                        tokens.push(MarkupToken::Text {
+                            text: full_tag,
+                            x_start: cursor_x,
+                            x_end: cursor_x + w,
+                        });
                         cursor_x += w;
                         continue;
                     }
                 } else {
                     let w = measure_text_cn("[", font_size).width;
-                    tokens.push(MarkupToken::Text { text: "[".to_string(), x_start: cursor_x, x_end: cursor_x + w });
+                    tokens.push(MarkupToken::Text {
+                        text: "[".to_string(),
+                        x_start: cursor_x,
+                        x_end: cursor_x + w,
+                    });
                     cursor_x += w;
                     continue;
                 }
@@ -197,23 +288,39 @@ impl ChatMessage {
                 if found_close && !emoji_name.is_empty() {
                     let emoji = emoji_to_char(&emoji_name);
                     let w = measure_text_cn(emoji, font_size).width;
-                    tokens.push(MarkupToken::Emoji { char: emoji, x_start: cursor_x, x_end: cursor_x + w });
+                    tokens.push(MarkupToken::Emoji {
+                        char: emoji,
+                        x_start: cursor_x,
+                        x_end: cursor_x + w,
+                    });
                     cursor_x += w;
                     for c in temp_chars {
                         let s = c.to_string();
                         let w = measure_text_cn(&s, font_size).width;
-                        tokens.push(MarkupToken::Text { text: s, x_start: cursor_x, x_end: cursor_x + w });
+                        tokens.push(MarkupToken::Text {
+                            text: s,
+                            x_start: cursor_x,
+                            x_end: cursor_x + w,
+                        });
                         cursor_x += w;
                     }
                     continue;
                 } else {
                     let w = measure_text_cn(":", font_size).width;
-                    tokens.push(MarkupToken::Text { text: ":".to_string(), x_start: cursor_x, x_end: cursor_x + w });
+                    tokens.push(MarkupToken::Text {
+                        text: ":".to_string(),
+                        x_start: cursor_x,
+                        x_end: cursor_x + w,
+                    });
                     cursor_x += w;
                     for c in temp_chars {
                         let s = c.to_string();
                         let w = measure_text_cn(&s, font_size).width;
-                        tokens.push(MarkupToken::Text { text: s, x_start: cursor_x, x_end: cursor_x + w });
+                        tokens.push(MarkupToken::Text {
+                            text: s,
+                            x_start: cursor_x,
+                            x_end: cursor_x + w,
+                        });
                         cursor_x += w;
                     }
                     continue;
@@ -222,7 +329,11 @@ impl ChatMessage {
 
             let s = ch.to_string();
             let w = measure_text_cn(&s, font_size).width;
-            tokens.push(MarkupToken::Text { text: s, x_start: cursor_x, x_end: cursor_x + w });
+            tokens.push(MarkupToken::Text {
+                text: s,
+                x_start: cursor_x,
+                x_end: cursor_x + w,
+            });
             cursor_x += w;
         }
 
@@ -530,7 +641,13 @@ impl ChatDialogHybrid {
             (1, _) => 2224,
             (2, 0) => 2207,
             (2, _) => 2227,
-            _ => if self.resolution_index == 0 { 2201 } else { 2221 },
+            _ => {
+                if self.resolution_index == 0 {
+                    2201
+                } else {
+                    2221
+                }
+            }
         };
 
         if let Some(texture) = LibraryName::Prguse.get_texture(bg_index) {
@@ -543,13 +660,16 @@ impl ChatDialogHybrid {
     }
 
     /// 异步加载纹理
-    pub  fn load_textures(&mut self) {
+    pub fn load_textures(&mut self) {
         // 预加载聊天窗口纹理
         for idx in [2201, 2204, 2207, 2221, 2224, 2227] {
             let _ = LibraryName::Prguse.get_texture(idx);
         }
         // 预加载滚动条纹理
-        for idx in [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028, 2029] {
+        for idx in [
+            2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025,
+            2026, 2027, 2028, 2029,
+        ] {
             let _ = LibraryName::Prguse.get_texture(idx);
         }
     }
@@ -613,7 +733,13 @@ impl ChatDialogHybrid {
             (1, _) => 2224,
             (2, 0) => 2207,
             (2, _) => 2227,
-            _ => if self.resolution_index == 0 { 2201 } else { 2221 },
+            _ => {
+                if self.resolution_index == 0 {
+                    2201
+                } else {
+                    2221
+                }
+            }
         };
 
         if let Some(texture) = LibraryName::Prguse.get_texture(bg_index) {
@@ -669,7 +795,11 @@ impl ChatDialogHybrid {
             );
 
             // 消息区域白色背景
-            let msg_width = if self.resolution_index == 0 { 380.0 } else { 600.0 };
+            let msg_width = if self.resolution_index == 0 {
+                380.0
+            } else {
+                600.0
+            };
             let msg_height = (self.line_count as f32 * 10.0) + 4.0;
             draw_rectangle(
                 self.position.x + 5.0,
@@ -684,7 +814,11 @@ impl ChatDialogHybrid {
             );
         } else {
             // 降级
-            let default_width = if self.resolution_index == 0 { 403.0 } else { 627.0 };
+            let default_width = if self.resolution_index == 0 {
+                403.0
+            } else {
+                627.0
+            };
             draw_rectangle(
                 self.position.x,
                 self.position.y,
@@ -706,7 +840,11 @@ impl ChatDialogHybrid {
         let line_height = 14.0;
         let font_size = 12.0;
 
-        let msg_width = if self.resolution_index == 0 { 380.0 } else { 600.0 };
+        let msg_width = if self.resolution_index == 0 {
+            380.0
+        } else {
+            600.0
+        };
 
         let visible_indices = self.visible_message_indices();
         let visible_count = visible_indices.len();
@@ -726,7 +864,12 @@ impl ChatDialogHybrid {
             msg.draw_with_markup(&tokens, y, font_size, mouse_pos);
 
             if is_mouse_button_pressed(MouseButton::Left) {
-                let line_rect = Rect::new(msg_x, msg_y + (i as f32 * line_height), msg_width, line_height);
+                let line_rect = Rect::new(
+                    msg_x,
+                    msg_y + (i as f32 * line_height),
+                    msg_width,
+                    line_height,
+                );
                 if line_rect.contains(mouse_pos) {
                     if let Some(link) = msg.hit_test_markup(&tokens, y, font_size, mouse_pos) {
                         clicked_link = Some(link);
@@ -752,10 +895,16 @@ impl ChatDialogHybrid {
                 if line_i >= 0 && (line_i as usize) < self.line_count {
                     let row = start_row + line_i as usize;
                     if row < visible_count {
-                        let line_rect = Rect::new(msg_x, msg_y + (line_i as f32 * line_height), msg_width, line_height);
+                        let line_rect = Rect::new(
+                            msg_x,
+                            msg_y + (line_i as f32 * line_height),
+                            msg_width,
+                            line_height,
+                        );
                         if line_rect.contains(mouse_pos) {
                             let msg_idx = visible_indices[row];
-                            let name_part: String = self.messages[msg_idx].text
+                            let name_part: String = self.messages[msg_idx]
+                                .text
                                 .split([':', ' '])
                                 .next()
                                 .unwrap_or("")
@@ -775,7 +924,11 @@ impl ChatDialogHybrid {
 
     /// 绘制滚动条按钮
     fn draw_scroll_buttons(&mut self, mouse_pos: Vec2) {
-        let scroll_x = if self.resolution_index == 0 { 394.0 } else { 618.0 };
+        let scroll_x = if self.resolution_index == 0 {
+            394.0
+        } else {
+            618.0
+        };
 
         let visible_count = self.cached_visible_indices.len();
         let max_start = self.max_scroll_start_for_visible_count(visible_count);
@@ -788,9 +941,10 @@ impl ChatDialogHybrid {
 
         // Up 按钮
         if self.draw_scroll_button(mouse_pos, scroll_x, 9.0, 2021, 2022, 2023)
-            && self.scroll_offset > 0 {
-                self.scroll_offset -= 1;
-            }
+            && self.scroll_offset > 0
+        {
+            self.scroll_offset -= 1;
+        }
 
         // Down 按钮
         let down_y = match self.window_size {
@@ -815,8 +969,16 @@ impl ChatDialogHybrid {
         }
 
         // CountBar / PositionBar（对齐 C#：CountBar at (622/398,16)，PositionBar at (619/395,16+offset)）
-        let count_x = if self.resolution_index == 0 { 398.0 } else { 622.0 };
-        let pos_x = if self.resolution_index == 0 { 395.0 } else { 619.0 };
+        let count_x = if self.resolution_index == 0 {
+            398.0
+        } else {
+            622.0
+        };
+        let pos_x = if self.resolution_index == 0 {
+            395.0
+        } else {
+            619.0
+        };
         let bar_y = 16.0;
 
         if let Some(ref count_tex) = self.count_bar_texture {
@@ -829,8 +991,7 @@ impl ChatDialogHybrid {
             );
 
             let count_h = count_tex.height();
-            let (pos_w, pos_h) = self
-                .position_bar_textures[0]
+            let (pos_w, pos_h) = self.position_bar_textures[0]
                 .as_ref()
                 .map(|t| (t.width(), t.height()))
                 .unwrap_or((12.0, 12.0));
@@ -869,7 +1030,11 @@ impl ChatDialogHybrid {
                     let positions = max_start + 1;
                     if positions > 1 {
                         let h = (count_h - pos_h).max(0.0);
-                        let step = if h > 0.0 { h / (positions as f32 - 1.0) } else { 1.0 };
+                        let step = if h > 0.0 {
+                            h / (positions as f32 - 1.0)
+                        } else {
+                            1.0
+                        };
                         let idx = ((self.position_bar_y - bar_y) / step).floor() as i32;
                         let idx = idx.clamp(0, max_start as i32);
                         self.scroll_offset = idx as usize;
@@ -881,9 +1046,13 @@ impl ChatDialogHybrid {
 
             // 绘制 PositionBar
             let tex = if pressed {
-                self.position_bar_textures[2].as_ref().or(self.position_bar_textures[0].as_ref())
+                self.position_bar_textures[2]
+                    .as_ref()
+                    .or(self.position_bar_textures[0].as_ref())
             } else if hovered {
-                self.position_bar_textures[1].as_ref().or(self.position_bar_textures[0].as_ref())
+                self.position_bar_textures[1]
+                    .as_ref()
+                    .or(self.position_bar_textures[0].as_ref())
             } else {
                 self.position_bar_textures[0].as_ref()
             };
@@ -899,7 +1068,11 @@ impl ChatDialogHybrid {
         }
 
         // 处理鼠标滚轮
-        let msg_width = if self.resolution_index == 0 { 380.0 } else { 600.0 };
+        let msg_width = if self.resolution_index == 0 {
+            380.0
+        } else {
+            600.0
+        };
         let msg_height = (self.line_count as f32 * 10.0) + 4.0;
         let msg_rect = Rect::new(
             self.position.x + 5.0,
@@ -932,7 +1105,12 @@ impl ChatDialogHybrid {
         let button_pos = vec2(self.position.x + x, self.position.y + y);
 
         if let Some(texture) = LibraryName::Prguse.get_texture(normal_idx) {
-            let button_rect = Rect::new(button_pos.x, button_pos.y, texture.width as f32, texture.height as f32);
+            let button_rect = Rect::new(
+                button_pos.x,
+                button_pos.y,
+                texture.width as f32,
+                texture.height as f32,
+            );
             let is_hovered = button_rect.contains(mouse_pos);
             let is_pressed = is_hovered && is_mouse_button_down(MouseButton::Left);
 
@@ -970,7 +1148,11 @@ impl ChatDialogHybrid {
             2 => 54.0 + 96.0,
             _ => 54.0,
         };
-        let input_width = if self.resolution_index == 0 { 403.0 } else { 627.0 };
+        let input_width = if self.resolution_index == 0 {
+            403.0
+        } else {
+            627.0
+        };
         let input_height = 13.0;
 
         let input_rect = Rect::new(
@@ -1030,12 +1212,14 @@ impl ChatDialogHybrid {
                 let ime_y = ((input_rect.y + input_rect.h + 2.0) * dpi) as i32;
                 set_ime_position(ime_x, ime_y);
             }
-        } else if !input_rect.contains(mouse_pos) && is_mouse_button_pressed(MouseButton::Left)
-            && self.input_active {
-                self.input_active = false;
-                // 禁用 IME 输入法（用于游戏控制）
-                set_ime_enabled(false);
-            }
+        } else if !input_rect.contains(mouse_pos)
+            && is_mouse_button_pressed(MouseButton::Left)
+            && self.input_active
+        {
+            self.input_active = false;
+            // 禁用 IME 输入法（用于游戏控制）
+            set_ime_enabled(false);
+        }
 
         // 处理键盘输入（支持中文）
         if self.input_active {
@@ -1045,7 +1229,7 @@ impl ChatDialogHybrid {
             let ime_x = (cursor_x * dpi) as i32;
             let ime_y = ((input_rect.y + input_rect.h + 2.0) * dpi) as i32;
             set_ime_position(ime_x, ime_y);
-            
+
             // 获取输入的字符（支持中文和其他Unicode字符）
             // 注意：macroquad 的 get_char_pressed() 在同一帧内可能以"后进先出"顺序吐出多个字符，
             // 这会导致 IME 一次性提交的文本显示为倒序。这里先收集后再反向追加，保证显示顺序正确。
@@ -1058,7 +1242,7 @@ impl ChatDialogHybrid {
             for ch in pending_chars.into_iter().rev() {
                 self.input_text.push(ch);
             }
-            
+
             // Ctrl+V 粘贴（支持中文输入的备用方案）
             if (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl))
                 && is_key_pressed(KeyCode::V)
@@ -1072,7 +1256,7 @@ impl ChatDialogHybrid {
                     }
                 }
             }
-            
+
             // Enter 发送消息
             if is_key_pressed(KeyCode::Enter) && !self.input_text.is_empty() {
                 let message = self.input_text.clone();

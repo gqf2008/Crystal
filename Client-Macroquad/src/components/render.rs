@@ -7,17 +7,16 @@ use std::time::Instant;
 /// 渲染层级 (用于排序)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RenderLayer {
-    Ground = 0,      // 地面层
-    GroundItem = 1,  // 地面物品
-    Shadow = 2,      // 阴影
-    Object = 3,      // 游戏对象 (玩家/怪物/NPC)
-    Effect = 4,      // 特效 (技能/爆炸)
-    UI = 5,          // UI元素
+    Ground = 0,     // 地面层
+    GroundItem = 1, // 地面物品
+    Shadow = 2,     // 阴影
+    Object = 3,     // 游戏对象 (玩家/怪物/NPC)
+    Effect = 4,     // 特效 (技能/爆炸)
+    UI = 5,         // UI元素
 }
 
 /// 渲染阶段参数（用于多次渲染 pass，例如遮挡后的 ghost pass）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RenderStage {
     /// 正常渲染（位于地图 Middle 与 Front 之间的对象/特效）
     #[default]
@@ -27,7 +26,6 @@ pub enum RenderStage {
     /// UI 渲染（默认相机下的覆盖层 UI；必须在世界渲染完成后执行）
     Ui,
 }
-
 
 /// 渲染阶段参数（用于多次渲染 pass，例如遮挡后的 ghost pass）
 #[derive(Debug, Clone, Copy)]
@@ -110,8 +108,7 @@ impl RenderOrder {
 }
 
 /// 相机模式 - 控制相机行为
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CameraMode {
     /// 跟随玩家模式 - CameraFollowSystem 自动更新相机位置
     #[default]
@@ -121,7 +118,6 @@ pub enum CameraMode {
     /// 固定模式 - 相机位置固定，不响应任何输入
     Fixed,
 }
-
 
 /// 相机组件 - 视口控制
 #[derive(Debug, Clone)]
@@ -149,18 +145,18 @@ pub struct RenderConfig {
     pub show_front: bool,
     pub show_grid: bool,
     pub show_obstacles: bool,
-    pub show_animations: bool,        // 是否播放动画
-    pub show_static_tiles: bool,      // 是否显示静态瓦片
-    pub show_animated_tiles: bool,    // 是否显示动画瓦片
+    pub show_animations: bool,     // 是否播放动画
+    pub show_static_tiles: bool,   // 是否显示静态瓦片
+    pub show_animated_tiles: bool, // 是否显示动画瓦片
     pub show_borders: bool,
-    pub show_npc_borders: bool,      // NPC边框调试
-    pub show_monster_borders: bool,  // Monster边框调试
-    pub show_effect_borders: bool,   // 特效边框调试
+    pub show_npc_borders: bool,     // NPC边框调试
+    pub show_monster_borders: bool, // Monster边框调试
+    pub show_effect_borders: bool,  // 特效边框调试
     pub show_path: bool,
-    pub show_player_debug: bool,     // 玩家调试信息（位置、速度等）
+    pub show_player_debug: bool, // 玩家调试信息（位置、速度等）
     pub max_fps: u32,
     pub enable_lod: bool,
-    pub enable_camera_drag: bool,    // 是否允许鼠标拖拽相机（地图查看器专用）
+    pub enable_camera_drag: bool, // 是否允许鼠标拖拽相机（地图查看器专用）
 }
 
 impl Default for RenderConfig {
@@ -172,17 +168,17 @@ impl Default for RenderConfig {
             show_grid: false,
             show_obstacles: false,
             show_animations: true,
-            show_static_tiles: true,      // 默认显示静态瓦片
-            show_animated_tiles: true,    // 默认显示动画瓦片
+            show_static_tiles: true,   // 默认显示静态瓦片
+            show_animated_tiles: true, // 默认显示动画瓦片
             show_borders: false,
             show_npc_borders: false,
             show_monster_borders: false,
             show_effect_borders: false,
             show_path: false,
-            show_player_debug: false,     // 默认不显示玩家调试信息
+            show_player_debug: false, // 默认不显示玩家调试信息
             max_fps: 120,
             enable_lod: false,
-            enable_camera_drag: false,  // 默认禁用（正常游戏不需要）
+            enable_camera_drag: false, // 默认禁用（正常游戏不需要）
         }
     }
 }

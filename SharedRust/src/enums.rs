@@ -1088,11 +1088,11 @@ pub enum Monster {
     Leopard = 358,
     ChieftainArcher = 359,
     ChieftainSword = 360,
-    StoningSpider = 361,  // Archer Spell mob
-    VampireSpider = 362,  // Archer Spell mob
-    SpittingToad = 363,   // Archer Spell mob
-    SnakeTotem = 364,     // Archer Spell mob
-    CharmedSnake = 365,   // Archer Spell mob
+    StoningSpider = 361, // Archer Spell mob
+    VampireSpider = 362, // Archer Spell mob
+    SpittingToad = 363,  // Archer Spell mob
+    SnakeTotem = 364,    // Archer Spell mob
+    CharmedSnake = 365,  // Archer Spell mob
     FrozenSoldier = 366,
     FrozenFighter = 367, // AI 44
     FrozenArcher = 368,  // AI 8
@@ -2671,7 +2671,10 @@ mod tests {
         // authored from a different snapshot of the C# data). The
         // round-trip property (raw -> enum -> raw) is what we test now.
         assert_eq!(BuffType::MagicShield as u8, u8::from(BuffType::MagicShield));
-        assert_eq!(BuffType::HornedArcherBuff as u8, u8::from(BuffType::HornedArcherBuff));
+        assert_eq!(
+            BuffType::HornedArcherBuff as u8,
+            u8::from(BuffType::HornedArcherBuff)
+        );
         assert_eq!(BuffType::Impact as u8, u8::from(BuffType::Impact));
         // Sanity: keep an absolute reference to the Rust values so
         // future re-numbering does not silently break network calls.
@@ -2763,8 +2766,7 @@ mod tests {
 // ==================== Phase 1.2 Additional Types ====================
 
 /// Color represented as ARGB (Alpha, Red, Green, Blue)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Color {
     pub argb: i32,
 }
@@ -2796,12 +2798,10 @@ impl Color {
 
     pub fn new(alpha: u8, red: u8, green: u8, blue: u8) -> Self {
         Color {
-            argb: ((alpha as i32) << 24) | ((red as i32) << 16) | ((green as i32) << 8) | (blue as i32),
+            argb: ((alpha as i32) << 24)
+                | ((red as i32) << 16)
+                | ((green as i32) << 8)
+                | (blue as i32),
         }
     }
 }
-
-
-
-
-

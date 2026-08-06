@@ -49,7 +49,7 @@ impl MovementVelocity {
             run_speed: DEFAULT_RUN_SPEED,
         }
     }
-    
+
     /// 创建带自定义速度的移动组件
     pub fn with_speeds(max_speed: f32, walk_speed: f32, run_speed: f32) -> Self {
         Self {
@@ -60,17 +60,17 @@ impl MovementVelocity {
             run_speed,
         }
     }
-    
+
     pub fn set(&mut self, x: f32, y: f32) {
         self.x = x;
         self.y = y;
         self.clamp();
     }
-    
+
     pub fn magnitude(&self) -> f32 {
         (self.x * self.x + self.y * self.y).sqrt()
     }
-    
+
     pub fn clamp(&mut self) {
         let mag = self.magnitude();
         if mag > self.max_speed {
@@ -79,7 +79,7 @@ impl MovementVelocity {
             self.y *= scale;
         }
     }
-    
+
     pub fn stop(&mut self) {
         self.x = 0.0;
         self.y = 0.0;
@@ -111,13 +111,13 @@ impl Path {
             is_valid: false,
         }
     }
-    
+
     pub fn set_path(&mut self, waypoints: Vec<(i32, i32)>) {
         self.waypoints = waypoints;
         self.current_index = 0;
         self.is_valid = !self.waypoints.is_empty();
     }
-    
+
     pub fn current_waypoint(&self) -> Option<(i32, i32)> {
         if self.current_index < self.waypoints.len() {
             Some(self.waypoints[self.current_index])
@@ -125,7 +125,7 @@ impl Path {
             None
         }
     }
-    
+
     pub fn advance(&mut self) -> bool {
         if self.current_index < self.waypoints.len() - 1 {
             self.current_index += 1;
@@ -135,13 +135,13 @@ impl Path {
             false
         }
     }
-    
+
     pub fn clear(&mut self) {
         self.waypoints.clear();
         self.current_index = 0;
         self.is_valid = false;
     }
-    
+
     pub fn is_complete(&self) -> bool {
         !self.is_valid || self.current_index >= self.waypoints.len()
     }
@@ -177,14 +177,14 @@ impl Movement {
             last_change_time: Instant::now(),
         }
     }
-    
+
     pub fn set_state(&mut self, state: MovementState) {
         if self.state != state {
             self.state = state;
             self.last_change_time = Instant::now();
         }
     }
-    
+
     pub fn is_moving(&self) -> bool {
         matches!(self.state, MovementState::Walking | MovementState::Running)
     }

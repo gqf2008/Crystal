@@ -4,7 +4,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use client_macroquad::scenes::dialogs::game::MainDialog;
-use client_macroquad::ui::text_renderer::{init_chinese_font, draw_text_cn, measure_text_cn};
+use client_macroquad::ui::text_renderer::{draw_text_cn, init_chinese_font, measure_text_cn};
 use macroquad::prelude::*;
 
 fn window_conf() -> Conf {
@@ -23,17 +23,17 @@ async fn main() {
     println!("🎮 传奇2 - MainDialog 测试（纯 Hybrid 版本）");
     println!("📐 窗口尺寸: {}x{}", screen_width(), screen_height());
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
+
     // 初始化中文字体（重要！）
     println!("🔤 正在加载中文字体...");
     init_chinese_font().await;
-    
+
     // 创建 MainDialog（内部自动创建所有子对话框）
     let mut main_dialog = MainDialog::new();
-    
+
     // 加载原生UI纹理
     main_dialog.load_native_textures();
-    
+
     println!("✅ MainDialog 及所有子对话框已创建（纯 Hybrid 模式）");
     println!("💡 提示:");
     println!("   - 点击底部按钮打开各种对话框（背包、角色、技能、任务、选项、菜单、商城）");
@@ -48,7 +48,7 @@ async fn main() {
 
     loop {
         let _frame_start = get_time();
-        
+
         clear_background(Color::from_rgba(60, 80, 100, 255));
 
         // 绘制背景提示
@@ -73,14 +73,18 @@ async fn main() {
         let current_time = get_time();
         let delta_time = (current_time - last_time) as f32;
         last_time = current_time;
-        
+
         frame_times.push(delta_time);
         if frame_times.len() > 60 {
             frame_times.remove(0);
         }
-        
+
         let avg_frame_time: f32 = frame_times.iter().sum::<f32>() / frame_times.len() as f32;
-        let fps = if avg_frame_time > 0.0 { 1.0 / avg_frame_time } else { 0.0 };
+        let fps = if avg_frame_time > 0.0 {
+            1.0 / avg_frame_time
+        } else {
+            0.0
+        };
         let frame_time_ms = avg_frame_time * 1000.0;
 
         // 绘制性能信息（左上角）
@@ -88,18 +92,24 @@ async fn main() {
             "FPS: {:.1}  帧时间: {:.2}ms  (纯 Hybrid 模式)",
             fps, frame_time_ms
         );
-        draw_text_cn(&perf_text, 10.0, 25.0, 20.0, Color::from_rgba(0, 255, 0, 255));
+        draw_text_cn(
+            &perf_text,
+            10.0,
+            25.0,
+            20.0,
+            Color::from_rgba(0, 255, 0, 255),
+        );
 
         // 键盘快捷键处理（仅在没有输入框激活时）
         if !main_dialog.is_any_input_active() {
             if is_key_pressed(KeyCode::M) {
                 main_dialog.toggle_minimap();
             }
-            
+
             if is_key_pressed(KeyCode::Tab) {
                 main_dialog.toggle_minimap_size();
             }
-            
+
             // ESC 退出（仅在没有输入框激活时）
             if is_key_pressed(KeyCode::Escape) {
                 println!("👋 退出测试");

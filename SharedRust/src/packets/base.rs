@@ -22,16 +22,16 @@ impl PacketHeader {
     pub fn read_from<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let length = reader.read_u16::<LittleEndian>()?;
         let opcode = reader.read_i16::<LittleEndian>()?;
-        
+
         // 🔒 安全检查: 验证包头的合理性
         // 包长度必须至少等于包头大小(4字节)
         if (length as usize) < Self::HEADER_SIZE {
             return Err(SharedError::InvalidPacketLength(length));
         }
-        
+
         // 包长度不应超过64KB(u16最大值,但实际游戏包应该更小)
         // 注: u16 天然上限 65535，此检查已省略（编译器优化）
-        
+
         Ok(Self { length, opcode })
     }
 
@@ -53,10 +53,7 @@ pub trait Packet: Sized {
     }
 }
 
-pub fn serialize_packet<W: Write, P: Packet>(
-    writer: &mut W,
-    packet: &P,
-) -> SharedResult<()> {
+pub fn serialize_packet<W: Write, P: Packet>(writer: &mut W, packet: &P) -> SharedResult<()> {
     let mut buffer = Vec::new();
     packet.write_body(&mut buffer)?;
     let body = if P::is_compressed() {
@@ -96,20 +93,33 @@ pub fn deserialize_packet<R: Read, P: Packet>(reader: &mut R) -> SharedResult<P>
     let body_len = match (header.length as usize).checked_sub(PacketHeader::HEADER_SIZE) {
         Some(len) => len,
         None => {
-            eprintln!("❌ ERROR: header.length={} < HEADER_SIZE={}", header.length, PacketHeader::HEADER_SIZE);
+            eprintln!(
+                "❌ ERROR: header.length={} < HEADER_SIZE={}",
+                header.length,
+                PacketHeader::HEADER_SIZE
+            );
             return Err(SharedError::InvalidPacketLength(header.length));
         }
     };
-    
+
     // 🔒 安全检查: 防止巨量内存分配 (51GB 崩溃修复)
     const MAX_BODY_SIZE: usize = 1024 * 1024; // 1MB 上限
     if body_len > MAX_BODY_SIZE {
-        eprintln!("❌ FATAL: body_len={} exceeds MAX_BODY_SIZE={}", body_len, MAX_BODY_SIZE);
-        eprintln!("   header.length={}, opcode={}", header.length, header.opcode);
+        eprintln!(
+            "❌ FATAL: body_len={} exceeds MAX_BODY_SIZE={}",
+            body_len, MAX_BODY_SIZE
+        );
+        eprintln!(
+            "   header.length={}, opcode={}",
+            header.length, header.opcode
+        );
         return Err(SharedError::PacketTooLarge(body_len));
     }
-    
-    eprintln!("DEBUG: Allocating body vec of {} bytes (opcode={})", body_len, header.opcode);
+
+    eprintln!(
+        "DEBUG: Allocating body vec of {} bytes (opcode={})",
+        body_len, header.opcode
+    );
     let mut body = vec![0u8; body_len];
     reader.read_exact(&mut body)?;
     let payload = if P::is_compressed() {
@@ -284,10 +294,8 @@ mod tests {
     // Real-world protocol packet roundtrip tests
     // ============================================================
 
-    use crate::packets::server::{
-        Chat as ServerChat, ObjectRemove, PlayerUpdate, HealthChanged,
-    };
     use crate::packets::client::Chat as ClientChat;
+    use crate::packets::server::{Chat as ServerChat, HealthChanged, ObjectRemove, PlayerUpdate};
 
     #[test]
     fn roundtrip_chat_server() -> SharedResult<()> {
@@ -319,9 +327,7 @@ mod tests {
 
     #[test]
     fn roundtrip_object_remove() -> SharedResult<()> {
-        let packet = ObjectRemove {
-            object_id: 12345,
-        };
+        let packet = ObjectRemove { object_id: 12345 };
         let mut bytes = Vec::new();
         serialize_packet(&mut bytes, &packet)?;
         let mut cursor = Cursor::new(bytes);
@@ -353,10 +359,7 @@ mod tests {
 
     #[test]
     fn roundtrip_health_changed() -> SharedResult<()> {
-        let packet = HealthChanged {
-            hp: 500,
-            mp: 200,
-        };
+        let packet = HealthChanged { hp: 500, mp: 200 };
         let mut bytes = Vec::new();
         serialize_packet(&mut bytes, &packet)?;
         let mut cursor = Cursor::new(bytes);
@@ -534,7 +537,8 @@ mod tests {
                 level: 42,
                 class: MirClass::Wizard,
                 gender: MirGender::Female,
-                last_access: chrono::Utc::with_ymd_and_hms(&chrono::Utc, 2024, 1, 15, 10, 30, 0).unwrap(),
+                last_access: chrono::Utc::with_ymd_and_hms(&chrono::Utc, 2024, 1, 15, 10, 30, 0)
+                    .unwrap(),
             },
         };
         let mut bytes = Vec::new();
@@ -571,17 +575,23 @@ mod tests {
 
     #[test]
     fn roundtrip_turn() -> SharedResult<()> {
-        roundtrip(&client::Turn { direction: MirDirection::DownLeft })
+        roundtrip(&client::Turn {
+            direction: MirDirection::DownLeft,
+        })
     }
 
     #[test]
     fn roundtrip_walk() -> SharedResult<()> {
-        roundtrip(&client::Walk { direction: MirDirection::Right })
+        roundtrip(&client::Walk {
+            direction: MirDirection::Right,
+        })
     }
 
     #[test]
     fn roundtrip_run() -> SharedResult<()> {
-        roundtrip(&client::Run { direction: MirDirection::UpRight })
+        roundtrip(&client::Run {
+            direction: MirDirection::UpRight,
+        })
     }
 
     #[test]
@@ -1394,7 +1404,9 @@ mod tests {
 
     #[test]
     fn roundtrip_magic_cast() -> SharedResult<()> {
-        let packet = server::magic_combat::MagicCast { spell: Spell::FireBall };
+        let packet = server::magic_combat::MagicCast {
+            spell: Spell::FireBall,
+        };
         let mut bytes = Vec::new();
         serialize_packet(&mut bytes, &packet)?;
         let mut cursor = Cursor::new(bytes);

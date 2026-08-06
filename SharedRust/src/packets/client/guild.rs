@@ -1,11 +1,11 @@
 //! Guild System Packets (Client → Server)
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::binary::{read_dotnet_string, write_dotnet_string};
-use crate::enums::ClientPacketIds;
 use super::super::base::Packet;
+use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::data::stats::SharedResult;
+use crate::enums::ClientPacketIds;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// Edit guild member (kick, promote, demote, etc.)
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,8 +24,13 @@ impl Packet for EditGuildMember {
         let rank_index = reader.read_u8()?;
         let name = read_dotnet_string(reader)?;
         let rank_name = read_dotnet_string(reader)?;
-        
-        Ok(Self { change_type, rank_index, name, rank_name })
+
+        Ok(Self {
+            change_type,
+            rank_index,
+            name,
+            rank_name,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -49,21 +54,21 @@ impl Packet for EditGuildNotice {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let line_count = reader.read_i32::<LittleEndian>()? as usize;
         let mut notice_lines = Vec::with_capacity(line_count);
-        
+
         for _ in 0..line_count {
             notice_lines.push(read_dotnet_string(reader)?);
         }
-        
+
         Ok(Self { notice_lines })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_i32::<LittleEndian>(self.notice_lines.len() as i32)?;
-        
+
         for line in &self.notice_lines {
             write_dotnet_string(writer, line)?;
         }
-        
+
         Ok(())
     }
 }
@@ -161,7 +166,10 @@ impl Packet for GuildStorageGoldChange {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let change_type = reader.read_u8()?;
         let amount = reader.read_u32::<LittleEndian>()?;
-        Ok(Self { change_type, amount })
+        Ok(Self {
+            change_type,
+            amount,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -186,7 +194,11 @@ impl Packet for GuildStorageItemChange {
         let change_type = reader.read_u8()?;
         let from_slot = reader.read_i32::<LittleEndian>()?;
         let to_slot = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { change_type, from_slot, to_slot })
+        Ok(Self {
+            change_type,
+            from_slot,
+            to_slot,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {

@@ -1,9 +1,9 @@
 // Friend Handler - 好友协议 → NetworkEvent
 // 负责将服务器发来的好友协议包转换为 NetworkEvent
 
-use mir2_shared::packets::{PacketHeader, Packet, server};
-use mir2_shared::enums::ServerPacketIds;
 use crate::network::handlers::{NetworkEvent, PacketHandler};
+use mir2_shared::enums::ServerPacketIds;
+use mir2_shared::packets::{server, Packet, PacketHeader};
 use std::io::Cursor;
 
 pub struct FriendHandler;
@@ -17,7 +17,8 @@ impl PacketHandler for FriendHandler {
             // FriendUpdate - 好友列表更新（完整列表同步）
             x if x == ServerPacketIds::FriendUpdate as u16 => {
                 if let Ok(packet) = server::FriendUpdate::read_body(&mut cursor) {
-                    let friends: Vec<crate::ui::ui_state::FriendEntry> = packet.friends
+                    let friends: Vec<crate::ui::ui_state::FriendEntry> = packet
+                        .friends
                         .into_iter()
                         .map(|f| crate::ui::ui_state::FriendEntry {
                             object_id: f.object_id,
@@ -32,7 +33,9 @@ impl PacketHandler for FriendHandler {
 
             _ => {
                 tracing::debug!("⚠️ FriendHandler: Unknown opcode {:04X}", header.opcode);
-                events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                events.push(NetworkEvent::UnhandledPacket {
+                    opcode: header.opcode,
+                });
             }
         }
 

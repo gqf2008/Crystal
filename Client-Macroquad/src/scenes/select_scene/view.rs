@@ -42,7 +42,11 @@ impl SelectScene {
 
                 // 计算角色预览帧索引
                 let base_index = if character.class == 4 {
-                    if character.gender == 0 { 100 } else { 140 }
+                    if character.gender == 0 {
+                        100
+                    } else {
+                        140
+                    }
                 } else {
                     20 + (character.class as usize * 20) + (character.gender as usize * 280)
                 };
@@ -109,7 +113,12 @@ impl SelectScene {
 
     /// 绘制角色按钮
     pub(super) fn draw_character_buttons(&mut self) {
-        let positions = [(637.0, 194.0), (637.0, 298.0), (637.0, 402.0), (637.0, 506.0)];
+        let positions = [
+            (637.0, 194.0),
+            (637.0, 298.0),
+            (637.0, 402.0),
+            (637.0, 506.0),
+        ];
         let (mx, my) = mouse_position();
 
         for (i, &(x, y)) in positions.iter().enumerate() {
@@ -133,7 +142,11 @@ impl SelectScene {
                     4 => 664,
                     _ => 660,
                 };
-                let texture_index = if is_selected { base_index + 5 } else { base_index };
+                let texture_index = if is_selected {
+                    base_index + 5
+                } else {
+                    base_index
+                };
 
                 if let Some(info) = LibraryName::Title.get_texture(texture_index) {
                     if let Some(ref texture) = info.image {
@@ -166,9 +179,11 @@ impl SelectScene {
                     && !self.show_delete_character
                     && !self.show_message_box
                     && !self.credits_dialog.is_visible()
-                    && is_hovered && is_mouse_button_pressed(MouseButton::Left) {
-                        self.selected_index = Some(i);
-                    }
+                    && is_hovered
+                    && is_mouse_button_pressed(MouseButton::Left)
+                {
+                    self.selected_index = Some(i);
+                }
             } else {
                 // 空槽位 - Prguse[44]
                 if let Some(info) = LibraryName::Prguse.get_texture(44) {
@@ -182,10 +197,12 @@ impl SelectScene {
                     && !self.show_delete_character
                     && !self.show_message_box
                     && !self.credits_dialog.is_visible()
-                    && is_hovered && is_mouse_button_pressed(MouseButton::Left)
-                        && self.characters.len() < 4 {
-                            self.show_new_character = true;
-                        }
+                    && is_hovered
+                    && is_mouse_button_pressed(MouseButton::Left)
+                    && self.characters.len() < 4
+                {
+                    self.show_new_character = true;
+                }
             }
         }
     }
@@ -211,9 +228,10 @@ impl SelectScene {
                 341,
                 342,
                 !any_dialog,
-            ) {
-                self.request_start_game();
-            }
+            )
+        {
+            self.request_start_game();
+        }
 
         // 新建角色 Title[343-345]
         if draw_button(
@@ -302,10 +320,9 @@ impl SelectScene {
             self.draw_delete_character_dialog();
         }
 
-        if self.show_message_box
-            && draw_mir_message_box_ok(&self.message_text) {
-                self.show_message_box = false;
-            }
+        if self.show_message_box && draw_mir_message_box_ok(&self.message_text) {
+            self.show_message_box = false;
+        }
 
         // Credits 最上层
         if self.credits_dialog.is_visible() {

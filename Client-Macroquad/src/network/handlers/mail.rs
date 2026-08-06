@@ -1,8 +1,8 @@
 // Mail Handler - 邮件系统数据包处理
 
-use mir2_shared::packets::{PacketHeader, Packet, server};
-use mir2_shared::enums::ServerPacketIds;
 use crate::network::handlers::{NetworkEvent, PacketHandler};
+use mir2_shared::enums::ServerPacketIds;
+use mir2_shared::packets::{server, Packet, PacketHeader};
 use std::io::Cursor;
 
 pub struct MailHandler;
@@ -30,14 +30,20 @@ impl PacketHandler for MailHandler {
                         unique_id: packet.unique_id,
                         locked: packet.locked,
                     });
-                    tracing::debug!("🔒 Mail locked item: unique_id={} locked={}", packet.unique_id, packet.locked);
+                    tracing::debug!(
+                        "🔒 Mail locked item: unique_id={} locked={}",
+                        packet.unique_id,
+                        packet.locked
+                    );
                 }
             }
 
             // MailSendRequest
             x if x == ServerPacketIds::MailSendRequest as u16 => {
                 if let Ok(packet) = server::MailSendRequest::read_body(&mut cursor) {
-                    events.push(NetworkEvent::MailSendRequestReceived { mail_id: packet.mail_id });
+                    events.push(NetworkEvent::MailSendRequestReceived {
+                        mail_id: packet.mail_id,
+                    });
                     tracing::debug!("📤 Mail send request received: mail_id={}", packet.mail_id);
                 }
             }
@@ -45,7 +51,9 @@ impl PacketHandler for MailHandler {
             // MailSent
             x if x == ServerPacketIds::MailSent as u16 => {
                 if let Ok(packet) = server::MailSent::read_body(&mut cursor) {
-                    events.push(NetworkEvent::MailSentEvent { result: packet.result });
+                    events.push(NetworkEvent::MailSentEvent {
+                        result: packet.result,
+                    });
                     tracing::debug!("📬 Mail sent result: {}", packet.result);
                 }
             }
@@ -53,7 +61,9 @@ impl PacketHandler for MailHandler {
             // ParcelCollected
             x if x == ServerPacketIds::ParcelCollected as u16 => {
                 if let Ok(packet) = server::ParcelCollected::read_body(&mut cursor) {
-                    events.push(NetworkEvent::ParcelCollectedEvent { result: packet.result });
+                    events.push(NetworkEvent::ParcelCollectedEvent {
+                        result: packet.result,
+                    });
                     tracing::debug!("📦 Parcel collected: result={}", packet.result);
                 }
             }
@@ -61,16 +71,16 @@ impl PacketHandler for MailHandler {
             // MailCost
             x if x == ServerPacketIds::MailCost as u16 => {
                 if let Ok(packet) = server::MailCost::read_body(&mut cursor) {
-                    events.push(NetworkEvent::MailCostReceived {
-                        cost: packet.cost,
-                    });
+                    events.push(NetworkEvent::MailCostReceived { cost: packet.cost });
                     tracing::debug!("💰 Mail cost received: {}", packet.cost);
                 }
             }
 
             _ => {
                 tracing::debug!("⚠️ MailHandler: Unknown opcode {:04X}", header.opcode);
-                events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                events.push(NetworkEvent::UnhandledPacket {
+                    opcode: header.opcode,
+                });
             }
         }
 

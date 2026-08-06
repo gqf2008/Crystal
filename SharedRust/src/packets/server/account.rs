@@ -2,14 +2,14 @@
 //!
 //! This module contains account and character management packet definitions and parsers.
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::{
-    enums::{ServerPacketIds, MirClass, MirGender},
-    binary::{read_dotnet_string, write_dotnet_string},
-};
 use super::super::base::Packet;
 use crate::data::stats::SharedResult;
+use crate::{
+    binary::{read_dotnet_string, write_dotnet_string},
+    enums::{MirClass, MirGender, ServerPacketIds},
+};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 // ============================================================================
 // Packet Structures
@@ -70,7 +70,8 @@ impl Packet for NewCharacterSuccess {
         let unix_epoch_ticks = 621355968000000000i64;
         let unix_seconds = (ticks - unix_epoch_ticks) / 10000000;
         use chrono::{TimeZone, Utc};
-        let last_access = Utc.timestamp_opt(unix_seconds, 0)
+        let last_access = Utc
+            .timestamp_opt(unix_seconds, 0)
             .single()
             .ok_or(crate::data::stats::SharedError::InvalidDateTime)?;
 

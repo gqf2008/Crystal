@@ -2,14 +2,14 @@
 //!
 //! This module contains all map-related packet definitions and parsers.
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::{
-    enums::ServerPacketIds,
-    binary::{read_dotnet_string, write_dotnet_string},
-};
 use super::super::base::Packet;
 use crate::data::stats::SharedResult;
+use crate::{
+    binary::{read_dotnet_string, write_dotnet_string},
+    enums::ServerPacketIds,
+};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 #[derive(Debug, Clone)]
 pub struct MapInformation {
@@ -132,12 +132,12 @@ impl Packet for MapInformation {
         let minimap = reader.read_u16::<LittleEndian>()?;
         let big_map = reader.read_u16::<LittleEndian>()?;
         let lights = reader.read_u8()?;
-        
+
         // 读取 Lightning 和 Fire 布尔标志位 (打包在一个字节中)
         let bools = reader.read_u8()?;
         let lightning = (bools & 0x01) == 0x01;
         let fire = (bools & 0x02) == 0x02;
-        
+
         let map_dark_light = reader.read_u8()?;
         let music = reader.read_u16::<LittleEndian>()?;
         let weather_particles = reader.read_u16::<LittleEndian>()?;
@@ -164,13 +164,17 @@ impl Packet for MapInformation {
         writer.write_u16::<LittleEndian>(self.minimap)?;
         writer.write_u16::<LittleEndian>(self.big_map)?;
         writer.write_u8(self.lights)?;
-        
+
         // 写入 Lightning 和 Fire 布尔标志位 (打包在一个字节中)
         let mut bools: u8 = 0;
-        if self.lightning { bools |= 0x01; }
-        if self.fire { bools |= 0x02; }
+        if self.lightning {
+            bools |= 0x01;
+        }
+        if self.fire {
+            bools |= 0x02;
+        }
         writer.write_u8(bools)?;
-        
+
         writer.write_u8(self.map_dark_light)?;
         writer.write_u16::<LittleEndian>(self.music)?;
         writer.write_u16::<LittleEndian>(self.weather_particles)?;
@@ -382,7 +386,11 @@ impl Packet for WorldMapSetupInfo {
             });
         }
         let teleport_cost = reader.read_i32::<LittleEndian>()?;
-        Ok(WorldMapSetupInfo { enabled, world_maps, teleport_cost })
+        Ok(WorldMapSetupInfo {
+            enabled,
+            world_maps,
+            teleport_cost,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -427,8 +435,16 @@ mod tests {
         let pkt = WorldMapSetupInfo {
             enabled: true,
             world_maps: vec![
-                WorldMapIcon { image_index: 1, title: "比奇省".to_string(), map_index: 0 },
-                WorldMapIcon { image_index: 2, title: "盟重省".to_string(), map_index: 1 },
+                WorldMapIcon {
+                    image_index: 1,
+                    title: "比奇省".to_string(),
+                    map_index: 0,
+                },
+                WorldMapIcon {
+                    image_index: 2,
+                    title: "盟重省".to_string(),
+                    map_index: 1,
+                },
             ],
             teleport_cost: 1000,
         };

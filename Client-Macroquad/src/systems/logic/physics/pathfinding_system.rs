@@ -21,11 +21,9 @@
 //
 // ============================================================================
 
-use crate::game::{GameResult, GameContext, Coord, PathFinder};
+use crate::game::{Coord, GameContext, GameResult, PathFinder};
 use crate::{
-    components::{
-        PlayerInput, Player, Position, Path, LocalPlayer, MapData, MovementVelocity,
-    },
+    components::{LocalPlayer, MapData, MovementVelocity, Path, Player, PlayerInput, Position},
     systems::LogicSystem,
 };
 use std::collections::HashSet;
@@ -101,7 +99,7 @@ impl PathfindingSystem {
         let cells = map_data.cells.clone();
         let width = map_data.width as usize;
         let height = map_data.height as usize;
-        
+
         let is_blocking = move |x: usize, y: usize| -> bool {
             if x >= width || y >= height {
                 return true; // 地图外视为阻挡
@@ -116,10 +114,10 @@ impl PathfindingSystem {
 
         // 创建寻路器并计算路径
         let pathfinder = PathFinder::new(width, height, is_blocking);
-        
+
         pathfinder.find_path(start, goal).map(|path| {
             path.into_iter()
-                .map(|p| (p.0 as i32, p.1 as i32))  // 转换 (usize, usize) -> (i32, i32)
+                .map(|p| (p.0 as i32, p.1 as i32)) // 转换 (usize, usize) -> (i32, i32)
                 .collect()
         })
     }
@@ -155,11 +153,9 @@ impl PathfindingSystem {
         };
 
         let pathfinder = PathFinder::new(width, height, is_blocking);
-        pathfinder.find_path(start, goal).map(|path| {
-            path.into_iter()
-                .map(|p| (p.0 as i32, p.1 as i32))
-                .collect()
-        })
+        pathfinder
+            .find_path(start, goal)
+            .map(|path| path.into_iter().map(|p| (p.0 as i32, p.1 as i32)).collect())
     }
 
     fn is_grid_walkable(map_data: &MapData, gx: i32, gy: i32) -> bool {
@@ -174,7 +170,11 @@ impl PathfindingSystem {
         map_data.cells[x][y].is_walkable()
     }
 
-    fn nearest_walkable_goal(map_data: &MapData, target: (i32, i32), max_radius: i32) -> Option<(i32, i32)> {
+    fn nearest_walkable_goal(
+        map_data: &MapData,
+        target: (i32, i32),
+        max_radius: i32,
+    ) -> Option<(i32, i32)> {
         if Self::is_grid_walkable(map_data, target.0, target.1) {
             return Some(target);
         }
@@ -207,55 +207,65 @@ impl PathfindingSystem {
 }
 
 impl LogicSystem for PathfindingSystem {
-
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
         // 获取地图数据(用于寻路)
-        let map_data = ctx.world
+        let map_data = ctx
+            .world
             .query_mut::<&MapData>()
             .into_iter()
-            .next().cloned();
+            .next()
+            .cloned();
 
         // 动态占位（仅用于挂机 AI 的寻路避障）
         // 注意：这里必须在 query_mut 循环之前收集，避免 hecs 的可变借用冲突。
-        let dynamic_occupied: Option<HashSet<(usize, usize)>> = if ctx.session.local_player_ai_enabled {
-            let mut occ: HashSet<(usize, usize)> = HashSet::new();
+        let dynamic_occupied: Option<HashSet<(usize, usize)>> =
+            if ctx.session.local_player_ai_enabled {
+                let mut occ: HashSet<(usize, usize)> = HashSet::new();
 
-            for (_, pos) in ctx.world.query::<(&Player, &Position)>().iter() {
-                let (gx, gy) = Coord::world_to_grid(pos.x, pos.y);
-                if gx >= 0 && gy >= 0 {
-                    occ.insert((gx as usize, gy as usize));
+                for (_, pos) in ctx.world.query::<(&Player, &Position)>().iter() {
+                    let (gx, gy) = Coord::world_to_grid(pos.x, pos.y);
+                    if gx >= 0 && gy >= 0 {
+                        occ.insert((gx as usize, gy as usize));
+                    }
                 }
-            }
-            for (_, pos) in ctx.world.query::<(&crate::components::Monster, &Position)>().iter() {
-                let (gx, gy) = Coord::world_to_grid(pos.x, pos.y);
-                if gx >= 0 && gy >= 0 {
-                    occ.insert((gx as usize, gy as usize));
+                for (_, pos) in ctx
+                    .world
+                    .query::<(&crate::components::Monster, &Position)>()
+                    .iter()
+                {
+                    let (gx, gy) = Coord::world_to_grid(pos.x, pos.y);
+                    if gx >= 0 && gy >= 0 {
+                        occ.insert((gx as usize, gy as usize));
+                    }
                 }
-            }
 
-            Some(occ)
-        } else {
-            None
-        };
+                Some(occ)
+            } else {
+                None
+            };
 
         // 处理本地玩家的移动输入
-        for (player_input, position, path, player, _local, velocity) in ctx.world
-            .query_mut::<(
-                &mut PlayerInput,
-                &Position,
-                &mut Path,
-                &Player,
-                &LocalPlayer,
-                &mut MovementVelocity,
-            )>()
-        {
+        for (player_input, position, path, player, _local, velocity) in ctx.world.query_mut::<(
+            &mut PlayerInput,
+            &Position,
+            &mut Path,
+            &Player,
+            &LocalPlayer,
+            &mut MovementVelocity,
+        )>() {
             // 检查是否有移动指令
             if let Some((target_x, target_y)) = player_input.move_to {
                 let current_grid = Self::world_to_grid(position.x, position.y);
                 let target_grid = Self::world_to_grid(target_x, target_y);
-                
-                tracing::trace!("🗺️ PathfindingSystem: current=({},{}), target=({},{}), mode={:?}", 
-                    current_grid.0, current_grid.1, target_grid.0, target_grid.1, player_input.movement_mode);
+
+                tracing::trace!(
+                    "🗺️ PathfindingSystem: current=({},{}), target=({},{}), mode={:?}",
+                    current_grid.0,
+                    current_grid.1,
+                    target_grid.0,
+                    target_grid.1,
+                    player_input.movement_mode
+                );
 
                 // 检查目标是否与当前位置不同
                 if current_grid != target_grid {
@@ -271,26 +281,27 @@ impl LogicSystem for PathfindingSystem {
 
                     // 🎯 DirectFollow模式: 不使用Path，每帧直接计算velocity方向
                     use crate::components::MovementMode;
-                    
+
                     if player_input.movement_mode == MovementMode::DirectFollow {
                         // 🚀 平滑跟随: 直接设置velocity朝向目标，完全不用Path
                         let dx = target_x - position.x;
                         let dy = target_y - position.y;
                         let distance = (dx * dx + dy * dy).sqrt();
-                        
-                        if distance > 5.0 { // 距离目标超过5像素才移动
+
+                        if distance > 5.0 {
+                            // 距离目标超过5像素才移动
                             // 🛡️ DirectFollow 模式需要预检查移动方向是否有障碍物
                             // 归一化方向向量
                             let dir_x = dx / distance;
                             let dir_y = dy / distance;
-                            
+
                             // 预测移动一小段距离后的位置（比如10像素）
                             let check_distance = 10.0;
                             let next_x = position.x + dir_x * check_distance;
                             let next_y = position.y + dir_y * check_distance;
                             // ✅ 使用统一坐标换算，避免手写 /48 /32 带来的边界误差
                             let (next_grid_x, next_grid_y) = Coord::world_to_grid(next_x, next_y);
-                            
+
                             // 检查是否有障碍物（需要地图数据）
                             let has_obstacle = if let Some(ref map) = map_data {
                                 // 检查目标格子是否在地图范围内
@@ -313,7 +324,7 @@ impl LogicSystem for PathfindingSystem {
                             } else {
                                 false // 没有地图数据，不阻挡
                             };
-                            
+
                             if !has_obstacle {
                                 // 前方没有障碍物，可以移动
                                 // 🎬 根据 Player.action 设置速度
@@ -323,7 +334,7 @@ impl LogicSystem for PathfindingSystem {
                                 } else {
                                     velocity.walk_speed
                                 };
-                                
+
                                 // 直接设置velocity，MovementSystem会直接用它更新position
                                 velocity.x = dir_x * speed;
                                 velocity.y = dir_y * speed;
@@ -332,7 +343,7 @@ impl LogicSystem for PathfindingSystem {
                                 // 前方有障碍物，停止移动
                                 velocity.stop();
                             }
-                            
+
                             // ❌ 不设置Path！让MovementSystem直接用velocity更新
                             path.clear(); // 确保Path不干扰
                         } else {
@@ -340,46 +351,67 @@ impl LogicSystem for PathfindingSystem {
                         }
                         continue; // 跳过后续的Path逻辑
                     }
-                    
+
                     if needs_update {
                         match player_input.movement_mode {
                             MovementMode::Pathfinding => {
                                 // 寻路模式 (双击): 使用A*算法
                                 tracing::debug!(
                                     "🔍 寻路: ({}, {}) -> ({}, {})",
-                                    current_grid.0, current_grid.1,
-                                    target_grid.0, target_grid.1
+                                    current_grid.0,
+                                    current_grid.1,
+                                    target_grid.0,
+                                    target_grid.1
                                 );
-                                
+
                                 // 🎯 使用 A* 算法计算完整路径（考虑障碍物）
                                 if let Some(ref map_data) = map_data {
                                     // 目标不可走时，先找一个最近可走的落点
-                                    let goal = Self::nearest_walkable_goal(map_data, target_grid, 8).unwrap_or(target_grid);
+                                    let goal =
+                                        Self::nearest_walkable_goal(map_data, target_grid, 8)
+                                            .unwrap_or(target_grid);
 
                                     let use_dynamic_blocked = ctx.session.local_player_ai_enabled;
                                     let mut blocked = dynamic_occupied.clone().unwrap_or_default();
 
                                     // 不要把自己当前格子视为阻挡，否则 A* 会直接失败。
                                     if current_grid.0 >= 0 && current_grid.1 >= 0 {
-                                        blocked.remove(&(current_grid.0 as usize, current_grid.1 as usize));
+                                        blocked.remove(&(
+                                            current_grid.0 as usize,
+                                            current_grid.1 as usize,
+                                        ));
                                     }
 
                                     // 若目标格子被占用（动态变化），这里保持“按占用阻挡”处理，
                                     // 让上层 AI/脱困逻辑换落点；避免强行走进人/怪格子。
                                     let path_res = if use_dynamic_blocked {
-                                        Self::calculate_path_with_blocked(map_data, current_grid, goal, blocked)
+                                        Self::calculate_path_with_blocked(
+                                            map_data,
+                                            current_grid,
+                                            goal,
+                                            blocked,
+                                        )
                                     } else {
                                         Self::calculate_path(map_data, current_grid, goal)
                                     };
 
                                     match path_res {
                                         Some(full_path) => {
-                                            tracing::debug!("✅ A* 找到路径，共 {} 个格子", full_path.len());
+                                            tracing::debug!(
+                                                "✅ A* 找到路径，共 {} 个格子",
+                                                full_path.len()
+                                            );
                                             if full_path.len() <= 10 {
                                                 tracing::debug!("完整路径: {:?}", full_path);
                                             } else {
-                                                tracing::debug!("路径开始: {:?} ...", &full_path[..5]);
-                                                tracing::debug!("路径结束: ... {:?}", &full_path[full_path.len()-5..]);
+                                                tracing::debug!(
+                                                    "路径开始: {:?} ...",
+                                                    &full_path[..5]
+                                                );
+                                                tracing::debug!(
+                                                    "路径结束: ... {:?}",
+                                                    &full_path[full_path.len() - 5..]
+                                                );
                                             }
                                             // A* 通常会把起点也包含在路径里。
                                             // 若直接把起点作为第一个 waypoint，MovementSystem 会先把角色“拉回”到当前格子中心，
@@ -393,8 +425,13 @@ impl LogicSystem for PathfindingSystem {
                                             // 跑步：将逐格路径压缩为“每步两格”（方向一致时才跳过中间格）。
                                             // 这样本地 MovementSystem 与网络 Run(2格/包) 语义一致。
                                             use crate::components::PlayerAction;
-                                            if player.action == PlayerAction::Run && waypoints.len() >= 2 {
-                                                waypoints = Self::compress_waypoints_for_run(current_grid, waypoints);
+                                            if player.action == PlayerAction::Run
+                                                && waypoints.len() >= 2
+                                            {
+                                                waypoints = Self::compress_waypoints_for_run(
+                                                    current_grid,
+                                                    waypoints,
+                                                );
                                             }
 
                                             if waypoints.is_empty() {
@@ -410,14 +447,18 @@ impl LogicSystem for PathfindingSystem {
                                                 // 而不是指向原始 move_to 的世界坐标。
                                                 // 否则当点击点落在不可走格/墙体边缘时，会出现：
                                                 // A* 算出可走路径 → 但 velocity 仍然顶向不可走点 → CollisionSystem 每帧清 path → 下一帧重复算路。
-                                                if let Some((wx_gx, wx_gy)) = path.current_waypoint() {
-                                                    let (wx, wy) = Coord::grid_to_world_center(wx_gx, wx_gy);
+                                                if let Some((wx_gx, wx_gy)) =
+                                                    path.current_waypoint()
+                                                {
+                                                    let (wx, wy) =
+                                                        Coord::grid_to_world_center(wx_gx, wx_gy);
                                                     use crate::components::PlayerAction;
-                                                    let speed = if player.action == PlayerAction::Run {
-                                                        velocity.run_speed
-                                                    } else {
-                                                        velocity.walk_speed
-                                                    };
+                                                    let speed =
+                                                        if player.action == PlayerAction::Run {
+                                                            velocity.run_speed
+                                                        } else {
+                                                            velocity.walk_speed
+                                                        };
 
                                                     let dx = wx - position.x;
                                                     let dy = wy - position.y;
@@ -437,8 +478,9 @@ impl LogicSystem for PathfindingSystem {
                                             velocity.stop();
                                             // 关键：若处于“本地挂机 AI 追砍”场景，不要清空 move_to。
                                             // 否则 AI 的 stuck 检测无法触发，表现为“跑跑就卡死”。
-                                            let ai_should_retry = ctx.session.local_player_ai_enabled
-                                                && player_input.attack_target.is_some();
+                                            let ai_should_retry =
+                                                ctx.session.local_player_ai_enabled
+                                                    && player_input.attack_target.is_some();
                                             if !ai_should_retry {
                                                 player_input.move_to = None;
                                                 player_input.movement_mode = MovementMode::None;
@@ -458,7 +500,7 @@ impl LogicSystem for PathfindingSystem {
                                     }
                                     continue;
                                 }
-                                
+
                                 // 🎬 根据 Player.action 计算初始速度（MovementSystem会从Player.action读取）
                                 use crate::components::PlayerAction;
                                 let _speed = if player.action == PlayerAction::Run {
@@ -468,7 +510,7 @@ impl LogicSystem for PathfindingSystem {
                                     tracing::debug!("🚶 使用行走速度: {}", velocity.walk_speed);
                                     velocity.walk_speed
                                 };
-                                
+
                                 // ⚠️ 不要在这里再用 (target_x, target_y) 设置 velocity。
                                 // Pathfinding 场景应以 waypoint 为准（上面已设置），否则会导致顶墙/反复算路。
                             }
@@ -489,8 +531,12 @@ impl LogicSystem for PathfindingSystem {
                     // 对于长按模式:保持 move_to,等鼠标松开或移到其他格子
                     // 对于寻路模式:清除 move_to,结束移动
                     use crate::components::MovementMode;
-                    tracing::trace!("📍 到达目标格子 ({}, {}), mode={:?}", 
-                        target_grid.0, target_grid.1, player_input.movement_mode);
+                    tracing::trace!(
+                        "📍 到达目标格子 ({}, {}), mode={:?}",
+                        target_grid.0,
+                        target_grid.1,
+                        player_input.movement_mode
+                    );
                     if player_input.movement_mode == MovementMode::Pathfinding {
                         tracing::debug!("✅ 寻路到达目标格子,清除 move_to");
                         player_input.move_to = None;

@@ -2,13 +2,13 @@
 //! Contains: Marriage, Mentor, Modes, Fishing, Reincarnation, Combine, Awakening,
 //! Intelligent Creature, Item Rental, and other systems
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::binary::{read_dotnet_string, write_dotnet_string};
-use crate::enums::{ClientPacketIds, AttackMode, PetMode, MirGridType, AwakeType};
-use crate::map::Point;
 use super::super::base::Packet;
+use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::data::stats::SharedResult;
+use crate::enums::{AttackMode, AwakeType, ClientPacketIds, MirGridType, PetMode};
+use crate::map::Point;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 // ==================== Mode Change Packets ====================
 
@@ -273,7 +273,12 @@ impl Packet for EquipSlotItem {
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let to_slot = reader.read_i32::<LittleEndian>()?;
         let grid_to = MirGridType::try_from(reader.read_u8()?)?;
-        Ok(Self { grid, unique_id, to_slot, grid_to })
+        Ok(Self {
+            grid,
+            unique_id,
+            to_slot,
+            grid_to,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -378,7 +383,11 @@ impl Packet for CombineItem {
         let grid = MirGridType::try_from(reader.read_u8()?)?;
         let id_from = reader.read_u64::<LittleEndian>()?;
         let id_to = reader.read_u64::<LittleEndian>()?;
-        Ok(Self { grid, id_from, id_to })
+        Ok(Self {
+            grid,
+            id_from,
+            id_to,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -404,7 +413,10 @@ impl Packet for AwakeningNeedMaterials {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let awake_type = AwakeType::try_from(reader.read_u8()?)?;
-        Ok(Self { unique_id, awake_type })
+        Ok(Self {
+            unique_id,
+            awake_type,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -452,7 +464,11 @@ impl Packet for Awakening {
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let awake_type = AwakeType::try_from(reader.read_u8()?)?;
         let position_idx = reader.read_u32::<LittleEndian>()?;
-        Ok(Self { unique_id, awake_type, position_idx })
+        Ok(Self {
+            unique_id,
+            awake_type,
+            position_idx,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -562,7 +578,11 @@ impl Packet for UpdateIntelligentCreature {
         let summon_me = reader.read_u8()? != 0;
         let unsummon_me = reader.read_u8()? != 0;
         let release_me = reader.read_u8()? != 0;
-        Ok(Self { summon_me, unsummon_me, release_me })
+        Ok(Self {
+            summon_me,
+            unsummon_me,
+            release_me,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -588,7 +608,10 @@ impl Packet for IntelligentCreaturePickup {
         let mouse_mode = reader.read_u8()? != 0;
         let x = reader.read_i32::<LittleEndian>()?;
         let y = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { mouse_mode, location: Point::new(x, y) })
+        Ok(Self {
+            mouse_mode,
+            location: Point::new(x, y),
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -618,7 +641,11 @@ impl Packet for GameshopBuy {
         let g_index = reader.read_i32::<LittleEndian>()?;
         let quantity = reader.read_u8()?;
         let p_type = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { g_index, quantity, p_type })
+        Ok(Self {
+            g_index,
+            quantity,
+            p_type,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {

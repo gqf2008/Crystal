@@ -14,13 +14,13 @@
 //
 // ============================================================================
 
-use crate::game::GameResult;
+use crate::components::{BuffList, BuffType, Health, Mana, RegenTimer};
 use crate::game::GameContext;
+use crate::game::GameResult;
 use crate::systems::LogicSystem;
-use crate::components::{Health, Mana, RegenTimer, BuffList, BuffType};
 
 /// 生命恢复系统
-/// 
+///
 /// 恢复规则 (参考C# HumanObject.ProcessRegen):
 /// - HP恢复: 每10秒恢复 MaxHP * 3% + 1
 /// - MP恢复: 每10秒恢复 MaxMP * 3% + 1
@@ -30,13 +30,14 @@ use crate::components::{Health, Mana, RegenTimer, BuffList, BuffType};
 pub struct HealthRegenSystem;
 
 impl LogicSystem for HealthRegenSystem {
-    
-
     fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         let delta_ms = (delay_time * 1000.0) as u64;
 
         // 1. HP/MP自动恢复
-        for (health, mana, regen_timer) in ctx.world.query_mut::<(&mut Health, &mut Mana, &mut RegenTimer)>() {
+        for (health, mana, regen_timer) in ctx
+            .world
+            .query_mut::<(&mut Health, &mut Mana, &mut RegenTimer)>()
+        {
             // 死亡（HP=0）不自动回血；复活应由服务器/道具/技能驱动。
             if health.current <= 0 {
                 continue;

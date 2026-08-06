@@ -8,8 +8,8 @@ use std::io::Read;
 /// DepositRefineItem - 存入精炼物品 (24)
 #[derive(Debug, Clone)]
 pub struct DepositRefineItem {
-    pub from: i32,                  // 来源槽位
-    pub to: i32,                    // 目标槽位
+    pub from: i32, // 来源槽位
+    pub to: i32,   // 目标槽位
 }
 
 impl Packet for DepositRefineItem {
@@ -33,8 +33,8 @@ impl Packet for DepositRefineItem {
 /// RetrieveRefineItem - 取回精炼物品 (25)
 #[derive(Debug, Clone)]
 pub struct RetrieveRefineItem {
-    pub from: i32,                  // 来源槽位
-    pub to: i32,                    // 目标槽位
+    pub from: i32, // 来源槽位
+    pub to: i32,   // 目标槽位
 }
 
 impl Packet for RetrieveRefineItem {
@@ -74,7 +74,7 @@ impl Packet for RefineCancel {
 /// RefineItem - 精炼物品 (27)
 #[derive(Debug, Clone)]
 pub struct RefineItem {
-    pub unique_id: u64,             // 物品唯一ID
+    pub unique_id: u64, // 物品唯一ID
 }
 
 impl Packet for RefineItem {
@@ -96,7 +96,7 @@ impl Packet for RefineItem {
 /// CheckRefine - 检查精炼 (28)
 #[derive(Debug, Clone)]
 pub struct CheckRefine {
-    pub unique_id: u64,             // 物品唯一ID
+    pub unique_id: u64, // 物品唯一ID
 }
 
 impl Packet for CheckRefine {
@@ -118,7 +118,7 @@ impl Packet for CheckRefine {
 /// ReplaceWedRing - 替换结婚戒指 (29)
 #[derive(Debug, Clone)]
 pub struct ReplaceWedRing {
-    pub unique_id: u64,             // 物品唯一ID
+    pub unique_id: u64, // 物品唯一ID
 }
 
 impl Packet for ReplaceWedRing {
@@ -140,8 +140,8 @@ impl Packet for ReplaceWedRing {
 /// DepositTradeItem - 存入交易物品 (30)
 #[derive(Debug, Clone)]
 pub struct DepositTradeItem {
-    pub from: i32,                  // 来源槽位
-    pub to: i32,                    // 目标槽位
+    pub from: i32, // 来源槽位
+    pub to: i32,   // 目标槽位
 }
 
 impl Packet for DepositTradeItem {
@@ -165,8 +165,8 @@ impl Packet for DepositTradeItem {
 /// RetrieveTradeItem - 取回交易物品 (31)
 #[derive(Debug, Clone)]
 pub struct RetrieveTradeItem {
-    pub from: i32,                  // 来源槽位
-    pub to: i32,                    // 目标槽位
+    pub from: i32, // 来源槽位
+    pub to: i32,   // 目标槽位
 }
 
 impl Packet for RetrieveTradeItem {
@@ -190,8 +190,8 @@ impl Packet for RetrieveTradeItem {
 /// TakeBackHeroItem - 取回英雄物品 (32)
 #[derive(Debug, Clone)]
 pub struct TakeBackHeroItem {
-    pub from: i32,                  // 来源槽位
-    pub to: i32,                    // 目标槽位
+    pub from: i32, // 来源槽位
+    pub to: i32,   // 目标槽位
 }
 
 impl Packet for TakeBackHeroItem {
@@ -215,8 +215,8 @@ impl Packet for TakeBackHeroItem {
 /// TransferHeroItem - 转移英雄物品 (33)
 #[derive(Debug, Clone)]
 pub struct TransferHeroItem {
-    pub from: i32,                  // 来源槽位
-    pub to: i32,                    // 目标槽位
+    pub from: i32, // 来源槽位
+    pub to: i32,   // 目标槽位
 }
 
 impl Packet for TransferHeroItem {

@@ -9,9 +9,9 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
 use crate::ui::text_renderer::draw_text_cn;
 use macroquad::input::KeyCode;
+use macroquad::prelude::*;
 
 /// 键位绑定配置
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -50,19 +50,71 @@ impl KeyboardLayoutDialogHybrid {
 
     fn default_bindings() -> Vec<KeyBinding> {
         vec![
-            KeyBinding { action_name: "移动".to_string(), key: KeyCode::W, group: "移动".to_string() },
-            KeyBinding { action_name: "移动".to_string(), key: KeyCode::A, group: "移动".to_string() },
-            KeyBinding { action_name: "移动".to_string(), key: KeyCode::S, group: "移动".to_string() },
-            KeyBinding { action_name: "移动".to_string(), key: KeyCode::D, group: "移动".to_string() },
-            KeyBinding { action_name: "攻击".to_string(), key: KeyCode::Q, group: "战斗".to_string() },
-            KeyBinding { action_name: "拾取".to_string(), key: KeyCode::Space, group: "交互".to_string() },
-            KeyBinding { action_name: "背包".to_string(), key: KeyCode::B, group: "界面".to_string() },
-            KeyBinding { action_name: "角色".to_string(), key: KeyCode::C, group: "界面".to_string() },
-            KeyBinding { action_name: "技能".to_string(), key: KeyCode::K, group: "界面".to_string() },
-            KeyBinding { action_name: "行会".to_string(), key: KeyCode::G, group: "界面".to_string() },
-            KeyBinding { action_name: "技能栏1-8".to_string(), key: KeyCode::F1, group: "技能".to_string() },
-            KeyBinding { action_name: "切换攻击模式".to_string(), key: KeyCode::LeftAlt, group: "战斗".to_string() },
-            KeyBinding { action_name: "聊天".to_string(), key: KeyCode::Enter, group: "交互".to_string() },
+            KeyBinding {
+                action_name: "移动".to_string(),
+                key: KeyCode::W,
+                group: "移动".to_string(),
+            },
+            KeyBinding {
+                action_name: "移动".to_string(),
+                key: KeyCode::A,
+                group: "移动".to_string(),
+            },
+            KeyBinding {
+                action_name: "移动".to_string(),
+                key: KeyCode::S,
+                group: "移动".to_string(),
+            },
+            KeyBinding {
+                action_name: "移动".to_string(),
+                key: KeyCode::D,
+                group: "移动".to_string(),
+            },
+            KeyBinding {
+                action_name: "攻击".to_string(),
+                key: KeyCode::Q,
+                group: "战斗".to_string(),
+            },
+            KeyBinding {
+                action_name: "拾取".to_string(),
+                key: KeyCode::Space,
+                group: "交互".to_string(),
+            },
+            KeyBinding {
+                action_name: "背包".to_string(),
+                key: KeyCode::B,
+                group: "界面".to_string(),
+            },
+            KeyBinding {
+                action_name: "角色".to_string(),
+                key: KeyCode::C,
+                group: "界面".to_string(),
+            },
+            KeyBinding {
+                action_name: "技能".to_string(),
+                key: KeyCode::K,
+                group: "界面".to_string(),
+            },
+            KeyBinding {
+                action_name: "行会".to_string(),
+                key: KeyCode::G,
+                group: "界面".to_string(),
+            },
+            KeyBinding {
+                action_name: "技能栏1-8".to_string(),
+                key: KeyCode::F1,
+                group: "技能".to_string(),
+            },
+            KeyBinding {
+                action_name: "切换攻击模式".to_string(),
+                key: KeyCode::LeftAlt,
+                group: "战斗".to_string(),
+            },
+            KeyBinding {
+                action_name: "聊天".to_string(),
+                key: KeyCode::Enter,
+                group: "交互".to_string(),
+            },
         ]
     }
 
@@ -99,8 +151,15 @@ impl KeyboardLayoutDialogHybrid {
     }
 
     /// 处理输入并绘制
-    pub fn draw(&mut self, screen_w: f32, screen_h: f32, mouse_pos: Vec2,
-                mouse_wheel: f32, left_clicked: bool, any_key_pressed: Option<KeyCode>) -> bool {
+    pub fn draw(
+        &mut self,
+        screen_w: f32,
+        screen_h: f32,
+        mouse_pos: Vec2,
+        mouse_wheel: f32,
+        left_clicked: bool,
+        any_key_pressed: Option<KeyCode>,
+    ) -> bool {
         if !self.visible {
             return false;
         }
@@ -114,8 +173,10 @@ impl KeyboardLayoutDialogHybrid {
         let dialog_x = (screen_w - dialog_w) / 2.0;
         let dialog_y = (screen_h - dialog_h) / 2.0;
 
-        let mouse_over = mouse_pos.x >= dialog_x && mouse_pos.x <= dialog_x + dialog_w
-            && mouse_pos.y >= dialog_y && mouse_pos.y <= dialog_y + dialog_h;
+        let mouse_over = mouse_pos.x >= dialog_x
+            && mouse_pos.x <= dialog_x + dialog_w
+            && mouse_pos.y >= dialog_y
+            && mouse_pos.y <= dialog_y + dialog_h;
 
         if mouse_over && mouse_wheel != 0.0 {
             self.scroll_offset = (self.scroll_offset - mouse_wheel * 15.0).max(0.0);
@@ -130,15 +191,36 @@ impl KeyboardLayoutDialogHybrid {
         }
 
         // 背景
-        draw_rectangle(dialog_x, dialog_y, dialog_w, dialog_h, Color::from_rgba(25, 25, 35, 240));
+        draw_rectangle(
+            dialog_x,
+            dialog_y,
+            dialog_w,
+            dialog_h,
+            Color::from_rgba(25, 25, 35, 240),
+        );
 
         // 标题
-        draw_text_cn("键位设置", dialog_x + 15.0, dialog_y + 10.0, 16.0,
-            Color::from_rgba(255, 220, 100, 255));
+        draw_text_cn(
+            "键位设置",
+            dialog_x + 15.0,
+            dialog_y + 10.0,
+            16.0,
+            Color::from_rgba(255, 220, 100, 255),
+        );
 
         // 严格/宽松模式切换
-        let mode_text = if self.strict_mode { "严格模式" } else { "宽松模式" };
-        draw_text_cn(&format!("模式: {}", mode_text), dialog_x + dialog_w - 120.0, dialog_y + 10.0, 12.0, WHITE);
+        let mode_text = if self.strict_mode {
+            "严格模式"
+        } else {
+            "宽松模式"
+        };
+        draw_text_cn(
+            &format!("模式: {}", mode_text),
+            dialog_x + dialog_w - 120.0,
+            dialog_y + 10.0,
+            12.0,
+            WHITE,
+        );
 
         // 键位列表
         let content_y = dialog_y + title_h + padding;
@@ -165,17 +247,34 @@ impl KeyboardLayoutDialogHybrid {
             };
             draw_rectangle(dialog_x + 10.0, y, dialog_w - 20.0, item_h, bg_color);
 
-            draw_text_cn(&binding.action_name, dialog_x + 15.0, y + 4.0, 12.0,
-                Color::from_rgba(200, 200, 200, 255));
+            draw_text_cn(
+                &binding.action_name,
+                dialog_x + 15.0,
+                y + 4.0,
+                12.0,
+                Color::from_rgba(200, 200, 200, 255),
+            );
 
             let key_x = dialog_x + dialog_w - 100.0;
-            draw_text_cn(&key_display, key_x, y + 4.0, 12.0,
-                if is_rebinding { Color::from_rgba(255, 100, 50, 255) }
-                else { Color::from_rgba(100, 200, 255, 255) });
+            draw_text_cn(
+                &key_display,
+                key_x,
+                y + 4.0,
+                12.0,
+                if is_rebinding {
+                    Color::from_rgba(255, 100, 50, 255)
+                } else {
+                    Color::from_rgba(100, 200, 255, 255)
+                },
+            );
 
             // 点击重新绑定
-            if left_clicked && mouse_pos.x >= key_x && mouse_pos.x <= key_x + 80.0
-                && mouse_pos.y >= y && mouse_pos.y <= y + item_h {
+            if left_clicked
+                && mouse_pos.x >= key_x
+                && mouse_pos.x <= key_x + 80.0
+                && mouse_pos.y >= y
+                && mouse_pos.y <= y + item_h
+            {
                 self.rebinding_index = Some(i);
             }
         }
@@ -186,10 +285,21 @@ impl KeyboardLayoutDialogHybrid {
 
         // 重置按钮
         let reset_x = dialog_x + 20.0;
-        let mouse_over_reset = mouse_pos.x >= reset_x && mouse_pos.x <= reset_x + btn_w
-            && mouse_pos.y >= btn_y && mouse_pos.y <= btn_y + btn_h;
-        draw_rectangle(reset_x, btn_y, btn_w, btn_h,
-            if mouse_over_reset { Color::from_rgba(100, 80, 40, 255) } else { Color::from_rgba(70, 60, 30, 255) });
+        let mouse_over_reset = mouse_pos.x >= reset_x
+            && mouse_pos.x <= reset_x + btn_w
+            && mouse_pos.y >= btn_y
+            && mouse_pos.y <= btn_y + btn_h;
+        draw_rectangle(
+            reset_x,
+            btn_y,
+            btn_w,
+            btn_h,
+            if mouse_over_reset {
+                Color::from_rgba(100, 80, 40, 255)
+            } else {
+                Color::from_rgba(70, 60, 30, 255)
+            },
+        );
         draw_text_cn("重置", reset_x + 20.0, btn_y + 7.0, 14.0, WHITE);
 
         if left_clicked && mouse_over_reset {
@@ -198,10 +308,21 @@ impl KeyboardLayoutDialogHybrid {
 
         // 关闭按钮
         let close_x = dialog_x + dialog_w - btn_w - 20.0;
-        let mouse_over_close = mouse_pos.x >= close_x && mouse_pos.x <= close_x + btn_w
-            && mouse_pos.y >= btn_y && mouse_pos.y <= btn_y + btn_h;
-        draw_rectangle(close_x, btn_y, btn_w, btn_h,
-            if mouse_over_close { Color::from_rgba(150, 50, 50, 255) } else { Color::from_rgba(100, 30, 30, 255) });
+        let mouse_over_close = mouse_pos.x >= close_x
+            && mouse_pos.x <= close_x + btn_w
+            && mouse_pos.y >= btn_y
+            && mouse_pos.y <= btn_y + btn_h;
+        draw_rectangle(
+            close_x,
+            btn_y,
+            btn_w,
+            btn_h,
+            if mouse_over_close {
+                Color::from_rgba(150, 50, 50, 255)
+            } else {
+                Color::from_rgba(100, 30, 30, 255)
+            },
+        );
         draw_text_cn("关闭", close_x + 20.0, btn_y + 7.0, 14.0, WHITE);
 
         if left_clicked && mouse_over_close {

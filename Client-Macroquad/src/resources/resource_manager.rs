@@ -425,10 +425,7 @@ pub fn load_to_array(
 
 /// 从数组库获取
 #[inline]
-pub fn get_from_array(
-    array_type: LibraryArray,
-    index: usize,
-) -> Option<Rc<RefCell<MLibrary>>> {
+pub fn get_from_array(array_type: LibraryArray, index: usize) -> Option<Rc<RefCell<MLibrary>>> {
     RESOURCE_MANAGER.with(|rm| rm.borrow().get_from_array(array_type, index))
 }
 
@@ -444,9 +441,9 @@ pub fn get_map_library(index: i16) -> Option<Rc<RefCell<MLibrary>>> {
 // ==================== 地图纹理便捷访问 ====================
 
 /// 获取地图纹理（一步到位，带 LRU 缓存）
-/// 
+///
 /// 这是最便捷的方式，直接从 file_index 和 image_index 获取纹理
-/// 
+///
 /// # Example
 /// ```rust
 /// // ✅ 新方式 - 一行搞定
@@ -455,7 +452,7 @@ pub fn get_map_library(index: i16) -> Option<Rc<RefCell<MLibrary>>> {
 ///         draw_texture_ex(texture, x, y, WHITE, params);
 ///     }
 /// }
-/// 
+///
 /// // ❌ 旧方式 - 需要 4 行
 /// // let lib = get_map_library(file_index)?;
 /// // let mut lib_guard = lib.borrow_mut();
@@ -467,28 +464,31 @@ pub fn get_map_texture(file_index: i16, image_index: i32) -> Option<ImageInfo> {
     if !(0..400).contains(&file_index) {
         return None;
     }
-    
+
     let key = TextureKey {
         library: format!("MapLib_{}", file_index),
         index: image_index as usize,
     };
-    
+
     RESOURCE_MANAGER.with(|rm| {
         let mut rm = rm.borrow_mut();
-        
+
         // 检查缓存
         if let Some(cached) = rm.texture_cache.get(&key) {
             return Some(cached.clone());
         }
-        
+
         // ✅ 从 LIBRARIES 获取地图库（而不是 RESOURCE_MANAGER 的独立副本）
         let lib = crate::resources::libraries::get_from_array(
             LibraryArray::MapLibs,
-            file_index as usize
+            file_index as usize,
         )?;
-        
+
         let mut lib_ref = lib.borrow_mut();
-        let info = lib_ref.get_or_create_texture(image_index as usize).ok()?.clone();
+        let info = lib_ref
+            .get_or_create_texture(image_index as usize)
+            .ok()?
+            .clone();
 
         // 地图瓦片/物件（含大量阴影/半透明边缘）在 Linear 过滤 + 相机移动/缩放时容易出现“阴影微闪”。
         // 这里对 MapLibs 单独使用 Nearest，显著稳定阴影区域采样。
@@ -498,16 +498,16 @@ pub fn get_map_texture(file_index: i16, image_index: i32) -> Option<ImageInfo> {
         if let Some(tex) = info.mask_image.as_ref() {
             tex.set_filter(FilterMode::Nearest);
         }
-        
+
         // 缓存
         rm.texture_cache.put(key, info.clone());
-        
+
         Some(info)
     })
 }
 
 /// 获取地图纹理尺寸（高效，无需加载纹理）
-/// 
+///
 /// # Example
 /// ```rust
 /// if let Some((w, h)) = get_map_size(file_index, image_index) {
@@ -519,7 +519,7 @@ pub fn get_map_size(file_index: i16, image_index: i32) -> Option<(i16, i16)> {
     if !(0..400).contains(&file_index) {
         return None;
     }
-    
+
     RESOURCE_MANAGER.with(|rm| {
         let rm = rm.borrow();
         let lib = rm.get_from_array(LibraryArray::MapLibs, file_index as usize)?;
@@ -595,26 +595,31 @@ mod tests {
         rm.set_data_path(&data_path);
 
         // FriendDialog: Title[199]=背景, Title[6]=标题
-        let (w, h) = rm.get_size(LibraryName::Title, 199)
+        let (w, h) = rm
+            .get_size(LibraryName::Title, 199)
             .expect("FriendDialog 背景 Title[199] 不存在");
         assert!(w > 0 && h > 0, "FriendDialog 背景尺寸异常: {}x{}", w, h);
 
-        let (w, h) = rm.get_size(LibraryName::Title, 6)
+        let (w, h) = rm
+            .get_size(LibraryName::Title, 6)
             .expect("FriendDialog 标题 Title[6] 不存在");
         assert!(w > 0 && h > 0);
 
         // GroupDialog: Prguse[120]=背景
-        let (w, h) = rm.get_size(LibraryName::Prguse, 120)
+        let (w, h) = rm
+            .get_size(LibraryName::Prguse, 120)
             .expect("GroupDialog 背景 Prguse[120] 不存在");
         assert!(w > 0 && h > 0);
 
         // NameInputDialog: Prguse[660]=背景
-        let (w, h) = rm.get_size(LibraryName::Prguse, 660)
+        let (w, h) = rm
+            .get_size(LibraryName::Prguse, 660)
             .expect("NameInputDialog 背景 Prguse[660] 不存在");
         assert!(w > 0 && h > 0);
 
         // NameInputDialog 按钮: Title[200]=OK, Title[203]=Cancel
-        let (w, h) = rm.get_size(LibraryName::Title, 200)
+        let (w, h) = rm
+            .get_size(LibraryName::Title, 200)
             .expect("OK 按钮 Title[200] 不存在");
         assert!(w > 0 && h > 0);
     }
@@ -630,7 +635,8 @@ mod tests {
 
         // Add: Prguse[554/555/556], Remove: [557/558/559], Memo: [560/561/562]
         for &idx in &[554, 555, 556, 557, 558, 559, 560, 561, 562] {
-            let (w, h) = rm.get_size(LibraryName::Prguse, idx)
+            let (w, h) = rm
+                .get_size(LibraryName::Prguse, idx)
                 .unwrap_or_else(|| panic!("Prguse[{}] 不存在", idx));
             assert!(w > 0 && h > 0, "Prguse[{}] 尺寸异常: {}x{}", idx, w, h);
         }
@@ -647,21 +653,24 @@ mod tests {
 
         // 组队开关: Prguse[114-116](禁止), [117-119](允许)
         for &idx in &[114, 115, 116, 117, 118, 119] {
-            let (w, h) = rm.get_size(LibraryName::Prguse, idx)
+            let (w, h) = rm
+                .get_size(LibraryName::Prguse, idx)
                 .unwrap_or_else(|| panic!("Prguse[{}] 不存在", idx));
             assert!(w > 0 && h > 0, "Prguse[{}] 尺寸异常: {}x{}", idx, w, h);
         }
 
         // 添加: Title[130-132](无成员), [133-135](有成员)
         for &idx in &[130, 131, 132, 133, 134, 135] {
-            let (w, h) = rm.get_size(LibraryName::Title, idx)
+            let (w, h) = rm
+                .get_size(LibraryName::Title, idx)
                 .unwrap_or_else(|| panic!("Title[{}] 不存在", idx));
             assert!(w > 0 && h > 0, "Title[{}] 尺寸异常: {}x{}", idx, w, h);
         }
 
         // 删除: Title[136/137/138]
         for &idx in &[136, 137, 138] {
-            let (w, h) = rm.get_size(LibraryName::Title, idx)
+            let (w, h) = rm
+                .get_size(LibraryName::Title, idx)
                 .unwrap_or_else(|| panic!("Title[{}] 不存在", idx));
             assert!(w > 0 && h > 0, "Title[{}] 尺寸异常: {}x{}", idx, w, h);
         }

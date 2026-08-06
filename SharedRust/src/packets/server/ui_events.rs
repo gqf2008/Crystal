@@ -8,7 +8,7 @@ use std::io::Read;
 /// ResizeInventory - 调整背包大小 (237)
 #[derive(Debug, Clone)]
 pub struct ResizeInventory {
-    pub size: i32,                  // 新大小
+    pub size: i32, // 新大小
 }
 
 impl Packet for ResizeInventory {
@@ -16,9 +16,9 @@ impl Packet for ResizeInventory {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         writer.write_i32::<LittleEndian>(self.size)?;
-        
+
         Ok(())
     }
 
@@ -31,7 +31,7 @@ impl Packet for ResizeInventory {
 /// ResizeStorage - 调整仓库大小 (236)
 #[derive(Debug, Clone)]
 pub struct ResizeStorage {
-    pub size: i32,                  // 新大小
+    pub size: i32, // 新大小
 }
 
 impl Packet for ResizeStorage {
@@ -39,9 +39,9 @@ impl Packet for ResizeStorage {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         writer.write_i32::<LittleEndian>(self.size)?;
-        
+
         Ok(())
     }
 
@@ -54,7 +54,7 @@ impl Packet for ResizeStorage {
 /// NewRecipeInfo - 新配方信息 (264)
 #[derive(Debug, Clone)]
 pub struct NewRecipeInfo {
-    pub recipe_id: i32,             // 配方ID
+    pub recipe_id: i32, // 配方ID
 }
 
 impl Packet for NewRecipeInfo {
@@ -62,9 +62,9 @@ impl Packet for NewRecipeInfo {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         writer.write_i32::<LittleEndian>(self.recipe_id)?;
-        
+
         Ok(())
     }
 
@@ -77,7 +77,7 @@ impl Packet for NewRecipeInfo {
 /// OpenBrowser - 打开浏览器 (265)
 #[derive(Debug, Clone)]
 pub struct OpenBrowser {
-    pub url: String,                // URL地址
+    pub url: String, // URL地址
 }
 
 impl Packet for OpenBrowser {
@@ -85,9 +85,9 @@ impl Packet for OpenBrowser {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use crate::binary::write_dotnet_string;
-        
+
         write_dotnet_string(writer, &self.url)?;
-        
+
         Ok(())
     }
 
@@ -101,7 +101,7 @@ impl Packet for OpenBrowser {
 /// PlaySound - 播放声音 (266)
 #[derive(Debug, Clone)]
 pub struct PlaySound {
-    pub sound_id: i32,              // 声音ID
+    pub sound_id: i32, // 声音ID
 }
 
 impl Packet for PlaySound {
@@ -109,9 +109,9 @@ impl Packet for PlaySound {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         writer.write_i32::<LittleEndian>(self.sound_id)?;
-        
+
         Ok(())
     }
 
@@ -124,8 +124,8 @@ impl Packet for PlaySound {
 /// SetTimer - 设置计时器 (267)
 #[derive(Debug, Clone)]
 pub struct SetTimer {
-    pub timer_id: i32,              // 计时器ID
-    pub seconds: i32,               // 秒数
+    pub timer_id: i32, // 计时器ID
+    pub seconds: i32,  // 秒数
 }
 
 impl Packet for SetTimer {
@@ -133,10 +133,10 @@ impl Packet for SetTimer {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         writer.write_i32::<LittleEndian>(self.timer_id)?;
         writer.write_i32::<LittleEndian>(self.seconds)?;
-        
+
         Ok(())
     }
 
@@ -150,7 +150,7 @@ impl Packet for SetTimer {
 /// ExpireTimer - 计时器过期 (268)
 #[derive(Debug, Clone)]
 pub struct ExpireTimer {
-    pub timer_id: i32,              // 计时器ID
+    pub timer_id: i32, // 计时器ID
 }
 
 impl Packet for ExpireTimer {
@@ -158,9 +158,9 @@ impl Packet for ExpireTimer {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         writer.write_i32::<LittleEndian>(self.timer_id)?;
-        
+
         Ok(())
     }
 
@@ -207,8 +207,8 @@ impl Packet for Roll {
     const OPCODE: i16 = ServerPacketIds::Roll as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
         use crate::binary::write_dotnet_string;
+        use byteorder::WriteBytesExt;
 
         writer.write_i32::<LittleEndian>(self.r#type)?;
         write_dotnet_string(writer, &self.page)?;
@@ -225,15 +225,19 @@ impl Packet for Roll {
         let page = read_dotnet_string(reader)?;
         let result = reader.read_i32::<LittleEndian>()?;
         let auto_roll = reader.read_u8()? != 0;
-        Ok(Self { r#type, page, result, auto_roll })
+        Ok(Self {
+            r#type,
+            page,
+            result,
+            auto_roll,
+        })
     }
 }
-
 
 /// SetCompass - 设置指南针 (271)
 #[derive(Debug, Clone)]
 pub struct SetCompass {
-    pub location: (i32, i32),       // 位置
+    pub location: (i32, i32), // 位置
 }
 
 impl Packet for SetCompass {
@@ -241,10 +245,10 @@ impl Packet for SetCompass {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         writer.write_i32::<LittleEndian>(self.location.0)?;
         writer.write_i32::<LittleEndian>(self.location.1)?;
-        
+
         Ok(())
     }
 
@@ -258,8 +262,8 @@ impl Packet for SetCompass {
 /// Opendoor - 打开门 (251)
 #[derive(Debug, Clone)]
 pub struct Opendoor {
-    pub door_index: u8,             // 门索引
-    pub close: bool,                // 是否关闭
+    pub door_index: u8, // 门索引
+    pub close: bool,    // 是否关闭
 }
 
 impl Packet for Opendoor {
@@ -267,10 +271,10 @@ impl Packet for Opendoor {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         writer.write_u8(self.door_index)?;
         writer.write_u8(if self.close { 1 } else { 0 })?;
-        
+
         Ok(())
     }
 
@@ -284,8 +288,8 @@ impl Packet for Opendoor {
 /// SendOutputMessage - 发送输出消息 (221)
 #[derive(Debug, Clone)]
 pub struct SendOutputMessage {
-    pub message: String,            // 消息内容
-    pub message_type: u8,           // 消息类型
+    pub message: String,  // 消息内容
+    pub message_type: u8, // 消息类型
 }
 
 impl Packet for SendOutputMessage {
@@ -316,7 +320,7 @@ impl Packet for SendOutputMessage {
 /// SetBindingShot - 设置捆绑射击 (220)
 #[derive(Debug, Clone)]
 pub struct SetBindingShot {
-    pub enabled: bool,              // 是否启用
+    pub enabled: bool, // 是否启用
 }
 
 impl Packet for SetBindingShot {
@@ -324,9 +328,9 @@ impl Packet for SetBindingShot {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         writer.write_u8(if self.enabled { 1 } else { 0 })?;
-        
+
         Ok(())
     }
 
@@ -339,7 +343,7 @@ impl Packet for SetBindingShot {
 /// RemoveDelayedExplosion - 移除延迟爆炸 (216)
 #[derive(Debug, Clone)]
 pub struct RemoveDelayedExplosion {
-    pub object_id: u32,             // 对象ID
+    pub object_id: u32, // 对象ID
 }
 
 impl Packet for RemoveDelayedExplosion {
@@ -347,9 +351,9 @@ impl Packet for RemoveDelayedExplosion {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         writer.write_u32::<LittleEndian>(self.object_id)?;
-        
+
         Ok(())
     }
 

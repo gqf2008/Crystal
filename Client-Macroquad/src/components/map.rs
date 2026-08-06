@@ -2,8 +2,8 @@
 // 地图相关组件
 // ============================================================================
 
-use std::time::Instant;
 use crate::resources::map_reader::CellInfo;
+use std::time::Instant;
 
 /// 地图瓦片组件
 #[derive(Debug, Clone)]
@@ -122,11 +122,11 @@ impl CollisionInfo {
             last_update: std::time::Instant::now(),
         }
     }
-    
+
     pub fn clear(&mut self) {
         self.collision_grids.clear();
     }
-    
+
     pub fn add_collision(&mut self, grid_x: i32, grid_y: i32) {
         // 避免重复添加
         if !self.collision_grids.contains(&(grid_x, grid_y)) {
@@ -134,7 +134,7 @@ impl CollisionInfo {
         }
         self.last_update = std::time::Instant::now();
     }
-    
+
     /// 清除超过指定时间的碰撞记录
     pub fn clear_old_collisions(&mut self, max_age_secs: f32) {
         if self.last_update.elapsed().as_secs_f32() > max_age_secs {

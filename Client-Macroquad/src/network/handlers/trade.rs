@@ -1,8 +1,8 @@
 // Trade Handler - 交易相关数据包处理
 
-use mir2_shared::packets::{PacketHeader, Packet, server};
-use mir2_shared::enums::ServerPacketIds;
 use crate::network::handlers::{NetworkEvent, PacketHandler};
+use mir2_shared::enums::ServerPacketIds;
+use mir2_shared::packets::{server, Packet, PacketHeader};
 use std::io::Cursor;
 
 pub struct TradeHandler;
@@ -65,14 +65,18 @@ impl PacketHandler for TradeHandler {
             // TradeCancel - 对方取消交易/解锁
             x if x == ServerPacketIds::TradeCancel as u16 => {
                 if let Ok(packet) = server::TradeCancel::read_body(&mut cursor) {
-                    events.push(NetworkEvent::TradeCancelledEvent { unlock: packet.unlock });
+                    events.push(NetworkEvent::TradeCancelledEvent {
+                        unlock: packet.unlock,
+                    });
                     tracing::debug!("💱 Trade cancelled (unlock={})", packet.unlock);
                 }
             }
 
             _ => {
                 tracing::debug!("⚠️ TradeHandler: Unknown opcode {:04X}", header.opcode);
-                events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                events.push(NetworkEvent::UnhandledPacket {
+                    opcode: header.opcode,
+                });
             }
         }
 

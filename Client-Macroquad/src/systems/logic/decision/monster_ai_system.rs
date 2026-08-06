@@ -17,13 +17,11 @@
 //
 // ============================================================================
 
-use hecs::World;
+use crate::components::{AIAction, AIState, Health, LocalPlayer, Monster, Position};
 use crate::game::GameContext;
-use crate::components::{
-    AIAction, AIState, Health, LocalPlayer, Monster, Position,
-};
-use crate::systems::LogicSystem;
 use crate::game::GameResult;
+use crate::systems::LogicSystem;
+use hecs::World;
 
 /// 怪物AI系统
 #[derive(ecs_macros::LogicSystem)]
@@ -36,21 +34,25 @@ impl MonsterAISystem {
         let player_pos = Self::find_player_position(world);
 
         // Use world.iter() to get entities for AIState check
-        let missing_ai: Vec<hecs::Entity> = world.iter().filter_map(|eref| {
-            if eref.get::<&Monster>().is_some() && eref.get::<&AIState>().is_none() {
-                Some(eref.entity())
-            } else {
-                None
-            }
-        }).collect();
+        let missing_ai: Vec<hecs::Entity> = world
+            .iter()
+            .filter_map(|eref| {
+                if eref.get::<&Monster>().is_some() && eref.get::<&AIState>().is_none() {
+                    Some(eref.entity())
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         for e in missing_ai {
             let _ = world.insert_one(e, AIState::default());
         }
-        
+
         // 遍历所有怪物
-        for (_monster, pos, ai_state, health) in
-            world.query::<(&Monster, &mut Position, &mut AIState, &Health)>().iter() 
+        for (_monster, pos, ai_state, health) in world
+            .query::<(&Monster, &mut Position, &mut AIState, &Health)>()
+            .iter()
         {
             // 跳过死亡怪物
             if health.current <= 0 {
@@ -61,16 +63,12 @@ impl MonsterAISystem {
             Self::ai_melee_attack(pos, ai_state, player_pos);
         }
     }
-    
+
     /// 近战攻击AI
-    fn ai_melee_attack(
-        pos: &mut Position,
-        ai_state: &mut AIState,
-        player_pos: Option<(f32, f32)>
-    ) {
+    fn ai_melee_attack(pos: &mut Position, ai_state: &mut AIState, player_pos: Option<(f32, f32)>) {
         if let Some((px, py)) = player_pos {
             let distance = Self::distance((pos.x, pos.y), (px, py));
-            
+
             if distance < 1.5 {
                 // 在攻击范围内 - 攻击
                 ai_state.current_action = AIAction::Attack;
@@ -90,7 +88,7 @@ impl MonsterAISystem {
             ai_state.target_pos = None;
         }
     }
-    
+
     /// 查找玩家位置
     fn find_player_position(world: &World) -> Option<(f32, f32)> {
         world
@@ -99,7 +97,7 @@ impl MonsterAISystem {
             .next()
             .map(|(_local, pos)| (pos.x, pos.y))
     }
-    
+
     /// 计算两点之间的距离
     fn distance(a: (f32, f32), b: (f32, f32)) -> f32 {
         let dx = b.0 - a.0;
@@ -109,10 +107,7 @@ impl MonsterAISystem {
 }
 
 impl LogicSystem for MonsterAISystem {
-
-    
-
-    fn update(&mut self,  ctx:&mut GameContext, _delay_time: f32) -> GameResult {
+    fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
         Self::update_ai(&mut ctx.world);
         Ok(())
     }

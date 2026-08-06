@@ -15,8 +15,10 @@
 
 use crate::resources;
 use crate::resources::MapReader;
+use macroquad::miniquad::{
+    BlendFactor, BlendState, BlendValue, Equation, UniformDesc, UniformType,
+};
 use macroquad::prelude::*;
-use macroquad::miniquad::{BlendState, BlendFactor, BlendValue, Equation, UniformDesc, UniformType};
 use std::collections::HashMap;
 
 /// 直接纹理渲染的地图渲染器
@@ -42,7 +44,7 @@ pub struct MeshMapRenderer {
 
     /// 是否显示纹理边框 (调试用)
     pub show_texture_border: bool,
-    
+
     /// 动画计时器
     animation_time: f32,
     /// 动画帧计数
@@ -272,7 +274,7 @@ impl MeshMapRenderer {
             },
         )
         .unwrap();
-        
+
         Self {
             tile_width,
             tile_height,
@@ -393,7 +395,8 @@ impl MeshMapRenderer {
                     rt.texture.set_filter(FilterMode::Nearest);
 
                     // 切到 RenderTarget 相机
-                    let mut rt_cam = Camera2D::from_display_rect(Rect::new(0.0, 0.0, world_w, world_h));
+                    let mut rt_cam =
+                        Camera2D::from_display_rect(Rect::new(0.0, 0.0, world_w, world_h));
                     // 当前项目的世界相机使用正的 zoom.y（不翻转 Y），这里保持一致，避免 chunk 纹理上下颠倒。
                     rt_cam.zoom.y = rt_cam.zoom.y.abs();
                     rt_cam.render_target = Some(rt.clone());
@@ -414,7 +417,10 @@ impl MeshMapRenderer {
                     // 恢复世界相机（GameScene 的 map_camera 也使用同一套参数）
                     let world_cam = Camera2D {
                         target: vec2(camera_x, camera_y),
-                        zoom: vec2(2.0 / viewport_width.max(1.0) * zoom, 2.0 / viewport_height.max(1.0) * zoom),
+                        zoom: vec2(
+                            2.0 / viewport_width.max(1.0) * zoom,
+                            2.0 / viewport_height.max(1.0) * zoom,
+                        ),
                         ..Default::default()
                     };
                     set_camera(&world_cam);
@@ -445,10 +451,14 @@ impl MeshMapRenderer {
                 }
             }
 
-            self.static_chunk_cache.hits_since_report =
-                self.static_chunk_cache.hits_since_report.saturating_add(frame_hits);
-            self.static_chunk_cache.misses_since_report =
-                self.static_chunk_cache.misses_since_report.saturating_add(frame_misses);
+            self.static_chunk_cache.hits_since_report = self
+                .static_chunk_cache
+                .hits_since_report
+                .saturating_add(frame_hits);
+            self.static_chunk_cache.misses_since_report = self
+                .static_chunk_cache
+                .misses_since_report
+                .saturating_add(frame_misses);
             self.static_chunk_cache
                 .maybe_report_stats(self.render_counter, visible_chunks);
         }
@@ -458,13 +468,7 @@ impl MeshMapRenderer {
             // 当静态 chunk 缓存启用且 Back 层已被缓存时，这里无需再逐瓦片绘制 Back。
             if !self.enable_static_chunk_cache {
                 let tiles = self.render_back_layer(
-                    map_reader,
-                    start_x,
-                    start_y,
-                    end_x,
-                    end_y,
-                    tint_color,
-                    None,
+                    map_reader, start_x, start_y, end_x, end_y, tint_color, None,
                 );
                 total_tiles += tiles;
             }
@@ -487,14 +491,8 @@ impl MeshMapRenderer {
 
         // Front层
         if self.show_front_layer {
-            let tiles = self.render_front_animated(
-                map_reader,
-                start_x,
-                start_y,
-                end_x,
-                end_y,
-                tint_color,
-            );
+            let tiles =
+                self.render_front_animated(map_reader, start_x, start_y, end_x, end_y, tint_color);
             total_tiles += tiles;
         }
 
@@ -528,8 +526,16 @@ impl MeshMapRenderer {
 
         if include_back {
             // Back（2x2 only even coords），缓存 priority=0/1
-            let start_x_even = if start_x % 2 == 0 { start_x } else { start_x - 1 };
-            let start_y_even = if start_y % 2 == 0 { start_y } else { start_y - 1 };
+            let start_x_even = if start_x % 2 == 0 {
+                start_x
+            } else {
+                start_x - 1
+            };
+            let start_y_even = if start_y % 2 == 0 {
+                start_y
+            } else {
+                start_y - 1
+            };
             for priority in 0..=1 {
                 for y in (start_y_even..end_y).step_by(2) {
                     if y < 0 || y >= map_reader.height {
@@ -543,7 +549,11 @@ impl MeshMapRenderer {
                             continue;
                         };
 
-                        let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                        let cell_priority = if (cell.back_image & 0x20000000) != 0 {
+                            1
+                        } else {
+                            0
+                        };
                         if cell_priority != priority {
                             continue;
                         }
@@ -597,7 +607,11 @@ impl MeshMapRenderer {
                             continue;
                         };
 
-                        let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                        let cell_priority = if (cell.back_image & 0x20000000) != 0 {
+                            1
+                        } else {
+                            0
+                        };
                         if cell_priority != priority {
                             continue;
                         }
@@ -889,7 +903,11 @@ impl MeshMapRenderer {
                         continue;
                     };
 
-                    let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                    let cell_priority = if (cell.back_image & 0x20000000) != 0 {
+                        1
+                    } else {
+                        0
+                    };
                     if cell_priority != priority {
                         continue;
                     }
@@ -933,7 +951,7 @@ impl MeshMapRenderer {
     }
 
     /// 渲染动画层 (Middle/Front)
-    /// 
+    ///
     /// 动画帧计算公式 (来自 C# 客户端):
     /// ```csharp
     /// index += (AnimationCount % (animation + (animation * animationTick))) / (1 + animationTick);
@@ -969,16 +987,22 @@ impl MeshMapRenderer {
                         continue;
                     };
 
-                    let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                    let cell_priority = if (cell.back_image & 0x20000000) != 0 {
+                        1
+                    } else {
+                        0
+                    };
                     if cell_priority != priority {
                         continue;
                     }
 
                     if skip_cached_static
-                        && !cell.middle_use_blend() && !cell.middle_has_animation() {
-                            // 这部分已由静态 chunk 缓存绘制（priority=0/1 都包含）
-                            continue;
-                        }
+                        && !cell.middle_use_blend()
+                        && !cell.middle_has_animation()
+                    {
+                        // 这部分已由静态 chunk 缓存绘制（priority=0/1 都包含）
+                        continue;
+                    }
 
                     if cell.middle_use_blend() {
                         continue;
@@ -1045,7 +1069,11 @@ impl MeshMapRenderer {
                         continue;
                     };
 
-                    let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                    let cell_priority = if (cell.back_image & 0x20000000) != 0 {
+                        1
+                    } else {
+                        0
+                    };
                     if cell_priority != priority {
                         continue;
                     }
@@ -1102,7 +1130,7 @@ impl MeshMapRenderer {
 
         tiles_count
     }
-    
+
     /// 渲染Front层（支持动画和混合）
     fn render_front_animated(
         &mut self,
@@ -1132,7 +1160,11 @@ impl MeshMapRenderer {
                         continue;
                     };
 
-                    let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                    let cell_priority = if (cell.back_image & 0x20000000) != 0 {
+                        1
+                    } else {
+                        0
+                    };
                     if cell_priority != priority {
                         continue;
                     }
@@ -1183,7 +1215,8 @@ impl MeshMapRenderer {
                         false
                     };
 
-                    let (pixel_x, pixel_y) = if file_index == 28 && (offset_x != 0 || offset_y != 0) {
+                    let (pixel_x, pixel_y) = if file_index == 28 && (offset_x != 0 || offset_y != 0)
+                    {
                         (
                             (world_x + offset_x as f32).floor(),
                             (base_y - self.tile_height + offset_y as f32).floor(),
@@ -1229,7 +1262,11 @@ impl MeshMapRenderer {
                         continue;
                     };
 
-                    let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                    let cell_priority = if (cell.back_image & 0x20000000) != 0 {
+                        1
+                    } else {
+                        0
+                    };
                     if cell_priority != priority {
                         continue;
                     }
@@ -1354,7 +1391,11 @@ impl MeshMapRenderer {
                         continue;
                     };
 
-                    let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                    let cell_priority = if (cell.back_image & 0x20000000) != 0 {
+                        1
+                    } else {
+                        0
+                    };
                     if cell_priority != priority {
                         continue;
                     }
@@ -1405,7 +1446,8 @@ impl MeshMapRenderer {
                         false
                     };
 
-                    let (pixel_x, pixel_y) = if file_index == 28 && (offset_x != 0 || offset_y != 0) {
+                    let (pixel_x, pixel_y) = if file_index == 28 && (offset_x != 0 || offset_y != 0)
+                    {
                         (
                             (world_x + offset_x as f32).floor(),
                             (base_y - self.tile_height + offset_y as f32).floor(),
@@ -1458,7 +1500,11 @@ impl MeshMapRenderer {
                         continue;
                     };
 
-                    let cell_priority = if (cell.back_image & 0x20000000) != 0 { 1 } else { 0 };
+                    let cell_priority = if (cell.back_image & 0x20000000) != 0 {
+                        1
+                    } else {
+                        0
+                    };
                     if cell_priority != priority {
                         continue;
                     }
@@ -1548,4 +1594,3 @@ impl MeshMapRenderer {
         tiles_count
     }
 }
-

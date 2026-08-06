@@ -1,10 +1,10 @@
 // Character Handler - 角色相关数据包处理
-// 
+//
 // 处理登录、角色创建、选择、删除等
 
-use mir2_shared::packets::{PacketHeader, Packet, server};
-use mir2_shared::enums::ServerPacketIds;
 use crate::network::handlers::{NetworkEvent, PacketHandler};
+use mir2_shared::enums::ServerPacketIds;
+use mir2_shared::packets::{server, Packet, PacketHeader};
 use std::io::Cursor;
 
 /// Character handler - processes character-related packets
@@ -14,7 +14,7 @@ impl PacketHandler for CharacterHandler {
     fn handle(&self, header: &PacketHeader, payload: &[u8]) -> Vec<NetworkEvent> {
         let mut events = Vec::new();
         let mut cursor = Cursor::new(payload);
-        
+
         match header.opcode as u16 {
             // Login (failed)
             x if x == ServerPacketIds::Login as u16 => {
@@ -44,9 +44,12 @@ impl PacketHandler for CharacterHandler {
             // LoginSuccess
             x if x == ServerPacketIds::LoginSuccess as u16 => {
                 if let Ok(packet) = server::LoginSuccess::read_body(&mut cursor) {
-                    tracing::info!("✅ Login successful, received {} characters", packet.characters.len());
-                    events.push(NetworkEvent::LoginSuccess { 
-                        characters: packet.characters 
+                    tracing::info!(
+                        "✅ Login successful, received {} characters",
+                        packet.characters.len()
+                    );
+                    events.push(NetworkEvent::LoginSuccess {
+                        characters: packet.characters,
                     });
                 }
             }
@@ -134,7 +137,7 @@ impl PacketHandler for CharacterHandler {
                     events.push(NetworkEvent::ChangePasswordFailed { reason });
                 }
             }
-            
+
             // StartGame
             x if x == ServerPacketIds::StartGame as u16 => {
                 if let Ok(packet) = server::StartGame::read_body(&mut cursor) {
@@ -162,15 +165,21 @@ impl PacketHandler for CharacterHandler {
                     events.push(NetworkEvent::StartGameDelay { packet });
                 }
             }
-            
+
             // NewCharacter (failed/response)
             x if x == ServerPacketIds::NewCharacter as u16 => {
                 if let Ok(packet) = server::NewCharacter::read_body(&mut cursor) {
                     let message = match packet.result {
                         0 => "Creating new characters is currently disabled.".to_string(),
                         1 => "Your Character Name is not acceptable.".to_string(),
-                        2 => "The gender you selected does not exist.\n Contact a GM for assistance.".to_string(),
-                        3 => "The class you selected does not exist.\n Contact a GM for assistance.".to_string(),
+                        2 => {
+                            "The gender you selected does not exist.\n Contact a GM for assistance."
+                                .to_string()
+                        }
+                        3 => {
+                            "The class you selected does not exist.\n Contact a GM for assistance."
+                                .to_string()
+                        }
                         4 => format!(
                             "You cannot make anymore then {} Characters.",
                             mir2_shared::MAX_CHARACTER_COUNT
@@ -186,7 +195,9 @@ impl PacketHandler for CharacterHandler {
             x if x == ServerPacketIds::NewCharacterSuccess as u16 => {
                 if let Ok(packet) = server::NewCharacterSuccess::read_body(&mut cursor) {
                     tracing::info!("👤 Character created: {}", packet.character.name);
-                    events.push(NetworkEvent::CharacterCreated { character: packet.character });
+                    events.push(NetworkEvent::CharacterCreated {
+                        character: packet.character,
+                    });
                 }
             }
 
@@ -208,7 +219,7 @@ impl PacketHandler for CharacterHandler {
                     });
                 }
             }
-            
+
             // UserInformation (player data after login)
             x if x == ServerPacketIds::UserInformation as u16 => {
                 if let Ok(packet) = server::UserInformation::read_body(&mut cursor) {
@@ -239,14 +250,21 @@ impl PacketHandler for CharacterHandler {
                         armor: packet.armor,
                         wings_effect: packet.wings_effect,
                     });
-                    tracing::debug!("🔄 PlayerUpdate: obj={} weapon={} armor={}", packet.object_id, packet.weapon, packet.armor);
+                    tracing::debug!(
+                        "🔄 PlayerUpdate: obj={} weapon={} armor={}",
+                        packet.object_id,
+                        packet.weapon,
+                        packet.armor
+                    );
                 }
             }
 
             // ChangeAMode
             x if x == ServerPacketIds::ChangeAMode as u16 => {
                 if let Ok(packet) = server::ChangeAMode::read_body(&mut cursor) {
-                    events.push(NetworkEvent::AttackModeChanged { mode: packet.mode as u8 });
+                    events.push(NetworkEvent::AttackModeChanged {
+                        mode: packet.mode as u8,
+                    });
                     tracing::debug!("⚔️ AttackModeChanged: {:?}", packet.mode);
                 }
             }
@@ -254,7 +272,9 @@ impl PacketHandler for CharacterHandler {
             // ChangePMode
             x if x == ServerPacketIds::ChangePMode as u16 => {
                 if let Ok(packet) = server::ChangePMode::read_body(&mut cursor) {
-                    events.push(NetworkEvent::PetModeChanged { mode: packet.mode as u8 });
+                    events.push(NetworkEvent::PetModeChanged {
+                        mode: packet.mode as u8,
+                    });
                     tracing::debug!("🐾 PetModeChanged: {:?}", packet.mode);
                 }
             }
@@ -262,7 +282,9 @@ impl PacketHandler for CharacterHandler {
             // ColourChanged
             x if x == ServerPacketIds::ColourChanged as u16 => {
                 if let Ok(packet) = server::ColourChanged::read_body(&mut cursor) {
-                    events.push(NetworkEvent::PlayerColourChanged { colour: packet.name_colour_argb as u32 });
+                    events.push(NetworkEvent::PlayerColourChanged {
+                        colour: packet.name_colour_argb as u32,
+                    });
                     tracing::debug!("🎨 PlayerColourChanged: {}", packet.name_colour_argb);
                 }
             }
@@ -276,7 +298,8 @@ impl PacketHandler for CharacterHandler {
                     });
                     tracing::debug!(
                         "🎨 ObjectColourChanged: object={} colour={}",
-                        packet.object_id, packet.name_colour_argb
+                        packet.object_id,
+                        packet.name_colour_argb
                     );
                 }
             }
@@ -290,7 +313,8 @@ impl PacketHandler for CharacterHandler {
                     });
                     tracing::debug!(
                         "🏰 ObjectGuildNameChanged: object={} guild={}",
-                        packet.object_id, packet.guild_name
+                        packet.object_id,
+                        packet.guild_name
                     );
                 }
             }
@@ -298,16 +322,30 @@ impl PacketHandler for CharacterHandler {
             // ObjectName
             x if x == ServerPacketIds::ObjectName as u16 => {
                 if let Ok(packet) = server::ObjectName::read_body(&mut cursor) {
-                    events.push(NetworkEvent::PlayerNameUpdated { object_id: packet.object_id, name: packet.name.clone() });
-                    tracing::debug!("📛 PlayerNameUpdated: object={} name={}", packet.object_id, packet.name);
+                    events.push(NetworkEvent::PlayerNameUpdated {
+                        object_id: packet.object_id,
+                        name: packet.name.clone(),
+                    });
+                    tracing::debug!(
+                        "📛 PlayerNameUpdated: object={} name={}",
+                        packet.object_id,
+                        packet.name
+                    );
                 }
             }
 
             // UserName
             x if x == ServerPacketIds::UserName as u16 => {
                 if let Ok(packet) = server::UserName::read_body(&mut cursor) {
-                    events.push(NetworkEvent::UserNameUpdated { object_id: packet.object_id, name: packet.name.clone() });
-                    tracing::debug!("📛 UserNameUpdated: object={} name={}", packet.object_id, packet.name);
+                    events.push(NetworkEvent::UserNameUpdated {
+                        object_id: packet.object_id,
+                        name: packet.name.clone(),
+                    });
+                    tracing::debug!(
+                        "📛 UserNameUpdated: object={} name={}",
+                        packet.object_id,
+                        packet.name
+                    );
                 }
             }
 
@@ -330,7 +368,9 @@ impl PacketHandler for CharacterHandler {
             x if x == ServerPacketIds::LogOutSuccess as u16 => {
                 if let Ok(packet) = server::LogOutSuccess::read_body(&mut cursor) {
                     let count = packet.characters.len();
-                    events.push(NetworkEvent::LogOutSuccess { characters: packet.characters });
+                    events.push(NetworkEvent::LogOutSuccess {
+                        characters: packet.characters,
+                    });
                     tracing::info!("🚪 LogOutSuccess: {} characters", count);
                 }
             }
@@ -386,11 +426,16 @@ impl PacketHandler for CharacterHandler {
             }
 
             _ => {
-                tracing::debug!("⚠️ CharacterHandler: Unhandled opcode {:04X}", header.opcode);
-                events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                tracing::debug!(
+                    "⚠️ CharacterHandler: Unhandled opcode {:04X}",
+                    header.opcode
+                );
+                events.push(NetworkEvent::UnhandledPacket {
+                    opcode: header.opcode,
+                });
             }
         }
-        
+
         events
     }
 }
@@ -398,7 +443,7 @@ impl PacketHandler for CharacterHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_character_handler_creation() {
         let handler = CharacterHandler;

@@ -16,27 +16,13 @@ use macroquad::miniquad::conf::Platform;
 use macroquad::prelude::*;
 
 use client_macroquad::components::{
-    movement::MovementVelocity,
-    Camera,
-    CameraMode,
-    LocalPlayer,
-    Path,
-    Player,
-    PlayerAction,
-    PlayerInput,
-    Position,
+    movement::MovementVelocity, Camera, CameraMode, LocalPlayer, Path, Player, PlayerAction,
+    PlayerInput, Position,
 };
 use client_macroquad::game::{GameContext, GameResult};
 use client_macroquad::systems::{
-    priority,
-    CameraFollowSystem,
-    IntoSystemKind,
-    MovementSystem,
-    PathfindingSystem,
-    PlayerControlSystem,
-    RenderSystem,
-    SystemKind,
-    SystemScheduler,
+    priority, CameraFollowSystem, IntoSystemKind, MovementSystem, PathfindingSystem,
+    PlayerControlSystem, RenderSystem, SystemKind, SystemScheduler,
 };
 use mir2_shared::enums::MirDirection;
 
@@ -59,7 +45,12 @@ fn window_conf() -> Conf {
     }
 }
 
-fn world_to_screen(world_x: f32, world_y: f32, camera_pos: &Position, camera: &Camera) -> (f32, f32) {
+fn world_to_screen(
+    world_x: f32,
+    world_y: f32,
+    camera_pos: &Position,
+    camera: &Camera,
+) -> (f32, f32) {
     let sx = (world_x - camera_pos.x) / camera.zoom + camera.screen_width / 2.0;
     let sy = (world_y - camera_pos.y) / camera.zoom + camera.screen_height / 2.0;
     (sx, sy)
@@ -93,14 +84,25 @@ impl RenderSystem for DrawProbe {
             .iter()
             .next()
             .map(|(c, p)| (c.clone(), *p))
-            .unwrap_or((Camera::new(screen_width(), screen_height()), Position::new(0.0, 0.0)));
+            .unwrap_or((
+                Camera::new(screen_width(), screen_height()),
+                Position::new(0.0, 0.0),
+            ));
 
         // 读取 player
         let player_snapshot = world
-            .query::<(&LocalPlayer, &Position, &MovementVelocity, &PlayerInput, &Player)>()
+            .query::<(
+                &LocalPlayer,
+                &Position,
+                &MovementVelocity,
+                &PlayerInput,
+                &Player,
+            )>()
             .iter()
             .next()
-            .map(|(_lp, pos, vel, input, player)| (*pos, vel.clone(), input.clone(), player.clone()));
+            .map(|(_lp, pos, vel, input, player)| {
+                (*pos, vel.clone(), input.clone(), player.clone())
+            });
 
         draw_text(
             "ECS Render(draw) MIN TEST | Scheduler.draw is running | ESC quit",
@@ -111,7 +113,10 @@ impl RenderSystem for DrawProbe {
         );
 
         draw_text(
-            &format!("frames={} dt={:.3} zoom={:.2}", self.frames, self.last_dt, camera.zoom),
+            &format!(
+                "frames={} dt={:.3} zoom={:.2}",
+                self.frames, self.last_dt, camera.zoom
+            ),
             16.0,
             48.0,
             18.0,

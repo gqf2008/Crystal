@@ -1,11 +1,11 @@
 //! Mail System Packets (Client → Server)
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::binary::{read_dotnet_string, write_dotnet_string};
-use crate::enums::ClientPacketIds;
 use super::super::base::Packet;
+use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::data::stats::SharedResult;
+use crate::enums::ClientPacketIds;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// Send mail to another player
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,26 +24,32 @@ impl Packet for SendMail {
         let name = read_dotnet_string(reader)?;
         let message = read_dotnet_string(reader)?;
         let gold = reader.read_u32::<LittleEndian>()?;
-        
+
         let mut items_idx = [0u64; 5];
         for item in &mut items_idx {
             *item = reader.read_u64::<LittleEndian>()?;
         }
-        
+
         let stamped = reader.read_u8()? != 0;
-        
-        Ok(Self { name, message, gold, items_idx, stamped })
+
+        Ok(Self {
+            name,
+            message,
+            gold,
+            items_idx,
+            stamped,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         write_dotnet_string(writer, &self.name)?;
         write_dotnet_string(writer, &self.message)?;
         writer.write_u32::<LittleEndian>(self.gold)?;
-        
+
         for &item_idx in &self.items_idx {
             writer.write_u64::<LittleEndian>(item_idx)?;
         }
-        
+
         writer.write_u8(if self.stamped { 1 } else { 0 })?;
         Ok(())
     }
@@ -168,24 +174,28 @@ impl Packet for MailCost {
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let gold = reader.read_u32::<LittleEndian>()?;
-        
+
         let mut items_idx = [0u64; 5];
         for item in &mut items_idx {
             *item = reader.read_u64::<LittleEndian>()?;
         }
-        
+
         let stamped = reader.read_u8()? != 0;
-        
-        Ok(Self { gold, items_idx, stamped })
+
+        Ok(Self {
+            gold,
+            items_idx,
+            stamped,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_u32::<LittleEndian>(self.gold)?;
-        
+
         for &item_idx in &self.items_idx {
             writer.write_u64::<LittleEndian>(item_idx)?;
         }
-        
+
         writer.write_u8(if self.stamped { 1 } else { 0 })?;
         Ok(())
     }

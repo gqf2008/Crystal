@@ -7,18 +7,18 @@ use once_cell::sync::OnceCell;
 static CHINESE_FONT: OnceCell<Option<Font>> = OnceCell::new();
 
 /// 初始化中文字体
-/// 
+///
 /// 应该在程序启动时调用一次
 pub async fn init_chinese_font() {
-    let font = if let Ok(font) = load_ttf_font("assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf").await {
+    let font = if let Ok(font) = load_ttf_font("assets/fonts/AlibabaPuHuiTi-3-55-Regular.ttf").await
+    {
         Some(font)
     } else if let Ok(font) = load_ttf_font("assets/fonts/Chinese.ttc").await {
         Some(font)
     } else {
         load_ttf_font("C:\\Windows\\Fonts\\msyh.ttc").await.ok()
     };
-    
-    
+
     CHINESE_FONT.set(font).ok();
 }
 
@@ -28,7 +28,7 @@ pub fn get_chinese_font() -> Option<&'static Font> {
 }
 
 /// 绘制文本（自动使用中文字体）
-/// 
+///
 /// # 参数
 /// - `text`: 要绘制的文本
 /// - `x`, `y`: 文本位置
@@ -41,12 +41,12 @@ pub fn draw_text_cn(text: &str, x: f32, y: f32, font_size: f32, color: Color) {
         color,
         ..Default::default()
     };
-    
+
     draw_text_ex(text, x, y, params);
 }
 
 /// 绘制居中文本（自动使用中文字体）
-/// 
+///
 /// # 参数
 /// - `text`: 要绘制的文本
 /// - `center_x`, `y`: 文本中心X坐标和Y坐标
@@ -59,7 +59,7 @@ pub fn draw_text_centered(text: &str, center_x: f32, y: f32, font_size: f32, col
 }
 
 /// 绘制右对齐文本（自动使用中文字体）
-/// 
+///
 /// # 参数
 /// - `text`: 要绘制的文本
 /// - `right_x`, `y`: 文本右侧X坐标和Y坐标
@@ -72,11 +72,11 @@ pub fn draw_text_right_aligned(text: &str, right_x: f32, y: f32, font_size: f32,
 }
 
 /// 测量文本尺寸（使用中文字体）
-/// 
+///
 /// # 参数
 /// - `text`: 要测量的文本
 /// - `font_size`: 字体大小
-/// 
+///
 /// # 返回
 /// TextDimensions 包含宽度、高度和偏移信息
 pub fn measure_text_cn(text: &str, font_size: f32) -> TextDimensions {
@@ -84,7 +84,7 @@ pub fn measure_text_cn(text: &str, font_size: f32) -> TextDimensions {
 }
 
 /// 绘制文本（带阴影效果）
-/// 
+///
 /// # 参数
 /// - `text`: 要绘制的文本
 /// - `x`, `y`: 文本位置
@@ -93,22 +93,28 @@ pub fn measure_text_cn(text: &str, font_size: f32) -> TextDimensions {
 /// - `shadow_color`: 阴影颜色
 /// - `shadow_offset`: 阴影偏移量
 pub fn draw_text_with_shadow(
-    text: &str, 
-    x: f32, 
-    y: f32, 
-    font_size: f32, 
+    text: &str,
+    x: f32,
+    y: f32,
+    font_size: f32,
     color: Color,
     shadow_color: Color,
     shadow_offset: f32,
 ) {
     // 先绘制阴影
-    draw_text_cn(text, x + shadow_offset, y + shadow_offset, font_size, shadow_color);
+    draw_text_cn(
+        text,
+        x + shadow_offset,
+        y + shadow_offset,
+        font_size,
+        shadow_color,
+    );
     // 再绘制文本
     draw_text_cn(text, x, y, font_size, color);
 }
 
 /// 绘制描边文本
-/// 
+///
 /// # 参数
 /// - `text`: 要绘制的文本
 /// - `x`, `y`: 文本位置

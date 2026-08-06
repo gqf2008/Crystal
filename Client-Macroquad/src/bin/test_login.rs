@@ -18,7 +18,13 @@ use macroquad::miniquad::conf::Platform;
 use macroquad::prelude::*;
 
 // 引用库模块
-use client_macroquad::{scenes::{CharacterInfo, GameScene, LoadingScene, LoginScene, Scene, SceneKind, SceneTransition, SelectScene}, ui::init_chinese_font};
+use client_macroquad::{
+    scenes::{
+        CharacterInfo, GameScene, LoadingScene, LoginScene, Scene, SceneKind, SceneTransition,
+        SelectScene,
+    },
+    ui::init_chinese_font,
+};
 
 // ============================================================================
 // 常量配置
@@ -37,10 +43,10 @@ fn window_conf() -> Conf {
         window_width: WINDOW_WIDTH,
         window_height: WINDOW_HEIGHT,
         window_resizable: true,
-         high_dpi: false,
+        high_dpi: false,
         fullscreen: false,
         platform: Platform {
-            swap_interval: Some(1),  // VSync
+            swap_interval: Some(1), // VSync
             ..Default::default()
         },
         ..Default::default()
@@ -59,28 +65,28 @@ async fn main() {
     init_chinese_font().await;
     // 创建初始场景 (登录场景)
     let mut current_scene = SceneKind::Login(LoginScene::new());
-    
+
     if let Err(e) = current_scene.on_enter() {
         eprintln!("❌ 场景初始化失败: {}", e);
         return;
     }
-    
+
     println!("✅ {} 初始化成功", current_scene.name());
     println!("\n💡 提示:");
     println!("  - 输入账号和密码");
     println!("  - 点击 OK 按钮或按 Enter 登录");
     println!("  - ESC 退出程序");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-    
+
     // 主循环
     loop {
         let dt = get_frame_time();
-        
+
         // 处理输入
         if let Err(e) = current_scene.handle_input() {
             eprintln!("❌ 输入处理错误: {}", e);
         }
-        
+
         // 更新场景
         match current_scene.update(dt) {
             Ok(SceneTransition::None) => {}
@@ -103,7 +109,9 @@ async fn main() {
                     gender: 0,
                     last_access: "刚刚".to_string(),
                 }];
-                let mut new_scene = SceneKind::CharacterSelect(SelectScene::new(characters).expect("SelectScene 创建失败"));
+                let mut new_scene = SceneKind::CharacterSelect(
+                    SelectScene::new(characters).expect("SelectScene 创建失败"),
+                );
                 new_scene.on_enter().expect("场景初始化失败");
                 current_scene = new_scene;
             }
@@ -131,20 +139,20 @@ async fn main() {
                 eprintln!("❌ 场景更新错误: {}", e);
             }
         }
-        
+
         // 渲染场景
         if let Err(e) = current_scene.render() {
             eprintln!("❌ 场景渲染错误: {}", e);
         }
-        
+
         // ESC退出
         if is_key_pressed(KeyCode::Escape) {
             println!("👋 退出程序 (ESC)");
             break;
         }
-        
+
         next_frame().await;
     }
-    
+
     println!("\n✅ 程序正常退出");
 }

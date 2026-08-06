@@ -17,11 +17,11 @@ pub struct NetworkSync {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetworkObjectType {
-    Player,      // 其他玩家
-    NPC,         // NPC
-    Monster,     // 怪物
-    Item,        // 地面物品
-    Spell,       // 技能特效
+    Player,  // 其他玩家
+    NPC,     // NPC
+    Monster, // 怪物
+    Item,    // 地面物品
+    Spell,   // 技能特效
 }
 
 impl NetworkSync {
@@ -42,7 +42,9 @@ pub struct Lifetime {
 
 impl Lifetime {
     pub fn new(duration_ms: u32) -> Self {
-        Self { remaining_ms: duration_ms }
+        Self {
+            remaining_ms: duration_ms,
+        }
     }
 
     pub fn update(&mut self, delta_ms: u32) -> bool {

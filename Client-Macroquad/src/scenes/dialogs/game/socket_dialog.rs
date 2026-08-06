@@ -9,10 +9,10 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
+use super::native_ui_utils::DragHelper;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
-use super::native_ui_utils::DragHelper;
+use macroquad::prelude::*;
 use mir2_shared::enums::AwakeType;
 
 /// 宝石孔位
@@ -28,8 +28,15 @@ pub struct SocketSlot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SocketAction {
     None,
-    InsertGem { item_unique_id: u64, position_idx: usize, awake_type: AwakeType },
-    RemoveGem { item_unique_id: u64, position_idx: usize },
+    InsertGem {
+        item_unique_id: u64,
+        position_idx: usize,
+        awake_type: AwakeType,
+    },
+    RemoveGem {
+        item_unique_id: u64,
+        position_idx: usize,
+    },
     Close,
 }
 
@@ -145,7 +152,12 @@ impl SocketDialogHybrid {
     }
 
     /// 更新孔位数据
-    pub fn update_sockets(&mut self, item_unique_id: Option<u64>, item_name: String, sockets: Vec<SocketSlot>) {
+    pub fn update_sockets(
+        &mut self,
+        item_unique_id: Option<u64>,
+        item_name: String,
+        sockets: Vec<SocketSlot>,
+    ) {
         self.item_unique_id = item_unique_id;
         self.item_name = item_name;
         self.sockets = sockets;
@@ -200,15 +212,28 @@ impl SocketDialogHybrid {
 
     fn draw_background(&self) {
         if let Some(tex) = &self.bg_texture {
-            draw_texture_ex(tex, self.position.x, self.position.y, WHITE, DrawTextureParams::default());
+            draw_texture_ex(
+                tex,
+                self.position.x,
+                self.position.y,
+                WHITE,
+                DrawTextureParams::default(),
+            );
         } else {
             draw_rectangle(
-                self.position.x, self.position.y, self.size.x, self.size.y,
+                self.position.x,
+                self.position.y,
+                self.size.x,
+                self.size.y,
                 Color::from_rgba(30, 30, 40, 230),
             );
             draw_rectangle_lines(
-                self.position.x, self.position.y, self.size.x, self.size.y,
-                2.0, Color::from_rgba(80, 80, 100, 255),
+                self.position.x,
+                self.position.y,
+                self.size.x,
+                self.size.y,
+                2.0,
+                Color::from_rgba(80, 80, 100, 255),
             );
         }
     }
@@ -232,7 +257,13 @@ impl SocketDialogHybrid {
         if let Some(tex) = &self.close_texture {
             draw_texture_ex(tex, close_x, close_y, WHITE, DrawTextureParams::default());
         } else {
-            draw_rectangle(close_x, close_y, 24.0, 24.0, Color::from_rgba(150, 60, 60, 200));
+            draw_rectangle(
+                close_x,
+                close_y,
+                24.0,
+                24.0,
+                Color::from_rgba(150, 60, 60, 200),
+            );
             draw_text_cn("X", close_x + 8.0, close_y + 16.0, 12.0, WHITE);
         }
 
@@ -249,8 +280,10 @@ impl SocketDialogHybrid {
         for (i, socket) in self.sockets.iter().enumerate() {
             let col = i % 4;
             let row = i / 4;
-            let slot_x = self.position.x + Self::START_X + col as f32 * (Self::SLOT_SIZE + Self::SLOT_GAP);
-            let slot_y = self.position.y + Self::START_Y + row as f32 * (Self::SLOT_SIZE + Self::SLOT_GAP);
+            let slot_x =
+                self.position.x + Self::START_X + col as f32 * (Self::SLOT_SIZE + Self::SLOT_GAP);
+            let slot_y =
+                self.position.y + Self::START_Y + row as f32 * (Self::SLOT_SIZE + Self::SLOT_GAP);
             let slot_rect = Rect::new(slot_x, slot_y, Self::SLOT_SIZE, Self::SLOT_SIZE);
             let is_hovered = slot_rect.contains(mouse_pos);
 
@@ -261,28 +294,50 @@ impl SocketDialogHybrid {
                 Color::from_rgba(40, 40, 40, 200)
             };
             draw_rectangle(slot_x, slot_y, Self::SLOT_SIZE, Self::SLOT_SIZE, bg_color);
-            draw_rectangle_lines(slot_x, slot_y, Self::SLOT_SIZE, Self::SLOT_SIZE, 1.0,
+            draw_rectangle_lines(
+                slot_x,
+                slot_y,
+                Self::SLOT_SIZE,
+                Self::SLOT_SIZE,
+                1.0,
                 if is_hovered {
                     Color::from_rgba(200, 200, 100, 255)
                 } else {
                     Color::from_rgba(80, 80, 80, 200)
-                });
+                },
+            );
 
             if socket.has_gem {
                 // 显示宝石
                 if let Some(tex) = &self.gem_texture {
-                    draw_texture_ex(tex, slot_x + 4.0, slot_y + 4.0, WHITE, DrawTextureParams {
-                        dest_size: Some(vec2(Self::SLOT_SIZE - 8.0, Self::SLOT_SIZE - 8.0)),
-                        ..Default::default()
-                    });
+                    draw_texture_ex(
+                        tex,
+                        slot_x + 4.0,
+                        slot_y + 4.0,
+                        WHITE,
+                        DrawTextureParams {
+                            dest_size: Some(vec2(Self::SLOT_SIZE - 8.0, Self::SLOT_SIZE - 8.0)),
+                            ..Default::default()
+                        },
+                    );
                 }
                 // 宝石名称
-                draw_text_cn(&socket.gem_name, slot_x + 2.0, slot_y + Self::SLOT_SIZE + 12.0, 8.0,
-                    Color::from_rgba(180, 100, 255, 255));
+                draw_text_cn(
+                    &socket.gem_name,
+                    slot_x + 2.0,
+                    slot_y + Self::SLOT_SIZE + 12.0,
+                    8.0,
+                    Color::from_rgba(180, 100, 255, 255),
+                );
             } else {
                 // 空孔位标记
-                draw_text_cn("空", slot_x + 12.0, slot_y + 24.0, 10.0,
-                    Color::from_rgba(80, 80, 80, 200));
+                draw_text_cn(
+                    "空",
+                    slot_x + 12.0,
+                    slot_y + 24.0,
+                    10.0,
+                    Color::from_rgba(80, 80, 80, 200),
+                );
             }
 
             // 点击检测
@@ -297,7 +352,10 @@ impl SocketDialogHybrid {
 
         if let Some(idx) = clicked_remove {
             if let Some(uid) = self.item_unique_id {
-                self.pending_action = SocketAction::RemoveGem { item_unique_id: uid, position_idx: idx };
+                self.pending_action = SocketAction::RemoveGem {
+                    item_unique_id: uid,
+                    position_idx: idx,
+                };
             }
         }
         if let Some(idx) = clicked_insert {
@@ -329,8 +387,21 @@ impl SocketDialogHybrid {
         draw_rectangle(0.0, 0.0, sw, sh, Color::from_rgba(0, 0, 0, 120));
 
         // 面板背景
-        draw_rectangle(picker_x, picker_y, picker_w, picker_h, Color::from_rgba(20, 20, 30, 240));
-        draw_rectangle_lines(picker_x, picker_y, picker_w, picker_h, 2.0, Color::from_rgba(120, 120, 140, 255));
+        draw_rectangle(
+            picker_x,
+            picker_y,
+            picker_w,
+            picker_h,
+            Color::from_rgba(20, 20, 30, 240),
+        );
+        draw_rectangle_lines(
+            picker_x,
+            picker_y,
+            picker_w,
+            picker_h,
+            2.0,
+            Color::from_rgba(120, 120, 140, 255),
+        );
 
         // 标题
         draw_text_cn(
@@ -343,11 +414,11 @@ impl SocketDialogHybrid {
 
         // AwakeType 选项 (跳过 None = 0)
         let options: [(AwakeType, &str); 6] = [
-            (AwakeType::Dc,   "DC - 物理攻击"),
-            (AwakeType::Mc,   "MC - 魔法攻击"),
-            (AwakeType::Sc,   "SC - 道术攻击"),
-            (AwakeType::Ac,   "AC - 物理防御"),
-            (AwakeType::Mac,  "MAC - 魔法防御"),
+            (AwakeType::Dc, "DC - 物理攻击"),
+            (AwakeType::Mc, "MC - 魔法攻击"),
+            (AwakeType::Sc, "SC - 道术攻击"),
+            (AwakeType::Ac, "AC - 物理防御"),
+            (AwakeType::Mac, "MAC - 魔法防御"),
             (AwakeType::HpMp, "HP/MP - 生命/魔法"),
         ];
 
@@ -361,14 +432,24 @@ impl SocketDialogHybrid {
             let rect = Rect::new(btn_x, by, btn_w, btn_h);
             let hover = rect.contains(mouse_pos);
             draw_rectangle(
-                btn_x, by, btn_w, btn_h,
+                btn_x,
+                by,
+                btn_w,
+                btn_h,
                 if hover {
                     Color::from_rgba(70, 70, 110, 240)
                 } else {
                     Color::from_rgba(50, 50, 80, 220)
                 },
             );
-            draw_rectangle_lines(btn_x, by, btn_w, btn_h, 1.0, Color::from_rgba(100, 100, 130, 255));
+            draw_rectangle_lines(
+                btn_x,
+                by,
+                btn_w,
+                btn_h,
+                1.0,
+                Color::from_rgba(100, 100, 130, 255),
+            );
             draw_text_cn(label, btn_x + 10.0, by + 8.0, 11.0, WHITE);
 
             if hover && is_mouse_button_pressed(MouseButton::Left) {
@@ -381,7 +462,10 @@ impl SocketDialogHybrid {
         let cancel_rect = Rect::new(btn_x, cancel_y, btn_w, btn_h);
         let cancel_hover = cancel_rect.contains(mouse_pos);
         draw_rectangle(
-            btn_x, cancel_y, btn_w, btn_h,
+            btn_x,
+            cancel_y,
+            btn_w,
+            btn_h,
             if cancel_hover {
                 Color::from_rgba(120, 40, 40, 240)
             } else {

@@ -3,15 +3,15 @@
 /// 商城主分类
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ShopSectionHybrid {
-    All,        // 全部
-    TopItems,   // 热销
-    Deals,      // 特价
-    New,        // 新品
+    All,      // 全部
+    TopItems, // 热销
+    Deals,    // 特价
+    New,      // 新品
 }
 
 impl ShopSectionHybrid {
     pub const ALL: &'static [Self] = &[Self::All, Self::TopItems, Self::Deals, Self::New];
-    
+
     pub fn name(&self) -> &'static str {
         match self {
             Self::All => "全部",
@@ -25,20 +25,24 @@ impl ShopSectionHybrid {
 /// 商城职业分类
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ShopClassHybrid {
-    All,        // 全部
-    Warrior,    // 战士
-    Assassin,   // 刺客
-    Taoist,     // 道士
-    Wizard,     // 法师
-    Archer,     // 弓箭手
+    All,      // 全部
+    Warrior,  // 战士
+    Assassin, // 刺客
+    Taoist,   // 道士
+    Wizard,   // 法师
+    Archer,   // 弓箭手
 }
 
 impl ShopClassHybrid {
     pub const ALL: &'static [Self] = &[
-        Self::All, Self::Warrior, Self::Assassin, 
-        Self::Taoist, Self::Wizard, Self::Archer
+        Self::All,
+        Self::Warrior,
+        Self::Assassin,
+        Self::Taoist,
+        Self::Wizard,
+        Self::Archer,
     ];
-    
+
     pub fn name(&self) -> &'static str {
         match self {
             Self::All => "全",
@@ -54,11 +58,11 @@ impl ShopClassHybrid {
 /// 商品分类
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ShopCategoryHybrid {
-    Weapon,     // 武器
-    Armor,      // 防具
-    Potion,     // 药品
-    Special,    // 特殊
-    Fashion,    // 时装
+    Weapon,  // 武器
+    Armor,   // 防具
+    Potion,  // 药品
+    Special, // 特殊
+    Fashion, // 时装
 }
 
 impl ShopCategoryHybrid {

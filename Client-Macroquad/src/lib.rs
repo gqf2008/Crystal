@@ -19,8 +19,8 @@ pub mod coord;
 pub mod core;
 pub mod event_bus;
 pub mod game;
-pub mod network;
 pub mod map_renderer;
+pub mod network;
 pub mod objects;
 pub mod resources;
 pub mod scenes;
@@ -30,7 +30,7 @@ pub mod utils;
 
 // ✨ ecs_macros 兼容性别名
 pub mod ecs {
+    pub use crate::components;
     pub use crate::game::GameContext;
     pub use crate::systems;
-    pub use crate::components;
 }

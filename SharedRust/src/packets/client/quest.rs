@@ -1,10 +1,10 @@
 //! Quest System Packets (Client → Server)
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::enums::ClientPacketIds;
 use super::super::base::Packet;
 use crate::data::stats::SharedResult;
+use crate::enums::ClientPacketIds;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// Accept quest from NPC
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,7 +19,10 @@ impl Packet for AcceptQuest {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let npc_index = reader.read_u32::<LittleEndian>()?;
         let quest_index = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { npc_index, quest_index })
+        Ok(Self {
+            npc_index,
+            quest_index,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -42,7 +45,10 @@ impl Packet for FinishQuest {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let quest_index = reader.read_i32::<LittleEndian>()?;
         let selected_item_index = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { quest_index, selected_item_index })
+        Ok(Self {
+            quest_index,
+            selected_item_index,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {

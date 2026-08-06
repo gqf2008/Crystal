@@ -21,7 +21,9 @@ use chrono::Utc;
 
 use mir2_shared::data::client_data::SelectInfo;
 use mir2_shared::data::item::{ItemInfo, UserItem};
-use mir2_shared::enums::{ChatType, HeroBehaviour, ItemType, MirClass, MirDirection, MirGender, PanelType};
+use mir2_shared::enums::{
+    ChatType, HeroBehaviour, ItemType, MirClass, MirDirection, MirGender, PanelType,
+};
 
 pub const CRYSTAL_REMOTE_PLAYERS: &str = "CRYSTAL_REMOTE_PLAYERS";
 pub const CRYSTAL_START_MAP: &str = "CRYSTAL_START_MAP";
@@ -373,8 +375,8 @@ impl MockNetwork {
             let mut state = MockWorldState::new(cfg);
 
             let _ = server_tx.send(NetworkEvent::Connected);
-                // mock 下直接接受版本校验，避免 LoginScene 卡在 version_ok 等待。
-                let _ = server_tx.send(NetworkEvent::ClientVersionResponse { result: 1 });
+            // mock 下直接接受版本校验，避免 LoginScene 卡在 version_ok 等待。
+            let _ = server_tx.send(NetworkEvent::ClientVersionResponse { result: 1 });
             let tick_sleep = Duration::from_millis(10);
 
             loop {
@@ -398,7 +400,11 @@ impl MockNetwork {
         (client_tx, server_rx)
     }
 
-    fn handle_game_event(event: NetworkEvent, response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState) {
+    fn handle_game_event(
+        event: NetworkEvent,
+        response_tx: &Sender<NetworkEvent>,
+        state: &mut MockWorldState,
+    ) {
         match event {
             NetworkEvent::DisconnectRequest => {
                 let _ = response_tx.send(NetworkEvent::Disconnected {
@@ -441,7 +447,11 @@ impl MockNetwork {
                 let _ = response_tx.send(NetworkEvent::ChangePasswordSuccess);
             }
 
-            NetworkEvent::NewCharacterRequest { name, class, gender } => {
+            NetworkEvent::NewCharacterRequest {
+                name,
+                class,
+                gender,
+            } => {
                 let class = MirClass::try_from(class).unwrap_or(MirClass::Warrior);
                 let gender = MirGender::try_from(gender).unwrap_or(MirGender::Male);
                 let next_index = state.characters.len() as i32;
@@ -465,7 +475,9 @@ impl MockNetwork {
 
             NetworkEvent::DeleteCharacterRequest { index } => {
                 state.characters.retain(|c| c.index != index);
-                let _ = response_tx.send(NetworkEvent::CharacterDeleted { index: index as u32 });
+                let _ = response_tx.send(NetworkEvent::CharacterDeleted {
+                    index: index as u32,
+                });
                 let _ = response_tx.send(NetworkEvent::LoginSuccess {
                     characters: state.characters.clone(),
                 });
@@ -531,7 +543,8 @@ impl MockNetwork {
                     MailInfo {
                         mail_id: 2,
                         sender_name: "新手引导".to_string(),
-                        message: "新手提示：按 I 打开背包，按 B 打开腰带，按 Tab 切换地图。".to_string(),
+                        message: "新手提示：按 I 打开背包，按 B 打开腰带，按 Tab 切换地图。"
+                            .to_string(),
                         opened: true,
                         locked: false,
                         can_reply: false,
@@ -582,8 +595,10 @@ impl MockNetwork {
                 let normal_zone_count = 6usize;
                 for i in 0..normal_zone_count {
                     let prefer = (
-                        (map_w_eff / 2 + (i as i32 - 3) * 55).clamp(0, map_w_eff.saturating_sub(1).max(0)),
-                        (map_h_eff / 2 + ((i as i32 % 3) - 1) * 55).clamp(0, map_h_eff.saturating_sub(1).max(0)),
+                        (map_w_eff / 2 + (i as i32 - 3) * 55)
+                            .clamp(0, map_w_eff.saturating_sub(1).max(0)),
+                        (map_h_eff / 2 + ((i as i32 % 3) - 1) * 55)
+                            .clamp(0, map_h_eff.saturating_sub(1).max(0)),
                     );
                     let center = Self::pick_random_walkable_near_center_raw(
                         state.map_width,
@@ -677,32 +692,44 @@ impl MockNetwork {
 
                     let weapon = (state.mock_cfg.weapon_min
                         + (Self::rng_next_u32(&mut state.rng)
-                            % ((state.mock_cfg.weapon_max - state.mock_cfg.weapon_min).max(0) as u32 + 1))
-                            as i16)
+                            % ((state.mock_cfg.weapon_max - state.mock_cfg.weapon_min).max(0)
+                                as u32
+                                + 1)) as i16)
                         .clamp(state.mock_cfg.weapon_min, state.mock_cfg.weapon_max);
                     let armour = (state.mock_cfg.armour_min
                         + (Self::rng_next_u32(&mut state.rng)
-                            % ((state.mock_cfg.armour_max - state.mock_cfg.armour_min).max(0) as u32 + 1))
-                            as i16)
+                            % ((state.mock_cfg.armour_max - state.mock_cfg.armour_min).max(0)
+                                as u32
+                                + 1)) as i16)
                         .clamp(state.mock_cfg.armour_min, state.mock_cfg.armour_max);
                     let weapon_effect = (state.mock_cfg.weapon_effect_min
                         + (Self::rng_next_u32(&mut state.rng)
-                            % ((state.mock_cfg.weapon_effect_max - state.mock_cfg.weapon_effect_min).max(0) as u32 + 1))
-                            as i16)
-                        .clamp(state.mock_cfg.weapon_effect_min, state.mock_cfg.weapon_effect_max);
-                    let wing_effect = if state.mock_cfg.wing_effect_max >= state.mock_cfg.wing_effect_min {
-                        let span = (state.mock_cfg.wing_effect_max - state.mock_cfg.wing_effect_min) as u32;
-                        state.mock_cfg.wing_effect_min + (Self::rng_next_u32(&mut state.rng) % (span + 1)) as u8
+                            % ((state.mock_cfg.weapon_effect_max - state.mock_cfg.weapon_effect_min)
+                                .max(0) as u32
+                                + 1)) as i16)
+                        .clamp(
+                            state.mock_cfg.weapon_effect_min,
+                            state.mock_cfg.weapon_effect_max,
+                        );
+                    let wing_effect = if state.mock_cfg.wing_effect_max
+                        >= state.mock_cfg.wing_effect_min
+                    {
+                        let span = (state.mock_cfg.wing_effect_max - state.mock_cfg.wing_effect_min)
+                            as u32;
+                        state.mock_cfg.wing_effect_min
+                            + (Self::rng_next_u32(&mut state.rng) % (span + 1)) as u8
                     } else {
                         0
                     };
 
                     let mut mount_type = 0i16;
                     let mut riding_mount = false;
-                    if level >= state.mock_cfg.mount_min_level && state.mock_cfg.mount_chance > 0.0 {
+                    if level >= state.mock_cfg.mount_min_level && state.mock_cfg.mount_chance > 0.0
+                    {
                         let roll = (Self::rng_next_u32(&mut state.rng) as f32) / (u32::MAX as f32);
                         if roll < state.mock_cfg.mount_chance {
-                            let span = (state.mock_cfg.mount_max - state.mock_cfg.mount_min).max(0) as u32;
+                            let span =
+                                (state.mock_cfg.mount_max - state.mock_cfg.mount_min).max(0) as u32;
                             mount_type = state.mock_cfg.mount_min
                                 + (Self::rng_next_u32(&mut state.rng) % (span + 1)) as i16;
                             riding_mount = mount_type != 0;
@@ -775,10 +802,15 @@ impl MockNetwork {
                         hp_max: 120,
                         experience: 0,
                         max_experience: Self::exp_for_next_level(level),
-                        last_attack: now - Duration::from_millis(state.mock_cfg.attack_cooldown_ms.max(50)),
+                        last_attack: now
+                            - Duration::from_millis(state.mock_cfg.attack_cooldown_ms.max(50)),
                         last_tick: now,
                         team: if state.mock_cfg.mass_battle_enabled {
-                            if i < team_a_count { 0 } else { 1 }
+                            if i < team_a_count {
+                                0
+                            } else {
+                                1
+                            }
                         } else {
                             (i % 2) as u8
                         },
@@ -828,9 +860,10 @@ impl MockNetwork {
                     if w_shape > 0 {
                         let effect = (cfg.weapon_effect_min
                             + (Self::rng_next_u32(&mut state.rng)
-                                % ((cfg.weapon_effect_max - cfg.weapon_effect_min).max(0) as u32 + 1))
-                                as i16)
-                            .clamp(cfg.weapon_effect_min, cfg.weapon_effect_max) as u8;
+                                % ((cfg.weapon_effect_max - cfg.weapon_effect_min).max(0) as u32
+                                    + 1)) as i16)
+                            .clamp(cfg.weapon_effect_min, cfg.weapon_effect_max)
+                            as u8;
                         let info = ItemInfo {
                             index: 5001,
                             item_type: mir2_shared::enums::ItemType::Weapon,
@@ -863,7 +896,8 @@ impl MockNetwork {
                     if a_shape > 0 {
                         let span = (cfg.wing_effect_max - cfg.wing_effect_min) as u32;
                         let effect = if cfg.wing_effect_max >= cfg.wing_effect_min {
-                            cfg.wing_effect_min + (Self::rng_next_u32(&mut state.rng) % (span + 1)) as u8
+                            cfg.wing_effect_min
+                                + (Self::rng_next_u32(&mut state.rng) % (span + 1)) as u8
                         } else {
                             0
                         };
@@ -892,7 +926,8 @@ impl MockNetwork {
                     // - 否则沿用原本概率逻辑
                     if mount_max_cfg > 0 || mount_min_cfg > 0 {
                         let span = (mount_max_cfg - mount_min_cfg).max(0) as u32;
-                        mount_type = mount_min_cfg + (Self::rng_next_u32(&mut state.rng) % (span + 1)) as i16;
+                        mount_type = mount_min_cfg
+                            + (Self::rng_next_u32(&mut state.rng) % (span + 1)) as i16;
                         if mount_type == 0 && mount_max_cfg > 0 {
                             mount_type = mount_max_cfg;
                         }
@@ -901,7 +936,8 @@ impl MockNetwork {
                         let roll = (Self::rng_next_u32(&mut state.rng) as f32) / (u32::MAX as f32);
                         if roll < cfg.mount_chance {
                             let span = (mount_max_cfg - mount_min_cfg).max(0) as u32;
-                            mount_type = mount_min_cfg + (Self::rng_next_u32(&mut state.rng) % (span + 1)) as i16;
+                            mount_type = mount_min_cfg
+                                + (Self::rng_next_u32(&mut state.rng) % (span + 1)) as i16;
                             riding = mount_type != 0;
                         }
                     }
@@ -970,7 +1006,9 @@ impl MockNetwork {
                     allow_observe: false,
                     observer: false,
                 };
-                let _ = response_tx.send(NetworkEvent::UserInformation { packet: user_packet });
+                let _ = response_tx.send(NetworkEvent::UserInformation {
+                    packet: user_packet,
+                });
 
                 // IMPORTANT: send local MountUpdated AFTER UserInformation.
                 // Otherwise the client may drop the mount update because the LocalPlayer entity
@@ -997,7 +1035,8 @@ impl MockNetwork {
                 // Make the local visual state obvious in logs/chat so we can confirm
                 // we're running the latest build and that equipment/mount data is non-empty.
                 let weapon_dbg = state
-                    .player_equipment.first()
+                    .player_equipment
+                    .first()
                     .and_then(|o| o.as_ref())
                     .and_then(|ui| ui.info.as_ref())
                     .map(|info| (info.shape, info.effect))
@@ -1156,7 +1195,13 @@ impl MockNetwork {
                 if dead {
                     let xp = state.monsters.get(&mid).map(|m| m.xp_reward).unwrap_or(10);
                     state.monsters.remove(&mid);
-                    let _ = response_tx.send(NetworkEvent::ObjectDied { object_id: mid, location_x: 0, location_y: 0, direction: 0, death_type: 0 });
+                    let _ = response_tx.send(NetworkEvent::ObjectDied {
+                        object_id: mid,
+                        location_x: 0,
+                        location_y: 0,
+                        direction: 0,
+                        death_type: 0,
+                    });
                     let _ = response_tx.send(NetworkEvent::ObjectRemove { object_id: mid });
 
                     state.player_experience += xp;
@@ -1165,7 +1210,8 @@ impl MockNetwork {
                     while state.player_experience >= state.player_max_experience {
                         state.player_experience -= state.player_max_experience.max(1);
                         state.player_level = state.player_level.saturating_add(1);
-                        state.player_max_experience = Self::exp_for_next_level(state.player_level).max(1);
+                        state.player_max_experience =
+                            Self::exp_for_next_level(state.player_level).max(1);
                         let _ = response_tx.send(NetworkEvent::LevelUp {
                             new_level: state.player_level,
                         });
@@ -1177,7 +1223,10 @@ impl MockNetwork {
                 // very small mock shop
                 if key.is_empty() {
                     let dialog = "<font color=yellow>Mock Shop</font>\\n[@Buy]".to_string();
-                    let _ = response_tx.send(NetworkEvent::NpcDialog { npc_id: npc_object_id, dialog });
+                    let _ = response_tx.send(NetworkEvent::NpcDialog {
+                        npc_id: npc_object_id,
+                        dialog,
+                    });
 
                     let mut goods: Vec<UserItem> = Vec::new();
                     for i in 0..6u64 {
@@ -1211,7 +1260,12 @@ impl MockNetwork {
                 if count == 0 {
                     return;
                 }
-                let Some(template) = state.last_shop_goods.iter().find(|g| g.unique_id == item_index).cloned() else {
+                let Some(template) = state
+                    .last_shop_goods
+                    .iter()
+                    .find(|g| g.unique_id == item_index)
+                    .cloned()
+                else {
                     let _ = response_tx.send(NetworkEvent::SystemMessage {
                         message: format!("(MOCK) 购买失败：找不到商品 unique_id={}", item_index),
                     });
@@ -1224,7 +1278,10 @@ impl MockNetwork {
 
                 if state.player_gold < total_cost {
                     let _ = response_tx.send(NetworkEvent::SystemMessage {
-                        message: format!("(MOCK) 金币不足：需要 {}，当前 {}", total_cost, state.player_gold),
+                        message: format!(
+                            "(MOCK) 金币不足：需要 {}，当前 {}",
+                            total_cost, state.player_gold
+                        ),
                     });
                     return;
                 }
@@ -1274,7 +1331,8 @@ impl MockNetwork {
 
                 if is_potion && state.player_hp_current > 0 {
                     let heal = (state.player_hp_max / 3).max(20);
-                    state.player_hp_current = (state.player_hp_current + heal).min(state.player_hp_max);
+                    state.player_hp_current =
+                        (state.player_hp_current + heal).min(state.player_hp_max);
 
                     let _ = response_tx.send(NetworkEvent::HealthChanged {
                         current: state.player_hp_current as u32,
@@ -1283,27 +1341,50 @@ impl MockNetwork {
                 }
 
                 // 物品消耗：直接移除（count=1 的简化模型）
-                let _ = response_tx.send(NetworkEvent::ItemLost { unique_id, count: 1 });
+                let _ = response_tx.send(NetworkEvent::ItemLost {
+                    unique_id,
+                    count: 1,
+                });
             }
 
             // ===== 仓库操作（Mock 模式） =====
             NetworkEvent::NPCStorageReceived => {
                 // 打开仓库时，发送当前仓库物品列表
-                let items: Vec<_> = state.player_storage.iter().filter_map(|s| s.clone()).collect();
+                let items: Vec<_> = state
+                    .player_storage
+                    .iter()
+                    .filter_map(|s| s.clone())
+                    .collect();
                 let _ = response_tx.send(NetworkEvent::UserStorageReceived { items });
-                tracing::debug!("[MOCK] NPCStorageReceived: sending {} storage items", state.player_storage.len());
+                tracing::debug!(
+                    "[MOCK] NPCStorageReceived: sending {} storage items",
+                    state.player_storage.len()
+                );
             }
 
             NetworkEvent::StoreItemRequest { unique_id } => {
                 // 从背包找物品，移到仓库
-                if let Some(slot_idx) = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id)) {
+                if let Some(slot_idx) = state
+                    .player_inventory
+                    .iter()
+                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id))
+                {
                     if let Some(item) = state.player_inventory[slot_idx].take() {
                         // 找仓库空位
-                        if let Some(storage_slot) = state.player_storage.iter_mut().find(|s| s.is_none()) {
+                        if let Some(storage_slot) =
+                            state.player_storage.iter_mut().find(|s| s.is_none())
+                        {
                             *storage_slot = Some(item.clone());
-                            let _ = response_tx.send(NetworkEvent::ItemLost { unique_id, count: 1 }); // 从背包移除
-                            let _ = response_tx.send(NetworkEvent::ItemGained { item: item.clone() }); // 重新通知（服务器权威）
-                            tracing::debug!("[MOCK] StoreItemRequest: unique_id={} stored", unique_id);
+                            let _ = response_tx.send(NetworkEvent::ItemLost {
+                                unique_id,
+                                count: 1,
+                            }); // 从背包移除
+                            let _ =
+                                response_tx.send(NetworkEvent::ItemGained { item: item.clone() }); // 重新通知（服务器权威）
+                            tracing::debug!(
+                                "[MOCK] StoreItemRequest: unique_id={} stored",
+                                unique_id
+                            );
                         } else {
                             // 仓库满了，放回背包
                             state.player_inventory[slot_idx] = Some(item);
@@ -1317,14 +1398,27 @@ impl MockNetwork {
 
             NetworkEvent::TakeBackItemRequest { unique_id } => {
                 // 从仓库找物品，移回背包
-                if let Some(slot_idx) = state.player_storage.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id)) {
+                if let Some(slot_idx) = state
+                    .player_storage
+                    .iter()
+                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id))
+                {
                     if let Some(item) = state.player_storage[slot_idx].take() {
                         // 找背包空位
-                        if let Some(inventory_slot) = state.player_inventory.iter_mut().find(|s| s.is_none()) {
+                        if let Some(inventory_slot) =
+                            state.player_inventory.iter_mut().find(|s| s.is_none())
+                        {
                             *inventory_slot = Some(item.clone());
-                            let _ = response_tx.send(NetworkEvent::ItemLost { unique_id, count: 1 }); // 从仓库移除
-                            let _ = response_tx.send(NetworkEvent::ItemGained { item: item.clone() }); // 重新通知
-                            tracing::debug!("[MOCK] TakeBackItemRequest: unique_id={} retrieved", unique_id);
+                            let _ = response_tx.send(NetworkEvent::ItemLost {
+                                unique_id,
+                                count: 1,
+                            }); // 从仓库移除
+                            let _ =
+                                response_tx.send(NetworkEvent::ItemGained { item: item.clone() }); // 重新通知
+                            tracing::debug!(
+                                "[MOCK] TakeBackItemRequest: unique_id={} retrieved",
+                                unique_id
+                            );
                         } else {
                             // 背包满了，放回仓库
                             state.player_storage[slot_idx] = Some(item);
@@ -1337,7 +1431,11 @@ impl MockNetwork {
             }
 
             NetworkEvent::DropItemRequest { unique_id, count } => {
-                if let Some(slot_idx) = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id)) {
+                if let Some(slot_idx) = state
+                    .player_inventory
+                    .iter()
+                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id))
+                {
                     let count = count as u16;
                     if let Some(ref mut item) = state.player_inventory[slot_idx] {
                         if item.count <= count {
@@ -1346,8 +1444,15 @@ impl MockNetwork {
                             item.count -= count;
                         }
                     }
-                    let _ = response_tx.send(NetworkEvent::ItemLost { unique_id, count: 1 });
-                    tracing::debug!("[MOCK] DropItemRequest: unique_id={} count={}", unique_id, count);
+                    let _ = response_tx.send(NetworkEvent::ItemLost {
+                        unique_id,
+                        count: 1,
+                    });
+                    tracing::debug!(
+                        "[MOCK] DropItemRequest: unique_id={} count={}",
+                        unique_id,
+                        count
+                    );
                 }
             }
 
@@ -1356,9 +1461,16 @@ impl MockNetwork {
                 if grid == 0 {
                     let from_idx = from as usize;
                     let to_idx = to as usize;
-                    if from_idx < state.player_inventory.len() && to_idx < state.player_inventory.len() {
+                    if from_idx < state.player_inventory.len()
+                        && to_idx < state.player_inventory.len()
+                    {
                         state.player_inventory.swap(from_idx, to_idx);
-                        tracing::debug!("[MOCK] MoveItemRequest: grid={} from={} to={}", grid, from, to);
+                        tracing::debug!(
+                            "[MOCK] MoveItemRequest: grid={} from={} to={}",
+                            grid,
+                            from,
+                            to
+                        );
                     }
                 }
             }
@@ -1367,7 +1479,9 @@ impl MockNetwork {
                 // 模拟拾取：生成一个随机物品放入背包
                 if let Some(slot) = state.player_inventory.iter_mut().find(|s| s.is_none()) {
                     let mock_item = Self::make_mock_item(&mut state.rng);
-                    let _ = response_tx.send(NetworkEvent::ItemGained { item: mock_item.clone() });
+                    let _ = response_tx.send(NetworkEvent::ItemGained {
+                        item: mock_item.clone(),
+                    });
                     *slot = Some(mock_item);
                     tracing::debug!("[MOCK] PickupItemRequest at {:?}", location);
                 } else {
@@ -1379,40 +1493,67 @@ impl MockNetwork {
 
             NetworkEvent::SellItemRequest { unique_id, count } => {
                 // 从背包找物品并出售
-                if let Some(slot_idx) = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id)) {
+                if let Some(slot_idx) = state
+                    .player_inventory
+                    .iter()
+                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id))
+                {
                     if let Some(ref item) = state.player_inventory[slot_idx] {
                         let base_price = item.info.as_ref().map(|i| i.price).unwrap_or(0) as f32;
                         let sell_price = (base_price * 0.5).round() as u32;
                         let total_gold = sell_price * count;
                         state.player_inventory[slot_idx] = None;
                         state.player_gold += total_gold;
-                        let _ = response_tx.send(NetworkEvent::ItemLost { unique_id, count: 1 });
+                        let _ = response_tx.send(NetworkEvent::ItemLost {
+                            unique_id,
+                            count: 1,
+                        });
                         let _ = response_tx.send(NetworkEvent::GoldChanged {
                             delta: total_gold as i32,
                         });
                         let _ = response_tx.send(NetworkEvent::SellItemReceived {
-                            unique_id, count: count as u16, success: true,
+                            unique_id,
+                            count: count as u16,
+                            success: true,
                         });
-                        tracing::debug!("[MOCK] SellItemRequest: unique_id={} count={} gold={}", unique_id, count, total_gold);
+                        tracing::debug!(
+                            "[MOCK] SellItemRequest: unique_id={} count={} gold={}",
+                            unique_id,
+                            count,
+                            total_gold
+                        );
                     }
                 }
             }
 
             NetworkEvent::RepairItemRequest { unique_id } => {
                 // 修理装备：恢复耐久到最大值
-                if let Some(slot_idx) = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id)) {
+                if let Some(slot_idx) = state
+                    .player_inventory
+                    .iter()
+                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id))
+                {
                     if let Some(ref mut item) = state.player_inventory[slot_idx] {
                         let max_dura = item.info.as_ref().map(|i| i.durability).unwrap_or(0);
                         item.current_dura = max_dura;
                         let _ = response_tx.send(NetworkEvent::RepairItemReceived { unique_id });
-                        tracing::debug!("[MOCK] RepairItemRequest: unique_id={} dura={}/{}", unique_id, max_dura, max_dura);
+                        tracing::debug!(
+                            "[MOCK] RepairItemRequest: unique_id={} dura={}/{}",
+                            unique_id,
+                            max_dura,
+                            max_dura
+                        );
                     }
                 }
             }
 
             NetworkEvent::SRepairItemRequest { unique_id } => {
                 // 特殊修理（同普通修理的 mock 实现）
-                if let Some(slot_idx) = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id)) {
+                if let Some(slot_idx) = state
+                    .player_inventory
+                    .iter()
+                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id))
+                {
                     if let Some(ref mut item) = state.player_inventory[slot_idx] {
                         let max_dura = item.info.as_ref().map(|i| i.durability).unwrap_or(0);
                         item.current_dura = max_dura;
@@ -1446,7 +1587,9 @@ impl MockNetwork {
 
             // ===== 组队（Mock 模式） =====
             NetworkEvent::GroupInviteRequest { ref player_name } => {
-                let _ = response_tx.send(NetworkEvent::GroupMemberAdded { name: player_name.clone() });
+                let _ = response_tx.send(NetworkEvent::GroupMemberAdded {
+                    name: player_name.clone(),
+                });
                 let _ = response_tx.send(NetworkEvent::GroupMembersMapUpdated {
                     player_name: player_name.clone(),
                     player_map: "初始地图".to_string(),
@@ -1456,13 +1599,17 @@ impl MockNetwork {
                 });
             }
             NetworkEvent::GroupKickRequest { ref player_name } => {
-                let _ = response_tx.send(NetworkEvent::GroupMemberRemoved { name: player_name.clone() });
+                let _ = response_tx.send(NetworkEvent::GroupMemberRemoved {
+                    name: player_name.clone(),
+                });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!("[MOCK] {} 已被踢出队伍", player_name),
                 });
             }
             NetworkEvent::GroupLeaveRequest { ref player_name } => {
-                let _ = response_tx.send(NetworkEvent::GroupMemberRemoved { name: player_name.clone() });
+                let _ = response_tx.send(NetworkEvent::GroupMemberRemoved {
+                    name: player_name.clone(),
+                });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!("[MOCK] {} 已离开队伍", player_name),
                 });
@@ -1489,7 +1636,9 @@ impl MockNetwork {
                 });
             }
             NetworkEvent::DivorceRequestSend => {
-                let _ = response_tx.send(NetworkEvent::DivorceRequested2 { lover_name: "未知".to_string() });
+                let _ = response_tx.send(NetworkEvent::DivorceRequested2 {
+                    lover_name: "未知".to_string(),
+                });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 离婚请求已处理".to_string(),
                 });
@@ -1524,11 +1673,27 @@ impl MockNetwork {
 
             // ===== 行会（Mock 模式） =====
             NetworkEvent::RequestGuildInfo => {
-                let _ = response_tx.send(NetworkEvent::GuildNameReceived { name: "[MOCK] 传奇行会".to_string() });
-                let _ = response_tx.send(NetworkEvent::GuildNoticeUpdated { notice: "[MOCK] 欢迎来到传奇行会！\n请勿在行会内发布广告。".to_string() });
-                let _ = response_tx.send(NetworkEvent::GuildMemberUpdated { name: "会长大人".to_string(), rank: 0, online: true });
-                let _ = response_tx.send(NetworkEvent::GuildMemberUpdated { name: "小弟甲".to_string(), rank: 1, online: true });
-                let _ = response_tx.send(NetworkEvent::GuildMemberUpdated { name: "摸鱼乙".to_string(), rank: 2, online: false });
+                let _ = response_tx.send(NetworkEvent::GuildNameReceived {
+                    name: "[MOCK] 传奇行会".to_string(),
+                });
+                let _ = response_tx.send(NetworkEvent::GuildNoticeUpdated {
+                    notice: "[MOCK] 欢迎来到传奇行会！\n请勿在行会内发布广告。".to_string(),
+                });
+                let _ = response_tx.send(NetworkEvent::GuildMemberUpdated {
+                    name: "会长大人".to_string(),
+                    rank: 0,
+                    online: true,
+                });
+                let _ = response_tx.send(NetworkEvent::GuildMemberUpdated {
+                    name: "小弟甲".to_string(),
+                    rank: 1,
+                    online: true,
+                });
+                let _ = response_tx.send(NetworkEvent::GuildMemberUpdated {
+                    name: "摸鱼乙".to_string(),
+                    rank: 2,
+                    online: false,
+                });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 行会信息已刷新".to_string(),
                 });
@@ -1540,19 +1705,32 @@ impl MockNetwork {
                 });
             }
             NetworkEvent::EditGuildNotice { ref notice } => {
-                let _ = response_tx.send(NetworkEvent::GuildNoticeUpdated { notice: notice.clone() });
+                let _ = response_tx.send(NetworkEvent::GuildNoticeUpdated {
+                    notice: notice.clone(),
+                });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 行会公告已更新".to_string(),
                 });
             }
-            NetworkEvent::EditGuildMember { ref member_name, ref rank } => {
-                let _ = response_tx.send(NetworkEvent::GuildMemberUpdated { name: member_name.clone(), rank: *rank, online: true });
+            NetworkEvent::EditGuildMember {
+                ref member_name,
+                ref rank,
+            } => {
+                let _ = response_tx.send(NetworkEvent::GuildMemberUpdated {
+                    name: member_name.clone(),
+                    rank: *rank,
+                    online: true,
+                });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!("[MOCK] 成员 {} 的 rank 已更新为 {}", member_name, rank),
                 });
             }
             NetworkEvent::GuildInviteRequest { ref player_name } => {
-                let _ = response_tx.send(NetworkEvent::GuildMemberUpdated { name: player_name.clone(), rank: 3, online: true });
+                let _ = response_tx.send(NetworkEvent::GuildMemberUpdated {
+                    name: player_name.clone(),
+                    rank: 3,
+                    online: true,
+                });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!("[MOCK] {} 已加入行会", player_name),
                 });
@@ -1613,7 +1791,11 @@ impl MockNetwork {
                     message: format!("[MOCK] 邮件 #{} 已删除", mail_id),
                 });
             }
-            NetworkEvent::SendMailRequest { ref to, ref subject, .. } => {
+            NetworkEvent::SendMailRequest {
+                ref to,
+                ref subject,
+                ..
+            } => {
                 let _ = response_tx.send(NetworkEvent::MailSentEvent { result: 1 });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!("[MOCK] 邮件已发送给 {}（主题：{}）", to, subject),
@@ -1628,7 +1810,10 @@ impl MockNetwork {
             }
             NetworkEvent::AllowMentorRequest { enabled } => {
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
-                    message: format!("[MOCK] 收徒状态已更新: {}", if enabled { "允许" } else { "禁止" }),
+                    message: format!(
+                        "[MOCK] 收徒状态已更新: {}",
+                        if enabled { "允许" } else { "禁止" }
+                    ),
                 });
             }
             NetworkEvent::MentorReply { accept } => {
@@ -1638,7 +1823,10 @@ impl MockNetwork {
             }
 
             // ===== 任务（Mock 模式） =====
-            NetworkEvent::AcceptQuestRequest { npc_index, quest_index } => {
+            NetworkEvent::AcceptQuestRequest {
+                npc_index,
+                quest_index,
+            } => {
                 let quest_id = npc_index * 100 + quest_index;
                 // 先发送 QuestInfoReceived（模拟服务器下发任务详情）
                 let _ = response_tx.send(NetworkEvent::QuestInfoReceived {
@@ -1659,10 +1847,18 @@ impl MockNetwork {
                     message: format!("[MOCK] 已接取任务 #{}", quest_id),
                 });
             }
-            NetworkEvent::FinishQuestRequest { quest_index, selected_item } => {
-                let _ = response_tx.send(NetworkEvent::QuestCompleted { quest_id: quest_index });
+            NetworkEvent::FinishQuestRequest {
+                quest_index,
+                selected_item,
+            } => {
+                let _ = response_tx.send(NetworkEvent::QuestCompleted {
+                    quest_id: quest_index,
+                });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
-                    message: format!("[MOCK] 任务 #{} 已完成（奖励物品 #{}）", quest_index, selected_item),
+                    message: format!(
+                        "[MOCK] 任务 #{} 已完成（奖励物品 #{}）",
+                        quest_index, selected_item
+                    ),
                 });
             }
             NetworkEvent::AbandonQuestRequest { quest_index } => {
@@ -1671,7 +1867,9 @@ impl MockNetwork {
                 });
             }
             NetworkEvent::ShareQuestRequest { quest_index } => {
-                let _ = response_tx.send(NetworkEvent::QuestShared { quest_id: quest_index });
+                let _ = response_tx.send(NetworkEvent::QuestShared {
+                    quest_id: quest_index,
+                });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!("[MOCK] 任务 #{} 已共享", quest_index),
                 });
@@ -1697,7 +1895,10 @@ impl MockNetwork {
             // ===== 钓鱼（Mock 模式） =====
             NetworkEvent::FishingAutocastToggle { enabled } => {
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
-                    message: format!("[MOCK] 钓鱼自动抛竿: {}", if enabled { "开启" } else { "关闭" }),
+                    message: format!(
+                        "[MOCK] 钓鱼自动抛竿: {}",
+                        if enabled { "开启" } else { "关闭" }
+                    ),
                 });
             }
 
@@ -1710,14 +1911,18 @@ impl MockNetwork {
 
             // ===== 交易（Mock 模式） =====
             NetworkEvent::TradeRequest => {
-                let _ = response_tx.send(NetworkEvent::TradeStarted { partner: "(MOCK)".to_string() });
+                let _ = response_tx.send(NetworkEvent::TradeStarted {
+                    partner: "(MOCK)".to_string(),
+                });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: "[MOCK] 交易已开始".to_string(),
                 });
             }
             NetworkEvent::TradeReplyRequest { accept } => {
                 if accept {
-                    let _ = response_tx.send(NetworkEvent::TradeStarted { partner: "(MOCK)".to_string() });
+                    let _ = response_tx.send(NetworkEvent::TradeStarted {
+                        partner: "(MOCK)".to_string(),
+                    });
                 }
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!("[MOCK] 交易回复: {}", if accept { "接受" } else { "拒绝" }),
@@ -1749,7 +1954,10 @@ impl MockNetwork {
 
             // ===== 物品操作补充（Mock 模式） =====
             NetworkEvent::LockMailRequest { mail_id } => {
-                let _ = response_tx.send(NetworkEvent::MailLockedItemReceived { unique_id: mail_id, locked: true });
+                let _ = response_tx.send(NetworkEvent::MailLockedItemReceived {
+                    unique_id: mail_id,
+                    locked: true,
+                });
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!("[MOCK] 邮件 #{} 的物品已锁定", mail_id),
                 });
@@ -1757,16 +1965,30 @@ impl MockNetwork {
 
             NetworkEvent::MergeItemRequest { from, to } => {
                 // 简单合并：把 from 和 to 的 count 合并到 to
-                let from_opt = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(from));
-                let to_opt = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(to));
+                let from_opt = state
+                    .player_inventory
+                    .iter()
+                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(from));
+                let to_opt = state
+                    .player_inventory
+                    .iter()
+                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(to));
                 if let (Some(from_idx), Some(to_idx)) = (from_opt, to_opt) {
                     if from_idx != to_idx {
                         let from_count = state.player_inventory[from_idx].as_ref().map(|i| i.count);
-                        let to_max = state.player_inventory[to_idx].as_ref().and_then(|i| i.info.as_ref().map(|info| info.stack_size as u32));
-                        let to_count = state.player_inventory[to_idx].as_ref().map(|i| i.count as u32);
+                        let to_max = state.player_inventory[to_idx]
+                            .as_ref()
+                            .and_then(|i| i.info.as_ref().map(|info| info.stack_size as u32));
+                        let to_count = state.player_inventory[to_idx]
+                            .as_ref()
+                            .map(|i| i.count as u32);
                         let same_type = {
-                            let fi = state.player_inventory[from_idx].as_ref().map(|i| i.item_index);
-                            let ti = state.player_inventory[to_idx].as_ref().map(|i| i.item_index);
+                            let fi = state.player_inventory[from_idx]
+                                .as_ref()
+                                .map(|i| i.item_index);
+                            let ti = state.player_inventory[to_idx]
+                                .as_ref()
+                                .map(|i| i.item_index);
                             fi == ti
                         };
                         if same_type {
@@ -1776,8 +1998,15 @@ impl MockNetwork {
                                         to_item.count += fc;
                                     }
                                     state.player_inventory[from_idx] = None;
-                                    let _ = response_tx.send(NetworkEvent::ItemLost { unique_id: from, count: 1 });
-                                    tracing::debug!("[MOCK] MergeItemRequest: from={} to={}", from, to);
+                                    let _ = response_tx.send(NetworkEvent::ItemLost {
+                                        unique_id: from,
+                                        count: 1,
+                                    });
+                                    tracing::debug!(
+                                        "[MOCK] MergeItemRequest: from={} to={}",
+                                        from,
+                                        to
+                                    );
                                 }
                             }
                         }
@@ -1787,7 +2016,10 @@ impl MockNetwork {
 
             NetworkEvent::SplitItemRequest { unique_id, count } => {
                 // 拆分堆叠物品
-                let slot_opt = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id));
+                let slot_opt = state
+                    .player_inventory
+                    .iter()
+                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id));
                 if let Some(slot_idx) = slot_opt {
                     let item_count = state.player_inventory[slot_idx].as_ref().map(|i| i.count);
                     let split_count = (count as u16).min(item_count.unwrap_or(0));
@@ -1796,12 +2028,21 @@ impl MockNetwork {
                         if item.count > split_count && has_empty {
                             let mut new_item = item.clone();
                             new_item.count = split_count;
-                            new_item.unique_id = 3_000_000_000 + (Self::rng_next_u32(&mut state.rng) as u64);
+                            new_item.unique_id =
+                                3_000_000_000 + (Self::rng_next_u32(&mut state.rng) as u64);
                             item.count -= split_count;
-                            let empty_idx = state.player_inventory.iter().position(|s| s.is_none()).unwrap();
+                            let empty_idx = state
+                                .player_inventory
+                                .iter()
+                                .position(|s| s.is_none())
+                                .unwrap();
                             state.player_inventory[empty_idx] = Some(new_item.clone());
                             let _ = response_tx.send(NetworkEvent::ItemGained { item: new_item });
-                            tracing::debug!("[MOCK] SplitItemRequest: unique_id={} split={}", unique_id, split_count);
+                            tracing::debug!(
+                                "[MOCK] SplitItemRequest: unique_id={} split={}",
+                                unique_id,
+                                split_count
+                            );
                         }
                     }
                 }
@@ -1809,7 +2050,11 @@ impl MockNetwork {
 
             NetworkEvent::DropItemStackRequest { unique_id, count } => {
                 // 丢弃指定数量的堆叠物品
-                if let Some(slot_idx) = state.player_inventory.iter().position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id)) {
+                if let Some(slot_idx) = state
+                    .player_inventory
+                    .iter()
+                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(unique_id))
+                {
                     if let Some(ref mut item) = state.player_inventory[slot_idx] {
                         if item.count as u32 <= count {
                             state.player_inventory[slot_idx] = None;
@@ -1817,15 +2062,24 @@ impl MockNetwork {
                             item.count -= count as u16;
                         }
                     }
-                    let _ = response_tx.send(NetworkEvent::ItemLost { unique_id, count: 1 });
-                    tracing::debug!("[MOCK] DropItemStackRequest: unique_id={} count={}", unique_id, count);
+                    let _ = response_tx.send(NetworkEvent::ItemLost {
+                        unique_id,
+                        count: 1,
+                    });
+                    tracing::debug!(
+                        "[MOCK] DropItemStackRequest: unique_id={} count={}",
+                        unique_id,
+                        count
+                    );
                 }
             }
 
             NetworkEvent::DropGoldRequest { amount } => {
                 let actual = amount.min(state.player_gold);
                 state.player_gold -= actual;
-                let _ = response_tx.send(NetworkEvent::GoldChanged { delta: -(actual as i32) });
+                let _ = response_tx.send(NetworkEvent::GoldChanged {
+                    delta: -(actual as i32),
+                });
                 tracing::debug!("[MOCK] DropGoldRequest: amount={}", actual);
             }
 
@@ -1886,7 +2140,10 @@ impl MockNetwork {
                     64,
                 ) {
                     state.player_grid = new_pos;
-                    let _ = response_tx.send(NetworkEvent::PlayerLocationChanged { x: new_pos.0, y: new_pos.1 });
+                    let _ = response_tx.send(NetworkEvent::PlayerLocationChanged {
+                        x: new_pos.0,
+                        y: new_pos.1,
+                    });
                 }
                 let _ = response_tx.send(NetworkEvent::SystemMessage {
                     message: format!("[MOCK] 已传送到 NPC {}", npc_name),
@@ -2041,15 +2298,19 @@ impl MockNetwork {
                 ];
 
                 // 按 tab 类型调整数值
-                let entries: Vec<_> = mock_players.iter().enumerate().map(|(i, &(name, val, _))| {
-                    let display_val = match ranking_type {
-                        0 => val.to_string(),  // Level
-                        1 => format!("{}", (i as u32 + 1) * 100000), // Gold
-                        2 => format!("{}", (15 - i as u32) * 100), // Reputation
-                        _ => val.to_string(),
-                    };
-                    (i as u32 + 1, name.to_string(), display_val)
-                }).collect();
+                let entries: Vec<_> = mock_players
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &(name, val, _))| {
+                        let display_val = match ranking_type {
+                            0 => val.to_string(),                        // Level
+                            1 => format!("{}", (i as u32 + 1) * 100000), // Gold
+                            2 => format!("{}", (15 - i as u32) * 100),   // Reputation
+                            _ => val.to_string(),
+                        };
+                        (i as u32 + 1, name.to_string(), display_val)
+                    })
+                    .collect();
 
                 let _ = response_tx.send(NetworkEvent::RankingsReceivedWithEntries {
                     tab: ranking_type,
@@ -2207,7 +2468,9 @@ mod tests {
         thread::sleep(Duration::from_millis(200));
 
         let events: Vec<_> = rx.try_iter().collect();
-        assert!(events.iter().any(|e| matches!(e, NetworkEvent::Disconnected { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, NetworkEvent::Disconnected { .. })));
     }
 
     #[test]
@@ -2223,6 +2486,8 @@ mod tests {
         thread::sleep(Duration::from_millis(300));
 
         let events: Vec<_> = rx.try_iter().collect();
-        assert!(events.iter().any(|e| matches!(e, NetworkEvent::LoginSuccess { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, NetworkEvent::LoginSuccess { .. })));
     }
 }

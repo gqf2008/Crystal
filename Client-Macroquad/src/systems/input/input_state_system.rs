@@ -30,15 +30,11 @@
 //
 // ============================================================================
 
-use crate::{
-    components::InputState,
-    game::GameContext,
-    systems::LogicSystem,
-};
 use crate::game::{GameResult, KeyCode};
+use crate::{components::InputState, game::GameContext, systems::LogicSystem};
 
 /// 需要追踪的按键列表（用于边缘检测）
-/// 
+///
 /// 只追踪需要边缘检测的键，避免不必要的开销
 const KEYS_TO_TRACK: &[KeyCode] = &[
     // 调试键
@@ -64,7 +60,6 @@ const KEYS_TO_TRACK: &[KeyCode] = &[
     KeyCode::Minus,
     KeyCode::KpSubtract,
     KeyCode::Escape,
-    
     // UI 交互键（未来可能需要）
     KeyCode::Enter,
     KeyCode::KpEnter,
@@ -94,26 +89,26 @@ impl LogicSystem for InputStateSystem {
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
         // 关键设计：在执行本系统时，把“当前帧输入状态”写入 prev_*，
         // 供下一帧其他系统进行边缘检测（key_just_pressed 等）
-        
+
         // 查询唯一的 InputState 组件
         let mut query = ctx.world.query::<&mut InputState>();
-        
+
         if let Some(state) = query.iter().next() {
             // ===== 更新键盘状态（为下一帧准备）=====
             state.prev_pressed_keys.clear();
-            
+
             for &key in KEYS_TO_TRACK {
                 if ctx.input().key_pressed(key) {
                     state.prev_pressed_keys.insert(key);
                 }
             }
-            
+
             // ===== 更新鼠标状态（为下一帧准备）=====
             state.prev_mouse_left = ctx.input().mouse_left_pressed();
             state.prev_mouse_right = ctx.input().mouse_right_pressed();
             state.prev_mouse_middle = ctx.input().mouse_middle_pressed();
         }
-        
+
         Ok(())
     }
 }

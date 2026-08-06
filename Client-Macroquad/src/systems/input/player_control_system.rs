@@ -34,16 +34,16 @@
 
 use crate::{
     components::{
-        Camera, HoverHighlight, LibrarySprite, NetworkObjectType, NetworkSync, Position, UiWorldInputBlock,
-        LocalPlayer, Player, PlayerInput, MovementVelocity,
+        Camera, HoverHighlight, LibrarySprite, LocalPlayer, MovementVelocity, NetworkObjectType,
+        NetworkSync, Player, PlayerInput, Position, UiWorldInputBlock,
     },
     game::{GameContext, GameResult},
     systems::LogicSystem,
 };
 use macroquad::prelude::{get_time, MouseButton};
-use std::time::{Duration, Instant};
 use mir2_shared::enums::MirDirection;
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 /// 鼠标状态追踪（用于双击和长按检测）
 #[derive(Debug)]
@@ -159,7 +159,11 @@ impl PlayerControlSystem {
         //    这能避免：
         //    - move_to 残留导致角色继续走/跑
         //    - path/velocity 残留导致动作/动画与输入不一致
-        let Some(player_e) = ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity())) else {
+        let Some(player_e) = ctx
+            .world
+            .iter()
+            .find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity()))
+        else {
             return;
         };
 
@@ -171,19 +175,31 @@ impl PlayerControlSystem {
             self.last_net_move_grid = None;
         }
 
-        let is_attacking = ctx.world.get::<&crate::components::AttackState>(player_e).is_ok();
+        let is_attacking = ctx
+            .world
+            .get::<&crate::components::AttackState>(player_e)
+            .is_ok();
 
-        if let Ok(mut input) = ctx.world.get::<&mut crate::components::PlayerInput>(player_e) {
+        if let Ok(mut input) = ctx
+            .world
+            .get::<&mut crate::components::PlayerInput>(player_e)
+        {
             input.move_to = None;
             input.movement_mode = MovementMode::None;
             input.run = false;
             input.attack_target = None;
         }
 
-        if let Ok(mut path) = ctx.world.get::<&mut crate::components::movement::Path>(player_e) {
+        if let Ok(mut path) = ctx
+            .world
+            .get::<&mut crate::components::movement::Path>(player_e)
+        {
             path.clear();
         }
-        if let Ok(mut mv) = ctx.world.get::<&mut crate::components::MovementVelocity>(player_e) {
+        if let Ok(mut mv) = ctx
+            .world
+            .get::<&mut crate::components::MovementVelocity>(player_e)
+        {
             mv.stop();
         }
         if let Ok(mut m) = ctx.world.get::<&mut crate::components::Movement>(player_e) {
@@ -244,10 +260,6 @@ impl PlayerControlSystem {
         };
     }
 
-    
-
-    
-
     /// 屏幕坐标 → 世界坐标
     fn screen_to_world(
         screen_x: f32,
@@ -265,14 +277,19 @@ impl PlayerControlSystem {
         object_type: NetworkObjectType,
         object_id: u32,
     ) -> Option<hecs::Entity> {
-        if let Some(e) = ctx.world.iter().filter_map(|e| {
-            let sync = e.get::<&NetworkSync>()?;
-            if sync.object_type == object_type && sync.object_id == object_id {
-                Some(e.entity())
-            } else {
-                None
-            }
-        }).next() {
+        if let Some(e) = ctx
+            .world
+            .iter()
+            .filter_map(|e| {
+                let sync = e.get::<&NetworkSync>()?;
+                if sync.object_type == object_type && sync.object_id == object_id {
+                    Some(e.entity())
+                } else {
+                    None
+                }
+            })
+            .next()
+        {
             return Some(e);
         }
         None
@@ -285,7 +302,11 @@ impl PlayerControlSystem {
     ) -> Option<u32> {
         // 贴近原版：优先像素级命中（VisiblePixel），命中里取 y 最大（最前景）
         let mut best_pixel: Option<(u32, f32)> = None;
-        for (sync, spr, pos) in ctx.world.query::<(&NetworkSync, &LibrarySprite, &Position)>().iter() {
+        for (sync, spr, pos) in ctx
+            .world
+            .query::<(&NetworkSync, &LibrarySprite, &Position)>()
+            .iter()
+        {
             if sync.object_type != object_type {
                 continue;
             }
@@ -304,7 +325,9 @@ impl PlayerControlSystem {
 
             match best_pixel {
                 None => best_pixel = Some((sync.object_id, pos.y)),
-                Some((_oid, best_y)) if pos.y > best_y => best_pixel = Some((sync.object_id, pos.y)),
+                Some((_oid, best_y)) if pos.y > best_y => {
+                    best_pixel = Some((sync.object_id, pos.y))
+                }
                 _ => {}
             }
         }
@@ -314,7 +337,11 @@ impl PlayerControlSystem {
 
         // 命中兜底：鼠标落在当前帧纹理矩形内
         let mut best_rect: Option<(u32, f32)> = None;
-        for (sync, spr, pos) in ctx.world.query::<(&NetworkSync, &LibrarySprite, &Position)>().iter() {
+        for (sync, spr, pos) in ctx
+            .world
+            .query::<(&NetworkSync, &LibrarySprite, &Position)>()
+            .iter()
+        {
             if sync.object_type != object_type {
                 continue;
             }
@@ -395,11 +422,11 @@ impl PlayerControlSystem {
         // 另外，如果本帧 `input_blocked`，FrameInput 会返回 (0,0)，必须直接跳过。
         let blocked_by_ui = ctx.input_blocked
             || ctx
-            .world
-            .get::<&UiWorldInputBlock>(pass_entity)
-            .ok()
-            .map(|b| b.mouse_captured || b.mouse_over_ui)
-            .unwrap_or(false);
+                .world
+                .get::<&UiWorldInputBlock>(pass_entity)
+                .ok()
+                .map(|b| b.mouse_captured || b.mouse_over_ui)
+                .unwrap_or(false);
 
         let (npc_oid, monster_oid) = if blocked_by_ui {
             (None, None)
@@ -432,7 +459,12 @@ impl PlayerControlSystem {
         let mut allowed = true;
 
         // 共享冷却：优先复用 GameScene 挂在 render-pass 实体上的组件
-        if let Some(cd) = ctx.world.query_mut::<&mut crate::components::NpcCallCooldown>().into_iter().next() {
+        if let Some(cd) = ctx
+            .world
+            .query_mut::<&mut crate::components::NpcCallCooldown>()
+            .into_iter()
+            .next()
+        {
             if now < cd.until {
                 allowed = false;
             } else {
@@ -452,8 +484,15 @@ impl PlayerControlSystem {
         }
     }
 
-    fn find_clicked_monster_entity(ctx: &GameContext, click_world: (f32, f32)) -> Option<hecs::Entity> {
-        let oid = Self::hit_test_object_id_with_grid_fallback(ctx, click_world, NetworkObjectType::Monster)?;
+    fn find_clicked_monster_entity(
+        ctx: &GameContext,
+        click_world: (f32, f32),
+    ) -> Option<hecs::Entity> {
+        let oid = Self::hit_test_object_id_with_grid_fallback(
+            ctx,
+            click_world,
+            NetworkObjectType::Monster,
+        )?;
         Self::find_network_entity_by_object_id(ctx, NetworkObjectType::Monster, oid)
     }
 
@@ -499,8 +538,6 @@ impl Default for PlayerControlSystem {
 }
 
 impl LogicSystem for PlayerControlSystem {
-    
-
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
         let ai_mode = ctx.session.local_player_ai_enabled;
 
@@ -570,16 +607,22 @@ impl LogicSystem for PlayerControlSystem {
                 self.mouse_state.left_press_start = None;
             } else {
                 // 检查是否是双击
-                let is_double_click = if let Some(last_click) = self.mouse_state.left_last_click_time {
-                    now.duration_since(last_click) < self.double_click_threshold
-                } else {
-                    false
-                };
+                let is_double_click =
+                    if let Some(last_click) = self.mouse_state.left_last_click_time {
+                        now.duration_since(last_click) < self.double_click_threshold
+                    } else {
+                        false
+                    };
 
                 if is_double_click {
-                    tracing::warn!("🖱️🖱️ 检测到左键双击 at ({:.1}, {:.1})", mouse_pos.x, mouse_pos.y);
+                    tracing::warn!(
+                        "🖱️🖱️ 检测到左键双击 at ({:.1}, {:.1})",
+                        mouse_pos.x,
+                        mouse_pos.y
+                    );
                     // 双击：记录一次性事件，供本帧后续消费（触发寻路）
-                    self.mouse_state.left_pending_double_click = self.mouse_state.left_press_position;
+                    self.mouse_state.left_pending_double_click =
+                        self.mouse_state.left_press_position;
                     self.mouse_state.left_last_click_time = None;
                 } else {
                     // 可能是单击，记录时间等待确认（双击窗口过后才确认）
@@ -612,16 +655,22 @@ impl LogicSystem for PlayerControlSystem {
                 self.mouse_state.right_press_start = None;
             } else {
                 // 检查是否是双击
-                let is_double_click = if let Some(last_click) = self.mouse_state.right_last_click_time {
-                    now.duration_since(last_click) < self.double_click_threshold
-                } else {
-                    false
-                };
+                let is_double_click =
+                    if let Some(last_click) = self.mouse_state.right_last_click_time {
+                        now.duration_since(last_click) < self.double_click_threshold
+                    } else {
+                        false
+                    };
 
                 if is_double_click {
-                    tracing::warn!("🖱️🖱️ 检测到右键双击 at ({:.1}, {:.1})", mouse_pos.x, mouse_pos.y);
+                    tracing::warn!(
+                        "🖱️🖱️ 检测到右键双击 at ({:.1}, {:.1})",
+                        mouse_pos.x,
+                        mouse_pos.y
+                    );
                     // 双击：记录一次性事件，供本帧后续消费（触发寻路）
-                    self.mouse_state.right_pending_double_click = self.mouse_state.right_press_position;
+                    self.mouse_state.right_pending_double_click =
+                        self.mouse_state.right_press_position;
                     self.mouse_state.right_last_click_time = None;
                 } else {
                     // 可能是单击，记录时间等待确认（双击窗口过后才确认）
@@ -632,7 +681,8 @@ impl LogicSystem for PlayerControlSystem {
         }
 
         // 获取相机信息
-        let (camera_pos, camera) = ctx.world
+        let (camera_pos, camera) = ctx
+            .world
             .query_mut::<(&Position, &Camera)>()
             .into_iter()
             .next()
@@ -651,19 +701,22 @@ impl LogicSystem for PlayerControlSystem {
 
         // 处理双击（移动到目标，使用寻路）
         // 说明：双击是“第二次点击松开”时产生的一次性事件；单击不会误触发。
-        let double_click_left = self
-            .mouse_state
-            .left_pending_double_click
-            .take()
-            .map(|(screen_x, screen_y)| Self::screen_to_world(screen_x, screen_y, &camera_pos, &camera));
+        let double_click_left =
+            self.mouse_state
+                .left_pending_double_click
+                .take()
+                .map(|(screen_x, screen_y)| {
+                    Self::screen_to_world(screen_x, screen_y, &camera_pos, &camera)
+                });
 
-        let double_click_right = self
-            .mouse_state
-            .right_pending_double_click
-            .take()
-            .map(|(screen_x, screen_y)| Self::screen_to_world(screen_x, screen_y, &camera_pos, &camera));
+        let double_click_right =
+            self.mouse_state
+                .right_pending_double_click
+                .take()
+                .map(|(screen_x, screen_y)| {
+                    Self::screen_to_world(screen_x, screen_y, &camera_pos, &camera)
+                });
 
-        
         // 🎯 检查延迟单击：只有在双击窗口已过且确认不是双击时才处理单击
         let now = Instant::now();
         let left_single_click = if let Some(last_click) = self.mouse_state.left_last_click_time {
@@ -672,14 +725,14 @@ impl LogicSystem for PlayerControlSystem {
         } else {
             false
         };
-        
+
         let right_single_click = if let Some(last_click) = self.mouse_state.right_last_click_time {
             // 超过双击窗口，确认是右键单击
             now.duration_since(last_click) >= self.double_click_threshold
         } else {
             false
         };
-        
+
         let has_single_click = left_single_click || right_single_click;
 
         // 克隆网络句柄（避免在持有 ctx.world 的可变借用时再借用 ctx）
@@ -691,8 +744,8 @@ impl LogicSystem for PlayerControlSystem {
         // 语义：本地玩家正常移动；可选择把移动意图同步到服务器。
         // - server_authoritative_movement=true: 同步 + 接受服务器回包校正
         // - sync_movement_intent_to_server=true: 仅同步（用于 Mock 命中判定），不做服务器纠偏
-        let sync_move_to_server = ctx.session.server_authoritative_movement
-            || ctx.session.sync_movement_intent_to_server;
+        let sync_move_to_server =
+            ctx.session.server_authoritative_movement || ctx.session.sync_movement_intent_to_server;
         let sync_combat_to_server = ctx.session.server_authoritative_combat;
 
         // 单击：优先判定是否点到 NPC（近似拾取：按格子命中）
@@ -795,357 +848,417 @@ impl LogicSystem for PlayerControlSystem {
         let right_click_attack_monster_grid: Option<(i32, i32)> = right_click_attack_monster
             .and_then(|e| ctx.world.get::<&crate::components::Position>(e).ok())
             .map(|pos| crate::coord::Coord::world_to_grid(pos.x, pos.y));
-        
+
         // 更新本地玩家输入和动作状态
         use crate::components::AttackState;
 
         // 先收集所有有AttackState的实体
-        let attacking_entities: std::collections::HashSet<_> = ctx.world
+        let attacking_entities: std::collections::HashSet<_> = ctx
+            .world
             .iter()
             .filter_map(|e| e.get::<&AttackState>().map(|_| e.entity()))
             .collect();
 
         // There is only one local player. Find it and process.
-        if let Some(entity) = ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity())) {
-            let in_trap_rock = ctx.world.get::<&crate::components::InTrapRock>(entity)
+        if let Some(entity) = ctx
+            .world
+            .iter()
+            .find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity()))
+        {
+            let in_trap_rock = ctx
+                .world
+                .get::<&crate::components::InTrapRock>(entity)
                 .map(|t| t.trapped)
                 .unwrap_or(false);
 
             if !attacking_entities.contains(&entity) {
                 if let Ok((player_input, player, pos, _path, velocity)) =
-                    ctx.world.query_one_mut::<(&mut PlayerInput, &mut Player, &Position, &mut crate::components::movement::Path, &MovementVelocity)>(entity)
+                    ctx.world.query_one_mut::<(
+                        &mut PlayerInput,
+                        &mut Player,
+                        &Position,
+                        &mut crate::components::movement::Path,
+                        &MovementVelocity,
+                    )>(entity)
                 {
-            // 🎯 优先处理单击
-            if has_single_click {
-                // 停止移动
-                player_input.move_to = None;
-                player_input.movement_mode = crate::components::MovementMode::None;
-                    // 原版体验：左键用于取消当前攻击目标（停止追砍）
-                    if left_single_click {
-                        player_input.attack_target = None;
-                    }
-                // 本地停下；不需要额外清 path（Movement/Pathfinding 会自行收敛），这里保持最小副作用。
-                
-                use crate::components::PlayerAction;
-                
-                if left_single_click {
-                    // 左键单击：优先 NPC 对话（对齐原版体验）
-                    if let Some(npc_object_id) = npc_interaction_target_left {
-                        tracing::warn!("💬 左键点到NPC，发送NPCCallRequest: {}", npc_object_id);
-                        npc_call_immediate = Some(npc_object_id);
-                        player.action = PlayerAction::Stand;
-                        self.pending_npc_call = None;
-                    } else if let Some((npc_object_id, wx, wy)) = npc_approach_left_world {
-                        // 走近再对话：先寻路靠近 NPC
-                        player_input.move_to = Some((wx, wy));
-                        player_input.movement_mode = crate::components::MovementMode::Pathfinding;
-                        player.action = PlayerAction::Walk;
-                        self.pending_npc_call = Some(npc_object_id);
-                    } else if let (Some(target_entity), Some((mgx, mgy))) = (left_click_attack_monster, left_click_attack_monster_grid) {
-                        // 左键点怪：走过去后攻击（走路）
-                        player_input.set_attack(target_entity);
-                        player.action = PlayerAction::Attack1;
-                        self.pending_npc_call = None;
-
-                        let (pgx, pgy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
-                        let dx = (mgx - pgx).abs();
-                        let dy = (mgy - pgy).abs();
-                        let in_melee_range = dx.max(dy) <= 1;
-
-                        if !in_melee_range {
-                            let step_x = (mgx - pgx).clamp(-1, 1);
-                            let step_y = (mgy - pgy).clamp(-1, 1);
-                            let agx = mgx - step_x;
-                            let agy = mgy - step_y;
-                            let (awx, awy) = crate::coord::Coord::grid_to_world_center(agx, agy);
-
-                            player_input.move_to = Some((awx, awy));
-                            player_input.movement_mode = crate::components::MovementMode::Pathfinding;
-                            player.action = PlayerAction::Walk;
+                    // 🎯 优先处理单击
+                    if has_single_click {
+                        // 停止移动
+                        player_input.move_to = None;
+                        player_input.movement_mode = crate::components::MovementMode::None;
+                        // 原版体验：左键用于取消当前攻击目标（停止追砍）
+                        if left_single_click {
+                            player_input.attack_target = None;
                         }
-                    } else {
-                        // 左键单击 = 站立
-                        tracing::warn!("⏹️ 检测到左键单击，立即停止移动");
-                        player.action = PlayerAction::Stand;
-                        self.pending_npc_call = None;
-                    }
-                } else if right_single_click {
-                    // 右键单击：优先 NPC 交互（服务器驱动），否则才是攻击
-                    if let Some(npc_object_id) = npc_interaction_target_right {
-                        tracing::warn!("💬 右键点到NPC，发送NPCCallRequest: {}", npc_object_id);
-                        // 原版主要是左键；此处仍允许右键交互，但同样走 [@Main]
-                        if npc_call_immediate.is_none() {
-                            npc_call_immediate = Some(npc_object_id);
-                        }
-                        player.action = PlayerAction::Stand;
-                        self.pending_npc_call = None;
-                    } else if let Some((npc_object_id, wx, wy)) = npc_approach_right_world {
-                        player_input.move_to = Some((wx, wy));
-                        player_input.movement_mode = crate::components::MovementMode::Pathfinding;
-                        player.action = PlayerAction::Run;
-                        self.pending_npc_call = Some(npc_object_id);
-                    } else {
-                        // 右键单击 = 攻击动作
-                        tracing::warn!("⚔️ 检测到右键单击，触发攻击");
-                        player.action = PlayerAction::Attack1;
+                        // 本地停下；不需要额外清 path（Movement/Pathfinding 会自行收敛），这里保持最小副作用。
 
-                        // 1) 点击到怪：设置 attack_target；若不在近战范围则自动走近
-                        if let (Some(target_entity), Some((mgx, mgy))) = (right_click_attack_monster, right_click_attack_monster_grid) {
-                            player_input.set_attack(target_entity);
+                        use crate::components::PlayerAction;
 
-                            let (pgx, pgy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
-                            let dx = (mgx - pgx).abs();
-                            let dy = (mgy - pgy).abs();
-                            let in_melee_range = dx.max(dy) <= 1;
+                        if left_single_click {
+                            // 左键单击：优先 NPC 对话（对齐原版体验）
+                            if let Some(npc_object_id) = npc_interaction_target_left {
+                                tracing::warn!(
+                                    "💬 左键点到NPC，发送NPCCallRequest: {}",
+                                    npc_object_id
+                                );
+                                npc_call_immediate = Some(npc_object_id);
+                                player.action = PlayerAction::Stand;
+                                self.pending_npc_call = None;
+                            } else if let Some((npc_object_id, wx, wy)) = npc_approach_left_world {
+                                // 走近再对话：先寻路靠近 NPC
+                                player_input.move_to = Some((wx, wy));
+                                player_input.movement_mode =
+                                    crate::components::MovementMode::Pathfinding;
+                                player.action = PlayerAction::Walk;
+                                self.pending_npc_call = Some(npc_object_id);
+                            } else if let (Some(target_entity), Some((mgx, mgy))) =
+                                (left_click_attack_monster, left_click_attack_monster_grid)
+                            {
+                                // 左键点怪：走过去后攻击（走路）
+                                player_input.set_attack(target_entity);
+                                player.action = PlayerAction::Attack1;
+                                self.pending_npc_call = None;
 
-                            if !in_melee_range {
-                                // 走到怪物附近一格（朝向玩家一侧的相邻格）
-                                let step_x = (mgx - pgx).clamp(-1, 1);
-                                let step_y = (mgy - pgy).clamp(-1, 1);
-                                let agx = mgx - step_x;
-                                let agy = mgy - step_y;
-                                let (awx, awy) = crate::coord::Coord::grid_to_world_center(agx, agy);
+                                let (pgx, pgy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
+                                let dx = (mgx - pgx).abs();
+                                let dy = (mgy - pgy).abs();
+                                let in_melee_range = dx.max(dy) <= 1;
 
-                                player_input.move_to = Some((awx, awy));
-                                player_input.movement_mode = crate::components::MovementMode::Pathfinding;
-                                player.action = PlayerAction::Run;
+                                if !in_melee_range {
+                                    let step_x = (mgx - pgx).clamp(-1, 1);
+                                    let step_y = (mgy - pgy).clamp(-1, 1);
+                                    let agx = mgx - step_x;
+                                    let agy = mgy - step_y;
+                                    let (awx, awy) =
+                                        crate::coord::Coord::grid_to_world_center(agx, agy);
+
+                                    player_input.move_to = Some((awx, awy));
+                                    player_input.movement_mode =
+                                        crate::components::MovementMode::Pathfinding;
+                                    player.action = PlayerAction::Walk;
+                                }
+                            } else {
+                                // 左键单击 = 站立
+                                tracing::warn!("⏹️ 检测到左键单击，立即停止移动");
+                                player.action = PlayerAction::Stand;
+                                self.pending_npc_call = None;
                             }
+                        } else if right_single_click {
+                            // 右键单击：优先 NPC 交互（服务器驱动），否则才是攻击
+                            if let Some(npc_object_id) = npc_interaction_target_right {
+                                tracing::warn!(
+                                    "💬 右键点到NPC，发送NPCCallRequest: {}",
+                                    npc_object_id
+                                );
+                                // 原版主要是左键；此处仍允许右键交互，但同样走 [@Main]
+                                if npc_call_immediate.is_none() {
+                                    npc_call_immediate = Some(npc_object_id);
+                                }
+                                player.action = PlayerAction::Stand;
+                                self.pending_npc_call = None;
+                            } else if let Some((npc_object_id, wx, wy)) = npc_approach_right_world {
+                                player_input.move_to = Some((wx, wy));
+                                player_input.movement_mode =
+                                    crate::components::MovementMode::Pathfinding;
+                                player.action = PlayerAction::Run;
+                                self.pending_npc_call = Some(npc_object_id);
+                            } else {
+                                // 右键单击 = 攻击动作
+                                tracing::warn!("⚔️ 检测到右键单击，触发攻击");
+                                player.action = PlayerAction::Attack1;
 
-                            // 点击到怪：攻击动画由 CombatSystem 在“进入范围并实际出手”时添加。
-                            // 这里不添加 AttackState，避免跑近过程中出现“挥刀后又站住”的不一致。
-                            // IMPORTANT: 必须清除单击状态，否则本次单击会在后续帧被重复判定，导致刷屏/重复发包。
-                            self.mouse_state.left_last_click_time = None;
-                            self.mouse_state.right_last_click_time = None;
-                            // Skip double-click/movement handling; go straight to server sync
-                            // (was: continue in old for-loop; now single-entity, just exit this branch)
-                        } else {
+                                // 1) 点击到怪：设置 attack_target；若不在近战范围则自动走近
+                                if let (Some(target_entity), Some((mgx, mgy))) =
+                                    (right_click_attack_monster, right_click_attack_monster_grid)
+                                {
+                                    player_input.set_attack(target_entity);
 
-                        // 2) 朝向点击方向；没点到怪则直接挥空发一次 AttackRequest
-                        if let Some(click_world) = right_click_attack_world {
-                            let (pgx, pgy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
-                            let (tgx, tgy) = crate::coord::Coord::world_to_grid(click_world.0, click_world.1);
-                            if let Some(dir) = Self::grid_direction_towards((pgx, pgy), (tgx, tgy)) {
-                                player.direction = dir;
-                                if sync_combat_to_server && right_click_attack_monster.is_none() {
-                                    if let Some(net) = net.as_ref() {
-                                        let _ = net.send(crate::network::handlers::NetworkEvent::AttackRequest {
+                                    let (pgx, pgy) =
+                                        crate::coord::Coord::world_to_grid(pos.x, pos.y);
+                                    let dx = (mgx - pgx).abs();
+                                    let dy = (mgy - pgy).abs();
+                                    let in_melee_range = dx.max(dy) <= 1;
+
+                                    if !in_melee_range {
+                                        // 走到怪物附近一格（朝向玩家一侧的相邻格）
+                                        let step_x = (mgx - pgx).clamp(-1, 1);
+                                        let step_y = (mgy - pgy).clamp(-1, 1);
+                                        let agx = mgx - step_x;
+                                        let agy = mgy - step_y;
+                                        let (awx, awy) =
+                                            crate::coord::Coord::grid_to_world_center(agx, agy);
+
+                                        player_input.move_to = Some((awx, awy));
+                                        player_input.movement_mode =
+                                            crate::components::MovementMode::Pathfinding;
+                                        player.action = PlayerAction::Run;
+                                    }
+
+                                    // 点击到怪：攻击动画由 CombatSystem 在“进入范围并实际出手”时添加。
+                                    // 这里不添加 AttackState，避免跑近过程中出现“挥刀后又站住”的不一致。
+                                    // IMPORTANT: 必须清除单击状态，否则本次单击会在后续帧被重复判定，导致刷屏/重复发包。
+                                    self.mouse_state.left_last_click_time = None;
+                                    self.mouse_state.right_last_click_time = None;
+                                    // Skip double-click/movement handling; go straight to server sync
+                                    // (was: continue in old for-loop; now single-entity, just exit this branch)
+                                } else {
+                                    // 2) 朝向点击方向；没点到怪则直接挥空发一次 AttackRequest
+                                    if let Some(click_world) = right_click_attack_world {
+                                        let (pgx, pgy) =
+                                            crate::coord::Coord::world_to_grid(pos.x, pos.y);
+                                        let (tgx, tgy) = crate::coord::Coord::world_to_grid(
+                                            click_world.0,
+                                            click_world.1,
+                                        );
+                                        if let Some(dir) =
+                                            Self::grid_direction_towards((pgx, pgy), (tgx, tgy))
+                                        {
+                                            player.direction = dir;
+                                            if sync_combat_to_server
+                                                && right_click_attack_monster.is_none()
+                                            {
+                                                if let Some(net) = net.as_ref() {
+                                                    let _ = net.send(crate::network::handlers::NetworkEvent::AttackRequest {
                                             direction: dir,
                                             spell: 0,
                                         });
+                                                }
+                                            }
+                                        }
                                     }
-                                }
+
+                                    // 没点到怪：本地播放挥刀动画
+                                    // (will add attack state below)
+                                } // end else (not clicking monster, do swing)
                             }
+
+                            // 攻击方向已由 grid_direction_towards 计算并设置到 player.direction
                         }
 
-                        // 没点到怪：本地播放挥刀动画
-                        // (will add attack state below)
-
-                        } // end else (not clicking monster, do swing)
+                        // 清除 last_click_time 避免重复触发
+                        self.mouse_state.left_last_click_time = None;
+                        self.mouse_state.right_last_click_time = None;
                     }
-                    
-                    // 攻击方向已由 grid_direction_towards 计算并设置到 player.direction
-                }
-                
-                // 清除 last_click_time 避免重复触发
-                self.mouse_state.left_last_click_time = None;
-                self.mouse_state.right_last_click_time = None;
-            }
 
-            // ✅ 启用双击寻路功能（仅在未处理单击时）
-            if !has_single_click {
-                let has_double_click = double_click_left.is_some() || double_click_right.is_some();
-            
-            if has_double_click {
-                use crate::components::PlayerAction;
-                
-                // 双击模式: 自动寻路,松开后继续移动
-                if let Some((world_x, world_y)) = double_click_left {
-                    player_input.move_to = Some((world_x, world_y));
-                    player_input.movement_mode = crate::components::MovementMode::Pathfinding;
-                    player_input.run = false;
-                    player.action = PlayerAction::Walk;
-                    tracing::warn!("🚶🚶 左键双击走路到 ({:.1}, {:.1}) [寻路模式-松开后继续走]", world_x, world_y);
-                } else if let Some((world_x, world_y)) = double_click_right {
-                    player_input.move_to = Some((world_x, world_y));
-                    player_input.movement_mode = crate::components::MovementMode::Pathfinding;
-                    player_input.run = true;
-                    player.action = PlayerAction::Run;
-                    tracing::warn!("🏃🏃 右键双击跑步到 ({:.1}, {:.1}) [寻路模式-松开后继续走]", world_x, world_y);
-                }
-            } else {
-                use crate::components::{MovementMode, PlayerAction};
-                
-                // 没有双击,检查是否按住鼠标(直接跟随模式)
-                let is_pressing_left = self.mouse_state.left_pressed;
-                let is_pressing_right = self.mouse_state.right_pressed;
-                
-                // 只有“按住超过阈值”才进入 DirectFollow；快速单击不产生移动。
-                let can_follow_left = is_pressing_left
-                    && self
-                        .mouse_state
-                        .left_press_start
-                        .map(|t| now.duration_since(t) >= self.long_press_threshold)
-                        .unwrap_or(false);
-                let can_follow_right = is_pressing_right
-                    && self
-                        .mouse_state
-                        .right_press_start
-                        .map(|t| now.duration_since(t) >= self.long_press_threshold)
-                        .unwrap_or(false);
+                    // ✅ 启用双击寻路功能（仅在未处理单击时）
+                    if !has_single_click {
+                        let has_double_click =
+                            double_click_left.is_some() || double_click_right.is_some();
 
-                if can_follow_left || can_follow_right {
-                    // 🎯 鼠标按下：设置移动目标和动作状态
-                    let (screen_x, screen_y) = self.mouse_state.current_position;
-                    let (world_x, world_y) = Self::screen_to_world(screen_x, screen_y, &camera_pos, &camera);
+                        if has_double_click {
+                            use crate::components::PlayerAction;
 
-                    player_input.movement_mode = MovementMode::DirectFollow;
-                    player_input.move_to = Some((world_x, world_y));
-
-                    // 🎬 设置动作（PlayerControlSystem 独占写入）
-                    if can_follow_right {
-                        player_input.run = true;
-                        player.action = PlayerAction::Run;
-                    } else {
-                        player_input.run = false;
-                        player.action = PlayerAction::Walk;
-                    }
-                } else {
-                    // 🎯 鼠标松开：根据模式决定是否停止
-                    match player_input.movement_mode {
-                        MovementMode::DirectFollow => {
-                            // 跟随模式下,松开立即停止
-                            if player_input.move_to.is_some() {
-                                tracing::warn!("⏹️⏹️ 松开鼠标,停止跟随 (mode={:?})", player_input.movement_mode);
-                                player_input.move_to = None;
-                                player_input.movement_mode = MovementMode::None;
-
-                                // 🎬 设置站立动作（PlayerControlSystem 独占写入）
-                                // 但若正在攻击（AttackState 存在），不要覆盖攻击动画。
-                                let is_attacking = attacking_entities.contains(&entity);
-                                if !is_attacking && !player.action.is_attack() {
-                                    player.action = PlayerAction::Stand;
-                                }
-                            }
-                        }
-                        MovementMode::Pathfinding => {
-                            // 寻路模式下,松开不停止,继续走完路径
-                            // ✅ move_to 可能来自 AI/脚本（非鼠标双击），此时也需要维持走/跑动作，
-                            // 否则会出现“位置在动但动画不播放”的平移效果。
-                            let is_attacking = attacking_entities.contains(&entity);
-                            if !is_attacking && player_input.move_to.is_some() && !player.action.is_attack() {
-                                // 关键：不要用“有 move_to”直接驱动跑/走动画。
-                                // 在碰撞/人墙场景下，move_to 会被保留用于下一帧重新算路，但 velocity/path 可能已被清空。
-                                // 若仍强制播放 Run，会出现“原地奔跑”。
-                                let has_velocity = velocity.x.abs() > 0.01 || velocity.y.abs() > 0.01;
-
-                                // 只用“实际速度”驱动 Walk/Run：
-                                // - Path/MoveTo 只是意图，可能长期存在（AI 追砍/重新算路）
-                                // - Velocity 才代表这一帧是否真的在动
-                                if has_velocity {
-                                    let desired = if player_input.run {
-                                        PlayerAction::Run
-                                    } else {
-                                        PlayerAction::Walk
-                                    };
-
-                                    // move_to 可能来自 AI/脚本：这里根据 PlayerInput.run 维持 Walk/Run。
-                                    if matches!(player.action, PlayerAction::Stand | PlayerAction::Walk | PlayerAction::Run)
-                                        && player.action != desired
-                                    {
-                                        player.action = desired;
-                                    }
-                                } else if player.action != PlayerAction::Stand {
-                                    // 有移动意图但当前帧确实没在动：用 Stand，避免“原地跑”。
-                                    player.action = PlayerAction::Stand;
-                                }
-                            }
-
-                            // 但如果 MovementSystem 已清除 move_to (到达目的地)，则设置站立
-                            if !is_attacking
-                                && player_input.move_to.is_none()
-                                && player.action != PlayerAction::Stand
-                                && !player.action.is_attack()
-                            {
-                                player.action = PlayerAction::Stand;
-                                player_input.movement_mode = MovementMode::None;
+                            // 双击模式: 自动寻路,松开后继续移动
+                            if let Some((world_x, world_y)) = double_click_left {
+                                player_input.move_to = Some((world_x, world_y));
+                                player_input.movement_mode =
+                                    crate::components::MovementMode::Pathfinding;
                                 player_input.run = false;
-                                tracing::info!("🎬 到达目的地,设置站立动作");
+                                player.action = PlayerAction::Walk;
+                                tracing::warn!(
+                                    "🚶🚶 左键双击走路到 ({:.1}, {:.1}) [寻路模式-松开后继续走]",
+                                    world_x,
+                                    world_y
+                                );
+                            } else if let Some((world_x, world_y)) = double_click_right {
+                                player_input.move_to = Some((world_x, world_y));
+                                player_input.movement_mode =
+                                    crate::components::MovementMode::Pathfinding;
+                                player_input.run = true;
+                                player.action = PlayerAction::Run;
+                                tracing::warn!(
+                                    "🏃🏃 右键双击跑步到 ({:.1}, {:.1}) [寻路模式-松开后继续走]",
+                                    world_x,
+                                    world_y
+                                );
                             }
-                        }
-                        MovementMode::None => {
-                            // 确保没有移动目标时是站立状态
-                            let is_attacking = attacking_entities.contains(&entity);
-                            if !is_attacking
-                                && player_input.move_to.is_none()
-                                && player.action != PlayerAction::Stand
-                                && !player.action.is_attack()
-                            {
-                                player.action = PlayerAction::Stand;
-                            }
-
-                            // 兜底：有 move_to 但 mode=None 且这一帧没在动时，也不要继续播放 Run/Walk。
-                            // 这种状态常见于“攻击结束/模式切换”边界，move_to 可能被上层保留，但本帧速度为 0。
-                            if !is_attacking
-                                && player_input.move_to.is_some()
-                                && !player.action.is_attack()
-                                && player.action != PlayerAction::Stand
-                            {
-                                let has_velocity = velocity.x.abs() > 0.01 || velocity.y.abs() > 0.01;
-                                if !has_velocity {
-                                    player.action = PlayerAction::Stand;
-                                }
-                            }
-                        }
-                    }
-
-                } // end else (mouse release handling)
-            } // end if-else (has_double_click / else)
-            } // end if !has_single_click
-
-            if in_trap_rock && (player_input.move_to.is_some()
-                || player_input.movement_mode != crate::components::MovementMode::None
-                || _path.is_valid
-                || !matches!(player.action, crate::components::PlayerAction::Stand))
-            {
-                player_input.move_to = None;
-                player_input.movement_mode = crate::components::MovementMode::None;
-                _path.clear();
-                if !player.action.is_attack() {
-                    player.action = crate::components::PlayerAction::Stand;
-                }
-            }
-
-            // ===== local move -> server sync: 同步”已发生的格子位移” =====
-            // 关键点：
-            // - 本地移动是连续像素移动；MockServer 的 Move/Walk/RunRequest 语义是“推进一格”。
-            // - 如果按固定时间间隔发送，会导致 Mock 端走得比本地快，累计偏差后触发客户端的大偏差纠偏（表现为瞬移）。
-            // - 这里改为：只有当本地玩家“跨入新格子”时，才给服务器发送一步，从而保持双方格子同步。
-            if sync_move_to_server && !in_trap_rock {
-                let now = Instant::now();
-                let (pgx, pgy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
-
-                match self.last_net_move_grid {
-                    None => {
-                        // 首帧只建立基准，不发包（Mock StartGame 会把 player_grid 初始化到出生点）。
-                        self.last_net_move_grid = Some((pgx, pgy));
-                    }
-                    Some((sgx, sgy)) => {
-                        if (sgx, sgy) == (pgx, pgy) {
-                            // 同一格：不需要发步进。
                         } else {
-                            // 与原版 Crystal 对齐：
-                            // - Walk: 前进 1 格
-                            // - Run: 前进 2 格（服务端 HumanObject.Run steps=2/3）
-                            // 因此这里不能简单“每格都发 Run”，否则服务端会按 2 格推进并导致坐标漂移。
-                            // 策略：每次允许发送时“追赶一步”，并根据剩余 delta 决定发 Walk(1) 还是 Run(2)。
-                            let dx = pgx - sgx;
-                            let dy = pgy - sgy;
+                            use crate::components::{MovementMode, PlayerAction};
 
-                            // 传送/复活/强制对齐等：差距过大时不尝试补步，直接重置基准。
-                            let is_large_jump = dx.abs() > 3 || dy.abs() > 3;
-                            if is_large_jump {
-                                if Self::net_move_diag_enabled() {
-                                    tracing::info!(
+                            // 没有双击,检查是否按住鼠标(直接跟随模式)
+                            let is_pressing_left = self.mouse_state.left_pressed;
+                            let is_pressing_right = self.mouse_state.right_pressed;
+
+                            // 只有“按住超过阈值”才进入 DirectFollow；快速单击不产生移动。
+                            let can_follow_left = is_pressing_left
+                                && self
+                                    .mouse_state
+                                    .left_press_start
+                                    .map(|t| now.duration_since(t) >= self.long_press_threshold)
+                                    .unwrap_or(false);
+                            let can_follow_right = is_pressing_right
+                                && self
+                                    .mouse_state
+                                    .right_press_start
+                                    .map(|t| now.duration_since(t) >= self.long_press_threshold)
+                                    .unwrap_or(false);
+
+                            if can_follow_left || can_follow_right {
+                                // 🎯 鼠标按下：设置移动目标和动作状态
+                                let (screen_x, screen_y) = self.mouse_state.current_position;
+                                let (world_x, world_y) =
+                                    Self::screen_to_world(screen_x, screen_y, &camera_pos, &camera);
+
+                                player_input.movement_mode = MovementMode::DirectFollow;
+                                player_input.move_to = Some((world_x, world_y));
+
+                                // 🎬 设置动作（PlayerControlSystem 独占写入）
+                                if can_follow_right {
+                                    player_input.run = true;
+                                    player.action = PlayerAction::Run;
+                                } else {
+                                    player_input.run = false;
+                                    player.action = PlayerAction::Walk;
+                                }
+                            } else {
+                                // 🎯 鼠标松开：根据模式决定是否停止
+                                match player_input.movement_mode {
+                                    MovementMode::DirectFollow => {
+                                        // 跟随模式下,松开立即停止
+                                        if player_input.move_to.is_some() {
+                                            tracing::warn!(
+                                                "⏹️⏹️ 松开鼠标,停止跟随 (mode={:?})",
+                                                player_input.movement_mode
+                                            );
+                                            player_input.move_to = None;
+                                            player_input.movement_mode = MovementMode::None;
+
+                                            // 🎬 设置站立动作（PlayerControlSystem 独占写入）
+                                            // 但若正在攻击（AttackState 存在），不要覆盖攻击动画。
+                                            let is_attacking = attacking_entities.contains(&entity);
+                                            if !is_attacking && !player.action.is_attack() {
+                                                player.action = PlayerAction::Stand;
+                                            }
+                                        }
+                                    }
+                                    MovementMode::Pathfinding => {
+                                        // 寻路模式下,松开不停止,继续走完路径
+                                        // ✅ move_to 可能来自 AI/脚本（非鼠标双击），此时也需要维持走/跑动作，
+                                        // 否则会出现“位置在动但动画不播放”的平移效果。
+                                        let is_attacking = attacking_entities.contains(&entity);
+                                        if !is_attacking
+                                            && player_input.move_to.is_some()
+                                            && !player.action.is_attack()
+                                        {
+                                            // 关键：不要用“有 move_to”直接驱动跑/走动画。
+                                            // 在碰撞/人墙场景下，move_to 会被保留用于下一帧重新算路，但 velocity/path 可能已被清空。
+                                            // 若仍强制播放 Run，会出现“原地奔跑”。
+                                            let has_velocity =
+                                                velocity.x.abs() > 0.01 || velocity.y.abs() > 0.01;
+
+                                            // 只用“实际速度”驱动 Walk/Run：
+                                            // - Path/MoveTo 只是意图，可能长期存在（AI 追砍/重新算路）
+                                            // - Velocity 才代表这一帧是否真的在动
+                                            if has_velocity {
+                                                let desired = if player_input.run {
+                                                    PlayerAction::Run
+                                                } else {
+                                                    PlayerAction::Walk
+                                                };
+
+                                                // move_to 可能来自 AI/脚本：这里根据 PlayerInput.run 维持 Walk/Run。
+                                                if matches!(
+                                                    player.action,
+                                                    PlayerAction::Stand
+                                                        | PlayerAction::Walk
+                                                        | PlayerAction::Run
+                                                ) && player.action != desired
+                                                {
+                                                    player.action = desired;
+                                                }
+                                            } else if player.action != PlayerAction::Stand {
+                                                // 有移动意图但当前帧确实没在动：用 Stand，避免“原地跑”。
+                                                player.action = PlayerAction::Stand;
+                                            }
+                                        }
+
+                                        // 但如果 MovementSystem 已清除 move_to (到达目的地)，则设置站立
+                                        if !is_attacking
+                                            && player_input.move_to.is_none()
+                                            && player.action != PlayerAction::Stand
+                                            && !player.action.is_attack()
+                                        {
+                                            player.action = PlayerAction::Stand;
+                                            player_input.movement_mode = MovementMode::None;
+                                            player_input.run = false;
+                                            tracing::info!("🎬 到达目的地,设置站立动作");
+                                        }
+                                    }
+                                    MovementMode::None => {
+                                        // 确保没有移动目标时是站立状态
+                                        let is_attacking = attacking_entities.contains(&entity);
+                                        if !is_attacking
+                                            && player_input.move_to.is_none()
+                                            && player.action != PlayerAction::Stand
+                                            && !player.action.is_attack()
+                                        {
+                                            player.action = PlayerAction::Stand;
+                                        }
+
+                                        // 兜底：有 move_to 但 mode=None 且这一帧没在动时，也不要继续播放 Run/Walk。
+                                        // 这种状态常见于“攻击结束/模式切换”边界，move_to 可能被上层保留，但本帧速度为 0。
+                                        if !is_attacking
+                                            && player_input.move_to.is_some()
+                                            && !player.action.is_attack()
+                                            && player.action != PlayerAction::Stand
+                                        {
+                                            let has_velocity =
+                                                velocity.x.abs() > 0.01 || velocity.y.abs() > 0.01;
+                                            if !has_velocity {
+                                                player.action = PlayerAction::Stand;
+                                            }
+                                        }
+                                    }
+                                }
+                            } // end else (mouse release handling)
+                        } // end if-else (has_double_click / else)
+                    } // end if !has_single_click
+
+                    if in_trap_rock
+                        && (player_input.move_to.is_some()
+                            || player_input.movement_mode != crate::components::MovementMode::None
+                            || _path.is_valid
+                            || !matches!(player.action, crate::components::PlayerAction::Stand))
+                    {
+                        player_input.move_to = None;
+                        player_input.movement_mode = crate::components::MovementMode::None;
+                        _path.clear();
+                        if !player.action.is_attack() {
+                            player.action = crate::components::PlayerAction::Stand;
+                        }
+                    }
+
+                    // ===== local move -> server sync: 同步”已发生的格子位移” =====
+                    // 关键点：
+                    // - 本地移动是连续像素移动；MockServer 的 Move/Walk/RunRequest 语义是“推进一格”。
+                    // - 如果按固定时间间隔发送，会导致 Mock 端走得比本地快，累计偏差后触发客户端的大偏差纠偏（表现为瞬移）。
+                    // - 这里改为：只有当本地玩家“跨入新格子”时，才给服务器发送一步，从而保持双方格子同步。
+                    if sync_move_to_server && !in_trap_rock {
+                        let now = Instant::now();
+                        let (pgx, pgy) = crate::coord::Coord::world_to_grid(pos.x, pos.y);
+
+                        match self.last_net_move_grid {
+                            None => {
+                                // 首帧只建立基准，不发包（Mock StartGame 会把 player_grid 初始化到出生点）。
+                                self.last_net_move_grid = Some((pgx, pgy));
+                            }
+                            Some((sgx, sgy)) => {
+                                if (sgx, sgy) == (pgx, pgy) {
+                                    // 同一格：不需要发步进。
+                                } else {
+                                    // 与原版 Crystal 对齐：
+                                    // - Walk: 前进 1 格
+                                    // - Run: 前进 2 格（服务端 HumanObject.Run steps=2/3）
+                                    // 因此这里不能简单“每格都发 Run”，否则服务端会按 2 格推进并导致坐标漂移。
+                                    // 策略：每次允许发送时“追赶一步”，并根据剩余 delta 决定发 Walk(1) 还是 Run(2)。
+                                    let dx = pgx - sgx;
+                                    let dy = pgy - sgy;
+
+                                    // 传送/复活/强制对齐等：差距过大时不尝试补步，直接重置基准。
+                                    let is_large_jump = dx.abs() > 3 || dy.abs() > 3;
+                                    if is_large_jump {
+                                        if Self::net_move_diag_enabled() {
+                                            tracing::info!(
                                         "[NETMOVE] reset baseline (large jump): last=({},{}), cur=({},{}), d=({},{}), run={} mode={:?}",
                                         sgx,
                                         sgy,
@@ -1156,35 +1269,36 @@ impl LogicSystem for PlayerControlSystem {
                                         player_input.run,
                                         player_input.movement_mode
                                     );
-                                }
-                                self.last_net_move_grid = Some((pgx, pgy));
-                            } else if self.can_send_net_move(now) {
-                                let step_x = dx.clamp(-1, 1);
-                                let step_y = dy.clamp(-1, 1);
+                                        }
+                                        self.last_net_move_grid = Some((pgx, pgy));
+                                    } else if self.can_send_net_move(now) {
+                                        let step_x = dx.clamp(-1, 1);
+                                        let step_y = dy.clamp(-1, 1);
 
-                                // 不要用 player.action 推断跑/走：它可能因为“这一帧没速度”被设为 Stand。
-                                // 原版的跑步并不是“更快的一格”，而是“一次两格”。
-                                let want_run = player_input.run;
+                                        // 不要用 player.action 推断跑/走：它可能因为“这一帧没速度”被设为 Stand。
+                                        // 原版的跑步并不是“更快的一格”，而是“一次两格”。
+                                        let want_run = player_input.run;
 
-                                let run_is_possible = want_run
-                                    && ((step_x == 0) || dx.abs() >= Self::NET_RUN_STEPS)
-                                    && ((step_y == 0) || dy.abs() >= Self::NET_RUN_STEPS);
+                                        let run_is_possible = want_run
+                                            && ((step_x == 0) || dx.abs() >= Self::NET_RUN_STEPS)
+                                            && ((step_y == 0) || dy.abs() >= Self::NET_RUN_STEPS);
 
-                                let steps = if run_is_possible {
-                                    Self::NET_RUN_STEPS
-                                } else {
-                                    1
-                                };
+                                        let steps = if run_is_possible {
+                                            Self::NET_RUN_STEPS
+                                        } else {
+                                            1
+                                        };
 
-                                let next_gx = sgx + step_x * steps;
-                                let next_gy = sgy + step_y * steps;
+                                        let next_gx = sgx + step_x * steps;
+                                        let next_gy = sgy + step_y * steps;
 
-                                if let Some(dir) =
-                                    Self::grid_direction_towards((sgx, sgy), (next_gx, next_gy))
-                                {
-                                    let run = run_is_possible;
-                                    if Self::net_move_diag_enabled() {
-                                        tracing::info!(
+                                        if let Some(dir) = Self::grid_direction_towards(
+                                            (sgx, sgy),
+                                            (next_gx, next_gy),
+                                        ) {
+                                            let run = run_is_possible;
+                                            if Self::net_move_diag_enabled() {
+                                                tracing::info!(
                                             "[NETMOVE] step: last=({},{})->next=({},{})->cur=({},{}), dir={:?}, run={} steps={} mode={:?}",
                                             sgx,
                                             sgy,
@@ -1197,18 +1311,18 @@ impl LogicSystem for PlayerControlSystem {
                                             steps,
                                             player_input.movement_mode
                                         );
+                                            }
+                                            Self::send_net_move_step(net.as_ref(), run, dir);
+                                            self.last_net_move_sent = Some(now);
+                                            self.last_net_move_grid = Some((next_gx, next_gy));
+                                        }
                                     }
-                                    Self::send_net_move_step(net.as_ref(), run, dir);
-                                    self.last_net_move_sent = Some(now);
-                                    self.last_net_move_grid = Some((next_gx, next_gy));
                                 }
                             }
                         }
                     }
-                }
-            }
-        } // end if let Ok(query_one_mut)
-        } // end if !attacking_entities
+                } // end if let Ok(query_one_mut)
+            } // end if !attacking_entities
         } // end if let Some(entity)
 
         // 发送 NPC 主对话请求（共享 5 秒冷却）
@@ -1223,7 +1337,7 @@ impl LogicSystem for PlayerControlSystem {
                 self.pending_npc_call = None;
             }
         }
-        
+
         Ok(())
     }
 }

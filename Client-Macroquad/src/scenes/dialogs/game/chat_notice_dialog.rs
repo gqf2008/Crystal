@@ -33,10 +33,10 @@ pub const DEFAULT_NOTICE_DURATION: f32 = 10.0;
 /// 单个通知条目
 struct NoticeEntry {
     text: String,
-    elapsed: f32,       // 已显示时间（秒）
-    duration: f32,      // 总显示时长（秒）
+    elapsed: f32,        // 已显示时间（秒）
+    duration: f32,       // 总显示时长（秒）
     fade_out_start: f32, // 开始淡出的时间点
-    notice_type: u8,    // 0=小字体, 1=大字体
+    notice_type: u8,     // 0=小字体, 1=大字体
 }
 
 /// 屏幕中央 transient 通知对话框
@@ -110,7 +110,8 @@ impl ChatNoticeDialogHybrid {
 
             // 计算透明度（淡出阶段）
             let alpha = if entry.elapsed >= entry.fade_out_start {
-                let fade_progress = (entry.elapsed - entry.fade_out_start) / (entry.duration - entry.fade_out_start);
+                let fade_progress = (entry.elapsed - entry.fade_out_start)
+                    / (entry.duration - entry.fade_out_start);
                 (1.0 - fade_progress).max(0.0)
             } else {
                 1.0
@@ -125,11 +126,17 @@ impl ChatNoticeDialogHybrid {
                 // C#: Location = (ScreenWidth/2 - Size.Width/2, ScreenHeight/6 - Size.Height/2)
                 let box_y = screen_h / 6.0 - box_h / 2.0;
                 // C# type=0 文本框 Location.Y = -6 (相对父)，type=1 = 0
-                let text_y_offset = if entry.notice_type == NOTICE_TYPE_SMALL { -6.0 } else { 0.0 };
+                let text_y_offset = if entry.notice_type == NOTICE_TYPE_SMALL {
+                    -6.0
+                } else {
+                    0.0
+                };
 
                 // 背景贴图（C# Opacity=0.7F）。若资源缺失则回退到纯色矩形。
                 let mut drew_bg = false;
-                if let Some(info) = LibraryName::Prguse.get_texture(Self::bg_index_for(entry.notice_type)) {
+                if let Some(info) =
+                    LibraryName::Prguse.get_texture(Self::bg_index_for(entry.notice_type))
+                {
                     if let Some(tex) = info.image {
                         // 缩放到框大小并应用半透明 (alpha ≈ 0.7)
                         let tint = Color::from_rgba(255, 255, 255, (alpha * 178.0) as u8);
@@ -153,13 +160,29 @@ impl ChatNoticeDialogHybrid {
                     // 边框
                     let border_color = Color::from_rgba(200, 180, 100, (alpha * 200.0) as u8);
                     draw_line(box_x, box_y, box_x + box_w, box_y, 1.0, border_color);
-                    draw_line(box_x + box_w, box_y, box_x + box_w, box_y + box_h, 1.0, border_color);
-                    draw_line(box_x + box_w, box_y + box_h, box_x, box_y + box_h, 1.0, border_color);
+                    draw_line(
+                        box_x + box_w,
+                        box_y,
+                        box_x + box_w,
+                        box_y + box_h,
+                        1.0,
+                        border_color,
+                    );
+                    draw_line(
+                        box_x + box_w,
+                        box_y + box_h,
+                        box_x,
+                        box_y + box_h,
+                        1.0,
+                        border_color,
+                    );
                     draw_line(box_x, box_y + box_h, box_x, box_y, 1.0, border_color);
                 }
 
                 // 前景叠加贴图（C# Layout 1360/1362）
-                if let Some(info) = LibraryName::Prguse.get_texture(Self::fg_index_for(entry.notice_type)) {
+                if let Some(info) =
+                    LibraryName::Prguse.get_texture(Self::fg_index_for(entry.notice_type))
+                {
                     if let Some(tex) = info.image {
                         let tint = Color::from_rgba(255, 255, 255, (alpha * 255.0) as u8);
                         draw_texture_ex(

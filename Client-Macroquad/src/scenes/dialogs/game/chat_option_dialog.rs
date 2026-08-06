@@ -32,8 +32,7 @@ use crate::resources::LibraryName;
 
 use super::native_ui_utils::DragHelper;
 
-#[derive(Debug, Clone, Copy)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ChatOptionSettingsHybrid {
     // 与 C# Settings.Filter*Chat 语义一致：true = 过滤(隐藏)该类别
     pub filter_normal: bool,
@@ -46,7 +45,6 @@ pub struct ChatOptionSettingsHybrid {
     pub filter_guild: bool,
     pub transparent_chat: bool,
 }
-
 
 pub struct ChatOptionDialogHybrid {
     position: Vec2,
@@ -105,8 +103,14 @@ impl ChatOptionDialogHybrid {
             );
 
             // 保险：避免出屏
-            self.position.x = self.position.x.clamp(0.0, (screen_w - self.size.x).max(0.0));
-            self.position.y = self.position.y.clamp(0.0, (screen_h - self.size.y).max(0.0));
+            self.position.x = self
+                .position
+                .x
+                .clamp(0.0, (screen_w - self.size.x).max(0.0));
+            self.position.y = self
+                .position
+                .y
+                .clamp(0.0, (screen_h - self.size.y).max(0.0));
 
             self.position_initialized = true;
         }
@@ -246,20 +250,30 @@ impl ChatOptionDialogHybrid {
 
         // 对齐 C# SwitchTab：不同 tab 下 Index/PressedIndex 交换
         // FilterTab at (8,8)
-        let (filter_idx, filter_pressed) = if self.tab == 0 { (463, 462) } else { (462, 463) };
+        let (filter_idx, filter_pressed) = if self.tab == 0 {
+            (463, 462)
+        } else {
+            (462, 463)
+        };
         if self.draw_title_button(mouse_pos, 8.0, 8.0, filter_idx, None, filter_pressed)
-            && self.tab != 0 {
-                self.tab = 0;
-                changed = true;
-            }
+            && self.tab != 0
+        {
+            self.tab = 0;
+            changed = true;
+        }
 
         // ChatTab at (78,8)
-        let (chat_idx, chat_pressed) = if self.tab == 0 { (464, 465) } else { (465, 464) };
+        let (chat_idx, chat_pressed) = if self.tab == 0 {
+            (464, 465)
+        } else {
+            (465, 464)
+        };
         if self.draw_title_button(mouse_pos, 78.0, 8.0, chat_idx, None, chat_pressed)
-            && self.tab != 1 {
-                self.tab = 1;
-                changed = true;
-            }
+            && self.tab != 1
+        {
+            self.tab = 1;
+            changed = true;
+        }
 
         changed
     }
@@ -268,8 +282,7 @@ impl ChatOptionDialogHybrid {
         let x = self.position.x + 198.0;
         let y = self.position.y + 3.0;
 
-        let (w, h) = self
-            .close_textures[0]
+        let (w, h) = self.close_textures[0]
             .as_ref()
             .map(|t| (t.width(), t.height()))
             .unwrap_or((24.0, 21.0));
@@ -279,21 +292,19 @@ impl ChatOptionDialogHybrid {
         let pressed = hovered && is_mouse_button_down(MouseButton::Left);
 
         let tex = if pressed {
-            self.close_textures[2].as_ref().or(self.close_textures[0].as_ref())
+            self.close_textures[2]
+                .as_ref()
+                .or(self.close_textures[0].as_ref())
         } else if hovered {
-            self.close_textures[1].as_ref().or(self.close_textures[0].as_ref())
+            self.close_textures[1]
+                .as_ref()
+                .or(self.close_textures[0].as_ref())
         } else {
             self.close_textures[0].as_ref()
         };
 
         if let Some(tex) = tex {
-            draw_texture_ex(
-                tex,
-                x,
-                y,
-                WHITE,
-                DrawTextureParams::default(),
-            );
+            draw_texture_ex(tex, x, y, WHITE, DrawTextureParams::default());
         }
 
         hovered && is_mouse_button_pressed(MouseButton::Left)
@@ -314,7 +325,11 @@ impl ChatOptionDialogHybrid {
             mouse_pos,
             40.0,
             69.0,
-            if self.settings.filter_normal { 2070 } else { 2071 },
+            if self.settings.filter_normal {
+                2070
+            } else {
+                2071
+            },
         ) {
             self.settings.filter_normal = !self.settings.filter_normal;
             self.check_all_filters();
@@ -325,7 +340,11 @@ impl ChatOptionDialogHybrid {
             mouse_pos,
             40.0,
             92.0,
-            if self.settings.filter_whisper { 2074 } else { 2075 },
+            if self.settings.filter_whisper {
+                2074
+            } else {
+                2075
+            },
         ) {
             self.settings.filter_whisper = !self.settings.filter_whisper;
             self.check_all_filters();
@@ -336,7 +355,11 @@ impl ChatOptionDialogHybrid {
             mouse_pos,
             40.0,
             115.0,
-            if self.settings.filter_shout { 2072 } else { 2073 },
+            if self.settings.filter_shout {
+                2072
+            } else {
+                2073
+            },
         ) {
             self.settings.filter_shout = !self.settings.filter_shout;
             self.check_all_filters();
@@ -347,7 +370,11 @@ impl ChatOptionDialogHybrid {
             mouse_pos,
             40.0,
             138.0,
-            if self.settings.filter_system { 2084 } else { 2085 },
+            if self.settings.filter_system {
+                2084
+            } else {
+                2085
+            },
         ) {
             self.settings.filter_system = !self.settings.filter_system;
             self.check_all_filters();
@@ -359,7 +386,11 @@ impl ChatOptionDialogHybrid {
             mouse_pos,
             135.0,
             69.0,
-            if self.settings.filter_lover { 2076 } else { 2077 },
+            if self.settings.filter_lover {
+                2076
+            } else {
+                2077
+            },
         ) {
             self.settings.filter_lover = !self.settings.filter_lover;
             self.check_all_filters();
@@ -370,7 +401,11 @@ impl ChatOptionDialogHybrid {
             mouse_pos,
             135.0,
             92.0,
-            if self.settings.filter_mentor { 2078 } else { 2079 },
+            if self.settings.filter_mentor {
+                2078
+            } else {
+                2079
+            },
         ) {
             self.settings.filter_mentor = !self.settings.filter_mentor;
             self.check_all_filters();
@@ -381,7 +416,11 @@ impl ChatOptionDialogHybrid {
             mouse_pos,
             135.0,
             115.0,
-            if self.settings.filter_group { 2080 } else { 2081 },
+            if self.settings.filter_group {
+                2080
+            } else {
+                2081
+            },
         ) {
             self.settings.filter_group = !self.settings.filter_group;
             self.check_all_filters();
@@ -392,7 +431,11 @@ impl ChatOptionDialogHybrid {
             mouse_pos,
             135.0,
             138.0,
-            if self.settings.filter_guild { 2082 } else { 2083 },
+            if self.settings.filter_guild {
+                2082
+            } else {
+                2083
+            },
         ) {
             self.settings.filter_guild = !self.settings.filter_guild;
             self.check_all_filters();
@@ -412,10 +455,11 @@ impl ChatOptionDialogHybrid {
             (471, 472)
         };
         if self.draw_title_button(mouse_pos, 45.0, 90.0, off_idx, Some(off_hover), 470)
-            && self.settings.transparent_chat {
-                self.settings.transparent_chat = false;
-                changed = true;
-            }
+            && self.settings.transparent_chat
+        {
+            self.settings.transparent_chat = false;
+            changed = true;
+        }
 
         // On button visual indices
         let (on_idx, on_hover) = if self.settings.transparent_chat {
@@ -424,10 +468,11 @@ impl ChatOptionDialogHybrid {
             (473, 473)
         };
         if self.draw_title_button(mouse_pos, 115.0, 90.0, on_idx, Some(on_hover), 473)
-            && !self.settings.transparent_chat {
-                self.settings.transparent_chat = true;
-                changed = true;
-            }
+            && !self.settings.transparent_chat
+        {
+            self.settings.transparent_chat = true;
+            changed = true;
+        }
 
         changed
     }
@@ -475,13 +520,7 @@ impl ChatOptionDialogHybrid {
             let hovered = rect.contains(mouse_pos);
 
             if let Some(tex) = texture.image.as_ref() {
-                draw_texture_ex(
-                    tex,
-                    pos.x,
-                    pos.y,
-                    WHITE,
-                    DrawTextureParams::default(),
-                );
+                draw_texture_ex(tex, pos.x, pos.y, WHITE, DrawTextureParams::default());
             }
 
             return hovered && is_mouse_button_pressed(MouseButton::Left);
@@ -520,13 +559,7 @@ impl ChatOptionDialogHybrid {
 
         if let Some(texture) = LibraryName::Title.get_texture(idx) {
             if let Some(tex) = texture.image.as_ref() {
-                draw_texture_ex(
-                    tex,
-                    pos.x,
-                    pos.y,
-                    WHITE,
-                    DrawTextureParams::default(),
-                );
+                draw_texture_ex(tex, pos.x, pos.y, WHITE, DrawTextureParams::default());
             }
         }
 

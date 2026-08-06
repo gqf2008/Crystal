@@ -5,15 +5,14 @@
 use serde::{Deserialize, Serialize};
 
 /// 游戏配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GameSettings {
     /// 窗口配置
     pub window: WindowSettings,
-    
+
     /// 渲染配置
     pub render: RenderSettings,
-    
+
     /// 网络配置
     pub network: NetworkSettings,
 }
@@ -61,7 +60,6 @@ pub struct NetworkSettings {
     pub server_port: u16,
     pub timeout_ms: u64,
 }
-
 
 impl Default for WindowSettings {
     fn default() -> Self {

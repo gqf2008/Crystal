@@ -1,9 +1,9 @@
-﻿// ============================================================================
+// ============================================================================
 // GameShopDialogHybrid - 游戏商城对话框（混合版本）
 // ============================================================================
 //
 // 使用 macroquad 原生绘制 + macroquad::ui 拖拽
-// 
+//
 // 功能：
 // - 商品列表显示（4x2网格）
 // - 分类筛选（主分类 + 职业分类）
@@ -12,13 +12,15 @@
 // - 分页浏览
 // ============================================================================
 
+use super::super::native_ui_utils::create_transparent_skin;
+use crate::resources::LibraryName;
 use macroquad::prelude::*;
 use macroquad::ui::Skin;
-use crate::resources::LibraryName;
-use super::super::native_ui_utils::create_transparent_skin;
 
-use super::types::{ShopSectionHybrid, ShopClassHybrid, ShopCategoryHybrid, ShopItemHybrid, GameShopBuyAction};
 use super::sample_items::create_sample_items;
+use super::types::{
+    GameShopBuyAction, ShopCategoryHybrid, ShopClassHybrid, ShopItemHybrid, ShopSectionHybrid,
+};
 
 /// 商城对话框（混合版本）
 pub struct GameShopDialogHybrid {
@@ -27,73 +29,73 @@ pub struct GameShopDialogHybrid {
     pub(super) position: Vec2,
     pub(super) dragging: bool,
     pub(super) drag_offset: Vec2,
-    
+
     // 纹理 - 主要
-    pub(super) background_texture: Option<Texture2D>,      // Title[749] - 主背景
-    pub(super) cell_texture: Option<Texture2D>,            // Title[750] - 商品格子
-    pub(super) filter_bg_texture: Option<Texture2D>,       // Title[769] - 分类列表背景
-    pub(super) viewer_bg_texture: Option<Texture2D>,       // Title[785] - 预览窗口背景
-    
+    pub(super) background_texture: Option<Texture2D>, // Title[749] - 主背景
+    pub(super) cell_texture: Option<Texture2D>,       // Title[750] - 商品格子
+    pub(super) filter_bg_texture: Option<Texture2D>,  // Title[769] - 分类列表背景
+    pub(super) viewer_bg_texture: Option<Texture2D>,  // Title[785] - 预览窗口背景
+
     // 纹理 - Section Tabs (主分类)
-    pub(super) section_tab_textures: Vec<(Option<Texture2D>, Option<Texture2D>)>,  // (normal, selected)
-    
+    pub(super) section_tab_textures: Vec<(Option<Texture2D>, Option<Texture2D>)>, // (normal, selected)
+
     // 纹理 - Class Tabs (职业)
-    pub(super) class_tab_textures: Vec<(Option<Texture2D>, Option<Texture2D>, Option<Texture2D>)>,  // (normal, hover, pressed)
-    
+    pub(super) class_tab_textures: Vec<(Option<Texture2D>, Option<Texture2D>, Option<Texture2D>)>, // (normal, hover, pressed)
+
     // 纹理 - 按钮
-    pub(super) buy_btn_textures: (Option<Texture2D>, Option<Texture2D>, Option<Texture2D>),  // Title[778-780]
-    pub(super) preview_btn_textures: (Option<Texture2D>, Option<Texture2D>, Option<Texture2D>),  // Title[781-783]
-    pub(super) close_btn_textures: (Option<Texture2D>, Option<Texture2D>, Option<Texture2D>),  // Prguse2[360-362]
-    
+    pub(super) buy_btn_textures: (Option<Texture2D>, Option<Texture2D>, Option<Texture2D>), // Title[778-780]
+    pub(super) preview_btn_textures: (Option<Texture2D>, Option<Texture2D>, Option<Texture2D>), // Title[781-783]
+    pub(super) close_btn_textures: (Option<Texture2D>, Option<Texture2D>, Option<Texture2D>), // Prguse2[360-362]
+
     // 纹理 - 滚动条
-    pub(super) scroll_up_textures: (Option<Texture2D>, Option<Texture2D>, Option<Texture2D>),  // Prguse2[197-199]
-    pub(super) scroll_down_textures: (Option<Texture2D>, Option<Texture2D>, Option<Texture2D>),  // Prguse2[207-209]
-    pub(super) scroll_bar_textures: (Option<Texture2D>, Option<Texture2D>),  // Prguse2[205-206]
-    
+    pub(super) scroll_up_textures: (Option<Texture2D>, Option<Texture2D>, Option<Texture2D>), // Prguse2[197-199]
+    pub(super) scroll_down_textures: (Option<Texture2D>, Option<Texture2D>, Option<Texture2D>), // Prguse2[207-209]
+    pub(super) scroll_bar_textures: (Option<Texture2D>, Option<Texture2D>), // Prguse2[205-206]
+
     // 纹理 - 方向按钮
-    pub(super) left_btn_textures: (Option<Texture2D>, Option<Texture2D>, Option<Texture2D>),  // Prguse2[240-242]
-    pub(super) right_btn_textures: (Option<Texture2D>, Option<Texture2D>, Option<Texture2D>),  // Prguse2[243-245]
-    
+    pub(super) left_btn_textures: (Option<Texture2D>, Option<Texture2D>, Option<Texture2D>), // Prguse2[240-242]
+    pub(super) right_btn_textures: (Option<Texture2D>, Option<Texture2D>, Option<Texture2D>), // Prguse2[243-245]
+
     // 纹理 - 标题图标
-    pub(super) title_label_texture: Option<Texture2D>,  // Title[26]
-    
+    pub(super) title_label_texture: Option<Texture2D>, // Title[26]
+
     // 纹理 - 支付方式复选框
-    pub(super) checkbox_textures: (Option<Texture2D>, Option<Texture2D>),  // Prguse[2086-2087]
-    
+    pub(super) checkbox_textures: (Option<Texture2D>, Option<Texture2D>), // Prguse[2086-2087]
+
     pub(super) transparent_skin: Option<Skin>,
-    
+
     // 分类
     pub current_section: ShopSectionHybrid,
     pub current_class: ShopClassHybrid,
-    
+
     // 商品
     pub shop_items: Vec<ShopItemHybrid>,
     pub filtered_items: Vec<ShopItemHybrid>,
-    
+
     // 分页
     pub current_page: usize,
     pub items_per_page: usize,
-    
+
     // 玩家货币
     pub player_gold: u32,
     pub player_ingot: u32,
-    
+
     // 分类列表
     pub(super) categories: Vec<String>,
     pub(super) category_scroll: usize,
     pub(super) selected_category: Option<usize>,
-    
+
     // 预览
     pub(super) preview_item: Option<usize>,
     pub(super) preview_direction: u8,
-    
+
     // 悬停提示
     pub(super) hover_item: Option<usize>,
-    
+
     // 搜索
     pub(super) search_text: String,
     pub(super) search_active: bool,
-    
+
     // 支付方式
     pub(super) pay_with_gold: bool,
 
@@ -182,26 +184,26 @@ impl GameShopDialogHybrid {
     pub(super) const DIALOG_WIDTH: f32 = 696.0;
     pub(super) const DIALOG_HEIGHT: f32 = 476.0;
     pub(super) const TITLE_HEIGHT: f32 = 35.0;
-    
+
     // 网格位置 (原版)
     pub(super) const GRID_START_X: f32 = 152.0;
-    pub(super) const GRID_ROW1_Y: f32 = 115.0;   // 原版: 115
-    pub(super) const GRID_ROW2_Y: f32 = 275.0;   // 原版: 275
+    pub(super) const GRID_ROW1_Y: f32 = 115.0; // 原版: 115
+    pub(super) const GRID_ROW2_Y: f32 = 275.0; // 原版: 275
     pub(super) const CELL_WIDTH: f32 = 125.0;
     pub(super) const CELL_HEIGHT: f32 = 146.0;
     pub(super) const CELL_SPACING: f32 = 132.0;
-    
+
     // Section tabs 位置 (原版: 138, 68)
     pub(super) const SECTION_TAB_X: f32 = 138.0;
     pub(super) const SECTION_TAB_Y: f32 = 68.0;
     pub(super) const SECTION_TAB_W: f32 = 71.0;
     pub(super) const SECTION_TAB_H: f32 = 23.0;
-    
+
     // Class tabs 位置 (原版: 539, 37)
     pub(super) const CLASS_TAB_X: f32 = 539.0;
     pub(super) const CLASS_TAB_Y: f32 = 38.0;
     pub(super) const CLASS_TAB_SIZE: f32 = 23.0;
-    
+
     // 分类列表位置 (原版: 11, 102)
     pub(super) const FILTER_BG_X: f32 = 11.0;
     pub(super) const FILTER_BG_Y: f32 = 102.0;
@@ -212,14 +214,14 @@ impl GameShopDialogHybrid {
     pub(super) const CATEGORY_ITEM_H: f32 = 20.0;
     pub(super) const CATEGORY_ITEM_STEP: f32 = 15.0;
     pub(super) const CATEGORY_MAX_VISIBLE: usize = 22;
-    
+
     // 滚动条位置 (原版: 120, 103/421)
     pub(super) const SCROLL_X: f32 = 120.0;
     pub(super) const SCROLL_UP_Y: f32 = 103.0;
     pub(super) const SCROLL_DOWN_Y: f32 = 421.0;
     pub(super) const SCROLL_BTN_W: f32 = 16.0;
     pub(super) const SCROLL_BTN_H: f32 = 14.0;
-    
+
     pub fn new() -> Self {
         let shop_items = create_sample_items();
         let mut dialog = Self {
@@ -227,7 +229,7 @@ impl GameShopDialogHybrid {
             position: vec2(200.0, 100.0),
             dragging: false,
             drag_offset: Vec2::ZERO,
-            
+
             // 纹理初始化
             background_texture: None,
             cell_texture: None,
@@ -246,7 +248,7 @@ impl GameShopDialogHybrid {
             title_label_texture: None,
             checkbox_textures: (None, None),
             transparent_skin: None,
-            
+
             current_section: ShopSectionHybrid::All,
             current_class: ShopClassHybrid::All,
             shop_items,
@@ -270,7 +272,7 @@ impl GameShopDialogHybrid {
         dialog.refresh_categories_and_items();
         dialog
     }
-    
+
     /// 加载纹理
     pub fn load_textures(&mut self) {
         // 主要纹理
@@ -286,31 +288,40 @@ impl GameShopDialogHybrid {
         if let Some(info) = LibraryName::Title.get_texture(785) {
             self.viewer_bg_texture = info.image;
         }
-        
+
         // Section Tabs 纹理 (All: 770/771, Deals: 772/773, New: 774/775, TopItems: 776/777)
-        let section_indices = [(770, 771), (776, 777), (772, 773), (774, 775)];  // All, TopItems, Deals, New
+        let section_indices = [(770, 771), (776, 777), (772, 773), (774, 775)]; // All, TopItems, Deals, New
         for (normal, selected) in section_indices.iter() {
-            let normal_tex = LibraryName::Title.get_texture(*normal).and_then(|i| i.image);
-            let selected_tex = LibraryName::Title.get_texture(*selected).and_then(|i| i.image);
+            let normal_tex = LibraryName::Title
+                .get_texture(*normal)
+                .and_then(|i| i.image);
+            let selected_tex = LibraryName::Title
+                .get_texture(*selected)
+                .and_then(|i| i.image);
             self.section_tab_textures.push((normal_tex, selected_tex));
         }
-        
+
         // Class Tabs 纹理 (每个职业3个状态: normal/hover/pressed)
         let class_indices = [
-            (751, 752, 753),  // All
-            (754, 755, 756),  // Warrior
-            (757, 758, 759),  // Assassin
-            (760, 761, 762),  // Taoist
-            (763, 764, 765),  // Wizard
-            (766, 767, 768),  // Archer
+            (751, 752, 753), // All
+            (754, 755, 756), // Warrior
+            (757, 758, 759), // Assassin
+            (760, 761, 762), // Taoist
+            (763, 764, 765), // Wizard
+            (766, 767, 768), // Archer
         ];
         for (normal, hover, pressed) in class_indices.iter() {
-            let normal_tex = LibraryName::Title.get_texture(*normal).and_then(|i| i.image);
+            let normal_tex = LibraryName::Title
+                .get_texture(*normal)
+                .and_then(|i| i.image);
             let hover_tex = LibraryName::Title.get_texture(*hover).and_then(|i| i.image);
-            let pressed_tex = LibraryName::Title.get_texture(*pressed).and_then(|i| i.image);
-            self.class_tab_textures.push((normal_tex, hover_tex, pressed_tex));
+            let pressed_tex = LibraryName::Title
+                .get_texture(*pressed)
+                .and_then(|i| i.image);
+            self.class_tab_textures
+                .push((normal_tex, hover_tex, pressed_tex));
         }
-        
+
         // 按钮纹理
         self.buy_btn_textures = (
             LibraryName::Title.get_texture(778).and_then(|i| i.image),
@@ -322,14 +333,14 @@ impl GameShopDialogHybrid {
             LibraryName::Title.get_texture(782).and_then(|i| i.image),
             LibraryName::Title.get_texture(783).and_then(|i| i.image),
         );
-        
+
         // 关闭按钮 (Prguse2[360-362])
         self.close_btn_textures = (
             LibraryName::Prguse2.get_texture(360).and_then(|i| i.image),
             LibraryName::Prguse2.get_texture(361).and_then(|i| i.image),
             LibraryName::Prguse2.get_texture(362).and_then(|i| i.image),
         );
-        
+
         // 滚动条纹理
         self.scroll_up_textures = (
             LibraryName::Prguse2.get_texture(197).and_then(|i| i.image),
@@ -345,7 +356,7 @@ impl GameShopDialogHybrid {
             LibraryName::Prguse2.get_texture(205).and_then(|i| i.image),
             LibraryName::Prguse2.get_texture(206).and_then(|i| i.image),
         );
-        
+
         // 方向按钮纹理
         self.left_btn_textures = (
             LibraryName::Prguse2.get_texture(240).and_then(|i| i.image),
@@ -357,20 +368,20 @@ impl GameShopDialogHybrid {
             LibraryName::Prguse2.get_texture(244).and_then(|i| i.image),
             LibraryName::Prguse2.get_texture(245).and_then(|i| i.image),
         );
-        
+
         // 标题图标 Title[26]
         self.title_label_texture = LibraryName::Title.get_texture(26).and_then(|i| i.image);
-        
+
         // 支付方式复选框 Prguse[2086-2087]
         self.checkbox_textures = (
             LibraryName::Prguse.get_texture(2086).and_then(|i| i.image),
             LibraryName::Prguse.get_texture(2087).and_then(|i| i.image),
         );
-        
+
         // 创建透明皮肤
         self.transparent_skin = Some(create_transparent_skin());
     }
-    
+
     /// 过滤商品
     pub fn filter_items(&mut self) {
         let selected_cat = self.selected_category_name().to_string();
@@ -396,72 +407,116 @@ impl GameShopDialogHybrid {
         self.current_page = 0;
         self.preview_item = None;
     }
-    
+
     // 基本控制方法
-    pub fn open(&mut self) { self.visible = true; }
-    pub fn close(&mut self) { self.visible = false; self.preview_item = None; }
-    pub fn toggle(&mut self) { 
-        if self.visible { self.close(); } else { self.open(); }
+    pub fn open(&mut self) {
+        self.visible = true;
     }
-    pub fn is_visible(&self) -> bool { self.visible }
-    pub fn set_position(&mut self, pos: Vec2) { self.position = pos; }
-    
+    pub fn close(&mut self) {
+        self.visible = false;
+        self.preview_item = None;
+    }
+    pub fn toggle(&mut self) {
+        if self.visible {
+            self.close();
+        } else {
+            self.open();
+        }
+    }
+    pub fn is_visible(&self) -> bool {
+        self.visible
+    }
+    pub fn set_position(&mut self, pos: Vec2) {
+        self.position = pos;
+    }
+
     /// 检查点是否在对话框区域内
     pub fn contains(&self, pos: Vec2) -> bool {
-        if !self.visible { return false; }
-        let rect = Rect::new(self.position.x, self.position.y, Self::DIALOG_WIDTH, Self::DIALOG_HEIGHT);
+        if !self.visible {
+            return false;
+        }
+        let rect = Rect::new(
+            self.position.x,
+            self.position.y,
+            Self::DIALOG_WIDTH,
+            Self::DIALOG_HEIGHT,
+        );
         rect.contains(pos)
     }
 
     /// 从服务器数据更新商品列表
-    pub fn update_from_server(&mut self, items: Vec<mir2_shared::packets::server::GameShopItem>, credit: u32, gold: u32) {
+    pub fn update_from_server(
+        &mut self,
+        items: Vec<mir2_shared::packets::server::GameShopItem>,
+        credit: u32,
+        gold: u32,
+    ) {
         self.player_ingot = credit;
         self.player_gold = gold;
-        self.shop_items = items.iter().map(|item| {
-            let class = match item.class {
-                0 => ShopClassHybrid::All,
-                1 => ShopClassHybrid::Warrior,
-                2 => ShopClassHybrid::Wizard,
-                3 => ShopClassHybrid::Taoist,
-                4 => ShopClassHybrid::Assassin,
-                5 => ShopClassHybrid::Archer,
-                _ => ShopClassHybrid::All,
-            };
-            let category = if item.category.contains("武器") || item.category.to_lowercase().contains("weapon") {
-                ShopCategoryHybrid::Weapon
-            } else if item.category.contains("防") || item.category.to_lowercase().contains("armor") {
-                ShopCategoryHybrid::Armor
-            } else if item.category.contains("药") || item.category.to_lowercase().contains("potion") {
-                ShopCategoryHybrid::Potion
-            } else if item.category.contains("时装") || item.category.to_lowercase().contains("fashion") {
-                ShopCategoryHybrid::Fashion
-            } else {
-                ShopCategoryHybrid::Special
-            };
-            ShopItemHybrid {
-                id: item.item_index as u32,
-                name: format!("物品 #{}", item.item_index),
-                description: format!("数量: {}", item.count),
-                icon_index: item.item_index as usize,
-                price_gold: item.gold_price,
-                price_ingot: item.credit_price,
-                class,
-                category,
-                in_stock: item.stock <= 0 || !item.is_bought,
-                hot: false,
-                new: false,
-                deal: item.deal,
-                days_ago: 0,
-                stock: if item.stock <= 0 { 0 } else { item.stock as u32 },
-                count: item.count as u32,
-            }
-        }).collect();
+        self.shop_items = items
+            .iter()
+            .map(|item| {
+                let class = match item.class {
+                    0 => ShopClassHybrid::All,
+                    1 => ShopClassHybrid::Warrior,
+                    2 => ShopClassHybrid::Wizard,
+                    3 => ShopClassHybrid::Taoist,
+                    4 => ShopClassHybrid::Assassin,
+                    5 => ShopClassHybrid::Archer,
+                    _ => ShopClassHybrid::All,
+                };
+                let category = if item.category.contains("武器")
+                    || item.category.to_lowercase().contains("weapon")
+                {
+                    ShopCategoryHybrid::Weapon
+                } else if item.category.contains("防")
+                    || item.category.to_lowercase().contains("armor")
+                {
+                    ShopCategoryHybrid::Armor
+                } else if item.category.contains("药")
+                    || item.category.to_lowercase().contains("potion")
+                {
+                    ShopCategoryHybrid::Potion
+                } else if item.category.contains("时装")
+                    || item.category.to_lowercase().contains("fashion")
+                {
+                    ShopCategoryHybrid::Fashion
+                } else {
+                    ShopCategoryHybrid::Special
+                };
+                ShopItemHybrid {
+                    id: item.item_index as u32,
+                    name: format!("物品 #{}", item.item_index),
+                    description: format!("数量: {}", item.count),
+                    icon_index: item.item_index as usize,
+                    price_gold: item.gold_price,
+                    price_ingot: item.credit_price,
+                    class,
+                    category,
+                    in_stock: item.stock <= 0 || !item.is_bought,
+                    hot: false,
+                    new: false,
+                    deal: item.deal,
+                    days_ago: 0,
+                    stock: if item.stock <= 0 {
+                        0
+                    } else {
+                        item.stock as u32
+                    },
+                    count: item.count as u32,
+                }
+            })
+            .collect();
         self.refresh_categories_and_items();
     }
 
     /// 更新单个商品库存
     pub fn update_stock(&mut self, item_index: i32, stock: i32) {
-        if let Some(item) = self.shop_items.iter_mut().find(|i| i.id == item_index as u32) {
+        if let Some(item) = self
+            .shop_items
+            .iter_mut()
+            .find(|i| i.id == item_index as u32)
+        {
             item.stock = if stock <= 0 { 0 } else { stock as u32 };
             item.in_stock = stock > 0;
             self.refresh_categories_and_items();

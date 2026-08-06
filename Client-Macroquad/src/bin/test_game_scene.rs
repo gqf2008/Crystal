@@ -13,10 +13,10 @@ use client_macroquad::components::{
     Health, LibrarySprite, MapData, MirAction, Monster, MonsterAnimState, Position,
 };
 use client_macroquad::coord::Coord;
+use client_macroquad::network::{load_network_runtime_config, NetworkBuilder, NetworkEvent};
 use client_macroquad::objects::frames::get_monster_frame;
 use client_macroquad::resources::LibraryName;
 use client_macroquad::scenes::{GameScene, Scene, SceneTransition};
-use client_macroquad::network::{load_network_runtime_config, NetworkBuilder, NetworkEvent};
 use client_macroquad::ui::text_renderer::init_chinese_font;
 use mir2_shared::enums::{MirDirection, Monster as MonsterKind};
 
@@ -428,16 +428,16 @@ async fn main() {
             {
                 Ok(net) => {
                     ctx.set_net(net);
-                    ctx.session.remote_player_walk_interp_secs = (cfg.remote_interp_walk_ms as f32) / 1000.0;
-                    ctx.session.remote_player_run_interp_secs = (cfg.remote_interp_run_ms as f32) / 1000.0;
+                    ctx.session.remote_player_walk_interp_secs =
+                        (cfg.remote_interp_walk_ms as f32) / 1000.0;
+                    ctx.session.remote_player_run_interp_secs =
+                        (cfg.remote_interp_run_ms as f32) / 1000.0;
                     ctx.session.server_authoritative_movement = false;
                     ctx.session.sync_movement_intent_to_server = true;
                     ctx.session.server_authoritative_combat = true;
 
                     if let Some(net) = ctx.net() {
-                        let _ = net.send(NetworkEvent::StartGameRequest {
-                            character_index: 0,
-                        });
+                        let _ = net.send(NetworkEvent::StartGameRequest { character_index: 0 });
                     }
 
                     println!("[test_game_scene] Attached MockNetwork (forced) and sent StartGameRequest.");

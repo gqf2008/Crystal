@@ -1,16 +1,16 @@
 // 高级移动相关的服务器数据包
 
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 use crate::enums::{MirDirection, ServerPacketIds};
-use super::super::base::Packet;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{Read, Write};
 
 /// 玩家后退
 #[derive(Debug, Clone)]
 pub struct UserBackStep {
-    pub location_x: i32,       // 位置 X
-    pub location_y: i32,       // 位置 Y
+    pub location_x: i32,         // 位置 X
+    pub location_y: i32,         // 位置 Y
     pub direction: MirDirection, // 朝向
 }
 
@@ -39,11 +39,11 @@ impl Packet for UserBackStep {
 /// 对象后退
 #[derive(Debug, Clone)]
 pub struct ObjectBackStep {
-    pub object_id: u32,        // 对象 ID
-    pub location_x: i32,       // 位置 X
-    pub location_y: i32,       // 位置 Y
+    pub object_id: u32,          // 对象 ID
+    pub location_x: i32,         // 位置 X
+    pub location_y: i32,         // 位置 Y
     pub direction: MirDirection, // 朝向
-    pub distance: i32,         // 后退距离
+    pub distance: i32,           // 后退距离
 }
 
 impl Packet for ObjectBackStep {
@@ -77,8 +77,8 @@ impl Packet for ObjectBackStep {
 /// 玩家冲刺攻击
 #[derive(Debug, Clone)]
 pub struct UserDashAttack {
-    pub location_x: i32,       // 位置 X
-    pub location_y: i32,       // 位置 Y
+    pub location_x: i32,         // 位置 X
+    pub location_y: i32,         // 位置 Y
     pub direction: MirDirection, // 朝向
 }
 
@@ -107,11 +107,11 @@ impl Packet for UserDashAttack {
 /// 对象冲刺攻击
 #[derive(Debug, Clone)]
 pub struct ObjectDashAttack {
-    pub object_id: u32,        // 对象 ID
-    pub location_x: i32,       // 位置 X
-    pub location_y: i32,       // 位置 Y
+    pub object_id: u32,          // 对象 ID
+    pub location_x: i32,         // 位置 X
+    pub location_y: i32,         // 位置 Y
     pub direction: MirDirection, // 朝向
-    pub distance: i32,         // 冲刺距离
+    pub distance: i32,           // 冲刺距离
 }
 
 impl Packet for ObjectDashAttack {
@@ -145,8 +145,8 @@ impl Packet for ObjectDashAttack {
 /// 玩家攻击移动（战士技能 - 斩击爆发）
 #[derive(Debug, Clone)]
 pub struct UserAttackMove {
-    pub location_x: i32,       // 位置 X
-    pub location_y: i32,       // 位置 Y
+    pub location_x: i32,         // 位置 X
+    pub location_y: i32,         // 位置 Y
     pub direction: MirDirection, // 朝向
 }
 
@@ -175,8 +175,8 @@ impl Packet for UserAttackMove {
 /// 设置专注（技能状态）
 #[derive(Debug, Clone)]
 pub struct SetConcentration {
-    pub object_id: u32,   // 对象 ID
-    pub enabled: bool,    // 是否启用
+    pub object_id: u32,    // 对象 ID
+    pub enabled: bool,     // 是否启用
     pub interrupted: bool, // 是否被打断
 }
 
@@ -299,8 +299,8 @@ impl Packet for ObjectSneaking {
 /// 对象等级特效
 #[derive(Debug, Clone)]
 pub struct ObjectLevelEffects {
-    pub object_id: u32,      // 对象 ID
-    pub level_effects: u16,  // 等级特效标志
+    pub object_id: u32,     // 对象 ID
+    pub level_effects: u16, // 等级特效标志
 }
 
 impl Packet for ObjectLevelEffects {

@@ -4,14 +4,12 @@
 // 1. 连接服务器 (TcpStream)
 // 2. 创建 Network（内部自动启动读写线程）
 // 3. 返回 NetContext 给游戏层
+use super::client::Network;
+use super::handlers::NetworkEvent;
 use anyhow::Result;
 use crossbeam_channel::{Receiver, Sender};
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use super::client::Network;
-use super::handlers::NetworkEvent;
-
-
 
 /// 网络上下文 - 游戏层唯一接口
 #[derive(Clone)]
@@ -33,7 +31,7 @@ impl Default for NetContext {
 
 impl NetContext {
     /// 创建空的 NetContext (用于测试/占位)
-    /// 
+    ///
     /// 注意：这个上下文无法实际发送或接收网络数据
     /// 正常使用请通过 NetworkBuilder::build() 创建
     pub fn new() -> Self {
@@ -44,7 +42,7 @@ impl NetContext {
             inbound: rx,
         }
     }
-    
+
     /// 发送事件到网络
     #[inline]
     pub fn send(&self, event: NetworkEvent) -> Result<()> {
@@ -165,7 +163,12 @@ impl NetContext {
     pub fn recv_connection_events(&self) -> Vec<NetworkEvent> {
         self.recv_all()
             .into_iter()
-            .filter(|e| matches!(e, NetworkEvent::Connected | NetworkEvent::Disconnected { .. }))
+            .filter(|e| {
+                matches!(
+                    e,
+                    NetworkEvent::Connected | NetworkEvent::Disconnected { .. }
+                )
+            })
             .collect()
     }
 
@@ -199,17 +202,20 @@ impl NetContext {
     }
 
     /// 检查是否有连接事件
-    /// 
+    ///
     /// ⚠️ 注意：此方法会消费 channel 中的所有事件来进行检查
     /// 如果需要保留事件，请使用 `recv_connection_events()` 获取事件列表
     pub fn has_connection_events(&self) -> bool {
-        self.inbound
-            .try_iter()
-            .any(|e| matches!(e, NetworkEvent::Connected | NetworkEvent::Disconnected { .. }))
+        self.inbound.try_iter().any(|e| {
+            matches!(
+                e,
+                NetworkEvent::Connected | NetworkEvent::Disconnected { .. }
+            )
+        })
     }
 
     /// 检查是否收到登录成功
-    /// 
+    ///
     /// ⚠️ 注意：此方法会消费 channel 中的所有事件来进行检查
     /// 如果需要保留事件，请使用 `recv_all()` 并手动过滤
     pub fn check_login_success(&self) -> bool {
@@ -220,7 +226,7 @@ impl NetContext {
 }
 
 /// 分类的网络事件
-#[derive(Default,Clone)]
+#[derive(Default, Clone)]
 pub struct CategorizedEvents {
     pub connection: Vec<NetworkEvent>,
     pub auth: Vec<NetworkEvent>,
@@ -283,8 +289,6 @@ impl CategorizedEvents {
             .chain(self.npc.iter())
             .chain(self.other.iter())
     }
-
-    
 }
 
 /// 网络构建器
@@ -312,8 +316,6 @@ impl NetworkBuilder {
         self.client_version_hash = hash;
         self
     }
-
-   
 
     /// 构建网络模块
     ///
@@ -425,7 +427,8 @@ impl Read for ReadDecoder {
             return Ok(0);
         }
         let to_read = buf.len().min(available);
-        buf[..to_read].copy_from_slice(&self.decoded_buf[self.decoded_pos..self.decoded_pos + to_read]);
+        buf[..to_read]
+            .copy_from_slice(&self.decoded_buf[self.decoded_pos..self.decoded_pos + to_read]);
         self.decoded_pos += to_read;
         Ok(to_read)
     }

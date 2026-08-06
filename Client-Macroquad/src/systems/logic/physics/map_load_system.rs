@@ -1,48 +1,48 @@
 //! 地图加载系统 (MapLoadSystem)
-//! 
+//!
 //! **优先级**: 510 (STATE_UPDATE)
 //! **职责**: 处理地图切换和加载
-//! 
+//!
 //! ## ECS 架构
-//! 
+//!
 //! ### 输入
 //! - 从 `GameContext.net_events().map_changed()` 读取地图切换事件
-//! 
+//!
 //! ### 输出
 //! - 加载新地图的 MapData 和瓦片实体
 //! - 更新 MapManager 组件状态
-//! 
+//!
 //! ### 组件依赖
 //! - **读取**: GameContext (net_events)
 //! - **写入**: MapData, MapManager
-//! 
+//!
 //! ## 地图加载流程
-//! 
+//!
 //! 1. 监听 `MapChanged` 事件 → 获取地图文件名
 //! 2. 使用 `MapReader::new()` 读取地图文件
 //! 3. 使用 `MapLoader::load_map()` 加载瓦片到 World
 //! 4. 更新 MapManager 状态
-//! 
+//!
 //! ## 示例
-//! 
+//!
 //! ```rust
 //! // 通过网络接收地图切换事件后，系统会自动处理：
 //! // ctx.net_events().map_changed() -> [(map_index, file_name, title)]
-//! 
+//!
 //! // MapLoadSystem 自动加载地图
 //! ```
 
 use crate::core::GameError;
 use crate::game::GameResult;
 use crate::resources::MapReader;
-use tracing::{info, error};
+use tracing::{error, info};
 
 use crate::components::MapData;
-use crate::game::{GameContext};
+use crate::game::GameContext;
 use crate::network::handlers::NetworkEvent;
 
 /// 地图管理组件
-/// 
+///
 /// **单例组件**: 记录当前地图状态
 pub struct MapManager {
     /// 当前加载的地图索引
@@ -73,7 +73,7 @@ impl MapManager {
 }
 
 /// 地图加载系统
-/// 
+///
 /// **优先级**: 510 (STATE_UPDATE 层)
 #[derive(ecs_macros::LogicSystem)]
 pub struct MapLoadSystem;
@@ -90,12 +90,20 @@ impl MapLoadSystem {
         for event in ctx.events().network_events() {
             match event {
                 NetworkEvent::MapChanged { packet } => {
-                    selected = Some((packet.map_index, packet.file_name.clone(), packet.title.clone()));
+                    selected = Some((
+                        packet.map_index,
+                        packet.file_name.clone(),
+                        packet.title.clone(),
+                    ));
                 }
                 NetworkEvent::MapInformation { packet } => {
                     // MapInformation 也包含 file/title，但一般 MapChanged 才携带落点
                     if selected.is_none() {
-                        selected = Some((packet.map_index, packet.file_name.clone(), packet.title.clone()));
+                        selected = Some((
+                            packet.map_index,
+                            packet.file_name.clone(),
+                            packet.title.clone(),
+                        ));
                     }
                 }
                 _ => {}
@@ -119,17 +127,20 @@ impl MapLoadSystem {
             }
         }
 
-        info!("📂 MapLoadSystem: map_index={} file={} title={}", map_index, map_file, map_title);
+        info!(
+            "📂 MapLoadSystem: map_index={} file={} title={}",
+            map_index, map_file, map_title
+        );
 
         // ====================================================================
         // 执行地图加载
         // ====================================================================
-        
+
         info!("🗺️  开始加载地图: {} (文件: {})", map_title, map_file);
 
         // map_file 通常是纯文件名（不含扩展名）；兼容 "0"/"0.map"/"Map/0.map"。
         let map_path = normalize_map_path(&map_file);
-        
+
         match MapReader::new(&map_path) {
             Ok(reader) => {
                 info!("✅ 地图文件读取成功: {}x{}", reader.width, reader.height);
@@ -141,7 +152,10 @@ impl MapLoadSystem {
                     height: reader.height,
                 };
 
-                let existing_map_entity = ctx.world.iter().find_map(|e| e.get::<&MapData>().map(|_| e.entity()));
+                let existing_map_entity = ctx
+                    .world
+                    .iter()
+                    .find_map(|e| e.get::<&MapData>().map(|_| e.entity()));
                 match existing_map_entity {
                     Some(entity) => {
                         if let Ok(mut map) = ctx.world.get::<&mut MapData>(entity) {
@@ -156,13 +170,17 @@ impl MapLoadSystem {
                 }
 
                 // MapManager 作为单例：清理旧的再创建
-                let old: Vec<_> = ctx.world.iter().filter_map(|eref| {
-                    if eref.get::<&MapManager>().is_some() {
-                        Some(eref.entity())
-                    } else {
-                        None
-                    }
-                }).collect();
+                let old: Vec<_> = ctx
+                    .world
+                    .iter()
+                    .filter_map(|eref| {
+                        if eref.get::<&MapManager>().is_some() {
+                            Some(eref.entity())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
                 for e in old {
                     let _ = ctx.world.despawn(e);
                 }
@@ -177,15 +195,15 @@ impl MapLoadSystem {
             }
             Err(e) => {
                 error!("❌ 地图文件读取失败: {}", e);
-                return Err(GameError::ResourceLoadError(
-                    format!("Failed to load map: {}", e)
-                ));
+                return Err(GameError::ResourceLoadError(format!(
+                    "Failed to load map: {}",
+                    e
+                )));
             }
         }
-        
+
         Ok(())
     }
-
 }
 
 fn normalize_map_path(file_name: &str) -> String {
@@ -199,7 +217,6 @@ fn normalize_map_path(file_name: &str) -> String {
 use crate::systems::LogicSystem;
 
 impl LogicSystem for MapLoadSystem {
-   
     fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
         Self::do_update(ctx)
     }

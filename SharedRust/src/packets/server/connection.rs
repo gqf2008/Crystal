@@ -2,11 +2,11 @@
 //!
 //! Packets related to connection lifecycle and keep-alive.
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 use crate::enums::ServerPacketIds;
-use super::super::base::Packet;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// KeepAlive packet - sent periodically to maintain connection
 #[derive(Debug, Clone)]

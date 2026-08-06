@@ -8,13 +8,13 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
+use super::native_ui_utils::{
+    draw_library_button_with_offset, draw_library_image_with_offset, DragHelper,
+};
+use crate::coord::Coord;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
-use crate::coord::Coord;
-use super::native_ui_utils::{
-    DragHelper, draw_library_button_with_offset, draw_library_image_with_offset,
-};
+use macroquad::prelude::*;
 
 /// 小地图待处理动作
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -95,7 +95,7 @@ impl Default for MiniMapDialogHybrid {
 impl MiniMapDialogHybrid {
     pub fn new() -> Self {
         let screen_w = screen_width() / screen_dpi_scale();
-        
+
         // 创建一些示例地图对象
         let map_objects = vec![
             MapObject {
@@ -270,12 +270,7 @@ impl MiniMapDialogHybrid {
         }
 
         // 与 draw_map 使用的区域保持一致
-        let map_rect = Rect::new(
-            self.position.x + 3.0,
-            self.position.y + 22.0,
-            120.0,
-            108.0,
-        );
+        let map_rect = Rect::new(self.position.x + 3.0, self.position.y + 22.0, 120.0, 108.0);
 
         if mouse_pos.x < map_rect.x
             || mouse_pos.x > map_rect.x + map_rect.w
@@ -371,12 +366,7 @@ impl MiniMapDialogHybrid {
     /// 绘制地图区域
     fn draw_map(&mut self, _mouse_pos: Vec2) {
         // 地图显示区域
-        let map_rect = Rect::new(
-            self.position.x + 3.0,
-            self.position.y + 22.0,
-            120.0,
-            108.0,
-        );
+        let map_rect = Rect::new(self.position.x + 3.0, self.position.y + 22.0, 120.0, 108.0);
 
         // 地图背景
         draw_rectangle(
@@ -404,7 +394,12 @@ impl MiniMapDialogHybrid {
         // LocationLabel: Location (46, y), Size(56,18), 居中
         // 对齐 C#：y = Size.Height - 23
         let bottom_y = (self.current_size.y - 23.0).max(0.0);
-        let loc_rect = Rect::new(self.position.x + 46.0, self.position.y + bottom_y, 56.0, 18.0);
+        let loc_rect = Rect::new(
+            self.position.x + 46.0,
+            self.position.y + bottom_y,
+            56.0,
+            18.0,
+        );
         let loc_text = format!("{},{}", self.player_pos.0 as i32, self.player_pos.1 as i32);
         let loc_x = loc_rect.x + loc_rect.w / 2.0 - (loc_text.chars().count() as f32) * 6.0 / 2.0;
         draw_text_cn(&loc_text, loc_x, loc_rect.y + 14.0, 12.0, WHITE);
@@ -496,8 +491,11 @@ impl MiniMapDialogHybrid {
             let pos = self.world_to_minimap(obj.x, obj.y, map_rect);
 
             // 检查是否在可见区域内
-            if pos.x < map_rect.x || pos.x > map_rect.x + map_rect.w ||
-               pos.y < map_rect.y || pos.y > map_rect.y + map_rect.h {
+            if pos.x < map_rect.x
+                || pos.x > map_rect.x + map_rect.w
+                || pos.y < map_rect.y
+                || pos.y > map_rect.y + map_rect.h
+            {
                 continue;
             }
 
@@ -521,11 +519,19 @@ impl MiniMapDialogHybrid {
 
             // 绘制玩家朝向
             if obj.obj_type == MapObjectType::Player {
-                let dir_end = pos + vec2(
-                    self.player_direction.cos() * 8.0,
-                    self.player_direction.sin() * 8.0,
+                let dir_end = pos
+                    + vec2(
+                        self.player_direction.cos() * 8.0,
+                        self.player_direction.sin() * 8.0,
+                    );
+                draw_line(
+                    pos.x,
+                    pos.y,
+                    dir_end.x,
+                    dir_end.y,
+                    2.0,
+                    Color::from_rgba(0, 255, 0, 255),
                 );
-                draw_line(pos.x, pos.y, dir_end.x, dir_end.y, 2.0, Color::from_rgba(0, 255, 0, 255));
             }
 
             // 显示名称

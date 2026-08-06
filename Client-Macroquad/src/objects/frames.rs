@@ -98,47 +98,125 @@ pub static PLAYER_FRAMES: LazyLock<FrameSet> = LazyLock::new(|| {
     // Common actions
     frames.insert(MirAction::Standing, Frame::new(0, 4, 0, 500, 0, 8, 0, 250));
     frames.insert(MirAction::Walking, Frame::new(32, 6, 0, 100, 64, 6, 0, 100));
-    frames.insert(MirAction::Running, Frame::new(80, 6, 0, 100, 112, 6, 0, 100));
-    frames.insert(MirAction::Stance, Frame::new(128, 1, 0, 1000, 160, 1, 0, 1000));
-    frames.insert(MirAction::Stance2, Frame::new(300, 1, 5, 1000, 332, 1, 5, 1000));
+    frames.insert(
+        MirAction::Running,
+        Frame::new(80, 6, 0, 100, 112, 6, 0, 100),
+    );
+    frames.insert(
+        MirAction::Stance,
+        Frame::new(128, 1, 0, 1000, 160, 1, 0, 1000),
+    );
+    frames.insert(
+        MirAction::Stance2,
+        Frame::new(300, 1, 5, 1000, 332, 1, 5, 1000),
+    );
 
-    frames.insert(MirAction::Attack1, Frame::new(136, 6, 0, 100, 168, 6, 0, 100));
-    frames.insert(MirAction::Attack2, Frame::new(184, 6, 0, 100, 216, 6, 0, 100));
-    frames.insert(MirAction::Attack3, Frame::new(232, 8, 0, 100, 264, 8, 0, 100));
-    frames.insert(MirAction::Attack4, Frame::new(416, 6, 0, 100, 448, 6, 0, 100));
+    frames.insert(
+        MirAction::Attack1,
+        Frame::new(136, 6, 0, 100, 168, 6, 0, 100),
+    );
+    frames.insert(
+        MirAction::Attack2,
+        Frame::new(184, 6, 0, 100, 216, 6, 0, 100),
+    );
+    frames.insert(
+        MirAction::Attack3,
+        Frame::new(232, 8, 0, 100, 264, 8, 0, 100),
+    );
+    frames.insert(
+        MirAction::Attack4,
+        Frame::new(416, 6, 0, 100, 448, 6, 0, 100),
+    );
 
     frames.insert(MirAction::Spell, Frame::new(296, 6, 0, 100, 328, 6, 0, 100));
-    frames.insert(MirAction::Harvest, Frame::new(344, 2, 0, 300, 376, 2, 0, 300));
-    frames.insert(MirAction::Struck, Frame::new(360, 3, 0, 100, 392, 3, 0, 100));
+    frames.insert(
+        MirAction::Harvest,
+        Frame::new(344, 2, 0, 300, 376, 2, 0, 300),
+    );
+    frames.insert(
+        MirAction::Struck,
+        Frame::new(360, 3, 0, 100, 392, 3, 0, 100),
+    );
     frames.insert(MirAction::Die, Frame::new(384, 4, 0, 100, 416, 4, 0, 100));
-    frames.insert(MirAction::Dead, Frame::new(387, 1, 3, 1000, 419, 1, 3, 1000));
-    frames.insert(MirAction::Revive, Frame::new(384, 4, 0, 100, 416, 4, 0, 100).with_reverse(true));
+    frames.insert(
+        MirAction::Dead,
+        Frame::new(387, 1, 3, 1000, 419, 1, 3, 1000),
+    );
+    frames.insert(
+        MirAction::Revive,
+        Frame::new(384, 4, 0, 100, 416, 4, 0, 100).with_reverse(true),
+    );
     frames.insert(MirAction::Mine, Frame::new(184, 6, 0, 100, 216, 6, 0, 100));
-    frames.insert(MirAction::Lunge, Frame::new(139, 1, 5, 1000, 300, 1, 5, 1000));
+    frames.insert(
+        MirAction::Lunge,
+        Frame::new(139, 1, 5, 1000, 300, 1, 5, 1000),
+    );
 
     // Assassin
     frames.insert(MirAction::Sneek, Frame::new(464, 6, 0, 100, 496, 6, 0, 100));
-    frames.insert(MirAction::DashAttack, Frame::new(80, 3, 3, 100, 112, 3, 3, 100));
+    frames.insert(
+        MirAction::DashAttack,
+        Frame::new(80, 3, 3, 100, 112, 3, 3, 100),
+    );
 
     // Archer
-    frames.insert(MirAction::WalkingBow, Frame::new(0, 6, 0, 100, 0, 6, 0, 100));
-    frames.insert(MirAction::RunningBow, Frame::new(48, 6, 0, 100, 48, 6, 0, 100));
-    frames.insert(MirAction::AttackRange1, Frame::new(96, 8, 0, 100, 96, 8, 0, 100));
-    frames.insert(MirAction::AttackRange2, Frame::new(160, 8, 0, 100, 160, 8, 0, 100));
-    frames.insert(MirAction::AttackRange3, Frame::new(224, 8, 0, 100, 224, 8, 0, 100));
+    frames.insert(
+        MirAction::WalkingBow,
+        Frame::new(0, 6, 0, 100, 0, 6, 0, 100),
+    );
+    frames.insert(
+        MirAction::RunningBow,
+        Frame::new(48, 6, 0, 100, 48, 6, 0, 100),
+    );
+    frames.insert(
+        MirAction::AttackRange1,
+        Frame::new(96, 8, 0, 100, 96, 8, 0, 100),
+    );
+    frames.insert(
+        MirAction::AttackRange2,
+        Frame::new(160, 8, 0, 100, 160, 8, 0, 100),
+    );
+    frames.insert(
+        MirAction::AttackRange3,
+        Frame::new(224, 8, 0, 100, 224, 8, 0, 100),
+    );
     frames.insert(MirAction::Jump, Frame::new(288, 8, 0, 100, 288, 8, 0, 100));
 
     // Mounts
-    frames.insert(MirAction::MountStanding, Frame::new(416, 4, 0, 500, 448, 4, 0, 500));
-    frames.insert(MirAction::MountWalking, Frame::new(448, 8, 0, 100, 480, 8, 0, 500));
-    frames.insert(MirAction::MountRunning, Frame::new(512, 6, 0, 100, 544, 6, 0, 100));
-    frames.insert(MirAction::MountStruck, Frame::new(560, 3, 0, 100, 592, 3, 0, 100));
-    frames.insert(MirAction::MountAttack, Frame::new(584, 6, 0, 100, 616, 6, 0, 100));
+    frames.insert(
+        MirAction::MountStanding,
+        Frame::new(416, 4, 0, 500, 448, 4, 0, 500),
+    );
+    frames.insert(
+        MirAction::MountWalking,
+        Frame::new(448, 8, 0, 100, 480, 8, 0, 500),
+    );
+    frames.insert(
+        MirAction::MountRunning,
+        Frame::new(512, 6, 0, 100, 544, 6, 0, 100),
+    );
+    frames.insert(
+        MirAction::MountStruck,
+        Frame::new(560, 3, 0, 100, 592, 3, 0, 100),
+    );
+    frames.insert(
+        MirAction::MountAttack,
+        Frame::new(584, 6, 0, 100, 616, 6, 0, 100),
+    );
 
     // Fishing
-    frames.insert(MirAction::FishingCast, Frame::new(632, 8, 0, 100, 0, 0, 0, 0));
-    frames.insert(MirAction::FishingWait, Frame::new(696, 6, 0, 120, 0, 0, 0, 0));
-    frames.insert(MirAction::FishingReel, Frame::new(744, 8, 0, 100, 0, 0, 0, 0));
+    frames.insert(
+        MirAction::FishingCast,
+        Frame::new(632, 8, 0, 100, 0, 0, 0, 0),
+    );
+    frames.insert(
+        MirAction::FishingWait,
+        Frame::new(696, 6, 0, 120, 0, 0, 0, 0),
+    );
+    frames.insert(
+        MirAction::FishingReel,
+        Frame::new(744, 8, 0, 100, 0, 0, 0, 0),
+    );
 
     frames
 });
@@ -155,7 +233,10 @@ pub static DEFAULT_MONSTER_FRAMES: LazyLock<FrameSet> = LazyLock::new(|| {
     frames.insert(MirAction::Struck, Frame::basic(128, 2, 0, 200));
     frames.insert(MirAction::Die, Frame::basic(144, 10, 0, 100));
     frames.insert(MirAction::Dead, Frame::basic(153, 1, 9, 1000));
-    frames.insert(MirAction::Revive, Frame::basic(144, 10, 0, 100).with_reverse(true));
+    frames.insert(
+        MirAction::Revive,
+        Frame::basic(144, 10, 0, 100).with_reverse(true),
+    );
 
     frames
 });
@@ -204,7 +285,10 @@ pub static GREAT_FOX_SPIRIT_FRAMES: LazyLock<Vec<FrameSet>> = LazyLock::new(|| {
         frame.insert(MirAction::Struck, Frame::basic(base + 20, 2, -2, 200));
         frame.insert(MirAction::Die, Frame::basic(300, 18, -18, 120));
         frame.insert(MirAction::Dead, Frame::basic(317, 1, -1, 1000));
-        frame.insert(MirAction::Revive, Frame::basic(300, 18, -18, 150).with_reverse(true));
+        frame.insert(
+            MirAction::Revive,
+            Frame::basic(300, 18, -18, 150).with_reverse(true),
+        );
         list.push(frame);
     }
 
@@ -217,9 +301,18 @@ pub static HELL_BOMB_FRAMES: LazyLock<Vec<FrameSet>> = LazyLock::new(|| {
     // HellBomb1/2/3
     for start in [52, 70, 88] {
         let mut frame = FrameSet::new();
-        frame.insert(MirAction::Standing, Frame::basic(start, 9, -9, 100).with_blend(true));
-        frame.insert(MirAction::Attack1, Frame::basic(999, 1, -1, 120).with_blend(true));
-        frame.insert(MirAction::Struck, Frame::basic(start, 9, -9, 100).with_blend(true));
+        frame.insert(
+            MirAction::Standing,
+            Frame::basic(start, 9, -9, 100).with_blend(true),
+        );
+        frame.insert(
+            MirAction::Attack1,
+            Frame::basic(999, 1, -1, 120).with_blend(true),
+        );
+        frame.insert(
+            MirAction::Struck,
+            Frame::basic(start, 9, -9, 100).with_blend(true),
+        );
         list.push(frame);
     }
 
@@ -275,7 +368,9 @@ pub fn get_monster_frame(
     match MonsterKind::try_from(monster_type) {
         Ok(MonsterKind::GreatFoxSpirit) => {
             let idx = (stage as usize).min(GREAT_FOX_SPIRIT_FRAMES.len().saturating_sub(1));
-            GREAT_FOX_SPIRIT_FRAMES.get(idx).and_then(|fs| fs.get(&action))
+            GREAT_FOX_SPIRIT_FRAMES
+                .get(idx)
+                .and_then(|fs| fs.get(&action))
         }
         Ok(MonsterKind::DragonStatue) => {
             let idx = (direction as u8 as usize).min(DRAGON_STATUE_FRAMES.len().saturating_sub(1));
@@ -384,41 +479,22 @@ mod tests {
     fn special_monster_frames_hell_bomb_by_base_image() {
         let dir0 = MirDirection::try_from(0).unwrap();
 
-        let hb1 = get_monster_frame(
-            MonsterKind::HellBomb1 as u16,
-            MirAction::Standing,
-            dir0,
-            0,
-        )
-        .expect("hb1 standing");
+        let hb1 = get_monster_frame(MonsterKind::HellBomb1 as u16, MirAction::Standing, dir0, 0)
+            .expect("hb1 standing");
         assert_eq!(hb1.start, 52);
         assert!(hb1.blend);
 
-        let hb2 = get_monster_frame(
-            MonsterKind::HellBomb2 as u16,
-            MirAction::Standing,
-            dir0,
-            0,
-        )
-        .expect("hb2 standing");
+        let hb2 = get_monster_frame(MonsterKind::HellBomb2 as u16, MirAction::Standing, dir0, 0)
+            .expect("hb2 standing");
         assert_eq!(hb2.start, 70);
 
-        let hb3 = get_monster_frame(
-            MonsterKind::HellBomb3 as u16,
-            MirAction::Standing,
-            dir0,
-            0,
-        )
-        .expect("hb3 standing");
+        let hb3 = get_monster_frame(MonsterKind::HellBomb3 as u16, MirAction::Standing, dir0, 0)
+            .expect("hb3 standing");
         assert_eq!(hb3.start, 88);
 
-        let hb_attack = get_monster_frame(
-            MonsterKind::HellBomb3 as u16,
-            MirAction::Attack1,
-            dir0,
-            0,
-        )
-        .expect("hb attack1");
+        let hb_attack =
+            get_monster_frame(MonsterKind::HellBomb3 as u16, MirAction::Attack1, dir0, 0)
+                .expect("hb attack1");
         assert_eq!(hb_attack.start, 999);
         assert!(hb_attack.blend);
     }
@@ -428,22 +504,12 @@ mod tests {
         let dir0 = MirDirection::try_from(0).unwrap();
         let dir1 = MirDirection::try_from(1).unwrap();
 
-        let s1 = get_monster_frame(
-            MonsterKind::CaveStatue as u16,
-            MirAction::Standing,
-            dir0,
-            0,
-        )
-        .expect("cave statue 1 standing");
+        let s1 = get_monster_frame(MonsterKind::CaveStatue as u16, MirAction::Standing, dir0, 0)
+            .expect("cave statue 1 standing");
         assert_eq!(s1.start, 0);
 
-        let s2 = get_monster_frame(
-            MonsterKind::CaveStatue as u16,
-            MirAction::Standing,
-            dir1,
-            0,
-        )
-        .expect("cave statue 2 standing");
+        let s2 = get_monster_frame(MonsterKind::CaveStatue as u16, MirAction::Standing, dir1, 0)
+            .expect("cave statue 2 standing");
         assert_eq!(s2.start, 18);
     }
 }

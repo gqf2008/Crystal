@@ -9,8 +9,8 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
 use crate::ui::text_renderer::draw_text_cn;
+use macroquad::prelude::*;
 
 /// 服务器公告对话框
 pub struct NoticeDialogHybrid {
@@ -67,7 +67,13 @@ impl NoticeDialogHybrid {
     }
 
     /// 处理鼠标输入并绘制
-    pub fn draw(&mut self, mouse_pos: Vec2, mouse_wheel: f32, left_clicked: bool, left_released: bool) -> bool {
+    pub fn draw(
+        &mut self,
+        mouse_pos: Vec2,
+        mouse_wheel: f32,
+        left_clicked: bool,
+        left_released: bool,
+    ) -> bool {
         if !self.visible || self.lines.is_empty() {
             return false;
         }
@@ -83,8 +89,10 @@ impl NoticeDialogHybrid {
         let content_w = dialog_w - 30.0;
         let content_h = dialog_h - title_bar_h - 45.0; // 留出底部关闭按钮空间
 
-        let mouse_over_dialog = mouse_pos.x >= dialog_x && mouse_pos.x <= dialog_x + dialog_w
-            && mouse_pos.y >= dialog_y && mouse_pos.y <= dialog_y + dialog_h;
+        let mouse_over_dialog = mouse_pos.x >= dialog_x
+            && mouse_pos.x <= dialog_x + dialog_w
+            && mouse_pos.y >= dialog_y
+            && mouse_pos.y <= dialog_y + dialog_h;
 
         // 滚动（鼠标滚轮）
         if mouse_over_dialog && mouse_wheel != 0.0 {
@@ -92,7 +100,11 @@ impl NoticeDialogHybrid {
         }
 
         // 拖拽滚动
-        if left_clicked && mouse_over_dialog && mouse_pos.y >= content_y && mouse_pos.y <= content_y + content_h {
+        if left_clicked
+            && mouse_over_dialog
+            && mouse_pos.y >= content_y
+            && mouse_pos.y <= content_y + content_h
+        {
             self.is_dragging = true;
             self.drag_start_y = mouse_pos.y;
             self.drag_start_scroll = self.scroll_offset;
@@ -112,7 +124,13 @@ impl NoticeDialogHybrid {
         // 标题栏
         let title_color = Color::from_rgba(50, 50, 70, 255);
         draw_rectangle(dialog_x, dialog_y, dialog_w, title_bar_h, title_color);
-        draw_text_cn("服务器公告", dialog_x + 15.0, dialog_y + 8.0, 16.0, Color::from_rgba(255, 220, 100, 255));
+        draw_text_cn(
+            "服务器公告",
+            dialog_x + 15.0,
+            dialog_y + 8.0,
+            16.0,
+            Color::from_rgba(255, 220, 100, 255),
+        );
 
         // 内容区域裁剪
         // 先绘制内容区域背景
@@ -138,22 +156,62 @@ impl NoticeDialogHybrid {
                 while start < chars.len() {
                     let end = (start + max_chars_per_line).min(chars.len());
                     let sub: String = chars[start..end].iter().collect();
-                    draw_text_cn(&sub, content_x + 5.0, y, 14.0, Color::from_rgba(220, 220, 220, 255));
+                    draw_text_cn(
+                        &sub,
+                        content_x + 5.0,
+                        y,
+                        14.0,
+                        Color::from_rgba(220, 220, 220, 255),
+                    );
                     y += line_height;
                     start = end;
                 }
             } else {
-                draw_text_cn(line, content_x + 5.0, y, 14.0, Color::from_rgba(220, 220, 220, 255));
+                draw_text_cn(
+                    line,
+                    content_x + 5.0,
+                    y,
+                    14.0,
+                    Color::from_rgba(220, 220, 220, 255),
+                );
                 y += line_height;
             }
         }
 
         // 边框
         let border_color = Color::from_rgba(120, 100, 50, 200);
-        draw_line(dialog_x, dialog_y, dialog_x + dialog_w, dialog_y, 1.5, border_color);
-        draw_line(dialog_x + dialog_w, dialog_y, dialog_x + dialog_w, dialog_y + dialog_h, 1.5, border_color);
-        draw_line(dialog_x + dialog_w, dialog_y + dialog_h, dialog_x, dialog_y + dialog_h, 1.5, border_color);
-        draw_line(dialog_x, dialog_y + dialog_h, dialog_x, dialog_y, 1.5, border_color);
+        draw_line(
+            dialog_x,
+            dialog_y,
+            dialog_x + dialog_w,
+            dialog_y,
+            1.5,
+            border_color,
+        );
+        draw_line(
+            dialog_x + dialog_w,
+            dialog_y,
+            dialog_x + dialog_w,
+            dialog_y + dialog_h,
+            1.5,
+            border_color,
+        );
+        draw_line(
+            dialog_x + dialog_w,
+            dialog_y + dialog_h,
+            dialog_x,
+            dialog_y + dialog_h,
+            1.5,
+            border_color,
+        );
+        draw_line(
+            dialog_x,
+            dialog_y + dialog_h,
+            dialog_x,
+            dialog_y,
+            1.5,
+            border_color,
+        );
 
         // 关闭按钮
         let close_btn_w = 60.0;
@@ -161,16 +219,30 @@ impl NoticeDialogHybrid {
         let close_btn_x = dialog_x + (dialog_w - close_btn_w) / 2.0;
         let close_btn_y = dialog_y + dialog_h - close_btn_h - 10.0;
 
-        let mouse_over_close = mouse_pos.x >= close_btn_x && mouse_pos.x <= close_btn_x + close_btn_w
-            && mouse_pos.y >= close_btn_y && mouse_pos.y <= close_btn_y + close_btn_h;
+        let mouse_over_close = mouse_pos.x >= close_btn_x
+            && mouse_pos.x <= close_btn_x + close_btn_w
+            && mouse_pos.y >= close_btn_y
+            && mouse_pos.y <= close_btn_y + close_btn_h;
 
         let close_color = if mouse_over_close {
             Color::from_rgba(180, 60, 60, 255)
         } else {
             Color::from_rgba(120, 40, 40, 255)
         };
-        draw_rectangle(close_btn_x, close_btn_y, close_btn_w, close_btn_h, close_color);
-        draw_text_cn("关闭", close_btn_x + 15.0, close_btn_y + 7.0, 14.0, Color::from_rgba(255, 255, 255, 255));
+        draw_rectangle(
+            close_btn_x,
+            close_btn_y,
+            close_btn_w,
+            close_btn_h,
+            close_color,
+        );
+        draw_text_cn(
+            "关闭",
+            close_btn_x + 15.0,
+            close_btn_y + 7.0,
+            14.0,
+            Color::from_rgba(255, 255, 255, 255),
+        );
 
         // 点击关闭按钮
         if left_clicked && mouse_over_close {

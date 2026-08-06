@@ -1,13 +1,14 @@
 use crate::{
-    components::{LocalPlayer, MirDirection, MovementMode, Player, PlayerAction, PlayerInput, Position},
+    components::{
+        LocalPlayer, MirDirection, MovementMode, Player, PlayerAction, PlayerInput, Position,
+    },
     game::{GameContext, GameResult},
     systems::LogicSystem,
     ui::ui_state::UiState,
 };
 
 #[derive(ecs_macros::LogicSystem)]
-pub struct MinimapSystem {
-}
+pub struct MinimapSystem {}
 
 impl Default for MinimapSystem {
     fn default() -> Self {
@@ -39,7 +40,8 @@ impl LogicSystem for MinimapSystem {
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
         // 1) UI -> ECS：点击小地图产生的自动寻路目标
         if let Some((wx, wy, run)) =
-            UiState::with_mut_in_world(&mut ctx.world, |ui| ui.pending_auto_path_target.take()).flatten()
+            UiState::with_mut_in_world(&mut ctx.world, |ui| ui.pending_auto_path_target.take())
+                .flatten()
         {
             // 模式互斥：挂机/AT/BT 控制开启时，忽略小地图的手动寻路命令。
             if ctx.session.local_player_ai_enabled {
@@ -48,19 +50,28 @@ impl LogicSystem for MinimapSystem {
                 // 小地图双击是 UI 事件，不一定会触发 PlayerControlSystem 的鼠标分支。
                 // 若这里不设置 Player.action，可能出现“位置在动但动画不播放”的平移效果。
                 // 这里直接把 walk/run 意图落地到 PlayerInput + Player.action（攻击中则不覆盖）。
-                if let Some((entity, _local, mut input, mut player)) = ctx.world.iter().find_map(|e| {
-                    let _local = e.get::<&LocalPlayer>()?;
-                    let input = e.get::<&mut PlayerInput>()?;
-                    let player = e.get::<&mut Player>()?;
-                    Some((e.entity(), _local, input, player))
-                }) {
+                if let Some((entity, _local, mut input, mut player)) =
+                    ctx.world.iter().find_map(|e| {
+                        let _local = e.get::<&LocalPlayer>()?;
+                        let input = e.get::<&mut PlayerInput>()?;
+                        let player = e.get::<&mut Player>()?;
+                        Some((e.entity(), _local, input, player))
+                    })
+                {
                     input.move_to = Some((wx, wy));
                     input.movement_mode = MovementMode::Pathfinding;
                     input.run = run;
 
-                    let is_attacking = ctx.world.get::<&crate::components::AttackState>(entity).is_ok();
+                    let is_attacking = ctx
+                        .world
+                        .get::<&crate::components::AttackState>(entity)
+                        .is_ok();
                     if !is_attacking && !player.action.is_attack() {
-                        player.action = if run { PlayerAction::Run } else { PlayerAction::Walk };
+                        player.action = if run {
+                            PlayerAction::Run
+                        } else {
+                            PlayerAction::Walk
+                        };
                     }
                 }
             }

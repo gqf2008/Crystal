@@ -1,11 +1,11 @@
 //! Friend System Packets (Client → Server)
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::binary::{read_dotnet_string, write_dotnet_string};
-use crate::enums::ClientPacketIds;
 use super::super::base::Packet;
+use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::data::stats::SharedResult;
+use crate::enums::ClientPacketIds;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// Add friend or blocked user
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,7 +79,10 @@ impl Packet for AddMemo {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let character_index = reader.read_i32::<LittleEndian>()?;
         let memo = read_dotnet_string(reader)?;
-        Ok(Self { character_index, memo })
+        Ok(Self {
+            character_index,
+            memo,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {

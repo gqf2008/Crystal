@@ -3,8 +3,11 @@ use macroquad::prelude::{
     screen_height, screen_width, vec2, Color, KeyCode, MouseButton, WHITE,
 };
 
-use crate::components::{MapData, RenderPass, RenderStage, ResourceInitState, SceneExitBlock, UiWorldInputBlock};
+use crate::components::{
+    MapData, RenderPass, RenderStage, ResourceInitState, SceneExitBlock, UiWorldInputBlock,
+};
 use crate::game::{GameContext, GameResult};
+use crate::network::handlers::NetworkEvent;
 use crate::scenes::dialogs::game::{
     amount_box::AmountBoxHybrid, npc_dialog::NpcDialogHybrid,
     npc_goods_dialog::NpcGoodsDialogHybrid, MainDialog,
@@ -12,10 +15,9 @@ use crate::scenes::dialogs::game::{
 use crate::systems::RenderSystem;
 use crate::ui::text_renderer::{draw_text_cn, draw_text_with_outline, measure_text_cn};
 use crate::ui::ui_state::{UiAction, UiCommand, UiState};
-use crate::network::handlers::NetworkEvent;
 
-mod update;
 mod draw;
+mod update;
 
 #[derive(ecs_macros::RenderSystem)]
 pub struct UIRenderSystem {
@@ -25,18 +27,25 @@ pub struct UIRenderSystem {
     pub(crate) npc_sub_goods_dialog: NpcGoodsDialogHybrid,
     pub(crate) amount_box: AmountBoxHybrid,
     pub(crate) timer_dialog: crate::scenes::dialogs::game::timer_dialog::TimerDialogHybrid,
-    pub(crate) chat_notice_dialog: crate::scenes::dialogs::game::chat_notice_dialog::ChatNoticeDialogHybrid,
+    pub(crate) chat_notice_dialog:
+        crate::scenes::dialogs::game::chat_notice_dialog::ChatNoticeDialogHybrid,
     pub(crate) notice_dialog: crate::scenes::dialogs::game::notice_dialog::NoticeDialogHybrid,
     pub(crate) roll_dialog: crate::scenes::dialogs::game::roll_dialog::RollDialogHybrid,
-    pub(crate) dura_status_dialog: crate::scenes::dialogs::game::dura_status_dialog::DuraStatusDialogHybrid,
+    pub(crate) dura_status_dialog:
+        crate::scenes::dialogs::game::dura_status_dialog::DuraStatusDialogHybrid,
     pub(crate) npc_drop_dialog: crate::scenes::dialogs::game::npc_drop_dialog::NPCDropDialogHybrid,
-    pub(crate) guild_territory_dialog: crate::scenes::dialogs::game::guild_territory_dialog::GuildTerritoryDialogHybrid,
-    pub(crate) keyboard_layout_dialog: crate::scenes::dialogs::game::keyboard_layout_dialog::KeyboardLayoutDialogHybrid,
-    pub(crate) npc_awake_dialog: crate::scenes::dialogs::game::npc_awake_dialog::NPCAwakeDialogHybrid,
+    pub(crate) guild_territory_dialog:
+        crate::scenes::dialogs::game::guild_territory_dialog::GuildTerritoryDialogHybrid,
+    pub(crate) keyboard_layout_dialog:
+        crate::scenes::dialogs::game::keyboard_layout_dialog::KeyboardLayoutDialogHybrid,
+    pub(crate) npc_awake_dialog:
+        crate::scenes::dialogs::game::npc_awake_dialog::NPCAwakeDialogHybrid,
     pub(crate) craft_dialog: crate::scenes::dialogs::game::craft_dialog::CraftDialogHybrid,
     pub(crate) refine_dialog: crate::scenes::dialogs::game::refine_dialog::RefineDialogHybrid,
-    pub(crate) item_rental_dialog: crate::scenes::dialogs::game::item_rental_dialog::ItemRentalDialogHybrid,
-    pub(crate) trust_merchant_dialog: crate::scenes::dialogs::game::trust_merchant_dialog::TrustMerchantDialogHybrid,
+    pub(crate) item_rental_dialog:
+        crate::scenes::dialogs::game::item_rental_dialog::ItemRentalDialogHybrid,
+    pub(crate) trust_merchant_dialog:
+        crate::scenes::dialogs::game::trust_merchant_dialog::TrustMerchantDialogHybrid,
     pub(crate) report_dialog: crate::scenes::dialogs::game::report_dialog::ReportDialogHybrid,
 
     pub(crate) npc_z_order: Vec<NpcUiLayer>,
@@ -44,13 +53,17 @@ pub struct UIRenderSystem {
     pub(crate) ui_stack_top: UiStackTop,
 
     /// 暂存的交易动作（由 draw 阶段产出，由 update 阶段发包）
-    pub(crate) pending_trade_action: Option<crate::scenes::dialogs::game::trade_dialog::TradeAction>,
+    pub(crate) pending_trade_action:
+        Option<crate::scenes::dialogs::game::trade_dialog::TradeAction>,
 
     /// 暂存的举报/反馈提交（由 draw 阶段产出，由 update 阶段发包）
     pub(crate) pending_report_issue: Option<String>,
 
     /// 暂存的文本输入结果（由 draw 阶段产出，由 update 阶段发包）
-    pub(crate) pending_text_input: Option<(crate::scenes::dialogs::game::main_dialog::TextInputKind, String)>,
+    pub(crate) pending_text_input: Option<(
+        crate::scenes::dialogs::game::main_dialog::TextInputKind,
+        String,
+    )>,
 
     /// 暂存的排行榜刷新请求（由 draw 阶段产出，由 update 阶段发包）
     pub(crate) pending_ranking_refresh_tab: Option<u8>,
@@ -68,7 +81,8 @@ pub struct UIRenderSystem {
     pub(crate) pending_unequip_request: Option<u64>,
 
     /// 缓存的任务信息（来自 NewQuestInfo，等待 QuestAccepted 到来时使用）
-    pub(crate) cached_quest_info: std::collections::HashMap<u32, (String, String, String, u32, u64, u32)>,
+    pub(crate) cached_quest_info:
+        std::collections::HashMap<u32, (String, String, String, u32, u64, u32)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -144,7 +158,11 @@ impl UIRenderSystem {
         }
     }
 
-    pub(crate) fn npc_layer_mouse_over(&self, layer: NpcUiLayer, mouse_pos: macroquad::prelude::Vec2) -> bool {
+    pub(crate) fn npc_layer_mouse_over(
+        &self,
+        layer: NpcUiLayer,
+        mouse_pos: macroquad::prelude::Vec2,
+    ) -> bool {
         match layer {
             NpcUiLayer::Dialog => self.npc_dialog.is_mouse_over(mouse_pos),
             NpcUiLayer::Goods => self.npc_goods_dialog.is_mouse_over(mouse_pos),
@@ -154,8 +172,10 @@ impl UIRenderSystem {
 
     pub(crate) fn npc_mouse_over_any(&self, mouse_pos: macroquad::prelude::Vec2) -> bool {
         (self.npc_dialog.is_visible() && self.npc_dialog.is_mouse_over(mouse_pos))
-            || (self.npc_goods_dialog.is_visible() && self.npc_goods_dialog.is_mouse_over(mouse_pos))
-            || (self.npc_sub_goods_dialog.is_visible() && self.npc_sub_goods_dialog.is_mouse_over(mouse_pos))
+            || (self.npc_goods_dialog.is_visible()
+                && self.npc_goods_dialog.is_mouse_over(mouse_pos))
+            || (self.npc_sub_goods_dialog.is_visible()
+                && self.npc_sub_goods_dialog.is_mouse_over(mouse_pos))
     }
 
     pub(crate) fn close_npc_related_dialogs(&mut self) {
@@ -165,8 +185,16 @@ impl UIRenderSystem {
         self.amount_box.hide();
     }
 
-    pub(crate) fn draw_invite_confirm(&mut self, kind: &crate::ui::ui_state::InviteKind, _inviter: &str, detail: &str) {
-        use macroquad::prelude::{draw_rectangle, draw_rectangle_lines, screen_height, screen_width, is_mouse_button_pressed, mouse_position, MouseButton, WHITE};
+    pub(crate) fn draw_invite_confirm(
+        &mut self,
+        kind: &crate::ui::ui_state::InviteKind,
+        _inviter: &str,
+        detail: &str,
+    ) {
+        use macroquad::prelude::{
+            draw_rectangle, draw_rectangle_lines, is_mouse_button_pressed, mouse_position,
+            screen_height, screen_width, MouseButton, WHITE,
+        };
 
         let sw = screen_width();
         let sh = screen_height();
@@ -188,15 +216,35 @@ impl UIRenderSystem {
         let accept_x = x + w / 2.0 - btn_w - 10.0;
         let decline_x = x + w / 2.0 + 10.0;
 
-        let accept_hover = mx >= accept_x && mx <= accept_x + btn_w && my >= btn_y && my <= btn_y + btn_h;
-        let decline_hover = mx >= decline_x && mx <= decline_x + btn_w && my >= btn_y && my <= btn_y + btn_h;
+        let accept_hover =
+            mx >= accept_x && mx <= accept_x + btn_w && my >= btn_y && my <= btn_y + btn_h;
+        let decline_hover =
+            mx >= decline_x && mx <= decline_x + btn_w && my >= btn_y && my <= btn_y + btn_h;
 
-        draw_rectangle(accept_x, btn_y, btn_w, btn_h,
-            if accept_hover { Color::from_rgba(80, 160, 80, 255) } else { Color::from_rgba(60, 120, 60, 255) });
+        draw_rectangle(
+            accept_x,
+            btn_y,
+            btn_w,
+            btn_h,
+            if accept_hover {
+                Color::from_rgba(80, 160, 80, 255)
+            } else {
+                Color::from_rgba(60, 120, 60, 255)
+            },
+        );
         crate::ui::text_renderer::draw_text_cn("接受", accept_x + 30.0, btn_y + 18.0, 14.0, WHITE);
 
-        draw_rectangle(decline_x, btn_y, btn_w, btn_h,
-            if decline_hover { Color::from_rgba(160, 60, 60, 255) } else { Color::from_rgba(120, 40, 40, 255) });
+        draw_rectangle(
+            decline_x,
+            btn_y,
+            btn_w,
+            btn_h,
+            if decline_hover {
+                Color::from_rgba(160, 60, 60, 255)
+            } else {
+                Color::from_rgba(120, 40, 40, 255)
+            },
+        );
         crate::ui::text_renderer::draw_text_cn("拒绝", decline_x + 30.0, btn_y + 18.0, 14.0, WHITE);
 
         if is_mouse_button_pressed(MouseButton::Left) {

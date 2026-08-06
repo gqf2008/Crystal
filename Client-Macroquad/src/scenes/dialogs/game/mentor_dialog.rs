@@ -11,10 +11,10 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
+use super::native_ui_utils::DragHelper;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
-use super::native_ui_utils::DragHelper;
+use macroquad::prelude::*;
 
 /// 师徒信息
 #[derive(Debug, Clone, Default)]
@@ -27,7 +27,7 @@ pub struct MentorInfo {
     pub apprentice_online: bool,
     pub exp_points: u32,
     pub allow_request: bool,
-    pub is_mentor: bool,    // 本地玩家是师傅
+    pub is_mentor: bool,     // 本地玩家是师傅
     pub is_apprentice: bool, // 本地玩家是徒弟
 }
 
@@ -209,15 +209,31 @@ impl MentorDialogHybrid {
 
         if self.mentor_info.is_mentor {
             // 我是师傅
-            draw_text_cn("身份：师傅", content_x, content_y, 13.0, Color::from_rgba(255, 200, 50, 255));
-            draw_text_cn("徒弟：", content_x, content_y + line_h, 12.0, Color::from_rgba(200, 200, 200, 255));
+            draw_text_cn(
+                "身份：师傅",
+                content_x,
+                content_y,
+                13.0,
+                Color::from_rgba(255, 200, 50, 255),
+            );
+            draw_text_cn(
+                "徒弟：",
+                content_x,
+                content_y + line_h,
+                12.0,
+                Color::from_rgba(200, 200, 200, 255),
+            );
 
             let apprentice_text = if self.mentor_info.apprentice_name.is_empty() {
                 "暂无徒弟"
             } else {
                 &self.mentor_info.apprentice_name
             };
-            let apprentice_color = if self.mentor_info.apprentice_online { WHITE } else { GRAY };
+            let apprentice_color = if self.mentor_info.apprentice_online {
+                WHITE
+            } else {
+                GRAY
+            };
             draw_text_cn(
                 apprentice_text,
                 content_x + 50.0,
@@ -230,15 +246,31 @@ impl MentorDialogHybrid {
             draw_text_cn(&lv_text, content_x + 160.0, content_y + line_h, 11.0, GRAY);
         } else if self.mentor_info.is_apprentice {
             // 我是徒弟
-            draw_text_cn("身份：徒弟", content_x, content_y, 13.0, Color::from_rgba(100, 180, 255, 255));
-            draw_text_cn("师傅：", content_x, content_y + line_h, 12.0, Color::from_rgba(200, 200, 200, 255));
+            draw_text_cn(
+                "身份：徒弟",
+                content_x,
+                content_y,
+                13.0,
+                Color::from_rgba(100, 180, 255, 255),
+            );
+            draw_text_cn(
+                "师傅：",
+                content_x,
+                content_y + line_h,
+                12.0,
+                Color::from_rgba(200, 200, 200, 255),
+            );
 
             let mentor_text = if self.mentor_info.mentor_name.is_empty() {
                 "暂无师傅"
             } else {
                 &self.mentor_info.mentor_name
             };
-            let mentor_color = if self.mentor_info.mentor_online { WHITE } else { GRAY };
+            let mentor_color = if self.mentor_info.mentor_online {
+                WHITE
+            } else {
+                GRAY
+            };
             draw_text_cn(
                 mentor_text,
                 content_x + 50.0,
@@ -255,19 +287,59 @@ impl MentorDialogHybrid {
 
         // 师徒经验（仅当服务器提供数据时显示）
         if self.mentor_info.exp_points > 0 {
-            draw_text_cn("师徒经验：", content_x, content_y + line_h * 2.0, 12.0, Color::from_rgba(200, 200, 200, 255));
+            draw_text_cn(
+                "师徒经验：",
+                content_x,
+                content_y + line_h * 2.0,
+                12.0,
+                Color::from_rgba(200, 200, 200, 255),
+            );
             let exp_text = format!("{}", self.mentor_info.exp_points);
-            draw_text_cn(&exp_text, content_x + 70.0, content_y + line_h * 2.0, 12.0, WHITE);
+            draw_text_cn(
+                &exp_text,
+                content_x + 70.0,
+                content_y + line_h * 2.0,
+                12.0,
+                WHITE,
+            );
 
             // 允许拜师状态
-            let status_text = if self.mentor_info.allow_request { "允许拜师" } else { "拒绝拜师" };
-            let status_color = if self.mentor_info.allow_request { GREEN } else { RED };
-            draw_text_cn(status_text, content_x, content_y + line_h * 3.0, 12.0, status_color);
+            let status_text = if self.mentor_info.allow_request {
+                "允许拜师"
+            } else {
+                "拒绝拜师"
+            };
+            let status_color = if self.mentor_info.allow_request {
+                GREEN
+            } else {
+                RED
+            };
+            draw_text_cn(
+                status_text,
+                content_x,
+                content_y + line_h * 3.0,
+                12.0,
+                status_color,
+            );
         } else {
             // 协议未提供经验数据，仅显示状态
-            let status_text = if self.mentor_info.allow_request { "允许拜师" } else { "拒绝拜师" };
-            let status_color = if self.mentor_info.allow_request { GREEN } else { RED };
-            draw_text_cn(status_text, content_x, content_y + line_h * 2.0, 12.0, status_color);
+            let status_text = if self.mentor_info.allow_request {
+                "允许拜师"
+            } else {
+                "拒绝拜师"
+            };
+            let status_color = if self.mentor_info.allow_request {
+                GREEN
+            } else {
+                RED
+            };
+            draw_text_cn(
+                status_text,
+                content_x,
+                content_y + line_h * 2.0,
+                12.0,
+                status_color,
+            );
         }
     }
 
@@ -278,21 +350,20 @@ impl MentorDialogHybrid {
         let btn_spacing = 10.0;
 
         // 根据当前关系动态决定按钮
-        let buttons: Vec<(&str, MentorDialogAction)> = if !self.mentor_info.is_mentor && !self.mentor_info.is_apprentice {
-            vec![
-                ("拜师", MentorDialogAction::AddMentor),
-                ("允许拜师", MentorDialogAction::ToggleAllowRequest),
-            ]
-        } else if self.mentor_info.is_apprentice {
-            vec![
-                ("取消申请", MentorDialogAction::CancelMentor),
-                ("允许拜师", MentorDialogAction::ToggleAllowRequest),
-            ]
-        } else {
-            vec![
-                ("允许拜师", MentorDialogAction::ToggleAllowRequest),
-            ]
-        };
+        let buttons: Vec<(&str, MentorDialogAction)> =
+            if !self.mentor_info.is_mentor && !self.mentor_info.is_apprentice {
+                vec![
+                    ("拜师", MentorDialogAction::AddMentor),
+                    ("允许拜师", MentorDialogAction::ToggleAllowRequest),
+                ]
+            } else if self.mentor_info.is_apprentice {
+                vec![
+                    ("取消申请", MentorDialogAction::CancelMentor),
+                    ("允许拜师", MentorDialogAction::ToggleAllowRequest),
+                ]
+            } else {
+                vec![("允许拜师", MentorDialogAction::ToggleAllowRequest)]
+            };
 
         let total_w = buttons.len() as f32 * (btn_w + btn_spacing) - btn_spacing;
         let start_x = self.position.x + (self.size.x - total_w) / 2.0;
@@ -312,7 +383,14 @@ impl MentorDialogHybrid {
                 Color::from_rgba(60, 70, 80, 255)
             };
             draw_rectangle(btn_x, btn_y, btn_w, btn_h, btn_color);
-            draw_rectangle_lines(btn_x, btn_y, btn_w, btn_h, 1.0, Color::from_rgba(100, 100, 120, 255));
+            draw_rectangle_lines(
+                btn_x,
+                btn_y,
+                btn_w,
+                btn_h,
+                1.0,
+                Color::from_rgba(100, 100, 120, 255),
+            );
 
             draw_text_cn(label, btn_x + 10.0, btn_y + 16.0, 12.0, WHITE);
 

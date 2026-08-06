@@ -2,14 +2,14 @@
 //!
 //! This module contains all magic/spell-related packet definitions and parsers.
 
-use std::io::{Read, Write};
-use byteorder::ReadBytesExt;
-use crate::{
-    data::client_data::ClientMagic,
-    enums::{Spell, ServerPacketIds},
-};
 use super::super::base::Packet;
 use crate::data::stats::SharedResult;
+use crate::{
+    data::client_data::ClientMagic,
+    enums::{ServerPacketIds, Spell},
+};
+use byteorder::ReadBytesExt;
+use std::io::{Read, Write};
 
 // ============================================================================
 // Packet Structures
@@ -75,7 +75,12 @@ impl Packet for MagicLeveled {
         let spell = Spell::try_from(reader.read_u8()?)?;
         let level = reader.read_u8()?;
         let experience = reader.read_u16::<LittleEndian>()?;
-        Ok(Self { object_id, spell, level, experience })
+        Ok(Self {
+            object_id,
+            spell,
+            level,
+            experience,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -142,7 +147,11 @@ mod tests {
         };
         let mut buf = Vec::new();
         pkt.write_body(&mut buf).unwrap();
-        assert_eq!(buf.len(), 8, "C# S.MagicLeveled 应为 8 字节（u32+byte+byte+u16）");
+        assert_eq!(
+            buf.len(),
+            8,
+            "C# S.MagicLeveled 应为 8 字节（u32+byte+byte+u16）"
+        );
         let mut cur = Cursor::new(&buf);
         let read = MagicLeveled::read_body(&mut cur).unwrap();
         assert_eq!(read, pkt);

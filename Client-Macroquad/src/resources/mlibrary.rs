@@ -49,11 +49,11 @@ pub struct ImageInfo {
     pub mask_x: i16,
     pub mask_y: i16,
     pub mask_length: i32,
-    pub texture_valid: bool, // 纹理是否有效
-    pub image: Option<Texture2D>, // 解压后的纹理数据 (RGBA格式)
-    pub mask_image: Option<Texture2D>, // 解压后的遮罩纹理数据 (RGBA格式)
+    pub texture_valid: bool,               // 纹理是否有效
+    pub image: Option<Texture2D>,          // 解压后的纹理数据 (RGBA格式)
+    pub mask_image: Option<Texture2D>,     // 解压后的遮罩纹理数据 (RGBA格式)
     pub last_access_time: Option<Instant>, // 最后访问时间 (用于缓存清理)
-    bgra_data: Option<Vec<u8>>, // 原始解压数据 (RGBA格式)
+    bgra_data: Option<Vec<u8>>,            // 原始解压数据 (RGBA格式)
 }
 
 impl ImageInfo {
@@ -142,11 +142,7 @@ impl ImageInfo {
         self.bgra_data = Some(main_image.clone()); // 保存原始数据副本
 
         // 🔧 使用 macroquad Texture2D 创建纹理（RGBA 格式数据）
-        let texture = Texture2D::from_rgba8(
-            self.width as u16,
-            self.height as u16,
-            &main_image,
-        );
+        let texture = Texture2D::from_rgba8(self.width as u16, self.height as u16, &main_image);
         // 使用线性过滤获得更平滑的视觉效果
         texture.set_filter(FilterMode::Linear);
         self.image = Some(texture);
@@ -170,11 +166,8 @@ impl ImageInfo {
             Self::bgra_to_rgba(&mut mask_data);
 
             // 🔧 使用 macroquad Texture2D 创建遮罩纹理（RGBA 格式数据）
-            let mask_texture = Texture2D::from_rgba8(
-                self.width as u16,
-                self.height as u16,
-                &mask_data,
-            );
+            let mask_texture =
+                Texture2D::from_rgba8(self.width as u16, self.height as u16, &mask_data);
             // 使用线性过滤获得更平滑的视觉效果
             mask_texture.set_filter(FilterMode::Linear);
             self.mask_image = Some(mask_texture);
@@ -255,29 +248,29 @@ impl ImageInfo {
     }
 
     /// BGRA 转 RGBA + 黑色背景透明化
-    /// 
+    ///
     /// lib 文件存储的是 BGRA 格式（DirectX 格式），需要转换为 RGBA：
     /// 1. 交换 R 和 B 通道（BGRA -> RGBA）
     /// 2. 纯黑色背景透明化（匹配C#原版逻辑）
-    /// 
+    ///
     /// 对应 ggez 版本的 bgra_to_transparent 函数
     fn bgra_to_rgba(data: &mut [u8]) {
         for chunk in data.chunks_exact_mut(4) {
             let b = chunk[0];
             let g = chunk[1];
             let r = chunk[2];
-            
+
             // 🔧 纯黑色背景透明化（匹配C#原版逻辑）
             // C# 原版: if (pixels[i] == 0 && pixels[i + 1] == 0 && pixels[i + 2] == 0) pixels[i + 3] = 0;
             //
             // 注意：将“接近黑”也透明化会误伤深色描边/阴影，导致部分装备/坐骑/特效出现“纹理/混合不对”。
             // 这里收紧为“严格纯黑”以避免误杀。
             let is_pure_black = r == 0 && g == 0 && b == 0;
-            
+
             // BGRA -> RGBA: 交换 B 和 R 通道
             chunk[0] = r;
             chunk[2] = b;
-            
+
             // 纯黑背景 → 完全透明
             if is_pure_black {
                 chunk[3] = 0;
@@ -506,18 +499,18 @@ impl MLibrary {
             ));
         }
         let count = reader.read_i32::<LittleEndian>()?;
-        
+
         // Version 3的.Lib文件有frame_seek字段
         if version >= 3 {
             let _frame_seek = reader.read_i32::<LittleEndian>()?;
         }
-  
+
         let mut indices = Vec::with_capacity(count as usize);
         for _ in 0..count {
             let offset = reader.read_i32::<LittleEndian>()?;
             indices.push(ImageIndex { offset });
         }
-        
+
         let cached_info = HashMap::with_capacity(count as usize);
 
         Ok(Self {
@@ -614,10 +607,7 @@ impl MLibrary {
     /// # 性能优化
     /// - ✅ 返回引用而非克隆，避免大块内存拷贝
     /// - ✅ 自动缓存纹理，重复调用零开销
-    pub fn get_or_create_texture(
-        &mut self,
-        index: usize,
-    ) -> io::Result<&ImageInfo> {
+    pub fn get_or_create_texture(&mut self, index: usize) -> io::Result<&ImageInfo> {
         // 检查索引范围
         if index >= self.indices.len() {
             return Err(io::Error::new(
@@ -638,7 +628,7 @@ impl MLibrary {
                 if !cached.texture_valid {
                     // 已有 info 但没有纹理，创建纹理
                     self.reader.seek(SeekFrom::Start(offset + 17))?;
-                    cached.create_texture( &mut self.reader)?;
+                    cached.create_texture(&mut self.reader)?;
                 }
                 // 更新访问时间
                 cached.last_access_time = Some(Instant::now());
@@ -661,7 +651,7 @@ impl MLibrary {
 
                 // 创建纹理
                 self.reader.seek(SeekFrom::Start(offset + 17))?;
-                info.create_texture( &mut self.reader)?;
+                info.create_texture(&mut self.reader)?;
 
                 // 插入
                 e.insert(info);
@@ -826,17 +816,13 @@ impl MLibrary {
     /// - 如果已经计算过，直接返回缓存的值
     /// - 如果还没有纹理数据，会先加载纹理
     /// - 然后调用 `ImageInfo::get_true_size()` 计算实际边界
-    pub fn get_true_size(
-        &mut self,
-        
-        index: usize,
-    ) -> io::Result<(i16, i16)> {
+    pub fn get_true_size(&mut self, index: usize) -> io::Result<(i16, i16)> {
         // 检查索引范围
         if index >= self.indices.len() {
             return Ok((0, 0)); // 对应 C# 的 Size.Empty
         }
         // 获取或读取图像信息
-        let info = self.get_or_create_texture( index)?;
+        let info = self.get_or_create_texture(index)?;
 
         // 检查图像是否有效
         if info.width == 0 || info.height == 0 {
@@ -847,5 +833,4 @@ impl MLibrary {
 
         Ok(true_size)
     }
-} 
-
+}

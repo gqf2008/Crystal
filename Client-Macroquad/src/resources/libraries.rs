@@ -34,10 +34,10 @@ impl StringPadding for String {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum LibraryName {
     // UI 相关
-    ChrSel,      // 角色选择界面
-    Prguse,      // 主要 UI 资源
-    Prguse2,     // 次要 UI 资源
-    Prguse3,     // 额外 UI 资源
+    ChrSel,  // 角色选择界面
+    Prguse,  // 主要 UI 资源
+    Prguse2, // 次要 UI 资源
+    Prguse3, // 额外 UI 资源
     /// PR #1155: KR-style 32-bit UI library, used for KR weight bar art.
     /// Not present in our Data/ directory; texture lookups for this
     /// library return None and the rendering falls back to Prguse.
@@ -231,11 +231,11 @@ impl LibraryName {
     // ==================== 便捷方法 ====================
 
     /// 获取纹理（使用新资源管理器，带 LRU 缓存）
-    /// 
+    ///
     /// # Example
     /// ```
     /// use client_macroquad::resources::LibraryName;
-    /// 
+    ///
     /// if let Some(info) = LibraryName::Prguse.get_texture(100) {
     ///     // 使用纹理
     /// }
@@ -246,11 +246,11 @@ impl LibraryName {
     }
 
     /// 获取图像尺寸（无需创建纹理，高效）
-    /// 
+    ///
     /// # Example
     /// ```
     /// use client_macroquad::resources::LibraryName;
-    /// 
+    ///
     /// if let Some((w, h)) = LibraryName::Items.get_size(200) {
     ///     println!("物品尺寸: {}x{}", w, h);
     /// }
@@ -261,11 +261,11 @@ impl LibraryName {
     }
 
     /// 获取库引用（如果未加载则自动懒加载）
-    /// 
+    ///
     /// # Example
     /// ```
     /// use client_macroquad::resources::LibraryName;
-    /// 
+    ///
     /// if let Some(lib) = LibraryName::Magic.get_library() {
     ///     let mut lib = lib.borrow_mut();
     ///     // 使用库...
@@ -1229,22 +1229,21 @@ thread_local! {
 // ===== 便捷访问函数 =====
 
 /// 便捷函数: 从数组库获取指定索引的库
-/// 
+///
 /// # Example
 /// ```rust
 /// use client_macroquad::resources::{get_from_array, LibraryArray};
-/// 
+///
 /// // 获取地图库
 /// if let Some(lib) = get_from_array(LibraryArray::MapLibs, 0) {
 ///     println!("MapLib[0] 已加载");
 /// }
 /// ```
-pub fn get_from_array(
-    array_type: LibraryArray,
-    index: usize,
-) -> Option<Rc<RefCell<MLibrary>>> {
+pub fn get_from_array(array_type: LibraryArray, index: usize) -> Option<Rc<RefCell<MLibrary>>> {
     LIBRARIES.with(|libs| {
-        libs.try_borrow().ok().and_then(|l| l.get_from_array(array_type, index))
+        libs.try_borrow()
+            .ok()
+            .and_then(|l| l.get_from_array(array_type, index))
     })
 }
 
@@ -1313,8 +1312,11 @@ pub fn set_data_path(path: impl Into<String>) {
 /// 便捷函数: 初始化地图库 (MapLibs[0-399])
 pub fn init_map_libraries() -> std::io::Result<()> {
     LIBRARIES.with(|libs| {
-        let mut libs = libs.try_borrow_mut()
-            .map_err(|e| std::io::Error::other(format!("LIBRARIES borrow failed in init_map_libraries: {e}")))?;
+        let mut libs = libs.try_borrow_mut().map_err(|e| {
+            std::io::Error::other(format!(
+                "LIBRARIES borrow failed in init_map_libraries: {e}"
+            ))
+        })?;
         libs.init_map_libraries()
     })
 }
@@ -1322,8 +1324,9 @@ pub fn init_map_libraries() -> std::io::Result<()> {
 /// 便捷函数: 加载库
 pub fn load_library(name: LibraryName) -> std::io::Result<()> {
     LIBRARIES.with(|libs| {
-        let mut libs = libs.try_borrow_mut()
-            .map_err(|e| std::io::Error::other(format!("LIBRARIES borrow failed in load_library: {e}")))?;
+        let mut libs = libs.try_borrow_mut().map_err(|e| {
+            std::io::Error::other(format!("LIBRARIES borrow failed in load_library: {e}"))
+        })?;
         libs.load(name)
     })
 }
@@ -1331,8 +1334,11 @@ pub fn load_library(name: LibraryName) -> std::io::Result<()> {
 /// 便捷函数: 加载库（自定义路径）
 pub fn load_library_custom(name: LibraryName, path: impl AsRef<Path>) -> std::io::Result<()> {
     LIBRARIES.with(|libs| {
-        let mut libs = libs.try_borrow_mut()
-            .map_err(|e| std::io::Error::other(format!("LIBRARIES borrow failed in load_library_custom: {e}")))?;
+        let mut libs = libs.try_borrow_mut().map_err(|e| {
+            std::io::Error::other(format!(
+                "LIBRARIES borrow failed in load_library_custom: {e}"
+            ))
+        })?;
         libs.load_custom(name, path)
     })
 }
@@ -1341,7 +1347,12 @@ pub fn load_library_custom(name: LibraryName, path: impl AsRef<Path>) -> std::io
 
 /// 便捷函数: 检查库是否已加载
 pub fn is_library_loaded(name: LibraryName) -> bool {
-    LIBRARIES.with(|libs| libs.try_borrow().ok().map(|l| l.is_loaded(name)).unwrap_or(false))
+    LIBRARIES.with(|libs| {
+        libs.try_borrow()
+            .ok()
+            .map(|l| l.is_loaded(name))
+            .unwrap_or(false)
+    })
 }
 
 /// 便捷函数: 卸载库
@@ -1371,8 +1382,11 @@ pub fn unload_all_libraries() {
 /// C# equivalent: Libraries 静态构造函数中的初始化逻辑
 pub fn load_core_libraries() -> std::io::Result<()> {
     LIBRARIES.with(|libs| {
-        let mut libs = libs.try_borrow_mut()
-            .map_err(|e| std::io::Error::other(format!("LIBRARIES borrow failed in load_core_libraries: {e}")))?;
+        let mut libs = libs.try_borrow_mut().map_err(|e| {
+            std::io::Error::other(format!(
+                "LIBRARIES borrow failed in load_core_libraries: {e}"
+            ))
+        })?;
 
         // 计算需要加载的库数量
         let core_libs = vec![
@@ -1425,8 +1439,11 @@ pub fn load_core_libraries() -> std::io::Result<()> {
 /// 包括 UI、魔法、物品、装备等所有库
 pub fn load_all_libraries() -> std::io::Result<()> {
     LIBRARIES.with(|libs| {
-        let mut libs = libs.try_borrow_mut()
-            .map_err(|e| std::io::Error::other(format!("LIBRARIES borrow failed in load_all_libraries: {e}")))?;
+        let mut libs = libs.try_borrow_mut().map_err(|e| {
+            std::io::Error::other(format!(
+                "LIBRARIES borrow failed in load_all_libraries: {e}"
+            ))
+        })?;
 
         let all_libs = vec![
             // UI
@@ -1509,6 +1526,9 @@ pub fn load_all_libraries() -> std::io::Result<()> {
 /// - Vec<Rc<RefCell<MLibrary>>>: 所有已加载的 MapLibs
 pub fn get_all_map_libraries() -> Vec<Rc<RefCell<MLibrary>>> {
     LIBRARIES.with(|libs| {
-        libs.try_borrow().ok().map(|l| l.get_all_from_array(LibraryArray::MapLibs)).unwrap_or_default()
+        libs.try_borrow()
+            .ok()
+            .map(|l| l.get_all_from_array(LibraryArray::MapLibs))
+            .unwrap_or_default()
     })
 }

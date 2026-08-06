@@ -49,7 +49,6 @@ pub fn resolve_map_path(file_name: &str) -> String {
     f
 }
 
-
 // ============================================================================
 // CellInfo - 对应 C# 的 CellInfo 类
 // ============================================================================
@@ -166,7 +165,7 @@ impl CellInfo {
 
     // 辅助方法：检查是否可行走
     // C# Reference: MapControl.ValidPoint() - (M2CellInfo[x, y].BackImage & 0x20000000) == 0
-    // 
+    //
     // ✅ 关键修正：只检查 back_image 的障碍物标志位！
     // - front_image/middle_image 只是图片装饰，不阻挡移动
     // - door_index 在传奇2中通常为0（门系统未实现）
@@ -175,7 +174,7 @@ impl CellInfo {
         // ✅ 只检查 back_image 的障碍物标志位 (0x20000000)
         // 如果设置了这个位，说明该格子有障碍物，不可通行
         let has_obstacle = (self.back_image & 0x20000000) != 0;
-        
+
         // ✅ 返回: 没有障碍物 = 可行走
         !has_obstacle
     }
@@ -215,20 +214,35 @@ impl CellInfo {
 
     pub fn debug_cell_data(&self, x: i32, y: i32) {
         println!("🔍 格子 ({},{}) 数据:", x, y);
-        println!("   Back:   index={:2}, image=0x{:08X}", self.back_index, self.back_image);
+        println!(
+            "   Back:   index={:2}, image=0x{:08X}",
+            self.back_index, self.back_image
+        );
         if let Some((lib, img)) = self.back_tile() {
             println!("           → 库{} 图{}", lib, img);
         }
-        println!("   Middle: index={:2}, image={}", self.middle_index, self.middle_image);
+        println!(
+            "   Middle: index={:2}, image={}",
+            self.middle_index, self.middle_image
+        );
         if let Some((lib, img)) = self.middle_tile() {
             println!("           → 库{} 图{}", lib, img);
         }
-        println!("   Front:  index={:2}, image=0x{:04X}", self.front_index, self.front_image);
+        println!(
+            "   Front:  index={:2}, image=0x{:04X}",
+            self.front_index, self.front_image
+        );
         if let Some((lib, img)) = self.front_tile() {
             println!("           → 库{} 图{}", lib, img);
         }
-        println!("   Flags:  door_index={}, door_offset={}", self.door_index, self.door_offset);
-        println!("           light={}, fishing={}", self.light, self.fishing_cell);
+        println!(
+            "   Flags:  door_index={}, door_offset={}",
+            self.door_index, self.door_offset
+        );
+        println!(
+            "           light={}, fishing={}",
+            self.light, self.fishing_cell
+        );
     }
 }
 

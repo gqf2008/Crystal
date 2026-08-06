@@ -15,9 +15,9 @@
 // ============================================================================
 
 use crate::components::{Camera, CameraMode, LocalPlayer, Position};
-use crate::systems::LogicSystem;
 use crate::game::GameContext;
 use crate::game::GameResult;
+use crate::systems::LogicSystem;
 
 /// 摄像机跟随系统
 #[derive(ecs_macros::LogicSystem)]
@@ -49,7 +49,8 @@ impl LogicSystem for CameraFollowSystem {
                 // 首次进入游戏时，相机可能还在 (0,0) 或与玩家相距非常远。
                 // 此时如果只做 lerp，会导致很长时间看不到角色（甚至被裁剪系统剔除），
                 // 体感上像是“人物/装备/坐骑都没了”。
-                let far_enough = (player_x - camera_pos.x).abs() > camera.screen_width.max(1.0) * 6.0
+                let far_enough = (player_x - camera_pos.x).abs()
+                    > camera.screen_width.max(1.0) * 6.0
                     || (player_y - camera_pos.y).abs() > camera.screen_height.max(1.0) * 6.0;
 
                 // 只要相机和玩家距离异常大，就直接对齐。

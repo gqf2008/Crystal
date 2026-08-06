@@ -8,11 +8,11 @@
 //! - interaction: 交互处理方法
 
 pub mod dialog;
-mod types;
-mod sample_items;
-mod rendering;
 mod interaction;
+mod rendering;
+mod sample_items;
+mod types;
 
 pub use dialog::GameShopDialogHybrid;
-pub use types::*;
 pub use sample_items::create_sample_items;
+pub use types::*;

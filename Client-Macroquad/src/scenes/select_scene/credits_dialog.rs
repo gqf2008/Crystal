@@ -165,9 +165,7 @@ impl CreditsDialog {
                 draw_texture(
                     texture,
                     // ClientRust CreditsDialog 使用 draw_sprite_at（不应用 offset）
-                    dialog.x,
-                    dialog.y,
-                    WHITE,
+                    dialog.x, dialog.y, WHITE,
                 );
             } else {
                 draw_dialog_panel(

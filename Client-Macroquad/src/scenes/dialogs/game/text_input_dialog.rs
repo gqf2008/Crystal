@@ -22,10 +22,10 @@
 
 use macroquad::prelude::*;
 
+use super::native_ui_utils::{ButtonState, ButtonTextures};
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
 use crate::utils::ime::set_ime_enabled;
-use super::native_ui_utils::{ButtonState, ButtonTextures};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextInputResult {
@@ -155,18 +155,40 @@ impl TextInputDialogHybrid {
         if let Some(ref bg) = self.bg_texture {
             draw_texture(bg, px, py, WHITE);
         } else {
-            draw_rectangle(px, py, self.size.x, self.size.y, Color::new(0.05, 0.05, 0.1, 0.9));
+            draw_rectangle(
+                px,
+                py,
+                self.size.x,
+                self.size.y,
+                Color::new(0.05, 0.05, 0.1, 0.9),
+            );
         }
 
         // 标题
         draw_text_cn(&self.title, px + 12.0, py + 18.0, 14.0, WHITE);
 
         // 输入框背景
-        let input_rect = Rect::new(px + Self::INPUT_X, py + Self::INPUT_Y, Self::INPUT_W, Self::INPUT_H);
-        draw_rectangle(input_rect.x, input_rect.y, input_rect.w, input_rect.h,
-            Color::from_rgba(30, 30, 40, 255));
-        draw_rectangle_lines(input_rect.x, input_rect.y, input_rect.w, input_rect.h, 1.0,
-            Color::from_rgba(80, 80, 100, 255));
+        let input_rect = Rect::new(
+            px + Self::INPUT_X,
+            py + Self::INPUT_Y,
+            Self::INPUT_W,
+            Self::INPUT_H,
+        );
+        draw_rectangle(
+            input_rect.x,
+            input_rect.y,
+            input_rect.w,
+            input_rect.h,
+            Color::from_rgba(30, 30, 40, 255),
+        );
+        draw_rectangle_lines(
+            input_rect.x,
+            input_rect.y,
+            input_rect.w,
+            input_rect.h,
+            1.0,
+            Color::from_rgba(80, 80, 100, 255),
+        );
 
         // 输入文本
         let display_text = if self.input_text.is_empty() {
@@ -179,7 +201,13 @@ impl TextInputDialogHybrid {
         } else {
             WHITE
         };
-        draw_text_cn(display_text, input_rect.x + 4.0, input_rect.y + 16.0, 13.0, text_color);
+        draw_text_cn(
+            display_text,
+            input_rect.x + 4.0,
+            input_rect.y + 16.0,
+            13.0,
+            text_color,
+        );
 
         // OK 按钮
         let ok_rect = Rect::new(px + Self::OK_X, py + Self::OK_Y, 32.0, 22.0);
@@ -189,7 +217,8 @@ impl TextInputDialogHybrid {
         // Cancel 按钮
         let cancel_rect = Rect::new(px + Self::CANCEL_X, py + Self::CANCEL_Y, 32.0, 22.0);
         let cancel_state = ButtonState::from_mouse(cancel_rect, mouse_pos);
-        self.cancel_btn.draw(vec2(cancel_rect.x, cancel_rect.y), cancel_state);
+        self.cancel_btn
+            .draw(vec2(cancel_rect.x, cancel_rect.y), cancel_state);
 
         // 按钮点击
         if ButtonState::is_clicked(ok_rect, mouse_pos) {

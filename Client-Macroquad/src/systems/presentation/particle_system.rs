@@ -1,8 +1,8 @@
 // 处理特效
-use crate::game::GameResult;
-use crate::game::GameContext;
-use crate::systems::LogicSystem;
 use crate::components::{Particle, ParticleColor, ParticleEmitter, ParticleType};
+use crate::game::GameContext;
+use crate::game::GameResult;
+use crate::systems::LogicSystem;
 use macroquad::prelude::get_time;
 
 /// 粒子系统 - 管理粒子效果生命周期
@@ -30,7 +30,6 @@ impl ParticleSystem {
 }
 
 impl LogicSystem for ParticleSystem {
-
     fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         // 使用 macroquad 的时间源（秒），避免 SystemTime 在极端情况下的 before-epoch unwrap。
         let current_time = get_time() as f32;
@@ -39,7 +38,12 @@ impl LogicSystem for ParticleSystem {
         let mut particles_to_spawn: Vec<Particle> = Vec::new();
         for event in ctx.events().presentation_events() {
             match event {
-                crate::event_bus::PresentationEvent::SpawnParticle { particle_type, position, velocity, duration } => {
+                crate::event_bus::PresentationEvent::SpawnParticle {
+                    particle_type,
+                    position,
+                    velocity,
+                    duration,
+                } => {
                     let ptype = match particle_type {
                         crate::event_bus::ParticleType::Fire => ParticleType::RedFogEmber,
                         crate::event_bus::ParticleType::Smoke => ParticleType::Fog,
@@ -57,7 +61,12 @@ impl LogicSystem for ParticleSystem {
                         particles_to_spawn.push(p);
                     }
                 }
-                crate::event_bus::PresentationEvent::ProjectileEffect { projectile_type, from, to, speed } => {
+                crate::event_bus::PresentationEvent::ProjectileEffect {
+                    projectile_type,
+                    from,
+                    to,
+                    speed,
+                } => {
                     let dx = to.0 - from.0;
                     let dy = to.1 - from.1;
                     let dist = (dx * dx + dy * dy).sqrt().max(0.001);
@@ -68,7 +77,13 @@ impl LogicSystem for ParticleSystem {
                         crate::event_bus::ProjectileType::IceBolt => (100, 200, 255),
                         crate::event_bus::ProjectileType::Arrow => (180, 140, 100),
                     };
-                    let mut p = Particle::new(from.0, from.1, dx / dist * *speed, dy / dist * *speed, lifetime);
+                    let mut p = Particle::new(
+                        from.0,
+                        from.1,
+                        dx / dist * *speed,
+                        dy / dist * *speed,
+                        lifetime,
+                    );
                     p.color = ParticleColor { r, g, b, a: 220 };
                     p.size = 4.0;
                     particles_to_spawn.push(p);
@@ -81,7 +96,10 @@ impl LogicSystem for ParticleSystem {
         }
 
         // 1. 更新粒子位置和速度
-        for (particle, emitter) in ctx.world.query_mut::<(&mut Particle, Option<&ParticleEmitter>)>() {
+        for (particle, emitter) in ctx
+            .world
+            .query_mut::<(&mut Particle, Option<&ParticleEmitter>)>()
+        {
             // 更新位置: Position += Velocity
             let vx = particle.velocity.x;
             let vy = particle.velocity.y;
@@ -128,7 +146,11 @@ impl LogicSystem for ParticleSystem {
         for emitter in ctx.world.query_mut::<&mut ParticleEmitter>() {
             if emitter.generate_particles && current_time >= emitter.next_particle_time {
                 emitter.next_particle_time = current_time + emitter.spawn_interval;
-                to_spawn.push((emitter.emitter_location.x, emitter.emitter_location.y, emitter.particle_type));
+                to_spawn.push((
+                    emitter.emitter_location.x,
+                    emitter.emitter_location.y,
+                    emitter.particle_type,
+                ));
             }
         }
         for (x, y, ptype) in to_spawn {
@@ -178,7 +200,12 @@ impl ParticleSystem {
         let vy = self.rand(300.0, 500.0);
         let lifetime = self.rand(0.5, 1.5);
         let mut p = Particle::new(x + self.rand(-100.0, 100.0), y, vx, vy, lifetime);
-        p.color = ParticleColor { r: 150, g: 180, b: 255, a: 120 };
+        p.color = ParticleColor {
+            r: 150,
+            g: 180,
+            b: 255,
+            a: 120,
+        };
         p.size = self.rand(1.0, 2.0);
         p
     }
@@ -188,7 +215,12 @@ impl ParticleSystem {
         let vy = self.rand(50.0, 120.0);
         let lifetime = self.rand(2.0, 4.0);
         let mut p = Particle::new(x + self.rand(-150.0, 150.0), y, vx, vy, lifetime);
-        p.color = ParticleColor { r: 240, g: 245, b: 255, a: 200 };
+        p.color = ParticleColor {
+            r: 240,
+            g: 245,
+            b: 255,
+            a: 200,
+        };
         p.size = self.rand(2.0, 4.0);
         p
     }
@@ -197,8 +229,19 @@ impl ParticleSystem {
         let vx = self.rand(-10.0, 10.0);
         let vy = self.rand(-5.0, 5.0);
         let lifetime = self.rand(3.0, 6.0);
-        let mut p = Particle::new(x + self.rand(-80.0, 80.0), y + self.rand(-20.0, 20.0), vx, vy, lifetime);
-        p.color = ParticleColor { r: 180, g: 180, b: 180, a: 80 };
+        let mut p = Particle::new(
+            x + self.rand(-80.0, 80.0),
+            y + self.rand(-20.0, 20.0),
+            vx,
+            vy,
+            lifetime,
+        );
+        p.color = ParticleColor {
+            r: 180,
+            g: 180,
+            b: 180,
+            a: 80,
+        };
         p.size = self.rand(15.0, 30.0);
         p
     }
@@ -207,7 +250,13 @@ impl ParticleSystem {
         let vx = self.rand(-10.0, 10.0);
         let vy = self.rand(-5.0, 5.0);
         let lifetime = self.rand(3.0, 6.0);
-        let mut p = Particle::new(x + self.rand(-80.0, 80.0), y + self.rand(-20.0, 20.0), vx, vy, lifetime);
+        let mut p = Particle::new(
+            x + self.rand(-80.0, 80.0),
+            y + self.rand(-20.0, 20.0),
+            vx,
+            vy,
+            lifetime,
+        );
         p.color = ParticleColor { r, g, b, a: 80 };
         p.size = self.rand(15.0, 30.0);
         p
@@ -217,7 +266,13 @@ impl ParticleSystem {
         let vx = self.rand(-40.0, 40.0);
         let vy = self.rand(-80.0, -20.0);
         let lifetime = self.rand(0.5, 2.0);
-        let mut p = Particle::new(x + self.rand(-30.0, 30.0), y + self.rand(-30.0, 30.0), vx, vy, lifetime);
+        let mut p = Particle::new(
+            x + self.rand(-30.0, 30.0),
+            y + self.rand(-30.0, 30.0),
+            vx,
+            vy,
+            lifetime,
+        );
         p.color = ParticleColor { r, g, b, a: 220 };
         p.size = self.rand(1.0, 3.0);
         p
@@ -228,7 +283,12 @@ impl ParticleSystem {
         let vy = self.rand(-20.0, 20.0);
         let lifetime = self.rand(1.0, 3.0);
         let mut p = Particle::new(x, y + self.rand(-50.0, 50.0), vx, vy, lifetime);
-        p.color = ParticleColor { r: 210, g: 180, b: 120, a: 150 };
+        p.color = ParticleColor {
+            r: 210,
+            g: 180,
+            b: 120,
+            a: 150,
+        };
         p.size = self.rand(1.0, 3.0);
         p
     }
@@ -238,7 +298,12 @@ impl ParticleSystem {
         let vy = self.rand(80.0, 200.0);
         let lifetime = self.rand(1.0, 2.5);
         let mut p = Particle::new(x + self.rand(-100.0, 100.0), y, vx, vy, lifetime);
-        p.color = ParticleColor { r: 200, g: 230, b: 255, a: 180 };
+        p.color = ParticleColor {
+            r: 200,
+            g: 230,
+            b: 255,
+            a: 180,
+        };
         p.size = self.rand(2.0, 5.0);
         p
     }
@@ -248,7 +313,12 @@ impl ParticleSystem {
         let vy = self.rand(-10.0, 10.0);
         let lifetime = self.rand(2.0, 5.0);
         let mut p = Particle::new(x, y, vx, vy, lifetime);
-        p.color = ParticleColor { r: 60, g: 60, b: 60, a: 255 };
+        p.color = ParticleColor {
+            r: 60,
+            g: 60,
+            b: 60,
+            a: 255,
+        };
         p.size = self.rand(5.0, 10.0);
         p
     }
@@ -259,9 +329,24 @@ impl ParticleSystem {
         let lifetime = self.rand(3.0, 6.0);
         let mut p = Particle::new(x + self.rand(-50.0, 50.0), y, vx, vy, lifetime);
         let colors = [
-            ParticleColor { r: 255, g: 180, b: 200, a: 200 },
-            ParticleColor { r: 255, g: 220, b: 150, a: 200 },
-            ParticleColor { r: 200, g: 150, b: 255, a: 200 },
+            ParticleColor {
+                r: 255,
+                g: 180,
+                b: 200,
+                a: 200,
+            },
+            ParticleColor {
+                r: 255,
+                g: 220,
+                b: 150,
+                a: 200,
+            },
+            ParticleColor {
+                r: 200,
+                g: 150,
+                b: 255,
+                a: 200,
+            },
         ];
         p.color = colors[(self.seed_counter as usize) % 3];
         p.size = self.rand(3.0, 6.0);
@@ -273,7 +358,12 @@ impl ParticleSystem {
         let vy = self.rand(30.0, 80.0);
         let lifetime = self.rand(3.0, 6.0);
         let mut p = Particle::new(x + self.rand(-50.0, 50.0), y, vx, vy, lifetime);
-        p.color = ParticleColor { r: 80, g: 180, b: 50, a: 200 };
+        p.color = ParticleColor {
+            r: 80,
+            g: 180,
+            b: 50,
+            a: 200,
+        };
         p.size = self.rand(3.0, 6.0);
         p
     }
@@ -283,7 +373,12 @@ impl ParticleSystem {
         let vy = self.rand(-50.0, -10.0);
         let lifetime = self.rand(1.0, 3.0);
         let mut p = Particle::new(x + self.rand(-30.0, 30.0), y, vx, vy, lifetime);
-        p.color = ParticleColor { r: 255, g: 150, b: 30, a: 220 };
+        p.color = ParticleColor {
+            r: 255,
+            g: 150,
+            b: 30,
+            a: 220,
+        };
         p.size = self.rand(3.0, 6.0);
         p
     }
@@ -293,47 +388,88 @@ impl ParticleSystem {
         let vy = self.rand(30.0, 80.0);
         let lifetime = self.rand(3.0, 6.0);
         let mut p = Particle::new(x + self.rand(-50.0, 50.0), y, vx, vy, lifetime);
-        p.color = ParticleColor { r: 150, g: 50, b: 200, a: 200 };
+        p.color = ParticleColor {
+            r: 150,
+            g: 50,
+            b: 200,
+            a: 200,
+        };
         p.size = self.rand(3.0, 6.0);
         p
     }
 
     /// 暴风雪：比普通雨更快、更密集、带水平漂移
     fn make_blizzard(&mut self, x: f32, y: f32) -> Particle {
-        let vx = self.rand(100.0, 300.0);   // 强水平风
-        let vy = self.rand(150.0, 350.0);   // 比普通雨稍慢
+        let vx = self.rand(100.0, 300.0); // 强水平风
+        let vy = self.rand(150.0, 350.0); // 比普通雨稍慢
         let lifetime = self.rand(0.8, 2.0);
         let mut p = Particle::new(x + self.rand(-200.0, 200.0), y, vx, vy, lifetime);
-        p.color = ParticleColor { r: 200, g: 220, b: 255, a: 180 };
+        p.color = ParticleColor {
+            r: 200,
+            g: 220,
+            b: 255,
+            a: 180,
+        };
         p.size = self.rand(1.5, 3.5);
         p
     }
 
     /// 花瓣雨：带颜色变化、飘落效果（缓慢下降+水平摇摆）
     fn make_flowers_rain(&mut self, x: f32, y: f32) -> Particle {
-        let vx = self.rand(-40.0, 40.0);    // 明显摇摆
-        let vy = self.rand(80.0, 180.0);    // 缓慢飘落
+        let vx = self.rand(-40.0, 40.0); // 明显摇摆
+        let vy = self.rand(80.0, 180.0); // 缓慢飘落
         let lifetime = self.rand(2.0, 4.0);
         let mut p = Particle::new(x + self.rand(-150.0, 150.0), y, vx, vy, lifetime);
         let colors = [
-            ParticleColor { r: 255, g: 150, b: 180, a: 200 },
-            ParticleColor { r: 255, g: 200, b: 150, a: 200 },
-            ParticleColor { r: 255, g: 180, b: 220, a: 200 },
-            ParticleColor { r: 255, g: 220, b: 180, a: 200 },
+            ParticleColor {
+                r: 255,
+                g: 150,
+                b: 180,
+                a: 200,
+            },
+            ParticleColor {
+                r: 255,
+                g: 200,
+                b: 150,
+                a: 200,
+            },
+            ParticleColor {
+                r: 255,
+                g: 180,
+                b: 220,
+                a: 200,
+            },
+            ParticleColor {
+                r: 255,
+                g: 220,
+                b: 180,
+                a: 200,
+            },
         ];
         p.color = colors[(self.seed_counter as usize) % 4];
-        p.size = self.rand(2.0, 5.0);       // 比普通雨大
+        p.size = self.rand(2.0, 5.0); // 比普通雨大
         p
     }
 
     /// 云雾：大颗粒、缓慢移动、半透明
     fn make_fog_cloud(&mut self, x: f32, y: f32) -> Particle {
-        let vx = self.rand(-5.0, 5.0);      // 极慢水平移动
-        let vy = self.rand(-3.0, 3.0);      // 轻微上下浮动
+        let vx = self.rand(-5.0, 5.0); // 极慢水平移动
+        let vy = self.rand(-3.0, 3.0); // 轻微上下浮动
         let lifetime = self.rand(5.0, 10.0); // 更长生命周期
-        let mut p = Particle::new(x + self.rand(-100.0, 100.0), y + self.rand(-40.0, 40.0), vx, vy, lifetime);
-        p.color = ParticleColor { r: 200, g: 200, b: 210, a: 60 }; // 更透明
-        p.size = self.rand(25.0, 50.0);     // 更大颗粒
+        let mut p = Particle::new(
+            x + self.rand(-100.0, 100.0),
+            y + self.rand(-40.0, 40.0),
+            vx,
+            vy,
+            lifetime,
+        );
+        p.color = ParticleColor {
+            r: 200,
+            g: 200,
+            b: 210,
+            a: 60,
+        }; // 更透明
+        p.size = self.rand(25.0, 50.0); // 更大颗粒
         p
     }
 }

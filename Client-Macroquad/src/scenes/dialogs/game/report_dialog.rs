@@ -24,10 +24,10 @@
 
 use macroquad::prelude::*;
 
+use super::native_ui_utils::{ButtonState, ButtonTextures};
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::{draw_text_cn, measure_text_cn};
 use crate::utils::ime::set_ime_enabled;
-use super::native_ui_utils::{ButtonState, ButtonTextures};
 
 /// 举报类型（对齐 C# ReportType.Items）
 ///
@@ -221,8 +221,20 @@ impl ReportDialogHybrid {
         draw_rectangle(px, py, w, h, Color::from_rgba(25, 25, 35, 235));
 
         // 标题栏
-        draw_rectangle(px, py, w, Self::TITLE_BAR_H, Color::from_rgba(50, 50, 70, 255));
-        draw_text_cn("举报 / 反馈", px + 12.0, py + 8.0, 14.0, Color::from_rgba(255, 220, 100, 255));
+        draw_rectangle(
+            px,
+            py,
+            w,
+            Self::TITLE_BAR_H,
+            Color::from_rgba(50, 50, 70, 255),
+        );
+        draw_text_cn(
+            "举报 / 反馈",
+            px + 12.0,
+            py + 8.0,
+            14.0,
+            Color::from_rgba(255, 220, 100, 255),
+        );
 
         // 边框
         let border = Color::from_rgba(120, 100, 50, 200);
@@ -231,7 +243,12 @@ impl ReportDialogHybrid {
         // ===== 关闭按钮（Prguse2[360/361/362]，C# Location=(336,3)） =====
         let close_pos = vec2(px + 336.0, py + 3.0);
         let close_size = self.close_btn.size;
-        let close_rect = Rect::new(close_pos.x, close_pos.y, close_size.x.max(16.0), close_size.y.max(16.0));
+        let close_rect = Rect::new(
+            close_pos.x,
+            close_pos.y,
+            close_size.x.max(16.0),
+            close_size.y.max(16.0),
+        );
         let close_state = ButtonState::from_mouse(close_rect, mouse_pos);
         self.close_btn.draw(close_pos, close_state);
         if ButtonState::is_clicked(close_rect, mouse_pos) {
@@ -262,7 +279,14 @@ impl ReportDialogHybrid {
                 Color::from_rgba(35, 35, 50, 255)
             };
             draw_rectangle(rect.x, rect.y, rect.w, rect.h, bg);
-            draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 1.0, Color::from_rgba(90, 90, 110, 255));
+            draw_rectangle_lines(
+                rect.x,
+                rect.y,
+                rect.w,
+                rect.h,
+                1.0,
+                Color::from_rgba(90, 90, 110, 255),
+            );
 
             let color = if selected {
                 Color::from_rgba(255, 230, 120, 255)
@@ -270,7 +294,13 @@ impl ReportDialogHybrid {
                 WHITE
             };
             let m = measure_text_cn(label, 12.0);
-            draw_text_cn(label, rect.x + (rect.w - m.width) / 2.0, rect.y + 15.0, 12.0, color);
+            draw_text_cn(
+                label,
+                rect.x + (rect.w - m.width) / 2.0,
+                rect.y + 15.0,
+                12.0,
+                color,
+            );
 
             if hover && left_clicked {
                 self.report_type = *t;
@@ -281,8 +311,21 @@ impl ReportDialogHybrid {
         let msg_x = px + Self::PADDING;
         let msg_y = py + Self::MSG_Y;
         let msg_rect = Rect::new(msg_x, msg_y, Self::MSG_W, Self::MSG_H);
-        draw_rectangle(msg_rect.x, msg_rect.y, msg_rect.w, msg_rect.h, Color::from_rgba(15, 15, 25, 255));
-        draw_rectangle_lines(msg_rect.x, msg_rect.y, msg_rect.w, msg_rect.h, 1.0, Color::from_rgba(80, 80, 100, 255));
+        draw_rectangle(
+            msg_rect.x,
+            msg_rect.y,
+            msg_rect.w,
+            msg_rect.h,
+            Color::from_rgba(15, 15, 25, 255),
+        );
+        draw_rectangle_lines(
+            msg_rect.x,
+            msg_rect.y,
+            msg_rect.w,
+            msg_rect.h,
+            1.0,
+            Color::from_rgba(80, 80, 100, 255),
+        );
 
         // 按宽度折行显示（模拟多行）
         let font_size = 13.0; // 对齐 C# 8F 字体的视觉密度
@@ -352,7 +395,14 @@ impl ReportDialogHybrid {
             Color::from_rgba(50, 90, 45, 255)
         };
         draw_rectangle(send_rect.x, send_rect.y, send_rect.w, send_rect.h, send_bg);
-        draw_rectangle_lines(send_rect.x, send_rect.y, send_rect.w, send_rect.h, 1.0, Color::from_rgba(90, 90, 110, 255));
+        draw_rectangle_lines(
+            send_rect.x,
+            send_rect.y,
+            send_rect.w,
+            send_rect.h,
+            1.0,
+            Color::from_rgba(90, 90, 110, 255),
+        );
 
         let send_color = if can_send {
             WHITE

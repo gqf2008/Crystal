@@ -23,7 +23,9 @@ impl PacketHandler for UiEventsHandler {
                     });
                     tracing::debug!("🔊 PlaySound received id={}", packet.sound_id);
                 } else {
-                    events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                    events.push(NetworkEvent::UnhandledPacket {
+                        opcode: header.opcode,
+                    });
                 }
             }
 
@@ -41,7 +43,9 @@ impl PacketHandler for UiEventsHandler {
                         packet.riding_mount
                     );
                 } else {
-                    events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                    events.push(NetworkEvent::UnhandledPacket {
+                        opcode: header.opcode,
+                    });
                 }
             }
 
@@ -56,9 +60,15 @@ impl PacketHandler for UiEventsHandler {
                         timer_id: packet.timer_id as u8,
                         seconds: packet.seconds as u32,
                     });
-                    tracing::debug!("⏱️ SetTimer: id={} seconds={}", packet.timer_id, packet.seconds);
+                    tracing::debug!(
+                        "⏱️ SetTimer: id={} seconds={}",
+                        packet.timer_id,
+                        packet.seconds
+                    );
                 } else {
-                    events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                    events.push(NetworkEvent::UnhandledPacket {
+                        opcode: header.opcode,
+                    });
                 }
             }
 
@@ -70,7 +80,9 @@ impl PacketHandler for UiEventsHandler {
                     });
                     tracing::debug!("⏰ TimerExpired: id={}", packet.timer_id);
                 } else {
-                    events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                    events.push(NetworkEvent::UnhandledPacket {
+                        opcode: header.opcode,
+                    });
                 }
             }
 
@@ -83,7 +95,9 @@ impl PacketHandler for UiEventsHandler {
                     });
                     tracing::debug!("📢 NoticeUpdated: {} notices", packet.notices.len());
                 } else {
-                    events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                    events.push(NetworkEvent::UnhandledPacket {
+                        opcode: header.opcode,
+                    });
                 }
             }
 
@@ -95,7 +109,9 @@ impl PacketHandler for UiEventsHandler {
                     });
                     tracing::debug!("🎲 RollReceived: result={}", packet.result);
                 } else {
-                    events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                    events.push(NetworkEvent::UnhandledPacket {
+                        opcode: header.opcode,
+                    });
                 }
             }
 
@@ -107,7 +123,9 @@ impl PacketHandler for UiEventsHandler {
                     });
                     tracing::debug!("🧭 CompassUpdated: location={:?}", packet.location);
                 } else {
-                    events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                    events.push(NetworkEvent::UnhandledPacket {
+                        opcode: header.opcode,
+                    });
                 }
             }
 
@@ -119,7 +137,9 @@ impl PacketHandler for UiEventsHandler {
                     });
                     tracing::debug!("🌐 BrowserOpened: {}", packet.url);
                 } else {
-                    events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                    events.push(NetworkEvent::UnhandledPacket {
+                        opcode: header.opcode,
+                    });
                 }
             }
 
@@ -130,9 +150,14 @@ impl PacketHandler for UiEventsHandler {
                         state: packet.fishing_progress as u8,
                         success: packet.fishing_success,
                     });
-                    tracing::debug!("🎣 FishingStatusUpdated: progress={}", packet.fishing_progress);
+                    tracing::debug!(
+                        "🎣 FishingStatusUpdated: progress={}",
+                        packet.fishing_progress
+                    );
                 } else {
-                    events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                    events.push(NetworkEvent::UnhandledPacket {
+                        opcode: header.opcode,
+                    });
                 }
             }
 
@@ -140,10 +165,14 @@ impl PacketHandler for UiEventsHandler {
             x if x == ServerPacketIds::Rankings as u16 => {
                 if let Ok(packet) = server::Rankings::read_body(&mut cursor) {
                     let count = packet.rankings.len();
-                    events.push(NetworkEvent::RankingsReceived { rankings: packet.rankings });
+                    events.push(NetworkEvent::RankingsReceived {
+                        rankings: packet.rankings,
+                    });
                     tracing::debug!("🏆 RankingsReceived: {} entries", count);
                 } else {
-                    events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                    events.push(NetworkEvent::UnhandledPacket {
+                        opcode: header.opcode,
+                    });
                 }
             }
 
@@ -158,7 +187,9 @@ impl PacketHandler for UiEventsHandler {
                     });
                     tracing::debug!("🛒 GameShopInfoReceived: {} items", item_count);
                 } else {
-                    events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                    events.push(NetworkEvent::UnhandledPacket {
+                        opcode: header.opcode,
+                    });
                 }
             }
 
@@ -169,15 +200,23 @@ impl PacketHandler for UiEventsHandler {
                         item_index: packet.item_index,
                         stock: packet.stock,
                     });
-                    tracing::debug!("📦 GameShopStockReceived: idx={} stock={}", packet.item_index, packet.stock);
+                    tracing::debug!(
+                        "📦 GameShopStockReceived: idx={} stock={}",
+                        packet.item_index,
+                        packet.stock
+                    );
                 } else {
-                    events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                    events.push(NetworkEvent::UnhandledPacket {
+                        opcode: header.opcode,
+                    });
                 }
             }
 
             _ => {
                 tracing::debug!("⚠️ UiEventsHandler: Unknown opcode {:04X}", header.opcode);
-                events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                events.push(NetworkEvent::UnhandledPacket {
+                    opcode: header.opcode,
+                });
             }
         }
 

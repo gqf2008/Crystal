@@ -230,7 +230,13 @@ impl AmountBoxHybrid {
         if let Some(bg) = self.bg_texture.as_ref() {
             draw_texture(bg, rect.x, rect.y, WHITE);
         } else {
-            draw_rectangle(rect.x, rect.y, rect.w, rect.h, Color::new(0.0, 0.0, 0.0, 0.75));
+            draw_rectangle(
+                rect.x,
+                rect.y,
+                rect.w,
+                rect.h,
+                Color::new(0.0, 0.0, 0.0, 0.75),
+            );
         }
 
         // 标题
@@ -250,7 +256,8 @@ impl AmountBoxHybrid {
             self.close_btn.size.y,
         );
         let close_state = ButtonState::from_mouse(close_rect, mouse_pos);
-        self.close_btn.draw(vec2(close_rect.x, close_rect.y), close_state);
+        self.close_btn
+            .draw(vec2(close_rect.x, close_rect.y), close_state);
         if ButtonState::is_clicked(close_rect, mouse_pos) {
             self.hide();
             return AmountBoxResult::Cancel;
@@ -290,7 +297,14 @@ impl AmountBoxHybrid {
             input_rect.h,
             Color::new(0.0, 0.0, 0.0, 0.35),
         );
-        draw_rectangle_lines(input_rect.x, input_rect.y, input_rect.w, input_rect.h, 1.0, border);
+        draw_rectangle_lines(
+            input_rect.x,
+            input_rect.y,
+            input_rect.w,
+            input_rect.h,
+            1.0,
+            border,
+        );
         draw_text_cn(
             &self.amount_text,
             input_rect.x + 6.0,
@@ -323,7 +337,9 @@ impl AmountBoxHybrid {
         );
         let ok_state = ButtonState::from_mouse(ok_rect, mouse_pos);
         self.ok_btn.draw(vec2(ok_rect.x, ok_rect.y), ok_state);
-        if ok_visible && (ButtonState::is_clicked(ok_rect, mouse_pos) || is_key_pressed(KeyCode::Enter)) {
+        if ok_visible
+            && (ButtonState::is_clicked(ok_rect, mouse_pos) || is_key_pressed(KeyCode::Enter))
+        {
             self.hide();
             return AmountBoxResult::Ok(clamped_amount);
         }

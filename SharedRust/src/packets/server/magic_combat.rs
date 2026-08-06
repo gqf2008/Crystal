@@ -1,21 +1,21 @@
 // 魔法战斗相关的服务器数据包
 
+use super::super::base::Packet;
 use crate::data::stats::SharedResult;
 use crate::enums::{MirDirection, ServerPacketIds, Spell, SpellEffect};
-use super::super::base::Packet;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{Read, Write};
 
 /// 玩家施放魔法
 #[derive(Debug, Clone)]
 pub struct Magic {
-    pub spell: Spell,                       // 魔法类型
-    pub target_id: u32,                     // 目标 ID
-    pub target_x: i32,                      // 目标 X 坐标
-    pub target_y: i32,                      // 目标 Y 坐标
-    pub cast: bool,                         // 是否施放
-    pub level: u8,                          // 魔法等级
-    pub secondary_target_ids: Vec<u32>,     // 次要目标 ID 列表（多目标魔法）
+    pub spell: Spell,                   // 魔法类型
+    pub target_id: u32,                 // 目标 ID
+    pub target_x: i32,                  // 目标 X 坐标
+    pub target_y: i32,                  // 目标 Y 坐标
+    pub cast: bool,                     // 是否施放
+    pub level: u8,                      // 魔法等级
+    pub secondary_target_ids: Vec<u32>, // 次要目标 ID 列表（多目标魔法）
 }
 
 impl Packet for Magic {
@@ -116,19 +116,19 @@ impl Packet for MagicCast {
 /// 对象施放魔法（其他玩家或怪物）
 #[derive(Debug, Clone)]
 pub struct ObjectMagic {
-    pub object_id: u32,                     // 施放者 ID
-    pub location_x: i32,                    // 施放者位置 X
-    pub location_y: i32,                    // 施放者位置 Y
-    pub direction: MirDirection,            // 施放者朝向
+    pub object_id: u32,          // 施放者 ID
+    pub location_x: i32,         // 施放者位置 X
+    pub location_y: i32,         // 施放者位置 Y
+    pub direction: MirDirection, // 施放者朝向
 
-    pub spell: Spell,                       // 魔法类型
-    pub target_id: u32,                     // 目标 ID
-    pub target_x: i32,                      // 目标 X 坐标
-    pub target_y: i32,                      // 目标 Y 坐标
-    pub cast: bool,                         // 是否施放
-    pub level: u8,                          // 魔法等级
-    pub self_broadcast: bool,               // 是否广播给自己
-    pub secondary_target_ids: Vec<u32>,     // 次要目标 ID 列表
+    pub spell: Spell,                   // 魔法类型
+    pub target_id: u32,                 // 目标 ID
+    pub target_x: i32,                  // 目标 X 坐标
+    pub target_y: i32,                  // 目标 Y 坐标
+    pub cast: bool,                     // 是否施放
+    pub level: u8,                      // 魔法等级
+    pub self_broadcast: bool,           // 是否广播给自己
+    pub secondary_target_ids: Vec<u32>, // 次要目标 ID 列表
 }
 
 impl Packet for ObjectMagic {
@@ -198,11 +198,11 @@ impl Packet for ObjectMagic {
 /// 对象特效
 #[derive(Debug, Clone)]
 pub struct ObjectEffect {
-    pub object_id: u32,   // 对象 ID
+    pub object_id: u32,      // 对象 ID
     pub effect: SpellEffect, // 特效类型
-    pub effect_type: u32, // 特效类型编号
-    pub delay_time: u32,  // 延迟时间
-    pub time: u32,        // 持续时间
+    pub effect_type: u32,    // 特效类型编号
+    pub delay_time: u32,     // 延迟时间
+    pub time: u32,           // 持续时间
 }
 
 impl Packet for ObjectEffect {
@@ -236,9 +236,9 @@ impl Packet for ObjectEffect {
 /// 对象投射物（箭矢、火球等）
 #[derive(Debug, Clone)]
 pub struct ObjectProjectile {
-    pub spell: Spell,      // 魔法类型
-    pub source: u32,       // 来源对象 ID
-    pub destination: u32,  // 目标对象 ID
+    pub spell: Spell,     // 魔法类型
+    pub source: u32,      // 来源对象 ID
+    pub destination: u32, // 目标对象 ID
 }
 
 impl Packet for ObjectProjectile {
@@ -266,10 +266,10 @@ impl Packet for ObjectProjectile {
 /// 对象魔法效果（buff/debuff显示）
 #[derive(Debug, Clone)]
 pub struct ObjectSpell {
-    pub object_id: u32, // 对象 ID
+    pub object_id: u32,  // 对象 ID
     pub location_x: i32, // 位置 X
     pub location_y: i32, // 位置 Y
-    pub spell: Spell,   // 魔法类型
+    pub spell: Spell,    // 魔法类型
 }
 
 impl Packet for ObjectSpell {

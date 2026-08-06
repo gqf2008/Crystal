@@ -15,7 +15,10 @@ impl LogicSystem for PositionInterpolationSystem {
         let mut done: Vec<hecs::Entity> = Vec::new();
 
         for eref in ctx.world.iter() {
-            let (Some(mut pos), Some(interp)) = (eref.get::<&mut Position>(), eref.get::<&PositionInterpolation>()) else {
+            let (Some(mut pos), Some(interp)) = (
+                eref.get::<&mut Position>(),
+                eref.get::<&PositionInterpolation>(),
+            ) else {
                 continue;
             };
             let duration = interp.duration.max(0.0001) as f64;

@@ -11,10 +11,10 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
+use super::native_ui_utils::DragHelper;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
-use super::native_ui_utils::DragHelper;
+use macroquad::prelude::*;
 
 /// 行会成员
 #[derive(Debug, Clone)]
@@ -67,9 +67,16 @@ pub enum GuildDialogAction {
     None,
     LeaveGuild,
     EditNotice(String),
-    EditMemberRank { name: String, rank: String },
+    EditMemberRank {
+        name: String,
+        rank: String,
+    },
     RequestGuildInfo,
-    ViewMemberDetail { name: String, rank: String, online: bool },
+    ViewMemberDetail {
+        name: String,
+        rank: String,
+        online: bool,
+    },
     RequestGuildWar,
 }
 
@@ -178,7 +185,9 @@ impl GuildDialogHybrid {
             m.rank = rank;
             m.online = online;
         } else {
-            self.guild_info.members.push(GuildMember { name, rank, online });
+            self.guild_info
+                .members
+                .push(GuildMember { name, rank, online });
         }
         // PR #1147: 增量更新时也同步 count (added/removed/updated)
         self.guild_info.member_count = self.count_members(&self.guild_info.members);
@@ -191,11 +200,20 @@ impl GuildDialogHybrid {
 
     /// 更新行会仓库物品
     pub fn update_storage_item(&mut self, name: String, quantity: i32, slot: i32) {
-        if let Some(item) = self.guild_info.storage_items.iter_mut().find(|i| i.slot == slot) {
+        if let Some(item) = self
+            .guild_info
+            .storage_items
+            .iter_mut()
+            .find(|i| i.slot == slot)
+        {
             item.name = name;
             item.quantity = quantity;
         } else {
-            self.guild_info.storage_items.push(GuildStorageItem { name, quantity, slot });
+            self.guild_info.storage_items.push(GuildStorageItem {
+                name,
+                quantity,
+                slot,
+            });
         }
     }
 
@@ -306,7 +324,13 @@ impl GuildDialogHybrid {
         let start_x = self.position.x + 15.0;
 
         let tabs = ["行会信息", "成员列表", "行会公告", "行会仓库", "行会战"];
-        let tab_kinds = [GuildTab::Info, GuildTab::Members, GuildTab::Notice, GuildTab::Storage, GuildTab::War];
+        let tab_kinds = [
+            GuildTab::Info,
+            GuildTab::Members,
+            GuildTab::Notice,
+            GuildTab::Storage,
+            GuildTab::War,
+        ];
 
         for (i, (label, kind)) in tabs.iter().zip(tab_kinds.iter()).enumerate() {
             let tab_x = start_x + i as f32 * (tab_w + tab_spacing);
@@ -322,7 +346,14 @@ impl GuildDialogHybrid {
                 Color::from_rgba(40, 45, 55, 200)
             };
             draw_rectangle(tab_x, tab_y, tab_w, tab_h, tab_color);
-            draw_rectangle_lines(tab_x, tab_y, tab_w, tab_h, 1.0, Color::from_rgba(100, 100, 120, 255));
+            draw_rectangle_lines(
+                tab_x,
+                tab_y,
+                tab_w,
+                tab_h,
+                1.0,
+                Color::from_rgba(100, 100, 120, 255),
+            );
 
             draw_text_cn(label, tab_x + 12.0, tab_y + 15.0, 11.0, WHITE);
 
@@ -337,12 +368,33 @@ impl GuildDialogHybrid {
         let content_x = self.position.x + 15.0;
         let line_h = 22.0;
 
-        draw_text_cn("行会名称", content_x, content_y, 12.0, Color::from_rgba(200, 200, 200, 255));
-        draw_text_cn(&self.guild_info.name, content_x + 80.0, content_y, 12.0, WHITE);
+        draw_text_cn(
+            "行会名称",
+            content_x,
+            content_y,
+            12.0,
+            Color::from_rgba(200, 200, 200, 255),
+        );
+        draw_text_cn(
+            &self.guild_info.name,
+            content_x + 80.0,
+            content_y,
+            12.0,
+            WHITE,
+        );
 
         let y2 = content_y + line_h;
-        draw_text_cn("成员数量", content_x, y2, 12.0, Color::from_rgba(200, 200, 200, 255));
-        let count_text = format!("{}/{}", self.guild_info.member_count, self.guild_info.max_members);
+        draw_text_cn(
+            "成员数量",
+            content_x,
+            y2,
+            12.0,
+            Color::from_rgba(200, 200, 200, 255),
+        );
+        let count_text = format!(
+            "{}/{}",
+            self.guild_info.member_count, self.guild_info.max_members
+        );
         draw_text_cn(&count_text, content_x + 80.0, y2, 12.0, WHITE);
     }
 
@@ -392,10 +444,22 @@ impl GuildDialogHybrid {
 
                 // 名称
                 let name_color = if member.online { WHITE } else { GRAY };
-                draw_text_cn(&member.name, list_x + 25.0, item_rect.y + 14.0, 12.0, name_color);
+                draw_text_cn(
+                    &member.name,
+                    list_x + 25.0,
+                    item_rect.y + 14.0,
+                    12.0,
+                    name_color,
+                );
 
                 // 职位
-                draw_text_cn(&member.rank, list_x + 150.0, item_rect.y + 14.0, 11.0, Color::from_rgba(200, 180, 100, 255));
+                draw_text_cn(
+                    &member.rank,
+                    list_x + 150.0,
+                    item_rect.y + 14.0,
+                    11.0,
+                    Color::from_rgba(200, 180, 100, 255),
+                );
 
                 if is_hovered && is_mouse_button_pressed(MouseButton::Left) {
                     let now = get_time();
@@ -443,7 +507,8 @@ impl GuildDialogHybrid {
         // 简单多行文本渲染（按换行符分割）
         for (i, line) in self.guild_info.notice.lines().enumerate() {
             let y = content_y + i as f32 * line_h;
-            let max_lines = ((self.position.y + Self::BUTTON_Y - 10.0 - content_y) / line_h) as usize;
+            let max_lines =
+                ((self.position.y + Self::BUTTON_Y - 10.0 - content_y) / line_h) as usize;
             if i >= max_lines {
                 break;
             }
@@ -457,14 +522,32 @@ impl GuildDialogHybrid {
         let line_h = 22.0;
 
         // 行会金币
-        draw_text_cn("行会金币:", content_x, content_y, 12.0, Color::from_rgba(200, 200, 200, 255));
-        draw_text_cn(&self.guild_info.storage_gold.to_string(), content_x + 80.0, content_y, 12.0, Color::from_rgba(255, 215, 0, 255));
+        draw_text_cn(
+            "行会金币:",
+            content_x,
+            content_y,
+            12.0,
+            Color::from_rgba(200, 200, 200, 255),
+        );
+        draw_text_cn(
+            &self.guild_info.storage_gold.to_string(),
+            content_x + 80.0,
+            content_y,
+            12.0,
+            Color::from_rgba(255, 215, 0, 255),
+        );
 
         // 仓库物品列表
         let list_top = content_y + line_h + 5.0;
         let list_bottom = self.position.y + Self::BUTTON_Y - 10.0;
 
-        draw_text_cn("仓库物品", content_x, list_top, 12.0, Color::from_rgba(200, 200, 200, 255));
+        draw_text_cn(
+            "仓库物品",
+            content_x,
+            list_top,
+            12.0,
+            Color::from_rgba(200, 200, 200, 255),
+        );
 
         if self.guild_info.storage_items.is_empty() {
             draw_text_cn("暂无物品", content_x + 10.0, list_top + 25.0, 12.0, GRAY);
@@ -486,7 +569,13 @@ impl GuildDialogHybrid {
         let content_x = self.position.x + 15.0;
         let line_h = 22.0;
 
-        draw_text_cn("行会战设置", content_x, content_y, 13.0, Color::from_rgba(255, 200, 100, 255));
+        draw_text_cn(
+            "行会战设置",
+            content_x,
+            content_y,
+            13.0,
+            Color::from_rgba(255, 200, 100, 255),
+        );
 
         let info_y = content_y + line_h;
         draw_text_cn("向其他行会发起战争", content_x, info_y, 11.0, GRAY);
@@ -509,7 +598,14 @@ impl GuildDialogHybrid {
             Color::from_rgba(140, 40, 40, 255)
         };
         draw_rectangle(btn_x, btn_y, btn_w, btn_h, btn_color);
-        draw_rectangle_lines(btn_x, btn_y, btn_w, btn_h, 1.0, Color::from_rgba(200, 100, 100, 255));
+        draw_rectangle_lines(
+            btn_x,
+            btn_y,
+            btn_w,
+            btn_h,
+            1.0,
+            Color::from_rgba(200, 100, 100, 255),
+        );
         draw_text_cn("请求行会战", btn_x + 15.0, btn_y + 18.0, 12.0, WHITE);
 
         if is_hovered && is_mouse_button_pressed(MouseButton::Left) {
@@ -547,7 +643,14 @@ impl GuildDialogHybrid {
                 Color::from_rgba(60, 70, 80, 255)
             };
             draw_rectangle(btn_x, btn_y, btn_w, btn_h, btn_color);
-            draw_rectangle_lines(btn_x, btn_y, btn_w, btn_h, 1.0, Color::from_rgba(100, 100, 120, 255));
+            draw_rectangle_lines(
+                btn_x,
+                btn_y,
+                btn_w,
+                btn_h,
+                1.0,
+                Color::from_rgba(100, 100, 120, 255),
+            );
 
             draw_text_cn(label, btn_x + 10.0, btn_y + 16.0, 12.0, WHITE);
 

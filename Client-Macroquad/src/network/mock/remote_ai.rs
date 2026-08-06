@@ -1,10 +1,16 @@
 use super::*;
 
 impl MockNetwork {
-    pub(super) fn tick_remote_players_ai(response_tx: &Sender<NetworkEvent>, state: &mut MockWorldState) {
+    pub(super) fn tick_remote_players_ai(
+        response_tx: &Sender<NetworkEvent>,
+        state: &mut MockWorldState,
+    ) {
         static REMOTE_AI_DIAG_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
         let _ = REMOTE_AI_DIAG_ONCE.set(()).map(|_| {
-            println!("[MOCK][AI] Multi-remote AI enabled (count={})", state.remote_players.len());
+            println!(
+                "[MOCK][AI] Multi-remote AI enabled (count={})",
+                state.remote_players.len()
+            );
         });
 
         // 行为树风格（方案 A）：用 stateless BT 组织决策，而不是显式“状态机大 switch”。
@@ -67,10 +73,12 @@ impl MockNetwork {
                 if x < 0 || y < 0 {
                     return false;
                 }
-                if self.map_width > 0 && self.map_height > 0
-                    && (x >= self.map_width || y >= self.map_height) {
-                        return false;
-                    }
+                if self.map_width > 0
+                    && self.map_height > 0
+                    && (x >= self.map_width || y >= self.map_height)
+                {
+                    return false;
+                }
                 if self.map_walkable.is_empty() || self.map_width <= 0 || self.map_height <= 0 {
                     // 未缓存碰撞：退化为“全部可走”
                     return true;
@@ -132,11 +140,7 @@ impl MockNetwork {
             }
 
             fn eval_best_zone(&mut self) {
-                if self
-                    .rp
-                    .last_zone_eval
-                    .elapsed()
-                    <= Duration::from_millis(self.cfg.zone_eval_ms)
+                if self.rp.last_zone_eval.elapsed() <= Duration::from_millis(self.cfg.zone_eval_ms)
                 {
                     return;
                 }
@@ -355,12 +359,7 @@ impl MockNetwork {
         fn act_rest_gate(ctx: &mut RemoteBtCtx) -> BtStatus {
             // 正在休息：到点后恢复 Seek，并允许继续决策
             if ctx.rp.mode == RemoteAiMode::Rest {
-                if ctx
-                    .rp
-                    .last_mode_change
-                    .elapsed()
-                    > Duration::from_millis(ctx.cfg.rest_ms)
-                {
+                if ctx.rp.last_mode_change.elapsed() > Duration::from_millis(ctx.cfg.rest_ms) {
                     ctx.rp.mode = RemoteAiMode::Seek;
                     ctx.rp.last_mode_change = ctx.now;
                     return BtStatus::Failure;
@@ -414,12 +413,7 @@ impl MockNetwork {
 
             ctx.rp.mode = RemoteAiMode::Fight;
 
-            if ctx
-                .rp
-                .last_attack
-                .elapsed()
-                < Duration::from_millis(ctx.cfg.attack_cooldown_ms)
-            {
+            if ctx.rp.last_attack.elapsed() < Duration::from_millis(ctx.cfg.attack_cooldown_ms) {
                 return BtStatus::Running;
             }
             ctx.rp.last_attack = ctx.now;
@@ -469,8 +463,16 @@ impl MockNetwork {
             if dead {
                 let xp = ctx.monsters.get(&tid).map(|mm| mm.xp_reward).unwrap_or(10);
 
-                let _ = ctx.response_tx.send(NetworkEvent::ObjectDied { object_id: tid, location_x: 0, location_y: 0, direction: 0, death_type: 0 });
-                let _ = ctx.response_tx.send(NetworkEvent::ObjectRemove { object_id: tid });
+                let _ = ctx.response_tx.send(NetworkEvent::ObjectDied {
+                    object_id: tid,
+                    location_x: 0,
+                    location_y: 0,
+                    direction: 0,
+                    death_type: 0,
+                });
+                let _ = ctx
+                    .response_tx
+                    .send(NetworkEvent::ObjectRemove { object_id: tid });
                 ctx.monsters.remove(&tid);
                 ctx.rp.target_monster_id = None;
                 ctx.rp.mode = RemoteAiMode::Seek;
@@ -485,7 +487,10 @@ impl MockNetwork {
                 }
 
                 let _ = ctx.response_tx.send(NetworkEvent::SystemMessage {
-                    message: format!("(MOCK) {} killed monster {} (+{} exp)", ctx.rp.name, tid, xp),
+                    message: format!(
+                        "(MOCK) {} killed monster {} (+{} exp)",
+                        ctx.rp.name, tid, xp
+                    ),
                 });
                 if leveled {
                     MockNetwork::send_object_player_update(ctx.response_tx, ctx.rp);
@@ -577,12 +582,7 @@ impl MockNetwork {
         }
 
         fn act_roam(ctx: &mut RemoteBtCtx) -> BtStatus {
-            if ctx
-                .rp
-                .last_roam_pick
-                .elapsed()
-                > Duration::from_millis(ctx.cfg.roam_pick_ms)
-            {
+            if ctx.rp.last_roam_pick.elapsed() > Duration::from_millis(ctx.cfg.roam_pick_ms) {
                 ctx.rp.last_roam_pick = ctx.now;
                 if let Some(z) = ctx.zones.get(ctx.rp.zone_idx) {
                     let mut picked: Option<(i32, i32)> = None;
@@ -613,7 +613,8 @@ impl MockNetwork {
         let (map_w_eff, map_h_eff) = MockNetwork::effective_map_dims(state);
 
         // 预构建占位集合：避免 3000 人时每步 O(n) 扫描导致 O(n^2)
-        let mut occupied_tiles: HashSet<(i32, i32)> = state.remote_players.iter().map(|p| p.grid).collect();
+        let mut occupied_tiles: HashSet<(i32, i32)> =
+            state.remote_players.iter().map(|p| p.grid).collect();
         occupied_tiles.insert(state.player_grid);
         for m in state.monsters.values() {
             if m.hp > 0 {
@@ -630,11 +631,7 @@ impl MockNetwork {
                 break;
             };
 
-            if rp
-                .last_tick
-                .elapsed()
-                < Duration::from_millis(cfg.ai_tick_ms)
-            {
+            if rp.last_tick.elapsed() < Duration::from_millis(cfg.ai_tick_ms) {
                 continue;
             }
             rp.last_tick = now;

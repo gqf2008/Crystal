@@ -2,13 +2,13 @@
 //!
 //! Packets related to login, account creation, and authentication.
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::SelectInfo;
-use crate::data::stats::SharedResult;
-use crate::binary::{read_dotnet_string, write_dotnet_string};
-use crate::enums::ServerPacketIds;
 use super::super::base::Packet;
+use crate::binary::{read_dotnet_string, write_dotnet_string};
+use crate::data::stats::SharedResult;
+use crate::enums::ServerPacketIds;
+use crate::SelectInfo;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// NewAccount packet - response to account creation request
 #[derive(Debug, Clone)]
@@ -79,7 +79,10 @@ impl Packet for ChangePasswordBanned {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let reason = read_dotnet_string(reader)?;
         let expiry_date = reader.read_i64::<LittleEndian>()?;
-        Ok(Self { reason, expiry_date })
+        Ok(Self {
+            reason,
+            expiry_date,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -127,7 +130,10 @@ impl Packet for LoginBanned {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let reason = read_dotnet_string(reader)?;
         let expiry_date = reader.read_i64::<LittleEndian>()?;
-        Ok(Self { reason, expiry_date })
+        Ok(Self {
+            reason,
+            expiry_date,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -143,28 +149,27 @@ pub struct LoginSuccess {
     pub characters: Vec<SelectInfo>,
 }
 
-
 impl Packet for LoginSuccess {
     const OPCODE: i16 = ServerPacketIds::LoginSuccess as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let count = reader.read_i32::<LittleEndian>()?;
         let mut characters = Vec::with_capacity(count as usize);
-        
+
         for _ in 0..count {
             characters.push(SelectInfo::read_from(reader)?);
         }
-        
+
         Ok(Self { characters })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_i32::<LittleEndian>(self.characters.len() as i32)?;
-        
+
         for character in &self.characters {
             character.write_to(writer)?;
         }
-        
+
         Ok(())
     }
 }
@@ -174,7 +179,6 @@ impl Packet for LoginSuccess {
 pub struct StartGame {
     pub result: u8,
     pub resolution: i32,
-
     // C# 参考: Shared/ServerPackets.cs::StartGame
     // Result:
     // 0: Disabled.
@@ -213,7 +217,10 @@ impl Packet for StartGameBanned {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let reason = read_dotnet_string(reader)?;
         let expiry_date = reader.read_i64::<LittleEndian>()?;
-        Ok(Self { reason, expiry_date })
+        Ok(Self {
+            reason,
+            expiry_date,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {

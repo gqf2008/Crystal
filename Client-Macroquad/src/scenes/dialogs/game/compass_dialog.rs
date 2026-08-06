@@ -9,21 +9,21 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
-use crate::resources::LibraryName;
 use super::native_ui_utils::DragHelper;
+use crate::resources::LibraryName;
+use macroquad::prelude::*;
 
 /// 8 个方向
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompassDirection {
-    East,       // 东
-    SouthEast,  // 东南
-    South,      // 南
-    SouthWest,  // 西南
-    West,       // 西
-    NorthWest,  // 西北
-    North,      // 北
-    NorthEast,  // 东北
+    East,      // 东
+    SouthEast, // 东南
+    South,     // 南
+    SouthWest, // 西南
+    West,      // 西
+    NorthWest, // 西北
+    North,     // 北
+    NorthEast, // 东北
 }
 
 impl CompassDirection {
@@ -60,8 +60,11 @@ impl CompassDirection {
         // atan2 返回 -PI 到 PI，转换为 0-7 的 8 方向索引
         // 0=东, 顺时针
         let angle = (dy as f32).atan2(dx as f32); // -PI..PI
-        let mut sector = ((angle + std::f32::consts::PI) / (std::f32::consts::PI / 4.0)).round() as i32 % 8;
-        if sector < 0 { sector += 8; }
+        let mut sector =
+            ((angle + std::f32::consts::PI) / (std::f32::consts::PI / 4.0)).round() as i32 % 8;
+        if sector < 0 {
+            sector += 8;
+        }
         Self::from_u8(sector as u8)
     }
 }
@@ -183,8 +186,19 @@ impl CompassDialogHybrid {
             );
         } else {
             // 绘制罗盘圆形背景
-            draw_circle(center_x, center_y, radius, Color::from_rgba(40, 40, 50, 220));
-            draw_circle_lines(center_x, center_y, radius, 2.0, Color::from_rgba(100, 100, 120, 255));
+            draw_circle(
+                center_x,
+                center_y,
+                radius,
+                Color::from_rgba(40, 40, 50, 220),
+            );
+            draw_circle_lines(
+                center_x,
+                center_y,
+                radius,
+                2.0,
+                Color::from_rgba(100, 100, 120, 255),
+            );
         }
 
         // 方向文字
@@ -204,7 +218,14 @@ impl CompassDialogHybrid {
         let needle_len = radius * 0.7;
         let needle_x = center_x + angle.cos() * needle_len;
         let needle_y = center_y + angle.sin() * needle_len;
-        draw_line(center_x, center_y, needle_x, needle_y, 2.5, Color::from_rgba(255, 80, 80, 255));
+        draw_line(
+            center_x,
+            center_y,
+            needle_x,
+            needle_y,
+            2.5,
+            Color::from_rgba(255, 80, 80, 255),
+        );
 
         // 方向标签
         crate::ui::text_renderer::draw_text_cn(
@@ -217,7 +238,13 @@ impl CompassDialogHybrid {
 
         // 悬停高亮
         if is_hovered {
-            draw_circle_lines(center_x, center_y, radius, 2.5, Color::from_rgba(200, 200, 100, 255));
+            draw_circle_lines(
+                center_x,
+                center_y,
+                radius,
+                2.5,
+                Color::from_rgba(200, 200, 100, 255),
+            );
         }
 
         // 点击切换

@@ -1,21 +1,19 @@
 //! Chat Packets (Client → Server)
 
-use std::io::{Read, Write};
-use byteorder::{ReadBytesExt, WriteBytesExt};
+use super::super::base::Packet;
 use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::data::item::ChatItem;
-use crate::enums::ClientPacketIds;
-use super::super::base::Packet;
 use crate::data::stats::SharedResult;
+use crate::enums::ClientPacketIds;
+use byteorder::{ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// Client sends a chat message
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Chat {
     pub message: String,
     pub linked_items: Vec<ChatItem>,
 }
-
 
 impl Packet for Chat {
     const OPCODE: i16 = ClientPacketIds::Chat as i16;
@@ -88,12 +86,10 @@ impl Packet for Inspect {
 }
 
 /// Client requests to observe another player
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Observe {
     pub name: String,
 }
-
 
 impl Packet for Observe {
     const OPCODE: i16 = ClientPacketIds::Observe as i16;

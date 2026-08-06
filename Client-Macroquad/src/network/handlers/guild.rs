@@ -1,8 +1,8 @@
 // Guild Handler - 公会相关数据包处理
 
-use mir2_shared::packets::{PacketHeader, Packet, server};
-use mir2_shared::enums::ServerPacketIds;
 use crate::network::handlers::{NetworkEvent, PacketHandler};
+use mir2_shared::enums::ServerPacketIds;
+use mir2_shared::packets::{server, Packet, PacketHeader};
 use std::io::Cursor;
 
 pub struct GuildHandler;
@@ -17,7 +17,7 @@ impl PacketHandler for GuildHandler {
             x if x == ServerPacketIds::GuildInvite as u16 => {
                 if let Ok(packet) = server::GuildInvite::read_body(&mut cursor) {
                     events.push(NetworkEvent::GuildInvite {
-                        inviter: String::new(),  // GuildInvite只有guild_name字段
+                        inviter: String::new(), // GuildInvite只有guild_name字段
                         guild_name: packet.guild_name.clone(),
                     });
                     tracing::info!("🏛️ Guild invite to join {}", packet.guild_name);
@@ -47,7 +47,14 @@ impl PacketHandler for GuildHandler {
                             my_options: packet.my_options,
                             my_rank_id: packet.my_rank_id,
                         });
-                        tracing::info!("🏛️ Guild status updated: {} ({}) level={} members={}/{}", packet.guild_name, packet.rank_name, packet.level, packet.member_count, packet.max_members);
+                        tracing::info!(
+                            "🏛️ Guild status updated: {} ({}) level={} members={}/{}",
+                            packet.guild_name,
+                            packet.rank_name,
+                            packet.level,
+                            packet.member_count,
+                            packet.max_members
+                        );
                     }
                 }
             }
@@ -70,7 +77,12 @@ impl PacketHandler for GuildHandler {
                         rank: packet.rank_index,
                         online,
                     });
-                    tracing::info!("🏛️ Guild member updated: {} (rank={}, online={})", packet.name, packet.rank_index, online);
+                    tracing::info!(
+                        "🏛️ Guild member updated: {} (rank={}, online={})",
+                        packet.name,
+                        packet.rank_index,
+                        online
+                    );
                 }
             }
 
@@ -112,14 +124,20 @@ impl PacketHandler for GuildHandler {
                         change_type: packet.change_type,
                         slot: packet.slot,
                     });
-                    tracing::info!("🏛️ Guild storage item changed: type={} slot={}", packet.change_type, packet.slot);
+                    tracing::info!(
+                        "🏛️ Guild storage item changed: type={} slot={}",
+                        packet.change_type,
+                        packet.slot
+                    );
                 }
             }
 
             // GuildStorageList
             x if x == ServerPacketIds::GuildStorageList as u16 => {
                 if let Ok(packet) = server::GuildStorageList::read_body(&mut cursor) {
-                    events.push(NetworkEvent::GuildStorageListReceived { items: packet.items });
+                    events.push(NetworkEvent::GuildStorageListReceived {
+                        items: packet.items,
+                    });
                     tracing::info!("🏛️ Guild storage list received");
                 }
             }
@@ -128,15 +146,22 @@ impl PacketHandler for GuildHandler {
             x if x == ServerPacketIds::GuildRequestWar as u16 => {
                 if let Ok(packet) = server::GuildRequestWar::read_body(&mut cursor) {
                     tracing::warn!("🏛️ Guild war requested by: {}", packet.guild_name);
-                    events.push(NetworkEvent::GuildWarRequested { guild_name: packet.guild_name.clone() });
+                    events.push(NetworkEvent::GuildWarRequested {
+                        guild_name: packet.guild_name.clone(),
+                    });
                 }
             }
 
             // GuildBuffList
             x if x == ServerPacketIds::GuildBuffList as u16 => {
                 if let Ok(packet) = server::GuildBuffList::read_body(&mut cursor) {
-                    events.push(NetworkEvent::GuildBuffListReceived { buff_ids: packet.active_buffs.clone() });
-                    tracing::info!("🏛️ Guild buff list received: {} buffs", packet.active_buffs.len());
+                    events.push(NetworkEvent::GuildBuffListReceived {
+                        buff_ids: packet.active_buffs.clone(),
+                    });
+                    tracing::info!(
+                        "🏛️ Guild buff list received: {} buffs",
+                        packet.active_buffs.len()
+                    );
                 }
             }
 
@@ -144,14 +169,18 @@ impl PacketHandler for GuildHandler {
             x if x == ServerPacketIds::GuildTerritoryPage as u16 => {
                 if let Ok(packet) = server::GuildTerritoryPage::read_body(&mut cursor) {
                     let count = packet.territories.len();
-                    events.push(NetworkEvent::GuildTerritoryPageReceived { territories: packet.territories });
+                    events.push(NetworkEvent::GuildTerritoryPageReceived {
+                        territories: packet.territories,
+                    });
                     tracing::info!("🏛️ Guild territory page received: {} territories", count);
                 }
             }
 
             _ => {
                 tracing::debug!("⚠️ GuildHandler: Unknown opcode {:04X}", header.opcode);
-                events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                events.push(NetworkEvent::UnhandledPacket {
+                    opcode: header.opcode,
+                });
             }
         }
 

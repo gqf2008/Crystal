@@ -48,7 +48,7 @@ pub struct DialogState {
 pub struct NpcDialogueSystem {
     /// 当前激活的对话
     active_dialogs: HashMap<hecs::Entity, DialogState>,
-    
+
     /// 对话内容缓存（NPC ID → 对话页面）
     dialog_cache: HashMap<u32, HashMap<u32, DialogPage>>,
 }
@@ -60,30 +60,34 @@ impl NpcDialogueSystem {
             dialog_cache: HashMap::new(),
         }
     }
-    
+
     /// 开始对话
     pub fn start_dialog(&mut self, player_entity: hecs::Entity, npc_id: u32) {
         tracing::info!("💬 开始与NPC对话: {}", npc_id);
-        
+
         let state = DialogState {
             npc_id,
             current_page: 0,
             is_open: true,
         };
-        
+
         self.active_dialogs.insert(player_entity, state);
     }
-    
+
     /// 选择对话选项
     pub fn select_option(&mut self, player_entity: hecs::Entity, option_index: u8) {
         if let Some(state) = self.active_dialogs.get_mut(&player_entity) {
             tracing::info!("📝 选择对话选项: {} (NPC: {})", option_index, state.npc_id);
-            
+
             // 查找对话内容
             if let Some(pages) = self.dialog_cache.get(&state.npc_id) {
                 if let Some(current_page) = pages.get(&state.current_page) {
                     // 查找选项
-                    if let Some(option) = current_page.options.iter().find(|o| o.index == option_index) {
+                    if let Some(option) = current_page
+                        .options
+                        .iter()
+                        .find(|o| o.index == option_index)
+                    {
                         if let Some(next_page) = option.next_page {
                             // 跳转到下一页
                             state.current_page = next_page;
@@ -96,22 +100,22 @@ impl NpcDialogueSystem {
             }
         }
     }
-    
+
     /// 关闭对话
     pub fn close_dialog(&mut self, player_entity: hecs::Entity) {
         if let Some(state) = self.active_dialogs.remove(&player_entity) {
             tracing::info!("❌ 关闭对话: NPC {}", state.npc_id);
         }
     }
-    
+
     /// 处理对话更新
     fn process_dialogs(&mut self, _world: &mut World) {
         // 清理已关闭的对话
         self.active_dialogs.retain(|_, state| state.is_open);
-        
+
         // 注：对话超时和脚本触发需等待脚本系统支持，当前通过服务器事件驱动
     }
-    
+
     /// 向后兼容的静态方法
     pub fn update(_world: &mut World, _delta_time: f32) {
         // 静态方法为空，实际逻辑在实例方法中
@@ -119,7 +123,6 @@ impl NpcDialogueSystem {
 }
 
 impl LogicSystem for NpcDialogueSystem {
-    
     fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
         self.process_dialogs(&mut ctx.world);
         Ok(())

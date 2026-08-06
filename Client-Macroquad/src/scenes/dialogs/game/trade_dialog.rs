@@ -11,10 +11,13 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
+use super::native_ui_utils::{
+    draw_cell_frame, draw_item_count, draw_item_icon, ButtonTextures, CellHighlight, CellStyle,
+    DragHelper, ItemDragState,
+};
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
-use super::native_ui_utils::{DragHelper, ButtonTextures, ItemDragState, CellHighlight, CellStyle, draw_cell_frame, draw_item_icon, draw_item_count};
+use macroquad::prelude::*;
 use tracing;
 
 /// 交易栏位物品
@@ -181,7 +184,9 @@ impl TradeDialogHybrid {
         self.their_items.clear();
         for item in items {
             let icon = item.info.as_ref().map(|info| info.shape as usize);
-            let name = item.info.as_ref()
+            let name = item
+                .info
+                .as_ref()
                 .map(|info| info.name.to_string())
                 .unwrap_or_else(|| "物品".to_string());
             self.their_items.push(TradeItemSlot {
@@ -224,7 +229,9 @@ impl TradeDialogHybrid {
     /// 添加自己的物品到交易栏
     pub fn add_my_item(&mut self, item: &mir2_shared::UserItem) {
         let icon = item.info.as_ref().map(|info| info.shape as usize);
-        let name = item.info.as_ref()
+        let name = item
+            .info
+            .as_ref()
             .map(|info| info.name.to_string())
             .unwrap_or_else(|| "物品".to_string());
         self.my_items.push(TradeItemSlot {
@@ -293,7 +300,11 @@ impl TradeDialogHybrid {
             self.size = vec2(texture.width as f32, texture.height as f32);
             if let Some(tex) = texture.image {
                 self.bg_texture = Some(tex);
-                tracing::debug!("💱 交易对话框背景 Title[22]: {}x{}", texture.width, texture.height);
+                tracing::debug!(
+                    "💱 交易对话框背景 Title[22]: {}x{}",
+                    texture.width,
+                    texture.height
+                );
             }
         }
 
@@ -315,8 +326,10 @@ impl TradeDialogHybrid {
         }
 
         // 确认/取消按钮 - Prguse[1960-1962] (使用菜单按钮样式)
-        self.confirm_btn = ButtonTextures::load_from_indices(LibraryName::Prguse, [1960, 1961, 1962]);
-        self.cancel_btn = ButtonTextures::load_from_indices(LibraryName::Prguse, [1960, 1961, 1962]);
+        self.confirm_btn =
+            ButtonTextures::load_from_indices(LibraryName::Prguse, [1960, 1961, 1962]);
+        self.cancel_btn =
+            ButtonTextures::load_from_indices(LibraryName::Prguse, [1960, 1961, 1962]);
 
         tracing::debug!("💱 交易对话框纹理加载完成");
     }
@@ -351,12 +364,16 @@ impl TradeDialogHybrid {
 
         // 检查拖拽释放：从交易栏移除
         if is_mouse_button_released(MouseButton::Left) {
-            if let (Some(_drag), Some(DragSource::MyTradeSlot(slot_idx))) = (&self.dragging_item, &self.drag_source) {
+            if let (Some(_drag), Some(DragSource::MyTradeSlot(slot_idx))) =
+                (&self.dragging_item, &self.drag_source)
+            {
                 let removed_idx = *slot_idx;
                 self.dragging_item = None;
                 self.drag_source = None;
                 self.my_confirmed = false;
-                return TradeAction::RemoveItem { slot_index: removed_idx };
+                return TradeAction::RemoveItem {
+                    slot_index: removed_idx,
+                };
             }
             self.dragging_item = None;
             self.drag_source = None;
@@ -425,26 +442,46 @@ impl TradeDialogHybrid {
 
         // 左侧面板（自己的）- 可点击移除
         self.draw_item_panel_slots(
-            left_x, top_y, panel_w, panel_h,
-            "我的", mouse_pos, mouse_down, mouse_just_pressed,
+            left_x,
+            top_y,
+            panel_w,
+            panel_h,
+            "我的",
+            mouse_pos,
+            mouse_down,
+            mouse_just_pressed,
             true, // 可移除
         );
 
         // 右侧面板（对方的）- 仅显示
         Self::draw_item_panel_slots_static(
-            right_x, top_y, panel_w, panel_h,
-            &self.partner_name, &self.their_items, mouse_pos,
+            right_x,
+            top_y,
+            panel_w,
+            panel_h,
+            &self.partner_name,
+            &self.their_items,
+            mouse_pos,
         );
 
         // 中间箭头
         let mid_x = self.position.x + self.size.x / 2.0;
-        draw_text_cn("→", mid_x - 5.0, top_y + panel_h / 2.0 - 5.0, 20.0, Color::from_rgba(200, 200, 200, 255));
+        draw_text_cn(
+            "→",
+            mid_x - 5.0,
+            top_y + panel_h / 2.0 - 5.0,
+            20.0,
+            Color::from_rgba(200, 200, 200, 255),
+        );
     }
 
     /// 绘制物品格子槽位（支持交互）
     fn draw_item_panel_slots(
         &mut self,
-        x: f32, y: f32, w: f32, h: f32,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
         title: &str,
         mouse_pos: Vec2,
         mouse_down: bool,
@@ -456,7 +493,13 @@ impl TradeDialogHybrid {
         draw_rectangle_lines(x, y, w, h, 1.0, Color::from_rgba(100, 100, 100, 255));
 
         // 标题
-        draw_text_cn(title, x + 5.0, y + 12.0, 11.0, Color::from_rgba(200, 200, 200, 255));
+        draw_text_cn(
+            title,
+            x + 5.0,
+            y + 12.0,
+            11.0,
+            Color::from_rgba(200, 200, 200, 255),
+        );
 
         let slot_size = 32.0;
         let cols = 4;
@@ -525,19 +568,21 @@ impl TradeDialogHybrid {
             }
 
             // 点击/拖拽处理：从交易栏移除物品
-            if can_remove && has_item && is_hovered
-                && mouse_just_pressed {
-                    let icon_idx = self.my_items.get(i).and_then(|s| s.icon_index).unwrap_or(0);
-                    let count = self.my_items.get(i).map(|s| s.count).unwrap_or(1);
-                    self.dragging_item = Some(ItemDragState::new(i, icon_idx, count));
-                    self.drag_source = Some(DragSource::MyTradeSlot(i));
-                }
+            if can_remove && has_item && is_hovered && mouse_just_pressed {
+                let icon_idx = self.my_items.get(i).and_then(|s| s.icon_index).unwrap_or(0);
+                let count = self.my_items.get(i).map(|s| s.count).unwrap_or(1);
+                self.dragging_item = Some(ItemDragState::new(i, icon_idx, count));
+                self.drag_source = Some(DragSource::MyTradeSlot(i));
+            }
         }
     }
 
     /// 绘制物品格子槽位（静态，仅显示）
     fn draw_item_panel_slots_static(
-        x: f32, y: f32, w: f32, h: f32,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
         title: &str,
         items: &[TradeItemSlot],
         mouse_pos: Vec2,
@@ -547,7 +592,13 @@ impl TradeDialogHybrid {
         draw_rectangle_lines(x, y, w, h, 1.0, Color::from_rgba(100, 100, 100, 255));
 
         // 标题
-        draw_text_cn(title, x + 5.0, y + 12.0, 11.0, Color::from_rgba(200, 200, 200, 255));
+        draw_text_cn(
+            title,
+            x + 5.0,
+            y + 12.0,
+            11.0,
+            Color::from_rgba(200, 200, 200, 255),
+        );
 
         let slot_size = 32.0;
         let cols = 4;
@@ -563,7 +614,11 @@ impl TradeDialogHybrid {
             let slot_rect = Rect::new(sx, sy, slot_size, slot_size);
 
             let is_hovered = slot_rect.contains(mouse_pos);
-            let highlight = if is_hovered { CellHighlight::Hovered } else { CellHighlight::None };
+            let highlight = if is_hovered {
+                CellHighlight::Hovered
+            } else {
+                CellHighlight::None
+            };
             draw_cell_frame(slot_rect, highlight, &style);
 
             if let Some(slot) = items.get(i) {
@@ -597,7 +652,13 @@ impl TradeDialogHybrid {
             }
             // 数量
             if drag.count > 1 {
-                draw_text_cn(&format!("x{}", drag.count), mx + 10.0, my + 5.0, 12.0, Color::from_rgba(255, 255, 100, 200));
+                draw_text_cn(
+                    &format!("x{}", drag.count),
+                    mx + 10.0,
+                    my + 5.0,
+                    12.0,
+                    Color::from_rgba(255, 255, 100, 200),
+                );
             }
         }
     }
@@ -618,16 +679,39 @@ impl TradeDialogHybrid {
         } else {
             Color::from_rgba(40, 40, 45, 255)
         };
-        draw_rectangle(gold_input_rect.x, gold_input_rect.y, gold_input_rect.w, gold_input_rect.h, gold_bg);
-        draw_rectangle_lines(gold_input_rect.x, gold_input_rect.y, gold_input_rect.w, gold_input_rect.h, 1.0, Color::from_rgba(120, 120, 120, 255));
+        draw_rectangle(
+            gold_input_rect.x,
+            gold_input_rect.y,
+            gold_input_rect.w,
+            gold_input_rect.h,
+            gold_bg,
+        );
+        draw_rectangle_lines(
+            gold_input_rect.x,
+            gold_input_rect.y,
+            gold_input_rect.w,
+            gold_input_rect.h,
+            1.0,
+            Color::from_rgba(120, 120, 120, 255),
+        );
 
         let gold_display = if self.editing_gold {
             &self.gold_input_text
         } else {
             &format!("{}", self.my_gold)
         };
-        let gold_text_color = if self.editing_gold { WHITE } else { Color::from_rgba(255, 215, 0, 255) };
-        draw_text_cn(gold_display, gold_input_rect.x + 5.0, gold_input_rect.y + 13.0, 11.0, gold_text_color);
+        let gold_text_color = if self.editing_gold {
+            WHITE
+        } else {
+            Color::from_rgba(255, 215, 0, 255)
+        };
+        draw_text_cn(
+            gold_display,
+            gold_input_rect.x + 5.0,
+            gold_input_rect.y + 13.0,
+            11.0,
+            gold_text_color,
+        );
 
         // 点击输入框激活
         if gold_input_rect.contains(mouse_pos) && is_mouse_button_pressed(MouseButton::Left) {
@@ -635,15 +719,30 @@ impl TradeDialogHybrid {
             if self.editing_gold {
                 self.gold_input_text = "0".to_string();
             }
-        } else if self.editing_gold && is_mouse_button_pressed(MouseButton::Left) && !gold_input_rect.contains(mouse_pos) {
+        } else if self.editing_gold
+            && is_mouse_button_pressed(MouseButton::Left)
+            && !gold_input_rect.contains(mouse_pos)
+        {
             self.editing_gold = false;
         }
 
         // 对方锁定状态
         if self.partner_locked {
-            draw_text_cn("已锁定", self.position.x + self.size.x / 2.0 - 15.0, bottom_y + 6.0, 12.0, Color::from_rgba(50, 200, 50, 255));
+            draw_text_cn(
+                "已锁定",
+                self.position.x + self.size.x / 2.0 - 15.0,
+                bottom_y + 6.0,
+                12.0,
+                Color::from_rgba(50, 200, 50, 255),
+            );
         } else {
-            draw_text_cn("未锁定", self.position.x + self.size.x / 2.0 - 15.0, bottom_y + 6.0, 12.0, Color::from_rgba(255, 100, 100, 255));
+            draw_text_cn(
+                "未锁定",
+                self.position.x + self.size.x / 2.0 - 15.0,
+                bottom_y + 6.0,
+                12.0,
+                Color::from_rgba(255, 100, 100, 255),
+            );
         }
 
         // 确认按钮
@@ -655,7 +754,13 @@ impl TradeDialogHybrid {
         } else {
             Color::from_rgba(40, 140, 40, 255)
         };
-        draw_rectangle(confirm_rect.x, confirm_rect.y, confirm_rect.w, confirm_rect.h, confirm_color);
+        draw_rectangle(
+            confirm_rect.x,
+            confirm_rect.y,
+            confirm_rect.w,
+            confirm_rect.h,
+            confirm_color,
+        );
         draw_text_cn("确认", confirm_x + 18.0, bottom_y + 6.0, 12.0, WHITE);
 
         // 取消按钮
@@ -667,7 +772,13 @@ impl TradeDialogHybrid {
         } else {
             Color::from_rgba(160, 40, 40, 255)
         };
-        draw_rectangle(cancel_rect.x, cancel_rect.y, cancel_rect.w, cancel_rect.h, cancel_color);
+        draw_rectangle(
+            cancel_rect.x,
+            cancel_rect.y,
+            cancel_rect.w,
+            cancel_rect.h,
+            cancel_color,
+        );
         draw_text_cn("取消", cancel_x + 18.0, bottom_y + 6.0, 12.0, WHITE);
 
         // 点击处理
@@ -703,14 +814,31 @@ impl TradeDialogHybrid {
     /// 处理金币输入的键盘事件（返回 TradeAction 如果提交了）
     fn process_gold_input(&mut self) -> Option<TradeAction> {
         // 数字键
-        for key in [KeyCode::Key0, KeyCode::Key1, KeyCode::Key2, KeyCode::Key3, KeyCode::Key4,
-                    KeyCode::Key5, KeyCode::Key6, KeyCode::Key7, KeyCode::Key8, KeyCode::Key9] {
+        for key in [
+            KeyCode::Key0,
+            KeyCode::Key1,
+            KeyCode::Key2,
+            KeyCode::Key3,
+            KeyCode::Key4,
+            KeyCode::Key5,
+            KeyCode::Key6,
+            KeyCode::Key7,
+            KeyCode::Key8,
+            KeyCode::Key9,
+        ] {
             if is_key_pressed(key) {
                 let digit = match key {
-                    KeyCode::Key0 => '0', KeyCode::Key1 => '1', KeyCode::Key2 => '2',
-                    KeyCode::Key3 => '3', KeyCode::Key4 => '4', KeyCode::Key5 => '5',
-                    KeyCode::Key6 => '6', KeyCode::Key7 => '7', KeyCode::Key8 => '8',
-                    KeyCode::Key9 => '9', _ => unreachable!(),
+                    KeyCode::Key0 => '0',
+                    KeyCode::Key1 => '1',
+                    KeyCode::Key2 => '2',
+                    KeyCode::Key3 => '3',
+                    KeyCode::Key4 => '4',
+                    KeyCode::Key5 => '5',
+                    KeyCode::Key6 => '6',
+                    KeyCode::Key7 => '7',
+                    KeyCode::Key8 => '8',
+                    KeyCode::Key9 => '9',
+                    _ => unreachable!(),
                 };
                 if self.gold_input_text.len() < 10 {
                     if self.gold_input_text == "0" {
@@ -786,9 +914,15 @@ pub enum TradeAction {
     /// 取消交易
     Cancel,
     /// 添加物品到交易栏（索引来自背包/地面）
-    AddItem { item_index: usize },
+    AddItem {
+        item_index: usize,
+    },
     /// 从交易栏移除物品
-    RemoveItem { slot_index: usize },
+    RemoveItem {
+        slot_index: usize,
+    },
     /// 设置自己的金币数量
-    SetGold { amount: u32 },
+    SetGold {
+        amount: u32,
+    },
 }

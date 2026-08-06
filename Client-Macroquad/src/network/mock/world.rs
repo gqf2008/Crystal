@@ -86,7 +86,12 @@ impl MockNetwork {
         // 立刻补一只 boss（只要存在 boss zone）
         let mut spawned = false;
         for zone_idx in 0..state.zones.len() {
-            if state.zones.get(zone_idx).map(|z| z.is_boss).unwrap_or(false) {
+            if state
+                .zones
+                .get(zone_idx)
+                .map(|z| z.is_boss)
+                .unwrap_or(false)
+            {
                 Self::spawn_monster_in_zone(response_tx, state, zone_idx);
                 spawned = true;
             }
@@ -94,7 +99,10 @@ impl MockNetwork {
 
         if spawned {
             let msg = if any_alive {
-                format!("(MOCK) AFK watchdog: nearest monster too far (d={}); spawned boss near player", nearest)
+                format!(
+                    "(MOCK) AFK watchdog: nearest monster too far (d={}); spawned boss near player",
+                    nearest
+                )
             } else {
                 "(MOCK) AFK watchdog: no alive monsters; spawned boss near player".to_string()
             };
@@ -148,7 +156,12 @@ impl MockNetwork {
         // 立即补一只 Boss（让挂机能立刻开始工作；避免等待 respawn_interval）。
         // 只刷 boss zone，普通怪保持关闭（当前 mock 设计主要用于“大怪目标”）。
         for zone_idx in 0..state.zones.len() {
-            if state.zones.get(zone_idx).map(|z| z.is_boss).unwrap_or(false) {
+            if state
+                .zones
+                .get(zone_idx)
+                .map(|z| z.is_boss)
+                .unwrap_or(false)
+            {
                 Self::spawn_monster_in_zone(response_tx, state, zone_idx);
             }
         }

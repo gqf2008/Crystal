@@ -18,7 +18,7 @@ pub struct SpellData {
 #[repr(u8)]
 pub enum SpellType {
     None = 0,
-    
+
     // Warrior (战士)
     Fencing = 1,
     Slaying = 2,
@@ -37,7 +37,7 @@ pub enum SpellType {
     SlashingBurst = 15,
     Fury = 16,
     ImmortalSkin = 17,
-    
+
     // Wizard (法师)
     FireBall = 31,
     Repulsion = 32,
@@ -64,7 +64,7 @@ pub enum SpellType {
     IceThrust = 53,
     FastMove = 54,
     StormEscape = 55,
-    
+
     // Taoist (道士)
     Healing = 61,
     SpiritSword = 62,
@@ -91,7 +91,7 @@ pub enum SpellType {
     EnergyShield = 84,
     PetEnhancer = 85,
     HealingCircle = 86,
-    
+
     // Assassin (刺客)
     FatalSword = 91,
     DoubleSlash = 92,
@@ -110,7 +110,7 @@ pub enum SpellType {
     CrescentSlash = 105,
     MoonMist = 106,
     CatTongue = 107,
-    
+
     // Archer (弓箭手)
     Focus = 121,
     StraightShot = 122,
@@ -252,16 +252,23 @@ impl SpellType {
             Self::MentalState => "精神状态",
         }
     }
-    
+
     /// 获取技能所需职业
     pub fn required_class(&self) -> MirClass {
         let id = *self as u8;
-        if (1..=17).contains(&id) { MirClass::Warrior }
-        else if (31..=55).contains(&id) { MirClass::Wizard }
-        else if (61..=86).contains(&id) { MirClass::Taoist }
-        else if (91..=107).contains(&id) { MirClass::Assassin }
-        else if (121..=141).contains(&id) { MirClass::Archer }
-        else { MirClass::Warrior } // 默认
+        if (1..=17).contains(&id) {
+            MirClass::Warrior
+        } else if (31..=55).contains(&id) {
+            MirClass::Wizard
+        } else if (61..=86).contains(&id) {
+            MirClass::Taoist
+        } else if (91..=107).contains(&id) {
+            MirClass::Assassin
+        } else if (121..=141).contains(&id) {
+            MirClass::Archer
+        } else {
+            MirClass::Warrior
+        } // 默认
     }
 }
 
@@ -391,10 +398,10 @@ impl TryFrom<u8> for SpellType {
 #[derive(Debug, Clone)]
 pub struct LearnedMagic {
     pub spell: SpellType,
-    pub level: u8,        // 技能等级 (0-3)
-    pub experience: u32,  // 技能经验
+    pub level: u8,            // 技能等级 (0-3)
+    pub experience: u32,      // 技能经验
     pub key_slot: Option<u8>, // 绑定的快捷键槽位 (F1-F8)
-    pub can_use: bool,    // 是否可用（SpellToggle）
+    pub can_use: bool,        // 是否可用（SpellToggle）
 }
 
 impl LearnedMagic {
@@ -419,7 +426,7 @@ impl MagicList {
     pub fn new() -> Self {
         Self { magics: Vec::new() }
     }
-    
+
     /// 学会新技能
     pub fn learn(&mut self, spell: SpellType) -> bool {
         if self.has_learned(spell) {
@@ -428,17 +435,17 @@ impl MagicList {
         self.magics.push(LearnedMagic::new(spell));
         true
     }
-    
+
     /// 是否已学会某技能
     pub fn has_learned(&self, spell: SpellType) -> bool {
         self.magics.iter().any(|m| m.spell == spell)
     }
-    
+
     /// 获取技能
     pub fn get_mut(&mut self, spell: SpellType) -> Option<&mut LearnedMagic> {
         self.magics.iter_mut().find(|m| m.spell == spell)
     }
-    
+
     /// 获取绑定到某槽位的技能
     pub fn get_by_slot(&self, slot: u8) -> Option<&LearnedMagic> {
         self.magics.iter().find(|m| m.key_slot == Some(slot))
@@ -461,22 +468,21 @@ impl LearnableMagicList {
     pub fn new() -> Self {
         Self { spells: Vec::new() }
     }
-    
+
     /// 添加可学技能
     pub fn add(&mut self, spell: SpellType, required_level: u16) {
         self.spells.push((spell, required_level));
     }
-    
+
     /// 获取玩家当前可学习的技能
     pub fn get_available(&self, player_level: u16, learned: &MagicList) -> Vec<SpellType> {
-        self.spells.iter()
-            .filter(|(spell, req_level)| {
-                *req_level <= player_level && !learned.has_learned(*spell)
-            })
+        self.spells
+            .iter()
+            .filter(|(spell, req_level)| *req_level <= player_level && !learned.has_learned(*spell))
             .map(|(spell, _)| *spell)
             .collect()
     }
-    
+
     /// 为职业初始化默认可学技能
     pub fn init_for_class(class: MirClass) -> Self {
         let mut list = Self::new();
@@ -488,7 +494,7 @@ impl LearnableMagicList {
                 list.add(SpellType::HalfMoon, 28);
                 list.add(SpellType::ShoulderDash, 30);
                 list.add(SpellType::LionRoar, 36);
-            },
+            }
             MirClass::Wizard => {
                 list.add(SpellType::FireBall, 7);
                 list.add(SpellType::Repulsion, 12);
@@ -499,7 +505,7 @@ impl LearnableMagicList {
                 list.add(SpellType::Teleport, 25);
                 list.add(SpellType::Lightning, 29);
                 list.add(SpellType::MagicShield, 31);
-            },
+            }
             MirClass::Taoist => {
                 list.add(SpellType::Healing, 7);
                 list.add(SpellType::SpiritSword, 9);
@@ -508,19 +514,19 @@ impl LearnableMagicList {
                 list.add(SpellType::SummonSkeleton, 19);
                 list.add(SpellType::Hiding, 20);
                 list.add(SpellType::SoulShield, 24);
-            },
+            }
             MirClass::Assassin => {
                 list.add(SpellType::FatalSword, 7);
                 list.add(SpellType::DoubleSlash, 15);
                 list.add(SpellType::Haste, 20);
                 list.add(SpellType::FlashDash, 25);
-            },
+            }
             MirClass::Archer => {
                 list.add(SpellType::Focus, 7);
                 list.add(SpellType::StraightShot, 9);
                 list.add(SpellType::DoubleShot, 15);
                 list.add(SpellType::Meditation, 20);
-            },
+            }
         }
         list
     }
@@ -554,7 +560,8 @@ impl SpellCooldowns {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        self.active_cooldowns.insert(spell_id, now + duration_ms as u64);
+        self.active_cooldowns
+            .insert(spell_id, now + duration_ms as u64);
     }
 
     /// 检查技能是否在冷却中

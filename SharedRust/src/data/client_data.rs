@@ -6,8 +6,11 @@ use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::binary::{read_bool, read_dotnet_string, write_bool, write_dotnet_string};
-use crate::enums::{IntelligentCreaturePickupMode, IntelligentCreatureType, ItemGrade, MirClass, MirGender, Monster, Spell};
 use crate::data::stats::{SharedError, SharedResult, Stats};
+use crate::enums::{
+    IntelligentCreaturePickupMode, IntelligentCreatureType, ItemGrade, MirClass, MirGender,
+    Monster, Spell,
+};
 
 /// Character selection information
 /// Used in login/logout for character list
@@ -32,12 +35,13 @@ impl SelectInfo {
         let gender_value = reader.read_u8()?;
         let gender = MirGender::try_from(gender_value)
             .map_err(|_| SharedError::unknown_enum("MirGender", gender_value.into()))?;
-        
+
         // Read .NET DateTime ticks and convert to chrono DateTime
         let ticks = reader.read_i64::<LittleEndian>()?;
         let unix_epoch_ticks = 621355968000000000i64; // .NET ticks at Unix epoch
         let unix_seconds = (ticks - unix_epoch_ticks) / 10000000;
-        let last_access = Utc.timestamp_opt(unix_seconds, 0)
+        let last_access = Utc
+            .timestamp_opt(unix_seconds, 0)
             .single()
             .ok_or(SharedError::InvalidDateTime)?;
 
@@ -57,7 +61,7 @@ impl SelectInfo {
         writer.write_u16::<LittleEndian>(self.level)?;
         writer.write_u8(self.class as u8)?;
         writer.write_u8(self.gender as u8)?;
-        
+
         // Convert chrono DateTime to .NET ticks
         let unix_epoch_ticks = 621355968000000000i64;
         let ticks = self.last_access.timestamp() * 10000000 + unix_epoch_ticks;
@@ -318,7 +322,7 @@ pub struct ClientHeroInformation {
 impl ClientHeroInformation {
     pub fn read_from<R: Read>(reader: &mut R) -> SharedResult<Self> {
         use crate::enums::{MirClass, MirGender};
-        
+
         let index = reader.read_i32::<LittleEndian>()?;
         let name = read_dotnet_string(reader)?;
         let level = reader.read_u16::<LittleEndian>()?;
@@ -352,13 +356,13 @@ pub struct ClientQuestProgress {
 impl ClientQuestProgress {
     pub fn read_from<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let id = reader.read_i32::<LittleEndian>()?;
-        
+
         let count = reader.read_i32::<LittleEndian>()?;
         let mut task_list = Vec::with_capacity(count as usize);
         for _ in 0..count {
             task_list.push(read_dotnet_string(reader)?);
         }
-        
+
         let taken = read_bool(reader)?;
         let completed = read_bool(reader)?;
         let new = read_bool(reader)?;
@@ -374,16 +378,16 @@ impl ClientQuestProgress {
 
     pub fn write_to<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_i32::<LittleEndian>(self.id)?;
-        
+
         writer.write_i32::<LittleEndian>(self.task_list.len() as i32)?;
         for task in &self.task_list {
             write_dotnet_string(writer, task)?;
         }
-        
+
         writer.write_u8(if self.taken { 1 } else { 0 })?;
         writer.write_u8(if self.completed { 1 } else { 0 })?;
         writer.write_u8(if self.new { 1 } else { 0 })?;
-        
+
         Ok(())
     }
 }
@@ -414,10 +418,10 @@ pub struct ClientQuestInfo {
 
 impl ClientQuestInfo {
     pub fn read_from<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        use crate::enums::{RequiredClass, QuestType};
-        
+        use crate::enums::{QuestType, RequiredClass};
+
         const MAX_QUEST_STRINGS: i32 = 100; // Maximum 100 strings per description vector
-        
+
         let index = reader.read_i32::<LittleEndian>()?;
         let npc_index = reader.read_u32::<LittleEndian>()?;
         let name = read_dotnet_string(reader)?;
@@ -502,15 +506,19 @@ impl ClientQuestInfo {
         let min_level_needed = reader.read_i32::<LittleEndian>()?;
         let max_level_needed = reader.read_i32::<LittleEndian>()?;
         let quest_needed = reader.read_i32::<LittleEndian>()?;
-        
+
         let class_needed_value = reader.read_u8()?;
-        let class_needed = RequiredClass::from_bits(class_needed_value)
-            .ok_or_else(|| SharedError::UnknownEnum { name: "RequiredClass", value: class_needed_value.into() })?;
-        
+        let class_needed = RequiredClass::from_bits(class_needed_value).ok_or_else(|| {
+            SharedError::UnknownEnum {
+                name: "RequiredClass",
+                value: class_needed_value.into(),
+            }
+        })?;
+
         let quest_type_value = reader.read_u8()?;
         let quest_type = QuestType::try_from(quest_type_value)
             .map_err(|_| SharedError::unknown_enum("QuestType", quest_type_value.into()))?;
-        
+
         let time_limit_in_seconds = reader.read_i32::<LittleEndian>()?;
         let reward_gold = reader.read_u32::<LittleEndian>()?;
         let reward_exp = reader.read_u32::<LittleEndian>()?;
@@ -532,7 +540,9 @@ impl ClientQuestInfo {
         }
         let mut rewards_fixed_item = Vec::with_capacity(count as usize);
         for _ in 0..count {
-            rewards_fixed_item.push(crate::data::shared_data::QuestItemReward::read_from(reader)?);
+            rewards_fixed_item.push(crate::data::shared_data::QuestItemReward::read_from(
+                reader,
+            )?);
         }
 
         let count = reader.read_i32::<LittleEndian>()?;
@@ -551,7 +561,9 @@ impl ClientQuestInfo {
         }
         let mut rewards_select_item = Vec::with_capacity(count as usize);
         for _ in 0..count {
-            rewards_select_item.push(crate::data::shared_data::QuestItemReward::read_from(reader)?);
+            rewards_select_item.push(crate::data::shared_data::QuestItemReward::read_from(
+                reader,
+            )?);
         }
 
         let finish_npc_index = reader.read_u32::<LittleEndian>()?;
@@ -647,7 +659,7 @@ impl GuildMember {
         let name = read_dotnet_string(reader)?;
         let rank_name = read_dotnet_string(reader)?;
         let rank_index = reader.read_u8()?;
-        
+
         let (online, last_login) = if !offline {
             (read_bool(reader)?, reader.read_i64::<LittleEndian>()?)
         } else {
@@ -675,12 +687,15 @@ pub struct GuildRank {
 impl GuildRank {
     pub fn read_from<R: Read>(reader: &mut R, offline: bool) -> SharedResult<Self> {
         use crate::enums::GuildRankOptions;
-        
+
         let name = read_dotnet_string(reader)?;
-        
+
         let options_value = reader.read_u8()?;
-        let options = GuildRankOptions::from_bits(options_value)
-            .ok_or_else(|| SharedError::UnknownEnum { name: "GuildRankOptions", value: options_value.into() })?;
+        let options =
+            GuildRankOptions::from_bits(options_value).ok_or_else(|| SharedError::UnknownEnum {
+                name: "GuildRankOptions",
+                value: options_value.into(),
+            })?;
 
         let index = if !offline {
             reader.read_i32::<LittleEndian>()?
@@ -925,13 +940,13 @@ impl ClientMapInfo {
         let width = reader.read_i32::<LittleEndian>()?;
         let height = reader.read_i32::<LittleEndian>()?;
         let big_map = reader.read_i32::<LittleEndian>()?;
-        
+
         let movement_count = reader.read_i32::<LittleEndian>()?;
         let mut movements = Vec::with_capacity(movement_count as usize);
         for _ in 0..movement_count {
             movements.push(ClientMovementInfo::read_from(reader)?);
         }
-        
+
         let npc_count = reader.read_i32::<LittleEndian>()?;
         let mut npcs = Vec::with_capacity(npc_count as usize);
         for _ in 0..npc_count {
@@ -953,17 +968,17 @@ impl ClientMapInfo {
         writer.write_i32::<LittleEndian>(self.width)?;
         writer.write_i32::<LittleEndian>(self.height)?;
         writer.write_i32::<LittleEndian>(self.big_map)?;
-        
+
         writer.write_i32::<LittleEndian>(self.movements.len() as i32)?;
         for movement in &self.movements {
             movement.write_to(writer)?;
         }
-        
+
         writer.write_i32::<LittleEndian>(self.npcs.len() as i32)?;
         for npc in &self.npcs {
             npc.write_to(writer)?;
         }
-        
+
         Ok(())
     }
 }
@@ -992,9 +1007,9 @@ impl ClientBuff {
         let expire_time = reader.read_i64::<LittleEndian>()?;
         let infinite = read_bool(reader)?;
         let paused = read_bool(reader)?;
-        
+
         let stats = crate::data::stats::Stats::read_from(reader)?;
-        
+
         let value_count = reader.read_i32::<LittleEndian>()?;
         let mut values = Vec::with_capacity(value_count as usize);
         for _ in 0..value_count {
@@ -1021,14 +1036,14 @@ impl ClientBuff {
         writer.write_i64::<LittleEndian>(self.expire_time)?;
         write_bool(writer, self.infinite)?;
         write_bool(writer, self.paused)?;
-        
+
         self.stats.write_to(writer)?;
-        
+
         writer.write_i32::<LittleEndian>(self.values.len() as i32)?;
         for value in &self.values {
             writer.write_i32::<LittleEndian>(*value)?;
         }
-        
+
         Ok(())
     }
 }
@@ -1048,17 +1063,25 @@ impl ClientRecipeInfo {
         let gold = reader.read_u32::<LittleEndian>()?;
         let chance = reader.read_u8()?;
         let item = crate::data::item::UserItem::read_from(reader, i32::MAX, i32::MAX)?;
-        
+
         let tool_count = reader.read_i32::<LittleEndian>()?;
         let mut tools = Vec::with_capacity(tool_count as usize);
         for _ in 0..tool_count {
-            tools.push(crate::data::item::UserItem::read_from(reader, i32::MAX, i32::MAX)?);
+            tools.push(crate::data::item::UserItem::read_from(
+                reader,
+                i32::MAX,
+                i32::MAX,
+            )?);
         }
-        
+
         let ingredient_count = reader.read_i32::<LittleEndian>()?;
         let mut ingredients = Vec::with_capacity(ingredient_count as usize);
         for _ in 0..ingredient_count {
-            ingredients.push(crate::data::item::UserItem::read_from(reader, i32::MAX, i32::MAX)?);
+            ingredients.push(crate::data::item::UserItem::read_from(
+                reader,
+                i32::MAX,
+                i32::MAX,
+            )?);
         }
 
         Ok(Self {
@@ -1074,17 +1097,17 @@ impl ClientRecipeInfo {
         writer.write_u32::<LittleEndian>(self.gold)?;
         writer.write_u8(self.chance)?;
         self.item.write_to(writer)?;
-        
+
         writer.write_i32::<LittleEndian>(self.tools.len() as i32)?;
         for tool in &self.tools {
             tool.write_to(writer)?;
         }
-        
+
         writer.write_i32::<LittleEndian>(self.ingredients.len() as i32)?;
         for ingredient in &self.ingredients {
             ingredient.write_to(writer)?;
         }
-        
+
         Ok(())
     }
 }
@@ -1150,21 +1173,26 @@ impl ClientMail {
         let locked = read_bool(reader)?;
         let can_reply = read_bool(reader)?;
         let collected = read_bool(reader)?;
-        
+
         // Read .NET DateTime
         let ticks = reader.read_i64::<LittleEndian>()?;
         let unix_epoch_ticks = 621355968000000000i64;
         let unix_seconds = (ticks - unix_epoch_ticks) / 10000000;
-        let date_sent = Utc.timestamp_opt(unix_seconds, 0)
+        let date_sent = Utc
+            .timestamp_opt(unix_seconds, 0)
             .single()
             .ok_or(SharedError::InvalidDateTime)?;
-        
+
         let gold = reader.read_u32::<LittleEndian>()?;
-        
+
         let item_count = reader.read_i32::<LittleEndian>()?;
         let mut items = Vec::with_capacity(item_count as usize);
         for _ in 0..item_count {
-            items.push(crate::data::item::UserItem::read_from(reader, i32::MAX, i32::MAX)?);
+            items.push(crate::data::item::UserItem::read_from(
+                reader,
+                i32::MAX,
+                i32::MAX,
+            )?);
         }
 
         Ok(Self {
@@ -1189,19 +1217,19 @@ impl ClientMail {
         write_bool(writer, self.locked)?;
         write_bool(writer, self.can_reply)?;
         write_bool(writer, self.collected)?;
-        
+
         // Write .NET DateTime
         let unix_epoch_ticks = 621355968000000000i64;
         let ticks = self.date_sent.timestamp() * 10000000 + unix_epoch_ticks;
         writer.write_i64::<LittleEndian>(ticks)?;
-        
+
         writer.write_u32::<LittleEndian>(self.gold)?;
-        
+
         writer.write_i32::<LittleEndian>(self.items.len() as i32)?;
         for item in &self.items {
             item.write_to(writer)?;
         }
-        
+
         Ok(())
     }
 }
@@ -1223,15 +1251,16 @@ impl ClientAuction {
         let item = crate::data::item::UserItem::read_from(reader, i32::MAX, i32::MAX)?;
         let seller = read_dotnet_string(reader)?;
         let price = reader.read_u32::<LittleEndian>()?;
-        
+
         // Read .NET DateTime
         let ticks = reader.read_i64::<LittleEndian>()?;
         let unix_epoch_ticks = 621355968000000000i64;
         let unix_seconds = (ticks - unix_epoch_ticks) / 10000000;
-        let consignment_date = Utc.timestamp_opt(unix_seconds, 0)
+        let consignment_date = Utc
+            .timestamp_opt(unix_seconds, 0)
             .single()
             .ok_or(SharedError::InvalidDateTime)?;
-        
+
         let item_type_value = reader.read_u8()?;
         let item_type = crate::enums::MarketItemType::try_from(item_type_value)
             .map_err(|_| SharedError::unknown_enum("MarketItemType", item_type_value.into()))?;
@@ -1251,14 +1280,14 @@ impl ClientAuction {
         self.item.write_to(writer)?;
         write_dotnet_string(writer, &self.seller)?;
         writer.write_u32::<LittleEndian>(self.price)?;
-        
+
         // Write .NET DateTime
         let unix_epoch_ticks = 621355968000000000i64;
         let ticks = self.consignment_date.timestamp() * 10000000 + unix_epoch_ticks;
         writer.write_i64::<LittleEndian>(ticks)?;
-        
+
         writer.write_u8(self.item_type as u8)?;
-        
+
         Ok(())
     }
 }
@@ -1480,5 +1509,3 @@ mod tests {
         assert!(result.is_ok());
     }
 }
-
-

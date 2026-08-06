@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // Character Render System - 角色渲染系统
 // ============================================================================
 //
@@ -58,7 +58,10 @@
 // ============================================================================
 
 use super::SpriteRenderSystem;
-use crate::components::{AnimationFrame, BuffList, BuffType, Camera, Health, LibrarySprite, LocalPlayer, Monster, MountState, OtherPlayer, Player, PlayerAppearance, Position, SpriteBlendMode, TimeTracker};
+use crate::components::{
+    AnimationFrame, BuffList, BuffType, Camera, Health, LibrarySprite, LocalPlayer, Monster,
+    MountState, OtherPlayer, Player, PlayerAppearance, Position, SpriteBlendMode, TimeTracker,
+};
 use crate::game::GameResult;
 use crate::objects::frames::get_player_frame;
 use crate::resources::LibraryName;
@@ -247,14 +250,16 @@ impl SpriteRenderSystem {
                 .and_then(|info| info.image)
                 .is_some()
         };
-        
+
         // 检查帧是否存在且尺寸合理（用于骑乘帧检测，避免把小特效图当成身体帧）
         let layer_has_valid_body_texture = |lib: LibraryName, frame: i32| -> bool {
             const MIN_BODY_SIZE: i16 = 40; // 身体帧至少应该 40x40 像素
             let frame_index = frame.max(0) as usize;
             lib.get_texture(frame_index)
                 .map(|info| {
-                    info.image.is_some() && info.width >= MIN_BODY_SIZE && info.height >= MIN_BODY_SIZE
+                    info.image.is_some()
+                        && info.width >= MIN_BODY_SIZE
+                        && info.height >= MIN_BODY_SIZE
                 })
                 .unwrap_or(false)
         };
@@ -274,16 +279,18 @@ impl SpriteRenderSystem {
                 draw_x,
                 draw_y,
                 tint,
-                DrawTextureParams { ..Default::default() },
+                DrawTextureParams {
+                    ..Default::default()
+                },
             );
             true
         };
 
         let draw_layer_additive = |material: &Material,
-                                  lib: LibraryName,
-                                  frame: i32,
-                                  pos: &Position,
-                                  tint: Color|
+                                   lib: LibraryName,
+                                   frame: i32,
+                                   pos: &Position,
+                                   tint: Color|
          -> bool {
             let frame_index = frame.max(0) as usize;
             let Some(info) = lib.get_texture(frame_index) else {
@@ -301,7 +308,9 @@ impl SpriteRenderSystem {
                 draw_x,
                 draw_y,
                 tint,
-                DrawTextureParams { ..Default::default() },
+                DrawTextureParams {
+                    ..Default::default()
+                },
             );
             gl_use_default_material();
 
@@ -311,7 +320,6 @@ impl SpriteRenderSystem {
         // 坐骑（由组件驱动）
         let mounted = mount_index.is_some();
         let mut mount_drawn = false;
-        
 
         if mounted {
             let mount_lib = LibraryName::Mounts(mount_index.unwrap_or(0));
@@ -359,11 +367,15 @@ impl SpriteRenderSystem {
         let mut rider_uses_mount_frames = false;
         if mounted {
             let mount_action = match player.action {
-                crate::components::PlayerAction::Walk => mir2_shared::enums::MirAction::MountWalking,
+                crate::components::PlayerAction::Walk => {
+                    mir2_shared::enums::MirAction::MountWalking
+                }
                 crate::components::PlayerAction::Run => mir2_shared::enums::MirAction::MountRunning,
                 crate::components::PlayerAction::Attack1
                 | crate::components::PlayerAction::Attack2
-                | crate::components::PlayerAction::Attack3 => mir2_shared::enums::MirAction::MountAttack,
+                | crate::components::PlayerAction::Attack3 => {
+                    mir2_shared::enums::MirAction::MountAttack
+                }
                 _ => mir2_shared::enums::MirAction::MountStanding,
             };
 
@@ -372,7 +384,9 @@ impl SpriteRenderSystem {
                 crate::components::PlayerAction::Run => mir2_shared::enums::MirAction::Running,
                 crate::components::PlayerAction::Attack1
                 | crate::components::PlayerAction::Attack2
-                | crate::components::PlayerAction::Attack3 => mir2_shared::enums::MirAction::Attack1,
+                | crate::components::PlayerAction::Attack3 => {
+                    mir2_shared::enums::MirAction::Attack1
+                }
                 _ => mir2_shared::enums::MirAction::Standing,
             };
 
@@ -394,7 +408,8 @@ impl SpriteRenderSystem {
                 let base = frame.start + (dir * frame.offset()) + current;
                 let sample_base = frame.start; // dir=0, idx=0 for stable detection
                 mount_base = Some(base);
-                mount_sample_ok = layer_has_valid_body_texture(armour_library, sample_base + body_hair_offset);
+                mount_sample_ok =
+                    layer_has_valid_body_texture(armour_library, sample_base + body_hair_offset);
             }
 
             if let Some(base) = mount_base {
@@ -426,7 +441,8 @@ impl SpriteRenderSystem {
                     rider_weapon_frame = weapon_frame;
                     rider_uses_mount_frames = false;
 
-                    static MOUNT_ARMOUR_MISSING_ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+                    static MOUNT_ARMOUR_MISSING_ONCE: std::sync::OnceLock<()> =
+                        std::sync::OnceLock::new();
                     let _ = MOUNT_ARMOUR_MISSING_ONCE.set(()).map(|_| {
                         eprintln!(
                             "[WARN][SpriteRenderSystem] mounted armour mount-frames unavailable: armour_lib={:?} mount_sample_ok={} chosen_base={:?} (fallback to normal frames)",
@@ -479,10 +495,12 @@ impl SpriteRenderSystem {
                     crate::components::PlayerAction::Run => mir2_shared::enums::MirAction::Running,
                     crate::components::PlayerAction::Attack1
                     | crate::components::PlayerAction::Attack2
-                    | crate::components::PlayerAction::Attack3 => mir2_shared::enums::MirAction::Attack1,
+                    | crate::components::PlayerAction::Attack3 => {
+                        mir2_shared::enums::MirAction::Attack1
+                    }
                     _ => mir2_shared::enums::MirAction::Standing,
                 };
-                
+
                 if let Some(frame) = get_player_frame(normal_action) {
                     if frame.effect_count > 0 {
                         let dir = player.direction as u8 as i32;
@@ -516,7 +534,7 @@ impl SpriteRenderSystem {
             let candidates = [wing_primary + wing_offset, wing_primary, wing_offset, 0];
             let mut wing_drawn = false;
             let mut wing_frame_used: Option<i32> = None;
-            
+
             // 诊断：每帧打印翅膀候选帧的取帧情况（只打印一次）
             static WING_CANDIDATE_DIAG: std::sync::OnceLock<()> = std::sync::OnceLock::new();
             if is_local {
@@ -544,7 +562,7 @@ impl SpriteRenderSystem {
                     }
                 });
             }
-            
+
             for f in candidates {
                 // 翅膀/人物特效通常是发光效果，用 additive 混合更接近原版观感。
                 if draw_layer_additive(add_blend_material, wing_lib, f, &wing_pos, tint) {
@@ -556,18 +574,27 @@ impl SpriteRenderSystem {
 
             // 兜底：如果候选帧都不存在，首次扫描前 64 帧找一个"能画出来"的帧。
             if !wing_drawn {
-                static WING_PROBE_ONCE: std::sync::OnceLock<Option<i32>> = std::sync::OnceLock::new();
+                static WING_PROBE_ONCE: std::sync::OnceLock<Option<i32>> =
+                    std::sync::OnceLock::new();
                 let probe = WING_PROBE_ONCE.get_or_init(|| {
                     // 先按当前性别的帧段（wing_offset）扫描，避免女号落到男号帧段。
                     for i in 0..64 {
                         let idx = (i + wing_offset) as usize;
-                        if wing_lib.get_texture(idx).and_then(|info| info.image).is_some() {
+                        if wing_lib
+                            .get_texture(idx)
+                            .and_then(|info| info.image)
+                            .is_some()
+                        {
                             return Some(i + wing_offset);
                         }
                     }
                     // 再兜底扫描低位帧段
                     for i in 0..64 {
-                        if wing_lib.get_texture(i).and_then(|info| info.image).is_some() {
+                        if wing_lib
+                            .get_texture(i)
+                            .and_then(|info| info.image)
+                            .is_some()
+                        {
                             return Some(i as i32);
                         }
                     }
@@ -649,14 +676,9 @@ impl SpriteRenderSystem {
 
         // body
         let body_frame = rider_base_frame + body_hair_offset;
-        let body_drew = draw_layer(
-            armour_library,
-            body_frame,
-            &actor_pos,
-            tint,
-        );
+        let body_drew = draw_layer(armour_library, body_frame, &actor_pos, tint);
         drew_any |= body_drew;
-        
+
         // 诊断：身体层绘制情况（只打印一次）
         static BODY_DRAW_DIAG: std::sync::OnceLock<()> = std::sync::OnceLock::new();
         if is_local {
@@ -810,8 +832,18 @@ impl SpriteRenderSystem {
             },
         }
 
-        fn in_view(pos: &Position, min_x: f32, min_y: f32, max_x: f32, max_y: f32, margin: f32) -> bool {
-            pos.x >= min_x - margin && pos.x <= max_x + margin && pos.y >= min_y - margin && pos.y <= max_y + margin
+        fn in_view(
+            pos: &Position,
+            min_x: f32,
+            min_y: f32,
+            max_x: f32,
+            max_y: f32,
+            margin: f32,
+        ) -> bool {
+            pos.x >= min_x - margin
+                && pos.x <= max_x + margin
+                && pos.y >= min_y - margin
+                && pos.y <= max_y + margin
         }
 
         let mut renderables: Vec<(f32, i32, Renderable)> = Vec::new();
@@ -819,47 +851,95 @@ impl SpriteRenderSystem {
         // Players
         if local_only {
             for eref in world.iter() {
-                let Some(_local) = eref.get::<&LocalPlayer>() else { continue };
-                let Some(player) = eref.get::<&Player>() else { continue };
-                let Some(pos) = eref.get::<&Position>() else { continue };
-                let Some(appearance) = eref.get::<&PlayerAppearance>() else { continue };
-                let Some(anim_frame) = eref.get::<&AnimationFrame>() else { continue };
+                let Some(_local) = eref.get::<&LocalPlayer>() else {
+                    continue;
+                };
+                let Some(player) = eref.get::<&Player>() else {
+                    continue;
+                };
+                let Some(pos) = eref.get::<&Position>() else {
+                    continue;
+                };
+                let Some(appearance) = eref.get::<&PlayerAppearance>() else {
+                    continue;
+                };
+                let Some(anim_frame) = eref.get::<&AnimationFrame>() else {
+                    continue;
+                };
                 let entity = eref.entity();
-                if eref.get::<&crate::components::Visibility>().map(|v| !v.is_visible()).unwrap_or(false) {
+                if eref
+                    .get::<&crate::components::Visibility>()
+                    .map(|v| !v.is_visible())
+                    .unwrap_or(false)
+                {
                     continue;
                 }
-                if !in_view(&pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
+                if !in_view(
+                    &pos,
+                    view_min_x,
+                    view_min_y,
+                    view_max_x,
+                    view_max_y,
+                    CULL_MARGIN,
+                ) {
                     continue;
                 }
                 // kind order: NPC(0) < GroundItem(1) < Monster(2) < Player(3)
-                renderables.push((pos.y, 3, Renderable::Player {
-                    entity,
-                    player: (*player).clone(),
-                    pos: *pos,
-                    appearance: (*appearance).clone(),
-                    anim_frame: *anim_frame,
-                }));
+                renderables.push((
+                    pos.y,
+                    3,
+                    Renderable::Player {
+                        entity,
+                        player: (*player).clone(),
+                        pos: *pos,
+                        appearance: (*appearance).clone(),
+                        anim_frame: *anim_frame,
+                    },
+                ));
             }
         } else {
             for eref in world.iter() {
-                let Some(player) = eref.get::<&Player>() else { continue };
-                let Some(pos) = eref.get::<&Position>() else { continue };
-                let Some(appearance) = eref.get::<&PlayerAppearance>() else { continue };
-                let Some(anim_frame) = eref.get::<&AnimationFrame>() else { continue };
+                let Some(player) = eref.get::<&Player>() else {
+                    continue;
+                };
+                let Some(pos) = eref.get::<&Position>() else {
+                    continue;
+                };
+                let Some(appearance) = eref.get::<&PlayerAppearance>() else {
+                    continue;
+                };
+                let Some(anim_frame) = eref.get::<&AnimationFrame>() else {
+                    continue;
+                };
                 let entity = eref.entity();
-                if eref.get::<&crate::components::Visibility>().map(|v| !v.is_visible()).unwrap_or(false) {
+                if eref
+                    .get::<&crate::components::Visibility>()
+                    .map(|v| !v.is_visible())
+                    .unwrap_or(false)
+                {
                     continue;
                 }
-                if !in_view(&pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
+                if !in_view(
+                    &pos,
+                    view_min_x,
+                    view_min_y,
+                    view_max_x,
+                    view_max_y,
+                    CULL_MARGIN,
+                ) {
                     continue;
                 }
-                renderables.push((pos.y, 2, Renderable::Player {
-                    entity,
-                    player: (*player).clone(),
-                    pos: *pos,
-                    appearance: (*appearance).clone(),
-                    anim_frame: *anim_frame,
-                }));
+                renderables.push((
+                    pos.y,
+                    2,
+                    Renderable::Player {
+                        entity,
+                        player: (*player).clone(),
+                        pos: *pos,
+                        appearance: (*appearance).clone(),
+                        anim_frame: *anim_frame,
+                    },
+                ));
             }
         }
 
@@ -872,38 +952,63 @@ impl SpriteRenderSystem {
                 let pos = e.get::<&Position>()?;
                 Some((e.entity(), (sync, spr, pos)))
             }) {
-                if sync.object_type != NetworkObjectType::NPC && sync.object_type != NetworkObjectType::Monster {
+                if sync.object_type != NetworkObjectType::NPC
+                    && sync.object_type != NetworkObjectType::Monster
+                {
                     continue;
                 }
-                if world.get::<&crate::components::Visibility>(entity).ok().map(|v| !v.is_visible()).unwrap_or(false) {
+                if world
+                    .get::<&crate::components::Visibility>(entity)
+                    .ok()
+                    .map(|v| !v.is_visible())
+                    .unwrap_or(false)
+                {
                     continue;
                 }
                 if !matches!(spr.blend_mode, SpriteBlendMode::Alpha) {
                     continue;
                 }
-                if !in_view(&pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
+                if !in_view(
+                    &pos,
+                    view_min_x,
+                    view_min_y,
+                    view_max_x,
+                    view_max_y,
+                    CULL_MARGIN,
+                ) {
                     continue;
                 }
 
                 // 获取名称（Monster 或 OtherPlayer）
-                let name = world.get::<&Monster>(entity)
+                let name = world
+                    .get::<&Monster>(entity)
                     .ok()
                     .map(|m| m.name.clone())
-                    .or_else(|| world.get::<&OtherPlayer>(entity)
-                        .ok()
-                        .map(|op| op.name.clone()));
+                    .or_else(|| {
+                        world
+                            .get::<&OtherPlayer>(entity)
+                            .ok()
+                            .map(|op| op.name.clone())
+                    });
 
                 // 获取血量
-                let (hp_cur, hp_max) = world.get::<&Health>(entity)
+                let (hp_cur, hp_max) = world
+                    .get::<&Health>(entity)
                     .ok()
                     .map(|hp| (Some(hp.current), Some(hp.max)))
                     .unwrap_or((None, None));
 
                 // 检查是否有交互提示标记
-                let has_interaction_hint = world.get::<&crate::components::InteractionHint>(entity).is_ok();
+                let has_interaction_hint = world
+                    .get::<&crate::components::InteractionHint>(entity)
+                    .is_ok();
 
                 // kind order: NPC(0) < GroundItem(1) < Monster(2) < Player(3)
-                let kind_order = if sync.object_type == NetworkObjectType::NPC { 0 } else { 2 };
+                let kind_order = if sync.object_type == NetworkObjectType::NPC {
+                    0
+                } else {
+                    2
+                };
                 renderables.push((
                     pos.y,
                     kind_order,
@@ -927,14 +1032,25 @@ impl SpriteRenderSystem {
             let pos = e.get::<&Position>()?;
             Some((e.entity(), (gnd, pos)))
         }) {
-            if !in_view(&pos, view_min_x, view_min_y, view_max_x, view_max_y, CULL_MARGIN) {
+            if !in_view(
+                &pos,
+                view_min_x,
+                view_min_y,
+                view_max_x,
+                view_max_y,
+                CULL_MARGIN,
+            ) {
                 continue;
             }
             // kind order: GroundItem(1) 在 NPC(0) 之后、Monster(2) 之前
-            renderables.push((pos.y, 1, Renderable::GroundItem {
-                item: (*gnd).clone(),
-                pos: *pos,
-            }));
+            renderables.push((
+                pos.y,
+                1,
+                Renderable::GroundItem {
+                    item: (*gnd).clone(),
+                    pos: *pos,
+                },
+            ));
         }
 
         // 深度排序：先按 y（越靠下越后绘制），再按类型优先级
@@ -947,7 +1063,13 @@ impl SpriteRenderSystem {
         // 渲染
         for (_y, _kind, item) in renderables {
             match item {
-                Renderable::Player { entity, player, pos, appearance, anim_frame } => {
+                Renderable::Player {
+                    entity,
+                    player,
+                    pos,
+                    appearance,
+                    anim_frame,
+                } => {
                     let mount_index = world
                         .get::<&MountState>(entity)
                         .ok()
@@ -968,7 +1090,16 @@ impl SpriteRenderSystem {
                         status_tint,
                     )?;
                 }
-                Renderable::LibrarySprite { entity, spr, pos, kind_order: _, name, hp_current, hp_max, has_interaction_hint } => {
+                Renderable::LibrarySprite {
+                    entity,
+                    spr,
+                    pos,
+                    kind_order: _,
+                    name,
+                    hp_current,
+                    hp_max,
+                    has_interaction_hint,
+                } => {
                     // C# MonsterObject.Draw(): drawColour = ApplyDrawColour()（受击/中毒着色）。
                     // 怪物/NPC 同样按 Poison 状态着色，与玩家保持一致。
                     let status_tint = Self::compute_status_tint(world, entity);
@@ -993,10 +1124,24 @@ impl SpriteRenderSystem {
                     // 由 EffectRenderSystem 用 ADD 材质（gl_use_material）完成加色混合绘制
                     // （等价于 C# MonsterObject.Draw 里的 BodyLibrary.DrawBlend）。
                     // 走到这里的一定是普通 Alpha 混合怪物。
-                    draw_texture_ex(tex, draw_x, draw_y, tint, DrawTextureParams { ..Default::default() });
+                    draw_texture_ex(
+                        tex,
+                        draw_x,
+                        draw_y,
+                        tint,
+                        DrawTextureParams {
+                            ..Default::default()
+                        },
+                    );
 
                     // 名称、血条和交互提示
-                    Self::draw_object_name_and_health(&pos, info, name.as_deref(), hp_current, hp_max);
+                    Self::draw_object_name_and_health(
+                        &pos,
+                        info,
+                        name.as_deref(),
+                        hp_current,
+                        hp_max,
+                    );
                     if has_interaction_hint {
                         Self::draw_interaction_hint(&pos, info);
                     }
@@ -1038,7 +1183,13 @@ impl SpriteRenderSystem {
                 let bar_y = name_y + 2.0;
 
                 // 背景
-                draw_rectangle(bar_x, bar_y, bar_width, bar_height, Color::from_rgba(80, 0, 0, 200));
+                draw_rectangle(
+                    bar_x,
+                    bar_y,
+                    bar_width,
+                    bar_height,
+                    Color::from_rgba(80, 0, 0, 200),
+                );
 
                 // 血条填充
                 let fill = (cur as f32 / max as f32).clamp(0.0, 1.0);
@@ -1052,7 +1203,14 @@ impl SpriteRenderSystem {
                 draw_rectangle(bar_x, bar_y, bar_width * fill, bar_height, bar_color);
 
                 // 边框
-                draw_rectangle_lines(bar_x, bar_y, bar_width, bar_height, 1.0, Color::from_rgba(200, 200, 200, 180));
+                draw_rectangle_lines(
+                    bar_x,
+                    bar_y,
+                    bar_width,
+                    bar_height,
+                    1.0,
+                    Color::from_rgba(200, 200, 200, 180),
+                );
             }
         }
     }
@@ -1085,8 +1243,13 @@ impl SpriteRenderSystem {
             // 金币袋：金色光晕
             let glow_color = Color::from_rgba(255, 215, 0, (pulse * alpha * 180.0) as u8);
             draw_circle(pos.x, pos.y, 16.0, glow_color);
-            draw_text_cn(&item.gold_amount.to_string(), pos.x - 12.0, pos.y + 4.0, 10.0,
-                Color::from_rgba(255, 215, 0, (alpha * 255.0) as u8));
+            draw_text_cn(
+                &item.gold_amount.to_string(),
+                pos.x - 12.0,
+                pos.y + 4.0,
+                10.0,
+                Color::from_rgba(255, 215, 0, (alpha * 255.0) as u8),
+            );
         } else {
             // 物品：青色光晕 + 物品索引
             let glow_color = Color::from_rgba(100, 200, 255, (pulse * alpha * 150.0) as u8);
@@ -1097,9 +1260,13 @@ impl SpriteRenderSystem {
             } else {
                 format!("物品 #{}", item.item.item_index)
             };
-            draw_text_cn(&name, pos.x - 20.0, pos.y + 4.0, 9.0,
-                Color::from_rgba(200, 230, 255, (alpha * 255.0) as u8));
+            draw_text_cn(
+                &name,
+                pos.x - 20.0,
+                pos.y + 4.0,
+                9.0,
+                Color::from_rgba(200, 230, 255, (alpha * 255.0) as u8),
+            );
         }
     }
 }
-

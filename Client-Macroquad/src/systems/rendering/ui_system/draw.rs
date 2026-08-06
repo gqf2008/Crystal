@@ -4,7 +4,8 @@ pub fn draw(sys: &mut UIRenderSystem, _world: &hecs::World) -> GameResult {
     let pass = _world
         .query::<&RenderPass>()
         .iter()
-        .next().copied()
+        .next()
+        .copied()
         .unwrap_or_default();
 
     if pass.stage != RenderStage::Ui {
@@ -69,11 +70,9 @@ pub fn draw(sys: &mut UIRenderSystem, _world: &hecs::World) -> GameResult {
     let npc_input_receiver = if amount_modal || sys.ui_stack_top != UiStackTop::Npc {
         None
     } else {
-        sys.npc_z_order
-            .iter()
-            .rev()
-            .copied()
-            .find(|&layer| sys.npc_layer_visible(layer) && sys.npc_layer_mouse_over(layer, mouse_pos))
+        sys.npc_z_order.iter().rev().copied().find(|&layer| {
+            sys.npc_layer_visible(layer) && sys.npc_layer_mouse_over(layer, mouse_pos)
+        })
     };
 
     let npc_dialog_input_enabled = npc_input_receiver == Some(NpcUiLayer::Dialog);
@@ -100,16 +99,17 @@ pub fn draw(sys: &mut UIRenderSystem, _world: &hecs::World) -> GameResult {
                                 crate::scenes::dialogs::game::npc_dialog::NpcDialogAction::None
                             ) {
                                 if let Some(s) = _world.query::<&UiState>().iter().next() {
-                                    s.borrow_mut().pending_actions.push(UiAction::NpcDialog(action));
+                                    s.borrow_mut()
+                                        .pending_actions
+                                        .push(UiAction::NpcDialog(action));
                                 }
                             }
                         }
                     }
                     NpcUiLayer::Goods => {
                         if sys.npc_goods_dialog.is_visible() {
-                            npc_consumed |= sys
-                                .npc_goods_dialog
-                                .update_and_draw_with_input(None, false);
+                            npc_consumed |=
+                                sys.npc_goods_dialog.update_and_draw_with_input(None, false);
                         }
                     }
                     NpcUiLayer::SubGoods => {
@@ -146,7 +146,9 @@ pub fn draw(sys: &mut UIRenderSystem, _world: &hecs::World) -> GameResult {
                                 crate::scenes::dialogs::game::npc_dialog::NpcDialogAction::None
                             ) {
                                 if let Some(s) = _world.query::<&UiState>().iter().next() {
-                                    s.borrow_mut().pending_actions.push(UiAction::NpcDialog(action));
+                                    s.borrow_mut()
+                                        .pending_actions
+                                        .push(UiAction::NpcDialog(action));
                                 }
                             }
                         }
@@ -180,14 +182,17 @@ pub fn draw(sys: &mut UIRenderSystem, _world: &hecs::World) -> GameResult {
 
     // 服务器倒计时（全局 overlay，最上层绘制）
     let delta = macroquad::time::get_frame_time();
-    sys.timer_dialog.draw(screen_width(), screen_height(), delta);
+    sys.timer_dialog
+        .draw(screen_width(), screen_height(), delta);
 
     // 屏幕中央 transient 通知
-    sys.chat_notice_dialog.draw(screen_width(), screen_height(), delta);
+    sys.chat_notice_dialog
+        .draw(screen_width(), screen_height(), delta);
 
     // 服务器公告对话框（模态弹窗，阻塞其它输入）
     let _notice_consumed = sys.notice_dialog.draw(
-        mouse_pos, 0.0,
+        mouse_pos,
+        0.0,
         is_mouse_button_pressed(MouseButton::Left),
         false,
     );
@@ -196,17 +201,30 @@ pub fn draw(sys: &mut UIRenderSystem, _world: &hecs::World) -> GameResult {
     sys.roll_dialog.draw(screen_width(), screen_height(), delta);
 
     // 耐久度状态
-    sys.dura_status_dialog.draw(screen_width(), screen_height(), mouse_pos,
-        is_mouse_button_pressed(MouseButton::Left));
+    sys.dura_status_dialog.draw(
+        screen_width(),
+        screen_height(),
+        mouse_pos,
+        is_mouse_button_pressed(MouseButton::Left),
+    );
 
     // NPC 赠送物品
-    sys.npc_drop_dialog.draw(screen_width(), screen_height(), mouse_pos,
-        is_mouse_button_pressed(MouseButton::Left));
+    sys.npc_drop_dialog.draw(
+        screen_width(),
+        screen_height(),
+        mouse_pos,
+        is_mouse_button_pressed(MouseButton::Left),
+    );
 
     // 行会领地
     let wheel_y = mouse_wheel().1;
-    sys.guild_territory_dialog.draw(screen_width(), screen_height(), mouse_pos,
-        wheel_y, is_mouse_button_pressed(MouseButton::Left));
+    sys.guild_territory_dialog.draw(
+        screen_width(),
+        screen_height(),
+        mouse_pos,
+        wheel_y,
+        is_mouse_button_pressed(MouseButton::Left),
+    );
 
     // 键位设置
     let any_key = if sys.keyboard_layout_dialog.is_rebinding() {
@@ -214,55 +232,92 @@ pub fn draw(sys: &mut UIRenderSystem, _world: &hecs::World) -> GameResult {
     } else {
         None
     };
-    sys.keyboard_layout_dialog.draw(screen_width(), screen_height(), mouse_pos,
-        wheel_y, is_mouse_button_pressed(MouseButton::Left), any_key);
+    sys.keyboard_layout_dialog.draw(
+        screen_width(),
+        screen_height(),
+        mouse_pos,
+        wheel_y,
+        is_mouse_button_pressed(MouseButton::Left),
+        any_key,
+    );
 
     // 装备觉醒
-    sys.npc_awake_dialog.draw(screen_width(), screen_height(), mouse_pos,
-        is_mouse_button_pressed(MouseButton::Left));
+    sys.npc_awake_dialog.draw(
+        screen_width(),
+        screen_height(),
+        mouse_pos,
+        is_mouse_button_pressed(MouseButton::Left),
+    );
 
     // 合成（先注入玩家金币用于 Gold 校验）
     {
         use crate::components::{Currency, LocalPlayer};
-        let player_gold = _world.iter().find_map(|e| {
-            e.get::<&LocalPlayer>()?;
-            _world.get::<&Currency>(e.entity()).ok().map(|c| c.gold)
-        }).unwrap_or(0);
+        let player_gold = _world
+            .iter()
+            .find_map(|e| {
+                e.get::<&LocalPlayer>()?;
+                _world.get::<&Currency>(e.entity()).ok().map(|c| c.gold)
+            })
+            .unwrap_or(0);
         sys.craft_dialog.set_player_gold(player_gold);
     }
-    if let Some(craft_data) = sys.craft_dialog.draw(screen_width(), screen_height(), mouse_pos,
-        wheel_y, is_mouse_button_pressed(MouseButton::Left)) {
+    if let Some(craft_data) = sys.craft_dialog.draw(
+        screen_width(),
+        screen_height(),
+        mouse_pos,
+        wheel_y,
+        is_mouse_button_pressed(MouseButton::Left),
+    ) {
         if let Some(s) = _world.query::<&UiState>().iter().next() {
-            s.borrow_mut().pending_commands.push(UiCommand::CraftItemRequest {
-                recipe_unique_id: craft_data.recipe_unique_id,
-                count: craft_data.count,
-                slots: craft_data.slots,
-            });
+            s.borrow_mut()
+                .pending_commands
+                .push(UiCommand::CraftItemRequest {
+                    recipe_unique_id: craft_data.recipe_unique_id,
+                    count: craft_data.count,
+                    slots: craft_data.slots,
+                });
         }
     }
     if let Some(warn) = sys.craft_dialog.take_gold_warn() {
         if let Some(s) = _world.query::<&UiState>().iter().next() {
-            s.borrow_mut().pending_commands.push(UiCommand::PushSystemChatLine(warn));
+            s.borrow_mut()
+                .pending_commands
+                .push(UiCommand::PushSystemChatLine(warn));
         }
     }
 
     // 精炼
-    sys.refine_dialog.draw(screen_width(), screen_height(), mouse_pos,
-        is_mouse_button_pressed(MouseButton::Left));
+    sys.refine_dialog.draw(
+        screen_width(),
+        screen_height(),
+        mouse_pos,
+        is_mouse_button_pressed(MouseButton::Left),
+    );
 
     // 物品租赁
-    sys.item_rental_dialog.draw(screen_width(), screen_height(), mouse_pos,
-        is_mouse_button_pressed(MouseButton::Left));
+    sys.item_rental_dialog.draw(
+        screen_width(),
+        screen_height(),
+        mouse_pos,
+        is_mouse_button_pressed(MouseButton::Left),
+    );
     if sys.item_rental_dialog.confirm_clicked {
         if let Some(s) = _world.query::<&UiState>().iter().next() {
-            s.borrow_mut().pending_commands.push(UiCommand::ConfirmItemRental);
+            s.borrow_mut()
+                .pending_commands
+                .push(UiCommand::ConfirmItemRental);
         }
         sys.item_rental_dialog.confirm_clicked = false;
     }
 
     // 寄售行
-    sys.trust_merchant_dialog.draw(screen_width(), screen_height(), mouse_pos,
-        wheel_y, is_mouse_button_pressed(MouseButton::Left));
+    sys.trust_merchant_dialog.draw(
+        screen_width(),
+        screen_height(),
+        mouse_pos,
+        wheel_y,
+        is_mouse_button_pressed(MouseButton::Left),
+    );
 
     // 举报 / Bug 反馈对话框
     if sys.report_dialog.is_visible() {

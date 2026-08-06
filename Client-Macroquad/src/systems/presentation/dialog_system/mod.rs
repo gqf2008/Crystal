@@ -11,8 +11,8 @@ use crate::{
 
 use mir2_shared::enums::PanelType;
 
-mod network_events;
 mod actions;
+mod network_events;
 
 /// 将 Unix 时间戳（秒）格式化为中文日期字符串
 fn format_mail_date(timestamp: i64) -> String {
@@ -31,8 +31,7 @@ fn sys_chat(cmds: &mut Vec<UiCommand>, msg: impl Into<String>) {
 }
 
 #[derive(ecs_macros::LogicSystem)]
-pub struct DialogSystem {
-}
+pub struct DialogSystem {}
 
 impl Default for DialogSystem {
     fn default() -> Self {

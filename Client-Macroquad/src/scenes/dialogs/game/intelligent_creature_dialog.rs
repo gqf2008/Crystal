@@ -11,10 +11,10 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
+use super::native_ui_utils::DragHelper;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
-use super::native_ui_utils::DragHelper;
+use macroquad::prelude::*;
 
 /// 宠物模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -263,7 +263,13 @@ impl IntelligentCreatureDialogHybrid {
 
     fn draw_background(&self) {
         if let Some(tex) = &self.bg_texture {
-            draw_texture_ex(tex, self.position.x, self.position.y, WHITE, DrawTextureParams::default());
+            draw_texture_ex(
+                tex,
+                self.position.x,
+                self.position.y,
+                WHITE,
+                DrawTextureParams::default(),
+            );
         }
     }
 
@@ -273,8 +279,10 @@ impl IntelligentCreatureDialogHybrid {
         for i in 0..10 {
             let col = i % Self::SLOT_COLS;
             let row = i / Self::SLOT_COLS;
-            let slot_x = self.position.x + Self::SLOT_START_X + col as f32 * (Self::SLOT_W + Self::SLOT_GAP);
-            let slot_y = self.position.y + Self::SLOT_START_Y + row as f32 * (Self::SLOT_H + Self::SLOT_GAP);
+            let slot_x =
+                self.position.x + Self::SLOT_START_X + col as f32 * (Self::SLOT_W + Self::SLOT_GAP);
+            let slot_y =
+                self.position.y + Self::SLOT_START_Y + row as f32 * (Self::SLOT_H + Self::SLOT_GAP);
             let slot_rect = Rect::new(slot_x, slot_y, Self::SLOT_W, Self::SLOT_H);
 
             let is_selected = self.selected_creature == Some(i);
@@ -289,11 +297,23 @@ impl IntelligentCreatureDialogHybrid {
             } else {
                 Color::from_rgba(80, 80, 80, 200)
             };
-            draw_rectangle_lines(slot_x, slot_y, Self::SLOT_W, Self::SLOT_H, 1.0, border_color);
+            draw_rectangle_lines(
+                slot_x,
+                slot_y,
+                Self::SLOT_W,
+                Self::SLOT_H,
+                1.0,
+                border_color,
+            );
 
             // 槽位背景
-            draw_rectangle(slot_x + 1.0, slot_y + 1.0, Self::SLOT_W - 2.0, Self::SLOT_H - 2.0,
-                Color::from_rgba(30, 30, 30, 150));
+            draw_rectangle(
+                slot_x + 1.0,
+                slot_y + 1.0,
+                Self::SLOT_W - 2.0,
+                Self::SLOT_H - 2.0,
+                Color::from_rgba(30, 30, 30, 150),
+            );
 
             if has_creature {
                 let creature = &self.creatures[i];
@@ -303,8 +323,13 @@ impl IntelligentCreatureDialogHybrid {
 
                 // 召唤状态标记
                 if creature.is_summoned {
-                    draw_text_cn("召", slot_x + 2.0, slot_y + 20.0, 8.0,
-                        Color::from_rgba(100, 255, 100, 255));
+                    draw_text_cn(
+                        "召",
+                        slot_x + 2.0,
+                        slot_y + 20.0,
+                        8.0,
+                        Color::from_rgba(100, 255, 100, 255),
+                    );
                 }
 
                 // 饱满度条
@@ -317,7 +342,13 @@ impl IntelligentCreatureDialogHybrid {
                 } else {
                     0.0
                 };
-                draw_rectangle(bar_x, bar_y, bar_w, bar_h, Color::from_rgba(40, 40, 40, 200));
+                draw_rectangle(
+                    bar_x,
+                    bar_y,
+                    bar_w,
+                    bar_h,
+                    Color::from_rgba(40, 40, 40, 200),
+                );
                 if fullness_pct > 0.0 {
                     let bar_color = if fullness_pct > 0.5 {
                         Color::from_rgba(60, 180, 60, 200)
@@ -328,12 +359,31 @@ impl IntelligentCreatureDialogHybrid {
                     };
                     draw_rectangle(bar_x, bar_y, bar_w * fullness_pct, bar_h, bar_color);
                 }
-                draw_rectangle_lines(bar_x, bar_y, bar_w, bar_h, 0.5, Color::from_rgba(80, 80, 80, 150));
+                draw_rectangle_lines(
+                    bar_x,
+                    bar_y,
+                    bar_w,
+                    bar_h,
+                    0.5,
+                    Color::from_rgba(80, 80, 80, 150),
+                );
 
                 // 饱满度数值
-                draw_text_cn(&format!("{}", creature.fullness), slot_x + 2.0, slot_y + 50.0, 8.0, GRAY);
+                draw_text_cn(
+                    &format!("{}", creature.fullness),
+                    slot_x + 2.0,
+                    slot_y + 50.0,
+                    8.0,
+                    GRAY,
+                );
             } else {
-                draw_text_cn("空", slot_x + 16.0, slot_y + 20.0, 10.0, Color::from_rgba(60, 60, 60, 200));
+                draw_text_cn(
+                    "空",
+                    slot_x + 16.0,
+                    slot_y + 20.0,
+                    10.0,
+                    Color::from_rgba(60, 60, 60, 200),
+                );
             }
 
             // 点击检测
@@ -353,7 +403,13 @@ impl IntelligentCreatureDialogHybrid {
             if let Some(tex) = &self.pearl_texture {
                 draw_texture_ex(tex, pearl_x, pearl_y, WHITE, DrawTextureParams::default());
             }
-            draw_text_cn(&format!("x{}", creature.pearl_count), pearl_x + 16.0, pearl_y + 4.0, 10.0, WHITE);
+            draw_text_cn(
+                &format!("x{}", creature.pearl_count),
+                pearl_x + 16.0,
+                pearl_y + 4.0,
+                10.0,
+                WHITE,
+            );
         }
     }
 
@@ -364,13 +420,21 @@ impl IntelligentCreatureDialogHybrid {
         let btn_gap = 10.0;
 
         let buttons: Vec<(&str, CreatureDialogAction, Color)> = vec![
-            ("召唤", CreatureDialogAction::SummonCreature(
-                self.selected_creature.unwrap_or(0)
-            ), Color::from_rgba(60, 150, 60, 200)),
-            ("解散", CreatureDialogAction::DismissCreature, Color::from_rgba(150, 100, 60, 200)),
-            ("放生", CreatureDialogAction::ReleaseCreature(
-                self.selected_creature.unwrap_or(0)
-            ), Color::from_rgba(150, 60, 60, 200)),
+            (
+                "召唤",
+                CreatureDialogAction::SummonCreature(self.selected_creature.unwrap_or(0)),
+                Color::from_rgba(60, 150, 60, 200),
+            ),
+            (
+                "解散",
+                CreatureDialogAction::DismissCreature,
+                Color::from_rgba(150, 100, 60, 200),
+            ),
+            (
+                "放生",
+                CreatureDialogAction::ReleaseCreature(self.selected_creature.unwrap_or(0)),
+                Color::from_rgba(150, 60, 60, 200),
+            ),
         ];
 
         let total_w = buttons.len() as f32 * (btn_w + btn_gap) - btn_gap;
@@ -390,7 +454,14 @@ impl IntelligentCreatureDialogHybrid {
                 *color
             };
             draw_rectangle(btn_x, btn_y, btn_w, btn_h, btn_color);
-            draw_rectangle_lines(btn_x, btn_y, btn_w, btn_h, 1.0, Color::from_rgba(100, 100, 120, 200));
+            draw_rectangle_lines(
+                btn_x,
+                btn_y,
+                btn_w,
+                btn_h,
+                1.0,
+                Color::from_rgba(100, 100, 120, 200),
+            );
 
             draw_text_cn(label, btn_x + 12.0, btn_y + 15.0, 11.0, WHITE);
 
@@ -439,7 +510,14 @@ impl IntelligentCreatureDialogHybrid {
             Color::from_rgba(60, 70, 90, 255)
         };
         draw_rectangle(toggle_x, toggle_y, toggle_w, toggle_h, bg_color);
-        draw_rectangle_lines(toggle_x, toggle_y, toggle_w, toggle_h, 1.0, Color::from_rgba(100, 100, 120, 200));
+        draw_rectangle_lines(
+            toggle_x,
+            toggle_y,
+            toggle_w,
+            toggle_h,
+            1.0,
+            Color::from_rgba(100, 100, 120, 200),
+        );
         draw_text_cn(mode_label, toggle_x + 12.0, toggle_y + 15.0, 11.0, WHITE);
 
         if is_hovered && is_mouse_button_pressed(MouseButton::Left) {

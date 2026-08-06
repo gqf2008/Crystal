@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use macroquad::prelude::KeyCode;
 
 use crate::{
-    components::{Health, LocalPlayer, Monster, PlayerInput, Position, MovementMode},
+    components::{Health, LocalPlayer, Monster, MovementMode, PlayerInput, Position},
     coord::Coord,
     game::{GameContext, GameResult},
     systems::LogicSystem,
@@ -101,13 +101,19 @@ impl BehaviorTree {
                     match self.tick_node(cid, sys, ctx, bb) {
                         BtStatus::Success => running_child += 1,
                         BtStatus::Failure => {
-                            if let BtNode::Sequence { running_child: rc, .. } = &mut self.nodes[node_id] {
+                            if let BtNode::Sequence {
+                                running_child: rc, ..
+                            } = &mut self.nodes[node_id]
+                            {
                                 *rc = 0;
                             }
                             return BtStatus::Failure;
                         }
                         BtStatus::Running => {
-                            if let BtNode::Sequence { running_child: rc, .. } = &mut self.nodes[node_id] {
+                            if let BtNode::Sequence {
+                                running_child: rc, ..
+                            } = &mut self.nodes[node_id]
+                            {
                                 *rc = running_child;
                             }
                             return BtStatus::Running;
@@ -115,7 +121,10 @@ impl BehaviorTree {
                     }
                 }
 
-                if let BtNode::Sequence { running_child: rc, .. } = &mut self.nodes[node_id] {
+                if let BtNode::Sequence {
+                    running_child: rc, ..
+                } = &mut self.nodes[node_id]
+                {
                     *rc = 0;
                 }
                 BtStatus::Success
@@ -133,14 +142,20 @@ impl BehaviorTree {
                     let cid = children[running_child];
                     match self.tick_node(cid, sys, ctx, bb) {
                         BtStatus::Success => {
-                            if let BtNode::Selector { running_child: rc, .. } = &mut self.nodes[node_id] {
+                            if let BtNode::Selector {
+                                running_child: rc, ..
+                            } = &mut self.nodes[node_id]
+                            {
                                 *rc = 0;
                             }
                             return BtStatus::Success;
                         }
                         BtStatus::Failure => running_child += 1,
                         BtStatus::Running => {
-                            if let BtNode::Selector { running_child: rc, .. } = &mut self.nodes[node_id] {
+                            if let BtNode::Selector {
+                                running_child: rc, ..
+                            } = &mut self.nodes[node_id]
+                            {
                                 *rc = running_child;
                             }
                             return BtStatus::Running;
@@ -148,7 +163,10 @@ impl BehaviorTree {
                     }
                 }
 
-                if let BtNode::Selector { running_child: rc, .. } = &mut self.nodes[node_id] {
+                if let BtNode::Selector {
+                    running_child: rc, ..
+                } = &mut self.nodes[node_id]
+                {
                     *rc = 0;
                 }
                 BtStatus::Failure
@@ -233,7 +251,9 @@ impl Default for LocalPlayerAiSystem {
 
         let act_update_snapshot = push(BtNode::Action(LocalPlayerAiSystem::bt_act_update_snapshot));
         let act_acquire_target = push(BtNode::Action(LocalPlayerAiSystem::bt_act_acquire_target));
-        let cond_in_melee = push(BtNode::Condition(LocalPlayerAiSystem::bt_cond_in_melee_range));
+        let cond_in_melee = push(BtNode::Condition(
+            LocalPlayerAiSystem::bt_cond_in_melee_range,
+        ));
         let act_stop_and_attack = push(BtNode::Action(LocalPlayerAiSystem::bt_act_stop_and_attack));
         let seq_in_melee = push(BtNode::Sequence {
             children: vec![cond_in_melee, act_stop_and_attack],
@@ -294,7 +314,13 @@ impl Default for LocalPlayerAiSystem {
 impl LocalPlayerAiSystem {
     fn find_local_player_snapshot(
         ctx: &GameContext,
-    ) -> Option<(hecs::Entity, (i32, i32), (f32, f32), Option<hecs::Entity>, bool)> {
+    ) -> Option<(
+        hecs::Entity,
+        (i32, i32),
+        (f32, f32),
+        Option<hecs::Entity>,
+        bool,
+    )> {
         if let Some((e, _local, pos, input)) = ctx
             .world
             .iter()
@@ -303,11 +329,18 @@ impl LocalPlayerAiSystem {
                 let pos = e.get::<&Position>()?;
                 let input = e.get::<&PlayerInput>()?;
                 Some((e.entity(), lp, pos, input))
-            }).next()
+            })
+            .next()
         {
             let (pgx, pgy) = Coord::world_to_grid(pos.x, pos.y);
             let has_move_goal = input.move_to.is_some();
-            return Some((e, (pgx, pgy), (pos.x, pos.y), input.attack_target, has_move_goal));
+            return Some((
+                e,
+                (pgx, pgy),
+                (pos.x, pos.y),
+                input.attack_target,
+                has_move_goal,
+            ));
         }
         None
     }
@@ -363,7 +396,11 @@ impl LocalPlayerAiSystem {
         best.map(|(e, _)| e)
     }
 
-    fn occupied_tiles(ctx: &GameContext, local_player: hecs::Entity, target_monster: hecs::Entity) -> HashSet<(i32, i32)> {
+    fn occupied_tiles(
+        ctx: &GameContext,
+        local_player: hecs::Entity,
+        target_monster: hecs::Entity,
+    ) -> HashSet<(i32, i32)> {
         let mut occ = HashSet::new();
 
         // 其他玩家
@@ -533,7 +570,9 @@ impl LocalPlayerAiSystem {
             bb.target_entity = None;
             bb.target_grid = None;
 
-            if self.debug_enabled && bb.now.duration_since(self.last_debug_log) >= self.debug_interval {
+            if self.debug_enabled
+                && bb.now.duration_since(self.last_debug_log) >= self.debug_interval
+            {
                 self.last_debug_log = bb.now;
                 eprintln!("[AI] no local player snapshot (need LocalPlayer+Position+PlayerInput)");
             }
@@ -595,9 +634,7 @@ impl LocalPlayerAiSystem {
         let mut did_scan = false;
 
         // 校验现有目标
-        let mut target = bb
-            .target_entity
-            .filter(|t| Self::target_is_valid(ctx, *t));
+        let mut target = bb.target_entity.filter(|t| Self::target_is_valid(ctx, *t));
         // 关键修复：如果旧目标失效（死亡/消失），立即触发重搜，不等待节流窗口。
         // 这能避免"打一会儿就停了"的问题：怪物死亡后立即找新怪，不等 160ms。
         let target_lost = prev_target.is_some() && target.is_none();
@@ -626,7 +663,9 @@ impl LocalPlayerAiSystem {
         if bb.now.duration_since(self.last_scan) >= self.scan_interval {
             self.last_scan = bb.now;
             did_scan = true;
-            if let Some(candidate) = Self::acquire_nearest_monster(ctx, player_grid, self.max_acquire_range) {
+            if let Some(candidate) =
+                Self::acquire_nearest_monster(ctx, player_grid, self.max_acquire_range)
+            {
                 target = Some(candidate);
             }
         }
@@ -644,7 +683,9 @@ impl LocalPlayerAiSystem {
                 input.attack_target = Some(t);
             }
 
-            if self.debug_enabled && bb.now.duration_since(self.last_debug_log) >= self.debug_interval {
+            if self.debug_enabled
+                && bb.now.duration_since(self.last_debug_log) >= self.debug_interval
+            {
                 self.last_debug_log = bb.now;
                 let changed = prev_target != bb.target_entity;
                 let tg = bb.target_grid;
@@ -736,9 +777,13 @@ impl LocalPlayerAiSystem {
         // 这比“只换怪物周围落点”更能处理动态人墙阻挡。
         if bb.stuck {
             self.repath_attempt = self.repath_attempt.wrapping_add(1);
-            if let Some((egx, egy)) =
-                Self::choose_escape_goal(ctx, player_grid, Some(target_grid), &occupied, self.repath_attempt)
-            {
+            if let Some((egx, egy)) = Self::choose_escape_goal(
+                ctx,
+                player_grid,
+                Some(target_grid),
+                &occupied,
+                self.repath_attempt,
+            ) {
                 let (ewx, ewy) = Coord::grid_to_world_center(egx, egy);
                 if let Ok(mut input) = ctx.world.get::<&mut PlayerInput>(player_entity) {
                     input.attack_target = Some(target_entity);
@@ -747,7 +792,9 @@ impl LocalPlayerAiSystem {
                     input.run = true;
                 }
 
-                if self.debug_enabled && bb.now.duration_since(self.last_debug_log) >= self.debug_interval {
+                if self.debug_enabled
+                    && bb.now.duration_since(self.last_debug_log) >= self.debug_interval
+                {
                     self.last_debug_log = bb.now;
                     eprintln!("[AI] stuck: escape_step to grid=({},{})", egx, egy);
                 }
@@ -762,14 +809,19 @@ impl LocalPlayerAiSystem {
                 input.movement_mode = MovementMode::None;
                 input.run = false;
             }
-            if let Ok(mut path) = ctx.world.get::<&mut crate::components::movement::Path>(player_entity) {
+            if let Ok(mut path) = ctx
+                .world
+                .get::<&mut crate::components::movement::Path>(player_entity)
+            {
                 path.clear();
             }
             self.last_melee_goal = None;
             // 下帧强制重搜目标（不等节流窗口）
             self.last_scan = bb.now - self.scan_interval;
 
-            if self.debug_enabled && bb.now.duration_since(self.last_debug_log) >= self.debug_interval {
+            if self.debug_enabled
+                && bb.now.duration_since(self.last_debug_log) >= self.debug_interval
+            {
                 self.last_debug_log = bb.now;
                 eprintln!("[AI] stuck: no escape goal; reset target+move and force rescan");
             }
@@ -889,7 +941,9 @@ impl LogicSystem for LocalPlayerAiSystem {
                 } else {
                     "[AI] 已关闭（F8 切换）".to_string()
                 };
-                ui.borrow_mut().pending_commands.push(UiCommand::PushSystemChatLine(msg));
+                ui.borrow_mut()
+                    .pending_commands
+                    .push(UiCommand::PushSystemChatLine(msg));
             }
         }
 
@@ -902,7 +956,12 @@ impl LogicSystem for LocalPlayerAiSystem {
         // 例如：UI 每帧都标记 ui_consumed_last_frame=true，会导致 ctx.input_blocked 永远为 true，
         // 从而 AI 永久站桩。
         if ctx.input_blocked {
-            let (ui_input_active, ui_mouse_captured, any_modal_or_popup_open, ui_consumed_last_frame) = ctx
+            let (
+                ui_input_active,
+                ui_mouse_captured,
+                any_modal_or_popup_open,
+                ui_consumed_last_frame,
+            ) = ctx
                 .world
                 .query::<&UiState>()
                 .iter()

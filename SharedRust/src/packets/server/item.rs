@@ -2,14 +2,14 @@
 //!
 //! This module contains all item-related packet definitions and parsers.
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::{
-    enums::{MirGridType, ServerPacketIds},
-    data::item::{ItemInfo, UserItem},
-};
 use super::super::base::Packet;
 use crate::data::stats::SharedResult;
+use crate::{
+    data::item::{ItemInfo, UserItem},
+    enums::{MirGridType, ServerPacketIds},
+};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 // ============================================================================
 // Packet Structures & PacketMessage Implementations
@@ -30,7 +30,11 @@ impl Packet for SellItem {
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let count = reader.read_u16::<LittleEndian>()?;
         let success = reader.read_u8()? != 0;
-        Ok(Self { unique_id, count, success })
+        Ok(Self {
+            unique_id,
+            count,
+            success,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -76,7 +80,11 @@ impl Packet for ItemRepaired {
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let max_dura = reader.read_u16::<LittleEndian>()?;
         let current_dura = reader.read_u16::<LittleEndian>()?;
-        Ok(Self { unique_id, max_dura, current_dura })
+        Ok(Self {
+            unique_id,
+            max_dura,
+            current_dura,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -102,7 +110,11 @@ impl Packet for SplitItem {
         let grid = MirGridType::try_from(reader.read_u8()?)?;
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let count = reader.read_u16::<LittleEndian>()?;
-        Ok(Self { grid, unique_id, count })
+        Ok(Self {
+            grid,
+            unique_id,
+            count,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -128,7 +140,11 @@ impl Packet for SplitItem1 {
         let grid = MirGridType::try_from(reader.read_u8()?)?;
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let count = reader.read_u16::<LittleEndian>()?;
-        Ok(Self { grid, unique_id, count })
+        Ok(Self {
+            grid,
+            unique_id,
+            count,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -172,7 +188,10 @@ impl Packet for ItemSlotSizeChanged {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let slot_size = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { unique_id, slot_size })
+        Ok(Self {
+            unique_id,
+            slot_size,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -197,7 +216,11 @@ impl Packet for ItemSealChanged {
         let grid_type = MirGridType::try_from(reader.read_u8()?)?;
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let expiry_date = reader.read_i64::<LittleEndian>()?;
-        Ok(Self { grid_type, unique_id, expiry_date })
+        Ok(Self {
+            grid_type,
+            unique_id,
+            expiry_date,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -223,7 +246,11 @@ impl Packet for CraftItem {
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let count = reader.read_u16::<LittleEndian>()?;
         let success = reader.read_u8()? != 0;
-        Ok(Self { unique_id, count, success })
+        Ok(Self {
+            unique_id,
+            count,
+            success,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {

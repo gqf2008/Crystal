@@ -10,8 +10,8 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
 use crate::ui::text_renderer::draw_text_cn;
+use macroquad::prelude::*;
 use mir2_shared::data::item::UserItem;
 use mir2_shared::enums::MarketPriceFilter;
 
@@ -133,8 +133,14 @@ impl TrustMerchantDialogHybrid {
     }
 
     /// 绘制
-    pub fn draw(&mut self, screen_w: f32, screen_h: f32, mouse_pos: Vec2,
-                mouse_wheel: f32, left_clicked: bool) -> bool {
+    pub fn draw(
+        &mut self,
+        screen_w: f32,
+        screen_h: f32,
+        mouse_pos: Vec2,
+        mouse_wheel: f32,
+        left_clicked: bool,
+    ) -> bool {
         if !self.visible {
             return false;
         }
@@ -150,19 +156,32 @@ impl TrustMerchantDialogHybrid {
         let dialog_x = (screen_w - dialog_w) / 2.0;
         let dialog_y = (screen_h - dialog_h) / 2.0;
 
-        let mouse_over = mouse_pos.x >= dialog_x && mouse_pos.x <= dialog_x + dialog_w
-            && mouse_pos.y >= dialog_y && mouse_pos.y <= dialog_y + dialog_h;
+        let mouse_over = mouse_pos.x >= dialog_x
+            && mouse_pos.x <= dialog_x + dialog_w
+            && mouse_pos.y >= dialog_y
+            && mouse_pos.y <= dialog_y + dialog_h;
 
         if mouse_over && mouse_wheel != 0.0 {
             self.scroll_offset = (self.scroll_offset - mouse_wheel * 15.0).max(0.0);
         }
 
         // 背景
-        draw_rectangle(dialog_x, dialog_y, dialog_w, dialog_h, Color::from_rgba(25, 25, 40, 230));
+        draw_rectangle(
+            dialog_x,
+            dialog_y,
+            dialog_w,
+            dialog_h,
+            Color::from_rgba(25, 25, 40, 230),
+        );
 
         // 标题
-        draw_text_cn("寄售行", dialog_x + 15.0, dialog_y + 10.0, 16.0,
-            Color::from_rgba(255, 220, 100, 255));
+        draw_text_cn(
+            "寄售行",
+            dialog_x + 15.0,
+            dialog_y + 10.0,
+            16.0,
+            Color::from_rgba(255, 220, 100, 255),
+        );
 
         // 页签栏
         let tab_y = dialog_y + title_h + padding;
@@ -182,8 +201,12 @@ impl TrustMerchantDialogHybrid {
             draw_rectangle(tab_x, tab_y, tab_w, tab_h, tab_color);
             draw_text_cn(label, tab_x + 15.0, tab_y + 5.0, 13.0, WHITE);
 
-            if left_clicked && mouse_pos.x >= tab_x && mouse_pos.x <= tab_x + tab_w
-                && mouse_pos.y >= tab_y && mouse_pos.y <= tab_y + tab_h {
+            if left_clicked
+                && mouse_pos.x >= tab_x
+                && mouse_pos.x <= tab_x + tab_w
+                && mouse_pos.y >= tab_y
+                && mouse_pos.y <= tab_y + tab_h
+            {
                 self.set_tab(tab_enum);
             }
         }
@@ -198,22 +221,46 @@ impl TrustMerchantDialogHybrid {
                 continue;
             }
 
-            let name = merchant_item.item.info.as_ref()
-                .map(|info| info.name.as_str()).unwrap_or("未知物品");
+            let name = merchant_item
+                .item
+                .info
+                .as_ref()
+                .map(|info| info.name.as_str())
+                .unwrap_or("未知物品");
 
-            draw_text_cn(name, dialog_x + 15.0, y + 5.0, 13.0,
-                Color::from_rgba(200, 200, 255, 255));
-            draw_text_cn(&format!("{} 金币 | 卖家: {} | 剩余: {}h",
-                merchant_item.price, merchant_item.seller, merchant_item.remaining_hours),
-                dialog_x + 15.0, y + 20.0, 11.0,
-                Color::from_rgba(150, 150, 150, 255));
+            draw_text_cn(
+                name,
+                dialog_x + 15.0,
+                y + 5.0,
+                13.0,
+                Color::from_rgba(200, 200, 255, 255),
+            );
+            draw_text_cn(
+                &format!(
+                    "{} 金币 | 卖家: {} | 剩余: {}h",
+                    merchant_item.price, merchant_item.seller, merchant_item.remaining_hours
+                ),
+                dialog_x + 15.0,
+                y + 20.0,
+                11.0,
+                Color::from_rgba(150, 150, 150, 255),
+            );
         }
 
         // 分页栏
         let page_y = dialog_y + dialog_h - page_h - padding;
-        draw_text_cn(&format!("第 {}/{} 页  共 {} 件商品",
-            self.current_page, self.total_pages, self.items.len()),
-            dialog_x + 15.0, page_y + 5.0, 12.0, WHITE);
+        draw_text_cn(
+            &format!(
+                "第 {}/{} 页  共 {} 件商品",
+                self.current_page,
+                self.total_pages,
+                self.items.len()
+            ),
+            dialog_x + 15.0,
+            page_y + 5.0,
+            12.0,
+            WHITE,
+        );
 
         // PR #1156: 价格 filter label (clickable,cycles Normal→High→Low)
         // 放在分页栏右侧
@@ -221,12 +268,20 @@ impl TrustMerchantDialogHybrid {
         let filter_w = 110.0;
         let mouse_over_filter = mouse_pos.x >= filter_x
             && mouse_pos.x <= filter_x + filter_w
-            && mouse_pos.y >= page_y && mouse_pos.y <= page_y + page_h;
+            && mouse_pos.y >= page_y
+            && mouse_pos.y <= page_y + page_h;
         let filter_label = price_filter_label(self.price_filter);
-        draw_text_cn(&format!("价格: {}", filter_label),
-            filter_x, page_y + 5.0, 12.0,
-            if mouse_over_filter { Color::from_rgba(255, 220, 100, 255) }
-            else { Color::from_rgba(180, 180, 180, 255) });
+        draw_text_cn(
+            &format!("价格: {}", filter_label),
+            filter_x,
+            page_y + 5.0,
+            12.0,
+            if mouse_over_filter {
+                Color::from_rgba(255, 220, 100, 255)
+            } else {
+                Color::from_rgba(180, 180, 180, 255)
+            },
+        );
         if left_clicked && mouse_over_filter {
             self.cycle_price_filter();
             tracing::info!("💰 TrustMerchant: price filter -> {:?}", self.price_filter);
@@ -234,11 +289,21 @@ impl TrustMerchantDialogHybrid {
 
         // 关闭按钮
         let close_x = dialog_x + dialog_w - 70.0;
-        let mouse_over_close = mouse_pos.x >= close_x && mouse_pos.x <= close_x + 55.0
-            && mouse_pos.y >= page_y && mouse_pos.y <= page_y + page_h;
-        draw_rectangle(close_x, page_y, 55.0, page_h,
-            if mouse_over_close { Color::from_rgba(150, 50, 50, 255) }
-            else { Color::from_rgba(100, 30, 30, 255) });
+        let mouse_over_close = mouse_pos.x >= close_x
+            && mouse_pos.x <= close_x + 55.0
+            && mouse_pos.y >= page_y
+            && mouse_pos.y <= page_y + page_h;
+        draw_rectangle(
+            close_x,
+            page_y,
+            55.0,
+            page_h,
+            if mouse_over_close {
+                Color::from_rgba(150, 50, 50, 255)
+            } else {
+                Color::from_rgba(100, 30, 30, 255)
+            },
+        );
         draw_text_cn("关闭", close_x + 12.0, page_y + 5.0, 14.0, WHITE);
 
         if left_clicked && mouse_over_close {

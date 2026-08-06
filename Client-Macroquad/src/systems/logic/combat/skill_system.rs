@@ -27,12 +27,12 @@ use crate::components::{
     TargetSelection, TargetType, NPC,
 };
 use crate::game::GameContext;
+use crate::game::GameResult;
 use crate::game::KeyCode;
 use crate::network::handlers::NetworkEvent as NetworkCommand;
-use crate::game::GameResult;
+use crossbeam_channel::Sender;
 use hecs::World;
 use mir2_shared::enums::MirDirection;
-use crossbeam_channel::Sender;
 
 /// Layer 3: 技能施放系统
 ///
@@ -53,8 +53,6 @@ impl Default for SkillSystem {
 }
 
 impl LogicSystem for SkillSystem {
-    
-
     fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
         // 检查玩家是否有施法意图
         let spell_request = {
@@ -77,7 +75,10 @@ impl LogicSystem for SkillSystem {
         // 如果有施法请求，执行施法逻辑
         if let Some((spell, _target_pos, _target_entity)) = spell_request {
             // 1. 检查是否已学会该技能
-            let learned = ctx.world.query::<(&LocalPlayer, &MagicList)>().iter()
+            let learned = ctx
+                .world
+                .query::<(&LocalPlayer, &MagicList)>()
+                .iter()
                 .next()
                 .map(|(_, ml)| ml.has_learned(spell))
                 .unwrap_or(false);
@@ -87,7 +88,10 @@ impl LogicSystem for SkillSystem {
 
                 // 清除施法输入
                 #[allow(clippy::never_loop)]
-                for (_local, input) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>() {
+                for (_local, input) in ctx
+                    .world
+                    .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
+                {
                     input.cast_spell = None;
                     break;
                 }
@@ -99,7 +103,10 @@ impl LogicSystem for SkillSystem {
             let on_cooldown = {
                 let mut cd = false;
                 #[allow(clippy::never_loop)]
-                for (_local, cooldowns) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::components::spell::SpellCooldowns)>() {
+                for (_local, cooldowns) in ctx
+                    .world
+                    .query_mut::<(&LocalPlayer, &mut crate::components::spell::SpellCooldowns)>()
+                {
                     cooldowns.cleanup();
                     cd = cooldowns.is_on_cooldown(spell as u8);
                     break;
@@ -111,7 +118,10 @@ impl LogicSystem for SkillSystem {
                 tracing::warn!("⚠️ 技能冷却中: {}", spell.name());
 
                 #[allow(clippy::never_loop)]
-                for (_local, input) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>() {
+                for (_local, input) in ctx
+                    .world
+                    .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
+                {
                     input.cast_spell = None;
                     break;
                 }
@@ -121,7 +131,10 @@ impl LogicSystem for SkillSystem {
 
             // 2. 检查魔法值
             let mp_cost = Self::get_spell_mp_cost(spell);
-            let has_enough_mp = ctx.world.query::<(&LocalPlayer, &Mana)>().iter()
+            let has_enough_mp = ctx
+                .world
+                .query::<(&LocalPlayer, &Mana)>()
+                .iter()
                 .next()
                 .map(|(_, mana)| mana.has_enough(mp_cost))
                 .unwrap_or(false);
@@ -167,7 +180,10 @@ impl LogicSystem for SkillSystem {
 
             // 6. 清除施法输入
             #[allow(clippy::never_loop)]
-            for (_local, input) in ctx.world.query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>() {
+            for (_local, input) in ctx
+                .world
+                .query_mut::<(&LocalPlayer, &mut crate::components::PlayerInput)>()
+            {
                 input.cast_spell = None;
                 input.spell_target_pos = None;
                 input.spell_target_entity = None;
@@ -189,7 +205,9 @@ impl SkillSystem {
         network_tx: &Sender<NetworkCommand>,
     ) -> bool {
         // 1. 检查是否已学会该技能
-        let learned = world.query::<(&LocalPlayer, &MagicList)>().iter()
+        let learned = world
+            .query::<(&LocalPlayer, &MagicList)>()
+            .iter()
             .next()
             .map(|(_, ml)| ml.has_learned(spell))
             .unwrap_or(false);
@@ -201,7 +219,9 @@ impl SkillSystem {
 
         // 2. 检查魔法值
         let mp_cost = Self::get_spell_mp_cost(spell);
-        let has_enough_mp = world.query::<(&LocalPlayer, &Mana)>().iter()
+        let has_enough_mp = world
+            .query::<(&LocalPlayer, &Mana)>()
+            .iter()
             .next()
             .map(|(_, mana)| mana.has_enough(mp_cost))
             .unwrap_or(false);
@@ -212,7 +232,9 @@ impl SkillSystem {
         }
 
         // 3. 检查冷却时间
-        let on_cooldown = world.query::<(&LocalPlayer, &crate::components::spell::SpellCooldowns)>().iter()
+        let on_cooldown = world
+            .query::<(&LocalPlayer, &crate::components::spell::SpellCooldowns)>()
+            .iter()
             .next()
             .map(|(_, cooldowns)| cooldowns.is_on_cooldown(spell as u8))
             .unwrap_or(false);
@@ -254,7 +276,9 @@ impl SkillSystem {
     fn set_client_cooldown(world: &mut World, spell: SpellType) {
         let cooldown_ms = Self::get_client_cooldown_ms(spell);
         #[allow(clippy::never_loop)]
-        for (_local, cooldowns) in world.query_mut::<(&LocalPlayer, &mut crate::components::spell::SpellCooldowns)>() {
+        for (_local, cooldowns) in
+            world.query_mut::<(&LocalPlayer, &mut crate::components::spell::SpellCooldowns)>()
+        {
             cooldowns.set(spell as u8, cooldown_ms);
             break;
         }
@@ -359,7 +383,11 @@ impl SkillSystem {
     /// 获取当前目标信息
     fn get_target_info(world: &World) -> (MirDirection, u32, Option<(i32, i32)>) {
         // 查询目标选择组件
-        if let Some((_local, target_sel)) = world.query::<(&LocalPlayer, &TargetSelection)>().iter().next() {
+        if let Some((_local, target_sel)) = world
+            .query::<(&LocalPlayer, &TargetSelection)>()
+            .iter()
+            .next()
+        {
             match target_sel.current {
                 TargetType::Monster(id) => {
                     let direction = Self::calculate_direction_to_target(world, id);
@@ -527,24 +555,31 @@ impl SkillSystem {
 //
 
 /// 快捷键技能输入系统
-#[derive(ecs_macros::LogicSystem)]
-#[derive(Default)]
+#[derive(ecs_macros::LogicSystem, Default)]
 pub struct SpellInputSystem {
     prev_f_keys: [bool; 8], // F1-F8 上一帧状态
 }
-
 
 impl LogicSystem for SpellInputSystem {
     fn update(&mut self, ctx: &mut GameContext, _dt: f32) -> GameResult {
         use crate::components::{LocalPlayer, MagicList, PlayerInput};
 
         let f_keys: [KeyCode; 8] = [
-            KeyCode::F1, KeyCode::F2, KeyCode::F3, KeyCode::F4,
-            KeyCode::F5, KeyCode::F6, KeyCode::F7, KeyCode::F8,
+            KeyCode::F1,
+            KeyCode::F2,
+            KeyCode::F3,
+            KeyCode::F4,
+            KeyCode::F5,
+            KeyCode::F6,
+            KeyCode::F7,
+            KeyCode::F8,
         ];
 
         // 找到本地玩家实体
-        let player_entity = ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity()));
+        let player_entity = ctx
+            .world
+            .iter()
+            .find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity()));
 
         let Some(player_entity) = player_entity else {
             // 更新上一帧状态
@@ -555,7 +590,9 @@ impl LogicSystem for SpellInputSystem {
         };
 
         // 检查是否有施法输入（已有则跳过快捷键）
-        let has_existing_spell = ctx.world.get::<&PlayerInput>(player_entity)
+        let has_existing_spell = ctx
+            .world
+            .get::<&PlayerInput>(player_entity)
             .ok()
             .map(|input| input.cast_spell.is_some())
             .unwrap_or(false);
@@ -587,12 +624,15 @@ impl LogicSystem for SpellInputSystem {
 
         // 根据 MagicList 中 key_slot 绑定查找技能
         let slot_u8 = (slot_idx + 1) as u8; // 1-based slot
-        let spell = ctx.world.get::<&MagicList>(player_entity)
+        let spell = ctx
+            .world
+            .get::<&MagicList>(player_entity)
             .ok()
             .and_then(|ml| ml.get_by_slot(slot_u8).map(|m| m.spell))
             .or_else(|| {
                 // 退而求其次：按 MagicList 中的顺序取第 N 个
-                ctx.world.get::<&MagicList>(player_entity)
+                ctx.world
+                    .get::<&MagicList>(player_entity)
                     .ok()
                     .and_then(|ml| ml.magics.get(slot_idx).map(|m| m.spell))
             });
@@ -611,4 +651,3 @@ impl LogicSystem for SpellInputSystem {
         Ok(())
     }
 }
-

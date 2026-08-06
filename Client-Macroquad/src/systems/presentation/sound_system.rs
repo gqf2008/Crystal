@@ -14,10 +14,10 @@
 //
 // ============================================================================
 
-use crate::game::GameResult;
-use crate::game::GameContext;
-use crate::systems::LogicSystem;
 use crate::components::{OneShotSoundEmitter, PersistentSound, Position, SoundTrigger, SoundType};
+use crate::game::GameContext;
+use crate::game::GameResult;
+use crate::systems::LogicSystem;
 use macroquad::audio::{play_sound, stop_sound, PlaySoundParams, Sound};
 use macroquad::experimental::coroutines::{start_coroutine, Coroutine};
 use std::collections::{HashMap, HashSet};
@@ -112,12 +112,19 @@ impl SoundSystem {
             Ok(text) => {
                 self.sound_list = parse_sound_list(&text);
                 if cfg!(debug_assertions) {
-                    println!("🔊 [SOUND] SoundList loaded: {} entries", self.sound_list.len());
+                    println!(
+                        "🔊 [SOUND] SoundList loaded: {} entries",
+                        self.sound_list.len()
+                    );
                 }
             }
             Err(e) => {
                 if cfg!(debug_assertions) {
-                    println!("⚠️ [SOUND] SoundList missing/unreadable: {} err={}", path.display(), e);
+                    println!(
+                        "⚠️ [SOUND] SoundList missing/unreadable: {} err={}",
+                        path.display(),
+                        e
+                    );
                 }
             }
         }
@@ -258,7 +265,11 @@ impl SoundSystem {
     fn try_update_listener_pos(&mut self, ctx: &GameContext) {
         // 监听者位置优先取 Camera，其次取 LocalPlayer。
         // 这里只做“有就用”的轻量策略，避免引入额外耦合。
-        if let Some(entity) = ctx.world.iter().find_map(|e| e.get::<&crate::components::Camera>().map(|_| e.entity())) {
+        if let Some(entity) = ctx
+            .world
+            .iter()
+            .find_map(|e| e.get::<&crate::components::Camera>().map(|_| e.entity()))
+        {
             // Camera 的位置通常放在同实体的 Position 上。
             if let Ok(p) = ctx.world.get::<&Position>(entity) {
                 self.listener_pos = (p.x, p.y);
@@ -266,7 +277,10 @@ impl SoundSystem {
             }
         }
 
-        if let Some(entity) = ctx.world.iter().find_map(|e| e.get::<&crate::components::LocalPlayer>().map(|_| e.entity())) {
+        if let Some(entity) = ctx.world.iter().find_map(|e| {
+            e.get::<&crate::components::LocalPlayer>()
+                .map(|_| e.entity())
+        }) {
             if let Ok(p) = ctx.world.get::<&Position>(entity) {
                 self.listener_pos = (p.x, p.y);
             }
@@ -286,10 +300,18 @@ impl SoundSystem {
 
         match sound_type {
             SoundType::BackgroundMusic => {
-                if ctx.settings.music_enabled { base } else { 0.0 }
+                if ctx.settings.music_enabled {
+                    base
+                } else {
+                    0.0
+                }
             }
             _ => {
-                if ctx.settings.sound_enabled { base } else { 0.0 }
+                if ctx.settings.sound_enabled {
+                    base
+                } else {
+                    0.0
+                }
             }
         }
     }
@@ -308,8 +330,6 @@ impl Default for SoundSystem {
 }
 
 impl LogicSystem for SoundSystem {
-   
-
     fn update(&mut self, ctx: &mut GameContext, _delay_time: f32) -> GameResult {
         // 这是一个“可渐进完善”的声音系统骨架：
         // - 读取/消费 SoundTrigger（一次性触发）
@@ -391,7 +411,11 @@ impl LogicSystem for SoundSystem {
         // 收集当前存活的 PersistentSound entity（用于后续清理已移除的）
         let mut current_ps_entities: Vec<hecs::Entity> = Vec::new();
 
-        for ps in ctx.world.query::<(&hecs::Entity, &PersistentSound)>().iter() {
+        for ps in ctx
+            .world
+            .query::<(&hecs::Entity, &PersistentSound)>()
+            .iter()
+        {
             let (entity, ps) = (ps.0, &ps.1);
             current_ps_entities.push(*entity);
             let global = self.global_volume_for_type(ctx, ps.sound_type);
@@ -419,7 +443,8 @@ impl LogicSystem for SoundSystem {
                     } else if !self.missing.contains(&ps.sound_file) {
                         self.ensure_loading(&ps.sound_file);
                     }
-                    self.persistent_playing.insert(*entity, (ps.sound_file.clone(), ps.looping));
+                    self.persistent_playing
+                        .insert(*entity, (ps.sound_file.clone(), ps.looping));
                 }
                 // 已在播放：不重复调用 play_sound（looped 声音会持续播放）
             } else if was_playing {

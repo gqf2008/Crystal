@@ -9,8 +9,8 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
 use crate::ui::text_renderer::draw_text_cn;
+use macroquad::prelude::*;
 
 /// 骰子对话框
 pub struct RollDialogHybrid {
@@ -84,7 +84,8 @@ impl RollDialogHybrid {
             1.0 - (self.elapsed - 2.0)
         } else {
             1.0
-        }.clamp(0.0, 1.0);
+        }
+        .clamp(0.0, 1.0);
 
         // 背景
         let box_w = 120.0;
@@ -98,23 +99,52 @@ impl RollDialogHybrid {
         // 边框（金色）
         let border_color = Color::from_rgba(200, 170, 50, (alpha * 255.0) as u8);
         draw_line(box_x, box_y, box_x + box_w, box_y, 2.0, border_color);
-        draw_line(box_x + box_w, box_y, box_x + box_w, box_y + box_h, 2.0, border_color);
-        draw_line(box_x + box_w, box_y + box_h, box_x, box_y + box_h, 2.0, border_color);
+        draw_line(
+            box_x + box_w,
+            box_y,
+            box_x + box_w,
+            box_y + box_h,
+            2.0,
+            border_color,
+        );
+        draw_line(
+            box_x + box_w,
+            box_y + box_h,
+            box_x,
+            box_y + box_h,
+            2.0,
+            border_color,
+        );
         draw_line(box_x, box_y + box_h, box_x, box_y, 2.0, border_color);
 
         // 标题
-        draw_text_cn("🎲 掷骰子", box_x + 20.0, box_y + 20.0, 14.0,
-            Color::from_rgba(255, 220, 100, (alpha * 255.0) as u8));
+        draw_text_cn(
+            "🎲 掷骰子",
+            box_x + 20.0,
+            box_y + 20.0,
+            14.0,
+            Color::from_rgba(255, 220, 100, (alpha * 255.0) as u8),
+        );
 
         // 骰子结果（大字）
         let result_text = format!("{}", self.display_value);
-        draw_text_cn(&result_text, box_x + 35.0, box_y + 50.0, 40.0,
-            Color::from_rgba(255, 255, 255, (alpha * 255.0) as u8));
+        draw_text_cn(
+            &result_text,
+            box_x + 35.0,
+            box_y + 50.0,
+            40.0,
+            Color::from_rgba(255, 255, 255, (alpha * 255.0) as u8),
+        );
 
         // 提示文字
         if !self.is_rolling {
-            draw_text_cn("结果", box_x + 35.0, box_y + 95.0, 12.0,
-                Color::from_rgba(200, 200, 200, (alpha * 255.0) as u8));
+            draw_text_cn(
+                "结果",
+                box_x + 35.0,
+                box_y + 95.0,
+                12.0,
+                Color::from_rgba(200, 200, 200, (alpha * 255.0) as u8),
+            );
         }
 
         true

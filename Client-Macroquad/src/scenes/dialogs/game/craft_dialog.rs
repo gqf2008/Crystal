@@ -10,8 +10,8 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
 use crate::ui::text_renderer::draw_text_cn;
+use macroquad::prelude::*;
 use mir2_shared::data::item::UserItem;
 
 /// 材料槽位
@@ -136,15 +136,25 @@ impl CraftDialogHybrid {
 
         // 遍历所有材料槽位
         for (slot_idx, slot) in self.slots.iter_mut().enumerate() {
-            let Some(shadow) = &slot.shadow_item else { continue };
-            let Some(shadow_info) = &shadow.info else { continue };
+            let Some(shadow) = &slot.shadow_item else {
+                continue;
+            };
+            let Some(shadow_info) = &shadow.info else {
+                continue;
+            };
 
             // 在背包中查找匹配的物品
             for &(inv_slot, ref item) in inventory.iter() {
-                if used_slots.contains(&inv_slot) { continue; }
-                let Some(item_info) = &item.info else { continue; };
+                if used_slots.contains(&inv_slot) {
+                    continue;
+                }
+                let Some(item_info) = &item.info else {
+                    continue;
+                };
 
-                if item_info.index != shadow_info.index { continue; }
+                if item_info.index != shadow_info.index {
+                    continue;
+                }
 
                 // 工具类需要耐久度 >= 1000
                 if slot_idx < TOOL_COUNT && item.current_dura < 1000 {
@@ -167,7 +177,9 @@ impl CraftDialogHybrid {
 
     /// 检查是否所有有需求（shadow_item）的槽位都已填充
     fn all_slots_filled(&self) -> bool {
-        self.slots.iter().all(|s| s.shadow_item.is_none() || s.filled_item.is_some())
+        self.slots
+            .iter()
+            .all(|s| s.shadow_item.is_none() || s.filled_item.is_some())
     }
 
     /// 获取合成结果数据（供发包）
@@ -177,9 +189,7 @@ impl CraftDialogHybrid {
             return None;
         }
 
-        let slots: Vec<i32> = self.slots.iter()
-            .filter_map(|s| s.inventory_slot)
-            .collect();
+        let slots: Vec<i32> = self.slots.iter().filter_map(|s| s.inventory_slot).collect();
 
         Some(CraftResult {
             recipe_unique_id: recipe.recipe_unique_id,
@@ -224,14 +234,21 @@ impl CraftDialogHybrid {
     pub fn fill_slot_from_inventory(&mut self, inv_slot: i32, item: UserItem) {
         if let Some(slot_idx) = self.selecting_slot.take() {
             // 防重用：检查该背包格是否已被其他合成槽占用（对齐 C# cell.Locked）
-            if self.slots.iter().enumerate()
-                .any(|(i, s)| i != slot_idx && s.inventory_slot == Some(inv_slot)) {
+            if self
+                .slots
+                .iter()
+                .enumerate()
+                .any(|(i, s)| i != slot_idx && s.inventory_slot == Some(inv_slot))
+            {
                 return;
             }
             let shadow = &self.slots[slot_idx].shadow_item;
             // 验证物品是否匹配
-            if let (Some(shadow_item), Some(item_info), Some(shadow_info)) =
-                (shadow.as_ref(), item.info.as_ref(), shadow.as_ref().and_then(|s| s.info.as_ref())) {
+            if let (Some(shadow_item), Some(item_info), Some(shadow_info)) = (
+                shadow.as_ref(),
+                item.info.as_ref(),
+                shadow.as_ref().and_then(|s| s.info.as_ref()),
+            ) {
                 if item_info.index == shadow_info.index {
                     // 工具类检查耐久度
                     if slot_idx < TOOL_COUNT && item.current_dura < 1000 {
@@ -249,8 +266,14 @@ impl CraftDialogHybrid {
     }
 
     /// 绘制并返回合成结果（玩家点击合成按钮时）
-    pub fn draw(&mut self, screen_w: f32, screen_h: f32, mouse_pos: Vec2,
-                _mouse_wheel: f32, left_clicked: bool) -> Option<CraftResult> {
+    pub fn draw(
+        &mut self,
+        screen_w: f32,
+        screen_h: f32,
+        mouse_pos: Vec2,
+        _mouse_wheel: f32,
+        left_clicked: bool,
+    ) -> Option<CraftResult> {
         if !self.visible {
             return None;
         }
@@ -274,25 +297,50 @@ impl CraftDialogHybrid {
         let dialog_y = (screen_h - dialog_h) / 2.0;
 
         // 背景
-        draw_rectangle(dialog_x, dialog_y, dialog_w, dialog_h, Color::from_rgba(25, 25, 35, 230));
+        draw_rectangle(
+            dialog_x,
+            dialog_y,
+            dialog_w,
+            dialog_h,
+            Color::from_rgba(25, 25, 35, 230),
+        );
 
         // 标题
-        draw_text_cn("合成", dialog_x + 15.0, dialog_y + 10.0, 16.0,
-            Color::from_rgba(255, 220, 100, 255));
+        draw_text_cn(
+            "合成",
+            dialog_x + 15.0,
+            dialog_y + 10.0,
+            16.0,
+            Color::from_rgba(255, 220, 100, 255),
+        );
 
         // 配方名称 + Gold 成本（对齐 C# GoldLabel）
-        let recipe_name = self.recipe.as_ref().map(|r| r.name.as_str()).unwrap_or("未选择配方");
-        draw_text_cn(recipe_name, dialog_x + 15.0, dialog_y + title_h + 10.0, 14.0,
-            Color::from_rgba(200, 200, 200, 255));
+        let recipe_name = self
+            .recipe
+            .as_ref()
+            .map(|r| r.name.as_str())
+            .unwrap_or("未选择配方");
+        draw_text_cn(
+            recipe_name,
+            dialog_x + 15.0,
+            dialog_y + title_h + 10.0,
+            14.0,
+            Color::from_rgba(200, 200, 200, 255),
+        );
         let gold_cost = self.recipe.as_ref().map(|r| r.gold).unwrap_or(0);
         if gold_cost > 0 {
             let gold_color = if self.player_gold >= gold_cost {
-                Color::from_rgba(220, 200, 100, 255)   // 够：金色
+                Color::from_rgba(220, 200, 100, 255) // 够：金色
             } else {
-                Color::from_rgba(255, 100, 100, 255)   // 不够：红色
+                Color::from_rgba(255, 100, 100, 255) // 不够：红色
             };
-            draw_text_cn(&format!("金币: {}", gold_cost),
-                dialog_x + dialog_w - 100.0, dialog_y + title_h + 10.0, 13.0, gold_color);
+            draw_text_cn(
+                &format!("金币: {}", gold_cost),
+                dialog_x + dialog_w - 100.0,
+                dialog_y + title_h + 10.0,
+                13.0,
+                gold_color,
+            );
         }
 
         // 材料槽位网格
@@ -301,8 +349,13 @@ impl CraftDialogHybrid {
 
         // 工具行（前3格）
         let tool_label = "工具:";
-        draw_text_cn(tool_label, dialog_x + 10.0, grid_start_y + 5.0, 12.0,
-            Color::from_rgba(150, 200, 150, 255));
+        draw_text_cn(
+            tool_label,
+            dialog_x + 10.0,
+            grid_start_y + 5.0,
+            12.0,
+            Color::from_rgba(150, 200, 150, 255),
+        );
         for i in 0..TOOL_COUNT {
             let slot_x = grid_start_x + i as f32 * (slot_size + slot_gap);
             let slot_y = grid_start_y;
@@ -312,14 +365,26 @@ impl CraftDialogHybrid {
         // 原料行（后6格，分两行显示，每行3格）
         let ingredient_label = "材料:";
         let ingredient_start_y = grid_start_y + slot_size + slot_gap + 10.0;
-        draw_text_cn(ingredient_label, dialog_x + 10.0, ingredient_start_y + 5.0, 12.0,
-            Color::from_rgba(200, 150, 100, 255));
+        draw_text_cn(
+            ingredient_label,
+            dialog_x + 10.0,
+            ingredient_start_y + 5.0,
+            12.0,
+            Color::from_rgba(200, 150, 100, 255),
+        );
         for i in 0..INGREDIENT_COUNT {
             let row = i / 3;
             let col = i % 3;
             let slot_x = grid_start_x + col as f32 * (slot_size + slot_gap);
             let slot_y = ingredient_start_y + row as f32 * (slot_size + slot_gap);
-            self.draw_slot(TOOL_COUNT + i, slot_x, slot_y, slot_size, mouse_pos, left_clicked);
+            self.draw_slot(
+                TOOL_COUNT + i,
+                slot_x,
+                slot_y,
+                slot_size,
+                mouse_pos,
+                left_clicked,
+            );
         }
 
         // 按钮行
@@ -327,10 +392,21 @@ impl CraftDialogHybrid {
 
         // 一键填充按钮
         let autofill_x = dialog_x + padding;
-        let autofill_hover = mouse_pos.x >= autofill_x && mouse_pos.x <= autofill_x + btn_w
-            && mouse_pos.y >= btn_y && mouse_pos.y <= btn_y + btn_h;
-        draw_rectangle(autofill_x, btn_y, btn_w, btn_h,
-            if autofill_hover { Color::from_rgba(80, 80, 40, 255) } else { Color::from_rgba(50, 50, 30, 255) });
+        let autofill_hover = mouse_pos.x >= autofill_x
+            && mouse_pos.x <= autofill_x + btn_w
+            && mouse_pos.y >= btn_y
+            && mouse_pos.y <= btn_y + btn_h;
+        draw_rectangle(
+            autofill_x,
+            btn_y,
+            btn_w,
+            btn_h,
+            if autofill_hover {
+                Color::from_rgba(80, 80, 40, 255)
+            } else {
+                Color::from_rgba(50, 50, 30, 255)
+            },
+        );
         draw_text_cn("一键填充", autofill_x + 10.0, btn_y + 7.0, 14.0, WHITE);
 
         if left_clicked && autofill_hover {
@@ -343,24 +419,42 @@ impl CraftDialogHybrid {
         let slots_filled = self.all_slots_filled();
         let gold_ok = self.player_gold >= gold_cost;
         let can_craft = slots_filled && gold_ok;
-        let craft_hover = mouse_pos.x >= craft_x && mouse_pos.x <= craft_x + btn_w
-            && mouse_pos.y >= btn_y && mouse_pos.y <= btn_y + btn_h;
-        draw_rectangle(craft_x, btn_y, btn_w, btn_h,
+        let craft_hover = mouse_pos.x >= craft_x
+            && mouse_pos.x <= craft_x + btn_w
+            && mouse_pos.y >= btn_y
+            && mouse_pos.y <= btn_y + btn_h;
+        draw_rectangle(
+            craft_x,
+            btn_y,
+            btn_w,
+            btn_h,
             if can_craft && craft_hover {
                 Color::from_rgba(60, 120, 60, 255)
             } else if can_craft {
                 Color::from_rgba(40, 100, 40, 255)
             } else {
                 Color::from_rgba(40, 40, 40, 255)
-            });
+            },
+        );
         draw_text_cn("合成", craft_x + 20.0, btn_y + 7.0, 14.0, WHITE);
 
         // 关闭按钮
         let close_x = craft_x + btn_w + 10.0;
-        let close_hover = mouse_pos.x >= close_x && mouse_pos.x <= close_x + btn_w
-            && mouse_pos.y >= btn_y && mouse_pos.y <= btn_y + btn_h;
-        draw_rectangle(close_x, btn_y, btn_w, btn_h,
-            if close_hover { Color::from_rgba(150, 50, 50, 255) } else { Color::from_rgba(100, 30, 30, 255) });
+        let close_hover = mouse_pos.x >= close_x
+            && mouse_pos.x <= close_x + btn_w
+            && mouse_pos.y >= btn_y
+            && mouse_pos.y <= btn_y + btn_h;
+        draw_rectangle(
+            close_x,
+            btn_y,
+            btn_w,
+            btn_h,
+            if close_hover {
+                Color::from_rgba(150, 50, 50, 255)
+            } else {
+                Color::from_rgba(100, 30, 30, 255)
+            },
+        );
         draw_text_cn("关闭", close_x + 20.0, btn_y + 7.0, 14.0, WHITE);
 
         if left_clicked && close_hover {
@@ -393,8 +487,15 @@ impl CraftDialogHybrid {
         self.pending_gold_warn.take()
     }
 
-    fn draw_slot(&mut self, idx: usize, x: f32, y: f32, size: f32,
-                 mouse_pos: Vec2, left_clicked: bool) {
+    fn draw_slot(
+        &mut self,
+        idx: usize,
+        x: f32,
+        y: f32,
+        size: f32,
+        mouse_pos: Vec2,
+        left_clicked: bool,
+    ) {
         let slot = &self.slots[idx];
         let is_selecting = self.selecting_slot == Some(idx);
         let is_filled = slot.filled_item.is_some();
@@ -424,12 +525,14 @@ impl CraftDialogHybrid {
 
         // 显示影子物品名称（需求）或填充物品名称
         let display_name = if is_filled {
-            slot.filled_item.as_ref()
+            slot.filled_item
+                .as_ref()
                 .and_then(|item| item.info.as_ref())
                 .map(|info| info.name.as_str())
                 .unwrap_or("已填入")
         } else {
-            slot.shadow_item.as_ref()
+            slot.shadow_item
+                .as_ref()
                 .and_then(|item| item.info.as_ref())
                 .map(|info| info.name.as_str())
                 .unwrap_or("[空]")
@@ -446,14 +549,23 @@ impl CraftDialogHybrid {
         // 显示数量
         if let Some(ref item) = slot.shadow_item {
             if !is_filled {
-                draw_text_cn(&format!("需要: {}", item.count), x + 3.0, y + size - 10.0, 8.0,
-                    Color::from_rgba(255, 150, 100, 200));
+                draw_text_cn(
+                    &format!("需要: {}", item.count),
+                    x + 3.0,
+                    y + size - 10.0,
+                    8.0,
+                    Color::from_rgba(255, 150, 100, 200),
+                );
             }
         }
 
         // 点击槽位
-        if left_clicked && mouse_pos.x >= x && mouse_pos.x <= x + size
-            && mouse_pos.y >= y && mouse_pos.y <= y + size {
+        if left_clicked
+            && mouse_pos.x >= x
+            && mouse_pos.x <= x + size
+            && mouse_pos.y >= y
+            && mouse_pos.y <= y + size
+        {
             self.click_slot(idx);
         }
     }

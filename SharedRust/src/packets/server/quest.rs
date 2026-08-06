@@ -2,13 +2,13 @@
 //!
 //! This module contains all quest-related packet definitions and parsers.
 
-use std::io::{Read, Write};
+use super::super::base::Packet;
+use crate::data::stats::SharedResult;
 use crate::{
     data::client_data::{ClientQuestInfo, ClientQuestProgress},
     enums::ServerPacketIds,
 };
-use super::super::base::Packet;
-use crate::data::stats::SharedResult;
+use std::io::{Read, Write};
 
 // ============================================================================
 // Packet Structures & PacketMessage Implementations

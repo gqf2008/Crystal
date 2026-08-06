@@ -6,17 +6,17 @@ pub use mir2_shared::{MirAction, MirClass, MirDirection, MirGender};
 use std::time::Instant;
 
 /// 玩家数据组件 (标记这是玩家实体 - 身份卡)
-/// 
+///
 /// **设计原则**: 只包含玩家的身份识别信息 (不可变或较少变化的属性)
 /// - ID、名字、职业、性别 - 角色的核心身份
 /// - Level 保留用于UI显示和等级相关的逻辑判断
-/// 
+///
 /// **已迁移到独立组件**:
 /// - `exp`, `max_experience` → `Experience` 组件
 /// - `gold`, `credit` → `Currency` 组件
 /// - 生命值、魔法值 → `Health`, `Mana` 组件
 /// - 战斗属性 → `CombatStats` 组件
-/// 
+///
 /// **参考**: `ECS_COMPONENTS_ARCHITECTURE.md` - Player Component
 #[derive(Debug, Clone)]
 pub struct PlayerData {
@@ -27,7 +27,7 @@ pub struct PlayerData {
     pub name: String,
     pub class: MirClass,
     pub gender: MirGender,
-    pub level: u16,  // 保留等级 (显示和逻辑判断用)
+    pub level: u16, // 保留等级 (显示和逻辑判断用)
 }
 
 /// 本地玩家标记 (只有一个)
@@ -63,29 +63,29 @@ impl OtherPlayer {
 }
 
 /// 角色组件 - 核心状态（单一职责）
-/// 
+///
 /// **设计原则**：
 /// - 只包含角色的核心游戏逻辑状态
 /// - 不重复其他组件的数据（渲染用Animation组件，移动用Movement组件）
-/// 
+///
 /// **数据所有权**：
 /// - `direction`: 由 MovementSystem 根据移动方向更新
 /// - `action`: 由 PlayerControlSystem 根据用户输入独占写入 (单一来源原则)
-/// 
+///
 /// **注意**: `is_moving` 状态已移到 Movement 组件,使用 `movement.is_moving()` 方法查询
 #[derive(Debug, Clone)]
 pub struct Player {
     /// 面向方向 (8方向枚举)
     pub direction: MirDirection,
     /// 当前动作状态（行走/跑步/站立/攻击）
-    /// 
+    ///
     /// **重要**: 此字段只能由 PlayerControlSystem 写入！
     /// 其他系统(MovementSystem等)只能读取，不能修改
     pub action: PlayerAction,
 }
 
 /// 攻击状态组件 (ECS 原则: 状态存储在Component中)
-/// 
+///
 /// 当玩家/怪物/NPC进行攻击时自动添加此组件
 /// 攻击完成后自动移除
 #[derive(Debug, Clone, Copy)]
@@ -107,9 +107,9 @@ pub enum PlayerAction {
     Stand = 0,
     Walk = 1,
     Run = 2,
-    Attack1 = 3,  // 普通攻击1
-    Attack2 = 4,  // 普通攻击2
-    Attack3 = 5,  // 普通攻击3
+    Attack1 = 3,     // 普通攻击1
+    Attack2 = 4,     // 普通攻击2
+    Attack3 = 5,     // 普通攻击3
     Struck = 6,      // 受击（对应 C# MirAction::Struck / MountStruck）
     SpellCast = 7,   // 施法前摇（对应 C# MirAction::Spell）
     Fishing = 8,     // 钓鱼（抛竿/等待，对应 C# MirAction::FishingCast / FishingWait）
@@ -168,7 +168,10 @@ impl PlayerAction {
 
     /// 是否是攻击动作
     pub fn is_attack(&self) -> bool {
-        matches!(self, PlayerAction::Attack1 | PlayerAction::Attack2 | PlayerAction::Attack3)
+        matches!(
+            self,
+            PlayerAction::Attack1 | PlayerAction::Attack2 | PlayerAction::Attack3
+        )
     }
 
     /// 是否是临时性动作（受击/施法/收竿等），播完后应回到 Stand。
@@ -181,10 +184,10 @@ impl PlayerAction {
             PlayerAction::Struck | PlayerAction::SpellCast | PlayerAction::FishingReel
         )
     }
-    
+
     // ⚠️ 以下方法已废弃，改为从 objects/frames.rs 的 PLAYER_FRAMES 读取
     // 保留仅用于兼容性，后续将移除
-    
+
     #[deprecated(note = "使用 objects::frames::get_player_frame() 替代")]
     pub fn frame_count(&self) -> i32 {
         match self {
@@ -275,8 +278,7 @@ pub struct PlayerAppearance {
 }
 
 /// 坐骑状态（渲染/动作切换使用）
-#[derive(Debug, Clone, Copy)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct MountState {
     /// None = 未骑乘；Some(idx) = 使用 Mounts(idx) 库绘制坐骑
     pub mount_index: Option<usize>,
@@ -298,15 +300,14 @@ impl MountStatus {
     }
 }
 
-
 impl Default for PlayerAppearance {
     fn default() -> Self {
         Self {
             class: mir2_shared::enums::MirClass::Warrior,
             gender: mir2_shared::enums::MirGender::Male,
             hair: 0,
-            weapon: -1,  // -1 表示无武器
-            armour: 0,   // 默认盔甲索引
+            weapon: -1, // -1 表示无武器
+            armour: 0,  // 默认盔甲索引
             weapon_effect: 0,
             wing_effect: 0,
         }
@@ -329,7 +330,7 @@ impl Visibility {
             dead: false,
         }
     }
-    
+
     pub fn is_visible(&self) -> bool {
         !self.hidden
     }
@@ -352,18 +353,18 @@ pub struct InTrapRock {
 #[derive(Debug, Clone)]
 pub struct GuildMembership {
     pub guild_name: String,
-    pub rank: u8,  // 0=会长, 1=副会长, 2=成员
+    pub rank: u8, // 0=会长, 1=副会长, 2=成员
 }
 
 impl GuildMembership {
     pub fn new(guild_name: String, rank: u8) -> Self {
         Self { guild_name, rank }
     }
-    
+
     pub fn is_leader(&self) -> bool {
         self.rank == 0
     }
-    
+
     pub fn is_officer(&self) -> bool {
         self.rank <= 1
     }
@@ -476,7 +477,7 @@ impl PetMode {
 // ============================================================================
 // 战斗属性组件 (Combat & Stats Components)
 // ============================================================================
-// 
+//
 // 注意: Health, Mana, CombatStats 等战斗组件已移到 combat.rs
 // 使用时通过 use crate::components::combat::* 导入
 //

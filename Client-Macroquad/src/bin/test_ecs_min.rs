@@ -15,23 +15,12 @@ use macroquad::miniquad::conf::Platform;
 use macroquad::prelude::*;
 
 use client_macroquad::components::{
-    movement::MovementVelocity,
-    Camera,
-    CameraMode,
-    LocalPlayer,
-    Path,
-    Player,
-    PlayerAction,
-    PlayerInput,
-    Position,
+    movement::MovementVelocity, Camera, CameraMode, LocalPlayer, Path, Player, PlayerAction,
+    PlayerInput, Position,
 };
 use client_macroquad::game::GameContext;
 use client_macroquad::systems::{
-    priority,
-    CameraFollowSystem,
-    MovementSystem,
-    PathfindingSystem,
-    PlayerControlSystem,
+    priority, CameraFollowSystem, MovementSystem, PathfindingSystem, PlayerControlSystem,
     SystemScheduler,
 };
 use mir2_shared::enums::MirDirection;
@@ -55,7 +44,12 @@ fn window_conf() -> Conf {
     }
 }
 
-fn world_to_screen(world_x: f32, world_y: f32, camera_pos: &Position, camera: &Camera) -> (f32, f32) {
+fn world_to_screen(
+    world_x: f32,
+    world_y: f32,
+    camera_pos: &Position,
+    camera: &Camera,
+) -> (f32, f32) {
     let sx = (world_x - camera_pos.x) / camera.zoom + camera.screen_width / 2.0;
     let sy = (world_y - camera_pos.y) / camera.zoom + camera.screen_height / 2.0;
     (sx, sy)
@@ -132,14 +126,16 @@ async fn main() {
         // 读取 player
         let mut player_info = None;
         #[allow(clippy::never_loop)]
-        for (pos, vel, input, player, _local) in ctx.world.query::<(
-            &Position,
-            &MovementVelocity,
-            &PlayerInput,
-            &Player,
-            &LocalPlayer,
-        )>()
-        .iter()
+        for (pos, vel, input, player, _local) in ctx
+            .world
+            .query::<(
+                &Position,
+                &MovementVelocity,
+                &PlayerInput,
+                &Player,
+                &LocalPlayer,
+            )>()
+            .iter()
         {
             player_info = Some((*pos, vel.clone(), input.clone(), player.clone()));
             break;

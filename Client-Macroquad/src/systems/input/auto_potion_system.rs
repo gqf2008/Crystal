@@ -49,7 +49,11 @@ impl AutoPotionSystem {
         }
 
         let mut score = 0;
-        if name.contains("金创") || name.contains("生命") || name.contains("红") || name.to_ascii_lowercase().contains("hp") {
+        if name.contains("金创")
+            || name.contains("生命")
+            || name.contains("红")
+            || name.to_ascii_lowercase().contains("hp")
+        {
             score += 100;
         }
         if name.contains("太阳") || name.contains("疗伤") {
@@ -100,7 +104,11 @@ impl LogicSystem for AutoPotionSystem {
         }
 
         // 找到本地玩家
-        let Some(player_entity) = ctx.world.iter().find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity())) else {
+        let Some(player_entity) = ctx
+            .world
+            .iter()
+            .find_map(|e| e.get::<&LocalPlayer>().map(|_| e.entity()))
+        else {
             return Ok(());
         };
 

@@ -59,12 +59,12 @@
 //! - 死亡检测应该在战斗系统之后执行
 // ============================================================================
 
-pub mod skill_system;
+pub mod buf_system;
 pub mod combat_system;
 pub mod regen_system;
-pub mod buf_system;
+pub mod skill_system;
 
+pub use buf_system::BufSystem;
+pub use combat_system::{CombatResult, CombatSystem, DamageType};
 pub use regen_system::HealthRegenSystem;
 pub use skill_system::{SkillSystem, SpellInputSystem};
-pub use combat_system::{CombatSystem, DamageType, CombatResult};
-pub use buf_system::BufSystem;

@@ -23,31 +23,29 @@ pub enum PresentationEvent {
     // ========================================================================
     // 动画事件
     // ========================================================================
-    
     /// 播放实体动画
     PlayAnimation {
         entity: Entity,
         animation: AnimationType,
         loop_mode: LoopMode,
     },
-    
+
     /// 停止实体动画
     StopAnimation {
         entity: Entity,
         animation: AnimationType,
     },
-    
+
     /// 播放动画特效（不绑定实体）
     PlayEffectAnimation {
         effect_type: EffectType,
         position: (f32, f32),
         duration: f32,
     },
-    
+
     // ========================================================================
     // 粒子效果事件
     // ========================================================================
-    
     /// 生成粒子效果
     SpawnParticle {
         particle_type: ParticleType,
@@ -55,7 +53,7 @@ pub enum PresentationEvent {
         velocity: Option<(f32, f32)>,
         duration: f32,
     },
-    
+
     /// 生成跟随实体的粒子
     SpawnFollowParticle {
         entity: Entity,
@@ -63,16 +61,13 @@ pub enum PresentationEvent {
         offset: (f32, f32),
         duration: f32,
     },
-    
+
     /// 停止粒子发射器
-    StopParticleEmitter {
-        emitter_id: u32,
-    },
-    
+    StopParticleEmitter { emitter_id: u32 },
+
     // ========================================================================
     // 音效事件
     // ========================================================================
-    
     /// 播放音效
     PlaySound {
         sound_id: String,
@@ -80,92 +75,66 @@ pub enum PresentationEvent {
         volume: f32,
         pitch: f32,
     },
-    
+
     /// 播放背景音乐
     PlayBackgroundMusic {
         music_id: String,
         fade_in_duration: f32,
     },
-    
+
     /// 停止背景音乐
-    StopBackgroundMusic {
-        fade_out_duration: f32,
-    },
-    
+    StopBackgroundMusic { fade_out_duration: f32 },
+
     /// 播放环境音
-    PlayAmbientSound {
-        sound_id: String,
-        volume: f32,
-    },
-    
+    PlayAmbientSound { sound_id: String, volume: f32 },
+
     // ========================================================================
     // 相机特效事件
     // ========================================================================
-    
     /// 相机震动
     CameraShake {
         intensity: f32,
         duration: f32,
         frequency: f32,
     },
-    
+
     /// 相机缩放动画
     CameraZoom {
         target_zoom: f32,
         duration: f32,
         easing: EasingType,
     },
-    
+
     /// 相机闪光
-    CameraFlash {
-        color: Color,
-        duration: f32,
-    },
-    
+    CameraFlash { color: Color, duration: f32 },
+
     /// 相机跟随目标
-    CameraFollowTarget {
-        target: Entity,
-        smooth: bool,
-    },
-    
+    CameraFollowTarget { target: Entity, smooth: bool },
+
     // ========================================================================
     // 屏幕特效事件
     // ========================================================================
-    
     /// 屏幕闪烁
-    ScreenFlash {
-        color: Color,
-        duration: f32,
-    },
-    
+    ScreenFlash { color: Color, duration: f32 },
+
     /// 屏幕淡入
-    ScreenFadeIn {
-        duration: f32,
-        from_color: Color,
-    },
-    
+    ScreenFadeIn { duration: f32, from_color: Color },
+
     /// 屏幕淡出
-    ScreenFadeOut {
-        duration: f32,
-        to_color: Color,
-    },
-    
+    ScreenFadeOut { duration: f32, to_color: Color },
+
     /// 屏幕震动（独立于相机）
-    ScreenShake {
-        intensity: f32,
-        duration: f32,
-    },
-    
+    ScreenShake { intensity: f32, duration: f32 },
+
     /// 后处理效果切换
     PostProcessToggle {
         effect_type: PostProcessType,
         enabled: bool,
     },
-    
+
     // ========================================================================
     // 文字/UI特效事件
     // ========================================================================
-    
     /// 飘字伤害
     FloatingText {
         text: String,
@@ -174,61 +143,53 @@ pub enum PresentationEvent {
         font_size: f32,
         duration: f32,
     },
-    
+
     /// 飘字治疗
-    FloatingHeal {
-        amount: i32,
-        position: (f32, f32),
-    },
-    
+    FloatingHeal { amount: i32, position: (f32, f32) },
+
     /// 飘字经验
-    FloatingExperience {
-        amount: i64,
-        position: (f32, f32),
-    },
-    
+    FloatingExperience { amount: i64, position: (f32, f32) },
+
     /// UI提示
     ShowToast {
         message: String,
         toast_type: ToastType,
         duration: f32,
     },
-    
+
     // ========================================================================
     // 天气/环境特效事件
     // ========================================================================
-    
     /// 改变天气
     ChangeWeather {
         weather_type: WeatherType,
         transition_duration: f32,
     },
-    
+
     /// 改变光照
     ChangeLighting {
         light_level: f32,
         color_tint: Color,
         transition_duration: f32,
     },
-    
+
     // ========================================================================
     // 技能/战斗特效事件
     // ========================================================================
-    
     /// 施法特效
     SpellCastEffect {
         caster: Entity,
         spell_type: u8,
         target_position: Option<(f32, f32)>,
     },
-    
+
     /// 命中特效
     HitEffect {
         target: Entity,
         hit_type: HitEffectType,
         position: (f32, f32),
     },
-    
+
     /// 弹道特效
     ProjectileEffect {
         projectile_type: ProjectileType,
@@ -258,9 +219,9 @@ pub enum AnimationType {
 /// 循环模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoopMode {
-    Once,           // 播放一次
-    Loop,           // 循环播放
-    PingPong,       // 往返播放
+    Once,     // 播放一次
+    Loop,     // 循环播放
+    PingPong, // 往返播放
 }
 
 /// 特效类型
@@ -346,21 +307,21 @@ pub enum ProjectileType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_animation_types() {
         let idle = AnimationType::Idle;
         let walk = AnimationType::Walk;
-        
+
         assert_ne!(idle, walk);
         assert_eq!(idle, AnimationType::Idle);
     }
-    
+
     #[test]
     fn test_loop_modes() {
         let once = LoopMode::Once;
         let looping = LoopMode::Loop;
-        
+
         assert_ne!(once, looping);
     }
 }

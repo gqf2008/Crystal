@@ -16,9 +16,12 @@
 //
 // ============================================================================
 
+use crate::components::{
+    movement::{MovementVelocity, Path},
+    Player, Position,
+};
 use crate::game::GameContext;
 use crate::game::GameResult;
-use crate::components::{Player, Position, movement::{MovementVelocity, Path}};
 use crate::systems::LogicSystem;
 use mir2_shared::enums::MirDirection;
 use std::collections::HashSet;
@@ -40,7 +43,7 @@ fn movement_diag_enabled() -> bool {
 
 impl MovementSystem {
     /// 根据移动向量计算8方向
-    /// 
+    ///
     /// C# 参考: MapObject.PointToDirection()
     /// ```
     ///     7  0  1
@@ -51,31 +54,27 @@ impl MovementSystem {
     /// ```
     fn calculate_direction(dx: f32, dy: f32) -> MirDirection {
         use MirDirection::*;
-        
+
         if dx.abs() < 0.01 && dy.abs() < 0.01 {
             return Up; // 静止，保持当前方向
         }
-        
+
         let angle = dy.atan2(dx).to_degrees();
-        
+
         // 将角度转换为0-360度
-        let normalized_angle = if angle < 0.0 {
-            angle + 360.0
-        } else {
-            angle
-        };
-        
+        let normalized_angle = if angle < 0.0 { angle + 360.0 } else { angle };
+
         // 8方向划分 (每个方向45度)
         // 0度 = 东 (右), 90度 = 南 (下), 180度 = 西 (左), 270度 = 北 (上)
         match normalized_angle as i32 {
-            337..=360 | 0..=22 => Right,      // 东 (右) = 2
-            23..=67 => DownRight,             // 东南 = 3
-            68..=112 => Down,                 // 南 (下) = 4
-            113..=157 => DownLeft,            // 西南 = 5
-            158..=202 => Left,                // 西 (左) = 6
-            203..=247 => UpLeft,              // 西北 = 7
-            248..=292 => Up,                  // 北 (上) = 0
-            293..=336 => UpRight,             // 东北 = 1
+            337..=360 | 0..=22 => Right, // 东 (右) = 2
+            23..=67 => DownRight,        // 东南 = 3
+            68..=112 => Down,            // 南 (下) = 4
+            113..=157 => DownLeft,       // 西南 = 5
+            158..=202 => Left,           // 西 (左) = 6
+            203..=247 => UpLeft,         // 西北 = 7
+            248..=292 => Up,             // 北 (上) = 0
+            293..=336 => UpRight,        // 东北 = 1
             _ => Up,
         }
     }
@@ -106,7 +105,11 @@ impl MovementSystem {
         }
     }
 
-    fn step_towards_direction(current: MirDirection, desired: MirDirection, max_steps: i32) -> MirDirection {
+    fn step_towards_direction(
+        current: MirDirection,
+        desired: MirDirection,
+        max_steps: i32,
+    ) -> MirDirection {
         let cur = Self::direction_index(current);
         let des = Self::direction_index(desired);
         let diff = (des - cur).rem_euclid(8);
@@ -125,34 +128,42 @@ impl MovementSystem {
             Self::index_direction(cur - ccw.min(steps))
         }
     }
-
 }
 
 impl LogicSystem for MovementSystem {
-    
-
     fn update(&mut self, ctx: &mut GameContext, delay_time: f32) -> GameResult {
         // 每秒最多转向几步（8向），做一点“转身缓冲”让方向更自然
         let turn_steps = (delay_time * 12.0).ceil() as i32;
 
         // Collect attacking entities with entity IDs
-        let attacking_entities: HashSet<_> = ctx.world.iter().filter_map(|eref| {
-            if eref.get::<&crate::components::AttackState>().is_some() {
-                Some(eref.entity())
-            } else {
-                None
-            }
-        }).collect();
+        let attacking_entities: HashSet<_> = ctx
+            .world
+            .iter()
+            .filter_map(|eref| {
+                if eref.get::<&crate::components::AttackState>().is_some() {
+                    Some(eref.entity())
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         // 🎯 处理有Player组件的实体（玩家、NPC等）
         for entity in ctx.world.iter() {
-            let (Some(mut position), Some(mut velocity), Some(mut path), Some(mut player), Some(mut player_input)) = (
+            let (
+                Some(mut position),
+                Some(mut velocity),
+                Some(mut path),
+                Some(mut player),
+                Some(mut player_input),
+            ) = (
                 entity.get::<&mut Position>(),
                 entity.get::<&mut MovementVelocity>(),
                 entity.get::<&mut Path>(),
                 entity.get::<&mut Player>(),
                 entity.get::<&mut crate::components::PlayerInput>(),
-            ) else {
+            )
+            else {
                 continue;
             };
             let entity = entity.entity();
@@ -167,33 +178,34 @@ impl LogicSystem for MovementSystem {
                 player_input.movement_mode = MovementMode::None;
                 continue;
             }
-            
+
             // 🎯 统一处理所有移动模式的动画状态
             // 检查是否有velocity (移动中)
             let has_velocity = velocity.x.abs() > 0.01 || velocity.y.abs() > 0.01;
-            
+
             if player_input.movement_mode == MovementMode::DirectFollow {
                 // DirectFollow模式: 直接用velocity更新位置
                 if has_velocity {
                     // 移动中: 更新位置和方向
                     let desired_dir = Self::calculate_direction(velocity.x, velocity.y);
-                    player.direction = Self::step_towards_direction(player.direction, desired_dir, turn_steps);
-                    
+                    player.direction =
+                        Self::step_towards_direction(player.direction, desired_dir, turn_steps);
+
                     // 🎯 关键修复：只在有velocity时才更新position
                     position.x += velocity.x * delay_time;
                     position.y += velocity.y * delay_time;
-                    
+
                     // 🔥 不再设置 player.action，由 PlayerStateSystem 根据 move_to 决定
                     // 这样碰撞时即使 velocity=0，动画仍会继续
                 } else {
                     // 🎯 静止时停止velocity
                     velocity.stop();
-                    
+
                     // 🔥 不再设置 player.action，由 PlayerStateSystem 决定
                 }
                 continue;
             }
-            
+
             // Pathfinding模式: 只检查path，velocity由MovementSystem自己计算
             if player_input.movement_mode == MovementMode::Pathfinding && !path.is_valid {
                 // 说明：Path 默认 is_valid=false。只有在“确实处于寻路移动”时，path 无效才算异常。
@@ -228,26 +240,27 @@ impl LogicSystem for MovementSystem {
                     // 对齐到格子中心
                     position.x = target_x;
                     position.y = target_y;
-                    
+
                     // 移动到下一个路径点
                     if !path.advance() {
                         // 🎯 路径结束: 只清理物理状态，不修改 player.action
                         // player.action 由 PlayerControlSystem 独占管理
                         velocity.stop();
                         path.clear();
-                        
+
                         // 清除移动目标，触发 PlayerControlSystem 下一帧设置 Stand
                         use crate::components::MovementMode;
                         player_input.move_to = None;
                         player_input.movement_mode = MovementMode::None;
-                        
+
                         tracing::info!("✅ 到达目的地，清除移动目标");
                     }
                 } else {
                     // 🎯 计算8方向
                     let desired_dir = Self::calculate_direction(dx, dy);
-                    player.direction = Self::step_towards_direction(player.direction, desired_dir, turn_steps);
-                    
+                    player.direction =
+                        Self::step_towards_direction(player.direction, desired_dir, turn_steps);
+
                     // ✅ 根据 Player.action 判断速度（统一数据源）
                     use crate::components::PlayerAction;
                     let speed = if player.action == PlayerAction::Run {
@@ -255,9 +268,9 @@ impl LogicSystem for MovementSystem {
                     } else {
                         velocity.walk_speed
                     };
-                    
+
                     // PlayerControlSystem 已设置 player.action，这里只负责移动
-                    
+
                     // 设置速度方向 (归一化)
                     velocity.set((dx / distance) * speed, (dy / distance) * speed);
 
@@ -266,7 +279,7 @@ impl LogicSystem for MovementSystem {
                     let move_y = velocity.y * delay_time;
                     position.x += move_x;
                     position.y += move_y;
-                    
+
                     // 调试：默认关闭（高频日志会严重影响帧率）。需要时用环境变量 CRYSTAL_MOVE_DIAG=1 打开。
                     if movement_diag_enabled() {
                         tracing::info!(
@@ -280,13 +293,17 @@ impl LogicSystem for MovementSystem {
 
         // 🎯 处理没有Player组件的通用实体（怪物、道具等）
         // 先收集所有有Player组件的实体ID
-        let player_entities: Vec<_> = ctx.world.iter().filter_map(|eref| {
-            if eref.get::<&Player>().is_some() {
-                Some(eref.entity())
-            } else {
-                None
-            }
-        }).collect();
+        let player_entities: Vec<_> = ctx
+            .world
+            .iter()
+            .filter_map(|eref| {
+                if eref.get::<&Player>().is_some() {
+                    Some(eref.entity())
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         for eref in ctx.world.iter() {
             let (Some(mut position), Some(mut velocity), Some(mut path)) = (
@@ -301,7 +318,7 @@ impl LogicSystem for MovementSystem {
             if player_entities.contains(&entity) {
                 continue;
             }
-            
+
             if !path.is_valid {
                 velocity.stop();
                 continue;
@@ -318,17 +335,14 @@ impl LogicSystem for MovementSystem {
                 if distance < ARRIVAL_THRESHOLD {
                     position.x = target_x;
                     position.y = target_y;
-                    
+
                     if !path.advance() {
                         velocity.stop();
                     }
                 } else {
                     let speed = velocity.max_speed;
-                    
-                    velocity.set(
-                        (dx / distance) * speed,
-                        (dy / distance) * speed
-                    );
+
+                    velocity.set((dx / distance) * speed, (dy / distance) * speed);
 
                     position.x += velocity.x * delay_time;
                     position.y += velocity.y * delay_time;

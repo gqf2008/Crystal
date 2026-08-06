@@ -11,10 +11,10 @@
 //
 // ============================================================================
 
+use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
 use macroquad::prelude::*;
 use macroquad::ui::{root_ui, Skin};
-use crate::resources::LibraryName;
 use std::collections::HashMap;
 
 // ============================================================================
@@ -42,12 +42,12 @@ impl ButtonState {
             ButtonState::Normal
         }
     }
-    
+
     /// 检查按钮是否被点击（释放时）
     pub fn is_clicked(rect: Rect, mouse_pos: Vec2) -> bool {
         rect.contains(mouse_pos) && is_mouse_button_released(MouseButton::Left)
     }
-    
+
     /// 检查按钮是否被按下（按下时）
     pub fn is_just_pressed(rect: Rect, mouse_pos: Vec2) -> bool {
         rect.contains(mouse_pos) && is_mouse_button_pressed(MouseButton::Left)
@@ -70,7 +70,7 @@ impl ButtonTextures {
             size: vec2(16.0, 16.0),
         }
     }
-    
+
     /// 从资源库加载纹理（连续三个索引：normal, hover, pressed）
     pub fn load_from_library(library: LibraryName, start_index: usize) -> Self {
         let mut btn = Self::new();
@@ -84,7 +84,7 @@ impl ButtonTextures {
         }
         btn
     }
-    
+
     /// 从资源库加载纹理（自定义索引数组）
     pub fn load_from_indices(library: LibraryName, indices: [usize; 3]) -> Self {
         let mut btn = Self::new();
@@ -98,19 +98,19 @@ impl ButtonTextures {
         }
         btn
     }
-    
+
     /// 获取当前状态的纹理
     pub fn get_texture(&self, state: ButtonState) -> Option<&Texture2D> {
         self.textures[state as usize].as_ref()
     }
-    
+
     /// 绘制按钮
     pub fn draw(&self, pos: Vec2, state: ButtonState) {
         if let Some(tex) = self.get_texture(state) {
             draw_texture(tex, pos.x, pos.y, WHITE);
         }
     }
-    
+
     /// 绘制按钮并返回是否被点击
     pub fn draw_button(&self, rect: Rect, mouse_pos: Vec2) -> bool {
         let state = ButtonState::from_mouse(rect, mouse_pos);
@@ -160,9 +160,9 @@ impl Default for CellStyle {
         Self {
             bg_color: Color::new(0.16, 0.16, 0.16, 0.8),
             border_color: Color::new(0.4, 0.4, 0.4, 1.0),
-            hover_color: Color::new(0.0, 1.0, 0.0, 1.0),        // 绿色
-            selected_color: Color::new(1.0, 1.0, 0.0, 1.0),     // 黄色
-            drag_target_color: Color::new(0.0, 1.0, 1.0, 1.0),  // 青色
+            hover_color: Color::new(0.0, 1.0, 0.0, 1.0), // 绿色
+            selected_color: Color::new(1.0, 1.0, 0.0, 1.0), // 黄色
+            drag_target_color: Color::new(0.0, 1.0, 1.0, 1.0), // 青色
             border_width: 1.0,
             highlight_border_width: 2.0,
         }
@@ -175,21 +175,21 @@ impl CellStyle {
         Self {
             bg_color: Color::new(0.16, 0.16, 0.16, 0.8),
             border_color: Color::new(0.4, 0.4, 0.4, 1.0),
-            hover_color: Color::new(0.8, 0.8, 0.2, 1.0),   // 黄色
+            hover_color: Color::new(0.8, 0.8, 0.2, 1.0), // 黄色
             selected_color: Color::new(1.0, 0.8, 0.2, 1.0),
             drag_target_color: Color::new(0.2, 0.8, 0.8, 1.0),
             border_width: 1.5,
             highlight_border_width: 2.0,
         }
     }
-    
+
     /// 背包风格
     pub fn inventory_style() -> Self {
         Self {
             bg_color: Color::new(0.12, 0.12, 0.15, 0.6),
             border_color: Color::new(0.3, 0.3, 0.35, 0.8),
-            hover_color: Color::new(0.0, 1.0, 0.0, 1.0),     // 绿色悬停
-            selected_color: Color::new(1.0, 1.0, 0.0, 1.0),  // 黄色选中
+            hover_color: Color::new(0.0, 1.0, 0.0, 1.0), // 绿色悬停
+            selected_color: Color::new(1.0, 1.0, 0.0, 1.0), // 黄色选中
             drag_target_color: Color::new(0.0, 1.0, 1.0, 1.0), // 青色目标
             border_width: 1.0,
             highlight_border_width: 2.0,
@@ -201,7 +201,7 @@ impl CellStyle {
 pub fn draw_cell_frame(rect: Rect, highlight: CellHighlight, style: &CellStyle) {
     // 背景
     draw_rectangle(rect.x, rect.y, rect.w, rect.h, style.bg_color);
-    
+
     // 边框
     let (color, width) = match highlight {
         CellHighlight::None => (style.border_color, style.border_width),
@@ -218,7 +218,7 @@ pub fn draw_item_icon(rect: Rect, texture: &Texture2D, alpha: f32) {
     let icon_h = texture.height();
     let offset_x = (rect.w - icon_w) / 2.0;
     let offset_y = (rect.h - icon_h) / 2.0;
-    
+
     let color = Color::new(1.0, 1.0, 1.0, alpha);
     draw_texture(texture, rect.x + offset_x, rect.y + offset_y, color);
 }
@@ -228,11 +228,11 @@ pub fn draw_item_count(rect: Rect, count: u32, with_shadow: bool) {
     if count <= 1 {
         return;
     }
-    
+
     let count_text = format!("{}", count);
     let text_x = rect.x + rect.w - 12.0;
     let text_y = rect.y + rect.h - 2.0;
-    
+
     if with_shadow {
         draw_text(&count_text, text_x + 1.0, text_y + 1.0, 16.0, BLACK);
     }
@@ -247,16 +247,16 @@ pub fn draw_item_count(rect: Rect, count: u32, with_shadow: bool) {
 pub fn draw_tooltip(pos: Vec2, text: &str) {
     let text_width = text.chars().count() as f32 * 8.0;
     let padding = 4.0;
-    
+
     // 背景
     draw_rectangle(
         pos.x - padding,
         pos.y - 16.0,
         text_width + padding * 2.0,
         20.0,
-        Color::new(0.0, 0.0, 0.0, 0.85)
+        Color::new(0.0, 0.0, 0.0, 0.85),
     );
-    
+
     // 边框
     draw_rectangle_lines(
         pos.x - padding,
@@ -264,9 +264,9 @@ pub fn draw_tooltip(pos: Vec2, text: &str) {
         text_width + padding * 2.0,
         20.0,
         1.0,
-        Color::new(0.5, 0.5, 0.5, 0.8)
+        Color::new(0.5, 0.5, 0.5, 0.8),
     );
-    
+
     // 文字
     draw_text_cn(text, pos.x, pos.y, 14.0, WHITE);
 }
@@ -303,7 +303,7 @@ impl DragHelper {
             offset: Vec2::ZERO,
         }
     }
-    
+
     /// 更新拖动状态，返回新位置（如果正在拖动）
     pub fn update(&mut self, drag_area: Rect, position: Vec2, mouse_pos: Vec2) -> Vec2 {
         // 开始拖动
@@ -311,12 +311,12 @@ impl DragHelper {
             self.dragging = true;
             self.offset = mouse_pos - position;
         }
-        
+
         // 停止拖动
         if is_mouse_button_released(MouseButton::Left) {
             self.dragging = false;
         }
-        
+
         // 计算新位置
         if self.dragging {
             mouse_pos - self.offset
@@ -324,7 +324,7 @@ impl DragHelper {
             position
         }
     }
-    
+
     /// 简化版：更新并直接修改位置
     pub fn apply(&mut self, drag_area: Rect, position: &mut Vec2) {
         let mouse = mouse_position();
@@ -349,7 +349,7 @@ impl ItemTextureCache {
             textures: HashMap::new(),
         }
     }
-    
+
     /// 预加载指定范围的物品图标
     pub fn preload(&mut self, library: LibraryName, start: usize, count: usize) {
         for i in start..(start + count) {
@@ -360,7 +360,7 @@ impl ItemTextureCache {
             }
         }
     }
-    
+
     /// 获取物品纹理（按需加载）
     pub fn get(&mut self, library: LibraryName, index: usize) -> Option<&Texture2D> {
         if let std::collections::hash_map::Entry::Vacant(e) = self.textures.entry(index) {
@@ -372,22 +372,22 @@ impl ItemTextureCache {
         }
         self.textures.get(&index)
     }
-    
+
     /// 获取已缓存的纹理（不加载）
     pub fn get_cached(&self, index: usize) -> Option<&Texture2D> {
         self.textures.get(&index)
     }
-    
+
     /// 是否已缓存
     pub fn contains(&self, index: usize) -> bool {
         self.textures.contains_key(&index)
     }
-    
+
     /// 缓存数量
     pub fn len(&self) -> usize {
         self.textures.len()
     }
-    
+
     /// 是否为空
     pub fn is_empty(&self) -> bool {
         self.textures.is_empty()
@@ -417,42 +417,42 @@ impl BackgroundTexture {
             size: Vec2::ZERO,
         }
     }
-    
+
     /// 从资源库加载（main_index, overlay_index）
     pub fn load(library: LibraryName, main_index: usize, overlay_index: Option<usize>) -> Self {
         let mut bg = Self::new();
-        
+
         if let Some(info) = library.get_texture(main_index) {
             bg.size = vec2(info.width as f32, info.height as f32);
             bg.main = info.image;
         }
-        
+
         if let Some(idx) = overlay_index {
             if let Some(info) = library.get_texture(idx) {
                 bg.overlay = info.image;
             }
         }
-        
+
         bg
     }
-    
+
     /// 绘制背景
     pub fn draw(&self, pos: Vec2) {
         if let Some(ref tex) = self.main {
             draw_texture(tex, pos.x, pos.y, WHITE);
         }
-        
+
         if let Some(ref tex) = self.overlay {
             draw_texture(tex, pos.x, pos.y, Color::new(1.0, 1.0, 1.0, 0.5));
         }
     }
-    
+
     /// 绘制背景（自定义覆盖层透明度）
     pub fn draw_with_alpha(&self, pos: Vec2, overlay_alpha: f32) {
         if let Some(ref tex) = self.main {
             draw_texture(tex, pos.x, pos.y, WHITE);
         }
-        
+
         if let Some(ref tex) = self.overlay {
             draw_texture(tex, pos.x, pos.y, Color::new(1.0, 1.0, 1.0, overlay_alpha));
         }
@@ -489,7 +489,12 @@ pub fn draw_library_image_with_offset(
     let draw_y = pos.y + info.offset_y as f32;
     draw_texture(&tex, draw_x, draw_y, color);
 
-    Some(Rect::new(draw_x, draw_y, info.width as f32, info.height as f32))
+    Some(Rect::new(
+        draw_x,
+        draw_y,
+        info.width as f32,
+        info.height as f32,
+    ))
 }
 
 /// 绘制三态按钮（normal/hover/pressed），应用 offset，并返回是否“按下点击”
@@ -598,7 +603,7 @@ impl CloseButton {
             offset: vec2(-25.0, 3.0),
         }
     }
-    
+
     /// 从 Prguse2 库加载（360/361/362）
     pub fn load_prguse2() -> Self {
         Self {
@@ -606,7 +611,7 @@ impl CloseButton {
             offset: vec2(-25.0, 3.0),
         }
     }
-    
+
     /// 获取按钮矩形
     pub fn get_rect(&self, window_pos: Vec2, window_size: Vec2) -> Rect {
         Rect::new(
@@ -616,7 +621,7 @@ impl CloseButton {
             self.textures.size.y.max(20.0),
         )
     }
-    
+
     /// 绘制并返回是否被点击
     pub fn draw(&self, window_pos: Vec2, window_size: Vec2, mouse_pos: Vec2) -> bool {
         let rect = self.get_rect(window_pos, window_size);
@@ -685,11 +690,21 @@ pub trait DialogWidget {
 macro_rules! impl_dialog_widget {
     ($ty:ty) => {
         impl $crate::scenes::dialogs::game::native_ui_utils::DialogWidget for $ty {
-            fn dw_open(&mut self) { self.open(); }
-            fn dw_close(&mut self) { self.close(); }
-            fn dw_is_visible(&self) -> bool { self.is_visible() }
-            fn dw_contains(&self, pos: Vec2) -> bool { self.contains(pos) }
-            fn dw_update_and_draw(&mut self) { self.update_and_draw(); }
+            fn dw_open(&mut self) {
+                self.open();
+            }
+            fn dw_close(&mut self) {
+                self.close();
+            }
+            fn dw_is_visible(&self) -> bool {
+                self.is_visible()
+            }
+            fn dw_contains(&self, pos: Vec2) -> bool {
+                self.contains(pos)
+            }
+            fn dw_update_and_draw(&mut self) {
+                self.update_and_draw();
+            }
         }
     };
 }

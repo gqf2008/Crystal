@@ -1,11 +1,11 @@
 //! Combat Packets (Client → Server)
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::enums::{ClientPacketIds, MirDirection, Spell};
-use crate::Point;
 use super::super::base::Packet;
 use crate::data::stats::SharedResult;
+use crate::enums::{ClientPacketIds, MirDirection, Spell};
+use crate::Point;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// Client performs an attack
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,7 +168,11 @@ impl Packet for MagicKey {
         let spell = Spell::try_from(reader.read_u8()?).unwrap_or(Spell::None);
         let key = reader.read_u8()?;
         let old_key = reader.read_u8()?;
-        Ok(Self { spell, key, old_key })
+        Ok(Self {
+            spell,
+            key,
+            old_key,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {

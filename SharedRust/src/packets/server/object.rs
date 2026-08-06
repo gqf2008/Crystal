@@ -2,14 +2,14 @@
 //!
 //! This module contains object status-related packet definitions and parsers.
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::{
-    enums::{SpellEffect, ServerPacketIds},
-    map::Point,
-};
 use super::super::base::Packet;
 use crate::data::stats::SharedResult;
+use crate::{
+    enums::{ServerPacketIds, SpellEffect},
+    map::Point,
+};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 // ============================================================================
 // Packet Structures & PacketMessage Implementations

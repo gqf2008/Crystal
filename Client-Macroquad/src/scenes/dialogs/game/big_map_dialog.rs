@@ -10,12 +10,12 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
-use crate::coord::{CELL_WIDTH, CELL_HEIGHT};
-use crate::resources::map_reader::CellInfo;
-use crate::resources::get_map_texture;
-use crate::ui::text_renderer::draw_text_cn;
 use super::native_ui_utils::{ButtonState, ButtonTextures};
+use crate::coord::{CELL_HEIGHT, CELL_WIDTH};
+use crate::resources::get_map_texture;
+use crate::resources::map_reader::CellInfo;
+use crate::ui::text_renderer::draw_text_cn;
+use macroquad::prelude::*;
 
 pub struct BigMapDialogHybrid {
     visible: bool,
@@ -99,8 +99,12 @@ impl BigMapDialogHybrid {
         self.world_size = vec2(width as f32, height as f32);
     }
 
-    pub fn map_width(&self) -> i32 { self.map_width }
-    pub fn map_height(&self) -> i32 { self.map_height }
+    pub fn map_width(&self) -> i32 {
+        self.map_width
+    }
+    pub fn map_height(&self) -> i32 {
+        self.map_height
+    }
 
     /// 更新并绘制，返回是否消耗了输入
     pub fn update_and_draw(&mut self) -> bool {
@@ -113,15 +117,39 @@ impl BigMapDialogHybrid {
         let mut consumed = false;
 
         // 半透明背景
-        draw_rectangle(0.0, 0.0, self.size.x, self.size.y, Color::from_rgba(0, 0, 0, 180));
+        draw_rectangle(
+            0.0,
+            0.0,
+            self.size.x,
+            self.size.y,
+            Color::from_rgba(0, 0, 0, 180),
+        );
 
         // 地图绘制区域（留边距）
         let margin = 40.0;
-        let map_area = Rect::new(margin, margin, self.size.x - margin * 2.0, self.size.y - margin * 2.0 - 50.0);
+        let map_area = Rect::new(
+            margin,
+            margin,
+            self.size.x - margin * 2.0,
+            self.size.y - margin * 2.0 - 50.0,
+        );
 
         // 地图背景
-        draw_rectangle(map_area.x, map_area.y, map_area.w, map_area.h, Color::from_rgba(20, 20, 30, 255));
-        draw_rectangle_lines(map_area.x, map_area.y, map_area.w, map_area.h, 2.0, Color::from_rgba(80, 80, 120, 255));
+        draw_rectangle(
+            map_area.x,
+            map_area.y,
+            map_area.w,
+            map_area.h,
+            Color::from_rgba(20, 20, 30, 255),
+        );
+        draw_rectangle_lines(
+            map_area.x,
+            map_area.y,
+            map_area.w,
+            map_area.h,
+            2.0,
+            Color::from_rgba(80, 80, 120, 255),
+        );
 
         // 处理拖拽和缩放
         self.handle_input(map_area, mouse_pos);
@@ -133,17 +161,32 @@ impl BigMapDialogHybrid {
         self.draw_player_marker(map_area);
 
         // 地图名称
-        draw_text_cn(&self.map_name, map_area.x + 10.0, map_area.y - 20.0, 16.0, WHITE);
+        draw_text_cn(
+            &self.map_name,
+            map_area.x + 10.0,
+            map_area.y - 20.0,
+            16.0,
+            WHITE,
+        );
 
         // 坐标信息
         if self.world_size.x > 0.0 {
             let coord_text = format!("{:.0} x {:.0}", self.player_pos.x, self.player_pos.y);
-            draw_text_cn(&coord_text, map_area.x + map_area.w - 100.0, map_area.y - 20.0, 14.0, Color::from_rgba(180, 180, 180, 255));
+            draw_text_cn(
+                &coord_text,
+                map_area.x + map_area.w - 100.0,
+                map_area.y - 20.0,
+                14.0,
+                Color::from_rgba(180, 180, 180, 255),
+            );
         }
 
         // 关闭按钮
         let close_size = vec2(32.0, 32.0);
-        let close_pos = vec2(self.size.x - margin - close_size.x, margin - close_size.y - 5.0);
+        let close_pos = vec2(
+            self.size.x - margin - close_size.x,
+            margin - close_size.y - 5.0,
+        );
         let close_rect = Rect::new(close_pos.x, close_pos.y, close_size.x, close_size.y);
         let close_state = ButtonState::from_mouse(close_rect, mouse_pos);
         self.close_btn.draw(close_pos, close_state);
@@ -188,8 +231,12 @@ impl BigMapDialogHybrid {
         let tile_h = CELL_HEIGHT as f32 * self.zoom_level;
 
         if let Some(ref cells) = self.map_cells {
-            let start_x = ((-self.view_offset.x / tile_w).floor() as i32).max(0).min(self.map_width);
-            let start_y = ((-self.view_offset.y / tile_h).floor() as i32).max(0).min(self.map_height);
+            let start_x = ((-self.view_offset.x / tile_w).floor() as i32)
+                .max(0)
+                .min(self.map_width);
+            let start_y = ((-self.view_offset.y / tile_h).floor() as i32)
+                .max(0)
+                .min(self.map_height);
             let end_x = ((-self.view_offset.x + map_area.w) / tile_w).ceil() as i32 + 1;
             let end_y = ((-self.view_offset.y + map_area.h) / tile_h).ceil() as i32 + 1;
             let end_x = end_x.min(self.map_width);
@@ -249,8 +296,10 @@ impl BigMapDialogHybrid {
         let screen_y = map_area.y + cell_y as f32 * tile_h + self.view_offset.y;
 
         // 粗略的屏幕外剔除
-        if screen_x + tile_w < 0.0 || screen_x > map_area.x + map_area.w
-            || screen_y + tile_h < 0.0 || screen_y > map_area.y + map_area.h
+        if screen_x + tile_w < 0.0
+            || screen_x > map_area.x + map_area.w
+            || screen_y + tile_h < 0.0
+            || screen_y > map_area.y + map_area.h
         {
             return;
         }

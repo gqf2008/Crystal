@@ -30,18 +30,18 @@ pub struct LoginScene {
     password: String,
     #[allow(dead_code)]
     password_focus: bool,
-    
+
     // 背景动画
     background_frame: usize,
     animation_playing: bool,
     frame_timer: f32,
     frame_delay: f32,
-    
+
     // UI 状态
     cursor_visible: bool,
     cursor_timer: f32,
     input_focus: InputFocus,
-    
+
     // 消息框
     show_message: bool,
     message_text: String,
@@ -95,16 +95,16 @@ impl LoginScene {
             account: String::new(),
             password: String::new(),
             password_focus: false,
-            
+
             background_frame: 0,
             animation_playing: false,
             frame_timer: 0.0,
             frame_delay: 0.1,
-            
+
             cursor_visible: true,
             cursor_timer: 0.0,
             input_focus: InputFocus::Account,
-            
+
             show_message: false,
             message_text: String::new(),
 
@@ -170,7 +170,8 @@ impl LoginScene {
                     if result == 1 {
                         self.version_ok = true;
                     } else {
-                        self.message_text = "客户端版本不匹配（ClientVersion 被服务器拒绝）".to_string();
+                        self.message_text =
+                            "客户端版本不匹配（ClientVersion 被服务器拒绝）".to_string();
                         self.show_message = true;
                     }
                 }
@@ -287,7 +288,11 @@ impl LoginScene {
         use std::io::Write;
         use std::path::Path;
 
-        fn upsert_ini_section(existing: &str, section_name: &str, replacement_section: &str) -> String {
+        fn upsert_ini_section(
+            existing: &str,
+            section_name: &str,
+            replacement_section: &str,
+        ) -> String {
             let mut out = String::with_capacity(existing.len() + replacement_section.len() + 16);
             let mut in_target = false;
             let mut replaced = false;
@@ -532,133 +537,141 @@ impl Scene for LoginScene {
                 self.draw_new_account_dialog();
             } else {
                 let (_dialog_w, dialog_h, dialog_x, dialog_y) = self.draw_login_background();
-            
-            // 绘制输入框
-            // 原版坐标：AccountIDTextBox (85,85) size(136,15), PasswordTextBox (85,108) size(136,15)
-            let input_x = dialog_x + 85.0;
-            let input_w = 136.0;
-            let input_h = 15.0;
-            
-            // 账号输入框
-            let account_y = dialog_y + 85.0;
-            draw_input_box(
-                input_x,
-                account_y,
-                input_w,
-                input_h,
-                &self.account,
-                false,
-                self.input_focus == InputFocus::Account,
-                self.cursor_visible,
-                14.0,
-            );
-            
-            // 密码输入框
-            let password_y = dialog_y + 108.0;
-            draw_input_box(
-                input_x,
-                password_y,
-                input_w,
-                input_h,
-                &self.password,
-                true,
-                self.input_focus == InputFocus::Password,
-                self.cursor_visible,
-                14.0,
-            );
 
-            // 按钮：对齐原版 C# LoginDialog
-            // OKButton Title[320-322] at (227,81) size 42x42
-            let ok_enabled = !self.account.is_empty() && !self.password.is_empty();
-            if draw_button(
-                LibraryName::Title,
-                dialog_x + 227.0,
-                dialog_y + 81.0,
-                320,
-                321,
-                322,
-                ok_enabled,
-            ) {
-                self.on_login_clicked();
-            }
+                // 绘制输入框
+                // 原版坐标：AccountIDTextBox (85,85) size(136,15), PasswordTextBox (85,108) size(136,15)
+                let input_x = dialog_x + 85.0;
+                let input_w = 136.0;
+                let input_h = 15.0;
 
-            // AccountButton Title[323-325] at (60,163)
-            if draw_button(
-                LibraryName::Title,
-                dialog_x + 60.0,
-                dialog_y + 163.0,
-                323,
-                324,
-                325,
-                true,
-            ) {
-                self.open_new_account_dialog();
-            }
+                // 账号输入框
+                let account_y = dialog_y + 85.0;
+                draw_input_box(
+                    input_x,
+                    account_y,
+                    input_w,
+                    input_h,
+                    &self.account,
+                    false,
+                    self.input_focus == InputFocus::Account,
+                    self.cursor_visible,
+                    14.0,
+                );
 
-            // PassButton Title[326-328] at (166,163)
-            if draw_button(
-                LibraryName::Title,
-                dialog_x + 166.0,
-                dialog_y + 163.0,
-                326,
-                327,
-                328,
-                true,
-            ) {
-                self.open_change_password_dialog();
-            }
+                // 密码输入框
+                let password_y = dialog_y + 108.0;
+                draw_input_box(
+                    input_x,
+                    password_y,
+                    input_w,
+                    input_h,
+                    &self.password,
+                    true,
+                    self.input_focus == InputFocus::Password,
+                    self.cursor_visible,
+                    14.0,
+                );
 
-            // ViewKeyButton Title[332-334] at (60,189)
-            if draw_button(
-                LibraryName::Title,
-                dialog_x + 60.0,
-                dialog_y + 189.0,
-                332,
-                333,
-                334,
-                true,
-            ) {
-                // View key action
-            }
+                // 按钮：对齐原版 C# LoginDialog
+                // OKButton Title[320-322] at (227,81) size 42x42
+                let ok_enabled = !self.account.is_empty() && !self.password.is_empty();
+                if draw_button(
+                    LibraryName::Title,
+                    dialog_x + 227.0,
+                    dialog_y + 81.0,
+                    320,
+                    321,
+                    322,
+                    ok_enabled,
+                ) {
+                    self.on_login_clicked();
+                }
 
-            // CloseButton Title[329-331] at (166,189)
-            if draw_button(
-                LibraryName::Title,
-                dialog_x + 166.0,
-                dialog_y + 189.0,
-                329,
-                330,
-                331,
-                true,
-            ) {
-                std::process::exit(0);
-            }
+                // AccountButton Title[323-325] at (60,163)
+                if draw_button(
+                    LibraryName::Title,
+                    dialog_x + 60.0,
+                    dialog_y + 163.0,
+                    323,
+                    324,
+                    325,
+                    true,
+                ) {
+                    self.open_new_account_dialog();
+                }
 
-            // 左下角显示当前服务器/模式（不增加交互，仅提示）
-            let status = if self.cfg.use_mock {
-                format!("服务器: {}  模式: Mock", self.cfg.server_addr)
-            } else {
-                format!("服务器: {}", self.cfg.server_addr)
-            };
-            draw_text_cn(&status, dialog_x + 10.0, dialog_y + dialog_h - 10.0, 12.0, LIGHTGRAY);
-            
+                // PassButton Title[326-328] at (166,163)
+                if draw_button(
+                    LibraryName::Title,
+                    dialog_x + 166.0,
+                    dialog_y + 163.0,
+                    326,
+                    327,
+                    328,
+                    true,
+                ) {
+                    self.open_change_password_dialog();
+                }
+
+                // ViewKeyButton Title[332-334] at (60,189)
+                if draw_button(
+                    LibraryName::Title,
+                    dialog_x + 60.0,
+                    dialog_y + 189.0,
+                    332,
+                    333,
+                    334,
+                    true,
+                ) {
+                    // View key action
+                }
+
+                // CloseButton Title[329-331] at (166,189)
+                if draw_button(
+                    LibraryName::Title,
+                    dialog_x + 166.0,
+                    dialog_y + 189.0,
+                    329,
+                    330,
+                    331,
+                    true,
+                ) {
+                    std::process::exit(0);
+                }
+
+                // 左下角显示当前服务器/模式（不增加交互，仅提示）
+                let status = if self.cfg.use_mock {
+                    format!("服务器: {}  模式: Mock", self.cfg.server_addr)
+                } else {
+                    format!("服务器: {}", self.cfg.server_addr)
+                };
+                draw_text_cn(
+                    &status,
+                    dialog_x + 10.0,
+                    dialog_y + dialog_h - 10.0,
+                    12.0,
+                    LIGHTGRAY,
+                );
+
                 // 处理点击输入框切换焦点
                 let (mx, my) = mouse_position();
                 if is_mouse_button_pressed(MouseButton::Left)
-                    && mx >= input_x && mx <= input_x + input_w {
-                        if my >= account_y && my <= account_y + input_h {
-                            self.input_focus = InputFocus::Account;
-                        } else if my >= password_y && my <= password_y + input_h {
-                            self.input_focus = InputFocus::Password;
-                        }
+                    && mx >= input_x
+                    && mx <= input_x + input_w
+                {
+                    if my >= account_y && my <= account_y + input_h {
+                        self.input_focus = InputFocus::Account;
+                    } else if my >= password_y && my <= password_y + input_h {
+                        self.input_focus = InputFocus::Password;
                     }
+                }
             }
         }
 
         // 绘制消息框
         if self.show_message {
             draw_message_box(&self.message_text);
-            
+
             // 点击任意位置关闭消息框
             if is_mouse_button_pressed(MouseButton::Left) {
                 self.show_message = false;

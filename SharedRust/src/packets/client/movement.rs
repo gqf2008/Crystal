@@ -1,10 +1,10 @@
 //! Movement Packets (Client → Server)
 
-use std::io::{Read, Write};
-use byteorder::{ReadBytesExt, WriteBytesExt};
-use crate::enums::{ClientPacketIds, MirDirection};
 use super::super::base::Packet;
 use crate::data::stats::SharedResult;
+use crate::enums::{ClientPacketIds, MirDirection};
+use byteorder::{ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// Client requests to turn in a direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

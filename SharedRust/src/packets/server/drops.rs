@@ -2,12 +2,12 @@
 //!
 //! Packets related to dropped items, gold, and credit on the ground.
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::data::stats::SharedResult;
-use crate::data::item::UserItem;
-use crate::enums::ServerPacketIds;
 use super::super::base::Packet;
+use crate::data::item::UserItem;
+use crate::data::stats::SharedResult;
+use crate::enums::ServerPacketIds;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// ObjectItem packet - item on the ground
 #[derive(Debug, Clone)]
@@ -27,7 +27,12 @@ impl Packet for ObjectItem {
         let item = UserItem::read_from_with_info(reader)?;
         let location_x = reader.read_i32::<LittleEndian>()?;
         let location_y = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { object_id, item, location_x, location_y })
+        Ok(Self {
+            object_id,
+            item,
+            location_x,
+            location_y,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -56,7 +61,12 @@ impl Packet for ObjectGold {
         let gold = reader.read_u32::<LittleEndian>()?;
         let location_x = reader.read_i32::<LittleEndian>()?;
         let location_y = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { object_id, gold, location_x, location_y })
+        Ok(Self {
+            object_id,
+            gold,
+            location_x,
+            location_y,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {

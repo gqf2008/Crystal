@@ -1,7 +1,7 @@
 //! Packets Module
 //!
 //! This module contains all network protocol packet definitions and infrastructure.
-//! 
+//!
 //! ## Structure
 //! - `base`: Core packet infrastructure (PacketHeader, PacketMessage trait, serialization)
 //! - `ids`: Packet ID enumerations (ClientPacketId, ServerPacketId)

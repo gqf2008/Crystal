@@ -1,11 +1,11 @@
 //! Market System Packets (Client → Server)
 
-use std::io::{Read, Write};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crate::binary::{read_dotnet_string, write_dotnet_string};
-use crate::enums::{ClientPacketIds, MarketPanelType, ItemType};
 use super::super::base::Packet;
+use crate::binary::{read_dotnet_string, write_dotnet_string};
 use crate::data::stats::SharedResult;
+use crate::enums::{ClientPacketIds, ItemType, MarketPanelType};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Write};
 
 /// Consign item to market
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,7 +22,11 @@ impl Packet for ConsignItem {
         let unique_id = reader.read_u64::<LittleEndian>()?;
         let price = reader.read_u32::<LittleEndian>()?;
         let panel_type = MarketPanelType::try_from(reader.read_u8()?)?;
-        Ok(Self { unique_id, price, panel_type })
+        Ok(Self {
+            unique_id,
+            price,
+            panel_type,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
@@ -54,7 +58,7 @@ impl Packet for MarketSearch {
         let min_shape = reader.read_i16::<LittleEndian>()?;
         let max_shape = reader.read_i16::<LittleEndian>()?;
         let market_type = MarketPanelType::try_from(reader.read_u8()?)?;
-        
+
         Ok(Self {
             match_text,
             item_type,
@@ -125,7 +129,10 @@ impl Packet for MarketBuy {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let auction_id = reader.read_u64::<LittleEndian>()?;
         let bid_price = reader.read_u32::<LittleEndian>()?;
-        Ok(Self { auction_id, bid_price })
+        Ok(Self {
+            auction_id,
+            bid_price,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {

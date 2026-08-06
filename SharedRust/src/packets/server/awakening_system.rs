@@ -84,14 +84,14 @@ impl Packet for NPCReset {
 /// AwakeningNeedMaterials - 觉醒所需材料 (226)
 #[derive(Debug, Clone)]
 pub struct AwakeningNeedMaterials {
-    pub item_id: i32,               // 物品ID
+    pub item_id: i32,                 // 物品ID
     pub materials: Vec<MaterialInfo>, // 材料列表
 }
 
 #[derive(Debug, Clone)]
 pub struct MaterialInfo {
-    pub item_id: i32,               // 材料物品ID
-    pub count: i32,                 // 所需数量
+    pub item_id: i32, // 材料物品ID
+    pub count: i32,   // 所需数量
 }
 
 impl Packet for AwakeningNeedMaterials {
@@ -99,15 +99,15 @@ impl Packet for AwakeningNeedMaterials {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         writer.write_i32::<LittleEndian>(self.item_id)?;
         writer.write_i32::<LittleEndian>(self.materials.len() as i32)?;
-        
+
         for material in &self.materials {
             writer.write_i32::<LittleEndian>(material.item_id)?;
             writer.write_i32::<LittleEndian>(material.count)?;
         }
-        
+
         Ok(())
     }
 
@@ -115,7 +115,7 @@ impl Packet for AwakeningNeedMaterials {
         let item_id = reader.read_i32::<LittleEndian>()?;
         let count = reader.read_i32::<LittleEndian>()?;
         let mut materials = Vec::with_capacity(count as usize);
-        
+
         for _ in 0..count {
             let mat_id = reader.read_i32::<LittleEndian>()?;
             let mat_count = reader.read_i32::<LittleEndian>()?;
@@ -124,7 +124,7 @@ impl Packet for AwakeningNeedMaterials {
                 count: mat_count,
             });
         }
-        
+
         Ok(Self { item_id, materials })
     }
 }
@@ -132,8 +132,8 @@ impl Packet for AwakeningNeedMaterials {
 /// AwakeningLockedItem - 觉醒锁定物品 (227)
 #[derive(Debug, Clone)]
 pub struct AwakeningLockedItem {
-    pub unique_id: u64,             // 物品唯一ID
-    pub locked: bool,               // 是否锁定
+    pub unique_id: u64, // 物品唯一ID
+    pub locked: bool,   // 是否锁定
 }
 
 impl Packet for AwakeningLockedItem {
@@ -141,10 +141,10 @@ impl Packet for AwakeningLockedItem {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        
+
         writer.write_u64::<LittleEndian>(self.unique_id)?;
         writer.write_u8(if self.locked { 1 } else { 0 })?;
-        
+
         Ok(())
     }
 

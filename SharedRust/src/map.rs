@@ -55,7 +55,6 @@ impl Point {
         self.x += dx;
         self.y += dy;
     }
-
 }
 
 /// Implement Display for Point to match C# ToString behavior
@@ -163,7 +162,10 @@ mod tests {
     fn test_point_from_str() {
         assert_eq!("10, 20".parse::<Point>().unwrap(), Point::new(10, 20));
         assert_eq!("5,7".parse::<Point>().unwrap(), Point::new(5, 7));
-        assert_eq!("  15  ,  25  ".parse::<Point>().unwrap(), Point::new(15, 25));
+        assert_eq!(
+            "  15  ,  25  ".parse::<Point>().unwrap(),
+            Point::new(15, 25)
+        );
         assert!("invalid".parse::<Point>().is_err());
         assert!("10".parse::<Point>().is_err());
     }

@@ -5,10 +5,10 @@
 /// 任务状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuestState {
-    Available,   // 可接取
-    Active,      // 进行中
-    Completed,   // 已完成
-    Failed,      // 已失败
+    Available, // 可接取
+    Active,    // 进行中
+    Completed, // 已完成
+    Failed,    // 已失败
 }
 
 /// 任务奖励物品
@@ -38,10 +38,7 @@ pub enum QuestObjective {
         required: u32,
     },
     /// 与NPC对话
-    TalkToNPC {
-        npc_name: String,
-        completed: bool,
-    },
+    TalkToNPC { npc_name: String, completed: bool },
     /// 到达指定地点
     ReachLocation {
         location_name: String,
@@ -89,7 +86,9 @@ impl Quest {
             return 0.0;
         }
 
-        let completed_count = self.objectives.iter()
+        let completed_count = self
+            .objectives
+            .iter()
             .filter(|obj| obj.is_completed())
             .count();
 
@@ -100,8 +99,12 @@ impl Quest {
 impl QuestObjective {
     pub fn is_completed(&self) -> bool {
         match self {
-            QuestObjective::KillMonsters { current, required, .. } => current >= required,
-            QuestObjective::CollectItems { current, required, .. } => current >= required,
+            QuestObjective::KillMonsters {
+                current, required, ..
+            } => current >= required,
+            QuestObjective::CollectItems {
+                current, required, ..
+            } => current >= required,
             QuestObjective::TalkToNPC { completed, .. } => *completed,
             QuestObjective::ReachLocation { completed, .. } => *completed,
         }
@@ -109,17 +112,40 @@ impl QuestObjective {
 
     pub fn get_progress_text(&self) -> String {
         match self {
-            QuestObjective::KillMonsters { monster_name, current, required } => {
+            QuestObjective::KillMonsters {
+                monster_name,
+                current,
+                required,
+            } => {
                 format!("击杀 {}: {}/{}", monster_name, current, required)
             }
-            QuestObjective::CollectItems { item_name, current, required } => {
+            QuestObjective::CollectItems {
+                item_name,
+                current,
+                required,
+            } => {
                 format!("收集 {}: {}/{}", item_name, current, required)
             }
-            QuestObjective::TalkToNPC { npc_name, completed } => {
-                format!("与 {} 对话: {}", npc_name, if *completed { "✓" } else { "○" })
+            QuestObjective::TalkToNPC {
+                npc_name,
+                completed,
+            } => {
+                format!(
+                    "与 {} 对话: {}",
+                    npc_name,
+                    if *completed { "✓" } else { "○" }
+                )
             }
-            QuestObjective::ReachLocation { location_name, completed, .. } => {
-                format!("到达 {}: {}", location_name, if *completed { "✓" } else { "○" })
+            QuestObjective::ReachLocation {
+                location_name,
+                completed,
+                ..
+            } => {
+                format!(
+                    "到达 {}: {}",
+                    location_name,
+                    if *completed { "✓" } else { "○" }
+                )
             }
         }
     }

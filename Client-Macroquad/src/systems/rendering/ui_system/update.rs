@@ -48,8 +48,13 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                     );
                     sys.bring_npc_layer_to_front(NpcUiLayer::SubGoods);
                 } else {
-                    sys.npc_goods_dialog
-                        .new_goods(items, rate, panel_type, hide_added_stats, use_pearls);
+                    sys.npc_goods_dialog.new_goods(
+                        items,
+                        rate,
+                        panel_type,
+                        hide_added_stats,
+                        use_pearls,
+                    );
                     sys.bring_npc_layer_to_front(NpcUiLayer::Goods);
                 }
                 sys.main_dialog.open_inventory();
@@ -86,7 +91,9 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                 sys.npc_goods_dialog.hide();
             }
             UiCommand::UpdateMountState { mount_type, riding } => {
-                sys.main_dialog.mount_dialog_mut().update_mount_state(mount_type, riding);
+                sys.main_dialog
+                    .mount_dialog_mut()
+                    .update_mount_state(mount_type, riding);
             }
             UiCommand::UpdateHeroBehaviour { behaviour } => {
                 if let Ok(b) = behaviour.try_into() {
@@ -106,10 +113,17 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                 sys.main_dialog.push_system_chat_line("英雄已切换");
             }
             UiCommand::PlayerLevelUp { new_level } => {
-                sys.main_dialog.push_system_chat_line(format!("🎉 升级到 Lv.{}！", new_level));
+                sys.main_dialog
+                    .push_system_chat_line(format!("🎉 升级到 Lv.{}！", new_level));
             }
-            UiCommand::UpdateFishingState { state, chance, progress } => {
-                sys.main_dialog.fishing_dialog_mut().update_fishing_state(state, chance, progress);
+            UiCommand::UpdateFishingState {
+                state,
+                chance,
+                progress,
+            } => {
+                sys.main_dialog
+                    .fishing_dialog_mut()
+                    .update_fishing_state(state, chance, progress);
             }
             UiCommand::SetFishingAutoCast { enabled } => {
                 sys.main_dialog.fishing_dialog_mut().set_auto_cast(enabled);
@@ -121,19 +135,26 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                 sys.main_dialog.buff_dialog_mut().remove_buff(buff_type);
             }
             UiCommand::UpdateCreatureList { creatures } => {
-                sys.main_dialog.intelligent_creature_dialog_mut().update_creatures(creatures.clone());
+                sys.main_dialog
+                    .intelligent_creature_dialog_mut()
+                    .update_creatures(creatures.clone());
             }
             UiCommand::UpdateFriendList { friends } => {
-                let friend_infos: Vec<crate::scenes::dialogs::game::friend_dialog::FriendInfo> = friends
-                    .iter()
-                    .map(|f| crate::scenes::dialogs::game::friend_dialog::FriendInfo {
-                        object_id: f.object_id,
-                        name: f.name.clone(),
-                        memo: f.memo.clone(),
-                        online: f.online,
-                    })
-                    .collect();
-                sys.main_dialog.friend_dialog_mut().update_friends(friend_infos);
+                let friend_infos: Vec<crate::scenes::dialogs::game::friend_dialog::FriendInfo> =
+                    friends
+                        .iter()
+                        .map(
+                            |f| crate::scenes::dialogs::game::friend_dialog::FriendInfo {
+                                object_id: f.object_id,
+                                name: f.name.clone(),
+                                memo: f.memo.clone(),
+                                online: f.online,
+                            },
+                        )
+                        .collect();
+                sys.main_dialog
+                    .friend_dialog_mut()
+                    .update_friends(friend_infos);
             }
             UiCommand::UpdateGroupMembers { members } => {
                 sys.main_dialog.group_dialog_mut().update_members(members);
@@ -141,11 +162,18 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             UiCommand::SetGroupAllowJoin { allow } => {
                 sys.main_dialog.group_dialog_mut().set_allow_join(allow);
             }
-            UiCommand::UpdateGroupMemberMap { player_name, player_map } => {
-                sys.main_dialog.group_dialog_mut().update_member_map(&player_name, player_map);
+            UiCommand::UpdateGroupMemberMap {
+                player_name,
+                player_map,
+            } => {
+                sys.main_dialog
+                    .group_dialog_mut()
+                    .update_member_map(&player_name, player_map);
             }
             UiCommand::UpdateGroupMemberLocation { player_name, x, y } => {
-                sys.main_dialog.group_dialog_mut().update_member_location(&player_name, x, y);
+                sys.main_dialog
+                    .group_dialog_mut()
+                    .update_member_location(&player_name, x, y);
             }
             UiCommand::AddGroupMember { name } => {
                 sys.main_dialog.group_dialog_mut().add_member(
@@ -164,22 +192,35 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                 sys.main_dialog.group_dialog_mut().remove_member(&name);
             }
             UiCommand::ClearGroupMembers => {
-                sys.main_dialog.group_dialog_mut().update_members(Vec::new());
+                sys.main_dialog
+                    .group_dialog_mut()
+                    .update_members(Vec::new());
             }
             UiCommand::SetHeroAutoPotUnlocked => {
-                sys.main_dialog.hero_dialog_mut().set_auto_pot_unlocked(true);
+                sys.main_dialog
+                    .hero_dialog_mut()
+                    .set_auto_pot_unlocked(true);
             }
             UiCommand::SetHeroAutoPotValue { pot_type, value } => {
-                sys.main_dialog.hero_dialog_mut().set_auto_pot_value(pot_type, value);
+                sys.main_dialog
+                    .hero_dialog_mut()
+                    .set_auto_pot_value(pot_type, value);
             }
             UiCommand::SetHeroAutoPotItem { slot, item_id } => {
-                sys.main_dialog.hero_dialog_mut().set_auto_pot_item(slot, item_id);
+                sys.main_dialog
+                    .hero_dialog_mut()
+                    .set_auto_pot_item(slot, item_id);
             }
             UiCommand::SetBuffPaused { buff_id, paused } => {
-                sys.main_dialog.buff_dialog_mut().set_buff_paused(buff_id, paused);
+                sys.main_dialog
+                    .buff_dialog_mut()
+                    .set_buff_paused(buff_id, paused);
             }
             UiCommand::UpdateCompass { location } => {
-                let dir = crate::scenes::dialogs::game::compass_dialog::CompassDirection::from_location(location.0, location.1);
+                let dir =
+                    crate::scenes::dialogs::game::compass_dialog::CompassDirection::from_location(
+                        location.0, location.1,
+                    );
                 sys.main_dialog.compass_dialog_mut().set_direction(dir);
             }
             UiCommand::OpenTradeDialog { partner } => {
@@ -194,16 +235,20 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             }
             UiCommand::TradeItemDeposited { from_slot, success } => {
                 if !success {
-                    sys.main_dialog.push_system_chat_line(format!("存入交易物品失败 (槽位{})", from_slot));
+                    sys.main_dialog
+                        .push_system_chat_line(format!("存入交易物品失败 (槽位{})", from_slot));
                 }
             }
             UiCommand::TradeItemRetrieved { from_slot, success } => {
                 if !success {
-                    sys.main_dialog.push_system_chat_line(format!("取回交易物品失败 (槽位{})", from_slot));
+                    sys.main_dialog
+                        .push_system_chat_line(format!("取回交易物品失败 (槽位{})", from_slot));
                 }
             }
             UiCommand::TradeConfirmed { locked } => {
-                sys.main_dialog.trade_dialog_mut().set_partner_confirmed(locked);
+                sys.main_dialog
+                    .trade_dialog_mut()
+                    .set_partner_confirmed(locked);
             }
             UiCommand::TradeCancelled { unlock: _ } => {
                 sys.main_dialog.trade_dialog_mut().reset_confirmations();
@@ -211,12 +256,26 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             UiCommand::TradeCompleted => {
                 sys.main_dialog.trade_dialog_mut().reset_confirmations();
             }
-            UiCommand::QuestAccepted { quest_id, name, description } => {
-                use crate::scenes::dialogs::game::quest_log_dialog::{QuestInfo, QuestRewards, QuestStatus};
+            UiCommand::QuestAccepted {
+                quest_id,
+                name,
+                description,
+            } => {
+                use crate::scenes::dialogs::game::quest_log_dialog::{
+                    QuestInfo, QuestRewards, QuestStatus,
+                };
                 // 优先使用缓存的真实数据（来自 NewQuestInfo），否则用传入的 stub 数据
                 let (real_name, real_group, real_desc, level_req, reward_exp, reward_gold) =
-                    sys.cached_quest_info.remove(&quest_id)
-                        .unwrap_or_else(|| (name.clone(), String::new(), description.clone(), 0u32, 0u64, 0u32));
+                    sys.cached_quest_info.remove(&quest_id).unwrap_or_else(|| {
+                        (
+                            name.clone(),
+                            String::new(),
+                            description.clone(),
+                            0u32,
+                            0u64,
+                            0u32,
+                        )
+                    });
                 sys.main_dialog.quest_log_dialog_mut().add_quest(QuestInfo {
                     id: quest_id,
                     name: real_name,
@@ -235,42 +294,84 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                 });
             }
             UiCommand::QuestCompleted { quest_id } => {
-                sys.main_dialog.quest_log_dialog_mut().notify_quest_complete(quest_id);
-                sys.main_dialog.quest_log_dialog_mut().remove_quest(quest_id);
+                sys.main_dialog
+                    .quest_log_dialog_mut()
+                    .notify_quest_complete(quest_id);
+                sys.main_dialog
+                    .quest_log_dialog_mut()
+                    .remove_quest(quest_id);
             }
-            UiCommand::QuestProgressUpdated { quest_id, progress_text } => {
-                sys.main_dialog.quest_log_dialog_mut().update_quest_progress_from_text(quest_id, progress_text.as_str());
+            UiCommand::QuestProgressUpdated {
+                quest_id,
+                progress_text,
+            } => {
+                sys.main_dialog
+                    .quest_log_dialog_mut()
+                    .update_quest_progress_from_text(quest_id, progress_text.as_str());
             }
             UiCommand::QuestInfoReceived {
-                quest_id, name, group, description, level_req, reward_exp, reward_gold,
+                quest_id,
+                name,
+                group,
+                description,
+                level_req,
+                reward_exp,
+                reward_gold,
             } => {
                 // 缓存任务信息，等 QuestAccepted 到来时使用真实数据
                 sys.cached_quest_info.insert(
                     quest_id,
-                    (name.clone(), group.clone(), description.clone(), level_req, reward_exp, reward_gold),
+                    (
+                        name.clone(),
+                        group.clone(),
+                        description.clone(),
+                        level_req,
+                        reward_exp,
+                        reward_gold,
+                    ),
                 );
             }
             // 公会扩展事件
             UiCommand::GuildMemberUpdated { name, rank, online } => {
-                sys.main_dialog.guild_dialog_mut().update_member(name.clone(), rank.clone(), online);
+                sys.main_dialog.guild_dialog_mut().update_member(
+                    name.clone(),
+                    rank.clone(),
+                    online,
+                );
             }
             UiCommand::GuildNoticeUpdated { notice } => {
-                sys.main_dialog.guild_dialog_mut().update_notice(notice.clone());
+                sys.main_dialog
+                    .guild_dialog_mut()
+                    .update_notice(notice.clone());
             }
             UiCommand::GuildExpGained { amount } => {
-                sys.main_dialog.push_system_chat_line(format!("行会经验 +{}", amount));
+                sys.main_dialog
+                    .push_system_chat_line(format!("行会经验 +{}", amount));
             }
             UiCommand::GuildWarRequested { guild_name } => {
-                sys.main_dialog.push_system_chat_line(format!("行会战请求！「{}」向你方宣战", guild_name));
+                sys.main_dialog
+                    .push_system_chat_line(format!("行会战请求！「{}」向你方宣战", guild_name));
             }
             UiCommand::SetGuildName { name } => {
-                sys.main_dialog.guild_dialog_mut().update_guild_info(crate::scenes::dialogs::game::guild_dialog::GuildInfo {
-                    name: name.clone(),
-                    ..Default::default()
-                });
+                sys.main_dialog.guild_dialog_mut().update_guild_info(
+                    crate::scenes::dialogs::game::guild_dialog::GuildInfo {
+                        name: name.clone(),
+                        ..Default::default()
+                    },
+                );
                 tracing::debug!("🏰 行会名称: {}", name);
             }
-            UiCommand::UpdateGuildStatus { rank_name, level, experience, max_experience, gold, spare_points, member_count, max_members, my_rank_id } => {
+            UiCommand::UpdateGuildStatus {
+                rank_name,
+                level,
+                experience,
+                max_experience,
+                gold,
+                spare_points,
+                member_count,
+                max_members,
+                my_rank_id,
+            } => {
                 let dialog = sys.main_dialog.guild_dialog_mut();
                 dialog.update_guild_info(crate::scenes::dialogs::game::guild_dialog::GuildInfo {
                     rank_name: rank_name.clone(),
@@ -290,11 +391,21 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             }
             UiCommand::UpdateGuildStorageItems { items } => {
                 for item in items {
-                    sys.main_dialog.guild_dialog_mut().update_storage_item(item.name.clone(), item.quantity, item.slot);
+                    sys.main_dialog.guild_dialog_mut().update_storage_item(
+                        item.name.clone(),
+                        item.quantity,
+                        item.slot,
+                    );
                 }
             }
-            UiCommand::UpdateGuildStorageItem { slot, name, quantity } => {
-                sys.main_dialog.guild_dialog_mut().update_storage_item(name, quantity, slot);
+            UiCommand::UpdateGuildStorageItem {
+                slot,
+                name,
+                quantity,
+            } => {
+                sys.main_dialog
+                    .guild_dialog_mut()
+                    .update_storage_item(name, quantity, slot);
             }
             UiCommand::ClearGuildStorageItems => {
                 sys.main_dialog.guild_dialog_mut().clear_storage_items();
@@ -330,10 +441,18 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                     .find_map(|e| {
                         let _lp = e.get::<&LocalPlayer>()?;
                         let inv = e.get::<&Inventory>()?;
-                        Some(inv.items.iter().filter_map(|s: &Option<mir2_shared::data::item::UserItem>| s.clone()).collect())
+                        Some(
+                            inv.items
+                                .iter()
+                                .filter_map(|s: &Option<mir2_shared::data::item::UserItem>| {
+                                    s.clone()
+                                })
+                                .collect(),
+                        )
                     })
                     .unwrap_or_default();
-                sys.npc_goods_dialog.show_storage_mode(vec![], inventory_items, 1.0);
+                sys.npc_goods_dialog
+                    .show_storage_mode(vec![], inventory_items, 1.0);
                 sys.bring_npc_layer_to_front(NpcUiLayer::Goods);
             }
             UiCommand::UpdateStorageItems { items } => {
@@ -343,26 +462,51 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                 sys.npc_goods_dialog.update_storage_inventory_items(items);
             }
             UiCommand::SetMarriageRequester { requester } => {
-                sys.main_dialog.relationship_dialog_mut().set_marriage_requester(requester.clone());
+                sys.main_dialog
+                    .relationship_dialog_mut()
+                    .set_marriage_requester(requester.clone());
             }
             UiCommand::ClearMarriageRequester => {
-                sys.main_dialog.relationship_dialog_mut().clear_marriage_requester();
+                sys.main_dialog
+                    .relationship_dialog_mut()
+                    .clear_marriage_requester();
             }
             UiCommand::UpdateLover { name, date } => {
-                sys.main_dialog.relationship_dialog_mut().set_lover_info(name, date);
+                sys.main_dialog
+                    .relationship_dialog_mut()
+                    .set_lover_info(name, date);
             }
-            UiCommand::UpdateMentor { name, level, online } => {
-                sys.main_dialog.relationship_dialog_mut().set_mentor_info(name, level as u32, online);
+            UiCommand::UpdateMentor {
+                name,
+                level,
+                online,
+            } => {
+                sys.main_dialog.relationship_dialog_mut().set_mentor_info(
+                    name,
+                    level as u32,
+                    online,
+                );
             }
-            UiCommand::ShowTextInput { kind, title, placeholder, max_length } => {
+            UiCommand::ShowTextInput {
+                kind,
+                title,
+                placeholder,
+                max_length,
+            } => {
                 sys.main_dialog.set_pending_text_input_kind(kind);
-                sys.main_dialog.text_input_dialog_mut().show(&title, &placeholder, max_length);
+                sys.main_dialog
+                    .text_input_dialog_mut()
+                    .show(&title, &placeholder, max_length);
             }
             UiCommand::HideTextInput => {
                 sys.main_dialog.reset_pending_text_input_kind();
                 sys.main_dialog.text_input_dialog_mut().hide();
             }
-            UiCommand::ShowInviteConfirm { kind, inviter, detail } => {
+            UiCommand::ShowInviteConfirm {
+                kind,
+                inviter,
+                detail,
+            } => {
                 sys.pending_invite = Some((kind, inviter.clone(), detail.clone()));
             }
             UiCommand::HideInviteConfirm => {
@@ -372,21 +516,32 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                 tracing::debug!("🏆 更新排行榜: tab={}, {} entries", tab, entries.len());
                 let ranking_dialog = sys.main_dialog.ranking_dialog_mut();
                 let tab_enum = crate::scenes::dialogs::game::RankingTab::from_index(tab as usize);
-                let mapped: Vec<_> = entries.iter().map(|(rank, name, value)| {
-                    crate::scenes::dialogs::game::RankingEntry {
-                        rank: *rank,
-                        name: name.clone(),
-                        value: value.clone(),
-                    }
-                }).collect();
+                let mapped: Vec<_> = entries
+                    .iter()
+                    .map(
+                        |(rank, name, value)| crate::scenes::dialogs::game::RankingEntry {
+                            rank: *rank,
+                            name: name.clone(),
+                            value: value.clone(),
+                        },
+                    )
+                    .collect();
                 ranking_dialog.set_rankings(tab_enum, mapped);
             }
-            UiCommand::UpdateGameShopItems { items, credit, gold } => {
+            UiCommand::UpdateGameShopItems {
+                items,
+                credit,
+                gold,
+            } => {
                 tracing::debug!("🛒 更新商城商品列表: {} items", items.len());
-                sys.main_dialog.game_shop_dialog_mut().update_from_server(items, credit, gold);
+                sys.main_dialog
+                    .game_shop_dialog_mut()
+                    .update_from_server(items, credit, gold);
             }
             UiCommand::UpdateGameShopStock { item_index, stock } => {
-                sys.main_dialog.game_shop_dialog_mut().update_stock(item_index, stock);
+                sys.main_dialog
+                    .game_shop_dialog_mut()
+                    .update_stock(item_index, stock);
             }
             UiCommand::UpdateAttackMode { mode } => {
                 sys.main_dialog.set_attack_mode(mode);
@@ -424,13 +579,21 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             UiCommand::ShowGuildTerritory => {
                 sys.guild_territory_dialog.show();
             }
-            UiCommand::UpdateGuildTerritory { entries, page, total } => {
-                sys.guild_territory_dialog.update_territories(entries, page, total);
+            UiCommand::UpdateGuildTerritory {
+                entries,
+                page,
+                total,
+            } => {
+                sys.guild_territory_dialog
+                    .update_territories(entries, page, total);
             }
             UiCommand::ToggleKeyboardLayout => {
                 sys.keyboard_layout_dialog.toggle();
             }
-            UiCommand::ShowNPCAwake { item_name, materials } => {
+            UiCommand::ShowNPCAwake {
+                item_name,
+                materials,
+            } => {
                 sys.npc_awake_dialog.show(item_name, materials);
             }
             UiCommand::SetAwakeLocked { locked } => {
@@ -439,8 +602,20 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             UiCommand::ShowCraft { recipes } => {
                 sys.craft_dialog.show(recipes);
             }
-            UiCommand::ShowRefine { item_name, stats, material_name, material_have, material_need } => {
-                sys.refine_dialog.show(item_name, stats, material_name, material_have, material_need);
+            UiCommand::ShowRefine {
+                item_name,
+                stats,
+                material_name,
+                material_have,
+                material_need,
+            } => {
+                sys.refine_dialog.show(
+                    item_name,
+                    stats,
+                    material_name,
+                    material_have,
+                    material_need,
+                );
             }
             UiCommand::OpenItemRental { partner } => {
                 sys.item_rental_dialog.show(partner);
@@ -472,9 +647,17 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             UiCommand::CloseTrustMerchant => {
                 sys.trust_merchant_dialog.close();
             }
-            UiCommand::CraftItemRequest { recipe_unique_id, count, slots } => {
+            UiCommand::CraftItemRequest {
+                recipe_unique_id,
+                count,
+                slots,
+            } => {
                 if let Some(net) = ctx.net.as_ref() {
-                    let _ = net.send(NetworkEvent::CraftItemRequest { recipe_unique_id, count, slots });
+                    let _ = net.send(NetworkEvent::CraftItemRequest {
+                        recipe_unique_id,
+                        count,
+                        slots,
+                    });
                 }
             }
             UiCommand::ConfirmItemRental => {
@@ -486,7 +669,9 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                 UiState::with_in_world(&ctx.world, |s| s.request_scene_transition = Some(target));
             }
             UiCommand::HeroLevelUp { new_level } => {
-                sys.main_dialog.hero_dialog_mut().update_hero_level(new_level);
+                sys.main_dialog
+                    .hero_dialog_mut()
+                    .update_hero_level(new_level);
             }
             UiCommand::UpdateHeroManageList { heroes } => {
                 sys.main_dialog.hero_dialog_mut().update_manage_list(heroes);
@@ -494,8 +679,12 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             UiCommand::HeroInfoReceived { hero_id } => {
                 sys.main_dialog.hero_dialog_mut().set_hero_id(hero_id);
             }
-            UiCommand::ItemDuraChanged { unique_id, current_dura } => {
-                sys.dura_status_dialog.update_item_dura(unique_id, current_dura);
+            UiCommand::ItemDuraChanged {
+                unique_id,
+                current_dura,
+            } => {
+                sys.dura_status_dialog
+                    .update_item_dura(unique_id, current_dura);
             }
             UiCommand::RemoveDuraEntry { unique_id } => {
                 sys.dura_status_dialog.remove_dura_entry(unique_id);
@@ -524,33 +713,66 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             UiCommand::SetHeroBaseStats { stats } => {
                 sys.main_dialog.hero_dialog_mut().set_base_stats(stats);
             }
-            UiCommand::UpdateBigMapInfo { map_index: _, title, width, height } => {
-                sys.main_dialog.big_map_dialog_mut().set_map_info(title.clone(), width as f32, height as f32);
+            UiCommand::UpdateBigMapInfo {
+                map_index: _,
+                title,
+                width,
+                height,
+            } => {
+                sys.main_dialog.big_map_dialog_mut().set_map_info(
+                    title.clone(),
+                    width as f32,
+                    height as f32,
+                );
             }
             UiCommand::UpdateWorldMapIcons { icons } => {
                 tracing::debug!("🌍 世界地图图标更新: {} icons", icons.len());
             }
             UiCommand::NavigateToMapLocation { map_index: _, x, y } => {
-                sys.main_dialog.big_map_dialog_mut().set_player_position(x as f32, y as f32);
+                sys.main_dialog
+                    .big_map_dialog_mut()
+                    .set_player_position(x as f32, y as f32);
                 sys.main_dialog.big_map_dialog_mut().show();
             }
-            UiCommand::MagicLearned { spell, name, level, icon, hero } => {
-                sys.main_dialog.skill_dialog_mut(hero).learn_skill(spell, name, level, icon);
+            UiCommand::MagicLearned {
+                spell,
+                name,
+                level,
+                icon,
+                hero,
+            } => {
+                sys.main_dialog
+                    .skill_dialog_mut(hero)
+                    .learn_skill(spell, name, level, icon);
             }
-            UiCommand::MagicLeveledUp { spell, level, experience: _ } => {
-                sys.main_dialog.skill_dialog_mut(false).level_up_skill(spell, level);
+            UiCommand::MagicLeveledUp {
+                spell,
+                level,
+                experience: _,
+            } => {
+                sys.main_dialog
+                    .skill_dialog_mut(false)
+                    .level_up_skill(spell, level);
             }
             UiCommand::MagicRemoved { spell, hero } => {
                 sys.main_dialog.skill_dialog_mut(hero).remove_skill(spell);
             }
-            UiCommand::SpellToggled { spell, can_use, hero } => {
-                sys.main_dialog.skill_dialog_mut(hero).toggle_skill(spell, can_use);
+            UiCommand::SpellToggled {
+                spell,
+                can_use,
+                hero,
+            } => {
+                sys.main_dialog
+                    .skill_dialog_mut(hero)
+                    .toggle_skill(spell, can_use);
             }
             UiCommand::ExperienceGained { amount } => {
-                sys.main_dialog.push_system_chat_line(format!("+{} 经验", amount));
+                sys.main_dialog
+                    .push_system_chat_line(format!("+{} 经验", amount));
             }
             UiCommand::HeroExperienceGained { amount } => {
-                sys.main_dialog.push_system_chat_line(format!("英雄 +{} 经验", amount));
+                sys.main_dialog
+                    .push_system_chat_line(format!("英雄 +{} 经验", amount));
             }
             UiCommand::SetTransformForm { form } => {
                 UiState::with_in_world(&ctx.world, |s| s.transform_form = form);
@@ -569,13 +791,19 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                 }
             }
             UiCommand::SetCreatureCanRename { can_rename } => {
-                sys.main_dialog.intelligent_creature_dialog_mut().set_can_rename(can_rename);
+                sys.main_dialog
+                    .intelligent_creature_dialog_mut()
+                    .set_can_rename(can_rename);
             }
             UiCommand::SetCreatureAutoPickup { enabled } => {
-                sys.main_dialog.intelligent_creature_dialog_mut().set_auto_pickup(enabled);
+                sys.main_dialog
+                    .intelligent_creature_dialog_mut()
+                    .set_auto_pickup(enabled);
             }
             UiCommand::OpenDoor { door_id } => {
-                UiState::with_in_world(&ctx.world, |s| { s.open_doors.insert(door_id); });
+                UiState::with_in_world(&ctx.world, |s| {
+                    s.open_doors.insert(door_id);
+                });
             }
             UiCommand::ShowReport => {
                 sys.report_dialog.show();
@@ -622,7 +850,11 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
         let (map_name, world_size, player_pos) = {
             if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
                 let s = s.borrow();
-                (s.big_map_map_name.clone(), s.minimap_world_size, s.minimap_player_pos)
+                (
+                    s.big_map_map_name.clone(),
+                    s.minimap_world_size,
+                    s.minimap_player_pos,
+                )
             } else {
                 (None, None, None)
             }
@@ -630,10 +862,14 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
 
         if let Some(name) = map_name {
             let ws = world_size.unwrap_or(macroquad::prelude::Vec2::ZERO);
-            sys.main_dialog.big_map_dialog_mut().set_map_info(name, ws.x, ws.y);
+            sys.main_dialog
+                .big_map_dialog_mut()
+                .set_map_info(name, ws.x, ws.y);
         }
         if let Some(p) = player_pos {
-            sys.main_dialog.big_map_dialog_mut().set_player_position(p.x, p.y);
+            sys.main_dialog
+                .big_map_dialog_mut()
+                .set_player_position(p.x, p.y);
         }
 
         // 同步地图瓦片数据（仅当地图尺寸变化时才克隆）
@@ -643,7 +879,11 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                 (big_map.map_width(), big_map.map_height())
             };
             if bm_w != map_data.width || bm_h != map_data.height {
-                sys.main_dialog.big_map_dialog_mut().set_map_data(map_data.cells.clone(), map_data.width, map_data.height);
+                sys.main_dialog.big_map_dialog_mut().set_map_data(
+                    map_data.cells.clone(),
+                    map_data.width,
+                    map_data.height,
+                );
             }
         }
     }
@@ -656,7 +896,9 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             MiniMapAction::OpenMail => {
                 tracing::debug!("📮 小地图：打开邮件对话框");
                 if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
-                    s.borrow_mut().pending_commands.push(UiCommand::OpenMailDialog);
+                    s.borrow_mut()
+                        .pending_commands
+                        .push(UiCommand::OpenMailDialog);
                 }
             }
             MiniMapAction::OpenBigMap => {
@@ -698,17 +940,24 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             let stats = e.get::<&CombatStats>()?;
             Some((e.entity(), lp, stats))
         }) {
-            let exp = ctx.world.get::<&Experience>(e).ok().map(|e| e.percent()).unwrap_or(0.0);
-            let currency = ctx.world.get::<&Currency>(e)
-                .map(|c| c.gold)
-                .unwrap_or(0);
-            let (weight, max_weight, bag_space, bag_capacity) = ctx.world.get::<&Inventory>(e)
-                .map(|inv| (
-                    inv.current_weight,
-                    inv.max_weight,
-                    inv.items.iter().filter(|s| s.is_some()).count() as u32,
-                    inv.items.len() as u32,
-                ))
+            let exp = ctx
+                .world
+                .get::<&Experience>(e)
+                .ok()
+                .map(|e| e.percent())
+                .unwrap_or(0.0);
+            let currency = ctx.world.get::<&Currency>(e).map(|c| c.gold).unwrap_or(0);
+            let (weight, max_weight, bag_space, bag_capacity) = ctx
+                .world
+                .get::<&Inventory>(e)
+                .map(|inv| {
+                    (
+                        inv.current_weight,
+                        inv.max_weight,
+                        inv.items.iter().filter(|s| s.is_some()).count() as u32,
+                        inv.items.len() as u32,
+                    )
+                })
                 .unwrap_or((0, 100, 0, 40));
 
             sys.main_dialog.set_player_stats(
@@ -793,7 +1042,11 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
     }
 
     // 写入 ECS 单例：UiWorldInputBlock（与 UiState 同挂在 RenderPass 实体上）
-    if let Some((pass_entity, _)) = ctx.world.iter().find_map(|e| e.get::<&UiState>().map(|ui| (e.entity(), ui))) {
+    if let Some((pass_entity, _)) = ctx
+        .world
+        .iter()
+        .find_map(|e| e.get::<&UiState>().map(|ui| (e.entity(), ui)))
+    {
         if let Ok(mut block) = ctx.world.get::<&mut UiWorldInputBlock>(pass_entity) {
             block.mouse_over_ui = ui_over;
             block.mouse_captured = ui_mouse_captured;
@@ -828,7 +1081,11 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
     }
 
     // Scene 退出 gating：避免 Scene 直接读取 UiState 内部结构。
-    if let Some((pass_entity, _)) = ctx.world.iter().find_map(|e| e.get::<&UiState>().map(|ui| (e.entity(), ui))) {
+    if let Some((pass_entity, _)) = ctx
+        .world
+        .iter()
+        .find_map(|e| e.get::<&UiState>().map(|ui| (e.entity(), ui)))
+    {
         let any_modal_or_popup_open = ctx
             .world
             .get::<&UiState>(pass_entity)
@@ -855,12 +1112,14 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             GroupDialogAction::Invite => {
                 if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
                     use crate::scenes::dialogs::game::main_dialog::TextInputKind;
-                    s.borrow_mut().pending_commands.push(UiCommand::ShowTextInput {
-                        kind: TextInputKind::GroupInvite,
-                        title: "组队邀请".to_string(),
-                        placeholder: "输入玩家名称".to_string(),
-                        max_length: 32,
-                    });
+                    s.borrow_mut()
+                        .pending_commands
+                        .push(UiCommand::ShowTextInput {
+                            kind: TextInputKind::GroupInvite,
+                            title: "组队邀请".to_string(),
+                            placeholder: "输入玩家名称".to_string(),
+                            max_length: 32,
+                        });
                 }
             }
             GroupDialogAction::Leave => {
@@ -876,7 +1135,11 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                     }
                 }
             }
-            GroupDialogAction::ViewMemberDetail { name, hp_percent, is_leader } => {
+            GroupDialogAction::ViewMemberDetail {
+                name,
+                hp_percent,
+                is_leader,
+            } => {
                 let hp_display = (hp_percent * 100.0).max(0.0) as u32;
                 let role_tag = if is_leader { "队长" } else { "队员" };
                 if let Some(net) = ctx.net.as_ref() {
@@ -899,12 +1162,14 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             FriendDialogAction::AddFriend => {
                 if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
                     use crate::scenes::dialogs::game::main_dialog::TextInputKind;
-                    s.borrow_mut().pending_commands.push(UiCommand::ShowTextInput {
-                        kind: TextInputKind::AddFriend,
-                        title: "添加好友".to_string(),
-                        placeholder: "输入玩家名称".to_string(),
-                        max_length: 32,
-                    });
+                    s.borrow_mut()
+                        .pending_commands
+                        .push(UiCommand::ShowTextInput {
+                            kind: TextInputKind::AddFriend,
+                            title: "添加好友".to_string(),
+                            placeholder: "输入玩家名称".to_string(),
+                            max_length: 32,
+                        });
                 }
             }
             FriendDialogAction::RemoveSelected => {
@@ -923,12 +1188,16 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                 if let Some(name) = fd.get_selected_friend_name() {
                     use crate::scenes::dialogs::game::main_dialog::TextInputKind;
                     if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
-                        s.borrow_mut().pending_commands.push(UiCommand::ShowTextInput {
-                            kind: TextInputKind::WhisperChat { target: name.clone() },
-                            title: format!("私聊 - {}", name),
-                            placeholder: "输入消息".to_string(),
-                            max_length: 256,
-                        });
+                        s.borrow_mut()
+                            .pending_commands
+                            .push(UiCommand::ShowTextInput {
+                                kind: TextInputKind::WhisperChat {
+                                    target: name.clone(),
+                                },
+                                title: format!("私聊 - {}", name),
+                                placeholder: "输入消息".to_string(),
+                                max_length: 256,
+                            });
                     }
                 }
             }
@@ -957,12 +1226,14 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             GuildDialogAction::EditNotice(_) => {
                 if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
                     use crate::scenes::dialogs::game::main_dialog::TextInputKind;
-                    s.borrow_mut().pending_commands.push(UiCommand::ShowTextInput {
-                        kind: TextInputKind::GuildNotice,
-                        title: "编辑行会公告".to_string(),
-                        placeholder: "输入行会公告内容".to_string(),
-                        max_length: 200,
-                    });
+                    s.borrow_mut()
+                        .pending_commands
+                        .push(UiCommand::ShowTextInput {
+                            kind: TextInputKind::GuildNotice,
+                            title: "编辑行会公告".to_string(),
+                            placeholder: "输入行会公告内容".to_string(),
+                            max_length: 200,
+                        });
                 }
             }
             GuildDialogAction::EditMemberRank { ref name, ref rank } => {
@@ -970,15 +1241,25 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                     tracing::info!("👤 管理行会成员待实现（需双击成员弹出输入框）");
                 } else if let Ok(rank_num) = rank.parse::<u8>() {
                     if let Some(net) = ctx.net.as_ref() {
-                        let _ = net.send(NetEv::EditGuildMember { member_name: name.clone(), rank: rank_num });
+                        let _ = net.send(NetEv::EditGuildMember {
+                            member_name: name.clone(),
+                            rank: rank_num,
+                        });
                     }
                 } else {
                     tracing::warn!("⚠️ 行会成员 rank 不是有效数字: {}", rank);
                 }
             }
-            GuildDialogAction::ViewMemberDetail { ref name, ref rank, ref online } => {
+            GuildDialogAction::ViewMemberDetail {
+                ref name,
+                ref rank,
+                ref online,
+            } => {
                 let status = if *online { "在线" } else { "离线" };
-                sys.main_dialog.push_system_chat_line(format!("行会成员: {} | 职位: {} | 状态: {}", name, rank, status));
+                sys.main_dialog.push_system_chat_line(format!(
+                    "行会成员: {} | 职位: {} | 状态: {}",
+                    name, rank, status
+                ));
             }
             GuildDialogAction::RequestGuildWar => {
                 if let Some(net) = ctx.net.as_ref() {
@@ -999,12 +1280,14 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             MentorDialogAction::AddMentor => {
                 if let Some(s) = ctx.world.query::<&UiState>().iter().next() {
                     use crate::scenes::dialogs::game::main_dialog::TextInputKind;
-                    s.borrow_mut().pending_commands.push(UiCommand::ShowTextInput {
-                        kind: TextInputKind::AddMentor,
-                        title: "拜师".to_string(),
-                        placeholder: "输入师傅名称".to_string(),
-                        max_length: 32,
-                    });
+                    s.borrow_mut()
+                        .pending_commands
+                        .push(UiCommand::ShowTextInput {
+                            kind: TextInputKind::AddMentor,
+                            title: "拜师".to_string(),
+                            placeholder: "输入师傅名称".to_string(),
+                            max_length: 32,
+                        });
                 }
             }
             MentorDialogAction::CancelMentor => {
@@ -1015,7 +1298,9 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             MentorDialogAction::ToggleAllowRequest => {
                 md.set_allow_request(!md.allow_request());
                 if let Some(net) = ctx.net.as_ref() {
-                    let _ = net.send(NetEv::AllowMentorRequest { enabled: md.allow_request() });
+                    let _ = net.send(NetEv::AllowMentorRequest {
+                        enabled: md.allow_request(),
+                    });
                 }
             }
             MentorDialogAction::AcceptMentor => {
@@ -1076,7 +1361,9 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             RelationshipDialogAction::RequestMarriage => {
                 if let Some(net) = ctx.net.as_ref() {
                     // 求婚目标由服务器根据亲密度/位置等逻辑判定
-                    let _ = net.send(NetEv::MarriageRequestSend { target: String::new() });
+                    let _ = net.send(NetEv::MarriageRequestSend {
+                        target: String::new(),
+                    });
                 }
                 tracing::debug!("💍 发送求婚请求");
             }
@@ -1131,7 +1418,9 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
         match action {
             HeroDialogAction::SetBehaviour(behaviour) => {
                 if let Some(net) = ctx.net.as_ref() {
-                    let _ = net.send(NetEv::SetHeroBehaviourRequest { behaviour: behaviour as u8 });
+                    let _ = net.send(NetEv::SetHeroBehaviourRequest {
+                        behaviour: behaviour as u8,
+                    });
                 }
             }
             HeroDialogAction::ChangeHero(hero_index) => {
@@ -1200,7 +1489,11 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
         let sd = sys.main_dialog.socket_dialog_mut();
         let action = sd.take_action();
         match action {
-            SocketAction::InsertGem { item_unique_id, position_idx, awake_type } => {
+            SocketAction::InsertGem {
+                item_unique_id,
+                position_idx,
+                awake_type,
+            } => {
                 // AwakeType 由用户通过嵌入式 gem picker 选择(见 SocketDialogHybrid::draw_gem_picker)
                 // 服务端需要的 op 协议: `Awakening { unique_id, awake_type, position_idx }`
                 // (PR #1126 之前是 `Awakening` 单个位置选择;现在带 awake_type)
@@ -1215,13 +1508,20 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                     });
                     tracing::info!(
                         "💎 插入宝石: uid={} pos={} awake_type={:?}",
-                        item_unique_id, position_idx, awake_type
+                        item_unique_id,
+                        position_idx,
+                        awake_type
                     );
                 }
             }
-            SocketAction::RemoveGem { item_unique_id, position_idx } => {
+            SocketAction::RemoveGem {
+                item_unique_id,
+                position_idx,
+            } => {
                 if let Some(net) = ctx.net.as_ref() {
-                    let _ = net.send(NetEv::DisassembleItemRequest { unique_id: item_unique_id });
+                    let _ = net.send(NetEv::DisassembleItemRequest {
+                        unique_id: item_unique_id,
+                    });
                     tracing::debug!("💎 取出宝石: uid={} pos={}", item_unique_id, position_idx);
                 }
             }
@@ -1285,11 +1585,17 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
         use crate::network::handlers::NetworkEvent as NetEv;
         use crate::scenes::dialogs::game::game_shop_dialog::GameShopBuyAction;
         match action {
-            GameShopBuyAction::Buy { item_index, quantity } => {
+            GameShopBuyAction::Buy {
+                item_index,
+                quantity,
+            } => {
                 if let Some(net) = ctx.net.as_ref() {
                     // Server-side: server::GameShopPurchase 接受 (item_index, count)
                     // 在 protocol 层映射为 client::GameshopBuy
-                    let _ = net.send(NetEv::GameShopBuyRequest { item_id: item_index, count: quantity as u32 });
+                    let _ = net.send(NetEv::GameShopBuyRequest {
+                        item_id: item_index,
+                        count: quantity as u32,
+                    });
                     tracing::info!("🛒 商城购买: item_index={} count={}", item_index, quantity);
                 }
             }
@@ -1302,7 +1608,9 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
         use crate::scenes::dialogs::game::guild_territory_dialog::GuildTerritoryAction;
         let GuildTerritoryAction::Purchase { owner } = action;
         if let Some(net) = ctx.net.as_ref() {
-            let _ = net.send(NetEv::PurchaseGuildTerritoryRequest { owner: owner.clone() });
+            let _ = net.send(NetEv::PurchaseGuildTerritoryRequest {
+                owner: owner.clone(),
+            });
             tracing::info!("🏰 行会领地购买: owner={}", owner);
         }
     }
@@ -1311,7 +1619,12 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
     if let Some(action) = sys.main_dialog.inventory_dialog_mut().take_action() {
         use crate::network::handlers::NetworkEvent as NetEv;
         use crate::scenes::dialogs::game::inventory_dialog::InventoryMoveAction;
-        let InventoryMoveAction::MoveToTab { from_tab, to_tab, from_idx, to_idx } = action;
+        let InventoryMoveAction::MoveToTab {
+            from_tab,
+            to_tab,
+            from_idx,
+            to_idx,
+        } = action;
         // PR #1153: Master C# TryMoveSelectedInventoryItem 走 MoveItem packet;
         // tab 间移动需要服务器知道源/目标 tab 编码(装备=0, 物品=1, 任务=2)。
         // 这里给一个简化的固定 grid 编码 (Equipment=0, Items=1, Quest=2)
@@ -1330,7 +1643,11 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             });
             tracing::info!(
                 "📦 Ctrl+tab: net.send MoveItem grid={} from={} to={} (from_tab={:?} to_tab={:?})",
-                grid, from_idx, to_idx, from_tab, to_tab
+                grid,
+                from_idx,
+                to_idx,
+                from_tab,
+                to_tab
             );
         }
     }
@@ -1342,7 +1659,9 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
         match kind {
             TextInputKind::GroupInvite => {
                 if let Some(net) = ctx.net.as_ref() {
-                    let _ = net.send(NetEv::GroupInviteRequest { player_name: text.clone() });
+                    let _ = net.send(NetEv::GroupInviteRequest {
+                        player_name: text.clone(),
+                    });
                 }
                 tracing::debug!("👥 发送组队邀请: {}", text);
             }
@@ -1360,7 +1679,9 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             }
             TextInputKind::GuildNotice => {
                 if let Some(net) = ctx.net.as_ref() {
-                    let _ = net.send(NetEv::EditGuildNotice { notice: text.clone() });
+                    let _ = net.send(NetEv::EditGuildNotice {
+                        notice: text.clone(),
+                    });
                 }
                 tracing::debug!("📝 编辑行会公告: {}", text);
             }
@@ -1368,7 +1689,10 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
                 if let Some(net) = ctx.net.as_ref() {
                     // 服务器通过 `/目标 消息` 格式识别私聊（非专用 opcode）
                     let whisper_message = format!("/{} {}", target, text);
-                    let _ = net.send(NetEv::ChatRequest { message: whisper_message.clone(), linked_items: vec![] });
+                    let _ = net.send(NetEv::ChatRequest {
+                        message: whisper_message.clone(),
+                        linked_items: vec![],
+                    });
                 }
                 tracing::debug!("💬 私聊 → {}: {}", target, text);
             }
@@ -1377,7 +1701,10 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             }
             TextInputKind::NPCInput { npc_id } => {
                 if let Some(net) = ctx.net.as_ref() {
-                    let _ = net.send(NetEv::NPCConfirmInput { npc_id, input: text.clone() });
+                    let _ = net.send(NetEv::NPCConfirmInput {
+                        npc_id,
+                        input: text.clone(),
+                    });
                 }
                 tracing::debug!("📝 NPC 输入确认: npc_id={} input={}", npc_id, text);
             }
@@ -1391,7 +1718,9 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
             // ===== PR #1169: Warehouse password flows =====
             TextInputKind::UnlockStorage => {
                 if let Some(net) = ctx.net.as_ref() {
-                    let _ = net.send(NetEv::UnlockStorageRequest { password: text.clone() });
+                    let _ = net.send(NetEv::UnlockStorageRequest {
+                        password: text.clone(),
+                    });
                 }
                 tracing::info!("🔐 发送 UnlockStorage 密码: text_len={}", text.len());
             }
@@ -1453,10 +1782,18 @@ pub fn update(sys: &mut UIRenderSystem, ctx: &mut GameContext, _dt: f32) -> Game
         if let Some(net) = ctx.net.as_ref() {
             match kind {
                 crate::ui::ui_state::InviteKind::Group => {
-                    let _ = net.send(if accept { NetEv::GroupAcceptRequest } else { NetEv::GroupDeclineRequest });
+                    let _ = net.send(if accept {
+                        NetEv::GroupAcceptRequest
+                    } else {
+                        NetEv::GroupDeclineRequest
+                    });
                 }
                 crate::ui::ui_state::InviteKind::Guild => {
-                    let _ = net.send(if accept { NetEv::GuildAcceptRequest } else { NetEv::GuildDeclineRequest });
+                    let _ = net.send(if accept {
+                        NetEv::GuildAcceptRequest
+                    } else {
+                        NetEv::GuildDeclineRequest
+                    });
                 }
                 crate::ui::ui_state::InviteKind::Trade => {
                     let _ = net.send(NetEv::TradeReplyRequest { accept });

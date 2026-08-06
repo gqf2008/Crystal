@@ -10,10 +10,10 @@
 //
 // ============================================================================
 
-use macroquad::prelude::*;
+use super::native_ui_utils::DragHelper;
 use crate::resources::LibraryName;
 use crate::ui::text_renderer::draw_text_cn;
-use super::native_ui_utils::DragHelper;
+use macroquad::prelude::*;
 
 /// 坐骑信息
 #[derive(Debug, Clone)]
@@ -221,7 +221,11 @@ impl MountDialogHybrid {
         }
 
         // 骑乘状态
-        let status_text = if self.is_riding { "骑乘中" } else { "未骑乘" };
+        let status_text = if self.is_riding {
+            "骑乘中"
+        } else {
+            "未骑乘"
+        };
         let status_color = if self.is_riding {
             Color::from_rgba(100, 255, 100, 255)
         } else {
@@ -297,7 +301,13 @@ impl MountDialogHybrid {
 
                 // 类型 ID
                 let type_text = format!("类型:{}", mount.mount_type);
-                draw_text_cn(&type_text, item_rect.x + 160.0, item_rect.y + 15.0, 10.0, GRAY);
+                draw_text_cn(
+                    &type_text,
+                    item_rect.x + 160.0,
+                    item_rect.y + 15.0,
+                    10.0,
+                    GRAY,
+                );
 
                 // 点击检测
                 if is_hovered && is_mouse_button_pressed(MouseButton::Left) {
@@ -351,7 +361,14 @@ impl MountDialogHybrid {
                 Color::from_rgba(60, 70, 80, 255)
             };
             draw_rectangle(btn_x, btn_y, btn_w, btn_h, btn_color);
-            draw_rectangle_lines(btn_x, btn_y, btn_w, btn_h, 1.0, Color::from_rgba(100, 100, 120, 255));
+            draw_rectangle_lines(
+                btn_x,
+                btn_y,
+                btn_w,
+                btn_h,
+                1.0,
+                Color::from_rgba(100, 100, 120, 255),
+            );
 
             draw_text_cn(label, btn_x + 20.0, btn_y + 16.0, 12.0, WHITE);
 

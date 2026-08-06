@@ -1,8 +1,8 @@
 // Market Handler - 市场/寄售数据包处理
 
-use mir2_shared::packets::{PacketHeader, Packet, server};
-use mir2_shared::enums::ServerPacketIds;
 use crate::network::handlers::{NetworkEvent, PacketHandler};
+use mir2_shared::enums::ServerPacketIds;
+use mir2_shared::packets::{server, Packet, PacketHeader};
 use std::io::Cursor;
 
 pub struct MarketHandler;
@@ -25,7 +25,9 @@ impl PacketHandler for MarketHandler {
             x if x == ServerPacketIds::NPCMarket as u16 => {
                 if let Ok(packet) = server::NPCMarket::read_body(&mut cursor) {
                     let page_count = packet.pages.len();
-                    events.push(NetworkEvent::NPCMarketEvent2 { pages: packet.pages });
+                    events.push(NetworkEvent::NPCMarketEvent2 {
+                        pages: packet.pages,
+                    });
                     tracing::debug!("🏪 NPC market: {} pages", page_count);
                 }
             }
@@ -34,7 +36,9 @@ impl PacketHandler for MarketHandler {
             x if x == ServerPacketIds::NPCMarketPage as u16 => {
                 if let Ok(packet) = server::NPCMarketPage::read_body(&mut cursor) {
                     let count = packet.listings.len();
-                    events.push(NetworkEvent::NPCMarketPageEvent2 { listings: packet.listings });
+                    events.push(NetworkEvent::NPCMarketPageEvent2 {
+                        listings: packet.listings,
+                    });
                     tracing::debug!("🏪 NPC market page: {} listings", count);
                 }
             }
@@ -46,7 +50,11 @@ impl PacketHandler for MarketHandler {
                         unique_id: packet.unique_id,
                         success: packet.success,
                     });
-                    tracing::debug!("📋 Consign item: uid={} success={}", packet.unique_id, packet.success);
+                    tracing::debug!(
+                        "📋 Consign item: uid={} success={}",
+                        packet.unique_id,
+                        packet.success
+                    );
                 }
             }
 
@@ -72,7 +80,9 @@ impl PacketHandler for MarketHandler {
 
             _ => {
                 tracing::debug!("⚠️ MarketHandler: Unknown opcode {:04X}", header.opcode);
-                events.push(NetworkEvent::UnhandledPacket { opcode: header.opcode });
+                events.push(NetworkEvent::UnhandledPacket {
+                    opcode: header.opcode,
+                });
             }
         }
 

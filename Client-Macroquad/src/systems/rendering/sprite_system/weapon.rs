@@ -46,7 +46,11 @@ impl SpriteRenderSystem {
             static WEAPON_PROBE_ONCE: std::sync::OnceLock<Option<i32>> = std::sync::OnceLock::new();
             let probe = WEAPON_PROBE_ONCE.get_or_init(|| {
                 for i in 0..64 {
-                    if weapon_lib.get_texture(i).and_then(|info| info.image).is_some() {
+                    if weapon_lib
+                        .get_texture(i)
+                        .and_then(|info| info.image)
+                        .is_some()
+                    {
                         return Some(i as i32);
                     }
                 }

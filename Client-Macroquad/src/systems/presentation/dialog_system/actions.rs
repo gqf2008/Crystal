@@ -1,6 +1,9 @@
 use super::*;
 
-pub fn handle_npc_goods_action(ctx: &mut GameContext, action: crate::scenes::dialogs::game::npc_goods_dialog::NpcGoodsDialogAction) {
+pub fn handle_npc_goods_action(
+    ctx: &mut GameContext,
+    action: crate::scenes::dialogs::game::npc_goods_dialog::NpcGoodsDialogAction,
+) {
     use crate::network::handlers::NetworkEvent as NetEv;
 
     match action {
@@ -45,8 +48,9 @@ pub fn handle_npc_goods_action(ctx: &mut GameContext, action: crate::scenes::dia
                     if let Some((_local, cur, inv)) = q.iter().next() {
                         gold = cur.gold;
                         credit = cur.credit;
-                        free_space =
-                            Some(DialogSystem::inventory_total_free_space(inv, item_index, stack_size));
+                        free_space = Some(DialogSystem::inventory_total_free_space(
+                            inv, item_index, stack_size,
+                        ));
                     }
                 }
 
@@ -73,7 +77,7 @@ pub fn handle_npc_goods_action(ctx: &mut GameContext, action: crate::scenes::dia
                                 "You do not have enough Pearls."
                             } else {
                                 "Not enough gold."
-                            }
+                            },
                         );
                     });
                     return;
@@ -124,8 +128,9 @@ pub fn handle_npc_goods_action(ctx: &mut GameContext, action: crate::scenes::dia
                     if let Some((_local, cur, inv)) = q.iter().next() {
                         gold = cur.gold;
                         credit = cur.credit;
-                        free_space =
-                            Some(DialogSystem::inventory_total_free_space(inv, item_index, stack_size));
+                        free_space = Some(DialogSystem::inventory_total_free_space(
+                            inv, item_index, stack_size,
+                        ));
                     }
                 }
 
@@ -133,13 +138,7 @@ pub fn handle_npc_goods_action(ctx: &mut GameContext, action: crate::scenes::dia
             };
 
             if let Err(msg) = DialogSystem::can_send_buy_request(
-                gold,
-                credit,
-                free_space,
-                unit_price,
-                count,
-                stack_size,
-                use_pearls,
+                gold, credit, free_space, unit_price, count, stack_size, use_pearls,
             ) {
                 let _ = UiState::with_mut_in_world(&mut ctx.world, |ui| {
                     sys_chat(&mut ui.pending_commands, msg);
@@ -182,24 +181,33 @@ pub fn handle_npc_goods_action(ctx: &mut GameContext, action: crate::scenes::dia
                 }
             }
         }
-        crate::scenes::dialogs::game::npc_goods_dialog::NpcGoodsDialogAction::RequestCraft { item } => {
+        crate::scenes::dialogs::game::npc_goods_dialog::NpcGoodsDialogAction::RequestCraft {
+            item,
+        } => {
             // 打开合成对话框，配方信息来自 NPC 商品列表
             let recipe = crate::scenes::dialogs::game::craft_dialog::CraftRecipe {
-                name: item.info.as_ref().map(|i| i.name.clone()).unwrap_or_else(|| "未知配方".to_string()),
+                name: item
+                    .info
+                    .as_ref()
+                    .map(|i| i.name.clone())
+                    .unwrap_or_else(|| "未知配方".to_string()),
                 recipe_unique_id: item.unique_id,
                 materials: Vec::new(), // 协议不携带配方材料数据，由客户端仅展示结果物品
                 gold: item.info.as_ref().map(|i| i.price).unwrap_or(0), // 用商品价格作为合成 Gold 成本
             };
             let _ = UiState::with_mut_in_world(&mut ctx.world, |ui| {
-                ui.pending_commands.push(UiCommand::ShowCraft { recipes: vec![recipe] });
+                ui.pending_commands.push(UiCommand::ShowCraft {
+                    recipes: vec![recipe],
+                });
             });
         }
     }
 }
 
 pub fn process_ui_actions(ctx: &mut GameContext) {
-    let actions = UiState::with_mut_in_world(&mut ctx.world, |ui| std::mem::take(&mut ui.pending_actions))
-        .unwrap_or_default();
+    let actions =
+        UiState::with_mut_in_world(&mut ctx.world, |ui| std::mem::take(&mut ui.pending_actions))
+            .unwrap_or_default();
 
     for action in actions {
         match action {

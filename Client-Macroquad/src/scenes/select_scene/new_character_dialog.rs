@@ -2,8 +2,8 @@ use macroquad::prelude::*;
 
 use crate::network::NetworkEvent;
 use crate::resources::LibraryName;
-use crate::ui::text_renderer::{draw_text_cn, measure_text_cn};
 use crate::ui::additive::with_additive_blend;
+use crate::ui::text_renderer::{draw_text_cn, measure_text_cn};
 use crate::ui::widgets::{begin_modal, draw_button};
 
 use super::{CharacterInfo, SelectScene};
@@ -25,7 +25,12 @@ impl SelectScene {
         // 背景纹理（缺失则退化为纯色遮罩+提示）
         if let Some(info) = LibraryName::Prguse.get_texture(73) {
             if let Some(ref tex) = info.image {
-                draw_texture(tex, dialog_x + info.offset_x as f32, dialog_y + info.offset_y as f32, WHITE);
+                draw_texture(
+                    tex,
+                    dialog_x + info.offset_x as f32,
+                    dialog_y + info.offset_y as f32,
+                    WHITE,
+                );
             }
         }
 
@@ -50,7 +55,11 @@ impl SelectScene {
             4 => (100, 140), // Archer
             _ => (20, 300),
         };
-        let base = if self.new_char_gender == 0 { male_base } else { female_base };
+        let base = if self.new_char_gender == 0 {
+            male_base
+        } else {
+            female_base
+        };
         let frame_index = base as usize + self.animation_frame;
         if let Some(info) = LibraryName::ChrSel.get_texture(frame_index) {
             if let Some(ref tex) = info.image {
@@ -84,11 +93,24 @@ impl SelectScene {
         let name_x = dialog_x + 325.0;
         let name_y_baseline = dialog_y + 268.0 + 15.0;
         let name_font = 14.0;
-        draw_text_cn(&self.new_char_name, name_x + 2.0, name_y_baseline, name_font, WHITE);
+        draw_text_cn(
+            &self.new_char_name,
+            name_x + 2.0,
+            name_y_baseline,
+            name_font,
+            WHITE,
+        );
         if self.cursor_visible {
             let w = measure_text_cn(&self.new_char_name, name_font).width;
             let cx = name_x + 2.0 + w;
-            draw_line(cx, dialog_y + 268.0 + 3.0, cx, dialog_y + 268.0 + 20.0 - 3.0, 1.0, WHITE);
+            draw_line(
+                cx,
+                dialog_y + 268.0 + 3.0,
+                cx,
+                dialog_y + 268.0 + 20.0 - 3.0,
+                1.0,
+                WHITE,
+            );
         }
 
         // 职业按钮（Prguse）
