@@ -95,6 +95,10 @@ pub struct WorldActorArgs {
     pub notice_path: String,
     /// 死亡经验惩罚百分比（默认 0=关闭，对齐 C#）
     pub death_exp_penalty_percent: u32,
+    /// 回血权重（C# Settings.HealthRegenWeight）
+    pub health_regen_weight: u32,
+    /// 回蓝权重（C# Settings.ManaRegenWeight）
+    pub mana_regen_weight: u32,
 }
 
 /// 世界中的玩家记录
@@ -844,6 +848,10 @@ pub struct WorldActor {
     pub(crate) notice_path: String,
     /// 死亡经验惩罚百分比（默认 0=关闭，对齐 C#）
     pub(crate) death_exp_penalty_percent: u32,
+    /// 回血权重（C# Settings.HealthRegenWeight）
+    pub(crate) health_regen_weight: u32,
+    /// 回蓝权重（C# Settings.ManaRegenWeight）
+    pub(crate) mana_regen_weight: u32,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -1017,6 +1025,8 @@ impl WorldActor {
             rarity_cfg: crate::util::config::RarityConfig::default(),
             notice_path: "Notice.txt".to_string(),
             death_exp_penalty_percent: 0,
+            health_regen_weight: 10,
+            mana_regen_weight: 10,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -3256,6 +3266,8 @@ impl Actor for WorldActor {
             rarity_cfg: args.rarity_cfg,
             notice_path: args.notice_path.clone(),
             death_exp_penalty_percent: args.death_exp_penalty_percent,
+            health_regen_weight: args.health_regen_weight,
+            mana_regen_weight: args.mana_regen_weight,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,

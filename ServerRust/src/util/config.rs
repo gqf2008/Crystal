@@ -277,10 +277,24 @@ pub struct ServerWorldConfig {
     /// 死亡经验惩罚百分比（0=关闭，对齐 C# 无通用死亡惩罚；>0 时按当前等级经验百分比扣除）
     #[serde(default = "default_death_exp_penalty_percent")]
     pub death_exp_penalty_percent: u32,
+    /// 回血权重（C# Settings.HealthRegenWeight = 10：healthRegen += regen * HealthRecovery / weight）
+    #[serde(default = "default_health_regen_weight")]
+    pub health_regen_weight: u32,
+    /// 回蓝权重（C# Settings.ManaRegenWeight = 10）
+    #[serde(default = "default_mana_regen_weight")]
+    pub mana_regen_weight: u32,
     /// 精英怪配置（C# Settings.MonsterRarity* 第一阶段：单级精英，默认保留 Rust 当前值；
     /// C# Elite 参考：2.25x HP / 75% 掉落加成）
     #[serde(default)]
     pub rarity: RarityConfig,
+}
+
+fn default_health_regen_weight() -> u32 {
+    10
+}
+
+fn default_mana_regen_weight() -> u32 {
+    10
 }
 
 fn default_item_timeout() -> u32 {
@@ -363,6 +377,8 @@ impl Default for ServerConfig {
                 drop_rate: default_drop_rate(),
                 item_timeout_secs: default_item_timeout(),
                 max_drop_gold: default_max_drop_gold(),
+                health_regen_weight: default_health_regen_weight(),
+                mana_regen_weight: default_mana_regen_weight(),
                 rarity: RarityConfig::default(),
                 notice_path: default_notice_path(),
                 death_exp_penalty_percent: default_death_exp_penalty_percent(),
