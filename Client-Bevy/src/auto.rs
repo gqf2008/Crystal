@@ -210,6 +210,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--repair-test") {
         app.add_systems(Update, auto_repair_test);
     }
+    // --toggle-test: 技能开关（SpellToggle 双向，#242）
+    if std::env::args().any(|a| a == "--toggle-test") {
+        app.add_systems(Update, auto_toggle_test);
+    }
     // --book-test: 技能书学习链路（使用技能书 → 等 NewMagic → 校验 MagicsState）
     if std::env::args().any(|a| a == "--book-test") {
         app.add_systems(Update, auto_book_test);
@@ -6451,6 +6455,126 @@ fn auto_repair_test(
                     tracing::info!("[REPAIR] ✅ 修理/槽位同步通过");
                 } else {
                     tracing::warn!("[REPAIR] ❌ 未通过（耐久={} 槽位={}）", dura, slots);
+                }
+                *stage = 9;
+            }
+        }
+        _ => {}
+    }
+}
+
+
+/// --toggle-test：施法 → mock 回发 S.SpellToggle(Slaying,true)；再发 C.SpellToggle(Thrusting,true)
+/// 等 mock 回显，断言 MagicsState.spell_toggles 双向更新（#242）
+#[allow(clippy::too_many_arguments)]
+fn auto_toggle_test(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    magics: Res<client_bevy::game::skills::MagicsState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut target: Local<Option<u32>>,
+    mut target_tile: Local<Option<(i32, i32)>>,
+    actors: Query<(
+        &client_bevy::actor::NetObjectId,
+        &Transform,
+        Has<client_bevy::actor::Monster>,
+    )>,
+    players: Query<
+        &Transform,
+        (
+            With<client_bevy::actor::LocalPlayer>,
+            With<client_bevy::actor::NetObjectId>,
+        ),
+    >,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 10.0 {
+                return;
+            }
+            let Ok(pf) = players.single() else { return };
+            let (px, py) =
+                client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+            let mut best: Option<(u32, i32, i32)> = None;
+            for (id, tf, monster) in &actors {
+                if !monster {
+                    continue;
+                }
+                let (mx, my) =
+                    client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+                let d = (mx - px).abs() + (my - py).abs();
+                if d <= 40 && best.map(|(_, _, bd)| d < bd).unwrap_or(true) {
+                    best = Some((id.0, mx, my));
+                }
+            }
+            match best {
+                Some((oid, mx, my)) => {
+                    *target = Some(oid);
+                    *target_tile = Some((mx, my));
+                    tracing::info!("[TOGGLE] 🎯 目标怪物 id={} @ ({},{})", oid, mx, my);
+                    *stage = 1;
+                    *t = 0.0;
+                }
+                None => {
+                    tracing::warn!("[TOGGLE] ❌ 附近没有怪物");
+                    *stage = 9;
+                }
+            }
+        }
+        1 => {
+            if *t < 1.5 {
+                return;
+            }
+            let (mx, my) = target_tile.unwrap_or((0, 0));
+            let Ok(pf) = players.single() else { return };
+            let (px, py) =
+                client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+            let dir = client_bevy::game::movement::direction_from_delta(
+                (mx - px).signum(),
+                (my - py).signum(),
+            )
+            .unwrap_or(mir2_shared::enums::MirDirection::Down);
+            net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                spell: mir2_shared::enums::Spell::FireBall,
+                direction: dir,
+                target_id: target.unwrap_or(0),
+                location: mir2_shared::Point { x: mx, y: my },
+            });
+            tracing::info!("[TOGGLE] 🔥 施法触发技能开关");
+            *stage = 2;
+            *t = 0.0;
+        }
+        2 => {
+            // mock 施法即发 S.SpellToggle(Slaying,true)
+            if *t >= 2.0 {
+                let sv_seen = magics.toggle_state(mir2_shared::enums::Spell::Slaying);
+                tracing::info!("[TOGGLE] 服务端同步 Slaying={}", sv_seen);
+                // 模拟客户端切换（skill_bar_system 同款包）
+                net.send_packet(&mir2_shared::packets::client::combat::SpellToggle {
+                    spell: mir2_shared::enums::Spell::Thrusting,
+                    can_use: true,
+                });
+                tracing::info!("[TOGGLE] 发送 C.SpellToggle(Thrusting,true)");
+                *stage = 3;
+                *t = 0.0;
+            }
+        }
+        3 => {
+            // mock 回显 S.SpellToggle(Thrusting,true)
+            if *t >= 3.0 {
+                let echo = magics.toggle_state(mir2_shared::enums::Spell::Thrusting);
+                tracing::info!("[TOGGLE] 回显 Thrusting={}", echo);
+                if echo {
+                    tracing::info!("[TOGGLE] ✅ 技能开关双向通过");
+                } else {
+                    tracing::warn!("[TOGGLE] ❌ 回显未更新");
                 }
                 *stage = 9;
             }
