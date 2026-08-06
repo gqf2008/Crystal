@@ -771,6 +771,8 @@ pub struct WorldActor {
     pub(crate) fatal_sword: HashMap<u64, (u64, u8)>,
     /// #448 宠物强化（怪物 oid → (到期 tick, DC 加成, AC 加成)）
     pub(crate) pet_enhanced: HashMap<u32, (u64, i32, i32)>,
+    /// #471 宠物协战（宠物 oid → 主人攻击的怪物 oid）
+    pub(crate) pet_targets: HashMap<u32, u32>,
     /// 活跃 NPC（按 object_id 索引）
     pub(crate) npcs: HashMap<u32, NpcState>,
     /// 等待重生的怪物 (object_id → 重生 tick)
@@ -970,6 +972,7 @@ impl WorldActor {
             mental_state: HashMap::new(),
             fatal_sword: HashMap::new(),
             pet_enhanced: HashMap::new(),
+            pet_targets: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
@@ -3094,6 +3097,7 @@ impl Actor for WorldActor {
             mental_state: HashMap::new(),
             fatal_sword: HashMap::new(),
             pet_enhanced: HashMap::new(),
+            pet_targets: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
