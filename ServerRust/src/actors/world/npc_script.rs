@@ -575,6 +575,89 @@ async fn eval_one_check(
             let remaining = npc_timer_remaining_secs(world.tick_count, expire);
             compare_i64(remaining, op, want)
         }
+        // CHECKDAY <DayOfWeek> — 当前星期几（对齐 C# CheckType.CheckDay）
+        "CHECKDAY" => {
+            now_weekday_upper().eq_ignore_ascii_case(arg0().trim())
+        }
+        // CHECKHOUR <hour> — 当前小时（对齐 C# CheckType.CheckHour）
+        "CHECKHOUR" => {
+            let want = arg0().parse::<u32>().unwrap_or(u32::MAX);
+            now_hour() == want
+        }
+        // CHECKMINUTE <minute> — 当前分钟（对齐 C# CheckType.CheckMinute）
+        "CHECKMINUTE" => {
+            let want = arg0().parse::<u32>().unwrap_or(u32::MAX);
+            now_minute() == want
+        }
+        // CHECKNAMELIST <file> — 玩家名在名单文件（对齐 C# CheckType.CheckNameList）
+        "CHECKNAMELIST" => {
+            let file_path = arg0();
+            if file_path.is_empty() { false }
+            else {
+                let base = world.script_dir.clone();
+                let path = base.join(file_path);
+                path.starts_with(&base) && name_list_contains(&path, &player.name)
+            }
+        }
+        // CHECKGUILDNAME <file> — 行会名在名单文件（对齐 C# CheckType.CheckGuildNameList；需在行会）
+        "CHECKGUILDNAME" | "CHECKGUILDNAMELIST" => {
+            let file_path = arg0();
+            if file_path.is_empty() { false }
+            else if let Some(guild_name) = &player.guild_name {
+                let base = world.script_dir.clone();
+                let path = base.join(file_path);
+                path.starts_with(&base) && name_list_contains(&path, guild_name)
+            } else {
+                false
+            }
+        }
+        // CHECKHUM <op> <count> <map> <instance> — 地图玩家数（对齐 C# CheckType.CheckHum；instance 忽略）
+        "CHECKHUM" => {
+            let (op, want) = parse_op_amount(&args[1..]);
+            let map_name = args.get(2).map(|s| s.as_str()).unwrap_or("");
+            let count = if let Some(mi) = map_index_by_name(world, map_name) {
+                let mut n = 0i64;
+                for (sid, r) in &world.players {
+                    if *sid == session_id { n += 1; continue; }
+                    if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                        if os.map_index == mi { n += 1; }
+                    }
+                }
+                n
+            } else {
+                -1
+            };
+            compare_i64(count, op, want)
+        }
+        // CHECKMON <op> <count> <map> <instance> — 地图怪物数（对齐 C# CheckType.CheckMon）
+        "CHECKMON" => {
+            let (op, want) = parse_op_amount(&args[1..]);
+            let map_name = args.get(2).map(|s| s.as_str()).unwrap_or("");
+            let count = if let Some(mi) = map_index_by_name(world, map_name) {
+                world.monsters.values().filter(|m| m.map_index == mi).count() as i64
+            } else {
+                -1
+            };
+            compare_i64(count, op, want)
+        }
+        // PETCOUNT <op> <count> — 宠物数量（active + owned，对齐 C# CheckType.PetCount）
+        "PETCOUNT" => {
+            let (op, want) = parse_op_amount(&args[1..]);
+            let pets = player.creature_log.owned_creatures.len() as i64
+                + if player.creature_log.active_creature.is_some() { 1 } else { 0 };
+            compare_i64(pets, op, want)
+        }
+        // CHECKPET — 是否有宠物（对齐 C# CheckType.CheckPet）
+        "CHECKPET" => {
+            player.creature_log.active_creature.is_some()
+        }
+        // CHECKWEDDINGRING — 已婚且左戒为结婚戒指（对齐 C# CheckType.CheckWeddingRing）
+        "CHECKWEDDINGRING" => {
+            player.spouse_name.is_some()
+                && player.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::RingL)
+                    .map(|r| r.wedding_ring != 0)
+                    .unwrap_or(false)
+        }
         // INGUILD / GUILDNAME <name>
         "INGUILD" => player.guild_name.is_some(),
         // CHECKMAP <map_name|index>
@@ -1537,6 +1620,46 @@ fn npc_timer_remaining_secs(now_tick: u64, expire_tick: Option<u64>) -> i64 {
     }
 }
 
+/// 当前星期几（C# DayOfWeek 全名，大写；使用服务器本地时间 chrono::Local）
+fn now_weekday_upper() -> String {
+    use chrono::Datelike;
+    match chrono::Local::now().weekday() {
+        chrono::Weekday::Mon => "MONDAY",
+        chrono::Weekday::Tue => "TUESDAY",
+        chrono::Weekday::Wed => "WEDNESDAY",
+        chrono::Weekday::Thu => "THURSDAY",
+        chrono::Weekday::Fri => "FRIDAY",
+        chrono::Weekday::Sat => "SATURDAY",
+        chrono::Weekday::Sun => "SUNDAY",
+    }.to_string()
+}
+
+/// 当前小时（本地时间）
+fn now_hour() -> u32 {
+    use chrono::Timelike;
+    chrono::Local::now().hour()
+}
+
+/// 当前分钟（本地时间）
+fn now_minute() -> u32 {
+    use chrono::Timelike;
+    chrono::Local::now().minute()
+}
+
+/// 地图名（file_name）→ map_index（大小写不敏感）
+fn map_index_by_name(world: &WorldActor, map_name: &str) -> Option<u16> {
+    world.map_infos.values()
+        .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
+        .map(|m| m.index as u16)
+}
+
+/// 名单文件：是否包含指定行（精确匹配，对齐 C# CheckNameList Contains）
+fn name_list_contains(path: &std::path::Path, name: &str) -> bool {
+    std::fs::read_to_string(path)
+        .map(|c| c.lines().any(|l| l == name))
+        .unwrap_or(false)
+}
+
 /// 名单文件：追加一行（不存在才加，对齐 C# AddNameList 精确匹配）
 fn name_list_add(path: &std::path::Path, name: &str) {
     let existing = std::fs::read_to_string(path).unwrap_or_default();
@@ -2297,6 +2420,28 @@ You don't have enough Gold!
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn name_list_contains_matches_exact() {
+        let dir = std::env::temp_dir().join(format!("npc_contains_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("list.txt");
+        std::fs::write(&path, "Alice\nBob\n").unwrap();
+        assert!(name_list_contains(&path, "Alice"));
+        assert!(name_list_contains(&path, "Bob"));
+        assert!(!name_list_contains(&path, "alice")); // C# 精确匹配
+        assert!(!name_list_contains(&path, "Charlie"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn weekday_is_uppercase_weekday_name() {
+        let w = now_weekday_upper();
+        assert!(w == "MONDAY" || w == "TUESDAY" || w == "WEDNESDAY" || w == "THURSDAY"
+            || w == "FRIDAY" || w == "SATURDAY" || w == "SUNDAY");
+        assert!(now_hour() <= 23);
+        assert!(now_minute() <= 59);
     }
 }
 
