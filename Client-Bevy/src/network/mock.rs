@@ -644,6 +644,16 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 location_y: my,
                                             },
                                         );
+                                        // #246：采集（怪物 101 位移 + Harvest 动作）
+                                        send(
+                                            &to_client,
+                                            &server::objects::ObjectHarvest {
+                                                object_id: 101,
+                                                location_x: 352,
+                                                location_y: 352,
+                                                direction: MirDirection::Right,
+                                            },
+                                        );
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
                                             send(

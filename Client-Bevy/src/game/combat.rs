@@ -31,6 +31,8 @@ pub enum CombatEvent {
     Attack { object_id: u32, direction: u8 },
     /// #238 对象蓝量（S.ObjectMana）
     ObjectMana { object_id: u32, percent: u8 },
+    /// #246 采集（S.ObjectHarvest/ObjectHarvested）：目标播 Harvest 动作
+    Harvest { object_id: u32, direction: u8 },
 }
 
 /// 真实服务器命中探测（#57）：DamageIndicator（非本地玩家）计数，
@@ -219,6 +221,25 @@ fn apply_combat_events(
                             percent: *percent,
                             expire: *expire as f32,
                         });
+                        break;
+                    }
+                }
+            }
+            CombatEvent::Harvest {
+                object_id,
+                direction,
+            } => {
+                // #246：采集动作——玩家/NPC 用 Harvest 帧（344），默认怪物回退 Attack1
+                for (e, id, mut anim, mon) in &mut actors {
+                    if id.0 == *object_id {
+                        anim.action = if mon.is_some() {
+                            mir2_shared::enums::MirAction::Attack1
+                        } else {
+                            mir2_shared::enums::MirAction::Harvest
+                        };
+                        anim.direction = *direction;
+                        anim.frame_index = 0;
+                        commands.entity(e).insert(StruckTimer(0.6));
                         break;
                     }
                 }
