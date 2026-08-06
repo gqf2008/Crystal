@@ -601,16 +601,49 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                 tracing::info!("📦 CancelReincarnation 解码");
             }
         }
-        // #291：C# 服务端包面收尾（GuildStorageGoldChange）
+        // #295：行会仓库金币变化（C# S.GuildStorageGoldChange）
         x if x == ServerPacketIds::GuildStorageGoldChange as i16 => {
-            if miscellaneous::GuildStorageGoldChange::read_body(&mut cur).is_ok() {
-                tracing::info!("📦 GuildStorageGoldChange 解码");
+            if let Ok(p) = miscellaneous::GuildStorageGoldChange::read_body(&mut cur) {
+                server_events.write(ServerEvent::GuildStorageGoldChanged {
+                    amount: p.amount,
+                    change_type: p.change_type,
+                    name: p.name.clone(),
+                });
+                // C#：金币变化在公会聊天提示
+                server_events.write(ServerEvent::Chat {
+                    text: format!(
+                        "{} 向行会仓库{}了 {} 金币",
+                        p.name,
+                        if p.change_type == 0 { "存入" } else { "取出" },
+                        p.amount
+                    ),
+                    chat_type: mir2_shared::enums::ChatType::Guild,
+                });
+                tracing::info!(
+                    "💰 行会仓库金币 {} {} 金币（by {}）",
+                    if p.change_type == 0 { "存入" } else { "取出" },
+                    p.amount,
+                    p.name
+                );
             }
         }
-        // #291：C# 服务端包面收尾（GuildStorageItemChange）
+        // #295：行会仓库物品变化（C# S.GuildStorageItemChange）
         x if x == ServerPacketIds::GuildStorageItemChange as i16 => {
-            if miscellaneous::GuildStorageItemChange::read_body(&mut cur).is_ok() {
-                tracing::info!("📦 GuildStorageItemChange 解码");
+            if let Ok(p) = miscellaneous::GuildStorageItemChange::read_body(&mut cur) {
+                let item = p.item.as_ref().map(|(_, it)| to_inv_item(it));
+                server_events.write(ServerEvent::GuildStorageItemChanged {
+                    change_type: p.change_type,
+                    to: p.to,
+                    from: p.from,
+                    item,
+                });
+                tracing::info!(
+                    "📦 行会仓库物品变化 type={} to={} from={} has_item={}",
+                    p.change_type,
+                    p.to,
+                    p.from,
+                    p.item.is_some()
+                );
             }
         }
         // #291：C# 服务端包面收尾（NewHeroInfo）

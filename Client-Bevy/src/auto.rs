@@ -46,6 +46,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--session-feedback-test") {
         app.add_systems(Update, auto_session_feedback_test);
     }
+    // --guild-storage-realtime-test: 行会仓库实时同步（#295，施法 → mock 回发 Gold/ItemChange → 校验状态）
+    if std::env::args().any(|a| a == "--guild-storage-realtime-test") {
+        app.add_systems(Update, auto_guild_storage_realtime_test);
+    }
     // --group-test: 自动组队邀请链路（自动化验证用，配合 --group-accept）
     if std::env::args().any(|a| a == "--group-test") {
         app.add_systems(Update, auto_group_test);
@@ -8750,6 +8754,54 @@ fn auto_session_feedback_test(
                 tracing::info!("[SESSION] ✅ PASS 已返回登录界面");
             } else {
                 tracing::error!("[SESSION] ❌ FAIL state={:?}", *state);
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --guild-storage-realtime-test：行会仓库实时同步（#295）
+/// 流程：进游戏 → 施法触发演示批次（GuildStorageGoldChange 500 / ItemChange 存入槽0）→ 断言 guild 状态
+fn auto_guild_storage_realtime_test(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    guild: Res<client_bevy::game::dialogs::guild::GuildState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 6.0 {
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                spell: mir2_shared::enums::Spell::FireBall,
+                direction: mir2_shared::enums::MirDirection::Down,
+                target_id: 101,
+                location: mir2_shared::Point { x: 353, y: 352 },
+            });
+            tracing::info!("[GSTORE] 🔥 施法触发行会仓库实时包");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 2.0 {
+                return;
+            }
+            let gold_ok = guild.gold == 500;
+            let item_ok = guild.storage_items.get(0).and_then(|s| s.as_ref()).is_some();
+            tracing::info!("[GSTORE] 金币={} 仓库槽0={}", guild.gold, item_ok);
+            if gold_ok && item_ok {
+                tracing::info!("[GSTORE] ✅ PASS 行会仓库实时同步");
+            } else {
+                tracing::error!("[GSTORE] ❌ FAIL 金币={} 槽0={}", gold_ok, item_ok);
             }
             *stage = 9;
         }

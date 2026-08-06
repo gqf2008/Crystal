@@ -510,11 +510,12 @@ impl Packet for GuildNameRequest {
     }
 }
 
-/// GuildStorageGoldChange - 公会仓库金币变化 (170)
+/// GuildStorageGoldChange - 行会仓库金币变化（C# S.GuildStorageGoldChange：Amount/Type/Name）
 #[derive(Debug, Clone)]
 pub struct GuildStorageGoldChange {
-    pub change: i32,                // 变化量
-    pub total: u32,                 // 总金币
+    pub amount: u32,     // 金额
+    pub change_type: u8, // 0=存入 1=取出
+    pub name: String,    // 操作者名字
 }
 
 impl Packet for GuildStorageGoldChange {
@@ -522,23 +523,31 @@ impl Packet for GuildStorageGoldChange {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
-        writer.write_i32::<LittleEndian>(self.change)?;
-        writer.write_u32::<LittleEndian>(self.total)?;
+        use crate::binary::write_dotnet_string;
+        writer.write_u32::<LittleEndian>(self.amount)?;
+        writer.write_u8(self.change_type)?;
+        write_dotnet_string(writer, &self.name)?;
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let change = reader.read_i32::<LittleEndian>()?;
-        let total = reader.read_u32::<LittleEndian>()?;
-        Ok(Self { change, total })
+        use crate::binary::read_dotnet_string;
+        let amount = reader.read_u32::<LittleEndian>()?;
+        let change_type = reader.read_u8()?;
+        let name = read_dotnet_string(reader)?;
+        Ok(Self { amount, change_type, name })
     }
 }
 
-/// GuildStorageItemChange - 公会仓库物品变化 (171)
+/// GuildStorageItemChange - 行会仓库物品变化（C# S.GuildStorageItemChange：Type/To/From/User + 可选 Item）
 #[derive(Debug, Clone)]
 pub struct GuildStorageItemChange {
-    pub change_type: u8,            // 变化类型 (add/remove)
-    pub slot: i32,                  // 槽位
+    pub change_type: u8, // 0=存入 1=取出 2=仓库内移动
+    pub to: i32,
+    pub from: i32,
+    pub user: i32,
+    /// 可选物品（(存入者 user_id, UserItem)；取出时为空）
+    pub item: Option<(i64, UserItem)>,
 }
 
 impl Packet for GuildStorageItemChange {
@@ -547,14 +556,33 @@ impl Packet for GuildStorageItemChange {
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
         writer.write_u8(self.change_type)?;
-        writer.write_i32::<LittleEndian>(self.slot)?;
+        writer.write_i32::<LittleEndian>(self.to)?;
+        writer.write_i32::<LittleEndian>(self.from)?;
+        writer.write_i32::<LittleEndian>(self.user)?;
+        if let Some((user_id, item)) = &self.item {
+            writer.write_u8(1)?;
+            writer.write_i64::<LittleEndian>(*user_id)?;
+            item.write_to_with_info(writer)?;
+        } else {
+            writer.write_u8(0)?;
+        }
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let change_type = reader.read_u8()?;
-        let slot = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { change_type, slot })
+        let to = reader.read_i32::<LittleEndian>()?;
+        let from = reader.read_i32::<LittleEndian>()?;
+        let user = reader.read_i32::<LittleEndian>()?;
+        let has_item = reader.read_u8()? != 0;
+        let item = if has_item {
+            let user_id = reader.read_i64::<LittleEndian>()?;
+            let item = UserItem::read_from_with_info(reader)?;
+            Some((user_id, item))
+        } else {
+            None
+        };
+        Ok(Self { change_type, to, from, user, item })
     }
 }
 
