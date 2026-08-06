@@ -512,6 +512,7 @@ const SPELL_THRUSTING: u8 = mir2_shared::enums::Spell::Thrusting as u8;        /
 const SPELL_HALFMOON: u8 = mir2_shared::enums::Spell::HalfMoon as u8;          // 7 半月（范围）
 const SPELL_SHOULDER_DASH: u8 = mir2_shared::enums::Spell::ShoulderDash as u8; // 8 野蛮冲撞
 const SPELL_CROSS_HALFMOON: u8 = mir2_shared::enums::Spell::CrossHalfMoon as u8; // 13 十字半月
+const SPELL_FLAMING_SWORD: u8 = mir2_shared::enums::Spell::FlamingSword as u8;     // 8 战士·烈焰剑（下一次近战附加火焰加成）
 #[allow(dead_code)]
 const SPELL_BLADE_AVALANCHE: u8 = mir2_shared::enums::Spell::BladeAvalanche as u8; // 14 冰刀斩（范围）
 // 弓箭手法术（Archer，弹道物理系 + 自身 buff）
@@ -554,6 +555,8 @@ const SPELL_TURN_UNDEAD: u8 = mir2_shared::enums::Spell::TurnUndead as u8;      
 const SPELL_REPULSION: u8 = mir2_shared::enums::Spell::Repulsion as u8;           // 32 法师·推开周围怪物
 const SPELL_ELECTRIC_SHOCK: u8 = mir2_shared::enums::Spell::ElectricShock as u8;  // 33 法师·驯服怪物
 const SPELL_HELLFIRE: u8 = mir2_shared::enums::Spell::HellFire as u8;             // 35 法师·地狱火（三向直线 AoE）
+const SPELL_ENERGY_SHIELD: u8 = mir2_shared::enums::Spell::EnergyShield as u8;    // 84 道士·能量盾（减伤 buff）
+const SPELL_MEDITATION: u8 = mir2_shared::enums::Spell::Meditation as u8;         // 126 弓手·冥想（施法返还 MP 被动）
 const SPELL_ICETHRUST: u8 = mir2_shared::enums::Spell::IceThrust as u8;           // 53 法师·冰刺（幸运暴击+溅射）
 const SPELL_MAGIC_BOOSTER: u8 = mir2_shared::enums::Spell::MagicBooster as u8;    // 51 法师·MP 上限提升 buff
 // 道士系
@@ -694,6 +697,8 @@ pub struct WorldActor {
     pub(crate) monsters: HashMap<u32, MonsterState>,
     /// #306 诅咒状态（怪物 oid → (减伤百分比, 到期 tick)）
     pub(crate) cursed_monsters: HashMap<u32, (i32, u64)>,
+    /// #312 烈焰剑状态（session → (到期 tick, 技能等级)）
+    pub(crate) flaming_sword: HashMap<u64, (u64, u8)>,
     /// 活跃 NPC（按 object_id 索引）
     pub(crate) npcs: HashMap<u32, NpcState>,
     /// 等待重生的怪物 (object_id → 重生 tick)
@@ -867,6 +872,7 @@ impl WorldActor {
             next_object_id: 1000,
             monsters: HashMap::new(),
             cursed_monsters: HashMap::new(),
+            flaming_sword: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
@@ -2962,6 +2968,7 @@ impl Actor for WorldActor {
             next_object_id: 1000,
             monsters: HashMap::new(),
             cursed_monsters: HashMap::new(),
+            flaming_sword: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
