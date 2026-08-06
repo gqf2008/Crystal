@@ -1654,7 +1654,15 @@ impl Message<DamageEquipment> for PlayerActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let broke = if let Some(ref mut item) = self.state.inventory.equipment[msg.slot as usize] {
-            if item.current_dura > msg.amount {
+            // C# SpecialItemMode.NoDuraLoss = 0x400：装备不掉耐久
+            let no_dura_loss = item
+                .info
+                .as_ref()
+                .map(|i| i.unique.contains(mir2_shared::enums::SpecialItemMode::NO_DURA_LOSS))
+                .unwrap_or(false);
+            if no_dura_loss {
+                false
+            } else if item.current_dura > msg.amount {
                 item.current_dura -= msg.amount;
                 item.dura_changed = true;
                 false
@@ -1977,6 +1985,8 @@ impl Message<InventoryUnequipItem> for PlayerActor {
 /// 喂坐骑：恢复坐骑耐久（C# UseItem Food；返回 (uid, max_dura, current_dura)）
 pub struct FeedMount {
     pub amount: u16,
+    /// 食物 shape（C#：shape 0 降低坐骑 MaxDura）
+    pub shape: i32,
 }
 
 impl Message<FeedMount> for PlayerActor {
@@ -1991,6 +2001,12 @@ impl Message<FeedMount> for PlayerActor {
             if m.current_dura >= m.max_dura {
                 return None;
             }
+            // C# Food shape 0：MaxDura -= min(1000, MaxDura - CurrentDura/30)
+            if msg.shape == 0 {
+                let reduce = 1000u32.min(m.max_dura as u32 - m.current_dura as u32 / 30);
+                m.max_dura = ((m.max_dura as u32).saturating_sub(reduce)).max(0) as u16;
+            }
+            // C#：CurrentDura += item.CurrentDura（cap MaxDura）
             m.current_dura = (m.current_dura as u32 + msg.amount as u32).min(m.max_dura as u32) as u16;
             m.dura_changed = true;
             Some((m.unique_id, m.max_dura, m.current_dura))
