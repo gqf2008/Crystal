@@ -320,5 +320,13 @@ fn logout_server_events(
             session.selected_index = None;
             tracing::info!("🧹 登出：已清理对话框/会话");
         }
+        if let ServerEvent::ReturnToLogin = ev {
+            // #289：服务端要求返回登录界面，同样清理对话框/会话
+            mgr.open.clear();
+            session.self_position = None;
+            session.local_player_id = None;
+            session.selected_index = None;
+            tracing::info!("🧹 返回登录：已清理对话框/会话");
+        }
     }
 }

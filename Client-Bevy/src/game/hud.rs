@@ -902,6 +902,11 @@ fn hud_server_events(
             | ServerEvent::StorageResized { .. }
             | ServerEvent::ObjectLeveled { .. }
             | ServerEvent::ChatItemReceived { .. }
+            | ServerEvent::LoginBanned { .. }
+            | ServerEvent::StartGameBanned { .. }
+            | ServerEvent::StartGameDelay { .. }
+            | ServerEvent::LogOutFailed
+            | ServerEvent::ReturnToLogin
             | ServerEvent::PlayerUpdate { .. }
             | ServerEvent::MonsterInfo { .. }
             | ServerEvent::NpcInfo { .. }

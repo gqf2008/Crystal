@@ -1368,6 +1368,12 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                 x if x == ClientPacketIds::Chat as i16 => {
                                     // 聊天：服务器回显（广播）
                                     if let Ok(p) = client::chat::Chat::read_body(&mut cur) {
+                                        // #289：测试命令 → 服务端要求返回登录界面
+                                        if p.message.trim().eq_ignore_ascii_case("@RETURNLOGIN") {
+                                            send(&to_client, &server::ReturnToLogin);
+                                            tracing::info!("🚪 [MOCK] 触发返回登录");
+                                            continue;
+                                        }
                                         let name = match active_char_index {
                                             1 => "法师",
                                             2 => "道士",
