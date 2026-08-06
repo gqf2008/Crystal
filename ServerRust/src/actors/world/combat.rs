@@ -154,6 +154,44 @@ impl Message<WorldAttackRequest> for WorldActor {
                                    result.object_id, label, second_hit, monster.name, *oid);
                         }
                     }
+                    // #345：MPEater —— 近战被动吸蓝（C# HumanObject.cs:3078）
+                    if let Some(magic) = state.magics.iter().find(|m| m.spell == (SPELL_MPEATER as i32 - 3)) {
+                        let lv = magic.level as i32;
+                        let acc = state.accuracy;
+                        let base_count = 1 + acc / 2;
+                        let max_count = base_count + lv * 5;
+                        let add = fastrand::i32(base_count..=(max_count.max(base_count)));
+                        let count = self.mp_eater_count.entry(msg.session_id).or_insert(0);
+                        *count += add;
+                        debug!("Player {} MPEater count={} (add={})", result.object_id, *count, add);
+                        if *count >= 100 {
+                            let add_mp = mp_eater_restore(lv, acc);
+                            let _ = record.actor_ref.ask(crate::actors::player::AddMP { amount: add_mp }).await;
+                            *count = 0;
+                            debug!("Player {} MPEater restored {} MP", result.object_id, add_mp);
+                        }
+                    }
+                    // #345：Hemorrhage —— 近战被动放血（C# HumanObject.cs:3110）
+                    if let Some(magic) = state.magics.iter().find(|m| m.spell == (SPELL_HEMORRHAGE as i32 - 3)) {
+                        let lv = magic.level as i32;
+                        let add = fastrand::i32(1..=(1 + lv * 2));
+                        let count = self.hemorrhage_count.entry(msg.session_id).or_insert(0);
+                        *count += add;
+                        debug!("Player {} Hemorrhage count={} (add={})", result.object_id, *count, add);
+                        if *count >= 55 {
+                            let duration = hemorrhage_duration(lv, state.luck).max(1) as u32;
+                            let value = hemorrhage_value(state.effective_max_attack());
+                            crate::combat::poison::apply_poison(
+                                &mut monster.poison_list,
+                                crate::combat::poison::Poison::new(
+                                    mir2_shared::enums::PoisonType::BLEEDING, duration, value, 1000,
+                                ),
+                            );
+                            *count = 0;
+                            debug!("Player {} Hemorrhage bleeding on '{}' (dur={}s value={})",
+                                   result.object_id, monster.name, duration, value);
+                        }
+                    }
                     // HalfMoon（半月）/ CrossHalfMoon（十字半月）：学了则溅射周围怪物
                     let halfmoon_lv = state.magics.iter()
                         .find(|m| m.spell == SPELL_HALFMOON as i32 || m.spell == SPELL_CROSS_HALFMOON as i32)
@@ -911,6 +949,21 @@ fn plague_duration(level: u8, value: i32) -> i32 {
     2 * (level as i32 + 1) + value / 10
 }
 
+/// #345 MPEater：恢复 MP = 5*(Lv + Acc/4)（C# HumanObject.cs:3086）
+fn mp_eater_restore(level: i32, accuracy: i32) -> i32 {
+    5 * (level + accuracy / 4)
+}
+
+/// #345 Hemorrhage：流血持续时间 = Lv*2 + Luck/6（C# HumanObject.cs:3122）
+fn hemorrhage_duration(level: i32, luck: i32) -> i32 {
+    level * 2 + luck / 6
+}
+
+/// #345 Hemorrhage：流血强度 = MaxDC + 1（C# HumanObject.cs:3126）
+fn hemorrhage_value(max_dc: i32) -> i32 {
+    max_dc + 1
+}
+
 impl WorldActor {
     /// #306：广播法术命中（ObjectStruck + DamageIndicator，对齐 C# Attacked() 表现）
     pub(crate) async fn broadcast_spell_hit(
@@ -1654,7 +1707,7 @@ impl Message<MagicRequest> for WorldActor {
             // BindingShot：弹道 + 命中后 Paralysis（在 complete_projectile_spell 结算）
             // NapalmShot：弹道 + 命中后 3×3 AOE（在 complete_projectile_spell 结算）
             // 伤害基于 DC（物理攻击），用 magic_stat（弓箭手类 = effective_max_attack）
-            SPELL_STRAIGHT_SHOT | SPELL_DOUBLE_SHOT | SPELL_BINDING_SHOT | SPELL_NAPALM_SHOT => {
+            SPELL_STRAIGHT_SHOT | SPELL_DOUBLE_SHOT | SPELL_BINDING_SHOT | SPELL_NAPALM_SHOT | SPELL_CAT_TONGUE => {
                 // 弓箭手弹道伤害：DC × 法术倍率（power_base 近似），最少 1
                 let raw_damage = (magic_stat + (power as i32) / 2).max(1);
 
@@ -2289,6 +2342,43 @@ impl Message<MagicRequest> for WorldActor {
                     debug!("Magic: {} casts Trap (no target at {},{})", state.name, target_x, target_y);
                 }
             }
+            // #345：MoonMist —— 隐身 + 自身周围 3×3 DC 范围伤害（C# HumanObject.cs:4565，简化 3×3）
+            SPELL_MOON_MIST => {
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::Invisibility,
+                    (30 + spell_level as u32 * 10) * 10,
+                    5,
+                );
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                self.invisible_sessions.insert(msg.session_id);
+                let raw_damage = (magic_stat + (power as i32) / 2).max(1);
+                let attacker_stats = state.to_combat_stats();
+                let level_offset = state.level.min(10) as u16;
+                let cells = plague_cells(state.x, state.y);
+                let hit_ids: Vec<u32> = self.monsters.iter()
+                    .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y)))
+                    .map(|(id, _)| *id)
+                    .collect();
+                let mut spell_hits: Vec<(u32, i32, i32, u8, i32)> = Vec::new();
+                for mid in hit_ids {
+                    if let Some(monster) = self.monsters.get_mut(&mid) {
+                        let ds = monster.to_combat_stats();
+                        let r = combat_attack::resolve_attack(
+                            &attacker_stats, &ds, raw_damage,
+                            mir2_shared::enums::DefenceType::AcAgility, level_offset,
+                        );
+                        if r.is_hit && r.damage > 0 {
+                            monster.take_damage(r.damage);
+                            monster.provoked = true;
+                            monster.target_session = Some(msg.session_id);
+                            spell_hits.push((mid, monster.x, monster.y, monster.direction, r.damage));
+                        }
+                    }
+                }
+                self.broadcast_spell_hit(&spell_hits, object_id).await;
+                debug!("Magic: {} casts MoonMist (invisible + 3x3 dmg={} hits={})",
+                       state.name, raw_damage, spell_hits.len());
+            }
             // #312：FlamingSword —— 施放后 10 秒内下一次近战攻击附加火焰加成（C# HumanObject.cs:8538）
             SPELL_FLAMING_SWORD => {
                 self.flaming_sword.insert(msg.session_id, (self.tick_count + 100, spell_level));
@@ -2693,5 +2783,18 @@ mod spell_geometry_tests {
         assert_eq!(plague_temp_value(30, 3, PoisonType::GREEN), 38);
         // 持续：2*(Lv+1)+value/10
         assert_eq!(plague_duration(3, 30), 11);
+    }
+
+    #[test]
+    fn mp_eater_restore_value() {
+        assert_eq!(mp_eater_restore(3, 0), 15);
+        assert_eq!(mp_eater_restore(3, 4), 20);
+    }
+
+    #[test]
+    fn hemorrhage_values() {
+        assert_eq!(hemorrhage_duration(3, 6), 7);
+        assert_eq!(hemorrhage_duration(0, 0), 0);
+        assert_eq!(hemorrhage_value(50), 51);
     }
 }

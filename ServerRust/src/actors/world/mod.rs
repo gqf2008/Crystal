@@ -545,6 +545,10 @@ const SPELL_FLASH_DASH: u8 = mir2_shared::enums::Spell::FlashDash as u8;        
 const SPELL_LIGHT_BODY: u8 = mir2_shared::enums::Spell::LightBody as u8;         // 98 敏捷+
 const SPELL_HEAVENLY_SWORD: u8 = mir2_shared::enums::Spell::HeavenlySword as u8; // 99 直线AoE
 const SPELL_DOUBLE_SLASH: u8 = mir2_shared::enums::Spell::DoubleSlash as u8;         // 92 刺客·双斩（下一次近战双段伤害）
+const SPELL_MPEATER: u8 = mir2_shared::enums::Spell::MPEater as u8;                    // 101 刺客·MP吞噬（近战被动吸蓝）
+const SPELL_HEMORRHAGE: u8 = mir2_shared::enums::Spell::Hemorrhage as u8;              // 104 刺客·放血（近战被动流血）
+const SPELL_MOON_MIST: u8 = mir2_shared::enums::Spell::MoonMist as u8;                 // 106 刺客·月雾（隐身+范围伤害）
+const SPELL_CAT_TONGUE: u8 = mir2_shared::enums::Spell::CatTongue as u8;               // 107 刺客·猫舌（DC 弹道）
 const SPELL_MOON_LIGHT: u8 = mir2_shared::enums::Spell::MoonLight as u8;         // 103 隐身
 const SPELL_SWIFT_FEET: u8 = mir2_shared::enums::Spell::SwiftFeet as u8;         // 105 移动速度+
 const SPELL_DARK_BODY: u8 = mir2_shared::enums::Spell::DarkBody as u8;           // 106 隐身+攻击
@@ -726,6 +730,10 @@ pub struct WorldActor {
     pub(crate) flaming_sword: HashMap<u64, (u64, u8)>,
     /// #318 双段近战状态（session → (到期 tick, 等级, 类型: 0=双龙斩 1=双斩)）
     pub(crate) double_hit_melee: HashMap<u64, (u64, u8, u8)>,
+    /// #345 MPEater 计数（session → 累计）
+    pub(crate) mp_eater_count: HashMap<u64, i32>,
+    /// #345 Hemorrhage 计数（session → 累计）
+    pub(crate) hemorrhage_count: HashMap<u64, i32>,
     /// 活跃 NPC（按 object_id 索引）
     pub(crate) npcs: HashMap<u32, NpcState>,
     /// 等待重生的怪物 (object_id → 重生 tick)
@@ -904,6 +912,8 @@ impl WorldActor {
             cursed_monsters: HashMap::new(),
             flaming_sword: HashMap::new(),
             double_hit_melee: HashMap::new(),
+            mp_eater_count: HashMap::new(),
+            hemorrhage_count: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
@@ -3005,6 +3015,8 @@ impl Actor for WorldActor {
             cursed_monsters: HashMap::new(),
             flaming_sword: HashMap::new(),
             double_hit_melee: HashMap::new(),
+            mp_eater_count: HashMap::new(),
+            hemorrhage_count: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
