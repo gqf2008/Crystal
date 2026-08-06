@@ -3466,9 +3466,11 @@ impl Message<SetAutoPotValue> for PlayerActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: SetAutoPotValue, _ctx: &mut Context<Self, Self::Reply>) {
+        // C# SetAutoPotValue：value = Math.Min(99, value)（英雄自动喝药阈值）
+        let value = msg.value.min(99);
         match msg.stat {
-            STAT_HP => { self.state.auto_pot_hp = msg.value; debug!("Player {} auto_pot_hp -> {}", self.state.name, msg.value); }
-            STAT_MP => { self.state.auto_pot_mp = msg.value; debug!("Player {} auto_pot_mp -> {}", self.state.name, msg.value); }
+            STAT_HP => { self.state.auto_pot_hp = value; debug!("Player {} auto_pot_hp -> {}", self.state.name, value); }
+            STAT_MP => { self.state.auto_pot_mp = value; debug!("Player {} auto_pot_mp -> {}", self.state.name, value); }
             _ => {}
         }
     }

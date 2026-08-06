@@ -1713,11 +1713,13 @@ impl Message<SetAutoPotItemRequest> for WorldActor {
             Some(r) => r,
             None => return,
         };
-        let _ = record.actor_ref.ask(SetAutoPotItem { grid: msg.grid, item_index: msg.item_index }).await;
+        // C# SetAutoPotItem：物品不存在则置 0
+        let item_index = if self.item_infos.contains_key(&msg.item_index) { msg.item_index } else { 0 };
+        let _ = record.actor_ref.ask(SetAutoPotItem { grid: msg.grid, item_index }).await;
         // Send SetAutoPotItem confirmation to client
         let mut body = Vec::new();
         body.push(msg.grid);
-        body.extend_from_slice(&msg.item_index.to_le_bytes());
+        body.extend_from_slice(&item_index.to_le_bytes());
         let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SetAutoPotItem as i16, &body),
