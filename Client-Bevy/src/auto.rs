@@ -5609,7 +5609,7 @@ fn auto_spell_verify(
         tracing::info!("[SPELL] 开始法术冒烟（HellFire → IceThrust → Curse → EnergyRepulsor）");
         return;
     }
-    if *stage > 13 {
+    if *stage > 15 {
         return;
     }
     let Ok((pe, pf)) = players.single() else { return };
@@ -5698,7 +5698,9 @@ fn auto_spell_verify(
         10 => mir2_shared::enums::Spell::SlashingBurst,
         11 => mir2_shared::enums::Spell::Plague,
         12 => mir2_shared::enums::Spell::Trap,
-        _ => mir2_shared::enums::Spell::DelayedExplosion,
+        13 => mir2_shared::enums::Spell::DelayedExplosion,
+        14 => mir2_shared::enums::Spell::CatTongue,
+        _ => mir2_shared::enums::Spell::MoonMist,
     };
     let dir = direction_from_delta((mx - px).signum(), (my - py).signum())
         .unwrap_or(mir2_shared::enums::MirDirection::Up);
@@ -5749,7 +5751,7 @@ fn auto_spell_verify(
         tracing::info!("[SPELL] ✅ {:?} 冒烟通过（3 次施放无崩溃）", spell);
         *stage += 1;
         *casts = 0;
-        if *stage == 14 {
+        if *stage == 16 {
             tracing::info!("[SPELL] ✅ 法术冒烟全流程完成");
             *stage = 99;
         }
