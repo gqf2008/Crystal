@@ -370,7 +370,7 @@ impl PlayerState {
             min_mac: self.effective_min_mac(),
             max_mac: self.effective_max_mac(),
             agility: self.agility + get_stat_bonus(&self.buffs, &BuffType::AgilityBoost { bonus: 0 }),
-            accuracy: self.accuracy + spirit_sword_accuracy(&self.magics),
+            accuracy: self.accuracy + spirit_sword_accuracy(&self.magics) + fencing_accuracy(&self.magics),
             luck: self.luck,
             critical_rate: self.critical_rate + get_stat_bonus(&self.buffs, &BuffType::CriticalRateBoost { bonus: 0 }),
             critical_damage: self.critical_damage,
@@ -391,6 +391,15 @@ impl PlayerState {
             }),
         }
     }
+}
+
+/// 战士 Fencing 被动：Accuracy + 3×Lv（C# HumanObject.RefreshStats：Stats[Stat.Accuracy] += magic.Level * 3）
+pub fn fencing_accuracy(magics: &[PlayerMagic]) -> i32 {
+    magics
+        .iter()
+        .find(|m| m.spell == 1) // Fencing C# 编号 = 1
+        .map(|m| m.level as i32 * 3)
+        .unwrap_or(0)
 }
 
 /// #427 道士 SpiritSword 被动：Accuracy +[0,3,5,8][Lv]（C# HumanObject.cs:2312 spiritSwordLvPlus）
