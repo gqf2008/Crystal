@@ -707,6 +707,8 @@ pub struct WorldActor {
     pub(crate) map_dir: PathBuf,
     /// 刷怪配置目录
     pub(crate) spawn_dir: Option<PathBuf>,
+    /// NPC 脚本/INI 根目录（C# NPCPath 等价，SAVEVALUE/LOADVALUE 用）
+    pub(crate) script_dir: PathBuf,
     /// 下一个对象 ID
     pub(crate) next_object_id: u32,
     /// 活跃怪物（按 object_id 索引）
@@ -893,6 +895,7 @@ impl WorldActor {
             chat_items_sent: HashMap::new(),
             map_dir,
             spawn_dir,
+            script_dir: PathBuf::from("."),
             next_object_id: 1000,
             monsters: HashMap::new(),
             cursed_monsters: HashMap::new(),
@@ -2993,6 +2996,7 @@ impl Actor for WorldActor {
             chat_items_sent: HashMap::new(),
             map_dir: args.map_dir,
             spawn_dir: args.spawn_dir,
+            script_dir: args.quest_dir.clone(),
             next_object_id: 1000,
             monsters: HashMap::new(),
             cursed_monsters: HashMap::new(),
