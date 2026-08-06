@@ -1516,7 +1516,7 @@ impl WorldActor {
 
             match spell_enum {
                 Spell::FireBall | Spell::GreatFireBall | Spell::ThunderBolt | Spell::FrostCrunch
-                | Spell::Vampirism | Spell::FlameDisruptor
+                | Spell::Vampirism | Spell::FlameDisruptor | Spell::SoulFireBall
                 // 弓箭手弹道物理系（命中后按 AC 防御结算，BindingShot/NapalmShot 附加效果）
                 | Spell::StraightShot | Spell::DoubleShot
                 | Spell::BindingShot | Spell::NapalmShot

@@ -1526,7 +1526,7 @@ impl Message<MagicRequest> for WorldActor {
             // --- 弹道类法术（任务3）：FireBall/GreatFireBall/ThunderBolt/FrostCrunch/Vampirism ---
             // 对齐 C# HumanObject Fireball()/ThunderBolt()/Vampirism()：创建 DelayedAction，延迟后结算
             SPELL_FIREBALL | SPELL_GREAT_FIREBALL | SPELL_THUNDERBOLT
-            | SPELL_FROST_CRUNCH | SPELL_VAMPIRISM | SPELL_FLAME_DISRUPTOR => {
+            | SPELL_FROST_CRUNCH | SPELL_VAMPIRISM | SPELL_FLAME_DISRUPTOR | SPELL_SOUL_FIREBALL => {
                 let raw_damage = if let Some(info) = spell_db {
                     crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
                 } else {
