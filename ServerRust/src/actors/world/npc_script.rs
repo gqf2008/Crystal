@@ -299,7 +299,7 @@ impl ParsedScript {
 
             // 收集 say（变量替换，用 segment 开头获取的 player_state，避免每行 actor 往返）
             for raw in &say_src {
-                let line = replace_vars(raw, &player_state, &npc.name, custom_vars);
+                let line = replace_vars(world, session_id, raw, &player_state, &npc.name, custom_vars).await;
                 result.say_lines.push(line);
             }
 
@@ -384,12 +384,18 @@ fn tokenize_args(line: &str) -> Vec<String> {
 // 变量替换
 // =============================================================================
 
-/// 系统变量与自定义变量替换。
+/// 系统变量与自定义变量替换（对齐 C# NPCSegment.ReplaceValue(PlayerObject) 的 `<$VAR>` 变量）。
 ///
-/// 支持：`<$USERNAME>` `<$LEVEL>` `<$NPCNAME>` `<$HP>` `<$MAXHP>` `<$MP>` `<$MAXMP>`
-/// `<$GAMEGOLD>` `<$CLASS>` `<$PKPOINT>` `<$GENDER>`。
+/// 支持：`<$USERNAME>` `<$LEVEL>` `<$CLASS>` `<$MAP>` `<$X_COORD>` `<$Y_COORD>`
+/// `<$HP>` `<$MAXHP>` `<$MP>` `<$MAXMP>` `<$GAMEGOLD>` `<$CREDIT>` `<$PKPOINT>` `<$GENDER>`
+/// `<$NPCNAME>` `<$DAYOFWEEK>` `<$HOUR>` `<$MIN>` `<$DATE>` `<$USERCOUNT>` `<$MAPLIGHT>`
+/// `<$GUILDNAME>` `<$PARCELAMOUNT>` `<$ROLLRESULT>`
+/// 以及装备槽 `<$WEAPON>` `<$ARMOUR>` `<$HELMET>` `<$NECKLACE>` `<$BRACELET_L/R>` `<$RING_L/R>`
+/// `<$BOOTS>` `<$AMULET>` `<$BELT>` `<$STONE>` `<$TORCH>` `<$MOUNT>`。
 /// 自定义变量 `%A0`/`%B0` 从 custom_vars 取值，未找到则原样保留。
-pub fn replace_vars(
+pub async fn replace_vars(
+    world: &WorldActor,
+    session_id: u64,
     text: &str,
     player: &PlayerState,
     npc_name: &str,
@@ -420,6 +426,88 @@ pub fn replace_vars(
     out = out.replace("<$GENDER>", gender_name(player.gender));
     out = out.replace("<$gender>", gender_name(player.gender));
 
+    // 地图/坐标（C# MAP=CurrentMap.Info.FileName）
+    let map_name = world.map_infos.get(&(player.map_index as i32))
+        .map(|m| m.file_name.clone())
+        .unwrap_or_default();
+    out = out.replace("<$MAP>", &map_name);
+    out = out.replace("<$map>", &map_name);
+    out = out.replace("<$X_COORD>", &player.x.to_string());
+    out = out.replace("<$x_coord>", &player.x.to_string());
+    out = out.replace("<$Y_COORD>", &player.y.to_string());
+    out = out.replace("<$y_coord>", &player.y.to_string());
+
+    // 时间（C# Envir.Now）
+    use chrono::Datelike;
+    let now = chrono::Local::now();
+    let date_str = now.format("%Y/%m/%d").to_string();
+    out = out.replace("<$DATE>", &date_str);
+    out = out.replace("<$date>", &date_str);
+    out = out.replace("<$DAYOFWEEK>", &weekday_title(now.weekday()));
+    out = out.replace("<$dayofweek>", &weekday_title(now.weekday()));
+    out = out.replace("<$HOUR>", &now_hour().to_string());
+    out = out.replace("<$hour>", &now_hour().to_string());
+    out = out.replace("<$MIN>", &now_minute().to_string());
+    out = out.replace("<$min>", &now_minute().to_string());
+
+    // 服务器统计/灯光（C# Envir.PlayerCount / Envir.Lights）
+    out = out.replace("<$USERCOUNT>", &world.players.len().to_string());
+    out = out.replace("<$usercount>", &world.players.len().to_string());
+    out = out.replace("<$MAPLIGHT>", &format!("{:?}", world.current_light));
+    out = out.replace("<$maplight>", &format!("{:?}", world.current_light));
+
+    // 行会名（C# "GuildName 行会" / NoGuild）
+    let guild_name = player.guild_name.as_deref()
+        .map(|g| format!("{} 行会", g))
+        .unwrap_or_else(|| "无行会".to_string());
+    out = out.replace("<$GUILDNAME>", &guild_name);
+    out = out.replace("<$guildname>", &guild_name);
+
+    // 账户积分（C# player.Account.Credit；db 权威，异步查询）
+    let credit = if let Some(record) = world.players.get(&session_id) {
+        crate::db::get_account_credit(&world.db_pool, &record.account_username).await.unwrap_or(0)
+    } else {
+        0
+    };
+    out = out.replace("<$CREDIT>", &credit.to_string());
+    out = out.replace("<$credit>", &credit.to_string());
+
+    // 待收取邮件附件数（C# GetMailAwaitingCollectionAmount）
+    let parcel_amount = player.mailbox.inbox.iter()
+        .filter(|m| !m.collected && (m.gold > 0 || !m.items.is_empty()))
+        .count();
+    out = out.replace("<$PARCELAMOUNT>", &parcel_amount.to_string());
+    out = out.replace("<$parcelamount>", &parcel_amount.to_string());
+
+    // 掷骰结果（C# %ROLLRESULT；Rust ROLLDIE 存 custom_vars["NPCRollResult"]）
+    if let Some(v) = custom_vars.get("NPCRollResult") {
+        out = out.replace("<$ROLLRESULT>", v);
+        out = out.replace("<$rollresult>", v);
+    }
+
+    // 装备槽位（C# Equipment[i].FriendlyName / 无X）
+    let eq = |slot: crate::actors::inventory::EquipmentSlot, none_label: &str| -> String {
+        player.inventory.get_equipment(slot)
+            .and_then(|it| world.item_infos.get(&it.item_index))
+            .map(|info| info.name.clone())
+            .unwrap_or_else(|| none_label.to_string())
+    };
+    out = out.replace("<$WEAPON>", &eq(crate::actors::inventory::EquipmentSlot::Weapon, "无武器"));
+    out = out.replace("<$ARMOUR>", &eq(crate::actors::inventory::EquipmentSlot::Armour, "无盔甲"));
+    out = out.replace("<$HELMET>", &eq(crate::actors::inventory::EquipmentSlot::Helmet, "无头盔"));
+    out = out.replace("<$NECKLACE>", &eq(crate::actors::inventory::EquipmentSlot::Necklace, "无项链"));
+    out = out.replace("<$BRACELET_L>", &eq(crate::actors::inventory::EquipmentSlot::BraceletL, "无手镯"));
+    out = out.replace("<$BRACELET_R>", &eq(crate::actors::inventory::EquipmentSlot::BraceletR, "无手镯"));
+    out = out.replace("<$RING_L>", &eq(crate::actors::inventory::EquipmentSlot::RingL, "无戒指"));
+    out = out.replace("<$RING_R>", &eq(crate::actors::inventory::EquipmentSlot::RingR, "无戒指"));
+    out = out.replace("<$BOOTS>", &eq(crate::actors::inventory::EquipmentSlot::Shoes, "无鞋子"));
+    out = out.replace("<$AMULET>", &eq(crate::actors::inventory::EquipmentSlot::Pendant, "无护身符"));
+    out = out.replace("<$MOUNT>", &eq(crate::actors::inventory::EquipmentSlot::Mount, "无坐骑"));
+    // Rust 无对应槽位：按 C# 文案返回「无」
+    out = out.replace("<$BELT>", "无腰带");
+    out = out.replace("<$STONE>", "无宝石");
+    out = out.replace("<$TORCH>", "无火把");
+
     for (k, v) in custom_vars {
         if !k.is_empty() {
             out = out.replace(k.as_str(), v.as_str());
@@ -427,6 +515,20 @@ pub fn replace_vars(
     }
 
     out
+}
+
+/// C# DayOfWeek 全名（首字母大写，如 "Monday"）
+fn weekday_title(wd: chrono::Weekday) -> &'static str {
+    use chrono::Weekday;
+    match wd {
+        Weekday::Mon => "Monday",
+        Weekday::Tue => "Tuesday",
+        Weekday::Wed => "Wednesday",
+        Weekday::Thu => "Thursday",
+        Weekday::Fri => "Friday",
+        Weekday::Sat => "Saturday",
+        Weekday::Sun => "Sunday",
+    }
 }
 
 fn class_name(c: MirClass) -> &'static str {
