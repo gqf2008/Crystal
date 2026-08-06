@@ -903,6 +903,12 @@ async fn exec_action(
                 }
             }
         }
+        // CANGAINEXP <true|false> —— 设置是否可获得经验（对齐 C# ActionType.CanGainExp）
+        "CANGAINEXP" => {
+            let can = arg0().eq_ignore_ascii_case("true") || arg0() == "1";
+            send_player_msg(world, session_id, crate::actors::player::SetCanGainExp { can }).await;
+            debug!("NPC CANGAINEXP: {}", can);
+        }
         // CHANGELEVEL <level> —— 设置等级（对齐 C# ActionType.ChangeLevel：设等级 + 经验 0 + LevelUp）
         "CHANGELEVEL" => {
             let level = arg0().parse::<u16>().unwrap_or(0);
