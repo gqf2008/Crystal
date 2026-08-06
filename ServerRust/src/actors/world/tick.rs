@@ -1653,6 +1653,9 @@ impl Message<Tick> for WorldActor {
         // [DEBUG] 每 5 秒打一次 tick 确认 WorldActor 活着
         self.tick_count += 1;
 
+        // NPC 脚本计时器到期清理（SETTIMER/EXPIRETIMER/CHECKTIMER，对齐 C# Envir.Timers）
+        self.tick_npc_timers();
+
         // --- 怪物 AI ---
         if !self.monsters.is_empty() && !self.players.is_empty() {
             // 收集所有玩家位置（避免在循环中借用 self）

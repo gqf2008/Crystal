@@ -701,6 +701,8 @@ pub struct WorldActor {
     pub(crate) monsters: HashMap<u32, MonsterState>,
     /// #306 诅咒状态（怪物 oid → (减伤百分比, 到期 tick)）
     pub(crate) cursed_monsters: HashMap<u32, (i32, u64)>,
+    /// NPC 脚本计时器（SETTIMER）：session -> (timer_id, expire_tick)
+    pub(crate) npc_timers: HashMap<u64, HashMap<i32, u64>>,
     /// #312 烈焰剑状态（session → (到期 tick, 技能等级)）
     pub(crate) flaming_sword: HashMap<u64, (u64, u8)>,
     /// #318 双段近战状态（session → (到期 tick, 等级, 类型: 0=双龙斩 1=双斩)）
@@ -867,6 +869,7 @@ impl WorldActor {
     pub fn new(gate_ref: ActorRef<GateActor>, map_dir: PathBuf, spawn_dir: Option<PathBuf>, db_pool: DbPool, social_ref: ActorRef<SocialActor>) -> Self {
         Self {
             tick_count: 0,
+            npc_timers: HashMap::new(),
             players: HashMap::new(),
             buyback_items: HashMap::new(),
             maps: HashMap::new(),
@@ -2964,6 +2967,7 @@ impl Actor for WorldActor {
 
         Ok(Self {
             tick_count: 0,
+            npc_timers: HashMap::new(),
             players: HashMap::new(),
             buyback_items: HashMap::new(),
             maps: HashMap::new(),
@@ -3202,6 +3206,14 @@ impl WorldActor {
         }
         debug!("spawn_monster_named: '{}' x{} at ({},{}) map {} spawned={}", name, count, x, y, map_index, spawned);
         spawned
+    }
+
+    /// NPC 脚本计时器到期清理（对齐 C# Envir.Timers 到期移除；无自动执行，脚本用 CHECKTIMER 轮询）
+    pub(crate) fn tick_npc_timers(&mut self) {
+        let now = self.tick_count;
+        for timers in self.npc_timers.values_mut() {
+            timers.retain(|_, expire| *expire > now);
+        }
     }
 
     /// 清除指定地图所有存活怪物（NPC 脚本 MONCLEAR，对齐 C# ActionType.MonClear：怪物 Die + 广播）
