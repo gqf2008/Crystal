@@ -108,6 +108,12 @@ pub enum ServerEvent {
     MemberLocation { name: String, x: i32, y: i32 },
     /// #256 UpdateNotice：服务器公告（C# Notice: Title + Message）
     NoticeUpdated { title: String, message: String },
+    /// #258 ItemUpgraded：物品升级（替换背包物品）
+    ItemUpgraded { item: InvItem },
+    /// #258 RemoveMagic：移除技能
+    MagicRemoved { spell: mir2_shared::enums::Spell },
+    /// #258 SendOutputMessage：服务端输出消息
+    ServerMessage { message: String, message_type: u8 },
     /// Roll：骰子/尤茨结果（npc_id 由 roll 消费端从 NpcDialogState 读取）
     Roll {
         r#type: i32,

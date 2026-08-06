@@ -340,6 +340,15 @@ fn skills_server_events(
                     magics.upsert(m.clone());
                 }
             }
+            ServerEvent::MagicRemoved { spell } => {
+                // #258：移除技能（遗忘）
+                let before = magics.magics.len();
+                magics.magics.retain(|m| m.spell != *spell);
+                magics.spell_toggles.retain(|(s, _)| s != spell);
+                if magics.magics.len() != before {
+                    tracing::info!("🗑️ 技能已移除: {:?}", spell);
+                }
+            }
             ServerEvent::SpellToggled { spell, can_use } => {
                 // #242：S.SpellToggle → 更新开关状态
                 let before = magics.toggle_state(*spell);

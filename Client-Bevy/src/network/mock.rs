@@ -704,6 +704,49 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 location: mir2_shared::Point { x: 356, y: 350 },
                                             },
                                         );
+                                        // #258：物品升级 / 合成 / 技能删除 / 对象魔法 / 服务端消息
+                                        let mut upgraded = potion_item(5);
+                                        upgraded.unique_id = 9005;
+                                        upgraded.item_index = 6; // 升级后物品索引变化
+                                        send(
+                                            &to_client,
+                                            &server::item_operations::ItemUpgraded {
+                                                item: upgraded,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::item_operations::CombineItem {
+                                                grid: mir2_shared::enums::MirGridType::Inventory,
+                                                id_from: 9010,
+                                                id_to: 9005,
+                                                success: true,
+                                                destroy: true,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::magic::RemoveMagic {
+                                                spell: Spell::Fencing,
+                                                hero: false,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::magic_combat::ObjectSpell {
+                                                object_id: 103,
+                                                location_x: 353,
+                                                location_y: 353,
+                                                spell: Spell::FireBall,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::ui_events::SendOutputMessage {
+                                                message: "测试服务端消息".to_string(),
+                                                message_type: 0,
+                                            },
+                                        );
                                         // #256：公告 + 杂项协议
                                         send(
                                             &to_client,
