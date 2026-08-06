@@ -75,6 +75,12 @@ pub enum ServerEvent {
     TimerSet { timer_id: i32, seconds: i32 },
     /// #230 ExpireTimer：计时器到期/关闭
     TimerExpired { timer_id: i32 },
+    /// #232 MountUpdate：坐骑上/下马
+    MountUpdated {
+        object_id: u32,
+        mount_type: i16,
+        is_mounted: bool,
+    },
     /// Roll：骰子/尤茨结果（npc_id 由 roll 消费端从 NpcDialogState 读取）
     Roll {
         r#type: i32,
