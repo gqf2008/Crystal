@@ -388,6 +388,16 @@ impl Message<WorldAttackRequest> for WorldActor {
 
                                 // 击杀玩家：增加 PK 值并广播名字颜色变化
                                 let _ = record.actor_ref.ask(crate::actors::player::AddPkPoints { points: 100 }).await;
+        // C# Die：击杀玩家 1/4 概率诅咒武器（Luck -1，Luck > -MaxLuck 时）
+        if let Ok(Some(weapon)) = record.actor_ref.ask(crate::actors::player::GetEquipmentInfo {
+            slot: crate::actors::inventory::EquipmentSlot::Weapon,
+        }).await {
+            if weapon.added_stats.get(mir2_shared::enums::Stat::Luck) > -7 && fastrand::i32(..4) == 0 {
+                let _ = record.actor_ref.ask(crate::actors::player::AddWeaponLuck { delta: -1 }).await;
+                send_system_message(&self.gate_ref, msg.session_id, "你的武器受到了诅咒！");
+                debug!("Weapon cursed on player kill: {} -> {}", record.name, weapon.item_index);
+            }
+        }
                                 if let Ok(Some(attacker_state)) = record.actor_ref.ask(GetPlayerState).await {
                                     let colour_packet = build_object_colour_changed_packet(
                                         attacker_state.object_id,
@@ -828,6 +838,16 @@ impl Message<RangeAttackRequest> for WorldActor {
 
                             // 增加 PK 值
                             let _ = record.actor_ref.ask(crate::actors::player::AddPkPoints { points: 100 }).await;
+        // C# Die：击杀玩家 1/4 概率诅咒武器（Luck -1，Luck > -MaxLuck 时）
+        if let Ok(Some(weapon)) = record.actor_ref.ask(crate::actors::player::GetEquipmentInfo {
+            slot: crate::actors::inventory::EquipmentSlot::Weapon,
+        }).await {
+            if weapon.added_stats.get(mir2_shared::enums::Stat::Luck) > -7 && fastrand::i32(..4) == 0 {
+                let _ = record.actor_ref.ask(crate::actors::player::AddWeaponLuck { delta: -1 }).await;
+                send_system_message(&self.gate_ref, msg.session_id, "你的武器受到了诅咒！");
+                debug!("Weapon cursed on player kill: {} -> {}", record.name, weapon.item_index);
+            }
+        }
                             if let Ok(Some(attacker_state)) = record.actor_ref.ask(GetPlayerState).await {
                                 let colour_packet = build_object_colour_changed_packet(
                                     attacker_state.object_id,
