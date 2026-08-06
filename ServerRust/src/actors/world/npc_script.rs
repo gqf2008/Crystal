@@ -1719,12 +1719,14 @@ async fn exec_action(
         "RECALL" => {
             teleport_player(world, session_id, npc.map_index, npc.x, npc.y).await;
         }
-        // MOVE <map_index> <x> <y>（C# 格式）
+        // MOVE <map_index> <x> <y>（C# 格式；C# Move 要求 x>0 且 y>0 才传送）
         "MOVE" | "MAPMOVE" | "TELEPORT" => {
             let map_idx = arg0().parse::<u16>().unwrap_or(0);
             let x = arg1().parse::<i32>().unwrap_or(0);
             let y = arg2().parse::<i32>().unwrap_or(0);
-            teleport_player(world, session_id, map_idx, x, y).await;
+            if x > 0 && y > 0 {
+                teleport_player(world, session_id, map_idx, x, y).await;
+            }
         }
         // SET [flag] <value>
         "SET" => {
