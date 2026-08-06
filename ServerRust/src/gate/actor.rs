@@ -30,6 +30,12 @@ pub struct GateActor {
     sessions: HashMap<SessionId, SendChannel>,
     /// 会话关联的用户名（登录成功后设置）
     session_usernames: HashMap<SessionId, String>,
+    /// 会话关联的客户端 IP（C# MirConnection.IPAddress）
+    session_ips: HashMap<SessionId, String>,
+    /// 被封禁 IP -> 解封时间（unix 秒；C# Envir.IPBlocks）
+    ip_blocks: HashMap<String, i64>,
+    /// 每 IP 创建角色时间戳（unix 秒；C# ConnectionLogs[IP].CharactersMade）
+    ip_character_creations: HashMap<String, Vec<i64>>,
     /// AccountActor 引用
     account_ref: Option<ActorRef<crate::actors::account::AccountActor>>,
     /// WorldActor 引用
@@ -45,6 +51,9 @@ impl GateActor {
         Self {
             sessions: HashMap::new(),
             session_usernames: HashMap::new(),
+            session_ips: HashMap::new(),
+            ip_blocks: HashMap::new(),
+            ip_character_creations: HashMap::new(),
             account_ref: None,
             world_ref: None,
             social_ref: None,
@@ -102,6 +111,7 @@ pub async fn run_gate_listener(addr: String, actor_ref: ActorRef<GateActor>) -> 
         let _ = actor_ref.ask(SessionCreated {
             session_id: sid,
             sender: tx,
+            ip: peer_addr.ip().to_string(),
         }).await;
 
         let gate_ref = actor_ref.clone();
@@ -163,6 +173,8 @@ pub async fn run_gate_listener(addr: String, actor_ref: ActorRef<GateActor>) -> 
 pub struct SessionCreated {
     pub session_id: SessionId,
     pub sender: SendChannel,
+    /// 客户端 IP（C# MirConnection.IPAddress，用于 IPBlocks 防刷）
+    pub ip: String,
 }
 
 /// Phase 2.2: 优雅关机 — 断开所有 session,触发自动保存。
@@ -218,6 +230,14 @@ pub struct SetSocialRef {
 // Handler 实现
 // ============================================================
 
+/// 当前 unix 秒（同步；IP 防刷用）
+fn gate_unix_now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 impl Message<SessionCreated> for GateActor {
     type Reply = ();
 
@@ -226,6 +246,12 @@ impl Message<SessionCreated> for GateActor {
         msg: SessionCreated,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        // C# Envir.IPBlocks：被封禁 IP 不接收连接（不注册会话，客户端超时断开）
+        let now = gate_unix_now_secs();
+        if self.ip_blocks.get(&msg.ip).map(|&u| u > now).unwrap_or(false) {
+            warn!("Connection rejected from blocked IP {} (session {})", msg.ip, msg.session_id);
+            return;
+        }
         // Phase 1.1: 连接数限制 — 超过 max_connections 拒绝新连接
         if self.sessions.len() >= self.max_connections {
             warn!(
@@ -236,6 +262,7 @@ impl Message<SessionCreated> for GateActor {
             return;
         }
         self.sessions.insert(msg.session_id, msg.sender);
+        self.session_ips.insert(msg.session_id, msg.ip.clone());
         debug!("Session {} created (active={})", msg.session_id, self.sessions.len());
 
         // 发送 Connected 包给客户端（客户端收到后会自动发送 ClientVersion）
@@ -579,6 +606,38 @@ impl Message<ClientData> for GateActor {
             }
             // 账号管理
             x if x == ClientPacketIds::NewCharacter as i16 => {
+                // C# Envir.NewCharacter IP 防刷：封禁 IP / 每小时 >4 次 → 封 24h
+                let now = gate_unix_now_secs();
+                let ip = self.session_ips.get(&msg.session_id).cloned().unwrap_or_default();
+                let mut blocked = false;
+                if !ip.is_empty() {
+                    if self.ip_blocks.get(&ip).map(|&u| u > now).unwrap_or(false) {
+                        blocked = true;
+                    } else {
+                        let creations = self.ip_character_creations.entry(ip.clone()).or_default();
+                        if creations.len() > 4 {
+                            self.ip_blocks.insert(ip.clone(), now + 24 * 3600);
+                            creations.clear();
+                            blocked = true;
+                        } else {
+                            creations.push(now);
+                            // C#：剔除超过 1 小时的记录
+                            creations.retain(|&t| t + 3600 >= now);
+                        }
+                    }
+                }
+                if blocked {
+                    let mut body = Vec::new();
+                    body.push(0u8); // S.NewCharacter { Result = 0 }
+                    let data = build_packet_bytes(ServerPacketIds::NewCharacter as i16, &body);
+                    let gate_ref = ctx.actor_ref().clone();
+                    let _ = gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data,
+                    }).await;
+                    warn!("NewCharacter rejected: IP {} rate-limited (session {})", ip, msg.session_id);
+                    return;
+                }
                 forward_new_character(&self.world_ref, &self.session_usernames, msg.session_id, payload).await;
             }
             x if x == ClientPacketIds::ChangePassword as i16 => {

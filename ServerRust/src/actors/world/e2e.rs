@@ -22,7 +22,7 @@ async fn setup_gate_and_session(
 ) -> (GateActorRef, tokio::sync::mpsc::UnboundedSender<Vec<u8>>, RxChannel) {
     let gate_ref = GateActor::spawn(());
     let (tx, rx) = mpsc::unbounded_channel::<Vec<u8>>();
-    let _ = gate_ref.ask(SessionCreated { session_id, sender: tx.clone() }).await;
+    let _ = gate_ref.ask(SessionCreated { session_id, sender: tx.clone(), ip: "127.0.0.1".to_string() }).await;
     (gate_ref, tx, rx)
 }
 
