@@ -3022,6 +3022,31 @@ impl Message<LearnMagic> for PlayerActor {
         self.state.learn_magic(msg.spell)
     }
 }
+
+/// 学习技能并设置等级（NPC 脚本 GIVESKILL 用，对齐 C# GiveSkill 设 Level，最多 3 级）
+pub struct LearnMagicWithLevel {
+    pub spell: i32,
+    pub level: u8,
+}
+
+impl Message<LearnMagicWithLevel> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(
+        &mut self,
+        msg: LearnMagicWithLevel,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        if self.state.magics.iter().any(|m| m.spell == msg.spell) {
+            // 已学会：不重复添加（对齐 C# 已学直接 break）
+            return false;
+        }
+        let mut magic = PlayerMagic::new(msg.spell);
+        magic.level = msg.level.min(3);
+        self.state.magics.push(magic);
+        true
+    }
+}
 /// 英雄装备/卸下（#206）
 impl PlayerState {
     /// 英雄背包格 → 英雄装备槽（C# C.EquipItem Grid=HeroInventory）
