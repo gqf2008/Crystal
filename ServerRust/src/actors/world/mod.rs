@@ -26,6 +26,7 @@ mod tick;
 
 // Re-export submodule structs for external access
 pub use tick::Tick;
+pub use tick::ProcessDelayedActions;
 pub use session::*;
 pub use item::*;
 pub use combat::*;
@@ -125,6 +126,17 @@ pub struct MonsterSpawn {
     pub max_dmg: i32,
     pub xp: i32,
     pub map_index: u16,
+}
+
+/// NPC 延迟执行动作（TIMERECALL/DELAYGOTO，对齐 C# DelayedAction DelayedType.NPC）
+#[derive(Debug, Clone)]
+pub struct DelayedNpcAction {
+    /// 到期 tick（100ms/tick）
+    pub expire_tick: u64,
+    /// 目标 NPC object_id（脚本来源）
+    pub npc_object_id: u32,
+    /// 目标 section 名（缺省 main）
+    pub section: String,
 }
 
 /// 地图刷怪配置
@@ -703,6 +715,8 @@ pub struct WorldActor {
     pub(crate) cursed_monsters: HashMap<u32, (i32, u64)>,
     /// NPC 脚本计时器（SETTIMER）：session -> (timer_id, expire_tick)
     pub(crate) npc_timers: HashMap<u64, HashMap<i32, u64>>,
+    /// NPC 脚本延迟执行（TIMERECALL/DELAYGOTO）：session -> 待执行动作列表
+    pub(crate) npc_delayed_actions: HashMap<u64, Vec<DelayedNpcAction>>,
     /// #312 烈焰剑状态（session → (到期 tick, 技能等级)）
     pub(crate) flaming_sword: HashMap<u64, (u64, u8)>,
     /// #318 双段近战状态（session → (到期 tick, 等级, 类型: 0=双龙斩 1=双斩)）
@@ -870,6 +884,7 @@ impl WorldActor {
         Self {
             tick_count: 0,
             npc_timers: HashMap::new(),
+            npc_delayed_actions: HashMap::new(),
             players: HashMap::new(),
             buyback_items: HashMap::new(),
             maps: HashMap::new(),
@@ -2796,6 +2811,7 @@ impl Actor for WorldActor {
             loop {
                 interval.tick().await;
                 let _ = tick_ref.ask(Tick).await;
+                let _ = tick_ref.ask(ProcessDelayedActions).await;
             }
         });
 
@@ -2968,6 +2984,7 @@ impl Actor for WorldActor {
         Ok(Self {
             tick_count: 0,
             npc_timers: HashMap::new(),
+            npc_delayed_actions: HashMap::new(),
             players: HashMap::new(),
             buyback_items: HashMap::new(),
             maps: HashMap::new(),
@@ -3206,6 +3223,50 @@ impl WorldActor {
         }
         debug!("spawn_monster_named: '{}' x{} at ({},{}) map {} spawned={}", name, count, x, y, map_index, spawned);
         spawned
+    }
+
+    /// NPC 脚本延迟执行到期处理（对齐 C# DelayedAction DelayedType.NPC：到点执行脚本段）
+    pub(crate) async fn process_delayed_actions(&mut self) {
+        let now = self.tick_count;
+        // 收集到点动作，避免在遍历时借用 self
+        let mut due: Vec<(u64, DelayedNpcAction)> = Vec::new();
+        for (session_id, actions) in &self.npc_delayed_actions {
+            for act in actions {
+                if act.expire_tick <= now {
+                    due.push((*session_id, act.clone()));
+                }
+            }
+        }
+        if due.is_empty() {
+            return;
+        }
+        // 移除到点动作
+        for (session_id, _act) in &due {
+            if let Some(actions) = self.npc_delayed_actions.get_mut(session_id) {
+                actions.retain(|a| a.expire_tick > now);
+            }
+        }
+        // 逐个执行
+        for (session_id, act) in due {
+            let Some(npc) = self.npcs.get(&act.npc_object_id).cloned() else { continue };
+            let section_upper = act.section.to_uppercase();
+            let script_key = (npc.db_index, section_upper.clone());
+            let Some(lines) = self.npc_scripts.get(&script_key).cloned() else { continue };
+            let joined = lines.join("\n");
+            if !npc_script::is_csharp_format(&joined) {
+                continue;
+            }
+            let parsed = npc_script::ParsedScript::parse(&joined);
+            let target = parsed
+                .find(&act.section)
+                .or_else(|| parsed.find(&section_upper))
+                .or_else(|| parsed.main_section());
+            let Some(section) = target else { continue };
+            let mut custom_vars: HashMap<String, String> = HashMap::new();
+            let res = parsed.execute_section(section, self, session_id, &npc, &mut custom_vars).await;
+            debug!("NPC delayed action fired: session={} npc={} section='{}' say_lines={} goto={:?}",
+                   session_id, npc.name, act.section, res.say_lines.len(), res.goto);
+        }
     }
 
     /// NPC 脚本计时器到期清理（对齐 C# Envir.Timers 到期移除；无自动执行，脚本用 CHECKTIMER 轮询）

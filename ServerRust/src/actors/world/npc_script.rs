@@ -946,6 +946,63 @@ async fn exec_action(
         "PARAM3" => {
             flow.param3 = arg0().parse::<i32>().unwrap_or(0);
         }
+        // TIMERECALL <秒> [section] —— 延迟执行当前 NPC 脚本段（对齐 C# ActionType.TimeRecall + DelayedAction）
+        "TIMERECALL" => {
+            let secs = arg0().parse::<i64>().unwrap_or(0).max(0);
+            let section = if arg1().is_empty() { "main".to_string() } else { arg1().to_string() };
+            if let Some(&npc_oid) = world.session_npc.get(&session_id) {
+                let expire_tick = world.tick_count.saturating_add(secs as u64 * 10);
+                world.npc_delayed_actions.entry(session_id).or_default().push(
+                    crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone() },
+                );
+                debug!("NPC TIMERECALL: session={} section='{}' in {}s (expire {})", session_id, section, secs, expire_tick);
+            } else {
+                warn!("NPC TIMERECALL: no current NPC for session {}", session_id);
+            }
+        }
+        // TIMERECALLGROUP <秒> [section] —— 给所有组员注册延迟执行（对齐 C# ActionType.TimeRecallGroup）
+        "TIMERECALLGROUP" => {
+            let secs = arg0().parse::<i64>().unwrap_or(0).max(0);
+            let section = if arg1().is_empty() { "main".to_string() } else { arg1().to_string() };
+            if let Some(&npc_oid) = world.session_npc.get(&session_id) {
+                let Some(st) = current_player_state(world, session_id).await else { return };
+                let gid = st.group_id;
+                let mut targets = vec![session_id];
+                for (sid, r) in &world.players {
+                    if *sid == session_id { continue; }
+                    if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                        if os.group_id == gid {
+                            targets.push(*sid);
+                        }
+                    }
+                }
+                let expire_tick = world.tick_count.saturating_add(secs as u64 * 10);
+                for sid in &targets {
+                    world.npc_delayed_actions.entry(*sid).or_default().push(
+                        crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone() },
+                    );
+                }
+                debug!("NPC TIMERECALLGROUP: {} players section='{}' in {}s", targets.len(), section, secs);
+            }
+        }
+        // BREAKTIMERECALL —— 取消该玩家所有 NPC 延迟执行（对齐 C# ActionType.BreakTimeRecall）
+        "BREAKTIMERECALL" => {
+            world.npc_delayed_actions.remove(&session_id);
+            debug!("NPC BREAKTIMERECALL: session={}", session_id);
+        }
+        // DELAYGOTO <秒> <section> —— 延迟跳转到脚本段（对齐 C# ActionType.DelayGoto）
+        "DELAYGOTO" => {
+            let secs = arg0().parse::<i64>().unwrap_or(0).max(0);
+            let section = arg1().to_string();
+            if section.is_empty() {
+                warn!("NPC DELAYGOTO: missing section");
+            } else if let Some(&npc_oid) = world.session_npc.get(&session_id) {
+                let expire_tick = world.tick_count.saturating_add(secs as u64 * 10);
+                world.npc_delayed_actions.entry(session_id).or_default().push(
+                    crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section },
+                );
+            }
+        }
         // SETTIMER <key> <seconds> [type] [global] —— 注册计时器（对齐 C# ActionType.SetTimer；发 S.SetTimer）
         // C# timerKey=玩家名-key、global 存 Envir；Rust 简化按 session 维度存 key，到点自动移除
         "SETTIMER" => {

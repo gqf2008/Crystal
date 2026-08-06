@@ -3,6 +3,22 @@ use super::*;
 /// 游戏主循环 Tick
 pub struct Tick;
 
+/// 延迟动作到期处理消息（独立于 Tick 消息，避免巨型 async 状态机内联进 Tick handler 导致栈溢出）
+pub struct ProcessDelayedActions;
+
+impl Message<ProcessDelayedActions> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        _msg: ProcessDelayedActions,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.process_delayed_actions().await;
+    }
+}
+
+
 impl WorldActor {
     /// 玩家 Buff tick + 死亡复活（每 5 ticks）
     pub(crate) async fn tick_buffs_and_revive(&mut self) {
@@ -1655,6 +1671,9 @@ impl Message<Tick> for WorldActor {
 
         // NPC 脚本计时器到期清理（SETTIMER/EXPIRETIMER/CHECKTIMER，对齐 C# Envir.Timers）
         self.tick_npc_timers();
+
+
+
 
         // --- 怪物 AI ---
         if !self.monsters.is_empty() && !self.players.is_empty() {
