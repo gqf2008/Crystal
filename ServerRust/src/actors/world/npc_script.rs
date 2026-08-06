@@ -819,6 +819,42 @@ async fn exec_action(
                 warn!("NPC REMOVESKILL: unknown skill '{}'", skill_name);
             }
         }
+        // UNEQUIPITEM [槽位名] —— 卸下装备（对齐 C# ActionType.UnequipItem：无参卸全部，指定槽位名卸单个）
+        "UNEQUIPITEM" => {
+            let slot_arg = arg0().to_lowercase();
+            let mut slots = Vec::new();
+            if slot_arg.is_empty() {
+                for i in 0..crate::actors::inventory::EquipmentSlot::COUNT {
+                    if let Some(slot) = crate::actors::inventory::EquipmentSlot::from_i32(i as i32) {
+                        slots.push(slot);
+                    }
+                }
+            } else if let Some(slot) = (0..crate::actors::inventory::EquipmentSlot::COUNT).find_map(|i| {
+                let slot = crate::actors::inventory::EquipmentSlot::from_i32(i as i32)?;
+                (format!("{:?}", slot).to_lowercase() == slot_arg).then_some(slot)
+            }) {
+                slots.push(slot);
+            } else {
+                warn!("NPC UNEQUIPITEM: unknown slot '{}'", arg0());
+            }
+            let mut removed_any = false;
+            for slot in slots {
+                if let Some(record) = world.players.get(&session_id) {
+                    let ok = record
+                        .actor_ref
+                        .ask(crate::actors::player::InventoryUnequipItem { slot })
+                        .await
+                        .unwrap_or(false);
+                    if ok {
+                        removed_any = true;
+                        if let Some(state) = world.recalculate_and_set_stat_bonuses(session_id).await {
+                            world.broadcast_equipment_visuals(session_id, &state).await;
+                        }
+                    }
+                }
+            }
+            debug!("NPC UNEQUIPITEM: session={} removed={}", session_id, removed_any);
+        }
         // CHANGECLASS <Warrior|...>
         "CHANGECLASS" => {
             if let Some(cls) = parse_class(arg0()) {
@@ -1058,6 +1094,34 @@ async fn exec_action(
                     for sid in targets {
                         let _ = world.gate_ref.tell(SendToClient { session_id: sid, data: body.clone() }).await;
                     }
+                }
+            }
+        }
+        // GROUPGOTO <section> —— 组队跳转脚本段（对齐 C# ActionType.GroupGoto：DelayedAction 立即调度，所有组员到点执行）
+        "GROUPGOTO" => {
+            let section = arg0().to_string();
+            if section.is_empty() {
+                warn!("NPC GROUPGOTO: missing section");
+            } else if let Some(&npc_oid) = world.session_npc.get(&session_id) {
+                if let Some(st) = current_player_state(world, session_id).await {
+                    let gid = st.group_id;
+                    let mut targets = vec![session_id];
+                    for (sid, r) in &world.players {
+                        if *sid == session_id { continue; }
+                        if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                            if os.group_id == gid {
+                                targets.push(*sid);
+                            }
+                        }
+                    }
+                    // C# 用 Envir.Time（立即）；Rust 端下个 ProcessDelayedActions tick 执行
+                    let expire_tick = world.tick_count;
+                    for sid in &targets {
+                        world.npc_delayed_actions.entry(*sid).or_default().push(
+                            crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone() },
+                        );
+                    }
+                    debug!("NPC GROUPGOTO: {} players section='{}'", targets.len(), section);
                 }
             }
         }
