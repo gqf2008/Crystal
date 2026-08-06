@@ -288,7 +288,7 @@ impl Plugin for ChatPlugin {
             Update,
             (
                 chat_tab_system,
-                chat_option_system,
+                chat_option_system.after(crate::ui::controls::checkbox_system),
                 chat_size_system,
                 chat_wheel_system,
                 chat_input_system,
@@ -517,7 +517,7 @@ fn spawn_chat_option_panel(
             &mut commands, &mut libs, &mut images, &mut cache,
             LibraryName::Prguse, off, on,
             dx + rx, dy + ry, 12.4, 16.0, 12.0,
-            kind == ChatFilterKind::All,
+            false,
         ) {
             commands.entity(e).insert((ChatFilterBox(kind), ChatOptionWidget));
         }
@@ -553,7 +553,13 @@ fn chat_option_system(
     settings: Query<&UiButton, With<ChatSettingsBtn>>,
     close: Query<&UiButton, (With<ChatOptionWidget>, Without<ChatFilterBox>, Without<ChatTranspBtn>)>,
     mut boxes: Query<
-        (&mut crate::ui::controls::CheckBox, &mut crate::ui::sprite_ui::ButtonFrames, &mut Sprite, &ChatFilterBox),
+        (
+            &UiButton,
+            &mut crate::ui::controls::CheckBox,
+            &mut crate::ui::sprite_ui::ButtonFrames,
+            &mut Sprite,
+            &ChatFilterBox,
+        ),
         With<ChatOptionWidget>,
     >,
     transp: Query<(&UiButton, &ChatTranspBtn), With<ChatOptionWidget>>,
@@ -577,25 +583,41 @@ fn chat_option_system(
         *vis = if filter.visible { Visibility::Visible } else { Visibility::Hidden };
     }
     // 勾选框 ↔ 过滤状态（checked = 屏蔽该频道，C# Filter*Chat 语义）
-    let mut all_checked = false;
-    for (cb, _frames, _sprite, kind) in boxes.iter() {
+    // C# ChatOptionDialog：AllFiltersOff 默认 true（全部未过滤）；All 点击 = 全开/全关切换
+    let mut all_clicked = false;
+    let mut any_on = false;
+    for (btn, cb, _, _, kind) in boxes.iter() {
         if kind.0 == ChatFilterKind::All {
-            all_checked = cb.checked;
+            all_clicked = btn.clicked;
+        } else if filter.get(kind.0) {
+            any_on = true;
         }
     }
-    for (mut cb, mut frames, mut sprite, kind) in &mut boxes {
-        if kind.0 == ChatFilterKind::All {
-            continue;
+    if all_clicked {
+        // All 切换：当前全关 → 全开；否则 → 全关（C# ToggleAllFilters）
+        let turn_on = !any_on;
+        for (_, _, _, _, kind) in &boxes {
+            if kind.0 != ChatFilterKind::All {
+                filter.set(kind.0, turn_on);
+            }
         }
-        if all_checked {
-            cb.checked = true;
+        any_on = turn_on;
+    } else {
+        // 单项勾选框状态 → 过滤状态（checkbox_system 已切换勾选）
+        for (_, cb, _, _, kind) in &boxes {
+            if kind.0 != ChatFilterKind::All && filter.get(kind.0) != cb.checked {
+                filter.set(kind.0, cb.checked);
+                if cb.checked {
+                    any_on = true;
+                }
+            }
         }
-        let v = cb.checked;
-        if filter.get(kind.0) != v {
-            filter.set(kind.0, v);
-        }
-        // 同步帧（外部/All 联动时刷新勾选图）
-        let f = if cb.checked { &cb.on } else { &cb.off };
+    }
+    // 同步勾选框显示：All = 任一频道被屏蔽（C# AllButton.Index = AllFiltersOff ? 2087 : 2086）
+    for (_, mut cb, mut frames, mut sprite, kind) in &mut boxes {
+        let v = if kind.0 == ChatFilterKind::All { any_on } else { filter.get(kind.0) };
+        cb.checked = v;
+        let f = if v { &cb.on } else { &cb.off };
         if frames.normal != f[0] {
             frames.normal = f[0].clone();
             frames.hover = f[1].clone();

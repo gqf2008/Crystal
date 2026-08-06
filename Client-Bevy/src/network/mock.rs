@@ -133,6 +133,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             let mut mock_storage_password: Option<String> = Some("123456".to_string());
             // #283：首次击杀触发本地升级演示（LevelChanged + ObjectLeveled）
             let mut mock_leveled_up = false;
+            // #297：精炼流程状态（(物品 uid, 是否已开始)）
+            let mut mock_refine: Option<(u64, bool)> = None;
             // #222：轮回术复活请求状态
             let mut mock_reincarnation_offered = false;
             // #226：对象状态演示（隐藏/显形/坐下/击退/传送）状态机
@@ -361,6 +363,92 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         if !page.is_empty() {
                                             send(&to_client, &server::npc_interaction::NPCResponse { page });
                                         }
+                                    }
+                                }
+                                // #297：精炼流程（存入 → 开始 → 查看 → 取回）
+                                // 客户端实际 wire 与 SharedRust 结构不同（RefineDeposit/Retrieve=[uid u64]，RefineItem=[item_id u32][materials u32]），按实际 wire 解析
+                                x if x == ClientPacketIds::DepositRefineItem as i16 => {
+                                    let mut buf = [0u8; 8];
+                                    if std::io::Read::read_exact(&mut cur, &mut buf).is_ok() {
+                                        let uid = u64::from_le_bytes(buf);
+                                        mock_refine = Some((uid, false));
+                                        send(
+                                            &to_client,
+                                            &server::chat::Chat {
+                                                message: "精炼物品已存入".to_string(),
+                                                chat_type: ChatType::System,
+                                            },
+                                        );
+                                        tracing::info!("⚒️ [MOCK] 精炼存入 uid={}", uid);
+                                    }
+                                }
+                                x if x == ClientPacketIds::RefineItem as i16 => {
+                                    let mut buf = [0u8; 8];
+                                    if std::io::Read::read_exact(&mut cur, &mut buf).is_ok() {
+                                        let item_id = u32::from_le_bytes(buf[0..4].try_into().unwrap_or([0; 4]));
+                                        let _materials = u32::from_le_bytes(buf[4..8].try_into().unwrap_or([0; 4]));
+                                        if let Some((uid, _)) = mock_refine.as_mut() {
+                                            *uid = item_id as u64;
+                                        } else {
+                                            mock_refine = Some((item_id as u64, false));
+                                        }
+                                        if let Some((_, started)) = mock_refine.as_mut() {
+                                            *started = true;
+                                        }
+                                        send(
+                                            &to_client,
+                                            &server::chat::Chat {
+                                                message: "精炼已开始，请稍后查看".to_string(),
+                                                chat_type: ChatType::System,
+                                            },
+                                        );
+                                        tracing::info!("⚒️ [MOCK] 精炼开始 item={}", item_id);
+                                    }
+                                }
+                                x if x == ClientPacketIds::CheckRefine as i16 => {
+                                    let mut buf = [0u8; 8];
+                                    if std::io::Read::read_exact(&mut cur, &mut buf).is_ok() {
+                                        if let Some((_uid, true)) = mock_refine {
+                                            // 测试等待 65s 后查看，直接返回成功 + 完成提示
+                                            send(
+                                                &to_client,
+                                                &server::chat::Chat {
+                                                    message: "精炼成功！物品已提升".to_string(),
+                                                    chat_type: ChatType::System,
+                                                },
+                                            );
+                                            send(
+                                                &to_client,
+                                                &server::chat::Chat {
+                                                    message: "精炼已完成，请取回物品".to_string(),
+                                                    chat_type: ChatType::System,
+                                                },
+                                            );
+                                        } else {
+                                            send(
+                                                &to_client,
+                                                &server::chat::Chat {
+                                                    message: "没有精炼进行中".to_string(),
+                                                    chat_type: ChatType::System,
+                                                },
+                                            );
+                                        }
+                                        tracing::info!("⚒️ [MOCK] 精炼查看");
+                                    }
+                                }
+                                x if x == ClientPacketIds::RetrieveRefineItem as i16 => {
+                                    let mut buf = [0u8; 8];
+                                    if std::io::Read::read_exact(&mut cur, &mut buf).is_ok() {
+                                        let _uid = u64::from_le_bytes(buf);
+                                        mock_refine = None;
+                                        send(
+                                            &to_client,
+                                            &server::chat::Chat {
+                                                message: "精炼物品已取回".to_string(),
+                                                chat_type: ChatType::System,
+                                            },
+                                        );
+                                        tracing::info!("⚒️ [MOCK] 精炼取回");
                                     }
                                 }
                                 // #285：聊天物品请求 → 回发 NewChatItem
