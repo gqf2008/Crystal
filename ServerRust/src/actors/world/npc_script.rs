@@ -658,6 +658,28 @@ async fn eval_one_check(
                     .map(|r| r.wedding_ring != 0)
                     .unwrap_or(false)
         }
+        // CHECKRANGE <x> <y> <range> — 玩家在 (x,y) 半径内（对齐 C# CheckType.CheckRange / Functions.InRange 欧氏）
+        "CHECKRANGE" => {
+            let x = arg0().parse::<i32>().unwrap_or(i32::MIN);
+            let y = arg1().parse::<i32>().unwrap_or(i32::MIN);
+            let range = args.get(2).map(|s| s.as_str()).unwrap_or("").parse::<i64>().unwrap_or(-1);
+            if range < 0 { false }
+            else {
+                let dx = (player.x as i64) - x as i64;
+                let dy = (player.y as i64) - y as i64;
+                dx * dx + dy * dy <= range * range
+            }
+        }
+        // CHECKMAPLIGHT <Day|Night|Dawn|Evening> — 全局昼夜状态（对齐 C# CheckType.CheckMapLight / Envir.Lights）
+        "CHECKMAPLIGHT" => {
+            let want = arg0().trim().to_uppercase();
+            let cur = format!("{:?}", world.current_light).to_uppercase();
+            !want.is_empty() && cur == want
+        }
+        // CHECKRELATIONSHIP — 是否已婚（对齐 C# CheckType.CheckRelationship：player.Info.Married != 0）
+        "CHECKRELATIONSHIP" => {
+            player.spouse_name.is_some()
+        }
         // INGUILD / GUILDNAME <name>
         "INGUILD" => player.guild_name.is_some(),
         // CHECKMAP <map_name|index>
