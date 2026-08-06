@@ -254,6 +254,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--recipe-test") {
         app.add_systems(Update, auto_recipe_test);
     }
+    // --name-test: 名称同步（ObjectName/UserName，#264）
+    if std::env::args().any(|a| a == "--name-test") {
+        app.add_systems(Update, auto_name_test);
+    }
     // --book-test: 技能书学习链路（使用技能书 → 等 NewMagic → 校验 MagicsState）
     if std::env::args().any(|a| a == "--book-test") {
         app.add_systems(Update, auto_book_test);
@@ -7733,6 +7737,116 @@ fn auto_recipe_test(
                         recipe,
                         buff_paused
                     );
+                }
+                *stage = 9;
+            }
+        }
+        _ => {}
+    }
+}
+
+
+/// --name-test：施法 → mock 回发 ObjectName(101) + UserName，断言 对象/玩家改名（#264）
+#[allow(clippy::too_many_arguments)]
+fn auto_name_test(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    names: Query<(
+        &client_bevy::actor::NetObjectId,
+        Option<&client_bevy::actor::MonsterName>,
+    )>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut target: Local<Option<u32>>,
+    mut target_tile: Local<Option<(i32, i32)>>,
+    actors: Query<(
+        &client_bevy::actor::NetObjectId,
+        &Transform,
+        Has<client_bevy::actor::Monster>,
+    )>,
+    players: Query<
+        &Transform,
+        (
+            With<client_bevy::actor::LocalPlayer>,
+            With<client_bevy::actor::NetObjectId>,
+        ),
+    >,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 10.0 {
+                return;
+            }
+            let Ok(pf) = players.single() else { return };
+            let (px, py) =
+                client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+            let mut best: Option<(u32, i32, i32)> = None;
+            for (id, tf, monster) in &actors {
+                if !monster {
+                    continue;
+                }
+                let (mx, my) =
+                    client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+                let d = (mx - px).abs() + (my - py).abs();
+                if d <= 40 && best.map(|(_, _, bd)| d < bd).unwrap_or(true) {
+                    best = Some((id.0, mx, my));
+                }
+            }
+            match best {
+                Some((oid, mx, my)) => {
+                    *target = Some(oid);
+                    *target_tile = Some((mx, my));
+                    tracing::info!("[NAME] 🎯 目标怪物 id={} @ ({},{})", oid, mx, my);
+                    *stage = 1;
+                    *t = 0.0;
+                }
+                None => {
+                    tracing::warn!("[NAME] ❌ 附近没有怪物");
+                    *stage = 9;
+                }
+            }
+        }
+        1 => {
+            if *t < 1.5 {
+                return;
+            }
+            let (mx, my) = target_tile.unwrap_or((0, 0));
+            let Ok(pf) = players.single() else { return };
+            let (px, py) =
+                client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+            let dir = client_bevy::game::movement::direction_from_delta(
+                (mx - px).signum(),
+                (my - py).signum(),
+            )
+            .unwrap_or(mir2_shared::enums::MirDirection::Down);
+            net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                spell: mir2_shared::enums::Spell::FireBall,
+                direction: dir,
+                target_id: target.unwrap_or(0),
+                location: mir2_shared::Point { x: mx, y: my },
+            });
+            tracing::info!("[NAME] 🔥 施法触发改名");
+            *stage = 2;
+            *t = 0.0;
+        }
+        2 => {
+            if *t >= 2.5 {
+                let obj = names
+                    .iter()
+                    .any(|(id, m)| id.0 == 101 && m.map(|m| m.0 == "稻草人·改").unwrap_or(false));
+                let player = hud.name == "刀客·改名";
+                tracing::info!("[NAME] 对象改名={} 玩家改名={}", obj, player);
+                if obj && player {
+                    tracing::info!("[NAME] ✅ 名称同步通过");
+                } else {
+                    tracing::warn!("[NAME] ❌ 未通过（对象改名={} 玩家改名={}）", obj, player);
                 }
                 *stage = 9;
             }

@@ -752,6 +752,11 @@ fn hud_server_events(
             ServerEvent::GoldGained { gold } => {
                 hud.gold = hud.gold.saturating_add(*gold);
             }
+            ServerEvent::PlayerNameUpdated { name } => {
+                // #264：本地玩家改名
+                hud.name = name.clone();
+                tracing::info!("🏷️ 玩家改名 -> {}", name);
+            }
             ServerEvent::CreditGained { credit } => {
                 // #248：声望增加
                 hud.credit = hud.credit.saturating_add(*credit);
@@ -878,7 +883,8 @@ fn hud_server_events(
             | ServerEvent::QuestInfo { .. }
             | ServerEvent::QuestShared { .. }
             | ServerEvent::RecipeLearned { .. }
-            | ServerEvent::BuffPaused { .. } => {}
+            | ServerEvent::BuffPaused { .. }
+            | ServerEvent::ObjectName { .. } => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);

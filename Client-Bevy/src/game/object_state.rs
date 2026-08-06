@@ -7,7 +7,10 @@
 
 use bevy::prelude::*;
 
-use crate::actor::{ActorAnim, MountState, NpcAppearance, NetObjectId, SpriteLayer};
+use crate::actor::{
+    ActorAnim, MonsterName, MountState, NpcAppearance, NpcName, NetObjectId, PlayerName,
+    SpriteLayer,
+};
 use crate::game::movement::tile_to_world;
 use crate::network::server_event::ServerEvent;
 use crate::scenes::AppState;
@@ -36,6 +39,18 @@ fn apply_object_state_events(
     mounts: Query<(Entity, &NetObjectId, Option<&MountState>)>,
     poisons: Query<(Entity, &NetObjectId, Option<&crate::actor::PoisonTint>)>,
     mut npcs: Query<(Entity, &NetObjectId, &mut NpcAppearance)>,
+    mut name_actors: Query<
+        (
+            Entity,
+            &NetObjectId,
+            Option<&mut PlayerName>,
+            Option<&mut MonsterName>,
+            Option<&mut NpcName>,
+        ),
+        Without<crate::actor::LocalPlayer>,
+    >,
+    mut local_names: Query<(Entity, Option<&mut PlayerName>), With<crate::actor::LocalPlayer>>,
+    mut name_labels: Query<&mut Text2d, With<crate::actor::ActorNameLabel>>,
     children: Query<&Children>,
     mut layers: Query<&mut SpriteLayer>,
     mut effects: MessageWriter<crate::game::effects::PendingEffect>,
@@ -134,6 +149,41 @@ fn apply_object_state_events(
                     if id.0 == object_id {
                         *v = Visibility::Visible;
                         break;
+                    }
+                }
+            }
+            ServerEvent::ObjectName { object_id, name } => {
+                // #264：对象改名 → 更新名字组件 + 头顶标签文本
+                let mut label_entity = None;
+                for (ent, id, mut p, mut m, mut n) in &mut name_actors {
+                    if id.0 == object_id {
+                        if let Some(p) = p.as_mut() {
+                            p.0 = name.clone();
+                        } else if let Some(m) = m.as_mut() {
+                            m.0 = name.clone();
+                        } else if let Some(n) = n.as_mut() {
+                            n.0 = name.clone();
+                        }
+                        label_entity = Some(ent);
+                        tracing::info!("🏷️ 对象改名 id={} -> {}", object_id, name);
+                        break;
+                    }
+                }
+                if let Some(ent) = label_entity {
+                    if let Ok(children_of) = children.get(ent) {
+                        for c in children_of.iter() {
+                            if let Ok(mut t) = name_labels.get_mut(c) {
+                                t.0 = name.clone();
+                            }
+                        }
+                    }
+                }
+            }
+            ServerEvent::PlayerNameUpdated { name } => {
+                // #264：本地玩家改名（HudState.name 由 hud 更新；这里同步名字组件）
+                for (_ent, mut p) in &mut local_names {
+                    if let Some(p) = p.as_mut() {
+                        p.0 = name.clone();
                     }
                 }
             }

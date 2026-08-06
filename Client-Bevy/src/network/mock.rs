@@ -808,6 +808,36 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             &to_client,
                                             &server::ui_events::SetBindingShot { enabled: true },
                                         );
+                                        // #264：改名 / 杂项
+                                        send(
+                                            &to_client,
+                                            &server::player::ObjectName {
+                                                object_id: 101,
+                                                name: "稻草人·改".to_string(),
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::miscellaneous::UserName {
+                                                object_id: 100,
+                                                name: "刀客·改名".to_string(),
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::miscellaneous::ChatItemStats {
+                                                unique_id: 9005,
+                                                stats: "攻击 10-20".to_string(),
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::miscellaneous::InTrapRock { in_trap: true },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::awakening_system::NPCAwakening {},
+                                        );
                                         // #256：公告 + 杂项协议
                                         send(
                                             &to_client,
