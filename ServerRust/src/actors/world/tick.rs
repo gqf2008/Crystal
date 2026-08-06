@@ -692,8 +692,8 @@ impl WorldActor {
                     // 再叠加 healthRegen * HealthRecovery / Settings.HealthRegenWeight(10)
                     let hp_base = (state.max_hp * 3 / 100) + 1;
                     let mp_base = (state.max_mp * 3 / 100) + 1;
-                    let hp_per_sec = hp_base + hp_base * state.health_recovery / 10;
-                    let mp_per_sec = mp_base + mp_base * state.spell_recovery / 10;
+                    let hp_per_sec = hp_base + hp_base * state.health_recovery / self.health_regen_weight.max(1) as i32;
+                    let mp_per_sec = mp_base + mp_base * state.spell_recovery / self.mana_regen_weight.max(1) as i32;
                     // 本 tick 每 10 秒一次
                     let hp_regen = hp_per_sec * 10;
                     let mp_regen = mp_per_sec * 10;

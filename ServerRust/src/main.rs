@@ -150,6 +150,8 @@ async fn async_main() -> anyhow::Result<()> {
         rarity_cfg: cfg.server.rarity.clone(),
         notice_path: cfg.server.notice_path.clone(),
         death_exp_penalty_percent: cfg.server.death_exp_penalty_percent,
+        health_regen_weight: cfg.server.health_regen_weight,
+        mana_regen_weight: cfg.server.mana_regen_weight,
     });
     info!("WorldActor spawned (tick={}ms, map_dir={})", cfg.server.tick_ms, cfg.server.map_data_dir);
 

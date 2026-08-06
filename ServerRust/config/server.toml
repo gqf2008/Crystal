@@ -16,6 +16,8 @@ item_timeout_secs = 30
 max_drop_gold = 2000
 notice_path = "Notice.txt"
 death_exp_penalty_percent = 0
+health_regen_weight = 10
+mana_regen_weight = 10
 
 [rarity]
 elite_chance_percent = 3
