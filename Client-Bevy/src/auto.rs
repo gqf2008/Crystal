@@ -8362,3 +8362,134 @@ fn auto_resize_test(
         _ => {}
     }
 }
+
+/// --storage-unlock-test：仓库密码解锁链路（#200）
+/// 流程：进游戏 → NPC [@Storage] → 断言解锁框出现（仓库未打开）→ 错误密码 → 提示
+///       → 正确密码 → 仓库打开（StorageOpened）
+#[allow(clippy::too_many_arguments)]
+fn auto_storage_unlock_test(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    storage: Res<client_bevy::game::dialogs::storage::StorageState>,
+    npcs: Query<(
+        &client_bevy::actor::NetObjectId,
+        &client_bevy::actor::NpcName,
+        &Transform,
+    )>,
+    players: Query<
+        &Transform,
+        (
+            With<client_bevy::actor::LocalPlayer>,
+            With<client_bevy::actor::NetObjectId>,
+        ),
+    >,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut npc_oid: Local<Option<u32>>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 6.0 {
+                return;
+            }
+            let oid = players.single().ok().and_then(|ptf| {
+                let (px, py) =
+                    client_bevy::game::movement::world_to_tile(ptf.translation.x, ptf.translation.y);
+                npcs.iter()
+                    .map(|(id, n, tf)| {
+                        let (nx, ny) =
+                            client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+                        (id.0, n.0.clone(), (nx - px).abs() + (ny - py).abs())
+                    })
+                    .min_by_key(|(_, _, d)| *d)
+                    .map(|(id, _, _)| id)
+            });
+            if let Some(oid) = oid {
+                *npc_oid = Some(oid);
+                net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                    object_id: oid,
+                    key: "[@Main]".to_string(),
+                });
+                tracing::info!("[UNLOCK] CallNPC {}", oid);
+                *stage = 1;
+                *t = 0.0;
+            }
+        }
+        1 => {
+            if *t < 1.0 {
+                return;
+            }
+            if let Some(oid) = *npc_oid {
+                net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                    object_id: oid,
+                    key: "[@Storage]".to_string(),
+                });
+                tracing::info!("[UNLOCK] CallNPC [@Storage]");
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t < 1.5 {
+                return;
+            }
+            if storage.unlock_panel && !storage.visible {
+                tracing::info!("[UNLOCK] ✅ 解锁框出现（仓库未打开）");
+                net.send_packet(&mir2_shared::packets::client::storage::UnlockStorage {
+                    password: "wrong".to_string(),
+                });
+                *stage = 3;
+                *t = 0.0;
+            } else {
+                tracing::warn!(
+                    "[UNLOCK] ❌ 解锁框未出现（panel={} visible={}）",
+                    storage.unlock_panel,
+                    storage.visible
+                );
+                *stage = 9;
+            }
+        }
+        3 => {
+            if *t < 1.0 {
+                return;
+            }
+            if !storage.unlock_msg.is_empty() && storage.unlock_panel {
+                tracing::info!("[UNLOCK] ✅ 错误密码提示: {}", storage.unlock_msg);
+                net.send_packet(&mir2_shared::packets::client::storage::UnlockStorage {
+                    password: "123456".to_string(),
+                });
+                *stage = 4;
+                *t = 0.0;
+            } else {
+                tracing::warn!(
+                    "[UNLOCK] ❌ 错误密码未提示（msg={} panel={}）",
+                    storage.unlock_msg,
+                    storage.unlock_panel
+                );
+                *stage = 9;
+            }
+        }
+        4 => {
+            if *t < 1.5 {
+                return;
+            }
+            if storage.visible && !storage.unlock_panel {
+                tracing::info!("[UNLOCK] ✅ PASS 仓库解锁并打开");
+            } else {
+                tracing::error!(
+                    "[UNLOCK] ❌ FAIL visible={} panel={}",
+                    storage.visible,
+                    storage.unlock_panel
+                );
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}

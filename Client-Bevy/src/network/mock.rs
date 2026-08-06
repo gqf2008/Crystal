@@ -129,6 +129,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             // #218：英雄技能书学习的技能
             let mut mock_hero_learned_magics: Vec<ClientMagic> = Vec::new();
             let mut player_dead_since: Option<std::time::Instant> = None;
+            // #200：仓库密码（MOCK 默认 123456，解锁后仓库才打开）
+            let mut mock_storage_password: Option<String> = Some("123456".to_string());
             // #222：轮回术复活请求状态
             let mut mock_reincarnation_offered = false;
             // #226：对象状态演示（隐藏/显形/坐下/击退/传送）状态机
@@ -311,17 +313,114 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 "完成后回来交任务，奖励 100 金币 + 4000 经验".to_string(),
                                                 "[@MAIN] 返回".to_string(),
                                             ],
+                                            "[@STORAGE]" => vec![
+                                                "这里是仓库（MOCK）".to_string(),
+                                                "[@CLOSE] 关闭".to_string(),
+                                            ],
                                             "[@CLOSE]" => vec![],
                                             _ => vec![
                                                 "欢迎来到传奇 2（MOCK NPC）".to_string(),
                                                 "[@SHOP] 商店".to_string(),
                                                 "[@QUEST] 任务".to_string(),
+                                                "[@STORAGE] 仓库".to_string(),
                                                 "[@CLOSE] 关闭".to_string(),
                                             ],
                                         };
+                                        // #200：仓库密码保护——有密码先弹解锁框，不泄露仓库内容
+                                        if key == "[@STORAGE]" {
+                                            if mock_storage_password.is_some() {
+                                                send(&to_client, &server::npc::NPCStorage);
+                                            } else {
+                                                let storage_items: Vec<Option<mir2_shared::data::item::UserItem>> =
+                                                    (0..80)
+                                                        .map(|i| {
+                                                            if i == 3 {
+                                                                Some(mir2_shared::data::item::UserItem {
+                                                                    item_index: 1,
+                                                                    count: 1,
+                                                                    info: Some(mir2_shared::data::item::ItemInfo {
+                                                                        index: 1,
+                                                                        name: "仓库演示物品".to_string(),
+                                                                        price: 10,
+                                                                        image: 1,
+                                                                        tool_tip: Some("仓库演示物品".to_string()),
+                                                                        ..Default::default()
+                                                                    }),
+                                                                    ..Default::default()
+                                                                })
+                                                            } else {
+                                                                None
+                                                            }
+                                                        })
+                                                        .collect();
+                                                send(&to_client, &server::player::UserStorage { storage: storage_items });
+                                            }
+                                        }
                                         if !page.is_empty() {
                                             send(&to_client, &server::npc_interaction::NPCResponse { page });
                                         }
+                                    }
+                                }
+                                // #200：仓库密码解锁 / 设置 / 移除（MOCK）
+                                x if x == ClientPacketIds::UnlockStorage as i16 => {
+                                    if let Ok(p) = client::storage::UnlockStorage::read_body(&mut cur) {
+                                        tracing::info!("[MOCK] 仓库解锁请求 pwd_len={}", p.password.len());
+                                        let ok = mock_storage_password
+                                            .as_ref()
+                                            .map(|pwd| *pwd == p.password)
+                                            .unwrap_or(false);
+                                        send(
+                                            &to_client,
+                                            &server::StorageUnlockResult {
+                                                result: if ok { 0 } else { 2 },
+                                                has_password: mock_storage_password.is_some(),
+                                            },
+                                        );
+                                        if ok {
+                                            let storage_items: Vec<Option<mir2_shared::data::item::UserItem>> =
+                                                (0..80).map(|_| None).collect();
+                                            send(&to_client, &server::player::UserStorage { storage: storage_items });
+                                        }
+                                    }
+                                }
+                                x if x == ClientPacketIds::SetStoragePassword as i16 => {
+                                    if let Ok(p) = client::storage::SetStoragePassword::read_body(&mut cur) {
+                                        let ok = match &mock_storage_password {
+                                            None => true,
+                                            Some(cur) => *cur == p.current_password,
+                                        };
+                                        if ok {
+                                            mock_storage_password = Some(p.new_password.clone());
+                                        }
+                                        send(
+                                            &to_client,
+                                            &server::StoragePasswordResult {
+                                                result: if ok { 4 } else { 2 },
+                                                removing: false,
+                                                has_password: mock_storage_password.is_some(),
+                                                last_set_time: 0,
+                                            },
+                                        );
+                                    }
+                                }
+                                x if x == ClientPacketIds::RemoveStoragePassword as i16 => {
+                                    if let Ok(p) = client::storage::RemoveStoragePassword::read_body(&mut cur) {
+                                        let ok = mock_storage_password
+                                            .as_ref()
+                                            .map(|cur| *cur == p.current_password)
+                                            .unwrap_or(false);
+                                        if ok {
+                                            mock_storage_password = None;
+                                        }
+                                        send(
+                                            &to_client,
+                                            &server::StoragePasswordResult {
+                                                result: if ok { 4 } else { 2 },
+                                                removing: true,
+                                                has_password: false,
+                                                last_set_time: 0,
+                                            },
+                                        );
                                     }
                                 }
                                 x if x == ClientPacketIds::Attack as i16 => {
