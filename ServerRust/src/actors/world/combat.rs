@@ -1355,6 +1355,9 @@ impl Message<MagicRequest> for WorldActor {
                 );
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
                 self.invisible_sessions.insert(msg.session_id);
+            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                self.broadcast_object_hidden(st.object_id, true, st.map_index).await;
+            }
                 debug!("Magic: {} casts Hiding (invisible)", state.name);
             }
             // MassHiding：组队隐身（简化：自身 + 附近组员）
@@ -1367,6 +1370,9 @@ impl Message<MagicRequest> for WorldActor {
                 );
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
                 self.invisible_sessions.insert(msg.session_id);
+            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                self.broadcast_object_hidden(st.object_id, true, st.map_index).await;
+            }
                 // 给附近组员（3 格内）
                 let group_id = state.group_id;
                 if let Some(gid) = group_id {
@@ -1383,6 +1389,9 @@ impl Message<MagicRequest> for WorldActor {
                                     );
                                     let _ = other.actor_ref.ask(crate::actors::player::ApplyBuff { buff: buff2 }).await;
                                     self.invisible_sessions.insert(*sid);
+                    if let Ok(Some(mst)) = other.actor_ref.ask(GetPlayerState).await {
+                        self.broadcast_object_hidden(mst.object_id, true, mst.map_index).await;
+                    }
                                 }
                             }
                         }
@@ -1906,6 +1915,9 @@ impl Message<MagicRequest> for WorldActor {
                     (30 + spell_level as u32 * 10) * 10, 5);
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
                 self.invisible_sessions.insert(msg.session_id);
+            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                self.broadcast_object_hidden(st.object_id, true, st.map_index).await;
+            }
                 debug!("Magic: {} casts MoonLight (invisible)", state.name);
             }
             // DarkBody：隐身 + 攻击力（刺客终极隐身）
@@ -1920,6 +1932,9 @@ impl Message<MagicRequest> for WorldActor {
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: buff1 }).await;
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: buff2 }).await;
                 self.invisible_sessions.insert(msg.session_id);
+            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                self.broadcast_object_hidden(st.object_id, true, st.map_index).await;
+            }
                 debug!("Magic: {} casts DarkBody (invisible + attack {})", state.name, atk_bonus);
             }
             // HeavenlySword：直线 3 格 AoE（物理 AC 防御，类似 Thrusting 但更长）
@@ -2427,6 +2442,9 @@ impl Message<MagicRequest> for WorldActor {
                 );
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
                 self.invisible_sessions.insert(msg.session_id);
+            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                self.broadcast_object_hidden(st.object_id, true, st.map_index).await;
+            }
                 let raw_damage = (magic_stat + (power as i32) / 2).max(1);
                 let attacker_stats = state.to_combat_stats();
                 let level_offset = state.level.min(10) as u16;
