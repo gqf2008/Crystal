@@ -813,6 +813,16 @@ async fn exec_action(
                 send_player_msg(world, session_id, ChangeClass { class: cls }).await;
             }
         }
+        // REMOVEPET —— 移除宠物（对齐 C# ActionType.RemovePet）
+        "REMOVEPET" => {
+            if let Some(mut st) = current_player_state(world, session_id).await {
+                if st.creature_log.active_creature.is_some() {
+                    st.creature_log.active_creature = None;
+                    send_player_msg(world, session_id, crate::actors::player::SetCreature { creature_log: st.creature_log }).await;
+                    debug!("NPC REMOVEPET: pet removed");
+                }
+            }
+        }
         // CHANGEGENDER <male|female|0|1> —— 修改性别（对齐 C# ActionType.ChangeGender）
         "CHANGEGENDER" => {
             if let Some(gender) = parse_gender(arg0()) {
@@ -826,6 +836,26 @@ async fn exec_action(
         "CHANGEHAIR" => {
             let h = arg0().parse::<u8>().unwrap_or(0);
             send_player_msg(world, session_id, SetHair { hair: h }).await;
+        }
+        // PLAYSOUND <sound_id> —— 播放声音（对齐 C# ActionType.PlaySound + S.PlaySound）
+        "PLAYSOUND" => {
+            let sound_id = arg0().parse::<i32>().unwrap_or(0);
+            let packet = mir2_shared::packets::server::ui_events::PlaySound { sound_id };
+            let mut body = Vec::new();
+            if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
+                let _ = world.gate_ref.tell(SendToClient { session_id, data: body }).await;
+                debug!("NPC PLAYSOUND: id={}", sound_id);
+            }
+        }
+        // OPENBROWSER <url> —— 打开浏览器（对齐 C# ActionType.OpenBrowser + S.OpenBrowser）
+        "OPENBROWSER" => {
+            let url = unquote(arg0()).to_string();
+            let packet = mir2_shared::packets::server::ui_events::OpenBrowser { url: url.clone() };
+            let mut body = Vec::new();
+            if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
+                let _ = world.gate_ref.tell(SendToClient { session_id, data: body }).await;
+                debug!("NPC OPENBROWSER: {}", url);
+            }
         }
         // GLOBALMESSAGE "msg" —— 全服广播（对齐 C# ActionType.GlobalMessage）
         "GLOBALMESSAGE" | "GLOBAL" => {
@@ -853,6 +883,31 @@ async fn exec_action(
         }
         "PARAM3" => {
             flow.param3 = arg0().parse::<i32>().unwrap_or(0);
+        }
+        // REFRESHEFFECTS —— 刷新等级特效（对齐 C# ActionType.RefreshEffects + S.ObjectLevelEffects）
+        "REFRESHEFFECTS" => {
+            if let Some(st) = current_player_state(world, session_id).await {
+                let map_index = st.map_index;
+                let packet = mir2_shared::packets::server::movement::ObjectLevelEffects {
+                    object_id: st.object_id,
+                    level_effects: 0, // Rust 端暂无 LevelEffects 计算（C# SetLevelEffects），先发 0 占位
+                };
+                let mut body = Vec::new();
+                if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
+                    // 广播给同图玩家（对齐 C# player.Broadcast）
+                    let mut targets = Vec::new();
+                    for (sid, r) in &world.players {
+                        if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                            if os.map_index == map_index {
+                                targets.push(*sid);
+                            }
+                        }
+                    }
+                    for sid in targets {
+                        let _ = world.gate_ref.tell(SendToClient { session_id: sid, data: body.clone() }).await;
+                    }
+                }
+            }
         }
         // GROUPTELEPORT <map> <x> <y> —— 组队传送（对齐 C# ActionType.GroupTeleport：目标地图+坐标；x/y 缺省用玩家位置）
         "GROUPTELEPORT" => {
