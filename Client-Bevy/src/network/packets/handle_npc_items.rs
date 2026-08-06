@@ -28,7 +28,7 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::NPCResponse as i16, ServerPacketIds::ObjectStruck as i16, ServerPacketIds::Struck as i16, ServerPacketIds::ObjectHealth as i16, ServerPacketIds::ObjectDied as i16, ServerPacketIds::Death as i16, ServerPacketIds::Revived as i16, ServerPacketIds::ObjectRevived as i16, ServerPacketIds::DamageIndicator as i16, ServerPacketIds::RangeAttack as i16, ServerPacketIds::ObjectRangeAttack as i16, ServerPacketIds::NPCGoods as i16, ServerPacketIds::MoveItem as i16, ServerPacketIds::EquipItem as i16, ServerPacketIds::RemoveItem as i16, ServerPacketIds::UseItem as i16, ServerPacketIds::SplitItem as i16, ServerPacketIds::DropItem as i16, ServerPacketIds::MergeItem as i16, ServerPacketIds::SellItem as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::NPCResponse as i16, ServerPacketIds::ObjectStruck as i16, ServerPacketIds::Struck as i16, ServerPacketIds::ObjectHealth as i16, ServerPacketIds::ObjectDied as i16, ServerPacketIds::Death as i16, ServerPacketIds::Revived as i16, ServerPacketIds::ObjectRevived as i16, ServerPacketIds::DamageIndicator as i16, ServerPacketIds::RangeAttack as i16, ServerPacketIds::ObjectRangeAttack as i16, ServerPacketIds::DuraChanged as i16, ServerPacketIds::DeleteItem as i16, ServerPacketIds::GainedItem as i16, ServerPacketIds::NPCGoods as i16, ServerPacketIds::MoveItem as i16, ServerPacketIds::EquipItem as i16, ServerPacketIds::RemoveItem as i16, ServerPacketIds::UseItem as i16, ServerPacketIds::SplitItem as i16, ServerPacketIds::DropItem as i16, ServerPacketIds::MergeItem as i16, ServerPacketIds::SellItem as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
 
@@ -112,6 +112,41 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
                 combat_evt.write(CombatEvent::Damage { object_id: p.object_id, damage: p.damage, dmg_type: p.damage_type });
             }
         }
+        // #228：物品状态同步（持久度/删除/获得）
+        x if x == ServerPacketIds::DuraChanged as i16 => {
+            if let Ok(p) = experience::DuraChanged::read_body(&mut cur) {
+                server_events.write(ServerEvent::ItemDuraChanged {
+                    unique_id: p.unique_id,
+                    current_dura: p.current_dura,
+                });
+                tracing::debug!(
+                    "🔧 物品耐久变化 uid={} dura={}",
+                    p.unique_id,
+                    p.current_dura
+                );
+            }
+        }
+        x if x == ServerPacketIds::DeleteItem as i16 => {
+            if let Ok(p) = experience::DeleteItem::read_body(&mut cur) {
+                server_events.write(ServerEvent::ItemDeleted {
+                    unique_id: p.unique_id,
+                });
+                tracing::debug!("🗑️ 物品删除 uid={} count={}", p.unique_id, p.count);
+            }
+        }
+        x if x == ServerPacketIds::GainedItem as i16 => {
+            if let Ok(p) = drops::GainedItem::read_body(&mut cur) {
+                server_events.write(ServerEvent::ItemGained {
+                    item: to_inv_item(&p.item),
+                });
+                tracing::debug!(
+                    "🎁 获得物品 uid={} name={}",
+                    p.item.unique_id,
+                    p.item.info.as_ref().map(|i| i.name.as_str()).unwrap_or("?")
+                );
+            }
+        }
+
         // #224：远程攻击（本地玩家 S.RangeAttack / 其他对象 S.ObjectRangeAttack）
         x if x == ServerPacketIds::RangeAttack as i16 => {
             if let Ok(p) = combat::RangeAttack::read_body(&mut cur) {

@@ -1002,6 +1002,51 @@ fn hud_server_events(
                     tracing::info!("💊 使用物品 uid={} 剩余 {}", unique_id, count.saturating_sub(1));
                 }
             }
+            ServerEvent::ItemDuraChanged {
+                unique_id,
+                current_dura,
+            } => {
+                // #228：背包/装备栏按 unique_id 更新当前耐久
+                let mut updated = false;
+                for slot in hud.inventory.items.iter_mut().flatten() {
+                    if slot.unique_id == *unique_id {
+                        slot.current_dura = *current_dura;
+                        updated = true;
+                        break;
+                    }
+                }
+                if !updated {
+                    for slot in hud.equipment.iter_mut().flatten() {
+                        if slot.unique_id == *unique_id {
+                            slot.current_dura = *current_dura;
+                            updated = true;
+                            break;
+                        }
+                    }
+                }
+                tracing::info!("🔧 物品耐久变化 uid={} dura={}", unique_id, current_dura);
+            }
+            ServerEvent::ItemDeleted { unique_id } => {
+                // #228：背包按 unique_id 删除（消耗/删除）
+                let idx = hud
+                    .inventory
+                    .items
+                    .iter()
+                    .position(|s| s.as_ref().map(|it| it.unique_id) == Some(*unique_id));
+                if let Some(idx) = idx {
+                    hud.inventory.items[idx] = None;
+                    tracing::info!("🗑️ 删除物品 uid={}", unique_id);
+                }
+            }
+            ServerEvent::ItemGained { item } => {
+                // #228：获得物品 → 放入第一个空格
+                if let Some(slot) = hud.inventory.items.iter_mut().find(|s| s.is_none()) {
+                    *slot = Some(item.clone());
+                    tracing::info!("🎁 获得物品入包: {} (uid={})", item.name, item.unique_id);
+                } else {
+                    tracing::warn!("🎒 背包已满，无法放入: {}", item.name);
+                }
+            }
         }
     }
 }
