@@ -62,6 +62,12 @@ pub struct ConquestInstance {
     pub gold_storage: u64,
     /// NPC 税率（C# GuildInfo.NPCRate，SETCONQUESTRATE 设置）
     pub tax_rate: u8,
+    /// 行会领地是否挂售（GTSALE/GTCANCELSALE）
+    pub for_sale: bool,
+    /// 挂售价格（GTSALE <price>）
+    pub sale_price: u64,
+    /// 领地剩余租期（天，EXTENDGT 延长）
+    pub rent_days: u32,
 }
 
 /// 控制点占领状态（对应 C# ControlPoints dict 的 entry）
@@ -102,6 +108,9 @@ impl ConquestInstance {
             siege_structure_ids: Vec::new(),
             gold_storage: 0,
             tax_rate: 0,
+            for_sale: false,
+            sale_price: 0,
+            rent_days: 30,
         }
     }
 
