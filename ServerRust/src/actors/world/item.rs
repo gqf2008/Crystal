@@ -1843,6 +1843,13 @@ impl Message<RepairItemRequest> for WorldActor {
         let success = record.actor_ref.ask(crate::actors::player::RepairItem { unique_id: msg.unique_id }).await.unwrap_or(false);
         if success {
             send_system_message(&self.gate_ref, msg.session_id, &format!("修理成功（花费 {} 金币）", repair_cost));
+            // C# RepairItem/SRepairItem：Enqueue(S.RepairItem { UniqueID })
+            let mut body = Vec::new();
+            body.extend_from_slice(&msg.unique_id.to_le_bytes());
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RepairItem as i16, &body),
+            }).await;
             debug!("RepairItem: {} repaired item={} cost={}", state.name, msg.unique_id, repair_cost);
         } else {
             send_system_message(&self.gate_ref, msg.session_id, "修理失败");
