@@ -530,6 +530,27 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         // #226：触发对象状态演示（2s 后开始隐藏/击退/坐下）
                                         object_state_stage = 1;
                                         object_state_timer = Some(std::time::Instant::now());
+                                        // #228：物品状态同步——耐久变化 + 获得物品入包 + 删除物品
+                                        send(
+                                            &to_client,
+                                            &server::experience::DuraChanged {
+                                                unique_id: 9005,
+                                                current_dura: 3,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::drops::GainedItem {
+                                                item: potion_item(2),
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::experience::DeleteItem {
+                                                unique_id: 9010,
+                                                count: 1,
+                                            },
+                                        );
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
                                             send(

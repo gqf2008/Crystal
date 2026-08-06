@@ -61,6 +61,12 @@ pub enum ServerEvent {
     ItemRemoved { unique_id: u64 },
     /// UseItem：使用成功（背包计数减一/移除）
     ItemUsed { unique_id: u64 },
+    /// #228 DuraChanged：物品持久度变化
+    ItemDuraChanged { unique_id: u64, current_dura: u16 },
+    /// #228 DeleteItem：物品删除/消耗
+    ItemDeleted { unique_id: u64 },
+    /// #228 GainedItem：获得物品入包
+    ItemGained { item: InvItem },
     /// Roll：骰子/尤茨结果（npc_id 由 roll 消费端从 NpcDialogState 读取）
     Roll {
         r#type: i32,
