@@ -574,10 +574,10 @@ impl Message<ClientData> for GateActor {
                 forward_sell_item(&self.world_ref, msg.session_id, payload);
             }
             x if x == ClientPacketIds::RepairItem as i16 => {
-                forward_repair_item(&self.world_ref, msg.session_id, payload);
+                forward_repair_item(&self.world_ref, msg.session_id, payload, false);
             }
             x if x == ClientPacketIds::SRepairItem as i16 => {
-                forward_repair_item(&self.world_ref, msg.session_id, payload); // 特殊修理走相同逻辑
+                forward_repair_item(&self.world_ref, msg.session_id, payload, true); // 特殊修理 ×3
             }
             x if x == ClientPacketIds::CraftItem as i16 => {
                 forward_craft_item(&self.world_ref, msg.session_id, payload);
@@ -1552,11 +1552,12 @@ fn forward_repair_item(
     world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
     session_id: SessionId,
     payload: &[u8],
+    special: bool,
 ) {
     if payload.len() < 8 { return; }
     let world_ref = match world_ref { Some(w) => w, None => return };
     let uid = u64::from_le_bytes(payload[..8].try_into().unwrap_or([0; 8]));
-    let _ = world_ref.tell(crate::actors::world::RepairItemRequest { session_id, unique_id: uid }).try_send();
+    let _ = world_ref.tell(crate::actors::world::RepairItemRequest { session_id, unique_id: uid, special }).try_send();
 }
 
 /// RangeAttack: [dir: u8][x: i32][y: i32][target_id: u32][tx: i32][ty: i32]
