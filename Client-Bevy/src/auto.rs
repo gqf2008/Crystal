@@ -5138,6 +5138,10 @@ struct RealVerifyState {
     npc_sent: bool,
     /// NPC 到达后等待服务器位置同步的计时
     npc_wait: f32,
+    /// #304：是否已发送城镇复活（死亡处理）
+    revive_sent: bool,
+    /// #304：连续死亡次数（超过 3 次判定冒烟失败）
+    revive_count: u8,
 }
 
 /// --real-verify：真实服务器交互闭环（#55）
@@ -5173,6 +5177,33 @@ fn real_verify_system(
         return;
     }
     s.t += time.delta_secs();
+
+    // #304：死亡处理——城镇复活（C# TownRevive）。
+    // 测试进行中死亡 → 复活后重置阶段重跑；测试完成后死亡 → 仅复活清理状态（避免角色卡死影响下次冒烟）
+    if hud.dead {
+        if !s.revive_sent {
+            s.revive_sent = true;
+            s.revive_count += 1;
+            net.send_packet(&mir2_shared::packets::client::misc::TownRevive);
+            tracing::warn!("[REAL] 💀 玩家死亡（第 {} 次），发送城镇复活", s.revive_count);
+        }
+        if s.stage < 9 && s.revive_count >= 3 {
+            tracing::warn!("[REAL] ❌ 连续死亡 {} 次，冒烟失败", s.revive_count);
+            s.stage = 9;
+        }
+        return;
+    }
+    if s.revive_sent && s.stage < 9 {
+        s.revive_sent = false;
+        s.tried.clear();
+        control.attack_target = None;
+        s.target = None;
+        s.target_tile = None;
+        s.stage = 1;
+        s.t = 0.0;
+        tracing::info!("[REAL] ✅ 已复活，重置阶段重跑");
+    }
+
     match s.stage {
         0 => {
             if s.t < 8.0 {
@@ -5214,7 +5245,21 @@ fn real_verify_system(
             let Ok((_, pf)) = players.single() else { return };
             let (px, py) =
                 client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+            // #304：优先选被动弱怪（Deer/Doe/Chicken 等，一次可击杀），其次最近非 guard 怪
+            let guard_tiles: Vec<(i32, i32)> = actors
+                .iter()
+                .filter(|(id, _, monster, _)| {
+                    *monster
+                        && monster_names
+                            .iter()
+                            .any(|(mid, mn)| mid.0 == id.0 && mn.0.to_lowercase().contains("guard"))
+                })
+                .map(|(_, tf, _, _)| {
+                    client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y)
+                })
+                .collect();
             let mut best: Option<(u32, i32, i32, i32)> = None;
+            let mut best_prey: Option<(u32, i32, i32, i32)> = None;
             let mut saw_monster = false;
             let mut saw_guard = false;
             for (id, tf, monster, _npc) in &actors {
@@ -5222,11 +5267,13 @@ fn real_verify_system(
                     continue;
                 }
                 saw_monster = true;
-                // 守卫是友好 NPC，攻击会被反杀（#77 实测打死玩家）；不作为猎杀目标
-                if monster_names
+                let name = monster_names
                     .iter()
-                    .any(|(mid, mn)| mid.0 == id.0 && mn.0.to_lowercase().contains("guard"))
-                {
+                    .find(|(mid, _)| mid.0 == id.0)
+                    .map(|(_, n)| n.0.clone())
+                    .unwrap_or_default();
+                // 守卫是友好 NPC，攻击会被反杀（#77 实测打死玩家）；不作为猎杀目标
+                if name.to_lowercase().contains("guard") {
                     saw_guard = true;
                     continue;
                 }
@@ -5237,11 +5284,15 @@ fn real_verify_system(
                 let (mx, my) =
                     client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
                 let d = (mx - px).abs() + (my - py).abs();
-                if best.map(|(_, _, _, bd)| d < bd).unwrap_or(true) {
+                if is_passive_prey(&name) {
+                    if best_prey.map(|(_, _, _, bd)| d < bd).unwrap_or(true) {
+                        best_prey = Some((id.0, mx, my, d));
+                    }
+                } else if best.map(|(_, _, _, bd)| d < bd).unwrap_or(true) {
                     best = Some((id.0, mx, my, d));
                 }
             }
-            let Some((oid, mx, my, d)) = best else {
+            let Some((oid, mx, my, d)) = best_prey.or(best) else {
                 if saw_guard && !saw_monster {
                     tracing::warn!("[REAL] ❌ 图上只有守卫类目标（已跳过），无猎杀目标");
                 } else if s.tried.is_empty() {
@@ -5281,6 +5332,10 @@ fn real_verify_system(
             for (ox, oy) in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
                 let t2 = (mx + ox, my + oy);
                 if !map.in_bounds(t2.0, t2.1) || !map.is_walkable(t2.0, t2.1) {
+                    continue;
+                }
+                // #304：避免站到守卫占用的格（近战会被反杀）
+                if guard_tiles.contains(&t2) {
                     continue;
                 }
                 if let Some(p) = client_bevy::game::pathfinding::find_path(map, (px, py), t2) {
@@ -5368,9 +5423,15 @@ fn real_verify_system(
                     return;
                 }
             }
-            if s.attack_elapsed >= 90.0 {
-                tracing::warn!("[REAL] ⚠️ 90s 内未击杀目标（可能打不过/怪物跑远）");
-                s.stage = 9;
+            // #304：30s 未击杀（有命中但打不动/怪物回血）→ 换目标，不卡死
+            if s.attack_elapsed >= 30.0 {
+                tracing::warn!("[REAL] ⚠️ 30s 内未击杀目标 {}（命中 {}），换目标", tid, probe.hits);
+                s.tried.push(tid);
+                control.attack_target = None;
+                s.target = None;
+                s.target_tile = None;
+                s.stage = 1;
+                s.t = 0.0;
             }
         }
         3 => {
@@ -5486,6 +5547,17 @@ fn real_verify_system(
         }
         _ => {}
     }
+}
+
+/// #304：被动弱怪名单（优先猎杀，避免守卫/高血量目标导致冒烟卡死）
+fn is_passive_prey(name: &str) -> bool {
+    let n = name.to_lowercase();
+    [
+        "deer", "doe", "chicken", "hen", "pig", "sheep", "cow", "duck", "goose", "rabbit",
+        "football", "鹿", "鸡", "猪", "羊", "鸭", "鹅", "兔",
+    ]
+    .iter()
+    .any(|k| n.contains(k))
 }
 
 /// --book-test：技能书学习（#212：使用背包槽 3 技能书 → 等 S.NewMagic → 校验技能列表）
