@@ -644,19 +644,23 @@ async fn eval_one_check(
             compare_i64(count, op, want)
         }
         // CHECKEXACTMON <怪物名> <op> <count> <map> <instance> — 指定怪物数量（对齐 C# CheckType.CheckExactMon）
+        // C#：d.Name.Replace(" ","") 与 param[0] 忽略大小写比较（怪物名去空格）；
+        // 未知怪物名（GetMonsterInfo null）→ failed（-1）。
         "CHECKEXACTMON" => {
             let monster_name = arg0();
             let (op, want) = parse_op_amount(&args[1..]);
             let map_name = args.get(3).map(|s| s.as_str()).unwrap_or("");
             let count = if let Some(mi) = map_index_by_name(world, map_name) {
-                world.monster_name_index
-                    .get(&monster_name.to_lowercase())
-                    .map(|&idx| {
-                        world.monsters.values()
-                            .filter(|m| m.map_index == mi && m.monster_index == idx)
-                            .count() as i64
-                    })
-                    .unwrap_or(-1)
+                // 怪物名是否存在（去空格、忽略大小写）
+                let known = world.monster_name_index.keys()
+                    .any(|k| k.replace(' ', "").eq_ignore_ascii_case(monster_name));
+                if !known {
+                    -1
+                } else {
+                    world.monsters.values()
+                        .filter(|m| m.map_index == mi && m.name.replace(' ', "").eq_ignore_ascii_case(monster_name))
+                        .count() as i64
+                }
             } else {
                 -1
             };
