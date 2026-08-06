@@ -2046,6 +2046,49 @@ impl Message<AddPkPoints> for PlayerActor {
     }
 }
 
+/// NPC 脚本 CHANGEGENDER：修改角色性别（对齐 C# ActionType.ChangeGender）
+pub struct SetGender {
+    pub gender: mir2_shared::enums::MirGender,
+}
+
+impl Message<SetGender> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetGender, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.gender = msg.gender;
+        debug!("Player {} gender changed to {:?}", self.state.name, msg.gender);
+    }
+}
+
+/// NPC 脚本 REMOVESKILL：移除已学技能（对齐 C# ActionType.RemoveSkill + S.RemoveMagic）
+pub struct RemoveMagicWithId {
+    pub spell: i32,
+}
+
+impl Message<RemoveMagicWithId> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: RemoveMagicWithId, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let Some(idx) = self.state.magics.iter().position(|m| m.spell == msg.spell) else {
+            return false;
+        };
+        self.state.magics.remove(idx);
+        // S.RemoveMagic（opcode 118，C# RemoveSkill 语义）
+        if let Ok(spell) = mir2_shared::enums::Spell::try_from(msg.spell as u8) {
+            let pkt = mir2_shared::packets::server::magic::RemoveMagic { spell, hero: false };
+            let mut body = Vec::new();
+            if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &pkt).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: body,
+                }).try_send();
+            }
+        }
+        debug!("Player {} removed magic spell={}", self.state.name, msg.spell);
+        true
+    }
+}
+
 /// PK 值衰减（每 tick 调用）
 pub struct DecayPkPoints;
 

@@ -651,6 +651,14 @@ async fn exec_action(
                 take_item(world, session_id, idx, cnt).await;
             }
         }
+        // INCREASEPKPOINT <amount> —— 增加 PK 值（对齐 C# ActionType.IncreasePkPoint）
+        "INCREASEPKPOINT" | "ADDPKPOINT" => {
+            let amount = arg0().parse::<i32>().unwrap_or(0);
+            if amount > 0 {
+                send_player_msg(world, session_id, crate::actors::player::AddPkPoints { points: amount }).await;
+                debug!("NPC INCREASEPKPOINT: +{}", amount);
+            }
+        }
         // GIVEEXP <amount>
         "GIVEEXP" | "ADDEXP" | "ADD EXP" => {
             let amt = arg0().parse::<i32>().unwrap_or(0);
@@ -733,6 +741,24 @@ async fn exec_action(
                 debug!("NPC MONGEN: '{}' x{} at ({},{}) map {} spawned={}", mob_name, count, tx, ty, map_index, spawned);
             }
         }
+        // MONCLEAR <map名|index> —— 清除指定地图所有怪物（对齐 C# ActionType.MonClear）
+        "MONCLEAR" | "MONCLEARALL" => {
+            let map_ref = arg0();
+            let map_index = if let Ok(idx) = map_ref.parse::<u16>() {
+                idx
+            } else {
+                world.map_infos.values()
+                    .find(|m| m.file_name.eq_ignore_ascii_case(map_ref))
+                    .map(|m| m.index as u16)
+                    .unwrap_or(0)
+            };
+            if map_index > 0 {
+                let cleared = world.clear_monsters_on_map(map_index).await;
+                debug!("NPC MONCLEAR: map {} cleared={}", map_index, cleared);
+            } else {
+                warn!("NPC MONCLEAR: map '{}' not found", map_ref);
+            }
+        }
         // GIVEBUFF <type> <duration_seconds> —— 给玩家加 Buff（对齐 C# ActionType.GiveBuff）
         "GIVEBUFF" => {
             let buff_name = arg0();
@@ -750,6 +776,16 @@ async fn exec_action(
                 warn!("NPC GIVEBUFF: unknown buff type '{}'", buff_name);
             }
         }
+        // REMOVEBUFF <type> —— 移除 Buff（对齐 C# ActionType.RemoveBuff）
+        "REMOVEBUFF" => {
+            let buff_name = arg0();
+            if let Some(bt) = parse_buff_type(buff_name) {
+                send_player_msg(world, session_id, crate::actors::player::RemoveBuff { buff_type: bt }).await;
+                debug!("NPC REMOVEBUFF: '{}'", buff_name);
+            } else {
+                warn!("NPC REMOVEBUFF: unknown buff type '{}'", buff_name);
+            }
+        }
         // GIVESKILL <skill_name|spell_id> <level> —— 学技能（对齐 C# ActionType.GiveSkill，Level 最多 3）
         "GIVESKILL" => {
             let skill_name = arg0();
@@ -761,16 +797,42 @@ async fn exec_action(
                 warn!("NPC GIVESKILL: unknown skill '{}'", skill_name);
             }
         }
+        // REMOVESKILL <skill_name|spell_id> —— 移除技能（对齐 C# ActionType.RemoveSkill + S.RemoveMagic）
+        "REMOVESKILL" => {
+            let skill_name = arg0();
+            if let Some(spell) = resolve_magic_id(&world.magic_infos, skill_name) {
+                send_player_msg(world, session_id, crate::actors::player::RemoveMagicWithId { spell }).await;
+                debug!("NPC REMOVESKILL: spell={}", spell);
+            } else {
+                warn!("NPC REMOVESKILL: unknown skill '{}'", skill_name);
+            }
+        }
         // CHANGECLASS <Warrior|...>
         "CHANGECLASS" => {
             if let Some(cls) = parse_class(arg0()) {
                 send_player_msg(world, session_id, ChangeClass { class: cls }).await;
             }
         }
+        // CHANGEGENDER <male|female|0|1> —— 修改性别（对齐 C# ActionType.ChangeGender）
+        "CHANGEGENDER" => {
+            if let Some(gender) = parse_gender(arg0()) {
+                send_player_msg(world, session_id, crate::actors::player::SetGender { gender }).await;
+                debug!("NPC CHANGEGENDER: {:?}", gender);
+            } else {
+                warn!("NPC CHANGEGENDER: unknown gender '{}'", arg0());
+            }
+        }
         // CHANGEHAIR <style>
         "CHANGEHAIR" => {
             let h = arg0().parse::<u8>().unwrap_or(0);
             send_player_msg(world, session_id, SetHair { hair: h }).await;
+        }
+        // GLOBALMESSAGE "msg" —— 全服广播（对齐 C# ActionType.GlobalMessage）
+        "GLOBALMESSAGE" | "GLOBAL" => {
+            let msg = unquote(arg0()).to_string();
+            if !msg.is_empty() {
+                broadcast_system_message(&world.gate_ref, &world.players, &msg);
+            }
         }
         // LOCALMESSAGE "msg" <type>
         "LOCALMESSAGE" | "MESSAGE" | "SYSMSG" => {
@@ -791,6 +853,38 @@ async fn exec_action(
         }
         "PARAM3" => {
             flow.param3 = arg0().parse::<i32>().unwrap_or(0);
+        }
+        // GROUPTELEPORT <map> <x> <y> —— 组队传送（对齐 C# ActionType.GroupTeleport：目标地图+坐标；x/y 缺省用玩家位置）
+        "GROUPTELEPORT" => {
+            let map_name = arg0();
+            let tx = arg2().parse::<i32>().unwrap_or(0);
+            let ty = arg3().parse::<i32>().unwrap_or(0);
+            let target_map = world.map_infos.values()
+                .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
+                .map(|m| m.index as u16);
+            if let Some(map_index) = target_map {
+                if let Some(st) = current_player_state(world, session_id).await {
+                    let gid = st.group_id;
+                    let (fx, fy) = if tx > 0 && ty > 0 { (tx, ty) } else { (st.x, st.y) };
+                    // 先收集同组在线成员，避免借用冲突
+                    let mut group_sessions = Vec::new();
+                    for (sid, r) in &world.players {
+                        if *sid == session_id { continue; }
+                        if let Ok(Some(mst)) = r.actor_ref.ask(GetPlayerState).await {
+                            if mst.group_id == gid {
+                                group_sessions.push(*sid);
+                            }
+                        }
+                    }
+                    teleport_player(world, session_id, map_index, fx, fy).await;
+                    for sid in &group_sessions {
+                        teleport_player(world, *sid, map_index, fx, fy).await;
+                    }
+                    debug!("NPC GROUPTELEPORT: {} members -> map {} ({},{})", group_sessions.len() + 1, map_index, fx, fy);
+                }
+            } else {
+                warn!("NPC GROUPTELEPORT: map '{}' not found", map_name);
+            }
         }
         // GROUPRECALL —— 组队召回（对齐 C# ActionType.GroupRecall：NPC 版无限制，直接召回组员到玩家位置）
         "GROUPRECALL" | "RECALLGROUP" => {
@@ -904,6 +998,15 @@ async fn exec_action(
 // =============================================================================
 // 辅助：玩家消息发送 / 物品 / 传送 / flag
 // =============================================================================
+
+/// CHANGEGENDER 性别解析：支持 male/female/0/1（大小写不敏感）
+fn parse_gender(s: &str) -> Option<mir2_shared::enums::MirGender> {
+    match s.trim().to_lowercase().as_str() {
+        "male" | "0" => Some(mir2_shared::enums::MirGender::Male),
+        "female" | "1" => Some(mir2_shared::enums::MirGender::Female),
+        _ => None,
+    }
+}
 
 /// GIVEBUFF buff 类型解析：支持 C# BuffType 枚举名（Hiding/SoulShield/...）+ Rust 变体名，大小写不敏感
 fn parse_buff_type(s: &str) -> Option<crate::combat::buff::BuffType> {
@@ -1504,6 +1607,15 @@ You don't have enough Gold!
         assert_eq!(resolve_magic_id(&infos, "fencing"), Some(4));
         assert_eq!(resolve_magic_id(&infos, "99"), None);
         assert_eq!(resolve_magic_id(&infos, "FireBall"), None);
+    }
+
+    #[test]
+    fn parse_gender_accepts_names_and_ids() {
+        assert_eq!(parse_gender("male"), Some(mir2_shared::enums::MirGender::Male));
+        assert_eq!(parse_gender("FEMALE"), Some(mir2_shared::enums::MirGender::Female));
+        assert_eq!(parse_gender("0"), Some(mir2_shared::enums::MirGender::Male));
+        assert_eq!(parse_gender("1"), Some(mir2_shared::enums::MirGender::Female));
+        assert_eq!(parse_gender("x"), None);
     }
 }
 
