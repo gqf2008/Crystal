@@ -77,6 +77,8 @@ pub struct AccountInfo {
     pub storage_password_hash: Option<String>,
     /// Unix timestamp (seconds) of when the password was last changed.
     pub storage_password_last_set: i64,
+    /// 账户积分（NPC 脚本 GIVECREDIT/TAKECREDIT，对齐 C# Account.Credit）
+    pub credit: u64,
 }
 
 impl AccountInfo {
@@ -118,6 +120,7 @@ impl AccountActor {
                 is_online: false,
                 storage_password_hash: None,
                 storage_password_last_set: 0,
+                credit: 0,
             },
         );
 
@@ -139,6 +142,7 @@ impl AccountActor {
                 is_online: false,
                 storage_password_hash: None,
                 storage_password_last_set: 0,
+                credit: 0,
             },
         );
 

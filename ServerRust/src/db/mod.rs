@@ -563,6 +563,8 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     let _ = sqlx::query("ALTER TABLE quests ADD COLUMN time_limit_seconds INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     // Migration: add GM flag to accounts (safe to re-run)
+    let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN credit INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN admin_account INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     // PR #1169: Warehouse password columns (safe to re-run; NULL = no password set)
@@ -839,7 +841,7 @@ pub async fn account_has_storage_password(pool: &DbPool, username: &str) -> anyh
 pub async fn load_account(pool: &DbPool, username: &str) -> anyhow::Result<Option<AccountInfo>> {
     let row = sqlx::query(
         "SELECT username, password_hash, is_online,
-                storage_password_hash, storage_password_last_set
+                storage_password_hash, storage_password_last_set, credit
          FROM accounts WHERE username = ?"
     )
     .bind(username)
@@ -852,13 +854,14 @@ pub async fn load_account(pool: &DbPool, username: &str) -> anyhow::Result<Optio
         is_online: r.get::<i32, _>("is_online") != 0,
         storage_password_hash: r.try_get::<Option<String>, _>("storage_password_hash").ok().flatten(),
         storage_password_last_set: r.try_get::<i64, _>("storage_password_last_set").unwrap_or(0),
+        credit: r.try_get::<i64, _>("credit").unwrap_or(0).max(0) as u64,
     }))
 }
 
 pub async fn load_all_accounts(pool: &DbPool) -> anyhow::Result<Vec<AccountInfo>> {
     let rows = sqlx::query(
         "SELECT username, password_hash, is_online,
-                storage_password_hash, storage_password_last_set
+                storage_password_hash, storage_password_last_set, credit
          FROM accounts"
     )
     .fetch_all(pool)
@@ -870,6 +873,7 @@ pub async fn load_all_accounts(pool: &DbPool) -> anyhow::Result<Vec<AccountInfo>
         is_online: r.get::<i32, _>("is_online") != 0,
         storage_password_hash: r.try_get::<Option<String>, _>("storage_password_hash").ok().flatten(),
         storage_password_last_set: r.try_get::<i64, _>("storage_password_last_set").unwrap_or(0),
+        credit: r.try_get::<i64, _>("credit").unwrap_or(0).max(0) as u64,
     }).collect())
 }
 
@@ -3528,3 +3532,21 @@ mod tests {
     }
 }
 
+/// 读取账户积分（NPC 脚本 CHECKCREDIT）
+pub async fn get_account_credit(pool: &DbPool, username: &str) -> anyhow::Result<u64> {
+    let row = sqlx::query("SELECT credit FROM accounts WHERE username = ?")
+        .bind(username)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(|r| r.get::<i64, _>("credit").max(0) as u64).unwrap_or(0))
+}
+
+/// 增加/减少账户积分（delta 为负数表示减少，下限 0；NPC 脚本 GIVECREDIT/TAKECREDIT）
+pub async fn add_account_credit(pool: &DbPool, username: &str, delta: i64) -> anyhow::Result<()> {
+    sqlx::query("UPDATE accounts SET credit = MAX(credit + ?, 0) WHERE username = ?")
+        .bind(delta)
+        .bind(username)
+        .execute(pool)
+        .await?;
+    Ok(())
+}

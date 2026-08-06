@@ -789,6 +789,46 @@ async fn eval_one_check(
                 cost > 0 && gold >= cost
             }
         }
+        // CHECKCREDIT <op> <amount> — 账户积分比较（对齐 C# CheckType.CheckCredit）
+        "CHECKCREDIT" => {
+            let (op, want) = parse_op_amount(&args[1..]);
+            let credit = if let Some(record) = world.players.get(&session_id) {
+                crate::db::get_account_credit(&world.db_pool, &record.account_username).await.unwrap_or(0) as i64
+            } else {
+                0
+            };
+            compare_i64(credit, op, want)
+        }
+        // ISNEWHUMAN — 账户只有 1 个角色（新玩家，对齐 C# CheckType.IsNewHuman）
+        "ISNEWHUMAN" => {
+            if let Some(record) = world.players.get(&session_id) {
+                let count = crate::db::list_character_summaries(&world.db_pool, &record.account_username).await.unwrap_or_default().len();
+                count <= 1
+            } else {
+                false
+            }
+        }
+        // GROUPCHECKNEARBY — 所有组员在 NPC 附近 9 格（对齐 C# CheckType.GroupCheckNearby）
+        "GROUPCHECKNEARBY" => {
+            // 当前 NPC 位置
+            let Some(&npc_oid) = world.session_npc.get(&session_id) else { return false };
+            let Some(npc) = world.npcs.get(&npc_oid) else { return false };
+            let Some(gid) = player.group_id else { return false };
+            let mut all_nearby = true;
+            for (sid, r) in &world.players {
+                if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                    if os.group_id == Some(gid) {
+                        let dx = (os.x - npc.x).abs() as i64;
+                        let dy = (os.y - npc.y).abs() as i64;
+                        if dx > 9 || dy > 9 {
+                            all_nearby = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            all_nearby
+        }
         // CONQUESTAVAILABLE <index> — 有行会且无人宣战（对齐 C# CheckType.ConquestAvailable：AttackerID == -1）
         "CONQUESTAVAILABLE" => {
             let index = arg0().parse::<i32>().unwrap_or(-1);
@@ -1043,6 +1083,20 @@ async fn exec_action(
                     send_player_msg(world, session_id, crate::actors::player::SetCreature { creature_log: st.creature_log }).await;
                     debug!("NPC CLEARPETS: all pets cleared");
                 }
+            }
+        }
+        // GIVECREDIT <n> —— 增加账户积分（对齐 C# ActionType.GiveCredit）
+        "GIVECREDIT" => {
+            let amount = arg0().parse::<i64>().unwrap_or(0);
+            if amount > 0 {
+                world.npc_change_credit(session_id, amount).await;
+            }
+        }
+        // TAKECREDIT <n> —— 减少账户积分（对齐 C# ActionType.TakeCredit，下限 0）
+        "TAKECREDIT" => {
+            let amount = arg0().parse::<i64>().unwrap_or(0);
+            if amount > 0 {
+                world.npc_change_credit(session_id, -amount).await;
             }
         }
         // GIVEPEARLS <n> —— 增加珍珠（对齐 C# ActionType.GivePearls）

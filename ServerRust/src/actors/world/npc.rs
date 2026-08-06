@@ -932,6 +932,21 @@ impl WorldActor {
     }
 }
 
+impl WorldActor {
+    /// NPC 脚本 GIVECREDIT/TAKECREDIT：增减账户积分（对齐 C# ActionType.GiveCredit/TakeCredit；db 权威）
+    pub(crate) async fn npc_change_credit(&mut self, session_id: u64, delta: i64) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let username = record.account_username.clone();
+        if let Err(e) = db::add_account_credit(&self.db_pool, &username, delta).await {
+            warn!("NPC ChangeCredit: failed for {}: {}", username, e);
+            return;
+        }
+        let current = db::get_account_credit(&self.db_pool, &username).await.unwrap_or(0);
+        send_system_message(&self.gate_ref, session_id, &format!("账户积分变化 {}（当前 {}）", delta, current));
+        debug!("NPC ChangeCredit: {} delta={} current={}", username, delta, current);
+    }
+}
+
 // ============================================================
 // 钓鱼系统
 // ============================================================
