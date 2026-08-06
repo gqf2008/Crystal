@@ -115,6 +115,9 @@ async fn async_main() -> anyhow::Result<()> {
         allow_create_archer: cfg.social.allow_create_archer,
         allow_new_hero: cfg.social.allow_new_hero,
         hero_can_create_class: cfg.social.hero_can_create_class.clone(),
+        mail_cost_per_1k_gold: cfg.social.mail_cost_per_1k_gold,
+        mail_item_insurance_percentage: cfg.social.mail_item_insurance_percentage,
+        mail_free_with_stamp: cfg.social.mail_free_with_stamp,
         guild_war_cost: cfg.social.guild_war_cost,
         guild_war_time: cfg.social.guild_war_time,
     };

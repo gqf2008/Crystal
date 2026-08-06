@@ -320,6 +320,21 @@ impl Message<NpcIsGroupLeader> for SocialActor {
     }
 }
 
+/// WorldActor -> SocialActor: 查询邮件寄送费率（C# Settings.MailCostPer1KGold / MailItemInsurancePercentage / MailFreeWithStamp）
+pub struct NpcGetMailSettings;
+
+impl Message<NpcGetMailSettings> for SocialActor {
+    type Reply = (u32, u32, bool);
+
+    async fn handle(&mut self, _msg: NpcGetMailSettings, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        (
+            self.config.mail_cost_per_1k_gold,
+            self.config.mail_item_insurance_percentage,
+            self.config.mail_free_with_stamp,
+        )
+    }
+}
+
 /// WorldActor -> SocialActor: 查询英雄创建选项（C# Settings.AllowNewHero / Hero_CanCreateClass）
 pub struct NpcGetHeroCreateOptions;
 
@@ -613,6 +628,12 @@ pub struct SocialActorConfig {
     pub allow_new_hero: bool,
     /// 英雄可创建职业（C# Settings.Hero_CanCreateClass[5]）
     pub hero_can_create_class: Vec<bool>,
+    /// 邮件寄金币费用（每 1000 金币，C# Settings.MailCostPer1KGold）
+    pub mail_cost_per_1k_gold: u32,
+    /// 邮件寄物品保险百分比（C# Settings.MailItemInsurancePercentage）
+    pub mail_item_insurance_percentage: u32,
+    /// 邮票免费寄信（C# Settings.MailFreeWithStamp）
+    pub mail_free_with_stamp: bool,
     /// 行会宣战费用（C# Settings.Guild_WarCost = 3000）
     pub guild_war_cost: u32,
     /// 行会战争时长（秒，C# Settings.Guild_WarTime = 180）
@@ -635,6 +656,9 @@ impl Default for SocialActorConfig {
             allow_create_archer: true,
             allow_new_hero: true,
             hero_can_create_class: vec![true; 5],
+            mail_cost_per_1k_gold: 100,
+            mail_item_insurance_percentage: 5,
+            mail_free_with_stamp: true,
             guild_war_cost: 3000,
             guild_war_time: 180,
         }

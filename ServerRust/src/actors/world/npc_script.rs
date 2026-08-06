@@ -472,9 +472,9 @@ pub async fn replace_vars(
     out = out.replace("<$CREDIT>", &credit.to_string());
     out = out.replace("<$credit>", &credit.to_string());
 
-    // 待收取邮件附件数（C# GetMailAwaitingCollectionAmount）
+    // 待收取邮件数（C# GetMailAwaitingCollectionAmount：统计所有未收取邮件，不限附件）
     let parcel_amount = player.mailbox.inbox.iter()
-        .filter(|m| !m.collected && (m.gold > 0 || !m.items.is_empty()))
+        .filter(|m| !m.collected)
         .count();
     out = out.replace("<$PARCELAMOUNT>", &parcel_amount.to_string());
     out = out.replace("<$parcelamount>", &parcel_amount.to_string());
