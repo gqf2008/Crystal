@@ -10,7 +10,7 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 use mir2_shared::enums::MirDirection;
 
-use crate::actor::{depth_z, ActorAnim, LocalPlayer, NetObjectId};
+use crate::actor::{depth_z, ActorAnim, LocalPlayer, NetObjectId, Sitting};
 use crate::map_renderer::{TILE_HEIGHT, TILE_WIDTH};
 use crate::network::{NetConnection, SessionState};
 use crate::scenes::AppState;
@@ -199,11 +199,14 @@ fn apply_net_motions(
             let from = Vec2::new(tf.translation.x, tf.translation.y);
             match motion {
                 NetMotion::Turn { dir, .. } => {
+                    // #573：移动/转身即解除坐下（C# 坐下状态被移动打断）
+                    commands.entity(e).remove::<Sitting>();
                     anim.direction = dir;
                     anim.action = mir2_shared::enums::MirAction::Standing;
                     anim.frame_index = 0;
                 }
                 NetMotion::Walk { x, y, dir, .. } => {
+                    commands.entity(e).remove::<Sitting>();
                     commands.entity(e).insert(MoveTween {
                         from,
                         to: tile_to_world(x, y),
@@ -217,6 +220,7 @@ fn apply_net_motions(
                     anim.frame_index = 0;
                 }
                 NetMotion::Run { x, y, dir, .. } => {
+                    commands.entity(e).remove::<Sitting>();
                     commands.entity(e).insert(MoveTween {
                         from,
                         to: tile_to_world(x, y),

@@ -9,7 +9,7 @@ use bevy::prelude::*;
 
 use crate::actor::{
     ActorAnim, ActorAppearance, LocalPlayer, MonsterName, MountState, NpcAppearance, NpcName,
-    NetObjectId, Player, PlayerName, SpriteLayer,
+    NetObjectId, Player, PlayerName, Sitting, SpriteLayer,
 };
 use crate::game::movement::tile_to_world;
 use crate::game::sound::{play_sound_cached, SoundBank, SoundCache};
@@ -52,7 +52,7 @@ fn apply_object_state_events(
     mut commands: Commands,
     mut events: MessageReader<ServerEvent>,
     mut vis: Query<(&NetObjectId, &mut Visibility)>,
-    mut anim: Query<(&NetObjectId, &mut ActorAnim)>,
+    mut anim: Query<(Entity, &NetObjectId, &mut ActorAnim)>,
     mut transforms: Query<(&NetObjectId, &mut Transform)>,
     mounts: Query<(Entity, &NetObjectId, Option<&MountState>)>,
     poisons: Query<(Entity, &NetObjectId, Option<&crate::actor::PoisonTint>)>,
@@ -101,7 +101,7 @@ fn apply_object_state_events(
                 object_id,
                 direction,
             } => {
-                let found = anim.iter().any(|(id, _)| id.0 == object_id);
+                let found = anim.iter().any(|(_, id, _)| id.0 == object_id);
                 tracing::debug!(
                     "[OBJSTATE] 坐下 id={} dir={} found={}",
                     object_id,
@@ -113,13 +113,15 @@ fn apply_object_state_events(
                     mir2_shared::enums::MirAction::SitDown,
                 )
                 .is_some();
-                for (id, mut a) in &mut anim {
+                for (e, id, mut a) in &mut anim {
                     if id.0 == object_id {
                         a.direction = direction;
                         if has_sit {
                             a.action = mir2_shared::enums::MirAction::SitDown;
                             a.frame_index = 0;
                         }
+                        // #573：坐下标记——演示驱动不再转向（C# 坐姿对象不自动转身）
+                        commands.entity(e).insert(Sitting);
                         break;
                     }
                 }
@@ -138,7 +140,7 @@ fn apply_object_state_events(
                         break;
                     }
                 }
-                for (id, mut a) in &mut anim {
+                for (_e, id, mut a) in &mut anim {
                     if id.0 == object_id {
                         a.direction = direction;
                         break;

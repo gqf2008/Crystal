@@ -122,6 +122,10 @@ pub struct MountState {
     pub mount_type: i16,
 }
 
+/// #573 坐下标记（ObjectSitDown 时插入；收到 Walk/Run/Turn 时移除；演示驱动不再转向）
+#[derive(Component)]
+pub struct Sitting;
+
 #[derive(Component)]
 pub enum DemoBehavior {
     /// 玩家：绕方块行走（平滑插值，一格 0.6s）
