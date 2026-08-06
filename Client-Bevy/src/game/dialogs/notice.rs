@@ -13,9 +13,10 @@ use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
 };
 
-/// 状态
+/// 状态（#256：S.UpdateNotice 服务器公告，C# Notice: Title + Message）
 #[derive(Resource, Default)]
 pub struct NoticeState {
+    pub title: String,
     pub message: String,
 }
 
@@ -37,8 +38,9 @@ impl Plugin for NoticePlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_notice);
         app.add_systems(
             Update,
-            (notice_ui_system, ui_button_system)
+            (notice_server_events, notice_ui_system, ui_button_system)
                 .chain()
+                .after(crate::network::network_system)
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -117,18 +119,29 @@ fn notice_ui_system(
             mgr.close(DialogKind::Notice);
         }
     }
-    const NOTICE_LINES: [&str; 4] = [
-        "—— 服务器公告 ——",
-        "欢迎来到传奇2 Bevy 移植版",
-        "本客户端为独立 Bevy worktree",
-        "全部对话框已按原版 C# 对齐",
-    ];
+    const HEADER: &str = "—— 服务器公告 ——";
     for (mut text, line) in &mut lines {
         text.0 = match line.0 {
-            i if i < 4 => NOTICE_LINES[i].to_string(),
-            i if i == 4 => notice.message.clone(),
+            0 => HEADER.to_string(),
+            1 => notice.title.clone(),
+            2 => notice.message.clone(),
             _ => String::new(),
         };
     }
-    notice.message = format!("{} 对话框", "公告");
+}
+
+/// #256：S.UpdateNotice → 打开公告对话框并更新内容
+fn notice_server_events(
+    mut mgr: ResMut<DialogManager>,
+    mut notice: ResMut<NoticeState>,
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+) {
+    for ev in events.read() {
+        if let crate::network::server_event::ServerEvent::NoticeUpdated { title, message } = ev {
+            notice.title = title.clone();
+            notice.message = message.clone();
+            mgr.open.push(DialogKind::Notice);
+            tracing::info!("📢 服务器公告: {} - {}", title, message);
+        }
+    }
 }

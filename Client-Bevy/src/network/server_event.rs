@@ -106,6 +106,8 @@ pub enum ServerEvent {
     CompassTarget { x: i32, y: i32 },
     /// #254 SendMemberLocation：小队成员位置
     MemberLocation { name: String, x: i32, y: i32 },
+    /// #256 UpdateNotice：服务器公告（C# Notice: Title + Message）
+    NoticeUpdated { title: String, message: String },
     /// Roll：骰子/尤茨结果（npc_id 由 roll 消费端从 NpcDialogState 读取）
     Roll {
         r#type: i32,

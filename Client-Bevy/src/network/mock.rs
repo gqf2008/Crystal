@@ -704,6 +704,46 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 location: mir2_shared::Point { x: 356, y: 350 },
                                             },
                                         );
+                                        // #256：公告 + 杂项协议
+                                        send(
+                                            &to_client,
+                                            &server::ui_events::UpdateNotice {
+                                                notice: mir2_shared::data::notice::Notice {
+                                                    title: "服务器公告".to_string(),
+                                                    message: "欢迎来到传奇2
+本次为 Bevy 迁移测试".to_string(),
+                                                },
+                                            },
+                                        );
+                                        tracing::info!("[MOCK] 已发送 UpdateNotice");
+                                        send(
+                                            &to_client,
+                                            &server::item::ItemSealChanged {
+                                                grid_type: mir2_shared::enums::MirGridType::Inventory,
+                                                unique_id: 9005,
+                                                expiry_date: 0,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::social_system::TransformUpdate {
+                                                object_id: 103,
+                                                transform_type: 2,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::ui_events::Opendoor {
+                                                door_index: 1,
+                                                close: false,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::ui_events::OpenBrowser {
+                                                url: "https://github.com/gqf2008/Crystal".to_string(),
+                                            },
+                                        );
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
                                             send(
