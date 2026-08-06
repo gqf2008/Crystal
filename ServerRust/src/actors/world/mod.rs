@@ -530,7 +530,8 @@ const SPELL_EXPLOSIVE_TRAP: u8 = mir2_shared::enums::Spell::ExplosiveTrap as u8;
 const SPELL_GREAT_FIREBALL: u8 = mir2_shared::enums::Spell::GreatFireBall as u8; // 37
 const SPELL_THUNDERBOLT: u8 = mir2_shared::enums::Spell::ThunderBolt as u8;    // 39
 const SPELL_FROST_CRUNCH: u8 = mir2_shared::enums::Spell::FrostCrunch as u8;   // 44
-const SPELL_VAMPIRISM: u8 = mir2_shared::enums::Spell::Vampirism as u8;        // 48
+const SPELL_VAMPIRISM: u8 = mir2_shared::enums::Spell::Vampirism as u8;
+const SPELL_SOUL_FIREBALL: u8 = mir2_shared::enums::Spell::SoulFireBall as u8; // 64 道士·灵魂火球（MAC 弹道）        // 48
 // 即时 AoE 类法术（任务4）
 const SPELL_FIREBANG: u8 = mir2_shared::enums::Spell::FireBang as u8;          // 41
 const SPELL_ICE_STORM: u8 = mir2_shared::enums::Spell::IceStorm as u8;         // 49
