@@ -424,6 +424,7 @@ fn buff_tag(t: &crate::combat::buff::BuffType) -> u8 {
         BuffType::Frozen => 20,
         BuffType::McBoost { .. } => 21,
         BuffType::ScBoost { .. } => 22,
+        BuffType::Transform { .. } => 23,
     }
 }
 

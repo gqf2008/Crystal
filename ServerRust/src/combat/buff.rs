@@ -51,6 +51,8 @@ pub enum BuffType {
     Slow { percent: i32 },
     /// 冰冻（Frozen poison 的 buff 表现，完全无法行动）
     Frozen,
+    /// 变身（C# BuffType.Transform：使用 Transform 面具/卷轴，values=shape 客户端渲染变身外观）
+    Transform { shape: i16 },
 }
 
 /// Buff 实例

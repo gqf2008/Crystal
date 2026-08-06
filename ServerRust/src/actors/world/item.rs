@@ -459,6 +459,8 @@ impl Message<UseItemRequest> for WorldActor {
             || item_type == 17 // Scroll
             || item_type == 20 // Book
             || item_type == 27 // Food
+            || item_type == 36 // Pets（C#：蛋/智能宠物物品使用后消耗）
+            || item_type == 37 // Transform（C#：变身面具/卷轴）
             || (item_type == 17 && item_shape == 12); // LotteryTicket（C# Scroll shape 12）
         if !usable {
             send_system_message(&self.gate_ref, msg.session_id, "该物品无法使用");
@@ -886,6 +888,25 @@ impl Message<UseItemRequest> for WorldActor {
                     } else {
                         send_system_message(&self.gate_ref, msg.session_id, "这本技能书无法使用");
                     }
+                }
+                // Pets（C# UseItem Pets：shape>=20 为智能宠物物品；shape<20（蛋）无效果但消耗）
+                t if t == 36 => {
+                    if db.shape >= 20 {
+                        send_system_message(&self.gate_ref, msg.session_id, "智能宠物功能暂未开放");
+                    }
+                    debug!("Pets: {} used pets item shape={}", player_state.name, db.shape);
+                }
+                // Transform（C# UseItem Transform：AddBuff(BuffType.Transform, duration=Durability秒, values=shape)）
+                t if t == 37 => {
+                    use crate::combat::buff::{BuffType, BuffInstance};
+                    // Rust buff tick 每 0.5s 一次（TickBuff 每 5 world tick），约等于 Durability 秒
+                    let ticks = (db.durability.max(1) as u32).saturating_mul(2);
+                    let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff {
+                        buff: BuffInstance::new(BuffType::Transform { shape: db.shape as i16 }, ticks, 1),
+                    }).await;
+                    send_system_message(&self.gate_ref, msg.session_id,
+                        &format!("变身效果已生效，持续 {} 秒", db.durability.max(1)));
+                    debug!("Transform: {} used transform item shape={} ticks={}", player_state.name, db.shape, ticks);
                 }
                 _ => {}
             }
