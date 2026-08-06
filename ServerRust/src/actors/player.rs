@@ -1637,6 +1637,54 @@ impl Message<LearnHeroMagic> for PlayerActor {
     }
 }
 
+/// NPC 脚本 HEROGIVESKILL：英雄学技能并设等级（对齐 C# HeroGiveSkill，Level<=3）
+pub struct LearnHeroMagicWithLevel {
+    pub spell: i32,
+    pub level: u8,
+}
+
+impl Message<LearnHeroMagicWithLevel> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: LearnHeroMagicWithLevel, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        if self.state.hero_magics.iter().any(|m| m.spell == msg.spell) {
+            return false;
+        }
+        let mut magic = PlayerMagic::new(msg.spell);
+        magic.level = msg.level.min(3);
+        self.state.hero_magics.push(magic);
+        true
+    }
+}
+
+/// NPC 脚本 HEROREMOVESKILL：移除英雄技能（对齐 C# HeroRemoveSkill + S.RemoveMagic hero）
+pub struct RemoveHeroMagicWithId {
+    pub spell: i32,
+}
+
+impl Message<RemoveHeroMagicWithId> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: RemoveHeroMagicWithId, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let Some(idx) = self.state.hero_magics.iter().position(|m| m.spell == msg.spell) else {
+            return false;
+        };
+        self.state.hero_magics.remove(idx);
+        if let Ok(spell) = mir2_shared::enums::Spell::try_from(msg.spell as u8) {
+            let pkt = mir2_shared::packets::server::magic::RemoveMagic { spell, hero: true };
+            let mut body = Vec::new();
+            if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &pkt).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: body,
+                }).try_send();
+            }
+        }
+        true
+    }
+}
+
+
 /// 装备物品
 pub struct InventoryEquipItem {
     pub grid: u8,

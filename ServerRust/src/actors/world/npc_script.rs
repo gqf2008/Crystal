@@ -919,6 +919,27 @@ async fn exec_action(
                 debug!("NPC TAKEPEARLS: -{}", amount);
             }
         }
+        // HEROGIVESKILL <技能名|ID> <level> —— 英雄学技能（对齐 C# ActionType.HeroGiveSkill）
+        "HEROGIVESKILL" => {
+            let skill_name = arg0();
+            if let Some(spell) = resolve_magic_id(&world.magic_infos, skill_name) {
+                let level = arg1().parse::<u8>().unwrap_or(0).min(3);
+                send_player_msg(world, session_id, crate::actors::player::LearnHeroMagicWithLevel { spell, level }).await;
+                debug!("NPC HEROGIVESKILL: spell={} level={}", spell, level);
+            } else {
+                warn!("NPC HEROGIVESKILL: unknown skill '{}'", skill_name);
+            }
+        }
+        // HEROREMOVESKILL <技能名|ID> —— 移除英雄技能（对齐 C# ActionType.HeroRemoveSkill）
+        "HEROREMOVESKILL" => {
+            let skill_name = arg0();
+            if let Some(spell) = resolve_magic_id(&world.magic_infos, skill_name) {
+                send_player_msg(world, session_id, crate::actors::player::RemoveHeroMagicWithId { spell }).await;
+                debug!("NPC HEROREMOVESKILL: spell={}", spell);
+            } else {
+                warn!("NPC HEROREMOVESKILL: unknown skill '{}'", skill_name);
+            }
+        }
         // CANGAINEXP <true|false> —— 设置是否可获得经验（对齐 C# ActionType.CanGainExp）
         "CANGAINEXP" => {
             let can = arg0().eq_ignore_ascii_case("true") || arg0() == "1";
