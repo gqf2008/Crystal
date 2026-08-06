@@ -34,6 +34,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--storage-resize-test") {
         app.add_systems(Update, auto_storage_resize_test);
     }
+    // --level-fx-test: 升级表现链路（#283，击杀 → mock 回发 LevelChanged+ObjectLeveled → 校验）
+    if std::env::args().any(|a| a == "--level-fx-test") {
+        app.add_systems(Update, auto_level_fx_test);
+    }
     // --group-test: 自动组队邀请链路（自动化验证用，配合 --group-accept）
     if std::env::args().any(|a| a == "--group-test") {
         app.add_systems(Update, auto_group_test);
@@ -735,6 +739,15 @@ fn auto_storage_test(
         }
         2 => {
             if *t < 2.0 {
+                return;
+            }
+            // #200/#283：mock 默认有仓库密码——先解锁再存取
+            if storage.unlock_panel {
+                net.send_packet(&mir2_shared::packets::client::storage::UnlockStorage {
+                    password: "123456".to_string(),
+                });
+                tracing::info!("[STORAGETEST] 仓库需解锁，发送密码");
+                *t = 0.0;
                 return;
             }
             if storage.visible {
@@ -8506,24 +8519,106 @@ fn auto_storage_unlock_test(
 /// --storage-resize-test：仓库扩容链路（#281）
 /// 流程：进游戏 → mock 回发 ResizeStorage(80) → 断言 StorageState.items.len()==80
 fn auto_storage_resize_test(
+    net: ResMut<client_bevy::network::NetConnection>,
     state: Res<State<client_bevy::scenes::AppState>>,
     time: Res<Time>,
     storage: Res<client_bevy::game::dialogs::storage::StorageState>,
     mut t: Local<f32>,
-    mut done: Local<bool>,
+    mut stage: Local<u8>,
 ) {
     use client_bevy::scenes::AppState;
-    if *state != AppState::Game || *done {
+    if *state != AppState::Game {
         return;
     }
     *t += time.delta_secs();
-    if *t < 8.0 {
+    match *stage {
+        0 => {
+            if *t < 6.0 {
+                return;
+            }
+            // mock 的 ResizeStorage(80) 在施法演示批次里回发
+            net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                spell: mir2_shared::enums::Spell::FireBall,
+                direction: mir2_shared::enums::MirDirection::Down,
+                target_id: 101,
+                location: mir2_shared::Point { x: 353, y: 352 },
+            });
+            tracing::info!("[SRESIZE] 🔥 施法触发演示批次");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 2.0 {
+                return;
+            }
+            if storage.items.len() == 80 {
+                tracing::info!("[SRESIZE] ✅ PASS 仓库扩容 size=80");
+            } else {
+                tracing::error!("[SRESIZE] ❌ FAIL size={} 期望 80", storage.items.len());
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+
+/// --level-fx-test：升级表现链路（#283）
+/// 流程：进游戏 → 连续攻击击杀怪物 → mock 回发 LevelChanged+ObjectLeveled → 断言 hud.level 提升
+fn auto_level_fx_test(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut hits: Local<u32>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
         return;
     }
-    if storage.items.len() == 80 {
-        tracing::info!("[SRESIZE] ✅ PASS 仓库扩容 size=80");
-    } else {
-        tracing::error!("[SRESIZE] ❌ FAIL size={} 期望 80", storage.items.len());
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 6.0 {
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::combat::Attack {
+                direction: mir2_shared::enums::MirDirection::Down,
+                spell: mir2_shared::enums::Spell::None,
+            });
+            tracing::info!("[LEVELFX] 开始攻击（第 {} 击）", *hits + 1);
+            *hits = 1;
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 1.0 {
+                return;
+            }
+            *hits += 1;
+            net.send_packet(&mir2_shared::packets::client::combat::Attack {
+                direction: mir2_shared::enums::MirDirection::Down,
+                spell: mir2_shared::enums::Spell::None,
+            });
+            *t = 0.0;
+            if *hits >= 9 {
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t < 2.0 {
+                return;
+            }
+            if hud.level >= 31 {
+                tracing::info!("[LEVELFX] ✅ PASS 升级生效 level={}", hud.level);
+            } else {
+                tracing::error!("[LEVELFX] ❌ FAIL level={} 期望 >=31", hud.level);
+            }
+            *stage = 9;
+        }
+        _ => {}
     }
-    *done = true;
 }

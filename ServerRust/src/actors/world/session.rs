@@ -149,6 +149,7 @@ impl Message<StartGameRequest> for WorldActor {
             msg.session_id,
             map_index,
             self.gate_ref.clone(),
+            self.self_ref.clone().expect("world self_ref set"),
         ));
 
         // 加载地图 — 优先用 DB 中的 map_infos 获取文件名

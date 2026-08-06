@@ -131,6 +131,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             let mut player_dead_since: Option<std::time::Instant> = None;
             // #200：仓库密码（MOCK 默认 123456，解锁后仓库才打开）
             let mut mock_storage_password: Option<String> = Some("123456".to_string());
+            // #283：首次击杀触发本地升级演示（LevelChanged + ObjectLeveled）
+            let mut mock_leveled_up = false;
             // #222：轮回术复活请求状态
             let mut mock_reincarnation_offered = false;
             // #226：对象状态演示（隐藏/显形/坐下/击退/传送）状态机
@@ -466,6 +468,28 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                     death_type: 0,
                                                 },
                                             );
+                                            // #283：首次击杀触发本地升级（LevelChanged + ObjectLeveled 演示）
+                                            if !mock_leveled_up {
+                                                mock_leveled_up = true;
+                                                player_stats.level += 1;
+                                                let max_exp = MockPlayerStats::max_exp_for(player_stats.level);
+                                                send(
+                                                    &to_client,
+                                                    &server::experience::LevelChanged {
+                                                        level: player_stats.level,
+                                                        experience: player_stats.exp,
+                                                        max_experience: max_exp,
+                                                    },
+                                                );
+                                                send(
+                                                    &to_client,
+                                                    &server::experience::ObjectLeveled {
+                                                        object_id: 100,
+                                                        level: player_stats.level,
+                                                    },
+                                                );
+                                                tracing::info!("⬆️ [MOCK] 玩家升级到 Lv.{}", player_stats.level);
+                                            }
                                             // 掉落：40% 金币 / 30% 药水 / 20% 装备 / 10% 无（#50）
                                             // 伪随机：时间微秒 + 击杀序号混合（毫秒级时间戳下 subsec_micros 末位仍有变化）
                                             let roll = (std::time::SystemTime::now()

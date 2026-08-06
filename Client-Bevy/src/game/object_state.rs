@@ -8,12 +8,16 @@
 use bevy::prelude::*;
 
 use crate::actor::{
-    ActorAnim, ActorAppearance, MonsterName, MountState, NpcAppearance, NpcName, NetObjectId,
-    PlayerName, SpriteLayer,
+    ActorAnim, ActorAppearance, LocalPlayer, MonsterName, MountState, NpcAppearance, NpcName,
+    NetObjectId, Player, PlayerName, SpriteLayer,
 };
 use crate::game::movement::tile_to_world;
+use crate::game::sound::{play_sound_cached, SoundBank, SoundCache};
+use crate::map_renderer::GameLibraries;
 use crate::network::server_event::ServerEvent;
+use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
+use crate::ui::sprite_ui::{ui_image, UiImageCache};
 
 pub struct ObjectStatePlugin;
 
@@ -33,6 +37,8 @@ impl Plugin for ObjectStatePlugin {
                 apply_object_state_events,
                 apply_player_update_events,
                 apply_info_cache_events,
+                apply_level_up_fx_events,
+                advance_level_up_fx,
             )
                 .after(crate::network::network_system)
                 .run_if(in_state(AppState::Game)),
@@ -323,6 +329,101 @@ fn apply_info_cache_events(mut events: MessageReader<ServerEvent>, mut cache: Re
                 cache.npcs.insert(info.object_id, info.clone());
             }
             _ => {}
+        }
+    }
+}
+
+/// #283：升级特效（C# Effect(Libraries.Magic2, 1180, 16, 2500, ob)）
+#[derive(Component)]
+struct LevelUpFx {
+    t: f32,
+    dur: f32,
+    frames: u32,
+    /// Magic2 起始帧（1180）
+    base: usize,
+}
+
+/// #283：ObjectLeveled → 目标对象升级特效 + LevelUp 音效；本地玩家 LevelChanged 同样播放
+fn apply_level_up_fx_events(
+    mut commands: Commands,
+    mut events: MessageReader<ServerEvent>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    bank: Res<SoundBank>,
+    mut sound_cache: ResMut<SoundCache>,
+    mut assets: ResMut<Assets<AudioSource>>,
+    actors: Query<(&NetObjectId, &Transform)>,
+    local: Query<&Transform, (With<LocalPlayer>, With<Player>)>,
+) {
+    for ev in events.read() {
+        match ev {
+            ServerEvent::ObjectLeveled { object_id, .. } => {
+                for (id, tf) in &actors {
+                    if id.0 == *object_id {
+                        spawn_level_up_fx(&mut commands, &mut libs, &mut images, &mut cache, tf.translation);
+                        play_sound_cached(&mut commands, &mut assets, &bank, &mut sound_cache, 10156);
+                        tracing::info!("✨ 对象 {} 升级特效", object_id);
+                    }
+                }
+            }
+            ServerEvent::LevelChanged { .. } => {
+                if let Ok(tf) = local.single() {
+                    spawn_level_up_fx(&mut commands, &mut libs, &mut images, &mut cache, tf.translation);
+                    play_sound_cached(&mut commands, &mut assets, &bank, &mut sound_cache, 10156);
+                    tracing::info!("✨ 本地玩家升级特效");
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// 生成升级特效实体（Magic2[1180..1195] 16 帧 2.5s，跟随对象当前位置）
+fn spawn_level_up_fx(
+    commands: &mut Commands,
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    cache: &mut UiImageCache,
+    pos: Vec3,
+) {
+    let Some(handle) = ui_image(libs, images, cache, LibraryName::Magic2, 1180) else {
+        return;
+    };
+    commands.spawn((
+        LevelUpFx {
+            t: 0.0,
+            dur: 2.5,
+            frames: 16,
+            base: 1180,
+        },
+        Sprite {
+            image: handle,
+            ..default()
+        },
+        bevy::sprite::Anchor::CENTER,
+        Transform::from_translation(pos),
+    ));
+}
+
+/// 推进升级特效帧并到期销毁
+fn advance_level_up_fx(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+    mut q: Query<(Entity, &mut LevelUpFx, &mut Sprite)>,
+) {
+    for (e, mut fx, mut sprite) in &mut q {
+        fx.t += time.delta_secs();
+        if fx.t >= fx.dur {
+            commands.entity(e).despawn();
+            continue;
+        }
+        let idx = (fx.t / fx.dur * fx.frames as f32).floor() as usize;
+        if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Magic2, fx.base + idx) {
+            sprite.image = h;
         }
     }
 }
