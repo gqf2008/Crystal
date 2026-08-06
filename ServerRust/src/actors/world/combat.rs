@@ -1121,6 +1121,27 @@ impl Message<MagicRequest> for WorldActor {
             .map(|m| m.level)
             .unwrap_or(0);
 
+        // C#：施法广播 S.ObjectSpell 给同图其他玩家（ObjectID + 位置 + Spell）
+        let spell_enum = mir2_shared::enums::Spell::try_from(msg.spell).unwrap_or(mir2_shared::enums::Spell::None);
+        let obj_spell = mir2_shared::packets::server::magic_combat::ObjectSpell {
+            object_id: state.object_id,
+            location_x: state.x,
+            location_y: state.y,
+            spell: spell_enum,
+        };
+        let mut ob = Vec::new();
+        if obj_spell.write_body(&mut ob).is_ok() {
+            let pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectSpell as i16, &ob);
+            for (sid, r) in &self.players {
+                if *sid == msg.session_id { continue; }
+                if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                    if os.map_index == state.map_index {
+                        let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: pkt.clone() }).await;
+                    }
+                }
+            }
+        }
+
         // Global timestamp for CD + XP
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
