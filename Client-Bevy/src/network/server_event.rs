@@ -35,6 +35,16 @@ pub enum ServerEvent {
     ObjectLeveled { object_id: u32, level: u16 },
     /// #285 NewChatItem：聊天物品信息（C# S.NewChatItem → ChatItemCache，供聊天链接解析）
     ChatItemReceived { item: InvItem },
+    /// #289 LoginBanned：登录被封禁（reason + 到期 ticks）
+    LoginBanned { reason: String, expiry_date: i64 },
+    /// #289 StartGameBanned：进游戏被封禁
+    StartGameBanned { reason: String, expiry_date: i64 },
+    /// #289 StartGameDelay：进游戏延迟（毫秒）
+    StartGameDelay { milliseconds: i64 },
+    /// #289 LogOutFailed：登出失败
+    LogOutFailed,
+    /// #289 ReturnToLogin：服务端要求返回登录界面
+    ReturnToLogin,
     /// #279 PlayerUpdate：玩家外观刷新（换装/光照，C# S.PlayerUpdate）
     PlayerUpdate {
         object_id: u32,

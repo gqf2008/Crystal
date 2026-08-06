@@ -28,7 +28,7 @@ pub(crate) fn handle_auth(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::Connected as i16, ServerPacketIds::Disconnect as i16, ServerPacketIds::ClientVersion as i16, ServerPacketIds::NewAccount as i16, ServerPacketIds::ChangePassword as i16, ServerPacketIds::Login as i16, ServerPacketIds::LoginSuccess as i16, ServerPacketIds::StartGame as i16, ServerPacketIds::NewCharacter as i16, ServerPacketIds::NewCharacterSuccess as i16, ServerPacketIds::DeleteCharacter as i16, ServerPacketIds::DeleteCharacterSuccess as i16, ServerPacketIds::MapChanged as i16, ServerPacketIds::NewMapInfo as i16, ServerPacketIds::AwakeningNeedMaterials as i16, ServerPacketIds::AwakeningLockedItem as i16, ServerPacketIds::Awakening as i16, ServerPacketIds::Roll as i16, ServerPacketIds::ObjectPlayer as i16, ServerPacketIds::ObjectMonster as i16, ServerPacketIds::ObjectNpc as i16, ServerPacketIds::ObjectRemove as i16, ServerPacketIds::ObjectItem as i16, ServerPacketIds::ObjectGold as i16, ServerPacketIds::ObjectHarvest as i16, ServerPacketIds::ObjectHarvested as i16, ServerPacketIds::ObjectSneaking as i16, ServerPacketIds::ObjectLevelEffects as i16, ServerPacketIds::ObjectDeco as i16, ServerPacketIds::TransformUpdate as i16, ServerPacketIds::ObjectName as i16, ServerPacketIds::UserName as i16, ServerPacketIds::ChatItemStats as i16, ServerPacketIds::InTrapRock as i16, ServerPacketIds::UserDashAttack as i16, ServerPacketIds::ObjectDashAttack as i16, ServerPacketIds::TeleportIn as i16, ServerPacketIds::SetConcentration as i16, ServerPacketIds::SetElemental as i16, ServerPacketIds::ColourChanged as i16, ServerPacketIds::ObjectGuildNameChanged as i16, ServerPacketIds::NPCUpdate as i16, ServerPacketIds::NPCImageUpdate as i16, ServerPacketIds::GainedCredit as i16, ServerPacketIds::LoseCredit as i16, ServerPacketIds::UserInformation as i16, ServerPacketIds::HealthChanged as i16, ServerPacketIds::UserLocation as i16, ServerPacketIds::GainedGold as i16, ServerPacketIds::GainExperience as i16, ServerPacketIds::LoseGold as i16, ServerPacketIds::TimeOfDay as i16, ServerPacketIds::LogOutSuccess as i16, ServerPacketIds::ChangeAMode as i16, ServerPacketIds::ChangePMode as i16, ServerPacketIds::LevelChanged as i16, ServerPacketIds::ObjectLeveled as i16, ServerPacketIds::ObjectTurn as i16, ServerPacketIds::ObjectWalk as i16, ServerPacketIds::ObjectRun as i16, ServerPacketIds::ObjectHide as i16, ServerPacketIds::ObjectShow as i16, ServerPacketIds::ObjectSitDown as i16, ServerPacketIds::Pushed as i16, ServerPacketIds::ObjectPushed as i16, ServerPacketIds::ObjectTeleportOut as i16, ServerPacketIds::ObjectTeleportIn as i16, ServerPacketIds::MountUpdate as i16, ServerPacketIds::ObjectAttack as i16, ServerPacketIds::UserDash as i16, ServerPacketIds::ObjectDash as i16, ServerPacketIds::UserDashFail as i16, ServerPacketIds::ObjectDashFail as i16, ServerPacketIds::UserBackStep as i16, ServerPacketIds::ObjectBackStep as i16, ServerPacketIds::UserAttackMove as i16, ServerPacketIds::Poisoned as i16, ServerPacketIds::ObjectPoisoned as i16, ServerPacketIds::Chat as i16, ServerPacketIds::ObjectChat as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::Connected as i16, ServerPacketIds::Disconnect as i16, ServerPacketIds::ClientVersion as i16, ServerPacketIds::NewAccount as i16, ServerPacketIds::ChangePassword as i16, ServerPacketIds::Login as i16, ServerPacketIds::LoginSuccess as i16, ServerPacketIds::StartGame as i16, ServerPacketIds::NewCharacter as i16, ServerPacketIds::NewCharacterSuccess as i16, ServerPacketIds::DeleteCharacter as i16, ServerPacketIds::DeleteCharacterSuccess as i16, ServerPacketIds::MapChanged as i16, ServerPacketIds::NewMapInfo as i16, ServerPacketIds::AwakeningNeedMaterials as i16, ServerPacketIds::AwakeningLockedItem as i16, ServerPacketIds::Awakening as i16, ServerPacketIds::Roll as i16, ServerPacketIds::ObjectPlayer as i16, ServerPacketIds::ObjectMonster as i16, ServerPacketIds::ObjectNpc as i16, ServerPacketIds::ObjectRemove as i16, ServerPacketIds::ObjectItem as i16, ServerPacketIds::ObjectGold as i16, ServerPacketIds::ObjectHarvest as i16, ServerPacketIds::ObjectHarvested as i16, ServerPacketIds::ObjectSneaking as i16, ServerPacketIds::ObjectLevelEffects as i16, ServerPacketIds::ObjectDeco as i16, ServerPacketIds::TransformUpdate as i16, ServerPacketIds::ObjectName as i16, ServerPacketIds::UserName as i16, ServerPacketIds::ChatItemStats as i16, ServerPacketIds::InTrapRock as i16, ServerPacketIds::UserDashAttack as i16, ServerPacketIds::ObjectDashAttack as i16, ServerPacketIds::TeleportIn as i16, ServerPacketIds::SetConcentration as i16, ServerPacketIds::SetElemental as i16, ServerPacketIds::ColourChanged as i16, ServerPacketIds::ObjectGuildNameChanged as i16, ServerPacketIds::NPCUpdate as i16, ServerPacketIds::NPCImageUpdate as i16, ServerPacketIds::GainedCredit as i16, ServerPacketIds::LoseCredit as i16, ServerPacketIds::UserInformation as i16, ServerPacketIds::HealthChanged as i16, ServerPacketIds::UserLocation as i16, ServerPacketIds::GainedGold as i16, ServerPacketIds::GainExperience as i16, ServerPacketIds::LoseGold as i16, ServerPacketIds::TimeOfDay as i16, ServerPacketIds::LogOutSuccess as i16, ServerPacketIds::LoginBanned as i16, ServerPacketIds::StartGameBanned as i16, ServerPacketIds::StartGameDelay as i16, ServerPacketIds::LogOutFailed as i16, ServerPacketIds::ReturnToLogin as i16, ServerPacketIds::ChangeAMode as i16, ServerPacketIds::ChangePMode as i16, ServerPacketIds::LevelChanged as i16, ServerPacketIds::ObjectLeveled as i16, ServerPacketIds::ObjectTurn as i16, ServerPacketIds::ObjectWalk as i16, ServerPacketIds::ObjectRun as i16, ServerPacketIds::ObjectHide as i16, ServerPacketIds::ObjectShow as i16, ServerPacketIds::ObjectSitDown as i16, ServerPacketIds::Pushed as i16, ServerPacketIds::ObjectPushed as i16, ServerPacketIds::ObjectTeleportOut as i16, ServerPacketIds::ObjectTeleportIn as i16, ServerPacketIds::MountUpdate as i16, ServerPacketIds::ObjectAttack as i16, ServerPacketIds::UserDash as i16, ServerPacketIds::ObjectDash as i16, ServerPacketIds::UserDashFail as i16, ServerPacketIds::ObjectDashFail as i16, ServerPacketIds::UserBackStep as i16, ServerPacketIds::ObjectBackStep as i16, ServerPacketIds::UserAttackMove as i16, ServerPacketIds::Poisoned as i16, ServerPacketIds::ObjectPoisoned as i16, ServerPacketIds::Chat as i16, ServerPacketIds::ObjectChat as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M7: 握手 ----
@@ -756,6 +756,45 @@ pub(crate) fn handle_auth(    net: &mut NetConnection,
                 server_events.write(ServerEvent::LogOutSuccess);
                 next.set(AppState::Select);
                 tracing::info!("🚪 登出成功，返回选角");
+            }
+        }
+        // #289：会话反馈——登录/进游戏封禁、延迟、登出失败、返回登录
+        x if x == ServerPacketIds::LoginBanned as i16 => {
+            if let Ok(p) = login::LoginBanned::read_body(&mut cur) {
+                auth.login_error = Some(format!("账号被封禁：{}（到期 ticks={}）", p.reason, p.expiry_date));
+                server_events.write(ServerEvent::LoginBanned {
+                    reason: p.reason.clone(),
+                    expiry_date: p.expiry_date,
+                });
+                tracing::warn!("🚫 登录封禁: {}", p.reason);
+            }
+        }
+        x if x == ServerPacketIds::StartGameBanned as i16 => {
+            if let Ok(p) = login::StartGameBanned::read_body(&mut cur) {
+                server_events.write(ServerEvent::StartGameBanned {
+                    reason: p.reason.clone(),
+                    expiry_date: p.expiry_date,
+                });
+                tracing::warn!("🚫 进游戏封禁: {}", p.reason);
+            }
+        }
+        x if x == ServerPacketIds::StartGameDelay as i16 => {
+            if let Ok(p) = login::StartGameDelay::read_body(&mut cur) {
+                server_events.write(ServerEvent::StartGameDelay { milliseconds: p.milliseconds });
+                tracing::info!("⏳ 进游戏延迟: {}ms", p.milliseconds);
+            }
+        }
+        x if x == ServerPacketIds::LogOutFailed as i16 => {
+            if let Ok(_p) = login::LogOutFailed::read_body(&mut cur) {
+                server_events.write(ServerEvent::LogOutFailed);
+                tracing::warn!("🚪 登出失败");
+            }
+        }
+        x if x == ServerPacketIds::ReturnToLogin as i16 => {
+            if let Ok(_p) = login::ReturnToLogin::read_body(&mut cur) {
+                server_events.write(ServerEvent::ReturnToLogin);
+                next.set(AppState::Login);
+                tracing::info!("🚪 服务端要求返回登录界面");
             }
         }
         x if x == ServerPacketIds::ChangeAMode as i16 => {

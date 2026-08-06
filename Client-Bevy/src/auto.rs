@@ -42,6 +42,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--chat-item-test") {
         app.add_systems(Update, auto_chat_item_test);
     }
+    // --session-feedback-test: 会话反馈链路（#289，@RETURNLOGIN → 返回登录界面）
+    if std::env::args().any(|a| a == "--session-feedback-test") {
+        app.add_systems(Update, auto_session_feedback_test);
+    }
     // --group-test: 自动组队邀请链路（自动化验证用，配合 --group-accept）
     if std::env::args().any(|a| a == "--group-test") {
         app.add_systems(Update, auto_group_test);
@@ -8682,6 +8686,48 @@ fn auto_chat_item_test(
                 tracing::info!("[CHATITEM] ✅ PASS 请求回发 9999 已缓存");
             } else {
                 tracing::error!("[CHATITEM] ❌ FAIL 9999 未缓存（{} 条）", cache.items.len());
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --session-feedback-test：会话反馈链路（#289）
+/// 流程：进游戏 → 聊天发送 @RETURNLOGIN → mock 回发 S.ReturnToLogin → 断言返回 Login
+fn auto_session_feedback_test(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *state != AppState::Game {
+                return;
+            }
+            if *t < 6.0 {
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::chat::Chat {
+                message: "@RETURNLOGIN".to_string(),
+                linked_items: Vec::new(),
+            });
+            tracing::info!("[SESSION] 发送 @RETURNLOGIN");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 2.0 {
+                return;
+            }
+            if *state == AppState::Login {
+                tracing::info!("[SESSION] ✅ PASS 已返回登录界面");
+            } else {
+                tracing::error!("[SESSION] ❌ FAIL state={:?}", *state);
             }
             *stage = 9;
         }
