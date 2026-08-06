@@ -323,6 +323,23 @@ impl Message<StartGameRequest> for WorldActor {
         info!("Player {} entered world (object_id={}, session={})",
               player_name, object_id, msg.session_id);
 
+        // C# StartGame：下发玩家所属行会的激活 Buff 列表（S.GuildBuffList）
+        if let Some(guild_name) = &loaded_state.guild_name {
+            let buffs = self.social_ref.ask(crate::actors::social::NpcGetGuildBuffs {
+                guild_name: guild_name.clone(),
+            }).await.unwrap_or_default();
+            let packet = mir2_shared::packets::server::special_systems::GuildBuffList {
+                active_buffs: buffs.iter().map(|b| *b as i32).collect(),
+            };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildBuffList as i16, &body),
+                }).await;
+            }
+        }
+
         // #188：下发英雄列表（ManageHeroes）
         // #194：从 DB 载入英雄（重启不丢）
         if let Ok(db_heroes) = db::load_heroes(&self.db_pool, &player_name).await {
