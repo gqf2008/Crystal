@@ -451,6 +451,16 @@ impl Message<SearchMapRequest> for WorldActor {
     }
 }
 
+/// 发送 S.NewCharacter{Result}（对齐 C# Envir.NewCharacter 失败响应）
+fn send_new_character_result(gate_ref: &kameo::actor::ActorRef<crate::gate::actor::GateActor>, session_id: u64, result: u8) {
+    let mut body = Vec::new();
+    body.push(result);
+    let _ = gate_ref.tell(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewCharacter as i16, &body),
+    }).try_send();
+}
+
 /// 创建角色请求
 pub struct NewCharacterRequest {
     pub session_id: u64,
@@ -466,9 +476,9 @@ impl Message<NewCharacterRequest> for WorldActor {
 
     async fn handle(&mut self, msg: NewCharacterRequest, _ctx: &mut Context<Self, Self::Reply>) {
         debug!("NewCharacterRequest handler entered: {}", msg.name);
-        // C# Settings.AllowNewCharacter：全局禁止创建角色
+        // C# Settings.AllowNewCharacter：全局禁止创建角色 → S.NewCharacter{Result=0}
         if !self.social_ref.ask(crate::actors::social::NpcGetAllowNewCharacter).await.unwrap_or(true) {
-            send_system_message(&self.gate_ref, msg.session_id, "当前服务器不允许创建角色");
+            send_new_character_result(&self.gate_ref, msg.session_id, 0);
             return;
         }
         // C# 规则（Globals.MinCharacterNameLength=3 / MaxCharacterNameLength=15 / Envir.CharacterReg）：
@@ -477,7 +487,8 @@ impl Message<NewCharacterRequest> for WorldActor {
         let valid_name = (3..=15).contains(&name_len)
             && msg.name.chars().all(|c| c == '_' || c.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fa5}').contains(&c));
         if !valid_name {
-            send_system_message(&self.gate_ref, msg.session_id, "角色名称无效（3-15 个中英文字符/数字/下划线）");
+            // C# CharacterReg 不匹配 → Result=1
+            send_new_character_result(&self.gate_ref, msg.session_id, 1);
             return;
         }
         // C# Globals.MaxCharacterCount = 4：账号角色数上限
@@ -486,20 +497,21 @@ impl Message<NewCharacterRequest> for WorldActor {
             .unwrap_or_default()
             .len();
         if existing_count >= 4 {
-            send_system_message(&self.gate_ref, msg.session_id, "账号角色已满（最多 4 个）");
+            // C# Globals.MaxCharacterCount → Result=4
+            send_new_character_result(&self.gate_ref, msg.session_id, 4);
             return;
         }
-        // 检查名称是否已被使用（在线玩家）
+        // 检查名称是否已被使用（在线玩家）→ C# Result=5
         for r in self.players.values() {
             if r.name.eq_ignore_ascii_case(&msg.name) {
-                send_system_message(&self.gate_ref, msg.session_id, "角色名称已被使用");
+                send_new_character_result(&self.gate_ref, msg.session_id, 5);
                 return;
             }
         }
         // 检查数据库中是否已有该角色
         match db::load_character(&self.db_pool, &msg.name).await {
             Ok(Some(_)) => {
-                send_system_message(&self.gate_ref, msg.session_id, "角色名称已被使用");
+                send_new_character_result(&self.gate_ref, msg.session_id, 5);
                 return;
             }
             Err(e) => {
@@ -508,11 +520,30 @@ impl Message<NewCharacterRequest> for WorldActor {
             Ok(None) => {}
         }
 
-        // 创建默认角色状态并保存到数据库
-        let class = mir2_shared::enums::MirClass::try_from(msg.class)
-            .unwrap_or(mir2_shared::enums::MirClass::Warrior);
-        let gender = mir2_shared::enums::MirGender::try_from(msg.gender)
-            .unwrap_or(mir2_shared::enums::MirGender::Male);
+        // C#：性别不合法 → Result=2
+        let gender = match mir2_shared::enums::MirGender::try_from(msg.gender) {
+            Ok(g) => g,
+            Err(_) => {
+                send_new_character_result(&self.gate_ref, msg.session_id, 2);
+                return;
+            }
+        };
+        // C#：职业不合法 → Result=3
+        let class = match mir2_shared::enums::MirClass::try_from(msg.class) {
+            Ok(c) => c,
+            Err(_) => {
+                send_new_character_result(&self.gate_ref, msg.session_id, 3);
+                return;
+            }
+        };
+        // C# Settings.AllowCreateAssassin/AllowCreateArcher → Result=3
+        let (allow_assassin, allow_archer) = self.social_ref
+            .ask(crate::actors::social::NpcGetCreateClassOptions).await.unwrap_or((true, true));
+        if (class == mir2_shared::enums::MirClass::Assassin && !allow_assassin)
+            || (class == mir2_shared::enums::MirClass::Archer && !allow_archer) {
+            send_new_character_result(&self.gate_ref, msg.session_id, 3);
+            return;
+        }
         let default_state = PlayerState {
             object_id: 0,
             name: msg.name.clone(),

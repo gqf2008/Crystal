@@ -320,6 +320,17 @@ impl Message<NpcIsGroupLeader> for SocialActor {
     }
 }
 
+/// WorldActor -> SocialActor: 查询允许创建职业（C# Settings.AllowCreateAssassin/AllowCreateArcher）
+pub struct NpcGetCreateClassOptions;
+
+impl Message<NpcGetCreateClassOptions> for SocialActor {
+    type Reply = (bool, bool);
+
+    async fn handle(&mut self, _msg: NpcGetCreateClassOptions, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        (self.config.allow_create_assassin, self.config.allow_create_archer)
+    }
+}
+
 /// WorldActor -> SocialActor: 查询是否允许删除角色（C# Settings.AllowDeleteCharacter）
 pub struct NpcGetAllowDeleteCharacter;
 
@@ -583,6 +594,10 @@ pub struct SocialActorConfig {
     pub allow_new_character: bool,
     /// 是否允许删除角色（C# Settings.AllowDeleteCharacter）
     pub allow_delete_character: bool,
+    /// 是否允许创建刺客（C# Settings.AllowCreateAssassin）
+    pub allow_create_assassin: bool,
+    /// 是否允许创建弓箭手（C# Settings.AllowCreateArcher）
+    pub allow_create_archer: bool,
     /// 行会宣战费用（C# Settings.Guild_WarCost = 3000）
     pub guild_war_cost: u32,
     /// 行会战争时长（秒，C# Settings.Guild_WarTime = 180）
@@ -601,6 +616,8 @@ impl Default for SocialActorConfig {
             newbie_guild: "NewbieGuild".to_string(),
             allow_new_character: true,
             allow_delete_character: true,
+            allow_create_assassin: true,
+            allow_create_archer: true,
             guild_war_cost: 3000,
             guild_war_time: 180,
         }
