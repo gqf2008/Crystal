@@ -172,63 +172,22 @@ impl Packet for ExpireTimer {
     }
 }
 
-/// UpdateNotice - 更新公告 (269)
+/// UpdateNotice - 服务器公告 (271)（#256：C# S.UpdateNotice = Notice(Title, Message)）
 #[derive(Debug, Clone)]
 pub struct UpdateNotice {
-    pub notices: Vec<String>,       // 公告列表
+    pub notice: crate::data::notice::Notice,
 }
 
 impl Packet for UpdateNotice {
     const OPCODE: i16 = ServerPacketIds::UpdateNotice as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
-        use crate::binary::write_dotnet_string;
-        
-        writer.write_i32::<LittleEndian>(self.notices.len() as i32)?;
-        
-        for notice in &self.notices {
-            write_dotnet_string(writer, notice)?;
-        }
-        
-        Ok(())
+        self.notice.write_to(writer)
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let count = reader.read_i32::<LittleEndian>()?;
-
-        // 安全校验：避免根据恶意或损坏的数据分配巨量内存
-        // 合理上限：最多 200 条公告，每条公告不超过 32KB
-        const MAX_NOTICES: i32 = 200;
-        const MAX_NOTICE_LEN: i32 = 32 * 1024; // 32 KB
-
-        if count < 0 {
-            return Err(crate::data::stats::SharedError::NegativeLength { field: "notices_count", length: count });
-        }
-
-        if count > MAX_NOTICES {
-            return Err(crate::data::stats::SharedError::LengthTooLarge { field: "notices_count", length: count, max: MAX_NOTICES });
-        }
-
-        let mut notices = Vec::with_capacity(count as usize);
-
-        for _ in 0..count {
-            let len = reader.read_i32::<LittleEndian>()?;
-
-            if len < 0 {
-                return Err(crate::data::stats::SharedError::NegativeLength { field: "notice_length", length: len });
-            }
-
-            if len > MAX_NOTICE_LEN {
-                return Err(crate::data::stats::SharedError::LengthTooLarge { field: "notice_length", length: len, max: MAX_NOTICE_LEN });
-            }
-
-            let mut bytes = vec![0u8; len as usize];
-            reader.read_exact(&mut bytes)?;
-            notices.push(String::from_utf8_lossy(&bytes).to_string());
-        }
-
-        Ok(Self { notices })
+        let notice = crate::data::notice::Notice::read_from(reader)?;
+        Ok(Self { notice })
     }
 }
 

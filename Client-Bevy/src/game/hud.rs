@@ -871,7 +871,8 @@ fn hud_server_events(
             | ServerEvent::SpellToggled { .. }
             | ServerEvent::NpcImageUpdated { .. }
             | ServerEvent::CompassTarget { .. }
-            | ServerEvent::MemberLocation { .. } => {}
+            | ServerEvent::MemberLocation { .. }
+            | ServerEvent::NoticeUpdated { .. } => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);
