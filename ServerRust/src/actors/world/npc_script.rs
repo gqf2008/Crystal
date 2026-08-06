@@ -699,6 +699,43 @@ async fn eval_one_check(
         "CHECKRELATIONSHIP" => {
             player.spouse_name.is_some()
         }
+        // HEROLEVEL <op> <level> — 当前英雄等级（对齐 C# CheckType.HeroLevel）
+        "HEROLEVEL" => {
+            let (op, want) = parse_op_amount(&args[1..]);
+            let level = current_hero(world, session_id, player).map(|h| h.level as i64).unwrap_or(-1);
+            compare_i64(level, op, want)
+        }
+        // CHECKHEROCLASS <class> — 当前英雄职业（对齐 C# CheckType.CheckHeroClass）
+        "CHECKHEROCLASS" => {
+            if let Some(cls) = parse_class(arg0()) {
+                current_hero(world, session_id, player).map(|h| h.class == cls).unwrap_or(false)
+            } else {
+                false
+            }
+        }
+        // CHECKHEROGENDER <male|female|0|1> — 当前英雄性别（对齐 C# CheckType.CheckHeroGender）
+        "CHECKHEROGENDER" => {
+            if let Some(g) = parse_gender(arg0()) {
+                current_hero(world, session_id, player).map(|h| h.gender == g).unwrap_or(false)
+            } else {
+                false
+            }
+        }
+        // CHECKHEROITEM <item> <count> [dura] — 英雄背包物品数量（>=，对齐 C# CheckHeroItem 简化；dura 忽略）
+        "CHECKHEROITEM" => {
+            let item_name = arg0();
+            let count = arg1().parse::<u32>().unwrap_or(0);
+            let idx = world.item_infos.values().find(|i| i.name.eq_ignore_ascii_case(item_name)).map(|i| i.index);
+            if let Some(idx) = idx {
+                let total: u32 = player.hero_inventory.backpack.iter().flatten()
+                    .filter(|s| s.item.item_index == idx)
+                    .map(|s| s.item.count as u32)
+                    .sum();
+                total >= count
+            } else {
+                false
+            }
+        }
         // CHECKGUILDGOLD <op> <amount> — 行会金币比较（对齐 C# CheckType.CheckGuildGold）
         "CHECKGUILDGOLD" => {
             let (op, want) = parse_op_amount(&args[1..]);
@@ -1964,6 +2001,14 @@ fn ini_write(path: &std::path::Path, header: &str, key: &str, value: &str) -> st
     }
     out.push_str(&format!("[{}]\n{}={}\n", header, key, value));
     std::fs::write(path, out)
+}
+
+/// 当前英雄（对齐 C# player.CurrentHero）：按 hero_index 从 player_heroes 查找
+fn current_hero(world: &WorldActor, session_id: u64, player: &PlayerState) -> Option<HeroInfo> {
+    world.player_heroes
+        .get(&session_id)
+        .and_then(|hs| hs.iter().find(|h| h.index as u8 == player.hero_index))
+        .cloned()
 }
 
 /// CHANGEGENDER 性别解析：支持 male/female/0/1（大小写不敏感）
