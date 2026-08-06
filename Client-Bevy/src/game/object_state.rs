@@ -7,7 +7,7 @@
 
 use bevy::prelude::*;
 
-use crate::actor::{ActorAnim, MountState, NetObjectId, SpriteLayer};
+use crate::actor::{ActorAnim, MountState, NpcAppearance, NetObjectId, SpriteLayer};
 use crate::game::movement::tile_to_world;
 use crate::network::server_event::ServerEvent;
 use crate::scenes::AppState;
@@ -35,8 +35,9 @@ fn apply_object_state_events(
     mut transforms: Query<(&NetObjectId, &mut Transform)>,
     mounts: Query<(Entity, &NetObjectId, Option<&MountState>)>,
     poisons: Query<(Entity, &NetObjectId, Option<&crate::actor::PoisonTint>)>,
+    mut npcs: Query<(Entity, &NetObjectId, &mut NpcAppearance)>,
     children: Query<&Children>,
-    layers: Query<&SpriteLayer>,
+    mut layers: Query<&mut SpriteLayer>,
     mut effects: MessageWriter<crate::game::effects::PendingEffect>,
 ) {
     let pending: Vec<ServerEvent> = events.read().cloned().collect();
@@ -132,6 +133,25 @@ fn apply_object_state_events(
                 for (id, mut v) in &mut vis {
                     if id.0 == object_id {
                         *v = Visibility::Visible;
+                        break;
+                    }
+                }
+            }
+            ServerEvent::NpcImageUpdated { npc_id, image } => {
+                // #248：NPC 形象更新 → NpcAppearance + 子层 slot（Npcs 库帧号）
+                for (ent, id, mut app) in &mut npcs {
+                    if id.0 == npc_id {
+                        app.npc_index = image;
+                        if let Ok(children_of) = children.get(ent) {
+                            for c in children_of.iter() {
+                                if let Ok(mut l) = layers.get_mut(c) {
+                                    if l.lib == crate::resources::libraries::ArrayLibType::Npcs {
+                                        l.slot = image as u32;
+                                    }
+                                }
+                            }
+                        }
+                        tracing::info!("🧙 NPC 形象更新 id={} image={}", npc_id, image);
                         break;
                     }
                 }
