@@ -147,6 +147,20 @@ impl Message<StartGameRequest> for WorldActor {
             }
         };
 
+        // C# Settings.AllowStartGame：非 GM 且关闭时 → S.StartGame{Result=0}（GM 用加载角色的 is_gm 判断）
+        if !self.social_ref.ask(crate::actors::social::NpcGetAllowStartGame).await.unwrap_or(true) && !state.is_gm {
+            let packet = mir2_shared::packets::server::login::StartGame { result: 0, resolution: 0 };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::StartGame as i16, &body),
+                }).await;
+            }
+            warn!("StartGame rejected: AllowStartGame=false for account {}", msg.account_username);
+            return;
+        }
+
         let object_id = self.alloc_object_id();
         let player_name = state.name.clone();
         let map_index = state.map_index;
