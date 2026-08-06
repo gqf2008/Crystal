@@ -880,7 +880,8 @@ async fn eval_one_check(
                     if os.group_id == Some(gid) {
                         let dx = (os.x - npc.x).abs() as i64;
                         let dy = (os.y - npc.y).abs() as i64;
-                        if dx > 9 || dy > 9 {
+                        // C# Functions.InRange 欧氏距离：dx²+dy² <= range²（9*9=81）
+                        if dx * dx + dy * dy > 81 {
                             all_nearby = false;
                             break;
                         }
@@ -966,7 +967,15 @@ async fn eval_one_check(
             world.social_ref.ask(crate::actors::social::NpcIsGroupLeader { session_id }).await.unwrap_or(false)
         }
         // INGUILD / GUILDNAME <name>
-        "INGUILD" => player.guild_name.is_some(),
+        // INGUILD [公会名] — 在行会；指定公会名时需精确匹配（对齐 C# CheckType.InGuild）
+        "INGUILD" => {
+            let guild_name = arg0().trim();
+            if guild_name.is_empty() {
+                player.guild_name.is_some()
+            } else {
+                player.guild_name.as_deref() == Some(guild_name)
+            }
+        }
         // CHECKMAP <map_name|index>
         "CHECKMAP" => {
             let want = arg0();
