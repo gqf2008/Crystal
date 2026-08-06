@@ -166,25 +166,27 @@ impl Packet for NPCStorage {
     }
 }
 
-/// NPC requests input from player
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// NPCRequestInput - NPC 请求输入 (249)（#272：对齐 C# [NPCID u32][PageName 7-bit string]）
+#[derive(Debug, Clone)]
 pub struct NPCRequestInput {
-    pub message: String,
-    pub max_length: u8,
+    pub npc_id: u32,
+    pub page_name: String,
 }
 
 impl Packet for NPCRequestInput {
     const OPCODE: i16 = ServerPacketIds::NPCRequestInput as i16;
-    
+
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let message = read_dotnet_string(reader)?;
-        let max_length = reader.read_u8()?;
-        Ok(Self { message, max_length })
+        let npc_id = reader.read_u32::<LittleEndian>()?;
+        let page_name = read_dotnet_string(reader)?;
+        Ok(Self { npc_id, page_name })
     }
-    
+
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
-        write_dotnet_string(writer, &self.message)?;
-        writer.write_u8(self.max_length)?;
+        use byteorder::WriteBytesExt;
+
+        writer.write_u32::<LittleEndian>(self.npc_id)?;
+        write_dotnet_string(writer, &self.page_name)?;
         Ok(())
     }
 }

@@ -164,7 +164,11 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         }
         x if x == ServerPacketIds::NPCRequestInput as i16 => {
             if let Ok(p) = npc::NPCRequestInput::read_body(&mut cur) {
-                tracing::info!("⌨️ NPC 请求输入: {}（最长 {}）", p.message, p.max_length);
+                tracing::info!("⌨️ NPC 请求输入: npc={} page={}", p.npc_id, p.page_name);
+                server_events.write(ServerEvent::NpcInputRequest {
+                    npc_id: p.npc_id,
+                    page_name: p.page_name,
+                });
             }
         }
 

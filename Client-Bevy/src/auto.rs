@@ -266,6 +266,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--final-test") {
         app.add_systems(Update, auto_final_test);
     }
+    // --npc-input-test: NPC 输入框（NPCRequestInput，#272）
+    if std::env::args().any(|a| a == "--npc-input-test") {
+        app.add_systems(Update, auto_npc_input_test);
+    }
     // --book-test: 技能书学习链路（使用技能书 → 等 NewMagic → 校验 MagicsState）
     if std::env::args().any(|a| a == "--book-test") {
         app.add_systems(Update, auto_book_test);
@@ -8075,6 +8079,115 @@ fn auto_final_test(
                     tracing::info!("[FINAL] ✅ 收尾协议通过");
                 } else {
                     tracing::warn!("[FINAL] ❌ 未通过（冲刺攻击={} 特效={}）", dash, delta);
+                }
+                *stage = 9;
+            }
+        }
+        _ => {}
+    }
+}
+
+
+/// --npc-input-test：施法 → mock 回发 NPCRequestInput(110, Amount)，断言输入状态激活（#272）
+#[allow(clippy::too_many_arguments)]
+fn auto_npc_input_test(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    npc_input: Res<client_bevy::game::dialogs::npc::NpcInputState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut target: Local<Option<u32>>,
+    mut target_tile: Local<Option<(i32, i32)>>,
+    actors: Query<(
+        &client_bevy::actor::NetObjectId,
+        &Transform,
+        Has<client_bevy::actor::Monster>,
+    )>,
+    players: Query<
+        &Transform,
+        (
+            With<client_bevy::actor::LocalPlayer>,
+            With<client_bevy::actor::NetObjectId>,
+        ),
+    >,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 10.0 {
+                return;
+            }
+            let Ok(pf) = players.single() else { return };
+            let (px, py) =
+                client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+            let mut best: Option<(u32, i32, i32)> = None;
+            for (id, tf, monster) in &actors {
+                if !monster {
+                    continue;
+                }
+                let (mx, my) =
+                    client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+                let d = (mx - px).abs() + (my - py).abs();
+                if d <= 40 && best.map(|(_, _, bd)| d < bd).unwrap_or(true) {
+                    best = Some((id.0, mx, my));
+                }
+            }
+            match best {
+                Some((oid, mx, my)) => {
+                    *target = Some(oid);
+                    *target_tile = Some((mx, my));
+                    tracing::info!("[NPCIN] 🎯 目标怪物 id={} @ ({},{})", oid, mx, my);
+                    *stage = 1;
+                    *t = 0.0;
+                }
+                None => {
+                    tracing::warn!("[NPCIN] ❌ 附近没有怪物");
+                    *stage = 9;
+                }
+            }
+        }
+        1 => {
+            if *t < 1.5 {
+                return;
+            }
+            let (mx, my) = target_tile.unwrap_or((0, 0));
+            let Ok(pf) = players.single() else { return };
+            let (px, py) =
+                client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+            let dir = client_bevy::game::movement::direction_from_delta(
+                (mx - px).signum(),
+                (my - py).signum(),
+            )
+            .unwrap_or(mir2_shared::enums::MirDirection::Down);
+            net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                spell: mir2_shared::enums::Spell::FireBall,
+                direction: dir,
+                target_id: target.unwrap_or(0),
+                location: mir2_shared::Point { x: mx, y: my },
+            });
+            tracing::info!("[NPCIN] 🔥 施法触发 NPC 输入");
+            *stage = 2;
+            *t = 0.0;
+        }
+        2 => {
+            if *t >= 2.5 {
+                let ok =
+                    npc_input.active && npc_input.npc_id == 110 && npc_input.page_name == "Amount";
+                tracing::info!(
+                    "[NPCIN] active={} npc={} page={}",
+                    npc_input.active,
+                    npc_input.npc_id,
+                    npc_input.page_name
+                );
+                if ok {
+                    tracing::info!("[NPCIN] ✅ NPC 输入框通过");
+                } else {
+                    tracing::warn!("[NPCIN] ❌ 输入状态未激活");
                 }
                 *stage = 9;
             }

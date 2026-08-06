@@ -852,8 +852,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         send(
                                             &to_client,
                                             &server::npc::NPCRequestInput {
-                                                message: "请输入数量".to_string(),
-                                                max_length: 8,
+                                                npc_id: 110,
+                                                page_name: "Amount".to_string(),
                                             },
                                         );
                                         // #270：冲刺攻击 / 传送 / 杂项
@@ -1513,6 +1513,17 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             "🔄 [MOCK] 技能开关回显 {:?} can_use={}",
                                             p.spell,
                                             p.can_use
+                                        );
+                                    }
+                                }
+                                x if x == ClientPacketIds::NPCConfirmInput as i16 => {
+                                    // #272：NPC 输入回执
+                                    if let Ok(p) = client::npc::NPCConfirmInput::read_body(&mut cur) {
+                                        tracing::info!(
+                                            "⌨️ [MOCK] NPC 输入回执 npc={} page={} value={}",
+                                            p.npc_id,
+                                            p.page_name,
+                                            p.value
                                         );
                                     }
                                 }
