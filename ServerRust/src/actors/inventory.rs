@@ -463,27 +463,23 @@ impl PlayerInventory {
         true
     }
 
-    /// 按 item_index 从背包中移除指定数量的物品，仅考虑 current_dura >= min_dura 的物品
+    /// 按 item_index 从背包中移除物品，仅考虑 current_dura >= min_dura 的物品
     /// （C# TakeItem dura；min_dura 为 None 时不过滤）
-    /// 返回是否成功移除了全部数量
+    /// C# TakeItem 语义：移除尽可能多（不要求全量）；返回是否移除了至少一个
     pub fn remove_item_by_index_with_dura(&mut self, item_index: i32, mut count: u16, min_dura: Option<u32>) -> bool {
-        let available: u16 = self.backpack.iter().flatten()
-            .filter(|s| s.item.item_index == item_index)
-            .filter(|s| min_dura.map(|d| (s.item.current_dura as u32) >= d).unwrap_or(true))
-            .map(|s| s.item.count)
-            .sum();
-        if available < count {
-            return false;
-        }
+        let mut removed_any = false;
         for s in self.backpack.iter_mut().flatten() {
             if s.item.item_index != item_index { continue; }
             if min_dura.map(|d| (s.item.current_dura as u32) >= d).unwrap_or(true) == false { continue; }
             if s.item.count > count {
                 s.item.count -= count;
-                return true;
+                removed_any = true;
+                count = 0;
+                break;
             }
             count -= s.item.count;
             s.item.count = 0;
+            removed_any = true;
             if count == 0 {
                 break;
             }
@@ -496,7 +492,7 @@ impl PlayerInventory {
                 }
             }
         }
-        true
+        removed_any
     }
 
     /// 从背包中随机选择一个物品并移除返回（用于死亡掉落）
@@ -891,14 +887,16 @@ mod tests {
         inv.backpack[g1 as usize].as_mut().unwrap().item.current_dura = 50;
         inv.backpack[g2 as usize].as_mut().unwrap().item.current_dura = 5000;
 
-        // dura >= 1000：只应移除 5000 那把，且数量不足时不删除
-        assert!(!inv.remove_item_by_index_with_dura(7, 2, Some(1000)));
-        assert_eq!(inv.count_item_by_index(7), 2);
-        assert!(inv.remove_item_by_index_with_dura(7, 1, Some(1000)));
+        // C# TakeItem：移除尽可能多——数量不足也移除能匹配的（5000 那把）
+        assert!(inv.remove_item_by_index_with_dura(7, 2, Some(1000)));
         assert_eq!(inv.count_item_by_index(7), 1);
         // 剩余那把是耐久 50 的
         let remaining = inv.backpack.iter().flatten().next().unwrap();
         assert_eq!(remaining.item.current_dura, 50);
+
+        // 没有匹配耐久的物品 → 不移除
+        assert!(!inv.remove_item_by_index_with_dura(7, 1, Some(1000)));
+        assert_eq!(inv.count_item_by_index(7), 1);
     }
 
     #[test]
