@@ -692,6 +692,21 @@ impl WorldActor {
                     } else {
                         saved += 1;
                     }
+                    // 英雄列表同步保存（避免崩溃丢失新建/变更的英雄；C# 英雄随角色一起持久化）
+                    if let Some(heroes) = self.player_heroes.get(&record.session_id) {
+                        let db_heroes: Vec<db::DbHero> = heroes.iter().map(|h| db::DbHero {
+                            index: h.index,
+                            name: h.name.clone(),
+                            level: h.level,
+                            class: h.class as u8,
+                            gender: h.gender as u8,
+                            dead: h.dead,
+                            sealed: h.sealed,
+                        }).collect();
+                        if let Err(e) = db::save_heroes(&self.db_pool, &record.name, &db_heroes).await {
+                            warn!("Auto-save heroes failed for {}: {}", record.name, e);
+                        }
+                    }
                 }
             }
             info!("Auto-saved {} players to database ({} online)", saved, player_count);
