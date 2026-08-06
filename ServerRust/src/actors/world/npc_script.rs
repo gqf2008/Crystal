@@ -868,14 +868,18 @@ async fn eval_one_check(
                     .unwrap_or(false)
             }
         }
-        // CHECKHEROITEM <item> <count> [dura] — 英雄背包物品数量（>=，对齐 C# CheckHeroItem 简化；dura 忽略）
+        // CHECKHEROITEM <item> [count] [dura] — 英雄背包物品数量（>=，对齐 C# CheckType.CheckHeroItem）
+        // C#：count 缺省为 1（parts.Length < 3 → "1"）；dura 存在且可解析时只统计
+        // current_dura >= dura*1000 的物品（NPCSegment.cs CheckHeroItem）。
         "CHECKHEROITEM" => {
             let item_name = arg0();
-            let count = arg1().parse::<u32>().unwrap_or(0);
+            let count = args.get(1).and_then(|s| s.parse::<u32>().ok()).unwrap_or(1);
+            let min_dura = args.get(2).and_then(|s| s.parse::<u32>().ok());
             let idx = world.item_infos.values().find(|i| i.name.eq_ignore_ascii_case(item_name)).map(|i| i.index);
             if let Some(idx) = idx {
                 let total: u32 = player.hero_inventory.backpack.iter().flatten()
                     .filter(|s| s.item.item_index == idx)
+                    .filter(|s| min_dura.map(|d| (s.item.current_dura as u32) >= d * 1000).unwrap_or(true))
                     .map(|s| s.item.count as u32)
                     .sum();
                 total >= count
