@@ -1739,6 +1739,7 @@ pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>
             members,
             gold: gold as u64,
             storage_items,
+            buffs: Vec::new(),
         });
     }
 
