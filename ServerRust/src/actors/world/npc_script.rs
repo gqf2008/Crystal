@@ -721,6 +721,38 @@ async fn eval_one_check(
                 false
             }
         }
+        // CHECKCONQUEST <index> — 领地不在战争中（对齐 C# CheckType.CheckConquest：failed=WarIsOn）
+        "CHECKCONQUEST" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            world.conquest_instances.iter()
+                .find(|c| c.id == index)
+                .map(|c| c.state != crate::actors::world::conquest::WarState::InProgress)
+                .unwrap_or(false)
+        }
+        // CONQUESTOWNER <index> — 玩家行会为该领地所有者（对齐 C# CheckType.ConquestOwner）
+        "CONQUESTOWNER" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            if let Some(guild_name) = &player.guild_name {
+                world.conquest_instances.iter()
+                    .find(|c| c.id == index)
+                    .map(|c| c.owner_guild.as_deref() == Some(guild_name.as_str()))
+                    .unwrap_or(false)
+            } else {
+                false
+            }
+        }
+        // CONQUESTAVAILABLE <index> — 有行会且无人宣战（对齐 C# CheckType.ConquestAvailable：AttackerID == -1）
+        "CONQUESTAVAILABLE" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            if player.guild_name.is_none() {
+                false
+            } else {
+                world.conquest_instances.iter()
+                    .find(|c| c.id == index)
+                    .map(|c| c.attacker_guild.is_none() && c.state == crate::actors::world::conquest::WarState::Idle)
+                    .unwrap_or(false)
+            }
+        }
         // CHECKHEROITEM <item> <count> [dura] — 英雄背包物品数量（>=，对齐 C# CheckHeroItem 简化；dura 忽略）
         "CHECKHEROITEM" => {
             let item_name = arg0();
@@ -988,6 +1020,35 @@ async fn exec_action(
         // SEALHERO —— 封印当前英雄（对齐 C# ActionType.SealHero）
         "SEALHERO" => {
             world.npc_seal_hero(session_id).await;
+        }
+        // TAKECONQUESTGOLD <index> —— 所有者取走攻城金库（对齐 C# ActionType.TakeConquestGold）
+        "TAKECONQUESTGOLD" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            if index >= 0 {
+                world.npc_take_conquest_gold(session_id, index).await;
+            }
+        }
+        // SETCONQUESTRATE <index> <rate> —— 所有者设置税率（对齐 C# ActionType.SetConquestRate）
+        "SETCONQUESTRATE" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            let rate = arg1().parse::<u8>().unwrap_or(0);
+            if index >= 0 {
+                world.npc_set_conquest_rate(session_id, index, rate).await;
+            }
+        }
+        // STARTCONQUEST <index> —— 开/停战争（对齐 C# ActionType.StartConquest）
+        "STARTCONQUEST" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            if index >= 0 {
+                world.npc_start_conquest(session_id, index).await;
+            }
+        }
+        // SCHEDULECONQUEST <index> —— 宣战（对齐 C# ActionType.ScheduleConquest）
+        "SCHEDULECONQUEST" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            if index >= 0 {
+                world.npc_schedule_conquest(session_id, index).await;
+            }
         }
         // DELETEHERO —— 删除当前英雄（对齐 C# ActionType.DeleteHero）
         "DELETEHERO" => {

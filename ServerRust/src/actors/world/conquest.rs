@@ -58,6 +58,10 @@ pub struct ConquestInstance {
     pub max_points: i32,
     /// 属于本区域的攻城结构 object_id 列表（城墙/城门/攻城器）
     pub siege_structure_ids: Vec<u32>,
+    /// 攻城金库（C# GuildInfo.GoldStorage，TAKECONQUESTGOLD 取走）
+    pub gold_storage: u64,
+    /// NPC 税率（C# GuildInfo.NPCRate，SETCONQUESTRATE 设置）
+    pub tax_rate: u8,
 }
 
 /// 控制点占领状态（对应 C# ControlPoints dict 的 entry）
@@ -96,6 +100,8 @@ impl ConquestInstance {
             control_point_owners: Vec::new(),
             max_points: MAX_KING_POINTS,
             siege_structure_ids: Vec::new(),
+            gold_storage: 0,
+            tax_rate: 0,
         }
     }
 
