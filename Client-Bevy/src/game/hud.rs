@@ -1164,6 +1164,11 @@ fn hud_server_events(
                     tracing::warn!("🎒 背包已满，无法放入: {}", item.name);
                 }
             }
+            ServerEvent::InventoryResized { size } => {
+                // #276：背包扩容（C# S.ResizeInventory → Array.Resize）
+                hud.inventory.resize(*size);
+                tracing::info!("🎒 背包扩容 -> {} 格", hud.inventory.items.len());
+            }
         }
     }
 }

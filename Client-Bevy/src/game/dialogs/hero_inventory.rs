@@ -16,6 +16,7 @@ use bevy::prelude::*;
 use crate::game::dialogs::hero::{next_autopot, HeroState, STAT_HP, STAT_MP};
 use crate::game::dialogs::inventory::{inv_slot_at, InvClickState};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -580,6 +581,7 @@ fn hero_inv_data_system(
 /// 点击转移：主背包选中 → 英雄格 = TransferHeroItem；英雄格选中/取消
 fn hero_inv_click_system(
     mgr: Res<DialogManager>,
+    hud: Res<HudState>,
     hero: Res<HeroState>,
     mut click: ResMut<InvClickState>,
     net: Res<NetConnection>,
@@ -599,7 +601,14 @@ fn hero_inv_click_system(
         return;
     }
     // 主背包格点击（英雄选中态下由 inv_item_action_system 发 TakeBackHeroItem）
-    if inv_slot_at(cursor.x, cursor.y).is_some() {
+    if inv_slot_at(
+        cursor.x,
+        cursor.y,
+        hud.inventory.page,
+        hud.inventory.items.len(),
+    )
+    .is_some()
+    {
         return;
     }
     let Some(i) = hero_slot_at(cursor.x, cursor.y) else {

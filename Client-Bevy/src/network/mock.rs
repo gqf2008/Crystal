@@ -462,6 +462,11 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 spell: p.spell,
                                             },
                                         );
+                                        // #276：施法后触发背包扩容（验证 ResizeInventory 解码/动态格子）
+                                        send(
+                                            &to_client,
+                                            &server::ui_events::ResizeInventory { size: 56 },
+                                        );
                                         let target = if p.target_id != 0 { p.target_id } else { 101u32 };
                                         let hp = monster_hp.entry(target).or_insert(monster_def(target).hp_max);
                                         *hp -= 20;
