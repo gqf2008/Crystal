@@ -569,6 +569,7 @@ const SPELL_VAMPIRE_SHOT: u8 = mir2_shared::enums::Spell::VampireShot as u8;    
 const SPELL_POISON_SHOT: u8 = mir2_shared::enums::Spell::PoisonShot as u8;             // 135 弓手·毒箭（弹道+绿毒）
 const SPELL_CRIPPLE_SHOT: u8 = mir2_shared::enums::Spell::CrippleShot as u8;           // 136 弓手·减速箭（弹道+减速）
 const SPELL_MOON_LIGHT: u8 = mir2_shared::enums::Spell::MoonLight as u8;         // 103 隐身
+const SPELL_FATAL_SWORD: u8 = mir2_shared::enums::Spell::FatalSword as u8;           // 91 刺客·致命一击（下一次近战暴击）
 const SPELL_SWIFT_FEET: u8 = mir2_shared::enums::Spell::SwiftFeet as u8;         // 105 移动速度+
 const SPELL_DARK_BODY: u8 = mir2_shared::enums::Spell::DarkBody as u8;           // 106 隐身+攻击
 const SPELL_CRESCENT_SLASH: u8 = mir2_shared::enums::Spell::CrescentSlash as u8; // 108 扇形AoE
@@ -609,6 +610,7 @@ const SPELL_SPIRIT_SWORD: u8 = mir2_shared::enums::Spell::SpiritSword as u8;    
 const SPELL_REINCARNATION: u8 = mir2_shared::enums::Spell::Reincarnation as u8;   // 79 道士·复活死亡玩家
 const SPELL_HALLUCINATION: u8 = mir2_shared::enums::Spell::Hallucination as u8;       // 76 道士·幻觉（怪物失目标不攻击）
 const SPELL_ULTIMATE_ENHANCER: u8 = mir2_shared::enums::Spell::UltimateEnhancer as u8; // 77 道士·终极强化（DC/MC/SC 提升 buff）
+const SPELL_PET_ENHANCER: u8 = mir2_shared::enums::Spell::PetEnhancer as u8;         // 85 道士·宠物强化（DC/AC 提升）
 const SPELL_ENERGY_REPULSOR: u8 = mir2_shared::enums::Spell::EnergyRepulsor as u8; // 72 道士·气功波（同 Repulsion）
 const SPELL_CURSE: u8 = mir2_shared::enums::Spell::Curse as u8;                   // 81 道士·诅咒（区域减攻+减速）
 const SPELL_PLAGUE: u8 = mir2_shared::enums::Spell::Plague as u8;                 // 82 道士·瘟疫（3x3 随机毒+伤害）
@@ -765,6 +767,10 @@ pub struct WorldActor {
     pub(crate) hallucinated: HashMap<u32, u64>,
     /// #409 精神状态（session → 0 攻击/1 特技/2 组队模式）
     pub(crate) mental_state: HashMap<u64, u8>,
+    /// #448 致命一击状态（session → (到期 tick, 等级)）
+    pub(crate) fatal_sword: HashMap<u64, (u64, u8)>,
+    /// #448 宠物强化（怪物 oid → (到期 tick, DC 加成, AC 加成)）
+    pub(crate) pet_enhanced: HashMap<u32, (u64, i32, i32)>,
     /// 活跃 NPC（按 object_id 索引）
     pub(crate) npcs: HashMap<u32, NpcState>,
     /// 等待重生的怪物 (object_id → 重生 tick)
@@ -962,6 +968,8 @@ impl WorldActor {
             hemorrhage_count: HashMap::new(),
             hallucinated: HashMap::new(),
             mental_state: HashMap::new(),
+            fatal_sword: HashMap::new(),
+            pet_enhanced: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
@@ -3084,6 +3092,8 @@ impl Actor for WorldActor {
             hemorrhage_count: HashMap::new(),
             hallucinated: HashMap::new(),
             mental_state: HashMap::new(),
+            fatal_sword: HashMap::new(),
+            pet_enhanced: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),

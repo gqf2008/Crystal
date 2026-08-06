@@ -1998,6 +1998,12 @@ impl Message<Tick> for WorldActor {
                             let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
                             let mut damage = ((self.tick_count.wrapping_add(*oid as u64).wrapping_mul(7)) as i32 % dmg_range)
                                 + monster.min_dmg;
+                            // #448：宠物强化 DC 加成（PetEnhancer）
+                            if let Some((until, dc_bonus, _ac)) = self.pet_enhanced.get(&monster.object_id).copied() {
+                                if self.tick_count < until {
+                                    damage += dc_bonus;
+                                }
+                            }
                             // #306：诅咒减伤（C# Curse 降低 MaxDC/MaxMC/MaxSC 输出百分比）
                             if let Some((pct, until)) = self.cursed_monsters.get(&monster.object_id) {
                                 if self.tick_count < *until && *pct > 0 {
