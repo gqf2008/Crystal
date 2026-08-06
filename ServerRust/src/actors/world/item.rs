@@ -632,6 +632,26 @@ impl Message<UseItemRequest> for WorldActor {
                                 map_index: None,
                                 is_mounted: None,
                             }).await;
+                            // C# Teleport：UserLocation 自身 + BroadcastMovement 同图其他玩家
+                            let mut loc = Vec::new();
+                            loc.extend_from_slice(&tx.to_le_bytes());
+                            loc.extend_from_slice(&ty.to_le_bytes());
+                            loc.push(player_state.direction);
+                            let _ = self.gate_ref.tell(SendToClient {
+                                session_id: msg.session_id,
+                                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &loc),
+                            }).await;
+                            let others: Vec<_> = self.other_players(msg.session_id).into_iter().map(|r| r.actor_ref.clone()).collect();
+                            for other in others {
+                                let _ = other.ask(crate::actors::player::BroadcastMovement {
+                                    object_id: player_state.object_id,
+                                    x: tx,
+                                    y: ty,
+                                    direction: player_state.direction,
+                                    move_type: crate::actors::player::MoveType::Walk,
+                                    exclude_session: msg.session_id,
+                                }).await;
+                            }
                             send_system_message(&self.gate_ref, msg.session_id,
                                 if shape == 0 { "已脱离迷宫，返回安全区" } else { "已返回安全区" });
                             debug!("Scroll: {} shape={} teleported to safe zone ({}, {})", player_state.name, shape, tx, ty);
@@ -660,6 +680,26 @@ impl Message<UseItemRequest> for WorldActor {
                                     map_index: None,
                                     is_mounted: None,
                                 }).await;
+                                // C# Teleport：UserLocation 自身 + BroadcastMovement 同图其他玩家
+                                let mut loc = Vec::new();
+                                loc.extend_from_slice(&rx.to_le_bytes());
+                                loc.extend_from_slice(&ry.to_le_bytes());
+                                loc.push(player_state.direction);
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: msg.session_id,
+                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &loc),
+                                }).await;
+                                let others: Vec<_> = self.other_players(msg.session_id).into_iter().map(|r| r.actor_ref.clone()).collect();
+                                for other in others {
+                                    let _ = other.ask(crate::actors::player::BroadcastMovement {
+                                        object_id: player_state.object_id,
+                                        x: rx,
+                                        y: ry,
+                                        direction: player_state.direction,
+                                        move_type: crate::actors::player::MoveType::Walk,
+                                        exclude_session: msg.session_id,
+                                    }).await;
+                                }
                                 send_system_message(&self.gate_ref, msg.session_id, "随机传送完成");
                                 debug!("RandomScroll: {} teleported to ({}, {})", player_state.name, rx, ry);
                             }
