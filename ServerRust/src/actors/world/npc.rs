@@ -683,6 +683,8 @@ impl Message<NewHeroRequest> for WorldActor {
                 level: 1,
                 class: msg.class,
                 gender: msg.gender,
+                dead: false,
+                sealed: false,
             });
             let _ = record.actor_ref.ask(SetHeroIndex { hero_index: 1 }).await;
             // #198：创建成功后生成英雄对象
@@ -705,6 +707,92 @@ impl Message<NewHeroRequest> for WorldActor {
         debug!("NewHero: {} name={} gender={:?} class={:?} result={}", state.name, msg.name, msg.gender, msg.class, result);
     }
 }
+impl WorldActor {
+    /// NPC 脚本 REVIVEHERO：复活当前英雄（对齐 C# ActionType.ReviveHero，简化：清 dead 标记）
+    pub(crate) async fn npc_revive_hero(&mut self, session_id: u64) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let Some(heroes) = self.player_heroes.get(&session_id).cloned() else {
+            send_system_message(&self.gate_ref, session_id, "你没有英雄");
+            return;
+        };
+        let Some(hero) = heroes.iter().find(|h| h.index as u8 == state.hero_index).cloned() else { return };
+        if hero.dead {
+            if let Some(hs) = self.player_heroes.get_mut(&session_id) {
+                if let Some(h) = hs.iter_mut().find(|h| h.index == hero.index) {
+                    h.dead = false;
+                }
+            }
+            let db_heroes: Vec<db::DbHero> = heroes.iter().map(|h| db::DbHero {
+                index: h.index, name: h.name.clone(), level: h.level,
+                class: h.class as u8, gender: h.gender as u8,
+                dead: false, sealed: h.sealed,
+            }).collect();
+            if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
+                warn!("Failed to save heroes on ReviveHero: {}", e);
+            }
+            send_system_message(&self.gate_ref, session_id, &format!("英雄 {} 已复活", hero.name));
+        }
+        debug!("NPC ReviveHero: session={}", session_id);
+    }
+
+    /// NPC 脚本 SEALHERO：封印当前英雄（对齐 C# ActionType.SealHero，简化：置 sealed 标记）
+    pub(crate) async fn npc_seal_hero(&mut self, session_id: u64) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let Some(heroes) = self.player_heroes.get(&session_id).cloned() else {
+            send_system_message(&self.gate_ref, session_id, "你没有英雄");
+            return;
+        };
+        let Some(hero) = heroes.iter().find(|h| h.index as u8 == state.hero_index).cloned() else { return };
+        if !hero.sealed {
+            if let Some(hs) = self.player_heroes.get_mut(&session_id) {
+                if let Some(h) = hs.iter_mut().find(|h| h.index == hero.index) {
+                    h.sealed = true;
+                }
+            }
+            let db_heroes: Vec<db::DbHero> = heroes.iter().map(|h| db::DbHero {
+                index: h.index, name: h.name.clone(), level: h.level,
+                class: h.class as u8, gender: h.gender as u8,
+                dead: h.dead, sealed: true,
+            }).collect();
+            if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
+                warn!("Failed to save heroes on SealHero: {}", e);
+            }
+            send_system_message(&self.gate_ref, session_id, &format!("英雄 {} 已被封印", hero.name));
+        }
+        debug!("NPC SealHero: session={}", session_id);
+    }
+
+    /// NPC 脚本 DELETEHERO：删除当前英雄（对齐 C# ActionType.DeleteHero）
+    pub(crate) async fn npc_delete_hero(&mut self, session_id: u64) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let Some(heroes) = self.player_heroes.get(&session_id).cloned() else {
+            send_system_message(&self.gate_ref, session_id, "你没有英雄");
+            return;
+        };
+        let before = heroes.len();
+        let remaining: Vec<HeroInfo> = heroes.into_iter().filter(|h| h.index as u8 != state.hero_index).collect();
+        if remaining.len() < before {
+            self.player_heroes.insert(session_id, remaining.clone());
+            // 清空当前英雄索引 + 移除英雄对象
+            let _ = record.actor_ref.ask(crate::actors::player::SetHeroIndex { hero_index: 0 }).await;
+            self.broadcast_hero_remove(state.object_id).await;
+            let db_heroes: Vec<db::DbHero> = remaining.iter().map(|h| db::DbHero {
+                index: h.index, name: h.name.clone(), level: h.level,
+                class: h.class as u8, gender: h.gender as u8,
+                dead: h.dead, sealed: h.sealed,
+            }).collect();
+            if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
+                warn!("Failed to save heroes on DeleteHero: {}", e);
+            }
+            send_system_message(&self.gate_ref, session_id, "英雄已删除");
+        }
+        debug!("NPC DeleteHero: session={}", session_id);
+    }
+}
+
 // ============================================================
 // 钓鱼系统
 // ============================================================

@@ -846,6 +846,10 @@ pub struct HeroInfo {
     pub level: u16,
     pub class: mir2_shared::enums::MirClass,
     pub gender: mir2_shared::enums::MirGender,
+    /// 是否死亡（REVIVEHERO 复活，对齐 C# Hero.Dead）
+    pub dead: bool,
+    /// 是否封印（SEALHERO，对齐 C# Hero.Sealed）
+    pub sealed: bool,
 }
 
 

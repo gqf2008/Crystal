@@ -944,6 +944,18 @@ async fn exec_action(
                 debug!("NPC TAKEPEARLS: -{}", amount);
             }
         }
+        // REVIVEHERO —— 复活当前英雄（对齐 C# ActionType.ReviveHero）
+        "REVIVEHERO" => {
+            world.npc_revive_hero(session_id).await;
+        }
+        // SEALHERO —— 封印当前英雄（对齐 C# ActionType.SealHero）
+        "SEALHERO" => {
+            world.npc_seal_hero(session_id).await;
+        }
+        // DELETEHERO —— 删除当前英雄（对齐 C# ActionType.DeleteHero）
+        "DELETEHERO" => {
+            world.npc_delete_hero(session_id).await;
+        }
         // HEROGIVESKILL <技能名|ID> <level> —— 英雄学技能（对齐 C# ActionType.HeroGiveSkill）
         "HEROGIVESKILL" => {
             let skill_name = arg0();

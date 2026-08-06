@@ -251,6 +251,8 @@ impl Message<StartGameRequest> for WorldActor {
                 level: h.level,
                 class: mir2_shared::enums::MirClass::try_from(h.class).unwrap_or(mir2_shared::enums::MirClass::Warrior),
                 gender: mir2_shared::enums::MirGender::try_from(h.gender).unwrap_or(mir2_shared::enums::MirGender::Male),
+                dead: h.dead,
+                sealed: h.sealed,
             }).collect());
         }
         let heroes = self.player_heroes.get(&msg.session_id).cloned().unwrap_or_default();
@@ -972,6 +974,8 @@ impl Message<PlayerLogOut> for WorldActor {
                 level: h.level,
                 class: h.class as u8,
                 gender: h.gender as u8,
+                dead: h.dead,
+                sealed: h.sealed,
             }).collect();
             if let Err(e) = db::save_heroes(&self.db_pool, &record.name, &db_heroes).await {
                 warn!("Failed to save heroes for {} on logout: {}", record.name, e);
