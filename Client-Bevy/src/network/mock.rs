@@ -131,6 +131,9 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             let mut player_dead_since: Option<std::time::Instant> = None;
             // #222：轮回术复活请求状态
             let mut mock_reincarnation_offered = false;
+            // #226：对象状态演示（隐藏/显形/坐下/击退/传送）状态机
+            let mut object_state_stage: u8 = 0;
+            let mut object_state_timer: Option<std::time::Instant> = None;
             // 怪物攻击伤害覆盖（默认 0 = 用怪物自身伤害；MOCK_PLAYER_DAMAGE 可调大测死亡/复活闭环）
             let player_damage = std::env::var("MOCK_PLAYER_DAMAGE")
                 .ok()
@@ -524,6 +527,9 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 spell_level: 0,
                                             },
                                         );
+                                        // #226：触发对象状态演示（2s 后开始隐藏/击退/坐下）
+                                        object_state_stage = 1;
+                                        object_state_timer = Some(std::time::Instant::now());
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
                                             send(
@@ -1259,6 +1265,62 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                         }
                     }
                     Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                }
+                // #226：对象状态演示状态机（施法触发后每 2s 推进）
+                if in_game && object_state_stage > 0 {
+                    if let Some(t) = object_state_timer {
+                        if t.elapsed() >= std::time::Duration::from_secs(2) {
+                            object_state_timer = Some(std::time::Instant::now());
+                            match object_state_stage {
+                                1 => {
+                                    send(&to_client, &server::map::ObjectHide { object_id: 102 });
+                                    send(
+                                        &to_client,
+                                        &server::combat::ObjectPushed {
+                                            object_id: 103,
+                                            location_x: 352,
+                                            location_y: 354,
+                                            direction: 2,
+                                        },
+                                    );
+                                    send(
+                                        &to_client,
+                                        &server::miscellaneous::ObjectSitDown {
+                                            object_id: 101,
+                                            direction: 2,
+                                            location: (353, 352),
+                                        },
+                                    );
+                                    tracing::info!("🌀 [MOCK] 对象状态: 隐藏102/击退103/坐下101");
+                                    object_state_stage = 2;
+                                }
+                                2 => {
+                                    send(&to_client, &server::map::ObjectShow { object_id: 102 });
+                                    send(
+                                        &to_client,
+                                        &server::map::ObjectTeleportOut {
+                                            object_id: 103,
+                                            teleport_type: 0,
+                                        },
+                                    );
+                                    tracing::info!("🌀 [MOCK] 对象状态: 显形102/传送消失103");
+                                    object_state_stage = 3;
+                                }
+                                3 => {
+                                    send(
+                                        &to_client,
+                                        &server::map::ObjectTeleportIn {
+                                            object_id: 103,
+                                            teleport_type: 0,
+                                        },
+                                    );
+                                    tracing::info!("🌀 [MOCK] 对象状态: 传送出现103");
+                                    object_state_stage = 4;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                 }
             }
         })

@@ -223,6 +223,23 @@ pub enum ServerEvent {
     ReincarnationRequested,
     /// Revived：本地玩家复活
     PlayerRevived,
+    /// #226 ObjectHide：对象隐藏（隐身等）
+    ObjectHidden { object_id: u32 },
+    /// #226 ObjectShow：对象显形
+    ObjectShown { object_id: u32 },
+    /// #226 ObjectSitDown：对象坐下
+    ObjectSitDown { object_id: u32, direction: u8 },
+    /// #226 ObjectPushed：对象被击退（位置 + 朝向）
+    ObjectPushed {
+        object_id: u32,
+        x: i32,
+        y: i32,
+        direction: u8,
+    },
+    /// #226 ObjectTeleportOut：对象传送消失
+    ObjectTeleportOut { object_id: u32 },
+    /// #226 ObjectTeleportIn：对象传送出现
+    ObjectTeleportIn { object_id: u32 },
     /// NewMagic：学会技能
     MagicLearned { magic: ClientMagic },
     /// MagicLeveled：技能升级（C# S.MagicLeveled）

@@ -840,7 +840,13 @@ fn hud_server_events(
             | ServerEvent::HeroInformation { .. }
             | ServerEvent::CraftResult { .. }
             | ServerEvent::NpcGoods { .. }
-            | ServerEvent::NpcSellPanel { .. } => {}
+            | ServerEvent::NpcSellPanel { .. }
+            | ServerEvent::ObjectHidden { .. }
+            | ServerEvent::ObjectShown { .. }
+            | ServerEvent::ObjectSitDown { .. }
+            | ServerEvent::ObjectPushed { .. }
+            | ServerEvent::ObjectTeleportOut { .. }
+            | ServerEvent::ObjectTeleportIn { .. } => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);
