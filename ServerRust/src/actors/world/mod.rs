@@ -85,6 +85,8 @@ pub struct WorldActorArgs {
     pub drop_rate: f64,
     /// 地面物品超时 ticks（= item_timeout_secs * 10，100ms/tick）
     pub item_timeout_ticks: u64,
+    /// 金币掉落每堆上限（C# Settings.MaxDropGold = 2000）
+    pub max_drop_gold: u32,
 }
 
 /// 世界中的玩家记录
@@ -803,6 +805,8 @@ pub struct WorldActor {
     pub(crate) drop_rate: f64,
     /// 地面物品超时 ticks
     pub(crate) item_timeout_ticks: u64,
+    /// 金币掉落每堆上限
+    pub(crate) max_drop_gold: u32,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -966,6 +970,7 @@ impl WorldActor {
             conquest_cfg: crate::util::config::ConquestConfig::default(),
             drop_rate: 1.0,
             item_timeout_ticks: 600,
+            max_drop_gold: 2000,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -1319,38 +1324,47 @@ impl WorldActor {
     pub(crate) async fn spawn_single_drop(&mut self, monster: &MonsterState, item_index: i32, count: u16) {
         let drop_oid = self.alloc_object_id();
         if item_index == 0 {
-            let gold = count as u32;
-            let object_gold = mir2_shared::packets::server::ObjectGold {
-                object_id: drop_oid,
-                gold,
-                location_x: monster.x,
-                location_y: monster.y,
-            };
-            let mut buf = Vec::new();
-            if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_gold) {
-                warn!("Failed to serialize ObjectGold: {}", e);
-                return;
+            // 对齐 C# Settings.MaxDropGold：每堆金币 ≤ max_drop_gold，超过拆成多堆
+            let total = count as u64;
+            let mut remaining = total;
+            let mut piles = 0u32;
+            while remaining > 0 {
+                let pile = remaining.min(self.max_drop_gold as u64) as u32;
+                remaining -= pile as u64;
+                let oid = if piles == 0 { drop_oid } else { self.alloc_object_id() };
+                let object_gold = mir2_shared::packets::server::ObjectGold {
+                    object_id: oid,
+                    gold: pile,
+                    location_x: monster.x,
+                    location_y: monster.y,
+                };
+                let mut buf = Vec::new();
+                if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_gold) {
+                    warn!("Failed to serialize ObjectGold: {}", e);
+                    continue;
+                }
+                for session_id in self.players.keys() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: *session_id,
+                        data: buf.clone(),
+                    }).await;
+                }
+                self.ground_items.push(GroundItem {
+                    object_id: oid,
+                    item: mir2_shared::data::item::UserItem {
+                        item_index: 0,
+                        count: pile as u16,
+                        ..Default::default()
+                    },
+                    x: monster.x,
+                    y: monster.y,
+                    map_index: monster.map_index,
+                    dropper_session: None,
+                    drop_tick: self.tick_count,
+                });
+                piles += 1;
             }
-            for session_id in self.players.keys() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: *session_id,
-                    data: buf.clone(),
-                }).await;
-            }
-            self.ground_items.push(GroundItem {
-                object_id: drop_oid,
-                item: mir2_shared::data::item::UserItem {
-                    item_index: 0,
-                    count,
-                    ..Default::default()
-                },
-                x: monster.x,
-                y: monster.y,
-                map_index: monster.map_index,
-                dropper_session: None,
-                drop_tick: self.tick_count,
-            });
-            debug!("Monster '{}' dropped {} gold at ({}, {})", monster.name, gold, monster.x, monster.y);
+            debug!("Monster '{}' dropped {} gold ({} piles) at ({}, {})", monster.name, total, piles, monster.x, monster.y);
         } else {
             let mut item = mir2_shared::data::item::UserItem {
                 item_index,
@@ -3075,6 +3089,7 @@ impl Actor for WorldActor {
             conquest_cfg: args.conquest_cfg,
             drop_rate: args.drop_rate,
             item_timeout_ticks: args.item_timeout_ticks,
+            max_drop_gold: args.max_drop_gold,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,

@@ -192,6 +192,7 @@ fn e2e_start_game_flow() {
             conquest_cfg: crate::util::config::ConquestConfig::default(),
             drop_rate: 1.0,
             item_timeout_ticks: 300,
+            max_drop_gold: 2000,
         });
 
         let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
@@ -267,6 +268,7 @@ fn e2e_magic_cast_flow() {
                 conquest_cfg: crate::util::config::ConquestConfig::default(),
                 drop_rate: 1.0,
                 item_timeout_ticks: 300,
+                max_drop_gold: 2000,
             },
         );
         let _ = gate_ref.ask(crate::gate::actor::SetWorldRef { world_ref }).await;
@@ -334,6 +336,7 @@ fn e2e_attack_flow() {
                 conquest_cfg: crate::util::config::ConquestConfig::default(),
                 drop_rate: 1.0,
                 item_timeout_ticks: 300,
+                max_drop_gold: 2000,
             },
         );
         let _ = gate_ref.ask(crate::gate::actor::SetWorldRef { world_ref }).await;
