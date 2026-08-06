@@ -27,6 +27,8 @@ pub enum CombatEvent {
     SpellCast { object_id: u32 },
     /// #224 对象远程攻击（S.ObjectRangeAttack）：施法者播 AttackRange 动作
     RangeAttack { object_id: u32 },
+    /// #234 对象近战攻击（S.ObjectAttack）：施法者播 Attack1 动作
+    Attack { object_id: u32, direction: u8 },
 }
 
 /// 真实服务器命中探测（#57）：DamageIndicator（非本地玩家）计数，
@@ -110,6 +112,19 @@ impl Plugin for CombatPlugin {
         app.add_systems(
             Update,
             attack_mode_server_events.run_if(in_state(AppState::Game)),
+        );
+        // #234 修复：战斗反馈系统此前未注册（受击动画/伤害飘字/头顶血条/死亡移除从未生效）
+        app.add_systems(
+            Update,
+            (
+                apply_combat_events,
+                advance_combat_timers,
+                advance_damage_texts,
+                actor_hp_bar_system,
+            )
+                .chain()
+                .after(crate::network::network_system)
+                .run_if(in_state(AppState::Game)),
         );
     }
 }
@@ -209,6 +224,22 @@ fn apply_combat_events(
                         } else {
                             mir2_shared::enums::MirAction::Spell
                         };
+                        anim.frame_index = 0;
+                        commands.entity(e).insert(StruckTimer(0.6));
+                        break;
+                    }
+                }
+            }
+            CombatEvent::Attack {
+                object_id,
+                direction,
+            } => {
+                // #234：其他对象近战攻击 → Attack1 动作（玩家/怪物通用帧表）
+                tracing::debug!("⚔️ [ATTACK] 处理攻击 id={}", object_id);
+                for (e, id, mut anim, _mon) in &mut actors {
+                    if id.0 == *object_id {
+                        anim.action = mir2_shared::enums::MirAction::Attack1;
+                        anim.direction = *direction;
                         anim.frame_index = 0;
                         commands.entity(e).insert(StruckTimer(0.6));
                         break;

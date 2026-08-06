@@ -580,6 +580,19 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 riding_mount: true,
                                             },
                                         );
+                                        // #234：邻接怪物立即反击（近战攻击动作）
+                                        send(
+                                            &to_client,
+                                            &server::combat::ObjectAttack {
+                                                object_id: 101,
+                                                location_x: 353,
+                                                location_y: 352,
+                                                direction: 4,
+                                                spell: 0,
+                                                level: 0,
+                                                attack_type: 0,
+                                            },
+                                        );
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
                                             send(
@@ -1253,6 +1266,19 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             direction: 4,
                                         },
                                     );
+                                    // #234：怪物近战攻击动作（攻击者挥砍动画）
+                                    send(
+                                        &to_client,
+                                        &server::combat::ObjectAttack {
+                                            object_id: id,
+                                            location_x: mx as u32,
+                                            location_y: my as u32,
+                                            direction: 4,
+                                            spell: 0,
+                                            level: 0,
+                                            attack_type: 0,
+                                        },
+                                    );
                                     send(
                                         &to_client,
                                         &server::combat::DamageIndicator {
@@ -1341,7 +1367,27 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             location: (353, 352),
                                         },
                                     );
-                                    tracing::info!("🌀 [MOCK] 对象状态: 隐藏102/击退103/坐下101");
+                                    // #234：对象冲刺/后跳动作
+                                    send(
+                                        &to_client,
+                                        &server::combat::ObjectDash {
+                                            object_id: 103,
+                                            location_x: 353,
+                                            location_y: 354,
+                                            direction: 2,
+                                        },
+                                    );
+                                    send(
+                                        &to_client,
+                                        &server::movement::ObjectBackStep {
+                                            object_id: 101,
+                                            location_x: 352,
+                                            location_y: 352,
+                                            direction: mir2_shared::enums::MirDirection::Down,
+                                            distance: 1,
+                                        },
+                                    );
+                                    tracing::info!("🌀 [MOCK] 对象状态: 隐藏102/击退103/坐下101 + 冲刺/后跳");
                                     object_state_stage = 2;
                                 }
                                 2 => {

@@ -194,6 +194,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--mount-sync-test") {
         app.add_systems(Update, auto_mount_sync_test);
     }
+    // --action-test: 对象动作（ObjectAttack/冲刺/后跳，#234）
+    if std::env::args().any(|a| a == "--action-test") {
+        app.add_systems(Update, auto_action_test);
+    }
     // --book-test: 技能书学习链路（使用技能书 → 等 NewMagic → 校验 MagicsState）
     if std::env::args().any(|a| a == "--book-test") {
         app.add_systems(Update, auto_book_test);
@@ -5926,6 +5930,160 @@ fn auto_mount_sync_test(
                     tracing::info!("[MOUNT] ✅ 坐骑同步（上马→下马）通过");
                 } else {
                     tracing::warn!("[MOUNT] ❌ 下马未生效");
+                }
+                *stage = 9;
+            }
+        }
+        _ => {}
+    }
+}
+
+
+/// --action-test：施法 → mock 怪物反击 ObjectAttack + 对象冲刺/后跳，逐项采样断言（#234）
+#[allow(clippy::too_many_arguments)]
+fn auto_action_test(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut target: Local<Option<u32>>,
+    mut target_tile: Local<Option<(i32, i32)>>,
+    mut flags: Local<u8>,
+    actors: Query<(
+        &client_bevy::actor::NetObjectId,
+        &Transform,
+        Has<client_bevy::actor::Monster>,
+    )>,
+    actors_st: Query<(
+        &client_bevy::actor::NetObjectId,
+        Has<client_bevy::game::combat::StruckTimer>,
+        Has<client_bevy::actor::Monster>,
+    )>,
+    players: Query<
+        &Transform,
+        (
+            With<client_bevy::actor::LocalPlayer>,
+            With<client_bevy::actor::NetObjectId>,
+        ),
+    >,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 10.0 {
+                return;
+            }
+            let Ok(pf) = players.single() else { return };
+            let (px, py) =
+                client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+            let mut best: Option<(u32, i32, i32)> = None;
+            for (id, tf, monster) in &actors {
+                if !monster {
+                    continue;
+                }
+                let (mx, my) =
+                    client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+                let d = (mx - px).abs() + (my - py).abs();
+                if d <= 40 && best.map(|(_, _, bd)| d < bd).unwrap_or(true) {
+                    best = Some((id.0, mx, my));
+                }
+            }
+            match best {
+                Some((oid, mx, my)) => {
+                    *target = Some(oid);
+                    *target_tile = Some((mx, my));
+                    tracing::info!("[ACTION] 🎯 目标怪物 id={} @ ({},{})", oid, mx, my);
+                    *stage = 1;
+                    *t = 0.0;
+                }
+                None => {
+                    tracing::warn!("[ACTION] ❌ 附近没有怪物");
+                    *stage = 9;
+                }
+            }
+        }
+        1 => {
+            if *t < 1.5 {
+                return;
+            }
+            let (mx, my) = target_tile.unwrap_or((0, 0));
+            let Ok(pf) = players.single() else { return };
+            let (px, py) =
+                client_bevy::game::movement::world_to_tile(pf.translation.x, pf.translation.y);
+            let dir = client_bevy::game::movement::direction_from_delta(
+                (mx - px).signum(),
+                (my - py).signum(),
+            )
+            .unwrap_or(mir2_shared::enums::MirDirection::Down);
+            net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                spell: mir2_shared::enums::Spell::FireBall,
+                direction: dir,
+                target_id: target.unwrap_or(0),
+                location: mir2_shared::Point { x: mx, y: my },
+            });
+            tracing::info!("[ACTION] 🔥 施法触发对象动作");
+            *stage = 2;
+            *t = 0.0;
+        }
+        2 => {
+            // 采样窗口 [0.5, 8.0)：怪物反击 ObjectAttack（StruckTimer）、103 冲刺位移、101 后跳
+            if *t >= 0.5 && *t < 8.0 {
+                let attack = actors_st
+                    .iter()
+                    .any(|(id, struck, monster)| monster && struck && id.0 != 100);
+                if attack {
+                    *flags |= 1;
+                }
+                let dash_orig = client_bevy::game::movement::tile_to_world(351, 355);
+                let dash = actors.iter().any(|(id, tf, monster)| {
+                    monster
+                        && id.0 == 103
+                        && ((tf.translation.x - dash_orig.x).abs() > 1.0
+                            || (tf.translation.y - dash_orig.y).abs() > 1.0)
+                });
+                if dash {
+                    *flags |= 2;
+                }
+                let back = client_bevy::game::movement::tile_to_world(352, 352);
+                let backstep = actors.iter().any(|(id, tf, monster)| {
+                    monster
+                        && id.0 == 101
+                        && (tf.translation.x - back.x).abs() < 1.0
+                        && (tf.translation.y - back.y).abs() < 1.0
+                });
+                if backstep {
+                    *flags |= 4;
+                }
+            }
+            if *t >= 8.0 {
+                let attack = *flags & 1 != 0;
+                let dash = *flags & 2 != 0;
+                let backstep = *flags & 4 != 0;
+                let struck_count = actors_st
+                    .iter()
+                    .filter(|(_, struck, _)| *struck)
+                    .count();
+                tracing::info!(
+                    "[ACTION] 攻击={} 冲刺={} 后跳={}（当前带StruckTimer怪物数={}）",
+                    attack,
+                    dash,
+                    backstep,
+                    struck_count
+                );
+                if attack && dash && backstep {
+                    tracing::info!("[ACTION] ✅ 对象动作全部通过");
+                } else {
+                    tracing::warn!(
+                        "[ACTION] ❌ 部分未通过（攻击={} 冲刺={} 后跳={}）",
+                        attack,
+                        dash,
+                        backstep
+                    );
                 }
                 *stage = 9;
             }
