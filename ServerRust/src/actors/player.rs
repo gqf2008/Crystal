@@ -221,6 +221,8 @@ pub struct PlayerState {
     pub is_dead: bool,
     /// 是否已解除诅咒锁定（C# UnlockCurse，神秘水使用后为 true，卸下诅咒装备后复位）
     pub unlock_curse: bool,
+    /// 上次复活戒指触发时间（Unix 毫秒；C# LastRevivalTime，冷却 300000ms = 5 分钟）
+    pub last_revival_time: i64,
     /// PK 值（>0 = 红名，每杀1人+100，在线 tick 衰减）
     pub pk_points: i32,
     /// 累计击杀玩家数
@@ -516,6 +518,7 @@ impl PlayerActor {
                 mount_type: 0,
                 is_dead: false,
             unlock_curse: false,
+            last_revival_time: 0,
                 pk_points: 0,
                 pk_kill_count: 0,
                 fishing_autocast: false,
@@ -709,6 +712,33 @@ impl Message<SetUnlockCurse> for PlayerActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         self.state.unlock_curse = msg.unlock;
+    }
+}
+
+/// 设置物品 info（WorldActor 装备成功后补 ItemInfo，供复活戒指等逻辑读取）
+pub struct SetItemInfo {
+    pub unique_id: u64,
+    pub info: Option<mir2_shared::data::item::ItemInfo>,
+}
+
+impl Message<SetItemInfo> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetItemInfo, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        for slot in self.state.inventory.equipment.iter_mut() {
+            if let Some(item) = slot {
+                if item.unique_id == msg.unique_id {
+                    item.info = msg.info;
+                    return;
+                }
+            }
+        }
+        for s in self.state.inventory.backpack.iter_mut().flatten() {
+            if s.item.unique_id == msg.unique_id {
+                s.item.info = msg.info;
+                return;
+            }
+        }
     }
 }
 
@@ -932,6 +962,29 @@ impl Message<AttackRequest> for PlayerActor {
     }
 }
 
+impl PlayerActor {
+    /// 查找可用的复活戒指槽位（C# Die：RingL/RingR 且 SpecialItemMode.Revival && CurrentDura >= 1000）
+    fn try_revival_ring(&self) -> Option<usize> {
+        use mir2_shared::enums::SpecialItemMode;
+        for idx in [
+            crate::actors::inventory::EquipmentSlot::RingL as usize,
+            crate::actors::inventory::EquipmentSlot::RingR as usize,
+        ] {
+            if let Some(ring) = self.state.inventory.equipment.get(idx).and_then(|s| s.as_ref()) {
+                let has_revival = ring
+                    .info
+                    .as_ref()
+                    .map(|i| i.unique.contains(SpecialItemMode::REVIVAL))
+                    .unwrap_or(false);
+                if has_revival && ring.current_dura >= 1000 {
+                    return Some(idx);
+                }
+            }
+        }
+        None
+    }
+}
+
 impl Message<TakeDamage> for PlayerActor {
     type Reply = bool;
 
@@ -958,6 +1011,46 @@ impl Message<TakeDamage> for PlayerActor {
 
         // 死亡处理
         if self.state.hp <= 0 && !self.state.is_dead {
+            // C# Die()：复活戒指（SpecialItemMode.Revival）——回满血、扣 1000 耐久、5 分钟冷却
+            if let Some(ring_idx) = self.try_revival_ring() {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                if now_ms >= self.state.last_revival_time {
+                    let (ring_uid, ring_dura) = {
+                        let ring = self.state.inventory.equipment[ring_idx].as_mut().unwrap();
+                        ring.current_dura = ring.current_dura.saturating_sub(1000);
+                        ring.dura_changed = true;
+                        (ring.unique_id, ring.current_dura)
+                    };
+                    self.state.last_revival_time = now_ms + 300_000;
+                    self.state.hp = self.state.max_hp;
+                    // S.DuraChanged（C# Die：item.CurrentDura -= 1000）
+                    let dc = mir2_shared::packets::server::experience::DuraChanged {
+                        unique_id: ring_uid,
+                        current_dura: ring_dura,
+                    };
+                    let mut dc_body = Vec::new();
+                    if dc.write_body(&mut dc_body).is_ok() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: self.state.session_id,
+                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DuraChanged as i16, &dc_body),
+                        }).await;
+                    }
+                    // S.HealthChanged 回满血
+                    let mut hb = Vec::new();
+                    hb.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
+                    hb.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: self.state.session_id,
+                        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &hb),
+                    }).await;
+                    self.send_equipment_changed();
+                    debug!("Player {} revived by ring (dura={})", self.state.name, ring_dura);
+                    return false;
+                }
+            }
             self.state.is_dead = true;
             // 只移除标记 RemoveOnDeath 的 buff（C# 保留部分 buff 如 Exp/Drop）
             // 简化：清除所有 debuff 但保留系统 buff（Exp/Drop/Gold 等）
@@ -4104,6 +4197,7 @@ mod tests {
             is_gm: false,
             is_dead: false,
             unlock_curse: false,
+            last_revival_time: 0,
             pk_points: 0,
             pk_kill_count: 0,
             buffs: Vec::new(),

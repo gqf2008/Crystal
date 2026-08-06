@@ -1088,6 +1088,21 @@ impl Message<EquipItemRequest> for WorldActor {
                     broadcast_mount_update(self, state.object_id, mount_type, true).await;
                 }
 
+                // 给新装备物品补 ItemInfo（复活戒指等需要 special_mode/unique）
+                let item_index = state.inventory.backpack[grid_idx].as_ref().map(|s| s.item.item_index);
+                if let Some(idx) = item_index {
+                    if self.item_infos.contains_key(&idx) {
+                        let mut item = mir2_shared::data::item::UserItem { item_index: idx, ..Default::default() };
+                        super::enrich_item_info(&mut item, &self.item_infos);
+                        if let Some(shared) = item.info {
+                            let _ = record.actor_ref.ask(crate::actors::player::SetItemInfo {
+                                unique_id: msg.unique_id,
+                                info: Some(shared),
+                            }).await;
+                        }
+                    }
+                }
+
                 // 重新计算装备加成 + 广播视觉变化
                 if let Some(state) = self.recalculate_and_set_stat_bonuses(msg.session_id).await {
                     self.broadcast_equipment_visuals(msg.session_id, &state).await;

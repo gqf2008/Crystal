@@ -1234,6 +1234,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         mount_type: 0,
         is_dead: row.get::<i32, _>("is_dead") != 0,
         unlock_curse: false, // C# UnlockCurse 运行时状态，不持久化
+        last_revival_time: 0, // C# LastRevivalTime 运行时状态，不持久化
         fishing_autocast: row.get::<i32, _>("fishing_autocast") != 0,
         reincarnation_host: None,
         reincarnation_ready: false,
