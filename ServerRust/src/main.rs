@@ -120,6 +120,7 @@ async fn async_main() -> anyhow::Result<()> {
         mail_free_with_stamp: cfg.social.mail_free_with_stamp,
         allow_start_game: cfg.social.allow_start_game,
         allow_change_password: cfg.social.allow_change_password,
+        allow_new_account: cfg.social.allow_new_account,
         guild_war_cost: cfg.social.guild_war_cost,
         guild_war_time: cfg.social.guild_war_time,
     };

@@ -121,8 +121,22 @@ async fn e2e_new_account_auto_success() {
     let (gate_ref, _tx, mut rx) = setup_gate_and_session(session_id).await;
     drain_connected(&mut rx).await;
 
-    let na_packet = build_packet_bytes(mir2_shared::enums::ClientPacketIds::NewAccount as i16, &[]);
-    let _ = gate_ref.ask(ClientData { session_id, data: na_packet }).await;
+    // 需要 AccountActor 才能真正注册（C# Envir.NewAccount 创建账号）
+    let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
+    let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool));
+    let _ = gate_ref.ask(SetAccountRef { account_ref }).await;
+
+    // 构造合法 NewAccount 包（对齐 C# ClientPackets.NewAccount）
+    let mut na_body = Vec::new();
+    let _ = mir2_shared::binary::write_dotnet_string(&mut na_body, "newuser");
+    let _ = mir2_shared::binary::write_dotnet_string(&mut na_body, "newpass123");
+    na_body.extend_from_slice(&0i64.to_le_bytes()); // birth_date_binary
+    let _ = mir2_shared::binary::write_dotnet_string(&mut na_body, "New User");
+    let _ = mir2_shared::binary::write_dotnet_string(&mut na_body, "");
+    let _ = mir2_shared::binary::write_dotnet_string(&mut na_body, "");
+    let _ = mir2_shared::binary::write_dotnet_string(&mut na_body, "");
+    let na_packet = build_packet_bytes(mir2_shared::enums::ClientPacketIds::NewAccount as i16, &na_body);
+    let _ = gate_ref.ask(ClientData { session_id, data: na_packet.clone() }).await;
 
     let response = tokio::time::timeout(Duration::from_secs(2), rx.recv())
         .await
@@ -132,6 +146,14 @@ async fn e2e_new_account_auto_success() {
     let resp_opcode = i16::from_le_bytes([response[2], response[3]]);
     assert_eq!(resp_opcode, mir2_shared::enums::ServerPacketIds::NewAccount as i16);
     assert_eq!(response[4], 8u8); // success
+
+    // 重复注册同一账号 → Result=7（已存在）
+    let _ = gate_ref.ask(ClientData { session_id, data: na_packet.clone() }).await;
+    let response2 = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+        .await
+        .expect("timeout2")
+        .expect("channel closed2");
+    assert_eq!(response2[4], 7u8);
 }
 
 #[tokio::test]
