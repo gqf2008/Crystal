@@ -320,6 +320,17 @@ impl Message<NpcIsGroupLeader> for SocialActor {
     }
 }
 
+/// WorldActor -> SocialActor: 查询是否允许进入游戏（C# Settings.AllowStartGame）
+pub struct NpcGetAllowStartGame;
+
+impl Message<NpcGetAllowStartGame> for SocialActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, _msg: NpcGetAllowStartGame, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.config.allow_start_game
+    }
+}
+
 /// WorldActor -> SocialActor: 查询邮件寄送费率（C# Settings.MailCostPer1KGold / MailItemInsurancePercentage / MailFreeWithStamp）
 pub struct NpcGetMailSettings;
 
@@ -634,6 +645,8 @@ pub struct SocialActorConfig {
     pub mail_item_insurance_percentage: u32,
     /// 邮票免费寄信（C# Settings.MailFreeWithStamp）
     pub mail_free_with_stamp: bool,
+    /// 是否允许进入游戏（C# Settings.AllowStartGame）
+    pub allow_start_game: bool,
     /// 行会宣战费用（C# Settings.Guild_WarCost = 3000）
     pub guild_war_cost: u32,
     /// 行会战争时长（秒，C# Settings.Guild_WarTime = 180）
@@ -659,6 +672,7 @@ impl Default for SocialActorConfig {
             mail_cost_per_1k_gold: 100,
             mail_item_insurance_percentage: 5,
             mail_free_with_stamp: true,
+            allow_start_game: true,
             guild_war_cost: 3000,
             guild_war_time: 180,
         }
