@@ -2458,6 +2458,19 @@ impl Message<AddGold> for PlayerActor {
     async fn handle(&mut self, msg: AddGold, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
         self.state.inventory.gold += msg.amount;
         self.send_gold_changed();
+        // C# GainGold：S.GainedGold（客户端金币浮字）
+        if msg.amount > 0 {
+            let packet = mir2_shared::packets::server::drops::GainedGold {
+                gold: msg.amount.min(u32::MAX as u64) as u32,
+            };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainedGold as i16, &body),
+                }).try_send();
+            }
+        }
         true
     }
 }
