@@ -531,8 +531,8 @@ async fn eval_one_check(
                 false
             }
         }
-        // CHECKLEVEL <op> <level>  / CHECKLEVEL <min> <max>
-        "CHECKLEVEL" => {
+        // CHECKLEVEL / LEVEL <op> <level>  / CHECKLEVEL <min> <max>（C# 命令名为 LEVEL）
+        "CHECKLEVEL" | "LEVEL" => {
             let (op, amount) = parse_op_amount(args);
             if op.is_empty() && args.len() >= 2 {
                 let lo = args[0].parse::<i64>().unwrap_or(0);
@@ -595,17 +595,17 @@ async fn eval_one_check(
             let remaining = npc_timer_remaining_secs(world.tick_count, expire);
             compare_i64(remaining, op, want)
         }
-        // CHECKDAY <DayOfWeek> — 当前星期几（对齐 C# CheckType.CheckDay）
-        "CHECKDAY" => {
+        // CHECKDAY / DAYOFWEEK <DayOfWeek> — 当前星期几（对齐 C# CheckType.CheckDay；C# 命令名为 DAYOFWEEK）
+        "CHECKDAY" | "DAYOFWEEK" => {
             now_weekday_upper().eq_ignore_ascii_case(arg0().trim())
         }
-        // CHECKHOUR <hour> — 当前小时（对齐 C# CheckType.CheckHour）
-        "CHECKHOUR" => {
+        // CHECKHOUR / HOUR <hour> — 当前小时（对齐 C# CheckType.CheckHour；C# 命令名为 HOUR）
+        "CHECKHOUR" | "HOUR" => {
             let want = arg0().parse::<u32>().unwrap_or(u32::MAX);
             now_hour() == want
         }
-        // CHECKMINUTE <minute> — 当前分钟（对齐 C# CheckType.CheckMinute）
-        "CHECKMINUTE" => {
+        // CHECKMINUTE / MIN <minute> — 当前分钟（对齐 C# CheckType.CheckMinute；C# 命令名为 MIN）
+        "CHECKMINUTE" | "MIN" => {
             let want = arg0().parse::<u32>().unwrap_or(u32::MAX);
             now_minute() == want
         }
