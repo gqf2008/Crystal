@@ -2808,9 +2808,14 @@ impl Message<Tick> for WorldActor {
                         }
                     }
 
-                    // 加入重生队列（3 分钟后重生 = 1800 ticks @ 100ms，对齐 C# 默认 RespawnDelay）
-                    // TODO: 从 map_respawns 表读 per-spawn-point 延迟
-                    let respawn_tick = self.tick_count + 1800;
+                    // 加入重生队列（延迟从 map_respawns.delay（秒）读取；C# RespawnInfo.Delay）
+                    let respawn_delay_ticks: u64 = self.map_infos.get(&(monster.map_index as i32))
+                        .and_then(|mi| mi.respawns.iter().find(|r| {
+                            r.monster_index == monster.monster_index && r.x == monster.spawn_x && r.y == monster.spawn_y
+                        }))
+                        .map(|r| (r.delay.max(1) as u64) * 10)
+                        .unwrap_or(1800);
+                    let respawn_tick = self.tick_count + respawn_delay_ticks;
                     let spawn = MonsterSpawn {
                         name: monster.name.clone(),
                         image: monster.image,
