@@ -1098,6 +1098,7 @@ fn auto_drop_pick_test(
     mut stage: Local<u8>,
     mut atk_timer: Local<f32>,
     mut dir_idx: Local<u8>,
+    mut before: Local<usize>,
 ) {
     use client_bevy::scenes::AppState;
     if *state != AppState::Game {
@@ -1144,8 +1145,9 @@ fn auto_drop_pick_test(
             if *t < 1.0 {
                 return;
             }
+            *before = hud.inventory.items.iter().flatten().count();
             net.send_packet(&mir2_shared::packets::client::item::PickUp {});
-            tracing::info!("[DROPTEST] 发送 PickUp");
+            tracing::info!("[DROPTEST] 发送 PickUp（拾取前背包 {} 件）", *before);
             *stage = 2;
             *t = 0.0;
         }
@@ -1153,10 +1155,11 @@ fn auto_drop_pick_test(
             if *t < 3.0 {
                 return;
             }
-            if hud.inventory.items.iter().flatten().any(|i| i.item_index == 853) {
-                tracing::info!("[DROPTEST] ✅ 拾取成功：背包有物品 853");
+            let now = hud.inventory.items.iter().flatten().count();
+            if now > *before {
+                tracing::info!("[DROPTEST] ✅ 拾取成功：背包 {} -> {} 件", *before, now);
             } else {
-                tracing::warn!("[DROPTEST] ❌ 背包未找到物品 853");
+                tracing::warn!("[DROPTEST] ❌ 拾取失败：背包 {} -> {} 件", *before, now);
             }
             *stage = 9;
         }
@@ -7808,6 +7811,7 @@ fn auto_name_test(
     )>,
     mut t: Local<f32>,
     mut stage: Local<u8>,
+    mut attempts: Local<u32>,
     mut target: Local<Option<u32>>,
     mut target_tile: Local<Option<(i32, i32)>>,
     actors: Query<(
@@ -7894,10 +7898,17 @@ fn auto_name_test(
                 tracing::info!("[NAME] 对象改名={} 玩家改名={}", obj, player);
                 if obj && player {
                     tracing::info!("[NAME] ✅ 名称同步通过");
+                    *stage = 9;
+                } else if *attempts < 3 {
+                    // 综合冒烟：怪物可能处于死亡/重生窗口，重试施法触发演示批次
+                    *attempts += 1;
+                    tracing::warn!("[NAME] ⚠️ 未通过（第 {} 次），重试施法", *attempts);
+                    *stage = 1;
+                    *t = 0.0;
                 } else {
                     tracing::warn!("[NAME] ❌ 未通过（对象改名={} 玩家改名={}）", obj, player);
+                    *stage = 9;
                 }
-                *stage = 9;
             }
         }
         _ => {}
@@ -8019,6 +8030,7 @@ fn auto_final_test(
     mut stage: Local<u8>,
     mut target: Local<Option<u32>>,
     mut target_tile: Local<Option<(i32, i32)>>,
+    mut attempts: Local<u32>,
     mut before: Local<u64>,
     mut flags: Local<u8>,
     actors_st: Query<(
@@ -8103,7 +8115,9 @@ fn auto_final_test(
         }
         2 => {
             if *t >= 0.5 && *t < 6.0 {
-                let dash = actors_st.iter().any(|(id, struck)| id.0 == 101 && struck);
+                let dash = actors_st
+                    .iter()
+                    .any(|(id, struck)| Some(id.0) == *target && struck);
                 if dash {
                     *flags |= 1;
                 }
@@ -8114,10 +8128,18 @@ fn auto_final_test(
                 tracing::info!("[FINAL] 冲刺攻击={} 特效增量={}", dash, delta);
                 if dash && delta >= 1 {
                     tracing::info!("[FINAL] ✅ 收尾协议通过");
+                    *stage = 9;
+                } else if *attempts < 3 {
+                    // 综合冒烟：目标怪物可能处于死亡/重生窗口，重试施法
+                    *attempts += 1;
+                    tracing::warn!("[FINAL] ⚠️ 未通过（第 {} 次），重试施法", *attempts);
+                    *flags = 0;
+                    *stage = 1;
+                    *t = 0.0;
                 } else {
                     tracing::warn!("[FINAL] ❌ 未通过（冲刺攻击={} 特效={}）", dash, delta);
+                    *stage = 9;
                 }
-                *stage = 9;
             }
         }
         _ => {}

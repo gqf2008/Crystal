@@ -879,8 +879,6 @@ fn hud_server_events(
             | ServerEvent::TimerExpired { .. }
             | ServerEvent::MountUpdated { .. }
             | ServerEvent::ObjectPoisoned { .. }
-            | ServerEvent::ItemRepaired { .. }
-            | ServerEvent::ItemSlotSizeChanged { .. }
             | ServerEvent::SpellToggled { .. }
             | ServerEvent::NpcImageUpdated { .. }
             | ServerEvent::CompassTarget { .. }
