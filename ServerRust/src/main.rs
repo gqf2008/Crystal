@@ -121,6 +121,7 @@ async fn async_main() -> anyhow::Result<()> {
         allow_start_game: cfg.social.allow_start_game,
         allow_change_password: cfg.social.allow_change_password,
         allow_new_account: cfg.social.allow_new_account,
+        allow_login: cfg.social.allow_login,
         guild_war_cost: cfg.social.guild_war_cost,
         guild_war_time: cfg.social.guild_war_time,
     };

@@ -108,6 +108,9 @@ pub struct SocialConfig {
     /// 是否允许注册新账号（C# Settings.AllowNewAccount）
     #[serde(default = "default_true")]
     pub allow_new_account: bool,
+    /// 是否允许登录（C# Settings.AllowLogin）
+    #[serde(default = "default_true")]
+    pub allow_login: bool,
     /// 行会宣战费用（C# Settings.Guild_WarCost = 3000；<$GUILDWARFEE>）
     #[serde(default = "default_guild_war_cost")]
     pub guild_war_cost: u32,
@@ -183,6 +186,7 @@ impl Default for SocialConfig {
             allow_start_game: default_true(),
             allow_change_password: default_true(),
             allow_new_account: default_true(),
+            allow_login: default_true(),
             guild_war_cost: default_guild_war_cost(),
             guild_war_time: default_guild_war_time(),
         }

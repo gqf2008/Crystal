@@ -357,6 +357,22 @@ impl Message<ClientData> for GateActor {
                 self.handle_new_account(ctx.actor_ref(), msg.session_id, payload).await;
             }
             x if x == ClientPacketIds::Login as i16 => {
+                // C# Settings.AllowLogin：关闭时 → S.Login{Result=0}
+                let allow_login = if let Some(s) = &self.social_ref {
+                    s.ask(crate::actors::social::NpcGetAllowLogin).await.unwrap_or(true)
+                } else {
+                    true
+                };
+                if !allow_login {
+                    let data = build_packet_bytes(ServerPacketIds::Login as i16, &[0u8]);
+                    let gate_ref = ctx.actor_ref().clone();
+                    let _ = gate_ref.tell(SendToClient {
+                        session_id: msg.session_id,
+                        data,
+                    }).await;
+                    warn!("Login rejected: AllowLogin=false session={}", msg.session_id);
+                    return;
+                }
                 // Login - 转发到 AccountActor (Phase 1.3: 输入验证)
                 if let Some(account_ref) = &self.account_ref {
                     if let Some((username, password)) = parse_login_payload(payload) {
