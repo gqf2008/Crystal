@@ -936,32 +936,32 @@ fn can_equip_item(item_info: &db::ItemInfo, slot: crate::actors::inventory::Equi
             return false;
         }
     }
-    // RequiredType / RequiredAmount（C# RequiredType：Level/MaxAC/MaxMAC/MaxDC/MaxMC/MaxSC/MaxLevel/Min*）
+    // RequiredType / RequiredAmount（C# RequiredType：Level=0 MaxAC=1 MaxMAC=2 MaxDC=3 MaxMC=4 MaxSC=5
+    // MaxLevel=6 MinAC=7 MinMAC=8 MinDC=9 MinMC=10 MinSC=11；SharedRust 枚举 +3 不可用于 DB 比较）
     let required = item_info.required_type;
-    if required != 0 {
-        let amount = item_info.required_amount;
-        let value = match mir2_shared::enums::RequiredType::try_from(required as u8) {
-            Ok(mir2_shared::enums::RequiredType::Level) => state.level as i32,
-            Ok(mir2_shared::enums::RequiredType::MaxAc) => state.max_ac,
-            Ok(mir2_shared::enums::RequiredType::MaxMac) => state.max_mac,
-            Ok(mir2_shared::enums::RequiredType::MaxDc) => state.max_attack,
-            Ok(mir2_shared::enums::RequiredType::MaxMc) => state.max_mc,
-            Ok(mir2_shared::enums::RequiredType::MaxSc) => state.max_sc,
-            Ok(mir2_shared::enums::RequiredType::MaxLevel) => state.level as i32,
-            Ok(mir2_shared::enums::RequiredType::MinAc) => state.min_ac,
-            Ok(mir2_shared::enums::RequiredType::MinMac) => state.min_mac,
-            Ok(mir2_shared::enums::RequiredType::MinDc) => state.min_attack,
-            Ok(mir2_shared::enums::RequiredType::MinMc) => state.min_mc,
-            Ok(mir2_shared::enums::RequiredType::MinSc) => state.min_sc,
-            _ => i32::MAX,
-        };
-        if required == mir2_shared::enums::RequiredType::MaxLevel as i32 {
-            if (state.level as i32) > amount {
-                return false;
-            }
-        } else if value < amount {
+    let amount = item_info.required_amount;
+    let value = match required {
+        0 => state.level as i32,   // Level
+        1 => state.max_ac,         // MaxAC
+        2 => state.max_mac,        // MaxMAC
+        3 => state.max_attack,     // MaxDC
+        4 => state.max_mc,         // MaxMC
+        5 => state.max_sc,         // MaxSC
+        6 => state.level as i32,   // MaxLevel
+        7 => state.min_ac,         // MinAC
+        8 => state.min_mac,        // MinMAC
+        9 => state.min_attack,     // MinDC
+        10 => state.min_mc,        // MinMC
+        11 => state.min_sc,        // MinSC
+        _ => i32::MAX,
+    };
+    if required == 6 {
+        // MaxLevel：等级不得超过 amount（C# Level > RequiredAmount 拒绝）
+        if (state.level as i32) > amount {
             return false;
         }
+    } else if value < amount {
+        return false;
     }
     true
 }

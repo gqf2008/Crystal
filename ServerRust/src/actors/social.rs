@@ -19,7 +19,7 @@ use crate::db::{self, DbPool};
 use crate::gate::actor::{GateActor, SendToClient};
 use crate::actors::social_packets::*;
 use crate::util::wire::build_packet_bytes;
-use mir2_shared::enums::{ServerPacketIds, ItemSet};
+use mir2_shared::enums::ServerPacketIds;
 
 // ============================================================
 // Message types (moved from WorldActor)
@@ -1205,7 +1205,7 @@ impl SocialActor {
             .filter_map(|e| e.as_ref())
             .filter(|e| {
                 item_infos.get(&e.item_index)
-                    .map(|info| info.set_type == ItemSet::Recall as i32)
+                    .map(|info| info.set_type == 2 /* ItemSet.Recall：C# 原始值，SharedRust 枚举 +3 不可用于 DB 比较 */)
                     .unwrap_or(false)
             })
             .filter_map(|e| item_infos.get(&e.item_index))
