@@ -3189,6 +3189,34 @@ impl WorldActor {
         spawned
     }
 
+    /// 清除指定地图所有存活怪物（NPC 脚本 MONCLEAR，对齐 C# ActionType.MonClear：怪物 Die + 广播）
+    /// 返回清除数量
+    pub(crate) async fn clear_monsters_on_map(&mut self, map_index: u16) -> usize {
+        let to_clear: Vec<u32> = self.monsters.iter()
+            .filter(|(_, m)| m.map_index == map_index)
+            .map(|(id, _)| *id)
+            .collect();
+        let mut cleared = 0usize;
+        for oid in to_clear {
+            if let Some(monster) = self.monsters.get(&oid) {
+                let died = Self::build_object_died_packet(oid, monster.x, monster.y, monster.direction);
+                let remove = Self::build_object_remove_packet(oid);
+                let online: Vec<u64> = self.players.keys().copied().collect();
+                for session_id in online {
+                    let _ = self.gate_ref.tell(SendToClient { session_id, data: died.clone() }).await;
+                    let _ = self.gate_ref.tell(SendToClient { session_id, data: remove.clone() }).await;
+                }
+            }
+            self.monsters.remove(&oid);
+            self.respawn_queue.remove(&oid);
+            self.world_boss_queue.remove(&oid);
+            self.cursed_monsters.remove(&oid);
+            cleared += 1;
+        }
+        debug!("MONCLEAR: cleared {} monsters on map {}", cleared, map_index);
+        cleared
+    }
+
     async fn find_session_by_name_ignore_case(&self, name: &str) -> Option<u64> {
         for (sid, record) in &self.players {
             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
