@@ -947,6 +947,34 @@ impl WorldActor {
     }
 }
 
+impl WorldActor {
+    /// NPC 脚本 CONQUESTSIEGE/CONQUESTGUARD：生成攻城器/守卫结构（对齐 C# ActionType；数据层，地图表现留待攻城专项）
+    pub(crate) async fn npc_spawn_siege_structure(
+        &mut self,
+        session_id: u64,
+        conquest_index: i32,
+        kind: crate::actors::world::conquest::SiegeStructureType,
+    ) {
+        let Some(conquest) = self.conquest_instances.iter().find(|c| c.id == conquest_index).cloned() else { return };
+        let oid = self.alloc_object_id();
+        let mut structure = match kind {
+            crate::actors::world::conquest::SiegeStructureType::Catapult =>
+                crate::actors::world::conquest::SiegeStructure::catapult(oid),
+            crate::actors::world::conquest::SiegeStructureType::ArcherTower =>
+                crate::actors::world::conquest::SiegeStructure::archer_tower(oid),
+            _ => return,
+        };
+        structure.conquest_id = conquest_index;
+        structure.x = conquest.map_index;
+        if let Some(c) = self.conquest_instances.iter_mut().find(|c| c.id == conquest_index) {
+            c.siege_structure_ids.push(oid);
+        }
+        self.siege_structures.insert(oid, structure);
+        send_system_message(&self.gate_ref, session_id, &format!("已生成攻城结构 #{}", oid));
+        debug!("NPC SpawnSiege: conquest={} kind={:?} oid={}", conquest_index, kind, oid);
+    }
+}
+
 // ============================================================
 // 钓鱼系统
 // ============================================================
