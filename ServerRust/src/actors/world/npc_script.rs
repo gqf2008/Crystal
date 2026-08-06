@@ -508,6 +508,35 @@ pub async fn replace_vars(
     out = out.replace("<$STONE>", "无宝石");
     out = out.replace("<$TORCH>", "无火把");
 
+    // 坐骑耐久（C# MOUNTLOYALTY = CurrentDura (MaxDura) / NoMount）
+    let mount_dura = player.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::Mount)
+        .map(|it| format!("{} ({})", it.current_dura, it.max_dura))
+        .unwrap_or_else(|| "无坐骑".to_string());
+    out = out.replace("<$MOUNTLOYALTY>", &mount_dura);
+    out = out.replace("<$mountloyalty>", &mount_dura);
+
+    // 行会领地费用/天数（C# Settings.BuyGTGold / ExtendGT / GTRent）
+    let rent_fee = world.conquest_cfg.buy_gold.to_string();
+    out = out.replace("<$GUILDRENTFEE>", &rent_fee);
+    out = out.replace("<$guildrentfee>", &rent_fee);
+    let owns_gt = player.guild_name.as_deref()
+        .and_then(|g| world.conquest_instances.iter().find(|c| c.owner_guild.as_deref() == Some(g)));
+    let extend_fee = owns_gt
+        .map(|_| format!("延长费用 {}", world.conquest_cfg.extend_gold))
+        .unwrap_or_else(|| "无".to_string());
+    out = out.replace("<$GUILDEXTENDFEE>", &extend_fee);
+    out = out.replace("<$guildextendfee>", &extend_fee);
+    let days_left = owns_gt.map(|c| c.rent_days.to_string()).unwrap_or_else(|| "0".to_string());
+    out = out.replace("<$GUILDGTRENTALDAYSLEFT>", &days_left);
+    out = out.replace("<$guildgtrentaldaysleft>", &days_left);
+    // AGITGUILDNAME：行会名（无行会 → 无行会）
+    let agit_name = player.guild_name.as_deref().unwrap_or("无行会");
+    out = out.replace("<$AGITGUILDNAME>", agit_name);
+    out = out.replace("<$agitguildname>", agit_name);
+
+    // 函数式变量 <$NAME(A0)>（C# varRegex/oneValRegex 形式）
+    out = replace_function_vars(&out, world, custom_vars);
+
     for (k, v) in custom_vars {
         if !k.is_empty() {
             out = out.replace(k.as_str(), v.as_str());
@@ -529,6 +558,56 @@ fn weekday_title(wd: chrono::Weekday) -> &'static str {
         Weekday::Sat => "Saturday",
         Weekday::Sun => "Sunday",
     }
+}
+
+/// 解析 `A0`/`%A0` 自定义变量为数值（C# FindVariable("%"+var) + int.TryParse）
+fn resolve_num_var(var_ref: &str, custom_vars: &HashMap<String, String>) -> i32 {
+    let key = if var_ref.starts_with('%') {
+        var_ref.to_string()
+    } else {
+        format!("%{}", var_ref)
+    };
+    custom_vars.get(&key).and_then(|v| v.parse::<i32>().ok()).unwrap_or(0)
+}
+
+/// 函数式变量替换 `<$NAME(A0)>`（对齐 C# ReplaceValue 的 varRegex/oneValRegex 形式：
+/// OUTPUT / CONQUESTOWNER / CONQUESTGOLD / CONQUESTRATE / CONQUESTSCHEDULE）
+fn replace_function_vars(out: &str, world: &WorldActor, custom_vars: &HashMap<String, String>) -> String {
+    let mut result = out.to_string();
+    let mut pos = 0usize;
+    while let Some(rel) = result[pos..].find("<$") {
+        let start = pos + rel;
+        let Some(end_rel) = result[start..].find('>') else { break };
+        let end = start + end_rel + 1; // 含 '>'
+        let token = &result[start + 2..end - 1];
+        let mut replaced: Option<String> = None;
+        if let Some(open) = token.find('(') {
+            let name = &token[..open];
+            let inner = &token[open + 1..];
+            if let Some(close) = inner.find(')') {
+                let var_ref = &inner[..close];
+                let idx = resolve_num_var(var_ref, custom_vars);
+                let conquest = world.conquest_instances.iter().find(|c| c.id == idx);
+                replaced = match name.to_uppercase().as_str() {
+                    "OUTPUT" => Some(idx.to_string()),
+                    "CONQUESTOWNER" => Some(conquest.and_then(|c| c.owner_guild.clone())
+                        .unwrap_or_else(|| "无所有者".to_string())),
+                    "CONQUESTGOLD" => Some(conquest.map(|c| c.gold_storage.to_string()).unwrap_or_default()),
+                    "CONQUESTRATE" => Some(conquest.map(|c| format!("{}%", c.tax_rate)).unwrap_or_default()),
+                    "CONQUESTSCHEDULE" => Some(conquest.and_then(|c| c.attacker_guild.clone())
+                        .unwrap_or_else(|| "未宣战".to_string())),
+                    _ => None,
+                };
+            }
+        }
+        if let Some(repl) = replaced {
+            result.replace_range(start..end, &repl);
+            pos = start;
+        } else {
+            pos = end;
+        }
+    }
+    result
 }
 
 fn class_name(c: MirClass) -> &'static str {
