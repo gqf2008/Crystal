@@ -320,6 +320,17 @@ impl Message<NpcIsGroupLeader> for SocialActor {
     }
 }
 
+/// WorldActor -> SocialActor: 查询英雄创建选项（C# Settings.AllowNewHero / Hero_CanCreateClass）
+pub struct NpcGetHeroCreateOptions;
+
+impl Message<NpcGetHeroCreateOptions> for SocialActor {
+    type Reply = (bool, Vec<bool>);
+
+    async fn handle(&mut self, _msg: NpcGetHeroCreateOptions, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        (self.config.allow_new_hero, self.config.hero_can_create_class.clone())
+    }
+}
+
 /// WorldActor -> SocialActor: 查询允许创建职业（C# Settings.AllowCreateAssassin/AllowCreateArcher）
 pub struct NpcGetCreateClassOptions;
 
@@ -598,6 +609,10 @@ pub struct SocialActorConfig {
     pub allow_create_assassin: bool,
     /// 是否允许创建弓箭手（C# Settings.AllowCreateArcher）
     pub allow_create_archer: bool,
+    /// 是否允许创建英雄（C# Settings.AllowNewHero）
+    pub allow_new_hero: bool,
+    /// 英雄可创建职业（C# Settings.Hero_CanCreateClass[5]）
+    pub hero_can_create_class: Vec<bool>,
     /// 行会宣战费用（C# Settings.Guild_WarCost = 3000）
     pub guild_war_cost: u32,
     /// 行会战争时长（秒，C# Settings.Guild_WarTime = 180）
@@ -618,6 +633,8 @@ impl Default for SocialActorConfig {
             allow_delete_character: true,
             allow_create_assassin: true,
             allow_create_archer: true,
+            allow_new_hero: true,
+            hero_can_create_class: vec![true; 5],
             guild_war_cost: 3000,
             guild_war_time: 180,
         }
