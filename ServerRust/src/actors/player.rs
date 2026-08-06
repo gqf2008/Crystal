@@ -2102,6 +2102,64 @@ impl Message<DecayPkPoints> for PlayerActor {
     }
 }
 
+/// NPC 脚本 SETPKPOINT：直接设置 PK 值（对齐 C# ActionType.SetPkPoint）
+pub struct SetPkPoints {
+    pub points: i32,
+}
+
+impl Message<SetPkPoints> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetPkPoints, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.pk_points = msg.points.max(0);
+        debug!("Player {} PK points set to {}", self.state.name, self.state.pk_points);
+    }
+}
+
+/// NPC 脚本 REDUCEPKPOINT：减少 PK 值（对齐 C# ActionType.ReducePkPoint）
+pub struct ReducePkPoints {
+    pub amount: i32,
+}
+
+impl Message<ReducePkPoints> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: ReducePkPoints, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.pk_points = (self.state.pk_points - msg.amount).max(0);
+        debug!("Player {} PK points reduced by {} (total={})", self.state.name, msg.amount, self.state.pk_points);
+    }
+}
+
+/// NPC 脚本 GIVEMP：恢复 MP（对齐 C# ActionType.GiveMP / ChangeMP）
+pub struct RestoreMp {
+    pub amount: i32,
+}
+
+impl Message<RestoreMp> for PlayerActor {
+    type Reply = i32;
+
+    async fn handle(&mut self, msg: RestoreMp, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        if self.state.is_dead || msg.amount <= 0 {
+            return 0;
+        }
+        let before = self.state.mp;
+        self.state.mp = (self.state.mp + msg.amount).min(self.state.max_mp);
+        let restored = self.state.mp - before;
+        if restored > 0 {
+            let mut body = Vec::new();
+            body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
+            body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
+            }).try_send();
+        }
+        debug!("Player {} MP +{} (restored={})", self.state.name, msg.amount, restored);
+        restored
+    }
+}
+
+
 /// 死亡时随机掉落背包物品（返回被掉落的物品列表）
 pub struct DropRandomItemsOnDeath;
 

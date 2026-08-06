@@ -659,12 +659,53 @@ async fn exec_action(
                 take_item(world, session_id, idx, cnt).await;
             }
         }
+        // SETPKPOINT <points> —— 设置 PK 值（对齐 C# ActionType.SetPkPoint）
+        "SETPKPOINT" => {
+            let points = arg0().parse::<i32>().unwrap_or(0);
+            send_player_msg(world, session_id, crate::actors::player::SetPkPoints { points }).await;
+            debug!("NPC SETPKPOINT: {}", points);
+        }
+        // REDUCEPKPOINT <amount> —— 减少 PK 值（对齐 C# ActionType.ReducePkPoint）
+        "REDUCEPKPOINT" => {
+            let amount = arg0().parse::<i32>().unwrap_or(0);
+            if amount > 0 {
+                send_player_msg(world, session_id, crate::actors::player::ReducePkPoints { amount }).await;
+                debug!("NPC REDUCEPKPOINT: -{}", amount);
+            }
+        }
         // INCREASEPKPOINT <amount> —— 增加 PK 值（对齐 C# ActionType.IncreasePkPoint）
         "INCREASEPKPOINT" | "ADDPKPOINT" => {
             let amount = arg0().parse::<i32>().unwrap_or(0);
             if amount > 0 {
                 send_player_msg(world, session_id, crate::actors::player::AddPkPoints { points: amount }).await;
                 debug!("NPC INCREASEPKPOINT: +{}", amount);
+            }
+        }
+        // GIVEHP <amount> —— 恢复 HP（对齐 C# ActionType.GiveHP / ChangeHP）
+        "GIVEHP" => {
+            let amount = arg0().parse::<i32>().unwrap_or(0);
+            if amount > 0 {
+                send_player_msg(world, session_id, crate::actors::player::Heal { amount }).await;
+                debug!("NPC GIVEHP: +{}", amount);
+            }
+        }
+        // GIVEMP <amount> —— 恢复 MP（对齐 C# ActionType.GiveMP / ChangeMP）
+        "GIVEMP" => {
+            let amount = arg0().parse::<i32>().unwrap_or(0);
+            if amount > 0 {
+                send_player_msg(world, session_id, crate::actors::player::RestoreMp { amount }).await;
+                debug!("NPC GIVEMP: +{}", amount);
+            }
+        }
+        // CLEARPETS —— 清除所有宠物（对齐 C# ActionType.ClearPets）
+        "CLEARPETS" => {
+            if let Some(mut st) = current_player_state(world, session_id).await {
+                if st.creature_log.active_creature.is_some() || !st.creature_log.owned_creatures.is_empty() {
+                    st.creature_log.active_creature = None;
+                    st.creature_log.owned_creatures.clear();
+                    send_player_msg(world, session_id, crate::actors::player::SetCreature { creature_log: st.creature_log }).await;
+                    debug!("NPC CLEARPETS: all pets cleared");
+                }
             }
         }
         // GIVEEXP <amount>
