@@ -106,12 +106,36 @@ pub struct SellItemRequest {
 // ============================================================
 
 /// 修理费用：每缺失 1 点耐久 = 1 金币
-const REPAIR_COST_PER_DURA: u64 = 1;
-
 /// 修理物品请求
 pub struct RepairItemRequest {
     pub session_id: u64,
     pub unique_id: u64,
+    /// 特殊修理（C# SRepairItem：费用 ×3，走 SRepairKey NPC）
+    pub special: bool,
+}
+
+/// 计算修理费（对齐 C# Shared/Data/ItemData.cs RepairPrice()）
+/// p = floor(MaxDura * (Price/2 / Durability) + Price/2) * (AddedStats.Count*0.1 + 1)
+/// cost = p * Count - Price；有租赁信息 ×2；特殊修理 ×3
+fn compute_repair_cost(item: &mir2_shared::data::item::UserItem, info: &db::ItemInfo, special: bool) -> u64 {
+    let durability = info.durability;
+    if durability <= 0 {
+        return 0;
+    }
+    let price = info.price as f64;
+    let max_dura = item.max_dura as f64;
+    let added_count = item.added_stats.len() as f64;
+    let p_float = (max_dura * (price / 2.0 / durability as f64) + price / 2.0).floor()
+        * (added_count * 0.1 + 1.0);
+    let p = p_float as u64;
+    let mut cost = p.saturating_mul(item.count as u64).saturating_sub(info.price as u64);
+    if item.rental_information.is_some() {
+        cost = cost.saturating_mul(2);
+    }
+    if special {
+        cost = cost.saturating_mul(3);
+    }
+    cost
 }
 
 /// 快捷装备栏装备
@@ -1130,13 +1154,21 @@ impl Message<RepairItemRequest> for WorldActor {
             }
         };
 
-        // 计算耐久缺失和修理费
+        // 计算耐久缺失和修理费（C# ItemData.RepairPrice）
         let dura_deficit = item_data.max_dura.saturating_sub(item_data.current_dura) as u64;
         if dura_deficit == 0 {
             send_system_message(&self.gate_ref, msg.session_id, "该物品不需要修理");
             return;
         }
-        let repair_cost = dura_deficit * REPAIR_COST_PER_DURA;
+        let item_db = self.item_infos.get(&item_data.item_index).cloned();
+        let repair_cost = item_db
+            .as_ref()
+            .map(|info| compute_repair_cost(&item_data, info, msg.special))
+            .unwrap_or(0);
+        if repair_cost == 0 {
+            send_system_message(&self.gate_ref, msg.session_id, "该物品无法修理");
+            return;
+        }
 
         // 检查金币
         if state.inventory.gold < repair_cost {
