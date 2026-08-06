@@ -13,6 +13,7 @@ tick_ms = 100
 map_data_dir = "Daneo1989"
 drop_rate = 1.0
 item_timeout_secs = 30
+max_drop_gold = 2000
 
 # Social / 行会 / 任务系统配置
 # guild_creation_cost_gold = 创建行会所需金币 (master C# Guild_CreationCost)

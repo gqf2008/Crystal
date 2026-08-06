@@ -121,10 +121,17 @@ pub struct ServerWorldConfig {
     /// 地面物品超时秒数（C# Settings.ItemTimeOut = 30）
     #[serde(default = "default_item_timeout")]
     pub item_timeout_secs: u32,
+    /// 金币掉落每堆上限（C# Settings.MaxDropGold = 2000）
+    #[serde(default = "default_max_drop_gold")]
+    pub max_drop_gold: u32,
 }
 
 fn default_item_timeout() -> u32 {
     30
+}
+
+fn default_max_drop_gold() -> u32 {
+    2000
 }
 
 fn default_drop_rate() -> f64 {
@@ -147,6 +154,7 @@ impl Default for ServerConfig {
                 map_data_dir: "Data".to_string(),
                 drop_rate: default_drop_rate(),
                 item_timeout_secs: default_item_timeout(),
+                max_drop_gold: default_max_drop_gold(),
             },
             social: SocialConfig::default(),
             conquest: ConquestConfig::default(),
