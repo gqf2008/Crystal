@@ -471,6 +471,59 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 object_id: target,
                                             },
                                         );
+                                        // #224：战斗表现层——怪物反击施法/远程攻击/命中特效（验证
+                                        // ObjectMagic/ObjectProjectile/ObjectEffect/ObjectRangeAttack 解码渲染）
+                                        let (mx, my) = monster_pos.get(&target).copied().unwrap_or((353, 352));
+                                        let (px, py): (i32, i32) = (354, 352);
+                                        send(
+                                            &to_client,
+                                            &server::magic_combat::ObjectMagic {
+                                                object_id: target,
+                                                location_x: mx,
+                                                location_y: my,
+                                                direction: MirDirection::Down,
+                                                spell: Spell::FireBall,
+                                                target_id: 100,
+                                                target_x: px,
+                                                target_y: py,
+                                                cast: true,
+                                                level: 1,
+                                                self_broadcast: false,
+                                                secondary_target_ids: Vec::new(),
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::magic_combat::ObjectProjectile {
+                                                spell: Spell::FireBall,
+                                                source: target,
+                                                destination: 100,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::magic_combat::ObjectEffect {
+                                                object_id: 100,
+                                                effect: mir2_shared::enums::SpellEffect::Critical,
+                                                effect_type: 0,
+                                                delay_time: 0,
+                                                time: 500,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::combat::ObjectRangeAttack {
+                                                object_id: target,
+                                                location_x: mx as u32,
+                                                location_y: my as u32,
+                                                direction: 2,
+                                                target_id: 100,
+                                                target_x: px as u32,
+                                                target_y: py as u32,
+                                                spell: 0,
+                                                spell_level: 0,
+                                            },
+                                        );
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
                                             send(
