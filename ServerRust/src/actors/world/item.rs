@@ -114,10 +114,10 @@ pub struct RepairItemRequest {
     pub special: bool,
 }
 
-/// 物品价值（对齐 C# Shared/Data/ItemData.cs Price()）：
+/// 物品单价（对齐 C# Shared/Data/ItemData.cs Price() 去掉 *Count 部分）：
 /// p = floor(p/2 + (p/2)*(CurrentDura/MaxDura) + Price/2)（Durability>0 时），
-/// p *= AddedStats.Count*0.1 + 1，返回 p * Count
-fn compute_item_price(item: &mir2_shared::data::item::UserItem, info: &db::ItemInfo) -> u64 {
+/// p *= AddedStats.Count*0.1 + 1
+fn compute_item_price_per_unit(item: &mir2_shared::data::item::UserItem, info: &db::ItemInfo) -> u64 {
     let mut p = info.price as f64;
     if info.durability > 0 {
         let r = (info.price as f64 / 2.0) / info.durability as f64;
@@ -127,7 +127,7 @@ fn compute_item_price(item: &mir2_shared::data::item::UserItem, info: &db::ItemI
         p = (p_base / 2.0 + (p_base / 2.0) * ratio + info.price as f64 / 2.0).floor();
     }
     p *= item.added_stats.len() as f64 * 0.1 + 1.0;
-    (p as u64).saturating_mul(item.count as u64)
+    p as u64
 }
 
 /// 计算修理费（对齐 C# Shared/Data/ItemData.cs RepairPrice()）
@@ -1118,25 +1118,28 @@ impl Message<SellItemRequest> for WorldActor {
             return;
         }
 
-        // 移除物品
-        let removed = record.actor_ref.ask(RemoveItemFromInventory { unique_id: msg.unique_id }).await.unwrap_or(None);
+        // 移除物品（C# SellItem：堆叠按 count 拆分，非堆叠整件移除）
+        let removed = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventoryCount {
+            unique_id: msg.unique_id,
+            count: msg.count as u16,
+        }).await.unwrap_or(None);
         if removed.is_none() {
             send_system_message(&self.gate_ref, msg.session_id, "移除物品失败");
             return;
         }
 
-        // 定价：C# Price() / 2（含耐久比例/附加属性/堆叠数）
-        let total_gold = item_db
+        // 定价：C# Price() / 2（单价含耐久比例/附加属性；按卖出数量计）
+        let per_unit = item_db
             .as_ref()
-            .map(|info| compute_item_price(&item_data, info) / 2)
-            .unwrap_or_else(|| ((item_data.item_index as u64 * 5) * item_data.count as u64) / 2)
-            .max(1);
+            .map(|info| compute_item_price_per_unit(&item_data, info))
+            .unwrap_or_else(|| item_data.item_index as u64 * 5);
+        let total_gold = (per_unit / 2).max(1) * msg.count as u64;
 
         let success = record.actor_ref.ask(AddGold { amount: total_gold }).await.unwrap_or(false);
         if success {
             // 记录到回购列表（最多保留 10 个）
             let buyback = BuybackItem {
-                item: item_data.clone(),
+                item: removed.as_ref().cloned().unwrap_or_else(|| item_data.clone()),
                 sell_price: total_gold,
             };
             let list = self.buyback_items.entry(msg.session_id).or_default();
