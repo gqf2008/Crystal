@@ -216,6 +216,7 @@ fn e2e_start_game_flow() {
             item_timeout_ticks: 300,
             max_drop_gold: 2000,
             rarity_cfg: crate::util::config::RarityConfig::default(),
+            notice_path: "Notice.txt".to_string(),
         });
 
         let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
@@ -317,6 +318,7 @@ fn e2e_magic_cast_flow() {
                 item_timeout_ticks: 300,
                 max_drop_gold: 2000,
                 rarity_cfg: crate::util::config::RarityConfig::default(),
+            notice_path: "Notice.txt".to_string(),
             },
         );
         let _ = gate_ref.ask(crate::gate::actor::SetWorldRef { world_ref }).await;
@@ -386,6 +388,7 @@ fn e2e_attack_flow() {
                 item_timeout_ticks: 300,
                 max_drop_gold: 2000,
                 rarity_cfg: crate::util::config::RarityConfig::default(),
+            notice_path: "Notice.txt".to_string(),
             },
         );
         let _ = gate_ref.ask(crate::gate::actor::SetWorldRef { world_ref }).await;

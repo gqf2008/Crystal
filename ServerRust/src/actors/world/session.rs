@@ -1,5 +1,49 @@
 use super::*;
 
+impl WorldActor {
+    /// 登录公告（C# Settings.Notice + S.UpdateNotice）
+    async fn send_login_notice(&mut self, session_id: u64, character_name: &str) {
+        // 读取 Notice.txt（首行 `Title=`，其余为消息；C# Settings.LoadNotice）
+        let path = std::path::Path::new(&self.notice_path);
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => return, // 无公告文件
+        };
+        let mut lines = content.lines();
+        let mut title = String::new();
+        if let Some(first) = lines.next() {
+            if let Some(t) = first.strip_prefix("Title=") {
+                title = t.trim().to_string();
+            }
+        }
+        let message = lines.collect::<Vec<_>>().join("\n");
+        if message.trim().is_empty() {
+            return;
+        }
+        let last_update = std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let last_access = db::get_character_last_access(&self.db_pool, character_name).await.unwrap_or(0);
+        if last_update <= last_access {
+            return;
+        }
+        let packet = mir2_shared::packets::server::ui_events::UpdateNotice {
+            notice: mir2_shared::data::notice::Notice { title, message },
+        };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UpdateNotice as i16, &body),
+            }).await;
+        }
+        info!("Login notice sent to {} (session={})", character_name, session_id);
+    }
+}
+
 /// 开始游戏请求（从 GateActor 转发）
 pub struct StartGameRequest {
     pub session_id: u64,
@@ -296,6 +340,9 @@ impl Message<StartGameRequest> for WorldActor {
 
         // C# ApplyMapEntryRules：登录进入世界后应用地图规则（NoGroup/NoPets/NoIntelligentCreatures/NoHero）
         super::npc_script::apply_map_entry_rules(self, msg.session_id).await;
+
+        // C# PlayerObject.cs:1172：公告非空且文件修改时间 > 上次下线时间 → S.UpdateNotice
+        self.send_login_notice(msg.session_id, &player_name).await;
 
         // 行会在线状态由 SocialActor 管理
 

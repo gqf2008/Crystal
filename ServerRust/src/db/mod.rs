@@ -857,6 +857,15 @@ pub async fn list_character_summaries(pool: &DbPool, account_username: &str) -> 
     }).collect())
 }
 
+/// 读取角色最后上线时间（unix 秒；C# CharacterInfo.LastLogoutDate）
+pub async fn get_character_last_access(pool: &DbPool, character_name: &str) -> anyhow::Result<i64> {
+    let row: Option<(i64,)> = sqlx::query_as("SELECT last_access FROM characters WHERE name = ?")
+        .bind(character_name)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(|r| r.0).unwrap_or(0))
+}
+
 /// 更新角色最后上线时间（unix 秒；C# CharacterInfo.LastLogoutDate）
 pub async fn update_last_access(pool: &DbPool, character_name: &str, now_unix: i64) -> anyhow::Result<()> {
     sqlx::query("UPDATE characters SET last_access = ? WHERE name = ?")

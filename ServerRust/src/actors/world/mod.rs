@@ -89,6 +89,8 @@ pub struct WorldActorArgs {
     pub max_drop_gold: u32,
     /// 精英怪配置（C# Settings.MonsterRarity*）
     pub rarity_cfg: crate::util::config::RarityConfig,
+    /// 服务器公告文件路径（C# Settings.NoticePath）
+    pub notice_path: String,
 }
 
 /// 世界中的玩家记录
@@ -832,6 +834,8 @@ pub struct WorldActor {
     pub(crate) max_drop_gold: u32,
     /// 精英怪配置
     pub(crate) rarity_cfg: crate::util::config::RarityConfig,
+    /// 服务器公告文件路径（C# Settings.NoticePath）
+    pub(crate) notice_path: String,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -1002,6 +1006,7 @@ impl WorldActor {
             item_timeout_ticks: 600,
             max_drop_gold: 2000,
             rarity_cfg: crate::util::config::RarityConfig::default(),
+            notice_path: "Notice.txt".to_string(),
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -3127,6 +3132,7 @@ impl Actor for WorldActor {
             item_timeout_ticks: args.item_timeout_ticks,
             max_drop_gold: args.max_drop_gold,
             rarity_cfg: args.rarity_cfg,
+            notice_path: args.notice_path.clone(),
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
