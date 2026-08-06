@@ -224,6 +224,9 @@ pub struct ServerWorldConfig {
     /// 金币掉落每堆上限（C# Settings.MaxDropGold = 2000）
     #[serde(default = "default_max_drop_gold")]
     pub max_drop_gold: u32,
+    /// 服务器公告文件（C# Settings.NoticePath = EnvirPath/Notice.txt；首行 Title=，其余为消息）
+    #[serde(default = "default_notice_path")]
+    pub notice_path: String,
     /// 精英怪配置（C# Settings.MonsterRarity* 第一阶段：单级精英，默认保留 Rust 当前值；
     /// C# Elite 参考：2.25x HP / 75% 掉落加成）
     #[serde(default)]
@@ -236,6 +239,10 @@ fn default_item_timeout() -> u32 {
 
 fn default_max_drop_gold() -> u32 {
     2000
+}
+
+fn default_notice_path() -> String {
+    "Notice.txt".to_string()
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -303,6 +310,7 @@ impl Default for ServerConfig {
                 item_timeout_secs: default_item_timeout(),
                 max_drop_gold: default_max_drop_gold(),
                 rarity: RarityConfig::default(),
+                notice_path: default_notice_path(),
             },
             social: SocialConfig::default(),
             conquest: ConquestConfig::default(),

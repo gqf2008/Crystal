@@ -14,6 +14,7 @@ map_data_dir = "Daneo1989"
 drop_rate = 1.0
 item_timeout_secs = 30
 max_drop_gold = 2000
+notice_path = "Notice.txt"
 
 [rarity]
 elite_chance_percent = 3
