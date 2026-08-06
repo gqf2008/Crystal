@@ -901,6 +901,7 @@ fn hud_server_events(
             | ServerEvent::StoragePrompt
             | ServerEvent::StorageResized { .. }
             | ServerEvent::ObjectLeveled { .. }
+            | ServerEvent::ChatItemReceived { .. }
             | ServerEvent::PlayerUpdate { .. }
             | ServerEvent::MonsterInfo { .. }
             | ServerEvent::NpcInfo { .. }

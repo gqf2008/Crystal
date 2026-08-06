@@ -676,6 +676,8 @@ pub struct WorldActor {
     pub(crate) gate_ref: ActorRef<GateActor>,
     /// 自身 ActorRef（#283：PlayerActor 升级通知回传用；on_start 设置）
     pub(crate) self_ref: Option<ActorRef<WorldActor>>,
+    /// 聊天物品已推送记录（#285：session_id → 已发送 uid，避免重复 NewChatItem）
+    pub(crate) chat_items_sent: HashMap<u64, std::collections::HashSet<u64>>,
     /// 地图目录
     pub(crate) map_dir: PathBuf,
     /// 刷怪配置目录
@@ -851,6 +853,7 @@ impl WorldActor {
             maps: HashMap::new(),
             gate_ref,
             self_ref: None,
+            chat_items_sent: HashMap::new(),
             map_dir,
             spawn_dir,
             next_object_id: 1000,
@@ -2944,6 +2947,7 @@ impl Actor for WorldActor {
             maps: HashMap::new(),
             gate_ref: args.gate_ref,
             self_ref: Some(actor_ref),
+            chat_items_sent: HashMap::new(),
             map_dir: args.map_dir,
             spawn_dir: args.spawn_dir,
             next_object_id: 1000,
@@ -3147,6 +3151,86 @@ impl WorldActor {
                 light, weapon_shape, weapon_effect, armor_shape, 0,
             ).await;
         }
+    }
+
+    /// #285：聊天物品链接 —— 解析 `%名字#uid%` 并在发送方背包/装备中查找，
+    /// 向所有在线玩家（含自己）推送 S.NewChatItem（按会话去重，C# SentChatItem）
+    pub(crate) async fn send_chat_item_links(&mut self, session_id: u64, message: &str) {
+        let mut uids: Vec<u64> = Vec::new();
+        let mut i = 0;
+        while i < message.len() {
+            let bytes = message.as_bytes();
+            if bytes[i] == b'%' {
+                if let Some(rel) = message[i + 1..].find('%') {
+                    let inner = &message[i + 1..i + 1 + rel];
+                    if let Some(hash) = inner.rfind('#') {
+                        if let Ok(uid) = inner[hash + 1..].trim().parse::<u64>() {
+                            uids.push(uid);
+                        }
+                    }
+                    i += rel + 2;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+        if uids.is_empty() {
+            return;
+        }
+        let record = match self.players.get(&session_id) {
+            Some(r) => r,
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        // 在发送方背包/装备中按 unique_id 查找（C# PlayerObject 聊天链接查 Inventory）
+        let mut items: Vec<mir2_shared::data::item::UserItem> = Vec::new();
+        let mut push_item = |item: &mir2_shared::data::item::UserItem| {
+            if uids.contains(&item.unique_id)
+                && !items.iter().any(|it| it.unique_id == item.unique_id)
+            {
+                let mut it = item.clone();
+                enrich_item_info(&mut it, &self.item_infos);
+                items.push(it);
+            }
+        };
+        for slot in state.inventory.backpack.iter() {
+            if let Some(s) = slot {
+                push_item(&s.item);
+            }
+        }
+        for eq in state.inventory.equipment.iter() {
+            if let Some(it) = eq {
+                push_item(it);
+            }
+        }
+        if items.is_empty() {
+            return;
+        }
+        for item in &items {
+            let mut body = Vec::new();
+            if mir2_shared::packets::base::serialize_packet(
+                &mut std::io::Cursor::new(&mut body),
+                &mir2_shared::packets::server::NewChatItem { item: item.clone() },
+            )
+            .is_err()
+            {
+                continue;
+            }
+            let data = body;
+            for sid in self.players.keys() {
+                let sent = self.chat_items_sent.entry(*sid).or_default();
+                if sent.insert(item.unique_id) {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: *sid,
+                        data: data.clone(),
+                    }).await;
+                }
+            }
+        }
+        info!("Chat item links sent for session {}: {:?}", session_id, uids);
     }
 
 /// 通过 object_id 查找玩家

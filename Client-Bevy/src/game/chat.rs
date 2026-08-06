@@ -262,12 +262,22 @@ pub struct ChatPlugin;
 impl Plugin for ChatPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ChatFilter>();
+        app.init_resource::<ChatItemCache>();
         app.add_systems(OnEnter(AppState::Game), spawn_chat);
         app.add_systems(OnEnter(AppState::Game), spawn_chat_option_panel);
         app.add_systems(OnExit(AppState::Game), cleanup_chat);
         app.add_systems(
             Update,
-            (chat_tab_system, chat_option_system, chat_size_system, chat_wheel_system, chat_input_system, chat_display_system, chat_server_events)
+            (
+                chat_tab_system,
+                chat_option_system,
+                chat_size_system,
+                chat_wheel_system,
+                chat_input_system,
+                chat_display_system,
+                chat_server_events,
+                chat_item_cache_events,
+            )
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -834,7 +844,11 @@ fn chat_server_events(
             if filter.get(chat_filter_kind(*chat_type)) {
                 continue;
             }
-            let color = chat_color(*chat_type);
+            let mut color = chat_color(*chat_type);
+            // #285：含物品链接 `%名字#uid%` 的行用蓝色（C# ChatLink 蓝色链接）
+            if has_item_link(text) {
+                color = Color::srgb(0.3, 0.6, 1.0);
+            }
             chat.add_line(text.clone(), color, chat_channel(*chat_type));
         }
         if let ServerEvent::ServerMessage { message, .. } = ev {
@@ -883,5 +897,43 @@ mod tests {
         assert!(!f.get(ChatFilterKind::Guild));
         f.set(ChatFilterKind::Guild, true);
         assert!(f.get(ChatFilterKind::Guild));
+    }
+}
+
+/// #285：聊天物品缓存（S.NewChatItem → unique_id → InvItem，供聊天链接 tooltip）
+#[derive(Resource, Default)]
+pub struct ChatItemCache {
+    pub items: std::collections::HashMap<u64, crate::game::dialogs::inventory::InvItem>,
+}
+
+/// 消息是否含 C# 聊天物品链接 `%名字#uid%`
+fn has_item_link(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            if let Some(rel) = text[i + 1..].find('%') {
+                let inner = &text[i + 1..i + 1 + rel];
+                if inner.contains('#') {
+                    return true;
+                }
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+/// #285：消费 ServerEvent::ChatItemReceived → 写入 ChatItemCache
+fn chat_item_cache_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut cache: ResMut<ChatItemCache>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        if let ServerEvent::ChatItemReceived { item } = ev {
+            cache.items.insert(item.unique_id, item.clone());
+            tracing::info!("💬 聊天物品缓存: {} (uid={})", item.name, item.unique_id);
+        }
     }
 }

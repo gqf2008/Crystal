@@ -38,6 +38,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--level-fx-test") {
         app.add_systems(Update, auto_level_fx_test);
     }
+    // --chat-item-test: 聊天物品链路（#285，进图缓存 9005 + RequestChatItem(9999) → 缓存增长）
+    if std::env::args().any(|a| a == "--chat-item-test") {
+        app.add_systems(Update, auto_chat_item_test);
+    }
     // --group-test: 自动组队邀请链路（自动化验证用，配合 --group-accept）
     if std::env::args().any(|a| a == "--group-test") {
         app.add_systems(Update, auto_group_test);
@@ -8616,6 +8620,68 @@ fn auto_level_fx_test(
                 tracing::info!("[LEVELFX] ✅ PASS 升级生效 level={}", hud.level);
             } else {
                 tracing::error!("[LEVELFX] ❌ FAIL level={} 期望 >=31", hud.level);
+            }
+            *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+
+/// --chat-item-test：聊天物品链路（#285）
+/// 流程：施法触发演示批次（含 NewChatItem 9005）→ 断言缓存；RequestChatItem(9999) → mock 回发 → 缓存增长
+fn auto_chat_item_test(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    cache: Res<client_bevy::game::chat::ChatItemCache>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 6.0 {
+                return;
+            }
+            net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                spell: mir2_shared::enums::Spell::FireBall,
+                direction: mir2_shared::enums::MirDirection::Down,
+                target_id: 101,
+                location: mir2_shared::Point { x: 353, y: 352 },
+            });
+            tracing::info!("[CHATITEM] 🔥 施法触发演示批次");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 2.0 {
+                return;
+            }
+            if cache.items.contains_key(&9005) {
+                tracing::info!("[CHATITEM] ✅ 缓存包含 9005");
+                net.send_packet(&mir2_shared::packets::client::misc::RequestChatItem {
+                    chat_item_id: 9999,
+                });
+                *stage = 2;
+                *t = 0.0;
+            } else {
+                tracing::warn!("[CHATITEM] ❌ 缓存缺少 9005（{} 条）", cache.items.len());
+                *stage = 9;
+            }
+        }
+        2 => {
+            if *t < 1.5 {
+                return;
+            }
+            if cache.items.contains_key(&9999) {
+                tracing::info!("[CHATITEM] ✅ PASS 请求回发 9999 已缓存");
+            } else {
+                tracing::error!("[CHATITEM] ❌ FAIL 9999 未缓存（{} 条）", cache.items.len());
             }
             *stage = 9;
         }
