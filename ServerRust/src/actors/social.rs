@@ -320,6 +320,17 @@ impl Message<NpcIsGroupLeader> for SocialActor {
     }
 }
 
+/// WorldActor -> SocialActor: 查询是否允许登录（C# Settings.AllowLogin）
+pub struct NpcGetAllowLogin;
+
+impl Message<NpcGetAllowLogin> for SocialActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, _msg: NpcGetAllowLogin, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.config.allow_login
+    }
+}
+
 /// WorldActor -> SocialActor: 查询是否允许注册新账号（C# Settings.AllowNewAccount）
 pub struct NpcGetAllowNewAccount;
 
@@ -673,6 +684,8 @@ pub struct SocialActorConfig {
     pub allow_change_password: bool,
     /// 是否允许注册新账号（C# Settings.AllowNewAccount）
     pub allow_new_account: bool,
+    /// 是否允许登录（C# Settings.AllowLogin）
+    pub allow_login: bool,
     /// 行会宣战费用（C# Settings.Guild_WarCost = 3000）
     pub guild_war_cost: u32,
     /// 行会战争时长（秒，C# Settings.Guild_WarTime = 180）
@@ -701,6 +714,7 @@ impl Default for SocialActorConfig {
             allow_start_game: true,
             allow_change_password: true,
             allow_new_account: true,
+            allow_login: true,
             guild_war_cost: 3000,
             guild_war_time: 180,
         }
