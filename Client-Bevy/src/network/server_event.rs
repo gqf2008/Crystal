@@ -83,6 +83,14 @@ pub enum ServerEvent {
     },
     /// #236 Poisoned/ObjectPoisoned：中毒状态
     ObjectPoisoned { object_id: u32, poisoned: bool },
+    /// #240 ItemRepaired：修理结果（耐久/最大耐久更新）
+    ItemRepaired {
+        unique_id: u64,
+        max_dura: u16,
+        current_dura: u16,
+    },
+    /// #240 ItemSlotSizeChanged：镶嵌槽位数量变化
+    ItemSlotSizeChanged { unique_id: u64, slot_size: i32 },
     /// Roll：骰子/尤茨结果（npc_id 由 roll 消费端从 NpcDialogState 读取）
     Roll {
         r#type: i32,

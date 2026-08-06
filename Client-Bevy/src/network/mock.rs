@@ -609,6 +609,22 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 percent: 80,
                                             },
                                         );
+                                        // #240：修理结果 + 镶嵌槽位（木剑 9005）
+                                        send(
+                                            &to_client,
+                                            &server::item::ItemRepaired {
+                                                unique_id: 9005,
+                                                max_dura: 12,
+                                                current_dura: 8,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::item::ItemSlotSizeChanged {
+                                                unique_id: 9005,
+                                                slot_size: 1,
+                                            },
+                                        );
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
                                             send(

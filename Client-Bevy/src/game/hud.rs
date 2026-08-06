@@ -1032,6 +1032,52 @@ fn hud_server_events(
                 }
                 tracing::info!("🔧 物品耐久变化 uid={} dura={}", unique_id, current_dura);
             }
+            ServerEvent::ItemRepaired {
+                unique_id,
+                max_dura,
+                current_dura,
+            } => {
+                // #240：修理结果 → 更新背包/装备栏 当前/最大耐久
+                let mut updated = false;
+                for slot in hud.inventory.items.iter_mut().flatten() {
+                    if slot.unique_id == *unique_id {
+                        slot.current_dura = *current_dura;
+                        slot.max_dura = *max_dura;
+                        updated = true;
+                        break;
+                    }
+                }
+                if !updated {
+                    for slot in hud.equipment.iter_mut().flatten() {
+                        if slot.unique_id == *unique_id {
+                            slot.current_dura = *current_dura;
+                            slot.max_dura = *max_dura;
+                            updated = true;
+                            break;
+                        }
+                    }
+                }
+                tracing::info!(
+                    "🔧 物品修理 uid={} dura={}/{}",
+                    unique_id,
+                    current_dura,
+                    max_dura
+                );
+            }
+            ServerEvent::ItemSlotSizeChanged {
+                unique_id,
+                slot_size,
+            } => {
+                // #240：镶嵌槽位数量变化 → 调整 slots 长度
+                for slot in hud.inventory.items.iter_mut().flatten() {
+                    if slot.unique_id == *unique_id {
+                        let n = (*slot_size).max(0) as usize;
+                        slot.slots.resize(n, None);
+                        break;
+                    }
+                }
+                tracing::info!("📐 物品槽位变化 uid={} size={}", unique_id, slot_size);
+            }
             ServerEvent::ItemDeleted { unique_id } => {
                 // #228：背包按 unique_id 删除（消耗/删除）
                 let idx = hud
