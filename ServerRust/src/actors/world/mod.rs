@@ -4355,7 +4355,7 @@ fn shared_item_type(cs_type: i32) -> mir2_shared::enums::ItemType {
 }
 
 /// 给物品补 ItemInfo（DB 配置 → SharedRust，编号差 3；已有 info 则跳过）
-fn enrich_item_info(
+pub(crate) fn enrich_item_info(
     item: &mut mir2_shared::data::item::UserItem,
     item_infos: &std::collections::HashMap<i32, db::ItemInfo>,
 ) {
@@ -4379,6 +4379,8 @@ fn enrich_item_info(
         ),
         set: mir2_shared::enums::ItemSet::try_from((info.set_type + 3) as u8)
             .unwrap_or(mir2_shared::enums::ItemSet::None),
+        // C# SpecialItemMode 位值与 SharedRust 一致（如 Revival=0x10），无需 +3；共享字段名 unique
+        unique: mir2_shared::enums::SpecialItemMode::from_bits_truncate(info.special_mode as u16),
         shape: info.shape as i16,
         weight: info.weight as u8,
         image: info.image as u16,

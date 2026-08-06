@@ -294,6 +294,18 @@ impl Message<StartGameRequest> for WorldActor {
         loaded_state.freezing = b.freezing;
         loaded_state.poison_attack = b.poison_attack;
 
+        // 给装备/背包物品补 ItemInfo（含 special_mode，供复活戒指等逻辑读取）
+        for slot in loaded_state.inventory.equipment.iter_mut() {
+            if let Some(item) = slot {
+                super::enrich_item_info(item, &self.item_infos);
+            }
+        }
+        for slot in loaded_state.inventory.backpack.iter_mut() {
+            if let Some(s) = slot {
+                super::enrich_item_info(&mut s.item, &self.item_infos);
+            }
+        }
+
         let _ = player_ref.ask(SetPlayerState { state: loaded_state.clone() }).await;
 
         self.players.insert(msg.session_id, PlayerRecord {
@@ -1759,6 +1771,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         last_recall_time: 0,
         is_dead: false,
             unlock_curse: false,
+            last_revival_time: 0,
         is_mounted: false,
         mount_type: 0,
         allow_lover_recall: false,

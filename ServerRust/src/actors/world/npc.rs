@@ -637,6 +637,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             last_recall_time: 0,
             is_dead: false,
             unlock_curse: false,
+            last_revival_time: 0,
             is_mounted: false,
             mount_type: 0,
             allow_lover_recall: false,
