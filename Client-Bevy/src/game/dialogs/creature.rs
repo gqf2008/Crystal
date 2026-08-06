@@ -201,5 +201,25 @@ fn creature_server_events(
         if let ServerEvent::CreatureList { creatures } = ev {
             creature.creatures = creatures.clone();
         }
+        if let ServerEvent::CreatureAcquired { creature_type } = ev {
+            // #274：获得新宠物
+            if !creature
+                .creatures
+                .iter()
+                .any(|c| c.creature_type == *creature_type)
+            {
+                creature.creatures.push(CreatureEntry {
+                    creature_type: *creature_type,
+                    ..Default::default()
+                });
+            }
+            creature.message = format!("获得新宠物（type {}）", creature_type);
+        }
+        if let ServerEvent::CreatureRenameEnabled { can_rename } = ev {
+            creature.message = format!("宠物{}重命名", if *can_rename { "可以" } else { "不可" });
+        }
+        if let ServerEvent::CreaturePickupToggled { enabled } = ev {
+            creature.message = format!("宠物拾取模式: {}", if *enabled { "开启" } else { "关闭" });
+        }
     }
 }

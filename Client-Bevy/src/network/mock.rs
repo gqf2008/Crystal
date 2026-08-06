@@ -894,6 +894,29 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 max_experience: 100,
                                             },
                                         );
+                                        // #274：智能宠物协议
+                                        send(
+                                            &to_client,
+                                            &server::special_systems::NewIntelligentCreature {
+                                                creature_type: mir2_shared::enums::IntelligentCreatureType::BabyPig,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::special_systems::IntelligentCreatureEnableRename {
+                                                can_rename: true,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::special_systems::IntelligentCreaturePickup {
+                                                enabled: true,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::ui_events::ResizeStorage { size: 80 },
+                                        );
                                         // #256：公告 + 杂项协议
                                         send(
                                             &to_client,
