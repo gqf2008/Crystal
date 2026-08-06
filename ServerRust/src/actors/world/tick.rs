@@ -314,13 +314,14 @@ impl WorldActor {
     /// 地面物品过期清理（每 50 ticks）
     pub(crate) async fn tick_ground_cleanup(&mut self) {
         if self.tick_count % 50 == 0 {
-            const GROUND_ITEM_LIFETIME_TICKS: u64 = 600; // ~60 秒
+            // 对齐 C# Settings.ItemTimeOut = 30 秒（配置化 item_timeout_ticks）
+            let lifetime = self.item_timeout_ticks;
             let expired: Vec<_> = self.ground_items.iter()
-                .filter(|gi| self.tick_count >= gi.drop_tick + GROUND_ITEM_LIFETIME_TICKS)
+                .filter(|gi| self.tick_count >= gi.drop_tick + lifetime)
                 .map(|gi| (gi.object_id, gi.map_index))
                 .collect();
             if !expired.is_empty() {
-                self.ground_items.retain(|gi| self.tick_count < gi.drop_tick + GROUND_ITEM_LIFETIME_TICKS);
+                self.ground_items.retain(|gi| self.tick_count < gi.drop_tick + lifetime);
                 for (oid, map_idx) in &expired {
                     let remove_packet = Self::build_object_remove_packet(*oid);
                     for (sid, rec) in &self.players {

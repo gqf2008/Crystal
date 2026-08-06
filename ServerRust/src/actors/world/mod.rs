@@ -83,6 +83,8 @@ pub struct WorldActorArgs {
     pub conquest_cfg: crate::util::config::ConquestConfig,
     /// 全局掉落倍率（C# Settings.DropRate）
     pub drop_rate: f64,
+    /// 地面物品超时 ticks（= item_timeout_secs * 10，100ms/tick）
+    pub item_timeout_ticks: u64,
 }
 
 /// 世界中的玩家记录
@@ -799,6 +801,8 @@ pub struct WorldActor {
     pub(crate) conquest_cfg: crate::util::config::ConquestConfig,
     /// 全局掉落倍率
     pub(crate) drop_rate: f64,
+    /// 地面物品超时 ticks
+    pub(crate) item_timeout_ticks: u64,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -961,6 +965,7 @@ impl WorldActor {
             social_ref,
             conquest_cfg: crate::util::config::ConquestConfig::default(),
             drop_rate: 1.0,
+            item_timeout_ticks: 600,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -3069,6 +3074,7 @@ impl Actor for WorldActor {
             social_ref: args.social_ref,
             conquest_cfg: args.conquest_cfg,
             drop_rate: args.drop_rate,
+            item_timeout_ticks: args.item_timeout_ticks,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
