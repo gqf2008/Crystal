@@ -860,6 +860,78 @@ impl WorldActor {
     }
 }
 
+impl WorldActor {
+    /// 攻城结构查找：conquest 内指定类型，id 作为 1-based 序号（对齐 C# GateList.Index 概念）
+    pub(crate) fn find_siege_structure(
+        &self,
+        conquest_id: i32,
+        kind: crate::actors::world::conquest::SiegeStructureType,
+        id: i32,
+    ) -> Option<u32> {
+        let mut matches: Vec<u32> = self.siege_structures.iter()
+            .filter(|(_, s)| s.conquest_id == conquest_id && s.structure_type == kind)
+            .map(|(oid, _)| *oid)
+            .collect();
+        matches.sort();
+        matches.get((id - 1).max(0) as usize).copied()
+    }
+
+    /// NPC 脚本 CONQUESTGATE/CONQUESTWALL：修复攻城结构（对齐 C#：GM 免费，非 GM 扣行会金币）
+    pub(crate) async fn npc_repair_siege_structure(
+        &mut self,
+        session_id: u64,
+        conquest_index: i32,
+        id: i32,
+        kind: crate::actors::world::conquest::SiegeStructureType,
+    ) {
+        let Some(oid) = self.find_siege_structure(conquest_index, kind.clone(), id) else { return };
+        let Some(structure) = self.siege_structures.get(&oid).cloned() else { return };
+        let cost = structure.repair_cost();
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        if !state.is_gm {
+            if cost == 0 { return; }
+            let guild_gold = self.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id }).await.unwrap_or(0);
+            if guild_gold < cost { return; }
+            let _ = self.social_ref.ask(crate::actors::social::NpcGuildGoldChange {
+                session_id,
+                amount: cost.min(u32::MAX as u64) as u32,
+                change_type: 2,
+            }).await;
+        }
+        if let Some(s) = self.siege_structures.get_mut(&oid) {
+            s.repair_full();
+        }
+        debug!("NPC RepairSiege: conquest={} id={} kind={:?} cost={}", conquest_index, id, kind, cost);
+    }
+
+    /// NPC 脚本 OPENGATE/CLOSEGATE：城门开关
+    pub(crate) async fn npc_open_close_gate(&mut self, session_id: u64, conquest_index: i32, gate_id: i32, open: bool) {
+        let Some(oid) = self.find_siege_structure(
+            conquest_index,
+            crate::actors::world::conquest::SiegeStructureType::CastleGate,
+            gate_id,
+        ) else { return };
+        if let Some(s) = self.siege_structures.get_mut(&oid) {
+            s.is_open = open;
+        }
+        debug!("NPC OpenCloseGate: conquest={} gate={} open={}", conquest_index, gate_id, open);
+    }
+
+    /// NPC 脚本 CONQUESTREPAIRALL：GM 修复全部结构（对齐 C# ActionType.ConquestRepairAll）
+    pub(crate) async fn npc_repair_all(&mut self, session_id: u64, conquest_index: i32) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        if !state.is_gm { return; }
+        for (_, s) in self.siege_structures.iter_mut() {
+            if s.conquest_id == conquest_index {
+                s.repair_full();
+            }
+        }
+        debug!("NPC RepairAll: conquest={}", conquest_index);
+    }
+}
+
 // ============================================================
 // 钓鱼系统
 // ============================================================

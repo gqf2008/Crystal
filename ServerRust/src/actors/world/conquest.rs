@@ -381,3 +381,17 @@ mod tests {
         assert!(inst.is_breached(&structures));
     }
 }
+
+impl SiegeStructure {
+    /// 修复费用（简化：按缺失 HP 比例，对齐 C# GetRepairCost 概念；每 100 点缺失收 5 金币）
+    pub fn repair_cost(&self) -> u64 {
+        let missing = (self.max_hp - self.hp).max(0) as u64;
+        missing / 100 * 5
+    }
+
+    /// 满修复（HP 回满 + 损伤等级清零；区分已有 repair(amount)）
+    pub fn repair_full(&mut self) {
+        self.hp = self.max_hp;
+        self.damage_level = 0;
+    }
+}
