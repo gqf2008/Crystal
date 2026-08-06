@@ -678,9 +678,24 @@ async fn eval_one_check(
                 + if player.creature_log.active_creature.is_some() { 1 } else { 0 };
             compare_i64(pets, op, want)
         }
-        // CHECKPET — 是否有宠物（对齐 C# CheckType.CheckPet）
+        // CHECKPET [宠物名] — 是否有宠物（对齐 C# CheckType.CheckPet）
+        // C# 语义：CHECKPET <宠物名> 遍历所有 Pets 比较 Info.Name（大小写不敏感），任一匹配即真。
+        // Rust 无参时保留旧行为（任意已激活宠物）；有参时遍历 active + owned，
+        // 比较 custom_name 或类型 Debug 名（BabyPanda…），均忽略大小写。
         "CHECKPET" => {
-            player.creature_log.active_creature.is_some()
+            let name = arg0().trim();
+            if name.is_empty() {
+                player.creature_log.active_creature.is_some()
+            } else {
+                let want = name.to_lowercase();
+                let pet_matches = |c: &crate::actors::creature::IntelligentCreature| {
+                    c.custom_name.as_deref().map(|n| n.to_lowercase() == want).unwrap_or(false)
+                        || format!("{:?}", c.creature_type).to_lowercase() == want
+                };
+                let active_match = player.creature_log.active_creature.as_ref()
+                    .map(|c| pet_matches(c)).unwrap_or(false);
+                active_match || player.creature_log.owned_creatures.iter().any(pet_matches)
+            }
         }
         // CHECKWEDDINGRING — 已婚且左戒为结婚戒指（对齐 C# CheckType.CheckWeddingRing）
         "CHECKWEDDINGRING" => {
