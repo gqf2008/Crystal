@@ -2575,8 +2575,12 @@ fn parse_buff_type(s: &str) -> Option<crate::combat::buff::BuffType> {
         "CRITICALRATEBOOST" | "RAGE" => Some(BuffType::CriticalRateBoost { bonus: 0 }),
         "MPREGENBOOST" | "CONCENTRATION" => Some(BuffType::MpRegenBoost { bonus: 0 }),
         "MAXMPBOOST" | "MAGICBOOSTER" => Some(BuffType::MaxMpBoost { bonus: 0 }),
-        "REFLECT" | "ENERGYSHIELD" => Some(BuffType::Reflect { percent: 0 }),
+        "REFLECT" | "ENERGYSHIELD" | "COUNTERATTACK" => Some(BuffType::Reflect { percent: 0 }),
         "TAUNT" | "LIONROAR" => Some(BuffType::Taunt),
+        // 法术批已实现的 C# BuffType 别名：ProtectionField/ImmortalSkin/UltimateEnhancer
+        "PROTECTIONFIELD" => Some(BuffType::DamageReduction { percent: 0 }),
+        "IMMORTALSKIN" => Some(BuffType::AcDefenseBoost { bonus: 0 }),
+        "ULTIMATEENHANCER" => Some(BuffType::McBoost { bonus: 0 }),
         // C# Curse 降低目标输出，Rust 端用 Slow 近似负面效果
         "SLOW" | "CURSE" => Some(BuffType::Slow { percent: 0 }),
         "FROZEN" => Some(BuffType::Frozen),
