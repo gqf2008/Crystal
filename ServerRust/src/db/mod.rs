@@ -638,6 +638,8 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN max_mac INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN can_gain_exp INTEGER NOT NULL DEFAULT 1")
+        .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN luck INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN critical_rate INTEGER NOT NULL DEFAULT 0")
@@ -945,8 +947,8 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
             gold, group_id, guild_name, guild_rank,
             spouse_name, allow_mentor, mentor_name, hero_index, hero_behaviour,
             auto_pot_hp, auto_pot_mp, auto_pot_hp_item, auto_pot_mp_item,
-            is_fishing, fishing_autocast, is_dead, pk_points, pk_kill_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+            is_fishing, fishing_autocast, is_dead, pk_points, pk_kill_count, can_gain_exp
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(&state.name)
     .bind(account_username)
@@ -998,6 +1000,7 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     .bind(if state.is_dead { 1 } else { 0 })
     .bind(state.pk_points)
     .bind(state.pk_kill_count as i32)
+    .bind(if state.can_gain_exp { 1 } else { 0 })
     .execute(&mut *tx)
     .await?;
 
@@ -1088,6 +1091,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         level: row.get::<i32, _>("level") as u16,
         experience: row.get("experience"),
         max_experience: row.get("max_experience"),
+        can_gain_exp: row.try_get("can_gain_exp").unwrap_or(1) != 0,
         hp: row.get("hp"),
         max_hp: row.get("max_hp"),
         mp: row.get("mp"),

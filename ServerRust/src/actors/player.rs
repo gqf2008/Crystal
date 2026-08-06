@@ -76,6 +76,8 @@ pub struct PlayerState {
     pub experience: i64,
     /// 升级所需经验
     pub max_experience: i64,
+    /// 是否可获得经验（NPC 脚本 CANGAINEXP，对齐 C# CanGainExp）
+    pub can_gain_exp: bool,
     /// 当前 HP
     pub hp: i32,
     /// 最大 HP（基础+装备加成后的总值）
@@ -414,6 +416,7 @@ impl PlayerActor {
                 level: 1,
                 experience: 0,
                 max_experience: 100,
+        can_gain_exp: true,
                 hp: 120,
                 max_hp: 120,
                 mp: 60,
@@ -935,6 +938,10 @@ impl Message<AddExperience> for PlayerActor {
         msg: AddExperience,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        // 对齐 C# CanGainExp：关闭时不给经验
+        if !self.state.can_gain_exp {
+            return;
+        }
         let base = msg.amount.max(0) as i64;
         let amount = (base as f64 * self.state.exp_multiplier).round() as i64;
         self.state.experience += amount;
@@ -2594,6 +2601,21 @@ impl Message<ChangeLevel> for PlayerActor {
     }
 }
 
+/// NPC 脚本 CANGAINEXP：设置是否可获得经验（对齐 C# ActionType.CanGainExp）
+pub struct SetCanGainExp {
+    pub can: bool,
+}
+
+impl Message<SetCanGainExp> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetCanGainExp, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.can_gain_exp = msg.can;
+        debug!("Player {} can_gain_exp={}", self.state.name, msg.can);
+    }
+}
+
+
 
 
 /// 设置是否允许拜师
@@ -3635,6 +3657,7 @@ mod tests {
             level: 1,
             experience: 0,
             max_experience: 100,
+        can_gain_exp: true,
             hp: 120,
             max_hp: 120,
             mp: 60,
