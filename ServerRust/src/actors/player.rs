@@ -219,6 +219,8 @@ pub struct PlayerState {
     pub mount_type: i16,
     /// 是否死亡（对应 C# Dead）
     pub is_dead: bool,
+    /// 是否已解除诅咒锁定（C# UnlockCurse，神秘水使用后为 true，卸下诅咒装备后复位）
+    pub unlock_curse: bool,
     /// PK 值（>0 = 红名，每杀1人+100，在线 tick 衰减）
     pub pk_points: i32,
     /// 累计击杀玩家数
@@ -513,6 +515,7 @@ impl PlayerActor {
                 is_mounted: false,
                 mount_type: 0,
                 is_dead: false,
+            unlock_curse: false,
                 pk_points: 0,
                 pk_kill_count: 0,
                 fishing_autocast: false,
@@ -689,6 +692,23 @@ impl Message<SetDropMultiplier> for PlayerActor {
     ) -> Self::Reply {
         self.state.drop_multiplier = msg.multiplier.max(1.0);
         self.state.drop_multiplier_end_tick = msg.end_tick;
+    }
+}
+
+/// 设置诅咒解锁状态（C# UnlockCurse：神秘水解除诅咒装备卸装锁定）
+pub struct SetUnlockCurse {
+    pub unlock: bool,
+}
+
+impl Message<SetUnlockCurse> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetUnlockCurse,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.unlock_curse = msg.unlock;
     }
 }
 
@@ -3287,7 +3307,11 @@ impl Message<RemoveSlotItemMsg> for PlayerActor {
             Some(item) => item,
             None => return false,
         };
-
+        // C# RemoveSlotItem：slotTemp.Cursed && !UnlockCurse → 拒绝
+        if removed_item.cursed && !self.state.unlock_curse {
+            return false;
+        }
+        let was_cursed = removed_item.cursed;
         // Place into destination grid
         let success = match msg.grid_to {
             GRID_INVENTORY | GRID_STORAGE => {
@@ -3300,6 +3324,10 @@ impl Message<RemoveSlotItemMsg> for PlayerActor {
         if success {
             self.send_inventory_changed();
             self.send_equipment_changed();
+            // C#：卸下诅咒物品后 UnlockCurse 复位
+            if was_cursed {
+                self.state.unlock_curse = false;
+            }
             debug!("Player {} removed slot item uid={} -> grid_to={} to={}", self.state.name, msg.unique_id, msg.grid_to, msg.to);
         }
         success
@@ -4075,6 +4103,7 @@ mod tests {
             allow_lover_recall: false,
             is_gm: false,
             is_dead: false,
+            unlock_curse: false,
             pk_points: 0,
             pk_kill_count: 0,
             buffs: Vec::new(),
