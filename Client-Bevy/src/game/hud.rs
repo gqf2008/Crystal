@@ -900,6 +900,7 @@ fn hud_server_events(
             | ServerEvent::StorageUnlockResult { .. }
             | ServerEvent::StoragePrompt
             | ServerEvent::StorageResized { .. }
+            | ServerEvent::ObjectLeveled { .. }
             | ServerEvent::PlayerUpdate { .. }
             | ServerEvent::MonsterInfo { .. }
             | ServerEvent::NpcInfo { .. }

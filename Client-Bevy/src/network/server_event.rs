@@ -31,6 +31,8 @@ pub enum ServerEvent {
     StoragePrompt,
     /// #281 ResizeStorage：仓库扩容（size = 新格数，C# S.ResizeStorage → Array.Resize）
     StorageResized { size: usize },
+    /// #283 ObjectLeveled：对象升级（C# S.ObjectLeveled → Magic2[1180] 升级特效 + LevelUp 音效）
+    ObjectLeveled { object_id: u32, level: u16 },
     /// #279 PlayerUpdate：玩家外观刷新（换装/光照，C# S.PlayerUpdate）
     PlayerUpdate {
         object_id: u32,

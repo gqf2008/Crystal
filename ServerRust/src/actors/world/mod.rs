@@ -674,6 +674,8 @@ pub struct WorldActor {
     pub(crate) maps: HashMap<u16, MapData>,
     /// GateActor 引用，用于发数据包给客户端
     pub(crate) gate_ref: ActorRef<GateActor>,
+    /// 自身 ActorRef（#283：PlayerActor 升级通知回传用；on_start 设置）
+    pub(crate) self_ref: Option<ActorRef<WorldActor>>,
     /// 地图目录
     pub(crate) map_dir: PathBuf,
     /// 刷怪配置目录
@@ -848,6 +850,7 @@ impl WorldActor {
             buyback_items: HashMap::new(),
             maps: HashMap::new(),
             gate_ref,
+            self_ref: None,
             map_dir,
             spawn_dir,
             next_object_id: 1000,
@@ -2759,11 +2762,12 @@ impl Actor for WorldActor {
         info!("WorldActor started (tick interval: {}ms)", args.tick_interval_ms);
 
         // 启动主循环
+        let tick_ref = actor_ref.clone();
         tokio::spawn(async move {
             let mut interval = interval(Duration::from_millis(args.tick_interval_ms));
             loop {
                 interval.tick().await;
-                let _ = actor_ref.ask(Tick).await;
+                let _ = tick_ref.ask(Tick).await;
             }
         });
 
@@ -2939,6 +2943,7 @@ impl Actor for WorldActor {
             buyback_items: HashMap::new(),
             maps: HashMap::new(),
             gate_ref: args.gate_ref,
+            self_ref: Some(actor_ref),
             map_dir: args.map_dir,
             spawn_dir: args.spawn_dir,
             next_object_id: 1000,
@@ -3144,7 +3149,7 @@ impl WorldActor {
         }
     }
 
-    /// 通过 object_id 查找玩家
+/// 通过 object_id 查找玩家
     #[allow(dead_code)]
     pub(crate) async fn find_player_by_object_id(&self, target_id: u32) -> Option<PlayerState> {
         for r in self.players.values() {
@@ -3174,6 +3179,30 @@ impl WorldActor {
         build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &body)
     }
 }
+/// #283：玩家升级 → 向同图其他玩家广播 ObjectLeveled（C# 升级表现）
+pub struct PlayerLeveled {
+    pub session_id: u64,
+    pub object_id: u32,
+    pub level: u16,
+}
+
+impl Message<PlayerLeveled> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: PlayerLeveled, _ctx: &mut Context<Self, Self::Reply>) {
+        for other in self.other_players(msg.session_id) {
+            let mut body = Vec::new();
+            body.extend_from_slice(&msg.object_id.to_le_bytes());
+            body.extend_from_slice(&msg.level.to_le_bytes());
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: other.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectLeveled as i16, &body),
+            }).await;
+        }
+        info!("Player {} leveled to {} broadcast", msg.object_id, msg.level);
+    }
+}
+
 
 /// 硬编码合成配方表（后续可从 DB 加载）
 fn get_craft_recipes() -> Vec<CraftRecipe> {

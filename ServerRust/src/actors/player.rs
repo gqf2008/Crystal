@@ -352,6 +352,8 @@ pub struct PlayerActor {
     pub state: PlayerState,
     /// GateActor 引用，用于发数据给客户端
     gate_ref: ActorRef<GateActor>,
+    /// WorldActor 引用（#283：升级时通知广播 ObjectLeveled）
+    world_ref: ActorRef<crate::actors::world::WorldActor>,
     /// 当前地图数据（用于边界+障碍物校验）
     map_data: Option<MapData>,
 }
@@ -392,6 +394,7 @@ impl PlayerActor {
         session_id: u64,
         map_index: u16,
         gate_ref: ActorRef<GateActor>,
+        world_ref: ActorRef<crate::actors::world::WorldActor>,
     ) -> Self {
         Self {
             state: PlayerState {
@@ -497,6 +500,7 @@ impl PlayerActor {
                 exp_multiplier_end_tick: 0,
             },
             gate_ref,
+            world_ref,
             map_data: None,
         }
     }
@@ -562,16 +566,16 @@ impl PlayerActor {
 }
 
 impl Actor for PlayerActor {
-    type Args = (u32, String, u64, u16, ActorRef<GateActor>);
+    type Args = (u32, String, u64, u16, ActorRef<GateActor>, ActorRef<crate::actors::world::WorldActor>);
     type Error = anyhow::Error;
 
     async fn on_start(
         args: Self::Args,
         _actor_ref: ActorRef<Self>,
     ) -> Result<Self, Self::Error> {
-        let (object_id, name, session_id, map_index, gate_ref) = args;
+        let (object_id, name, session_id, map_index, gate_ref, world_ref) = args;
         debug!("PlayerActor spawned: {} (object_id={}, session={})", name, object_id, session_id);
-        Ok(Self::new(object_id, name, session_id, map_index, gate_ref))
+        Ok(Self::new(object_id, name, session_id, map_index, gate_ref, world_ref))
     }
 }
 
@@ -953,6 +957,14 @@ impl Message<AddExperience> for PlayerActor {
         while self.state.experience >= self.state.max_experience && self.state.level < MAX_LEVEL {
             self.state.experience -= self.state.max_experience;
             self.state.level += 1;
+            // #283：通知 WorldActor 广播 ObjectLeveled 给同图其他玩家
+            let _ = self.world_ref
+                .tell(crate::actors::world::PlayerLeveled {
+                    session_id: self.state.session_id,
+                    object_id: self.state.object_id,
+                    level: self.state.level,
+                })
+                .try_send();
 
             // 按 BaseStats 公式重算所有基础属性（对齐 C# Settings.ClassBaseStats[Class].Calculate）
             let base_stats = mir2_shared::data::stats::BaseStats::new(self.state.class);
