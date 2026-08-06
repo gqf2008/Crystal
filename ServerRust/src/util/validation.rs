@@ -6,14 +6,17 @@
 /// 最大聊天消息长度(字节)。master C# 默认 512。
 pub const MAX_CHAT_LEN: usize = 512;
 
-/// 最大用户名长度。
-pub const MAX_USERNAME_LEN: usize = 20;
+/// 最大用户名长度（C# Globals.MaxAccountIDLength = 15）。
+pub const MAX_USERNAME_LEN: usize = 15;
 
-/// 最小用户名长度。
+/// 最小用户名长度（C# Globals.MinAccountIDLength = 3）。
 pub const MIN_USERNAME_LEN: usize = 3;
 
-/// 最大密码长度。
-pub const MAX_PASSWORD_LEN: usize = 32;
+/// 最大密码长度（C# Globals.MaxPasswordLength = 15）。
+pub const MAX_PASSWORD_LEN: usize = 15;
+
+/// 最小密码长度（C# Globals.MinPasswordLength = 5）。
+pub const MIN_PASSWORD_LEN: usize = 5;
 
 /// 最大角色名长度（C# Globals.MaxCharacterNameLength = 15，按字符计数）。
 pub const MAX_CHAR_NAME_LEN: usize = 15;
@@ -37,17 +40,20 @@ pub fn validate_chat(msg: &str) -> bool {
     control_count < msg.chars().count() / 2
 }
 
-/// 验证用户名:3-20 字符,字母数字 + 下划线。
+/// 验证用户名：3-15 字符，仅字母数字（C# Envir.AccountIDReg `^[A-Za-z0-9]{3,15}$`）。
 pub fn validate_username(name: &str) -> bool {
     if name.len() < MIN_USERNAME_LEN || name.len() > MAX_USERNAME_LEN {
         return false;
     }
-    name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    name.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
-/// 验证密码:非空,≤32 字符。
+/// 验证密码：5-15 字符，仅字母数字（C# Envir.PasswordReg `^[A-Za-z0-9]{5,15}$`）。
 pub fn validate_password(pw: &str) -> bool {
-    !pw.is_empty() && pw.len() <= MAX_PASSWORD_LEN
+    if pw.len() < MIN_PASSWORD_LEN || pw.len() > MAX_PASSWORD_LEN {
+        return false;
+    }
+    pw.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 /// 验证角色名：3-15 字符（按字符计数），字符集对齐 C# Envir.CharacterReg

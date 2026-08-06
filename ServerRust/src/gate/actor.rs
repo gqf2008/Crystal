@@ -641,7 +641,7 @@ impl Message<ClientData> for GateActor {
                 forward_new_character(&self.world_ref, &self.session_usernames, msg.session_id, payload).await;
             }
             x if x == ClientPacketIds::ChangePassword as i16 => {
-                forward_change_password(&self.account_ref, &self.session_usernames, msg.session_id, payload);
+                forward_change_password(ctx.actor_ref(), &self.social_ref, &self.account_ref, msg.session_id, payload).await;
             }
             x if x == ClientPacketIds::DeleteCharacter as i16 => {
                 forward_delete_character(&self.world_ref, &self.session_usernames, msg.session_id, payload);
@@ -1704,34 +1704,71 @@ fn forward_spell_toggle(
 // 账号管理
 // ============================================================================
 
-/// ChangePassword: [old_password: DotNetString][new_password: DotNetString]
-fn forward_change_password(
+/// ChangePassword: [account_id DotNetString][current_password DotNetString][new_password DotNetString]
+/// （对齐 C# Envir.ChangePassword：Result 0=开关关闭 1=账号格式 2=当前密码格式 3=新密码格式；
+/// 4=账号不存在 5=当前密码错误 6=成功 由 AccountActor 返回）
+async fn forward_change_password(
+    gate_ref: &ActorRef<GateActor>,
+    social_ref: &Option<ActorRef<crate::actors::social::SocialActor>>,
     account_ref: &Option<ActorRef<crate::actors::account::AccountActor>>,
-    session_usernames: &HashMap<SessionId, String>,
     session_id: SessionId,
     payload: &[u8],
 ) {
-    if payload.len() < 2 { return; }
-    let old_len = u16::from_le_bytes(payload[0..2].try_into().unwrap_or([0; 2])) as usize;
-    if payload.len() < 2 + old_len + 2 { return; }
-    let new_len = u16::from_le_bytes(payload[2 + old_len..4 + old_len].try_into().unwrap_or([0; 2])) as usize;
-    if payload.len() < 4 + old_len + new_len { return; }
-    let old_password = String::from_utf8_lossy(&payload[2..2 + old_len]).to_string();
-    let new_password = String::from_utf8_lossy(&payload[4 + old_len..4 + old_len + new_len]).to_string();
-
-    if let Some(username) = session_usernames.get(&session_id) {
-        if let Some(account_ref) = account_ref {
-            let _ = account_ref.tell(crate::actors::account::AccountChangePassword {
-                session_id,
-                username: username.clone(),
-                old_password,
-                new_password,
-            }).try_send();
-        } else {
-            warn!("ChangePassword: account_ref not available for session={}", session_id);
+    let mut cur = std::io::Cursor::new(payload);
+    let (account_id, old_password, new_password) = match (
+        mir2_shared::binary::read_dotnet_string(&mut cur),
+        mir2_shared::binary::read_dotnet_string(&mut cur),
+        mir2_shared::binary::read_dotnet_string(&mut cur),
+    ) {
+        (Ok(a), Ok(o), Ok(n)) => (a, o, n),
+        _ => {
+            warn!("ChangePassword: parse failed session={}", session_id);
+            return;
         }
+    };
+
+    let send_result = |result: u8| async move {
+        let packet = mir2_shared::packets::server::login::ChangePassword { result };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            let data = build_packet_bytes(ServerPacketIds::ChangePassword as i16, &body);
+            let _ = gate_ref.tell(SendToClient { session_id, data }).await;
+        }
+    };
+
+    // C# Settings.AllowChangePassword → Result=0
+    let allow = if let Some(s) = social_ref {
+        s.ask(crate::actors::social::NpcGetAllowChangePassword).await.unwrap_or(true)
     } else {
-        warn!("ChangePassword: no username mapping for session={}", session_id);
+        true
+    };
+    if !allow {
+        send_result(0).await;
+        return;
+    }
+    // C# AccountIDReg / PasswordReg 格式校验
+    if !crate::util::validation::validate_username(&account_id) {
+        send_result(1).await;
+        return;
+    }
+    if !crate::util::validation::validate_password(&old_password) {
+        send_result(2).await;
+        return;
+    }
+    if !crate::util::validation::validate_password(&new_password) {
+        send_result(3).await;
+        return;
+    }
+
+    if let Some(account_ref) = account_ref {
+        let _ = account_ref.tell(crate::actors::account::AccountChangePassword {
+            session_id,
+            username: account_id,
+            old_password,
+            new_password,
+        }).try_send();
+    } else {
+        warn!("ChangePassword: account_ref not available for session={}", session_id);
     }
 }
 
