@@ -106,6 +106,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                 inv[1] = Some(potion_item(10)); // 布衣
                 inv[2] = Some(potion_item(1)); // 金创药（可喝）
                 inv[3] = Some(book_item(34)); // 技能书：FireBall（#212）
+                inv[4] = Some(socketed_sword_item()); // 带孔铁剑（#557 镶嵌验收）
                 inv
             };
             let mut player_gold: u32 = 10000;
@@ -133,6 +134,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             let mut mock_storage_password: Option<String> = Some("123456".to_string());
             // #512：仓库物品（80 格，MOCK 本地维护，StoreItem/TakeBackItem 闭环）
             let mut mock_storage: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 80];
+            // #557：本地坐骑状态（@ride 切换）
+            let mut mock_riding = false;
             // #283：首次击杀触发本地升级演示（LevelChanged + ObjectLeveled）
             let mut mock_leveled_up = false;
             // #297：精炼流程状态（(物品 uid, 是否已开始)）
@@ -624,6 +627,62 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     }
                                 }
                                 // #512：仓库存取（C# S.StoreItem/TakeBackItem 回执闭环）
+                                // #557：商城（C# GameshopDialog；wire [item_id u32][quantity u32]）
+                                x if x == ClientPacketIds::GameshopBuy as i16 => {
+                                    use byteorder::{LittleEndian, ReadBytesExt};
+                                    let item_id = cur.read_u32::<LittleEndian>().unwrap_or(0);
+                                    let quantity = cur.read_u32::<LittleEndian>().unwrap_or(0);
+                                    if item_id == 0 {
+                                        // 请求目录 → GameShopInfo + GameShopStock
+                                        send(
+                                            &to_client,
+                                            &server::special_systems::GameShopInfo {
+                                                items: vec![
+                                                    server::special_systems::GameShopItem {
+                                                        item_index: 1,
+                                                        gold_price: 10,
+                                                        credit_price: 0,
+                                                        count: 1,
+                                                        class: 0,
+                                                        category: "药品".to_string(),
+                                                        stock: 99,
+                                                        is_bought: false,
+                                                        deal: false,
+                                                    },
+                                                    server::special_systems::GameShopItem {
+                                                        item_index: 221,
+                                                        gold_price: 100,
+                                                        credit_price: 0,
+                                                        count: 1,
+                                                        class: 0,
+                                                        category: "武器".to_string(),
+                                                        stock: 10,
+                                                        is_bought: false,
+                                                        deal: false,
+                                                    },
+                                                ],
+                                                credit: 0,
+                                                gold: player_gold,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::special_systems::GameShopStock {
+                                                item_index: 1,
+                                                stock: 99,
+                                            },
+                                        );
+                                        tracing::info!("🛒 [MOCK] 商城目录回发");
+                                    } else {
+                                        // 购买 → 物品邮件送达（sender=GameShop）
+                                        send(&to_client, &MockGameshopMail);
+                                        tracing::info!(
+                                            "🛒 [MOCK] 商城购买 #{} x{} 邮件送达",
+                                            item_id,
+                                            quantity
+                                        );
+                                    }
+                                }
                                 x if x == ClientPacketIds::StoreItem as i16 => {
                                     if let Ok(p) = client::item::StoreItem::read_body(&mut cur) {
                                         let from = p.from as usize;
@@ -1641,6 +1700,23 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     // 聊天：服务器回显（广播）
                                     if let Ok(p) = client::chat::Chat::read_body(&mut cur) {
                                         // #289：测试命令 → 服务端要求返回登录界面
+                                        // #557：@ride 切换坐骑（C# MountDialog 骑乘）
+                                        if p.message.trim().eq_ignore_ascii_case("@ride") {
+                                            mock_riding = !mock_riding;
+                                            send(
+                                                &to_client,
+                                                &server::miscellaneous::MountUpdate {
+                                                    object_id: 100,
+                                                    mount_type: 1,
+                                                    riding_mount: mock_riding,
+                                                },
+                                            );
+                                            tracing::info!(
+                                                "🐎 [MOCK] 坐骑切换 riding={}",
+                                                mock_riding
+                                            );
+                                            continue;
+                                        }
                                         if p.message.trim().eq_ignore_ascii_case("@RETURNLOGIN") {
                                             send(&to_client, &server::ReturnToLogin);
                                             tracing::info!("🚪 [MOCK] 触发返回登录");
@@ -2301,6 +2377,37 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
 }
 
 /// 发送服务器包（serialize 内层 → codec 外帧编码）
+/// #557：商城购买成功邮件（客户端 parse_receive_mail 单条目格式，与 SharedRust 列表格式不同）
+struct MockGameshopMail;
+
+impl Packet for MockGameshopMail {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::ReceiveMail as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u64::<LittleEndian>(9001)?;
+        mir2_shared::binary::write_dotnet_string(writer, "GameShop")?;
+        mir2_shared::binary::write_dotnet_string(writer, "商城购买成功")?;
+        mir2_shared::binary::write_dotnet_string(writer, "感谢购买！物品已通过邮件送达。")?;
+        writer.write_i64::<LittleEndian>(0)?; // timestamp
+        writer.write_u8(0)?; // read
+        writer.write_u8(0)?; // collected
+        writer.write_u32::<LittleEndian>(0)?; // gold
+        writer.write_u8(1)?; // item_count
+        writer.write_u64::<LittleEndian>(9002)?; // uid
+        writer.write_u32::<LittleEndian>(1)?; // idx
+        mir2_shared::binary::write_dotnet_string(writer, "金创药(小)")?;
+        writer.write_u16::<LittleEndian>(1)?; // count
+        writer.write_u16::<LittleEndian>(1)?; // cd
+        writer.write_u16::<LittleEndian>(1)?; // md
+        Ok(())
+    }
+}
+
 fn send<P: Packet>(to_client: &Sender<Vec<u8>>, packet: &P) {
     let mut inner = Vec::new();
     if serialize_packet(&mut inner, packet).is_ok() {
@@ -2471,6 +2578,30 @@ fn wooden_sword_item() -> mir2_shared::data::item::UserItem {
             stats: s,
             ..Default::default()
         }),
+        ..Default::default()
+    }
+}
+
+/// #557：带孔铁剑（2 孔，镶嵌面板验收）
+fn socketed_sword_item() -> mir2_shared::data::item::UserItem {
+    let mut s = mir2_shared::data::stats::Stats::new();
+    s.set(Stat::MinDC, 6);
+    s.set(Stat::MaxDC, 14);
+    mir2_shared::data::item::UserItem {
+        unique_id: 9007,
+        item_index: 222,
+        count: 1,
+        info: Some(mir2_shared::data::item::ItemInfo {
+            index: 222,
+            name: "带孔铁剑".to_string(),
+            image: 222,
+            item_type: ItemType::Weapon,
+            shape: 0,
+            price: 100,
+            stats: s,
+            ..Default::default()
+        }),
+        slots: vec![None, None],
         ..Default::default()
     }
 }
