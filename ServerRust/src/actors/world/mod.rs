@@ -81,6 +81,8 @@ pub struct WorldActorArgs {
     pub social_ref: ActorRef<SocialActor>,
     /// 攻城/GT 配置（对齐 C# Settings.BuyGTGold/ExtendGT）
     pub conquest_cfg: crate::util::config::ConquestConfig,
+    /// 全局掉落倍率（C# Settings.DropRate）
+    pub drop_rate: f64,
 }
 
 /// 世界中的玩家记录
@@ -795,6 +797,8 @@ pub struct WorldActor {
     pub(crate) social_ref: ActorRef<SocialActor>,
     /// 攻城/GT 配置
     pub(crate) conquest_cfg: crate::util::config::ConquestConfig,
+    /// 全局掉落倍率
+    pub(crate) drop_rate: f64,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -956,6 +960,7 @@ impl WorldActor {
             movement_index: HashMap::new(),
             social_ref,
             conquest_cfg: crate::util::config::ConquestConfig::default(),
+            drop_rate: 1.0,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -1397,7 +1402,9 @@ impl WorldActor {
 
         for drop in &drops {
             let roll = fastrand::f64();
-            if roll > drop.chance {
+            // 全局掉落倍率（C# Settings.DropRate）：chance * drop_rate，上限 1.0
+            let effective_chance = (drop.chance * self.drop_rate).min(1.0);
+            if roll > effective_chance {
                 continue;
             }
             let count = if drop.max_count > drop.min_count {
@@ -3061,6 +3068,7 @@ impl Actor for WorldActor {
             movement_index,
             social_ref: args.social_ref,
             conquest_cfg: args.conquest_cfg,
+            drop_rate: args.drop_rate,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,

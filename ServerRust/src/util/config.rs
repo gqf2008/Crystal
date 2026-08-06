@@ -115,6 +115,13 @@ pub struct ServerWorldConfig {
     pub tick_ms: u64,
     /// 地图数据目录
     pub map_data_dir: String,
+    /// 全局掉落倍率（C# Settings.DropRate，默认 1.0；影响掉落概率 chance * drop_rate）
+    #[serde(default = "default_drop_rate")]
+    pub drop_rate: f64,
+}
+
+fn default_drop_rate() -> f64 {
+    1.0
 }
 
 impl Default for ServerConfig {
@@ -131,6 +138,7 @@ impl Default for ServerConfig {
             server: ServerWorldConfig {
                 tick_ms: 100,
                 map_data_dir: "Data".to_string(),
+                drop_rate: default_drop_rate(),
             },
             social: SocialConfig::default(),
             conquest: ConquestConfig::default(),

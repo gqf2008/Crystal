@@ -190,6 +190,7 @@ fn e2e_start_game_flow() {
             db_pool: db_pool.clone(),
             social_ref,
             conquest_cfg: crate::util::config::ConquestConfig::default(),
+            drop_rate: 1.0,
         });
 
         let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
@@ -263,6 +264,7 @@ fn e2e_magic_cast_flow() {
                 db_pool: db_pool.clone(),
                 social_ref,
                 conquest_cfg: crate::util::config::ConquestConfig::default(),
+                drop_rate: 1.0,
             },
         );
         let _ = gate_ref.ask(crate::gate::actor::SetWorldRef { world_ref }).await;
@@ -328,6 +330,7 @@ fn e2e_attack_flow() {
                 db_pool: db_pool.clone(),
                 social_ref,
                 conquest_cfg: crate::util::config::ConquestConfig::default(),
+                drop_rate: 1.0,
             },
         );
         let _ = gate_ref.ask(crate::gate::actor::SetWorldRef { world_ref }).await;
