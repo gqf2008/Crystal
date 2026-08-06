@@ -3670,6 +3670,8 @@ impl WorldActor {
             poison_attack: b.poison_attack,
             health_recovery: b.health_recovery,
             spell_recovery: b.spell_recovery,
+            attack_speed: b.attack_speed,
+            poison_resist: b.poison_resist,
         }).await;
         Some(state)
     }
@@ -4049,6 +4051,7 @@ pub struct EquipmentBonuses {
     pub agility: i32, pub accuracy: i32,
     pub freezing: i32, pub poison_attack: i32,
     pub health_recovery: i32, pub spell_recovery: i32,
+    pub attack_speed: i32, pub poison_resist: i32,
 }
 
 fn calculate_equipment_bonuses(
@@ -4086,6 +4089,8 @@ fn calculate_equipment_bonuses(
             b.poison_attack += get(Stat::PoisonAttack);
             b.health_recovery += get(Stat::HealthRecovery);
             b.spell_recovery += get(Stat::SpellRecovery);
+            b.attack_speed += get(Stat::AttackSpeed);
+            b.poison_resist += get(Stat::PoisonResist);
         }
     }
     b
@@ -4782,14 +4787,19 @@ fn build_user_information_packet(
         .flatten()
         .map(|i| item_infos.get(&i.item_index).map(|i| i.weight).unwrap_or(0))
         .sum();
+    // C# HandWeight：武器（含火把）重量
+    let hand_weight: i32 = state.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::Weapon)
+        .and_then(|i| item_infos.get(&i.item_index))
+        .map(|i| i.weight)
+        .unwrap_or(0);
     for v in [
         bag_weight,
         wear_weight,
-        0, // hand_weight（服务端暂缺）
+        hand_weight,
         state.magic_resist,
-        0, // poison_resist（服务端暂缺）
-        0, // health_recovery（服务端暂缺）
-        0, // spell_recovery（服务端暂缺）
+        state.poison_resist,
+        state.health_recovery,
+        state.spell_recovery,
         state.poison_recovery,
         state.holy,
         state.freezing,
