@@ -195,6 +195,8 @@ pub struct LoginResult {
     pub username: String,
     /// 角色摘要列表（登录成功时携带，用于选角界面）
     pub characters: Vec<crate::db::CharacterSummary>,
+    /// 封禁到期时间（unix 秒；Some 时发 S.LoginBanned，C# WrongPasswordCount>=5 封 2 分钟）
+    pub banned_until: Option<i64>,
 }
 
 /// 设置 AccountActor 引用
@@ -1048,6 +1050,23 @@ impl Message<LoginResult> for GateActor {
                     session_id: msg.session_id,
                     data: response_data,
                 }).await;
+        } else if let Some(until) = msg.banned_until {
+            // C#：封禁期登录 → S.LoginBanned（Reason + ExpiryDate，.NET DateTime ticks）
+            let expiry_ticks = (until + 62135596800) * 10_000_000;
+            let packet = mir2_shared::packets::server::login::LoginBanned {
+                reason: "密码错误次数过多，账号已临时封禁".to_string(),
+                expiry_date: expiry_ticks,
+            };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let data = build_packet_bytes(ServerPacketIds::LoginBanned as i16, &body);
+                let gate_ref = ctx.actor_ref().clone();
+                let _ = gate_ref
+                    .tell(SendToClient {
+                        session_id: msg.session_id,
+                        data,
+                    }).await;
+            }
         } else {
             // Login failure
             let response_data = build_packet_bytes(ServerPacketIds::Login as i16, &[4u8]);

@@ -573,6 +573,11 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN storage_password_last_set INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    // #480: 密码错误锁定（C# WrongPasswordCount / ExpiryDate，safe to re-run）
+    let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN wrong_password_count INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN banned_until INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     // Migration: add key column to player_magics (safe to re-run)
     let _ = sqlx::query("ALTER TABLE player_magics ADD COLUMN key INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
@@ -776,14 +781,17 @@ pub async fn init_db(db_path: &Path) -> anyhow::Result<DbPool> {
 pub async fn save_account(pool: &DbPool, account: &AccountInfo) -> anyhow::Result<()> {
     sqlx::query(
         r#"INSERT OR REPLACE INTO accounts
-           (username, password_hash, is_online, storage_password_hash, storage_password_last_set)
-           VALUES (?, ?, ?, ?, ?)"#
+           (username, password_hash, is_online, storage_password_hash, storage_password_last_set,
+            wrong_password_count, banned_until)
+           VALUES (?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(&account.username)
     .bind(&account.password_hash)
     .bind(if account.is_online { 1 } else { 0 })
     .bind(account.storage_password_hash.as_deref())
     .bind(account.storage_password_last_set)
+    .bind(account.wrong_password_count as i64)
+    .bind(account.banned_until)
     .execute(pool)
     .await?;
     Ok(())
@@ -846,7 +854,8 @@ pub async fn account_has_storage_password(pool: &DbPool, username: &str) -> anyh
 pub async fn load_account(pool: &DbPool, username: &str) -> anyhow::Result<Option<AccountInfo>> {
     let row = sqlx::query(
         "SELECT username, password_hash, is_online,
-                storage_password_hash, storage_password_last_set, credit
+                storage_password_hash, storage_password_last_set, credit,
+                wrong_password_count, banned_until
          FROM accounts WHERE username = ?"
     )
     .bind(username)
@@ -860,13 +869,16 @@ pub async fn load_account(pool: &DbPool, username: &str) -> anyhow::Result<Optio
         storage_password_hash: r.try_get::<Option<String>, _>("storage_password_hash").ok().flatten(),
         storage_password_last_set: r.try_get::<i64, _>("storage_password_last_set").unwrap_or(0),
         credit: r.try_get::<i64, _>("credit").unwrap_or(0).max(0) as u64,
+        wrong_password_count: r.try_get::<i64, _>("wrong_password_count").unwrap_or(0).max(0) as u32,
+        banned_until: r.try_get::<i64, _>("banned_until").unwrap_or(0),
     }))
 }
 
 pub async fn load_all_accounts(pool: &DbPool) -> anyhow::Result<Vec<AccountInfo>> {
     let rows = sqlx::query(
         "SELECT username, password_hash, is_online,
-                storage_password_hash, storage_password_last_set, credit
+                storage_password_hash, storage_password_last_set, credit,
+                wrong_password_count, banned_until
          FROM accounts"
     )
     .fetch_all(pool)
@@ -879,6 +891,8 @@ pub async fn load_all_accounts(pool: &DbPool) -> anyhow::Result<Vec<AccountInfo>
         storage_password_hash: r.try_get::<Option<String>, _>("storage_password_hash").ok().flatten(),
         storage_password_last_set: r.try_get::<i64, _>("storage_password_last_set").unwrap_or(0),
         credit: r.try_get::<i64, _>("credit").unwrap_or(0).max(0) as u64,
+        wrong_password_count: r.try_get::<i64, _>("wrong_password_count").unwrap_or(0).max(0) as u32,
+        banned_until: r.try_get::<i64, _>("banned_until").unwrap_or(0),
     }).collect())
 }
 
