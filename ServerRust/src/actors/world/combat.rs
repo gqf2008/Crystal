@@ -2163,7 +2163,7 @@ impl Message<MagicRequest> for WorldActor {
             // --- 战士系 ---
             // LionRoar：嘲讽范围内怪物（吸引仇恨，对齐 C# WarriorObject.LionRoar）
             // 范围 = Range（默认 5 格），命中怪物 provoked + target_session=施法者
-            SPELL_LION_ROAR => {
+            SPELL_LION_ROAR | SPELL_BATTLE_CRY => {
                 let range = spell_range.max(3);
                 let hit_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(_, m)| {

@@ -601,7 +601,8 @@ const SPELL_SUMMON_SNAKES: u8 = mir2_shared::enums::Spell::SummonSnakes as u8;  
 
 // ===== 特殊/辅助类法术（任务：补齐剩余主动法术）=====
 // 战士系
-const SPELL_LION_ROAR: u8 = mir2_shared::enums::Spell::LionRoar as u8;            // 9 战士·嘲讽（范围内怪物仇恨转移）
+const SPELL_LION_ROAR: u8 = mir2_shared::enums::Spell::LionRoar as u8;
+const SPELL_BATTLE_CRY: u8 = mir2_shared::enums::Spell::BattleCry as u8; // 153 战士·战吼（同 LionRoar 嘲讽）            // 9 战士·嘲讽（范围内怪物仇恨转移）
 const SPELL_PROTECTION_FIELD: u8 = mir2_shared::enums::Spell::ProtectionField as u8; // 12 战士·群体减伤
 const SPELL_COUNTER_ATTACK: u8 = mir2_shared::enums::Spell::CounterAttack as u8;  // 14 战士/刺客·反击 buff
 const SPELL_IMMORTAL_SKIN: u8 = mir2_shared::enums::Spell::ImmortalSkin as u8;         // 17 战士·不死之肤（AC 提升 buff）
