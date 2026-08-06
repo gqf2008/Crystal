@@ -563,6 +563,8 @@ const SPELL_HEMORRHAGE: u8 = mir2_shared::enums::Spell::Hemorrhage as u8;       
 const SPELL_MOON_MIST: u8 = mir2_shared::enums::Spell::MoonMist as u8;                 // 106 刺客·月雾（隐身+范围伤害）
 const SPELL_CAT_TONGUE: u8 = mir2_shared::enums::Spell::CatTongue as u8;               // 107 刺客·猫舌（DC 弹道）
 const SPELL_ELEMENTAL_SHOT: u8 = mir2_shared::enums::Spell::ElementalShot as u8;       // 128 弓手·元素箭（DC 弹道）
+const SPELL_ONE_WITH_NATURE: u8 = mir2_shared::enums::Spell::OneWithNature as u8;     // 139 弓手·与自然合一（5x5 AoE）
+const SPELL_MENTAL_STATE: u8 = mir2_shared::enums::Spell::MentalState as u8;           // 141 弓手·精神状态（模式切换）
 const SPELL_VAMPIRE_SHOT: u8 = mir2_shared::enums::Spell::VampireShot as u8;           // 133 弓手·吸血箭（弹道+吸血）
 const SPELL_POISON_SHOT: u8 = mir2_shared::enums::Spell::PoisonShot as u8;             // 135 弓手·毒箭（弹道+绿毒）
 const SPELL_CRIPPLE_SHOT: u8 = mir2_shared::enums::Spell::CrippleShot as u8;           // 136 弓手·减速箭（弹道+减速）
@@ -600,6 +602,7 @@ const SPELL_MEDITATION: u8 = mir2_shared::enums::Spell::Meditation as u8;       
 const SPELL_ICETHRUST: u8 = mir2_shared::enums::Spell::IceThrust as u8;           // 53 法师·冰刺（幸运暴击+溅射）
 const SPELL_MAGIC_BOOSTER: u8 = mir2_shared::enums::Spell::MagicBooster as u8;    // 51 法师·MP 上限提升 buff
 const SPELL_FLAME_DISRUPTOR: u8 = mir2_shared::enums::Spell::FlameDisruptor as u8;   // 47 法师·火焰干扰（非亡灵 ×1.5）
+const SPELL_STORM_ESCAPE: u8 = mir2_shared::enums::Spell::StormEscape as u8;           // 55 法师·风遁（定点传送）
 // 道士系
 const SPELL_REVELATION: u8 = mir2_shared::enums::Spell::Revelation as u8;         // 70 道士·显血/反隐
 const SPELL_REINCARNATION: u8 = mir2_shared::enums::Spell::Reincarnation as u8;   // 79 道士·复活死亡玩家
@@ -758,6 +761,8 @@ pub struct WorldActor {
     pub(crate) hemorrhage_count: HashMap<u64, i32>,
     /// #395 幻觉状态（怪物 oid → 到期 tick，期内不攻击）
     pub(crate) hallucinated: HashMap<u32, u64>,
+    /// #409 精神状态（session → 0 攻击/1 特技/2 组队模式）
+    pub(crate) mental_state: HashMap<u64, u8>,
     /// 活跃 NPC（按 object_id 索引）
     pub(crate) npcs: HashMap<u32, NpcState>,
     /// 等待重生的怪物 (object_id → 重生 tick)
@@ -954,6 +959,7 @@ impl WorldActor {
             mp_eater_count: HashMap::new(),
             hemorrhage_count: HashMap::new(),
             hallucinated: HashMap::new(),
+            mental_state: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
@@ -3075,6 +3081,7 @@ impl Actor for WorldActor {
             mp_eater_count: HashMap::new(),
             hemorrhage_count: HashMap::new(),
             hallucinated: HashMap::new(),
+            mental_state: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),

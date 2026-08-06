@@ -911,6 +911,17 @@ fn curse_cells(tx: i32, ty: i32) -> Vec<(i32, i32)> {
     cells
 }
 
+/// #409 OneWithNature：5×5 区域（C# Map.cs:2101 location ±2）
+fn curse_cells_5x5(tx: i32, ty: i32) -> Vec<(i32, i32)> {
+    let mut cells = Vec::new();
+    for x in (tx - 2)..=(tx + 2) {
+        for y in (ty - 2)..=(ty + 2) {
+            cells.push((x, y));
+        }
+    }
+    cells
+}
+
 /// #328 Plague：C# Map.cs GetPointsInEffectiveSquare(location, 3) —— 3×3 区域
 fn plague_cells(tx: i32, ty: i32) -> Vec<(i32, i32)> {
     let mut cells = Vec::new();
@@ -1417,7 +1428,7 @@ impl Message<MagicRequest> for WorldActor {
             // --- 传送类 ---
             // Teleport：随机传送（C# MagicTeleport 选随机点）
             // Blink：定点传送，距离上限=Range，成功率=(level+1)/4
-            SPELL_TELEPORT | SPELL_BLINK => {
+            SPELL_TELEPORT | SPELL_BLINK | SPELL_STORM_ESCAPE => {
                 if let Some(mi) = self.map_infos.get(&(state.map_index as i32)) {
                     if mi.no_teleport {
                         send_system_message(&self.gate_ref, msg.session_id, "该地图无法使用传送魔法");
@@ -1432,8 +1443,8 @@ impl Message<MagicRequest> for WorldActor {
                     .map(|m| (m.width as i32, m.height as i32))
                     .unwrap_or((i32::MAX, i32::MAX));
 
-                // Blink 专属：距离校验 + 成功率
-                if msg.spell == SPELL_BLINK {
+                // Blink/StormEscape：距离校验 + 成功率（C# Random(4) >= Lv+1 失败）
+                if msg.spell == SPELL_BLINK || msg.spell == SPELL_STORM_ESCAPE {
                     let dist = ((state.x - target_x).abs() + (state.y - target_y).abs()) as i32;
                     let range = spell_db.map(|m| m.range as i32).unwrap_or(10);
                     if dist > range {
@@ -2430,6 +2441,59 @@ impl Message<MagicRequest> for WorldActor {
                     debug!("Magic: {} casts Hallucination (failed)", state.name);
                 }
             }
+            // #409：OneWithNature —— 5×5 AoE MAC 伤害 + 40% Green 毒（C# Map.cs:2101，毒箭 buff 依赖简化）
+            SPELL_ONE_WITH_NATURE => {
+                let raw_damage = if let Some(info) = spell_db {
+                    crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
+                } else { fastrand::i32(8..=20) }.max(1);
+                let attacker_stats = state.to_combat_stats();
+                let level_offset = state.level.min(10) as u16;
+                let cells = curse_cells_5x5(target_x, target_y);
+                let hit_ids: Vec<u32> = self.monsters.iter()
+                    .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y)))
+                    .map(|(id, _)| *id)
+                    .collect();
+                let mut spell_hits: Vec<(u32, i32, i32, u8, i32)> = Vec::new();
+                for mid in hit_ids {
+                    if let Some(monster) = self.monsters.get_mut(&mid) {
+                        let ds = monster.to_combat_stats();
+                        let r = combat_attack::resolve_attack(
+                            &attacker_stats, &ds, raw_damage,
+                            mir2_shared::enums::DefenceType::Mac, level_offset,
+                        );
+                        if r.is_hit && r.damage > 0 {
+                            monster.take_damage(r.damage);
+                            monster.provoked = true;
+                            monster.target_session = Some(msg.session_id);
+                            spell_hits.push((mid, monster.x, monster.y, monster.direction, r.damage));
+                        }
+                        // 40% 概率施加 Green 毒（模拟持有毒箭 buff）
+                        if fastrand::i32(0..100) < 40 {
+                            let dur = (raw_damage * 2 + (spell_level as i32 + 1) * 7).max(1) as u32;
+                            let val = (raw_damage / 15 + spell_level as i32 + 1).max(1);
+                            crate::combat::poison::apply_poison(&mut monster.poison_list,
+                                crate::combat::poison::Poison::new(
+                                    mir2_shared::enums::PoisonType::GREEN, dur, val, 2000,
+                                ));
+                        }
+                    }
+                }
+                self.broadcast_spell_hit(&spell_hits, object_id).await;
+                debug!("Magic: {} casts OneWithNature (5x5, {} hit, dmg={})",
+                       state.name, spell_hits.len(), raw_damage);
+            }
+            // #409：MentalState —— 模式 0/1/2 循环（C# HumanObject.cs:8571）
+            SPELL_MENTAL_STATE => {
+                let cur = self.mental_state.entry(msg.session_id).or_insert(0);
+                *cur = (*cur + 1) % 3;
+                let label = match *cur {
+                    1 => "特技射击",
+                    2 => "组队模式",
+                    _ => "攻击模式",
+                };
+                send_system_message(&self.gate_ref, msg.session_id, &format!("精神状态切换到：{}", label));
+                debug!("Magic: {} casts MentalState -> {}", state.name, label);
+            }
             // #312：FlamingSword —— 施放后 10 秒内下一次近战攻击附加火焰加成（C# HumanObject.cs:8538）
             SPELL_FLAMING_SWORD => {
                 self.flaming_sword.insert(msg.session_id, (self.tick_count + 100, spell_level));
@@ -2861,6 +2925,14 @@ mod spell_geometry_tests {
             let d = hallucination_duration();
             assert!((10..=29).contains(&d), "duration out of range: {}", d);
         }
+    }
+
+    #[test]
+    fn one_with_nature_area_5x5() {
+        let cells = curse_cells_5x5(50, 60);
+        assert_eq!(cells.len(), 25);
+        assert!(cells.contains(&(48, 58)));
+        assert!(cells.contains(&(52, 62)));
     }
 
     #[test]
