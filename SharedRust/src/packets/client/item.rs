@@ -142,6 +142,32 @@ impl Packet for EquipItem {
     }
 }
 
+/// Client requests to delete an item from inventory (C# C.DeleteItem)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeleteItem {
+    pub unique_id: u64,
+    pub count: u16,
+    pub hero_inventory: bool,
+}
+
+impl Packet for DeleteItem {
+    const OPCODE: i16 = ClientPacketIds::DeleteItem as i16;
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let unique_id = reader.read_u64::<LittleEndian>()?;
+        let count = reader.read_u16::<LittleEndian>()?;
+        let hero_inventory = reader.read_u8()? != 0;
+        Ok(Self { unique_id, count, hero_inventory })
+    }
+
+    fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        writer.write_u16::<LittleEndian>(self.count)?;
+        writer.write_u8(if self.hero_inventory { 1 } else { 0 })?;
+        Ok(())
+    }
+}
+
 /// Client requests to remove an equipped item
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RemoveItem {

@@ -1742,6 +1742,52 @@ pub struct RemoveItemFromInventory {
     pub unique_id: u64,
 }
 
+
+/// 客户端删除物品（C# C.DeleteItem）：按 uid 扣减背包/英雄背包数量，发 S.DeleteItem 确认
+pub struct DeleteItemFromInventory {
+    pub unique_id: u64,
+    pub count: u16,
+    pub hero: bool,
+}
+
+impl Message<DeleteItemFromInventory> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: DeleteItemFromInventory, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let backpack = if msg.hero { &mut self.state.hero_inventory.backpack } else { &mut self.state.inventory.backpack };
+        let mut removed = 0u16;
+        for slot in backpack.iter_mut() {
+            if let Some(s) = slot {
+                if s.item.unique_id == msg.unique_id {
+                    let take = msg.count.saturating_sub(removed).min(s.item.count);
+                    s.item.count -= take;
+                    removed += take;
+                    if s.item.count == 0 {
+                        *slot = None;
+                    }
+                    if removed >= msg.count {
+                        break;
+                    }
+                }
+            }
+        }
+        if removed > 0 {
+            // 简化：统一发背包变更包（英雄背包同步由 WorldActor.send_hero_information_packet 负责）
+            self.send_inventory_changed();
+            // S.DeleteItem 确认包（C# ServerPackets.DeleteItem：UniqueID + Count）
+            let mut body = Vec::new();
+            body.extend_from_slice(&msg.unique_id.to_le_bytes());
+            body.extend_from_slice(&removed.to_le_bytes());
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DeleteItem as i16, &body),
+            }).try_send();
+            return true;
+        }
+        false
+    }
+}
+
 impl Message<RemoveItemFromInventory> for PlayerActor {
     type Reply = Option<mir2_shared::data::item::UserItem>;
 

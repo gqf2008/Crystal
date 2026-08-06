@@ -499,6 +499,9 @@ impl Message<ClientData> for GateActor {
             x if x == ClientPacketIds::RemoveItem as i16 => {
                 forward_remove_item(&self.world_ref, msg.session_id, payload);
             }
+            x if x == ClientPacketIds::DeleteItem as i16 => {
+                forward_delete_item(&self.world_ref, msg.session_id, payload);
+            }
             x if x == ClientPacketIds::DropItem as i16 => {
                 forward_drop_item(&self.world_ref, msg.session_id, payload);
             }
@@ -1245,6 +1248,21 @@ fn forward_equip_item(
     let slot = payload[9] as i32;
     let _ = world_ref.tell(crate::actors::world::EquipItemRequest {
         session_id, grid, unique_id: uid, slot,
+    }).try_send();
+}
+
+fn forward_delete_item(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.len() < 11 { return; }
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let uid = u64::from_le_bytes(payload[0..8].try_into().unwrap_or([0; 8]));
+    let count = u16::from_le_bytes(payload[8..10].try_into().unwrap_or([0; 2]));
+    let hero = payload[10] != 0;
+    let _ = world_ref.tell(crate::actors::world::DeleteItemRequest {
+        session_id, unique_id: uid, count, hero,
     }).try_send();
 }
 

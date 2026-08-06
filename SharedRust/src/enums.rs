@@ -225,6 +225,7 @@ pub enum ClientPacketIds {
     ConfirmItemRental = 146,
     GuildTerritoryPage,
     PurchaseGuildTerritory,
+    DeleteItem,
     UnlockStorage,
     SetStoragePassword,
     RemoveStoragePassword,
