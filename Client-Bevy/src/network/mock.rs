@@ -1073,7 +1073,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         send(
                                             &to_client,
                                             &server::movement::ObjectDashAttack {
-                                                object_id: 101,
+                                                object_id: target,
                                                 location_x: 353,
                                                 location_y: 352,
                                                 direction: MirDirection::Down,
@@ -1856,6 +1856,16 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         buffs: vec![],
                                     },
                                 );
+                                // #293：重生后重发名字（避免综合冒烟 NAME 测试因怪物死亡/重生丢失名字）
+                                if id == 101 {
+                                    send(
+                                        &to_client,
+                                        &server::player::ObjectName {
+                                            object_id: 101,
+                                            name: "稻草人·改".to_string(),
+                                        },
+                                    );
+                                }
                                 tracing::info!("♻️ 怪物 {} 重生", id);
                             }
                             // 怪物 AI（#49）：脱战回血 + 追击 + 邻接攻击
