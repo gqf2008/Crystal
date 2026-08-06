@@ -131,6 +131,17 @@ impl Message<WorldAttackRequest> for WorldActor {
                             monster.take_damage(slaying_bonus);
                         }
                     }
+                    // #312：FlamingSword —— 下一次近战攻击附加火焰加成（C# HumanObject.cs 一次性）
+                    let mut flaming_bonus = 0i32;
+                    if let Some((expire, lv)) = self.flaming_sword.get(&msg.session_id).copied() {
+                        self.flaming_sword.remove(&msg.session_id);
+                        if self.tick_count < expire {
+                            flaming_bonus = (damage as f32 * (1.4 + 0.4 * lv as f32)) as i32;
+                            monster.take_damage(flaming_bonus);
+                            debug!("Player {} FlamingSword bonus +{} on '{}' (#{})",
+                                   result.object_id, flaming_bonus, monster.name, *oid);
+                        }
+                    }
                     // HalfMoon（半月）/ CrossHalfMoon（十字半月）：学了则溅射周围怪物
                     let halfmoon_lv = state.magics.iter()
                         .find(|m| m.spell == SPELL_HALFMOON as i32 || m.spell == SPELL_CROSS_HALFMOON as i32)
@@ -974,6 +985,16 @@ impl Message<MagicRequest> for WorldActor {
         if !mp_ok {
             send_system_message(&self.gate_ref, msg.session_id, "魔法值不足");
             return;
+        }
+        // #312：冥想被动——施法后有概率返还 MP（C# HumanObject.cs:3827，概率≈(Lv+集中)/8）
+        let meditation_lv = state.magics.iter()
+            .find(|m| m.spell == (SPELL_MEDITATION as i32 - 3))
+            .map(|m| m.level)
+            .unwrap_or(0);
+        if meditation_lv > 0 && fastrand::i32(0..8) < meditation_lv as i32 {
+            let _ = record.actor_ref.ask(crate::actors::player::AddMP { amount: mp_cost as i32 }).await;
+            send_system_message(&self.gate_ref, msg.session_id, &format!("冥想恢复 {} 魔法值", mp_cost));
+            debug!("Magic: {} Meditation refunded {} MP", state.name, mp_cost);
         }
 
         let object_id = state.object_id;
@@ -2094,6 +2115,24 @@ impl Message<MagicRequest> for WorldActor {
                     }
                 }
                 debug!("Magic: {} casts TurnUndead (killed {} undead)", state.name, killed);
+            }
+            // #312：FlamingSword —— 施放后 10 秒内下一次近战攻击附加火焰加成（C# HumanObject.cs:8538）
+            SPELL_FLAMING_SWORD => {
+                self.flaming_sword.insert(msg.session_id, (self.tick_count + 100, spell_level));
+                debug!("Magic: {} casts FlamingSword (next melee +{:.2}x, 10s)",
+                       state.name, 1.4 + 0.4 * spell_level as f32);
+            }
+            // #312：EnergyShield —— 减伤 buff（C# HumanObject.cs:4751，chance=10-(Luck/3+Lv+1)，吸收百分比转 HP）
+            SPELL_ENERGY_SHIELD => {
+                let chance = (10 - (state.luck / 3 + spell_level as i32 + 1)).max(2);
+                let percent = ((1.0 / chance as f32) * 100.0).round() as i32;
+                let duration_ticks = ((30 + 50 * spell_level as i32) as u32) * 10;
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyDamageReduction {
+                    percent,
+                    duration_ticks,
+                }).await;
+                debug!("Magic: {} casts EnergyShield (damage -{}%, {}s)",
+                       state.name, percent, 30 + 50 * spell_level as i32);
             }
             // Repulsion/EnergyRepulsor：推开周围怪物（C# 两者共用 Repulsion 方法）
             // 命中 1-2 格内怪物，将其沿反方向推 1-2 格（受 can_push 限制）

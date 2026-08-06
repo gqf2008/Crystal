@@ -5609,7 +5609,7 @@ fn auto_spell_verify(
         tracing::info!("[SPELL] 开始法术冒烟（HellFire → IceThrust → Curse → EnergyRepulsor）");
         return;
     }
-    if *stage > 4 {
+    if *stage > 6 {
         return;
     }
     let Ok((pe, pf)) = players.single() else { return };
@@ -5689,7 +5689,9 @@ fn auto_spell_verify(
         1 => mir2_shared::enums::Spell::HellFire,
         2 => mir2_shared::enums::Spell::IceThrust,
         3 => mir2_shared::enums::Spell::Curse,
-        _ => mir2_shared::enums::Spell::EnergyRepulsor,
+        4 => mir2_shared::enums::Spell::EnergyRepulsor,
+        5 => mir2_shared::enums::Spell::FlamingSword,
+        _ => mir2_shared::enums::Spell::EnergyShield,
     };
     let dir = direction_from_delta((mx - px).signum(), (my - py).signum())
         .unwrap_or(mir2_shared::enums::MirDirection::Up);
@@ -5725,12 +5727,20 @@ fn auto_spell_verify(
         }
         return;
     }
-    // Curse/EnergyRepulsor：施放 3 次后冒烟通过（不要求击杀）
+    // #312 FlamingSword：施放后补一次近战攻击，触发下一次攻击火焰加成（服务端 debug 日志验证）
+    if *stage == 5 && *casts == 1 {
+        net.send_packet(&mir2_shared::packets::client::combat::Attack {
+            direction: dir,
+            spell: mir2_shared::enums::Spell::None,
+        });
+        tracing::info!("[SPELL] ⚔️ 烈焰剑后补近战攻击（触发加成）");
+    }
+    // Curse/EnergyRepulsor/FlamingSword/EnergyShield：施放 3 次后冒烟通过（不要求击杀）
     if *casts >= 3 {
         tracing::info!("[SPELL] ✅ {:?} 冒烟通过（3 次施放无崩溃）", spell);
         *stage += 1;
         *casts = 0;
-        if *stage == 5 {
+        if *stage == 7 {
             tracing::info!("[SPELL] ✅ 法术冒烟全流程完成");
             *stage = 9;
         }
