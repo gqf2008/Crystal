@@ -94,7 +94,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             /// 怪物最后受击时刻（#49 脱战回血）
             let mut monster_last_hit: HashMap<u32, std::time::Instant> = HashMap::new();
             /// 地面掉落物品（id, x, y）
-            let mut ground_items: Vec<(u32, i32, i32)> = Vec::new();
+            let mut ground_items: Vec<(u32, i32, i32, mir2_shared::data::item::UserItem)> = Vec::new();
             let mut next_item_id = 200u32;
             /// 死亡怪物重生计时（3 秒后）
             let mut respawn: HashMap<u32, std::time::Instant> = HashMap::new();
@@ -102,7 +102,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             // 玩家背包/金币（购买/使用/拾取后更新）
             let mut player_inventory: Vec<Option<mir2_shared::data::item::UserItem>> = {
                 let mut inv: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 40];
-                inv[0] = Some(potion_item(5)); // 木剑
+                inv[0] = Some(wooden_sword_item()); // 木剑(221)
                 inv[1] = Some(potion_item(10)); // 布衣
                 inv[2] = Some(potion_item(1)); // 金创药（可喝）
                 inv[3] = Some(book_item(34)); // 技能书：FireBall（#212）
@@ -389,6 +389,37 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         tracing::info!("[MOCK] 聊天物品请求 uid={}", uid);
                                     }
                                 }
+                                // #222：觉醒材料/执行（MOCK 回发成功，供 --awake-test）
+                                x if x == ClientPacketIds::AwakeningNeedMaterials as i16 => {
+                                    if let Ok(p) = client::misc::AwakeningNeedMaterials::read_body(&mut cur) {
+                                        send(
+                                            &to_client,
+                                            &server::awakening_system::AwakeningNeedMaterials {
+                                                item_id: 221,
+                                                materials: vec![
+                                                    mir2_shared::packets::server::awakening_system::MaterialInfo {
+                                                        item_id: 1,
+                                                        count: 2,
+                                                    },
+                                                ],
+                                            },
+                                        );
+                                        tracing::info!(
+                                            "⚒️ [MOCK] 觉醒材料请求 uid={} type={:?}",
+                                            p.unique_id,
+                                            p.awake_type
+                                        );
+                                    }
+                                }
+                                x if x == ClientPacketIds::Awakening as i16 => {
+                                    if let Ok(p) = client::misc::Awakening::read_body(&mut cur) {
+                                        send(
+                                            &to_client,
+                                            &server::awakening_system::Awakening { result: 1, remove_id: 0 },
+                                        );
+                                        tracing::info!("⚒️ [MOCK] 执行觉醒 uid={} -> 成功", p.unique_id);
+                                    }
+                                }
                                 // #200：仓库密码解锁 / 设置 / 移除（MOCK）
                                 x if x == ClientPacketIds::UnlockStorage as i16 => {
                                     if let Ok(p) = client::storage::UnlockStorage::read_body(&mut cur) {
@@ -540,7 +571,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             } else if roll < 7 {
                                                 let item_id = next_item_id;
                                                 next_item_id += 1;
-                                                ground_items.push((item_id, ix, iy));
+                                                ground_items.push((item_id, ix, iy, potion_item(1)));
                                                 send(
                                                     &to_client,
                                                     &server::drops::ObjectItem {
@@ -555,7 +586,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 let item_id = next_item_id;
                                                 next_item_id += 1;
                                                 let equip = if next_item_id % 2 == 0 { 5 } else { 10 };
-                                                ground_items.push((item_id, ix, iy));
+                                                ground_items.push((item_id, ix, iy, potion_item(equip)));
                                                 send(
                                                     &to_client,
                                                     &server::drops::ObjectItem {
@@ -763,22 +794,6 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 percent: 80,
                                             },
                                         );
-                                        // #240：修理结果 + 镶嵌槽位（木剑 9005）
-                                        send(
-                                            &to_client,
-                                            &server::item::ItemRepaired {
-                                                unique_id: 9005,
-                                                max_dura: 12,
-                                                current_dura: 8,
-                                            },
-                                        );
-                                        send(
-                                            &to_client,
-                                            &server::item::ItemSlotSizeChanged {
-                                                unique_id: 9005,
-                                                slot_size: 1,
-                                            },
-                                        );
                                         // #242：服务端同步开关技能状态（Slaying 开）
                                         send(
                                             &to_client,
@@ -866,6 +881,22 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             &to_client,
                                             &server::item_operations::ItemUpgraded {
                                                 item: upgraded,
+                                            },
+                                        );
+                                        // #240：修理结果 + 镶嵌槽位（木剑 9005）——放在升级之后，避免覆盖升级后的物品
+                                        send(
+                                            &to_client,
+                                            &server::item::ItemRepaired {
+                                                unique_id: 9005,
+                                                max_dura: 12,
+                                                current_dura: 8,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::item::ItemSlotSizeChanged {
+                                                unique_id: 9005,
+                                                slot_size: 1,
                                             },
                                         );
                                         send(
@@ -1167,7 +1198,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             } else if roll < 7 {
                                                 let item_id = next_item_id;
                                                 next_item_id += 1;
-                                                ground_items.push((item_id, ix, iy));
+                                                ground_items.push((item_id, ix, iy, potion_item(1)));
                                                 send(
                                                     &to_client,
                                                     &server::drops::ObjectItem {
@@ -1182,7 +1213,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 let item_id = next_item_id;
                                                 next_item_id += 1;
                                                 let equip = if next_item_id % 2 == 0 { 5 } else { 10 };
-                                                ground_items.push((item_id, ix, iy));
+                                                ground_items.push((item_id, ix, iy, potion_item(equip)));
                                                 send(
                                                     &to_client,
                                                     &server::drops::ObjectItem {
@@ -1205,14 +1236,40 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                 x if x == ClientPacketIds::PickUp as i16 => {
                                     // 拾取第一个地面物品 → 移除
                                     if client::item::PickUp::read_body(&mut cur).is_ok() {
-                                        if let Some((id, _, _)) = ground_items.first().copied() {
-                                            ground_items.retain(|(i, _, _)| *i != id);
+                                        if let Some((id, _, _, item)) = ground_items.first().cloned() {
+                                            ground_items.retain(|(i, _, _, _)| *i != id);
                                             send(&to_client, &server::objects::ObjectRemove { object_id: id });
-                                            tracing::info!("🎒 拾取地面物品 #{}", id);
+                                            // 放入背包并同步客户端（#293 修复：拾取真正入包）
+                                            if let Some(empty) = player_inventory.iter_mut().find(|s| s.is_none()) {
+                                                *empty = Some(item.clone());
+                                            }
+                                            send(&to_client, &server::drops::GainedItem { item });
+                                            send_user_information(
+                                                &to_client,
+                                                active_char_index,
+                                                &player_inventory,
+                                                &player_equipment,
+                                                player_gold,
+                                                player_stats,
+                                            );
+                                            tracing::info!("🎒 拾取地面物品 #{} 入包", id);
                                         } else {
-                                            // 初始物品 300（无战斗掉落时）
+                                            // 初始物品 300（无战斗掉落时）——同样入包
                                             send(&to_client, &server::objects::ObjectRemove { object_id: 300 });
-                                            tracing::info!("🎒 拾取初始地面物品 #300");
+                                            let item = potion_item(1);
+                                            if let Some(empty) = player_inventory.iter_mut().find(|s| s.is_none()) {
+                                                *empty = Some(item.clone());
+                                            }
+                                            send(&to_client, &server::drops::GainedItem { item });
+                                            send_user_information(
+                                                &to_client,
+                                                active_char_index,
+                                                &player_inventory,
+                                                &player_equipment,
+                                                player_gold,
+                                                player_stats,
+                                            );
+                                            tracing::info!("🎒 拾取初始地面物品 #300 入包");
                                         }
                                     }
                                 }
@@ -2170,6 +2227,29 @@ fn revive_player(
 }
 
 /// 构造可拾取/背包物品（金创药等）
+/// 木剑（WoodenSword，index 221；觉醒测试用，uid 9005 与修理/槽位演示一致）
+fn wooden_sword_item() -> mir2_shared::data::item::UserItem {
+    let mut s = mir2_shared::data::stats::Stats::new();
+    s.set(Stat::MinDC, 5);
+    s.set(Stat::MaxDC, 12);
+    mir2_shared::data::item::UserItem {
+        unique_id: 9005,
+        item_index: 221,
+        count: 1,
+        info: Some(mir2_shared::data::item::ItemInfo {
+            index: 221,
+            name: "木剑".to_string(),
+            image: 221,
+            item_type: ItemType::Weapon,
+            shape: 0,
+            price: 10,
+            stats: s,
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
 fn potion_item(index: i32) -> mir2_shared::data::item::UserItem {
     mir2_shared::data::item::UserItem {
         unique_id: 9000 + index as u64,

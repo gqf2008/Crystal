@@ -1098,6 +1098,7 @@ fn auto_drop_pick_test(
     mut stage: Local<u8>,
     mut atk_timer: Local<f32>,
     mut dir_idx: Local<u8>,
+    mut before: Local<usize>,
 ) {
     use client_bevy::scenes::AppState;
     if *state != AppState::Game {
@@ -1144,8 +1145,9 @@ fn auto_drop_pick_test(
             if *t < 1.0 {
                 return;
             }
+            *before = hud.inventory.items.iter().flatten().count();
             net.send_packet(&mir2_shared::packets::client::item::PickUp {});
-            tracing::info!("[DROPTEST] 发送 PickUp");
+            tracing::info!("[DROPTEST] 发送 PickUp（拾取前背包 {} 件）", *before);
             *stage = 2;
             *t = 0.0;
         }
@@ -1153,10 +1155,11 @@ fn auto_drop_pick_test(
             if *t < 3.0 {
                 return;
             }
-            if hud.inventory.items.iter().flatten().any(|i| i.item_index == 853) {
-                tracing::info!("[DROPTEST] ✅ 拾取成功：背包有物品 853");
+            let now = hud.inventory.items.iter().flatten().count();
+            if now == *before + 1 {
+                tracing::info!("[DROPTEST] ✅ 拾取成功：背包 {} -> {} 件", *before, now);
             } else {
-                tracing::warn!("[DROPTEST] ❌ 背包未找到物品 853");
+                tracing::warn!("[DROPTEST] ❌ 拾取失败：背包 {} -> {} 件", *before, now);
             }
             *stage = 9;
         }
