@@ -81,6 +81,8 @@ pub enum ServerEvent {
         mount_type: i16,
         is_mounted: bool,
     },
+    /// #236 Poisoned/ObjectPoisoned：中毒状态
+    ObjectPoisoned { object_id: u32, poisoned: bool },
     /// Roll：骰子/尤茨结果（npc_id 由 roll 消费端从 NpcDialogState 读取）
     Roll {
         r#type: i32,

@@ -200,3 +200,23 @@ pub fn object_colour_server_events(
         }
     }
 }
+
+
+/// #236 中毒染层：根实体挂 PoisonTint 时，把子图层 Sprite 染绿（actor_sprite_render 之后运行）
+pub(crate) fn apply_poison_tint(
+    roots: Query<(Entity, Has<super::components::PoisonTint>, &Children)>,
+    mut sprites: Query<&mut Sprite>,
+) {
+    for (_root, poisoned, children) in &roots {
+        for c in children.iter() {
+            if let Ok(mut sp) = sprites.get_mut(c) {
+                let alpha = sp.color.alpha();
+                sp.color = if poisoned {
+                    Color::srgba(0.45, 1.0, 0.45, alpha)
+                } else {
+                    Color::srgba(1.0, 1.0, 1.0, alpha)
+                };
+            }
+        }
+    }
+}

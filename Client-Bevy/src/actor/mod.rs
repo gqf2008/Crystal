@@ -29,7 +29,7 @@ pub use components::*;
 pub(crate) use spawn_helpers::attach_mount_layer;
 pub use spawn::depth_z;
 
-use render::actor_sprite_render;
+use render::{actor_sprite_render, apply_poison_tint};
 use spawn::{despawn_removed_objects, spawn_demo_actors_when_ready, spawn_net_objects_when_ready};
 use systems::{advance_actor_animations, demo_drive, dump_depth_debug, log_player_walk, sync_actor_depth, sync_player_equipment, update_local_ghost};
 
@@ -48,6 +48,7 @@ impl Plugin for ActorPlugin {
                 despawn_removed_objects,
                 advance_actor_animations,
                 actor_sprite_render,
+                apply_poison_tint,
                 update_local_ghost,
                 dump_depth_debug,
             )
