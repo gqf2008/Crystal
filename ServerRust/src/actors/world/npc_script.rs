@@ -1064,6 +1064,43 @@ async fn exec_action(
                             for d in &drops {
                                 // C# AttemptDrop：1/分母 概率
                                 if fastrand::f64() > d.chance { continue; }
+                                // GROUP 嵌套（C# GroupedDrop）：遍历子项各自概率，first/random/全部选择
+                                if let Some(group) = &d.group {
+                                    let mut hit_gold = 0u64;
+                                    let mut hit_items: Vec<String> = Vec::new();
+                                    for sub in &group.drops {
+                                        if fastrand::f64() > sub.chance { continue; }
+                                        if let Some(g) = sub.gold {
+                                            let lo = g / 2;
+                                            let hi = g + g / 2;
+                                            hit_gold += if hi > lo { fastrand::u32(lo..=hi) } else { lo } as u64;
+                                        }
+                                        if let Some(item) = &sub.item_name {
+                                            hit_items.push(item.clone());
+                                            if group.first {
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    // GROUP*：随机选一个命中物品
+                                    if group.random && hit_items.len() > 1 {
+                                        let idx = fastrand::usize(0..hit_items.len());
+                                        hit_items = vec![hit_items[idx].clone()];
+                                    }
+                                    if hit_gold > 0 {
+                                        send_player_msg(world, session_id, AddGold { amount: hit_gold }).await;
+                                        given_gold += hit_gold;
+                                    }
+                                    for item_name in &hit_items {
+                                        if let Some(info) = world.item_infos.values().find(|i| i.name.eq_ignore_ascii_case(item_name)) {
+                                            give_item(world, session_id, info.index, 1).await;
+                                            given_items += 1;
+                                        } else {
+                                            warn!("NPC DROP: item '{}' not found", item_name);
+                                        }
+                                    }
+                                    continue;
+                                }
                                 if let Some(gold) = d.gold {
                                     // C# 金币 0.5~1.5 倍随机
                                     let lo = gold / 2;
@@ -2198,41 +2235,106 @@ struct ParsedDrop {
     gold: Option<u32>,
     /// 物品名（Item 行，需再按名查 item_infos）
     item_name: Option<String>,
+    /// GROUP 嵌套（C# GroupedDrop）
+    group: Option<DropGroup>,
 }
 
-/// 解析 C# 掉落表文件（对齐 DropInfo.Load/FromLine）：
-/// 行格式 `1/100 <物品名|Gold 金额>`；`;` 注释/空行跳过；GROUP 嵌套简化跳过；无效行跳过
+/// C# GroupDropInfo：一组子掉落（`{ }` 块内）
+#[derive(Debug, Clone, PartialEq)]
+struct DropGroup {
+    /// `GROUP*`：从命中子项中随机选一个
+    random: bool,
+    /// `GROUP^`：首个命中的子项后停止
+    first: bool,
+    /// 子掉落列表
+    drops: Vec<ParsedDrop>,
+}
+
+/// 解析单行掉落（C# DropInfo.FromLine）：`1/100 <物品名|Gold 金额|GROUP100[*|^]>`
+fn parse_drop_line(line: &str) -> Option<ParsedDrop> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    // C# FromLine：parts[0].Substring(2) 去掉 "1/" 前缀取分母
+    let denom = parts[0].strip_prefix("1/").or_else(|| parts[0].strip_prefix("1\\"))?;
+    let denom = denom.parse::<f64>().ok()?;
+    if denom <= 0.0 {
+        return None;
+    }
+    let chance = (1.0 / denom).min(1.0);
+    if parts[1].eq_ignore_ascii_case("Gold") {
+        let gold = parts.get(2).and_then(|s| s.parse::<u32>().ok())?;
+        if gold == 0 {
+            return None;
+        }
+        Some(ParsedDrop { chance, gold: Some(gold), item_name: None, group: None })
+    } else if parts[1].to_uppercase().starts_with("GROUP") {
+        Some(ParsedDrop {
+            chance,
+            gold: None,
+            item_name: None,
+            group: Some(DropGroup {
+                random: parts[1].ends_with('*'),
+                first: parts[1].ends_with('^'),
+                drops: Vec::new(),
+            }),
+        })
+    } else {
+        Some(ParsedDrop { chance, gold: None, item_name: Some(parts[1].to_string()), group: None })
+    }
+}
+
+/// 解析 C# 掉落表文件（对齐 DropInfo.Load/FromLine + ParseGroup）：
+/// 行格式 `1/100 <物品名|Gold 金额|GROUP100[*|^]>`；`;` 注释/空行跳过；
+/// GROUP 行后 `{ 子行... }` 块解析为子掉落；无效行跳过
 fn parse_drop_table(content: &str) -> Vec<ParsedDrop> {
+    let lines: Vec<&str> = content.lines().collect();
     let mut drops = Vec::new();
-    for line in content.lines() {
-        let line = line.trim();
+    let mut i = 0usize;
+    while i < lines.len() {
+        let line = lines[i].trim();
+        i += 1;
         if line.is_empty() || line.starts_with(';') {
             continue;
         }
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 2 {
-            continue;
-        }
-        // C# FromLine：parts[0].Substring(2) 去掉 "1/" 前缀取分母
-        let denom = parts[0].strip_prefix("1/").or_else(|| parts[0].strip_prefix("1\\"));
-        let Some(denom) = denom else { continue };
-        let Ok(denom) = denom.parse::<f64>() else { continue };
-        if denom <= 0.0 {
-            continue;
-        }
-        let chance = (1.0 / denom).min(1.0);
-        if parts[1].eq_ignore_ascii_case("Gold") {
-            if let Some(gold) = parts.get(2).and_then(|s| s.parse::<u32>().ok()) {
-                if gold > 0 {
-                    drops.push(ParsedDrop { chance, gold: Some(gold), item_name: None });
+        let Some(mut d) = parse_drop_line(line) else { continue };
+        // GROUP 块：对齐 C# ParseGroup（`{` 后子行直到 `}`）
+        if d.group.is_some() {
+            // 找 `{`；无块则跳过该 GROUP 行且不消费后续行（对齐 C# 无 start 不填充）
+            let start_idx = i;
+            let mut found_open = false;
+            while i < lines.len() {
+                if lines[i].trim() == "{" {
+                    found_open = true;
+                    break;
+                }
+                i += 1;
+            }
+            if !found_open {
+                i = start_idx;
+                continue;
+            }
+            i += 1; // 跳过 {
+            while i < lines.len() && lines[i].trim() != "}" {
+                let sub = lines[i].trim();
+                i += 1;
+                if sub.is_empty() || sub.starts_with(';') {
+                    continue;
+                }
+                if let Some(mut sub_drop) = parse_drop_line(sub) {
+                    // 子项不支持再嵌套 GROUP（C# 同语义）
+                    sub_drop.group = None;
+                    if let Some(g) = d.group.as_mut() {
+                        g.drops.push(sub_drop);
+                    }
                 }
             }
-        } else if parts[1].to_uppercase().starts_with("GROUP") {
-            // 简化：跳过 GROUP 嵌套（C# GroupedDrop 复杂结构）
-            continue;
-        } else {
-            drops.push(ParsedDrop { chance, gold: None, item_name: Some(parts[1].to_string()) });
+            if d.group.as_ref().map(|g| g.drops.is_empty()).unwrap_or(true) {
+                continue; // 空组跳过
+            }
         }
+        drops.push(d);
     }
     drops
 }
@@ -3039,9 +3141,32 @@ You don't have enough Gold!
         assert!((drops[1].chance - 0.1).abs() < 1e-9);
         assert_eq!(drops[1].gold, Some(500));
         assert_eq!(drops[1].item_name, None);
-        // GROUP 行跳过
+        // GROUP 无块跳过
         assert!((drops[2].chance - 0.001).abs() < 1e-9);
         assert_eq!(drops[2].item_name.as_deref(), Some("强效金创药"));
+    }
+
+    #[test]
+    fn drop_table_parses_group_blocks() {
+        let content = "1/100 GROUP100\n{\n1/10 金创药\n1/20 Gold 100\n}\n1/50 强效金创药\n";
+        let drops = parse_drop_table(content);
+        assert_eq!(drops.len(), 2);
+        let g = drops[0].group.as_ref().unwrap();
+        assert_eq!(g.drops.len(), 2);
+        assert_eq!(g.drops[0].item_name.as_deref(), Some("金创药"));
+        assert_eq!(g.drops[1].gold, Some(100));
+        assert_eq!(drops[1].item_name.as_deref(), Some("强效金创药"));
+    }
+
+    #[test]
+    fn drop_group_random_first_flags() {
+        let content = "1/2 GROUP100*\n{\n1/10 A\n1/10 B\n}\n1/2 GROUP200^\n{\n1/10 C\n1/10 D\n}\n";
+        let drops = parse_drop_table(content);
+        assert_eq!(drops.len(), 2);
+        assert!(drops[0].group.as_ref().unwrap().random);
+        assert!(!drops[0].group.as_ref().unwrap().first);
+        assert!(!drops[1].group.as_ref().unwrap().random);
+        assert!(drops[1].group.as_ref().unwrap().first);
     }
 }
 
