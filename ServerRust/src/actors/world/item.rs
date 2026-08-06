@@ -678,7 +678,7 @@ impl Message<UseItemRequest> for WorldActor {
                                 return;
                             }
                             // C#：20% 诅咒（Luck > -MaxLuck 且 random(20)==0）；否则 Luck<=0 或 random(10*Luck)==0 时 +1
-                            let delta = if luck > -7 && fastrand::i32(..20) == 0 {
+                            let delta = if luck > -10 && fastrand::i32(..20) == 0 { // C# Settings.MaxLuck = 10
                                 -1
                             } else if luck <= 0 || fastrand::i32(..(10 * luck.max(1))) == 0 {
                                 1

@@ -585,6 +585,8 @@ impl Message<NewCharacterRequest> for WorldActor {
             bonus_max_sc: 0,
             freezing: 0,
             poison_attack: 0,
+            health_recovery: 0,
+            spell_recovery: 0,
             poison_recovery: 0,
             holy: 0,
             accuracy: 0,
