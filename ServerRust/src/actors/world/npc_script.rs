@@ -680,6 +680,17 @@ async fn eval_one_check(
         "CHECKRELATIONSHIP" => {
             player.spouse_name.is_some()
         }
+        // CHECKCALC <left> <op> <right> — 整数比较（对齐 C# CheckType.CheckCalc）
+        "CHECKCALC" => {
+            let left = arg0().parse::<i64>().unwrap_or(0);
+            let op = arg1();
+            let right = args.get(2).map(|s| s.as_str()).unwrap_or("").parse::<i64>().unwrap_or(0);
+            compare_i64(left, op, right)
+        }
+        // GROUPLEADER — 是否队长（对齐 C# CheckType.Groupleader）
+        "GROUPLEADER" => {
+            world.social_ref.ask(crate::actors::social::NpcIsGroupLeader { session_id }).await.unwrap_or(false)
+        }
         // INGUILD / GUILDNAME <name>
         "INGUILD" => player.guild_name.is_some(),
         // CHECKMAP <map_name|index>
