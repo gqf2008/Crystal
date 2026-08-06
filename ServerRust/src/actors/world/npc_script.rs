@@ -534,6 +534,16 @@ pub async fn replace_vars(
     out = out.replace("<$AGITGUILDNAME>", agit_name);
     out = out.replace("<$agitguildname>", agit_name);
 
+    // 行会宣战费用/时长（C# Settings.Guild_WarCost / Guild_WarTime）
+    if let Ok((war_cost, war_time)) = world.social_ref.ask(crate::actors::social::NpcGetGuildWarSettings).await {
+        let war_cost_s = war_cost.to_string();
+        out = out.replace("<$GUILDWARFEE>", &war_cost_s);
+        out = out.replace("<$guildwarfee>", &war_cost_s);
+        let war_time_s = war_time.to_string();
+        out = out.replace("<$GUILDWARTIME>", &war_time_s);
+        out = out.replace("<$guildwartime>", &war_time_s);
+    }
+
     // 函数式变量 <$NAME(A0)>（C# varRegex/oneValRegex 形式）
     out = replace_function_vars(&out, world, custom_vars);
 
