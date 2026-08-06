@@ -356,7 +356,7 @@ impl Message<TeleportToNPCRequest> for WorldActor {
 /// 请求地图信息（传送）
 pub struct RequestMapInfoRequest {
     pub session_id: u64,
-    pub map_id: u32,
+    pub map_id: i32,
 }
 
 impl Message<RequestMapInfoRequest> for WorldActor {
@@ -367,64 +367,39 @@ impl Message<RequestMapInfoRequest> for WorldActor {
             Some(r) => r.clone(),
             None => return,
         };
-        let state = match record.actor_ref.ask(GetPlayerState).await {
+        let _state = match record.actor_ref.ask(GetPlayerState).await {
             Ok(Some(s)) => s,
             _ => return,
         };
 
-        // Look up target map from DB
-        let Some(dest_mi) = self.map_infos.get(&(msg.map_id as i32)) else {
-            send_system_message(&self.gate_ref, msg.session_id, "地图不存在");
+        // 世界地图配置每连接下发一次（C# CheckMapInfo：WorldMapSetupSent）
+        if let Some(rec) = self.players.get_mut(&msg.session_id) {
+            if !rec.world_map_setup_sent {
+                rec.world_map_setup_sent = true;
+                let wm = super::build_world_map_setup_packet(&self.map_infos, super::TELEPORT_TO_NPC_COST);
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: wm,
+                }).await;
+                info!("WorldMapSetup: sent to session {} (on RequestMapInfo)", msg.session_id);
+            }
+        }
+
+        // C# CheckMapInfo 语义：按 map_index 回 NewMapInfo（大地图 NPC 列表），不传送
+        let Some(dest_mi) = self.map_infos.get(&msg.map_id) else {
+            debug!("RequestMapInfo: unknown map {}", msg.map_id);
             return;
         };
-
-        // Check no_recall flag
-        if dest_mi.no_recall {
-            send_system_message(&self.gate_ref, msg.session_id, "无法传送到该地图");
-            return;
-        }
-
-        let dest_file = dest_mi.file_name.clone();
-        let dest_title = dest_mi.title.clone();
-
-        // Place at safe zone spawn point if available
-        let (spawn_x, spawn_y) = dest_mi.safe_zones.iter()
-            .find(|s| s.start_point)
-            .map(|s| (s.x, s.y))
-            .unwrap_or((DEFAULT_SPAWN_X, DEFAULT_SPAWN_Y));
-
-        // Load dest map（按目标 map_index 加载，支持多图并存）
-        let dest_slot = dest_mi.index as u16;
-        if self.get_or_load_map(&dest_file, dest_slot).is_none() {
-            send_system_message(&self.gate_ref, msg.session_id, "地图加载失败");
-            return;
-        }
-
-        // Inject new map data into player for collision/pathfinding
-        if let Some(map_data) = self.maps.get(&0).cloned() {
-            let _ = record.actor_ref.ask(SetMapData { map: map_data }).await;
-        }
-
-        // Update player position
-        let _ = record.actor_ref.ask(SetPlayerPosition { x: spawn_x, y: spawn_y, direction: state.direction, map_index: Some(msg.map_id as u16), is_mounted: None }).await;
-
-        // Send MapChanged first, then UserLocation (client processes in order)
-        let map_changed_body = build_map_changed_packet(msg.map_id as u16, &dest_file, &dest_title, spawn_x, spawn_y, false);
+        let npcs: Vec<db::NPCInfo> = self.npc_infos.values()
+            .filter(|n| n.map_index == msg.map_id && n.show_on_big_map)
+            .cloned()
+            .collect();
+        let new_map_info = super::build_new_map_info_packet_from_db(dest_mi.index, &dest_mi.title, &npcs);
         let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
-            data: map_changed_body,
+            data: new_map_info,
         }).await;
-
-        let mut body = Vec::new();
-        body.extend_from_slice(&spawn_x.to_le_bytes());
-        body.extend_from_slice(&spawn_y.to_le_bytes());
-        body.push(state.direction);
-        let _ = self.gate_ref.tell(SendToClient {
-            session_id: msg.session_id,
-            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
-        }).await;
-
-        debug!("RequestMapInfo: {} -> map {} ({}) ({}, {})", state.name, msg.map_id, dest_file, spawn_x, spawn_y);
+        info!("RequestMapInfo: session={} map={} ({}) npcs={}", msg.session_id, msg.map_id, dest_mi.title, npcs.len());
     }
 }
 

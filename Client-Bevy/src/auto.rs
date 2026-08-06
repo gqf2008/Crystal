@@ -334,6 +334,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--worldmap-test") {
         app.add_systems(Update, auto_worldmap_test);
     }
+    // --real-worldmap-test: 真实服务器世界地图联调（#302）WorldMapSetup → RequestMapInfo → NewMapInfo
+    if std::env::args().any(|a| a == "--real-worldmap-test") {
+        app.add_systems(Update, auto_real_worldmap_test);
+    }
     // --awake-test: 觉醒对话框验证（选武器 → 类型 → 材料 → 觉醒 → 结果）
     if std::env::args().any(|a| a == "--awake-test") {
         app.add_systems(Update, auto_awake_test);
@@ -4391,6 +4395,121 @@ fn auto_worldmap_test(
     }
     if *t >= 45.0 && *stage < 9 {
         tracing::warn!("[WORLDMAP] ❌ 超时 stage={}", *stage);
+        *stage = 9;
+    }
+}
+
+/// --real-worldmap-test：真实服务器世界地图联调（#302）
+/// 阶段：打开大地图 → 等 WorldMapSetup → RequestMapInfo 切图 → 等 NewMapInfo → 回当前图
+#[allow(clippy::too_many_arguments)]
+fn auto_real_worldmap_test(
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut bm: ResMut<client_bevy::game::dialogs::big_map::BigMapState>,
+    net: ResMut<client_bevy::network::NetConnection>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut phase: Local<f32>,
+    mut current_map: Local<i32>,
+    mut target_map: Local<i32>,
+) {
+    use client_bevy::scenes::AppState;
+    use client_bevy::game::dialogs::DialogKind;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    if *stage == 0 {
+        if !mgr.is_open(DialogKind::BigMap) {
+            mgr.toggle(DialogKind::BigMap);
+            tracing::info!("[REALWM] 打开大地图");
+        }
+        *phase = *t;
+        *stage = 1;
+        return;
+    }
+    if *stage == 1 {
+        if *t - *phase >= 10.0 {
+            tracing::warn!("[REALWM] ❌ WorldMapSetup 超时");
+            *stage = 9;
+            return;
+        }
+        if bm.world_enabled && !bm.world_icons.is_empty() {
+            tracing::info!(
+                "[REALWM] ✅ WorldMapSetup: enabled={} icons={} cost={}",
+                bm.world_enabled,
+                bm.world_icons.len(),
+                bm.teleport_cost
+            );
+            *current_map = bm.map_index;
+            // 目标：选一个与当前地图不同的图标，否则用第一个
+            *target_map = bm
+                .world_icons
+                .iter()
+                .map(|i| i.map_index)
+                .find(|m| *m != *current_map)
+                .unwrap_or_else(|| bm.world_icons[0].map_index);
+            tracing::info!("[REALWM] 当前地图={} 目标地图={}", *current_map, *target_map);
+            *phase = *t;
+            *stage = 2;
+        }
+        return;
+    }
+    if *stage == 2 {
+        net.send_packet(&mir2_shared::packets::client::npc::RequestMapInfo {
+            map_index: *target_map,
+        });
+        tracing::info!("[REALWM] 请求地图 {}", *target_map);
+        *phase = *t;
+        *stage = 3;
+        return;
+    }
+    if *stage == 3 {
+        if *t - *phase >= 8.0 {
+            tracing::warn!(
+                "[REALWM] ❌ 切图超时 map={} title={} npcs={}",
+                bm.map_index,
+                bm.title,
+                bm.npcs.len()
+            );
+            *stage = 9;
+            return;
+        }
+        if bm.map_index == *target_map {
+            tracing::info!("[REALWM] ✅ 切图成功: map={} title={} npcs={}", bm.map_index, bm.title, bm.npcs.len());
+            *phase = *t;
+            *stage = 4;
+        }
+        return;
+    }
+    if *stage == 4 {
+        net.send_packet(&mir2_shared::packets::client::npc::RequestMapInfo {
+            map_index: *current_map,
+        });
+        tracing::info!("[REALWM] 请求回当前地图 {}", *current_map);
+        *phase = *t;
+        *stage = 5;
+        return;
+    }
+    if *stage == 5 {
+        if *t - *phase >= 8.0 {
+            tracing::warn!("[REALWM] ❌ 回图超时");
+            *stage = 9;
+            return;
+        }
+        if bm.map_index == *current_map {
+            tracing::info!("[REALWM] ✅ 回到当前地图 {}（{}）", bm.map_index, bm.title);
+            if mgr.is_open(DialogKind::BigMap) {
+                mgr.close(DialogKind::BigMap);
+            }
+            tracing::info!("[REALWM] ✅ 全流程完成");
+            *stage = 9;
+        }
+        return;
+    }
+    if *t >= 45.0 && *stage < 9 {
+        tracing::warn!("[REALWM] ❌ 超时 stage={}", *stage);
         *stage = 9;
     }
 }

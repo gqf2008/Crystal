@@ -95,6 +95,8 @@ pub(crate) struct PlayerRecord {
     last_pk_points: i32,
     /// 玩家 object_id（缓存，避免 async 查找）
     object_id: u32,
+    /// 是否已下发世界地图配置（C# WorldMapSetupSent，每连接一次）
+    world_map_setup_sent: bool,
 }
 
 /// NPC 定义（从刷怪配置加载）
@@ -3945,6 +3947,57 @@ fn build_new_map_info_packet(
         body.push(if can_tp { 1u8 } else { 0u8 });
     }
 
+    build_packet_bytes(ServerPacketIds::NewMapInfo as i16, &body)
+}
+
+/// 传送 NPC 费用（C# Settings.TeleportToNPCCost）
+pub(crate) const TELEPORT_TO_NPC_COST: i32 = 1000;
+
+/// 构建 S.WorldMapSetupInfo（C# 线格式：enabled/count/icons/teleport_cost）
+/// icons 取 DB 中 big_map=true 的地图（前 64 个，image_index 用 MapLinkIcon 帧序号）
+pub(crate) fn build_world_map_setup_packet(
+    map_infos: &std::collections::HashMap<i32, db::MapInfo>,
+    teleport_cost: i32,
+) -> Vec<u8> {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+    let icons: Vec<&db::MapInfo> = map_infos.values().filter(|m| m.big_map).take(64).collect();
+    body.push(1u8); // enabled
+    body.extend_from_slice(&(icons.len() as i32).to_le_bytes());
+    for (i, m) in icons.iter().enumerate() {
+        body.extend_from_slice(&(i as i32).to_le_bytes());
+        write_dotnet_string(&mut body, &m.title);
+        body.extend_from_slice(&m.index.to_le_bytes());
+    }
+    body.extend_from_slice(&teleport_cost.to_le_bytes());
+    build_packet_bytes(ServerPacketIds::WorldMapSetup as i16, &body)
+}
+
+/// 按 DB NPCInfo 构建 NewMapInfo（C.RequestMapInfo 用，C# CheckMapInfo 语义）
+pub(crate) fn build_new_map_info_packet_from_db(
+    map_index: i32,
+    title: &str,
+    npcs: &[db::NPCInfo],
+) -> Vec<u8> {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+    body.extend_from_slice(&map_index.to_le_bytes());
+    write_dotnet_string(&mut body, title);
+    // width/height/big_map：客户端本地有地图数据，服务端补 0
+    body.extend_from_slice(&0i32.to_le_bytes());
+    body.extend_from_slice(&0i32.to_le_bytes());
+    body.extend_from_slice(&0i32.to_le_bytes());
+    // movements：暂无传送点数据，发空
+    body.extend_from_slice(&0i32.to_le_bytes());
+    body.extend_from_slice(&(npcs.len() as i32).to_le_bytes());
+    for n in npcs {
+        body.extend_from_slice(&(n.index as u32).to_le_bytes());
+        write_dotnet_string(&mut body, &n.name);
+        body.extend_from_slice(&n.x.to_le_bytes());
+        body.extend_from_slice(&n.y.to_le_bytes());
+        body.extend_from_slice(&n.big_map_icon.to_le_bytes());
+        body.push(if n.can_teleport_to { 1u8 } else { 0u8 });
+    }
     build_packet_bytes(ServerPacketIds::NewMapInfo as i16, &body)
 }
 
