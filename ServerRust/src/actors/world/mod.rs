@@ -87,6 +87,8 @@ pub struct WorldActorArgs {
     pub item_timeout_ticks: u64,
     /// 金币掉落每堆上限（C# Settings.MaxDropGold = 2000）
     pub max_drop_gold: u32,
+    /// 精英怪配置（C# Settings.MonsterRarity*）
+    pub rarity_cfg: crate::util::config::RarityConfig,
 }
 
 /// 世界中的玩家记录
@@ -258,6 +260,7 @@ struct SpawnContext<'a> {
     monster_infos: &'a HashMap<i32, db::MonsterInfo>,
     npc_infos: &'a HashMap<i32, db::NPCInfo>,
     dragon_info: Option<&'a db::DragonInfo>,
+    rarity: crate::util::config::RarityConfig,
 }
 
 #[derive(serde::Deserialize)]
@@ -807,6 +810,8 @@ pub struct WorldActor {
     pub(crate) item_timeout_ticks: u64,
     /// 金币掉落每堆上限
     pub(crate) max_drop_gold: u32,
+    /// 精英怪配置
+    pub(crate) rarity_cfg: crate::util::config::RarityConfig,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -971,6 +976,7 @@ impl WorldActor {
             drop_rate: 1.0,
             item_timeout_ticks: 600,
             max_drop_gold: 2000,
+            rarity_cfg: crate::util::config::RarityConfig::default(),
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -3090,6 +3096,7 @@ impl Actor for WorldActor {
             drop_rate: args.drop_rate,
             item_timeout_ticks: args.item_timeout_ticks,
             max_drop_gold: args.max_drop_gold,
+            rarity_cfg: args.rarity_cfg,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -4733,16 +4740,16 @@ async fn spawn_npcs_and_monsters(
         let object_id = *next_object_id;
         *next_object_id += 1;
 
-        // 精英判定：3% 概率
-        let is_elite = fastrand::u8(1..=100) <= 3;
+        // 精英判定（C# Settings.MonsterRarity* 配置化）
+        let is_elite = fastrand::u8(1..=100) <= ctx.rarity.elite_chance_percent;
         let (name, hp, max_hp, min_dmg, max_dmg, xp) = if is_elite {
             (
                 format!("[精英] {}", monster.name),
-                monster.hp.saturating_mul(2),
-                monster.hp.saturating_mul(2),
-                (monster.min_dmg as f32 * 1.5) as i32,
-                (monster.max_dmg as f32 * 1.5) as i32,
-                monster.xp.saturating_mul(2),
+                (monster.hp as f64 * ctx.rarity.elite_hp_multiplier).max(1.0) as i32,
+                (monster.hp as f64 * ctx.rarity.elite_hp_multiplier).max(1.0) as i32,
+                (monster.min_dmg as f64 * ctx.rarity.elite_dmg_multiplier) as i32,
+                (monster.max_dmg as f64 * ctx.rarity.elite_dmg_multiplier) as i32,
+                (monster.xp as f64 * ctx.rarity.elite_xp_multiplier).max(1.0) as i32,
             )
         } else {
             (monster.name.clone(), monster.hp, monster.hp, monster.min_dmg, monster.max_dmg, monster.xp)
