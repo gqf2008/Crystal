@@ -2121,6 +2121,21 @@ impl Message<RemoveItemByIndex> for PlayerActor {
     }
 }
 
+/// 按 item_index 从背包中移除指定数量的物品（带耐久下限过滤，C# TakeItem dura）
+pub struct RemoveItemByIndexWithDura {
+    pub item_index: i32,
+    pub count: u16,
+    pub min_dura: Option<u32>,
+}
+
+impl Message<RemoveItemByIndexWithDura> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: RemoveItemByIndexWithDura, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.inventory.remove_item_by_index_with_dura(msg.item_index, msg.count, msg.min_dura)
+    }
+}
+
 /// 检查背包是否有空位
 pub struct HasItemSpace;
 
