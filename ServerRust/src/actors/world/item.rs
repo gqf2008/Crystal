@@ -1346,6 +1346,17 @@ impl Message<DropItemRequest> for WorldActor {
             send_drop_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count as u32, false);
             return;
         }
+        // C# DropItem：BindMode.DestroyOnDrop(0x80) 丢弃即销毁（不落地）
+        let destroy_on_drop = state.inventory.get_item(msg.unique_id)
+            .and_then(|it| self.item_infos.get(&it.item_index))
+            .map(|i| (i.bind_mode & mir2_shared::enums::BindMode::DESTROY_ON_DROP.bits() as i32) != 0)
+            .unwrap_or(false);
+        if destroy_on_drop {
+            let _ = actor_ref.ask(DropInventoryItem { unique_id: msg.unique_id, count: msg.count }).await;
+            send_system_message(&self.gate_ref, msg.session_id, "该物品已被销毁");
+            send_drop_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count as u32, true);
+            return;
+        }
 
         let item = actor_ref.ask(DropInventoryItem {
             unique_id: msg.unique_id,
