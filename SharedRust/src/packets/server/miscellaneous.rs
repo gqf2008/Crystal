@@ -304,19 +304,18 @@ impl Packet for UserName {
     const OPCODE: i16 = ServerPacketIds::UserName as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
         use crate::binary::write_dotnet_string;
+        use byteorder::WriteBytesExt;
         writer.write_u32::<LittleEndian>(self.object_id)?;
         write_dotnet_string(writer, &self.name)?;
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use crate::binary::read_dotnet_string;
+
         let object_id = reader.read_u32::<LittleEndian>()?;
-        let len = reader.read_i32::<LittleEndian>()?;
-        let mut bytes = vec![0u8; len as usize];
-        reader.read_exact(&mut bytes)?;
-        let name = String::from_utf8_lossy(&bytes).to_string();
+        let name = read_dotnet_string(reader)?;
         Ok(Self { object_id, name })
     }
 }
@@ -324,8 +323,8 @@ impl Packet for UserName {
 /// ChatItemStats - 聊天物品属性 (163)
 #[derive(Debug, Clone)]
 pub struct ChatItemStats {
-    pub unique_id: u64,             // 物品唯一ID
-    pub stats: String,              // 属性字符串
+    pub unique_id: u64, // 物品唯一ID
+    pub stats: String,  // 属性字符串
 }
 
 impl Packet for ChatItemStats {
@@ -340,11 +339,10 @@ impl Packet for ChatItemStats {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use crate::binary::read_dotnet_string;
+
         let unique_id = reader.read_u64::<LittleEndian>()?;
-        let len = reader.read_i32::<LittleEndian>()?;
-        let mut bytes = vec![0u8; len as usize];
-        reader.read_exact(&mut bytes)?;
-        let stats = String::from_utf8_lossy(&bytes).to_string();
+        let stats = read_dotnet_string(reader)?;
         Ok(Self { unique_id, stats })
     }
 }

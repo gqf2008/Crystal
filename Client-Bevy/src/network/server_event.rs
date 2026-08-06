@@ -126,6 +126,10 @@ pub enum ServerEvent {
     RecipeLearned { recipe_id: i32 },
     /// #262 PauseBuff：Buff 暂停
     BuffPaused { buff_type: u8, object_id: u32, paused: bool },
+    /// #264 ObjectName：对象改名
+    ObjectName { object_id: u32, name: String },
+    /// #264 UserName：本地玩家改名
+    PlayerNameUpdated { name: String },
     /// Roll：骰子/尤茨结果（npc_id 由 roll 消费端从 NpcDialogState 读取）
     Roll {
         r#type: i32,
