@@ -247,6 +247,29 @@ fn quest_log_server_events(
                     quest_log.quests.last().map(|q| q.name.clone()).unwrap_or_default()
                 );
             }
+            ServerEvent::QuestInfo { id, name, tasks } => {
+                // #260：任务完整信息（C# S.NewQuestInfo）→ 添加/更新任务日志
+                let entry = QuestEntry {
+                    id: *id,
+                    name: name.clone(),
+                    tasks: tasks.clone(),
+                    taken: true,
+                    completed: false,
+                    is_new: true,
+                };
+                if let Some(e) = quest_log.quests.iter_mut().find(|q| q.id == *id) {
+                    *e = entry;
+                } else {
+                    quest_log.quests.push(entry);
+                }
+                quest_log.message = format!("接受任务: {}", name);
+                tracing::info!("📜 任务日志新增: {}", name);
+            }
+            ServerEvent::QuestShared { quest_id } => {
+                // #260：共享任务提示
+                quest_log.message = format!("收到共享任务 #{}", quest_id);
+                tracing::info!("🔗 共享任务 #{}", quest_id);
+            }
             ServerEvent::QuestCompleted { id } => {
                 quest_log.quests.retain(|q| q.id != *id);
                 quest_log.message = format!("任务 {} 完成！", id);

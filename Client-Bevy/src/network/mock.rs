@@ -747,6 +747,46 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 message_type: 0,
                                             },
                                         );
+                                        // #260：任务数据包
+                                        send(
+                                            &to_client,
+                                            &server::quest::NewQuestInfo {
+                                                quest: mir2_shared::data::client_data::ClientQuestInfo {
+                                                    index: 1,
+                                                    npc_index: 0,
+                                                    name: "消灭稻草人".to_string(),
+                                                    group: String::new(),
+                                                    description: vec![],
+                                                    task_description: vec!["击杀 稻草人 3/3".to_string()],
+                                                    return_description: vec![],
+                                                    completion_description: vec![],
+                                                    min_level_needed: 1,
+                                                    max_level_needed: 99,
+                                                    quest_needed: 0,
+                                                    class_needed: mir2_shared::enums::RequiredClass::WAR_WIZ_TAO,
+                                                    quest_type: mir2_shared::enums::QuestType::General,
+                                                    time_limit_in_seconds: 0,
+                                                    reward_gold: 100,
+                                                    reward_exp: 50,
+                                                    reward_credit: 0,
+                                                    rewards_fixed_item: vec![],
+                                                    rewards_select_item: vec![],
+                                                    finish_npc_index: 0,
+                                                },
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::miscellaneous::ShareQuest { quest_id: 1 },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::miscellaneous::GainedQuestItem { item_id: 1001 },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::miscellaneous::DeleteQuestItem { item_id: 1002 },
+                                        );
                                         // #256：公告 + 杂项协议
                                         send(
                                             &to_client,

@@ -104,6 +104,36 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
             server_events.write(ServerEvent::RentalCancelled);
             tracing::info!("📦 租赁取消");
         }
+        // #260：任务数据包
+        x if x == ServerPacketIds::NewQuestInfo as i16 => {
+            if let Ok(p) = quest::NewQuestInfo::read_body(&mut cur) {
+                server_events.write(ServerEvent::QuestInfo {
+                    id: p.quest.index,
+                    name: p.quest.name.clone(),
+                    tasks: p.quest.task_description,
+                });
+                tracing::info!("📜 任务信息: #{} {}", p.quest.index, p.quest.name);
+            }
+        }
+        x if x == ServerPacketIds::ShareQuest as i16 => {
+            if let Ok(p) = miscellaneous::ShareQuest::read_body(&mut cur) {
+                server_events.write(ServerEvent::QuestShared {
+                    quest_id: p.quest_id,
+                });
+                tracing::info!("🔗 共享任务 #{}", p.quest_id);
+            }
+        }
+        x if x == ServerPacketIds::GainedQuestItem as i16 => {
+            if let Ok(p) = miscellaneous::GainedQuestItem::read_body(&mut cur) {
+                tracing::info!("🎁 任务物品获得 #{}", p.item_id);
+            }
+        }
+        x if x == ServerPacketIds::DeleteQuestItem as i16 => {
+            if let Ok(p) = miscellaneous::DeleteQuestItem::read_body(&mut cur) {
+                tracing::info!("🗑️ 任务物品删除 #{}", p.item_id);
+            }
+        }
+
         // ---- M43: 任务日志 ----
         x if x == ServerPacketIds::ChangeQuest as i16 => {
             // [id i32][count i32][task dotnet...][taken u8][completed u8][new u8]

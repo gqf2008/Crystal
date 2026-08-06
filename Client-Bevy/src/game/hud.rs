@@ -874,7 +874,9 @@ fn hud_server_events(
             | ServerEvent::MemberLocation { .. }
             | ServerEvent::NoticeUpdated { .. }
             | ServerEvent::MagicRemoved { .. }
-            | ServerEvent::ServerMessage { .. } => {}
+            | ServerEvent::ServerMessage { .. }
+            | ServerEvent::QuestInfo { .. }
+            | ServerEvent::QuestShared { .. } => {}
             ServerEvent::InventoryMoved { from, to } => {
                 if *from < hud.inventory.items.len() && *to < hud.inventory.items.len() {
                     hud.inventory.items.swap(*from, *to);
