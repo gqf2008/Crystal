@@ -1564,6 +1564,16 @@ impl WorldActor {
             | Spell::VampireShot | Spell::PoisonShot | Spell::CrippleShot | Spell::ElementalShot);
         let defence = if is_archer { DefenceType::Ac } else { DefenceType::Mac };
 
+        // 弓手被动 Focus（C# HumanObject CompleteRangeAttack：Random(5)<=Lv 时命中概率 ×2）
+        let mut attacker_stats_owned = attacker_stats.clone();
+        if is_archer {
+            if let Some(focus) = caster_state.magics.iter().find(|m| m.spell == 121) {
+                if fastrand::i32(0..5) <= focus.level as i32 {
+                    attacker_stats_owned.accuracy = attacker_stats_owned.accuracy.saturating_mul(2);
+                }
+            }
+        }
+
         // 查找目标怪物
         let monster_hit = {
             let monster = self.monsters.iter().find(|(_, m)| m.object_id == target_id);
@@ -1601,7 +1611,7 @@ impl WorldActor {
             };
 
             let result = attack::resolve_attack(
-                attacker_stats, &defender_stats, final_damage,
+                &attacker_stats_owned, &defender_stats, final_damage,
                 defence, level_offset,
             );
 
@@ -1691,7 +1701,7 @@ impl WorldActor {
                     if let Some(monster) = self.monsters.get_mut(&sid) {
                         let ds = monster.to_combat_stats();
                         let r = attack::resolve_attack(
-                            attacker_stats, &ds, raw_damage, DefenceType::Ac, level_offset,
+                            &attacker_stats_owned, &ds, raw_damage, DefenceType::Ac, level_offset,
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
@@ -1720,7 +1730,7 @@ impl WorldActor {
                 }
                 let defender_stats = other_state.to_combat_stats();
                 let result = attack::resolve_attack(
-                    attacker_stats, &defender_stats, raw_damage,
+                    &attacker_stats_owned, &defender_stats, raw_damage,
                     defence, level_offset,
                 );
                 if result.is_hit && result.damage > 0 {
