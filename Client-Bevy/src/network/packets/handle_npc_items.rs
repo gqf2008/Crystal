@@ -28,7 +28,7 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::NPCResponse as i16, ServerPacketIds::ObjectStruck as i16, ServerPacketIds::Struck as i16, ServerPacketIds::ObjectHealth as i16, ServerPacketIds::ObjectMana as i16, ServerPacketIds::ObjectDied as i16, ServerPacketIds::Death as i16, ServerPacketIds::Revived as i16, ServerPacketIds::ObjectRevived as i16, ServerPacketIds::DamageIndicator as i16, ServerPacketIds::RangeAttack as i16, ServerPacketIds::ObjectRangeAttack as i16, ServerPacketIds::DuraChanged as i16, ServerPacketIds::DeleteItem as i16, ServerPacketIds::GainedItem as i16, ServerPacketIds::ItemRepaired as i16, ServerPacketIds::ItemSlotSizeChanged as i16, ServerPacketIds::EquipSlotItem as i16, ServerPacketIds::ItemSealChanged as i16, ServerPacketIds::CombineItem as i16, ServerPacketIds::ItemUpgraded as i16, ServerPacketIds::NPCAwakening as i16, ServerPacketIds::NPCGoods as i16, ServerPacketIds::MoveItem as i16, ServerPacketIds::EquipItem as i16, ServerPacketIds::RemoveItem as i16, ServerPacketIds::UseItem as i16, ServerPacketIds::SplitItem as i16, ServerPacketIds::DropItem as i16, ServerPacketIds::MergeItem as i16, ServerPacketIds::SellItem as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::NPCResponse as i16, ServerPacketIds::ObjectStruck as i16, ServerPacketIds::Struck as i16, ServerPacketIds::ObjectHealth as i16, ServerPacketIds::ObjectMana as i16, ServerPacketIds::ObjectDied as i16, ServerPacketIds::Death as i16, ServerPacketIds::Revived as i16, ServerPacketIds::ObjectRevived as i16, ServerPacketIds::DamageIndicator as i16, ServerPacketIds::RangeAttack as i16, ServerPacketIds::ObjectRangeAttack as i16, ServerPacketIds::DuraChanged as i16, ServerPacketIds::DeleteItem as i16, ServerPacketIds::GainedItem as i16, ServerPacketIds::ItemRepaired as i16, ServerPacketIds::ItemSlotSizeChanged as i16, ServerPacketIds::EquipSlotItem as i16, ServerPacketIds::ItemSealChanged as i16, ServerPacketIds::CombineItem as i16, ServerPacketIds::ItemUpgraded as i16, ServerPacketIds::NPCAwakening as i16, ServerPacketIds::NPCConsign as i16, ServerPacketIds::NPCGoods as i16, ServerPacketIds::MoveItem as i16, ServerPacketIds::EquipItem as i16, ServerPacketIds::RemoveItem as i16, ServerPacketIds::UseItem as i16, ServerPacketIds::SplitItem as i16, ServerPacketIds::DropItem as i16, ServerPacketIds::MergeItem as i16, ServerPacketIds::SellItem as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
 
@@ -122,6 +122,13 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
                 combat_evt.write(CombatEvent::Damage { object_id: p.object_id, damage: p.damage, dmg_type: p.damage_type });
             }
         }
+        // #270：NPC 寄售（空包）
+        x if x == ServerPacketIds::NPCConsign as i16 => {
+            if market_system::NPCConsign::read_body(&mut cur).is_ok() {
+                tracing::debug!("📦 NPC 寄售面板");
+            }
+        }
+
         // #264：NPC 觉醒（空包）
         x if x == ServerPacketIds::NPCAwakening as i16 => {
             if awakening_system::NPCAwakening::read_body(&mut cur).is_ok() {

@@ -856,6 +856,44 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 max_length: 8,
                                             },
                                         );
+                                        // #270：冲刺攻击 / 传送 / 杂项
+                                        send(
+                                            &to_client,
+                                            &server::movement::UserDashAttack {
+                                                location_x: 353,
+                                                location_y: 352,
+                                                direction: MirDirection::Down,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::movement::ObjectDashAttack {
+                                                object_id: 101,
+                                                location_x: 353,
+                                                location_y: 352,
+                                                direction: MirDirection::Down,
+                                                distance: 1,
+                                            },
+                                        );
+                                        send(&to_client, &server::map::TeleportIn {});
+                                        send(
+                                            &to_client,
+                                            &server::trade::TradeAccept {
+                                                name: "队友A".to_string(),
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::mail_system::MailSent { result: 1 },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::experience::HeroLevelChanged {
+                                                level: 5,
+                                                experience: 0,
+                                                max_experience: 100,
+                                            },
+                                        );
                                         // #256：公告 + 杂项协议
                                         send(
                                             &to_client,
