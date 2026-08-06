@@ -131,6 +131,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             let mut player_dead_since: Option<std::time::Instant> = None;
             // #200：仓库密码（MOCK 默认 123456，解锁后仓库才打开）
             let mut mock_storage_password: Option<String> = Some("123456".to_string());
+            // #512：仓库物品（80 格，MOCK 本地维护，StoreItem/TakeBackItem 闭环）
+            let mut mock_storage: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 80];
             // #283：首次击杀触发本地升级演示（LevelChanged + ObjectLeveled）
             let mut mock_leveled_up = false;
             // #297：精炼流程状态（(物品 uid, 是否已开始)）
@@ -273,7 +275,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         tracing::info!("[MOCK] NPC 对话: id={} key={}", p.object_id, p.key);
                                         // 简单对话页：欢迎 + 选项
                                         let key = p.key.to_uppercase();
-                                        if key == "[@SHOP]" {
+                                        if key == "[@SHOP]" || key == "[@BUY]" {
                                             // 商店商品（带 ItemInfo）
                                             use mir2_shared::data::item::ItemInfo;
                                             let mk = |index: i32, name: &str, price: u32| {
@@ -548,9 +550,10 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             },
                                         );
                                         if ok {
-                                            let storage_items: Vec<Option<mir2_shared::data::item::UserItem>> =
-                                                (0..80).map(|_| None).collect();
-                                            send(&to_client, &server::player::UserStorage { storage: storage_items });
+                                            send(
+                                                &to_client,
+                                                &server::player::UserStorage { storage: mock_storage.clone() },
+                                            );
                                         }
                                     }
                                 }
@@ -591,6 +594,61 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 has_password: false,
                                                 last_set_time: 0,
                                             },
+                                        );
+                                    }
+                                }
+                                // #512：仓库存取（C# S.StoreItem/TakeBackItem 回执闭环）
+                                x if x == ClientPacketIds::StoreItem as i16 => {
+                                    if let Ok(p) = client::item::StoreItem::read_body(&mut cur) {
+                                        let from = p.from as usize;
+                                        let to = p.to as usize;
+                                        let ok = from < player_inventory.len()
+                                            && to < mock_storage.len()
+                                            && player_inventory[from].is_some()
+                                            && mock_storage[to].is_none();
+                                        if ok {
+                                            mock_storage[to] = player_inventory[from].take();
+                                        }
+                                        send(
+                                            &to_client,
+                                            &server::item_operations::StoreItem {
+                                                from: p.from,
+                                                to: p.to,
+                                                success: ok,
+                                            },
+                                        );
+                                        tracing::info!(
+                                            "📦 [MOCK] 存入仓库 {} -> {} success={}",
+                                            p.from,
+                                            p.to,
+                                            ok
+                                        );
+                                    }
+                                }
+                                x if x == ClientPacketIds::TakeBackItem as i16 => {
+                                    if let Ok(p) = client::item::TakeBackItem::read_body(&mut cur) {
+                                        let from = p.from as usize;
+                                        let to = p.to as usize;
+                                        let ok = from < mock_storage.len()
+                                            && to < player_inventory.len()
+                                            && mock_storage[from].is_some()
+                                            && player_inventory[to].is_none();
+                                        if ok {
+                                            player_inventory[to] = mock_storage[from].take();
+                                        }
+                                        send(
+                                            &to_client,
+                                            &server::item_operations::TakeBackItem {
+                                                from: p.from,
+                                                to: p.to,
+                                                success: ok,
+                                            },
+                                        );
+                                        tracing::info!(
+                                            "📦 [MOCK] 取出仓库 {} -> {} success={}",
+                                            p.from,
+                                            p.to,
+                                            ok
                                         );
                                     }
                                 }
@@ -2663,6 +2721,7 @@ fn send_map_and_objects(
                 server::map::NpcMapInfo { object_id: 2001, name: "仓库管理员".to_string(), location_x: 352, location_y: 353, icon: 0, can_teleport_to: true },
                 server::map::NpcMapInfo { object_id: 2002, name: "武器店老板".to_string(), location_x: 356, location_y: 352, icon: 0, can_teleport_to: true },
                 server::map::NpcMapInfo { object_id: 2003, name: "药店老板".to_string(), location_x: 352, location_y: 355, icon: 0, can_teleport_to: false },
+                server::map::NpcMapInfo { object_id: 2004, name: "Merchant".to_string(), location_x: 355, location_y: 353, icon: 0, can_teleport_to: true },
             ],
         },
     );
@@ -2759,6 +2818,22 @@ fn send_map_and_objects(
         },
     );
 
+    // Merchant NPC（--storage-test / --shop-test / --storage-unlock-test 按 Alchemist/Merchant 查找）
+    send(
+        to_client,
+        &server::objects::ObjectNpc {
+            object_id: 111,
+            name: "Merchant".to_string(),
+            name_colour: 0,
+            image: 0,
+            colour: 0,
+            location_x: 355,
+            location_y: 353,
+            direction: MirDirection::Up,
+            quest_ids: vec![],
+        },
+    );
+
     send_user_information(to_client, char_index, inventory, equipment, gold, stats);
 
 
@@ -2808,6 +2883,7 @@ fn mock_map_info(map_index: i32) -> server::map::NewMapInfo {
                 server::map::NpcMapInfo { object_id: 2001, name: "仓库管理员".to_string(), location_x: 352, location_y: 353, icon: 0, can_teleport_to: true },
                 server::map::NpcMapInfo { object_id: 2002, name: "武器店老板".to_string(), location_x: 356, location_y: 352, icon: 0, can_teleport_to: true },
                 server::map::NpcMapInfo { object_id: 2003, name: "药店老板".to_string(), location_x: 352, location_y: 355, icon: 0, can_teleport_to: false },
+                server::map::NpcMapInfo { object_id: 2004, name: "Merchant".to_string(), location_x: 355, location_y: 353, icon: 0, can_teleport_to: true },
             ],
         },
         1 => server::map::NewMapInfo {
