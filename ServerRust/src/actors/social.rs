@@ -231,6 +231,24 @@ pub struct SocialPlayerLeft {
     pub session_id: u64,
 }
 
+/// WorldActor(NPC 脚本) -> SocialActor: 查询玩家行会金币（对齐 C# CheckType.CheckGuildGold）
+pub struct NpcGetGuildGold {
+    pub session_id: u64,
+}
+
+impl Message<NpcGetGuildGold> for SocialActor {
+    type Reply = u64;
+
+    async fn handle(&mut self, msg: NpcGetGuildGold, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let state = match self.players.get(&msg.session_id) {
+            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return 0 },
+            None => return 0,
+        };
+        let Some(guild_name) = state.guild_name else { return 0 };
+        self.guilds.get(&guild_name).map(|g| g.gold).unwrap_or(0)
+    }
+}
+
 /// WorldActor(NPC 脚本) -> SocialActor: 查询玩家是否队长（对齐 C# CheckType.Groupleader）
 pub struct NpcIsGroupLeader {
     pub session_id: u64,

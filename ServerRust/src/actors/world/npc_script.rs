@@ -629,6 +629,25 @@ async fn eval_one_check(
             };
             compare_i64(count, op, want)
         }
+        // CHECKEXACTMON <怪物名> <op> <count> <map> <instance> — 指定怪物数量（对齐 C# CheckType.CheckExactMon）
+        "CHECKEXACTMON" => {
+            let monster_name = arg0();
+            let (op, want) = parse_op_amount(&args[1..]);
+            let map_name = args.get(3).map(|s| s.as_str()).unwrap_or("");
+            let count = if let Some(mi) = map_index_by_name(world, map_name) {
+                world.monster_name_index
+                    .get(&monster_name.to_lowercase())
+                    .map(|&idx| {
+                        world.monsters.values()
+                            .filter(|m| m.map_index == mi && m.monster_index == idx)
+                            .count() as i64
+                    })
+                    .unwrap_or(-1)
+            } else {
+                -1
+            };
+            compare_i64(count, op, want)
+        }
         // CHECKMON <op> <count> <map> <instance> — 地图怪物数（对齐 C# CheckType.CheckMon）
         "CHECKMON" => {
             let (op, want) = parse_op_amount(&args[1..]);
@@ -679,6 +698,12 @@ async fn eval_one_check(
         // CHECKRELATIONSHIP — 是否已婚（对齐 C# CheckType.CheckRelationship：player.Info.Married != 0）
         "CHECKRELATIONSHIP" => {
             player.spouse_name.is_some()
+        }
+        // CHECKGUILDGOLD <op> <amount> — 行会金币比较（对齐 C# CheckType.CheckGuildGold）
+        "CHECKGUILDGOLD" => {
+            let (op, want) = parse_op_amount(&args[1..]);
+            let gold = world.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id }).await.unwrap_or(0);
+            compare_i64(gold as i64, op, want)
         }
         // CHECKCALC <left> <op> <right> — 整数比较（对齐 C# CheckType.CheckCalc）
         "CHECKCALC" => {
