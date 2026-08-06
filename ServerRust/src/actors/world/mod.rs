@@ -965,6 +965,21 @@ pub struct AuctionListing {
     pub item_type: u8, // MarketItemType
 }
 
+    /// C# ItemObject.Drop(distance)：掉落物在 range 内散落（简化：随机偏移可行走格，回退原点）
+pub(crate) fn scatter_drop_position(map: Option<&MapData>, x: i32, y: i32, range: i32) -> (i32, i32) {
+    if let Some(m) = map {
+        for _ in 0..12 {
+            let nx = x + fastrand::i32(-range..=range);
+            let ny = y + fastrand::i32(-range..=range);
+            if m.is_walkable(nx, ny) {
+                return (nx, ny);
+            }
+        }
+    }
+    (x, y)
+}
+
+
 impl WorldActor {
     pub fn new(gate_ref: ActorRef<GateActor>, map_dir: PathBuf, spawn_dir: Option<PathBuf>, db_pool: DbPool, social_ref: ActorRef<SocialActor>) -> Self {
         Self {
@@ -1376,7 +1391,7 @@ impl WorldActor {
         self.broadcast_player_appearance(session_id, &state).await;
     }
 
-    /// 怪物死亡时生成掉落并广播给所有在线玩家
+/// 怪物死亡时生成掉落并广播给所有在线玩家
     pub(crate) async fn spawn_single_drop(&mut self, monster: &MonsterState, item_index: i32, count: u16) {
         let drop_oid = self.alloc_object_id();
         if item_index == 0 {
@@ -1434,11 +1449,13 @@ impl WorldActor {
             }
             // 补 ItemInfo（ObjectItem 携带 info 供客户端渲染名称/图标，与 M16 玩家丢弃路径一致）
             enrich_item_info(&mut item, &self.item_infos);
+            // C#：掉落散落（Settings.DropRange）
+            let (dx, dy) = scatter_drop_position(self.maps.get(&monster.map_index), monster.x, monster.y, 4);
             let object_item = mir2_shared::packets::server::ObjectItem {
                 object_id: drop_oid,
                 item: item.clone(),
-                location_x: monster.x,
-                location_y: monster.y,
+                location_x: dx,
+                location_y: dy,
             };
             let mut buf = Vec::new();
             if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item) {
@@ -1454,13 +1471,13 @@ impl WorldActor {
             self.ground_items.push(GroundItem {
                 object_id: drop_oid,
                 item,
-                x: monster.x,
-                y: monster.y,
+                x: dx,
+                y: dy,
                 map_index: monster.map_index,
                 dropper_session: None,
                 drop_tick: self.tick_count,
             });
-            debug!("Monster '{}' dropped item index={} count={} at ({}, {})", monster.name, item_index, count, monster.x, monster.y);
+            debug!("Monster '{}' dropped item index={} count={} at ({}, {})", monster.name, item_index, count, dx, dy);
         }
     }
 
@@ -1571,6 +1588,8 @@ impl WorldActor {
         };
         // C#：PKPoints > 200 → RedDeathDrop（概率更高）；否则 DeathDrop
         let red = state.pk_points > 200;
+        // C#：掉落散落（Settings.DropRange=4）
+        let (drop_x, drop_y) = scatter_drop_position(self.maps.get(&map_index), x, y, 4);
 
         let mut dropped_items: Vec<mir2_shared::data::item::UserItem> = Vec::new();
 
@@ -1691,14 +1710,18 @@ impl WorldActor {
             }
         }
 
-        // 落地物品（C# 死亡不掉金币）
-        for item in dropped_items {
+        // 落地物品（C# 死亡不掉金币；散落 + Meat 掉 2000 耐久）
+        for mut item in dropped_items {
+            // C# HumanObject.DropItem：Meat 落地 current_dura -= 2000
+            if self.item_infos.get(&item.item_index).map(|i| i.item_type == 15 /* Meat */).unwrap_or(false) {
+                item.current_dura = item.current_dura.saturating_sub(2000);
+            }
             let drop_oid = self.alloc_object_id();
             let object_item = mir2_shared::packets::server::ObjectItem {
                 object_id: drop_oid,
                 item: item.clone(),
-                location_x: x,
-                location_y: y,
+                location_x: drop_x,
+                location_y: drop_y,
             };
             let mut buf = Vec::new();
             if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item) {
@@ -1708,7 +1731,7 @@ impl WorldActor {
             for sid in self.players.keys() {
                 let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: buf.clone() }).await;
             }
-            self.ground_items.push(GroundItem { object_id: drop_oid, item, x, y, map_index, dropper_session: Some(session_id), drop_tick: self.tick_count });
+            self.ground_items.push(GroundItem { object_id: drop_oid, item, x: drop_x, y: drop_y, map_index, dropper_session: Some(session_id), drop_tick: self.tick_count });
         }
     }
 
