@@ -741,6 +741,54 @@ async fn eval_one_check(
                 false
             }
         }
+        // AFFORDGATE <index> <id> — 行会金币足够修复城门（对齐 C# CheckType.AffordGate）
+        "AFFORDGATE" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            let id = arg1().parse::<i32>().unwrap_or(-1);
+            if player.guild_name.is_none() || index < 0 || id < 0 { false }
+            else {
+                let oid = world.find_siege_structure(index, crate::actors::world::conquest::SiegeStructureType::CastleGate, id);
+                let cost = oid.and_then(|o| world.siege_structures.get(&o)).map(|s| s.repair_cost()).unwrap_or(0);
+                let gold = world.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id }).await.unwrap_or(0);
+                cost > 0 && gold >= cost
+            }
+        }
+        // AFFORDWALL <index> <id> — 行会金币足够修复城墙（对齐 C# CheckType.AffordWall）
+        "AFFORDWALL" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            let id = arg1().parse::<i32>().unwrap_or(-1);
+            if player.guild_name.is_none() || index < 0 || id < 0 { false }
+            else {
+                let oid = world.find_siege_structure(index, crate::actors::world::conquest::SiegeStructureType::Wall, id);
+                let cost = oid.and_then(|o| world.siege_structures.get(&o)).map(|s| s.repair_cost()).unwrap_or(0);
+                let gold = world.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id }).await.unwrap_or(0);
+                cost > 0 && gold >= cost
+            }
+        }
+        // AFFORDGUARD <index> <id> — 守卫（箭塔）负担检查（对齐 C# CheckType.AffordGuard，简化用 ArcherTower）
+        "AFFORDGUARD" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            let id = arg1().parse::<i32>().unwrap_or(-1);
+            if player.guild_name.is_none() || index < 0 || id < 0 { false }
+            else {
+                let oid = world.find_siege_structure(index, crate::actors::world::conquest::SiegeStructureType::ArcherTower, id);
+                let cost = oid.and_then(|o| world.siege_structures.get(&o)).map(|s| s.repair_cost()).unwrap_or(0);
+                let gold = world.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id }).await.unwrap_or(0);
+                cost > 0 && gold >= cost
+            }
+        }
+        // AFFORDSIEGE <index> <id> — 攻城器负担检查（对齐 C# CheckType.AffordSiege，简化用 Catapult）
+        "AFFORDSIEGE" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            let id = arg1().parse::<i32>().unwrap_or(-1);
+            if player.guild_name.is_none() || index < 0 || id < 0 { false }
+            else {
+                let oid = world.find_siege_structure(index, crate::actors::world::conquest::SiegeStructureType::Catapult, id);
+                let cost = oid.and_then(|o| world.siege_structures.get(&o)).map(|s| s.repair_cost()).unwrap_or(0);
+                let gold = world.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id }).await.unwrap_or(0);
+                cost > 0 && gold >= cost
+            }
+        }
         // CONQUESTAVAILABLE <index> — 有行会且无人宣战（对齐 C# CheckType.ConquestAvailable：AttackerID == -1）
         "CONQUESTAVAILABLE" => {
             let index = arg0().parse::<i32>().unwrap_or(-1);
@@ -1020,6 +1068,45 @@ async fn exec_action(
         // SEALHERO —— 封印当前英雄（对齐 C# ActionType.SealHero）
         "SEALHERO" => {
             world.npc_seal_hero(session_id).await;
+        }
+        // CONQUESTGATE <index> <id> —— 修复城门（对齐 C# ActionType.ConquestGate）
+        "CONQUESTGATE" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            let id = arg1().parse::<i32>().unwrap_or(-1);
+            if index >= 0 && id >= 0 {
+                world.npc_repair_siege_structure(session_id, index, id, crate::actors::world::conquest::SiegeStructureType::CastleGate).await;
+            }
+        }
+        // CONQUESTWALL <index> <id> —— 修复城墙（对齐 C# ActionType.ConquestWall）
+        "CONQUESTWALL" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            let id = arg1().parse::<i32>().unwrap_or(-1);
+            if index >= 0 && id >= 0 {
+                world.npc_repair_siege_structure(session_id, index, id, crate::actors::world::conquest::SiegeStructureType::Wall).await;
+            }
+        }
+        // CONQUESTREPAIRALL <index> —— GM 修复全部（对齐 C# ActionType.ConquestRepairAll）
+        "CONQUESTREPAIRALL" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            if index >= 0 {
+                world.npc_repair_all(session_id, index).await;
+            }
+        }
+        // OPENGATE <index> <id> —— 打开城门（对齐 C# ActionType.OpenGate）
+        "OPENGATE" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            let id = arg1().parse::<i32>().unwrap_or(-1);
+            if index >= 0 && id >= 0 {
+                world.npc_open_close_gate(session_id, index, id, true).await;
+            }
+        }
+        // CLOSEGATE <index> <id> —— 关闭城门（对齐 C# ActionType.CloseGate）
+        "CLOSEGATE" => {
+            let index = arg0().parse::<i32>().unwrap_or(-1);
+            let id = arg1().parse::<i32>().unwrap_or(-1);
+            if index >= 0 && id >= 0 {
+                world.npc_open_close_gate(session_id, index, id, false).await;
+            }
         }
         // TAKECONQUESTGOLD <index> —— 所有者取走攻城金库（对齐 C# ActionType.TakeConquestGold）
         "TAKECONQUESTGOLD" => {
