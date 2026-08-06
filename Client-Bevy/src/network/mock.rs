@@ -673,6 +673,29 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 location: (354, 350),
                                             },
                                         );
+                                        // #252：潜行 / 等级特效 / 装饰
+                                        send(
+                                            &to_client,
+                                            &server::movement::ObjectSneaking {
+                                                object_id: 102,
+                                                sneaking: true,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::movement::ObjectLevelEffects {
+                                                object_id: 103,
+                                                level_effects: 1,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::movement::ObjectDeco {
+                                                object_id: 101,
+                                                deco: 3,
+                                                remove: false,
+                                            },
+                                        );
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
                                             send(
