@@ -451,6 +451,13 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         tracing::info!("⚒️ [MOCK] 精炼取回");
                                     }
                                 }
+                                // #300：请求地图信息 → 回发 NewMapInfo（世界地图/大地图切换）
+                                x if x == ClientPacketIds::RequestMapInfo as i16 => {
+                                    if let Ok(p) = client::npc::RequestMapInfo::read_body(&mut cur) {
+                                        tracing::info!("[MOCK] 请求地图信息 map={}", p.map_index);
+                                        send(&to_client, &mock_map_info(p.map_index));
+                                    }
+                                }
                                 // #285：聊天物品请求 → 回发 NewChatItem
                                 x if x == ClientPacketIds::RequestChatItem as i16 => {
                                     if let Ok(p) = client::misc::RequestChatItem::read_body(&mut cur) {
@@ -2619,6 +2626,29 @@ fn send_map_and_objects(
         },
     );
 
+    // 大地图信息（#300：--bigmap-test / --worldmap-test 需要 NewMapInfo）
+    send(
+        to_client,
+        &server::map::NewMapInfo {
+            map_index: 0,
+            title: "新手村".to_string(),
+            width: 400,
+            height: 400,
+            big_map: 1,
+            movements: vec![server::map::MovementInfo {
+                destination: 1,
+                title: "比奇省".to_string(),
+                location_x: 320,
+                location_y: 300,
+                icon: 0,
+            }],
+            npcs: vec![
+                server::map::NpcMapInfo { object_id: 2001, name: "仓库管理员".to_string(), location_x: 352, location_y: 353, icon: 0, can_teleport_to: true },
+                server::map::NpcMapInfo { object_id: 2002, name: "武器店老板".to_string(), location_x: 356, location_y: 352, icon: 0, can_teleport_to: true },
+                server::map::NpcMapInfo { object_id: 2003, name: "药店老板".to_string(), location_x: 352, location_y: 355, icon: 0, can_teleport_to: false },
+            ],
+        },
+    );
     // 本地玩家（职业/性别随所选角色）
     let (class, gender) = match char_index {
         1 => (MirClass::Wizard, MirGender::Female),
@@ -2725,7 +2755,97 @@ fn send_map_and_objects(
             location_y: 352,
         },
     );
+
+    // 世界地图配置（#300：C# S.WorldMapSetupInfo，进图下发一次）
+    send(
+        to_client,
+        &server::map::WorldMapSetupInfo {
+            enabled: true,
+            world_maps: vec![
+                server::map::WorldMapIcon { image_index: 0, title: "新手村".to_string(), map_index: 0 },
+                server::map::WorldMapIcon { image_index: 1, title: "比奇省".to_string(), map_index: 1 },
+                server::map::WorldMapIcon { image_index: 2, title: "盟重省".to_string(), map_index: 2 },
+                server::map::WorldMapIcon { image_index: 3, title: "沙漠".to_string(), map_index: 3 },
+            ],
+            teleport_cost: 1000,
+        },
+    );
 }
+/// 按地图返回大地图信息（#300：--worldmap-test 多地图切换演示）
+fn mock_map_info(map_index: i32) -> server::map::NewMapInfo {
+    match map_index {
+        0 => server::map::NewMapInfo {
+            map_index: 0,
+            title: "新手村".to_string(),
+            width: 400,
+            height: 400,
+            big_map: 1,
+            movements: vec![server::map::MovementInfo {
+                destination: 1,
+                title: "比奇省".to_string(),
+                location_x: 320,
+                location_y: 300,
+                icon: 0,
+            }],
+            npcs: vec![
+                server::map::NpcMapInfo { object_id: 2001, name: "仓库管理员".to_string(), location_x: 352, location_y: 353, icon: 0, can_teleport_to: true },
+                server::map::NpcMapInfo { object_id: 2002, name: "武器店老板".to_string(), location_x: 356, location_y: 352, icon: 0, can_teleport_to: true },
+                server::map::NpcMapInfo { object_id: 2003, name: "药店老板".to_string(), location_x: 352, location_y: 355, icon: 0, can_teleport_to: false },
+            ],
+        },
+        1 => server::map::NewMapInfo {
+            map_index: 1,
+            title: "比奇省".to_string(),
+            width: 800,
+            height: 600,
+            big_map: 1,
+            movements: vec![server::map::MovementInfo {
+                destination: 2,
+                title: "盟重省".to_string(),
+                location_x: 500,
+                location_y: 200,
+                icon: 0,
+            }],
+            npcs: vec![
+                server::map::NpcMapInfo { object_id: 2101, name: "比奇城主".to_string(), location_x: 400, location_y: 300, icon: 0, can_teleport_to: true },
+                server::map::NpcMapInfo { object_id: 2102, name: "比奇铁匠".to_string(), location_x: 410, location_y: 310, icon: 0, can_teleport_to: true },
+            ],
+        },
+        2 => server::map::NewMapInfo {
+            map_index: 2,
+            title: "盟重省".to_string(),
+            width: 900,
+            height: 700,
+            big_map: 1,
+            movements: vec![],
+            npcs: vec![
+                server::map::NpcMapInfo { object_id: 2201, name: "盟重城主".to_string(), location_x: 450, location_y: 350, icon: 0, can_teleport_to: true },
+                server::map::NpcMapInfo { object_id: 2202, name: "盟重药店".to_string(), location_x: 460, location_y: 360, icon: 0, can_teleport_to: false },
+            ],
+        },
+        3 => server::map::NewMapInfo {
+            map_index: 3,
+            title: "沙漠".to_string(),
+            width: 700,
+            height: 500,
+            big_map: 1,
+            movements: vec![],
+            npcs: vec![
+                server::map::NpcMapInfo { object_id: 2301, name: "沙漠商队".to_string(), location_x: 350, location_y: 250, icon: 0, can_teleport_to: true },
+            ],
+        },
+        _ => server::map::NewMapInfo {
+            map_index,
+            title: "未知地图".to_string(),
+            width: 400,
+            height: 400,
+            big_map: 0,
+            movements: vec![],
+            npcs: vec![],
+        },
+    }
+}
+
 
 
 #[cfg(test)]

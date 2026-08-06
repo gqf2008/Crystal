@@ -360,6 +360,12 @@ pub enum ServerEvent {
         title: String,
         npcs: Vec<NpcRow>,
     },
+    /// WorldMapSetup：世界地图配置（C# S.WorldMapSetupInfo，进图首次下发）
+    WorldMapSetup {
+        enabled: bool,
+        icons: Vec<mir2_shared::packets::server::map::WorldMapIcon>,
+        teleport_cost: i32,
+    },
     /// Death：本地玩家死亡
     PlayerDied,
     /// RequestReincarnation：收到轮回术复活请求（#222）

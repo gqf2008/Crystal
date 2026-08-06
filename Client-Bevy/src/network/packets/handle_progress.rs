@@ -736,13 +736,16 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                 tracing::info!("📦 SearchMapResult 解码");
             }
         }
-        // #291：C# 服务端包面收尾（WorldMapSetup → WorldMapSetupInfo）
+        // #300：世界地图（S.WorldMapSetupInfo → ServerEvent::WorldMapSetup，C# 线格式）
         x if x == ServerPacketIds::WorldMapSetup as i16 => {
             if let Ok(p) = map::WorldMapSetupInfo::read_body(&mut cur) {
-                tracing::info!(
-                    "📦 WorldMapSetup 解码（{} 个世界地图点）",
-                    p.world_maps.len()
-                );
+                let n = p.world_maps.len();
+                server_events.write(ServerEvent::WorldMapSetup {
+                    enabled: p.enabled,
+                    icons: p.world_maps,
+                    teleport_cost: p.teleport_cost,
+                });
+                tracing::info!("📦 WorldMapSetup 解码（{} 个世界地图点, cost={}）", n, p.teleport_cost);
             }
         }
         // #291：C# 服务端包面收尾（NPCCheckRefine）

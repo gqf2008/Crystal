@@ -851,6 +851,7 @@ fn hud_server_events(
             | ServerEvent::RankingsCleared
             | ServerEvent::WeatherChanged { .. }
             | ServerEvent::MapInfo { .. }
+            | ServerEvent::WorldMapSetup { .. }
             | ServerEvent::MagicLearned { .. }
             | ServerEvent::MagicLeveled { .. }
             | ServerEvent::TimeOfDay { .. }
