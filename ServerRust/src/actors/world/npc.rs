@@ -1097,8 +1097,10 @@ impl WorldActor {
         }
         for sid in &targets {
             if let Some(r) = self.players.get(sid) {
+                // C# GTAllRecall：目标坐标 = 会长坐标 + Random.Next(4) 偏移，避免叠格
                 let _ = r.actor_ref.ask(crate::actors::player::SetPlayerPosition {
-                    x: state.x, y: state.y, direction: state.direction,
+                    x: state.x + fastrand::i32(0..4), y: state.y + fastrand::i32(0..4),
+                    direction: state.direction,
                     map_index: Some(state.map_index), is_mounted: None,
                 }).await;
             }
@@ -1119,8 +1121,10 @@ impl WorldActor {
         for (sid, r) in &self.players {
             if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
                 if os.guild_name.as_deref() == Some(guild_name.as_str()) && os.name.eq_ignore_ascii_case(member_name) {
+                    // C# GTRecall：目标坐标 = 会长坐标 + Random.Next(4) 偏移
                     let _ = r.actor_ref.ask(crate::actors::player::SetPlayerPosition {
-                        x: state.x, y: state.y, direction: state.direction,
+                        x: state.x + fastrand::i32(0..4), y: state.y + fastrand::i32(0..4),
+                        direction: state.direction,
                         map_index: Some(state.map_index), is_mounted: None,
                     }).await;
                     send_system_message(&self.gate_ref, session_id, &format!("已召回 {}", os.name));
