@@ -1649,7 +1649,26 @@ impl Message<SetStatBonuses> for PlayerActor {
         let d_max_sc = msg.bonus_max_sc - self.state.bonus_max_sc;
 
         let changed = d_min != 0 || d_max != 0 || d_def != 0 || d_hp != 0 || d_mp != 0
-            || d_min_mc != 0 || d_max_mc != 0 || d_min_sc != 0 || d_max_sc != 0;
+            || d_min_mc != 0 || d_max_mc != 0 || d_min_sc != 0 || d_max_sc != 0
+            || msg.bonus_min_ac != self.state.bonus_min_ac
+            || msg.bonus_max_ac != self.state.bonus_max_ac
+            || msg.bonus_min_mac != self.state.bonus_min_mac
+            || msg.bonus_max_mac != self.state.bonus_max_mac
+            || msg.luck != self.state.luck
+            || msg.critical_rate != self.state.critical_rate
+            || msg.critical_damage != self.state.critical_damage
+            || msg.magic_resist != self.state.magic_resist
+            || msg.reflect != self.state.reflect
+            || msg.attack_bonus != self.state.attack_bonus
+            || msg.hp_drain_rate_percent != self.state.hp_drain_rate_percent
+            || msg.agility != self.state.agility
+            || msg.accuracy != self.state.accuracy
+            || msg.freezing != self.state.freezing
+            || msg.poison_attack != self.state.poison_attack
+            || msg.health_recovery != self.state.health_recovery
+            || msg.spell_recovery != self.state.spell_recovery
+            || msg.attack_speed != self.state.attack_speed
+            || msg.poison_resist != self.state.poison_resist;
 
         if changed {
             self.state.min_attack += d_min;
@@ -1675,8 +1694,6 @@ impl Message<SetStatBonuses> for PlayerActor {
             self.state.bonus_max_mc = msg.bonus_max_mc;
             self.state.bonus_min_sc = msg.bonus_min_sc;
             self.state.bonus_max_sc = msg.bonus_max_sc;
-
-            self.send_user_information_refresh();
         }
 
         // 战斗公式扩展字段：直接覆盖（装备提供的绝对值，非增量）
@@ -1699,6 +1716,10 @@ impl Message<SetStatBonuses> for PlayerActor {
         self.state.spell_recovery = msg.spell_recovery;
         self.state.attack_speed = msg.attack_speed;
         self.state.poison_resist = msg.poison_resist;
+
+        if changed {
+            self.send_user_information_refresh();
+        }
     }
 }
 
@@ -4291,7 +4312,7 @@ impl PlayerActor {
         }
         body.extend_from_slice(&self.state.critical_rate.to_le_bytes());
         body.extend_from_slice(&self.state.critical_damage.to_le_bytes());
-        body.extend_from_slice(&0i32.to_le_bytes()); // attack_speed（服务端暂缺）
+        body.extend_from_slice(&self.state.attack_speed.to_le_bytes()); // attack_speed（装备加成 Stat::AttackSpeed）
         body.extend_from_slice(&self.state.accuracy.to_le_bytes());
         body.extend_from_slice(&self.state.agility.to_le_bytes());
         body.extend_from_slice(&self.state.luck.to_le_bytes());
@@ -4302,9 +4323,9 @@ impl PlayerActor {
             0i32, // wear_weight
             0i32, // hand_weight
             self.state.magic_resist,
-            0i32, // poison_resist
-            0i32, // health_recovery
-            0i32, // spell_recovery
+            self.state.poison_resist,
+            self.state.health_recovery,
+            self.state.spell_recovery,
             self.state.poison_recovery,
             self.state.holy,
             self.state.freezing,

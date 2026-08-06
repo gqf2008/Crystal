@@ -4787,7 +4787,7 @@ fn build_user_information_packet(
     }
     body.extend_from_slice(&state.critical_rate.to_le_bytes());
     body.extend_from_slice(&state.critical_damage.to_le_bytes());
-    body.extend_from_slice(&0i32.to_le_bytes()); // attack_speed（服务端暂缺）
+    body.extend_from_slice(&state.attack_speed.to_le_bytes()); // attack_speed（装备加成 Stat::AttackSpeed）
     body.extend_from_slice(&state.accuracy.to_le_bytes());
     body.extend_from_slice(&state.agility.to_le_bytes());
     body.extend_from_slice(&state.luck.to_le_bytes());
