@@ -39,6 +39,10 @@ pub enum BuffType {
     MpRegenBoost { bonus: i32 },
     /// 魔力上限提升（MagicBooster）
     MaxMpBoost { bonus: i32 },
+    /// 魔法攻击提升（UltimateEnhancer 法师/弓手，C# Stat.MaxMC）
+    McBoost { bonus: i32 },
+    /// 道术提升（UltimateEnhancer 道士，C# Stat.MaxSC）
+    ScBoost { bonus: i32 },
     /// 反伤（EnergyShield 概率回血用，此处简化为固定反伤）
     Reflect { percent: i32 },
     /// 嘲讽/吸引仇恨（LionRoar/BattleCry）
@@ -160,6 +164,8 @@ pub fn get_stat_bonus(buffs: &[BuffInstance], stat_type: &BuffType) -> i32 {
             (BuffType::CriticalRateBoost { bonus }, BuffType::CriticalRateBoost { .. }) => *bonus,
             (BuffType::MpRegenBoost { bonus }, BuffType::MpRegenBoost { .. }) => *bonus,
             (BuffType::MaxMpBoost { bonus }, BuffType::MaxMpBoost { .. }) => *bonus,
+            (BuffType::McBoost { bonus }, BuffType::McBoost { .. }) => *bonus,
+            (BuffType::ScBoost { bonus }, BuffType::ScBoost { .. }) => *bonus,
             (BuffType::AttackSpeedBoost { percent }, BuffType::AttackSpeedBoost { .. }) => *percent,
             (BuffType::MoveSpeedBoost { percent }, BuffType::MoveSpeedBoost { .. }) => *percent,
             (BuffType::Reflect { percent }, BuffType::Reflect { .. }) => *percent,

@@ -279,7 +279,11 @@ impl PlayerState {
 
     pub fn effective_max_mc(&self) -> i32 {
         let base = self.max_mc + self.bonus_max_mc;
-        (base).max(self.effective_min_mc())
+        let buff_bonus = crate::combat::buff::get_stat_bonus(
+            &self.buffs,
+            &crate::combat::buff::BuffType::McBoost { bonus: 0 },
+        );
+        (base + buff_bonus).max(self.effective_min_mc())
     }
 
     pub fn effective_min_sc(&self) -> i32 {
@@ -289,7 +293,11 @@ impl PlayerState {
 
     pub fn effective_max_sc(&self) -> i32 {
         let base = self.max_sc + self.bonus_max_sc;
-        (base).max(self.effective_min_sc())
+        let buff_bonus = crate::combat::buff::get_stat_bonus(
+            &self.buffs,
+            &crate::combat::buff::BuffType::ScBoost { bonus: 0 },
+        );
+        (base + buff_bonus).max(self.effective_min_sc())
     }
 
     /// 计算包含装备+Buff加成的防御力
@@ -332,7 +340,7 @@ impl PlayerState {
             min_mac: self.effective_min_mac(),
             max_mac: self.effective_max_mac(),
             agility: self.agility + get_stat_bonus(&self.buffs, &BuffType::AgilityBoost { bonus: 0 }),
-            accuracy: self.accuracy,
+            accuracy: self.accuracy + spirit_sword_accuracy(&self.magics),
             luck: self.luck,
             critical_rate: self.critical_rate + get_stat_bonus(&self.buffs, &BuffType::CriticalRateBoost { bonus: 0 }),
             critical_damage: self.critical_damage,
@@ -349,6 +357,16 @@ impl PlayerState {
             poison_attack: self.poison_attack,
         }
     }
+}
+
+/// #427 道士 SpiritSword 被动：Accuracy +[0,3,5,8][Lv]（C# HumanObject.cs:2312 spiritSwordLvPlus）
+pub fn spirit_sword_accuracy(magics: &[PlayerMagic]) -> i32 {
+    const LV_PLUS: [i32; 4] = [0, 3, 5, 8];
+    magics
+        .iter()
+        .find(|m| m.spell == (mir2_shared::enums::Spell::SpiritSword as i32 - 3))
+        .map(|m| LV_PLUS[(m.level as usize).min(3)])
+        .unwrap_or(0)
 }
 
 /// PlayerActor 状态
@@ -388,6 +406,8 @@ fn buff_tag(t: &crate::combat::buff::BuffType) -> u8 {
         BuffType::Taunt => 18,
         BuffType::Slow { .. } => 19,
         BuffType::Frozen => 20,
+        BuffType::McBoost { .. } => 21,
+        BuffType::ScBoost { .. } => 22,
     }
 }
 
@@ -4080,5 +4100,24 @@ mod tests {
         assert!(!s.learn_magic(31)); // 重复学习失败
         assert!(s.learn_magic(1)); // Fencing（C# 编号 = 1，SharedRust = 4）
         assert_eq!(s.magics.len(), 2);
+    }
+
+    // ---- #427 精神力剑被动 accuracy ----
+    #[test]
+    fn test_spirit_sword_accuracy() {
+        let mut s = make_state();
+        assert_eq!(spirit_sword_accuracy(&s.magics), 0);
+        // SpiritSword C# 编号 = 62（SharedRust 65）
+        s.magics.push(PlayerMagic::new(62));
+        assert_eq!(spirit_sword_accuracy(&s.magics), 0); // 未学
+        // SpiritSword C# 编号 = 62（SharedRust 65）；spiritSwordLvPlus = {0,3,5,8}
+        s.magics.push(PlayerMagic::new(62));
+        assert_eq!(spirit_sword_accuracy(&s.magics), 0); // Lv0 -> 0
+        s.magics[0].level = 1;
+        assert_eq!(spirit_sword_accuracy(&s.magics), 3);
+        s.magics[0].level = 2;
+        assert_eq!(spirit_sword_accuracy(&s.magics), 5);
+        s.magics[0].level = 3;
+        assert_eq!(spirit_sword_accuracy(&s.magics), 8);
     }
 }

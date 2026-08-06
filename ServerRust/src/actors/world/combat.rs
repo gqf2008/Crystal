@@ -2494,6 +2494,23 @@ impl Message<MagicRequest> for WorldActor {
                 send_system_message(&self.gate_ref, msg.session_id, &format!("精神状态切换到：{}", label));
                 debug!("Magic: {} casts MentalState -> {}", state.name, label);
             }
+            // #427：UltimateEnhancer —— 友方目标 DC/MC/SC 提升（C# HumanObject.cs:4784，简化自施放）
+            SPELL_ULTIMATE_ENHANCER => {
+                let sc = state.effective_max_sc();
+                let value = if sc >= 5 { (sc / 5).min(8) } else { 1 };
+                let duration_ticks = ((sc * 4 + (spell_level as i32 + 1) * 50) as u32) * 10;
+                let (buff, label) = match state.class {
+                    mir2_shared::enums::MirClass::Wizard | mir2_shared::enums::MirClass::Archer =>
+                        (crate::combat::buff::BuffType::McBoost { bonus: value }, "MC"),
+                    mir2_shared::enums::MirClass::Taoist =>
+                        (crate::combat::buff::BuffType::ScBoost { bonus: value }, "SC"),
+                    _ => (crate::combat::buff::BuffType::AttackBoost { bonus: value }, "DC"),
+                };
+                let inst = crate::combat::buff::BuffInstance::new(buff, duration_ticks, 5);
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: inst }).await;
+                debug!("Magic: {} casts UltimateEnhancer ({} +{}, {}s)",
+                       state.name, label, value, duration_ticks / 10);
+            }
             // #312：FlamingSword —— 施放后 10 秒内下一次近战攻击附加火焰加成（C# HumanObject.cs:8538）
             SPELL_FLAMING_SWORD => {
                 self.flaming_sword.insert(msg.session_id, (self.tick_count + 100, spell_level));
