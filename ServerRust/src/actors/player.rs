@@ -1533,9 +1533,22 @@ impl Message<TickBuff> for PlayerActor {
         if total_mp != 0 {
             self.state.mp = (self.state.mp + total_mp).clamp(0, self.state.max_mp);
         }
+        // 收集过期 buff 的 tag（C# RemoveBuff 客户端通知，格式与 M44 AddBuff 一致：[tag u8]）
+        let expired_tags: Vec<u8> = self.state.buffs.iter()
+            .filter(|b| b.remaining_ticks == 0)
+            .map(|b| buff_tag(&b.buff_type))
+            .collect();
         // 移除过期 buff
         crate::combat::buff::expire_buffs(&mut self.state.buffs,
         );
+        for tag in expired_tags {
+            let mut body = Vec::new();
+            body.push(tag);
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveBuff as i16, &body),
+            }).try_send();
+        }
 
         // DamageReduction buff 过期后重置 damage_reduction_percent
         // （MagicShield/ElementalBarrier/ProtectionField 的减伤不应永久生效）
