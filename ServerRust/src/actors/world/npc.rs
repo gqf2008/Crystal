@@ -833,6 +833,11 @@ impl WorldActor {
     pub(crate) async fn npc_revive_hero(&mut self, session_id: u64) {
         let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        // C# ReviveHero：CurrentMap.Info.NoHero → 禁止复活
+        if self.map_infos.get(&(state.map_index as i32)).map(|m| m.no_hero).unwrap_or(false) {
+            send_system_message(&self.gate_ref, session_id, "该地图无法复活英雄");
+            return;
+        }
         let Some(heroes) = self.player_heroes.get(&session_id).cloned() else {
             send_system_message(&self.gate_ref, session_id, "你没有英雄");
             return;
