@@ -53,6 +53,8 @@ pub struct CombatStats {
     pub freezing: i32,
     /// 毒物攻击（ApplyNegativeEffects 用）
     pub poison_attack: i32,
+    /// 麻痹攻击（C# SpecialItemMode.Paralize：非 MAC 攻击 1/15 概率麻痹 5 秒）
+    pub paralize: bool,
 }
 
 // ============================================================
