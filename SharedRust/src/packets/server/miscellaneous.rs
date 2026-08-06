@@ -1,5 +1,6 @@
 // 杂项数据包（任务、重生、其他）
 use super::super::base::Packet;
+use crate::data::item::UserItem;
 use crate::data::stats::SharedResult;
 use crate::enums::ServerPacketIds;
 use byteorder::{LittleEndian, ReadBytesExt};
@@ -317,6 +318,25 @@ impl Packet for UserName {
         let object_id = reader.read_u32::<LittleEndian>()?;
         let name = read_dotnet_string(reader)?;
         Ok(Self { object_id, name })
+    }
+}
+
+/// NewChatItem - 聊天物品信息（C# S.NewChatItem：完整 UserItem 供聊天链接解析）
+#[derive(Debug, Clone)]
+pub struct NewChatItem {
+    pub item: UserItem,
+}
+
+impl Packet for NewChatItem {
+    const OPCODE: i16 = ServerPacketIds::NewChatItem as i16;
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
+        self.item.write_to_with_info(writer)
+    }
+
+    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        let item = UserItem::read_from_with_info(reader)?;
+        Ok(Self { item })
     }
 }
 
@@ -705,26 +725,6 @@ impl Packet for TransferHeroItem {
     }
 }
 
-/// NewChatItem - 新聊天物品 (34)
-#[derive(Debug, Clone)]
-pub struct NewChatItem {
-    pub item_id: i32,               // 物品ID
-}
-
-impl Packet for NewChatItem {
-    const OPCODE: i16 = ServerPacketIds::NewChatItem as i16;
-
-    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
-        writer.write_i32::<LittleEndian>(self.item_id)?;
-        Ok(())
-    }
-
-    fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let item_id = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { item_id })
-    }
-}
 
 /// NewHeroInfo - 新英雄信息 (33)
 #[derive(Debug, Clone)]

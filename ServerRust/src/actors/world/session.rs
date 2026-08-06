@@ -1305,6 +1305,9 @@ impl Message<ChatRequest> for WorldActor {
             return;
         }
 
+        // #285：聊天物品链接 → 向在线玩家推送 S.NewChatItem
+        self.send_chat_item_links(msg.session_id, &message).await;
+
         let formatted = format!("[{}]: {}", player_name, message);
         debug!("Chat from {}: {}", player_name, message);
 

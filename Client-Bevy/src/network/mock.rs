@@ -363,6 +363,32 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         }
                                     }
                                 }
+                                // #285：聊天物品请求 → 回发 NewChatItem
+                                x if x == ClientPacketIds::RequestChatItem as i16 => {
+                                    if let Ok(p) = client::misc::RequestChatItem::read_body(&mut cur) {
+                                        let uid = if p.chat_item_id == 0 { 9005 } else { p.chat_item_id };
+                                        send(
+                                            &to_client,
+                                            &server::NewChatItem {
+                                                item: mir2_shared::data::item::UserItem {
+                                                    unique_id: uid,
+                                                    item_index: 1,
+                                                    count: 1,
+                                                    info: Some(mir2_shared::data::item::ItemInfo {
+                                                        index: 1,
+                                                        name: "金创药(小)".to_string(),
+                                                        price: 10,
+                                                        image: 1,
+                                                        tool_tip: Some("金创药(小)：恢复少量生命。".to_string()),
+                                                        ..Default::default()
+                                                    }),
+                                                    ..Default::default()
+                                                },
+                                            },
+                                        );
+                                        tracing::info!("[MOCK] 聊天物品请求 uid={}", uid);
+                                    }
+                                }
                                 // #200：仓库密码解锁 / 设置 / 移除（MOCK）
                                 x if x == ClientPacketIds::UnlockStorage as i16 => {
                                     if let Ok(p) = client::storage::UnlockStorage::read_body(&mut cur) {
@@ -956,6 +982,26 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             &server::miscellaneous::ChatItemStats {
                                                 unique_id: 9005,
                                                 stats: "攻击 10-20".to_string(),
+                                            },
+                                        );
+                                        // #285：聊天物品信息（聊天链接解析用）
+                                        send(
+                                            &to_client,
+                                            &server::NewChatItem {
+                                                item: mir2_shared::data::item::UserItem {
+                                                    unique_id: 9005,
+                                                    item_index: 1,
+                                                    count: 1,
+                                                    info: Some(mir2_shared::data::item::ItemInfo {
+                                                        index: 1,
+                                                        name: "金创药(小)".to_string(),
+                                                        price: 10,
+                                                        image: 1,
+                                                        tool_tip: Some("金创药(小)：恢复少量生命。".to_string()),
+                                                        ..Default::default()
+                                                    }),
+                                                    ..Default::default()
+                                                },
                                             },
                                         );
                                         send(
