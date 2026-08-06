@@ -975,6 +975,197 @@ impl WorldActor {
     }
 }
 
+impl WorldActor {
+    /// 查找玩家行会拥有的领地（owner == guild_name）
+    fn guild_gt(&self, guild_name: &str) -> Option<usize> {
+        self.conquest_instances.iter().position(|c| c.owner_guild.as_deref() == Some(guild_name))
+    }
+
+    /// NPC 脚本 BUYGT：会长购买当前地图领地（对齐 C# ActionType.BuyGT，简化：买第一个无主领地）
+    pub(crate) async fn npc_gt_buy(&mut self, session_id: u64) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        if state.guild_rank != crate::actors::guild::GuildRank::Leader {
+            send_system_message(&self.gate_ref, session_id, "只有行会会长才能购买领地");
+            return;
+        }
+        let Some(guild_name) = &state.guild_name else { return };
+        if self.guild_gt(guild_name).is_some() {
+            send_system_message(&self.gate_ref, session_id, "行会已拥有领地");
+            return;
+        }
+        const BUY_GT_GOLD: u64 = 1_000_000;
+        let gold = self.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id }).await.unwrap_or(0);
+        if gold < BUY_GT_GOLD {
+            send_system_message(&self.gate_ref, session_id, "行会资金不足（需要 1,000,000）");
+            return;
+        }
+        let Some(idx) = self.conquest_instances.iter().position(|c| c.owner_guild.is_none()) else {
+            send_system_message(&self.gate_ref, session_id, "没有可购买的领地");
+            return;
+        };
+        let _ = self.social_ref.ask(crate::actors::social::NpcGuildGoldChange {
+            session_id, amount: BUY_GT_GOLD as u32, change_type: 2,
+        }).await;
+        self.conquest_instances[idx].owner_guild = Some(guild_name.clone());
+        self.conquest_instances[idx].rent_days = 30;
+        send_system_message(&self.gate_ref, session_id, "领地购买成功");
+        debug!("NPC BuyGT: {} bought conquest {}", guild_name, self.conquest_instances[idx].id);
+    }
+
+    /// NPC 脚本 TELEPORTGT：传送到行会领地（对齐 C# ActionType.TeleportGT）
+    pub(crate) async fn npc_gt_teleport(&mut self, session_id: u64) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let Some(guild_name) = &state.guild_name else { return };
+        let Some(gt) = self.guild_gt(guild_name) else {
+            send_system_message(&self.gate_ref, session_id, "行会未拥有领地");
+            return;
+        };
+        let map_index = self.conquest_instances[gt].map_index as u16;
+        // 简化：SetPlayerPosition（跨图 MapChanged 包依赖 teleport_player，此处数据层传送）
+        let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+            x: 330, y: 330, direction: state.direction,
+            map_index: Some(map_index), is_mounted: None,
+        }).await;
+        send_system_message(&self.gate_ref, session_id, "已传送至行会领地");
+        debug!("NPC TeleportGT: {} -> map {}", guild_name, map_index);
+    }
+
+    /// NPC 脚本 EXTENDGT：会长延长领地租期（对齐 C# ActionType.ExtendGT，简化 +7 天）
+    pub(crate) async fn npc_gt_extend(&mut self, session_id: u64) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        if state.guild_rank != crate::actors::guild::GuildRank::Leader {
+            send_system_message(&self.gate_ref, session_id, "只有行会会长才能延长领地");
+            return;
+        }
+        let Some(guild_name) = &state.guild_name else { return };
+        let Some(gt) = self.guild_gt(guild_name) else {
+            send_system_message(&self.gate_ref, session_id, "行会未拥有领地");
+            return;
+        };
+        const EXTEND_GT_GOLD: u64 = 500_000;
+        let gold = self.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id }).await.unwrap_or(0);
+        if gold < EXTEND_GT_GOLD {
+            send_system_message(&self.gate_ref, session_id, "行会资金不足（需要 500,000）");
+            return;
+        }
+        let _ = self.social_ref.ask(crate::actors::social::NpcGuildGoldChange {
+            session_id, amount: EXTEND_GT_GOLD as u32, change_type: 2,
+        }).await;
+        self.conquest_instances[gt].rent_days += 7;
+        send_system_message(&self.gate_ref, session_id, &format!("领地租期延长 7 天（剩余 {} 天）", self.conquest_instances[gt].rent_days));
+        debug!("NPC ExtendGT: {} +7d", guild_name);
+    }
+
+    /// NPC 脚本 DISPLAYGTRENTALDAYS：显示剩余天数（对齐 C# ActionType.DisplayGTRentalDays）
+    pub(crate) async fn npc_gt_display_days(&mut self, session_id: u64) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let Some(guild_name) = &state.guild_name else { return };
+        let Some(gt) = self.guild_gt(guild_name) else {
+            send_system_message(&self.gate_ref, session_id, "行会未拥有领地");
+            return;
+        };
+        send_system_message(&self.gate_ref, session_id, &format!("领地剩余 {} 天", self.conquest_instances[gt].rent_days));
+        debug!("NPC DisplayGTRentalDays: {} days={}", guild_name, self.conquest_instances[gt].rent_days);
+    }
+
+    /// NPC 脚本 GTALLRECALL：会长召回所有在线同公会玩家（对齐 C# ActionType.GTAllRecall）
+    pub(crate) async fn npc_gt_recall_all(&mut self, session_id: u64) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        if state.guild_rank != crate::actors::guild::GuildRank::Leader {
+            send_system_message(&self.gate_ref, session_id, "只有行会会长才能召回成员");
+            return;
+        }
+        let Some(guild_name) = state.guild_name.clone() else { return };
+        let mut targets = Vec::new();
+        for (sid, r) in &self.players {
+            if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                if os.guild_name.as_deref() == Some(guild_name.as_str()) && *sid != session_id {
+                    targets.push(*sid);
+                }
+            }
+        }
+        for sid in &targets {
+            if let Some(r) = self.players.get(sid) {
+                let _ = r.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                    x: state.x, y: state.y, direction: state.direction,
+                    map_index: Some(state.map_index), is_mounted: None,
+                }).await;
+            }
+        }
+        send_system_message(&self.gate_ref, session_id, "已召回行会成员");
+        debug!("NPC GTAllRecall: {} members", targets.len());
+    }
+
+    /// NPC 脚本 GTRECALL <name>：会长召回指定同公会玩家（对齐 C# ActionType.GTRecall）
+    pub(crate) async fn npc_gt_recall(&mut self, session_id: u64, member_name: &str) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        if state.guild_rank != crate::actors::guild::GuildRank::Leader {
+            send_system_message(&self.gate_ref, session_id, "只有行会会长才能召回成员");
+            return;
+        }
+        let Some(guild_name) = state.guild_name.clone() else { return };
+        for (sid, r) in &self.players {
+            if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                if os.guild_name.as_deref() == Some(guild_name.as_str()) && os.name.eq_ignore_ascii_case(member_name) {
+                    let _ = r.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                        x: state.x, y: state.y, direction: state.direction,
+                        map_index: Some(state.map_index), is_mounted: None,
+                    }).await;
+                    send_system_message(&self.gate_ref, session_id, &format!("已召回 {}", os.name));
+                    return;
+                }
+            }
+        }
+        send_system_message(&self.gate_ref, session_id, &format!("未找到在线成员 {}", member_name));
+        debug!("NPC GTRecall: {} not found", member_name);
+    }
+
+    /// NPC 脚本 GTSALE <price>：会长挂售领地（对齐 C# ActionType.GTSale，最低 200 万）
+    pub(crate) async fn npc_gt_sale(&mut self, session_id: u64, price: u64) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        if state.guild_rank != crate::actors::guild::GuildRank::Leader {
+            send_system_message(&self.gate_ref, session_id, "只有行会会长才能挂售领地");
+            return;
+        }
+        let Some(guild_name) = &state.guild_name else { return };
+        let Some(gt) = self.guild_gt(guild_name) else {
+            send_system_message(&self.gate_ref, session_id, "行会未拥有领地");
+            return;
+        };
+        if price < 2_000_000 {
+            send_system_message(&self.gate_ref, session_id, "挂售价格最低 2,000,000");
+            return;
+        }
+        self.conquest_instances[gt].for_sale = true;
+        self.conquest_instances[gt].sale_price = price;
+        send_system_message(&self.gate_ref, session_id, &format!("领地已挂售，价格 {}", price));
+        debug!("NPC GTSale: {} price={}", guild_name, price);
+    }
+
+    /// NPC 脚本 GTCANCELSALE：取消挂售（对齐 C# ActionType.GTCancelSale）
+    pub(crate) async fn npc_gt_cancel_sale(&mut self, session_id: u64) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        if state.guild_rank != crate::actors::guild::GuildRank::Leader {
+            send_system_message(&self.gate_ref, session_id, "只有行会会长才能取消挂售");
+            return;
+        }
+        let Some(guild_name) = &state.guild_name else { return };
+        let Some(gt) = self.guild_gt(guild_name) else { return };
+        self.conquest_instances[gt].for_sale = false;
+        self.conquest_instances[gt].sale_price = 0;
+        send_system_message(&self.gate_ref, session_id, "已取消领地挂售");
+        debug!("NPC GTCancelSale: {}", guild_name);
+    }
+}
+
 // ============================================================
 // 钓鱼系统
 // ============================================================

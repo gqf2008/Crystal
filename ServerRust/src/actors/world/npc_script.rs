@@ -876,6 +876,14 @@ async fn eval_one_check(
                 options & bit != 0
             }
         }
+        // HASGT — 行会是否拥有领地（对齐 C# CheckType.HasGT）
+        "HASGT" => {
+            if let Some(guild_name) = &player.guild_name {
+                world.conquest_instances.iter().any(|c| c.owner_guild.as_deref() == Some(guild_name.as_str()))
+            } else {
+                false
+            }
+        }
         // CHECKGUILDGOLD <op> <amount> — 行会金币比较（对齐 C# CheckType.CheckGuildGold）
         "CHECKGUILDGOLD" => {
             let (op, want) = parse_op_amount(&args[1..]);
@@ -1302,6 +1310,44 @@ async fn exec_action(
                 }).await;
             }
             info!("NPC {}: ROLL type={} result={} page={} auto={}", npc.name, r#type, result, page, auto_roll);
+        }
+        // BUYGT —— 会长购买领地（对齐 C# ActionType.BuyGT）
+        "BUYGT" => {
+            world.npc_gt_buy(session_id).await;
+        }
+        // TELEPORTGT —— 传送到行会领地（对齐 C# ActionType.TeleportGT）
+        "TELEPORTGT" => {
+            world.npc_gt_teleport(session_id).await;
+        }
+        // EXTENDGT —— 会长延长领地租期（对齐 C# ActionType.ExtendGT）
+        "EXTENDGT" => {
+            world.npc_gt_extend(session_id).await;
+        }
+        // DISPLAYGTRENTALDAYS —— 显示领地剩余天数（对齐 C# ActionType.DisplayGTRentalDays）
+        "DISPLAYGTRENTALDAYS" => {
+            world.npc_gt_display_days(session_id).await;
+        }
+        // GTALLRECALL —— 会长召回全部在线成员（对齐 C# ActionType.GTAllRecall）
+        "GTALLRECALL" => {
+            world.npc_gt_recall_all(session_id).await;
+        }
+        // GTRECALL <name> —— 会长召回指定成员（对齐 C# ActionType.GTRecall）
+        "GTRECALL" => {
+            let member_name = unquote(arg0()).to_string();
+            if !member_name.is_empty() {
+                world.npc_gt_recall(session_id, &member_name).await;
+            }
+        }
+        // GTSALE <price> —— 会长挂售领地（对齐 C# ActionType.GTSale）
+        "GTSALE" => {
+            let price = arg0().parse::<u64>().unwrap_or(0);
+            if price > 0 {
+                world.npc_gt_sale(session_id, price).await;
+            }
+        }
+        // GTCANCELSALE —— 取消挂售（对齐 C# ActionType.GTCancelSale）
+        "GTCANCELSALE" => {
+            world.npc_gt_cancel_sale(session_id).await;
         }
         // INSTANCEMOVE <map> <instance> <x> <y> —— 副本实例传送（对齐 C# ActionType.InstanceMove；
         // Rust 暂无独立副本实例，instance 忽略，等同传送到指定地图坐标）
