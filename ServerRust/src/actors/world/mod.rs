@@ -1544,18 +1544,145 @@ impl WorldActor {
         y: i32,
         map_index: u16,
     ) {
-        // 安全区不掉落
+        // C# DeathDrop：NoDropPlayer 地图直接返回；安全区也不掉落（保留现有保护）
+        if self.map_infos.get(&(map_index as i32)).map(|m| m.no_drop_player).unwrap_or(false) {
+            return;
+        }
         if self.maps.get(&map_index).map(|m| m.is_safe_zone(x, y)).unwrap_or(false) {
             return;
         }
-        let actor_ref = match self.players.get(&session_id) {
-            Some(r) => r.actor_ref.clone(),
+        let record = match self.players.get(&session_id) {
+            Some(r) => r,
             None => return,
         };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        // C#：PKPoints > 200 → RedDeathDrop（概率更高）；否则 DeathDrop
+        let red = state.pk_points > 200;
 
-        // 掉落背包物品（0-2 个）
-        let dropped = actor_ref.ask(crate::actors::player::DropRandomItemsOnDeath).await.unwrap_or_default();
-        for item in dropped {
+        let mut dropped_items: Vec<mir2_shared::data::item::UserItem> = Vec::new();
+
+        // ===== 装备槽位（C# DeathDrop 先遍历装备） =====
+        for slot_idx in 0..crate::actors::inventory::EquipmentSlot::COUNT {
+            let Some(slot) = crate::actors::inventory::EquipmentSlot::from_i32(slot_idx as i32) else {
+                continue;
+            };
+            let Some(item) = state.inventory.equipment[slot_idx].as_ref() else { continue };
+            let Some(info) = self.item_infos.get(&item.item_index) else { continue };
+            let bind = info.bind_mode;
+            // C# BindMode.DontDeathdrop = 0x0001：不掉落
+            if (bind & 0x0001) != 0 {
+                continue;
+            }
+            // 结婚戒指（C#：WeddingRing != -1 且为左戒指不掉）
+            if item.wedding_ring != -1 {
+                continue;
+            }
+            // 封印物品未到期不掉（Rust 简化：任何封印状态都不掉）
+            if item.sealed_info.is_some() {
+                continue;
+            }
+            // 租赁物品：C# 返还主人；Rust 简化不参与死亡掉落
+            if item.rental_information.is_some() {
+                continue;
+            }
+
+            // C# BindMode.BreakOnDeath = 0x0100：碎裂（移除但不落地）
+            if (bind & 0x0100) != 0 {
+                let _ = record.actor_ref.ask(crate::actors::player::TakeEquipmentOnDeath { slot }).await;
+                continue;
+            }
+
+            if item.count > 1 {
+                // 堆叠：按百分比掉（C# RandomomRange(10, rate)：10 次 p=1/rate 二项）
+                let rate = if red { 4 } else { 8 };
+                let mut percent = 0;
+                for _ in 0..10 {
+                    if fastrand::i32(..rate) == 0 {
+                        percent += 1;
+                    }
+                }
+                if percent == 0 && !red {
+                    continue;
+                }
+                let drop_count = ((item.count as f32) / 10.0 * percent as f32).ceil() as u16;
+                if drop_count == 0 {
+                    continue;
+                }
+                if let Some(dropped) = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventoryCount {
+                    unique_id: item.unique_id,
+                    count: drop_count,
+                }).await.unwrap_or(None) {
+                    dropped_items.push(dropped);
+                }
+            } else {
+                // 单件：1/30（非红）或 1/10（红）整件掉落
+                let chance = if red { 10 } else { 30 };
+                if fastrand::i32(..chance) == 0 {
+                    if let Some(dropped) = record.actor_ref.ask(crate::actors::player::TakeEquipmentOnDeath { slot }).await.unwrap_or(None) {
+                        dropped_items.push(dropped);
+                    }
+                }
+            }
+        }
+
+        // ===== 背包（C# 遍历 Inventory） =====
+        let backpack = state.inventory.backpack.clone();
+        for s in backpack.iter().flatten() {
+            let item = &s.item;
+            let Some(info) = self.item_infos.get(&item.item_index) else { continue };
+            let bind = info.bind_mode;
+            if (bind & 0x0001) != 0 {
+                continue;
+            }
+            if item.wedding_ring != -1 {
+                continue;
+            }
+            if item.sealed_info.is_some() {
+                continue;
+            }
+            if item.rental_information.is_some() {
+                continue;
+            }
+
+            if item.count > 1 {
+                let rate = if red { 4 } else { 8 };
+                let mut percent = 0;
+                for _ in 0..10 {
+                    if fastrand::i32(..rate) == 0 {
+                        percent += 1;
+                    }
+                }
+                if percent == 0 && !red {
+                    continue;
+                }
+                let drop_count = ((item.count as f32) / 10.0 * percent as f32).ceil() as u16;
+                if drop_count == 0 {
+                    continue;
+                }
+                if let Some(dropped) = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventoryCount {
+                    unique_id: item.unique_id,
+                    count: drop_count,
+                }).await.unwrap_or(None) {
+                    dropped_items.push(dropped);
+                }
+            } else {
+                let chance = if red { 10 } else { 30 };
+                if fastrand::i32(..chance) == 0 {
+                    if let Some(dropped) = record.actor_ref.ask(crate::actors::player::RemoveItemFromInventoryCount {
+                        unique_id: item.unique_id,
+                        count: 1,
+                    }).await.unwrap_or(None) {
+                        dropped_items.push(dropped);
+                    }
+                }
+            }
+        }
+
+        // 落地物品（C# 死亡不掉金币）
+        for item in dropped_items {
             let drop_oid = self.alloc_object_id();
             let object_item = mir2_shared::packets::server::ObjectItem {
                 object_id: drop_oid,
@@ -1573,43 +1700,9 @@ impl WorldActor {
             }
             self.ground_items.push(GroundItem { object_id: drop_oid, item, x, y, map_index, dropper_session: Some(session_id), drop_tick: self.tick_count });
         }
-
-        // 掉落金币（1-5%）
-        if let Ok(Some(state)) = actor_ref.ask(GetPlayerState).await {
-            let pct = fastrand::u8(1..=5);
-            let gold_drop = state.inventory.gold * pct as u64 / 100;
-            if gold_drop > 0 {
-                let _ = actor_ref.ask(crate::actors::player::DeductGold { amount: gold_drop }).await;
-                let drop_oid = self.alloc_object_id();
-                let object_gold = mir2_shared::packets::server::ObjectGold {
-                    object_id: drop_oid,
-                    gold: gold_drop as u32,
-                    location_x: x,
-                    location_y: y,
-                };
-                let mut buf = Vec::new();
-                if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_gold) {
-                    warn!("Failed to serialize ObjectGold: {}", e);
-                } else {
-                    for sid in self.players.keys() {
-                        let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: buf.clone() }).await;
-                    }
-                    self.ground_items.push(GroundItem {
-                        object_id: drop_oid,
-                        item: mir2_shared::data::item::UserItem {
-                            item_index: 0,
-                            count: gold_drop as u16,
-                            ..Default::default()
-                        },
-                        x, y, map_index, dropper_session: Some(session_id),
-                        drop_tick: self.tick_count,
-                    });
-                }
-            }
-        }
     }
 
-    /// 执行 NPC 脚本行，解析条件命令与动作命令
+/// 执行 NPC 脚本行，解析条件命令与动作命令
     /// 返回 (显示文本, GOTO 目标页面名)
     pub(crate) async fn eval_npc_script(
         &mut self,

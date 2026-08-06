@@ -2657,6 +2657,23 @@ impl Message<RestoreMp> for PlayerActor {
 /// 死亡时随机掉落背包物品（返回被掉落的物品列表）
 pub struct DropRandomItemsOnDeath;
 
+/// 死亡掉落：直接从装备槽位取走物品（不放回背包；C# DeathDrop Info.Equipment[i] = null）
+pub struct TakeEquipmentOnDeath {
+    pub slot: crate::actors::inventory::EquipmentSlot,
+}
+
+impl Message<TakeEquipmentOnDeath> for PlayerActor {
+    type Reply = Option<mir2_shared::data::item::UserItem>;
+
+    async fn handle(&mut self, msg: TakeEquipmentOnDeath, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let result = self.state.inventory.take_equipment(msg.slot);
+        if result.is_some() {
+            self.send_equipment_changed();
+        }
+        result
+    }
+}
+
 impl Message<DropRandomItemsOnDeath> for PlayerActor {
     type Reply = Vec<mir2_shared::data::item::UserItem>;
 

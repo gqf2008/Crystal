@@ -546,6 +546,11 @@ impl PlayerInventory {
         None
     }
 
+    /// 死亡掉落：直接从装备槽位取走物品（不放回背包）
+    pub fn take_equipment(&mut self, slot: EquipmentSlot) -> Option<UserItem> {
+        self.equipment[slot as usize].take()
+    }
+
     /// 修理物品：恢复耐久到最大值
     /// 返回是否成功
     pub fn repair_item(&mut self, uid: u64) -> bool {
