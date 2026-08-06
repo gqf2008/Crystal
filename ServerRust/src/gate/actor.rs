@@ -2500,7 +2500,7 @@ fn handle_check_refine(world_ref: &Option<ActorRef<crate::actors::world::WorldAc
 // 传送/地图
 // ============================================================================
 
-/// RequestMapInfo: [map_id: u32]
+/// RequestMapInfo: [map_index: i32]
 fn forward_request_map_info(
     world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
     session_id: SessionId,
@@ -2508,7 +2508,7 @@ fn forward_request_map_info(
 ) {
     if payload.len() < 4 { return; }
     let world_ref = match world_ref { Some(w) => w, None => { return; } };
-    let map_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
+    let map_id = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
     debug!("RequestMapInfo: session={} map={}", session_id, map_id);
     let _ = world_ref.tell(crate::actors::world::RequestMapInfoRequest { session_id, map_id }).try_send();
 }

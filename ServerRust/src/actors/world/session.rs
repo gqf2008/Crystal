@@ -236,6 +236,7 @@ impl Message<StartGameRequest> for WorldActor {
             account_username: msg.account_username.clone(),
             last_pk_points: loaded_state.pk_points,
             object_id: loaded_state.object_id,
+            world_map_setup_sent: false,
         });
 
         info!("Player {} entered world (object_id={}, session={})",
@@ -408,6 +409,18 @@ impl Message<StartGameRequest> for WorldActor {
                 data: new_map_info,
             }).await;
             info!("NewMapInfo: map={} npcs={}", map_info_idx, map_npcs.len());
+        }
+        // #302：世界地图配置（C# CheckMapInfo 每连接下发一次）
+        if let Some(rec) = self.players.get_mut(&msg.session_id) {
+            if !rec.world_map_setup_sent {
+                rec.world_map_setup_sent = true;
+                let wm = super::build_world_map_setup_packet(&self.map_infos, super::TELEPORT_TO_NPC_COST);
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: wm,
+                }).await;
+                info!("WorldMapSetup: sent to session {}", msg.session_id);
+            }
         }
         // 先收集精英广播信息（move 前遍历）
         let elite_broadcasts: Vec<String> = new_monsters.iter()
