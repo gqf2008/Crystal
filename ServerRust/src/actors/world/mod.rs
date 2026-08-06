@@ -133,10 +133,12 @@ pub struct MonsterSpawn {
 pub struct DelayedNpcAction {
     /// 到期 tick（100ms/tick）
     pub expire_tick: u64,
-    /// 目标 NPC object_id（脚本来源）
+    /// 目标 NPC object_id（脚本来源；execute_section 需要 npc 上下文）
     pub npc_object_id: u32,
     /// 目标 section 名（缺省 main）
     pub section: String,
+    /// CALL 目标：直接指定脚本 db_index（覆盖 npc_object_id 查到的 db_index）
+    pub target_db_index: Option<i32>,
 }
 
 /// 地图刷怪配置
@@ -3256,8 +3258,10 @@ impl WorldActor {
         // 逐个执行
         for (session_id, act) in due {
             let Some(npc) = self.npcs.get(&act.npc_object_id).cloned() else { continue };
+            // CALL 用 target_db_index 覆盖（目标脚本是另一个 NPC），否则用 npc.db_index
+            let db_index = act.target_db_index.unwrap_or(npc.db_index);
             let section_upper = act.section.to_uppercase();
-            let script_key = (npc.db_index, section_upper.clone());
+            let script_key = (db_index, section_upper.clone());
             let Some(lines) = self.npc_scripts.get(&script_key).cloned() else { continue };
             let joined = lines.join("\n");
             if !npc_script::is_csharp_format(&joined) {

@@ -811,6 +811,26 @@ async fn exec_action(
                 debug!("NPC INCREASEPKPOINT: +{}", amount);
             }
         }
+        // CALL <script_id> —— 调用另一个 NPC 脚本的 [@MAIN] 段（对齐 C# ActionType.Call + DelayedAction 立即）
+        // 通过 ProcessDelayedActions 队列执行（避免 async 递归；C# 同样是 DelayedAction）
+        "CALL" => {
+            let script_id = arg0().parse::<i32>().unwrap_or(0);
+            if script_id <= 0 {
+                warn!("NPC CALL: invalid script id '{}'", arg0());
+            } else if let Some(&npc_oid) = world.session_npc.get(&session_id) {
+                world.npc_delayed_actions.entry(session_id).or_default().push(
+                    crate::actors::world::DelayedNpcAction {
+                        expire_tick: world.tick_count,
+                        npc_object_id: npc_oid,
+                        section: "main".to_string(),
+                        target_db_index: Some(script_id),
+                    },
+                );
+                debug!("NPC CALL: script {} [@MAIN] queued", script_id);
+            } else {
+                warn!("NPC CALL: no current NPC for session {}", session_id);
+            }
+        }
         // DROP <掉落表文件> —— 按 NPC 掉落表给玩家发奖励（对齐 C# ActionType.Drop + DropInfo.Load/AttemptDrop）
         "DROP" => {
             let file_path = arg0();
@@ -1228,7 +1248,7 @@ async fn exec_action(
             if let Some(&npc_oid) = world.session_npc.get(&session_id) {
                 let expire_tick = world.tick_count.saturating_add(secs as u64 * 10);
                 world.npc_delayed_actions.entry(session_id).or_default().push(
-                    crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone() },
+                    crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone(), target_db_index: None },
                 );
                 debug!("NPC TIMERECALL: session={} section='{}' in {}s (expire {})", session_id, section, secs, expire_tick);
             } else {
@@ -1254,7 +1274,7 @@ async fn exec_action(
                 let expire_tick = world.tick_count.saturating_add(secs as u64 * 10);
                 for sid in &targets {
                     world.npc_delayed_actions.entry(*sid).or_default().push(
-                        crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone() },
+                        crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone(), target_db_index: None },
                     );
                 }
                 debug!("NPC TIMERECALLGROUP: {} players section='{}' in {}s", targets.len(), section, secs);
@@ -1274,7 +1294,7 @@ async fn exec_action(
             } else if let Some(&npc_oid) = world.session_npc.get(&session_id) {
                 let expire_tick = world.tick_count.saturating_add(secs as u64 * 10);
                 world.npc_delayed_actions.entry(session_id).or_default().push(
-                    crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section },
+                    crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section, target_db_index: None },
                 );
             }
         }
@@ -1357,7 +1377,7 @@ async fn exec_action(
                     let expire_tick = world.tick_count;
                     for sid in &targets {
                         world.npc_delayed_actions.entry(*sid).or_default().push(
-                            crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone() },
+                            crate::actors::world::DelayedNpcAction { expire_tick, npc_object_id: npc_oid, section: section.clone(), target_db_index: None },
                         );
                     }
                     debug!("NPC GROUPGOTO: {} players section='{}'", targets.len(), section);
