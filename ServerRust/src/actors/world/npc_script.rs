@@ -811,6 +811,51 @@ async fn exec_action(
                 debug!("NPC INCREASEPKPOINT: +{}", amount);
             }
         }
+        // DROP <掉落表文件> —— 按 NPC 掉落表给玩家发奖励（对齐 C# ActionType.Drop + DropInfo.Load/AttemptDrop）
+        "DROP" => {
+            let file_path = arg0();
+            if file_path.is_empty() {
+                warn!("NPC DROP: missing file");
+            } else {
+                let base = world.script_dir.clone();
+                let path = base.join(file_path);
+                if path.starts_with(&base) {
+                    match std::fs::read_to_string(&path) {
+                        Ok(content) => {
+                            let drops = parse_drop_table(&content);
+                            let mut given_gold = 0u64;
+                            let mut given_items = 0usize;
+                            for d in &drops {
+                                // C# AttemptDrop：1/分母 概率
+                                if fastrand::f64() > d.chance { continue; }
+                                if let Some(gold) = d.gold {
+                                    // C# 金币 0.5~1.5 倍随机
+                                    let lo = gold / 2;
+                                    let hi = gold + gold / 2;
+                                    let amount = if hi > lo { fastrand::u32(lo..=hi) } else { lo };
+                                    if amount > 0 {
+                                        send_player_msg(world, session_id, AddGold { amount: amount as u64 }).await;
+                                        given_gold += amount as u64;
+                                    }
+                                }
+                                if let Some(item_name) = &d.item_name {
+                                    if let Some(info) = world.item_infos.values().find(|i| i.name.eq_ignore_ascii_case(item_name)) {
+                                        give_item(world, session_id, info.index, 1).await;
+                                        given_items += 1;
+                                    } else {
+                                        warn!("NPC DROP: item '{}' not found", item_name);
+                                    }
+                                }
+                            }
+                            debug!("NPC DROP: {} ({} entries, gold={}, items={})", file_path, drops.len(), given_gold, given_items);
+                        }
+                        Err(e) => warn!("NPC DROP: failed {}: {}", path.display(), e),
+                    }
+                } else {
+                    warn!("NPC DROP: path escape denied: {}", file_path);
+                }
+            }
+        }
         // GIVEHP <amount> —— 恢复 HP（对齐 C# ActionType.GiveHP / ChangeHP）
         "GIVEHP" => {
             let amount = arg0().parse::<i32>().unwrap_or(0);
@@ -1693,6 +1738,54 @@ fn name_list_contains(path: &std::path::Path, name: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// C# DropInfo.FromLine 解析后的掉落条目
+#[derive(Debug, Clone, PartialEq)]
+struct ParsedDrop {
+    /// 命中概率（1/分母）
+    chance: f64,
+    /// 金币奖励（Gold 行）
+    gold: Option<u32>,
+    /// 物品名（Item 行，需再按名查 item_infos）
+    item_name: Option<String>,
+}
+
+/// 解析 C# 掉落表文件（对齐 DropInfo.Load/FromLine）：
+/// 行格式 `1/100 <物品名|Gold 金额>`；`;` 注释/空行跳过；GROUP 嵌套简化跳过；无效行跳过
+fn parse_drop_table(content: &str) -> Vec<ParsedDrop> {
+    let mut drops = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with(';') {
+            continue;
+        }
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        // C# FromLine：parts[0].Substring(2) 去掉 "1/" 前缀取分母
+        let denom = parts[0].strip_prefix("1/").or_else(|| parts[0].strip_prefix("1\\"));
+        let Some(denom) = denom else { continue };
+        let Ok(denom) = denom.parse::<f64>() else { continue };
+        if denom <= 0.0 {
+            continue;
+        }
+        let chance = (1.0 / denom).min(1.0);
+        if parts[1].eq_ignore_ascii_case("Gold") {
+            if let Some(gold) = parts.get(2).and_then(|s| s.parse::<u32>().ok()) {
+                if gold > 0 {
+                    drops.push(ParsedDrop { chance, gold: Some(gold), item_name: None });
+                }
+            }
+        } else if parts[1].to_uppercase().starts_with("GROUP") {
+            // 简化：跳过 GROUP 嵌套（C# GroupedDrop 复杂结构）
+            continue;
+        } else {
+            drops.push(ParsedDrop { chance, gold: None, item_name: Some(parts[1].to_string()) });
+        }
+    }
+    drops
+}
+
 /// 名单文件：追加一行（不存在才加，对齐 C# AddNameList 精确匹配）
 fn name_list_add(path: &std::path::Path, name: &str) {
     let existing = std::fs::read_to_string(path).unwrap_or_default();
@@ -2475,6 +2568,21 @@ You don't have enough Gold!
             || w == "FRIDAY" || w == "SATURDAY" || w == "SUNDAY");
         assert!(now_hour() <= 23);
         assert!(now_minute() <= 59);
+    }
+
+    #[test]
+    fn drop_table_parses_csharp_format() {
+        let content = "; 注释\n\n1/100 金创药\n1/10 Gold 500\n1/2 GROUP100\ninvalid\n1/1000 强效金创药\n";
+        let drops = parse_drop_table(content);
+        assert_eq!(drops.len(), 3);
+        assert!((drops[0].chance - 0.01).abs() < 1e-9);
+        assert_eq!(drops[0].item_name.as_deref(), Some("金创药"));
+        assert!((drops[1].chance - 0.1).abs() < 1e-9);
+        assert_eq!(drops[1].gold, Some(500));
+        assert_eq!(drops[1].item_name, None);
+        // GROUP 行跳过
+        assert!((drops[2].chance - 0.001).abs() < 1e-9);
+        assert_eq!(drops[2].item_name.as_deref(), Some("强效金创药"));
     }
 }
 
