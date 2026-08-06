@@ -5609,7 +5609,7 @@ fn auto_spell_verify(
         tracing::info!("[SPELL] 开始法术冒烟（HellFire → IceThrust → Curse → EnergyRepulsor）");
         return;
     }
-    if *stage > 6 {
+    if *stage > 10 {
         return;
     }
     let Ok((pe, pf)) = players.single() else { return };
@@ -5629,7 +5629,7 @@ fn auto_spell_verify(
     }
     let Some((oid, mx, my, d)) = best else {
         tracing::warn!("[SPELL] ❌ 无可施法目标（stage={} casts={}）", *stage, *casts);
-        *stage = 9;
+        *stage = 99;
         return;
     };
 
@@ -5691,7 +5691,11 @@ fn auto_spell_verify(
         3 => mir2_shared::enums::Spell::Curse,
         4 => mir2_shared::enums::Spell::EnergyRepulsor,
         5 => mir2_shared::enums::Spell::FlamingSword,
-        _ => mir2_shared::enums::Spell::EnergyShield,
+        6 => mir2_shared::enums::Spell::EnergyShield,
+        7 => mir2_shared::enums::Spell::FireBurst,
+        8 => mir2_shared::enums::Spell::TwinDrakeBlade,
+        9 => mir2_shared::enums::Spell::DoubleSlash,
+        _ => mir2_shared::enums::Spell::SlashingBurst,
     };
     let dir = direction_from_delta((mx - px).signum(), (my - py).signum())
         .unwrap_or(mir2_shared::enums::MirDirection::Up);
@@ -5727,22 +5731,22 @@ fn auto_spell_verify(
         }
         return;
     }
-    // #312 FlamingSword：施放后补一次近战攻击，触发下一次攻击火焰加成（服务端 debug 日志验证）
-    if *stage == 5 && *casts == 1 {
+    // #312/#318：FlamingSword/TwinDrakeBlade/DoubleSlash 施放后补一次近战攻击，触发下一次攻击效果
+    if (*stage == 5 || *stage == 8 || *stage == 9) && *casts == 1 {
         net.send_packet(&mir2_shared::packets::client::combat::Attack {
             direction: dir,
             spell: mir2_shared::enums::Spell::None,
         });
-        tracing::info!("[SPELL] ⚔️ 烈焰剑后补近战攻击（触发加成）");
+        tracing::info!("[SPELL] ⚔️ {:?} 后补近战攻击（触发效果）", spell);
     }
     // Curse/EnergyRepulsor/FlamingSword/EnergyShield：施放 3 次后冒烟通过（不要求击杀）
     if *casts >= 3 {
         tracing::info!("[SPELL] ✅ {:?} 冒烟通过（3 次施放无崩溃）", spell);
         *stage += 1;
         *casts = 0;
-        if *stage == 7 {
+        if *stage == 11 {
             tracing::info!("[SPELL] ✅ 法术冒烟全流程完成");
-            *stage = 9;
+            *stage = 99;
         }
     }
 }
