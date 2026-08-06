@@ -804,13 +804,14 @@ async fn eval_one_check(
                 cost > 0 && gold >= cost
             }
         }
-        // AFFORDSIEGE <index> <id> — 攻城器负担检查（对齐 C# CheckType.AffordSiege，简化用 Catapult）
+        // AFFORDSIEGE <index> <id> — 攻城器负担检查（对齐 C# CheckType.AffordSiege）
+        // C# NPCSegment.cs:2698 实际查 GateList（与 AffordGate 相同），严格对齐
         "AFFORDSIEGE" => {
             let index = arg0().parse::<i32>().unwrap_or(-1);
             let id = arg1().parse::<i32>().unwrap_or(-1);
             if player.guild_name.is_none() || index < 0 || id < 0 { false }
             else {
-                let oid = world.find_siege_structure(index, crate::actors::world::conquest::SiegeStructureType::Catapult, id);
+                let oid = world.find_siege_structure(index, crate::actors::world::conquest::SiegeStructureType::CastleGate, id);
                 let cost = oid.and_then(|o| world.siege_structures.get(&o)).map(|s| s.repair_cost()).unwrap_or(0);
                 let gold = world.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id }).await.unwrap_or(0);
                 cost > 0 && gold >= cost
