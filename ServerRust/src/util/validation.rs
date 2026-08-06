@@ -15,11 +15,11 @@ pub const MIN_USERNAME_LEN: usize = 3;
 /// 最大密码长度。
 pub const MAX_PASSWORD_LEN: usize = 32;
 
-/// 最大角色名长度。
-pub const MAX_CHAR_NAME_LEN: usize = 12;
+/// 最大角色名长度（C# Globals.MaxCharacterNameLength = 15，按字符计数）。
+pub const MAX_CHAR_NAME_LEN: usize = 15;
 
-/// 最小角色名长度。
-pub const MIN_CHAR_NAME_LEN: usize = 2;
+/// 最小角色名长度（C# Globals.MinCharacterNameLength = 3，按字符计数）。
+pub const MIN_CHAR_NAME_LEN: usize = 3;
 
 /// 最大 NPC 输入长度(对话框文本输入)。
 pub const MAX_NPC_INPUT_LEN: usize = 64;
@@ -50,17 +50,14 @@ pub fn validate_password(pw: &str) -> bool {
     !pw.is_empty() && pw.len() <= MAX_PASSWORD_LEN
 }
 
-/// 验证角色名:2-12 字符,允许中文 + 字母数字。
+/// 验证角色名：3-15 字符（按字符计数），字符集对齐 C# Envir.CharacterReg
+/// `[\u4e00-\u9fa5_A-Za-z0-9]`（中文/下划线/ASCII 字母数字）。
 pub fn validate_character_name(name: &str) -> bool {
-    if name.len() < MIN_CHAR_NAME_LEN || name.len() > MAX_CHAR_NAME_LEN {
+    let len = name.chars().count();
+    if len < MIN_CHAR_NAME_LEN || len > MAX_CHAR_NAME_LEN {
         return false;
     }
-    // 允许:字母、数字、中文(CJK Unified Ideographs)、部分标点
-    name.chars().all(|c| {
-        c.is_ascii_alphanumeric()
-            || ('\u{4E00}'..='\u{9FFF}').contains(&c)  // CJK
-            || c == '_'
-    })
+    name.chars().all(|c| c == '_' || c.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fa5}').contains(&c))
 }
 
 /// 验证 NPC 对话输入:≤64 字符,无 control chars。
