@@ -5609,7 +5609,7 @@ fn auto_spell_verify(
         tracing::info!("[SPELL] 开始法术冒烟（HellFire → IceThrust → Curse → EnergyRepulsor）");
         return;
     }
-    if *stage > 10 {
+    if *stage > 13 {
         return;
     }
     let Ok((pe, pf)) = players.single() else { return };
@@ -5695,15 +5695,20 @@ fn auto_spell_verify(
         7 => mir2_shared::enums::Spell::FireBurst,
         8 => mir2_shared::enums::Spell::TwinDrakeBlade,
         9 => mir2_shared::enums::Spell::DoubleSlash,
-        _ => mir2_shared::enums::Spell::SlashingBurst,
+        10 => mir2_shared::enums::Spell::SlashingBurst,
+        11 => mir2_shared::enums::Spell::Plague,
+        12 => mir2_shared::enums::Spell::Trap,
+        _ => mir2_shared::enums::Spell::DelayedExplosion,
     };
     let dir = direction_from_delta((mx - px).signum(), (my - py).signum())
         .unwrap_or(mir2_shared::enums::MirDirection::Up);
+    // #328：Plague/Trap/DelayedExplosion 以玩家所在格为目标（3×3 覆盖附近怪物，规避位置漂移）
+    let (tx, ty) = if *stage >= 11 { (px, py) } else { (mx, my) };
     net.send_packet(&mir2_shared::packets::client::combat::Magic {
         spell,
         direction: dir,
         target_id: oid,
-        location: mir2_shared::map::Point { x: mx, y: my },
+        location: mir2_shared::map::Point { x: tx, y: ty },
     });
     tracing::info!(
         "[SPELL] 🧙 stage={} 施放 {:?} → 怪物 {} @ ({},{}) dir={:?} casts={}（玩家 @ {},{})",
@@ -5744,7 +5749,7 @@ fn auto_spell_verify(
         tracing::info!("[SPELL] ✅ {:?} 冒烟通过（3 次施放无崩溃）", spell);
         *stage += 1;
         *casts = 0;
-        if *stage == 11 {
+        if *stage == 14 {
             tracing::info!("[SPELL] ✅ 法术冒烟全流程完成");
             *stage = 99;
         }

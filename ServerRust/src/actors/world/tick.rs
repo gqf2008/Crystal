@@ -1289,8 +1289,9 @@ impl WorldActor {
                         }
                     }
                 }
-                Spell::ExplosiveTrap => {
+                Spell::ExplosiveTrap | Spell::DelayedExplosion => {
                     if !spell_obj.detonated {
+                        debug!("SpellObject: {:?} detonated at ({},{})", spell_obj.spell, spell_obj.x, spell_obj.y);
                         spell_obj.detonated = true;
                         let hit_ids: Vec<u32> = self.monsters.iter()
                             .filter(|(_, m)| {
