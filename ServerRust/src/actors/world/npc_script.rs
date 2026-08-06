@@ -619,7 +619,7 @@ async fn eval_one_check(
         }
         // CHECKHUM <op> <count> <map> <instance> — 地图玩家数（对齐 C# CheckType.CheckHum；instance 忽略）
         "CHECKHUM" => {
-            let (op, want) = parse_op_amount(&args[1..]);
+            let (op, want) = parse_op_amount(args);
             let map_name = args.get(2).map(|s| s.as_str()).unwrap_or("");
             let count = if let Some(mi) = map_index_by_name(world, map_name) {
                 let mut n = 0i64;
@@ -656,7 +656,7 @@ async fn eval_one_check(
         }
         // CHECKMON <op> <count> <map> <instance> — 地图怪物数（对齐 C# CheckType.CheckMon）
         "CHECKMON" => {
-            let (op, want) = parse_op_amount(&args[1..]);
+            let (op, want) = parse_op_amount(args);
             let map_name = args.get(2).map(|s| s.as_str()).unwrap_or("");
             let count = if let Some(mi) = map_index_by_name(world, map_name) {
                 world.monsters.values().filter(|m| m.map_index == mi).count() as i64
@@ -667,13 +667,13 @@ async fn eval_one_check(
         }
         // PETLEVEL <op> <level> — 宠物等级比较（对齐 C# CheckType.PetLevel；无宠物视为失败）
         "PETLEVEL" => {
-            let (op, want) = parse_op_amount(&args[1..]);
+            let (op, want) = parse_op_amount(args);
             let level = player.creature_log.active_creature.as_ref().map(|c| c.level as i64).unwrap_or(-1);
             compare_i64(level, op, want)
         }
         // PETCOUNT <op> <count> — 宠物数量（active + owned，对齐 C# CheckType.PetCount）
         "PETCOUNT" => {
-            let (op, want) = parse_op_amount(&args[1..]);
+            let (op, want) = parse_op_amount(args);
             let pets = player.creature_log.owned_creatures.len() as i64
                 + if player.creature_log.active_creature.is_some() { 1 } else { 0 };
             compare_i64(pets, op, want)
@@ -728,7 +728,7 @@ async fn eval_one_check(
         }
         // HEROLEVEL <op> <level> — 当前英雄等级（对齐 C# CheckType.HeroLevel）
         "HEROLEVEL" => {
-            let (op, want) = parse_op_amount(&args[1..]);
+            let (op, want) = parse_op_amount(args);
             let level = current_hero(world, session_id, player).map(|h| h.level as i64).unwrap_or(-1);
             compare_i64(level, op, want)
         }
@@ -819,7 +819,7 @@ async fn eval_one_check(
         }
         // CHECKCREDIT <op> <amount> — 账户积分比较（对齐 C# CheckType.CheckCredit）
         "CHECKCREDIT" => {
-            let (op, want) = parse_op_amount(&args[1..]);
+            let (op, want) = parse_op_amount(args);
             let credit = if let Some(record) = world.players.get(&session_id) {
                 crate::db::get_account_credit(&world.db_pool, &record.account_username).await.unwrap_or(0) as i64
             } else {
@@ -918,7 +918,7 @@ async fn eval_one_check(
         }
         // CHECKGUILDGOLD <op> <amount> — 行会金币比较（对齐 C# CheckType.CheckGuildGold）
         "CHECKGUILDGOLD" => {
-            let (op, want) = parse_op_amount(&args[1..]);
+            let (op, want) = parse_op_amount(args);
             let gold = world.social_ref.ask(crate::actors::social::NpcGetGuildGold { session_id }).await.unwrap_or(0);
             compare_i64(gold as i64, op, want)
         }
