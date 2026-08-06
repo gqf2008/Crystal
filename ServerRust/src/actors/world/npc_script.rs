@@ -2885,9 +2885,12 @@ async fn give_item(world: &WorldActor, session_id: u64, item_index: i32, count: 
     let identified = info.map(|i| i.is_identified()).unwrap_or(false);
     let stack_size = info.map(|i| i.stack_size).unwrap_or(1).max(1) as u16;
 
-    let remaining = count.max(1);
+    // C# GiveItem：count 缺省 1；显式 0 → 不给予
+    if count == 0 {
+        return;
+    }
     // 按 stack_size 分批创建堆叠物品（对齐 C# GiveItem 遵守 StackSize）
-    let mut left = remaining;
+    let mut left = count;
     while left > 0 {
         let batch = left.min(stack_size);
         let item = mir2_shared::data::item::UserItem {
