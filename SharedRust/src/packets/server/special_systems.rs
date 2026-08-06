@@ -75,6 +75,7 @@ impl Packet for UpdateIntelligentCreatureList {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use crate::binary::read_dotnet_string;
         let count = reader.read_i32::<LittleEndian>()?;
         let mut creatures = Vec::with_capacity(count as usize);
         
@@ -82,10 +83,7 @@ impl Packet for UpdateIntelligentCreatureList {
             let creature_id = reader.read_i32::<LittleEndian>()?;
             let creature_type = IntelligentCreatureType::try_from(reader.read_u8()?)?;
             
-            let name_len = reader.read_i32::<LittleEndian>()?;
-            let mut name_bytes = vec![0u8; name_len as usize];
-            reader.read_exact(&mut name_bytes)?;
-            let custom_name = String::from_utf8_lossy(&name_bytes).to_string();
+            let custom_name = read_dotnet_string(reader)?;
             
             let petmode = reader.read_u8()?;
             let exp = reader.read_i64::<LittleEndian>()?;
@@ -286,6 +284,7 @@ impl Packet for GameShopInfo {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use crate::binary::read_dotnet_string;
         let count = reader.read_i32::<LittleEndian>()?;
         let mut items = Vec::with_capacity(count as usize);
         
@@ -296,10 +295,7 @@ impl Packet for GameShopInfo {
             let item_count = reader.read_i32::<LittleEndian>()?;
             let class = reader.read_u8()?;
             
-            let cat_len = reader.read_i32::<LittleEndian>()?;
-            let mut cat_bytes = vec![0u8; cat_len as usize];
-            reader.read_exact(&mut cat_bytes)?;
-            let category = String::from_utf8_lossy(&cat_bytes).to_string();
+            let category = read_dotnet_string(reader)?;
             
             let stock = reader.read_i32::<LittleEndian>()?;
             let is_bought = reader.read_u8()? != 0;
@@ -402,16 +398,14 @@ impl Packet for Rankings {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use crate::binary::read_dotnet_string;
         let count = reader.read_i32::<LittleEndian>()?;
         let mut rankings = Vec::with_capacity(count as usize);
         
         for _ in 0..count {
             let rank = reader.read_i32::<LittleEndian>()?;
             
-            let name_len = reader.read_i32::<LittleEndian>()?;
-            let mut name_bytes = vec![0u8; name_len as usize];
-            reader.read_exact(&mut name_bytes)?;
-            let player_name = String::from_utf8_lossy(&name_bytes).to_string();
+            let player_name = read_dotnet_string(reader)?;
             
             let class = reader.read_u8()?;
             let level = reader.read_i32::<LittleEndian>()?;
@@ -470,21 +464,16 @@ impl Packet for GuildTerritoryPage {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use crate::binary::read_dotnet_string;
         let count = reader.read_i32::<LittleEndian>()?;
         let mut territories = Vec::with_capacity(count as usize);
         
         for _ in 0..count {
             let index = reader.read_i32::<LittleEndian>()?;
             
-            let name_len = reader.read_i32::<LittleEndian>()?;
-            let mut name_bytes = vec![0u8; name_len as usize];
-            reader.read_exact(&mut name_bytes)?;
-            let name = String::from_utf8_lossy(&name_bytes).to_string();
+            let name = read_dotnet_string(reader)?;
             
-            let guild_len = reader.read_i32::<LittleEndian>()?;
-            let mut guild_bytes = vec![0u8; guild_len as usize];
-            reader.read_exact(&mut guild_bytes)?;
-            let owner_guild = String::from_utf8_lossy(&guild_bytes).to_string();
+            let owner_guild = read_dotnet_string(reader)?;
             
             let start_time = reader.read_i64::<LittleEndian>()?;
             let end_time = reader.read_i64::<LittleEndian>()?;

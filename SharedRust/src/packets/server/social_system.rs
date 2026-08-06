@@ -68,21 +68,16 @@ impl Packet for FriendUpdate {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use crate::binary::read_dotnet_string;
         let count = reader.read_i32::<LittleEndian>()?;
         let mut friends = Vec::with_capacity(count as usize);
         
         for _ in 0..count {
             let object_id = reader.read_u32::<LittleEndian>()?;
             
-            let name_len = reader.read_i32::<LittleEndian>()?;
-            let mut name_bytes = vec![0u8; name_len as usize];
-            reader.read_exact(&mut name_bytes)?;
-            let name = String::from_utf8_lossy(&name_bytes).to_string();
+            let name = read_dotnet_string(reader)?;
             
-            let memo_len = reader.read_i32::<LittleEndian>()?;
-            let mut memo_bytes = vec![0u8; memo_len as usize];
-            reader.read_exact(&mut memo_bytes)?;
-            let memo = String::from_utf8_lossy(&memo_bytes).to_string();
+            let memo = read_dotnet_string(reader)?;
             
             let online = reader.read_u8()? != 0;
             
@@ -124,17 +119,12 @@ impl Packet for LoverUpdate {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let name_len = reader.read_i32::<LittleEndian>()?;
-        let mut name_bytes = vec![0u8; name_len as usize];
-        reader.read_exact(&mut name_bytes)?;
-        let lover_name = String::from_utf8_lossy(&name_bytes).to_string();
+        use crate::binary::read_dotnet_string;
+        let lover_name = read_dotnet_string(reader)?;
         
         let date = reader.read_i64::<LittleEndian>()?;
         
-        let map_len = reader.read_i32::<LittleEndian>()?;
-        let mut map_bytes = vec![0u8; map_len as usize];
-        reader.read_exact(&mut map_bytes)?;
-        let map_name = String::from_utf8_lossy(&map_bytes).to_string();
+        let map_name = read_dotnet_string(reader)?;
         
         let location_x = reader.read_i32::<LittleEndian>()?;
         let location_y = reader.read_i32::<LittleEndian>()?;
@@ -171,10 +161,8 @@ impl Packet for MentorUpdate {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let name_len = reader.read_i32::<LittleEndian>()?;
-        let mut name_bytes = vec![0u8; name_len as usize];
-        reader.read_exact(&mut name_bytes)?;
-        let mentor_name = String::from_utf8_lossy(&name_bytes).to_string();
+        use crate::binary::read_dotnet_string;
+        let mentor_name = read_dotnet_string(reader)?;
         
         let mentor_level = reader.read_i32::<LittleEndian>()?;
         let mentor_online = reader.read_u8()? != 0;
@@ -205,10 +193,8 @@ impl Packet for MarriageRequest {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let len = reader.read_i32::<LittleEndian>()?;
-        let mut bytes = vec![0u8; len as usize];
-        reader.read_exact(&mut bytes)?;
-        let lover_name = String::from_utf8_lossy(&bytes).to_string();
+        use crate::binary::read_dotnet_string;
+        let lover_name = read_dotnet_string(reader)?;
         Ok(Self { lover_name })
     }
 }
@@ -231,10 +217,8 @@ impl Packet for DivorceRequest {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let len = reader.read_i32::<LittleEndian>()?;
-        let mut bytes = vec![0u8; len as usize];
-        reader.read_exact(&mut bytes)?;
-        let lover_name = String::from_utf8_lossy(&bytes).to_string();
+        use crate::binary::read_dotnet_string;
+        let lover_name = read_dotnet_string(reader)?;
         Ok(Self { lover_name })
     }
 }
@@ -257,10 +241,8 @@ impl Packet for MentorRequest {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let len = reader.read_i32::<LittleEndian>()?;
-        let mut bytes = vec![0u8; len as usize];
-        reader.read_exact(&mut bytes)?;
-        let mentor_name = String::from_utf8_lossy(&bytes).to_string();
+        use crate::binary::read_dotnet_string;
+        let mentor_name = read_dotnet_string(reader)?;
         Ok(Self { mentor_name })
     }
 }

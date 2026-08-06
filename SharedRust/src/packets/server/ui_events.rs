@@ -92,10 +92,8 @@ impl Packet for OpenBrowser {
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let len = reader.read_i32::<LittleEndian>()?;
-        let mut bytes = vec![0u8; len as usize];
-        reader.read_exact(&mut bytes)?;
-        let url = String::from_utf8_lossy(&bytes).to_string();
+        use crate::binary::read_dotnet_string;
+        let url = read_dotnet_string(reader)?;
         Ok(Self { url })
     }
 }
