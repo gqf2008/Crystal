@@ -773,6 +773,26 @@ impl Message<UseItemRequest> for WorldActor {
                                 debug!("ResurrectionScroll: {} revived", player_state.name);
                             }
                         }
+                        // 8 MapShoutScroll（C#：HasMapShout = true，! 喊话免费地图广播）
+                        8 => {
+                            let _ = record.actor_ref.ask(crate::actors::player::SetShoutState {
+                                map_shout: true,
+                                server_shout: false,
+                                last_shout_time: 0,
+                            }).await;
+                            send_system_message(&self.gate_ref, msg.session_id, "地图喊话已激活！使用 ! 可免费地图喊话");
+                            debug!("MapShoutScroll: {} activated", player_state.name);
+                        }
+                        // 9 ServerShoutScroll（C#：HasServerShout = true，! 喊话免费全服广播）
+                        9 => {
+                            let _ = record.actor_ref.ask(crate::actors::player::SetShoutState {
+                                map_shout: false,
+                                server_shout: true,
+                                last_shout_time: 0,
+                            }).await;
+                            send_system_message(&self.gate_ref, msg.session_id, "全服喊话已激活！使用 ! 可免费全服喊话");
+                            debug!("ServerShoutScroll: {} activated", player_state.name);
+                        }
                         // 12 LotteryTicket（C# Scroll shape 12：按 Effect 概率中奖）
                         12 => {
                             let effect = db.effect.max(1) as usize;

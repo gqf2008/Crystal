@@ -1206,6 +1206,96 @@ impl Message<ChatRequest> for WorldActor {
             return;
         }
 
+        // C#：! 前缀喊话（HasMapShout/HasServerShout 卷轴 + 8 级门槛 + 10 秒冷却）
+        if let Some(shout_msg) = message.strip_prefix('!') {
+            let shout_msg = shout_msg.trim();
+            if !shout_msg.is_empty() {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                let (level, map_shout, server_shout, last_shout_time) =
+                    if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                        (state.level, state.has_map_shout, state.has_server_shout, state.last_shout_time)
+                    } else {
+                        (0u16, false, false, 0i64)
+                    };
+                if now_ms < last_shout_time + 10_000 {
+                    send_system_message(&self.gate_ref, msg.session_id, "喊话冷却中，请稍后再试");
+                    return;
+                }
+                if level < 8 && !map_shout && !server_shout {
+                    send_system_message(&self.gate_ref, msg.session_id, "需要 8 级才能喊话");
+                    return;
+                }
+                let sender_map = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    state.map_index
+                } else {
+                    return;
+                };
+                if map_shout {
+                    // 地图喊话（C# ChatType.Shout2），消耗卷轴标记
+                    let _ = record.actor_ref.ask(crate::actors::player::SetShoutState {
+                        map_shout: false,
+                        server_shout: false,
+                        last_shout_time: now_ms,
+                    }).await;
+                    for (sid, other) in &self.players {
+                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                            if os.map_index == sender_map {
+                                let mut body = Vec::new();
+                                write_dotnet_string(&mut body, &format!("(!){}:{}", record.name, shout_msg));
+                                body.push(mir2_shared::enums::ChatType::Shout2 as u8);
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: *sid,
+                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body),
+                                }).await;
+                            }
+                        }
+                    }
+                    return;
+                } else if server_shout {
+                    // 全服喊话（C# ChatType.Shout3），消耗卷轴标记
+                    let _ = record.actor_ref.ask(crate::actors::player::SetShoutState {
+                        map_shout: false,
+                        server_shout: false,
+                        last_shout_time: now_ms,
+                    }).await;
+                    for sid in self.players.keys() {
+                        let mut body = Vec::new();
+                        write_dotnet_string(&mut body, &format!("(!!){}:{}", record.name, shout_msg));
+                        body.push(mir2_shared::enums::ChatType::Shout3 as u8);
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *sid,
+                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body),
+                        }).await;
+                    }
+                    return;
+                } else {
+                    // 8 级+ 普通喊话：同地图（C# Shout 范围内）；记录冷却
+                    let _ = record.actor_ref.ask(crate::actors::player::SetShoutState {
+                        map_shout: false,
+                        server_shout: false,
+                        last_shout_time: now_ms,
+                    }).await;
+                    for (sid, other) in &self.players {
+                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                            if os.map_index == sender_map {
+                                let mut body = Vec::new();
+                                write_dotnet_string(&mut body, &format!("[喊话] {}: {}", record.name, shout_msg));
+                                body.push(mir2_shared::enums::ChatType::Shout as u8);
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: *sid,
+                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body),
+                                }).await;
+                            }
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+
         // Check for social chat commands and forward to SocialActor
         let parts: Vec<&str> = message.split_whitespace().collect();
         // 去掉前导 @（C# 客户端命令如 @ride 均带 @）
@@ -1776,6 +1866,9 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
             rested_counter: 0,
             rested_exp_percent: 0,
             rested_exp_end_tick: 0,
+            has_map_shout: false,
+            has_server_shout: false,
+            last_shout_time: 0,
         is_mounted: false,
         mount_type: 0,
         allow_lover_recall: false,

@@ -231,6 +231,12 @@ pub struct PlayerState {
     pub rested_exp_percent: u32,
     /// 休息加成到期时间（Unix 毫秒）
     pub rested_exp_end_tick: u64,
+    /// 地图喊话卷轴标记（C# HasMapShout：! 喊话免费地图广播）
+    pub has_map_shout: bool,
+    /// 全服喊话卷轴标记（C# HasServerShout：! 喊话免费全服广播）
+    pub has_server_shout: bool,
+    /// 上次喊话时间（Unix 毫秒；C# ShoutTime，冷却 10 秒）
+    pub last_shout_time: i64,
     /// PK 值（>0 = 红名，每杀1人+100，在线 tick 衰减）
     pub pk_points: i32,
     /// 累计击杀玩家数
@@ -532,6 +538,9 @@ impl PlayerActor {
             rested_counter: 0,
             rested_exp_percent: 0,
             rested_exp_end_tick: 0,
+            has_map_shout: false,
+            has_server_shout: false,
+            last_shout_time: 0,
                 pk_points: 0,
                 pk_kill_count: 0,
                 fishing_autocast: false,
@@ -816,6 +825,23 @@ impl Message<GiveRestedBonus> for PlayerActor {
             &format!("休息经验加成已生效：+{}% 经验（剩余 {} 分钟）", msg.exp_bonus_percent, total / 60_000),
         );
         debug!("Player {} rested bonus: +{}% for {} min", self.state.name, msg.exp_bonus_percent, total / 60_000);
+    }
+}
+
+/// 设置喊话状态（C# HasMapShout/HasServerShout/ShoutTime）
+pub struct SetShoutState {
+    pub map_shout: bool,
+    pub server_shout: bool,
+    pub last_shout_time: i64,
+}
+
+impl Message<SetShoutState> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetShoutState, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.has_map_shout = msg.map_shout;
+        self.state.has_server_shout = msg.server_shout;
+        self.state.last_shout_time = msg.last_shout_time;
     }
 }
 
@@ -4314,6 +4340,9 @@ mod tests {
             rested_counter: 0,
             rested_exp_percent: 0,
             rested_exp_end_tick: 0,
+            has_map_shout: false,
+            has_server_shout: false,
+            last_shout_time: 0,
             pk_points: 0,
             pk_kill_count: 0,
             buffs: Vec::new(),
