@@ -337,7 +337,16 @@ impl Message<UseItemRequest> for WorldActor {
             Ok(Some(s)) => s,
             _ => return,
         };
-        if player_state.is_dead { return; }
+        // C# UseItem：死亡时仅允许使用复活卷轴（Scroll shape 6）
+        if player_state.is_dead {
+            let allow_resurrect = record.actor_ref.ask(GetItemInfo { unique_id: msg.unique_id }).await.unwrap_or(None)
+                .and_then(|it| self.item_infos.get(&it.item_index).cloned())
+                .map(|i| i.item_type == 17 && i.shape == 6)
+                .unwrap_or(false);
+            if !allow_resurrect {
+                return;
+            }
+        }
         if let Some(mi) = self.map_infos.get(&(player_state.map_index as i32)) {
             if mi.no_drug {
                 send_system_message(&self.gate_ref, msg.session_id, "该地图无法使用物品");
