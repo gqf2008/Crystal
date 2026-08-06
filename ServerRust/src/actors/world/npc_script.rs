@@ -496,13 +496,21 @@ async fn eval_one_check(
             let (op, amount) = parse_op_amount(args);
             compare_i64(player.inventory.gold as i64, op, amount)
         }
-        // CHECKITEM <name|index> <count>
+        // CHECKITEM <name|index> <count> [dura] — 背包物品数量（>=，对齐 C# CheckType.CheckItem）
+        // C#：count 缺省为 1；dura 存在且可解析时只统计 current_dura >= dura*1000 的物品
+        // （NPCSegment.cs CheckItem，与 CHECKHEROITEM 一致）。
         "CHECKITEM" => {
             let (idx, cnt) = parse_item_count(args, world);
+            let min_dura = args.get(2).and_then(|s| s.parse::<u32>().ok());
             if idx == 0 {
                 false
             } else {
-                has_item(world, session_id, idx, cnt).await
+                let total: u16 = player.inventory.backpack.iter().flatten()
+                    .filter(|s| s.item.item_index == idx)
+                    .filter(|s| min_dura.map(|d| (s.item.current_dura as u32) >= d * 1000).unwrap_or(true))
+                    .map(|s| s.item.count)
+                    .sum();
+                total >= cnt
             }
         }
         // CHECKCLASS <Warrior|Wizard|...|class_index>
