@@ -61,6 +61,8 @@ pub struct Guild {
     pub gold: u64,
     /// 行会仓库物品（最多 100 格）
     pub storage_items: Vec<Option<(mir2_shared::data::item::UserItem, u32)>>,
+    /// 已激活的行会 Buff id 列表（C# GuildObject.BuffList）
+    pub buffs: Vec<u32>,
 }
 
 impl Guild {
@@ -81,6 +83,7 @@ impl Guild {
             }],
             gold: 0,
             storage_items: vec![None; 100],
+            buffs: Vec::new(),
         }
     }
 

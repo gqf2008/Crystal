@@ -276,20 +276,77 @@ impl Message<GuildBuffUpdateRequest> for WorldActor {
 
         debug!("GuildBuffUpdate: {} buff_id={}", state.name, msg.buff_id);
 
-        if state.guild_name.is_none() {
+        let Some(guild_name) = &state.guild_name else {
             send_system_message(&self.gate_ref, msg.session_id, "你还没有加入行会");
+            return;
+        };
+
+        // buff_id=0 means "request list" - send current active buffs
+        if msg.buff_id == 0 {
+            let buffs = self.guild_buffs(guild_name).await;
+            self.send_guild_buff_list(msg.session_id, &buffs).await;
             return;
         }
 
-        // buff_id=0 means "request buff list" - send empty list (no buffs defined yet)
-        if msg.buff_id == 0 {
-            let body = Vec::new();
+        // 激活/停用需要 Leader/Officer（对齐 C# GuildRankOptions.CanActivateBuff）
+        if state.guild_rank != crate::actors::guild::GuildRank::Leader
+            && state.guild_rank != crate::actors::guild::GuildRank::Officer
+        {
+            send_system_message(&self.gate_ref, msg.session_id, "没有权限激活行会 Buff");
+            return;
+        }
+
+        // 切换 buff 激活状态（C# GuildBuffUpdate enable/activate）
+        let mut buffs = self.guild_buffs(guild_name).await;
+        if buffs.contains(&msg.buff_id) {
+            buffs.retain(|b| *b != msg.buff_id);
+            send_system_message(&self.gate_ref, msg.session_id, &format!("行会 Buff #{} 已停用", msg.buff_id));
+        } else {
+            buffs.push(msg.buff_id);
+            send_system_message(&self.gate_ref, msg.session_id, &format!("行会 Buff #{} 已激活", msg.buff_id));
+        }
+        self.set_guild_buffs(guild_name, &buffs).await;
+
+        // 广播给同公会在线成员
+        let online: Vec<u64> = self.players.keys().copied().collect();
+        for sid in online {
+            if let Some(r) = self.players.get(&sid) {
+                if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                    if os.guild_name.as_deref() == Some(guild_name.as_str()) {
+                        self.send_guild_buff_list(sid, &buffs).await;
+                    }
+                }
+            }
+        }
+        debug!("GuildBuffUpdate: {} toggled buff {} (active={:?})", state.name, msg.buff_id, buffs);
+    }
+}
+
+impl WorldActor {
+    /// 读取行会激活的 Buff 列表
+    async fn guild_buffs(&self, guild_name: &str) -> Vec<u32> {
+        self.social_ref.ask(crate::actors::social::NpcGetGuildBuffs { guild_name: guild_name.to_string() }).await.unwrap_or_default()
+    }
+
+    /// 写入行会激活的 Buff 列表
+    async fn set_guild_buffs(&self, guild_name: &str, buffs: &[u32]) {
+        let _ = self.social_ref.ask(crate::actors::social::NpcSetGuildBuffs {
+            guild_name: guild_name.to_string(),
+            buffs: buffs.to_vec(),
+        }).await;
+    }
+
+    /// 发送 GuildBuffList 完整包（C# S.GuildBuffList：Remove + ActiveBuffs + GuildBuffs）
+    async fn send_guild_buff_list(&self, session_id: u64, buffs: &[u32]) {
+        let packet = mir2_shared::packets::server::special_systems::GuildBuffList {
+            active_buffs: buffs.iter().map(|b| *b as i32).collect(),
+        };
+        let mut body = Vec::new();
+        if packet.write_body(&mut std::io::Cursor::new(&mut body)).is_ok() {
             let _ = self.gate_ref.tell(SendToClient {
-                session_id: msg.session_id,
+                session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildBuffList as i16, &body),
             }).await;
-        } else {
-            debug!("GuildBuffUpdate: {} buff_id={} (guild buff system not implemented)", state.name, msg.buff_id);
         }
     }
 }

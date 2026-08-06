@@ -269,6 +269,36 @@ impl Message<NpcGetGuildMemberOptions> for SocialActor {
     }
 }
 
+/// WorldActor -> SocialActor: 读取行会激活的 Buff 列表（C# GuildObject.BuffList）
+pub struct NpcGetGuildBuffs {
+    pub guild_name: String,
+}
+
+impl Message<NpcGetGuildBuffs> for SocialActor {
+    type Reply = Vec<u32>;
+
+    async fn handle(&mut self, msg: NpcGetGuildBuffs, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.guilds.get(&msg.guild_name).map(|g| g.buffs.clone()).unwrap_or_default()
+    }
+}
+
+/// WorldActor -> SocialActor: 写入行会激活的 Buff 列表
+pub struct NpcSetGuildBuffs {
+    pub guild_name: String,
+    pub buffs: Vec<u32>,
+}
+
+impl Message<NpcSetGuildBuffs> for SocialActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: NpcSetGuildBuffs, _ctx: &mut Context<Self, Self::Reply>) {
+        if let Some(g) = self.guilds.get_mut(&msg.guild_name) {
+            g.buffs = msg.buffs;
+            self.save_guild_to_db(&msg.guild_name).await;
+        }
+    }
+}
+
 /// WorldActor(NPC 脚本) -> SocialActor: 查询玩家是否队长（对齐 C# CheckType.Groupleader）
 pub struct NpcIsGroupLeader {
     pub session_id: u64,
