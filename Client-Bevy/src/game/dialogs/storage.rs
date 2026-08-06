@@ -43,6 +43,18 @@ pub struct StorageState {
     pub unlock_msg: String,
 }
 
+impl StorageState {
+    /// 按服务端 ResizeStorage 调整格数（C# Array.Resize：截断/补空，上限 COLS*ROWS=80，#281）
+    pub fn resize(&mut self, size: usize) {
+        let size = size.min(COLS * ROWS);
+        if size < self.items.len() {
+            self.items.truncate(size);
+        } else {
+            self.items.resize(size, None);
+        }
+    }
+}
+
 const DIALOG_X: f32 = 600.0;
 const DIALOG_Y: f32 = 60.0;
 const COLS: usize = 10;
@@ -100,6 +112,7 @@ impl Plugin for StoragePlugin {
         app.add_systems(
             Update,
             (
+                storage_grid_sync_system,
                 storage_ui_system,
                 storage_action_system,
                 storage_tooltip_system,
@@ -416,24 +429,13 @@ fn spawn_storage_dialog(
         9.8,
     );
 
-    // 格子底板（80 格，10x8）+ 物品图标 + 堆叠数量（#90 通用 ItemCell）
-    for i in 0..(COLS * ROWS) {
-        let x = i % COLS;
-        let y = i / COLS;
-        let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
-        let sy = DIALOG_Y + 60.0 + y as f32 * (CELL_H + 1.0);
-        let slot = spawn_item_cell(&mut commands, &mut images, &font, sx, sy, 6.5, CELL_W, CELL_H, i);
-        commands.entity(slot).insert((
-            StorageSlot(i),
-            DialogRoot(DialogKind::Storage),
-            StorageWidget,
-        ));
-    }
+    // 格子底板不在此预生成：#281 由 storage_grid_sync_system 按 StorageState.items.len()
+    // 动态生成/移除（进图 UserStorage 到达前 items 为空，避免先建后删抖动）
 }
 
-/// 光标坐标 → 仓库格
-fn storage_slot_at(cx: f32, cy: f32) -> Option<usize> {
-    for i in 0..(COLS * ROWS) {
+/// 光标坐标 → 仓库格（按实际格数，#281）
+fn storage_slot_at(cx: f32, cy: f32, size: usize) -> Option<usize> {
+    for i in 0..size.min(COLS * ROWS) {
         let x = i % COLS;
         let y = i / COLS;
         let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
@@ -522,7 +524,7 @@ fn storage_action_system(
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
 
-    let storage_slot = storage_slot_at(cursor.x, cursor.y);
+    let storage_slot = storage_slot_at(cursor.x, cursor.y, state.items.len());
     let inv_slot = inv_slot_at(
         cursor.x,
         cursor.y,
@@ -611,6 +613,11 @@ fn storage_server_events(
             storage.unlock_panel = true;
             storage.unlock_msg.clear();
         }
+        if let ServerEvent::StorageResized { size } = ev {
+            // #281：仓库扩容（C# S.ResizeStorage → Array.Resize + RefreshStorage2）
+            storage.resize(*size);
+            tracing::info!("📦 仓库扩容 -> {} 格", storage.items.len());
+        }
         if let ServerEvent::StorageUnlockResult { result, has_password } = ev {
             // C# result：0=成功 1=格式错 2=密码错 3=不可用 4=无密码直接解锁
             let _ = has_password;
@@ -642,7 +649,7 @@ fn storage_tooltip_system(
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
     let mut hit: Option<crate::game::dialogs::inventory::InvItem> = None;
-    if let Some(i) = storage_slot_at(cursor.x, cursor.y) {
+    if let Some(i) = storage_slot_at(cursor.x, cursor.y, state.items.len()) {
         hit = state.items.get(i).and_then(|s| s.as_ref()).cloned();
     }
     let Some(item) = hit else {
@@ -761,5 +768,66 @@ fn storage_unlock_system(
             storage.unlock_msg.clear();
             input.active = None;
         }
+    }
+}
+
+/// 仓库动态格子同步（#281）：按 StorageState.items.len() 生成/移除 StorageSlot 格子。
+/// 对齐 C# StorageDialog Grid（10x8=80 上限）；缩容时移除多余格子。
+fn storage_grid_sync_system(
+    mut commands: Commands,
+    state: Res<StorageState>,
+    mut images: ResMut<Assets<Image>>,
+    mut fonts: ResMut<Assets<Font>>,
+    mut ui_font: ResMut<UiFont>,
+    slots: Query<(Entity, &StorageSlot)>,
+) {
+    let size = state.items.len().min(COLS * ROWS);
+    if state.items.is_empty() && slots.is_empty() {
+        return; // 进图 UserStorage 到达前：无格子可同步
+    }
+    // 缩容：移除超出 size 的格子
+    for (e, s) in &slots {
+        if s.0 >= size {
+            commands.entity(e).despawn();
+        }
+    }
+    let mut existing: Vec<usize> = slots
+        .iter()
+        .map(|(_, s)| s.0)
+        .filter(|i| *i < size)
+        .collect();
+    existing.sort_unstable();
+    if existing.len() == size {
+        return;
+    }
+    // 扩容：补缺失格子
+    if !ui_font.0.is_strong() {
+        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+    }
+    let font = ui_font.0.clone();
+    let mut next = 0usize;
+    for i in 0..size {
+        if existing.get(next).copied() == Some(i) {
+            next += 1;
+            continue;
+        }
+        let x = i % COLS;
+        let y = i / COLS;
+        let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
+        let sy = DIALOG_Y + 60.0 + y as f32 * (CELL_H + 1.0);
+        let cell = spawn_item_cell(
+            &mut commands,
+            &mut images,
+            &font,
+            sx,
+            sy,
+            6.5,
+            CELL_W,
+            CELL_H,
+            i,
+        );
+        commands
+            .entity(cell)
+            .insert((StorageSlot(i), DialogRoot(DialogKind::Storage), StorageWidget));
     }
 }

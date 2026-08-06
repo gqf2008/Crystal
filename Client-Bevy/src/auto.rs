@@ -26,6 +26,14 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--storage-test") {
         app.add_systems(Update, auto_storage_test);
     }
+    // --storage-unlock-test: 仓库密码解锁链路（#200，[@Storage] → 解锁框 → UnlockStorage → UserStorage）
+    if std::env::args().any(|a| a == "--storage-unlock-test") {
+        app.add_systems(Update, auto_storage_unlock_test);
+    }
+    // --storage-resize-test: 仓库扩容链路（#281，进图 mock 回发 ResizeStorage(80) → 校验 items.len()==80）
+    if std::env::args().any(|a| a == "--storage-resize-test") {
+        app.add_systems(Update, auto_storage_resize_test);
+    }
     // --group-test: 自动组队邀请链路（自动化验证用，配合 --group-accept）
     if std::env::args().any(|a| a == "--group-test") {
         app.add_systems(Update, auto_group_test);
@@ -8492,4 +8500,30 @@ fn auto_storage_unlock_test(
         }
         _ => {}
     }
+}
+
+
+/// --storage-resize-test：仓库扩容链路（#281）
+/// 流程：进游戏 → mock 回发 ResizeStorage(80) → 断言 StorageState.items.len()==80
+fn auto_storage_resize_test(
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    storage: Res<client_bevy::game::dialogs::storage::StorageState>,
+    mut t: Local<f32>,
+    mut done: Local<bool>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game || *done {
+        return;
+    }
+    *t += time.delta_secs();
+    if *t < 8.0 {
+        return;
+    }
+    if storage.items.len() == 80 {
+        tracing::info!("[SRESIZE] ✅ PASS 仓库扩容 size=80");
+    } else {
+        tracing::error!("[SRESIZE] ❌ FAIL size={} 期望 80", storage.items.len());
+    }
+    *done = true;
 }
