@@ -1209,6 +1209,30 @@ impl WorldActor {
             .collect()
     }
 
+    /// C# Teleport/Knockback：向自身发 UserLocation + 同图其他玩家 BroadcastMovement
+    pub(crate) async fn broadcast_position_change(&self, session_id: u64, x: i32, y: i32, direction: u8) {
+        let mut loc = Vec::new();
+        loc.extend_from_slice(&x.to_le_bytes());
+        loc.extend_from_slice(&y.to_le_bytes());
+        loc.push(direction);
+        let _ = self.gate_ref.tell(SendToClient {
+            session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &loc),
+        }).await;
+        let object_id = self.players.get(&session_id).map(|r| r.object_id).unwrap_or(0);
+        let others: Vec<_> = self.other_players(session_id).into_iter().map(|r| r.actor_ref.clone()).collect();
+        for other in others {
+            let _ = other.ask(crate::actors::player::BroadcastMovement {
+                object_id,
+                x,
+                y,
+                direction,
+                move_type: crate::actors::player::MoveType::Walk,
+                exclude_session: session_id,
+            }).await;
+        }
+    }
+
     /// 发送 NPC 商店商品列表（DB 商品）
     pub(crate) fn send_npc_goods(&self, session_id: u64, npc: &NpcState) {
         let goods = self.npc_goods.get(&npc.db_index).cloned().unwrap_or_default();

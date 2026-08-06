@@ -1430,6 +1430,7 @@ impl Message<MagicRequest> for WorldActor {
                         x: new_x, y: new_y, direction: msg.direction,
                         map_index: None, is_mounted: None,
                     }).await;
+                    self.broadcast_position_change(msg.session_id, new_x, new_y, msg.direction).await;
                 }
                 debug!("Magic: {} casts ShoulderDash (dashed to {},{}, dealt {} dmg)",
                     state.name, new_x, new_y, pushed_damage);
@@ -1510,6 +1511,7 @@ impl Message<MagicRequest> for WorldActor {
                     map_index: None,
                     is_mounted: None,
                 }).await;
+                self.broadcast_position_change(msg.session_id, tx, ty, msg.direction).await;
                 debug!("Magic: {} teleports/blinks to ({}, {})", state.name, tx, ty);
             }
             // --- 弹道类法术（任务3）：FireBall/GreatFireBall/ThunderBolt/FrostCrunch/Vampirism ---
@@ -2003,6 +2005,7 @@ impl Message<MagicRequest> for WorldActor {
                         x: tx, y: ty, direction: msg.direction,
                         map_index: None, is_mounted: None,
                     }).await;
+                    self.broadcast_position_change(msg.session_id, tx, ty, msg.direction).await;
                     debug!("Magic: {} casts FlashDash to ({},{})", state.name, tx, ty);
                 }
             }
@@ -2019,6 +2022,7 @@ impl Message<MagicRequest> for WorldActor {
                     x: tx, y: ty, direction: back_dir as u8,
                     map_index: None, is_mounted: None,
                 }).await;
+                self.broadcast_position_change(msg.session_id, tx, ty, back_dir as u8).await;
                 debug!("Magic: {} casts BackStep to ({},{})", state.name, tx, ty);
             }
             // --- 召唤系法术（道士/法师/弓箭手）：在施法者前方 1 格 spawn 一只战斗召唤物 ---
@@ -2346,6 +2350,7 @@ impl Message<MagicRequest> for WorldActor {
                         x: new_x, y: new_y, direction: msg.direction,
                         map_index: None, is_mounted: None,
                     }).await;
+                    self.broadcast_position_change(msg.session_id, new_x, new_y, msg.direction).await;
                 }
                 debug!("Magic: {} casts SlashingBurst (dashed to {},{}, dealt {} dmg)",
                        state.name, new_x, new_y, slashed_damage);
