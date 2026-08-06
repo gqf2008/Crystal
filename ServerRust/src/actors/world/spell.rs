@@ -144,6 +144,12 @@ fn make_spell_config(
             tick_interval_ms: 1000,
             tick_value: stat.max(30) * 2,
         },
+        Spell::DelayedExplosion => SpellConfig {
+            spell: Spell::DelayedExplosion,
+            duration_ms: 60_000,
+            tick_interval_ms: 3000,
+            tick_value: stat.max(30) * 2,
+        },
         Spell::Portal => SpellConfig {
             spell: Spell::Portal,
             duration_ms: 60_000,

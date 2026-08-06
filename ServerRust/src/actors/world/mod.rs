@@ -513,6 +513,7 @@ const SPELL_HALFMOON: u8 = mir2_shared::enums::Spell::HalfMoon as u8;          /
 const SPELL_SHOULDER_DASH: u8 = mir2_shared::enums::Spell::ShoulderDash as u8; // 8 野蛮冲撞
 const SPELL_CROSS_HALFMOON: u8 = mir2_shared::enums::Spell::CrossHalfMoon as u8; // 13 十字半月
 const SPELL_FIRE_BURST: u8 = mir2_shared::enums::Spell::FireBurst as u8;             // 97 刺客·火焰爆发（同 Repulsion）
+const SPELL_TRAP: u8 = mir2_shared::enums::Spell::Trap as u8;                       // 98 刺客·陷阱（目标 60s 麻痹）
 const SPELL_FLAMING_SWORD: u8 = mir2_shared::enums::Spell::FlamingSword as u8;     // 8 战士·烈焰剑（下一次近战附加火焰加成）
 const SPELL_TWIN_DRAKE_BLADE: u8 = mir2_shared::enums::Spell::TwinDrakeBlade as u8;   // 6 战士·双龙斩（下一次近战双段伤害）
 const SPELL_SLASHING_BURST: u8 = mir2_shared::enums::Spell::SlashingBurst as u8;     // 15 战士·横扫千军（冲锋+伤害）
@@ -539,6 +540,7 @@ const SPELL_CRESCENT_SLASH: u8 = mir2_shared::enums::Spell::CrescentSlash as u8;
 const SPELL_FURY: u8 = mir2_shared::enums::Spell::Fury as u8;                    // 19 攻击力+
 const SPELL_RAGE: u8 = mir2_shared::enums::Spell::Rage as u8;                    // 16 暴击+
 const SPELL_BACK_STEP: u8 = mir2_shared::enums::Spell::BackStep as u8;           // 130 后跳
+const SPELL_DELAYED_EXPLOSION: u8 = mir2_shared::enums::Spell::DelayedExplosion as u8; // 125 弓手·定时爆炸（3s 引爆）
 
 // 召唤系法术（在施法者附近 spawn 一只 MonsterState 作为战斗召唤物）
 const SPELL_SUMMON_SKELETON: u8 = mir2_shared::enums::Spell::SummonSkeleton as u8; // 68 道士·召唤骷髅
@@ -568,6 +570,7 @@ const SPELL_REVELATION: u8 = mir2_shared::enums::Spell::Revelation as u8;       
 const SPELL_REINCARNATION: u8 = mir2_shared::enums::Spell::Reincarnation as u8;   // 79 道士·复活死亡玩家
 const SPELL_ENERGY_REPULSOR: u8 = mir2_shared::enums::Spell::EnergyRepulsor as u8; // 72 道士·气功波（同 Repulsion）
 const SPELL_CURSE: u8 = mir2_shared::enums::Spell::Curse as u8;                   // 81 道士·诅咒（区域减攻+减速）
+const SPELL_PLAGUE: u8 = mir2_shared::enums::Spell::Plague as u8;                 // 82 道士·瘟疫（3x3 随机毒+伤害）
 // 刺客系
 const SPELL_POISON_SWORD: u8 = mir2_shared::enums::Spell::PoisonSword as u8;      // 99 刺客·武器涂毒 buff
 

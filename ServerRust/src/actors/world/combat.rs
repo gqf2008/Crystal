@@ -873,6 +873,44 @@ fn curse_cells(tx: i32, ty: i32) -> Vec<(i32, i32)> {
     cells
 }
 
+/// #328 Plague：C# Map.cs GetPointsInEffectiveSquare(location, 3) —— 3×3 区域
+fn plague_cells(tx: i32, ty: i32) -> Vec<(i32, i32)> {
+    let mut cells = Vec::new();
+    for x in (tx - 1)..=(tx + 1) {
+        for y in (ty - 1)..=(ty + 1) {
+            cells.push((x, y));
+        }
+    }
+    cells
+}
+
+/// #328 Plague：C# 随机毒表（Random.Next(15)：0-2 Slow、3-4 Frozen、5-9 Green、10-14 None）
+fn plague_poison(roll: i32) -> mir2_shared::enums::PoisonType {
+    if roll < 3 {
+        mir2_shared::enums::PoisonType::SLOW
+    } else if roll < 5 {
+        mir2_shared::enums::PoisonType::FROZEN
+    } else if roll < 10 {
+        mir2_shared::enums::PoisonType::GREEN
+    } else {
+        mir2_shared::enums::PoisonType::NONE
+    }
+}
+
+/// #328 Plague：毒强度（C# Red → value/15+Lv+1；其余 value+(Lv+1)*2）
+fn plague_temp_value(value: i32, level: u8, poison: mir2_shared::enums::PoisonType) -> i32 {
+    if poison == mir2_shared::enums::PoisonType::RED {
+        value / 15 + level as i32 + 1
+    } else {
+        value + (level as i32 + 1) * 2
+    }
+}
+
+/// #328 Plague：毒持续时间（C# 2*(Lv+1)+value/10）
+fn plague_duration(level: u8, value: i32) -> i32 {
+    2 * (level as i32 + 1) + value / 10
+}
+
 impl WorldActor {
     /// #306：广播法术命中（ObjectStruck + DamageIndicator，对齐 C# Attacked() 表现）
     pub(crate) async fn broadcast_spell_hit(
@@ -937,6 +975,7 @@ impl Message<MagicRequest> for WorldActor {
         // Pre-allocate object ID for persistent spells (before spell_db borrow)
         let needs_spell_obj = matches!(msg.spell,
             SPELL_FIREWALL | SPELL_BLIZZARD | SPELL_METEOR_STRIKE | SPELL_POISON_CLOUD | SPELL_HEALING_CIRCLE | SPELL_EXPLOSIVE_TRAP
+            | SPELL_DELAYED_EXPLOSION
         );
         let spell_oid = if needs_spell_obj { Some(self.alloc_object_id()) } else { None };
 
@@ -1061,7 +1100,7 @@ impl Message<MagicRequest> for WorldActor {
             mir2_shared::enums::Spell::FireWall | mir2_shared::enums::Spell::Blizzard
             | mir2_shared::enums::Spell::MeteorStrike | mir2_shared::enums::Spell::PoisonCloud
             | mir2_shared::enums::Spell::HealingCircle | mir2_shared::enums::Spell::ExplosiveTrap
-            | mir2_shared::enums::Spell::Portal
+            | mir2_shared::enums::Spell::Portal | mir2_shared::enums::Spell::DelayedExplosion
         );
         let persistent_spell = if is_persistent {
             spell_oid.map(|oid| spell::create_persistent_spell(
@@ -2187,6 +2226,69 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} casts SlashingBurst (dashed to {},{}, dealt {} dmg)",
                        state.name, new_x, new_y, slashed_damage);
             }
+            // #328：Plague —— 3×3 区域随机毒 + MaxSC×2 MAC 伤害（C# Map.cs:1972）
+            SPELL_PLAGUE => {
+                let value = if let Some(info) = spell_db {
+                    crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
+                } else { fastrand::i32(5..=12) }.max(1);
+                let damage = (magic_stat * 2).max(1);
+                let attacker_stats = state.to_combat_stats();
+                let level_offset = state.level.min(10) as u16;
+                let cells = plague_cells(target_x, target_y);
+                let hit_ids: Vec<u32> = self.monsters.iter()
+                    .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y)))
+                    .map(|(id, _)| *id)
+                    .collect();
+                let mut spell_hits: Vec<(u32, i32, i32, u8, i32)> = Vec::new();
+                for mid in hit_ids {
+                    // 随机毒（C# Map.cs 概率表）
+                    let ptype = plague_poison(fastrand::i32(0..15));
+                    if let Some(monster) = self.monsters.get_mut(&mid) {
+                        let temp_value = plague_temp_value(value, spell_level, ptype);
+                        if ptype != mir2_shared::enums::PoisonType::NONE {
+                            let dur = plague_duration(spell_level, value).max(1) as u32;
+                            crate::combat::poison::apply_poison(
+                                &mut monster.poison_list,
+                                crate::combat::poison::Poison::new(ptype, dur, temp_value, 1000),
+                            );
+                        }
+                        let defender_stats = monster.to_combat_stats();
+                        let r = combat_attack::resolve_attack(
+                            &attacker_stats, &defender_stats, damage,
+                            mir2_shared::enums::DefenceType::Mac, level_offset,
+                        );
+                        if r.is_hit && r.damage > 0 {
+                            monster.take_damage(r.damage);
+                            monster.provoked = true;
+                            monster.target_session = Some(msg.session_id);
+                            spell_hits.push((mid, monster.x, monster.y, monster.direction, r.damage));
+                        }
+                    }
+                }
+                self.broadcast_spell_hit(&spell_hits, object_id).await;
+                debug!("Magic: {} casts Plague (3x3, {} hit, dmg={})", state.name, spell_hits.len(), damage);
+            }
+            // #328：Trap —— 目标怪物 60 秒麻痹（C# Map.cs:2048 ShockTime）
+            SPELL_TRAP => {
+                let hit: Option<u32> = self.monsters.iter()
+                    .find(|(_, m)| m.x == target_x && m.y == target_y && m.hp > 0)
+                    .map(|(id, _)| *id);
+                if let Some(mid) = hit {
+                    if let Some(monster) = self.monsters.get_mut(&mid) {
+                        crate::combat::poison::apply_poison(
+                            &mut monster.poison_list,
+                            crate::combat::poison::Poison::new(
+                                mir2_shared::enums::PoisonType::PARALYSIS, 60, 0, 1000,
+                            ),
+                        );
+                        monster.provoked = true;
+                        monster.target_session = Some(msg.session_id);
+                        debug!("Magic: {} casts Trap -> monster {} paralyzed 60s", state.name, mid);
+                    }
+                } else {
+                    debug!("Magic: {} casts Trap (no target at {},{})", state.name, target_x, target_y);
+                }
+            }
             // #312：FlamingSword —— 施放后 10 秒内下一次近战攻击附加火焰加成（C# HumanObject.cs:8538）
             SPELL_FLAMING_SWORD => {
                 self.flaming_sword.insert(msg.session_id, (self.tick_count + 100, spell_level));
@@ -2558,5 +2660,38 @@ mod spell_geometry_tests {
         assert_eq!(cells.len(), 49);
         assert!(cells.contains(&(47, 57)));
         assert!(cells.contains(&(53, 63)));
+    }
+
+    #[test]
+    fn plague_area_3x3() {
+        let cells = plague_cells(50, 60);
+        assert_eq!(cells.len(), 9);
+        assert!(cells.contains(&(49, 59)));
+        assert!(cells.contains(&(51, 61)));
+        assert!(cells.contains(&(50, 60)));
+    }
+
+    #[test]
+    fn plague_poison_table() {
+        use mir2_shared::enums::PoisonType;
+        assert_eq!(plague_poison(0), PoisonType::SLOW);
+        assert_eq!(plague_poison(2), PoisonType::SLOW);
+        assert_eq!(plague_poison(3), PoisonType::FROZEN);
+        assert_eq!(plague_poison(4), PoisonType::FROZEN);
+        assert_eq!(plague_poison(5), PoisonType::GREEN);
+        assert_eq!(plague_poison(9), PoisonType::GREEN);
+        assert_eq!(plague_poison(10), PoisonType::NONE);
+        assert_eq!(plague_poison(14), PoisonType::NONE);
+    }
+
+    #[test]
+    fn plague_values() {
+        use mir2_shared::enums::PoisonType;
+        // Red：value/15 + Lv + 1
+        assert_eq!(plague_temp_value(30, 3, PoisonType::RED), 6);
+        // 其他：value + (Lv+1)*2
+        assert_eq!(plague_temp_value(30, 3, PoisonType::GREEN), 38);
+        // 持续：2*(Lv+1)+value/10
+        assert_eq!(plague_duration(3, 30), 11);
     }
 }
