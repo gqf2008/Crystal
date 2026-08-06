@@ -79,6 +79,10 @@ pub struct AccountInfo {
     pub storage_password_last_set: i64,
     /// 账户积分（NPC 脚本 GIVECREDIT/TAKECREDIT，对齐 C# Account.Credit）
     pub credit: u64,
+    /// 连续密码错误次数（C# Account.WrongPasswordCount，>=5 封禁 2 分钟）
+    pub wrong_password_count: u32,
+    /// 封禁到期时间（unix 秒；0 = 未封禁，C# Account.ExpiryDate）
+    pub banned_until: i64,
 }
 
 impl AccountInfo {
@@ -121,6 +125,8 @@ impl AccountActor {
                 storage_password_hash: None,
                 storage_password_last_set: 0,
                 credit: 0,
+                wrong_password_count: 0,
+                banned_until: 0,
             },
         );
 
@@ -143,6 +149,8 @@ impl AccountActor {
                 storage_password_hash: None,
                 storage_password_last_set: 0,
                 credit: 0,
+                wrong_password_count: 0,
+                banned_until: 0,
             },
         );
 
@@ -152,12 +160,28 @@ impl AccountActor {
     /// 登录验证
     /// 返回 (success, needs_db_save) — needs_db_save 表示密码已从 PBKDF2 迁移到 Argon2
     pub fn login(&mut self, username: &str, password: &str) -> (bool, bool) {
+        let now = Self::unix_now_secs();
         if let Some(account) = self.accounts.get_mut(username) {
-            let (ok, needs_migration) = verify_password(password, &account.password_hash);
-            if !ok {
-                warn!("Wrong password for account: {}", username);
+            // C#：封禁期内直接拒绝
+            if account.banned_until > now {
+                warn!("Account banned until {}: {}", account.banned_until, username);
                 return (false, false);
             }
+            let (ok, needs_migration) = verify_password(password, &account.password_hash);
+            if !ok {
+                // C#：WrongPasswordCount++，>=5 → 封禁 2 分钟
+                account.wrong_password_count = account.wrong_password_count.saturating_add(1);
+                if account.wrong_password_count >= 5 {
+                    account.banned_until = now + 120;
+                    warn!("Account '{}' banned for 2 minutes (too many wrong passwords)", username);
+                } else {
+                    warn!("Wrong password for account: {} (attempt {})", username, account.wrong_password_count);
+                }
+                return (false, false);
+            }
+            // 登录成功重置（C# WrongPasswordCount = 0 / Banned = false）
+            account.wrong_password_count = 0;
+            account.banned_until = 0;
             // If migrated from C#, re-hash with Argon2 on first login
             if needs_migration {
                 account.password_hash = hash_password(password);
@@ -177,6 +201,21 @@ impl AccountActor {
             (true, false)
         }
     }
+
+    /// 当前是否处于封禁期，返回封禁到期 unix 秒
+    pub fn banned_until(&self, username: &str) -> Option<i64> {
+        let now = Self::unix_now_secs();
+        self.accounts.get(username)
+            .map(|a| a.banned_until)
+            .filter(|&until| until > now)
+    }
+
+fn unix_now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
 
     /// 登出
     pub fn logout(&mut self, username: &str) {
@@ -320,6 +359,7 @@ impl Message<LoginRequest> for AccountActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let (success, _needs_db_save) = self.login(&msg.username, &msg.password);
+        let banned_until = if success { None } else { self.banned_until(&msg.username) };
 
         // 同步到数据库
         if success {
@@ -352,6 +392,7 @@ impl Message<LoginRequest> for AccountActor {
                 success,
                 username: msg.username.clone(),
                 characters,
+                banned_until,
             })
             .await;
     }
