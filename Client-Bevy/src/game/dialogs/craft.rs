@@ -49,6 +49,8 @@ pub struct CraftState {
     pub selected: Option<usize>,
     pub message: String,
     pub last_result: Option<(u32, u16, bool)>,
+    /// #262 已学会配方（S.NewRecipeInfo）
+    pub learned: Vec<i32>,
 }
 
 #[derive(Component)]
@@ -238,6 +240,13 @@ fn craft_server_events(
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
+        if let ServerEvent::RecipeLearned { recipe_id } = ev {
+            // #262：学会配方
+            if !craft.learned.contains(recipe_id) {
+                craft.learned.push(*recipe_id);
+            }
+            craft.message = format!("学会配方 #{}", recipe_id);
+        }
         if let ServerEvent::CraftResult { recipe_id, count, success } = ev {
             craft.last_result = Some((*recipe_id, *count, *success));
             craft.message = if *success {

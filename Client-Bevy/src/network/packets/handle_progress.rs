@@ -17,7 +17,7 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::CraftItem as i16, ServerPacketIds::ItemRentalRequest as i16, ServerPacketIds::UpdateRentalItem as i16, ServerPacketIds::ItemRentalFee as i16, ServerPacketIds::ItemRentalPeriod as i16, ServerPacketIds::DepositRentalItem as i16, ServerPacketIds::RetrieveRentalItem as i16, ServerPacketIds::ItemRentalLock as i16, ServerPacketIds::ItemRentalPartnerLock as i16, ServerPacketIds::CanConfirmItemRental as i16, ServerPacketIds::ConfirmItemRental as i16, ServerPacketIds::CancelItemRental as i16, ServerPacketIds::ChangeQuest as i16, ServerPacketIds::CompleteQuest as i16, ServerPacketIds::AddBuff as i16, ServerPacketIds::RemoveBuff as i16, ServerPacketIds::PlayerInspect as i16, ServerPacketIds::UpdateIntelligentCreatureList as i16, ServerPacketIds::ChangeHero as i16, ServerPacketIds::MarriageRequest as i16, ServerPacketIds::LoverUpdate as i16, ServerPacketIds::DivorceRequest as i16, ServerPacketIds::ObjectColourChanged as i16, ServerPacketIds::ManageHeroes as i16, ServerPacketIds::NewHero as i16, ServerPacketIds::SetHeroBehaviour as i16, ServerPacketIds::SetAutoPotValue as i16, ServerPacketIds::SetAutoPotItem as i16, ServerPacketIds::HeroInformation as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::CraftItem as i16, ServerPacketIds::ItemRentalRequest as i16, ServerPacketIds::UpdateRentalItem as i16, ServerPacketIds::ItemRentalFee as i16, ServerPacketIds::ItemRentalPeriod as i16, ServerPacketIds::DepositRentalItem as i16, ServerPacketIds::RetrieveRentalItem as i16, ServerPacketIds::ItemRentalLock as i16, ServerPacketIds::ItemRentalPartnerLock as i16, ServerPacketIds::CanConfirmItemRental as i16, ServerPacketIds::ConfirmItemRental as i16, ServerPacketIds::CancelItemRental as i16, ServerPacketIds::ChangeQuest as i16, ServerPacketIds::CompleteQuest as i16, ServerPacketIds::NewQuestInfo as i16, ServerPacketIds::ShareQuest as i16, ServerPacketIds::GainedQuestItem as i16, ServerPacketIds::DeleteQuestItem as i16, ServerPacketIds::NewRecipeInfo as i16, ServerPacketIds::PauseBuff as i16, ServerPacketIds::RefreshItem as i16, ServerPacketIds::SetBindingShot as i16, ServerPacketIds::AddBuff as i16, ServerPacketIds::RemoveBuff as i16, ServerPacketIds::PlayerInspect as i16, ServerPacketIds::UpdateIntelligentCreatureList as i16, ServerPacketIds::ChangeHero as i16, ServerPacketIds::MarriageRequest as i16, ServerPacketIds::LoverUpdate as i16, ServerPacketIds::DivorceRequest as i16, ServerPacketIds::ObjectColourChanged as i16, ServerPacketIds::ManageHeroes as i16, ServerPacketIds::NewHero as i16, ServerPacketIds::SetHeroBehaviour as i16, ServerPacketIds::SetAutoPotValue as i16, ServerPacketIds::SetAutoPotItem as i16, ServerPacketIds::HeroInformation as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M41: 合成 ----
@@ -104,6 +104,36 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
             server_events.write(ServerEvent::RentalCancelled);
             tracing::info!("📦 租赁取消");
         }
+        // #262：配方 / Buff 暂停 / 杂项
+        x if x == ServerPacketIds::NewRecipeInfo as i16 => {
+            if let Ok(p) = ui_events::NewRecipeInfo::read_body(&mut cur) {
+                server_events.write(ServerEvent::RecipeLearned {
+                    recipe_id: p.recipe_id,
+                });
+                tracing::info!("📖 学会配方 #{}", p.recipe_id);
+            }
+        }
+        x if x == ServerPacketIds::PauseBuff as i16 => {
+            if let Ok(p) = buff::PauseBuff::read_body(&mut cur) {
+                server_events.write(ServerEvent::BuffPaused {
+                    buff_type: p.buff_type as u8,
+                    object_id: p.object_id,
+                    paused: p.paused,
+                });
+                tracing::info!("⏸️ Buff 暂停 id={} paused={}", p.object_id, p.paused);
+            }
+        }
+        x if x == ServerPacketIds::RefreshItem as i16 => {
+            if let Ok(p) = item::RefreshItem::read_body(&mut cur) {
+                tracing::debug!("🔄 刷新物品 uid={}", p.item.unique_id);
+            }
+        }
+        x if x == ServerPacketIds::SetBindingShot as i16 => {
+            if let Ok(p) = ui_events::SetBindingShot::read_body(&mut cur) {
+                tracing::debug!("🎯 定身射击 enabled={}", p.enabled);
+            }
+        }
+
         // #260：任务数据包
         x if x == ServerPacketIds::NewQuestInfo as i16 => {
             if let Ok(p) = quest::NewQuestInfo::read_body(&mut cur) {

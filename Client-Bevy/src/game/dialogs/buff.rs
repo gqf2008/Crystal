@@ -198,6 +198,20 @@ fn buff_server_events(
                 buff.buffs.retain(|b| b.tag != *tag);
                 buff.message = format!("状态消失: {}", buff_name(*tag));
             }
+            ServerEvent::BuffPaused {
+                buff_type,
+                object_id,
+                paused,
+            } => {
+                // #262：Buff 暂停/恢复提示
+                buff.message = format!(
+                    "状态{}: {} (对象 {})",
+                    if *paused { "暂停" } else { "恢复" },
+                    buff_name(*buff_type),
+                    object_id
+                );
+                tracing::info!("⏸️ Buff {} 对象 {}", buff_name(*buff_type), object_id);
+            }
             _ => {}
         }
     }
