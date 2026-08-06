@@ -998,10 +998,25 @@ async fn eval_one_check(
             };
             want_byte.map(|w| player.gender as u8 == w).unwrap_or(false)
         }
-        // GROUPCOUNT <op> <n>
+        // GROUPCOUNT <op> <n> — 组队成员数比较（对齐 C# CheckType.GroupCount：
+        // 统计同 group_id 玩家数（含自己）；无组（GroupMembers == null）→ 恒失败）
         "GROUPCOUNT" => {
             let (op, amount) = parse_op_amount(args);
-            let cnt = player.group_id.map(|_| 1i64).unwrap_or(0);
+            let Some(gid) = player.group_id else {
+                return false;
+            };
+            let mut cnt = 0i64;
+            for (sid, r) in &world.players {
+                if *sid == session_id {
+                    cnt += 1;
+                    continue;
+                }
+                if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                    if os.group_id == Some(gid) {
+                        cnt += 1;
+                    }
+                }
+            }
             compare_i64(cnt, op, amount)
         }
         // HASBAGSPACE <op> <count> — 背包空格数比较（对齐 C# CheckType.HasBagSpace：
