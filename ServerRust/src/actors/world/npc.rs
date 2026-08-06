@@ -717,17 +717,26 @@ impl WorldActor {
             return;
         };
         let Some(hero) = heroes.iter().find(|h| h.index as u8 == state.hero_index).cloned() else { return };
-        if hero.dead {
+        // C# ReviveHero：仅当英雄死亡（HP == 0）时复活；Rust 用 dead 标记 + AI HP<=0 判定
+        let ai_dead = self.hero_ai_states.get(&session_id).map(|ai| ai.hp <= 0).unwrap_or(false);
+        if hero.dead || ai_dead {
             if let Some(hs) = self.player_heroes.get_mut(&session_id) {
                 if let Some(h) = hs.iter_mut().find(|h| h.index == hero.index) {
                     h.dead = false;
                 }
             }
-            let db_heroes: Vec<db::DbHero> = heroes.iter().map(|h| db::DbHero {
-                index: h.index, name: h.name.clone(), level: h.level,
-                class: h.class as u8, gender: h.gender as u8,
-                dead: false, sealed: h.sealed,
-            }).collect();
+            // 复活回满 HP（C# CurrentHero.HP = Hero.Stats[HP]）
+            if let Some(ai) = self.hero_ai_states.get_mut(&session_id) {
+                ai.hp = ai.max_hp;
+            }
+            // DB 保存用更新后的列表：只复活当前英雄，其他英雄保持原 dead/sealed
+            let db_heroes: Vec<db::DbHero> = self.player_heroes.get(&session_id)
+                .map(|hs| hs.iter().map(|h| db::DbHero {
+                    index: h.index, name: h.name.clone(), level: h.level,
+                    class: h.class as u8, gender: h.gender as u8,
+                    dead: h.dead, sealed: h.sealed,
+                }).collect())
+                .unwrap_or_default();
             if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
                 warn!("Failed to save heroes on ReviveHero: {}", e);
             }
