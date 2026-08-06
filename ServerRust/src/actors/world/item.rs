@@ -508,10 +508,15 @@ impl Message<UseItemRequest> for WorldActor {
                                 debug!("Potion: {} recovered hp={} mp={}", player_state.name, hp_recover, mp_recover);
                             }
                         }
-                        // 2 MysteryWater（C#：UnlockCurse 解除诅咒锁定；Rust 暂无 Cursed 物品系统）
+                        // 2 MysteryWater（C#：UnlockCurse 解除诅咒装备卸装锁定）
                         2 => {
-                            send_system_message(&self.gate_ref, msg.session_id, "神秘水暂不可用");
-                            return;
+                            if player_state.unlock_curse {
+                                send_system_message(&self.gate_ref, msg.session_id, "已可卸下诅咒装备，无需再使用");
+                                return;
+                            }
+                            let _ = record.actor_ref.ask(crate::actors::player::SetUnlockCurse { unlock: true }).await;
+                            send_system_message(&self.gate_ref, msg.session_id, "诅咒已解除，现在可以卸下诅咒装备！");
+                            debug!("MysteryWater: {} unlock_curse=true", player_state.name);
                         }
                         // 3 Buff（C#：临时属性 Buff，时长 = Durability * Settings.Minute）
                         3 => {
@@ -1137,9 +1142,25 @@ impl Message<RemoveItemRequest> for WorldActor {
 
         let Some(slot) = found_slot else { return; };
 
+        // C# RemoveItem：temp.Cursed && !UnlockCurse → 拒绝卸下诅咒装备
+        let eq = record.actor_ref.ask(GetEquipmentInfo { slot }).await.unwrap_or(None);
+        let was_cursed = eq.as_ref().map(|e| e.cursed).unwrap_or(false);
+        if was_cursed {
+            let state = record.actor_ref.ask(GetPlayerState).await.unwrap_or(None);
+            if !state.map(|s| s.unlock_curse).unwrap_or(false) {
+                send_system_message(&self.gate_ref, msg.session_id, "该装备被诅咒，无法卸下（使用神秘水解除）");
+                send_remove_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, false);
+                return;
+            }
+        }
+
         let result = record.actor_ref.ask(InventoryUnequipItem { slot }).await;
         match result {
             Ok(true) => {
+                // C#：卸下诅咒装备后 UnlockCurse 复位
+                if was_cursed {
+                    let _ = record.actor_ref.ask(crate::actors::player::SetUnlockCurse { unlock: false }).await;
+                }
                 debug!("Player session={} unequipped item uid={} from slot {:?}", msg.session_id, msg.unique_id, slot);
                 send_remove_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, true);
 
