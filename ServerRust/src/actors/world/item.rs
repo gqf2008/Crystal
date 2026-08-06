@@ -1056,16 +1056,34 @@ impl Message<BuyItemRequest> for WorldActor {
             goods_list[good_idx].stock -= msg.count as i32;
         }
 
-        // Create item from DB template
-        let item = mir2_shared::data::item::UserItem {
-            item_index: msg.item_index as i32,
-            count: msg.count as u16,
-            max_dura: item_db.durability as u16,
-            current_dura: item_db.durability as u16,
-            ..Default::default()
-        };
-
-        let _ = record.actor_ref.ask(AddItemToInventory { item }).await;
+        // C# BuyItem：按 Info.StackSize 分批创建（堆叠物品合并、非堆叠一格一个；背包满则停止）
+        let stack_size = item_db.stack_size.max(1) as u16;
+        let mut left = msg.count as u16;
+        let mut added = 0u16;
+        while left > 0 {
+            let batch = left.min(stack_size);
+            let item = mir2_shared::data::item::UserItem {
+                item_index: msg.item_index as i32,
+                count: batch,
+                max_dura: item_db.durability as u16,
+                current_dura: item_db.durability as u16,
+                ..Default::default()
+            };
+            let ok = record.actor_ref.ask(AddItemToInventory { item }).await.unwrap_or(false);
+            if !ok {
+                break;
+            }
+            added += batch;
+            left -= batch;
+        }
+        if added < msg.count as u16 {
+            send_system_message(&self.gate_ref, msg.session_id, "背包空间不足，部分物品未购买");
+            // 退款未购买部分
+            let refund = (msg.count as u16 - added) as u64 * price_per_unit;
+            if refund > 0 {
+                let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount: refund }).await;
+            }
+        }
         // 完整 UserInformation 刷新（背包 + 金币）
         if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
             let packet = super::build_user_information_packet(&new_state, &self.item_infos);
