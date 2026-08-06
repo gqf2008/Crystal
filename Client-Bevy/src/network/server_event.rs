@@ -67,6 +67,8 @@ pub enum ServerEvent {
     ItemDeleted { unique_id: u64 },
     /// #228 GainedItem：获得物品入包
     ItemGained { item: InvItem },
+    /// #276 ResizeInventory：背包扩容（size = 新格数，C# S.ResizeInventory）
+    InventoryResized { size: usize },
     /// #230 MapEffect：地图范围特效
     MapEffect { x: i32, y: i32, effect: u8 },
     /// #230 PlaySound：服务端指定音效

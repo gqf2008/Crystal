@@ -110,14 +110,31 @@ impl InvItem {
     }
 }
 
+/// 背包最大格数（C# Grid 8x10=80，扩容上限；超出部分不渲染）
+pub const MAX_INV_SLOTS: usize = 80;
+
 /// 背包数据（网络 UserInformation.inventory 写入）
 #[derive(Resource, Default)]
 pub struct InventoryState {
-    /// 40 格背包
+    /// 动态格数背包（默认 40，ResizeInventory 扩容/缩容，#276）
     pub items: Vec<Option<InvItem>>,
     pub gold: u32,
     pub weight: u32,
     pub max_weight: u32,
+    /// 当前背包页（0=道具 1=道具2 2=任务；#276 双页扩容）
+    pub page: usize,
+}
+
+impl InventoryState {
+    /// 按服务端 ResizeInventory 调整格数（C# Array.Resize：截断/补空，上限 MAX_INV_SLOTS）
+    pub fn resize(&mut self, size: usize) {
+        let size = size.min(MAX_INV_SLOTS);
+        if size < self.items.len() {
+            self.items.truncate(size);
+        } else {
+            self.items.resize(size, None);
+        }
+    }
 }
 
 const DIALOG_X: f32 = 182.0;
@@ -143,15 +160,10 @@ pub struct InvGoldText;
 #[derive(Component)]
 pub struct InvWeightText;
 
-/// 页切换（当前显示页）
-#[derive(Resource, Default)]
-pub struct InvPage(pub usize);
-
 pub struct InventoryDialogPlugin;
 
 impl Plugin for InventoryDialogPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<InvPage>();
         app.init_resource::<InvClickState>();
         app.init_resource::<InvDropConfirm>();
         app.init_resource::<InvPendingAmount>();
@@ -161,6 +173,7 @@ impl Plugin for InventoryDialogPlugin {
         app.add_systems(
             Update,
             (
+                inv_grid_sync_system,
                 inventory_ui_system,
                 inv_selection_system,
                 inv_tooltip_system,
@@ -293,33 +306,26 @@ fn spawn_inventory_dialog(
         DialogWidget,
     ));
 
-    // 格子背景（40 格，8x5）：通用 ItemCell（底格 + 图标 + 数量 + 耐久条，#90 续）
-    // 渲染由 item_cell_system 统一处理；这里只挂 InvSlot 标记供交互查询
-    for i in 0..(GRID_COLS * GRID_ROWS) {
-        let x = i % GRID_COLS;
-        let y = i / GRID_COLS;
-        let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
-        let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
-        let cell = spawn_item_cell(
-            &mut commands, &mut images, &font,
-            sx, sy, 6.5, CELL_W, CELL_H, i,
-        );
-        commands.entity(cell).insert((
-            DialogRoot(DialogKind::Inventory),
-            DialogWidget,
-            InvSlot(i),
-        ));
-    }
+    // 格子背景不在此预生成：#276 由 inv_grid_sync_system 按 InventoryState.items.len()
+    // 动态生成/移除（进图 UserInformation 到达前 items 为空，避免先建后删抖动）
 }
 
 #[derive(Component)]
 struct InvCloseBtn;
 
-/// 光标坐标 → 背包格（0..39）；供仓库对话框复用（原版 C# MirItemCell 命中语义）
-pub fn inv_slot_at(cx: f32, cy: f32) -> Option<usize> {
-    for i in 0..(GRID_COLS * GRID_ROWS) {
+/// 光标坐标 → 背包格（按当前页与格数）；供仓库/交易/英雄对话框复用。
+/// 对齐 C# InventoryDialog：page 0=道具（0..min(40,size)），1=道具2（40..size-1），
+/// 位置 (i%8, (i/8)%5) 复用同一 8x5 区域（C# Grid Location = y%5）。
+pub fn inv_slot_at(cx: f32, cy: f32, page: usize, size: usize) -> Option<usize> {
+    let size = size.min(MAX_INV_SLOTS);
+    let range: std::ops::Range<usize> = match page {
+        0 => 0..size.min(GRID_COLS * GRID_ROWS),
+        1 => (GRID_COLS * GRID_ROWS)..size,
+        _ => return None,
+    };
+    for i in range {
         let x = i % GRID_COLS;
-        let y = i / GRID_COLS;
+        let y = (i / GRID_COLS) % GRID_ROWS;
         let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
         let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
         if cx >= sx && cx <= sx + CELL_W && cy >= sy && cy <= sy + CELL_H {
@@ -329,7 +335,7 @@ pub fn inv_slot_at(cx: f32, cy: f32) -> Option<usize> {
     None
 }
 
-/// 背包格子索引（0..39）
+/// 背包格子索引（0..MAX_INV_SLOTS-1）
 #[derive(Component, Clone, Copy)]
 pub struct InvSlot(pub usize);
 /// 双击检测（记录最近一次左键点击的格子与时间）
@@ -371,8 +377,7 @@ pub struct InvConfirmNo;
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn inventory_ui_system(
     mut mgr: ResMut<DialogManager>,
-    hud: Res<HudState>,
-    mut page: ResMut<InvPage>,
+    mut hud: ResMut<HudState>,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
@@ -412,8 +417,22 @@ fn inventory_ui_system(
 ) {
     let inv = &hud.inventory;
     let open = mgr.is_open(DialogKind::Inventory);
-    for (mut vis, _slot) in &mut all_vis {
-        *vis = if open {
+    let size = inv.items.len().min(MAX_INV_SLOTS);
+    // 格子弹页显隐（#276）：道具=0..min(40,size)，道具2=40..size-1，任务页隐藏
+    for (mut vis, slot) in &mut all_vis {
+        let visible = if !open {
+            false
+        } else {
+            match slot {
+                Some(s) => match inv.page {
+                    0 => s.0 < size.min(GRID_COLS * GRID_ROWS),
+                    1 => s.0 >= GRID_COLS * GRID_ROWS && s.0 < size,
+                    _ => false,
+                },
+                None => true, // 背景/标签/关闭按钮
+            }
+        };
+        *vis = if visible {
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -455,7 +474,7 @@ fn inventory_ui_system(
         if btn.clicked {
             match tab {
                 Some(t) => {
-                    page.0 = t.0;
+                    hud.inventory.page = t.0;
                     tracing::debug!("背包页 -> {}", t.0);
                 }
                 None => mgr.close(DialogKind::Inventory),
@@ -464,9 +483,9 @@ fn inventory_ui_system(
     }
     for (mut t, _vis, gold, weight) in &mut money {
         if gold.is_some() {
-            t.0 = format!("{}", inv.gold);
+            t.0 = format!("{}", hud.inventory.gold);
         } else if weight.is_some() {
-            t.0 = format!("{}/{}", inv.weight, inv.max_weight);
+            t.0 = format!("{}/{}", hud.inventory.weight, hud.inventory.max_weight);
         }
     }
 }
@@ -480,11 +499,22 @@ fn inv_tooltip_system(
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
+    let page = inv.inventory.page;
+    let size = inv.inventory.items.len().min(MAX_INV_SLOTS);
     let mut hit: Option<InvItem> = None;
     for slot in &slots {
         let i = slot.0;
+        // 只命中当前页可见格（#276）
+        let visible = match page {
+            0 => i < size.min(GRID_COLS * GRID_ROWS),
+            1 => i >= GRID_COLS * GRID_ROWS && i < size,
+            _ => false,
+        };
+        if !visible {
+            continue;
+        }
         let x = i % GRID_COLS;
-        let y = i / GRID_COLS;
+        let y = (i / GRID_COLS) % GRID_ROWS;
         let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
         let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
         if cursor.x >= sx && cursor.x <= sx + CELL_W && cursor.y >= sy && cursor.y <= sy + CELL_H {
@@ -553,6 +583,68 @@ pub fn item_type_name(t: u8) -> &'static str {
         _ => "其他",
     }
 
+}
+
+/// 背包动态格子同步（#276）：按 InventoryState.items.len() 生成/移除 InvSlot 格子。
+/// 对齐 C# InventoryDialog.Grid（8x10，位置 y%5 复用）；缩容时移除多余格子。
+#[allow(clippy::too_many_arguments)]
+fn inv_grid_sync_system(
+    mut commands: Commands,
+    hud: Res<HudState>,
+    mut images: ResMut<Assets<Image>>,
+    mut fonts: ResMut<Assets<Font>>,
+    mut ui_font: ResMut<UiFont>,
+    slots: Query<(Entity, &InvSlot)>,
+) {
+    let size = hud.inventory.items.len().min(MAX_INV_SLOTS);
+    if hud.inventory.items.is_empty() && slots.is_empty() {
+        return; // 进图 UserInformation 到达前：无格子可同步
+    }
+    // 缩容：移除超出 size 的格子
+    for (e, s) in &slots {
+        if s.0 >= size {
+            commands.entity(e).despawn();
+        }
+    }
+    let mut existing: Vec<usize> = slots
+        .iter()
+        .map(|(_, s)| s.0)
+        .filter(|i| *i < size)
+        .collect();
+    existing.sort_unstable();
+    if existing.len() == size {
+        return;
+    }
+    // 扩容：补缺失格子
+    if !ui_font.0.is_strong() {
+        ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
+    }
+    let font = ui_font.0.clone();
+    let mut next = 0usize;
+    for i in 0..size {
+        if existing.get(next).copied() == Some(i) {
+            next += 1;
+            continue;
+        }
+        let x = i % GRID_COLS;
+        let y = (i / GRID_COLS) % GRID_ROWS;
+        let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
+        let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
+        let cell = spawn_item_cell(
+            &mut commands,
+            &mut images,
+            &font,
+            sx,
+            sy,
+            6.5,
+            CELL_W,
+            CELL_H,
+            i,
+        );
+        commands
+            .entity(cell)
+            .insert((DialogRoot(DialogKind::Inventory), DialogWidget, InvSlot(i)));
+    }
 }
 
 /// 选中格子高亮（原版 C# SelectedCell 黄色边框语义：用黄色半透明覆盖表示）
@@ -737,11 +829,18 @@ fn inv_item_action_system(
         }
     }
 
-    // 光标下的背包格
+    // 光标下的背包格（按当前页与格数，#276）
+    let page = hud.inventory.page;
+    let size = hud.inventory.items.len().min(MAX_INV_SLOTS);
     let slot_at = |cx: f32, cy: f32| -> Option<usize> {
-        for i in 0..(GRID_COLS * GRID_ROWS) {
+        let range: std::ops::Range<usize> = match page {
+            0 => 0..size.min(GRID_COLS * GRID_ROWS),
+            1 => (GRID_COLS * GRID_ROWS)..size,
+            _ => 0..0,
+        };
+        for i in range {
             let x = i % GRID_COLS;
-            let y = i / GRID_COLS;
+            let y = (i / GRID_COLS) % GRID_ROWS;
             let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
             let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
             if cx >= sx && cx <= sx + CELL_W && cy >= sy && cy <= sy + CELL_H {

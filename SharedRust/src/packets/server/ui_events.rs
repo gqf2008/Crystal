@@ -5,7 +5,7 @@ use crate::enums::ServerPacketIds;
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::Read;
 
-/// ResizeInventory - 调整背包大小 (235)
+/// ResizeInventory - 调整背包大小 (237)
 #[derive(Debug, Clone)]
 pub struct ResizeInventory {
     pub size: i32,                  // 新大小

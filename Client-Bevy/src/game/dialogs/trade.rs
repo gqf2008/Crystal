@@ -419,7 +419,12 @@ fn trade_action_system(
     }
     // 点击背包物品 → 存入（C# DepositTradeItem）
     if !trade.my_locked {
-        if let Some(from) = inv_slot_at(cursor.x, cursor.y) {
+        if let Some(from) = inv_slot_at(
+            cursor.x,
+            cursor.y,
+            hud.inventory.page,
+            hud.inventory.items.len(),
+        ) {
             if let Some(item) = hud.inventory.items.get(from).and_then(|s| s.as_ref()) {
                 if let Some(to) = trade.my_items.iter().position(|s| s.is_none()) {
                     net.send_packet(&mir2_shared::packets::client::trade::DepositTradeItem {

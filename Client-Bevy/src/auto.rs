@@ -274,6 +274,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--creature2-test") {
         app.add_systems(Update, auto_creature2_test);
     }
+    // --resize-test: 背包扩容链路（#276，施法 → mock 回发 ResizeInventory(56) → 校验）
+    if std::env::args().any(|a| a == "--resize-test") {
+        app.add_systems(Update, auto_resize_test);
+    }
     // --book-test: 技能书学习链路（使用技能书 → 等 NewMagic → 校验 MagicsState）
     if std::env::args().any(|a| a == "--book-test") {
         app.add_systems(Update, auto_book_test);
@@ -8303,6 +8307,57 @@ fn auto_creature2_test(
                 }
                 *stage = 9;
             }
+        }
+        _ => {}
+    }
+}
+
+/// --resize-test：背包扩容链路（#276）
+/// 流程：进游戏 → 施法（mock 回发 ResizeInventory(56)）→ 校验 items.len()==56
+fn auto_resize_test(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 6.0 {
+                return;
+            }
+            if hud.inventory.items.len() < 40 {
+                return; // 等 UserInformation 完成
+            }
+            net.send_packet(&mir2_shared::packets::client::combat::Magic {
+                spell: mir2_shared::enums::Spell::FireBall,
+                direction: mir2_shared::enums::MirDirection::Down,
+                target_id: 101,
+                location: mir2_shared::Point { x: 353, y: 352 },
+            });
+            tracing::info!("[RESIZE] 🔥 施法触发 ResizeInventory");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t < 2.0 {
+                return;
+            }
+            if hud.inventory.items.len() == 56 {
+                tracing::info!("[RESIZE] ✅ PASS 背包扩容 size=56");
+            } else {
+                tracing::error!(
+                    "[RESIZE] ❌ FAIL size={} 期望 56",
+                    hud.inventory.items.len()
+                );
+            }
+            *stage = 9;
         }
         _ => {}
     }

@@ -355,7 +355,7 @@ fn storage_ui_system(
 fn storage_action_system(
     mut state: ResMut<StorageState>,
     mut inv_click: ResMut<InvClickState>,
-    _hud: Res<HudState>,
+    hud: Res<HudState>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
@@ -367,7 +367,12 @@ fn storage_action_system(
     let Some(cursor) = window.cursor_position() else { return };
 
     let storage_slot = storage_slot_at(cursor.x, cursor.y);
-    let inv_slot = inv_slot_at(cursor.x, cursor.y);
+    let inv_slot = inv_slot_at(
+        cursor.x,
+        cursor.y,
+        hud.inventory.page,
+        hud.inventory.items.len(),
+    );
 
     // 1) 选中了背包物品 → 点仓库格：存入（原版 C# SelectedCell Inventory → Storage 拖放）
     if let Some(from) = inv_click.selected {
