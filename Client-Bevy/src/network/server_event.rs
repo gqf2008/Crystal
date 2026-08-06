@@ -104,6 +104,8 @@ pub enum ServerEvent {
     CreditLost { amount: u32 },
     /// #250 SetCompass：罗盘目标方向
     CompassTarget { x: i32, y: i32 },
+    /// #254 SendMemberLocation：小队成员位置
+    MemberLocation { name: String, x: i32, y: i32 },
     /// Roll：骰子/尤茨结果（npc_id 由 roll 消费端从 NpcDialogState 读取）
     Roll {
         r#type: i32,

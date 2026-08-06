@@ -94,6 +94,26 @@ pub struct MiniMapNameText;
 #[derive(Component)]
 pub struct MiniMapActorDot(pub usize);
 
+/// #254 小队成员光点（黄色）
+#[derive(Component)]
+pub struct MiniMapMemberDot(pub usize);
+
+/// #254 成员位置状态（S.SendMemberLocation 按名字 upsert）
+#[derive(Resource, Default)]
+pub struct MemberLocations {
+    pub members: Vec<(String, i32, i32)>,
+}
+
+impl MemberLocations {
+    pub fn upsert(&mut self, name: String, x: i32, y: i32) {
+        if let Some(entry) = self.members.iter_mut().find(|(n, _, _)| *n == name) {
+            *entry = (name, x, y);
+        } else {
+            self.members.push((name, x, y));
+        }
+    }
+}
+
 #[derive(Component)]
 pub struct MiniMapPosText;
 
@@ -102,13 +122,21 @@ pub struct MiniMapPlugin;
 impl Plugin for MiniMapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MiniMapMode>();
+        app.init_resource::<MemberLocations>();
         app.add_systems(OnEnter(AppState::Game), spawn_minimap);
         app.add_systems(OnExit(AppState::Game), cleanup_minimap);
         app.add_systems(
             Update,
             // #148 小地图快捷键改由 dialog_hotkey_system 按键位设置处理（可重绑）
-            (minimap_toggle_system, minimap_ui_system, ui_button_system)
+            (
+                minimap_toggle_system,
+                minimap_ui_system,
+                minimap_member_events,
+                minimap_member_dots_system,
+                ui_button_system,
+            )
                 .chain()
+                .after(crate::network::network_system)
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -194,6 +222,24 @@ fn spawn_minimap(
                 image: white.clone(),
                 custom_size: Some(Vec2::new(2.0, 2.0)),
                 color: Color::WHITE,
+                ..default()
+            },
+            Anchor::TOP_LEFT,
+            Transform::from_xyz(-999.0, -999.0, 5.2),
+            Visibility::Hidden,
+        ));
+    }
+
+    // #254：小队成员光点（最多 10 个，黄色 2x2）
+    for i in 0..10usize {
+        commands.spawn((
+            UiEntity,
+            DialogRoot(DialogKind::Minimap),
+            MiniMapMemberDot(i),
+            Sprite {
+                image: white.clone(),
+                custom_size: Some(Vec2::new(2.0, 2.0)),
+                color: Color::srgb(1.0, 0.9, 0.2),
                 ..default()
             },
             Anchor::TOP_LEFT,
@@ -589,3 +635,54 @@ mod tests {
     }
 }
 
+
+
+/// #254：S.SendMemberLocation → MemberLocations（按名字 upsert）
+fn minimap_member_events(
+    mut locs: ResMut<MemberLocations>,
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+) {
+    for ev in events.read() {
+        if let crate::network::server_event::ServerEvent::MemberLocation { name, x, y } = ev {
+            locs.upsert(name.clone(), *x, *y);
+        }
+    }
+}
+
+/// #254：成员光点定位（与玩家光点同公式；无成员/小地图未开/大模式才显示）
+fn minimap_member_dots_system(
+    mgr: Res<DialogManager>,
+    mode: Res<MiniMapMode>,
+    game_data: Res<GameData>,
+    locs: Res<MemberLocations>,
+    mut dots: Query<
+        (&mut Transform, &mut Visibility, &MiniMapMemberDot),
+        (
+            Without<MiniMapWidget>,
+            Without<MiniMapPlayerDot>,
+            Without<MiniMapActorDot>,
+        ),
+    >,
+) {
+    let open = mgr.is_open(DialogKind::Minimap);
+    let big = mode.big;
+    let (map_w, map_h) = match &game_data.map {
+        Some(m) => (m.width as f32, m.height as f32),
+        None => (1.0, 1.0),
+    };
+    for (mut tf, mut vis, idx) in &mut dots {
+        let Some((_, tx, ty)) = locs.members.get(idx.0) else {
+            *vis = Visibility::Hidden;
+            continue;
+        };
+        if !open || !big {
+            *vis = Visibility::Hidden;
+            continue;
+        }
+        *vis = Visibility::Visible;
+        let px = MINIMAP_X + MAP_RECT.0 + (*tx as f32 / map_w) * MAP_RECT.2;
+        let py = MINIMAP_Y + MAP_RECT.1 + (*ty as f32 / map_h) * MAP_RECT.3;
+        tf.translation.x = px - 1.0;
+        tf.translation.y = -(py - 1.0);
+    }
+}
