@@ -567,6 +567,14 @@ async fn eval_one_check(
             let _want = arg0();
             !player.buffs.is_empty()
         }
+        // CHECKTIMER <key> <op> <seconds> — 检查计时器剩余秒数（对齐 C# CheckType.CheckTimer；无计时器视为 0）
+        "CHECKTIMER" => {
+            let key = arg0().parse::<i32>().unwrap_or(0);
+            let (op, want) = parse_op_amount(&args[1..]);
+            let expire = world.npc_timers.get(&session_id).and_then(|m| m.get(&key)).copied();
+            let remaining = npc_timer_remaining_secs(world.tick_count, expire);
+            compare_i64(remaining, op, want)
+        }
         // INGUILD / GUILDNAME <name>
         "INGUILD" => player.guild_name.is_some(),
         // CHECKMAP <map_name|index>
@@ -938,6 +946,39 @@ async fn exec_action(
         "PARAM3" => {
             flow.param3 = arg0().parse::<i32>().unwrap_or(0);
         }
+        // SETTIMER <key> <seconds> [type] [global] —— 注册计时器（对齐 C# ActionType.SetTimer；发 S.SetTimer）
+        // C# timerKey=玩家名-key、global 存 Envir；Rust 简化按 session 维度存 key，到点自动移除
+        "SETTIMER" => {
+            let key = arg0().parse::<i32>().unwrap_or(0);
+            let secs = arg1().parse::<i64>().unwrap_or(0).max(0);
+            let _kind = arg2().parse::<u8>().unwrap_or(0);
+            let _global = arg3().eq_ignore_ascii_case("true") || arg3() == "1";
+            // 世界循环 100ms/tick：1 秒 = 10 ticks
+            let expire_tick = world.tick_count.saturating_add(secs as u64 * 10);
+            world.npc_timers.entry(session_id).or_default().insert(key, expire_tick);
+            let packet = mir2_shared::packets::server::ui_events::SetTimer {
+                timer_id: key,
+                seconds: secs as i32,
+            };
+            let mut body = Vec::new();
+            if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
+                let _ = world.gate_ref.tell(SendToClient { session_id, data: body }).await;
+            }
+            debug!("NPC SETTIMER: key={} {}s (expire tick {})", key, secs, expire_tick);
+        }
+        // EXPIRETIMER <key> —— 移除计时器（对齐 C# ActionType.ExpireTimer；发 S.ExpireTimer）
+        "EXPIRETIMER" | "CLEARTIMER" => {
+            let key = arg0().parse::<i32>().unwrap_or(0);
+            if let Some(timers) = world.npc_timers.get_mut(&session_id) {
+                timers.remove(&key);
+            }
+            let packet = mir2_shared::packets::server::ui_events::ExpireTimer { timer_id: key };
+            let mut body = Vec::new();
+            if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
+                let _ = world.gate_ref.tell(SendToClient { session_id, data: body }).await;
+            }
+            debug!("NPC EXPIRETIMER: key={}", key);
+        }
         // REFRESHEFFECTS —— 刷新等级特效（对齐 C# ActionType.RefreshEffects + S.ObjectLevelEffects）
         "REFRESHEFFECTS" => {
             if let Some(st) = current_player_state(world, session_id).await {
@@ -1118,6 +1159,14 @@ async fn exec_action(
 // =============================================================================
 // 辅助：玩家消息发送 / 物品 / 传送 / flag
 // =============================================================================
+
+/// CHECKTIMER 剩余秒数：无计时器视为 0（对齐 C# timer==null → remainingTime=0）；tick 100ms
+fn npc_timer_remaining_secs(now_tick: u64, expire_tick: Option<u64>) -> i64 {
+    match expire_tick {
+        Some(exp) => exp.saturating_sub(now_tick) as i64 / 10,
+        None => 0,
+    }
+}
 
 /// CHANGEGENDER 性别解析：支持 male/female/0/1（大小写不敏感）
 fn parse_gender(s: &str) -> Option<mir2_shared::enums::MirGender> {
@@ -1736,6 +1785,18 @@ You don't have enough Gold!
         assert_eq!(parse_gender("0"), Some(mir2_shared::enums::MirGender::Male));
         assert_eq!(parse_gender("1"), Some(mir2_shared::enums::MirGender::Female));
         assert_eq!(parse_gender("x"), None);
+    }
+
+    #[test]
+    fn timer_remaining_secs_handles_missing_and_expired() {
+        // 无计时器 → 0
+        assert_eq!(npc_timer_remaining_secs(100, None), 0);
+        // 剩余 50 tick = 5 秒
+        assert_eq!(npc_timer_remaining_secs(100, Some(150)), 5);
+        // 已到期 → 0
+        assert_eq!(npc_timer_remaining_secs(100, Some(90)), 0);
+        // 正好到点 → 0
+        assert_eq!(npc_timer_remaining_secs(100, Some(100)), 0);
     }
 }
 
