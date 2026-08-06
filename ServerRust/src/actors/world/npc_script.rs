@@ -705,12 +705,26 @@ async fn eval_one_check(
                 active_match || player.creature_log.owned_creatures.iter().any(pet_matches)
             }
         }
-        // CHECKWEDDINGRING — 已婚且左戒为结婚戒指（对齐 C# CheckType.CheckWeddingRing）
+        // CHECKWEDDINGRING — 已婚且左戒可制作结婚戒指（对齐 C# CheckType.CheckWeddingRing
+        // → player.CheckMakeWeddingRing：已婚 + 左戒已装备 + 左戒未绑定结婚戒指
+        // （C# -1 / Rust 约定 0）+ 戒指类型允许结婚戒指（!Bind.NoWeddingRing））
         "CHECKWEDDINGRING" => {
-            player.spouse_name.is_some()
-                && player.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::RingL)
-                    .map(|r| r.wedding_ring != 0)
-                    .unwrap_or(false)
+            if player.spouse_name.is_none() {
+                false
+            } else if let Some(ring) = player.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::RingL) {
+                if ring.wedding_ring != 0 {
+                    // 已是结婚戒指，不能再制作
+                    false
+                } else {
+                    // 戒指类型允许结婚戒指（C# ItemInfo.Bind.NoWeddingRing = 0x0800）
+                    let no_wedding = mir2_shared::enums::BindMode::NO_WEDDING_RING.bits() as i32;
+                    world.item_infos.get(&ring.item_index)
+                        .map(|info| (info.bind_mode & no_wedding) == 0)
+                        .unwrap_or(true)
+                }
+            } else {
+                false
+            }
         }
         // CHECKRANGE <x> <y> <range> — 玩家在 (x,y) 半径内（对齐 C# CheckType.CheckRange / Functions.InRange 欧氏）
         "CHECKRANGE" => {
