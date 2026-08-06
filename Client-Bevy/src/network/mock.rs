@@ -571,6 +571,15 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 seconds: 5,
                                             },
                                         );
+                                        // #232：上马（本地玩家）
+                                        send(
+                                            &to_client,
+                                            &server::miscellaneous::MountUpdate {
+                                                object_id: 100,
+                                                mount_type: 1,
+                                                riding_mount: true,
+                                            },
+                                        );
                                         if *hp <= 0 && !respawn.contains_key(&target) {
                                             let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
                                             send(
@@ -1349,7 +1358,16 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         &to_client,
                                         &server::ui_events::ExpireTimer { timer_id: 1 },
                                     );
-                                    tracing::info!("🌀 [MOCK] 对象状态: 显形102/传送消失103 + 计时器到期");
+                                    // #232：下马（本地玩家）
+                                    send(
+                                        &to_client,
+                                        &server::miscellaneous::MountUpdate {
+                                            object_id: 100,
+                                            mount_type: 1,
+                                            riding_mount: false,
+                                        },
+                                    );
+                                    tracing::info!("🌀 [MOCK] 对象状态: 显形102/传送消失103 + 计时器到期 + 下马");
                                     object_state_stage = 3;
                                 }
                                 3 => {

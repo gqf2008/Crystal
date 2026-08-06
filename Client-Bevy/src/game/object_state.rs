@@ -7,7 +7,7 @@
 
 use bevy::prelude::*;
 
-use crate::actor::{ActorAnim, NetObjectId};
+use crate::actor::{ActorAnim, MountState, NetObjectId, SpriteLayer};
 use crate::game::movement::tile_to_world;
 use crate::network::server_event::ServerEvent;
 use crate::scenes::AppState;
@@ -25,13 +25,17 @@ impl Plugin for ObjectStatePlugin {
     }
 }
 
-/// 消费对象状态事件：隐藏/显形/坐下/击退/传送进出
+/// 消费对象状态事件：隐藏/显形/坐下/击退/传送进出/坐骑上马下马
 #[allow(clippy::too_many_arguments)]
 fn apply_object_state_events(
+    mut commands: Commands,
     mut events: MessageReader<ServerEvent>,
     mut vis: Query<(&NetObjectId, &mut Visibility)>,
     mut anim: Query<(&NetObjectId, &mut ActorAnim)>,
     mut transforms: Query<(&NetObjectId, &mut Transform)>,
+    mounts: Query<(Entity, &NetObjectId, Option<&MountState>)>,
+    children: Query<&Children>,
+    layers: Query<&SpriteLayer>,
     mut effects: MessageWriter<crate::game::effects::PendingEffect>,
 ) {
     let pending: Vec<ServerEvent> = events.read().cloned().collect();
@@ -128,6 +132,42 @@ fn apply_object_state_events(
                     if id.0 == object_id {
                         *v = Visibility::Visible;
                         break;
+                    }
+                }
+            }
+            ServerEvent::MountUpdated {
+                object_id,
+                mount_type,
+                is_mounted,
+            } => {
+                // #232：上马插入 MountState + 坐骑层；下马移除
+                if is_mounted && mount_type >= 0 {
+                    let target = mounts
+                        .iter()
+                        .find(|(_, id, m)| id.0 == object_id && m.is_none())
+                        .map(|(e, _, _)| e);
+                    if let Some(ent) = target {
+                        commands.entity(ent).insert(MountState { mount_type });
+                        crate::actor::attach_mount_layer(&mut commands, ent, mount_type);
+                        tracing::info!("🐴 对象 {} 上马 type={}", object_id, mount_type);
+                    }
+                } else {
+                    let target = mounts
+                        .iter()
+                        .find(|(_, id, m)| id.0 == object_id && m.is_some())
+                        .map(|(e, _, _)| e);
+                    if let Some(ent) = target {
+                        commands.entity(ent).remove::<MountState>();
+                        if let Ok(children_of) = children.get(ent) {
+                            for c in children_of.iter() {
+                                if let Ok(l) = layers.get(c) {
+                                    if l.is_mount {
+                                        commands.entity(c).despawn();
+                                    }
+                                }
+                            }
+                        }
+                        tracing::info!("🐴 对象 {} 下马", object_id);
                     }
                 }
             }

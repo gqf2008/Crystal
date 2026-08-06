@@ -28,7 +28,7 @@ pub(crate) fn handle_auth(    net: &mut NetConnection,
         return false;
     };
     let opcode = header.opcode;
-    const HANDLED: &[i16] = &[ServerPacketIds::Connected as i16, ServerPacketIds::Disconnect as i16, ServerPacketIds::ClientVersion as i16, ServerPacketIds::NewAccount as i16, ServerPacketIds::ChangePassword as i16, ServerPacketIds::Login as i16, ServerPacketIds::LoginSuccess as i16, ServerPacketIds::StartGame as i16, ServerPacketIds::NewCharacter as i16, ServerPacketIds::NewCharacterSuccess as i16, ServerPacketIds::DeleteCharacter as i16, ServerPacketIds::DeleteCharacterSuccess as i16, ServerPacketIds::MapChanged as i16, ServerPacketIds::NewMapInfo as i16, ServerPacketIds::AwakeningNeedMaterials as i16, ServerPacketIds::AwakeningLockedItem as i16, ServerPacketIds::Awakening as i16, ServerPacketIds::Roll as i16, ServerPacketIds::ObjectPlayer as i16, ServerPacketIds::ObjectMonster as i16, ServerPacketIds::ObjectNpc as i16, ServerPacketIds::ObjectRemove as i16, ServerPacketIds::ObjectItem as i16, ServerPacketIds::UserInformation as i16, ServerPacketIds::HealthChanged as i16, ServerPacketIds::UserLocation as i16, ServerPacketIds::GainedGold as i16, ServerPacketIds::GainExperience as i16, ServerPacketIds::LoseGold as i16, ServerPacketIds::TimeOfDay as i16, ServerPacketIds::LogOutSuccess as i16, ServerPacketIds::ChangeAMode as i16, ServerPacketIds::ChangePMode as i16, ServerPacketIds::LevelChanged as i16, ServerPacketIds::ObjectTurn as i16, ServerPacketIds::ObjectWalk as i16, ServerPacketIds::ObjectRun as i16, ServerPacketIds::ObjectHide as i16, ServerPacketIds::ObjectShow as i16, ServerPacketIds::ObjectSitDown as i16, ServerPacketIds::Pushed as i16, ServerPacketIds::ObjectPushed as i16, ServerPacketIds::ObjectTeleportOut as i16, ServerPacketIds::ObjectTeleportIn as i16, ServerPacketIds::Chat as i16, ServerPacketIds::ObjectChat as i16];
+    const HANDLED: &[i16] = &[ServerPacketIds::Connected as i16, ServerPacketIds::Disconnect as i16, ServerPacketIds::ClientVersion as i16, ServerPacketIds::NewAccount as i16, ServerPacketIds::ChangePassword as i16, ServerPacketIds::Login as i16, ServerPacketIds::LoginSuccess as i16, ServerPacketIds::StartGame as i16, ServerPacketIds::NewCharacter as i16, ServerPacketIds::NewCharacterSuccess as i16, ServerPacketIds::DeleteCharacter as i16, ServerPacketIds::DeleteCharacterSuccess as i16, ServerPacketIds::MapChanged as i16, ServerPacketIds::NewMapInfo as i16, ServerPacketIds::AwakeningNeedMaterials as i16, ServerPacketIds::AwakeningLockedItem as i16, ServerPacketIds::Awakening as i16, ServerPacketIds::Roll as i16, ServerPacketIds::ObjectPlayer as i16, ServerPacketIds::ObjectMonster as i16, ServerPacketIds::ObjectNpc as i16, ServerPacketIds::ObjectRemove as i16, ServerPacketIds::ObjectItem as i16, ServerPacketIds::UserInformation as i16, ServerPacketIds::HealthChanged as i16, ServerPacketIds::UserLocation as i16, ServerPacketIds::GainedGold as i16, ServerPacketIds::GainExperience as i16, ServerPacketIds::LoseGold as i16, ServerPacketIds::TimeOfDay as i16, ServerPacketIds::LogOutSuccess as i16, ServerPacketIds::ChangeAMode as i16, ServerPacketIds::ChangePMode as i16, ServerPacketIds::LevelChanged as i16, ServerPacketIds::ObjectTurn as i16, ServerPacketIds::ObjectWalk as i16, ServerPacketIds::ObjectRun as i16, ServerPacketIds::ObjectHide as i16, ServerPacketIds::ObjectShow as i16, ServerPacketIds::ObjectSitDown as i16, ServerPacketIds::Pushed as i16, ServerPacketIds::ObjectPushed as i16, ServerPacketIds::ObjectTeleportOut as i16, ServerPacketIds::ObjectTeleportIn as i16, ServerPacketIds::MountUpdate as i16, ServerPacketIds::Chat as i16, ServerPacketIds::ObjectChat as i16];
     let handled = HANDLED.contains(&opcode);
     match opcode {
         // ---- M7: 握手 ----
@@ -671,6 +671,23 @@ pub(crate) fn handle_auth(    net: &mut NetConnection,
                     object_id: p.object_id,
                 });
                 tracing::debug!("🌀 对象传送出现 id={}", p.object_id);
+            }
+        }
+
+        // #232：坐骑上/下马（S.MountUpdate）
+        x if x == ServerPacketIds::MountUpdate as i16 => {
+            if let Ok(p) = miscellaneous::MountUpdate::read_body(&mut cur) {
+                server_events.write(ServerEvent::MountUpdated {
+                    object_id: p.object_id,
+                    mount_type: p.mount_type,
+                    is_mounted: p.riding_mount,
+                });
+                tracing::info!(
+                    "🐴 坐骑更新: id={} type={} riding={}",
+                    p.object_id,
+                    p.mount_type,
+                    p.riding_mount
+                );
             }
         }
 

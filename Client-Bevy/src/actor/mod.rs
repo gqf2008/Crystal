@@ -26,6 +26,7 @@ mod spawn_helpers;
 mod systems;
 
 pub use components::*;
+pub(crate) use spawn_helpers::attach_mount_layer;
 pub use spawn::depth_z;
 
 use render::actor_sprite_render;
