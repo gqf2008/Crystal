@@ -465,23 +465,64 @@ impl Message<UseItemRequest> for WorldActor {
         // 根据物品类型执行效果
         if let Some(ref db) = item_db {
             match db.item_type {
-                // Potion
+                // Potion（C# UseItem：Shape 0/1 回血回蓝；Shape 3 临时属性 Buff）
                 13 => {
                     use mir2_shared::enums::Stat;
-                    let hp_recover = db.stats.get(&(Stat::HP as u8)).copied().unwrap_or(0);
-                    let mp_recover = db.stats.get(&(Stat::MP as u8)).copied().unwrap_or(0);
-                    if hp_recover > 0 {
-                        let _ = record.actor_ref.ask(crate::actors::player::Heal {
-                            amount: hp_recover,
-                        }).await;
-                    }
-                    if mp_recover > 0 {
-                        let _ = record.actor_ref.ask(crate::actors::player::AddMP {
-                            amount: mp_recover,
-                        }).await;
-                    }
-                    if hp_recover > 0 || mp_recover > 0 {
-                        debug!("Potion: {} recovered hp={} mp={}", player_state.name, hp_recover, mp_recover);
+                    use crate::combat::buff::{BuffType, BuffInstance};
+                    let shape = db.shape;
+                    let get = |stat: Stat| db.stats.get(&(stat as u8)).copied().unwrap_or(0);
+                    if shape == 3 {
+                        // C#：Buff 药水，时长 = Durability * Settings.Minute（60000ms → 600 ticks）
+                        let ticks = (db.durability.max(1) as u32).saturating_mul(600);
+                        let mut applied = false;
+                        let apply = |bt: BuffType| async move {
+                            let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff {
+                                buff: BuffInstance::new(bt, ticks, 1),
+                            }).await;
+                        };
+                        if get(Stat::MaxDC) > 0 || get(Stat::MinDC) > 0 {
+                            apply(BuffType::AttackBoost { bonus: get(Stat::MaxDC).max(get(Stat::MinDC)) }).await;
+                            applied = true;
+                        }
+                        if get(Stat::MaxMC) > 0 || get(Stat::MinMC) > 0 {
+                            apply(BuffType::McBoost { bonus: get(Stat::MaxMC).max(get(Stat::MinMC)) }).await;
+                            applied = true;
+                        }
+                        if get(Stat::MaxSC) > 0 || get(Stat::MinSC) > 0 {
+                            apply(BuffType::ScBoost { bonus: get(Stat::MaxSC).max(get(Stat::MinSC)) }).await;
+                            applied = true;
+                        }
+                        if get(Stat::AttackSpeed) > 0 {
+                            apply(BuffType::AttackSpeedBoost { percent: get(Stat::AttackSpeed) }).await;
+                            applied = true;
+                        }
+                        if get(Stat::HP) > 0 {
+                            apply(BuffType::HpRegen { amount_per_tick: get(Stat::HP) }).await;
+                            applied = true;
+                        }
+                        if get(Stat::MP) > 0 {
+                            apply(BuffType::MpRegen { amount_per_tick: get(Stat::MP) }).await;
+                            applied = true;
+                        }
+                        if applied {
+                            debug!("Potion: {} shape=3 buff potion {} ticks", player_state.name, ticks);
+                        }
+                    } else {
+                        let hp_recover = get(Stat::HP);
+                        let mp_recover = get(Stat::MP);
+                        if hp_recover > 0 {
+                            let _ = record.actor_ref.ask(crate::actors::player::Heal {
+                                amount: hp_recover,
+                            }).await;
+                        }
+                        if mp_recover > 0 {
+                            let _ = record.actor_ref.ask(crate::actors::player::AddMP {
+                                amount: mp_recover,
+                            }).await;
+                        }
+                        if hp_recover > 0 || mp_recover > 0 {
+                            debug!("Potion: {} recovered hp={} mp={}", player_state.name, hp_recover, mp_recover);
+                        }
                     }
                 }
                 // Scroll (回城卷 / 随机传送卷)
