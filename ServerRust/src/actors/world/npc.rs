@@ -513,6 +513,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             experience: 0,
             max_experience: 100,
         can_gain_exp: true,
+        pearl_count: 0,
             hp: 120,
             max_hp: 120,
             mp: 60,

@@ -78,6 +78,8 @@ pub struct PlayerState {
     pub max_experience: i64,
     /// 是否可获得经验（NPC 脚本 CANGAINEXP，对齐 C# CanGainExp）
     pub can_gain_exp: bool,
+    /// 珍珠数（NPC 脚本 GIVEPEARLS/TAKEPEARLS，对齐 C# PearlCount）
+    pub pearl_count: i32,
     /// 当前 HP
     pub hp: i32,
     /// 最大 HP（基础+装备加成后的总值）
@@ -417,6 +419,7 @@ impl PlayerActor {
                 experience: 0,
                 max_experience: 100,
         can_gain_exp: true,
+        pearl_count: 0,
                 hp: 120,
                 max_hp: 120,
                 mp: 60,
@@ -2615,6 +2618,36 @@ impl Message<SetCanGainExp> for PlayerActor {
     }
 }
 
+/// NPC 脚本 GIVEPEARLS：增加珍珠（对齐 C# ActionType.GivePearls / IntelligentCreatureGainPearls）
+pub struct GainPearls {
+    pub amount: u32,
+}
+
+impl Message<GainPearls> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: GainPearls, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let capped = (msg.amount as i64 + self.state.pearl_count as i64).min(i32::MAX as i64) as i32;
+        self.state.pearl_count = capped;
+        debug!("Player {} pearls +{} (total={})", self.state.name, msg.amount, self.state.pearl_count);
+    }
+}
+
+/// NPC 脚本 TAKEPEARLS：减少珍珠（对齐 C# ActionType.TakePearls / IntelligentCreatureLosePearls，下限 0）
+pub struct LosePearls {
+    pub amount: u32,
+}
+
+impl Message<LosePearls> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: LosePearls, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.pearl_count = (self.state.pearl_count - msg.amount as i32).max(0);
+        debug!("Player {} pearls -{} (total={})", self.state.name, msg.amount, self.state.pearl_count);
+    }
+}
+
+
 
 
 
@@ -3658,6 +3691,7 @@ mod tests {
             experience: 0,
             max_experience: 100,
         can_gain_exp: true,
+        pearl_count: 0,
             hp: 120,
             max_hp: 120,
             mp: 60,

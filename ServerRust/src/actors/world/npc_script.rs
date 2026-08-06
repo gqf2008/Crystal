@@ -903,6 +903,22 @@ async fn exec_action(
                 }
             }
         }
+        // GIVEPEARLS <n> —— 增加珍珠（对齐 C# ActionType.GivePearls）
+        "GIVEPEARLS" => {
+            let amount = arg0().parse::<u32>().unwrap_or(0);
+            if amount > 0 {
+                send_player_msg(world, session_id, crate::actors::player::GainPearls { amount }).await;
+                debug!("NPC GIVEPEARLS: +{}", amount);
+            }
+        }
+        // TAKEPEARLS <n> —— 减少珍珠（对齐 C# ActionType.TakePearls）
+        "TAKEPEARLS" => {
+            let amount = arg0().parse::<u32>().unwrap_or(0);
+            if amount > 0 {
+                send_player_msg(world, session_id, crate::actors::player::LosePearls { amount }).await;
+                debug!("NPC TAKEPEARLS: -{}", amount);
+            }
+        }
         // CANGAINEXP <true|false> —— 设置是否可获得经验（对齐 C# ActionType.CanGainExp）
         "CANGAINEXP" => {
             let can = arg0().eq_ignore_ascii_case("true") || arg0() == "1";
