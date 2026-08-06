@@ -838,6 +838,24 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             &to_client,
                                             &server::awakening_system::NPCAwakening {},
                                         );
+                                        // #268：杂项协议
+                                        send(
+                                            &to_client,
+                                            &server::miscellaneous::BaseStatsInfo {
+                                                stats: vec![10, 20, 30],
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::rental_system::GetRentedItems { items: vec![] },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::npc::NPCRequestInput {
+                                                message: "请输入数量".to_string(),
+                                                max_length: 8,
+                                            },
+                                        );
                                         // #256：公告 + 杂项协议
                                         send(
                                             &to_client,

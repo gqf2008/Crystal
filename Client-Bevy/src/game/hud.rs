@@ -33,6 +33,8 @@ pub struct HudState {
     pub gold: u32,
     /// #248 声望/功勋
     pub credit: u32,
+    /// #268 基础属性（S.BaseStatsInfo）
+    pub base_stats: Vec<i32>,
     pub name: String,
     /// 本地玩家 object_id（UserInformation 提供）
     pub player_object_id: Option<u32>,
@@ -64,6 +66,7 @@ impl Default for HudState {
             level: 1,
             gold: 0,
             credit: 0,
+            base_stats: Vec::new(),
             name: String::new(),
             player_object_id: None,
             class: 0,
@@ -751,6 +754,11 @@ fn hud_server_events(
             }
             ServerEvent::GoldGained { gold } => {
                 hud.gold = hud.gold.saturating_add(*gold);
+            }
+            ServerEvent::BaseStats { stats } => {
+                // #268：基础属性（角色面板数据）
+                hud.base_stats = stats.clone();
+                tracing::info!("📊 基础属性: {:?}", stats);
             }
             ServerEvent::PlayerNameUpdated { name } => {
                 // #264：本地玩家改名
