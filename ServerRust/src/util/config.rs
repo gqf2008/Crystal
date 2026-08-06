@@ -55,6 +55,13 @@ pub struct SocialConfig {
     /// cfg 字段名 guild_creation_cost_gold (snake_case),TOML 示例见 server.toml。
     #[serde(default = "default_guild_creation_cost")]
     pub guild_creation_cost_gold: u64,
+    /// 是否启用配偶（结婚戒指）召回（C# Settings.WeddingRingRecall）
+    #[serde(default = "default_wedding_ring_recall")]
+    pub wedding_ring_recall_enabled: bool,
+}
+
+fn default_wedding_ring_recall() -> bool {
+    true
 }
 
 fn default_guild_creation_cost() -> u64 {
@@ -65,6 +72,7 @@ impl Default for SocialConfig {
     fn default() -> Self {
         Self {
             guild_creation_cost_gold: default_guild_creation_cost(),
+            wedding_ring_recall_enabled: default_wedding_ring_recall(),
         }
     }
 }

@@ -538,6 +538,8 @@ pub struct SocialActorConfig {
     /// 创建行会所需金币 (来自 cfg.server.toml 的 [social] section)
     /// 替代之前 hardcoded 1_000_000 常量。
     pub guild_creation_cost_gold: u64,
+    /// 是否启用配偶（结婚戒指）召回（C# Settings.WeddingRingRecall）
+    pub wedding_ring_recall_enabled: bool,
 }
 
 impl Default for SocialActorConfig {
@@ -547,6 +549,7 @@ impl Default for SocialActorConfig {
             item_infos: Arc::new(RwLock::new(HashMap::new())),
             // default 与主流程 cfg 路径一致
             guild_creation_cost_gold: 1_000_000,
+            wedding_ring_recall_enabled: true,
         }
     }
 }
@@ -625,9 +628,6 @@ const TRADE_RANGE: i32 = 3;
 
 /// 行会创建所需等级（对应 C# Settings.Guild_RequiredLevel）
 const GUILD_REQUIRED_LEVEL: u16 = 7;
-
-/// 是否允许配偶召回（对应 C# Settings.WeddingRingRecall）
-const WEDDING_RING_RECALL_ENABLED: bool = true;
 
 /// 行会创建费用：金币（对应 C# Settings.Guild_CreationCostList gold entry）
 // 创建行会所需金币来自 cfg.server.toml (social.guild_creation_cost_gold),
@@ -1263,7 +1263,7 @@ impl SocialActor {
         }
 
         // 全局开关（对应 C# Settings.WeddingRingRecall）
-        if !WEDDING_RING_RECALL_ENABLED {
+        if !self.config.wedding_ring_recall_enabled {
             send_system_message(&self.gate_ref, session_id, "结婚戒指召回功能已关闭");
             return;
         }
