@@ -154,6 +154,15 @@ impl Message<WorldAttackRequest> for WorldActor {
                                    result.object_id, label, second_hit, monster.name, *oid);
                         }
                     }
+                    // #448：FatalSword —— 下一次近战攻击暴击（×2 总伤害，一次性）
+                    if let Some((expire, _lv)) = self.fatal_sword.get(&msg.session_id).copied() {
+                        self.fatal_sword.remove(&msg.session_id);
+                        if self.tick_count < expire {
+                            monster.take_damage(damage);
+                            debug!("Player {} FatalSword crit +{} on '{}' (#{})",
+                                   result.object_id, damage, monster.name, *oid);
+                        }
+                    }
                     // #345：MPEater —— 近战被动吸蓝（C# HumanObject.cs:3078）
                     if let Some(magic) = state.magics.iter().find(|m| m.spell == (SPELL_MPEATER as i32 - 3)) {
                         let lv = magic.level as i32;
@@ -2510,6 +2519,26 @@ impl Message<MagicRequest> for WorldActor {
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: inst }).await;
                 debug!("Magic: {} casts UltimateEnhancer ({} +{}, {}s)",
                        state.name, label, value, duration_ticks / 10);
+            }
+            // #448：FatalSword —— 施放后 10s 内下一次近战攻击暴击（C# 配置 MPowerBase=20，简化 ×2）
+            SPELL_FATAL_SWORD => {
+                self.fatal_sword.insert(msg.session_id, (self.tick_count + 100, spell_level));
+                debug!("Magic: {} casts FatalSword (next melee crit, 10s)", state.name);
+            }
+            // #448：PetEnhancer —— 召唤宠物 DC/AC 提升（C# HumanObject.cs:6363；Rust 宠物无等级，按 2/4 简化）
+            SPELL_PET_ENHANCER => {
+                let duration_s = (magic_stat / 2).max(5) as u32; // SC 强度近似
+                let until = self.tick_count + (duration_s as u64) * 10;
+                let pet: Option<u32> = self.monsters.iter()
+                    .find(|(_, m)| m.master_session == Some(msg.session_id)
+                        && (m.x - target_x).abs() <= 2 && (m.y - target_y).abs() <= 2)
+                    .map(|(id, _)| *id);
+                if let Some(pid) = pet {
+                    self.pet_enhanced.insert(pid, (until, 2, 4));
+                    debug!("Magic: {} casts PetEnhancer -> pet {} (DC+2 AC+4, {}s)", state.name, pid, duration_s);
+                } else {
+                    debug!("Magic: {} casts PetEnhancer (no pet near {},{})", state.name, target_x, target_y);
+                }
             }
             // #312：FlamingSword —— 施放后 10 秒内下一次近战攻击附加火焰加成（C# HumanObject.cs:8538）
             SPELL_FLAMING_SWORD => {

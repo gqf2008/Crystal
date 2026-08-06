@@ -5609,7 +5609,7 @@ fn auto_spell_verify(
         tracing::info!("[SPELL] 开始法术冒烟（HellFire → IceThrust → Curse → EnergyRepulsor）");
         return;
     }
-    if *stage > 26 {
+    if *stage > 29 {
         return;
     }
     let Ok((pe, pf)) = players.single() else { return };
@@ -5711,7 +5711,10 @@ fn auto_spell_verify(
         23 => mir2_shared::enums::Spell::StormEscape,
         24 => mir2_shared::enums::Spell::OneWithNature,
         25 => mir2_shared::enums::Spell::MentalState,
-        _ => mir2_shared::enums::Spell::UltimateEnhancer,
+        26 => mir2_shared::enums::Spell::UltimateEnhancer,
+        27 => mir2_shared::enums::Spell::FatalSword,
+        28 => mir2_shared::enums::Spell::SummonSkeleton,
+        _ => mir2_shared::enums::Spell::PetEnhancer,
     };
     let dir = direction_from_delta((mx - px).signum(), (my - py).signum())
         .unwrap_or(mir2_shared::enums::MirDirection::Up);
@@ -5750,7 +5753,7 @@ fn auto_spell_verify(
         return;
     }
     // #312/#318：FlamingSword/TwinDrakeBlade/DoubleSlash 施放后补一次近战攻击，触发下一次攻击效果
-    if (*stage == 5 || *stage == 8 || *stage == 9) && *casts == 1 {
+    if (*stage == 5 || *stage == 8 || *stage == 9 || *stage == 27) && *casts == 1 {
         net.send_packet(&mir2_shared::packets::client::combat::Attack {
             direction: dir,
             spell: mir2_shared::enums::Spell::None,
@@ -5762,7 +5765,7 @@ fn auto_spell_verify(
         tracing::info!("[SPELL] ✅ {:?} 冒烟通过（3 次施放无崩溃）", spell);
         *stage += 1;
         *casts = 0;
-        if *stage == 27 {
+        if *stage == 30 {
             tracing::info!("[SPELL] ✅ 法术冒烟全流程完成");
             *stage = 99;
         }
