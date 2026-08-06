@@ -793,6 +793,73 @@ impl WorldActor {
     }
 }
 
+impl WorldActor {
+    /// NPC 脚本 TAKECONQUESTGOLD：所有者行会取走攻城金库（对齐 C# ActionType.TakeConquestGold）
+    pub(crate) async fn npc_take_conquest_gold(&mut self, session_id: u64, conquest_index: i32) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let Some(guild_name) = &state.guild_name else { return };
+        let Some(conquest) = self.conquest_instances.iter_mut().find(|c| c.id == conquest_index) else { return };
+        if conquest.owner_guild.as_deref() != Some(guild_name.as_str()) {
+            return;
+        }
+        let amount = conquest.gold_storage;
+        if amount > 0 {
+            conquest.gold_storage = 0;
+            let _ = self.social_ref.ask(crate::actors::social::NpcGuildGoldChange {
+                session_id,
+                amount: amount.min(u32::MAX as u64) as u32,
+                change_type: 3,
+            }).await;
+            send_system_message(&self.gate_ref, session_id, &format!("已从攻城金库取走 {} 金币", amount));
+        }
+        debug!("NPC TakeConquestGold: conquest={} gold={}", conquest_index, amount);
+    }
+
+    /// NPC 脚本 SETCONQUESTRATE：所有者设置税率（对齐 C# ActionType.SetConquestRate / NPCRate）
+    pub(crate) async fn npc_set_conquest_rate(&mut self, session_id: u64, conquest_index: i32, rate: u8) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let Some(guild_name) = &state.guild_name else { return };
+        let Some(conquest) = self.conquest_instances.iter_mut().find(|c| c.id == conquest_index) else { return };
+        if conquest.owner_guild.as_deref() == Some(guild_name.as_str()) {
+            conquest.tax_rate = rate;
+            debug!("NPC SetConquestRate: conquest={} rate={}", conquest_index, rate);
+        }
+    }
+
+    /// NPC 脚本 STARTCONQUEST：开/停战争（对齐 C# ActionType.StartConquest：强制 StartWar / WarIsOn=false）
+    pub(crate) async fn npc_start_conquest(&mut self, session_id: u64, conquest_index: i32) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let Some(conquest) = self.conquest_instances.iter_mut().find(|c| c.id == conquest_index) else { return };
+        if conquest.state == crate::actors::world::conquest::WarState::InProgress {
+            conquest.end_war();
+            send_system_message(&self.gate_ref, session_id, &format!("领地 {} 战争已停止", conquest.id));
+        } else {
+            let attacker = state.guild_name.clone().unwrap_or_default();
+            conquest.start_war(&attacker);
+            send_system_message(&self.gate_ref, session_id, &format!("领地 {} 战争已开始", conquest.id));
+        }
+        debug!("NPC StartConquest: conquest={} state={:?}", conquest_index, conquest.state);
+    }
+
+    /// NPC 脚本 SCHEDULECONQUEST：宣战（对齐 C# ActionType.ScheduleConquest：非所有者且未开战 → 设 Attacker）
+    pub(crate) async fn npc_schedule_conquest(&mut self, session_id: u64, conquest_index: i32) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let Some(guild_name) = &state.guild_name else { return };
+        let Some(conquest) = self.conquest_instances.iter_mut().find(|c| c.id == conquest_index) else { return };
+        if conquest.owner_guild.as_deref() != Some(guild_name.as_str())
+            && conquest.state == crate::actors::world::conquest::WarState::Idle
+        {
+            conquest.attacker_guild = Some(guild_name.clone());
+            send_system_message(&self.gate_ref, session_id, &format!("行会 {} 已宣战领地 {}", guild_name, conquest.id));
+            debug!("NPC ScheduleConquest: conquest={} attacker={}", conquest_index, guild_name);
+        }
+    }
+}
+
 // ============================================================
 // 钓鱼系统
 // ============================================================
