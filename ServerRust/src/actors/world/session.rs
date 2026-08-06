@@ -280,6 +280,9 @@ impl Message<StartGameRequest> for WorldActor {
             name: player_name.clone(),
         }).try_send();
 
+        // C# ApplyMapEntryRules：登录进入世界后应用地图规则（NoGroup/NoPets/NoIntelligentCreatures/NoHero）
+        super::npc_script::apply_map_entry_rules(self, msg.session_id).await;
+
         // 行会在线状态由 SocialActor 管理
 
         // 发送玩家自身的 ObjectPlayer（客户端据此生成本地玩家实体并驱动移动/拾取）

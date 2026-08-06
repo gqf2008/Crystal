@@ -573,6 +573,15 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN storage_password_last_set INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    // #493: 地图进入规则列（C# MapInfo NoGroup/NoPets/NoIntelligentCreatures/NoHero，safe to re-run）
+    let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN no_group INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN no_pets INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN no_intelligent_creatures INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN no_hero INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     // #491: 角色最后上线时间（C# LastLogoutDate，safe to re-run）
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN last_access INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
@@ -2134,6 +2143,14 @@ pub struct MapInfo {
     pub no_mount: bool,
     pub need_bridle: bool,
     pub no_fight: bool,
+    /// 禁止组队（C# MapInfo.NoGroup；进入时解散队伍）
+    pub no_group: bool,
+    /// 禁止战斗宠物（C# MapInfo.NoPets）
+    pub no_pets: bool,
+    /// 禁止拾取宠物（C# MapInfo.NoIntelligentCreatures；进入时解散）
+    pub no_intelligent_creatures: bool,
+    /// 禁止英雄（C# MapInfo.NoHero；进入时解除）
+    pub no_hero: bool,
     pub music: bool,
     pub no_town_teleport: bool,
     pub no_reincarnation: bool,
@@ -2521,6 +2538,10 @@ pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
             no_mount: row.get::<i32, _>("no_mount") != 0,
             need_bridle: row.get::<i32, _>("need_bridle") != 0,
             no_fight: row.get::<i32, _>("no_fight") != 0,
+            no_group: row.try_get::<i32, _>("no_group").unwrap_or(0) != 0,
+            no_pets: row.try_get::<i32, _>("no_pets").unwrap_or(0) != 0,
+            no_intelligent_creatures: row.try_get::<i32, _>("no_intelligent_creatures").unwrap_or(0) != 0,
+            no_hero: row.try_get::<i32, _>("no_hero").unwrap_or(0) != 0,
             music: row.get::<i32, _>("music") != 0,
             no_town_teleport: row.get::<Option<i32>, _>("no_town_teleport").unwrap_or(0) != 0,
             no_reincarnation: row.get::<Option<i32>, _>("no_reincarnation").unwrap_or(0) != 0,
