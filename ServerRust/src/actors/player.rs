@@ -1757,6 +1757,28 @@ impl Message<InventoryUnequipItem> for PlayerActor {
     }
 }
 
+/// 标记物品已鉴定（C# NeedIdentify 使用/装备时自动鉴定 + S.RefreshItem）
+pub struct SetItemIdentified {
+    pub unique_id: u64,
+}
+
+impl Message<SetItemIdentified> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: SetItemIdentified, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        for s in self.state.inventory.backpack.iter_mut().flatten() {
+            if s.item.unique_id == msg.unique_id {
+                if !s.item.identified {
+                    s.item.identified = true;
+                    self.send_inventory_changed();
+                }
+                return true;
+            }
+        }
+        false
+    }
+}
+
 /// 从背包移除物品
 pub struct RemoveItemFromInventory {
     pub unique_id: u64,
