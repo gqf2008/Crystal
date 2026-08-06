@@ -2537,6 +2537,64 @@ impl Message<MakeWeddingRing> for PlayerActor {
     }
 }
 
+/// NPC 脚本 CHANGELEVEL：设置角色等级（对齐 C# ActionType.ChangeLevel：设等级 + 经验 0 + LevelUp）
+pub struct ChangeLevel {
+    pub level: u16,
+}
+
+impl Message<ChangeLevel> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: ChangeLevel, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        const MAX_LEVEL: u16 = 200;
+        let new_level = msg.level.min(MAX_LEVEL);
+        self.state.level = new_level;
+        self.state.experience = 0;
+        // 按 BaseStats 公式重算基础属性（对齐 C# Settings.ClassBaseStats[Class].Calculate）
+        let base_stats = mir2_shared::data::stats::BaseStats::new(self.state.class);
+        for bs in &base_stats.stats {
+            let val = bs.calculate(self.state.class, self.state.level as i32);
+            use mir2_shared::enums::Stat;
+            match bs.stat {
+                Stat::HP => { self.state.max_hp = val; self.state.hp = val; }
+                Stat::MP => { self.state.max_mp = val; self.state.mp = val; }
+                Stat::MinDC => self.state.min_attack = val,
+                Stat::MaxDC => self.state.max_attack = val,
+                Stat::MinMC => self.state.min_mc = val,
+                Stat::MaxMC => self.state.max_mc = val,
+                Stat::MinSC => self.state.min_sc = val,
+                Stat::MaxSC => self.state.max_sc = val,
+                Stat::MinAC => self.state.min_ac = val,
+                Stat::MaxAC => { self.state.max_ac = val; self.state.defence = val; }
+                Stat::MinMAC => self.state.min_mac = val,
+                Stat::MaxMAC => self.state.max_mac = val,
+                Stat::Agility => self.state.agility = val,
+                Stat::Accuracy => self.state.accuracy = val,
+                _ => {}
+            }
+        }
+        // 发 LevelChanged
+        let mut lv_body = Vec::new();
+        lv_body.extend_from_slice(&self.state.level.to_le_bytes());
+        lv_body.extend_from_slice(&self.state.experience.to_le_bytes());
+        lv_body.extend_from_slice(&self.state.max_experience.to_le_bytes());
+        let _ = self.gate_ref.tell(SendToClient {
+            session_id: self.state.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LevelChanged as i16, &lv_body),
+        }).await;
+        // #283：通知 WorldActor 广播 ObjectLeveled
+        let _ = self.world_ref
+            .tell(crate::actors::world::PlayerLeveled {
+                session_id: self.state.session_id,
+                object_id: self.state.object_id,
+                level: self.state.level,
+            })
+            .try_send();
+        info!("Player {} level changed to {}", self.state.name, self.state.level);
+    }
+}
+
+
 
 /// 设置是否允许拜师
 pub struct SetAllowMentor {

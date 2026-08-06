@@ -673,6 +673,20 @@ async fn exec_action(
                 debug!("NPC REDUCEPKPOINT: -{}", amount);
             }
         }
+        // GIVEGUILDGOLD <amount> —— 行会仓库增加金币（对齐 C# ActionType.GiveGuildGold）
+        "GIVEGUILDGOLD" => {
+            let amount = arg0().parse::<u32>().unwrap_or(0);
+            if amount > 0 {
+                let _ = world.social_ref.ask(crate::actors::social::NpcGuildGoldChange { session_id, amount, change_type: 3 }).await;
+            }
+        }
+        // TAKEGUILDGOLD <amount> —— 行会仓库减少金币（对齐 C# ActionType.TakeGuildGold）
+        "TAKEGUILDGOLD" => {
+            let amount = arg0().parse::<u32>().unwrap_or(0);
+            if amount > 0 {
+                let _ = world.social_ref.ask(crate::actors::social::NpcGuildGoldChange { session_id, amount, change_type: 2 }).await;
+            }
+        }
         // INCREASEPKPOINT <amount> —— 增加 PK 值（对齐 C# ActionType.IncreasePkPoint）
         "INCREASEPKPOINT" | "ADDPKPOINT" => {
             let amount = arg0().parse::<i32>().unwrap_or(0);
@@ -706,6 +720,14 @@ async fn exec_action(
                     send_player_msg(world, session_id, crate::actors::player::SetCreature { creature_log: st.creature_log }).await;
                     debug!("NPC CLEARPETS: all pets cleared");
                 }
+            }
+        }
+        // CHANGELEVEL <level> —— 设置等级（对齐 C# ActionType.ChangeLevel：设等级 + 经验 0 + LevelUp）
+        "CHANGELEVEL" => {
+            let level = arg0().parse::<u16>().unwrap_or(0);
+            if level > 0 {
+                send_player_msg(world, session_id, crate::actors::player::ChangeLevel { level }).await;
+                debug!("NPC CHANGELEVEL: {}", level);
             }
         }
         // GIVEEXP <amount>

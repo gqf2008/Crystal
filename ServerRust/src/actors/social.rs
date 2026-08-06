@@ -231,6 +231,43 @@ pub struct SocialPlayerLeft {
     pub session_id: u64,
 }
 
+/// WorldActor(NPC 脚本) -> SocialActor: NPC 直接给/扣行会金币（对齐 C# ActionType.GiveGuildGold/TakeGuildGold）
+pub struct NpcGuildGoldChange {
+    pub session_id: u64,
+    pub amount: u32,
+    /// 2=减少（TakeGuildGold），3=增加（GiveGuildGold），对齐 C# S.GuildStorageGoldChange Type
+    pub change_type: u8,
+}
+
+impl Message<NpcGuildGoldChange> for SocialActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: NpcGuildGoldChange, _ctx: &mut Context<Self, Self::Reply>) {
+        let state = match self.players.get(&msg.session_id) {
+            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return },
+            None => return,
+        };
+        let Some(guild_name) = state.guild_name.clone() else { return };
+        let Some(guild) = self.guilds.get_mut(&guild_name) else { return };
+        match msg.change_type {
+            2 => {
+                let amount = (msg.amount as u64).min(guild.gold);
+                guild.gold -= amount;
+                self.send_guild_storage_gold_change(msg.session_id, &state.name, amount as u32, 2).await;
+                send_system_message(&self.gate_ref, msg.session_id, &format!("行会仓库减少 {} 金币", amount));
+            }
+            _ => {
+                guild.gold = guild.gold.saturating_add(msg.amount as u64);
+                self.send_guild_storage_gold_change(msg.session_id, &state.name, msg.amount, 3).await;
+                send_system_message(&self.gate_ref, msg.session_id, &format!("行会仓库增加 {} 金币", msg.amount));
+            }
+        }
+        self.save_guild_to_db(&guild_name).await;
+        self.broadcast_guild_info(&guild_name).await;
+        debug!("NPC GuildGoldChange: {} {} (type {})", state.name, msg.amount, msg.change_type);
+    }
+}
+
 /// WorldActor(NPC 脚本) -> SocialActor: 强制离婚（对齐 C# ActionType.ForceDivorce：NPCDivorce）
 pub struct NpcForceDivorce {
     pub session_id: u64,
