@@ -428,7 +428,8 @@ impl Message<MarketSellNowRequest> for WorldActor {
 
         let auction = &self.auctions[auction_idx];
         let price = auction.price as u64;
-        let commission = price / 10;
+        // C# Globals.Commission = 0.05（5%）
+        let commission = price * 5 / 100;
         let seller_gold = price - commission;
 
         let _ = db::delete_auction(&self.db_pool, msg.unique_id as i64).await;
@@ -479,8 +480,9 @@ impl Message<ConsignItemRequest> for WorldActor {
         }
 
         let price = msg.price as u32;
-        if price == 0 || price > 1_000_000_000 {
-            send_system_message(&self.gate_ref, msg.session_id, "价格无效");
+        // C# Globals.MinConsignment=5000 / MaxConsignment=50000000
+        if price < 5000 || price > 50_000_000 {
+            send_system_message(&self.gate_ref, msg.session_id, "价格无效（5000 - 50,000,000）");
             return;
         }
 
