@@ -121,6 +121,32 @@ impl Message<AcceptReincarnationRequest> for WorldActor {
 
         // Revive the dead player at half HP
         let _ = record.actor_ref.ask(ReviveAtHalfHp).await;
+        // #222：与 TownRevive 同款收尾——S.Revived 清除客户端死亡态 + ObjectRevived 广播
+        let _ = self
+            .gate_ref
+            .tell(crate::gate::actor::SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Revived as i16, &[]),
+            })
+            .await;
+        let mut obj_body = Vec::new();
+        obj_body.extend_from_slice(&state.object_id.to_le_bytes());
+        obj_body.push(1u8); // effect
+        let revived_packet = build_packet_bytes(
+            mir2_shared::enums::ServerPacketIds::ObjectRevived as i16,
+            &obj_body,
+        );
+        for sid in self.players.keys() {
+            let _ = self
+                .gate_ref
+                .tell(crate::gate::actor::SendToClient {
+                    session_id: *sid,
+                    data: revived_packet.clone(),
+                })
+                .await;
+        }
+        // 从死亡队列移除（避免自动复活覆盖）
+        self.player_death_queue.remove(&msg.session_id);
 
         // Clear reincarnation state on both players
         let _ = record.actor_ref.ask(ClearReincarnation).await;

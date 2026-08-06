@@ -3196,6 +3196,21 @@ impl Message<TakeBackItemTo> for PlayerActor {
 // 轮回系统消息
 // ============================================================
 
+/// 轮回术 offer（#222：施法者请求复活死亡玩家）
+pub struct OfferReincarnation {
+    pub host_session: u64,
+    pub expire_tick: u64,
+}
+
+impl Message<OfferReincarnation> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: OfferReincarnation, _ctx: &mut Context<Self, Self::Reply>) {
+        self.state.reincarnation_host = Some(msg.host_session);
+        self.state.reincarnation_ready = true;
+        self.state.reincarnation_expire_time = msg.expire_tick;
+    }
+}
 /// 清除当前玩家的轮回状态（被施法者/死亡玩家使用）
 pub struct ClearReincarnation;
 

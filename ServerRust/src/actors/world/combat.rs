@@ -2091,24 +2091,41 @@ impl Message<MagicRequest> for WorldActor {
                 }
                 if let Some(dead_sid) = target_dead {
                     if let Some(other) = self.players.get(&dead_sid) {
-                        // 获取死亡玩家状态用于位置
-                        if let Ok(Some(dead_state)) = other.actor_ref.ask(GetPlayerState).await {
-                            let rx = dead_state.x;
-                            let ry = dead_state.y;
-                            let rmap = dead_state.map_index;
-                            // 原地复活（半血），对齐 C# Reincarnation Revive(HP/2)
-                            let revived = other.actor_ref.ask(crate::actors::player::RevivePlayer {
-                                x: rx, y: ry, map_index: rmap,
-                            }).await.unwrap_or(false);
-                            if revived {
-                                // 从死亡队列移除（避免自动复活覆盖）
-                                self.player_death_queue.remove(&dead_sid);
-                                debug!("Magic: {} casts Reincarnation (revived player {})",
-                                    state.name, dead_sid);
-                                send_system_message(&self.gate_ref, msg.session_id, "轮回术成功，玩家已复活！");
-                                send_system_message(&self.gate_ref, dead_sid, "你被轮回术复活了！");
-                            }
+                        // #222：对齐 C# offer/accept 链路——设置轮回状态并请求确认
+                        let expire_tick = self.tick_count + 300; // 30s 有效期
+                        let _ = other
+                            .actor_ref
+                            .ask(crate::actors::player::OfferReincarnation {
+                                host_session: msg.session_id,
+                                expire_tick,
+                            })
+                            .await;
+                        // 发送 S.RequestReincarnation（空包）给死亡玩家
+                        let req =
+                            mir2_shared::packets::server::miscellaneous::RequestReincarnation {};
+                        let mut body = Vec::new();
+                        if req.write_body(&mut body).is_ok() {
+                            let _ = self
+                                .gate_ref
+                                .tell(SendToClient {
+                                    session_id: dead_sid,
+                                    data: build_packet_bytes(
+                                        mir2_shared::enums::ServerPacketIds::RequestReincarnation
+                                            as i16,
+                                        &body,
+                                    ),
+                                })
+                                .await;
                         }
+                        debug!(
+                            "Magic: {} casts Reincarnation (offered player {})",
+                            state.name, dead_sid
+                        );
+                        send_system_message(
+                            &self.gate_ref,
+                            msg.session_id,
+                            "轮回术已施展，等待对方确认…",
+                        );
                     }
                 } else {
                     send_system_message(&self.gate_ref, msg.session_id, "附近没有可复活的目标");

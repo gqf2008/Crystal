@@ -170,6 +170,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--hero-test") {
         app.add_systems(Update, auto_hero_test);
     }
+    // --reincarnation-test: 轮回术确认链路（死亡 → 收到 offer → 接受 → 复活）
+    if std::env::args().any(|a| a == "--reincarnation-test") {
+        app.add_systems(Update, auto_reincarnation_test);
+    }
     // --book-test: 技能书学习链路（使用技能书 → 等 NewMagic → 校验 MagicsState）
     if std::env::args().any(|a| a == "--book-test") {
         app.add_systems(Update, auto_book_test);
@@ -5177,6 +5181,56 @@ fn auto_book_test(
                 .any(|m| m.spell == mir2_shared::enums::Spell::FireBall)
             {
                 tracing::info!("[BOOKTEST] ✅ 学会 FireBall");
+                *stage = 9;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// --reincarnation-test：死亡 → S.RequestReincarnation offer → 接受 → 复活（#222）
+#[allow(clippy::too_many_arguments)]
+fn auto_reincarnation_test(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t >= 300.0 {
+                tracing::warn!("[REINC] ❌ 等待死亡超时");
+                *stage = 9;
+                return;
+            }
+            if hud.dead {
+                if hud.reincarnation_offered {
+                    tracing::info!("[REINC] ✅ 收到轮回术 offer");
+                    net.send_packet(&mir2_shared::packets::client::misc::AcceptReincarnation);
+                    tracing::info!("[REINC] 接受轮回术复活");
+                    *stage = 1;
+                    *t = 0.0;
+                } else {
+                    tracing::warn!("[REINC] ❌ 死亡但未收到 offer");
+                    *stage = 9;
+                }
+            }
+        }
+        1 => {
+            if *t >= 10.0 {
+                tracing::warn!("[REINC] ❌ 复活超时");
+                *stage = 9;
+                return;
+            }
+            if !hud.dead {
+                tracing::info!("[REINC] ✅ 轮回术复活成功");
                 *stage = 9;
             }
         }
