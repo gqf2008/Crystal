@@ -441,6 +441,19 @@ impl Message<UseItemRequest> for WorldActor {
             }).await;
         }
 
+        // C# UseItem：仅可处理类型才消耗（Potion/Scroll/Book/Food/彩票）；未处理类型不消耗
+        let item_type = item_db.as_ref().map(|i| i.item_type).unwrap_or(-1);
+        let usable = item_index == 4
+            || item_type == mir2_shared::enums::ItemType::Potion as i32
+            || item_type == mir2_shared::enums::ItemType::Scroll as i32
+            || item_type == mir2_shared::enums::ItemType::Book as i32
+            || item_type == mir2_shared::enums::ItemType::Food as i32;
+        if !usable {
+            send_system_message(&self.gate_ref, msg.session_id, "该物品无法使用");
+            send_use_item_response(&self.gate_ref, msg.session_id, msg.unique_id);
+            return;
+        }
+
         // 消耗品：扣减 count 或移除
         let consumed = record.actor_ref.ask(ConsumeItem { unique_id: msg.unique_id }).await.unwrap_or(false);
         if !consumed {
@@ -627,6 +640,30 @@ impl Message<UseItemRequest> for WorldActor {
                     }
                     if !won {
                         send_system_message(&self.gate_ref, msg.session_id, "很遗憾，你没有中奖。");
+                    }
+                }
+                // Food（喂坐骑：恢复坐骑耐久 + S.ItemRepaired，C# UseItem Food）
+                t if t == mir2_shared::enums::ItemType::Food as i32 => {
+                    let fed = record.actor_ref.ask(crate::actors::player::FeedMount {
+                        amount: db.durability as u16,
+                    }).await.unwrap_or(None);
+                    if let Some((uid, max_dura, cur_dura)) = fed {
+                        let packet = mir2_shared::packets::server::item::ItemRepaired {
+                            unique_id: uid,
+                            max_dura,
+                            current_dura: cur_dura,
+                        };
+                        let mut body = Vec::new();
+                        if packet.write_body(&mut body).is_ok() {
+                            let _ = self.gate_ref.tell(SendToClient {
+                                session_id: msg.session_id,
+                                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ItemRepaired as i16, &body),
+                            }).await;
+                        }
+                        send_system_message(&self.gate_ref, msg.session_id, "坐骑吃饱了！");
+                        debug!("FeedMount: {} fed mount (uid={} dura={}/{})", player_state.name, uid, cur_dura, max_dura);
+                    } else {
+                        send_system_message(&self.gate_ref, msg.session_id, "没有可喂养的坐骑或坐骑已满");
                     }
                 }
                 // Book（技能书，#212：C# UseItem Book → magic = (Spell)item.Info.Shape）
