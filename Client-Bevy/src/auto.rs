@@ -5753,7 +5753,7 @@ fn auto_spell_verify(
         return;
     }
     // #312/#318：FlamingSword/TwinDrakeBlade/DoubleSlash 施放后补一次近战攻击，触发下一次攻击效果
-    if (*stage == 5 || *stage == 8 || *stage == 9 || *stage == 27) && *casts == 1 {
+    if (*stage == 5 || *stage == 8 || *stage == 9 || *stage == 27 || *stage == 28) && *casts == 1 {
         net.send_packet(&mir2_shared::packets::client::combat::Attack {
             direction: dir,
             spell: mir2_shared::enums::Spell::None,

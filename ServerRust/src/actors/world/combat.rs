@@ -90,12 +90,21 @@ impl Message<WorldAttackRequest> for WorldActor {
                 debug!("Attack nearby: {}", nearby.join(", "));
             }
 
+            // #471：主人当前召唤的宠物（协战目标分配用）
+            let pet_ids: Vec<u32> = self.monsters.iter()
+                .filter(|(_, m)| m.master_session == Some(msg.session_id))
+                .map(|(id, _)| *id)
+                .collect();
             let mut hit_monster = false;
             // HalfMoon/CrossHalfMoon 溅射目标（循环外应用，避免借用冲突）
             let mut halfmoon_splash: Vec<(u32, i32)> = Vec::new();
             let mut primary_target_oid: u32 = 0; // 主目标 oid（溅射排除用）
             for (oid, monster) in &mut self.monsters {
                 let dist = (monster.x - target_x).abs() + (monster.y - target_y).abs();
+                // #471：主人近战不攻击自己的召唤宠物（宠物是友方）
+                if monster.master_session == Some(msg.session_id) {
+                    continue;
+                }
                 // 近战只打正前方那一格（C# 语义）：dist==0 才命中。此前 <=1 会把
                 // 攻击格旁边的守卫/怪物一并命中（#77 实测守卫被打死都不掉血挡住击杀）
                 if dist == 0 {
@@ -260,6 +269,11 @@ impl Message<WorldAttackRequest> for WorldActor {
 
                     primary_target_oid = *oid;
                     hit_monster = true;
+                    // #471：主人攻击的怪物作为所有宠物协战目标
+                    for pid in &pet_ids {
+                        self.pet_targets.insert(*pid, *oid);
+                        debug!("Pet #{} target set -> monster #{}", pid, *oid);
+                    }
                     break; // 一次只打一只
                 }
             }

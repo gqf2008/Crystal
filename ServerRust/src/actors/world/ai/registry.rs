@@ -327,7 +327,7 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("bugbagmaggot") || name.contains("虫袋蛆")
         || name.contains("bombspider") || name.contains("bomb spider") || name.contains("炸弹蜘蛛")
         || name == "hugger"
-        || name == "guard" || (name.contains("guard") && !name.contains("town") && !name.contains("guardian"))
+        || name == "guard" || (name.starts_with("guard") && !name.contains("town") && !name.contains("guardian") && !name.contains("vanguard") && !name.contains("bodyguard"))
         || name.contains("townarcher") || name.contains("town archer") || name.contains("城镇弓箭手")
         || name.contains("castlegate") || name.contains("castle gate") || name.contains("城门")
         || name.contains("digoutzombie") || name.contains("digout zombie") || name.contains("钻地僵尸")
@@ -429,4 +429,22 @@ pub fn is_passive_object(monster_name: &str) -> bool {
     name == "deer" || name.contains("鹿")
         || name == "doe" || name.contains("母鹿")
         || name == "football" || name.contains("足球")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn archer_guard_not_boss() {
+        // #471 修复：ArcherGuard 等普通守卫不应被当作 Boss（否则跳过 tick 死亡判定 → 无敌）
+        assert!(!is_registered_boss("ArcherGuard"));
+        assert!(!is_registered_boss("archerguard"));
+    }
+
+    #[test]
+    fn plain_guard_still_boss_behavior() {
+        assert!(is_registered_boss("Guard"));
+        assert!(is_registered_boss("Guard2"));
+    }
 }

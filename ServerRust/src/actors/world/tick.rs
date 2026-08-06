@@ -1756,6 +1756,8 @@ impl Message<Tick> for WorldActor {
                 .collect();
             // Healer 治疗动作和 Summoner 召唤动作（在循环后应用）
             let mut heal_actions: Vec<(u32, i32)> = Vec::new();
+            // #471 宠物协战动作（pet_oid, target_oid, damage, master_session，循环后应用）
+            let mut pet_attacks: Vec<(u32, u32, i32, u64)> = Vec::new();
             let mut summon_spawns: Vec<MonsterSpawn> = Vec::new();
             // Boss AI 输出队列（在循环后应用）
             let mut boss_moves: Vec<(u32, i32, i32, u8)> = Vec::new();
@@ -1892,6 +1894,37 @@ impl Message<Tick> for WorldActor {
                     MonsterAiType::Guard => nearest.is_some_and(|(_, _, _, d)| d <= profile.aggro_range) && dist_to_spawn(monster) <= profile.aggro_range * 2,
                     _ => nearest.is_some(),
                 };
+
+                // #471：宠物——不主动攻击玩家；有协战目标则靠近/攻击
+                if monster.master_session.is_some() {
+                    nearest = None;
+                    monster.target_session = None;
+                    if let Some(tmid) = self.pet_targets.get(&monster.object_id).copied() {
+                        let target_alive = monster_snapshot.iter().any(|s| s.0 == tmid && s.3 > 0 && s.5 == monster.map_index);
+                        if !target_alive {
+                            self.pet_targets.remove(&monster.object_id);
+                        } else if let Some((_, tx, ty, _, _, _, _, _, _, _)) = monster_snapshot.iter().find(|s| s.0 == tmid) {
+                            let dist = (tx - monster.x).abs() + (ty - monster.y).abs();
+                            if dist <= 1 && can_attack {
+                                let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
+                                let damage = ((self.tick_count.wrapping_add(*oid as u64).wrapping_mul(13)) as i32 % dmg_range) + monster.min_dmg;
+                                pet_attacks.push((*oid, tmid, damage, monster.master_session.unwrap_or(0)));
+                                monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
+                                monster.ai_state = MonsterAiState::Attack;
+                            } else if can_move {
+                                let (nx, ny, dir) = monster.step_toward(*tx, *ty);
+                                if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
+                                    && !monster_positions.contains(&(nx, ny))
+                                    && moved_targets.insert((nx, ny))
+                                {
+                                    moved_monsters.push((*oid, nx, ny, dir));
+                                }
+                                monster.next_move_tick = self.tick_count + profile.move_interval;
+                                monster.ai_state = MonsterAiState::Chase;
+                            }
+                        }
+                    }
+                }
 
                 if let Some((target_session, px, py, dist)) = nearest {
                     // #395：幻觉——期内不攻击/不追击（C# HallucinationTime）
@@ -2183,6 +2216,16 @@ impl Message<Tick> for WorldActor {
             for (target_oid, heal_amount) in &heal_actions {
                 if let Some(target) = self.monsters.get_mut(target_oid) {
                     target.hp = (target.hp + *heal_amount).min(target.max_hp);
+                }
+            }
+
+            // #471：宠物协战伤害（循环外应用，避免借用冲突）
+            for (pid, tmid, damage, master) in &pet_attacks {
+                if let Some(tm) = self.monsters.get_mut(tmid) {
+                    tm.take_damage(*damage);
+                    tm.provoked = true;
+                    tm.target_session = Some(*master);
+                    debug!("Pet #{} assists hitting '{}' (#{}) for {} dmg", pid, tm.name, tmid, damage);
                 }
             }
 
