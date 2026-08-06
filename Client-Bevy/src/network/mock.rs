@@ -1035,6 +1035,25 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 },
                                             },
                                         );
+                                        // #295：行会仓库实时同步（金币 + 物品存入）
+                                        send(
+                                            &to_client,
+                                            &server::GuildStorageGoldChange {
+                                                amount: 500,
+                                                change_type: 0,
+                                                name: "刀客".to_string(),
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::GuildStorageItemChange {
+                                                change_type: 0,
+                                                to: 0,
+                                                from: 0,
+                                                user: 100,
+                                                item: Some((100, potion_item(5))),
+                                            },
+                                        );
                                         send(
                                             &to_client,
                                             &server::miscellaneous::InTrapRock { in_trap: true },

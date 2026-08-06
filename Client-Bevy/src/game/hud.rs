@@ -900,6 +900,8 @@ fn hud_server_events(
             | ServerEvent::StorageResized { .. }
             | ServerEvent::ObjectLeveled { .. }
             | ServerEvent::ChatItemReceived { .. }
+            | ServerEvent::GuildStorageGoldChanged { .. }
+            | ServerEvent::GuildStorageItemChanged { .. }
             | ServerEvent::LoginBanned { .. }
             | ServerEvent::StartGameBanned { .. }
             | ServerEvent::StartGameDelay { .. }

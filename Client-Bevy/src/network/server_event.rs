@@ -45,6 +45,19 @@ pub enum ServerEvent {
     LogOutFailed,
     /// #289 ReturnToLogin：服务端要求返回登录界面
     ReturnToLogin,
+    /// #295 GuildStorageGoldChange：行会仓库金币变化（0=存入 1=取出）
+    GuildStorageGoldChanged {
+        amount: u32,
+        change_type: u8,
+        name: String,
+    },
+    /// #295 GuildStorageItemChange：行会仓库物品变化（0=存入 1=取出 2=移动）
+    GuildStorageItemChanged {
+        change_type: u8,
+        to: i32,
+        from: i32,
+        item: Option<InvItem>,
+    },
     /// #279 PlayerUpdate：玩家外观刷新（换装/光照，C# S.PlayerUpdate）
     PlayerUpdate {
         object_id: u32,

@@ -981,6 +981,77 @@ fn guild_server_events(
                 guild.members = members.clone();
                 guild.gold = *gold;
             }
+            ServerEvent::GuildStorageGoldChanged {
+                amount,
+                change_type,
+                name,
+            } => {
+                // #295：行会仓库金币实时同步（C# GuildDialog.Gold +/-）
+                if *change_type == 0 {
+                    guild.gold = guild.gold.saturating_add(*amount);
+                } else {
+                    guild.gold = guild.gold.saturating_sub(*amount);
+                }
+                tracing::info!(
+                    "💰 行会仓库金币 {} {}（by {}）",
+                    if *change_type == 0 { "存入" } else { "取出" },
+                    amount,
+                    name
+                );
+            }
+            ServerEvent::GuildStorageItemChanged {
+                change_type,
+                to,
+                from,
+                item,
+            } => {
+                // #295：行会仓库物品实时同步（C# 0=存入 1=取出 2=移动）
+                match *change_type {
+                    0 => {
+                        if let Some(item) = item {
+                            if *to >= 0 {
+                                // 未收到全量列表时先扩容（C# StorageGrid 固定 100 格）
+                                let need = (*to as usize).saturating_add(1);
+                                if guild.storage_items.len() < need {
+                                    guild.storage_items.resize(need, None);
+                                }
+                                guild.storage_items[*to as usize] = Some(StorageItem {
+                                    unique_id: item.unique_id,
+                                    item_index: item.item_index,
+                                    name: item.name.clone(),
+                                    count: item.count,
+                                });
+                            }
+                        }
+                    }
+                    1 => {
+                        if *from >= 0 && (*from as usize) < guild.storage_items.len() {
+                            guild.storage_items[*from as usize] = None;
+                        }
+                    }
+                    2 => {
+                        if *from >= 0
+                            && *to >= 0
+                            && (*from as usize) < guild.storage_items.len()
+                            && (*to as usize) < guild.storage_items.len()
+                        {
+                            let moved = guild.storage_items[*from as usize].take();
+                            if let Some(item) = item {
+                                guild.storage_items[*to as usize] = Some(StorageItem {
+                                    unique_id: item.unique_id,
+                                    item_index: item.item_index,
+                                    name: item.name.clone(),
+                                    count: item.count,
+                                });
+                            } else {
+                                guild.storage_items[*to as usize] = moved;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                tracing::info!("📦 行会仓库物品变化 type={} to={} from={}", change_type, to, from);
+            }
             ServerEvent::GuildStorage { items } => {
                 guild.storage_items = items
                     .iter()

@@ -433,6 +433,63 @@ impl SocialActor {
     }
 
     /// 保存行会到数据库（创建/金币/物品/公告等变更后调用）
+    /// #295：下发行会仓库金币实时包（C# S.GuildStorageGoldChange）
+    async fn send_guild_storage_gold_change(
+        &self,
+        session_id: u64,
+        name: &str,
+        amount: u32,
+        change_type: u8,
+    ) {
+        let mut body = Vec::new();
+        if mir2_shared::packets::base::serialize_packet(
+            &mut std::io::Cursor::new(&mut body),
+            &mir2_shared::packets::server::GuildStorageGoldChange {
+                amount,
+                change_type,
+                name: name.to_string(),
+            },
+        )
+        .is_ok()
+        {
+            let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
+                session_id,
+                data: body,
+            }).await;
+        }
+    }
+
+    /// #295：下发行会仓库物品实时包（C# S.GuildStorageItemChange）
+    async fn send_guild_storage_item_change(
+        &self,
+        session_id: u64,
+        change_type: u8,
+        to: i32,
+        from: i32,
+        user: i32,
+        item: Option<(i64, mir2_shared::data::item::UserItem)>,
+    ) {
+        let mut body = Vec::new();
+        if mir2_shared::packets::base::serialize_packet(
+            &mut std::io::Cursor::new(&mut body),
+            &mir2_shared::packets::server::GuildStorageItemChange {
+                change_type,
+                to,
+                from,
+                user,
+                item,
+            },
+        )
+        .is_ok()
+        {
+            let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
+                session_id,
+                data: body,
+            }).await;
+        }
+    }
+
+
     async fn save_guild_to_db(&self, guild_name: &str) {
         if let Some(guild) = self.guilds.get(guild_name) {
             if let Err(e) = db::save_guild(&self.db_pool, guild).await {
@@ -2385,6 +2442,7 @@ impl Message<GuildStorageGoldChangeRequest> for SocialActor {
                 let _ = record.ask(DeductGold { amount: msg.amount as u64 }).await;
                 guild.gold += msg.amount as u64;
                 send_system_message(&self.gate_ref, msg.session_id, &format!("已存入 {} 金币到行会仓库", msg.amount));
+                self.send_guild_storage_gold_change(msg.session_id, &state.name, msg.amount, 0).await;
                 self.save_guild_to_db(&guild_name).await;
                 self.broadcast_guild_info(&guild_name).await;
             }
@@ -2401,6 +2459,7 @@ impl Message<GuildStorageGoldChangeRequest> for SocialActor {
                 guild.gold -= msg.amount as u64;
                 let _ = record.ask(AddGold { amount: msg.amount as u64 }).await;
                 send_system_message(&self.gate_ref, msg.session_id, &format!("已从行会仓库取出 {} 金币", msg.amount));
+                self.send_guild_storage_gold_change(msg.session_id, &state.name, msg.amount, 1).await;
                 self.save_guild_to_db(&guild_name).await;
                 self.broadcast_guild_info(&guild_name).await;
             }
@@ -2451,6 +2510,15 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                     if let Some(slot_val) = slot {
                         send_system_message(&self.gate_ref, msg.session_id, "物品已存入行会仓库");
                         debug!("GuildStorageItem: {} deposited item={} slot={}", state.name, item_index, slot_val);
+                        // #295：实时通知（C# S.GuildStorageItemChange type=0 存入）
+                        self.send_guild_storage_item_change(
+                            msg.session_id,
+                            0,
+                            slot_val as i32,
+                            0,
+                            state.object_id as i32,
+                            Some((state.object_id as i64, removed_item)),
+                        ).await;
                         deposited = true;
                     } else {
                         let _ = record.ask(AddItemToInventory { item: removed_item }).await;
@@ -2483,6 +2551,15 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                         let added = record.ask(AddItemToInventory { item: item_data.clone() }).await.unwrap_or(false);
                         if added {
                             send_system_message(&self.gate_ref, msg.session_id, "物品已取出");
+                            // #295：实时通知（C# S.GuildStorageItemChange type=1 取出）
+                            self.send_guild_storage_item_change(
+                                msg.session_id,
+                                1,
+                                0,
+                                msg.grid as i32,
+                                state.object_id as i32,
+                                None,
+                            ).await;
                             withdrew = true;
                         } else {
                             guild.storage_items[msg.grid as usize] = Some((item_data, qty));
