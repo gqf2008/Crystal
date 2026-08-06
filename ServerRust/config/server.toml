@@ -35,6 +35,9 @@ allow_create_assassin = true
 allow_create_archer = true
 allow_new_hero = true
 # hero_can_create_class = [true, true, true, true, true]  # 英雄可创建职业（Warrior/Wizard/Taoist/Assassin/Archer）
+mail_cost_per_1k_gold = 100
+mail_item_insurance_percentage = 5
+mail_free_with_stamp = true
 guild_war_cost = 3000
 guild_war_time = 180
 

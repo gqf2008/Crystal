@@ -84,10 +84,31 @@ impl Message<SendMailRequest> for WorldActor {
             return;
         }
 
-        // 检查金币是否足够
+        // C# PlayerObject.GetMailCost：金币费用 floor(gold/1000)*CostPer1K + 物品保险 floor(price/100*Insurance)
+        let (mail_cost_per_1k, mail_insurance_pct, mail_free_with_stamp) = self.social_ref
+            .ask(crate::actors::social::NpcGetMailSettings)
+            .await
+            .unwrap_or((100, 5, true));
+        // Rust 暂无邮票系统：无邮票 → 不免费（对齐 C# 无 stamp 时收费）
+        let mail_cost: u64 = if mail_free_with_stamp {
+            0
+        } else {
+            let gold_fee = (msg.gold as u64 / 1000) * mail_cost_per_1k as u64;
+            let mut item_fee: u64 = 0;
+            for uid in &msg.item_uids {
+                if let Some(item) = sender_state.inventory.get_item(*uid) {
+                    if let Some(info) = self.item_infos.get(&item.item_index) {
+                        item_fee += (info.price as u64) / 100 * mail_insurance_pct as u64;
+                    }
+                }
+            }
+            gold_fee + item_fee
+        };
+
+        // 检查金币是否足够（附件金币 + 寄送费用）
         let total_gold = msg.gold as u64;
-        if sender_state.inventory.gold < total_gold {
-            send_system_message(&self.gate_ref, msg.session_id, "金币不足");
+        if sender_state.inventory.gold < total_gold + mail_cost {
+            send_system_message(&self.gate_ref, msg.session_id, "金币不足（含寄送费用）");
             return;
         }
 
@@ -99,9 +120,9 @@ impl Message<SendMailRequest> for WorldActor {
             }
         }
 
-        // 从发送者扣除金币和物品
-        if total_gold > 0 {
-            let _ = record.actor_ref.ask(DeductGold { amount: total_gold }).await;
+        // 从发送者扣除金币（附件 + 寄送费用）和物品
+        if total_gold + mail_cost > 0 {
+            let _ = record.actor_ref.ask(DeductGold { amount: total_gold + mail_cost }).await;
         }
         for uid in &msg.item_uids {
             let _ = record.actor_ref.ask(RemoveItemFromInventory { unique_id: *uid }).await;
