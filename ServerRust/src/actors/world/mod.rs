@@ -4712,6 +4712,35 @@ impl WorldActor {
     }
 }
 /// #283：玩家升级 → 向同图其他玩家广播 ObjectLeveled（C# 升级表现）
+/// PlayerActor -> WorldActor: 玩家获得经验（含全部加成后）→ 转发给行会（C# GainExp MyGuild.GainExp）
+pub struct GuildExpEarned {
+    pub session_id: u64,
+    pub amount: i64,
+}
+
+impl Message<GuildExpEarned> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: GuildExpEarned, _ctx: &mut Context<Self, Self::Reply>) {
+        let guild_name = match self.players.get(&msg.session_id) {
+            Some(r) => match r.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(s)) => s.guild_name,
+                _ => None,
+            },
+            None => None,
+        };
+        let Some(name) = guild_name else { return };
+        // C#：新手行会不积累经验（MyGuild.Name != Settings.NewbieGuild）
+        if name.eq_ignore_ascii_case(&self.social_ref.ask(crate::actors::social::NpcGetNewbieGuildConfig).await.map(|c| c.0).unwrap_or_else(|_| "NewbieGuild".to_string())) {
+            return;
+        }
+        let _ = self.social_ref.ask(crate::actors::social::GuildGainExp {
+            guild_name: name,
+            amount: msg.amount,
+        }).await;
+    }
+}
+
 pub struct PlayerLeveled {
     pub session_id: u64,
     pub object_id: u32,

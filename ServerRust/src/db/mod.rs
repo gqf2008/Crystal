@@ -202,7 +202,12 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             name TEXT PRIMARY KEY,
             notice_json TEXT NOT NULL DEFAULT '[]',
             gold INTEGER NOT NULL DEFAULT 0,
-            storage_items_json TEXT NOT NULL DEFAULT '[]'
+            storage_items_json TEXT NOT NULL DEFAULT '[]',
+            experience INTEGER NOT NULL DEFAULT 0,
+            level INTEGER NOT NULL DEFAULT 1,
+            max_experience INTEGER NOT NULL DEFAULT 0,
+            spare_points INTEGER NOT NULL DEFAULT 0,
+            member_cap INTEGER NOT NULL DEFAULT 50
         );
         CREATE TABLE IF NOT EXISTS guild_members (
             guild_name TEXT NOT NULL,
@@ -739,6 +744,17 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN bind_x INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN bind_y INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    // Migration: guilds 行会经验/等级列（#1161）
+    let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN experience INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN level INTEGER NOT NULL DEFAULT 1")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN max_experience INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN spare_points INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN member_cap INTEGER NOT NULL DEFAULT 50")
         .execute(&pool).await;
     // Migration: add weather_particles to old map_infos (from migrate_mirdb)
     let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN weather_particles INTEGER NOT NULL DEFAULT 0")
@@ -1886,11 +1902,16 @@ async fn load_quests(pool: &DbPool, character_name: &str) -> anyhow::Result<Ques
 pub async fn save_guild(pool: &DbPool, guild: &Guild) -> anyhow::Result<()> {
     let notice_json = serde_json::to_string(&guild.notice)?;
     let storage_items_json = serde_json::to_string(&guild.storage_items)?;
-    sqlx::query("INSERT OR REPLACE INTO guilds (name, notice_json, gold, storage_items_json) VALUES (?, ?, ?, ?)")
+    sqlx::query("INSERT OR REPLACE INTO guilds (name, notice_json, gold, storage_items_json, experience, level, max_experience, spare_points, member_cap) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(&guild.name)
         .bind(&notice_json)
         .bind(guild.gold as i64)
         .bind(&storage_items_json)
+        .bind(guild.experience)
+        .bind(guild.level as i32)
+        .bind(guild.max_experience)
+        .bind(guild.spare_points as i32)
+        .bind(guild.member_cap)
         .execute(pool)
         .await?;
 
@@ -1912,7 +1933,7 @@ pub async fn save_guild(pool: &DbPool, guild: &Guild) -> anyhow::Result<()> {
 pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>> {
     let mut guilds = HashMap::new();
 
-    let guild_rows = sqlx::query("SELECT name, notice_json, gold, storage_items_json FROM guilds")
+    let guild_rows = sqlx::query("SELECT name, notice_json, gold, storage_items_json, experience, level, max_experience, spare_points, member_cap FROM guilds")
         .fetch_all(pool)
         .await?;
 
@@ -1922,6 +1943,11 @@ pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>
         let gold: i64 = row.get("gold");
         let storage_items: Vec<Option<(mir2_shared::data::item::UserItem, u32)>> =
             serde_json::from_str(&row.get::<String, _>("storage_items_json")).unwrap_or_else(|_| vec![None; 100]);
+        let experience: i64 = row.get("experience");
+        let level: i32 = row.get("level");
+        let max_experience: i64 = row.get("max_experience");
+        let spare_points: i32 = row.get("spare_points");
+        let member_cap: i32 = row.get("member_cap");
 
         let member_rows = sqlx::query(
             "SELECT member_name, rank FROM guild_members WHERE guild_name = ?"
@@ -1943,6 +1969,11 @@ pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>
             gold: gold as u64,
             storage_items,
             buffs: Vec::new(),
+            experience,
+            level: level.clamp(1, 255) as u8,
+            max_experience,
+            spare_points: spare_points.clamp(0, 255) as u8,
+            member_cap,
         });
     }
 

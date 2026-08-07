@@ -148,6 +148,18 @@ pub struct SocialConfig {
     /// 新手行会经验加成 %（C# Settings.NewbieGuildExpBuff = 5）
     #[serde(default = "default_newbie_guild_exp_buff")]
     pub newbie_guild_exp_buff: i32,
+    /// 行会经验倍率（C# Settings.Guild_ExpRate = 0.01）
+    #[serde(default = "default_guild_exp_rate")]
+    pub guild_exp_rate: f64,
+    /// 行会每级分配点数（C# Settings.Guild_PointPerLevel = 0）
+    #[serde(default = "default_guild_point_per_level")]
+    pub guild_point_per_level: u8,
+    /// 行会各级所需经验（C# Settings.Guild_ExperienceList，索引=等级）
+    #[serde(default)]
+    pub guild_experience_list: Vec<i64>,
+    /// 行会各级成员上限（C# Settings.Guild_MembercapList，索引=等级）
+    #[serde(default)]
+    pub guild_membercap_list: Vec<i32>,
     /// 是否允许创建角色（C# Settings.AllowNewCharacter = true）
     #[serde(default = "default_allow_new_character")]
     pub allow_new_character: bool,
@@ -243,6 +255,14 @@ fn default_newbie_guild_exp_buff() -> i32 {
     5
 }
 
+fn default_guild_exp_rate() -> f64 {
+    0.01
+}
+
+fn default_guild_point_per_level() -> u8 {
+    0
+}
+
 fn default_newbie_guild() -> String {
     "NewbieGuild".to_string()
 }
@@ -260,6 +280,10 @@ impl Default for SocialConfig {
             newbie_guild: default_newbie_guild(),
             newbie_guild_buff_enabled: default_newbie_guild_buff_enabled(),
             newbie_guild_exp_buff: default_newbie_guild_exp_buff(),
+            guild_exp_rate: default_guild_exp_rate(),
+            guild_point_per_level: default_guild_point_per_level(),
+            guild_experience_list: Vec::new(),
+            guild_membercap_list: Vec::new(),
             allow_new_character: default_allow_new_character(),
             allow_delete_character: default_allow_delete_character(),
             allow_create_assassin: default_true(),

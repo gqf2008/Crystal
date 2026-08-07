@@ -1408,6 +1408,14 @@ impl Message<AddExperience> for PlayerActor {
             self.state.mentee_exp += (amount * 1) / 100;
         }
 
+        // C# GainExp：行会获得经验（MyGuild.GainExp；新手行会由 WorldActor 侧过滤）
+        if self.state.guild_name.is_some() {
+            let _ = self.world_ref.tell(crate::actors::world::GuildExpEarned {
+                session_id: self.state.session_id,
+                amount,
+            }).try_send();
+        }
+
         debug!(
             "Player {} gained {} exp (base={} x{:.1}) (total={}/{})",
             self.state.name, amount, base, self.state.exp_multiplier, self.state.experience, self.state.max_experience

@@ -63,6 +63,16 @@ pub struct Guild {
     pub storage_items: Vec<Option<(mir2_shared::data::item::UserItem, u32)>>,
     /// 已激活的行会 Buff id 列表（C# GuildObject.BuffList）
     pub buffs: Vec<u32>,
+    /// 行会经验（C# GuildInfo.Experience）
+    pub experience: i64,
+    /// 行会等级（C# GuildInfo.Level）
+    pub level: u8,
+    /// 本级所需经验（C# GuildInfo.MaxExperience；0=不升级）
+    pub max_experience: i64,
+    /// 未分配点数（C# GuildInfo.SparePoints）
+    pub spare_points: u8,
+    /// 成员上限（C# GuildInfo.MemberCap）
+    pub member_cap: i32,
 }
 
 impl Guild {
@@ -84,7 +94,51 @@ impl Guild {
             gold: 0,
             storage_items: vec![None; 100],
             buffs: Vec::new(),
+            experience: 0,
+            level: 1,
+            max_experience: 0,
+            spare_points: 0,
+            member_cap: 50,
         }
+    }
+
+    /// C# GuildObject.GainExp（644-690）：行会经验积累 + 升级
+    /// 返回是否升级；升级时 SparePoints += PointPerLevel，MaxExperience/MemberCap 查配置列表
+    pub fn apply_gain_exp(
+        &mut self,
+        amount: i64,
+        exp_rate: f64,
+        point_per_level: u8,
+        experience_list: &[i64],
+        membercap_list: &[i32],
+    ) -> bool {
+        if self.max_experience <= 0 {
+            return false;
+        }
+        let exp_amount = (amount as f64 * exp_rate) as u64;
+        if exp_amount == 0 {
+            return false;
+        }
+        self.experience += exp_amount as i64;
+        let mut leveled = false;
+        while self.experience > self.max_experience {
+            leveled = true;
+            self.level = (self.level as u16 + 1).min(255) as u8;
+            self.spare_points = (self.spare_points as u16 + point_per_level as u16).min(255) as u8;
+            self.experience -= self.max_experience;
+            let li = self.level as usize;
+            self.max_experience = if li < experience_list.len() { experience_list[li] } else { 0 };
+            if self.max_experience == 0 || self.level == 255 {
+                break;
+            }
+        }
+        if leveled {
+            let li = self.level as usize;
+            if li < membercap_list.len() {
+                self.member_cap = membercap_list[li];
+            }
+        }
+        leveled
     }
 
     /// 成员数量
@@ -186,8 +240,8 @@ impl Guild {
     pub fn storage_has_space(&self) -> bool {
         self.storage_items.iter().any(|s| s.is_none())
     }
-}
 
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,4 +313,41 @@ mod tests {
         g.add_member("Bob".into(), Some(3));
         assert_eq!(g.member_count(), 2);
     }
+
+
+
+    /// #1161：C# GuildObject.GainExp——经验按 ExpRate 积累、升级、点/上限列表
+    #[test]
+    fn test_apply_gain_exp_levels_up() {
+        let mut g = Guild::new("G".into(), "Leader".into(), 1);
+        g.max_experience = 1000;
+        // C#：MaxExperience = Guild_ExperienceList[Level]（索引=等级；0 位占位）
+        let exp_list = [0i64, 1000, 2000, 4000];
+        let cap_list = [0i32, 50, 60, 70];
+        // 10000 经验 × 0.01 = 100 → 不升级
+        assert!(!g.apply_gain_exp(10000, 0.01, 1, &exp_list, &cap_list));
+        assert_eq!(g.experience, 100);
+        assert_eq!(g.level, 1);
+        // 200000 经验 × 0.01 = 2000 → 连升（1000 满 → 剩 1000 = 2000 的 0 → 升到 2 级余 1000）
+        // 100(已有)+2000=2100 > 1000 → 升 1 级：剩 1100，max=2000；不满足 >2000 → 停
+        assert!(g.apply_gain_exp(200000, 0.01, 1, &exp_list, &cap_list));
+        assert_eq!(g.level, 2);
+        assert_eq!(g.experience, 1100);
+        assert_eq!(g.spare_points, 1);
+        assert_eq!(g.max_experience, 2000);
+        assert_eq!(g.member_cap, 60);
+        // max_experience=0 → 不再积累
+        g.max_experience = 0;
+        assert!(!g.apply_gain_exp(999999, 0.01, 1, &exp_list, &cap_list));
+    }
+
+    /// #1161：ExpRate=0 时经验为 0 → 不处理
+    #[test]
+    fn test_apply_gain_exp_zero_rate() {
+        let mut g = Guild::new("G".into(), "L".into(), 1);
+        g.max_experience = 1000;
+        assert!(!g.apply_gain_exp(10000, 0.0, 0, &[], &[]));
+        assert_eq!(g.experience, 0);
+    }
 }
+
