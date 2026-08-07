@@ -600,8 +600,8 @@ impl WorldActor {
         // 近战/远程物理攻击意图：(hero_session_id, target_oid, raw_damage, defence_type, is_ranged)
         let mut attack_intents: Vec<(u64, u32, i32, DefenceType, bool)> = Vec::new();
         // 弹道法术意图（法师/道士/弓箭手远程技能）：直接 push 到 pending_spell_completions
-        // (session_id, spell, target_oid, target_x, target_y, damage, fire_at_tick)
-        let mut spell_intents: Vec<(u64, u8, u32, i32, i32, i32, u64)> = Vec::new();
+        // (session_id, spell, target_oid, target_x, target_y, damage, fire_at_tick, level)
+        let mut spell_intents: Vec<(u64, u8, u32, i32, i32, i32, u64, u8)> = Vec::new();
         // 辅助意图（道士治疗主人 / 战士 buff）：暂时简化为发送 ObjectAttack 广播但不造伤害
         // (hero_session_id, target_session_or_zero, spell_id, is_heal)
         let mut support_intents: Vec<(u64, u64, u8, bool)> = Vec::new();
@@ -775,169 +775,215 @@ impl WorldActor {
                 MirClass::Archer => (HERO_RANGED_RANGE, DefenceType::Ac),
             };
 
+            // #1188：战士 Thrusting / 刺客 HeavenlySword 可在距离 2 施放（C# 子类 InAttackRange 扩展）
+            let ranged2_skill = match snap.class {
+                MirClass::Warrior => Some(Spell::Thrusting),
+                MirClass::Assassin => Some(Spell::HeavenlySword),
+                _ => None,
+            };
+            if can_attack && target_dist == 2 {
+                if let Some(spell) = ranged2_skill {
+                    if hero_magic_level(&snap.hero_magics, spell as u8) > 0 {
+                        ai_local.direction = direction_towards(ai_local.x, ai_local.y, target.x, target.y);
+                        let raw = hero_attack_power(&snap.hero_combat);
+                        attack_intents.push((snap.session_id, target.oid, raw, DefenceType::Ac, true));
+                        support_intents.push((snap.session_id, 0, spell as u8, false));
+                        ai_local.next_attack_tick = self.tick_count + 6;
+                        *ai = ai_local;
+                        continue;
+                    }
+                }
+            }
+
             // ===== 在攻击范围内：攻击/施法 =====
             if target_dist <= attack_range && can_attack {
                 ai_local.direction = direction_towards(ai_local.x, ai_local.y, target.x, target.y);
 
                 match snap.class {
                     MirClass::Warrior => {
-                        // 战士近战：基础 DC 伤害，偶尔触发 Slaying（攻杀）
+                        // #1188：C# WarriorHero.Attack 优先级取已学技能（Thrusting 已在距离 2 分支处理）
                         let raw = hero_attack_power(&snap.hero_combat);
-                        let spell_id = if self.tick_count % 7 == 0 { Spell::Slaying as u8 } else { Spell::None as u8 };
+                        let learned = first_learned_spell(
+                            &snap.hero_magics,
+                            &[
+                                Spell::Slaying,
+                                Spell::HalfMoon,
+                                Spell::CrossHalfMoon,
+                                Spell::TwinDrakeBlade,
+                                Spell::FlamingSword,
+                            ],
+                        );
+                        let spell_id = learned.map(|(s, _)| s as u8).unwrap_or(Spell::None as u8);
                         attack_intents.push((snap.session_id, target.oid, raw, defence, false));
                         // 广播带 spell_id 的 ObjectAttack（循环外广播）
                         support_intents.push((snap.session_id, 0, spell_id, false));
                         ai_local.next_attack_tick = self.tick_count + 6; // ~600ms
                     }
                     MirClass::Assassin => {
-                        // 刺客突进 + 近战：DoubleSlash 双击
+                        // #1188：C# AssassinHero.Attack：DoubleSlash（已学）；HeavenlySword 已在距离 2 分支处理
                         let raw = hero_attack_power(&snap.hero_combat);
-                        attack_intents.push((snap.session_id, target.oid, raw, defence, false));
-                        // 偶尔突进（FlashDash）：模拟为额外一次伤害
-                        if self.tick_count % 10 == 0 {
-                            attack_intents.push((snap.session_id, target.oid, raw / 2, defence, false));
-                            support_intents.push((snap.session_id, 0, Spell::FlashDash as u8, false));
+                        let spell_id = if hero_magic_level(&snap.hero_magics, Spell::DoubleSlash as u8) > 0 {
+                            Spell::DoubleSlash as u8
                         } else {
-                            support_intents.push((snap.session_id, 0, Spell::DoubleSlash as u8, false));
-                        }
+                            Spell::None as u8
+                        };
+                        attack_intents.push((snap.session_id, target.oid, raw, defence, false));
+                        support_intents.push((snap.session_id, 0, spell_id, false));
                         ai_local.next_attack_tick = self.tick_count + 5;
                     }
                     MirClass::Wizard => {
-                        // 法师弹道：FireBall / ThunderBolt（亡灵 +50% 由 tick_spell_completions 处理）
-                        let spell = Spell::FireBall;
-                        // #1184：法师法术伤害用英雄自身 MC（C# WizardHero BeginMagic → 自身 Stats）
-                        let raw = hero_spell_damage(&snap.hero_stats, snap.class);
-                        // #1186：耗蓝（C# CanUseMagic：MagicCost > MP → 无法施法）
-                        let cost =
-                            hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
-                        if ai_local.mp >= cost {
-                            ai_local.mp -= cost;
-                            spell_intents.push((
-                                snap.session_id,
-                                spell as u8,
-                                target.oid,
-                                target.x,
-                                target.y,
-                                raw,
-                                self.tick_count + 4, // 弹道延迟 ~400ms
-                            ));
-                            ai_local.next_attack_tick = self.tick_count + 8;
-                        } else {
-                            // 蓝不足：1 格内近战兜底（C# WizardHero 无蓝时 ProcessTarget 退避/近战）
-                            if target_dist <= 1 {
-                                let mraw = hero_attack_power(&snap.hero_combat);
-                                attack_intents.push((
-                                    snap.session_id,
-                                    target.oid,
-                                    mraw,
-                                    DefenceType::Ac,
-                                    false,
-                                ));
-                                support_intents.push((
-                                    snap.session_id,
-                                    0,
-                                    Spell::None as u8,
-                                    false,
-                                ));
+                        // #1188：C# WizardHero 单体弹道优先级：FlameDisruptor → Vampirism → FrostCrunch → ThunderBolt → GreatFireBall → FireBall
+                        let learned = first_learned_spell(
+                            &snap.hero_magics,
+                            &[
+                                Spell::FlameDisruptor,
+                                Spell::Vampirism,
+                                Spell::FrostCrunch,
+                                Spell::ThunderBolt,
+                                Spell::GreatFireBall,
+                                Spell::FireBall,
+                            ],
+                        );
+                        match learned {
+                            Some((spell, level)) => {
+                                // #1188：伤害 = C# GetDamage（英雄自身 MC + 魔法表 Power/Multiplier × 实际等级）
+                                let raw = hero_spell_damage(
+                                    &self.magic_infos,
+                                    &snap.hero_magics,
+                                    spell as u8,
+                                    &snap.hero_stats,
+                                    snap.class,
+                                );
+                                // #1186：耗蓝（C# CanUseMagic：MagicCost > MP → 无法施法）
+                                let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+                                if ai_local.mp >= cost {
+                                    ai_local.mp -= cost;
+                                    spell_intents.push((
+                                        snap.session_id,
+                                        spell as u8,
+                                        target.oid,
+                                        target.x,
+                                        target.y,
+                                        raw,
+                                        self.tick_count + 4, // 弹道延迟 ~400ms
+                                        level,
+                                    ));
+                                    ai_local.next_attack_tick = self.tick_count + 8;
+                                } else {
+                                    // 蓝不足：1 格内近战兜底（C# WizardHero 无蓝时 ProcessTarget 退避/近战）
+                                    let _ = hero_melee_fallback(
+                                        snap.session_id, target.oid, target_dist,
+                                        &snap.hero_combat, &mut attack_intents, &mut support_intents,
+                                    );
+                                    ai_local.next_attack_tick = self.tick_count + 6;
+                                }
                             }
-                            ai_local.next_attack_tick = self.tick_count + 6;
+                            None => {
+                                // 未学任何弹道技能：近战兜底
+                                let _ = hero_melee_fallback(
+                                    snap.session_id, target.oid, target_dist,
+                                    &snap.hero_combat, &mut attack_intents, &mut support_intents,
+                                );
+                                ai_local.next_attack_tick = self.tick_count + 6;
+                            }
                         }
                     }
                     MirClass::Taoist => {
-                        // 道士：辅助为主（治疗主人/上盾）+ 毒 + SoulFireBall 弹道
-                        // 优先辅助：主人 HP < 70% 时治疗
+                        // 道士：治疗（已学 + 主人 HP<90%，C# TaoistHero ProcessFriend）优先，否则 SoulFireBall（已学），否则近战兜底
                         let owner_hp_pct = if snap.owner_max_hp > 0 {
                             snap.owner_hp * 100 / snap.owner_max_hp
                         } else { 100 };
-                        // #1186：治疗也耗蓝（C# CanUseMagic）
-                        let heal_cost = hero_spell_cost(
-                            &self.magic_infos,
-                            &snap.hero_magics,
-                            Spell::Healing as u8,
-                        );
-                        if owner_hp_pct < 70 && ai_local.mp >= heal_cost {
-                            ai_local.mp -= heal_cost;
-                            support_intents.push((
-                                snap.session_id,
-                                snap.session_id,
-                                Spell::Healing as u8,
-                                true,
-                            ));
-                            ai_local.next_attack_tick = self.tick_count + 10;
-                        } else {
-                            // 否则施毒 + 弹道（#1184：道士符伤害用英雄自身 SC）
-                            let spell = Spell::SoulFireBall;
-                            let raw = hero_spell_damage(&snap.hero_stats, snap.class);
-                            let cost =
-                                hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+                        let healing_lv = hero_magic_level(&snap.hero_magics, Spell::Healing as u8);
+                        let soulfire_lv = hero_magic_level(&snap.hero_magics, Spell::SoulFireBall as u8);
+                        if healing_lv > 0 && owner_hp_pct < 90 {
+                            // #1186：治疗也耗蓝（C# CanUseMagic）
+                            let heal_cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Healing as u8);
+                            if ai_local.mp >= heal_cost {
+                                ai_local.mp -= heal_cost;
+                                support_intents.push((
+                                    snap.session_id,
+                                    snap.session_id,
+                                    Spell::Healing as u8,
+                                    true,
+                                ));
+                                ai_local.next_attack_tick = self.tick_count + 10;
+                            } else {
+                                let _ = hero_melee_fallback(
+                                    snap.session_id, target.oid, target_dist,
+                                    &snap.hero_combat, &mut attack_intents, &mut support_intents,
+                                );
+                                ai_local.next_attack_tick = self.tick_count + 10;
+                            }
+                        } else if soulfire_lv > 0 {
+                            // #1184/#1188：道士符伤害用英雄自身 SC + 魔法表加成
+                            let raw = hero_spell_damage(
+                                &self.magic_infos,
+                                &snap.hero_magics,
+                                Spell::SoulFireBall as u8,
+                                &snap.hero_stats,
+                                snap.class,
+                            );
+                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::SoulFireBall as u8);
                             if ai_local.mp >= cost {
                                 ai_local.mp -= cost;
                                 spell_intents.push((
                                     snap.session_id,
-                                    spell as u8,
+                                    Spell::SoulFireBall as u8,
                                     target.oid,
                                     target.x,
                                     target.y,
                                     raw,
                                     self.tick_count + 4,
+                                    soulfire_lv,
                                 ));
-                            } else if target_dist <= 1 {
-                                // 蓝不足：1 格内近战兜底
-                                let mraw = hero_attack_power(&snap.hero_combat);
-                                attack_intents.push((
-                                    snap.session_id,
-                                    target.oid,
-                                    mraw,
-                                    DefenceType::Ac,
-                                    false,
-                                ));
-                                support_intents.push((
-                                    snap.session_id,
-                                    0,
-                                    Spell::None as u8,
-                                    false,
-                                ));
+                                ai_local.next_attack_tick = self.tick_count + 10;
+                            } else {
+                                let _ = hero_melee_fallback(
+                                    snap.session_id, target.oid, target_dist,
+                                    &snap.hero_combat, &mut attack_intents, &mut support_intents,
+                                );
+                                ai_local.next_attack_tick = self.tick_count + 10;
                             }
+                        } else {
+                            let _ = hero_melee_fallback(
+                                snap.session_id, target.oid, target_dist,
+                                &snap.hero_combat, &mut attack_intents, &mut support_intents,
+                            );
                             ai_local.next_attack_tick = self.tick_count + 10;
                         }
                     }
                     MirClass::Archer => {
-                        // 弓箭手远程：StraightShot（AC 防御的物理弹道）
-                        let spell = Spell::StraightShot;
-                        let raw = hero_attack_power(&snap.hero_combat);
-                        // #1186：弓箭技能耗蓝（C# CanUseMagic）
-                        let cost =
-                            hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
-                        if ai_local.mp >= cost {
-                            ai_local.mp -= cost;
-                            spell_intents.push((
-                                snap.session_id,
-                                spell as u8,
-                                target.oid,
-                                target.x,
-                                target.y,
-                                raw,
-                                self.tick_count + 4,
-                            ));
-                            ai_local.next_attack_tick = self.tick_count + 7;
-                        } else {
-                            // 蓝不足：1 格内近战兜底
-                            if target_dist <= 1 {
-                                let mraw = hero_attack_power(&snap.hero_combat);
-                                attack_intents.push((
+                        // #1188：C# ArcherHero：StraightShot（已学）
+                        let straight_lv = hero_magic_level(&snap.hero_magics, Spell::StraightShot as u8);
+                        if straight_lv > 0 {
+                            let raw = hero_attack_power(&snap.hero_combat);
+                            // #1186：弓箭技能耗蓝（C# CanUseMagic）
+                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::StraightShot as u8);
+                            if ai_local.mp >= cost {
+                                ai_local.mp -= cost;
+                                spell_intents.push((
                                     snap.session_id,
+                                    Spell::StraightShot as u8,
                                     target.oid,
-                                    mraw,
-                                    DefenceType::Ac,
-                                    false,
+                                    target.x,
+                                    target.y,
+                                    raw,
+                                    self.tick_count + 4,
+                                    straight_lv,
                                 ));
-                                support_intents.push((
-                                    snap.session_id,
-                                    0,
-                                    Spell::None as u8,
-                                    false,
-                                ));
+                                ai_local.next_attack_tick = self.tick_count + 7;
+                            } else {
+                                let _ = hero_melee_fallback(
+                                    snap.session_id, target.oid, target_dist,
+                                    &snap.hero_combat, &mut attack_intents, &mut support_intents,
+                                );
+                                ai_local.next_attack_tick = self.tick_count + 6;
                             }
+                        } else {
+                            let _ = hero_melee_fallback(
+                                snap.session_id, target.oid, target_dist,
+                                &snap.hero_combat, &mut attack_intents, &mut support_intents,
+                            );
                             ai_local.next_attack_tick = self.tick_count + 6;
                         }
                     }
@@ -945,6 +991,7 @@ impl WorldActor {
                 // 战斗时英雄 HP 模拟损耗（敌人反击的近似，#1134 增强到可感知）
                 let counter = (target.max_hp / 10).max(5);
                 ai_local.hp = ai_local.hp.saturating_sub(counter / 3);
+
             } else if target_dist > attack_range && can_move {
                 // ===== 不在攻击范围：移动靠近目标（ProcessTarget.MoveTo） =====
                 let (nx, ny, dir) = step_towards(ai_local.x, ai_local.y, target.x, target.y);
@@ -1172,7 +1219,7 @@ impl WorldActor {
 
         // 3c. 应用弹道法术（法师/道士/弓箭手）：直接 push 到 pending_spell_completions
         //     由 tick_spell_completions 在后续 tick 结算（复用现有弹道管线）
-        for (session_id, spell, target_oid, tx, ty, damage, fire_at_tick) in &spell_intents {
+        for (session_id, spell, target_oid, tx, ty, damage, fire_at_tick, level) in &spell_intents {
             // 广播 ObjectAttack 作为弹道发射动画
             broadcast_hero_attack(self, *session_id, *spell).await;
             // #1184：英雄弹道用英雄自身属性结算（命中/暴击/等级）
@@ -1185,12 +1232,22 @@ impl WorldActor {
                 target_x: *tx,
                 target_y: *ty,
                 damage: *damage,
+                // #1188：magic_stat 也用英雄自身魔法表伤害（Vampirism 等吸血/附加用）
                 magic_stat: hero_snap
-                    .map(|s| hero_spell_damage(&s.hero_stats, s.class))
+                    .map(|s| {
+                        hero_spell_damage(
+                            &self.magic_infos,
+                            &s.hero_magics,
+                            *spell,
+                            &s.hero_stats,
+                            s.class,
+                        )
+                    })
                     .unwrap_or(10),
                 hero_stats: hero_snap.map(|s| s.hero_combat),
                 hero_level: hero_snap.map(|s| s.hero_level),
-                spell_level: 1,
+                // #1188：施放等级用英雄已学实际等级（影响法术附加/经验/效果）
+                spell_level: *level,
                 bounce: 0,
             });
             // #220：英雄施法技能经验（spell 为 SharedRust 值，升级发 S.MagicLeveled）
@@ -1462,21 +1519,70 @@ fn hero_attack_power(stats: &crate::combat::attack::CombatStats) -> i32 {
     }
 }
 
-/// 英雄法术伤害（#1184：C# HumanObject Magic 用英雄自身 Stats）
-/// Wizard→MC / Taoist→SC / 其他→DC，取对应属性中值作为稳定近似。
+/// 英雄已学技能等级（#1188：C# = SharedRust - 3；0 = 未学）
+fn hero_magic_level(hero_magics: &[(i32, u8)], spell_shared: u8) -> u8 {
+    let spell_cs = (spell_shared as i32).saturating_sub(3);
+    hero_magics
+        .iter()
+        .find(|(s, _)| *s == spell_cs)
+        .map(|(_, l)| *l)
+        .unwrap_or(0)
+}
+
+/// 按优先级取第一个已学技能（#1188：C# 各子类 ProcessAttack/Attack 顺序）
+fn first_learned_spell(
+    hero_magics: &[(i32, u8)],
+    priority: &[mir2_shared::enums::Spell],
+) -> Option<(mir2_shared::enums::Spell, u8)> {
+    priority
+        .iter()
+        .map(|s| (*s, hero_magic_level(hero_magics, *s as u8)))
+        .find(|(_, lvl)| *lvl > 0)
+}
+
+/// 英雄法术伤害（#1188：C# GetDamage = (DamageBase + GetPower()) * GetMultiplier()）
+/// DamageBase = 英雄自身 MC/SC 中值；Power/Multiplier 来自魔法表 + 实际等级。
 fn hero_spell_damage(
+    magic_infos: &std::collections::HashMap<u32, crate::db::MagicInfo>,
+    hero_magics: &[(i32, u8)],
+    spell_shared: u8,
     stats: &super::hero_stats::HeroStats,
     class: mir2_shared::enums::MirClass,
 ) -> i32 {
+    let spell_cs = (spell_shared as i32).saturating_sub(3);
+    let level = hero_magic_level(hero_magics, spell_shared).max(1);
     let (min_v, max_v) = match class {
         mir2_shared::enums::MirClass::Wizard => (stats.min_mc, stats.max_mc),
         mir2_shared::enums::MirClass::Taoist => (stats.min_sc, stats.max_sc),
         _ => (stats.min_dc, stats.max_dc),
     };
-    if max_v > min_v {
+    let base = if max_v > min_v {
         (min_v + max_v) / 2
     } else {
         max_v.max(1)
+    };
+    match magic_infos.get(&(spell_cs as u32)) {
+        Some(info) => crate::combat::magic::calc_magic_damage(info, level, base),
+        None => base,
+    }
+}
+
+/// 英雄近战兜底（#1188：未学技能/蓝不足时 1 格内近战；返回是否实际攻击）
+fn hero_melee_fallback(
+    session_id: u64,
+    target_oid: u32,
+    target_dist: i32,
+    combat: &crate::combat::attack::CombatStats,
+    attack_intents: &mut Vec<(u64, u32, i32, mir2_shared::enums::DefenceType, bool)>,
+    support_intents: &mut Vec<(u64, u64, u8, bool)>,
+) -> bool {
+    if target_dist <= 1 {
+        let mraw = hero_attack_power(combat);
+        attack_intents.push((session_id, target_oid, mraw, mir2_shared::enums::DefenceType::Ac, false));
+        support_intents.push((session_id, 0, mir2_shared::enums::Spell::None as u8, false));
+        true
+    } else {
+        false
     }
 }
 
@@ -1498,6 +1604,7 @@ fn hero_spell_cost(
     spell_shared: u8,
 ) -> i32 {
     let spell_cs = (spell_shared as i32).saturating_sub(3);
+    // 已学按实际等级计费（0 级 = 基础费）；未学按 1 级近似（实际不会施放）
     let level = hero_magics
         .iter()
         .find(|(s, _)| *s == spell_cs)
@@ -1672,5 +1779,117 @@ mod tests {
         // 无配置 → 兜底 5
         let empty = std::collections::HashMap::new();
         assert_eq!(hero_spell_cost(&empty, &[], shared), 5);
+    }
+
+    fn magic_info_damage(
+        mpower_base: i32,
+        mpower_bonus: i32,
+        power_base: i32,
+        power_bonus: i32,
+        mult_base: f64,
+        mult_bonus: f64,
+    ) -> crate::db::MagicInfo {
+        crate::db::MagicInfo {
+            name: String::new(),
+            spell: 0,
+            base_cost: 0,
+            level_cost: 0,
+            icon: 0,
+            level1: 0,
+            level2: 0,
+            level3: 0,
+            need1: 0,
+            need2: 0,
+            need3: 0,
+            delay_base: 0,
+            delay_reduction: 0,
+            power_base,
+            power_bonus,
+            mpower_base,
+            mpower_bonus,
+            range: 0,
+            multiplier_base: mult_base,
+            multiplier_bonus: mult_bonus,
+        }
+    }
+
+    #[test]
+    fn hero_magic_level_converts_shared_to_cs() {
+        use mir2_shared::enums::Spell;
+        let shared = Spell::FireBall as u8;
+        let cs = shared.saturating_sub(3) as i32;
+        // 已学 3 级
+        assert_eq!(hero_magic_level(&[(cs, 3)], shared), 3);
+        // 未学 → 0
+        assert_eq!(hero_magic_level(&[(cs + 100, 3)], shared), 0);
+        assert_eq!(hero_magic_level(&[], shared), 0);
+    }
+
+    #[test]
+    fn first_learned_spell_respects_priority() {
+        use mir2_shared::enums::Spell;
+        let magics = vec![
+            ((Spell::ThunderBolt as u8).saturating_sub(3) as i32, 2u8),
+            ((Spell::FireBall as u8).saturating_sub(3) as i32, 1u8),
+        ];
+        // 优先级 ThunderBolt > GreatFireBall > FireBall：已学 ThunderBolt 应被选中
+        let picked = first_learned_spell(
+            &magics,
+            &[Spell::ThunderBolt, Spell::GreatFireBall, Spell::FireBall],
+        );
+        assert_eq!(picked, Some((Spell::ThunderBolt, 2)));
+        // 只学 FireBall 时选 FireBall
+        let magics2 = vec![((Spell::FireBall as u8).saturating_sub(3) as i32, 1u8)];
+        let picked2 = first_learned_spell(
+            &magics2,
+            &[Spell::ThunderBolt, Spell::GreatFireBall, Spell::FireBall],
+        );
+        assert_eq!(picked2, Some((Spell::FireBall, 1)));
+        // 全未学 → None
+        assert_eq!(
+            first_learned_spell(&[], &[Spell::ThunderBolt, Spell::FireBall]),
+            None
+        );
+    }
+
+    #[test]
+    fn hero_spell_damage_scales_with_level() {
+        use mir2_shared::enums::{MirClass, Spell};
+        let shared = Spell::FireBall as u8;
+        let cs = shared.saturating_sub(3) as u32;
+        let mut map = std::collections::HashMap::new();
+        // C# GetDamage = (MC + GetPower()) * GetMultiplier()；GetPower = round(MPower/4*(Lv+1) + DefPower)
+        map.insert(cs, magic_info_damage(40, 0, 5, 0, 1.0, 0.1));
+        let stats = super::hero_stats::hero_base_stats(MirClass::Wizard, 30);
+        let lv1 = hero_spell_damage(&map, &[(cs as i32, 1)], shared, &stats, MirClass::Wizard);
+        let lv3 = hero_spell_damage(&map, &[(cs as i32, 3)], shared, &stats, MirClass::Wizard);
+        // 等级越高伤害越高（multiplier 1.0+0.1*Lv，power 随 Lv+1 增长）
+        assert!(lv3 > lv1);
+        assert!(lv1 > 0);
+    }
+
+    #[test]
+    fn hero_melee_fallback_only_at_range1() {
+        use mir2_shared::enums::DefenceType;
+        let combat = crate::combat::attack::CombatStats {
+            min_atk: 5,
+            max_atk: 9,
+            ..Default::default()
+        };
+        let mut atk = Vec::new();
+        let mut sup = Vec::new();
+        let hit = hero_melee_fallback(1, 100, 1, &combat, &mut atk, &mut sup);
+        assert!(hit);
+        assert_eq!(atk.len(), 1);
+        assert_eq!(atk[0].0, 1);
+        assert_eq!(atk[0].1, 100);
+        assert_eq!(atk[0].2, 7); // (5+9)/2
+        assert_eq!(atk[0].3, DefenceType::Ac);
+        assert!(!atk[0].4);
+        assert_eq!(sup.len(), 1);
+        // 距离 2 不攻击
+        let hit2 = hero_melee_fallback(1, 100, 2, &combat, &mut atk, &mut sup);
+        assert!(!hit2);
+        assert_eq!(atk.len(), 1);
     }
 }
