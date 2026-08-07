@@ -138,6 +138,24 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("glacierbeast") || name.contains("glacier beast") || name.contains("冰川兽") {
         return Box::new(bosses::glacier_beast::GlacierBeastBehavior::new());
     }
+    if name.contains("redfoxman") || name.contains("red foxman") || name.contains("红狐人") {
+        return Box::new(bosses::red_foxman::RedFoxmanBehavior::new());
+    }
+    if name.contains("whitefoxman") || name.contains("white foxman") || name.contains("白狐人") {
+        return Box::new(bosses::white_foxman::WhiteFoxmanBehavior::new());
+    }
+    if name.contains("snowyeti") || name.contains("snow yeti") || name.contains("雪猿") {
+        return Box::new(bosses::snow_yeti::SnowYetiBehavior::new());
+    }
+    if name.contains("furbolgguard") || name.contains("furbolg guard") || name.contains("兽人守卫") {
+        return Box::new(bosses::furbolg_guard::FurbolgGuardBehavior::new());
+    }
+    if name.contains("furbolgcommander") || name.contains("furbolg commander") || name.contains("兽人指挥官") {
+        return Box::new(bosses::furbolg_commander::FurbolgCommanderBehavior::new());
+    }
+    if name.contains("chieftainarcher") || name.contains("chieftain archer") || name.contains("酋长弓手") {
+        return Box::new(bosses::chieftain_archer::ChieftainArcherBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -434,6 +452,12 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("treeguardian") || name.contains("tree guardian") || name.contains("树卫")
         || name.contains("frozenknight") || name.contains("frozen knight") || name.contains("冰霜骑士")
         || name.contains("glacierbeast") || name.contains("glacier beast") || name.contains("冰川兽")
+        || name.contains("redfoxman") || name.contains("red foxman") || name.contains("红狐人")
+        || name.contains("whitefoxman") || name.contains("white foxman") || name.contains("白狐人")
+        || name.contains("snowyeti") || name.contains("snow yeti") || name.contains("雪猿")
+        || name.contains("furbolgguard") || name.contains("furbolg guard") || name.contains("兽人守卫")
+        || name.contains("furbolgcommander") || name.contains("furbolg commander") || name.contains("兽人指挥官")
+        || name.contains("chieftainarcher") || name.contains("chieftain archer") || name.contains("酋长弓手")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
