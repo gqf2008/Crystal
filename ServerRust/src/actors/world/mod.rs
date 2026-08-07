@@ -1888,11 +1888,57 @@ impl WorldActor {
             if drop.quest_required {
                 continue;
             }
+            // #1002：组子条目由父组统一处理
+            if drop.group_parent_id != 0 {
+                continue;
+            }
             let roll = fastrand::f64();
             // 全局掉落倍率（C# Settings.DropRate）+ 玩家掉落 Buff + 装备 ItemDropRatePercent（#1000）
             let item_factor = 1.0 + item_drop_pct / 100.0;
             let effective_chance = (drop.chance * self.drop_rate * player_drop_mul * item_factor).min(1.0);
             if roll > effective_chance {
+                continue;
+            }
+            // #1002：组合掉落（C# GroupedDrop：GROUP^ 首个命中即停 / GROUP* 随机取 1 / 默认全部命中）
+            if drop.group_random || drop.group_first {
+                let children: Vec<&crate::db::MonsterDropInfo> = drops.iter()
+                    .filter(|d| d.group_parent_id == drop.id)
+                    .collect();
+                let mut success: Vec<&crate::db::MonsterDropInfo> = Vec::new();
+                for child in &children {
+                    let croll = fastrand::f64();
+                    let cchance = (child.chance * self.drop_rate * player_drop_mul * item_factor).min(1.0);
+                    if croll <= cchance {
+                        success.push(child);
+                        if drop.group_first {
+                            break;
+                        }
+                    }
+                }
+                let picked: Vec<&crate::db::MonsterDropInfo> = if drop.group_random {
+                    if success.is_empty() {
+                        Vec::new()
+                    } else {
+                        vec![success[fastrand::usize(0..success.len())]]
+                    }
+                } else {
+                    success
+                };
+                for child in picked {
+                    if child.gold > 0 {
+                        let gold_factor = 1.0 + gold_drop_pct / 100.0;
+                        let gold = (child.gold as f64 * global_gold_mul * gold_factor).round() as u64;
+                        self.spawn_gold_drop(monster, gold).await;
+                    } else {
+                        let ccount = if child.max_count > child.min_count {
+                            fastrand::u16(child.min_count..=child.max_count)
+                        } else {
+                            child.min_count
+                        };
+                        let cadjusted = (ccount as f64 * global_drop_mul * player_drop_mul).round() as u16;
+                        self.spawn_single_drop(monster, child.item_index, cadjusted.max(1)).await;
+                    }
+                }
                 continue;
             }
             // #995：金币条目（C# DropInfo.Gold → DropGold，按金币倍率 + GoldDropRatePercent）
@@ -1914,6 +1960,10 @@ impl WorldActor {
         // 精英怪额外掉落判定（50% 原概率）
         if monster.is_elite {
             for drop in &drops {
+                // #1002：组合条目（父/子）不在额外循环处理
+                if drop.group_parent_id != 0 || drop.group_random || drop.group_first {
+                    continue;
+                }
                 // #1000：装备 ItemDropRatePercent 对精英额外判定同样生效（C# AttemptDrop 共用加成）
                 let bonus_chance = drop.chance * 0.5 * (1.0 + item_drop_pct / 100.0);
                 let roll = fastrand::f64();
@@ -1937,6 +1987,10 @@ impl WorldActor {
             let gold_drop = (fastrand::u32(5000..=20000) as f64 * global_gold_mul * gold_factor).round() as u64;
             self.spawn_gold_drop(monster, gold_drop).await;
             for drop in &drops {
+                // #1002：组合条目（父/子）不在额外循环处理
+                if drop.group_parent_id != 0 || drop.group_random || drop.group_first {
+                    continue;
+                }
                 let count = if drop.max_count > drop.min_count {
                     fastrand::u16(drop.min_count..=drop.max_count).saturating_mul(2)
                 } else {
