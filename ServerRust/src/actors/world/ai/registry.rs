@@ -367,6 +367,15 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("siege") || name.contains("攻城") {
         return Box::new(bosses::siege::SiegeBehavior::new());
     }
+    if name.contains("woodbox") || name.contains("wood box") || name.contains("木箱") {
+        return Box::new(bosses::wood_box::WoodBoxBehavior::new());
+    }
+    if name.contains("icepillar") || name.contains("ice pillar") || name.contains("冰柱") {
+        return Box::new(bosses::ice_pillar::IcePillarBehavior::new());
+    }
+    if name.contains("boulderspirit") || name.contains("boulder spirit") || name.contains("巨石之灵") || name.contains("巨石") {
+        return Box::new(bosses::boulder_spirit::BoulderSpiritBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -743,6 +752,9 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("floatingrock") || name.contains("floating rock") || name.contains("浮石")
         || name.contains("hoodedsummonerscroll") || name.contains("hooded summoner scroll") || name.contains("兜帽召唤卷轴")
         || name.contains("siege") || name.contains("攻城")
+        || name.contains("woodbox") || name.contains("wood box") || name.contains("木箱")
+        || name.contains("icepillar") || name.contains("ice pillar") || name.contains("冰柱")
+        || name.contains("boulderspirit") || name.contains("boulder spirit") || name.contains("巨石之灵") || name.contains("巨石")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
@@ -842,10 +854,7 @@ pub fn is_static_object(monster_name: &str) -> bool {
     name == "tree"
         || name == "wall"
         || name == "cavestatue" || name.contains("cave statue") || name.contains("洞穴雕像")
-        || name == "boulderspirit" || name.contains("boulder spirit") || name.contains("巨石之灵")
         || name == "evilmirbody" || name.contains("evil mir body") || name.contains("邪龙身躯")
-        || name == "icepillar" || name.contains("ice pillar") || name.contains("冰柱")
-        || name == "woodbox" || name.contains("wood box") || name.contains("木箱")
         || name == "cargobox" || name.contains("cargo box") || name.contains("货箱")
         // 注意：RestlessJar 曾在此列表（CanMove=false），但它 CanAttack=true，已改由专属 RestlessJarBehavior 处理（#1089）
         || name == "purplefaeflower" || name.contains("purple fae flower") || name.contains("紫妖花")
@@ -916,11 +925,18 @@ mod tests {
 
     #[test]
     fn static_and_passive_stay_default() {
-        for name in ["Tree", "Wall", "CaveStatue", "BoulderSpirit", "IcePillar", "WoodBox",
+        for name in ["Tree", "Wall", "CaveStatue",
                       "CargoBox", "PurpleFaeFlower", "BlockingObject", "EvilMirBody",
                       "Deer", "Doe", "Football"] {
             assert!(!is_registered_boss(name), "{} should not be registered", name);
         }
+        // WoodBox/IcePillar/BoulderSpirit 现注册专属行为（#1130-#1132 死亡/受击机制），不再走静态拦截
+        assert!(is_registered_boss("WoodBox"));
+        assert!(is_registered_boss("IcePillar"));
+        assert!(is_registered_boss("BoulderSpirit"));
+        assert!(!is_static_object("WoodBox"));
+        assert!(!is_static_object("IcePillar"));
+        assert!(!is_static_object("BoulderSpirit"));
         assert!(is_static_object("Tree"));
         assert!(is_static_object("Wall"));
         assert!(is_static_object("CaveStatue"));
