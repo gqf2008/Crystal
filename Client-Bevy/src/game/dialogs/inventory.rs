@@ -81,6 +81,10 @@ impl InvItem {
             ItemType::Amulet => 9,   // Pendant
             ItemType::Boots => 8,    // Shoes
             ItemType::Mount => 10,   // Mount
+            // #1136：C# 补槽（SharedRust ItemType：Torch=15 / Belt=12 / Stone=14）
+            ItemType::Torch => 11,   // Torch
+            ItemType::Belt => 12,    // Belt
+            ItemType::Stone => 13,   // Stone
             _ => return None,
         };
         Some(s)

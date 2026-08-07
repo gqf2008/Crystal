@@ -3,7 +3,9 @@
 
 use mir2_shared::data::item::UserItem;
 
-/// 装备槽位索引（12 个槽位）
+/// 装备槽位索引（14 个槽位，#1136：补 C# Torch/Belt/Stone，保持既有编号）
+/// 客户端 UI 已按 C# 14 槽布局（EQUIP_SLOTS），经 SERVER_SLOT_TO_POS 映射；
+/// 本批次仅补齐缺失槽位，不做全量重编号（客户端与服务端编号一致即可）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EquipmentSlot {
     Weapon = 0,
@@ -17,11 +19,14 @@ pub enum EquipmentSlot {
     Shoes = 8,
     Pendant = 9,
     Mount = 10,
-    // 第 11 槽位预留
+    // #1136：C# 三槽（DB ItemType：Torch=12 / Belt=9 / Stone=11）
+    Torch = 11,
+    Belt = 12,
+    Stone = 13,
 }
 
 impl EquipmentSlot {
-    pub const COUNT: usize = 12;
+    pub const COUNT: usize = 14;
 
     pub fn from_i32(val: i32) -> Option<Self> {
         match val {
@@ -36,6 +41,9 @@ impl EquipmentSlot {
             8 => Some(Self::Shoes),
             9 => Some(Self::Pendant),
             10 => Some(Self::Mount),
+            11 => Some(Self::Torch),
+            12 => Some(Self::Belt),
+            13 => Some(Self::Stone),
             _ => None,
         }
     }
