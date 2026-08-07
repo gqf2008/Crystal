@@ -1,5 +1,43 @@
 use super::*;
 
+/// #895：PvP/受击耐久损耗的非武器装备槽（C# DamageDura 排除 Weapon，且 Amulet 由
+/// DamageItem 内部免疫；与 tick.rs 怪物命中路径的槽位一致）
+const DAMAGE_DURA_ARMOR_SLOTS: [EquipmentSlot; 8] = [
+    EquipmentSlot::Armour,
+    EquipmentSlot::Helmet,
+    EquipmentSlot::BraceletL,
+    EquipmentSlot::BraceletR,
+    EquipmentSlot::RingL,
+    EquipmentSlot::RingR,
+    EquipmentSlot::Shoes,
+    EquipmentSlot::Necklace,
+];
+
+impl WorldActor {
+    /// #895：PvP 受击装备耐久损耗（C# HumanObject.DamageDura：非武器槽 -1，
+    /// 命中即扣，含致死；NoDuraLoss/Strong 减免由 DamageEquipment 处理）。
+    /// 对齐 tick.rs 怪物命中路径；装备损坏时重算属性并广播外观。
+    async fn damage_armor_on_pvp_hit(&self, session_id: u64) {
+        let mut any_broke = false;
+        if let Some(record) = self.players.get(&session_id) {
+            for slot in DAMAGE_DURA_ARMOR_SLOTS {
+                let broke = record.actor_ref
+                    .ask(crate::actors::player::DamageEquipment { slot, amount: 1 })
+                    .await
+                    .unwrap_or(false);
+                if broke {
+                    any_broke = true;
+                }
+            }
+        }
+        if any_broke {
+            if let Some(state) = self.recalculate_and_set_stat_bonuses(session_id).await {
+                self.broadcast_equipment_visuals(session_id, &state).await;
+            }
+        }
+    }
+}
+
 /// 攻击请求（从 GateActor 转发）
 pub struct WorldAttackRequest {
     pub session_id: u64,
@@ -437,6 +475,8 @@ impl Message<WorldAttackRequest> for WorldActor {
                                 attacker_session: msg.session_id,
                                 damage: second,
                             }).await;
+                            // #895：PvP 连击受击装备耐久损耗
+                            self.damage_armor_on_pvp_hit(other_session).await;
                             // TwinDrakeBlade PvP 眩晕：需 PvpCanResistPoison 开启（C# 6803）
                             if kind == 0 && self.pvp_cfg.can_resist_poison && fastrand::i32(0..40) <= lv as i32 + 1 {
                                 let _ = other_actor.ask(crate::actors::player::ApplyCombatPoisons {
@@ -460,6 +500,8 @@ impl Message<WorldAttackRequest> for WorldActor {
                                 attacker_session: msg.session_id,
                                 damage: bonus,
                             }).await;
+                            // #895：PvP 追加伤害受击装备耐久损耗
+                            self.damage_armor_on_pvp_hit(other_session).await;
                             debug!("Player {} FlamingSword bonus +{} on player {}", result.object_id, bonus, other_session);
                         }
                     }
@@ -473,6 +515,8 @@ impl Message<WorldAttackRequest> for WorldActor {
                                 attacker_session: msg.session_id,
                                 damage: bonus,
                             }).await;
+                            // #895：PvP 追加伤害受击装备耐久损耗
+                            self.damage_armor_on_pvp_hit(other_session).await;
                             debug!("Player {} FatalSword bonus +{} on player {}", result.object_id, bonus, other_session);
                         }
                     } else if state.magics.iter().any(|m| m.spell == (SPELL_FATAL_SWORD as i32 - 3))
@@ -521,6 +565,8 @@ impl Message<WorldAttackRequest> for WorldActor {
                                     attacker_session: msg.session_id,
                                     damage: splash_dmg,
                                 }).await;
+                                // #895：PvP 溅射受击装备耐久损耗（C# Struck → DamageDura）
+                                self.damage_armor_on_pvp_hit(*sid).await;
                             }
                         }
                         debug!("Player {} {} PvP splash dmg={} on {} players",
@@ -541,6 +587,8 @@ impl Message<WorldAttackRequest> for WorldActor {
                                 attacker_session: other_session,
                                 damage: counter_dmg,
                             }).await;
+                            // #895：CounterAttack 反击受击装备耐久损耗（受害者 = 原攻击者）
+                            self.damage_armor_on_pvp_hit(msg.session_id).await;
                             // 攻击者吃 Stun（Lv+1）秒
                             let _ = record.actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
                                 poisons: vec![crate::combat::poison::Poison::new(
@@ -550,11 +598,14 @@ impl Message<WorldAttackRequest> for WorldActor {
                                    other_session, msg.session_id, counter_dmg);
                         }
                     }
-                    if other_actor.ask(TakeDamage {
+                    let pvp_died = other_actor.ask(TakeDamage {
                                 attacker_id: result.object_id,
                                 attacker_session: msg.session_id,
                                 damage,
-                            }).await.unwrap_or(false) {
+                            }).await.unwrap_or(false);
+                    // #895：PvP 受击装备耐久损耗（C# Struck → DamageDura，命中即扣，含致死）
+                    self.damage_armor_on_pvp_hit(other_session).await;
+                    if pvp_died {
                                 let died_packet = Self::build_object_died_packet(
                                     other_state.object_id, other_state.x, other_state.y, other_state.direction);
                                 for (sid, _) in &self.players {
@@ -1134,11 +1185,14 @@ impl Message<RangeAttackRequest> for WorldActor {
                         other_state.x, other_state.y, other_state.direction, damage, other_state.map_index,
                     ).await;
                 }
-                if other.actor_ref.ask(TakeDamage {
+                let pvp_died = other.actor_ref.ask(TakeDamage {
                             attacker_id: object_id,
                             attacker_session: msg.session_id,
                             damage,
-                        }).await.unwrap_or(false) {
+                        }).await.unwrap_or(false);
+                // #895：PvP 受击装备耐久损耗（C# Struck → DamageDura，命中即扣，含致死）
+                self.damage_armor_on_pvp_hit(other.session_id).await;
+                if pvp_died {
                             // 目标死亡处理
                             let died_packet = Self::build_object_died_packet(
                                 other_state.object_id, other_state.x, other_state.y, other_state.direction);
@@ -4154,5 +4208,27 @@ mod spell_geometry_tests {
             }
         }
         assert!(ok);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DAMAGE_DURA_ARMOR_SLOTS;
+    use crate::actors::inventory::EquipmentSlot;
+
+    #[test]
+    fn test_damage_dura_armor_slots_excludes_weapon() {
+        // #895：C# DamageDura 只扣非武器装备槽（本地 12 槽模型：排除 Weapon/Mount/Pendant）
+        assert!(!DAMAGE_DURA_ARMOR_SLOTS.contains(&EquipmentSlot::Weapon));
+        assert!(!DAMAGE_DURA_ARMOR_SLOTS.contains(&EquipmentSlot::Mount));
+        assert!(!DAMAGE_DURA_ARMOR_SLOTS.contains(&EquipmentSlot::Pendant));
+        assert!(DAMAGE_DURA_ARMOR_SLOTS.contains(&EquipmentSlot::Armour));
+        assert!(DAMAGE_DURA_ARMOR_SLOTS.contains(&EquipmentSlot::Helmet));
+        assert!(DAMAGE_DURA_ARMOR_SLOTS.contains(&EquipmentSlot::RingL));
+        assert!(DAMAGE_DURA_ARMOR_SLOTS.contains(&EquipmentSlot::RingR));
+        assert!(DAMAGE_DURA_ARMOR_SLOTS.contains(&EquipmentSlot::BraceletL));
+        assert!(DAMAGE_DURA_ARMOR_SLOTS.contains(&EquipmentSlot::BraceletR));
+        assert!(DAMAGE_DURA_ARMOR_SLOTS.contains(&EquipmentSlot::Shoes));
+        assert!(DAMAGE_DURA_ARMOR_SLOTS.contains(&EquipmentSlot::Necklace));
     }
 }
