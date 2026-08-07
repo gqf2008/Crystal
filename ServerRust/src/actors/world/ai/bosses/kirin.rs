@@ -40,7 +40,7 @@ impl MonsterBehavior for KirinBehavior {
         let in_melee = dist <= MELEE_RANGE;
 
         if ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 8;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
             if in_melee {
                 // 4/5 基础近战，1/5 AC 强攻（C# Attack Random(5)==0）
@@ -76,7 +76,7 @@ impl MonsterBehavior for KirinBehavior {
                 step_toward(monster.x, monster.y, target.x, target.y)
             };
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

@@ -48,7 +48,7 @@ impl MonsterBehavior for AncientBringerBehavior {
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             if dist <= MELEE_RANGE {
                 // 近战 PoisonLineAttack(2)：4/5 普通 / 1/5 DC*2 + Paralysis
-                monster.next_attack_tick = ctx.tick_count + 8;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let strong = fastrand::i32(0..5) == 0;
                 let max_dc = if strong { monster.max_dmg * 2 } else { monster.max_dmg };
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, max_dc, 0).max(1);
@@ -77,10 +77,13 @@ impl MonsterBehavior for AncientBringerBehavior {
                     });
                     // 强攻附加 Paralysis 5s（C# PoisonTarget 5,5,Paralysis,2000）
                     if strong {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: h.session_id,
-                            poison: Poison::new(PoisonType::PARALYSIS, 5, 5, 2000),
-                        });
+                        // C# PoisonTarget 1/5
+                            if fastrand::i32(0..5) == 0 {
+                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: h.session_id,
+                                poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 2000),
+                            });
+                            }
                     }
                 }
             } else {
@@ -117,7 +120,7 @@ impl MonsterBehavior for AncientBringerBehavior {
         if ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

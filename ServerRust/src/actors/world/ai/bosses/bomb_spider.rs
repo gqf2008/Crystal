@@ -61,7 +61,7 @@ impl MonsterBehavior for BombSpiderBehavior {
         if ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }
@@ -86,7 +86,8 @@ impl BombSpiderBehavior {
             if fastrand::i32(0..5) == 0 {
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                     session_id: h.session_id,
-                    poison: Poison::new(PoisonType::GREEN, 5, 5, 2000),
+                    // C# 毒值 = SP 攻（DC 近似）
+                    poison: Poison::new(PoisonType::GREEN, 5, damage, 2000),
                 });
             }
         }

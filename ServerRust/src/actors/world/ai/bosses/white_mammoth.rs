@@ -36,7 +36,7 @@ impl MonsterBehavior for WhiteMammothBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= MELEE_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 6;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let roll8 = fastrand::i32(0..8);
 
             if roll8 > 0 {
@@ -89,7 +89,7 @@ impl MonsterBehavior for WhiteMammothBehavior {
         if dist > MELEE_RANGE && ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

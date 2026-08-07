@@ -49,7 +49,7 @@ impl MonsterBehavior for LeftGuardBehavior {
                     step_toward(monster.x, monster.y, target.x, target.y)
                 };
                 ctx.out_moves.push((monster.object_id, nx, ny, dir));
-                monster.next_move_tick = ctx.tick_count + 2;
+                monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
                 monster.ai_state = crate::actors::world::MonsterAiState::Chase;
             }
             return;
@@ -59,7 +59,7 @@ impl MonsterBehavior for LeftGuardBehavior {
 
         if in_melee {
             // 近战：MACAgility
-            monster.next_attack_tick = ctx.tick_count + 5;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                 attacker_oid: monster.object_id,
                 target_session: target.session_id,
@@ -69,7 +69,7 @@ impl MonsterBehavior for LeftGuardBehavior {
             });
         } else {
             // 远程弹道：MAC（C# AttackTime + AttackSpeed + 500，冷却更长）
-            monster.next_attack_tick = ctx.tick_count + 10;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
             ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                 attacker_oid: monster.object_id,
                 target_session: target.session_id,

@@ -57,7 +57,7 @@ impl MonsterBehavior for HornedCommanderBehavior {
         // 护盾到期检查（C# ProcessBuffEnd）
         if self.immune && ctx.tick_count >= self.shield_end_tick {
             self.immune = false;
-            monster.next_attack_tick = ctx.tick_count + 3;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
         }
 
         let hp_pct = (monster.hp as f32 / monster.max_hp as f32) * 100.0;
@@ -152,7 +152,7 @@ impl MonsterBehavior for HornedCommanderBehavior {
         let attack_range = 2;
 
         if dist <= attack_range && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 5;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
 
             if self.start_advanced {
@@ -183,7 +183,7 @@ impl MonsterBehavior for HornedCommanderBehavior {
             // 追击（C# 标准 MoveTo）
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

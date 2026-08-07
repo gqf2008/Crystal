@@ -120,7 +120,7 @@ impl MonsterBehavior for TreeQueenBehavior {
         // 近战攻击（C# TreeQueen.cs:54-100）：玩家 2 格内才攻击
         if let Some(t) = near_player {
             if ctx.tick_count >= monster.next_attack_tick {
-                monster.next_attack_tick = ctx.tick_count + 5;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
                 let is_fire = fastrand::i32(0..2) == 0;
                 if is_fire {

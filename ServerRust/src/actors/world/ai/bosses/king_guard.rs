@@ -38,7 +38,7 @@ impl MonsterBehavior for KingGuardBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 8;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
             if dist <= MELEE_RANGE {
                 // 近战：4/5 普通 DC ACAgility；1/5 DC*2 AC AOE(3)
@@ -75,10 +75,13 @@ impl MonsterBehavior for KingGuardBehavior {
                         spell_id: 0,
                     });
                     // C# PoisonTarget(target,10,5,Green,1000)
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::GREEN, 10, 5, 1000),
-                    });
+                    // C# PoisonTarget(10,5,Green,1000)：1/10
+                    if fastrand::i32(0..10) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::GREEN, 5, damage, 1000),
+                        });
+                    }
                 } else {
                     // 重击 MC*2 + AOE(AttackRange) Slow/Paralysis
                     let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac * 2, 0).max(1);
@@ -91,10 +94,13 @@ impl MonsterBehavior for KingGuardBehavior {
                         spell_id: 0,
                     });
                     // C# PoisonTarget Slow/Paralysis（分支恒真，用 Slow 近似）
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::SLOW, 5, 10, 1000),
-                    });
+                    // C# PoisonTarget(5,10,Slow,1000)：1/5
+                    if fastrand::i32(0..5) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::SLOW, 10, 0, 1000),
+                        });
+                    }
                 }
             }
             return;
@@ -104,7 +110,7 @@ impl MonsterBehavior for KingGuardBehavior {
         if ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

@@ -48,7 +48,7 @@ impl MonsterBehavior for WingedTigerLordBehavior {
         // ---- 远程 tornado 连招 ----
         if dist > MELEE_RANGE && self.pending_tornado && dist <= ATTACK_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
-                monster.next_attack_tick = ctx.tick_count + 8;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 self.pending_tornado = false;
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
                 // C# FindAllTargets(1, Target.CurrentLocation) AOE
@@ -63,12 +63,14 @@ impl MonsterBehavior for WingedTigerLordBehavior {
                         damage,
                         spell_id: 0,
                     });
-                    // C# PoisonTarget Dazed
-                    let poison_time = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(2);
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: h.session_id,
-                        poison: Poison::new(PoisonType::DAZED, 2, poison_time, 2000),
-                    });
+                    // C# PoisonTarget(2, poisonTime, Dazed, 2000)：1/2、时长=poisonTime（DC 近似）
+                    if fastrand::i32(0..2) == 0 {
+                        let poison_time = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(2) as u32;
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: h.session_id,
+                            poison: Poison::new(PoisonType::DAZED, poison_time, 0, 2000),
+                        });
+                    }
                 }
             }
             return;
@@ -79,7 +81,7 @@ impl MonsterBehavior for WingedTigerLordBehavior {
             if ctx.tick_count >= monster.next_move_tick {
                 let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
                 ctx.out_moves.push((monster.object_id, nx, ny, dir));
-                monster.next_move_tick = ctx.tick_count + 2;
+                monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
                 monster.ai_state = crate::actors::world::MonsterAiState::Chase;
             }
             return;
@@ -87,12 +89,12 @@ impl MonsterBehavior for WingedTigerLordBehavior {
 
         // ---- 近战攻击 ----
         if ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 6;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
             // stomp 连招优先
             if self.pending_stomp {
                 self.pending_stomp = false;
-                monster.next_attack_tick = ctx.tick_count + 8;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
                 // C# 周围 8 格 AOE
                 let hits: Vec<crate::actors::world::ai::PlayerSnap> =
@@ -106,10 +108,13 @@ impl MonsterBehavior for WingedTigerLordBehavior {
                         spell_id: 0,
                         attack_type: 2,
                     });
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: h.session_id,
-                        poison: Poison::new(PoisonType::PARALYSIS, 2, 5, 2000),
-                    });
+                    // C# PoisonTarget 1/2
+                        if fastrand::i32(0..2) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: h.session_id,
+                            poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 2000),
+                        });
+                        }
                 }
                 return;
             }

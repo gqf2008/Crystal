@@ -15,6 +15,7 @@ pub struct PlayerSnap {
     pub hp: i32,
     pub map_index: u16,
     pub object_id: u32,
+    pub level: u16,
 }
 
 /// 怪物快照（供 Boss 互查，如 Healer 治疗友军、Yimoogi 分身聚合）
@@ -54,6 +55,16 @@ pub enum AttackAction {
         center_x: i32,
         center_y: i32,
         radius: i32,
+        damage: i32,
+        spell_id: u8,
+    },
+    /// 直线攻击（C# LineAttack(damage, range)：沿 direction 逐格命中第一个目标）
+    Line {
+        attacker_oid: u32,
+        origin_x: i32,
+        origin_y: i32,
+        direction: u8,
+        range: i32,
         damage: i32,
         spell_id: u8,
     },
@@ -143,6 +154,12 @@ pub struct AiCtx<'a> {
     pub out_player_teleports: &'a mut Vec<(u64, i32, i32, u8)>,
     /// 输出：延迟攻击（C# DelayedAction DelayedType.Damage）
     pub out_delayed_attacks: &'a mut Vec<DelayedAttack>,
+    /// 输出：怪物嘲讽（C# StoneTrap：target_oid 攻击 taunter_oid）→ monster_targets
+    pub out_monster_taunts: &'a mut Vec<(u32, u32)>,
+    /// 输出：怪物自传送 (oid, x, y)（C# TeleportRandom/Teleport：RedFoxman/WhiteFoxman 等）
+    pub out_monster_teleports: &'a mut Vec<(u32, i32, i32)>,
+    /// 输出：给玩家加 buff (session, BuffInstance)（C# AddBuff：YinDevilNode/PowerBead 等）
+    pub out_player_buffs: &'a mut Vec<(u64, crate::combat::buff::BuffInstance)>,
 }
 
 impl<'a> AiCtx<'a> {

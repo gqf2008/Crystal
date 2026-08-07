@@ -39,7 +39,7 @@ impl MonsterBehavior for TrollKingBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 8;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
             if dist <= MELEE_RANGE {
                 // 近战：2/3 概率范围攻击，1/3 WalkAway（C# Random(2)==0 || !InRange(,2)）
@@ -58,7 +58,7 @@ impl MonsterBehavior for TrollKingBehavior {
                     // WalkAway（拉开）
                     let (nx, ny, dir) = step_away(monster.x, monster.y, target.x, target.y);
                     ctx.out_moves.push((monster.object_id, nx, ny, dir));
-                    monster.next_move_tick = ctx.tick_count + 2;
+                    monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
                 }
             } else {
                 // 远程投石：目标点 3 格 AOE（ACAgility）+ 命中后 Dazed（C# DefenceType.ACAgility）
@@ -72,10 +72,11 @@ impl MonsterBehavior for TrollKingBehavior {
                     spell_id: 0,
                 });
                 // C# CompleteRangeAttack：命中后 Dazed 1s
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::DAZED, 1, 0, 1000),
-                });
+                // C# PoisonTarget(1, random(MaxMC), Dazed, 1000)：恒生效、时长=random(MaxMC)（DC 近似）
+                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(PoisonType::DAZED, fastrand::i32(0..damage.max(1)) as u32, 0, 1000),
+                    });
             }
             return;
         }
@@ -88,7 +89,7 @@ impl MonsterBehavior for TrollKingBehavior {
                 step_away(monster.x, monster.y, target.x, target.y)
             };
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

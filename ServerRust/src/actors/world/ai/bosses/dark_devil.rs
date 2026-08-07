@@ -53,13 +53,13 @@ impl MonsterBehavior for DarkDevilBehavior {
             if ctx.tick_count >= monster.next_move_tick {
                 let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
                 ctx.out_moves.push((monster.object_id, nx, ny, dir));
-                monster.next_move_tick = ctx.tick_count + 2;
+                monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
                 monster.ai_state = crate::actors::world::MonsterAiState::Chase;
             }
             return;
         }
 
-        monster.next_attack_tick = ctx.tick_count + 8;
+        monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
         if in_area_mode {
             // AOE 模式：DC*3，朝向 2 格前方 1 格范围（C# PointMove(self,dir,2)）

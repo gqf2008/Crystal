@@ -39,7 +39,7 @@ impl MonsterBehavior for ElementGuardBehavior {
 
         if dist <= MELEE_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
-                monster.next_attack_tick = ctx.tick_count + 6;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
@@ -48,15 +48,17 @@ impl MonsterBehavior for ElementGuardBehavior {
                     spell_id: 0,
                     attack_type: 0,
                 });
-                // C# 1/2 Red 毒（CompleteAttack poison=true）
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::RED, 5, 5, 1000),
-                });
+                // C# PoisonTarget(5,5,Red,1000)：1/5
+                if fastrand::i32(0..5) == 0 {
+                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(PoisonType::RED, 5, damage, 1000),
+                    });
+                }
             }
         } else if dist <= VIEW_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
-                monster.next_attack_tick = ctx.tick_count + 6;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                     attacker_oid: monster.object_id,
@@ -65,16 +67,18 @@ impl MonsterBehavior for ElementGuardBehavior {
                     damage,
                     spell_id: 0,
                 });
-                // C# Green 毒（CompleteRangeAttack poison=true）
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::GREEN, 5, 3, 1000),
-                });
+                // C# PoisonTarget(5,3,Green,1000)：1/5、3s、值=SP
+                if fastrand::i32(0..5) == 0 {
+                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(PoisonType::GREEN, 3, damage, 1000),
+                    });
+                }
             }
         } else if ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

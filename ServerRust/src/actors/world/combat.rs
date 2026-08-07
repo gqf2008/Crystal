@@ -174,7 +174,10 @@ impl Message<WorldAttackRequest> for WorldActor {
                     monster.last_hitter_session = Some(msg.session_id);
                     self.pending_gather.push(msg.session_id);
                     monster.provoked = true;
-                    monster.target_session = Some(msg.session_id);
+                    // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（Target == null 才设置）
+                    if monster.target_session.is_none() {
+                        monster.target_session = Some(msg.session_id);
+                    }
                     // 施加战斗触发的 Poison（冰冻/毒攻），经 behavior.on_poison 过滤
                     for p in &attack_result.applied_poisons {
                         monster.try_apply_poison(*p);
@@ -384,7 +387,10 @@ impl Message<WorldAttackRequest> for WorldActor {
                             sm.last_hitter_session = Some(msg.session_id);
                             self.pending_gather.push(msg.session_id);
                             sm.provoked = true;
-                            sm.target_session = Some(msg.session_id);
+                            // C# MonsterObject.Attacked：仅当无目标时锁定攻击者
+                            if sm.target_session.is_none() {
+                                sm.target_session = Some(msg.session_id);
+                            }
                         }
                     }
                 }
@@ -1107,7 +1113,10 @@ impl Message<RangeAttackRequest> for WorldActor {
                 monster.last_hitter_session = Some(msg.session_id);
                 self.pending_gather.push(msg.session_id);
                 monster.provoked = true;
-                monster.target_session = Some(msg.session_id);
+                // C# MonsterObject.Attacked：仅当无目标时锁定攻击者
+                if monster.target_session.is_none() {
+                    monster.target_session = Some(msg.session_id);
+                }
                 for p in &attack_result.applied_poisons {
                     crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
                 }
@@ -1826,7 +1835,10 @@ impl Message<MagicRequest> for WorldActor {
                                 mir2_shared::enums::PoisonType::GREEN, duration, poison_value, 2000,
                             ));
                         monster.provoked = true;
-                        monster.target_session = Some(msg.session_id);
+                        // C# MonsterObject.ApplyPoison：仅当无目标时锁定施毒者（Target == null 才设置）
+                        if monster.target_session.is_none() {
+                            monster.target_session = Some(msg.session_id);
+                        }
                         debug!("Magic: {} casts Poisoning -> monster {} ({}s, {}dmg/tick)",
                                state.name, mid, duration, poison_value);
                     }
@@ -2047,7 +2059,10 @@ impl Message<MagicRequest> for WorldActor {
                                 m.last_hitter_session = Some(msg.session_id);
                                 self.pending_gather.push(msg.session_id);
                                 m.provoked = true;
-                                m.target_session = Some(msg.session_id);
+                                // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
+                                if m.target_session.is_none() {
+                                    m.target_session = Some(msg.session_id);
+                                }
                             }
                         }
                     }
@@ -2253,7 +2268,10 @@ impl Message<MagicRequest> for WorldActor {
                             monster.last_hitter_session = Some(msg.session_id);
                             self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
-                            monster.target_session = Some(msg.session_id);
+                            // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
+                            if monster.target_session.is_none() {
+                                monster.target_session = Some(msg.session_id);
+                            }
                             for p in &r.applied_poisons {
                                 crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
                             }
@@ -2291,7 +2309,10 @@ impl Message<MagicRequest> for WorldActor {
                                 monster.last_hitter_session = Some(msg.session_id);
                                 self.pending_gather.push(msg.session_id);
                                 monster.provoked = true;
-                                monster.target_session = Some(msg.session_id);
+                                // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
+                                if monster.target_session.is_none() {
+                                    monster.target_session = Some(msg.session_id);
+                                }
                                 for p in &r.applied_poisons {
                                     crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
                                 }
@@ -2337,7 +2358,10 @@ impl Message<MagicRequest> for WorldActor {
                             monster.last_hitter_session = Some(msg.session_id);
                             self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
-                            monster.target_session = Some(msg.session_id);
+                            // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
+                            if monster.target_session.is_none() {
+                                monster.target_session = Some(msg.session_id);
+                            }
                             for p in &r.applied_poisons {
                                 crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
                             }
@@ -2371,7 +2395,10 @@ impl Message<MagicRequest> for WorldActor {
                             monster.last_hitter_session = Some(msg.session_id);
                             self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
-                            monster.target_session = Some(msg.session_id);
+                            // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
+                            if monster.target_session.is_none() {
+                                monster.target_session = Some(msg.session_id);
+                            }
                             for p in &r.applied_poisons {
                                 crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
                             }
@@ -2412,7 +2439,10 @@ impl Message<MagicRequest> for WorldActor {
                                 monster.last_hitter_session = Some(msg.session_id);
                                 self.pending_gather.push(msg.session_id);
                                 monster.provoked = true;
-                                monster.target_session = Some(msg.session_id);
+                                // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
+                                if monster.target_session.is_none() {
+                                    monster.target_session = Some(msg.session_id);
+                                }
                                 spell_hits.push((mid, monster.x, monster.y, monster.direction, r.damage));
                             }
                         }
@@ -2660,8 +2690,9 @@ impl Message<MagicRequest> for WorldActor {
                                 agility: 0, accuracy: 0,
                                 armour_rate: 1.0, damage_rate: 1.0,
                                 magic_resist: 0, critical_rate: 0, critical_damage: 0,
-                                luck: 0, reflect: 0, damage_reduction_percent: 0,
+                                luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
                                 poison_list: Vec::new(),
+                                last_hit_damage: 0,
                                 undead: info.undead,
                                 master_session: Some(msg.session_id),
                                 recall_at_tick: 0,
@@ -2840,8 +2871,9 @@ impl Message<MagicRequest> for WorldActor {
                                 agility: 0, accuracy: 0,
                                 armour_rate: 1.0, damage_rate: 1.0,
                                 magic_resist: 0, critical_rate: 0, critical_damage: 0,
-                                luck: 0, reflect: 0, damage_reduction_percent: 0,
+                                luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
                                 poison_list: Vec::new(),
+                                last_hit_damage: 0,
                                 undead: info.undead,
                                 master_session: Some(msg.session_id),
                                 recall_at_tick: 0,
@@ -2887,7 +2919,10 @@ impl Message<MagicRequest> for WorldActor {
                             m.last_hitter_session = Some(msg.session_id);
                             self.pending_gather.push(msg.session_id);
                             m.provoked = true;
-                            m.target_session = Some(msg.session_id);
+                            // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
+                            if m.target_session.is_none() {
+                                m.target_session = Some(msg.session_id);
+                            }
                             for p in &r.applied_poisons {
                                 crate::combat::poison::apply_poison(&mut m.poison_list, *p);
                             }
@@ -2939,7 +2974,10 @@ impl Message<MagicRequest> for WorldActor {
                                     monster.last_hitter_session = Some(msg.session_id);
                                     self.pending_gather.push(msg.session_id);
                                     monster.provoked = true;
-                                    monster.target_session = Some(msg.session_id);
+                                    // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
+                                    if monster.target_session.is_none() {
+                                        monster.target_session = Some(msg.session_id);
+                                    }
                                     hit_count += 1;
                                 }
                             }
@@ -2978,7 +3016,10 @@ impl Message<MagicRequest> for WorldActor {
                             m.last_hitter_session = Some(msg.session_id);
                             self.pending_gather.push(msg.session_id);
                             m.provoked = true;
-                            m.target_session = Some(msg.session_id);
+                            // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
+                            if m.target_session.is_none() {
+                                m.target_session = Some(msg.session_id);
+                            }
                         }
                     }
                 }
@@ -3132,8 +3173,9 @@ impl Message<MagicRequest> for WorldActor {
                                 agility: 0, accuracy: 0,
                                 armour_rate: 1.0, damage_rate: 1.0,
                                 magic_resist: 0, critical_rate: 0, critical_damage: 0,
-                                luck: 0, reflect: 0, damage_reduction_percent: 0,
+                                luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
                                 poison_list: Vec::new(),
+                                last_hit_damage: 0,
                                 undead: info.undead,
                                 master_session: Some(msg.session_id),
                                 recall_at_tick: if recall_at_tick > 0 { self.tick_count + recall_at_tick } else { 0 },
@@ -3209,7 +3251,9 @@ impl Message<MagicRequest> for WorldActor {
                                 count: 1,
                                 spread: 0,
                             };
-                            let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
+                            // C# StoneTrap.Name：宠物名 = 怪物名(主人名)
+                            let display_name = format!("{}({})", spawn.name, state.name);
+                            let packet = build_object_monster_packet(&spawn, new_oid, &display_name);
                             for session_id in self.players.keys() {
                                 let _ = self.gate_ref.tell(SendToClient {
                                     session_id: *session_id,
@@ -3237,8 +3281,9 @@ impl Message<MagicRequest> for WorldActor {
                                 agility: 0, accuracy: 0,
                                 armour_rate: 1.0, damage_rate: 1.0,
                                 magic_resist: 0, critical_rate: 0, critical_damage: 0,
-                                luck: 0, reflect: 0, damage_reduction_percent: 0,
+                                luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
                                 poison_list: Vec::new(),
+                                last_hit_damage: 0,
                                 undead: info.undead,
                                 master_session: Some(msg.session_id),
                                 recall_at_tick: self.tick_count + duration_ticks,
@@ -3390,7 +3435,10 @@ impl Message<MagicRequest> for WorldActor {
                                     m.last_hitter_session = Some(msg.session_id);
                                     self.pending_gather.push(msg.session_id);
                                     m.provoked = true;
-                                    m.target_session = Some(msg.session_id);
+                                    // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
+                                    if m.target_session.is_none() {
+                                        m.target_session = Some(msg.session_id);
+                                    }
                                     slashed_damage += r.damage;
                                 }
                             }
@@ -3446,7 +3494,10 @@ impl Message<MagicRequest> for WorldActor {
                             monster.last_hitter_session = Some(msg.session_id);
                             self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
-                            monster.target_session = Some(msg.session_id);
+                            // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
+                            if monster.target_session.is_none() {
+                                monster.target_session = Some(msg.session_id);
+                            }
                             spell_hits.push((mid, monster.x, monster.y, monster.direction, r.damage));
                         }
                     }
@@ -3526,7 +3577,10 @@ impl Message<MagicRequest> for WorldActor {
                             monster.last_hitter_session = Some(msg.session_id);
                             self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
-                            monster.target_session = Some(msg.session_id);
+                            // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
+                            if monster.target_session.is_none() {
+                                monster.target_session = Some(msg.session_id);
+                            }
                             spell_hits.push((mid, monster.x, monster.y, monster.direction, r.damage));
                         }
                     }
@@ -3607,7 +3661,10 @@ impl Message<MagicRequest> for WorldActor {
                             monster.last_hitter_session = Some(msg.session_id);
                             self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
-                            monster.target_session = Some(msg.session_id);
+                            // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
+                            if monster.target_session.is_none() {
+                                monster.target_session = Some(msg.session_id);
+                            }
                             spell_hits.push((mid, monster.x, monster.y, monster.direction, r.damage));
                         }
                         // C#：持有 PoisonShot buff 时必中绿毒（Duration = value*2 + (Lv+1)*7；
@@ -3787,8 +3844,7 @@ impl Message<MagicRequest> for WorldActor {
                             monster.x = nx;
                             monster.y = ny;
                             monster.direction = ((pdir + 4) % 8) as u8; // 朝向施法者
-                            monster.provoked = true;
-                            monster.target_session = Some(msg.session_id);
+                            // C# MonsterObject.Pushed：仅转身朝向施法者，不改目标、不激怒
                             moved_packets.push((mid, nx, ny, monster.direction));
                         }
                     }
@@ -4064,7 +4120,10 @@ impl Message<MagicRequest> for WorldActor {
                             monster.last_hitter_session = Some(msg.session_id);
                             self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
-                            monster.target_session = Some(msg.session_id);
+                            // C# MonsterObject.Attacked：仅当无目标时锁定攻击者（魔法伤害同物理）
+                            if monster.target_session.is_none() {
+                                monster.target_session = Some(msg.session_id);
+                            }
                             for p in &r.applied_poisons {
                                 crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
                             }

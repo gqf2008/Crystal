@@ -43,7 +43,7 @@ impl MonsterBehavior for FurbolgWarriorBehavior {
             if ctx.tick_count >= monster.next_move_tick {
                 let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
                 ctx.out_moves.push((monster.object_id, nx, ny, dir));
-                monster.next_move_tick = ctx.tick_count + 2;
+                monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
                 monster.ai_state = crate::actors::world::MonsterAiState::Chase;
             }
             return;
@@ -51,7 +51,7 @@ impl MonsterBehavior for FurbolgWarriorBehavior {
         if ctx.tick_count < monster.next_attack_tick {
             return;
         }
-        monster.next_attack_tick = ctx.tick_count + 7;
+        monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
         let base = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
         let ranged = dx > 1 || dy > 1;

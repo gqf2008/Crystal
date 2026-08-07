@@ -38,7 +38,7 @@ impl MonsterBehavior for DarkDevourerBehavior {
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
             if dist <= MELEE_RANGE {
                 // 近战 DC AC
-                monster.next_attack_tick = ctx.tick_count + 6;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,
@@ -48,7 +48,7 @@ impl MonsterBehavior for DarkDevourerBehavior {
                 });
             } else {
                 // 远程 DC MACAgility（+500ms 冷却）
-                monster.next_attack_tick = ctx.tick_count + 10;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,
@@ -59,7 +59,7 @@ impl MonsterBehavior for DarkDevourerBehavior {
                 // Effect==1：命中后吞噬绿毒 1s（C# PoisonTarget(1,5,Green,1000)）
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                     session_id: target.session_id,
-                    poison: Poison::new(PoisonType::GREEN, 5, 5, 1000),
+                    poison: Poison::new(PoisonType::GREEN, 5, damage, 1000),
                 });
             }
             return;
@@ -69,7 +69,7 @@ impl MonsterBehavior for DarkDevourerBehavior {
         if ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }
