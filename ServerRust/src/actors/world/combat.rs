@@ -133,6 +133,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                     );
                     let damage = attack_result.damage;
                     monster.take_damage(damage);
+                    self.pending_gather.push(msg.session_id);
                     monster.provoked = true;
                     monster.target_session = Some(msg.session_id);
                     // 施加战斗触发的 Poison（冰冻/毒攻），经 behavior.on_poison 过滤
@@ -338,6 +339,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                     if let Some(mid) = mid {
                         if let Some(sm) = self.monsters.get_mut(&mid) {
                             sm.take_damage(splash_dmg);
+                            self.pending_gather.push(msg.session_id);
                             sm.provoked = true;
                             sm.target_session = Some(msg.session_id);
                         }
@@ -943,6 +945,7 @@ impl Message<RangeAttackRequest> for WorldActor {
                 );
                 let damage = attack_result.damage;
                 monster.take_damage(damage);
+                self.pending_gather.push(msg.session_id);
                 monster.provoked = true;
                 monster.target_session = Some(msg.session_id);
                 for p in &attack_result.applied_poisons {
@@ -1862,6 +1865,7 @@ impl Message<MagicRequest> for WorldActor {
                             );
                             if r.is_hit && r.damage > 0 {
                                 m.take_damage(r.damage);
+                                self.pending_gather.push(msg.session_id);
                                 m.provoked = true;
                                 m.target_session = Some(msg.session_id);
                             }
@@ -2019,6 +2023,7 @@ impl Message<MagicRequest> for WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
+                            self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
                             monster.target_session = Some(msg.session_id);
                             for p in &r.applied_poisons {
@@ -2055,6 +2060,7 @@ impl Message<MagicRequest> for WorldActor {
                             );
                             if r.is_hit && r.damage > 0 {
                                 monster.take_damage(r.damage);
+                                self.pending_gather.push(msg.session_id);
                                 monster.provoked = true;
                                 monster.target_session = Some(msg.session_id);
                                 for p in &r.applied_poisons {
@@ -2099,6 +2105,7 @@ impl Message<MagicRequest> for WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
+                            self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
                             monster.target_session = Some(msg.session_id);
                             for p in &r.applied_poisons {
@@ -2131,6 +2138,7 @@ impl Message<MagicRequest> for WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
+                            self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
                             monster.target_session = Some(msg.session_id);
                             for p in &r.applied_poisons {
@@ -2170,6 +2178,7 @@ impl Message<MagicRequest> for WorldActor {
                             );
                             if r.is_hit && r.damage > 0 {
                                 monster.take_damage(r.damage);
+                                self.pending_gather.push(msg.session_id);
                                 monster.provoked = true;
                                 monster.target_session = Some(msg.session_id);
                                 spell_hits.push((mid, monster.x, monster.y, monster.direction, r.damage));
@@ -2271,16 +2280,25 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} casts Archer projectile spell={} dmg={} delay={}ms (DoubleShot={})",
                     state.name, msg.spell, raw_damage, base_delay_ms, msg.spell == SPELL_DOUBLE_SHOT);
             }
-            // Concentration：自身 MP 恢复 buff（MpRegenBoost），持续 60s
+            // Concentration：专注 buff（MP 回复），时长 45+15*Lv 秒（C# HumanObject.Concentration）
             SPELL_CONCENTRATION => {
                 let bonus = 3 + spell_level as i32 * 2;
+                let duration_ticks = ((45 + 15 * spell_level as i32) as u32) * 10;
                 let buff = crate::combat::buff::BuffInstance::new(
                     crate::combat::buff::BuffType::MpRegenBoost { bonus },
-                    600, // 60s = 600 ticks
+                    duration_ticks,
                     5,
                 );
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
-                debug!("Magic: {} casts Concentration (MP regen +{})", state.name, bonus);
+                // 重置打断状态 + 广播 SetConcentration（C# UpdateConcentration(true,false)）
+                let _ = record.actor_ref.ask(crate::actors::player::SetConcentrationInterrupt {
+                    interrupted: false,
+                    interrupt_time_ms: 0,
+                }).await;
+                self.concentration_visible.insert(msg.session_id, true);
+                self.broadcast_set_concentration(state.object_id, true, false, state.map_index).await;
+                debug!("Magic: {} casts Concentration (MP regen +{}, {}s)",
+                       state.name, bonus, 45 + 15 * spell_level as i32);
             }
             // ElementalBarrier：自身减伤 buff（DamageReduction）
             // C# 时长 = magic.GetPower(MC随机) + barrierPower(0) = MC 随机秒（HumanObject.cs:3726/6417）
@@ -2585,6 +2603,7 @@ impl Message<MagicRequest> for WorldActor {
                             mir2_shared::enums::DefenceType::AcAgility, level_offset);
                         if r.is_hit && r.damage > 0 {
                             m.take_damage(r.damage);
+                            self.pending_gather.push(msg.session_id);
                             m.provoked = true;
                             m.target_session = Some(msg.session_id);
                             for p in &r.applied_poisons {
@@ -2635,6 +2654,7 @@ impl Message<MagicRequest> for WorldActor {
                                 );
                                 if r.is_hit && r.damage > 0 {
                                     monster.take_damage(r.damage);
+                                    self.pending_gather.push(msg.session_id);
                                     monster.provoked = true;
                                     monster.target_session = Some(msg.session_id);
                                     hit_count += 1;
@@ -2672,6 +2692,7 @@ impl Message<MagicRequest> for WorldActor {
                             mir2_shared::enums::DefenceType::AcAgility, level_offset);
                         if r.is_hit && r.damage > 0 {
                             m.take_damage(r.damage);
+                            self.pending_gather.push(msg.session_id);
                             m.provoked = true;
                             m.target_session = Some(msg.session_id);
                         }
@@ -3074,6 +3095,7 @@ impl Message<MagicRequest> for WorldActor {
                                 );
                                 if r.is_hit && r.damage > 0 {
                                     m.take_damage(r.damage);
+                                    self.pending_gather.push(msg.session_id);
                                     m.provoked = true;
                                     m.target_session = Some(msg.session_id);
                                     slashed_damage += r.damage;
@@ -3128,6 +3150,7 @@ impl Message<MagicRequest> for WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
+                            self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
                             monster.target_session = Some(msg.session_id);
                             spell_hits.push((mid, monster.x, monster.y, monster.direction, r.damage));
@@ -3206,6 +3229,7 @@ impl Message<MagicRequest> for WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
+                            self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
                             monster.target_session = Some(msg.session_id);
                             spell_hits.push((mid, monster.x, monster.y, monster.direction, r.damage));
@@ -3285,6 +3309,7 @@ impl Message<MagicRequest> for WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
+                            self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
                             monster.target_session = Some(msg.session_id);
                             spell_hits.push((mid, monster.x, monster.y, monster.direction, r.damage));
@@ -3740,6 +3765,7 @@ impl Message<MagicRequest> for WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
+                            self.pending_gather.push(msg.session_id);
                             monster.provoked = true;
                             monster.target_session = Some(msg.session_id);
                             for p in &r.applied_poisons {

@@ -279,6 +279,14 @@ pub struct PlayerState {
     pub drop_multiplier: f64,
     /// 掉落倍率过期时间（WorldActor tick count）
     pub drop_multiplier_end_tick: u64,
+    /// 元素等级（C# HumanObject.ElementsLevel，弓手元素球）
+    pub elements_level: i32,
+    /// 是否已有元素（C# HumanObject.HasElemental）
+    pub has_elemental: bool,
+    /// 专注是否被打断（C# Concentration buff Interrupted）
+    pub concentration_interrupted: bool,
+    /// 专注打断恢复时间（毫秒，C# Concentration buff InterruptTime）
+    pub concentration_interrupt_time: i64,
 }
 
 impl PlayerState {
@@ -593,6 +601,10 @@ impl PlayerActor {
                 exp_multiplier_end_tick: 0,
             drop_multiplier: 1.0,
             drop_multiplier_end_tick: 0,
+            elements_level: 0,
+            has_elemental: false,
+            concentration_interrupted: false,
+            concentration_interrupt_time: 0,
             },
             gate_ref,
             world_ref,
@@ -1418,6 +1430,44 @@ impl Message<Revive> for PlayerActor {
         }).await;
 
         debug!("Player {} revived (hp={} mp={})", self.state.name, self.state.hp, self.state.mp);
+    }
+}
+
+/// 设置元素状态（C# HumanObject.ObtainElement 更新 ElementsLevel/HasElemental）
+pub struct SetElements {
+    pub level: i32,
+    pub has_elemental: bool,
+}
+
+impl Message<SetElements> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetElements,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.elements_level = msg.level;
+        self.state.has_elemental = msg.has_elemental;
+    }
+}
+
+/// 设置专注打断状态（C# Concentration buff Interrupted/InterruptTime）
+pub struct SetConcentrationInterrupt {
+    pub interrupted: bool,
+    pub interrupt_time_ms: i64,
+}
+
+impl Message<SetConcentrationInterrupt> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetConcentrationInterrupt,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.concentration_interrupted = msg.interrupted;
+        self.state.concentration_interrupt_time = msg.interrupt_time_ms;
     }
 }
 
@@ -4474,6 +4524,10 @@ mod tests {
             auto_pot_hp_item: -1,
             auto_pot_mp_item: -1,
             hero_behaviour: 0,
+            elements_level: 0,
+            has_elemental: false,
+            concentration_interrupted: false,
+            concentration_interrupt_time: 0,
         }
     }
 

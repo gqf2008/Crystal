@@ -662,6 +662,10 @@ impl Message<NewCharacterRequest> for WorldActor {
             exp_multiplier_end_tick: 0,
             drop_multiplier: 1.0,
             drop_multiplier_end_tick: 0,
+            elements_level: 0,
+            has_elemental: false,
+            concentration_interrupted: false,
+            concentration_interrupt_time: 0,
         };
         debug!("NewCharacter: saving '{}' ...", msg.name);
         match db::save_character(&self.db_pool, &default_state, &msg.account_username).await {
