@@ -842,7 +842,7 @@ pub fn is_static_object(monster_name: &str) -> bool {
         || name == "icepillar" || name.contains("ice pillar") || name.contains("冰柱")
         || name == "woodbox" || name.contains("wood box") || name.contains("木箱")
         || name == "cargobox" || name.contains("cargo box") || name.contains("货箱")
-        || name == "restlessjar" || name.contains("restless jar") || name.contains("躁动之坛")
+        // 注意：RestlessJar 曾在此列表（CanMove=false），但它 CanAttack=true，已改由专属 RestlessJarBehavior 处理（#1089）
         || name == "purplefaeflower" || name.contains("purple fae flower") || name.contains("紫妖花")
         || name == "blockingobject" || name.contains("blocking object") || name.contains("阻挡物")
 }
@@ -877,5 +877,49 @@ mod tests {
     fn plain_guard_still_boss_behavior() {
         assert!(is_registered_boss("Guard"));
         assert!(is_registered_boss("Guard2"));
+    }
+
+    #[test]
+    fn monster_ai_batch_registered() {
+        // #1022-#1120 批次的特殊怪全部注册（覆盖 40+ 新怪抽查）
+        for name in [
+            "SandWorm", "ShamanZombie", "StrayCat", "DarkBeast", "SnowWolf", "MudZombie",
+            "IncarnatedGhoul", "IncarnatedZT", "Mantis", "SandSnail", "ScalyBeast", "LightTurtle",
+            "HellCannibal", "Nadz", "OmaWitchDoctor", "SwampWarrior", "OmaCannibal", "BurningZombie",
+            "AntCommander", "FurbolgArcher", "HellSlasher", "OmaBlest", "ElephantMan", "TreeGuardian",
+            "FrozenKnight", "GlacierBeast", "RedFoxman", "WhiteFoxman", "SnowYeti", "FurbolgGuard",
+            "FurbolgCommander", "ChieftainArcher", "RedThunderZuma", "WereTiger", "DarkWraith",
+            "PeacockSpider", "ManTree", "FrozenMagician", "FrozenZombie", "FrozenAxeman",
+            "IceCrystalSoldier", "BlackFoxman", "BlackHammerCat", "HellPirate", "CannibalTentacles",
+            "TucsonWarrior", "Turtlegrass", "FinialTurtle", "AvengingSpirit", "BlueSoul",
+            "FlameScythe", "FlameSpear", "AvengingWarrior", "BlackTortoise", "ManectricClaw",
+            "HardenRhino", "CreeperPlant", "HellBomb", "FrozenMiner", "GlacierSnail", "OmaSlasher",
+            "ManectricBlest", "GlacierWarrior", "MutatedManworm", "Mandrill", "FrostTiger",
+            "RestlessJar", "SpittingToad", "CharmedSnake", "FlyingStatue", "DemonWolf",
+            "TucsonEgg", "DeathCrawler", "SnakeTotem", "Jar2", "AssassinBird", "ArmadilloElder",
+            "AxePlant", "HedgeKekTal", "FlameAssassin", "YinDevilNode", "PowerBead", "DemonGuard",
+            "TrapRock", "SepWarrior", "SepArcher", "SepTaoist", "SepWizard", "SepAssassin",
+            "SepHighWarrior", "SepHighArcher", "SepHighTaoist", "SepHighWizard", "SepHighAssassin",
+            "DragonWarrior", "SackWarrior", "ArcherGuard", "ConquestArcher", "DragonStatue",
+            "FloatingRock", "HoodedSummonerScrolls", "Siege",
+        ] {
+            assert!(is_registered_boss(name), "{} should be registered", name);
+            // make_behavior 注册命中（DefaultBehavior 无 as_any_mut 区分，仅验证注册 + 可构建）
+            let _b = make_behavior(name);
+        }
+    }
+
+    #[test]
+    fn static_and_passive_stay_default() {
+        for name in ["Tree", "Wall", "CaveStatue", "BoulderSpirit", "IcePillar", "WoodBox",
+                      "CargoBox", "PurpleFaeFlower", "BlockingObject", "EvilMirBody",
+                      "Deer", "Doe", "Football"] {
+            assert!(!is_registered_boss(name), "{} should not be registered", name);
+        }
+        assert!(is_static_object("Tree"));
+        assert!(is_static_object("Wall"));
+        assert!(is_static_object("CaveStatue"));
+        assert!(is_passive_object("Deer"));
+        assert!(is_passive_object("Football"));
     }
 }
