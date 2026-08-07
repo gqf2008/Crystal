@@ -235,8 +235,8 @@ fn spawn_hero(
             HeroWidget,
         ));
     }
-    // 列表行（0..4）
-    for i in 0..5usize {
+    // 列表行（0..5，#1135 末行显示英雄实时状态）
+    for i in 0..6usize {
         let e = spawn_ui_text(
             &mut commands, &font, "",
             298.0, 120.0 + i as f32 * 22.0,
@@ -504,6 +504,17 @@ fn hero_ui_system(
                 .unwrap_or_else(|| "（无英雄，点“创建英雄”创建）".to_string()),
             3 => state.message.clone(),
             4 => state.create_msg.clone(),
+            5 => {
+                // #1135：出战英雄实时状态（HeroHealthChanged/GainHeroExperience/HeroLevelChanged 驱动）
+                if state.hero_index > 0 {
+                    format!(
+                        "状态: HP {}  MP {}  经验 {}/{}",
+                        state.hero_hp, state.hero_mp, state.hero_exp, state.hero_max_exp.max(1)
+                    )
+                } else {
+                    String::new()
+                }
+            }
             _ => String::new(),
         };
     }
