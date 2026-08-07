@@ -66,22 +66,19 @@ impl MonsterBehavior for StoneGolemBehavior {
                 }
                 let _ = dir; // 方向已隐含在 center 坐标里
                 let value = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
-                // 5x5 法术场（C# 每格一个 SpellObject，这里投放中心+四角近似）
+                // 5x5 法术场：C# 每格一个 SpellObject（全 25 格）
                 for oy in -QUAKE_RADIUS..=QUAKE_RADIUS {
                     for ox in -QUAKE_RADIUS..=QUAKE_RADIUS {
-                        // 仅在 5x5 边缘和中心投放以减少数量（近似视觉效果）
-                        if ox.abs() == QUAKE_RADIUS || oy.abs() == QUAKE_RADIUS || (ox == 0 && oy == 0) {
-                            ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {
-                                spell: Spell::MapQuake1,
-                                x: center_x + ox,
-                                y: center_y + oy,
-                                value,
-                                duration_ms: 800,
-                                tick_ms: 1000,
-                                caster_oid: monster.object_id,
-                                caster_session: 0,
-                            });
-                        }
+                        ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {
+                            spell: Spell::StoneGolemQuake,
+                            x: center_x + ox,
+                            y: center_y + oy,
+                            value,
+                            duration_ms: 800,
+                            tick_ms: 1000,
+                            caster_oid: monster.object_id,
+                            caster_session: 0,
+                        });
                     }
                 }
             }
