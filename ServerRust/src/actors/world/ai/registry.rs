@@ -174,6 +174,24 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("frozenmagician") || name.contains("frozen magician") || name.contains("冰霜法师") {
         return Box::new(bosses::frozen_magician::FrozenMagicianBehavior::new());
     }
+    if name.contains("frozenzombie") || name.contains("frozen zombie") || name.contains("冰霜僵尸") {
+        return Box::new(bosses::frozen_zombie::FrozenZombieBehavior::new());
+    }
+    if name.contains("frozenaxeman") || name.contains("frozen axeman") || name.contains("冰霜斧手") {
+        return Box::new(bosses::frozen_axeman::FrozenAxemanBehavior::new());
+    }
+    if name.contains("icecrystalsoldier") || name.contains("ice crystal soldier") || name.contains("冰晶士兵") {
+        return Box::new(bosses::ice_crystal_soldier::IceCrystalSoldierBehavior::new());
+    }
+    if name.contains("blackfoxman") || name.contains("black foxman") || name.contains("黑狐人") {
+        return Box::new(bosses::black_foxman::BlackFoxmanBehavior::new());
+    }
+    if name.contains("blackhammercat") || name.contains("black hammer cat") || name.contains("黑锤猫") {
+        return Box::new(bosses::black_hammer_cat::BlackHammerCatBehavior::new());
+    }
+    if name.contains("hellpirate") || name.contains("hell pirate") || name.contains("地狱海盗") {
+        return Box::new(bosses::hell_pirate::HellPirateBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -482,6 +500,12 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("peacockspider") || name.contains("peacock spider") || name.contains("孔雀蜘蛛")
         || name.contains("mantree") || name.contains("man tree") || name.contains("树人")
         || name.contains("frozenmagician") || name.contains("frozen magician") || name.contains("冰霜法师")
+        || name.contains("frozenzombie") || name.contains("frozen zombie") || name.contains("冰霜僵尸")
+        || name.contains("frozenaxeman") || name.contains("frozen axeman") || name.contains("冰霜斧手")
+        || name.contains("icecrystalsoldier") || name.contains("ice crystal soldier") || name.contains("冰晶士兵")
+        || name.contains("blackfoxman") || name.contains("black foxman") || name.contains("黑狐人")
+        || name.contains("blackhammercat") || name.contains("black hammer cat") || name.contains("黑锤猫")
+        || name.contains("hellpirate") || name.contains("hell pirate") || name.contains("地狱海盗")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
