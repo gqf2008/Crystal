@@ -505,6 +505,10 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("castlegate") || name.contains("castle gate") || name.contains("城门") {
         return Box::new(bosses::castle_gate::CastleGateBehavior::new());
     }
+    if name == "gate" || name == "gate2" {
+        // C# Gate.cs：CastleGate 子类（仅覆写 GetDamageLevel），复用城门行为
+        return Box::new(bosses::castle_gate::CastleGateBehavior::new());
+    }
     if name.contains("digoutzombie") || name.contains("digout zombie") || name.contains("钻地僵尸") {
         return Box::new(bosses::dig_out_zombie::DigOutZombieBehavior::new());
     }
@@ -760,6 +764,7 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name == "guard" || (name.starts_with("guard") && !name.contains("town") && !name.contains("guardian") && !name.contains("vanguard") && !name.contains("bodyguard"))
         || name.contains("townarcher") || name.contains("town archer") || name.contains("城镇弓箭手")
         || name.contains("castlegate") || name.contains("castle gate") || name.contains("城门")
+        || name == "gate" || name == "gate2"
         || name.contains("digoutzombie") || name.contains("digout zombie") || name.contains("钻地僵尸")
         || name.contains("revivingzombie") || name.contains("reviving zombie") || name.contains("复活僵尸")
         || name == "jar1" || name.contains("坛子")
