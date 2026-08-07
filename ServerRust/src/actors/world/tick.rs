@@ -109,52 +109,22 @@ impl WorldActor {
             for session_id in to_revive {
                 self.player_death_queue.remove(&session_id);
                 if let Some(record) = self.players.get(&session_id).cloned() {
-                    // C# StartGame：死亡地图 NoReconnect → 复活到 NoReconnectMap 随机点（而非原地）
-                    let no_reconnect_spot = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                        let mi = self.map_infos.get(&(state.map_index as i32)).cloned();
-                        if let Some(mi) = mi {
-                            if mi.no_reconnect && !mi.no_reconnect_map.is_empty() {
-                                // 先 clone 目标地图信息，结束 map_infos 借用后再加载
-                                let dest = self.map_infos.values()
-                                    .find(|m| m.file_name.eq_ignore_ascii_case(&mi.no_reconnect_map))
-                                    .cloned();
-                                if let Some(dest_mi) = dest {
-                                    let dest_map_index = dest_mi.index as u16;
-                                    self.get_or_load_map(&dest_mi.file_name, dest_map_index);
-                                    let (rx, ry) = if let Some(map) = self.maps.get(&dest_map_index) {
-                                        let mut pt = (map.width as i32 / 2, map.height as i32 / 2);
-                                        for _ in 0..40 {
-                                            let cx = fastrand::i32(0..map.width as i32);
-                                            let cy = fastrand::i32(0..map.height as i32);
-                                            if map.is_walkable(cx, cy) {
-                                                pt = (cx, cy);
-                                                break;
-                                            }
-                                        }
-                                        pt
-                                    } else {
-                                        (330, 330)
-                                    };
-                                    Some((dest_map_index, rx, ry))
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
+                    // 死亡地图 NoReconnect：由独立消息 ApplyNoReconnect 处理传送
+                    //（避免 Tick handler 内同步加载大图导致 tokio 栈溢出，#881 回归）
+                    let needs_noreconnect = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                        self.map_infos.get(&(state.map_index as i32))
+                            .map(|mi| mi.no_reconnect && !mi.no_reconnect_map.is_empty())
+                            .unwrap_or(false)
                     } else {
-                        None
+                        false
                     };
-                    if let Some((dest_map, rx, ry)) = no_reconnect_spot {
-                        let _ = record.actor_ref.ask(crate::actors::player::RevivePlayer {
-                            x: rx, y: ry, map_index: dest_map,
-                        }).await;
-                        debug!("Player {} revived to NoReconnectMap {} ({},{})", session_id, dest_map, rx, ry);
-                    } else {
-                        let _ = record.actor_ref.ask(crate::actors::player::Revive).await;
+                    let _ = record.actor_ref.ask(crate::actors::player::Revive).await;
+                    if needs_noreconnect {
+                        if let Some(world_ref) = self.self_ref.clone() {
+                            let _ = world_ref.tell(crate::actors::world::ApplyNoReconnect {
+                                session_id,
+                            }).try_send();
+                        }
                     }
                     // C# Revive：广播 ObjectRevived（其他玩家看到复活动画）
                     if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {

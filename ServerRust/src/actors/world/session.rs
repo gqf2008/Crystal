@@ -268,37 +268,6 @@ impl Message<StartGameRequest> for WorldActor {
             }
         }
 
-        // C# StartGame（PlayerObject.cs:1073）：当前地图 NoReconnect → 登录时传送到 NoReconnectMap 随机点
-        if let Some(mi) = self.map_infos.get(&(map_index as i32)).cloned() {
-            if mi.no_reconnect && !mi.no_reconnect_map.is_empty() {
-                if let Some(dest_mi) = self.map_infos.values()
-                    .find(|m| m.file_name.eq_ignore_ascii_case(&mi.no_reconnect_map))
-                    .cloned()
-                {
-                    let dest_map_index = dest_mi.index as u16;
-                    self.get_or_load_map(&dest_mi.file_name, dest_map_index);
-                    let (rx, ry) = if let Some(map) = self.maps.get(&dest_map_index) {
-                        let mut pt = (map.width as i32 / 2, map.height as i32 / 2);
-                        for _ in 0..40 {
-                            let cx = fastrand::i32(0..map.width as i32);
-                            let cy = fastrand::i32(0..map.height as i32);
-                            if map.is_walkable(cx, cy) {
-                                pt = (cx, cy);
-                                break;
-                            }
-                        }
-                        pt
-                    } else {
-                        (330, 330)
-                    };
-                    info!("NoReconnect: moving {} from map {} to {} ({},{})",
-                          player_name, map_index, dest_mi.file_name, rx, ry);
-                    loaded_state.map_index = dest_map_index;
-                    loaded_state.x = rx;
-                    loaded_state.y = ry;
-                }
-            }
-        }
 
         // 初始化装备属性加成（从已装备物品计算）
         let b = calculate_equipment_bonuses(&loaded_state.inventory.equipment, &self.item_infos);
@@ -361,6 +330,14 @@ impl Message<StartGameRequest> for WorldActor {
 
         // C# PlayerObject.SetBind：确保绑定点有效（无绑定点/无效时随机出生安全区）
         self.ensure_bind(msg.session_id).await;
+
+        // C# StartGame NoReconnect：由独立消息 ApplyNoReconnect 处理
+        //（避免登录 handler 内同步加载大图导致 tokio 栈溢出，#881 回归）
+        if let Some(world_ref) = self.self_ref.clone() {
+            let _ = world_ref.tell(crate::actors::world::ApplyNoReconnect {
+                session_id: msg.session_id,
+            }).try_send();
+        }
 
         // C# PlayerObject.StartGame → SetLevelEffects：按 flags 990-998 刷新等级特效
         self.refresh_level_effects(msg.session_id).await;
@@ -1017,6 +994,59 @@ impl Message<WorldTurnRequest> for WorldActor {
                 }).await;
             }
         }
+    }
+}
+
+/// 登录/复活后应用 NoReconnect 地图规则（C# PlayerObject.StartGame：
+/// 当前地图 NoReconnect → 传送到 NoReconnectMap 随机点）。
+/// 独立消息处理：避免在登录/Tick handler 内同步加载大图导致 tokio 栈溢出（#881）。
+pub struct ApplyNoReconnect {
+    pub session_id: u64,
+}
+
+impl Message<ApplyNoReconnect> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: ApplyNoReconnect, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        let Some(mi) = self.map_infos.get(&(state.map_index as i32)).cloned() else {
+            return;
+        };
+        if !mi.no_reconnect || mi.no_reconnect_map.is_empty() {
+            return;
+        }
+        let Some(dest_mi) = self.map_infos.values()
+            .find(|m| m.file_name.eq_ignore_ascii_case(&mi.no_reconnect_map))
+            .cloned()
+        else {
+            return;
+        };
+        let dest_map_index = dest_mi.index as u16;
+        self.get_or_load_map(&dest_mi.file_name, dest_map_index);
+        let (rx, ry) = if let Some(map) = self.maps.get(&dest_map_index) {
+            let mut pt = (map.width as i32 / 2, map.height as i32 / 2);
+            for _ in 0..40 {
+                let cx = fastrand::i32(0..map.width as i32);
+                let cy = fastrand::i32(0..map.height as i32);
+                if map.is_walkable(cx, cy) {
+                    pt = (cx, cy);
+                    break;
+                }
+            }
+            pt
+        } else {
+            (330, 330)
+        };
+        crate::actors::world::npc_script::teleport_player(
+            self, msg.session_id, dest_map_index, rx, ry).await;
+        info!("NoReconnect: moved session {} to map {} ({},{})", msg.session_id, dest_map_index, rx, ry);
     }
 }
 
