@@ -1668,7 +1668,7 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} casts Lightning (line 6) dmg={}", state.name, raw_damage);
             }
             // ThunderStorm/FlameField：5×5 自身周围，MAC（C# Map.cs:1303）
-            // ThunderStorm 对非亡灵伤害 ×1/10（Rust 暂无 undead 字段，全额伤害，TODO）
+            // ThunderStorm 对非亡灵伤害 ×1/10（下方按 monster.undead 调整）
             SPELL_THUNDERSTORM | SPELL_FLAME_FIELD => {
                 let raw_damage = if let Some(info) = spell_db {
                     crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)

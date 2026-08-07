@@ -385,7 +385,7 @@ impl PlayerState {
             damage_rate: 1.0,
             freezing: self.freezing,
             poison_attack: self.poison_attack,
-            // C# SpecialItemMode.Paralize：任意装备带 Paralize 特殊模式（1/15 概率麻痹）
+            // C# SpecialItemMode.Paralize：任意装备带 Paralize 特殊模式（1/14 概率麻痹，Random.Next(1,15)==1）
             paralize: self.inventory.equipment.iter().flatten().any(|e| {
                 e.info.as_ref().map(|i| i.unique.contains(mir2_shared::enums::SpecialItemMode::PARALIZE)).unwrap_or(false)
             }),
