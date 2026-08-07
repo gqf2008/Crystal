@@ -144,6 +144,23 @@ impl Message<ProcessRevives> for WorldActor {
     }
 }
 
+/// #986：C# FindTarget 子集——宠物在 Both/AttackOnly 下若无协战目标，
+/// 找最近正在攻击主人（target_session == master）的怪物（C# IsAttackTarget：ob.Target == attacker.Master）。
+fn pet_find_hostile_target(
+    monster: &MonsterState,
+    monster_snapshot: &[(u32, i32, i32, i32, i32, u16, i32, String, u16, u8)],
+    monster_hostility: &std::collections::HashMap<u32, (Option<u64>, Option<u64>)>,
+) -> Option<(u32, i32, i32)> {
+    let master = monster.master_session?;
+    monster_snapshot.iter()
+        .filter(|s| s.0 != monster.object_id && s.5 == monster.map_index && s.3 > 0)
+        .filter(|s| monster_hostility.get(&s.0).map_or(false, |(ms, ts)| {
+            *ms != monster.master_session && *ts == Some(master)
+        }))
+        .min_by_key(|s| ((s.1 - monster.x).abs() + (s.2 - monster.y).abs(), s.0))
+        .map(|s| (s.0, s.1, s.2))
+}
+
 impl WorldActor {
 
     /// 处理自动复活（C# Revive）：Revive + NoReconnect 传送 + ObjectRevived 广播。
@@ -668,6 +685,7 @@ impl WorldActor {
             }
         }
     }
+
 
     /// 广播对象显示/隐藏（C# S.ObjectShow / S.ObjectHide：Shinsu 形态切换等）
     async fn broadcast_object_show_hide(&self, object_id: u32, visible: bool) {
@@ -3057,6 +3075,11 @@ impl Message<Tick> for WorldActor {
             let monster_snapshot: Vec<(u32, i32, i32, i32, i32, u16, i32, String, u16, u8)> = self.monsters.values()
                 .map(|m| (m.object_id, m.x, m.y, m.hp, m.max_hp, m.map_index, m.monster_index, m.name.clone(), m.image, m.direction))
                 .collect();
+            // #986：怪物敌对关系预收集（oid → (master_session, target_session)），供宠物自主索敌
+            let monster_hostility: std::collections::HashMap<u32, (Option<u64>, Option<u64>)> =
+                self.monsters.iter()
+                    .map(|(oid, m)| (*oid, (m.master_session, m.target_session)))
+                    .collect();
             // Healer 治疗动作和 Summoner 召唤动作（在循环后应用）
             let mut heal_actions: Vec<(u32, i32)> = Vec::new();
             // #471 宠物协战动作（pet_oid, target_oid, damage, master_session，循环后应用）
@@ -3181,6 +3204,8 @@ impl Message<Tick> for WorldActor {
                             monster.target_session = None;
                             continue;
                         }
+                        // 协战目标（#471 主人攻击的怪物）
+                        let mut pet_target: Option<(u32, i32, i32)> = None;
                         if let Some(tmid) = self.pet_targets.get(&monster.object_id).copied() {
                             let target_alive = monster_snapshot.iter()
                                 .any(|s| s.0 == tmid && s.3 > 0 && s.5 == monster.map_index);
@@ -3189,25 +3214,32 @@ impl Message<Tick> for WorldActor {
                             } else if let Some((_, tx, ty, _, _, _, _, _, _, _)) =
                                 monster_snapshot.iter().find(|s| s.0 == tmid)
                             {
-                                let dist = (tx - monster.x).abs() + (ty - monster.y).abs();
-                                if dist <= 1 && self.tick_count >= monster.next_attack_tick {
-                                    let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
-                                    let damage = ((self.tick_count.wrapping_add(monster.object_id as u64)
-                                        .wrapping_mul(13)) as i32 % dmg_range) + monster.min_dmg;
-                                    pet_attacks.push((monster.object_id, tmid, damage, master));
-                                    monster.next_attack_tick = self.tick_count + monster.ai_profile.attack_cooldown;
-                                    monster.ai_state = MonsterAiState::Attack;
-                                } else if self.tick_count >= monster.next_move_tick {
-                                    let (nx, ny, dir) = monster.step_toward(*tx, *ty);
-                                    if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
-                                        && !monster_positions.contains(&(nx, ny))
-                                        && moved_targets.insert((nx, ny))
-                                    {
-                                        moved_monsters.push((monster.object_id, nx, ny, dir));
-                                    }
-                                    monster.next_move_tick = self.tick_count + monster.ai_profile.move_interval;
-                                    monster.ai_state = MonsterAiState::Chase;
+                                pet_target = Some((tmid, *tx, *ty));
+                            }
+                        }
+                        // #986：无协战目标 → 找最近正在攻击主人的怪物（C# FindTarget 子集）
+                        if pet_target.is_none() {
+                            pet_target = pet_find_hostile_target(monster, &monster_snapshot, &monster_hostility);
+                        }
+                        if let Some((tmid, tx, ty)) = pet_target {
+                            let dist = (tx - monster.x).abs() + (ty - monster.y).abs();
+                            if dist <= 1 && self.tick_count >= monster.next_attack_tick {
+                                let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
+                                let damage = ((self.tick_count.wrapping_add(monster.object_id as u64)
+                                    .wrapping_mul(13)) as i32 % dmg_range) + monster.min_dmg;
+                                pet_attacks.push((monster.object_id, tmid, damage, master));
+                                monster.next_attack_tick = self.tick_count + monster.ai_profile.attack_cooldown;
+                                monster.ai_state = MonsterAiState::Attack;
+                            } else if self.tick_count >= monster.next_move_tick {
+                                let (nx, ny, dir) = monster.step_toward(tx, ty);
+                                if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
+                                    && !monster_positions.contains(&(nx, ny))
+                                    && moved_targets.insert((nx, ny))
+                                {
+                                    moved_monsters.push((monster.object_id, nx, ny, dir));
                                 }
+                                monster.next_move_tick = self.tick_count + monster.ai_profile.move_interval;
+                                monster.ai_state = MonsterAiState::Chase;
                             }
                         }
                     }
@@ -3345,29 +3377,38 @@ impl Message<Tick> for WorldActor {
                     nearest = None;
                     chase_target = None;
                     monster.target_session = None;
+                    // 协战目标（#471 主人攻击的怪物）
+                    let mut pet_target: Option<(u32, i32, i32)> = None;
                     if let Some(tmid) = self.pet_targets.get(&monster.object_id).copied() {
                         let target_alive = monster_snapshot.iter().any(|s| s.0 == tmid && s.3 > 0 && s.5 == monster.map_index);
                         if !target_alive {
                             self.pet_targets.remove(&monster.object_id);
                         } else if let Some((_, tx, ty, _, _, _, _, _, _, _)) = monster_snapshot.iter().find(|s| s.0 == tmid) {
-                            let dist = (tx - monster.x).abs() + (ty - monster.y).abs();
-                            if dist <= 1 && can_attack {
-                                let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
-                                let damage = ((self.tick_count.wrapping_add(*oid as u64).wrapping_mul(13)) as i32 % dmg_range) + monster.min_dmg;
-                                pet_attacks.push((*oid, tmid, damage, monster.master_session.unwrap_or(0)));
-                                monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
-                                monster.ai_state = MonsterAiState::Attack;
-                            } else if can_move {
-                                let (nx, ny, dir) = monster.step_toward(*tx, *ty);
-                                if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
-                                    && !monster_positions.contains(&(nx, ny))
-                                    && moved_targets.insert((nx, ny))
-                                {
-                                    moved_monsters.push((*oid, nx, ny, dir));
-                                }
-                                monster.next_move_tick = self.tick_count + profile.move_interval;
-                                monster.ai_state = MonsterAiState::Chase;
+                            pet_target = Some((tmid, *tx, *ty));
+                        }
+                    }
+                    // #986：无协战目标 → 找最近正在攻击主人的怪物（C# FindTarget 子集）
+                    if pet_target.is_none() {
+                        pet_target = pet_find_hostile_target(monster, &monster_snapshot, &monster_hostility);
+                    }
+                    if let Some((tmid, tx, ty)) = pet_target {
+                        let dist = (tx - monster.x).abs() + (ty - monster.y).abs();
+                        if dist <= 1 && can_attack {
+                            let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
+                            let damage = ((self.tick_count.wrapping_add(*oid as u64).wrapping_mul(13)) as i32 % dmg_range) + monster.min_dmg;
+                            pet_attacks.push((*oid, tmid, damage, monster.master_session.unwrap_or(0)));
+                            monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
+                            monster.ai_state = MonsterAiState::Attack;
+                        } else if can_move {
+                            let (nx, ny, dir) = monster.step_toward(tx, ty);
+                            if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
+                                && !monster_positions.contains(&(nx, ny))
+                                && moved_targets.insert((nx, ny))
+                            {
+                                moved_monsters.push((*oid, nx, ny, dir));
                             }
+                            monster.next_move_tick = self.tick_count + profile.move_interval;
+                            monster.ai_state = MonsterAiState::Chase;
                         }
                     }
                 }
