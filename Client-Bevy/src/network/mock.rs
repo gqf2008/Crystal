@@ -1104,6 +1104,60 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         tracing::info!("🏪 [MOCK] 取回 auction={}", listing_id);
                                     }
                                 }
+                                // #755：交易（--trade-test）
+                                x if x == ClientPacketIds::TradeRequest as i16 => {
+                                    if let Ok(_p) = client::trade::TradeRequest::read_body(&mut cur) {
+                                        send(&to_client, &MockTradeRequest);
+                                        tracing::info!("🤝 [MOCK] 交易请求回发");
+                                    }
+                                }
+                                x if x == ClientPacketIds::TradeGold as i16 => {
+                                    if let Ok(p) = client::trade::TradeGold::read_body(&mut cur) {
+                                        send(&to_client, &MockTradeGold { amount: p.amount });
+                                        tracing::info!("💰 [MOCK] 交易金币 {}", p.amount);
+                                    }
+                                }
+                                x if x == ClientPacketIds::DepositTradeItem as i16 => {
+                                    if let Ok(p) = client::trade::DepositTradeItem::read_body(&mut cur) {
+                                        send(&to_client, &MockTradeDeposit { from: p.from });
+                                        tracing::info!("📦 [MOCK] 交易入槽 {} -> {}", p.from, p.to);
+                                    }
+                                }
+                                x if x == ClientPacketIds::TradeConfirm as i16 => {
+                                    if let Ok(_p) = client::trade::TradeConfirm::read_body(&mut cur) {
+                                        send(&to_client, &MockTradeConfirm);
+                                        tracing::info!("🔒 [MOCK] 双方锁定，交易完成");
+                                    }
+                                }
+                                // #755：师徒（--mentor-test）
+                                x if x == ClientPacketIds::AddMentor as i16 => {
+                                    if let Ok(p) = client::misc::AddMentor::read_body(&mut cur) {
+                                        send(
+                                            &to_client,
+                                            &MockMentorUpdate {
+                                                name: p.name,
+                                                level: 30,
+                                                online: true,
+                                                exp: 0,
+                                            },
+                                        );
+                                        tracing::info!("🧑‍🏫 [MOCK] 拜师成功回发 MentorUpdate");
+                                    }
+                                }
+                                x if x == ClientPacketIds::CancelMentor as i16 => {
+                                    if let Ok(_p) = client::misc::CancelMentor::read_body(&mut cur) {
+                                        send(
+                                            &to_client,
+                                            &MockMentorUpdate {
+                                                name: String::new(),
+                                                level: 0,
+                                                online: false,
+                                                exp: 0,
+                                            },
+                                        );
+                                        tracing::info!("🧑‍🏫 [MOCK] 解除师徒回发 MentorUpdate");
+                                    }
+                                }
                                 x if x == ClientPacketIds::Attack as i16 => {
                                     // 攻击反馈：怪物受击动画 + 伤害飘字 + 血量/死亡/掉落
                                     if player_dead {
@@ -3147,6 +3201,104 @@ impl Packet for MockConsignResult {
         use byteorder::{LittleEndian, WriteBytesExt};
         writer.write_u64::<LittleEndian>(self.uid)?;
         writer.write_u8(if self.success { 1 } else { 0 })?;
+        Ok(())
+    }
+}
+
+/// #755：交易请求（客户端格式 [name dotnet]）
+struct MockTradeRequest;
+
+impl Packet for MockTradeRequest {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::TradeRequest as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        mir2_shared::binary::write_dotnet_string(writer, "bevy2char")?;
+        Ok(())
+    }
+}
+
+/// #755：交易金币（客户端格式 [amount u64]）
+struct MockTradeGold {
+    amount: u32,
+}
+
+impl Packet for MockTradeGold {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::TradeGold as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u64::<LittleEndian>(self.amount as u64)?;
+        Ok(())
+    }
+}
+
+/// #755：交易物品入槽回执（客户端格式 [from i32][success u8]）
+struct MockTradeDeposit {
+    from: i32,
+}
+
+impl Packet for MockTradeDeposit {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::DepositTradeItem as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_i32::<LittleEndian>(self.from)?;
+        writer.write_u8(1)?;
+        Ok(())
+    }
+}
+
+/// #755：交易锁定（客户端格式 [a u8][b u8]）
+struct MockTradeConfirm;
+
+impl Packet for MockTradeConfirm {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::TradeConfirm as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u8(1)?; // a 锁定
+        writer.write_u8(1)?; // b 锁定
+        Ok(())
+    }
+}
+
+/// #755：师徒更新（客户端格式 [name dotnet][level i32][online u8][exp i64]）
+struct MockMentorUpdate {
+    name: String,
+    level: i32,
+    online: bool,
+    exp: i64,
+}
+
+impl Packet for MockMentorUpdate {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::MentorUpdate as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        mir2_shared::binary::write_dotnet_string(writer, &self.name)?;
+        writer.write_i32::<LittleEndian>(self.level)?;
+        writer.write_u8(if self.online { 1 } else { 0 })?;
+        writer.write_i64::<LittleEndian>(self.exp)?;
         Ok(())
     }
 }
