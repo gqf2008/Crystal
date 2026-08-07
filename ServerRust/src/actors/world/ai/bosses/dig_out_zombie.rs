@@ -23,11 +23,15 @@ pub struct DigOutZombieBehavior {
     visible: bool,
     next_check_tick: u64,
     spawned: bool,
+    /// 钻出时刻（tick；1s 后生成洞口，C# DigOutTime + 1000）
+    dig_out_tick: u64,
+    /// 洞口是否已生成（C# DoneDigOut）
+    hole_done: bool,
 }
 
 impl DigOutZombieBehavior {
     pub fn new() -> Self {
-        Self { visible: false, next_check_tick: 0, spawned: false }
+        Self { visible: false, next_check_tick: 0, spawned: false, dig_out_tick: 0, hole_done: false }
     }
 }
 
@@ -51,11 +55,28 @@ impl MonsterBehavior for DigOutZombieBehavior {
             let has_near = ctx.nearest_target(monster.x, monster.y, APPEAR_RANGE, monster.map_index).is_some();
             if !self.visible && has_near {
                 self.visible = true;
+                self.dig_out_tick = ctx.tick_count;
+                self.hole_done = false;
             }
         }
 
         if !self.visible {
             return;
+        }
+
+        // C# SpawnDigOutEffect：钻出 1s 后生成洞口 SpellObject（5 分钟，供 NeedHole 传送点使用）
+        if !self.hole_done && ctx.tick_count >= self.dig_out_tick + 10 {
+            self.hole_done = true;
+            ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {
+                spell: mir2_shared::enums::Spell::DigOutZombie,
+                x: monster.x,
+                y: monster.y,
+                value: 1,
+                duration_ms: 300_000,
+                tick_ms: 2000,
+                caster_oid: monster.object_id,
+                caster_session: 0,
+            });
         }
 
         // 活跃期标准近战

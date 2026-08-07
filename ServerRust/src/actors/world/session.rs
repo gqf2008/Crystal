@@ -766,6 +766,19 @@ impl Message<WorldMoveRequest> for WorldActor {
             let mv = self.movement_index.get(&(state.map_index as i32, state.x, state.y)).cloned();
 
             if let Some(mv) = mv {
+                // C# MovementInfo.NeedHole：需源格有 DigOutZombie/DigOutArmadillo 洞口 SpellObject 才能传送
+                if mv.need_hole {
+                    let has_hole = self.spell_objects.values().any(|so| {
+                        so.map_index == state.map_index && so.x == state.x && so.y == state.y
+                            && (so.spell == mir2_shared::enums::Spell::DigOutZombie
+                                || so.spell == mir2_shared::enums::Spell::DigOutArmadillo)
+                    });
+                    if !has_hole {
+                        send_system_message(&self.gate_ref, msg.session_id, "这里需要先挖开洞口才能通过");
+                        return;
+                    }
+                }
+
                 let dest_map_index = mv.map_index;
                 let dest_x = mv.dest_x;
                 let dest_y = mv.dest_y;

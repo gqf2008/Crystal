@@ -24,13 +24,17 @@ pub struct ArmadilloBehavior {
     visible: bool,
     next_check_tick: u64,
     spawned: bool,
+    /// 钻出时刻（tick；1s 后生成洞口，继承 C# DigOutZombie）
+    dig_out_tick: u64,
+    /// 洞口是否已生成（继承 C# DoneDigOut）
+    hole_done: bool,
     /// 逃跑模式（C# _runAway）
     run_away: bool,
 }
 
 impl ArmadilloBehavior {
     pub fn new() -> Self {
-        Self { visible: false, next_check_tick: 0, spawned: false, run_away: false }
+        Self { visible: false, next_check_tick: 0, spawned: false, dig_out_tick: 0, hole_done: false, run_away: false }
     }
 }
 
@@ -59,11 +63,28 @@ impl MonsterBehavior for ArmadilloBehavior {
                 let has_near = ctx.nearest_target(monster.x, monster.y, APPEAR_RANGE, monster.map_index).is_some();
                 if has_near {
                     self.visible = true;
+                    self.dig_out_tick = ctx.tick_count;
+                    self.hole_done = false;
                 }
             }
         }
         if !self.visible {
             return;
+        }
+
+        // C# DigOutZombie.SpawnDigOutEffect（继承）：钻出 1s 后生成洞口 SpellObject（5 分钟）
+        if !self.hole_done && ctx.tick_count >= self.dig_out_tick + 10 {
+            self.hole_done = true;
+            ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {
+                spell: mir2_shared::enums::Spell::DigOutArmadillo,
+                x: monster.x,
+                y: monster.y,
+                value: 1,
+                duration_ms: 300_000,
+                tick_ms: 2000,
+                caster_oid: monster.object_id,
+                caster_session: 0,
+            });
         }
 
         let target = match ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index) {
