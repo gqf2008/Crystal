@@ -51,13 +51,17 @@ impl MonsterBehavior for FlamingMutantBehavior {
                     spell_id: 0,
                     attack_type: 0,
                 });
-                // C# CompleteAttack: 推开 3 格内目标（Pushed 朝远离方向）
+                // C# CompleteAttack: 拉向 Boss（Pushed 朝自身方向 dist-1 格，落点 Boss 邻格）
                 let push_targets: Vec<crate::actors::world::ai::PlayerSnap> =
                     ctx.find_targets_in_range(monster.x, monster.y, PUSH_RADIUS, monster.map_index)
                         .into_iter().copied().collect();
                 for pt in push_targets {
-                    let (nx, ny, _dir) = step_away(pt.x, pt.y, monster.x, monster.y);
-                    ctx.out_moves.push((pt.object_id, nx, ny, 0));
+                    let dist = max_distance(monster.x, monster.y, pt.x, pt.y);
+                    ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                        session_id: pt.session_id,
+                        dir: direction_towards(pt.x, pt.y, monster.x, monster.y),
+                        distance: (dist - 1).max(1),
+                    });
                 }
             }
         } else if dist <= VIEW_RANGE {

@@ -59,13 +59,25 @@ impl MonsterBehavior for KhazardBehavior {
         let ranged = dist > 1;
 
         if ranged {
-            // 远程：拉扯（冷却到期）
+            // 远程：拉扯（冷却到期，C# Khazard.cs:68-81 PullAttack）
             if ctx.tick_count >= self.next_pull_tick && ctx.tick_count >= monster.next_attack_tick {
                 self.next_pull_tick = ctx.tick_count + PULL_COOLDOWN_TICKS;
                 monster.next_attack_tick = ctx.tick_count + 6;
-                // 把目标拉到自身邻格（近似 C# Pushed 朝自身方向 i 格）
-                let (nx, ny, _dir) = step_toward(target.x, target.y, monster.x, monster.y);
-                ctx.out_moves.push((target.object_id, nx, ny, 0));
+                // 沿 Boss 朝向 i=1..4 找目标所在格；命中则朝自身方向拉 i 格（阻挡时停在 Boss 邻格）
+                let dir = monster.direction as usize % 8;
+                for i in 1..=PULL_MAX_DIST {
+                    let front_x = monster.x + DIR_DX[dir] * i;
+                    let front_y = monster.y + DIR_DY[dir] * i;
+                    if front_x == target.x && front_y == target.y {
+                        let pull_dist = i.min((dist - 1).max(1));
+                        ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                            session_id: target.session_id,
+                            dir: direction_towards(target.x, target.y, monster.x, monster.y),
+                            distance: pull_dist,
+                        });
+                        break;
+                    }
+                }
             }
         } else {
             // 近战：DC 单体
