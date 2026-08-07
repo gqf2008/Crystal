@@ -3063,6 +3063,7 @@ impl Message<Tick> for WorldActor {
             // 对每个怪物执行 AI
             let mut dead_monsters = Vec::new();
             let mut moved_monsters = Vec::new();
+        let mut pet_recalls: Vec<(u32, i32, i32)> = Vec::new();
             // 巡逻转身广播（C# ProcessRoam Turn → ObjectTurn）
             let mut monster_turns: Vec<(u32, u8, i32, i32)> = Vec::new();
             let mut moved_targets: HashSet<(i32, i32)> = HashSet::new();
@@ -3706,18 +3707,12 @@ impl Message<Tick> for WorldActor {
                     if pet_can_follow && can_move {
                         let master_pos = player_positions.iter()
                             .find(|(sid, _, _, _, _, _, _, _)| *sid == master)
-                            .map(|(_, x, y, _, _, _, _, _)| (*x, *y));
-                        if let Some((mx, my)) = master_pos {
-                            let dist_master = (monster.x - mx).abs() + (monster.y - my).abs();
-                            if dist_master > 5 {
-                                let (nx, ny, dir) = monster.step_toward(mx, my);
-                                if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
-                                    && !monster_positions.contains(&(nx, ny))
-                                    && moved_targets.insert((nx, ny))
-                                {
-                                    moved_monsters.push((*oid, nx, ny, dir));
-                                }
-                                monster.next_move_tick = self.tick_count + profile.move_interval;
+                            .map(|(_, x, y, _, _, _, _, pmap)| (*x, *y, *pmap));
+                        if let Some((mx, my, master_map)) = master_pos {
+                            // C# MonsterObject.ProcessAI：!InRange(Master, DataRange=16) 或跨图 → PetRecall（传送回主人）
+                            let dist_master = (monster.x - mx).abs().max((monster.y - my).abs());
+                            if monster.map_index != master_map || dist_master > 16 {
+                                pet_recalls.push((*oid, mx, my));
                                 monster.ai_state = MonsterAiState::Return;
                             } else {
                                 monster.ai_state = MonsterAiState::Idle;
@@ -4198,6 +4193,27 @@ impl Message<Tick> for WorldActor {
                 }
             }
 
+
+            // 宠物 PetRecall（C# MonsterObject.ProcessAI）：主人>16 格/跨图 → 传送到主人身边
+            for (oid, tx, ty) in &pet_recalls {
+                if let Some(m) = self.monsters.get_mut(oid) {
+                    m.x = *tx;
+                    m.y = *ty;
+                    let mut walk_body = Vec::new();
+                    walk_body.extend_from_slice(&oid.to_le_bytes());
+                    walk_body.extend_from_slice(&m.x.to_le_bytes());
+                    walk_body.extend_from_slice(&m.y.to_le_bytes());
+                    walk_body.push(m.direction);
+                    let walk_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectWalk as i16, &walk_body);
+                    for session_id in self.players.keys() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *session_id,
+                            data: walk_packet.clone(),
+                        }).await;
+                    }
+                }
+            }
             // 广播 ObjectTurn（C# ProcessRoam 转身；ObjectID + Location(i32,i32) + Direction(u8)）
             for (oid, dir, x, y) in &monster_turns {
                 let mut turn_body = Vec::new();
@@ -4665,3 +4681,4 @@ mod tests {
         assert!(now > 638_000_000_000_000_000, "unexpected ticks: {}", now);
     }
 }
+
