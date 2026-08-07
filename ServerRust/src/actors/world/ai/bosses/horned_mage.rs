@@ -53,15 +53,27 @@ impl MonsterBehavior for HornedMageBehavior {
                     });
                 }
             } else {
-                // 远距：4/5 弹道 / 1/5 传送目标（POC：传送无法实现，降级为弹道）
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    target_object_id: target.object_id,
-                    damage,
-                    spell_id: 0,
-                });
+                // 远距：4/5 弹道 / 1/5 传送目标（C# HornedMage.cs:61-66 TeleportTarget(4,4)）
+                if fastrand::i32(0..5) > 0 {
+                    let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
+                        attacker_oid: monster.object_id,
+                        target_session: target.session_id,
+                        target_object_id: target.object_id,
+                        damage,
+                        spell_id: 0,
+                    });
+                } else {
+                    // 把目标玩家传送到自身 ±4 随机点（尝试 4 次；推候选，tick 端校验 walkable）
+                    for _ in 0..4 {
+                        ctx.out_player_teleports.push((
+                            target.session_id,
+                            monster.x + fastrand::i32(-4..=4),
+                            monster.y + fastrand::i32(-4..=4),
+                            monster.direction,
+                        ));
+                    }
+                }
             }
             return;
         }
