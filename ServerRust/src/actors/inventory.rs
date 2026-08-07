@@ -63,6 +63,8 @@ pub struct GroundItem {
     pub dropper_session: Option<u64>,
     /// 掉落时的 tick 计数（用于过期清理）
     pub drop_tick: u64,
+    /// 是否玩家死亡掉落（C# PlayerDiedItemTimeOut=120s，比普通 ItemTimeOut=30s 更久）
+    pub death_drop: bool,
 }
 
 /// 仓库格子数
