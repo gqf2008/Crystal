@@ -28,8 +28,8 @@ impl VampireSpiderBehavior {
 
 impl MonsterBehavior for VampireSpiderBehavior {
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
-        let target = match ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index) {
-            Some(t) => *t,
+        let target = match ctx.pet_target(monster.x, monster.y, VIEW_RANGE, monster.map_index) {
+            Some(t) => t,
             None => return,
         };
         monster.target_session = Some(target.session_id);
@@ -46,9 +46,11 @@ impl MonsterBehavior for VampireSpiderBehavior {
                     spell_id: 0,
                     attack_type: 0,
                 });
-                // 吸血：对主人回血（C# MasterVampire，value*(PetLevel+1)*0.25）
-                // 简化：通过 out_heals 给主人（master_session 关联的友军）回血近似
-                // 这里用 self_heal 近似：蜘蛛自身不回血，仅标记吸血效果由上层处理。
+                // C# MasterVampire：命中后主人回血 value*(PetLevel+1)*0.25
+                if let Some(master) = monster.master_session {
+                    let heal = ((damage as f32 * (ctx.pet_level as f32 + 1.0) * 0.25) as i32).max(1);
+                    ctx.out_player_heals.push((master, heal));
+                }
             }
             return;
         }
@@ -62,9 +64,11 @@ impl MonsterBehavior for VampireSpiderBehavior {
         }
     }
 
-    /// C# Die：1 格范围 MACAgility 爆炸 + 吸血主人
+    /// C# Die：1 格范围 MACAgility 爆炸（10*PetLevel）+ MasterVampire 吸血主人
     fn on_die(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
-        let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+        // C# VampireSpider.Die：Attacked(10*PetLevel, MACAgility)
+        let damage = 10 * ctx.pet_level;
+        if damage <= 0 { return; }
         ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
             attacker_oid: monster.object_id,
             center_x: monster.x,
@@ -73,5 +77,13 @@ impl MonsterBehavior for VampireSpiderBehavior {
             damage,
             spell_id: 0,
         });
+        // C# MasterVampire：每个命中目标给主人回血 value*(PetLevel+1)*0.25
+        if let Some(master) = monster.master_session {
+            let per = ((damage as f32 * (ctx.pet_level as f32 + 1.0) * 0.25) as i32).max(1);
+            let hits = ctx.find_targets_in_range(monster.x, monster.y, EXPLOSION_RADIUS, monster.map_index).len() as i32;
+            if hits > 0 {
+                ctx.out_player_heals.push((master, per.saturating_mul(hits)));
+            }
+        }
     }
 }

@@ -710,6 +710,7 @@ impl WorldActor {
         let mut die_monster_teleports: Vec<(u32, i32, i32)> = Vec::new();
         let mut die_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
         let mut die_show_hide: Vec<(u32, bool)> = Vec::new();
+        let mut die_player_heals: Vec<(u64, i32)> = Vec::new();
         {
             // 死亡回调也提供玩家快照（C# Die 可 FindAllTargets；ToxicGhoul 死亡 AOE 毒等用）
             let die_player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
@@ -739,6 +740,11 @@ impl WorldActor {
                 out_monster_teleports: &mut die_monster_teleports,
                 out_player_buffs: &mut die_player_buffs,
                 out_show_hide: &mut die_show_hide,
+                out_player_heals: &mut die_player_heals,
+                pet_level: self.pet_levels.get(&monster.object_id).copied().unwrap_or(0),
+                master_pet_mode: None,
+                master_target: None,
+                has_master_monster_target: false,
             };
             // 临时取出 behavior 避免 &mut monster + &mut behavior 双重借用（与 AI 循环一致）
             let mut behavior = std::mem::replace(
@@ -3072,6 +3078,7 @@ impl Message<Tick> for WorldActor {
             let mut boss_monster_teleports: Vec<(u32, i32, i32)> = Vec::new();
             let mut boss_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
             let mut boss_show_hide: Vec<(u32, bool)> = Vec::new();
+            let mut boss_player_heals: Vec<(u64, i32)> = Vec::new();
             // 召唤物过期队列（到期 tick 已过 → 移除，不掉落）
             let mut expired_monsters: Vec<u32> = Vec::new();
 
@@ -3088,10 +3095,24 @@ impl Message<Tick> for WorldActor {
                     let monster_index = monster.monster_index;
                     let _monster_map = monster.map_index;
                     let monster_name = monster.name.clone();
+                    // 宠物元数据（C# Master.PMode / Master.Target / PetLevel；#471 协战）
+                    let (master_pet_mode, master_target, has_master_monster_target) =
+                        if let Some(master) = monster.master_session {
+                            let mode = self.player_pet_modes.get(&master).copied();
+                            let tgt = self.player_targets.get(&master).copied()
+                                .and_then(|oid| player_positions.iter()
+                                    .find(|(_, _, _, o, _, _, _, _)| *o == oid)
+                                    .map(|(s, x, y, oid, _, hp, map, lvl)| ai::PlayerSnap {
+                                        session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl,
+                                    }));
+                            (mode, tgt, self.pet_targets.contains_key(&monster.object_id))
+                        } else {
+                            (None, None, false)
+                        };
                     let player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
                         .map(|(s, x, y, oid, _, hp, map, lvl)| ai::PlayerSnap {
-                            session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl,
-                        }).collect();
+                                        session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl,
+                                    }).collect();
                     // monster_snaps 从循环外预收集的 monster_snapshot 构建（避免 &mut self.monsters 借用冲突）
                     let monster_snaps: Vec<ai::MonsterSnap> = monster_snapshot.iter()
                         .map(|(oid, x, y, hp, max_hp, map, idx, _, _, _)| ai::MonsterSnap {
@@ -3120,6 +3141,11 @@ impl Message<Tick> for WorldActor {
                         out_monster_teleports: &mut boss_monster_teleports,
                         out_player_buffs: &mut boss_player_buffs,
                         out_show_hide: &mut boss_show_hide,
+                        out_player_heals: &mut boss_player_heals,
+                        pet_level: self.pet_levels.get(&monster_oid).copied().unwrap_or(0),
+                        master_pet_mode,
+                        master_target,
+                        has_master_monster_target,
                     };
                     // 临时取出 behavior 避免 &mut monster + &mut behavior 双重借用
                     let mut behavior = std::mem::replace(
@@ -3140,6 +3166,38 @@ impl Message<Tick> for WorldActor {
                     for (target, taunter) in boss_taunts.drain(..) {
                         if target != monster.object_id {
                             self.monster_targets.insert(target, taunter);
+                        }
+                    }
+                    // #471 宠物协战（自定义 AI 宠物）：攻击主人攻击的怪物，不主动攻击玩家
+                    if let Some(master) = monster.master_session {
+                        if let Some(tmid) = self.pet_targets.get(&monster.object_id).copied() {
+                            let target_alive = monster_snapshot.iter()
+                                .any(|s| s.0 == tmid && s.3 > 0 && s.5 == monster.map_index);
+                            if !target_alive {
+                                self.pet_targets.remove(&monster.object_id);
+                            } else if let Some((_, tx, ty, _, _, _, _, _, _, _)) =
+                                monster_snapshot.iter().find(|s| s.0 == tmid)
+                            {
+                                let dist = (tx - monster.x).abs() + (ty - monster.y).abs();
+                                if dist <= 1 && self.tick_count >= monster.next_attack_tick {
+                                    let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
+                                    let damage = ((self.tick_count.wrapping_add(monster.object_id as u64)
+                                        .wrapping_mul(13)) as i32 % dmg_range) + monster.min_dmg;
+                                    pet_attacks.push((monster.object_id, tmid, damage, master));
+                                    monster.next_attack_tick = self.tick_count + monster.ai_profile.attack_cooldown;
+                                    monster.ai_state = MonsterAiState::Attack;
+                                } else if self.tick_count >= monster.next_move_tick {
+                                    let (nx, ny, dir) = monster.step_toward(*tx, *ty);
+                                    if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
+                                        && !monster_positions.contains(&(nx, ny))
+                                        && moved_targets.insert((nx, ny))
+                                    {
+                                        moved_monsters.push((monster.object_id, nx, ny, dir));
+                                    }
+                                    monster.next_move_tick = self.tick_count + monster.ai_profile.move_interval;
+                                    monster.ai_state = MonsterAiState::Chase;
+                                }
+                            }
                         }
                     }
                     debug!("Boss '{}' AI tick processed", monster_name);
@@ -3792,6 +3850,13 @@ impl Message<Tick> for WorldActor {
             // Boss 显示/隐藏广播（C# ObjectShow/ObjectHide，如 Shinsu 形态切换）
             for (oid, visible) in boss_show_hide.drain(..) {
                 self.broadcast_object_show_hide(oid, visible).await;
+            }
+            // Boss 对玩家回血（C# MasterVampire 吸血主人 / Healer 治疗玩家）
+            for (sid, amount) in boss_player_heals.drain(..) {
+                if amount <= 0 { continue; }
+                if let Some(r) = self.players.get(&sid) {
+                    let _ = r.actor_ref.ask(crate::actors::player::Heal { amount }).await;
+                }
             }
             // Boss 移动（合并到 moved_monsters 复用广播逻辑），校验 walkable 避免穿墙
             for (oid, nx, ny, dir) in boss_moves.drain(..) {

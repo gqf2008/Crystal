@@ -1066,6 +1066,11 @@ impl Message<RangeAttackRequest> for WorldActor {
         };
         if state.is_dead { return; }
 
+        // 记录玩家当前攻击目标（C# HumanObject.TargetID；宠物 FocusMasterTarget 用）
+        if msg.target_id != 0 {
+            self.player_targets.insert(msg.session_id, msg.target_id);
+        }
+
         let object_id = state.object_id;
         let target_x = msg.target_x;
         let target_y = msg.target_y;
@@ -1452,6 +1457,11 @@ impl Message<MagicRequest> for WorldActor {
             _ => { return; }
         };
         if state.is_dead { return; }
+
+        // 记录玩家当前施法目标（C# HumanObject.TargetID；宠物 FocusMasterTarget 用）
+        if msg.target_id != 0 {
+            self.player_targets.insert(msg.session_id, msg.target_id);
+        }
 
         // 施法时自动下坐骑
         self.dismount_player(msg.session_id).await;
@@ -3124,6 +3134,22 @@ impl Message<MagicRequest> for WorldActor {
                     .count();
                 if pet_count >= 2 {
                     return;
+                }
+
+                // C# SummonSkeleton/SummonShinsu/SummonHolyDeva：需护身符并消耗（GetAmulet + ConsumeItem）
+                if matches!(msg.spell, SPELL_SUMMON_SKELETON | SPELL_SUMMON_SHINSU | SPELL_SUMMON_HOLY_DEVA) {
+                    let amulet_amount = match msg.spell {
+                        SPELL_SUMMON_SKELETON => 1,
+                        SPELL_SUMMON_SHINSU => 5,
+                        _ => 2, // SummonHolyDeva
+                    };
+                    let ok = record.actor_ref.ask(crate::actors::player::ConsumeAmuletForSummon {
+                        amount: amulet_amount,
+                    }).await.unwrap_or(false);
+                    if !ok {
+                        // C#：无对应护身符 → 施法失败（静默 return）
+                        return;
+                    }
                 }
 
                 // C#：道士/法师召唤永久；弓手召唤 AliveTime：

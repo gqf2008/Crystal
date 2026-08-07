@@ -3028,8 +3028,9 @@ impl Message<ChangePModeRequest> for WorldActor {
             None => return,
         };
 
-        // 更新玩家宠物模式
+        // 更新玩家宠物模式（WorldActor 缓存供宠物 AI 读取；PlayerActor 持久化）
         let _ = record.actor_ref.ask(SetPetMode { mode: msg.mode }).await;
+        self.player_pet_modes.insert(msg.session_id, msg.mode);
 
         // 发送 ChangePMode 确认包给客户端
         let body = vec![msg.mode as u8];

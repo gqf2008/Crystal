@@ -3,7 +3,7 @@
 //! behavior 通过 AiCtx 读取怪物自身状态 + 玩家快照，通过输出队列推动作，
 //! 循环外由 tick_monsters 统一应用（避免 &mut self.monsters 借用冲突）。
 
-use mir2_shared::enums::Spell;
+use mir2_shared::enums::{PetMode, Spell};
 use crate::combat::poison::Poison;
 
 /// 玩家快照（behavior 不可直接访问 PlayerActor，只读此快照）
@@ -162,9 +162,33 @@ pub struct AiCtx<'a> {
     pub out_player_buffs: &'a mut Vec<(u64, crate::combat::buff::BuffInstance)>,
     /// 输出：对象显示/隐藏广播（C# ObjectShow/ObjectHide，如 Shinsu 形态切换）
     pub out_show_hide: &'a mut Vec<(u32, bool)>,
+    /// 输出：对玩家回血（session, amount；C# MasterVampire / Healer 治疗玩家）
+    pub out_player_heals: &'a mut Vec<(u64, i32)>,
+    /// 当前怪物的宠物等级（C# MonsterObject.PetLevel；非宠物=0）
+    pub pet_level: i32,
+    /// 主人宠物模式（C# Master.PMode；非宠物=None）
+    pub master_pet_mode: Option<PetMode>,
+    /// 主人的当前目标（仅当目标是玩家快照时；C# Master.Target）
+    pub master_target: Option<PlayerSnap>,
+    /// 主人是否正在攻击怪物（#471 pet_targets 协战目标；Shinsu 形态切换用）
+    pub has_master_monster_target: bool,
 }
 
 impl<'a> AiCtx<'a> {
+    /// 宠物目标选择（C# MonsterObject.ProcessSearch/ProcessTarget + Master.PMode）：
+    /// - 非宠物：正常怪，最近玩家目标
+    /// - FocusMasterTarget：只攻击主人目标（无法解析则无目标 → 跟随主人）
+    /// - MoveOnly/None：不攻击（跟随主人）
+    /// - Both/AttackOnly：不自主攻击玩家（#471：由 pet_targets 协战打主人攻击的怪物）
+    pub fn pet_target(&self, x: i32, y: i32, view_range: i32, map_index: u16) -> Option<PlayerSnap> {
+        match self.master_pet_mode {
+            None => self.nearest_target(x, y, view_range, map_index).copied(),
+            Some(PetMode::MoveOnly) | Some(PetMode::None) => None,
+            Some(PetMode::FocusMasterTarget) => self.master_target.filter(|t| t.map_index == map_index),
+            Some(PetMode::Both) | Some(PetMode::AttackOnly) => None,
+        }
+    }
+
     /// 查找范围内所有玩家（对齐 C# FindAllTargets(range, point, false)）
     pub fn find_targets_in_range(&self, cx: i32, cy: i32, radius: i32, map_index: u16) -> Vec<&PlayerSnap> {
         self.players.iter()

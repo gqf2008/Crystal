@@ -44,11 +44,10 @@ impl MonsterBehavior for ShinsuBehavior {
             self.base_image = monster.image;
         }
 
-        let target = ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index)
-            .copied(); // 立即转为 owned，避免借用 ctx 期间无法 push out_show_hide
+        let target = ctx.pet_target(monster.x, monster.y, VIEW_RANGE, monster.map_index);
 
-        // Mode 切换（C# ProcessAI）
-        if let Some(t) = target {
+        // Mode 切换（C# ProcessAI）：有目标（含 #471 协战怪物目标）→ 攻击形态
+        if target.is_some() || ctx.has_master_monster_target {
             // 有目标：刷新 ModeTime 并进入攻击形态
             self.mode_end_tick = ctx.tick_count + MODE_TICKS;
             if !self.mode {
@@ -57,7 +56,7 @@ impl MonsterBehavior for ShinsuBehavior {
                 monster.image = self.base_image.saturating_add(1);
                 ctx.out_show_hide.push((monster.object_id, true));
             }
-            monster.target_session = Some(t.session_id);
+            monster.target_session = target.map(|t| t.session_id);
         } else if ctx.tick_count >= self.mode_end_tick && self.mode {
             // 超时退出攻击形态（C# Mode=false + ObjectHide）
             self.mode = false;

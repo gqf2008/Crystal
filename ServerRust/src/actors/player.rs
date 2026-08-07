@@ -2863,6 +2863,30 @@ impl Message<ConsumeItemsByIndex> for PlayerActor {
     }
 }
 
+/// 召唤消耗护身符（C# HumanObject.GetAmulet + ConsumeItem）：
+/// 装备槽 Pendant（C# Amulet）、ItemType::Amulet、shape==0、count>=amount；
+/// 扣减 count，扣完移除装备并刷新客户端。
+pub struct ConsumeAmuletForSummon {
+    pub amount: u16,
+}
+
+impl Message<ConsumeAmuletForSummon> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: ConsumeAmuletForSummon, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let removed = self.state.consume_amulet_for_summon(msg.amount);
+        if removed {
+            self.send_equipment_changed();
+        } else {
+            // 仍有剩余：下发 RefreshItem 即时刷新护身符数量
+            if let Some(item) = self.state.inventory.equipment[EquipmentSlot::Pendant as usize].as_ref() {
+                self.send_refresh_item(item);
+            }
+        }
+        removed
+    }
+}
+
 /// 丢弃金币
 pub struct DropGold {
     pub amount: u64,
@@ -4270,6 +4294,33 @@ impl Message<SetFishing> for PlayerActor {
     }
 }
 
+/// 召唤护身符消耗（纯逻辑，#973）
+impl PlayerState {
+    /// C# HumanObject.GetAmulet + ConsumeItem：装备槽 Pendant、ItemType::Amulet、shape==0、count>=amount。
+    /// 扣减 count；count 归零移除装备。返回是否消耗成功（移除时需由调用方刷新装备）。
+    pub fn consume_amulet_for_summon(&mut self, amount: u16) -> bool {
+        use crate::actors::inventory::EquipmentSlot;
+        let slot = EquipmentSlot::Pendant as usize;
+        let Some(item) = self.inventory.equipment.get_mut(slot) else {
+            return false;
+        };
+        let Some(item) = item.as_mut() else {
+            return false;
+        };
+        let Some(info) = item.info.as_ref() else {
+            return false;
+        };
+        if info.item_type != mir2_shared::enums::ItemType::Amulet || info.shape != 0 || item.count < amount {
+            return false;
+        }
+        item.count -= amount;
+        if item.count == 0 {
+            self.inventory.equipment[slot] = None;
+        }
+        true
+    }
+}
+
 /// 英雄↔主背包物品转移（纯逻辑，#203）
 impl PlayerState {
     /// 英雄背包格 → 主背包格（C# TakeBackHeroItem 语义）
@@ -5253,5 +5304,54 @@ allow_group: false,
         });
         let _ = s.gain_spell_exp(34, 100);
         assert_eq!(s.magics.iter().find(|m| m.spell == 31).unwrap().experience, 400); // 100 + 300
+    }
+
+    /// #973：召唤护身符消耗（C# GetAmulet + ConsumeItem）
+    #[test]
+    fn test_consume_amulet_for_summon() {
+        use crate::actors::inventory::EquipmentSlot;
+        use mir2_shared::data::item::UserItem;
+
+        let amulet = |shape: i16, count: u16| {
+            let mut info = mir2_shared::data::item::ItemInfo::default();
+            info.item_type = mir2_shared::enums::ItemType::Amulet;
+            info.shape = shape;
+            Some(UserItem { info: Some(info), count, ..Default::default() })
+        };
+
+        // 正常消耗：count 5 扣 2 → 剩 3
+        let mut s = make_state();
+        s.inventory.equipment[EquipmentSlot::Pendant as usize] = amulet(0, 5);
+        assert!(s.consume_amulet_for_summon(2));
+        assert_eq!(s.inventory.equipment[EquipmentSlot::Pendant as usize].as_ref().unwrap().count, 3);
+
+        // 扣到 0 → 移除装备
+        assert!(s.consume_amulet_for_summon(3));
+        assert!(s.inventory.equipment[EquipmentSlot::Pendant as usize].is_none());
+
+        // 数量不足 → 失败
+        let mut s = make_state();
+        s.inventory.equipment[EquipmentSlot::Pendant as usize] = amulet(0, 2);
+        assert!(!s.consume_amulet_for_summon(3));
+
+        // shape != 0 → 失败（C# GetAmulet(count, shape=0)）
+        let mut s = make_state();
+        s.inventory.equipment[EquipmentSlot::Pendant as usize] = amulet(1, 5);
+        assert!(!s.consume_amulet_for_summon(1));
+
+        // 非护身符 → 失败
+        let mut s = make_state();
+        let mut info = mir2_shared::data::item::ItemInfo::default();
+        info.item_type = mir2_shared::enums::ItemType::Necklace;
+        s.inventory.equipment[EquipmentSlot::Pendant as usize] = Some(UserItem {
+            info: Some(info),
+            count: 5,
+            ..Default::default()
+        });
+        assert!(!s.consume_amulet_for_summon(1));
+
+        // 未装备 → 失败
+        let mut s = make_state();
+        assert!(!s.consume_amulet_for_summon(1));
     }
 }
