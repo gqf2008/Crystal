@@ -1332,6 +1332,19 @@ impl WorldActor {
             match spell_obj.spell {
                 Spell::FireWall | Spell::Blizzard | Spell::MeteorStrike | Spell::PoisonCloud => {
                     // 持久伤害法术：命中 spell 位置 ±1 的怪物（C# SpellObject.ProcessSpell 按单格）
+                    let caster_freezing = if spell_obj.spell == Spell::Blizzard {
+                        if let Some(record) = self.players.get(&spell_obj.caster_session) {
+                            if let Ok(Some(cs)) = record.actor_ref.ask(GetPlayerState).await {
+                                Some(cs.freezing)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
                     let hit_ids: Vec<u32> = self.monsters.iter()
                         .filter(|(_, m)| {
                             let dist = (m.x - spell_obj.x).abs() + (m.y - spell_obj.y).abs();
@@ -1346,8 +1359,30 @@ impl WorldActor {
                             spell_obj.x,
                             spell_obj.y,
                             spell_obj.tick_value,
-                            hit_ids,
+                            hit_ids.clone(),
                         ));
+                        // C# SpellObject.ProcessSpell 附加效果
+                        for mid in &hit_ids {
+                            if let Some(monster) = self.monsters.get_mut(mid) {
+                                if spell_obj.spell == Spell::PoisonCloud {
+                                    // 绿毒 12s，Value = (MinSC+MaxSC)/2 + BonusDmg ≈ magic_stat
+                                    crate::combat::poison::apply_poison(&mut monster.poison_list,
+                                        crate::combat::poison::Poison::new(
+                                            mir2_shared::enums::PoisonType::GREEN, 12,
+                                            spell_obj.bonus.max(1), spell_obj.tick_interval_ms,
+                                        ));
+                                }
+                                if spell_obj.spell == Spell::Blizzard && fastrand::i32(0..8) == 0 {
+                                    // Slow：5 + Random(Freezing) 秒，TickSpeed 2000
+                                    let freeze = caster_freezing.unwrap_or(0).max(1);
+                                    crate::combat::poison::apply_poison(&mut monster.poison_list,
+                                        crate::combat::poison::Poison::new(
+                                            mir2_shared::enums::PoisonType::SLOW,
+                                            (5 + fastrand::i32(0..freeze)) as u32, 0, 2000,
+                                        ));
+                                }
+                            }
+                        }
                     }
                 }
                 Spell::HealingCircle => {
