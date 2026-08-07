@@ -4487,6 +4487,26 @@ impl Message<Tick> for WorldActor {
                                 debug!("QuestKill: session={} quest={} monster={} complete={}", session_id, quest_index, monster.monster_index, complete);
                             }
                         }
+
+                        // #1163/#1142：C# PlayerObject.WinExp 末尾——HeroSpawned && !Hero.Dead 时英雄分得经验
+                        //（Hero.ReduceExp(amount, targetLevel) * ExpRate → Hero.GainExp → S.GainHeroExperience）
+                        if let Some(record) = self.players.get(&session_id).cloned() {
+                            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                                if st.hero_index > 0 && !st.is_dead {
+                                    let hero_level = self.player_heroes.get(&session_id)
+                                        .and_then(|hs| hs.iter().find(|h| h.index as u8 == st.hero_index))
+                                        .map(|h| h.level)
+                                        .unwrap_or(1);
+                                    let mon_level = self.monster_infos.get(&monster.monster_index)
+                                        .map(|m| m.level).unwrap_or(0);
+                                    let share = reduce_exp(monster.xp, hero_level, mon_level);
+                                    let share = self.apply_global_exp_multiplier(share).max(0) as u32;
+                                    if share > 0 {
+                                        self.grant_hero_experience(session_id, share).await;
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     // 加入重生队列（延迟从 map_respawns.delay（秒）读取；C# RespawnInfo.Delay）
