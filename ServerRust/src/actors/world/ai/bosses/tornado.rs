@@ -55,11 +55,13 @@ impl MonsterBehavior for TornadoBehavior {
                         .into_iter().copied().collect();
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
                 for p in pulls {
-                    // 拉到自身相邻格（朝玩家方向 1 格处）
-                    let dir = direction_towards(p.x, p.y, monster.x, monster.y);
-                    let nx = monster.x - DIR_DX[dir as usize];
-                    let ny = monster.y - DIR_DY[dir as usize];
-                    ctx.out_moves.push((monster.object_id, nx, ny, dir)); // 用 move 槽近似位移（POC）
+                    // C# Tornado.cs:48 targets[i].Pushed(this, DirectionFromPoint(player→tornado), dist-1)
+                    let dist = max_distance(monster.x, monster.y, p.x, p.y);
+                    ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                        session_id: p.session_id,
+                        dir: direction_towards(p.x, p.y, monster.x, monster.y),
+                        distance: (dist - 1).max(1),
+                    });
                     ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                         attacker_oid: monster.object_id,
                         target_session: p.session_id,
