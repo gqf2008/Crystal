@@ -14,6 +14,7 @@ pub mod zuma_taurus;
 // ===== 额外 Boss（10 个，独特机制）=====
 pub mod evil_centipede;
 pub mod cannibal_plant;
+pub mod cave_maggot;
 pub mod oma_king;
 pub mod wooma_taurus;
 pub mod flame_queen;

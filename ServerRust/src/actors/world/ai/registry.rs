@@ -53,6 +53,9 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("cannibalplant") || name.contains("cannibal plant") || name.contains("食人花") {
         return Box::new(bosses::cannibal_plant::CannibalPlantBehavior::new());
     }
+    if name.contains("cavemaggot") || name.contains("cave maggot") || name.contains("洞穴蛆") {
+        return Box::new(bosses::cave_maggot::CaveMaggotBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -318,6 +321,7 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("zumataurus") || name.contains("zuma taurus") || name.contains("祖玛教主") || name.contains("祖玛金牛")
         || name.contains("evilcentipede") || name.contains("evil centipede") || name.contains("地蜈蚣") || name.contains("触角恶魔")
         || name.contains("cannibalplant") || name.contains("cannibal plant") || name.contains("食人花")
+        || name.contains("cavemaggot") || name.contains("cave maggot") || name.contains("洞穴蛆")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
