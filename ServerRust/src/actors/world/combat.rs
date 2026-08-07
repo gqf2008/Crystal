@@ -1494,24 +1494,26 @@ impl Message<MagicRequest> for WorldActor {
                     debug!("Magic: {} casts Poisoning (no target near {},{})", state.name, target_x, target_y);
                 }
             }
-            // TrapHexagon：定身目标怪物（C# 限制移动，施加 Slow/Paralysis）
+            // TrapHexagon：定身目标怪物（C# HumanObject.cs + Map.cs：跳过等级 > 施法+2 的怪物，
+            // 时长 = (Lv*5+10) 秒）
             SPELL_TRAP_HEXAGON => {
                 let hit_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(_, m)| {
                         let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
                         dist <= 1 && m.hp > 0
+                            && self.monster_infos.get(&m.monster_index).map(|i| i.level).unwrap_or(0) <= state.level as i32 + 2
                     })
                     .map(|(id, _)| *id)
                     .collect();
                 let trapped_count = hit_ids.len();
+                let duration = (spell_level as u32 * 5 + 10) as u32;
                 for mid in hit_ids {
                     if let Some(monster) = self.monsters.get_mut(&mid) {
-                        let duration = (3 + spell_level as u32 * 2).min(15);
                         crate::combat::poison::apply_poison(&mut monster.poison_list,
                             crate::combat::poison::Poison::new(mir2_shared::enums::PoisonType::PARALYSIS, duration, 0, 1000));
                     }
                 }
-                debug!("Magic: {} casts TrapHexagon (trapped {} monsters)", state.name, trapped_count);
+                debug!("Magic: {} casts TrapHexagon (trapped {} monsters, {}s)", state.name, trapped_count, duration);
             }
             // --- 道士 Buff/辅助类 ---
             // Hiding：自身隐身（怪物失去目标，C# BuffType.Hiding）
