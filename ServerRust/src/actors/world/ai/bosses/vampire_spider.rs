@@ -33,7 +33,7 @@ impl MonsterBehavior for VampireSpiderBehavior {
             let near = ctx.players.iter().any(|p| {
                 p.session_id == master
                     && p.map_index == monster.map_index
-                    && ((p.x - monster.x).abs() + (p.y - monster.y).abs()) <= 15
+                    && max_distance(p.x, p.y, monster.x, monster.y) <= 15 // C# InRange=切比雪夫
             });
             if !near {
                 monster.hp = 0; // 触发死亡流程 → on_die（10*PetLevel 爆炸 + MasterVampire）
