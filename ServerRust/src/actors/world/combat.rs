@@ -615,6 +615,22 @@ impl Message<WorldAttackRequest> for WorldActor {
 // 采集系统（Harvest：挖矿/采集）
 // ============================================================
 
+/// 矿脉状态（C# MineSpot：StonesLeft + LastRegenTick）
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MineSpotState {
+    pub stones_left: u8,
+    pub last_regen_tick: u64,
+}
+
+/// 矿脉最大储量（C# Mine.MaxStones 数据缺失，取近似 5）
+const MINE_MAX_STONES: u8 = 5;
+/// 矿脉再生间隔（C# Mine.SpotRegenRate 分钟，近似 2 分钟 = 1200 ticks）
+const MINE_REGEN_TICKS: u64 = 1200;
+/// 挖矿命中率（C# Mine.HitRate + 镐 Accuracy*10，近似 70%）
+const MINE_HIT_RATE: i32 = 70;
+/// Rubble 废墟持续时间（C# 5 分钟）
+const RUBBLE_DURATION_MS: u64 = 300_000;
+
 impl Message<HarvestRequest> for WorldActor {
     type Reply = ();
 
@@ -624,7 +640,7 @@ impl Message<HarvestRequest> for WorldActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r,
+            Some(r) => r.clone(),
             None => return,
         };
 
@@ -643,30 +659,40 @@ impl Message<HarvestRequest> for WorldActor {
             state.name, msg.session_id, dir, target_x, target_y
         );
 
-        // 检查当前地图是否可采集
-        let map_info = self.map_infos.get(&(state.map_index as i32));
-        let mine_index = map_info.map(|m| m.mine_index).unwrap_or(0);
+        // 当前地图需为矿区（C# CurrentMap.Mine != null）
+        let map_info = match self.map_infos.get(&(state.map_index as i32)).cloned() {
+            Some(mi) => mi,
+            None => return,
+        };
+        let mine_index = map_info.mine_index;
         if mine_index <= 0 {
             send_system_message(&self.gate_ref, msg.session_id, "这里没有什么可采集的");
             return;
         }
 
-        // 检查是否持有镐类工具
-        let has_pickaxe = state.inventory.backpack.iter().chain(state.inventory.storage.iter())
-            .any(|slot| {
-                if let Some(item) = slot {
-                    self.item_infos.get(&item.item.item_index)
-                        .map(|info| {
-                            let n = info.name.to_lowercase();
-                            n.contains('镐') || n.contains("pick") || n.contains("hoe") || n.contains("锄")
-                        })
-                        .unwrap_or(false)
-                } else {
-                    false
-                }
-            });
-        if !has_pickaxe {
-            send_system_message(&self.gate_ref, msg.session_id, "你需要一把镐才能采矿");
+        // 目标格需在矿区范围内（C# MineSpot 判定）
+        let in_mine_zone = map_info.mine_zones.iter().any(|z| {
+            (target_x - z.x).abs() <= z.size && (target_y - z.y).abs() <= z.size
+        });
+        if !in_mine_zone {
+            send_system_message(&self.gate_ref, msg.session_id, "这里不是矿区");
+            return;
+        }
+
+        // 需装备可采矿的镐且耐久 > 0（C# Equipment[Weapon].Info.CanMine && CurrentDura > 0）
+        let pickaxe_ok = state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .and_then(|item| self.item_infos.get(&item.item_index))
+            .map(|info| (info.bool_flags & 0x10) != 0) // C# ItemInfo.CanMine
+            .unwrap_or(false);
+        if !pickaxe_ok {
+            send_system_message(&self.gate_ref, msg.session_id, "你需要装备一把镐才能采矿");
+            return;
+        }
+        let weapon_dura_ok = state.inventory.get_equipment(EquipmentSlot::Weapon)
+            .map(|item| item.current_dura > 0)
+            .unwrap_or(false);
+        if !weapon_dura_ok {
+            send_system_message(&self.gate_ref, msg.session_id, "你的镐耐久已耗尽");
             return;
         }
 
@@ -686,11 +712,120 @@ impl Message<HarvestRequest> for WorldActor {
             }).await;
         }
 
-        // 延迟处理采集结果
+        // 矿脉储量：取/初始化（C# MineSpot.StonesLeft），枯竭则等待再生
+        let spot_key = (state.map_index, target_x, target_y);
+        {
+            let spot = self.mine_spot_state.entry(spot_key).or_insert(MineSpotState {
+                stones_left: fastrand::i32(1..=MINE_MAX_STONES as i32) as u8,
+                last_regen_tick: 0,
+            });
+            if spot.stones_left == 0 {
+                if self.tick_count >= spot.last_regen_tick + MINE_REGEN_TICKS {
+                    spot.stones_left = fastrand::i32(1..=MINE_MAX_STONES as i32) as u8;
+                    spot.last_regen_tick = self.tick_count;
+                } else {
+                    send_system_message(&self.gate_ref, msg.session_id, "这里的矿脉已枯竭，稍后再来");
+                    return;
+                }
+            }
+            spot.stones_left -= 1;
+        }
+
+        // 命中判定（C# Random(100) < HitRate + Accuracy*10；命中才出废墟/掉落/耗耐久）
+        let hit = fastrand::i32(0..100) < MINE_HIT_RATE;
+        let mut result_msg = "没有挖到东西".to_string();
+        if hit {
+            // Rubble 废墟：玩家脚下创建/刷新（C# CurrentLocation 格，5 分钟）
+            let rubble_oid = if let Some(existing) = self.spell_objects.values_mut().find(|so| {
+                so.spell == mir2_shared::enums::Spell::Rubble
+                    && so.map_index == state.map_index
+                    && so.x == state.x && so.y == state.y
+            }) {
+                // 已有废墟：刷新过期时间（C# Rubble.ExpireTime = now + 5min）
+                existing.expires_at_ms = RUBBLE_DURATION_MS;
+                existing.object_id
+            } else {
+                let oid = self.alloc_object_id();
+                self.spell_objects.insert(oid, spell::SpellObject::new(
+                    oid,
+                    mir2_shared::enums::Spell::Rubble,
+                    0, 0,
+                    state.map_index,
+                    state.x, state.y,
+                    RUBBLE_DURATION_MS,
+                    0,
+                    60_000,
+                    0,
+                    1,
+                ));
+                oid
+            };
+            if rubble_oid != 0 {
+                // 广播 ObjectSpell(Rubble) 视觉（自己 + 同图玩家）
+                let object_spell = mir2_shared::packets::server::magic_combat::ObjectSpell {
+                    object_id: rubble_oid,
+                    location_x: state.x,
+                    location_y: state.y,
+                    spell: mir2_shared::enums::Spell::Rubble,
+                };
+                let mut ob = Vec::new();
+                if object_spell.write_body(&mut ob).is_ok() {
+                    let pkt = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectSpell as i16, &ob);
+                    for (sid, r) in &self.players {
+                        if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                            if os.map_index == state.map_index {
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: *sid, data: pkt.clone(),
+                                }).await;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 掉落判定（保留现有按矿种的掉落表）
+            let roll = fastrand::i32(0..100);
+            let (drop_item_index, drop_count, drop_name) = match mine_index {
+                1 if roll < 40 => (500, 1 + (roll % 3) as u16, "铁矿石"),
+                1 if roll < 65 => (503, 1, "铜矿石"),
+                1 if roll < 70 => (504, 1, "银矿石"),
+                1 if roll < 71 => (505, 1, "黑铁矿石"),
+                2 if roll < 40 => (501, 1, "金矿石"),
+                2 if roll < 60 => (504, 1 + (roll % 2) as u16, "银矿石"),
+                2 if roll < 70 => (506, 1, "铂金矿石"),
+                2 if roll < 75 => (507, 1, "红宝石原石"),
+                3 if roll < 20 => (508, 1, "软玉原石"),
+                3 if roll < 35 => (509, 1, "紫水晶原石"),
+                3 if roll < 40 => (510, 1, "钻石原石"),
+                3 if roll < 43 => (511, 1, "蓝宝石原石"),
+                _ => (0, 0, ""),
+            };
+            if drop_item_index > 0 {
+                let item_name = self.item_infos.get(&drop_item_index)
+                    .map(|i| i.name.clone())
+                    .unwrap_or_else(|| drop_name.to_string());
+                let item = mir2_shared::data::item::UserItem {
+                    item_index: drop_item_index,
+                    count: drop_count,
+                    ..Default::default()
+                };
+                let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+                result_msg = format!("采集成功！获得了 {} x{}", item_name, drop_count);
+            } else {
+                result_msg = "采集成功，但这次什么也没有挖到".to_string();
+            }
+
+            // 镐耐久消耗（C# DamageItem(weapon, 5+Random(15))）
+            let _ = record.actor_ref.ask(crate::actors::player::DamageEquipment {
+                slot: EquipmentSlot::Weapon,
+                amount: (5 + fastrand::i32(0..15)) as u16,
+            }).await;
+        }
+
+        // 延迟发送 ObjectHarvested 视觉包
         let object_id = state.object_id;
         let gate_ref = self.gate_ref.clone();
-        let actor_ref = record.actor_ref.clone();
-        let item_infos = self.item_infos.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(1500)).await;
             let mut b = Vec::new();
@@ -705,43 +840,10 @@ impl Message<HarvestRequest> for WorldActor {
                 session_id: msg.session_id,
                 data: packet,
             }).await;
-
-            // Drop table by mine type
-            let roll = (msg.session_id.wrapping_add(tokio::time::Instant::now().elapsed().as_millis() as u64) % 100) as u8;
-            let (drop_item_index, drop_count, drop_name) = match mine_index {
-                // Iron mine: iron ore (70%), copper ore (30%), silver ore (5%), black iron (1%)
-                1 if roll < 40 => (500, 1 + (roll % 3) as u16, "铁矿石"),
-                1 if roll < 65 => (503, 1, "铜矿石"),
-                1 if roll < 70 => (504, 1, "银矿石"),
-                1 if roll < 71 => (505, 1, "黑铁矿石"),
-                // Gold mine: gold ore (40%), silver (20%), platinum (10%), ruby (5%)
-                2 if roll < 40 => (501, 1, "金矿石"),
-                2 if roll < 60 => (504, 1 + (roll % 2) as u16, "银矿石"),
-                2 if roll < 70 => (506, 1, "铂金矿石"),
-                2 if roll < 75 => (507, 1, "红宝石原石"),
-                // Gem mine: nephrite (20%), amethyst (15%), diamond (5%), sapphire (3%)
-                3 if roll < 20 => (508, 1, "软玉原石"),
-                3 if roll < 35 => (509, 1, "紫水晶原石"),
-                3 if roll < 40 => (510, 1, "钻石原石"),
-                3 if roll < 43 => (511, 1, "蓝宝石原石"),
-                _ => (0, 0, ""),
-            };
-            if drop_item_index > 0 {
-                let item_name = item_infos.get(&drop_item_index)
-                    .map(|i| i.name.clone())
-                    .unwrap_or_else(|| drop_name.to_string());
-                let item = mir2_shared::data::item::UserItem {
-                    item_index: drop_item_index,
-                    count: drop_count,
-                    ..Default::default()
-                };
-                let _ = actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
-                send_system_message(&gate_ref, msg.session_id,
-                    &format!("采集成功！获得了 {} x{}", item_name, drop_count));
-            } else {
-                send_system_message(&gate_ref, msg.session_id, "采集成功，但这次什么也没有挖到");
-            }
         });
+        send_system_message(&self.gate_ref, msg.session_id, &result_msg);
+        debug!("Harvest: {} mine_index={} spot({},{}) hit={} msg={}",
+               state.name, mine_index, target_x, target_y, hit, result_msg);
     }
 }
 
