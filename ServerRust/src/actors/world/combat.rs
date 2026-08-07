@@ -347,12 +347,12 @@ impl Message<WorldAttackRequest> for WorldActor {
                 }
             }
 
-            // 武器耐久损耗（每次攻击一次）
+            // 武器耐久损耗（C# HumanObject.DamageWeapon：每次命中 Random(4)+1）
             if hit_monster {
                 if let Some(record) = self.players.get(&msg.session_id) {
                     let broke = record.actor_ref.ask(crate::actors::player::DamageEquipment {
                         slot: EquipmentSlot::Weapon,
-                        amount: 1,
+                        amount: (1 + fastrand::i32(0..4)) as u16,
                     }).await.unwrap_or(false);
                     if broke {
                         debug!("Player {} weapon broke!", result.object_id);
@@ -1066,6 +1066,22 @@ impl Message<RangeAttackRequest> for WorldActor {
                 hit_monster = true;
                 if monster.hp <= 0 {
                     // 死亡由 Tick 循环处理（广播 ObjectDied + 重生）
+                }
+            }
+        }
+
+        // 武器耐久损耗（C# DamageWeapon：远程命中同样扣耐久 Random(4)+1）
+        if hit_monster {
+            if let Some(record) = self.players.get(&msg.session_id) {
+                let broke = record.actor_ref.ask(crate::actors::player::DamageEquipment {
+                    slot: EquipmentSlot::Weapon,
+                    amount: (1 + fastrand::i32(0..4)) as u16,
+                }).await.unwrap_or(false);
+                if broke {
+                    debug!("Player {} weapon broke (ranged)!", object_id);
+                    if let Some(state) = self.recalculate_and_set_stat_bonuses(msg.session_id).await {
+                        self.broadcast_equipment_visuals(msg.session_id, &state).await;
+                    }
                 }
             }
         }
