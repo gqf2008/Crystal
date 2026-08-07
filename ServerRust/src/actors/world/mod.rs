@@ -123,6 +123,8 @@ pub(crate) struct PlayerRecord {
     account_username: String,
     /// 上次广播的 PK 值（用于检测名字颜色变化）
     last_pk_points: i32,
+    /// 上次广播的名字颜色（含灰名；用于检测颜色变化）
+    last_colour: i32,
     /// 玩家 object_id（缓存，避免 async 查找）
     object_id: u32,
     /// 是否已下发世界地图配置（C# WorldMapSetupSent，每连接一次）
@@ -1198,7 +1200,7 @@ impl WorldActor {
             .map(|info| info.effect as i16).unwrap_or(0);
         let packet = build_object_player_packet(
             &state.name, state.object_id, state.x, state.y, state.direction, state.level,
-            name_colour_for_pk(state.pk_points),
+            name_colour_for_pk(state.pk_points, is_brown(state.brown_until_ms)),
             state.class, state.gender, state.hair,
             weapon, weapon_effect, armor,
             state.mount_type, state.is_mounted,
@@ -1647,7 +1649,7 @@ impl WorldActor {
             .map(|info| info.effect as i16).unwrap_or(0);
         let packet = build_object_player_packet(
             &state.name, state.object_id, state.x, state.y, state.direction, state.level,
-            name_colour_for_pk(state.pk_points),
+            name_colour_for_pk(state.pk_points, is_brown(state.brown_until_ms)),
             state.class, state.gender, state.hair,
             weapon, weapon_effect, armor,
             state.mount_type, state.is_mounted,
@@ -4985,12 +4987,24 @@ pub(crate) fn build_new_map_info_packet_from_db(
     build_packet_bytes(ServerPacketIds::NewMapInfo as i16, &body)
 }
 
-/// 根据 PK 值计算名字颜色（0=白名, 1=红名, 2=橙名）
-pub(crate) fn name_colour_for_pk(pk_points: i32) -> i32 {
-    if pk_points >= 200 {
-        1 // Red
+/// 是否灰名（C# BrownTime：当前时间 < brown_until_ms）
+pub(crate) fn is_brown(brown_until_ms: i64) -> bool {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    brown_until_ms > now
+}
+
+/// 根据 PK 值与灰名计算名字颜色（ARGB，对齐 C# GetNameColour：
+/// 白=0（客户端默认）、红=0xFFFF0000、黄=0xFFFFFF00、褐(灰名)=0xFFA52A2A）
+pub(crate) fn name_colour_for_pk(pk_points: i32, brown_active: bool) -> i32 {
+    if brown_active {
+        0xFFA52A2Au32 as i32 // SaddleBrown（C# Color.SaddleBrown）
+    } else if pk_points >= 200 {
+        0xFFFF0000u32 as i32 // Red
     } else if pk_points >= 100 {
-        2 // Orange
+        0xFFFFFF00u32 as i32 // Yellow
     } else {
         0 // White
     }
@@ -5133,7 +5147,7 @@ fn build_user_information_packet(
     write_dotnet_string(&mut body, &state.name);              // name
     write_dotnet_string(&mut body, state.guild_name.as_deref().unwrap_or(""));  // guild_name
     write_dotnet_string(&mut body, "");                       // guild_rank
-    body.extend_from_slice(&name_colour_for_pk(state.pk_points).to_le_bytes()); // name_colour
+    body.extend_from_slice(&name_colour_for_pk(state.pk_points, is_brown(state.brown_until_ms)).to_le_bytes()); // name_colour
     body.push(state.class as u8);                             // class
     body.push(state.gender as u8);                            // gender
     body.extend_from_slice(&state.level.to_le_bytes());       // level
@@ -5633,14 +5647,15 @@ mod tests {
 
     #[test]
     fn test_name_colour_for_pk_thresholds() {
-        assert_eq!(name_colour_for_pk(0), 0);    // White
-        assert_eq!(name_colour_for_pk(50), 0);   // White
-        assert_eq!(name_colour_for_pk(99), 0);   // White
-        assert_eq!(name_colour_for_pk(100), 2);  // Orange
-        assert_eq!(name_colour_for_pk(150), 2);  // Orange
-        assert_eq!(name_colour_for_pk(199), 2);  // Orange
-        assert_eq!(name_colour_for_pk(200), 1);  // Red
-        assert_eq!(name_colour_for_pk(500), 1);  // Red
+        assert_eq!(name_colour_for_pk(0, false), 0);       // White
+        assert_eq!(name_colour_for_pk(50, false), 0);      // White
+        assert_eq!(name_colour_for_pk(99, false), 0);      // White
+        assert_eq!(name_colour_for_pk(100, false), 0xFFFFFF00u32 as i32); // Yellow
+        assert_eq!(name_colour_for_pk(150, false), 0xFFFFFF00u32 as i32);
+        assert_eq!(name_colour_for_pk(199, false), 0xFFFFFF00u32 as i32);
+        assert_eq!(name_colour_for_pk(200, false), 0xFFFF0000u32 as i32); // Red
+        assert_eq!(name_colour_for_pk(500, false), 0xFFFF0000u32 as i32);
+        assert_eq!(name_colour_for_pk(0, true), 0xFFA52A2Au32 as i32);    // Brown（灰名优先）
     }
 
     #[test]

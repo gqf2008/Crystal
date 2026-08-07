@@ -301,6 +301,8 @@ pub struct PlayerState {
     pub mentor_damage_bonus: bool,
     /// 新手行会经验 buff（C# BuffType.Newbie：在 NewbieGuild 且开关开启时 true）
     pub newbie_exp_bonus: bool,
+    /// 灰名截止时间（毫秒；C# HumanObject.BrownTime，攻击低 PK 玩家后 1 分钟）
+    pub brown_until_ms: i64,
 }
 
 impl PlayerState {
@@ -629,6 +631,7 @@ impl PlayerActor {
             is_mentor: false,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
+            brown_until_ms: 0,
             },
             gate_ref,
             world_ref,
@@ -1169,6 +1172,16 @@ impl Message<TakeDamage> for PlayerActor {
     ) -> Self::Reply {
         let damage = msg.damage.max(0);
         self.state.hp = (self.state.hp - damage).max(0);
+
+        // C# HumanObject.Attacked：被玩家攻击时攻击者获得灰名（BrownTime，世界侧校验 PK/开战）
+        if msg.attacker_session != 0 {
+            let _ = self.world_ref
+                .tell(crate::actors::world::partners::MarkBrown {
+                    attacker_session: msg.attacker_session,
+                    victim_session: self.state.session_id,
+                })
+                .try_send();
+        }
 
         debug!(
             "Player {} took {} damage from object_id={} (hp: {}/{})",
@@ -3510,6 +3523,23 @@ impl Message<SetNewbieExpBonus> for PlayerActor {
     }
 }
 
+/// 设置灰名截止时间（C# BrownTime；WorldActor MarkBrown 设置）
+pub struct SetBrownTime {
+    pub until_ms: i64,
+}
+
+impl Message<SetBrownTime> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetBrownTime,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.brown_until_ms = msg.until_ms;
+    }
+}
+
 /// 设置宠物信息
 pub struct SetCreature {
     pub creature_log: CreatureLog,
@@ -4663,6 +4693,7 @@ mod tests {
             is_mentor: false,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
+            brown_until_ms: 0,
         }
     }
 

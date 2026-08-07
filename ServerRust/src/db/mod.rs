@@ -1306,6 +1306,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
             is_mentor: row.try_get("is_mentor").unwrap_or(0) != 0,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
+            brown_until_ms: 0,
     };
 
     Ok(Some(state))

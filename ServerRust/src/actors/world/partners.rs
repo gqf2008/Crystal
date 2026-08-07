@@ -100,6 +100,55 @@ impl Message<GetMenteeExpBonus> for WorldActor {
     }
 }
 
+/// PvP 灰名标记（C# HumanObject.Attacked：受害者 PK<200 且不在开战时，攻击者 BrownTime=1 分钟）
+pub struct MarkBrown {
+    pub attacker_session: u64,
+    pub victim_session: u64,
+}
+
+impl Message<MarkBrown> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: MarkBrown, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let victim = match self.players.get(&msg.victim_session) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let victim_state = match victim.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        // C#：受害者 PK>=200（红名）时攻击者不灰名
+        if victim_state.pk_points >= 200 {
+            return;
+        }
+        let attacker = match self.players.get(&msg.attacker_session) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        // C# AtWar：双方行会处于开战状态则不灰名
+        if let Some(victim_guild) = &victim_state.guild_name {
+            if let Ok(Some(attacker_state)) = attacker.actor_ref.ask(GetPlayerState).await {
+                if let Some(attacker_guild) = &attacker_state.guild_name {
+                    if self.guild_wars.get(victim_guild)
+                        .map(|set| set.contains(attacker_guild))
+                        .unwrap_or(false)
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let _ = attacker.actor_ref.ask(crate::actors::player::SetBrownTime {
+            until_ms: now_ms + 60_000, // C# Settings.Minute
+        }).await;
+    }
+}
+
 /// WorldActor 转发：查询新手行会配置（PlayerActor 无 social_ref，经 world 转发）
 pub struct GetNewbieGuildConfig;
 

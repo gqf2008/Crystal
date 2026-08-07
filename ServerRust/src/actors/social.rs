@@ -3557,7 +3557,7 @@ impl SocialActor {
             state.y,
             state.direction,
             state.level,
-            crate::actors::world::name_colour_for_pk(state.pk_points),
+            crate::actors::world::name_colour_for_pk(state.pk_points, crate::actors::world::is_brown(state.brown_until_ms)),
             state.class,
             state.gender,
             state.hair,
