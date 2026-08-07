@@ -3342,6 +3342,8 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         exp_multiplier_end_tick: 0,
             drop_multiplier: 1.0,
             drop_multiplier_end_tick: 0,
+            item_drop_rate_percent: 0,
+            gold_drop_rate_percent: 0,
             elements_level: 0,
             has_elemental: false,
             concentration_interrupted: false,

@@ -1081,18 +1081,22 @@ impl WorldActor {
                     move_interval: 2,
                     flee_threshold: 0.0,
                 });
+            // 精英判定：用 RarityConfig（C# MonsterRarityEliteChancePercent=0.1，缺省 3 兼容旧配置）
+            let is_elite = fastrand::u8(1..=100) <= self.rarity_cfg.elite_chance_percent;
             let monster_level = monster_info_opt.map(|i| i.level).unwrap_or(0);
             let monster_effect = monster_info_opt.map(|i| i.effect).unwrap_or(0);
-            // 精英判定：3% 概率
-            let is_elite = fastrand::u8(1..=100) <= 3;
             let (name, hp, max_hp, min_dmg, max_dmg, xp) = if is_elite {
+                // 对齐 C# MonsterRarityData.Elite 倍率（config 驱动）
+                let hp_m = self.rarity_cfg.elite_hp_multiplier;
+                let dmg_m = self.rarity_cfg.elite_dmg_multiplier;
+                let xp_m = self.rarity_cfg.elite_xp_multiplier;
                 (
                     format!("[精英] {}", spawn.name),
-                    spawn.hp.saturating_mul(2),
-                    spawn.hp.saturating_mul(2),
-                    (spawn.min_dmg as f32 * 1.5) as i32,
-                    (spawn.max_dmg as f32 * 1.5) as i32,
-                    spawn.xp.saturating_mul(2),
+                    (spawn.hp as f64 * hp_m).max(1.0) as i32,
+                    (spawn.hp as f64 * hp_m).max(1.0) as i32,
+                    (spawn.min_dmg as f64 * dmg_m) as i32,
+                    (spawn.max_dmg as f64 * dmg_m) as i32,
+                    (spawn.xp as f64 * xp_m).max(1.0) as i32,
                 )
             } else {
                 (spawn.name.clone(), spawn.hp, spawn.hp, spawn.min_dmg, spawn.max_dmg, spawn.xp)
@@ -4123,6 +4127,33 @@ impl Message<Tick> for WorldActor {
 
                     // 生成掉落物品
                     self.spawn_monster_drops(&monster).await;
+
+                    // #1001/#1003：任务击杀进度（C# MonsterObject.Die → EXPOwner.CheckGroupQuestKill）
+                    // 击杀者 = target_session（最后命中者，与掉落归属一致）；同组同图 16 格内未死成员共享
+                    // #1016：击杀归属用 LastHitter（C# EXPOwner），回退 target_session
+                    if let Some(killer) = monster.last_hitter_session.or(monster.target_session) {
+                        // 击杀者 + 同组同图 16 格内未死成员（C# CheckGroupQuestKill）
+                        let quest_sessions = self.quest_participants(
+                            killer, monster.map_index, monster.x, monster.y).await;
+                        for sid in quest_sessions {
+                            if let Some(record) = self.players.get(&sid) {
+                                let updates = record.actor_ref.ask(crate::actors::player::ProcessKillQuest {
+                                    monster_index: monster.monster_index,
+                                }).await.unwrap_or_default();
+                                if !updates.is_empty() {
+                                    for (quest_index, _, _) in &updates {
+                                        if let Ok(Some(q)) = record.actor_ref.ask(crate::actors::player::GetQuest {
+                                            quest_index: *quest_index,
+                                        }).await {
+                                            crate::actors::social_packets::send_quest_change_packet(
+                                                &self.gate_ref, sid, &q);
+                                        }
+                                    }
+                                    send_system_message(&self.gate_ref, sid, "任务进度更新：击杀目标");
+                                }
+                            }
+                        }
+                    }
 
                     // 世界Boss被击败广播
                     if monster.is_boss {

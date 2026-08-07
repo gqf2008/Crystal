@@ -373,6 +373,15 @@ pub struct RarityConfig {
     /// 精英经验倍率
     #[serde(default = "default_elite_xp_multiplier")]
     pub elite_xp_multiplier: f64,
+    /// 精英物品掉落加成 %（C# Settings.MonsterRarityEliteItemDropBonusPercent = 75）
+    #[serde(default = "default_elite_item_drop_bonus_percent")]
+    pub elite_item_drop_bonus_percent: i32,
+    /// 精英金币掉落加成 %（C# Settings.MonsterRarityEliteGoldDropBonusPercent = 75）
+    #[serde(default = "default_elite_gold_drop_bonus_percent")]
+    pub elite_gold_drop_bonus_percent: i32,
+    /// 精英金币倍率（C# MonsterRarityData.Elite.GoldMultiplier = 2.50，ApplyGoldModifier）
+    #[serde(default = "default_elite_gold_multiplier")]
+    pub elite_gold_multiplier: f64,
 }
 
 fn default_elite_chance() -> u8 {
@@ -380,15 +389,27 @@ fn default_elite_chance() -> u8 {
 }
 
 fn default_elite_hp_multiplier() -> f64 {
-    2.0
+    2.25 // C# MonsterRarityData.Elite HpMultiplier
 }
 
 fn default_elite_dmg_multiplier() -> f64 {
-    1.5
+    1.65 // C# Elite DamageMultiplier
 }
 
 fn default_elite_xp_multiplier() -> f64 {
-    2.0
+    2.20 // C# Elite ExpMultiplier
+}
+
+fn default_elite_item_drop_bonus_percent() -> i32 {
+    75
+}
+
+fn default_elite_gold_drop_bonus_percent() -> i32 {
+    75
+}
+
+fn default_elite_gold_multiplier() -> f64 {
+    2.50
 }
 
 impl Default for RarityConfig {
@@ -398,6 +419,9 @@ impl Default for RarityConfig {
             elite_hp_multiplier: default_elite_hp_multiplier(),
             elite_dmg_multiplier: default_elite_dmg_multiplier(),
             elite_xp_multiplier: default_elite_xp_multiplier(),
+            elite_item_drop_bonus_percent: default_elite_item_drop_bonus_percent(),
+            elite_gold_drop_bonus_percent: default_elite_gold_drop_bonus_percent(),
+            elite_gold_multiplier: default_elite_gold_multiplier(),
         }
     }
 }

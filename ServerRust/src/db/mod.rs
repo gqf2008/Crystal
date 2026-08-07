@@ -498,6 +498,11 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             min_count INTEGER NOT NULL DEFAULT 1,
             max_count INTEGER NOT NULL DEFAULT 1,
             chance REAL NOT NULL DEFAULT 1.0,
+            gold INTEGER NOT NULL DEFAULT 0,
+            quest_required INTEGER NOT NULL DEFAULT 0,
+            group_parent_id INTEGER NOT NULL DEFAULT 0,
+            group_random INTEGER NOT NULL DEFAULT 0,
+            group_first INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (monster_index) REFERENCES monster_infos(idx)
         );
         CREATE INDEX IF NOT EXISTS idx_monster_drops_monster ON monster_drops(monster_index);
@@ -560,6 +565,13 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         CREATE INDEX IF NOT EXISTS idx_recipe_tools_recipe ON recipe_tools(recipe_id);
         "#
     ).execute(&pool).await?;
+
+    // #995/#996：旧库补 monster_drops 列（safe to re-run；新库 CREATE 已含）
+    let _ = sqlx::query("ALTER TABLE monster_drops ADD COLUMN gold INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE monster_drops ADD COLUMN quest_required INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE monster_drops ADD COLUMN group_parent_id INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE monster_drops ADD COLUMN group_random INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE monster_drops ADD COLUMN group_first INTEGER NOT NULL DEFAULT 0").execute(&pool).await;
 
     // Migration: add quest timer columns (safe to re-run)
     let _ = sqlx::query("ALTER TABLE quests ADD COLUMN start_time INTEGER NOT NULL DEFAULT 0")
@@ -1364,6 +1376,8 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         exp_multiplier_end_tick: 0,
             drop_multiplier: 1.0,
             drop_multiplier_end_tick: 0,
+            item_drop_rate_percent: 0,
+            gold_drop_rate_percent: 0,
             elements_level: 0,
             has_elemental: false,
             concentration_interrupted: false,
@@ -2406,11 +2420,22 @@ pub struct MonsterInfo {
 /// Monster drop entry (from DB)
 #[derive(Debug, Clone)]
 pub struct MonsterDropInfo {
+    pub id: i64,
     pub monster_index: i32,
     pub item_index: i32,
     pub min_count: u16,
     pub max_count: u16,
     pub chance: f64,
+    /// 金币条目（C# DropInfo.Gold；>0 时落地金币而非物品）
+    pub gold: u64,
+    /// 任务掉落标记（C# DropInfo.QuestRequired；普通掉落跳过，任务系统发放）
+    pub quest_required: bool,
+    /// 组子条目归属（C# DropInfo.GroupedDrop；>0 = 父组行 id）
+    pub group_parent_id: i64,
+    /// 组随机（C# GROUP*：命中子条目中随机取 1）
+    pub group_random: bool,
+    /// 组首个（C# GROUP^：第一个命中即停）
+    pub group_first: bool,
 }
 
 /// NPC info
@@ -2834,11 +2859,17 @@ pub async fn load_monster_drops(pool: &DbPool) -> anyhow::Result<HashMap<i32, Ve
     for r in rows {
         let monster_index: i32 = r.get("monster_index");
         let entry = MonsterDropInfo {
+            id: r.get::<i64, _>("id"),
             monster_index,
             item_index: r.get("item_index"),
             min_count: r.get::<i32, _>("min_count") as u16,
             max_count: r.get::<i32, _>("max_count") as u16,
             chance: r.get::<f64, _>("chance"),
+            gold: r.try_get::<i64, _>("gold").unwrap_or(0).max(0) as u64,
+            quest_required: r.try_get::<i32, _>("quest_required").unwrap_or(0) != 0,
+            group_parent_id: r.try_get::<i64, _>("group_parent_id").unwrap_or(0),
+            group_random: r.try_get::<i32, _>("group_random").unwrap_or(0) != 0,
+            group_first: r.try_get::<i32, _>("group_first").unwrap_or(0) != 0,
         };
         map.entry(monster_index).or_default().push(entry);
     }
@@ -2910,9 +2941,41 @@ pub async fn import_drops_from_dir(
         };
         matched_monsters += 1;
 
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with(';') || line.starts_with("//") { continue; }
+        // #1006：C# ParseInsert——`#INSERT [相对路径]` 引入共享掉落表（递归展开，防循环）
+        let mut drop_lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+        for _ in 0..8 {
+            let mut appended = false;
+            let mut next: Vec<String> = Vec::new();
+            for line in &drop_lines {
+                let t = line.trim();
+                if let Some(rest) = t.strip_prefix("#INSERT") {
+                    let sub = rest.trim().trim_start_matches('[').trim_end_matches(']').trim();
+                    if !sub.is_empty() {
+                        let sub_path = drop_dir.join(sub);
+                        if let Ok(sub_content) = std::fs::read_to_string(&sub_path) {
+                            next.extend(sub_content.lines().map(|l| l.to_string()));
+                            appended = true;
+                            tracing::debug!("Drop #INSERT expanded: {} -> {}", drop_dir.display(), sub);
+                        } else {
+                            tracing::warn!("Drop #INSERT file not found: {}", sub_path.display());
+                        }
+                    }
+                    // #INSERT 行本身不保留
+                } else {
+                    next.push(line.clone());
+                }
+            }
+            drop_lines = next;
+            if !appended {
+                break;
+            }
+        }
+        let raw_lines: Vec<&str> = drop_lines.iter().map(|l| l.trim()).collect();
+        let mut li = 0usize;
+        while li < raw_lines.len() {
+            let line = raw_lines[li];
+            li += 1;
+            if line.is_empty() || line.starts_with(';') || line.starts_with("//") || line == "{" || line == "}" { continue; }
 
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() < 2 { continue; }
@@ -2930,14 +2993,115 @@ pub async fn import_drops_from_dir(
                 chance_str.parse::<f64>().unwrap_or(0.0)
             } else { 0.01 };
 
+            // #995：金币条目（C# DropInfo：`1/10 Gold 1000`）
+            if parts.get(1).map(|s| s.eq_ignore_ascii_case("gold")).unwrap_or(false) {
+                let gold: u64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                if gold > 0 {
+                    let _ = sqlx::query(
+                        "INSERT INTO monster_drops (monster_index, item_index, min_count, max_count, chance, gold, quest_required, group_parent_id, group_random, group_first) VALUES (?, 0, 1, 1, ?, ?, 0, 0, 0, 0)"
+                    )
+                    .bind(m_idx)
+                    .bind(chance)
+                    .bind(gold as i64)
+                    .execute(pool).await;
+                    total += 1;
+                }
+                continue;
+            }
+
+            // #1002：组合掉落（C# `GROUP`/`GROUP*`/`GROUP^` + `{ ... }` 子表）
+            if parts.get(1).map(|s| s.to_uppercase().starts_with("GROUP")).unwrap_or(false) {
+                let group_random = parts[1].ends_with('*');
+                let group_first = parts[1].ends_with('^');
+                let res = sqlx::query(
+                    "INSERT INTO monster_drops (monster_index, item_index, min_count, max_count, chance, gold, quest_required, group_parent_id, group_random, group_first) VALUES (?, 0, 1, 1, ?, 0, 0, 0, ?, ?)"
+                )
+                .bind(m_idx)
+                .bind(chance)
+                .bind(if group_random { 1i32 } else { 0i32 })
+                .bind(if group_first { 1i32 } else { 0i32 })
+                .execute(pool).await;
+                let parent_id: i64 = res.map(|r| r.last_insert_rowid()).unwrap_or(0);
+                total += 1;
+                // 消费 `{ ... }` 内的子条目
+                while li < raw_lines.len() {
+                    let st = raw_lines[li];
+                    li += 1;
+                    if st == "}" { break; }
+                    if st.is_empty() || st.starts_with(';') || st.starts_with("//") { continue; }
+                    let sub_parts: Vec<&str> = st.split_whitespace().collect();
+                    if sub_parts.len() < 2 { continue; }
+                    let sub_chance = if sub_parts[0].contains('/') {
+                        let frac: Vec<&str> = sub_parts[0].split('/').collect();
+                        if frac.len() == 2 {
+                            let n: f64 = frac[0].parse().unwrap_or(0.0);
+                            let d: f64 = frac[1].parse().unwrap_or(1.0);
+                            if d > 0.0 { n / d } else { 0.0 }
+                        } else { 0.0 }
+                    } else { 0.01 };
+                    // 子条目金币
+                    if sub_parts.get(1).map(|s| s.eq_ignore_ascii_case("gold")).unwrap_or(false) {
+                        let gold: u64 = sub_parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                        if gold > 0 {
+                            let _ = sqlx::query(
+                                "INSERT INTO monster_drops (monster_index, item_index, min_count, max_count, chance, gold, quest_required, group_parent_id, group_random, group_first) VALUES (?, 0, 1, 1, ?, ?, 0, ?, 0, 0)"
+                            )
+                            .bind(m_idx)
+                            .bind(sub_chance)
+                            .bind(gold as i64)
+                            .bind(parent_id)
+                            .execute(pool).await;
+                            total += 1;
+                        }
+                        continue;
+                    }
+                    // 子条目物品
+                    let mut sp = sub_parts.to_vec();
+                    let sub_quest = sp.last().map(|s| s.eq_ignore_ascii_case("q")).unwrap_or(false);
+                    if sub_quest { sp.pop(); }
+                    let sub_item_name = if sp.len() >= 3 && sp[sp.len()-1].parse::<u16>().is_ok() {
+                        sp[1..sp.len()-1].join(" ")
+                    } else {
+                        sp[1..].join(" ")
+                    };
+                    let sub_count: u16 = if sp.len() >= 3 && sp[sp.len()-1].parse::<u16>().is_ok() {
+                        sp[sp.len()-1].parse().unwrap_or(1)
+                    } else { 1 };
+                    let sub_idx = item_name_index.get(&sub_item_name.to_lowercase()).copied()
+                        .or_else(|| item_name_index.get(&sub_item_name.to_lowercase().replace(' ', "")).copied());
+                    if let Some(sidx) = sub_idx {
+                        let _ = sqlx::query(
+                            "INSERT INTO monster_drops (monster_index, item_index, min_count, max_count, chance, gold, quest_required, group_parent_id, group_random, group_first) VALUES (?, ?, ?, ?, ?, 0, ?, ?, 0, 0)"
+                        )
+                        .bind(m_idx).bind(sidx)
+                        .bind(sub_count as i32).bind(sub_count as i32)
+                        .bind(sub_chance)
+                        .bind(if sub_quest { 1i32 } else { 0i32 })
+                        .bind(parent_id)
+                        .execute(pool).await;
+                        total += 1;
+                    }
+                }
+                continue;
+            }
+
+            // #996：QuestRequired 标记（C# `1/10 ItemName Q`，行尾 Q）
+            let mut parts_vec = parts.to_vec();
+            let quest_required = parts_vec.last()
+                .map(|s| s.eq_ignore_ascii_case("q"))
+                .unwrap_or(false);
+            if quest_required {
+                parts_vec.pop();
+            }
+
             // 物品名（可能含空格，取最后一个数字为 count）
-            let item_name = if parts.len() >= 3 && parts[parts.len()-1].parse::<u16>().is_ok() {
-                parts[1..parts.len()-1].join(" ")
+            let item_name = if parts_vec.len() >= 3 && parts_vec[parts_vec.len()-1].parse::<u16>().is_ok() {
+                parts_vec[1..parts_vec.len()-1].join(" ")
             } else {
-                parts[1..].join(" ")
+                parts_vec[1..].join(" ")
             };
-            let count: u16 = if parts.len() >= 3 && parts[parts.len()-1].parse::<u16>().is_ok() {
-                parts[parts.len()-1].parse().unwrap_or(1)
+            let count: u16 = if parts_vec.len() >= 3 && parts_vec[parts_vec.len()-1].parse::<u16>().is_ok() {
+                parts_vec[parts_vec.len()-1].parse().unwrap_or(1)
             } else { 1 };
 
             // 物品名 → item_index（精确 + 去空格模糊）
@@ -2949,11 +3113,12 @@ pub async fn import_drops_from_dir(
             };
 
             let _ = sqlx::query(
-                "INSERT INTO monster_drops (monster_index, item_index, min_count, max_count, chance) VALUES (?, ?, ?, ?, ?)"
+                "INSERT INTO monster_drops (monster_index, item_index, min_count, max_count, chance, gold, quest_required, group_parent_id, group_random, group_first) VALUES (?, ?, ?, ?, ?, 0, ?, 0, 0, 0)"
             )
             .bind(m_idx).bind(i_idx)
             .bind(count as i32).bind(count as i32)
             .bind(chance)
+            .bind(if quest_required { 1i32 } else { 0i32 })
             .execute(pool).await;
             total += 1;
         }
