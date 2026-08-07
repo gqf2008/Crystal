@@ -2742,17 +2742,29 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} casts MoonMist (invisible {}s + 5x5 AC dmg={} hits={})",
                        state.name, duration_ticks / 10, raw_damage, spell_hits.len());
             }
-            // #395：ImmortalSkin —— AC 提升 buff（C# HumanObject.cs:6171，60s+Lv；DC 交换项简化跳过）
+            // #395：ImmortalSkin —— AC 提升 + DC 交换（C# HumanObject.cs:6171 CompleteMagic）
+            // MaxDC = round(MaxDC * (0.05+0.01Lv)) * -1；MaxAC = round(MaxAC * (0.10+0.07Lv))
             SPELL_IMMORTAL_SKIN => {
-                let bonus = (state.max_ac as f32 * (0.10 + 0.07 * spell_level as f32)) as i32;
+                let ac_bonus = (state.max_ac as f32 * (0.10 + 0.07 * spell_level as f32)) as i32;
+                let dc_penalty = ((state.max_attack + state.bonus_max_attack) as f32
+                    * (0.05 + 0.01 * spell_level as f32)).round() as i32;
                 let duration_ticks = ((60 + spell_level as i32) as u32) * 10;
                 let buff = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::AcDefenseBoost { bonus: bonus.max(1) },
+                    crate::combat::buff::BuffType::AcDefenseBoost { bonus: ac_bonus.max(1) },
                     duration_ticks,
                     5,
                 );
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
-                debug!("Magic: {} casts ImmortalSkin (AC +{}, {}s)", state.name, bonus.max(1), 60 + spell_level as i32);
+                if dc_penalty > 0 {
+                    let dc_buff = crate::combat::buff::BuffInstance::new(
+                        crate::combat::buff::BuffType::AttackBoost { bonus: -dc_penalty },
+                        duration_ticks,
+                        5,
+                    );
+                    let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: dc_buff }).await;
+                }
+                debug!("Magic: {} casts ImmortalSkin (AC +{}, DC -{}, {}s)",
+                       state.name, ac_bonus.max(1), dc_penalty, 60 + spell_level as i32);
             }
             // #395：Hallucination —— 概率成功，怪物 10-29s 失去目标不攻击（C# HumanObject.cs:6342）
             SPELL_HALLUCINATION => {
