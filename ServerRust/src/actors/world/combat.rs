@@ -3479,7 +3479,7 @@ impl Message<MagicRequest> for WorldActor {
                 }
             }
             // Reincarnation：复活死亡玩家（对齐 C# TaoistObject.Reincarnation）
-            // 简化：找附近（3格内）死亡玩家，原地半血复活
+            // 实现：找附近 3 格死亡玩家 → OfferReincarnation（30s 有效期）+ RequestReincarnation（客户端确认）
             SPELL_REINCARNATION => {
                 let revive_range = 3;
                 // 从 player_death_queue 找附近死亡玩家
