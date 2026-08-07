@@ -154,6 +154,9 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                 (2, 1, String::new(), 0),
                 (3, 2, "敌对行会".to_string(), 0),
             ];
+            // #702：--guild-accept 行会邀请推送（进游戏 2s 后）
+            let mut mock_guild_invite_sent = false;
+            let mut mock_guild_invite_since: Option<std::time::Instant> = None;
             // #283：首次击杀触发本地升级演示（LevelChanged + ObjectLeveled）
             let mut mock_leveled_up = false;
             // #297：精炼流程状态（(物品 uid, 是否已开始)）
@@ -959,6 +962,47 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             &MockGuildRequestWar { guild_name: p.guild_name },
                                         );
                                         tracing::info!("🏯 [MOCK] 宣战确认");
+                                    }
+                                }
+                                // #702：好友（--friend-test）
+                                x if x == ClientPacketIds::AddFriend as i16 => {
+                                    if let Ok(p) = client::friend::AddFriend::read_body(&mut cur) {
+                                        send(&to_client, &MockFriendList);
+                                        tracing::info!("👥 [MOCK] 添加好友 {} 回发列表", p.name);
+                                    }
+                                }
+                                // #702：婚姻（--marriage-test，wire [target_name dotnet]）
+                                x if x == ClientPacketIds::MarriageRequest as i16 => {
+                                    let _target =
+                                        mir2_shared::binary::read_dotnet_string(&mut cur)
+                                            .unwrap_or_default();
+                                    send(&to_client, &MockLoverUpdate { married: true });
+                                    tracing::info!("💍 [MOCK] 结婚成功回发 LoverUpdate");
+                                }
+                                x if x == ClientPacketIds::DivorceRequest as i16 => {
+                                    let _partner =
+                                        mir2_shared::binary::read_dotnet_string(&mut cur)
+                                            .unwrap_or_default();
+                                    send(&to_client, &MockLoverUpdate { married: false });
+                                    tracing::info!("💔 [MOCK] 离婚成功回发 LoverUpdate");
+                                }
+                                // #702：行会邀请接受（--guild-accept）
+                                x if x == ClientPacketIds::GuildInvite as i16 => {
+                                    if let Ok(p) = client::guild::GuildInvite::read_body(&mut cur) {
+                                        if p.accept_invite {
+                                            mock_guild_name = Some("TestGuild".to_string());
+                                            send(
+                                                &to_client,
+                                                &MockGuildStatus {
+                                                    name: "TestGuild".to_string(),
+                                                    leader: "刀客".to_string(),
+                                                    notice: vec![],
+                                                    members: vec![("刀客".to_string(), 1u8, true)],
+                                                    gold: 0,
+                                                },
+                                            );
+                                            tracing::info!("🏰 [MOCK] 接受行会邀请，回发 GuildStatus");
+                                        }
                                     }
                                 }
                                 x if x == ClientPacketIds::Attack as i16 => {
@@ -2630,6 +2674,18 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                     tracing::info!("🔌 [MOCK] 模拟断线（--reconnect-test）");
                     break;
                 }
+                // #702：--guild-accept 进游戏 2s 后推送行会邀请
+                if in_game
+                    && std::env::args().any(|a| a == "--guild-accept")
+                    && !mock_guild_invite_sent
+                {
+                    let since = *mock_guild_invite_since.get_or_insert_with(std::time::Instant::now);
+                    if since.elapsed() >= std::time::Duration::from_secs(2) {
+                        mock_guild_invite_sent = true;
+                        send(&to_client, &MockGuildInvitePush { guild_name: "TestGuild".to_string() });
+                        tracing::info!("🏰 [MOCK] 推送行会邀请 TestGuild");
+                    }
+                }
             }
         })
         .expect("spawn mock thread");
@@ -2871,6 +2927,64 @@ fn send_guild_storage_list(
         })
         .collect();
     send(to_client, &server::guild::GuildStorageList { items });
+}
+
+/// #702：好友列表（客户端格式 [count i32][per: oid u32][name dotnet][memo dotnet][online u8]）
+struct MockFriendList;
+
+impl Packet for MockFriendList {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::FriendUpdate as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_i32::<LittleEndian>(1)?; // count
+        writer.write_u32::<LittleEndian>(120)?; // oid bevy2char
+        mir2_shared::binary::write_dotnet_string(writer, "bevy2char")?;
+        mir2_shared::binary::write_dotnet_string(writer, "")?;
+        writer.write_u8(1)?; // online
+        Ok(())
+    }
+}
+
+/// #702：婚姻状态（客户端格式 [married u8]）
+struct MockLoverUpdate {
+    married: bool,
+}
+
+impl Packet for MockLoverUpdate {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::LoverUpdate as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u8(if self.married { 1 } else { 0 })?;
+        Ok(())
+    }
+}
+
+/// #702：行会邀请（客户端格式 [guild_name dotnet]）
+struct MockGuildInvitePush {
+    guild_name: String,
+}
+
+impl Packet for MockGuildInvitePush {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::GuildInvite as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        mir2_shared::binary::write_dotnet_string(writer, &self.guild_name)?;
+        Ok(())
+    }
 }
 
 fn send<P: Packet>(to_client: &Sender<Vec<u8>>, packet: &P) {
