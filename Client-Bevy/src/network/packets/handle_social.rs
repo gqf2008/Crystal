@@ -423,7 +423,16 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
         }
         x if x == ServerPacketIds::NewMagic as i16 => {
             if let Ok(p) = magic::NewMagic::read_body(&mut cur) {
-                if !p.hero {
+                if p.hero {
+                    // #1128：英雄技能（C# S.NewMagic hero=true）→ HeroState.magics
+                    server_events.write(ServerEvent::HeroMagicLearned { magic: p.magic.clone() });
+                    tracing::info!(
+                        "🦸 英雄学会技能: {} ({:?}) key={}",
+                        p.magic.name,
+                        p.magic.spell,
+                        p.magic.key
+                    );
+                } else {
                     server_events.write(ServerEvent::MagicLearned { magic: p.magic.clone() });
                     tracing::info!(
                         "📖 学会技能: {} ({:?}) key={}",

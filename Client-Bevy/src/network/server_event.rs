@@ -393,6 +393,8 @@ pub enum ServerEvent {
     ObjectTeleportIn { object_id: u32 },
     /// NewMagic：学会技能
     MagicLearned { magic: ClientMagic },
+    /// NewMagic(hero=true)：英雄学会技能（#1128）
+    HeroMagicLearned { magic: ClientMagic },
     /// MagicLeveled：技能升级（C# S.MagicLeveled）
     MagicLeveled {
         object_id: u32,

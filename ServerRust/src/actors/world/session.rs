@@ -1226,6 +1226,22 @@ impl Message<PlayerDisconnected> for WorldActor {
                 warn!("Failed to update last_access for {} on disconnect: {}", record.name, e);
             }
 
+            // #1127：断线同样持久化英雄列表——save_character 会 DELETE heroes 子表但不重建，
+            // 若断线路径不补 save_heroes，英雄会在重启/再登录后永久丢失（与 PlayerLogOut 对齐）
+            let heroes = self.player_heroes.get(&msg.session_id).cloned().unwrap_or_default();
+            let db_heroes: Vec<db::DbHero> = heroes.iter().map(|h| db::DbHero {
+                index: h.index,
+                name: h.name.clone(),
+                level: h.level,
+                class: h.class as u8,
+                gender: h.gender as u8,
+                dead: h.dead,
+                sealed: h.sealed,
+            }).collect();
+            if let Err(e) = db::save_heroes(&self.db_pool, &record.name, &db_heroes).await {
+                warn!("Failed to save heroes for {} on disconnect: {}", record.name, e);
+            }
+
             // 行会离线状态由 SocialActor 管理
         }
 
