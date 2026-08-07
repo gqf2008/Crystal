@@ -2841,12 +2841,42 @@ impl Message<MagicRequest> for WorldActor {
                 send_system_message(&self.gate_ref, msg.session_id, &format!("精神状态切换到：{}", label));
                 debug!("Magic: {} casts MentalState -> {}", state.name, label);
             }
-            // #427：UltimateEnhancer —— 友方目标 DC/MC/SC 提升（C# HumanObject.cs:4784，简化自施放）
+            // #427：UltimateEnhancer —— 友方目标 DC/MC/SC 提升（C# HumanObject.cs:4784）
+            // 按目标职业加成：战士/刺客→DC，法师/弓手→MC，道士→SC；C# 需 amulet（Rust 暂不实现门槛）
             SPELL_ULTIMATE_ENHANCER => {
                 let sc = state.effective_max_sc();
                 let value = if sc >= 5 { (sc / 5).min(8) } else { 1 };
                 let duration_ticks = ((sc * 4 + (spell_level as i32 + 1) * 50) as u32) * 10;
-                let (buff, label) = match state.class {
+                // 目标选择：msg.target_id 指向自己或同组玩家 → 对其施放；否则自己
+                let mut target_session = msg.session_id;
+                let mut target_class = state.class;
+                if msg.target_id != 0 {
+                    let mut found_any = false;
+                    for (sid, r) in &self.players {
+                        if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                            if os.object_id == msg.target_id {
+                                found_any = true;
+                                let friendly = *sid == msg.session_id
+                                    || (os.group_id.is_some() && os.group_id == state.group_id);
+                                if friendly {
+                                    target_session = *sid;
+                                    target_class = os.class;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    // 自己的召唤物目标：怪物无 buff 系统，按 DC 提升近似作用于自身
+                    if !found_any || target_session == msg.session_id {
+                        if self.monsters.get(&msg.target_id)
+                            .map(|m| m.master_session == Some(msg.session_id))
+                            .unwrap_or(false)
+                        {
+                            target_class = state.class; // DC（怪物默认）
+                        }
+                    }
+                }
+                let (buff, label) = match target_class {
                     mir2_shared::enums::MirClass::Wizard | mir2_shared::enums::MirClass::Archer =>
                         (crate::combat::buff::BuffType::McBoost { bonus: value }, "MC"),
                     mir2_shared::enums::MirClass::Taoist =>
@@ -2854,9 +2884,13 @@ impl Message<MagicRequest> for WorldActor {
                     _ => (crate::combat::buff::BuffType::AttackBoost { bonus: value }, "DC"),
                 };
                 let inst = crate::combat::buff::BuffInstance::new(buff, duration_ticks, 5);
-                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: inst }).await;
-                debug!("Magic: {} casts UltimateEnhancer ({} +{}, {}s)",
-                       state.name, label, value, duration_ticks / 10);
+                if target_session == msg.session_id {
+                    let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: inst }).await;
+                } else if let Some(r) = self.players.get(&target_session) {
+                    let _ = r.actor_ref.ask(crate::actors::player::ApplyBuff { buff: inst }).await;
+                }
+                debug!("Magic: {} casts UltimateEnhancer on session {} ({} +{}, {}s)",
+                       state.name, target_session, label, value, duration_ticks / 10);
             }
             // #448：FatalSword —— C# 中为被动技能（近战 10% 触发），无主动施放分支；施放不消耗
             SPELL_FATAL_SWORD => {
