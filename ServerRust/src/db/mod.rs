@@ -571,6 +571,11 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     // PR #1169: Warehouse password columns (safe to re-run; NULL = no password set)
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN storage_password_hash TEXT")
         .execute(&pool).await;
+    // #887: 仓库扩容字段（C# AccountInfo.HasExpandedStorage / ExpandedStorageExpiryDate，safe to re-run）
+    let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN has_expanded_storage INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN expanded_storage_expiry_date INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN storage_password_last_set INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     // #493: 地图进入规则列（C# MapInfo NoGroup/NoPets/NoIntelligentCreatures/NoHero，safe to re-run）
@@ -805,8 +810,9 @@ pub async fn save_account(pool: &DbPool, account: &AccountInfo) -> anyhow::Resul
     sqlx::query(
         r#"INSERT OR REPLACE INTO accounts
            (username, password_hash, is_online, storage_password_hash, storage_password_last_set,
-            wrong_password_count, banned_until, require_password_change)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#
+            wrong_password_count, banned_until, require_password_change,
+            has_expanded_storage, expanded_storage_expiry_date)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(&account.username)
     .bind(&account.password_hash)
@@ -816,6 +822,8 @@ pub async fn save_account(pool: &DbPool, account: &AccountInfo) -> anyhow::Resul
     .bind(account.wrong_password_count as i64)
     .bind(account.banned_until)
     .bind(if account.require_password_change { 1 } else { 0 })
+    .bind(if account.has_expanded_storage { 1 } else { 0 })
+    .bind(account.expanded_storage_expiry_date)
     .execute(pool)
     .await?;
     Ok(())
@@ -894,11 +902,30 @@ pub async fn account_has_storage_password(pool: &DbPool, username: &str) -> anyh
     Ok(row.and_then(|r| r.0).is_some_and(|h| !h.is_empty()))
 }
 
+/// #887：更新仓库扩容状态（C# ADDSTORAGE 购买 / 过期降级）
+pub async fn update_account_storage_expansion(
+    pool: &DbPool,
+    username: &str,
+    has_expanded_storage: bool,
+    expanded_storage_expiry_date: i64,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        "UPDATE accounts SET has_expanded_storage = ?, expanded_storage_expiry_date = ? WHERE username = ?"
+    )
+    .bind(if has_expanded_storage { 1 } else { 0 })
+    .bind(expanded_storage_expiry_date)
+    .bind(username)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn load_account(pool: &DbPool, username: &str) -> anyhow::Result<Option<AccountInfo>> {
     let row = sqlx::query(
         "SELECT username, password_hash, is_online,
                 storage_password_hash, storage_password_last_set, credit,
-                wrong_password_count, banned_until, require_password_change
+                wrong_password_count, banned_until, require_password_change,
+                has_expanded_storage, expanded_storage_expiry_date
          FROM accounts WHERE username = ?"
     )
     .bind(username)
@@ -915,6 +942,8 @@ pub async fn load_account(pool: &DbPool, username: &str) -> anyhow::Result<Optio
         wrong_password_count: r.try_get::<i64, _>("wrong_password_count").unwrap_or(0).max(0) as u32,
         banned_until: r.try_get::<i64, _>("banned_until").unwrap_or(0),
         require_password_change: r.try_get::<i64, _>("require_password_change").unwrap_or(0) != 0,
+        has_expanded_storage: r.try_get::<i64, _>("has_expanded_storage").unwrap_or(0) != 0,
+        expanded_storage_expiry_date: r.try_get::<i64, _>("expanded_storage_expiry_date").unwrap_or(0),
     }))
 }
 
@@ -922,7 +951,8 @@ pub async fn load_all_accounts(pool: &DbPool) -> anyhow::Result<Vec<AccountInfo>
     let rows = sqlx::query(
         "SELECT username, password_hash, is_online,
                 storage_password_hash, storage_password_last_set, credit,
-                wrong_password_count, banned_until, require_password_change
+                wrong_password_count, banned_until, require_password_change,
+                has_expanded_storage, expanded_storage_expiry_date
          FROM accounts"
     )
     .fetch_all(pool)
@@ -938,6 +968,8 @@ pub async fn load_all_accounts(pool: &DbPool) -> anyhow::Result<Vec<AccountInfo>
         wrong_password_count: r.try_get::<i64, _>("wrong_password_count").unwrap_or(0).max(0) as u32,
         banned_until: r.try_get::<i64, _>("banned_until").unwrap_or(0),
         require_password_change: r.try_get::<i64, _>("require_password_change").unwrap_or(0) != 0,
+        has_expanded_storage: r.try_get::<i64, _>("has_expanded_storage").unwrap_or(0) != 0,
+        expanded_storage_expiry_date: r.try_get::<i64, _>("expanded_storage_expiry_date").unwrap_or(0),
     }).collect())
 }
 
@@ -1283,6 +1315,11 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         last_recall_time: 0,
         allow_lover_recall: row.get::<Option<i32>, _>("allow_lover_recall").map(|v| v != 0).unwrap_or(false),
         is_gm: row.get::<i32, _>("admin_account") != 0,
+        has_expanded_storage: false,
+        expanded_storage_expiry_date: 0,
+        has_storage_password: false,
+        require_storage_password: false,
+        storage_password_last_set: 0,
         pk_points: row.get::<i32, _>("pk_points"),
         pk_kill_count: row.get::<i32, _>("pk_kill_count") as u32,
         buffs: Vec::new(),
@@ -3703,6 +3740,43 @@ mod tests {
         let info = &infos[0];
         assert_eq!(info.stats.get(&15), Some(&30)); // C# HP=12 -> SharedRust HP=15
         assert_eq!(info.stats.get(&18), Some(&50)); // C# Luck=15 -> SharedRust Luck=18
+    }
+
+    #[tokio::test]
+    async fn test_account_storage_expansion_roundtrip() {
+        // #887：仓库扩容字段持久化（C# AccountInfo.HasExpandedStorage / ExpandedStorageExpiryDate）
+        let pool = init_db_pool("sqlite::memory:?cache=shared").await.unwrap();
+        let mut account = AccountInfo {
+            username: "storagetest".to_string(),
+            password_hash: "x".to_string(),
+            is_online: false,
+            storage_password_hash: None,
+            storage_password_last_set: 0,
+            credit: 0,
+            wrong_password_count: 0,
+            banned_until: 0,
+            require_password_change: false,
+            has_expanded_storage: true,
+            expanded_storage_expiry_date: 1_800_000_000,
+        };
+        save_account(&pool, &account).await.unwrap();
+        let loaded = load_account(&pool, "storagetest").await.unwrap().expect("account exists");
+        assert!(loaded.has_expanded_storage);
+        assert_eq!(loaded.expanded_storage_expiry_date, 1_800_000_000);
+
+        // 过期降级：update → 重新加载应读到 false / 0
+        update_account_storage_expansion(&pool, "storagetest", false, 0).await.unwrap();
+        let loaded = load_account(&pool, "storagetest").await.unwrap().expect("account exists");
+        assert!(!loaded.has_expanded_storage);
+        assert_eq!(loaded.expanded_storage_expiry_date, 0);
+
+        // 重新购买续期：update → 再次读到 true / 新到期时间
+        account.has_expanded_storage = true;
+        account.expanded_storage_expiry_date = 1_800_864_000;
+        save_account(&pool, &account).await.unwrap();
+        let loaded = load_account(&pool, "storagetest").await.unwrap().expect("account exists");
+        assert!(loaded.has_expanded_storage);
+        assert_eq!(loaded.expanded_storage_expiry_date, 1_800_864_000);
     }
 }
 

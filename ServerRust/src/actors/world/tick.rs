@@ -1183,6 +1183,11 @@ impl WorldActor {
                 self.tick_count, self.players.len(), self.monsters.len()
             );
 
+            let now_unix = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+
             // 每 10 秒（100 ticks @ 100ms）回复 HP/MP
             for record in self.players.values() {
                 // 宠物饥饿值
@@ -1213,6 +1218,42 @@ impl WorldActor {
                                 &health_body,
                             ),
                         }).await;
+                    }
+
+                    // #887：仓库扩容过期降级（C# PlayerObject.Process：过期 → HasExpandedStorage=false
+                    // + 系统消息 ExpandedStorageExpired + ResizeStorage{Size, false, ExpiryTime}）
+                    if state.has_expanded_storage
+                        && state.expanded_storage_expiry_date > 0
+                        && now_unix > state.expanded_storage_expiry_date
+                    {
+                        let mut new_state = state.clone();
+                        new_state.has_expanded_storage = false;
+                        new_state.expanded_storage_expiry_date = 0;
+                        let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+                        send_system_message(&self.gate_ref, state.session_id, "仓库扩容已到期，仓库恢复为 80 格。");
+                        let mut resize_body = Vec::new();
+                        let resize = mir2_shared::packets::server::ui_events::ResizeStorage {
+                            size: state.inventory.storage.len() as i32,
+                            has_expanded_storage: false,
+                            expiry_time: 0,
+                        };
+                        if resize.write_body(&mut resize_body).is_ok() {
+                            let _ = self.gate_ref.tell(SendToClient {
+                                session_id: state.session_id,
+                                data: build_packet_bytes(
+                                    mir2_shared::enums::ServerPacketIds::ResizeStorage as i16,
+                                    &resize_body,
+                                ),
+                            }).await;
+                        }
+                        if let Err(e) = db::update_account_storage_expansion(
+                            &self.db_pool,
+                            &record.account_username,
+                            false,
+                            0,
+                        ).await {
+                            warn!("Failed to persist storage expansion expiry for {}: {}", record.name, e);
+                        }
                     }
                 }
             }
