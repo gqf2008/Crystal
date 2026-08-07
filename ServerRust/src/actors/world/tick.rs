@@ -3417,7 +3417,7 @@ impl Message<Tick> for WorldActor {
 
             // 处理死亡怪物
             for oid in &dead_monsters {
-                if let Some(mut monster) = self.monsters.remove(oid) {
+                if let Some(monster) = self.monsters.remove(oid) {
                     debug!("Monster '{}' (#{}) died", monster.name, oid);
 
                     // ===== on_die 集成 =====
@@ -3472,16 +3472,16 @@ impl Message<Tick> for WorldActor {
                     }
 
                     // 发放经验（支持组队平分）
+                    // C#：经验归属 LastHitter（最后一次伤害者，≈ monster.target_session），组内平分
                     let mut nearest_session: Option<u64> = None;
-                    let mut nearest_dist = i32::MAX;
                     let mut nearest_group_id: Option<u64> = None;
-                    for (session_id, record) in &self.players {
-                        if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                            let dist = (state.x - monster.x).abs() + (state.y - monster.y).abs();
-                            if dist < nearest_dist {
-                                nearest_dist = dist;
-                                nearest_session = Some(*session_id);
-                                nearest_group_id = state.group_id;
+                    if let Some(sid) = monster.target_session.filter(|sid| self.players.contains_key(sid)) {
+                        if let Some(record) = self.players.get(&sid) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                if !state.is_dead {
+                                    nearest_session = Some(sid);
+                                    nearest_group_id = state.group_id;
+                                }
                             }
                         }
                     }
