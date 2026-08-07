@@ -385,6 +385,8 @@ impl Message<StartGameRequest> for WorldActor {
                 gender: mir2_shared::enums::MirGender::try_from(h.gender).unwrap_or(mir2_shared::enums::MirGender::Male),
                 dead: h.dead,
                 sealed: h.sealed,
+                experience: 0,
+                max_experience: 100,
             }).collect());
         }
         let heroes = self.player_heroes.get(&msg.session_id).cloned().unwrap_or_default();

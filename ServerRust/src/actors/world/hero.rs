@@ -827,6 +827,10 @@ impl WorldActor {
                     monster.provoked = true;
                     // 英雄攻击的怪物仇恨转移到主人（英雄本身不可被攻击）
                     monster.target_session = Some(*session_id);
+                    // #1163：英雄伤害同样记 LastHitter（C# MapObject.LastHitter）——
+                    // tick_heroes 在死亡处理之后运行，仅靠 target_session 会在下一 tick
+                    // 怪物循环 hp<=0 时被清掉，导致主人/英雄拿不到击杀经验归属
+                    monster.last_hitter_session = Some(*session_id);
                     debug!(
                         "Hero (owner {}) attacked monster '{}' (#{}) for {} dmg [hit={}, crit={}]",
                         session_id, monster.name, target_oid, result.damage, result.is_hit, result.is_critical
@@ -980,6 +984,90 @@ impl WorldActor {
         }
         send_system_message(&self.gate_ref, session_id, "英雄已阵亡，请找 NPC 复活（REVIVEHERO）");
         info!("Hero died: session={} hero_index={}", session_id, state.hero_index);
+    }
+
+    /// 英雄经验发放（#1142/#1163，对齐 C# HeroObject.GainExp/LevelUp）：
+    /// - 累加经验并发 S.GainHeroExperience{Amount}
+    /// - 满级经验升级：level+1、max_exp ×1.5、发 S.HeroLevelChanged、DB 持久化等级、广播对象刷新
+    pub(crate) async fn grant_hero_experience(&mut self, session_id: u64, amount: u32) {
+        if amount == 0 {
+            return;
+        }
+        let Some(record) = self.players.get(&session_id).cloned() else { return };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        if state.hero_index == 0 || state.is_dead {
+            return;
+        }
+        let Some(hero) = self.player_heroes.get_mut(&session_id)
+            .and_then(|hs| hs.iter_mut().find(|h| h.index as u8 == state.hero_index))
+        else {
+            return;
+        };
+        if hero.dead {
+            return;
+        }
+        hero.experience = hero.experience.saturating_add(amount);
+        let mut leveled = false;
+        while hero.experience >= hero.max_experience && hero.level < u16::MAX {
+            hero.experience -= hero.max_experience;
+            hero.level += 1;
+            hero.max_experience = (hero.max_experience as f64 * 1.5) as u32;
+            leveled = true;
+        }
+        let hero_name = hero.name.clone();
+        let hero_level = hero.level;
+        let hero_exp = hero.experience;
+        let hero_max = hero.max_experience;
+        drop(hero); // 释放 player_heroes 借用后再用 self
+
+        // S.GainHeroExperience（C# Hero.GainExp → Owner.Enqueue）
+        let pkt = mir2_shared::packets::server::experience::GainHeroExperience { amount };
+        let mut body = Vec::new();
+        if pkt.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::GainHeroExperience as i16,
+                    &body,
+                ),
+            }).await;
+        }
+        if leveled {
+            // S.HeroLevelChanged（C# Hero.LevelUp → Owner.Enqueue）
+            let lvl_pkt = mir2_shared::packets::server::experience::HeroLevelChanged {
+                level: hero_level,
+                experience: hero_exp as i64,
+                max_experience: hero_max as i64,
+            };
+            let mut lvl_body = Vec::new();
+            if lvl_pkt.write_body(&mut lvl_body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::HeroLevelChanged as i16,
+                        &lvl_body,
+                    ),
+                }).await;
+            }
+            // DB 持久化等级
+            let db_heroes: Vec<db::DbHero> = self.player_heroes.get(&session_id)
+                .map(|hs| hs.iter().map(|h| db::DbHero {
+                    index: h.index, name: h.name.clone(), level: h.level,
+                    class: h.class as u8, gender: h.gender as u8,
+                    dead: h.dead, sealed: h.sealed,
+                }).collect())
+                .unwrap_or_default();
+            if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
+                warn!("Failed to save heroes on hero level up: {}", e);
+            }
+            // 广播英雄对象刷新（等级显示，C# BroadcastInfo）
+            self.broadcast_hero_spawn(session_id).await;
+            info!("🦸 Hero {} leveled to Lv.{}", hero_name, hero_level);
+        }
+        debug!("Hero {} gained {} exp (total {}, Lv.{})", hero_name, amount, hero_exp, hero_level);
     }
 }
 
