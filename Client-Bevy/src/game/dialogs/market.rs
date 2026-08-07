@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -552,6 +553,7 @@ fn market_action_system(
 fn market_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut market: ResMut<MarketState>,
+    mut hud: ResMut<HudState>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
@@ -586,6 +588,16 @@ fn market_server_events(
             }
             ServerEvent::MarketConsign { uid, success } => {
                 if *success {
+                    // #720：寄售成功从背包移除（C# S.ConsignItem 语义）
+                    if let Some(idx) = hud
+                        .inventory
+                        .items
+                        .iter()
+                        .position(|s| s.as_ref().map(|it| it.unique_id) == Some(*uid))
+                    {
+                        hud.inventory.items[idx] = None;
+                        tracing::info!("🏪 寄售成功，背包移除 uid={}", uid);
+                    }
                     market.consign_ok = Some(*uid);
                     market.message = format!("寄售成功 uid={}", uid);
                 } else {

@@ -106,11 +106,13 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             // 玩家背包/金币（购买/使用/拾取后更新）
             let mut player_inventory: Vec<Option<mir2_shared::data::item::UserItem>> = {
                 let mut inv: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 40];
-                inv[0] = Some(wooden_sword_item()); // 木剑(221)
-                inv[1] = Some(potion_item(10)); // 布衣
-                inv[2] = Some(potion_item(1)); // 金创药（可喝）
-                inv[3] = Some(book_item(34)); // 技能书：FireBall（#212）
-                inv[4] = Some(socketed_sword_item()); // 带孔铁剑（#557 镶嵌验收）
+                inv[0] = Some(market_item(100)); // 市场演示物品 uid=100（--market-test）
+                inv[1] = Some(market_item(101)); // 市场演示物品 uid=101（--market-test）
+                inv[2] = Some(wooden_sword_item()); // 木剑(221)
+                inv[3] = Some(potion_item(10)); // 布衣
+                inv[4] = Some(potion_item(1)); // 金创药（可喝）
+                inv[5] = Some(book_item(34)); // 技能书：FireBall（#212）
+                inv[6] = Some(socketed_sword_item()); // 带孔铁剑（#557 镶嵌验收）
                 inv
             };
             let mut player_gold: u32 = 10000;
@@ -157,6 +159,10 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             // #702：--guild-accept 行会邀请推送（进游戏 2s 后）
             let mut mock_guild_invite_sent = false;
             let mut mock_guild_invite_since: Option<std::time::Instant> = None;
+            // #720：市场状态（(auction_id, item, seller, price)）
+            let mut mock_market_listings: Vec<(u64, mir2_shared::data::item::UserItem, String, u32)> =
+                Vec::new();
+            let mut mock_next_auction: u64 = 5000;
             // #283：首次击杀触发本地升级演示（LevelChanged + ObjectLeveled）
             let mut mock_leveled_up = false;
             // #297：精炼流程状态（(物品 uid, 是否已开始)）
@@ -1003,6 +1009,99 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             );
                                             tracing::info!("🏰 [MOCK] 接受行会邀请，回发 GuildStatus");
                                         }
+                                    }
+                                }
+                                // #720：组队（--group-test）
+                                x if x == ClientPacketIds::AddMember as i16 => {
+                                    if let Ok(_p) = client::group::AddMember::read_body(&mut cur) {
+                                        send(
+                                            &to_client,
+                                            &server::group::GroupMembersMap {
+                                                members: vec![
+                                                    server::group::GroupMember {
+                                                        name: "刀客".to_string(),
+                                                        is_leader: true,
+                                                        online: true,
+                                                    },
+                                                    server::group::GroupMember {
+                                                        name: "bevy2char".to_string(),
+                                                        is_leader: false,
+                                                        online: true,
+                                                    },
+                                                ],
+                                            },
+                                        );
+                                        tracing::info!("👥 [MOCK] 组队成员回发（2 人）");
+                                    }
+                                }
+                                // #720：市场（--market-test）
+                                x if x == ClientPacketIds::MarketRefresh as i16 => {
+                                    if let Ok(_p) = client::market::MarketRefresh::read_body(&mut cur) {
+                                        send(&to_client, &MockNPCMarket);
+                                        send(
+                                            &to_client,
+                                            &MockNPCMarketPage {
+                                                listings: mock_market_listings.clone(),
+                                            },
+                                        );
+                                        tracing::info!(
+                                            "🏪 [MOCK] 市场刷新回发（{} 件）",
+                                            mock_market_listings.len()
+                                        );
+                                    }
+                                }
+                                x if x == ClientPacketIds::ConsignItem as i16 => {
+                                    use byteorder::{LittleEndian, ReadBytesExt};
+                                    let uid32 = cur.read_u32::<LittleEndian>().unwrap_or(0);
+                                    let price = cur.read_u32::<LittleEndian>().unwrap_or(0);
+                                    let _duration = cur.read_u32::<LittleEndian>().unwrap_or(0);
+                                    let uid = uid32 as u64;
+                                    let idx = player_inventory
+                                        .iter()
+                                        .position(|s| s.as_ref().map(|i| i.unique_id) == Some(uid));
+                                    if let Some(idx) = idx {
+                                        if let Some(item) = player_inventory[idx].take() {
+                                            mock_next_auction += 1;
+                                            mock_market_listings.push((
+                                                mock_next_auction,
+                                                item.clone(),
+                                                "bevychar".to_string(),
+                                                price,
+                                            ));
+                                            send(
+                                                &to_client,
+                                                &MockConsignResult { uid, success: true },
+                                            );
+                                            tracing::info!(
+                                                "🏪 [MOCK] 寄售 uid={} 价格{}（auction={}）",
+                                                uid,
+                                                price,
+                                                mock_next_auction
+                                            );
+                                        }
+                                    }
+                                }
+                                x if x == ClientPacketIds::MarketGetBack as i16 => {
+                                    use byteorder::{LittleEndian, ReadBytesExt};
+                                    let listing_id = cur.read_u32::<LittleEndian>().unwrap_or(0) as u64;
+                                    let pos = mock_market_listings
+                                        .iter()
+                                        .position(|(aid, _, _, _)| *aid == listing_id);
+                                    if let Some(pos) = pos {
+                                        let (_, item, _, _) = mock_market_listings.remove(pos);
+                                        if let Some(empty) =
+                                            player_inventory.iter_mut().find(|s| s.is_none())
+                                        {
+                                            *empty = Some(item);
+                                        }
+                                        send(
+                                            &to_client,
+                                            &server::ui_events::SendOutputMessage {
+                                                message: "已取回寄售物品".to_string(),
+                                                message_type: 0,
+                                            },
+                                        );
+                                        tracing::info!("🏪 [MOCK] 取回 auction={}", listing_id);
                                     }
                                 }
                                 x if x == ClientPacketIds::Attack as i16 => {
@@ -2987,6 +3086,71 @@ impl Packet for MockGuildInvitePush {
     }
 }
 
+/// #720：市场页数（客户端格式 [count i32][page dotnet]）
+struct MockNPCMarket;
+
+impl Packet for MockNPCMarket {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::NPCMarket as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_i32::<LittleEndian>(1)?;
+        mir2_shared::binary::write_dotnet_string(writer, "全部")?;
+        Ok(())
+    }
+}
+
+/// #720：市场列表（客户端格式 [count i32][per: auction_id u64][UserItem][seller dotnet][price u32][date i64]）
+struct MockNPCMarketPage {
+    listings: Vec<(u64, mir2_shared::data::item::UserItem, String, u32)>,
+}
+
+impl Packet for MockNPCMarketPage {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::NPCMarketPage as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_i32::<LittleEndian>(self.listings.len() as i32)?;
+        for (auction_id, item, seller, price) in &self.listings {
+            writer.write_u64::<LittleEndian>(*auction_id)?;
+            item.write_to(writer)?;
+            mir2_shared::binary::write_dotnet_string(writer, seller)?;
+            writer.write_u32::<LittleEndian>(*price)?;
+            writer.write_i64::<LittleEndian>(0)?; // date
+        }
+        Ok(())
+    }
+}
+
+/// #720：寄售结果（客户端格式 [uid u64][success u8]）
+struct MockConsignResult {
+    uid: u64,
+    success: bool,
+}
+
+impl Packet for MockConsignResult {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::ConsignItem as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u64::<LittleEndian>(self.uid)?;
+        writer.write_u8(if self.success { 1 } else { 0 })?;
+        Ok(())
+    }
+}
+
 fn send<P: Packet>(to_client: &Sender<Vec<u8>>, packet: &P) {
     let mut inner = Vec::new();
     if serialize_packet(&mut inner, packet).is_ok() {
@@ -3162,6 +3326,25 @@ fn wooden_sword_item() -> mir2_shared::data::item::UserItem {
 }
 
 /// #557：带孔铁剑（2 孔，镶嵌面板验收）
+/// #720：市场演示物品（uid=100/101，--market-test 寄售链路）
+fn market_item(uid: u64) -> mir2_shared::data::item::UserItem {
+    mir2_shared::data::item::UserItem {
+        unique_id: uid,
+        item_index: uid as i32,
+        count: 1,
+        info: Some(ItemInfo {
+            index: uid as i32,
+            name: format!("寄售物品#{}", uid),
+            image: 1,
+            item_type: ItemType::Weapon,
+            shape: 0,
+            price: 100,
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
 fn socketed_sword_item() -> mir2_shared::data::item::UserItem {
     let mut s = mir2_shared::data::stats::Stats::new();
     s.set(Stat::MinDC, 6);

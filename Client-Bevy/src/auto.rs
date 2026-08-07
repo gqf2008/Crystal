@@ -3945,6 +3945,14 @@ fn auto_socket_test(
     }
     *t += time.delta_secs();
     if *stage == 0 {
+        // 等 UserInformation 背包数据应用后再检查（首次进入 Game 帧时可能尚未应用）
+        if *phase == 0.0 {
+            *phase = *t;
+            return;
+        }
+        if *t - *phase < 2.0 {
+            return;
+        }
         let sock = hud
             .inventory
             .items
