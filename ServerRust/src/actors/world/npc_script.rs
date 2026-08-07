@@ -2989,6 +2989,27 @@ pub(crate) async fn teleport_player(world: &mut WorldActor, session_id: u64, map
         return;
     };
 
+    // #935：C# RequiredGroup——必须组队才能进入（GM 豁免）
+    if dest_mi.required_group {
+        let st = match world.players.get(&session_id) {
+            Some(r) => match r.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(s)) => Some(s),
+                _ => None,
+            },
+            None => None,
+        };
+        if let Some(st) = st {
+            if !st.is_gm {
+                let required = 2.max(dest_mi.required_group_size);
+                let have = world.group_member_count(session_id).await;
+                if (have as i32) < required {
+                    send_system_message(&world.gate_ref, session_id, &format!("该地图需要至少 {} 人组队才能进入", required));
+                    return;
+                }
+            }
+        }
+    }
+
     let dest_file = dest_mi.file_name.clone();
     let dest_title = dest_mi.title.clone();
     let _ = world.get_or_load_map(&dest_file, map_index);

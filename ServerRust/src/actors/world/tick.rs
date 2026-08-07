@@ -1245,6 +1245,9 @@ impl WorldActor {
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
 
+            // #935：required_group 地图组队人数不足 → 循环后统一送回绑定点（避免循环内 &mut self 借用冲突）
+            let mut required_leave: Vec<(u64, u16, i32, i32, u8)> = Vec::new();
+
             // 每 10 秒（100 ticks @ 100ms）回复 HP/MP
             for record in self.players.values() {
                 // 宠物饥饿值
@@ -1312,6 +1315,51 @@ impl WorldActor {
                             warn!("Failed to persist storage expansion expiry for {}: {}", record.name, e);
                         }
                     }
+
+                    // #935：C# CheckGroupValidityOnMap——required_group 地图组队人数不足强制送回绑定点
+                    if !state.is_gm {
+                        if let Some(mi) = self.map_infos.get(&(state.map_index as i32)) {
+                            if mi.required_group {
+                                let required = 2.max(mi.required_group_size);
+                                let have = self.group_member_count(state.session_id).await;
+                                if (have as i32) < required {
+                                    required_leave.push((
+                                        state.session_id,
+                                        state.bind_map_index.max(0) as u16,
+                                        state.bind_x,
+                                        state.bind_y,
+                                        state.direction,
+                                    ));
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        state.session_id,
+                                        &format!("组队人数不足（需要至少 {} 人），已被送回安全地图", required),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // #935：处理强制离开（加载绑定地图 + 传送）
+            for (sid, bind_map, bx, by, dir) in required_leave {
+                if let Some(file) = self.map_infos.get(&(bind_map as i32)).map(|m| m.file_name.clone()) {
+                    if self.get_or_load_map(&file, bind_map).is_some() {
+                        if let Some(map_data) = self.maps.get(&bind_map).cloned() {
+                            if let Some(record) = self.players.get(&sid) {
+                                let _ = record.actor_ref.ask(SetMapData { map: map_data }).await;
+                            }
+                        }
+                    }
+                }
+                if let Some(record) = self.players.get(&sid) {
+                    let _ = record.actor_ref.ask(SetPlayerPosition {
+                        x: bx,
+                        y: by,
+                        direction: dir,
+                        map_index: Some(bind_map),
+                        is_mounted: None,
+                    }).await;
                 }
             }
         }

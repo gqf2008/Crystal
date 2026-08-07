@@ -4070,6 +4070,27 @@ impl WorldActor {
         None
     }
 
+    /// #935：在线同组人数（C# GroupMembers.Count）
+    async fn group_member_count(&self, session_id: u64) -> usize {
+        let gid = match self.players.get(&session_id) {
+            Some(r) => match r.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(s)) => s.group_id,
+                _ => return 0,
+            },
+            None => return 0,
+        };
+        let Some(gid) = gid else { return 0 };
+        let mut count = 0usize;
+        for (_, rec) in &self.players {
+            if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                if s.group_id == Some(gid) {
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
     /// #921：玩家是否位于攻城区域（C# CheckConquest → WarZone；领地地图/王座地图）
     pub(crate) fn is_conquest_map(&self, map_index: u16) -> bool {
         let mi = map_index as i32;

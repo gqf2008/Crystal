@@ -599,6 +599,11 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     // #932: 无经验地图（C# MapInfo.NoExperience，safe to re-run）
     let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN no_experience INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    // #935: 必须组队地图（C# MapInfo.RequiredGroup/RequiredGroupSize，safe to re-run）
+    let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN required_group INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN required_group_size INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     // #480: 密码错误锁定（C# WrongPasswordCount / ExpiryDate，safe to re-run）
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN wrong_password_count INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
@@ -2291,6 +2296,10 @@ pub struct MapInfo {
     pub no_hero: bool,
     /// 禁止获得经验（C# MapInfo.NoExperience；WinExp/GainExp 入口拦截）
     pub no_experience: bool,
+    /// 必须组队才能进入/停留（C# MapInfo.RequiredGroup）
+    pub required_group: bool,
+    /// 所需组队人数（C# MapInfo.RequiredGroupSize；实际门槛 = max(2, size)）
+    pub required_group_size: i32,
     pub music: bool,
     pub no_town_teleport: bool,
     pub no_reincarnation: bool,
@@ -2697,6 +2706,8 @@ pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
             no_intelligent_creatures: row.try_get::<i32, _>("no_intelligent_creatures").unwrap_or(0) != 0,
             no_hero: row.try_get::<i32, _>("no_hero").unwrap_or(0) != 0,
             no_experience: row.try_get::<i32, _>("no_experience").unwrap_or(0) != 0,
+            required_group: row.try_get::<i32, _>("required_group").unwrap_or(0) != 0,
+            required_group_size: row.try_get::<i32, _>("required_group_size").unwrap_or(0),
             music: row.get::<i32, _>("music") != 0,
             no_town_teleport: row.get::<Option<i32>, _>("no_town_teleport").unwrap_or(0) != 0,
             no_reincarnation: row.get::<Option<i32>, _>("no_reincarnation").unwrap_or(0) != 0,
