@@ -1,5 +1,10 @@
 use super::*;
 
+/// 怪物仇恨保留距离（C# Globals.DataRange = 16；超距/跨图/死亡 → 丢失目标）
+const DATA_RANGE: i32 = 16;
+/// 怪物巡逻间隔（C# MonsterObject.RoamDelay = 1000ms = 10 ticks）
+const ROAM_DELAY_TICKS: u64 = 10;
+
 /// 游戏主循环 Tick
 pub struct Tick;
 
@@ -3081,11 +3086,25 @@ impl Message<Tick> for WorldActor {
                     }
                 }
 
-                // 更新目标
-                if let Some((sess, _, _, _)) = nearest {
+                // 更新目标：优先视野内最近玩家；已有目标时按 C# DataRange(16) 保留
+                //（C# MonsterObject.Process：跨图/不可攻击/超距 → Target = null）
+                let mut chase_target: Option<(u64, i32, i32, i32)> = None; // (session, px, py, dist)
+                if let Some((sess, px, py, dist)) = nearest {
                     monster.target_session = Some(sess);
-                } else {
-                    monster.target_session = None;
+                    chase_target = Some((sess, px, py, dist));
+                } else if let Some(ts) = monster.target_session {
+                    if let Some((sid, px, py, _, _, hp, map)) =
+                        player_positions.iter().find(|(s, _, _, _, _, _, _)| *s == ts)
+                    {
+                        let d = (monster.x - px).abs() + (monster.y - py).abs();
+                        if *map == monster.map_index && *hp > 0 && d <= DATA_RANGE {
+                            chase_target = Some((*sid, *px, *py, d));
+                        } else {
+                            monster.target_session = None; // 仇恨丢失
+                        }
+                    } else {
+                        monster.target_session = None;
+                    }
                 }
 
                 // 被动环境物体（Deer/Doe/Football 等）：不主动攻击/追击玩家，
@@ -3107,13 +3126,14 @@ impl Message<Tick> for WorldActor {
                 // Passive 怪物：未激怒时不主动攻击
                 let should_chase = match profile.ai_type {
                     MonsterAiType::Passive => monster.provoked,
-                    MonsterAiType::Guard => nearest.is_some_and(|(_, _, _, d)| d <= profile.aggro_range) && dist_to_spawn(monster) <= profile.aggro_range * 2,
-                    _ => nearest.is_some(),
+                    MonsterAiType::Guard => chase_target.is_some_and(|(_, _, _, d)| d <= profile.aggro_range) && dist_to_spawn(monster) <= profile.aggro_range * 2,
+                    _ => chase_target.is_some(),
                 };
 
                 // #471：宠物——不主动攻击玩家；有协战目标则靠近/攻击
                 if monster.master_session.is_some() {
                     nearest = None;
+                    chase_target = None;
                     monster.target_session = None;
                     if let Some(tmid) = self.pet_targets.get(&monster.object_id).copied() {
                         let target_alive = monster_snapshot.iter().any(|s| s.0 == tmid && s.3 > 0 && s.5 == monster.map_index);
@@ -3142,7 +3162,7 @@ impl Message<Tick> for WorldActor {
                     }
                 }
 
-                if let Some((target_session, px, py, dist)) = nearest {
+                if let Some((target_session, px, py, dist)) = chase_target {
                     // #395：幻觉——期内不攻击/不追击（C# HallucinationTime）
                     if self.hallucinated.get(&monster.object_id).is_some_and(|u| self.tick_count < *u) {
                         monster.target_session = None;
@@ -3425,6 +3445,23 @@ impl Message<Tick> for WorldActor {
                     monster.next_move_tick = self.tick_count + profile.move_interval;
                     monster.ai_state = MonsterAiState::Return;
                 } else {
+                    // C# ProcessRoam：无目标时按 RoamDelay(1s) 1/10 概率随机走动
+                    //（C# 1/3 转身、2/3 沿当前方向走；转身广播暂简化为原地）
+                    let roam_next = self.monster_roam_ticks.get(oid).copied().unwrap_or(0);
+                    if can_move && self.tick_count >= roam_next {
+                        self.monster_roam_ticks.insert(*oid, self.tick_count + ROAM_DELAY_TICKS);
+                        if fastrand::i32(0..10) == 0 && fastrand::i32(0..3) != 0 {
+                            let dir = monster.direction as usize % 8;
+                            let (nx, ny) = (monster.x + MON_DIR_DX[dir], monster.y + MON_DIR_DY[dir]);
+                            if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(false)
+                                && !monster_positions.contains(&(nx, ny))
+                                && moved_targets.insert((nx, ny))
+                            {
+                                moved_monsters.push((*oid, nx, ny, monster.direction));
+                                monster.next_move_tick = self.tick_count + profile.move_interval;
+                            }
+                        }
+                    }
                     monster.ai_state = MonsterAiState::Idle;
                 }
 
