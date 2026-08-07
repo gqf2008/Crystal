@@ -130,6 +130,14 @@ function Invoke-PairCase {
     $mB | ForEach-Object { Write-Output ("    B " + $_) }
 }
 
+# 0) 测试库准备：安全点 + 背包物品（#990 怪物 AI 后城镇出生点会被围杀）
+$pyCmd = Get-Command python -ErrorAction SilentlyContinue
+if ($pyCmd) {
+    & python (Join-Path $PSScriptRoot "e2e_setup_db.py") (Join-Path $ServerWorkDir "data\crystal.db")
+} else {
+    Write-Warning "python 不可用，跳过 E2E 测试库准备（角色可能被怪物围杀）"
+}
+
 # 1) 启动服务端
 Get-Process -Name mir2_server -ErrorAction SilentlyContinue | Stop-Process -Force
 $srvErr = Join-Path $tmp "server.err.log"; $srvOut = Join-Path $tmp "server.log"
