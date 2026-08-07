@@ -2890,7 +2890,7 @@ impl Message<Tick> for WorldActor {
                                     dismount_sessions.push(target_session);
                                 }
 
-                                // 装备耐久损耗（存活时）
+                                // 装备耐久损耗（C# HumanObject.DamageDura：受击时所有非武器槽位 -1）
                                 if !died {
                                     let armor_slots = [
                                         EquipmentSlot::Armour,
@@ -2902,15 +2902,16 @@ impl Message<Tick> for WorldActor {
                                         EquipmentSlot::Shoes,
                                         EquipmentSlot::Necklace,
                                     ];
-                                    let slot = armor_slots[fastrand::usize(0..armor_slots.len())];
-                                    let broke = record.actor_ref.ask(crate::actors::player::DamageEquipment {
-                                        slot,
-                                        amount: 1,
-                                    }).await.unwrap_or(false);
-                                    if broke {
-                                        debug!("Player session={} {:?} broke from monster damage!", target_session, slot);
-                                        // 延迟到怪物循环结束后广播（避免借用冲突）
-                                        broken_armor.push((target_session, slot));
+                                    for slot in armor_slots {
+                                        let broke = record.actor_ref.ask(crate::actors::player::DamageEquipment {
+                                            slot,
+                                            amount: 1,
+                                        }).await.unwrap_or(false);
+                                        if broke {
+                                            debug!("Player session={} {:?} broke from monster damage!", target_session, slot);
+                                            // 延迟到怪物循环结束后广播（避免借用冲突）
+                                            broken_armor.push((target_session, slot));
+                                        }
                                     }
                                 }
 
