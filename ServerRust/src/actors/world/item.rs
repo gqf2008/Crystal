@@ -1303,7 +1303,7 @@ impl Message<EquipItemRequest> for WorldActor {
                 Some(s) => s,
                 None => return,
             };
-            // C# CanEquipItem 校验（英雄用主人职业/性别/等级近似）
+            // C# CanEquipItem 校验（this=HeroObject）：英雄用自身等级/职业/性别（#1178）
             let state = match record.actor_ref.ask(GetPlayerState).await {
                 Ok(Some(s)) => s,
                 _ => return,
@@ -1311,8 +1311,17 @@ impl Message<EquipItemRequest> for WorldActor {
             let item = state.hero_inventory.backpack.iter().flatten()
                 .find(|s| s.item.unique_id == msg.unique_id)
                 .map(|s| s.item.clone());
+            // #1178：英雄等级/职业/性别覆盖主人值（统计需求 MaxAC 等无英雄属性，保留主人值近似）
+            let mut hero_state = state.clone();
+            if let Some(hero) = self.player_heroes.get(&msg.session_id)
+                .and_then(|hs| hs.iter().find(|h| h.index as u8 == state.hero_index))
+            {
+                hero_state.level = hero.level;
+                hero_state.class = hero.class;
+                hero_state.gender = hero.gender;
+            }
             let equippable = item.as_ref().and_then(|it| self.item_infos.get(&it.item_index))
-                .map(|info| can_equip_item(info, slot, &state))
+                .map(|info| can_equip_item(info, slot, &hero_state))
                 .unwrap_or(false);
             if !equippable {
                 send_system_message(&self.gate_ref, msg.session_id, "该物品无法装备到此位置");
