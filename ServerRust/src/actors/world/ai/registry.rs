@@ -228,6 +228,24 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("hardenrhino") || name.contains("harden rhino") || name.contains("硬皮犀牛") {
         return Box::new(bosses::harden_rhino::HardenRhinoBehavior::new());
     }
+    if name.contains("creeperplant") || name.contains("creeper plant") || name.contains("爬行植物") {
+        return Box::new(bosses::creeper_plant::CreeperPlantBehavior::new());
+    }
+    if name.contains("hellbomb") || name.contains("hell bomb") || name.contains("地狱炸弹") {
+        return Box::new(bosses::hell_bomb::HellBombBehavior::new());
+    }
+    if name.contains("frozenminer") || name.contains("frozen miner") || name.contains("冰霜矿工") {
+        return Box::new(bosses::frozen_miner::FrozenMinerBehavior::new());
+    }
+    if name.contains("glaciersnail") || name.contains("glacier snail") || name.contains("冰川蜗牛") {
+        return Box::new(bosses::glacier_snail::GlacierSnailBehavior::new());
+    }
+    if name.contains("omaslasher") || name.contains("oma slasher") || name.contains("奥玛斩击者") {
+        return Box::new(bosses::oma_slasher::OmaSlasherBehavior::new());
+    }
+    if name.contains("manectricblest") || name.contains("manectric blest") || name.contains("雷兽祝福") {
+        return Box::new(bosses::manectric_blest::ManectricBlestBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -554,6 +572,12 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("blacktortoise") || name.contains("black tortoise") || name.contains("黑龟")
         || name.contains("manectricclaw") || name.contains("manectric claw") || name.contains("雷兽之爪")
         || name.contains("hardenrhino") || name.contains("harden rhino") || name.contains("硬皮犀牛")
+        || name.contains("creeperplant") || name.contains("creeper plant") || name.contains("爬行植物")
+        || name.contains("hellbomb") || name.contains("hell bomb") || name.contains("地狱炸弹")
+        || name.contains("frozenminer") || name.contains("frozen miner") || name.contains("冰霜矿工")
+        || name.contains("glaciersnail") || name.contains("glacier snail") || name.contains("冰川蜗牛")
+        || name.contains("omaslasher") || name.contains("oma slasher") || name.contains("奥玛斩击者")
+        || name.contains("manectricblest") || name.contains("manectric blest") || name.contains("雷兽祝福")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
