@@ -524,6 +524,8 @@ pub struct MonsterState {
     pub level: i32,
     /// DB MonsterInfo.effect（C# Info.Effect；DarkBeast 出血毒开关等用）
     pub effect: i32,
+    /// 最近一次受击伤害（C# Attacked 反制：GlacierWarrior/MutatedManworm 等换目标传送用）
+    pub last_hit_damage: i32,
     /// 运行时中毒/负面状态列表
     pub poison_list: Vec<crate::combat::poison::Poison>,
     /// 是否为亡灵类型（ThunderBolt +50%、TurnUndead 秒杀用，C# MonsterInfo.Undead）
@@ -720,6 +722,8 @@ impl MonsterState {
         let actual = behavior.on_attacked(damage);
         self.behavior = behavior;
         self.hp = self.hp.saturating_sub(actual);
+        // C# Attacked 反制：记录实际承伤，behavior 下一 tick 读取（GlacierWarrior 等换目标传送）
+        self.last_hit_damage = actual;
         actual
     }
 
@@ -3063,6 +3067,7 @@ impl WorldActor {
                                     effect: monster_info.effect,
                                     damage_reduction_percent: 0,
                                     poison_list: Vec::new(),
+                                    last_hit_damage: 0,
             undead: false,
                                     master_session: None,
                                     recall_at_tick: 0,
@@ -3340,7 +3345,8 @@ impl WorldActor {
                                         agility: 0, accuracy: 0, armour_rate: 1.0, damage_rate: 1.0,
                                         magic_resist: 0, critical_rate: 0, critical_damage: 0,
                                         luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
-                                        poison_list: Vec::new(), undead: info.undead,
+                                        poison_list: Vec::new(),
+                                        last_hit_damage: 0, undead: info.undead,
                                         master_session: None, recall_at_tick: 0,
                                         behavior: ai::make_behavior(&info.name),
                                     });
@@ -4041,6 +4047,7 @@ impl WorldActor {
                 effect: info.effect,
                 damage_reduction_percent: 0,
                 poison_list: Vec::new(),
+                last_hit_damage: 0,
                 undead: info.undead,
                 master_session: None,
                 recall_at_tick: 0,
@@ -6076,6 +6083,7 @@ async fn spawn_npcs_and_monsters(
             effect: monster_effect,
             damage_reduction_percent: 0,
             poison_list: Vec::new(),
+            last_hit_damage: 0,
             undead: ctx.monster_infos.get(&monster.monster_index).map(|i| i.undead).unwrap_or(false),
             master_session: None,
             recall_at_tick: 0,
@@ -6157,6 +6165,7 @@ async fn spawn_npcs_and_monsters(
                         effect: monster_db.effect,
                         damage_reduction_percent: 0,
                         poison_list: Vec::new(),
+                        last_hit_damage: 0,
             undead: false,
                         master_session: None,
                         recall_at_tick: 0,
@@ -6273,6 +6282,7 @@ mod tests {
             effect: 0,
             damage_reduction_percent: 0,
             poison_list: Vec::new(),
+            last_hit_damage: 0,
             undead: false,
             master_session: None,
             recall_at_tick: 0,

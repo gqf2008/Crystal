@@ -246,6 +246,24 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("manectricblest") || name.contains("manectric blest") || name.contains("雷兽祝福") {
         return Box::new(bosses::manectric_blest::ManectricBlestBehavior::new());
     }
+    if name.contains("glacierwarrior") || name.contains("glacier warrior") || name.contains("冰川战士") {
+        return Box::new(bosses::glacier_warrior::GlacierWarriorBehavior::new());
+    }
+    if name.contains("mutatedmanworm") || name.contains("mutated manworm") || name.contains("变异蠕虫") {
+        return Box::new(bosses::mutated_manworm::MutatedManwormBehavior::new());
+    }
+    if name.contains("mandrill") || name.contains("山魈") {
+        return Box::new(bosses::mandrill::MandrillBehavior::new());
+    }
+    if name.contains("frosttiger") || name.contains("frost tiger") || name.contains("霜虎") {
+        return Box::new(bosses::frost_tiger::FrostTigerBehavior::new());
+    }
+    if name.contains("restlessjar") || name.contains("restless jar") || name.contains("躁动之坛") {
+        return Box::new(bosses::restless_jar::RestlessJarBehavior::new());
+    }
+    if name.contains("spittingtoad") || name.contains("spitting toad") || name.contains("吐毒蟾蜍") {
+        return Box::new(bosses::spitting_toad::SpittingToadBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -578,6 +596,12 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("glaciersnail") || name.contains("glacier snail") || name.contains("冰川蜗牛")
         || name.contains("omaslasher") || name.contains("oma slasher") || name.contains("奥玛斩击者")
         || name.contains("manectricblest") || name.contains("manectric blest") || name.contains("雷兽祝福")
+        || name.contains("glacierwarrior") || name.contains("glacier warrior") || name.contains("冰川战士")
+        || name.contains("mutatedmanworm") || name.contains("mutated manworm") || name.contains("变异蠕虫")
+        || name.contains("mandrill") || name.contains("山魈")
+        || name.contains("frosttiger") || name.contains("frost tiger") || name.contains("霜虎")
+        || name.contains("restlessjar") || name.contains("restless jar") || name.contains("躁动之坛")
+        || name.contains("spittingtoad") || name.contains("spitting toad") || name.contains("吐毒蟾蜍")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
