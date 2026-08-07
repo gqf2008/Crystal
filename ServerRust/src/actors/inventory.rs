@@ -677,6 +677,15 @@ impl PlayerInventory {
     pub fn storage_has_space(&self) -> bool {
         self.storage.iter().any(|s| s.is_none())
     }
+
+    /// 仓库扩容（C# AccountInfo.ExpandStorage：StorageGridSize=80 → 160；
+    /// 已扩容（160）时保持原长度，由调用方负责续期/扣金）
+    pub fn expand_storage(&mut self) -> usize {
+        if self.storage.len() == STORAGE_SIZE {
+            self.storage.resize(STORAGE_SIZE * 2, None);
+        }
+        self.storage.len()
+    }
     /// 镶嵌宝石：将 from_grid 的宝石插入 to_grid 装备的第一个空槽位
     /// 返回 (source_uid, target_uid) 或 None
     pub fn socket_gem(&mut self, from_grid: u8, to_grid: u8, target_slot_count: usize) -> Option<(u64, u64)> {
@@ -866,6 +875,24 @@ mod tests {
         }
         assert!(!inv.storage_has_space());
         assert_eq!(inv.storage.iter().filter(|s| s.is_some()).count(), STORAGE_SIZE);
+    }
+
+    #[test]
+    fn test_expand_storage() {
+        // #888：C# ExpandStorage 80 → 160；已扩容时不变
+        let mut inv = PlayerInventory::new();
+        assert_eq!(inv.storage.len(), STORAGE_SIZE);
+        let len = inv.expand_storage();
+        assert_eq!(len, STORAGE_SIZE * 2);
+        assert_eq!(inv.storage.len(), STORAGE_SIZE * 2);
+        // 再次调用不重复扩容
+        assert_eq!(inv.expand_storage(), STORAGE_SIZE * 2);
+        // 扩容后新格子可用（160 格可全部占用）
+        for g in 0..(STORAGE_SIZE * 2) {
+            inv.storage[g] = Some(InventorySlot { grid: g as u8, item: make_item(3, 1) });
+        }
+        assert!(!inv.storage_has_space());
+        assert_eq!(inv.storage.iter().filter(|s| s.is_some()).count(), STORAGE_SIZE * 2);
     }
 
     #[test]
