@@ -1773,6 +1773,13 @@ impl WorldActor {
     }
 
     pub(crate) async fn spawn_monster_drops(&mut self, monster: &MonsterState) {
+        // C# MonsterObject.DropItem：NoDropMonster 地图不掉落（金币/物品）
+        if self.map_infos.get(&(monster.map_index as i32))
+            .map(|mi| mi.no_drop_monster)
+            .unwrap_or(false)
+        {
+            return;
+        }
         let drops = match self.monster_drops.get(&monster.monster_index) {
             Some(d) if !d.is_empty() => d.clone(),
             _ => return,
@@ -3083,6 +3090,19 @@ impl WorldActor {
                     }
                     "BREAK" => break,
                     "TELEPORT" | "MOVE" => {
+                        // C# ActionType.Move：NoPosition 地图禁止传送指令（非 GM）
+                        if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                                if !st.is_gm {
+                                    if let Some(mi) = self.map_infos.get(&(st.map_index as i32)) {
+                                        if mi.no_position {
+                                            send_system_message(&self.gate_ref, session_id, "该地图禁止传送指令");
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         let map_name = parts.next().unwrap_or("");
                         let tx = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(330);
                         let ty = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(330);

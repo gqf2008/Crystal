@@ -623,6 +623,15 @@ impl Message<UseItemRequest> for WorldActor {
                         // 0 DungeonEscape（C# TeleportEscape(20)：传回绑定点±100）
                         // 1 TownTeleport（C# Teleport(BindMap, BindLocation)）
                         0 | 1 => {
+                            // C# UseItem Scroll case 1：TownTeleport 在地图 NoTownTeleport 时禁用
+                            if shape == 1 {
+                                if let Some(mi) = self.map_infos.get(&(player_state.map_index as i32)) {
+                                    if mi.no_town_teleport {
+                                        send_system_message(&self.gate_ref, msg.session_id, "该地图禁止回城传送");
+                                        return;
+                                    }
+                                }
+                            }
                             let bind_map = player_state.bind_map_index;
                             if self.map_infos.get(&bind_map).is_some() {
                                 // 确保绑定地图已加载（供 DungeonEscape 随机落点校验）
@@ -689,6 +698,13 @@ impl Message<UseItemRequest> for WorldActor {
                         }
                         // 2 RandomTeleport（C# TeleportRandom(200, Durability)：随机可行走格）
                         2 => {
+                            // C# UseItem Scroll case 2：RandomTeleport 在地图 NoRandom 时禁用
+                            if let Some(mi) = self.map_infos.get(&(player_state.map_index as i32)) {
+                                if mi.no_random {
+                                    send_system_message(&self.gate_ref, msg.session_id, "该地图禁止随机传送");
+                                    return;
+                                }
+                            }
                             if let Some(map) = self.maps.get(&player_state.map_index) {
                                 let (max_x, max_y) = (map.width as i32, map.height as i32);
                                 let mut attempts = 0;
