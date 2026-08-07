@@ -420,7 +420,7 @@ impl Message<StartGameRequest> for WorldActor {
             .map(|info| info.effect as i16).unwrap_or(0);
         let self_packet = build_object_player_packet(
             &player_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction,
-            loaded_state.level, name_colour_for_pk(loaded_state.pk_points, is_brown(loaded_state.brown_until_ms)),
+            loaded_state.level, self.self_name_colour(&loaded_state),
             loaded_state.class, loaded_state.gender, loaded_state.hair,
             self_weapon, self_weapon_effect, self_armor,
             loaded_state.mount_type, loaded_state.is_mounted,
@@ -453,9 +453,24 @@ impl Message<StartGameRequest> for WorldActor {
                 let ep_weapon_effect = ep_state.inventory.get_equipment(EquipmentSlot::Weapon)
                     .and_then(|item| self.item_infos.get(&item.item_index))
                     .map(|info| info.effect as i16).unwrap_or(0);
+                // #921：观察者（新玩家）相对色（C# GetNameColour）
+                let (at_war, enemy) = super::guild_war_flags(
+                    loaded_state.guild_name.as_deref(),
+                    ep_state.guild_name.as_deref(),
+                    &self.guild_wars,
+                );
+                let ep_colour = super::name_colour_for_viewer(
+                    ep_state.pk_points,
+                    super::is_brown(ep_state.brown_until_ms),
+                    self.is_conquest_map(ep_state.map_index),
+                    ep_state.guild_name.as_deref(),
+                    loaded_state.guild_name.as_deref(),
+                    at_war,
+                    enemy,
+                );
                 let packet = build_object_player_packet(
                     &ep_state.name, ep_state.object_id, ep_state.x, ep_state.y, ep_state.direction, ep_state.level,
-                    name_colour_for_pk(ep_state.pk_points, is_brown(ep_state.brown_until_ms)),
+                    ep_colour,
                     ep_state.class, ep_state.gender, ep_state.hair,
                     ep_weapon, ep_weapon_effect, ep_armor,
                     ep_state.mount_type, ep_state.is_mounted,
@@ -484,18 +499,37 @@ impl Message<StartGameRequest> for WorldActor {
             let new_weapon_effect = loaded_state.inventory.get_equipment(EquipmentSlot::Weapon)
                 .and_then(|item| self.item_infos.get(&item.item_index))
                 .map(|info| info.effect as i16).unwrap_or(0);
-            let new_player_packet = build_object_player_packet(
-                &player_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction, loaded_state.level,
-                name_colour_for_pk(loaded_state.pk_points, is_brown(loaded_state.brown_until_ms)),
-                loaded_state.class, loaded_state.gender, loaded_state.hair,
-                new_weapon, new_weapon_effect, new_armor,
-                loaded_state.mount_type, loaded_state.is_mounted,
-                loaded_state.level_effects,
-            );
             for existing in &existing_players {
+                // #921：观察者（已有玩家）相对色（C# GetNameColour）
+                let viewer_guild = match existing.actor_ref.ask(GetPlayerState).await {
+                    Ok(Some(s)) => s.guild_name,
+                    _ => None,
+                };
+                let (at_war, enemy) = super::guild_war_flags(
+                    viewer_guild.as_deref(),
+                    loaded_state.guild_name.as_deref(),
+                    &self.guild_wars,
+                );
+                let new_colour = super::name_colour_for_viewer(
+                    loaded_state.pk_points,
+                    super::is_brown(loaded_state.brown_until_ms),
+                    self.is_conquest_map(loaded_state.map_index),
+                    loaded_state.guild_name.as_deref(),
+                    viewer_guild.as_deref(),
+                    at_war,
+                    enemy,
+                );
+                let new_player_packet = build_object_player_packet(
+                    &player_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction, loaded_state.level,
+                    new_colour,
+                    loaded_state.class, loaded_state.gender, loaded_state.hair,
+                    new_weapon, new_weapon_effect, new_armor,
+                    loaded_state.mount_type, loaded_state.is_mounted,
+                    loaded_state.level_effects,
+                );
                 let _ = self.gate_ref.tell(SendToClient {
                     session_id: existing.session_id,
-                    data: new_player_packet.clone(),
+                    data: new_player_packet,
                 }).await;
             }
         }

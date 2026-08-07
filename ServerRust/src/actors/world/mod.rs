@@ -4066,6 +4066,72 @@ impl WorldActor {
         None
     }
 
+    /// #921：玩家是否位于攻城区域（C# CheckConquest → WarZone；领地地图/王座地图）
+    pub(crate) fn is_conquest_map(&self, map_index: u16) -> bool {
+        let mi = map_index as i32;
+        self.conquest_instances.iter().any(|c| c.map_index == mi || c.palace_map == mi)
+    }
+
+    /// #921：自视角名字颜色（C# RefreshNameColour → GetNameColour(this)）
+    fn self_name_colour(&self, state: &PlayerState) -> i32 {
+        let (at_war, _enemy) = guild_war_flags(
+            state.guild_name.as_deref(),
+            state.guild_name.as_deref(),
+            &self.guild_wars,
+        );
+        name_colour_for_viewer(
+            state.pk_points,
+            is_brown(state.brown_until_ms),
+            self.is_conquest_map(state.map_index),
+            state.guild_name.as_deref(),
+            state.guild_name.as_deref(),
+            at_war,
+            false,
+        )
+    }
+
+    /// #921：向所有在线玩家广播目标的名字颜色（逐观众计算，C# HumanObject.BroadcastColourChange）
+    async fn broadcast_viewer_colours(&mut self, target_session: u64) {
+        let target = match self.players.get(&target_session).cloned() {
+            Some(t) => t,
+            None => return,
+        };
+        let target_state = match target.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        let target_war_zone = self.is_conquest_map(target_state.map_index);
+        let mut viewers: Vec<(u64, Option<String>)> = Vec::new();
+        for (sid, rec) in &self.players {
+            let guild = match rec.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(s)) => s.guild_name,
+                _ => None,
+            };
+            viewers.push((*sid, guild));
+        }
+        for (sid, viewer_guild) in viewers {
+            let (at_war, enemy) = guild_war_flags(
+                viewer_guild.as_deref(),
+                target_state.guild_name.as_deref(),
+                &self.guild_wars,
+            );
+            let colour = name_colour_for_viewer(
+                target_state.pk_points,
+                is_brown(target_state.brown_until_ms),
+                target_war_zone,
+                target_state.guild_name.as_deref(),
+                viewer_guild.as_deref(),
+                at_war,
+                enemy,
+            );
+            let packet = build_object_colour_changed_packet(target_state.object_id, colour);
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: sid,
+                data: packet,
+            }).await;
+        }
+    }
+
     /// 重新计算装备属性加成并设置到 PlayerActor
     /// 返回最新的 PlayerState（如果成功）
     pub(crate) async fn recalculate_and_set_stat_bonuses(&self, session_id: u64) -> Option<PlayerState> {
@@ -5120,6 +5186,65 @@ pub(crate) fn name_colour_for_pk(pk_points: i32, brown_active: bool) -> i32 {
     } else {
         0 // White
     }
+}
+
+/// #921：观察者相对名字颜色（C# PlayerObject.GetNameColour 全逻辑，ARGB）：
+/// PK>=200 Red / 灰名 SaddleBrown / WarZone（无行会或同行会 Green，异会 Orange）/
+/// 观察者行会宣战时（同行会 Blue，敌对 Orange）/ PK>=100 Yellow / 默认 White(0=客户端默认)
+pub(crate) fn name_colour_for_viewer(
+    target_pk: i32,
+    target_brown: bool,
+    target_war_zone: bool,
+    target_guild: Option<&str>,
+    viewer_guild: Option<&str>,
+    viewer_guild_at_war: bool,
+    target_is_enemy: bool,
+) -> i32 {
+    if target_brown {
+        return 0xFFA52A2Au32 as i32; // SaddleBrown
+    }
+    if target_pk >= 200 {
+        return 0xFFFF0000u32 as i32; // Red
+    }
+    if target_war_zone {
+        // C#：无行会 / 同行会 → Green；不同行会 → Orange
+        return if target_guild.is_none() || target_guild == viewer_guild {
+            0xFF008000u32 as i32 // Green
+        } else {
+            0xFFFFA500u32 as i32 // Orange
+        };
+    }
+    if viewer_guild.is_some() && viewer_guild_at_war {
+        if let Some(tg) = target_guild {
+            if Some(tg) == viewer_guild {
+                return 0xFF0000FFu32 as i32; // Blue（同行会）
+            }
+            if target_is_enemy {
+                return 0xFFFFA500u32 as i32; // Orange（敌对行会）
+            }
+        }
+    }
+    if target_pk >= 100 {
+        0xFFFFFF00u32 as i32 // Yellow
+    } else {
+        0 // White（客户端默认）
+    }
+}
+
+/// #921：计算观察者行会的宣战/敌对标志（C# MyGuild.IsAtWar / IsEnemy）
+fn guild_war_flags(
+    viewer_guild: Option<&str>,
+    target_guild: Option<&str>,
+    guild_wars: &std::collections::HashMap<String, std::collections::HashSet<String>>,
+) -> (bool, bool) {
+    let at_war = viewer_guild
+        .map(|g| guild_wars.get(g).map(|s| !s.is_empty()).unwrap_or(false))
+        .unwrap_or(false);
+    let enemy = match (viewer_guild, target_guild) {
+        (Some(v), Some(t)) => guild_wars.get(v).map(|s| s.contains(t)).unwrap_or(false),
+        _ => false,
+    };
+    (at_war, enemy)
 }
 
 /// 检查攻击者是否可以在当前攻击模式下攻击目标玩家
@@ -6193,5 +6318,28 @@ mod set_bonus_tests {
         inv.equipment[EquipmentSlot::Armour as usize] = Some(UserItem { item_index: 5, count: 1, ..Default::default() });
         let muscle = weight_limit(&inv, mir2_shared::enums::MirClass::Warrior, 1, mir2_shared::enums::Stat::BagWeight, &infos);
         assert_eq!(muscle, base * 2, "Muscle doubles weight limit");
+    }
+
+    #[test]
+    fn test_name_colour_for_viewer() {
+        use super::name_colour_for_viewer;
+        // #921：C# GetNameColour 分支
+        // PK>=200 → Red
+        assert_eq!(name_colour_for_viewer(200, false, false, None, None, false, false), 0xFFFF0000u32 as i32);
+        // 灰名 → SaddleBrown（优先于红）
+        assert_eq!(name_colour_for_viewer(300, true, false, None, None, false, false), 0xFFA52A2Au32 as i32);
+        // WarZone：无行会 → Green；同行会 → Green；异会 → Orange
+        assert_eq!(name_colour_for_viewer(50, false, true, None, None, false, false), 0xFF008000u32 as i32);
+        assert_eq!(name_colour_for_viewer(50, false, true, Some("A"), Some("A"), false, false), 0xFF008000u32 as i32);
+        assert_eq!(name_colour_for_viewer(50, false, true, Some("A"), Some("B"), false, true), 0xFFFFA500u32 as i32);
+        // WarZone 下 PK 150 仍是 Green/Orange（WarZone 优先于 Yellow）
+        assert_eq!(name_colour_for_viewer(150, false, true, Some("A"), Some("A"), false, false), 0xFF008000u32 as i32);
+        // 行会战：同行会 → Blue；敌对 → Orange；非敌对异会 → 落到 Yellow/White
+        assert_eq!(name_colour_for_viewer(50, false, false, Some("A"), Some("A"), true, false), 0xFF0000FFu32 as i32);
+        assert_eq!(name_colour_for_viewer(50, false, false, Some("B"), Some("A"), true, true), 0xFFFFA500u32 as i32);
+        assert_eq!(name_colour_for_viewer(50, false, false, Some("C"), Some("A"), true, false), 0); // 白
+        // 非战：PK>=100 → Yellow；否则 White(0)
+        assert_eq!(name_colour_for_viewer(150, false, false, None, None, false, false), 0xFFFFFF00u32 as i32);
+        assert_eq!(name_colour_for_viewer(50, false, false, None, None, false, false), 0);
     }
 }

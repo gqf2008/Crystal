@@ -811,25 +811,21 @@ impl WorldActor {
             for (session_id, record) in &self.players {
                 let _ = record.actor_ref.ask(crate::actors::player::DecayPkPoints).await;
                 if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                    let new_colour = name_colour_for_pk(state.pk_points, is_brown(state.brown_until_ms));
+                    // #921：自视角颜色（含 WarZone/行会战；进沙巴克/宣战即触发刷新，C# RefreshNameColour）
+                    let new_colour = self.self_name_colour(&state);
                     let old_colour = record.last_colour;
                     if new_colour != old_colour {
-                        colour_changes.push((*session_id, state.object_id, new_colour, state.pk_points));
+                        colour_changes.push((*session_id, new_colour, state.pk_points));
                     }
                 }
             }
-            for (session_id, object_id, new_colour, pk_points) in colour_changes {
+            for (session_id, new_colour, pk_points) in colour_changes {
                 if let Some(record) = self.players.get_mut(&session_id) {
                     record.last_pk_points = pk_points;
                     record.last_colour = new_colour;
                 }
-                let packet = build_object_colour_changed_packet(object_id, new_colour);
-                for (sid, _) in &self.players {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: *sid,
-                        data: packet.clone(),
-                    }).await;
-                }
+                // #921：逐观众广播名字颜色（C# BroadcastColourChange）
+                self.broadcast_viewer_colours(session_id).await;
             }
         }
     }
