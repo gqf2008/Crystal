@@ -186,6 +186,15 @@ impl Message<CancelReincarnationRequest> for WorldActor {
 // 行会战/领地
 // ============================================================
 
+/// 行会战争键（排序后行会对，保证双向唯一）
+fn war_key(a: &str, b: &str) -> (String, String) {
+    if a < b {
+        (a.to_string(), b.to_string())
+    } else {
+        (b.to_string(), a.to_string())
+    }
+}
+
 pub struct GuildWarReturnRequest {
     pub session_id: u64,
     pub guild_name: String,
@@ -223,9 +232,45 @@ impl Message<GuildWarReturnRequest> for WorldActor {
             return;
         }
 
+        // C# GoToWar：目标行会必须存在
+        let exists = self.social_ref.ask(crate::actors::social::NpcGuildExists {
+            guild_name: msg.guild_name.clone(),
+        }).await.unwrap_or(false);
+        if !exists {
+            send_system_message(&self.gate_ref, msg.session_id, "目标行会不存在");
+            return;
+        }
+        // C#：已在战争中不可重复宣战
+        if self.guild_wars.get(sender_guild)
+            .map(|s| s.contains(&msg.guild_name))
+            .unwrap_or(false)
+        {
+            send_system_message(&self.gate_ref, msg.session_id, "你们已与该行会开战");
+            return;
+        }
+        // C# 宣战费用（Settings.Guild_WarCost=3000）：行会金币不足拒绝
+        let (war_cost, war_time) = self.social_ref
+            .ask(crate::actors::social::NpcGetGuildWarSettings).await
+            .unwrap_or((3000u32, 180i64));
+        let deducted = self.social_ref.ask(crate::actors::social::GuildDeductGold {
+            guild_name: sender_guild.clone(),
+            amount: war_cost as u64,
+        }).await.unwrap_or(false);
+        if !deducted {
+            send_system_message(&self.gate_ref, msg.session_id,
+                &format!("行会金币不足，宣战需要 {} 金币", war_cost));
+            return;
+        }
+
         // Record the war declaration
         self.guild_wars.entry(sender_guild.clone()).or_default().insert(msg.guild_name.clone());
         self.guild_wars.entry(msg.guild_name.clone()).or_default().insert(sender_guild.clone());
+        // C# GuildAtWar.TimeRemaining = Settings.Minute * Guild_WarTime（单位分钟）
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        self.guild_war_ends.insert(war_key(sender_guild, &msg.guild_name), now + war_time * 60);
 
         // Notify all online members of the declaring guild
         let war_msg = format!("行会 {} 已向 {} 宣战！", sender_guild, msg.guild_name);
@@ -424,5 +469,17 @@ impl Message<PurchaseGuildTerritoryRequest> for WorldActor {
                 send_system_message(&self.gate_ref, msg.session_id, "领地不存在");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_war_key_sorted() {
+        assert_eq!(war_key("A", "B"), ("A".to_string(), "B".to_string()));
+        assert_eq!(war_key("B", "A"), ("A".to_string(), "B".to_string()));
+        assert_eq!(war_key("A", "A"), ("A".to_string(), "A".to_string()));
     }
 }

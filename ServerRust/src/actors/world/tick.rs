@@ -2052,6 +2052,44 @@ impl WorldActor {
             dragon_info.map_file_name, dragon_info.location_x, dragon_info.location_y);
     }
 
+    /// 行会战到期检查（C# Envir.cs 2317-2327：TimeRemaining 递减，到期 EndWar）
+    pub(crate) async fn tick_guild_wars(&mut self) {
+        if self.tick_count % 30 != 0 {
+            return; // 每 3 秒检查
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let mut expired: Vec<(String, String)> = Vec::new();
+        for ((a, b), end) in &self.guild_war_ends {
+            if now >= *end {
+                expired.push((a.clone(), b.clone()));
+            }
+        }
+        for (a, b) in expired {
+            self.guild_war_ends.remove(&(a.clone(), b.clone()));
+            if let Some(set) = self.guild_wars.get_mut(&a) {
+                set.remove(&b);
+            }
+            if let Some(set) = self.guild_wars.get_mut(&b) {
+                set.remove(&a);
+            }
+            // C# EndWar：通知双方行会
+            for (sid, rec) in &self.players {
+                if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                    if s.guild_name.as_deref() == Some(a.as_str())
+                        || s.guild_name.as_deref() == Some(b.as_str())
+                    {
+                        send_system_message(&self.gate_ref, *sid,
+                            &format!("行会 {} 与 {} 的战争已结束！", a, b));
+                    }
+                }
+            }
+            debug!("Guild war expired: {} vs {}", a, b);
+        }
+    }
+
     pub(crate) async fn tick_conquest(&mut self) {
         // 1) 战争调度：开始/结束（每 tick 检查时间）
         //    先收集需要广播的消息，避免在借用 instance 时借用 gate_ref
@@ -4611,6 +4649,8 @@ impl Message<Tick> for WorldActor {
         self.tick_robots().await;
 
         self.tick_dragon().await;
+
+        self.tick_guild_wars().await;
 
         self.tick_conquest().await;
     }
