@@ -2146,6 +2146,16 @@ pub struct SafeZoneInfo {
     pub start_point: bool,
 }
 
+/// Map mine zone（C# MineSpot：x/y 为中心、size 为半径）
+#[derive(Debug, Clone)]
+pub struct MineZoneInfo {
+    pub map_index: i32,
+    pub x: i32,
+    pub y: i32,
+    pub size: i32,
+    pub mine: i32,
+}
+
 /// Map respawn
 #[derive(Debug, Clone)]
 pub struct MapRespawnInfo {
@@ -2227,6 +2237,7 @@ pub struct MapInfo {
     pub safe_zones: Vec<SafeZoneInfo>,
     pub respawns: Vec<MapRespawnInfo>,
     pub movements: Vec<MapMovementInfo>,
+    pub mine_zones: Vec<MineZoneInfo>,
 }
 
 /// Item info (flat from DB, stats parsed from JSON)
@@ -2522,6 +2533,7 @@ pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
     let sz_rows = sqlx::query("SELECT * FROM safe_zones").fetch_all(pool).await?;
     let rs_rows = sqlx::query("SELECT * FROM map_respawns").fetch_all(pool).await?;
     let mv_rows = sqlx::query("SELECT * FROM map_movements").fetch_all(pool).await?;
+    let mz_rows = sqlx::query("SELECT * FROM mine_zones").fetch_all(pool).await?;
 
     // Index child rows by map_index
     let mut sz_by_map: HashMap<i32, Vec<SafeZoneInfo>> = HashMap::new();
@@ -2553,6 +2565,18 @@ pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
             respawn_index: r.get("respawn_index"),
             save_respawn_time: r.get::<i32, _>("save_respawn_time") != 0,
             respawn_ticks: r.get("respawn_ticks"),
+        });
+    }
+
+    let mut mz_by_map: HashMap<i32, Vec<MineZoneInfo>> = HashMap::new();
+    for r in mz_rows {
+        let mi: i32 = r.get("map_index");
+        mz_by_map.entry(mi).or_default().push(MineZoneInfo {
+            map_index: mi,
+            x: r.get("x"),
+            y: r.get("y"),
+            size: r.get("size"),
+            mine: r.try_get::<i32, _>("mine").unwrap_or(0),
         });
     }
 
@@ -2618,6 +2642,7 @@ pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
             safe_zones: sz_by_map.remove(&index).unwrap_or_default(),
             respawns: rs_by_map.remove(&index).unwrap_or_default(),
             movements: mv_by_map.remove(&index).unwrap_or_default(),
+            mine_zones: mz_by_map.remove(&index).unwrap_or_default(),
         });
     }
 

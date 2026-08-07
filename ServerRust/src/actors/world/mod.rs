@@ -929,6 +929,8 @@ pub struct WorldActor {
     pub(crate) map_lightning_next_tick: HashMap<u16, u64>,
     /// 各图火海/岩浆下一波打击 tick（C# Map.FireTime）
     pub(crate) map_fire_next_tick: HashMap<u16, u64>,
+    /// 矿脉储量状态（map,(x,y) -> 剩余石头/再生 tick；C# MineSpot）
+    pub(crate) mine_spot_state: HashMap<(u16, i32, i32), MineSpotState>,
     /// 定时机器人任务
     pub(crate) robot_tasks: Vec<robot::RobotTask>,
     /// 机器人上次检查的分钟值
@@ -1114,6 +1116,7 @@ impl WorldActor {
             concentration_visible: HashMap::new(),
             map_lightning_next_tick: HashMap::new(),
             map_fire_next_tick: HashMap::new(),
+            mine_spot_state: HashMap::new(),
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
@@ -3666,6 +3669,7 @@ impl Actor for WorldActor {
             concentration_visible: HashMap::new(),
             map_lightning_next_tick: HashMap::new(),
             map_fire_next_tick: HashMap::new(),
+            mine_spot_state: HashMap::new(),
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
