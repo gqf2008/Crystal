@@ -856,6 +856,9 @@ fn hud_server_events(
             | ServerEvent::MagicLearned { .. }
             | ServerEvent::MagicLeveled { .. }
             | ServerEvent::HeroMagicLearned { .. }
+            | ServerEvent::HeroHealthChanged { .. }
+            | ServerEvent::GainHeroExperience { .. }
+            | ServerEvent::HeroLevelChanged { .. }
             | ServerEvent::TimeOfDay { .. }
             | ServerEvent::ObjectColourChanged { .. }
             | ServerEvent::StoragePasswordResult { .. }

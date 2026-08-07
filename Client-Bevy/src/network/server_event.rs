@@ -395,6 +395,12 @@ pub enum ServerEvent {
     MagicLearned { magic: ClientMagic },
     /// NewMagic(hero=true)：英雄学会技能（#1128）
     HeroMagicLearned { magic: ClientMagic },
+    /// HeroHealthChanged：英雄 HP/MP 实时同步（#1135，C# S.HeroHealthChanged）
+    HeroHealthChanged { hp: u32, mp: u32 },
+    /// GainHeroExperience：英雄经验增加（#1135，C# S.GainHeroExperience）
+    GainHeroExperience { amount: u32 },
+    /// HeroLevelChanged：英雄升级（#1135，C# S.HeroLevelChanged）
+    HeroLevelChanged { level: u16, exp: i64, max_exp: i64 },
     /// MagicLeveled：技能升级（C# S.MagicLeveled）
     MagicLeveled {
         object_id: u32,
