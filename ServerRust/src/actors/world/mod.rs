@@ -1889,6 +1889,18 @@ impl WorldActor {
         // C# RedDeathDrop：红名（PK>200）被玩家击杀时跳过装备掉落（killer.Race == Player 分支），
         // 只掉背包；被怪物/环境击杀才按红名高概率掉装备。
         let equipment_drops = !(red && killed_by_player);
+        // C# DeathDrop（HumanObject.cs:1427）：Spirit 套装不完整时，装备的 Spirit 部件直接碎裂（移除不掉落）
+        let spirit_incomplete = {
+            let mut spirit_types: Vec<i32> = Vec::new();
+            for eq in state.inventory.equipment.iter().flatten() {
+                if let Some(info) = self.item_infos.get(&eq.item_index) {
+                    if info.set_type == 1 /* ItemSet.Spirit（C# 值） */ && !spirit_types.contains(&info.item_type) {
+                        spirit_types.push(info.item_type);
+                    }
+                }
+            }
+            spirit_types.len() < 5 // C# ItemSets.Amount：Spirit → 5
+        };
         for slot_idx in 0..crate::actors::inventory::EquipmentSlot::COUNT {
             if !equipment_drops {
                 break;
@@ -1899,6 +1911,11 @@ impl WorldActor {
             let Some(item) = state.inventory.equipment[slot_idx].as_ref() else { continue };
             let Some(info) = self.item_infos.get(&item.item_index) else { continue };
             let bind = info.bind_mode;
+            // C# DeathDrop：Spirit 套装不完整 → Spirit 部件碎裂（移除，不掉落）
+            if spirit_incomplete && info.set_type == 1 {
+                let _ = record.actor_ref.ask(crate::actors::player::TakeEquipmentOnDeath { slot }).await;
+                continue;
+            }
             // C# BindMode.DontDeathdrop = 0x0001：不掉落
             if (bind & 0x0001) != 0 {
                 continue;
