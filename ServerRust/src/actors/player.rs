@@ -1760,6 +1760,26 @@ impl Message<RemoveBuff> for PlayerActor {
     }
 }
 
+/// #965：清除全部 Buff（@CLEARBUFFS，C# FlagForRemoval；逐 buff 下发 S.RemoveBuff）
+pub struct ClearAllBuffs;
+
+impl Message<ClearAllBuffs> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, _msg: ClearAllBuffs, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let tags: Vec<u8> = self.state.buffs.iter().map(|b| buff_tag(&b.buff_type)).collect();
+        self.state.buffs.clear();
+        for tag in tags {
+            let mut body = Vec::new();
+            body.push(tag);
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveBuff as i16, &body),
+            }).try_send();
+        }
+    }
+}
+
 /// Buff tick（由 WorldActor 主循环每 tick 调用）
 pub struct TickBuff;
 
