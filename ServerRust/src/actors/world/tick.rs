@@ -1554,7 +1554,8 @@ impl WorldActor {
                 // 弓箭手弹道物理系（命中后按 AC 防御结算，BindingShot/NapalmShot 附加效果）
                 | Spell::StraightShot | Spell::DoubleShot
                 | Spell::BindingShot | Spell::NapalmShot
-                | Spell::VampireShot | Spell::PoisonShot | Spell::CrippleShot | Spell::ElementalShot => {
+                | Spell::VampireShot | Spell::PoisonShot | Spell::CrippleShot | Spell::ElementalShot
+                | Spell::CatTongue => {
                     Self::complete_projectile_spell(
                         self, pending, &caster_state, &attacker_stats, level_offset, spell_enum,
                     ).await;
@@ -1595,7 +1596,8 @@ impl WorldActor {
         // 弓箭手弹道走 AC 防御（物理），法师弹道走 MAC（魔法）
         let is_archer = matches!(spell,
             Spell::StraightShot | Spell::DoubleShot | Spell::BindingShot | Spell::NapalmShot
-            | Spell::VampireShot | Spell::PoisonShot | Spell::CrippleShot | Spell::ElementalShot);
+            | Spell::VampireShot | Spell::PoisonShot | Spell::CrippleShot | Spell::ElementalShot
+            | Spell::CatTongue);
         let defence = if is_archer { DefenceType::Ac } else { DefenceType::Mac };
 
         // 弓手被动 Focus（C# HumanObject CompleteRangeAttack：Random(5)<=Lv 时命中概率 ×2）
@@ -1704,6 +1706,12 @@ impl WorldActor {
                         poison::apply_poison(&mut monster.poison_list,
                             poison::Poison::new(PoisonType::SLOW, dur, 0, 1000));
                         debug!("CrippleShot slowed monster {} ({}s)", target_id, dur);
+                    }
+                    // CatTongue：20% 概率冰冻（C# CompleteMagic：Random(10)>=8，Duration=(Lv+1)*3s）
+                    if spell == Spell::CatTongue && fastrand::i32(0..10) >= 8 {
+                        poison::apply_poison(&mut monster.poison_list,
+                            poison::Poison::new(PoisonType::FROZEN, (pending.spell_level as u32 + 1) * 3, 0, 1000));
+                        debug!("CatTongue froze monster {} ({}s)", target_id, (pending.spell_level as u32 + 1) * 3);
                     }
                     if spell == Spell::VampireShot {
                         let vamp = (result.damage as f32 * 0.25) as i32;
@@ -1853,6 +1861,10 @@ impl WorldActor {
                     if spell == Spell::CrippleShot {
                         let dur = super::special_shot_buff_time(pending.spell_level).max(1) as u32;
                         player_poisons.push(poison::Poison::new(PoisonType::SLOW, dur, 0, 1000));
+                    }
+                    if spell == Spell::CatTongue && fastrand::i32(0..10) >= 8 {
+                        player_poisons.push(poison::Poison::new(
+                            PoisonType::FROZEN, (pending.spell_level as u32 + 1) * 3, 0, 1000));
                     }
                     if !player_poisons.is_empty() {
                         let _ = actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
