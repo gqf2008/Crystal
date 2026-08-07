@@ -18,6 +18,10 @@ pub struct HornedCommanderBehavior {
     called_shield: bool,
     rock_spike_tick: u64,
     shield_end_tick: u64,
+    /// C# _RockSpikeArea 7×7 锚点（以地图中心为基准，间距 5 格）
+    rock_spike_anchors: Vec<(i32, i32)>,
+    /// 下一个待生成的锚点索引
+    rock_spike_index: usize,
 }
 
 impl HornedCommanderBehavior {
@@ -30,6 +34,8 @@ impl HornedCommanderBehavior {
             called_shield: false,
             rock_spike_tick: 0,
             shield_end_tick: 0,
+            rock_spike_anchors: Vec::new(),
+            rock_spike_index: 0,
         }
     }
 }
@@ -98,20 +104,39 @@ impl MonsterBehavior for HornedCommanderBehavior {
         if hp_pct < 50.0 && hp_pct >= 10.0 {
             if !self.called_rock_spikes {
                 self.called_rock_spikes = true;
+                // C# SetupRockSpike：以地图中心为基准的 7×7 锚点网格，间距 5 格
+                let (mw, mh) = ctx.map_size;
+                let cx = mw / 2;
+                let cy = mh / 2;
+                self.rock_spike_anchors.clear();
+                for ax in 0..7i32 {
+                    for ay in 0..7i32 {
+                        self.rock_spike_anchors.push((cx + (ax - 3) * 5, cy + (ay - 3) * 5));
+                    }
+                }
+                self.rock_spike_index = 0;
             }
             if ctx.tick_count >= self.rock_spike_tick {
-                // 撒 RockSpike 法术场（简化：5×5 单片）
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {
-                    spell: Spell::HornedCommanderRockSpike,
-                    x: monster.x,
-                    y: monster.y,
-                    value: damage,
-                    duration_ms: 10 * 60 * 1000, // 10 分钟
-                    tick_ms: 1000,
-                    caster_oid: monster.object_id,
-                    caster_session: 0,
-                });
+                // C# SpawnRockSpikes：每 5s 推进一个锚点，生成其周围 5×5 法术场
+                if self.rock_spike_index < self.rock_spike_anchors.len() {
+                    let (anchor_x, anchor_y) = self.rock_spike_anchors[self.rock_spike_index];
+                    self.rock_spike_index += 1;
+                    let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+                    for dy in -2..=2i32 {
+                        for dx in -2..=2i32 {
+                            ctx.out_spell_fields.push(crate::actors::world::ai::SpellFieldSpawn {
+                                spell: Spell::HornedCommanderRockSpike,
+                                x: anchor_x + dx,
+                                y: anchor_y + dy,
+                                value: damage,
+                                duration_ms: 10 * 60 * 1000, // 10 分钟
+                                tick_ms: 1000,
+                                caster_oid: monster.object_id,
+                                caster_session: 0,
+                            });
+                        }
+                    }
+                }
                 self.rock_spike_tick = ctx.tick_count + 50; // 5s
             }
         }
