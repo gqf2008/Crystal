@@ -144,6 +144,23 @@ impl Message<ProcessRevives> for WorldActor {
     }
 }
 
+/// #986：C# FindTarget 子集——宠物在 Both/AttackOnly 下若无协战目标，
+/// 找最近正在攻击主人（target_session == master）的怪物（C# IsAttackTarget：ob.Target == attacker.Master）。
+fn pet_find_hostile_target(
+    monster: &MonsterState,
+    monster_snapshot: &[(u32, i32, i32, i32, i32, u16, i32, String, u16, u8)],
+    monster_hostility: &std::collections::HashMap<u32, (Option<u64>, Option<u64>)>,
+) -> Option<(u32, i32, i32)> {
+    let master = monster.master_session?;
+    monster_snapshot.iter()
+        .filter(|s| s.0 != monster.object_id && s.5 == monster.map_index && s.3 > 0)
+        .filter(|s| monster_hostility.get(&s.0).map_or(false, |(ms, ts)| {
+            *ms != monster.master_session && *ts == Some(master)
+        }))
+        .min_by_key(|s| ((s.1 - monster.x).abs() + (s.2 - monster.y).abs(), s.0))
+        .map(|s| (s.0, s.1, s.2))
+}
+
 impl WorldActor {
 
     /// 处理自动复活（C# Revive）：Revive + NoReconnect 传送 + ObjectRevived 广播。
@@ -669,6 +686,25 @@ impl WorldActor {
         }
     }
 
+
+    /// 广播对象显示/隐藏（C# S.ObjectShow / S.ObjectHide：Shinsu 形态切换等）
+    async fn broadcast_object_show_hide(&self, object_id: u32, visible: bool) {
+        let mut body = Vec::new();
+        body.extend_from_slice(&object_id.to_le_bytes());
+        let opcode = if visible {
+            mir2_shared::enums::ServerPacketIds::ObjectShow as i16
+        } else {
+            mir2_shared::enums::ServerPacketIds::ObjectHide as i16
+        };
+        let packet = build_packet_bytes(opcode, &body);
+        for sid in self.players.keys() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: *sid,
+                data: packet.clone(),
+            }).await;
+        }
+    }
+
 /// PK 值衰减 + 名字颜色广播（C# MapObject.Process：每 Settings.PKDelay=12 秒衰减 1 点）
     /// 死亡回调：调用 behavior.on_die 并应用其输出（C# Die 覆盖；
     /// 此前 on_die 从未被接线，HumanAssassin 死亡爆炸 / KingHydrax 死亡召唤等机制失效）。
@@ -691,6 +727,8 @@ impl WorldActor {
         let mut die_taunts: Vec<(u32, u32)> = Vec::new();
         let mut die_monster_teleports: Vec<(u32, i32, i32)> = Vec::new();
         let mut die_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
+        let mut die_show_hide: Vec<(u32, bool)> = Vec::new();
+        let mut die_player_heals: Vec<(u64, i32)> = Vec::new();
         {
             // 死亡回调也提供玩家快照（C# Die 可 FindAllTargets；ToxicGhoul 死亡 AOE 毒等用）
             let die_player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
@@ -719,6 +757,12 @@ impl WorldActor {
                 out_monster_taunts: &mut die_taunts,
                 out_monster_teleports: &mut die_monster_teleports,
                 out_player_buffs: &mut die_player_buffs,
+                out_show_hide: &mut die_show_hide,
+                out_player_heals: &mut die_player_heals,
+                pet_level: self.pet_levels.get(&monster.object_id).copied().unwrap_or(0),
+                master_pet_mode: None,
+                master_target: None,
+                has_master_monster_target: false,
             };
             // 临时取出 behavior 避免 &mut monster + &mut behavior 双重借用（与 AI 循环一致）
             let mut behavior = std::mem::replace(
@@ -3023,6 +3067,7 @@ impl Message<Tick> for WorldActor {
             // 对每个怪物执行 AI
             let mut dead_monsters = Vec::new();
             let mut moved_monsters = Vec::new();
+        let mut pet_recalls: Vec<(u32, i32, i32)> = Vec::new();
             // 巡逻转身广播（C# ProcessRoam Turn → ObjectTurn）
             let mut monster_turns: Vec<(u32, u8, i32, i32)> = Vec::new();
             let mut moved_targets: HashSet<(i32, i32)> = HashSet::new();
@@ -3035,6 +3080,11 @@ impl Message<Tick> for WorldActor {
             let monster_snapshot: Vec<(u32, i32, i32, i32, i32, u16, i32, String, u16, u8)> = self.monsters.values()
                 .map(|m| (m.object_id, m.x, m.y, m.hp, m.max_hp, m.map_index, m.monster_index, m.name.clone(), m.image, m.direction))
                 .collect();
+            // #986：怪物敌对关系预收集（oid → (master_session, target_session)），供宠物自主索敌
+            let monster_hostility: std::collections::HashMap<u32, (Option<u64>, Option<u64>)> =
+                self.monsters.iter()
+                    .map(|(oid, m)| (*oid, (m.master_session, m.target_session)))
+                    .collect();
             // Healer 治疗动作和 Summoner 召唤动作（在循环后应用）
             let mut heal_actions: Vec<(u32, i32)> = Vec::new();
             // #471 宠物协战动作（pet_oid, target_oid, damage, master_session，循环后应用）
@@ -3055,6 +3105,8 @@ impl Message<Tick> for WorldActor {
             let mut boss_taunts: Vec<(u32, u32)> = Vec::new();
             let mut boss_monster_teleports: Vec<(u32, i32, i32)> = Vec::new();
             let mut boss_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
+            let mut boss_show_hide: Vec<(u32, bool)> = Vec::new();
+            let mut boss_player_heals: Vec<(u64, i32)> = Vec::new();
             // 召唤物过期队列（到期 tick 已过 → 移除，不掉落）
             let mut expired_monsters: Vec<u32> = Vec::new();
 
@@ -3071,10 +3123,24 @@ impl Message<Tick> for WorldActor {
                     let monster_index = monster.monster_index;
                     let _monster_map = monster.map_index;
                     let monster_name = monster.name.clone();
+                    // 宠物元数据（C# Master.PMode / Master.Target / PetLevel；#471 协战）
+                    let (master_pet_mode, master_target, has_master_monster_target) =
+                        if let Some(master) = monster.master_session {
+                            let mode = self.player_pet_modes.get(&master).copied();
+                            let tgt = self.player_targets.get(&master).copied()
+                                .and_then(|oid| player_positions.iter()
+                                    .find(|(_, _, _, o, _, _, _, _)| *o == oid)
+                                    .map(|(s, x, y, oid, _, hp, map, lvl)| ai::PlayerSnap {
+                                        session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl,
+                                    }));
+                            (mode, tgt, self.pet_targets.contains_key(&monster.object_id))
+                        } else {
+                            (None, None, false)
+                        };
                     let player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
                         .map(|(s, x, y, oid, _, hp, map, lvl)| ai::PlayerSnap {
-                            session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl,
-                        }).collect();
+                                        session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl,
+                                    }).collect();
                     // monster_snaps 从循环外预收集的 monster_snapshot 构建（避免 &mut self.monsters 借用冲突）
                     let monster_snaps: Vec<ai::MonsterSnap> = monster_snapshot.iter()
                         .map(|(oid, x, y, hp, max_hp, map, idx, _, _, _)| ai::MonsterSnap {
@@ -3102,6 +3168,12 @@ impl Message<Tick> for WorldActor {
                         out_monster_taunts: &mut boss_taunts,
                         out_monster_teleports: &mut boss_monster_teleports,
                         out_player_buffs: &mut boss_player_buffs,
+                        out_show_hide: &mut boss_show_hide,
+                        out_player_heals: &mut boss_player_heals,
+                        pet_level: self.pet_levels.get(&monster_oid).copied().unwrap_or(0),
+                        master_pet_mode,
+                        master_target,
+                        has_master_monster_target,
                     };
                     // 临时取出 behavior 避免 &mut monster + &mut behavior 双重借用
                     let mut behavior = std::mem::replace(
@@ -3122,6 +3194,58 @@ impl Message<Tick> for WorldActor {
                     for (target, taunter) in boss_taunts.drain(..) {
                         if target != monster.object_id {
                             self.monster_targets.insert(target, taunter);
+                        }
+                    }
+                    // #471 宠物协战（自定义 AI 宠物）：攻击主人攻击的怪物，不主动攻击玩家
+                    // C# CanAttack：MoveOnly/None 不允许攻击（PetMode）
+                    if let Some(master) = monster.master_session {
+                        let pet_may_attack = self.player_pet_modes
+                            .get(&master)
+                            .map(|m| matches!(m, mir2_shared::enums::PetMode::Both
+                                | mir2_shared::enums::PetMode::AttackOnly
+                                | mir2_shared::enums::PetMode::FocusMasterTarget))
+                            .unwrap_or(true); // 无缓存默认允许（C# 默认 Both）
+                        if !pet_may_attack {
+                            monster.target_session = None;
+                            continue;
+                        }
+                        // 协战目标（#471 主人攻击的怪物）
+                        let mut pet_target: Option<(u32, i32, i32)> = None;
+                        if let Some(tmid) = self.pet_targets.get(&monster.object_id).copied() {
+                            let target_alive = monster_snapshot.iter()
+                                .any(|s| s.0 == tmid && s.3 > 0 && s.5 == monster.map_index);
+                            if !target_alive {
+                                self.pet_targets.remove(&monster.object_id);
+                            } else if let Some((_, tx, ty, _, _, _, _, _, _, _)) =
+                                monster_snapshot.iter().find(|s| s.0 == tmid)
+                            {
+                                pet_target = Some((tmid, *tx, *ty));
+                            }
+                        }
+                        // #986：无协战目标 → 找最近正在攻击主人的怪物（C# FindTarget 子集）
+                        if pet_target.is_none() {
+                            pet_target = pet_find_hostile_target(monster, &monster_snapshot, &monster_hostility);
+                        }
+                        if let Some((tmid, tx, ty)) = pet_target {
+                            let dist = (tx - monster.x).abs() + (ty - monster.y).abs();
+                            if dist <= 1 && self.tick_count >= monster.next_attack_tick {
+                                let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
+                                let damage = ((self.tick_count.wrapping_add(monster.object_id as u64)
+                                    .wrapping_mul(13)) as i32 % dmg_range) + monster.min_dmg;
+                                pet_attacks.push((monster.object_id, tmid, damage, master));
+                                monster.next_attack_tick = self.tick_count + monster.ai_profile.attack_cooldown;
+                                monster.ai_state = MonsterAiState::Attack;
+                            } else if self.tick_count >= monster.next_move_tick {
+                                let (nx, ny, dir) = monster.step_toward(tx, ty);
+                                if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
+                                    && !monster_positions.contains(&(nx, ny))
+                                    && moved_targets.insert((nx, ny))
+                                {
+                                    moved_monsters.push((monster.object_id, nx, ny, dir));
+                                }
+                                monster.next_move_tick = self.tick_count + monster.ai_profile.move_interval;
+                                monster.ai_state = MonsterAiState::Chase;
+                            }
                         }
                     }
                     debug!("Boss '{}' AI tick processed", monster_name);
@@ -3235,33 +3359,52 @@ impl Message<Tick> for WorldActor {
                 };
 
                 // #471：宠物——不主动攻击玩家；有协战目标则靠近/攻击
-                if monster.master_session.is_some() {
+                // C# CanAttack：MoveOnly/None 不允许攻击（PetMode）
+                let pet_may_attack = match monster.master_session {
+                    Some(master) => self.player_pet_modes
+                        .get(&master)
+                        .map(|m| matches!(m, mir2_shared::enums::PetMode::Both
+                            | mir2_shared::enums::PetMode::AttackOnly
+                            | mir2_shared::enums::PetMode::FocusMasterTarget))
+                        .unwrap_or(true), // 无缓存默认允许（C# 默认 Both）
+                    None => false,
+                };
+                if monster.master_session.is_some() && pet_may_attack {
                     nearest = None;
                     chase_target = None;
                     monster.target_session = None;
+                    // 协战目标（#471 主人攻击的怪物）
+                    let mut pet_target: Option<(u32, i32, i32)> = None;
                     if let Some(tmid) = self.pet_targets.get(&monster.object_id).copied() {
                         let target_alive = monster_snapshot.iter().any(|s| s.0 == tmid && s.3 > 0 && s.5 == monster.map_index);
                         if !target_alive {
                             self.pet_targets.remove(&monster.object_id);
                         } else if let Some((_, tx, ty, _, _, _, _, _, _, _)) = monster_snapshot.iter().find(|s| s.0 == tmid) {
-                            let dist = (tx - monster.x).abs() + (ty - monster.y).abs();
-                            if dist <= 1 && can_attack {
-                                let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
-                                let damage = ((self.tick_count.wrapping_add(*oid as u64).wrapping_mul(13)) as i32 % dmg_range) + monster.min_dmg;
-                                pet_attacks.push((*oid, tmid, damage, monster.master_session.unwrap_or(0)));
-                                monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
-                                monster.ai_state = MonsterAiState::Attack;
-                            } else if can_move {
-                                let (nx, ny, dir) = monster.step_toward(*tx, *ty);
-                                if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
-                                    && !monster_positions.contains(&(nx, ny))
-                                    && moved_targets.insert((nx, ny))
-                                {
-                                    moved_monsters.push((*oid, nx, ny, dir));
-                                }
-                                monster.next_move_tick = self.tick_count + profile.move_interval;
-                                monster.ai_state = MonsterAiState::Chase;
+                            pet_target = Some((tmid, *tx, *ty));
+                        }
+                    }
+                    // #986：无协战目标 → 找最近正在攻击主人的怪物（C# FindTarget 子集）
+                    if pet_target.is_none() {
+                        pet_target = pet_find_hostile_target(monster, &monster_snapshot, &monster_hostility);
+                    }
+                    if let Some((tmid, tx, ty)) = pet_target {
+                        let dist = (tx - monster.x).abs() + (ty - monster.y).abs();
+                        if dist <= 1 && can_attack {
+                            let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
+                            let damage = ((self.tick_count.wrapping_add(*oid as u64).wrapping_mul(13)) as i32 % dmg_range) + monster.min_dmg;
+                            pet_attacks.push((*oid, tmid, damage, monster.master_session.unwrap_or(0)));
+                            monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
+                            monster.ai_state = MonsterAiState::Attack;
+                        } else if can_move {
+                            let (nx, ny, dir) = monster.step_toward(tx, ty);
+                            if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
+                                && !monster_positions.contains(&(nx, ny))
+                                && moved_targets.insert((nx, ny))
+                            {
+                                moved_monsters.push((*oid, nx, ny, dir));
                             }
+                            monster.next_move_tick = self.tick_count + profile.move_interval;
+                            monster.ai_state = MonsterAiState::Chase;
                         }
                     }
                 }
@@ -3548,21 +3691,23 @@ impl Message<Tick> for WorldActor {
                 } else if let Some(master) = monster.master_session {
                     // ===== 召唤物无目标 → 跟随主人 =====
                     // 简化版：有 master 且主人在线且距离>5 则 step_toward 主人位置
-                    if can_move {
+                    // C# CanMove/ProcessAI：仅 MoveOnly/Both/FocusMasterTarget 允许跟随/召回
+                    //（AttackOnly/None 不移动，原地待命）
+                    let pet_can_follow = self.player_pet_modes
+                        .get(&master)
+                        .map(|m| matches!(m, mir2_shared::enums::PetMode::MoveOnly
+                            | mir2_shared::enums::PetMode::Both
+                            | mir2_shared::enums::PetMode::FocusMasterTarget))
+                        .unwrap_or(true); // 无缓存默认允许（C# 默认 Both）
+                    if pet_can_follow && can_move {
                         let master_pos = player_positions.iter()
                             .find(|(sid, _, _, _, _, _, _, _)| *sid == master)
-                            .map(|(_, x, y, _, _, _, _, _)| (*x, *y));
-                        if let Some((mx, my)) = master_pos {
-                            let dist_master = (monster.x - mx).abs() + (monster.y - my).abs();
-                            if dist_master > 5 {
-                                let (nx, ny, dir) = monster.step_toward(mx, my);
-                                if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
-                                    && !monster_positions.contains(&(nx, ny))
-                                    && moved_targets.insert((nx, ny))
-                                {
-                                    moved_monsters.push((*oid, nx, ny, dir));
-                                }
-                                monster.next_move_tick = self.tick_count + profile.move_interval;
+                            .map(|(_, x, y, _, _, _, _, pmap)| (*x, *y, *pmap));
+                        if let Some((mx, my, master_map)) = master_pos {
+                            // C# MonsterObject.ProcessAI：!InRange(Master, DataRange=16) 或跨图 → PetRecall（传送回主人）
+                            let dist_master = (monster.x - mx).abs().max((monster.y - my).abs());
+                            if monster.map_index != master_map || dist_master > 16 {
+                                pet_recalls.push((*oid, mx, my));
                                 monster.ai_state = MonsterAiState::Return;
                             } else {
                                 monster.ai_state = MonsterAiState::Idle;
@@ -3762,6 +3907,17 @@ impl Message<Tick> for WorldActor {
             }
 
             // ===== 应用 Boss AI 输出队列 =====
+            // Boss 显示/隐藏广播（C# ObjectShow/ObjectHide，如 Shinsu 形态切换）
+            for (oid, visible) in boss_show_hide.drain(..) {
+                self.broadcast_object_show_hide(oid, visible).await;
+            }
+            // Boss 对玩家回血（C# MasterVampire 吸血主人 / Healer 治疗玩家）
+            for (sid, amount) in boss_player_heals.drain(..) {
+                if amount <= 0 { continue; }
+                if let Some(r) = self.players.get(&sid) {
+                    let _ = r.actor_ref.ask(crate::actors::player::Heal { amount }).await;
+                }
+            }
             // Boss 移动（合并到 moved_monsters 复用广播逻辑），校验 walkable 避免穿墙
             for (oid, nx, ny, dir) in boss_moves.drain(..) {
                 let map_idx = self.monsters.get(&oid).map(|m| m.map_index).unwrap_or(0);
@@ -4032,6 +4188,27 @@ impl Message<Tick> for WorldActor {
                 }
             }
 
+
+            // 宠物 PetRecall（C# MonsterObject.ProcessAI）：主人>16 格/跨图 → 传送到主人身边
+            for (oid, tx, ty) in &pet_recalls {
+                if let Some(m) = self.monsters.get_mut(oid) {
+                    m.x = *tx;
+                    m.y = *ty;
+                    let mut walk_body = Vec::new();
+                    walk_body.extend_from_slice(&oid.to_le_bytes());
+                    walk_body.extend_from_slice(&m.x.to_le_bytes());
+                    walk_body.extend_from_slice(&m.y.to_le_bytes());
+                    walk_body.push(m.direction);
+                    let walk_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectWalk as i16, &walk_body);
+                    for session_id in self.players.keys() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *session_id,
+                            data: walk_packet.clone(),
+                        }).await;
+                    }
+                }
+            }
             // 广播 ObjectTurn（C# ProcessRoam 转身；ObjectID + Location(i32,i32) + Direction(u8)）
             for (oid, dir, x, y) in &monster_turns {
                 let mut turn_body = Vec::new();
@@ -4526,3 +4703,4 @@ mod tests {
         assert!(now > 638_000_000_000_000_000, "unexpected ticks: {}", now);
     }
 }
+

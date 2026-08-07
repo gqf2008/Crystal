@@ -10,6 +10,8 @@
 //! ProcessAI（C# :26-47）：Target!=null → ModeTime=+30s；进/出 Mode 广播 Show/Hide。
 //! Attack（C# :63-82）：DC LineAttack(2)。
 
+use mir2_shared::enums::PetMode;
+
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
@@ -27,11 +29,13 @@ pub struct ShinsuBehavior {
     /// Mode 到期 tick（C# ModeTime）
     mode_end_tick: u64,
     spawned: bool,
+    /// 基础贴图（C# Monster.Shinsu；攻击形态为 +1 的 Shinsu1）
+    base_image: u16,
 }
 
 impl ShinsuBehavior {
     pub fn new() -> Self {
-        Self { mode: false, mode_end_tick: 0, spawned: false }
+        Self { mode: false, mode_end_tick: 0, spawned: false, base_image: 0 }
     }
 }
 
@@ -39,21 +43,32 @@ impl MonsterBehavior for ShinsuBehavior {
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         if !self.spawned {
             self.spawned = true;
+            self.base_image = monster.image;
         }
 
-        let target = ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index);
+        let target = ctx.pet_target(monster.x, monster.y, VIEW_RANGE, monster.map_index);
+        // C# ProcessAI：MoveOnly/None 时 Target=null（不攻击），协战怪物目标也不进攻击形态
+        let mode_allows_attack = match ctx.master_pet_mode {
+            Some(PetMode::MoveOnly) | Some(PetMode::None) => false,
+            _ => true, // 野生 / Both / AttackOnly / FocusMasterTarget
+        };
 
-        // Mode 切换（C# ProcessAI）
-        if let Some(t) = target {
+        // Mode 切换（C# ProcessAI）：有目标（含 #471 协战怪物目标）→ 攻击形态
+        if target.is_some() || (ctx.has_master_monster_target && mode_allows_attack) {
             // 有目标：刷新 ModeTime 并进入攻击形态
             self.mode_end_tick = ctx.tick_count + MODE_TICKS;
             if !self.mode {
                 self.mode = true; // C# Mode=true + ObjectShow
+                // 攻击形态贴图 Shinsu1（C# GetInfo：Image = Mode ? Shinsu1 : Shinsu）
+                monster.image = self.base_image.saturating_add(1);
+                ctx.out_show_hide.push((monster.object_id, true));
             }
-            monster.target_session = Some(t.session_id);
+            monster.target_session = target.map(|t| t.session_id);
         } else if ctx.tick_count >= self.mode_end_tick && self.mode {
             // 超时退出攻击形态（C# Mode=false + ObjectHide）
             self.mode = false;
+            monster.image = self.base_image;
+            ctx.out_show_hide.push((monster.object_id, false));
             monster.target_session = None;
             return;
         }
@@ -64,7 +79,7 @@ impl MonsterBehavior for ShinsuBehavior {
         }
 
         let target = match target {
-            Some(t) => *t,
+            Some(t) => t,
             None => return,
         };
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
