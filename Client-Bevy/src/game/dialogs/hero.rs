@@ -235,8 +235,8 @@ fn spawn_hero(
             HeroWidget,
         ));
     }
-    // 列表行（0..4）
-    for i in 0..5usize {
+    // 列表行（0..5，#1135 末行显示英雄实时状态）
+    for i in 0..6usize {
         let e = spawn_ui_text(
             &mut commands, &font, "",
             298.0, 120.0 + i as f32 * 22.0,
@@ -504,6 +504,17 @@ fn hero_ui_system(
                 .unwrap_or_else(|| "（无英雄，点“创建英雄”创建）".to_string()),
             3 => state.message.clone(),
             4 => state.create_msg.clone(),
+            5 => {
+                // #1135：出战英雄实时状态（HeroHealthChanged/GainHeroExperience/HeroLevelChanged 驱动）
+                if state.hero_index > 0 {
+                    format!(
+                        "状态: HP {}  MP {}  经验 {}/{}",
+                        state.hero_hp, state.hero_mp, state.hero_exp, state.hero_max_exp.max(1)
+                    )
+                } else {
+                    String::new()
+                }
+            }
             _ => String::new(),
         };
     }
@@ -762,6 +773,31 @@ fn hero_server_events(
                 }
                 hero.message = format!("英雄学会技能: {}", magic.name);
                 tracing::info!("🦸 英雄学会技能: {} ({:?})", magic.name, magic.spell);
+            }
+            ServerEvent::HeroHealthChanged { hp, mp } => {
+                // #1135：英雄 HP/MP 实时同步（C# S.HeroHealthChanged）
+                hero.hero_hp = *hp as i32;
+                hero.hero_mp = *mp as i32;
+            }
+            ServerEvent::GainHeroExperience { amount } => {
+                // #1135：英雄经验增加（C# S.GainHeroExperience）
+                hero.hero_exp = hero.hero_exp.saturating_add(*amount as i64);
+                hero.message = format!("英雄经验 +{}", amount);
+            }
+            ServerEvent::HeroLevelChanged { level, exp, max_exp } => {
+                // #1135：英雄升级（C# S.HeroLevelChanged）——同步面板与列表等级
+                hero.hero_exp = *exp;
+                hero.hero_max_exp = *max_exp;
+                hero.message = format!("英雄升级 Lv.{}", level);
+                if let Some(cur) = hero.current.as_mut() {
+                    cur.level = *level;
+                }
+                let hero_idx = hero.hero_index;
+                for h in hero.heroes.iter_mut() {
+                    if h.index as u8 == hero_idx {
+                        h.level = *level;
+                    }
+                }
             }
             ServerEvent::HeroInformation {
                 object_id,

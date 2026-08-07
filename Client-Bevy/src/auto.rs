@@ -202,6 +202,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--hero-test") {
         app.add_systems(Update, auto_hero_test);
     }
+    // --hero-battle-test: 英雄战斗 HP 实时同步（#1135：部署英雄 → 等 HeroHealthChanged 使 HP 下降）
+    if std::env::args().any(|a| a == "--hero-battle-test") {
+        app.add_systems(Update, auto_hero_battle_test);
+    }
     // --reincarnation-test: 轮回术确认链路（死亡 → 收到 offer → 接受 → 复活）
     if std::env::args().any(|a| a == "--reincarnation-test") {
         app.add_systems(Update, auto_reincarnation_test);
@@ -3641,6 +3645,78 @@ fn auto_hero_test(
                 tracing::warn!("[HEROTEST] ⚠️ 当前 index={}", hero.hero_index);
             }
             *stage = 9;
+        }
+        _ => {}
+    }
+}
+
+/// --hero-battle-test：部署英雄 → 等待 HeroHealthChanged 使 hero_hp 下降 → 切回主角色（#1135）
+#[allow(clippy::too_many_arguments)]
+fn auto_hero_battle_test(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    hero: Res<client_bevy::game::dialogs::hero::HeroState>,
+    mut mgr: ResMut<client_bevy::game::dialogs::DialogManager>,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut initial_hp: Local<i32>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 8.0 {
+                return;
+            }
+            if !mgr.is_open(client_bevy::game::dialogs::DialogKind::Hero) {
+                mgr.toggle(client_bevy::game::dialogs::DialogKind::Hero);
+            }
+            net.send_packet(&client_bevy::network::ChangeHeroWire { hero_index: 1 });
+            tracing::info!("[HEROBATTLE] 部署英雄 1");
+            *stage = 1;
+            *t = 0.0;
+        }
+        1 => {
+            if *t >= 10.0 {
+                tracing::warn!("[HEROBATTLE] ❌ 未切换到英雄");
+                *stage = 9;
+                return;
+            }
+            if hero.hero_index == 1 && hero.hero_hp > 0 {
+                *initial_hp = hero.hero_hp;
+                tracing::info!("[HEROBATTLE] ✅ 英雄已部署 初始 HP={}", hero.hero_hp);
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            // 等待 HP 下降（收到 HeroHealthChanged → HeroState.hero_hp 更新）
+            if *t >= 30.0 {
+                tracing::warn!("[HEROBATTLE] ❌ HP 未下降（initial={} now={}）", *initial_hp, hero.hero_hp);
+                *stage = 9;
+                return;
+            }
+            if hero.hero_hp < *initial_hp {
+                tracing::info!("[HEROBATTLE] ✅ 英雄 HP 实时同步: {} -> {}", *initial_hp, hero.hero_hp);
+                net.send_packet(&client_bevy::network::ChangeHeroWire { hero_index: 0 });
+                *stage = 3;
+                *t = 0.0;
+            }
+        }
+        3 => {
+            if *t >= 8.0 {
+                tracing::warn!("[HEROBATTLE] ⚠️ 切回主角色未确认");
+                *stage = 9;
+                return;
+            }
+            if hero.hero_index == 0 {
+                tracing::info!("[HEROBATTLE] ✅ 切回主角色成功");
+                *stage = 9;
+            }
         }
         _ => {}
     }

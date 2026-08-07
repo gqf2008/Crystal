@@ -217,16 +217,23 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
         // #270：英雄状态/经验/等级
         x if x == ServerPacketIds::HeroHealthChanged as i16 => {
             if let Ok(p) = combat::HeroHealthChanged::read_body(&mut cur) {
+                server_events.write(ServerEvent::HeroHealthChanged { hp: p.hp, mp: p.mp });
                 tracing::debug!("⭐ 英雄 HP/MP {}/{}", p.hp, p.mp);
             }
         }
         x if x == ServerPacketIds::GainHeroExperience as i16 => {
             if let Ok(p) = experience::GainHeroExperience::read_body(&mut cur) {
+                server_events.write(ServerEvent::GainHeroExperience { amount: p.amount });
                 tracing::debug!("⭐ 英雄经验 +{}", p.amount);
             }
         }
         x if x == ServerPacketIds::HeroLevelChanged as i16 => {
             if let Ok(p) = experience::HeroLevelChanged::read_body(&mut cur) {
+                server_events.write(ServerEvent::HeroLevelChanged {
+                    level: p.level,
+                    exp: p.experience,
+                    max_exp: p.max_experience,
+                });
                 tracing::debug!("⭐ 英雄等级 Lv.{}", p.level);
             }
         }
