@@ -14,7 +14,10 @@ import sys
 
 DB = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "ServerRust", "data", "crystal.db"))
-SAFE_X, SAFE_Y = 650, 629  # map 1 (BichonProvince) 远端安全区，附近仅 1 组怪
+# map '0'（BichonProvince）运行时安全区为硬编码北部城镇 (260,245)-(295,285)
+# （mod.rs apply_hardcoded_safe_zones；南部 start_point (288,616) 不在运行时安全区，
+#   会被 ArcherGuard 等怪攻击）。选 (267,256)（可走 + 安全区中心，已实测）。
+SAFE_X, SAFE_Y = 267, 256  # map 1 (BichonProvince) 北部城镇安全区
 
 
 def make_item(template, uid: int, item_index: int) -> str:
@@ -30,9 +33,9 @@ def main() -> int:
     db_path = sys.argv[1] if len(sys.argv) > 1 else DB
     con = sqlite3.connect(db_path)
     cur = con.cursor()
-    # 1) 安全点
+    # 1) 安全点 + 足够金币（gameshop 购买 #1268 需 165000；交易用例会搬金）
     cur.execute(
-        "UPDATE characters SET x=?, y=? WHERE name IN ('bevychar','bevy2char')",
+        "UPDATE characters SET x=?, y=?, gold=1000000 WHERE name IN ('bevychar','bevy2char')",
         (SAFE_X, SAFE_Y),
     )
     # 2) bevychar 背包为空则恢复（item 194 BraceletOfAgony / 430 BoundlessRing）
