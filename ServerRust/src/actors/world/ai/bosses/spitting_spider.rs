@@ -51,13 +51,18 @@ impl MonsterBehavior for SpittingSpiderBehavior {
             if ctx.tick_count >= monster.next_attack_tick {
                 monster.next_attack_tick = ctx.tick_count + 8;
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-                // LineAttack：方向上 2 格内的玩家（简化：Aoe 命中前方）
-                let dir = direction_towards(monster.x, monster.y, target.x, target.y);
-                let cx = monster.x + DIR_DX[dir as usize] * 2;
-                let cy = monster.y + DIR_DY[dir as usize] * 2;
-                let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-                    ctx.find_targets_in_range(cx, cy, 2, monster.map_index)
-                        .into_iter().copied().collect();
+                // C# LineAttack(damage, 2, 300, ACAgility)：沿朝向 2 格直线每格首目标
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y) as usize % 8;
+                let mut hits: Vec<crate::actors::world::ai::PlayerSnap> = Vec::new();
+                for i in 1..=2i32 {
+                    let tx = monster.x + DIR_DX[dir] * i;
+                    let ty = monster.y + DIR_DY[dir] * i;
+                    if let Some(p) = ctx.players.iter()
+                        .find(|p| p.map_index == monster.map_index && p.x == tx && p.y == ty && p.hp > 0)
+                    {
+                        hits.push(*p);
+                    }
+                }
                 if hits.is_empty() {
                     // 至少打主目标
                     ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
