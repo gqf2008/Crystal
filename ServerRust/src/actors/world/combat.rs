@@ -2241,7 +2241,26 @@ impl Message<MagicRequest> for WorldActor {
             SPELL_STRAIGHT_SHOT | SPELL_DOUBLE_SHOT | SPELL_BINDING_SHOT | SPELL_NAPALM_SHOT | SPELL_CAT_TONGUE
             | SPELL_VAMPIRE_SHOT | SPELL_POISON_SHOT | SPELL_CRIPPLE_SHOT | SPELL_ELEMENTAL_SHOT => {
                 // 弓箭手弹道伤害：DC × 法术倍率（power_base 近似），最少 1
-                let raw_damage = (magic_stat + (power as i32) / 2).max(1);
+                let mut raw_damage = (magic_stat + (power as i32) / 2).max(1);
+                // ElementalShot（C# HumanObject.ElementalShot）：无元素时施法凝聚第一档并取消射击；
+                // 有元素时伤害 = GetAttackPower(MinMC, MaxMC) + 元素球攻击加成（OrbsDmgList）
+                if msg.spell == SPELL_ELEMENTAL_SHOT {
+                    if !state.has_elemental {
+                        self.obtain_element(msg.session_id, true).await;
+                        debug!("Magic: {} casts ElementalShot without orbs -> gather orb", state.name);
+                        return;
+                    }
+                    let mc_power = crate::combat::attack::get_attack_power(
+                        state.min_mc + state.bonus_min_mc,
+                        state.max_mc + state.bonus_max_mc,
+                        0,
+                    );
+                    let orb_power = crate::actors::world::elements::elemental_orb_power(
+                        state.elements_level, false);
+                    raw_damage = (mc_power + (power as i32) / 2 + orb_power).max(1);
+                    debug!("Magic: {} ElementalShot orb_power +{} (elements_level={})",
+                           state.name, orb_power, state.elements_level);
+                }
 
                 // 弹道延迟：距离×50ms + 500ms
                 let target_dist = ((state.x - target_x).abs() + (state.y - target_y).abs()) as u64;
@@ -2300,22 +2319,44 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} casts Concentration (MP regen +{}, {}s)",
                        state.name, bonus, 45 + 15 * spell_level as i32);
             }
-            // ElementalBarrier：自身减伤 buff（DamageReduction）
-            // C# 时长 = magic.GetPower(MC随机) + barrierPower(0) = MC 随机秒（HumanObject.cs:3726/6417）
+            // ElementalBarrier：元素护盾（C# HumanObject.cs:6417）——
+            // 已有护盾不叠加；无元素时施法凝聚并取消；有元素时消耗元素获得防御加成
             SPELL_ELEMENTAL_BARRIER => {
                 let reduction_pct = ((spell_level as i32 + 1) * 10).min(80);
+                // C#：已有 ElementalBarrier buff 直接 return
+                if state.buffs.iter().any(|b| matches!(
+                    b.buff_type, crate::combat::buff::BuffType::DamageReduction { .. }))
+                {
+                    debug!("Magic: {} ElementalBarrier already active, skip", state.name);
+                    return;
+                }
+                // C#：无元素时凝聚第一档并返回（不施放护盾）
+                if !state.has_elemental {
+                    self.obtain_element(msg.session_id, true).await;
+                    debug!("Magic: {} casts ElementalBarrier without orbs -> gather orb", state.name);
+                    return;
+                }
                 let mc_power = crate::combat::attack::get_attack_power(
                     state.min_mc + state.bonus_min_mc,
                     state.max_mc + state.bonus_max_mc,
                     0,
                 ).max(1);
-                let duration_ticks = (mc_power as u32) * 10;
+                let barrier_power = crate::actors::world::elements::elemental_orb_power(
+                    state.elements_level, true);
+                let duration_ticks = ((mc_power + barrier_power) as u32) * 10;
+                // 消耗元素（C# ElementsLevel=0; ObtainElement(false)）
+                self.consume_elemental(msg.session_id).await;
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyDamageReduction {
                     percent: reduction_pct,
                     duration_ticks,
                 }).await;
-                debug!("Magic: {} casts ElementalBarrier (damage -{}%, {}s)",
-                       state.name, reduction_pct, mc_power);
+                // C# CurrentMap.Broadcast(ObjectEffect ElementalBarrierUp)
+                self.broadcast_object_effect(
+                    state.object_id, mir2_shared::enums::SpellEffect::ElementalBarrierUp,
+                    state.map_index,
+                ).await;
+                debug!("Magic: {} casts ElementalBarrier (damage -{}%, {}s, orb +{}s)",
+                       state.name, reduction_pct, mc_power + barrier_power, barrier_power);
             }
             // Mirroring：分身术（C# HumanObject.cs Mirroring）——召唤 Clone 分身宠物（Settings.CloneName="Clone"）
             SPELL_MIRRORING => {

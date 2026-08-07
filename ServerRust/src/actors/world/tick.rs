@@ -1838,10 +1838,11 @@ impl WorldActor {
                 let dist = (m.x - pending.target_x).abs() + (m.y - pending.target_y).abs();
                 if dist > 2 {
                     debug!("Projectile spell {:?} missed target {} (moved {} tiles)", spell, target_id, dist);
-                    return;
+                    None
+                } else {
+                    // ThunderBolt 亡灵 +50%（C# HumanObject.cs:4126），下方 final_damage 分支按 m.undead 加成
+                    Some((m.x, m.y, m.to_combat_stats()))
                 }
-                // ThunderBolt 亡灵 +50%（C# HumanObject.cs:4126），下方 final_damage 分支按 m.undead 加成
-                Some((m.x, m.y, m.to_combat_stats()))
             } else {
                 None
             }
@@ -2034,6 +2035,10 @@ impl WorldActor {
                 let _ = self.push_monster(target_id, dir, distance).await;
                 debug!("ElementalShot knocked back monster {} {} tiles", target_id, distance);
             }
+            // ElementalShot：命中后消耗元素（C# DelayedType.Magic 中 ElementsLevel=0 + ObtainElement(false)）
+            if spell == Spell::ElementalShot {
+                self.consume_elemental(pending.session_id).await;
+            }
             return;
         }
 
@@ -2117,6 +2122,11 @@ impl WorldActor {
         if let Some((sid, dir, distance)) = pvp_knockback {
             let _ = self.push_player(sid, dir, distance).await;
             debug!("ElementalShot knocked back player {} {} tiles", sid, distance);
+        }
+        // ElementalShot：PvP 命中 / 目标移动 miss / 目标已消失，同样消耗元素
+        //（C# HumanObject.cs:6423 目标无效分支 ElementsLevel=0 + ObtainElement(false)）
+        if spell == Spell::ElementalShot {
+            self.consume_elemental(pending.session_id).await;
         }
     }
 }
