@@ -291,6 +291,8 @@ pub struct PlayerState {
     pub flags: std::collections::HashMap<String, i32>,
     /// 经验倍率（1.0 = 正常，2.0 = 双倍）
     pub exp_multiplier: f64,
+    /// 服务器全局经验倍率（C# Settings.ExpRate，登录时从 WorldActor 注入）
+    pub exp_rate: f64,
     /// 经验倍率过期时间（WorldActor tick count）
     pub exp_multiplier_end_tick: u64,
     /// 掉落倍率（1.0 = 正常；Potion shape 5 Drop Buff，C# BuffType.Drop）
@@ -647,6 +649,7 @@ impl PlayerActor {
                 magics: Vec::new(),
                 flags: std::collections::HashMap::new(),
                 exp_multiplier: 1.0,
+                exp_rate: 1.0,
                 exp_multiplier_end_tick: 0,
             drop_multiplier: 1.0,
             drop_multiplier_end_tick: 0,
@@ -1384,7 +1387,7 @@ impl Message<AddExperience> for PlayerActor {
         } else {
             0
         };
-        let amount = (base as f64 * self.state.exp_multiplier * rested_mul
+        let amount = (base as f64 * self.state.exp_multiplier * self.state.exp_rate * rested_mul
             * (1.0 + lover_bonus as f64 / 100.0)
             * (1.0 + mentee_bonus as f64 / 100.0)
             * (1.0 + newbie_bonus as f64 / 100.0)).round() as i64;
@@ -4918,6 +4921,7 @@ mod tests {
             magics: Vec::new(),
             flags: std::collections::HashMap::new(),
             exp_multiplier: 1.0,
+            exp_rate: 1.0,
             exp_multiplier_end_tick: 0,
             drop_multiplier: 1.0,
             drop_multiplier_end_tick: 0,

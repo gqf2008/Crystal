@@ -667,6 +667,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             magics: Vec::new(),
             flags: std::collections::HashMap::new(),
             exp_multiplier: 1.0,
+            exp_rate: 1.0,
             exp_multiplier_end_tick: 0,
             drop_multiplier: 1.0,
             drop_multiplier_end_tick: 0,

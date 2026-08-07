@@ -245,6 +245,9 @@ impl Message<StartGameRequest> for WorldActor {
         loaded_state.object_id = object_id;
         loaded_state.session_id = msg.session_id;
 
+        // #944：服务器全局经验倍率（C# Settings.ExpRate）
+        loaded_state.exp_rate = self.exp_rate;
+
         // #887：仓库扩容/仓库密码状态（C# AccountInfo + Settings.RequireStoragePassword，
         // 登录进图时从 accounts 表加载，UserInformation 下发真实值）
         if let Ok(Some(account)) = db::load_account(&self.db_pool, &msg.account_username).await {
@@ -2693,6 +2696,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         magics: Vec::new(),
         flags: std::collections::HashMap::new(),
         exp_multiplier: 1.0,
+        exp_rate: 1.0,
         exp_multiplier_end_tick: 0,
             drop_multiplier: 1.0,
             drop_multiplier_end_tick: 0,
