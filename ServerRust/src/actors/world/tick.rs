@@ -30,6 +30,8 @@ impl Message<ProcessElementalTick> for WorldActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         self.tick_elements().await;
+        // 导师伤害加成刷新（C# ProcessBuffs Mentor buff + Attacked 判定）
+        crate::actors::world::partners::tick_partner_bonuses(self).await;
     }
 }
 

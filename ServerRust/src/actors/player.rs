@@ -297,6 +297,8 @@ pub struct PlayerState {
     pub level_effects: u16,
     /// 是否为师徒关系中的导师（C# CharacterInfo.IsMentor；徒弟=false）
     pub is_mentor: bool,
+    /// 导师伤害加成是否激活（C# HasBuff(Mentor)：徒弟近身同组时 true）
+    pub mentor_damage_bonus: bool,
 }
 
 impl PlayerState {
@@ -411,6 +413,8 @@ impl PlayerState {
             energy_shield_hp_gain: self.energy_shield_hp_gain,
             armour_rate,
             damage_rate,
+            // C# MentorDamageRatePercent：导师伤害加成（徒弟近身同组时 +10%）
+            attacker_damage_rate: if self.mentor_damage_bonus { 1.1 } else { 1.0 },
             freezing: self.freezing,
             poison_attack: self.poison_attack,
             // C# SpecialItemMode.Paralize：任意装备带 Paralize 特殊模式（1/14 概率麻痹，Random.Next(1,15)==1）
@@ -621,6 +625,7 @@ impl PlayerActor {
             bind_y: 0,
             level_effects: 0,
             is_mentor: false,
+            mentor_damage_bonus: false,
             },
             gate_ref,
             world_ref,
@@ -3455,6 +3460,23 @@ impl Message<SetMentor> for PlayerActor {
     }
 }
 
+/// 设置导师伤害加成激活状态（C# BuffType.Mentor 存在性，WorldActor 近身检查后设置）
+pub struct SetMentorDamageBonus {
+    pub active: bool,
+}
+
+impl Message<SetMentorDamageBonus> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetMentorDamageBonus,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.mentor_damage_bonus = msg.active;
+    }
+}
+
 /// 设置宠物信息
 pub struct SetCreature {
     pub creature_log: CreatureLog,
@@ -4606,6 +4628,7 @@ mod tests {
             bind_y: 0,
             level_effects: 0,
             is_mentor: false,
+            mentor_damage_bonus: false,
         }
     }
 
