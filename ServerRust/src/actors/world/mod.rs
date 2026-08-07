@@ -83,6 +83,8 @@ pub struct WorldActorArgs {
     pub conquest_cfg: crate::util::config::ConquestConfig,
     /// 休息经验加成配置（C# Settings.Rested*）
     pub rested_cfg: crate::util::config::RestedConfig,
+    /// PvP 开关配置（C# Settings.PvpCan*）
+    pub pvp_cfg: crate::util::config::PvpConfig,
     /// 全局掉落倍率（C# Settings.DropRate）
     pub drop_rate: f64,
     /// 地面物品超时 ticks（= item_timeout_secs * 10，100ms/tick）
@@ -864,6 +866,7 @@ pub struct WorldActor {
     pub(crate) conquest_cfg: crate::util::config::ConquestConfig,
     /// 休息经验加成配置（C# Settings.Rested*）
     pub(crate) rested_cfg: crate::util::config::RestedConfig,
+    pub(crate) pvp_cfg: crate::util::config::PvpConfig,
     /// 全局掉落倍率
     pub(crate) drop_rate: f64,
     /// 地面物品超时 ticks
@@ -1069,6 +1072,7 @@ impl WorldActor {
             social_ref,
             conquest_cfg: crate::util::config::ConquestConfig::default(),
             rested_cfg: crate::util::config::RestedConfig::default(),
+            pvp_cfg: crate::util::config::PvpConfig::default(),
             drop_rate: 1.0,
             item_timeout_ticks: 600,
             max_drop_gold: 2000,
@@ -3606,6 +3610,7 @@ impl Actor for WorldActor {
             social_ref: args.social_ref,
             conquest_cfg: args.conquest_cfg,
             rested_cfg: args.rested_cfg,
+            pvp_cfg: args.pvp_cfg,
             drop_rate: args.drop_rate,
             item_timeout_ticks: args.item_timeout_ticks,
             max_drop_gold: args.max_drop_gold,

@@ -144,6 +144,7 @@ async fn async_main() -> anyhow::Result<()> {
         social_ref: social_ref.clone(),
         conquest_cfg: cfg.conquest.clone(),
         rested_cfg: cfg.rested.clone(),
+        pvp_cfg: cfg.pvp.clone(),
         drop_rate: cfg.server.drop_rate,
         item_timeout_ticks: cfg.server.item_timeout_secs as u64 * 10,
         max_drop_gold: cfg.server.max_drop_gold,

@@ -1915,7 +1915,8 @@ impl WorldActor {
                         let dur = super::special_shot_buff_time(pending.spell_level).max(1) as u32;
                         player_poisons.push(poison::Poison::new(PoisonType::SLOW, dur, 0, 1000));
                     }
-                    if spell == Spell::CatTongue && fastrand::i32(0..10) >= 8 {
+                    // PvP 冰冻需 PvpCanFreeze（C# Settings；默认 false 玩家不冰冻）
+                    if spell == Spell::CatTongue && self.pvp_cfg.can_freeze && fastrand::i32(0..10) >= 8 {
                         player_poisons.push(poison::Poison::new(
                             PoisonType::FROZEN, (pending.spell_level as u32 + 1) * 3, 0, 1000));
                     }
