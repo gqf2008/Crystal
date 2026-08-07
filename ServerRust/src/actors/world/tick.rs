@@ -3856,23 +3856,48 @@ impl Message<Tick> for WorldActor {
                     // 生成掉落物品
                     self.spawn_monster_drops(&monster).await;
 
-                    // #1001：任务击杀进度（C# MonsterObject.Die → EXPOwner → QuestInfo Kill 任务）
-                    // 击杀者 = target_session（最后命中者，与掉落归属一致）
+                    // #1001/#1003：任务击杀进度（C# MonsterObject.Die → EXPOwner.CheckGroupQuestKill）
+                    // 击杀者 = target_session（最后命中者，与掉落归属一致）；同组同图 16 格内未死成员共享
                     if let Some(killer) = monster.target_session {
-                        if let Some(record) = self.players.get(&killer) {
-                            let updates = record.actor_ref.ask(crate::actors::player::ProcessKillQuest {
-                                monster_index: monster.monster_index,
-                            }).await.unwrap_or_default();
-                            if !updates.is_empty() {
-                                for (quest_index, _, _) in &updates {
-                                    if let Ok(Some(q)) = record.actor_ref.ask(crate::actors::player::GetQuest {
-                                        quest_index: *quest_index,
-                                    }).await {
-                                        crate::actors::social_packets::send_quest_change_packet(
-                                            &self.gate_ref, killer, &q);
+                        let mut quest_sessions: Vec<u64> = vec![killer];
+                        if let Some(krecord) = self.players.get(&killer) {
+                            if let Ok(Some(kstate)) = krecord.actor_ref
+                                .ask(crate::actors::player::GetPlayerState).await
+                            {
+                                if let Some(gid) = kstate.group_id {
+                                    for other in self.players.values() {
+                                        if other.session_id == killer { continue; }
+                                        if let Ok(Some(os)) = other.actor_ref
+                                            .ask(crate::actors::player::GetPlayerState).await
+                                        {
+                                            if os.group_id == Some(gid)
+                                                && os.map_index == monster.map_index
+                                                && !os.is_dead
+                                                && ((os.x - monster.x).abs() + (os.y - monster.y).abs()) <= 16
+                                            {
+                                                quest_sessions.push(os.session_id);
+                                            }
+                                        }
                                     }
                                 }
-                                send_system_message(&self.gate_ref, killer, "任务进度更新：击杀目标");
+                            }
+                        }
+                        for sid in quest_sessions {
+                            if let Some(record) = self.players.get(&sid) {
+                                let updates = record.actor_ref.ask(crate::actors::player::ProcessKillQuest {
+                                    monster_index: monster.monster_index,
+                                }).await.unwrap_or_default();
+                                if !updates.is_empty() {
+                                    for (quest_index, _, _) in &updates {
+                                        if let Ok(Some(q)) = record.actor_ref.ask(crate::actors::player::GetQuest {
+                                            quest_index: *quest_index,
+                                        }).await {
+                                            crate::actors::social_packets::send_quest_change_packet(
+                                                &self.gate_ref, sid, &q);
+                                        }
+                                    }
+                                    send_system_message(&self.gate_ref, sid, "任务进度更新：击杀目标");
+                                }
                             }
                         }
                     }
