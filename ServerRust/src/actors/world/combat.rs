@@ -1490,10 +1490,32 @@ impl Message<MagicRequest> for WorldActor {
                 }
                 debug!("Magic: {} casts MassHiding on {} targets ({}s)", state.name, targets.len(), duration_ticks / 10);
             }
-            // Purification：解毒（清除自身所有 Poison，C# 清除 debuff）
+            // Purification：解毒/清除 debuff（C# HumanObject.cs:4440 + CompleteMagic 6246）
+            // 友方目标（自己/同组），成功率 Random(4) <= Lv（Lv0=25%）
             SPELL_PURIFICATION => {
-                let _ = record.actor_ref.ask(crate::actors::player::PurifyPoisons).await;
-                debug!("Magic: {} casts Purification (cleared poisons)", state.name);
+                if fastrand::i32(0..4) > spell_level as i32 {
+                    debug!("Magic: {} casts Purification (failed)", state.name);
+                    return;
+                }
+                let mut target_session = msg.session_id;
+                if msg.target_id != 0 {
+                    for (sid, r) in &self.players {
+                        if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                            if os.object_id == msg.target_id {
+                                let friendly = *sid == msg.session_id
+                                    || (os.group_id.is_some() && os.group_id == state.group_id);
+                                if friendly {
+                                    target_session = *sid;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                if let Some(r) = self.players.get(&target_session) {
+                    let _ = r.actor_ref.ask(crate::actors::player::PurifyPoisons).await;
+                }
+                debug!("Magic: {} casts Purification on session {} (success)", state.name, target_session);
             }
             // Entrapment：困魔咒（C# HumanObject.cs:4893 + CompleteMagic 6315）——
             // 拉拽目标怪物朝施法者反方向靠近（对角 min(|dx|,|dy|)，十字轴 |axis|-2），并麻痹 round((Lv+1)*0.8) 秒
