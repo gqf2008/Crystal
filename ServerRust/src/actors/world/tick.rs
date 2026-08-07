@@ -4239,11 +4239,21 @@ impl Message<Tick> for WorldActor {
                     }
 
                     // 加入重生队列（延迟从 map_respawns.delay（秒）读取；C# RespawnInfo.Delay）
+                    // #1017：C# Map.cs——delay = max(1, Delay - RandomDelay + Random.Next(RandomDelay*2))
                     let respawn_delay_ticks: u64 = self.map_infos.get(&(monster.map_index as i32))
                         .and_then(|mi| mi.respawns.iter().find(|r| {
                             r.monster_index == monster.monster_index && r.x == monster.spawn_x && r.y == monster.spawn_y
                         }))
-                        .map(|r| (r.delay.max(1) as u64) * 10)
+                        .map(|r| {
+                            let base = r.delay.max(1) as i64;
+                            let rd = r.random_delay.max(0) as i64;
+                            let secs = if rd > 0 {
+                                (base - rd + fastrand::i64(0..(rd * 2))).max(1)
+                            } else {
+                                base
+                            };
+                            (secs as u64) * 10
+                        })
                         .unwrap_or(1800);
                     let respawn_tick = self.tick_count + respawn_delay_ticks;
                     let spawn = MonsterSpawn {
