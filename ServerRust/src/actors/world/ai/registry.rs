@@ -210,6 +210,24 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("bluesoul") || name.contains("blue soul") || name.contains("蓝魂") {
         return Box::new(bosses::blue_soul::BlueSoulBehavior::new());
     }
+    if name.contains("flamescythe") || name.contains("flame scythe") || name.contains("火焰镰刀") {
+        return Box::new(bosses::flame_scythe::FlameScytheBehavior::new());
+    }
+    if name.contains("flamespear") || name.contains("flame spear") || name.contains("火焰长矛") {
+        return Box::new(bosses::flame_spear::FlameSpearBehavior::new());
+    }
+    if name.contains("avengingwarrior") || name.contains("avenging warrior") || name.contains("复仇战士") {
+        return Box::new(bosses::avenging_warrior::AvengingWarriorBehavior::new());
+    }
+    if name.contains("blacktortoise") || name.contains("black tortoise") || name.contains("黑龟") {
+        return Box::new(bosses::black_tortoise::BlackTortoiseBehavior::new());
+    }
+    if name.contains("manectricclaw") || name.contains("manectric claw") || name.contains("雷兽之爪") {
+        return Box::new(bosses::manectric_claw::ManectricClawBehavior::new());
+    }
+    if name.contains("hardenrhino") || name.contains("harden rhino") || name.contains("硬皮犀牛") {
+        return Box::new(bosses::harden_rhino::HardenRhinoBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -530,6 +548,12 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("finialturtle") || name.contains("finial turtle") || name.contains("终结龟")
         || name.contains("avengingspirit") || name.contains("avenging spirit") || name.contains("复仇之魂")
         || name.contains("bluesoul") || name.contains("blue soul") || name.contains("蓝魂")
+        || name.contains("flamescythe") || name.contains("flame scythe") || name.contains("火焰镰刀")
+        || name.contains("flamespear") || name.contains("flame spear") || name.contains("火焰长矛")
+        || name.contains("avengingwarrior") || name.contains("avenging warrior") || name.contains("复仇战士")
+        || name.contains("blacktortoise") || name.contains("black tortoise") || name.contains("黑龟")
+        || name.contains("manectricclaw") || name.contains("manectric claw") || name.contains("雷兽之爪")
+        || name.contains("hardenrhino") || name.contains("harden rhino") || name.contains("硬皮犀牛")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")

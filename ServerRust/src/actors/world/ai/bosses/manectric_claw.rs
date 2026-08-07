@@ -1,0 +1,94 @@
+//! ManectricClaw（雷兽之爪）behavior
+//!
+//! C# 参考：Server/MirObjects/Monsters/ManectricClaw.cs
+//! 机制：
+//!   - AttackRange=3
+//!   - 远程或 5s 冷却到：ObjectRangeAttack → IceThrust：前方 3x3（近 DC / 远 MC，用前方 1 格半径 1 AOE 近似）
+//!     + 命中 1/5 减速 + 1/5 冰冻（5s，tick 1000）
+//!   - 否则：base.Attack 近战
+
+use crate::actors::world::MonsterState;
+use crate::actors::world::ai::behavior::MonsterBehavior;
+use crate::actors::world::ai::ctx::AiCtx;
+use crate::actors::world::ai::helpers::*;
+use crate::combat::poison::Poison;
+use mir2_shared::enums::PoisonType;
+
+const VIEW_RANGE: i32 = 12;
+const ATTACK_RANGE: i32 = 3;
+const THRUST_COOLDOWN: u64 = 50; // 5s
+
+pub struct ManectricClawBehavior {
+    next_thrust_tick: u64,
+}
+
+impl ManectricClawBehavior {
+    pub fn new() -> Self {
+        Self { next_thrust_tick: 0 }
+    }
+}
+
+impl MonsterBehavior for ManectricClawBehavior {
+    fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
+        let target = match ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index) {
+            Some(t) => *t,
+            None => return,
+        };
+        monster.target_session = Some(target.session_id);
+        let dist = max_distance(monster.x, monster.y, target.x, target.y);
+
+        if ctx.tick_count >= monster.next_attack_tick {
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
+            let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            // C# ranged || 冷却到 → IceThrust
+            if dist > 1 || ctx.tick_count >= self.next_thrust_tick {
+                self.next_thrust_tick = ctx.tick_count + THRUST_COOLDOWN;
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y) as usize % 8;
+                let cx = monster.x + DIR_DX[dir];
+                let cy = monster.y + DIR_DY[dir];
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                    attacker_oid: monster.object_id,
+                    center_x: cx,
+                    center_y: cy,
+                    radius: 1,
+                    damage,
+                    spell_id: 0,
+                });
+                let nearby: Vec<u64> = ctx.find_targets_in_range(cx, cy, 1, monster.map_index)
+                    .iter().map(|p| p.session_id).collect();
+                for sid in nearby {
+                    // PoisonTarget(5, Slow, 1000)：1/5
+                    if fastrand::i32(0..5) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: sid,
+                            poison: Poison::new(PoisonType::SLOW, 5, 0, 1000),
+                        });
+                    }
+                    // PoisonTarget(5, Frozen, 1000)：1/5
+                    if fastrand::i32(0..5) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: sid,
+                            poison: Poison::new(PoisonType::FROZEN, 5, 0, 1000),
+                        });
+                    }
+                }
+            } else {
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    damage,
+                    spell_id: 0,
+                    attack_type: 0,
+                });
+            }
+            return;
+        }
+
+        if ctx.tick_count >= monster.next_move_tick {
+            let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
+            ctx.out_moves.push((monster.object_id, nx, ny, dir));
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
+            monster.ai_state = crate::actors::world::MonsterAiState::Chase;
+        }
+    }
+}
