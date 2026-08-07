@@ -91,11 +91,13 @@ impl MonsterBehavior for BehemothBehavior {
                         poison: Poison::new(PoisonType::DAZED, 3, 0, 1000),
                     });
                 }
-                // 近战命中后 Bleeding 15s（C# PoisonTarget(Target, 15, 5, Bleeding)）
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::BLEEDING, 15, 5, 1000),
-                });
+                // 近战命中后 Bleeding 15s（C# PoisonTarget(15, 5, Bleeding)：1/15 概率、值=SP）
+                if fastrand::i32(0..15) == 0 {
+                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(PoisonType::BLEEDING, 15, base, 1000),
+                    });
+                }
             } else {
                 // ---- 远程：1/2 追击；1/2 SpawnSlaves / 弹道 ----
                 if fastrand::i32(0..2) == 0 {

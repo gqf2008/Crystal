@@ -62,7 +62,7 @@ impl MonsterBehavior for VenomSpiderBehavior {
                     });
                     ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                         session_id: target.session_id,
-                        poison: Poison::new(PoisonType::GREEN, 8, 5, 1000),
+                        poison: Poison::new(PoisonType::GREEN, 8, damage, 1000),
                     });
                 } else {
                     for h in hits {
@@ -75,7 +75,7 @@ impl MonsterBehavior for VenomSpiderBehavior {
                         });
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: h.session_id,
-                            poison: Poison::new(PoisonType::GREEN, 8, 5, 1000),
+                            poison: Poison::new(PoisonType::GREEN, 8, damage, 1000),
                         });
                     }
                 }

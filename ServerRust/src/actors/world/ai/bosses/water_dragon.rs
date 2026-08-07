@@ -104,7 +104,7 @@ impl MonsterBehavior for WaterDragonBehavior {
             // finalDamage>0 → Green 7s（C# PoisonTarget(target,7,5,Green,1000)）
             ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                 session_id: target.session_id,
-                poison: Poison::new(PoisonType::GREEN, 7, 5, 1000),
+                poison: Poison::new(PoisonType::GREEN, 7, damage, 1000),
             });
         }
     }

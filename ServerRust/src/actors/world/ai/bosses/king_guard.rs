@@ -77,7 +77,7 @@ impl MonsterBehavior for KingGuardBehavior {
                     // C# PoisonTarget(target,10,5,Green,1000)
                     ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                         session_id: target.session_id,
-                        poison: Poison::new(PoisonType::GREEN, 10, 5, 1000),
+                        poison: Poison::new(PoisonType::GREEN, 10, damage, 1000),
                     });
                 } else {
                     // 重击 MC*2 + AOE(AttackRange) Slow/Paralysis

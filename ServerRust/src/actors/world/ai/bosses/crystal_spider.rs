@@ -72,7 +72,7 @@ impl MonsterBehavior for CrystalSpiderBehavior {
                         });
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: h.session_id,
-                            poison: Poison::new(PoisonType::GREEN, 8, 5, 2000),
+                            poison: Poison::new(PoisonType::GREEN, 8, damage, 2000),
                         });
                         hit_any = true;
                     }
@@ -88,7 +88,7 @@ impl MonsterBehavior for CrystalSpiderBehavior {
                     });
                     ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                         session_id: target.session_id,
-                        poison: Poison::new(PoisonType::GREEN, 8, 5, 2000),
+                        poison: Poison::new(PoisonType::GREEN, 8, damage, 2000),
                     });
                 }
             }

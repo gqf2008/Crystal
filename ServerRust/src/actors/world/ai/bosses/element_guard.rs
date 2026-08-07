@@ -51,7 +51,7 @@ impl MonsterBehavior for ElementGuardBehavior {
                 // C# 1/2 Red 毒（CompleteAttack poison=true）
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                     session_id: target.session_id,
-                    poison: Poison::new(PoisonType::RED, 5, 5, 1000),
+                    poison: Poison::new(PoisonType::RED, 5, damage, 1000),
                 });
             }
         } else if dist <= VIEW_RANGE {

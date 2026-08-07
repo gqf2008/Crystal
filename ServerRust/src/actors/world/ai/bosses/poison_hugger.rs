@@ -89,10 +89,13 @@ impl PoisonHuggerBehavior {
                 spell_id: 0,
                 attack_type: 0,
             });
-            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                session_id: h.session_id,
-                poison: Poison::new(PoisonType::GREEN, 5, 5, 2000),
-            });
+            // C# PoisonTarget(5, 5, Green, 2000)：1/5 概率、值=SP（DC 近似）
+            if fastrand::i32(0..5) == 0 {
+                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                    session_id: h.session_id,
+                    poison: Poison::new(PoisonType::GREEN, 5, damage, 2000),
+                });
+            }
         }
         monster.hp = 0;
     }

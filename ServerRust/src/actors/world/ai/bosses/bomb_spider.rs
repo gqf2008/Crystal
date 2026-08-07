@@ -86,7 +86,8 @@ impl BombSpiderBehavior {
             if fastrand::i32(0..5) == 0 {
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                     session_id: h.session_id,
-                    poison: Poison::new(PoisonType::GREEN, 5, 5, 2000),
+                    // C# 毒值 = SP 攻（DC 近似）
+                    poison: Poison::new(PoisonType::GREEN, 5, damage, 2000),
                 });
             }
         }

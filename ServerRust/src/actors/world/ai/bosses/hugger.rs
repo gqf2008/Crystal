@@ -77,7 +77,7 @@ impl HuggerBehavior {
             });
             ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                 session_id: h.session_id,
-                poison: Poison::new(PoisonType::GREEN, 5, 5, 2000),
+                poison: Poison::new(PoisonType::GREEN, 5, damage, 2000),
             });
         }
         monster.hp = 0;
