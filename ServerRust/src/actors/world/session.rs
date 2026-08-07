@@ -1794,6 +1794,33 @@ impl Message<ChatRequest> for WorldActor {
                     send_system_message(&self.gate_ref, msg.session_id, &format!("未找到在线玩家：{}", target_name));
                     return;
                 }
+                Some("SUMMONHERO") => {
+                    // C# case "SUMMONHERO"（~3697）：有英雄时召唤/收起出战英雄
+                    let state = match record.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(s)) => s,
+                        _ => return,
+                    };
+                    if state.hero_index == 0 {
+                        send_system_message(&self.gate_ref, msg.session_id, "你没有英雄");
+                        return;
+                    }
+                    let mut new_state = state.clone();
+                    new_state.hero_despawned = !new_state.hero_despawned;
+                    let now_spawned = !new_state.hero_despawned;
+                    let object_id = state.object_id;
+                    let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+                    if now_spawned {
+                        // 召唤英雄（C# SummonHero：生成英雄对象 + 下发完整信息）
+                        self.broadcast_hero_spawn(msg.session_id).await;
+                        self.send_hero_information_packet(msg.session_id).await;
+                        send_system_message(&self.gate_ref, msg.session_id, "英雄已出战");
+                    } else {
+                        // 收起英雄（C# DespawnHero）
+                        self.broadcast_hero_remove(object_id).await;
+                        send_system_message(&self.gate_ref, msg.session_id, "英雄已收起");
+                    }
+                    return;
+                }
                 Some("LEAVEGUILD") => {
                     // C# case "LEAVEGUILD"（~3251）：退会；开战期间禁止（CannotLeaveGuildAtWar）
                     let state = match record.actor_ref.ask(GetPlayerState).await {
@@ -2672,6 +2699,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         creature_log: CreatureLog::new(),
         hero_index: 0,
         hero_behaviour: 0,
+        hero_despawned: false,
         auto_pot_hp: 0,
         auto_pot_mp: 0,
         auto_pot_hp_item: 0,

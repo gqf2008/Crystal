@@ -205,6 +205,8 @@ pub struct PlayerState {
     pub creature_log: CreatureLog,
     /// 英雄索引（0 = 无英雄）
     pub hero_index: u8,
+    /// 英雄是否被收起（C# HeroSpawned 反义，@SUMMONHERO 切换；运行时状态不持久化）
+    pub hero_despawned: bool,
     /// 英雄行为模式 (0=Attack, 1=Follow, etc.)
     pub hero_behaviour: u8,
     /// 自动药水 HP 阈值
@@ -607,6 +609,7 @@ impl PlayerActor {
                 creature_log: CreatureLog::new(),
                 hero_index: 0,
                 hero_behaviour: 0,
+                hero_despawned: false,
                 auto_pot_hp: 0,
                 auto_pot_mp: 0,
                 auto_pot_hp_item: 0,
@@ -4883,6 +4886,7 @@ mod tests {
             mentor_name: None,
             creature_log: CreatureLog::new(),
             hero_index: 0,
+            hero_despawned: false,
             hero_inventory: PlayerInventory::new(),
             hero_magics: Vec::new(),
             refine_log: RefineLog::new(),

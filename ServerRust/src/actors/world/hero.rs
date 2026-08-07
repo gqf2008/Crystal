@@ -466,7 +466,7 @@ impl WorldActor {
         for (session_id, record) in &self.players {
             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                 // hero_index > 0 表示有出战英雄
-                if state.hero_index == 0 || state.is_dead {
+                if state.hero_index == 0 || state.is_dead || state.hero_despawned {
                     continue;
                 }
                 // hero_behaviour == 1 (Follow) 时英雄纯跟随，不参战

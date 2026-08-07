@@ -1291,6 +1291,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         creature_log,
         hero_index: row.get::<i32, _>("hero_index") as u8,
         hero_behaviour: row.try_get::<i32, _>("hero_behaviour").unwrap_or(0) as u8,
+        hero_despawned: false,
         auto_pot_hp: row.try_get::<i64, _>("auto_pot_hp").unwrap_or(0) as u32,
         auto_pot_mp: row.try_get::<i64, _>("auto_pot_mp").unwrap_or(0) as u32,
         auto_pot_hp_item: row.try_get::<i32, _>("auto_pot_hp_item").unwrap_or(0),

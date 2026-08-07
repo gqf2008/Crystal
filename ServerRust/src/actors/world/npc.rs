@@ -625,6 +625,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             creature_log: CreatureLog::new(),
             hero_index: 0,
                 hero_behaviour: 0,
+                hero_despawned: false,
                 auto_pot_hp: 0,
                 auto_pot_mp: 0,
                 auto_pot_hp_item: 0,
