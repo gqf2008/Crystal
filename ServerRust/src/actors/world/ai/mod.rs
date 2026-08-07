@@ -12,6 +12,7 @@ pub mod helpers;
 pub mod bosses;
 
 pub use behavior::MonsterBehavior;
-pub use ctx::{AiCtx, PlayerSnap, MonsterSnap, AttackAction, SpellFieldSpawn, BossSummon, PoisonPlayer};
+pub use ctx::{AiCtx, PlayerSnap, MonsterSnap, AttackAction, SpellFieldSpawn, BossSummon, PoisonPlayer, PushPlayer};
+pub use helpers::{direction_towards, max_distance, manhattan};
 pub use default::DefaultBehavior;
 pub use registry::{make_behavior, is_registered_boss, is_static_object, is_passive_object};

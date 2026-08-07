@@ -1291,6 +1291,77 @@ impl WorldActor {
         }
     }
 
+    /// 推开玩家（C# HumanObject.Pushed：沿 dir 最多 distance 格，遇不可行走/出界停止；
+    /// 方向取反，发 Pushed 给本人 + ObjectPushed 给其他人）
+    pub(crate) async fn push_player(&mut self, session_id: u64, dir: u8, distance: i32) -> usize {
+        if dir >= 8 || distance <= 0 {
+            return 0;
+        }
+        let record = match self.players.get(&session_id) {
+            Some(r) => r.clone(),
+            None => return 0,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return 0,
+        };
+        if state.is_dead {
+            return 0;
+        }
+        let map_index = state.map_index;
+        let (dx, dy) = (MON_DIR_DX[dir as usize], MON_DIR_DY[dir as usize]);
+        let mut nx = state.x;
+        let mut ny = state.y;
+        let mut steps = 0usize;
+        for _ in 0..distance {
+            let tx = nx + dx;
+            let ty = ny + dy;
+            let walkable = self.maps.get(&map_index)
+                .map(|m| m.is_walkable(tx, ty))
+                .unwrap_or(false);
+            if !walkable {
+                break;
+            }
+            nx = tx;
+            ny = ty;
+            steps += 1;
+        }
+        if steps == 0 {
+            return 0;
+        }
+        // C#：被推开时朝向反方向
+        let reverse_dir = ((dir as usize + 4) % 8) as u8;
+        let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+            x: nx, y: ny, direction: reverse_dir,
+            map_index: None, is_mounted: None,
+        }).await;
+        // 本人：Pushed（location + direction）
+        let mut self_body = Vec::new();
+        self_body.extend_from_slice(&(nx as u32).to_le_bytes());
+        self_body.extend_from_slice(&(ny as u32).to_le_bytes());
+        self_body.push(reverse_dir);
+        let _ = self.gate_ref.tell(SendToClient {
+            session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Pushed as i16, &self_body),
+        }).await;
+        // 他人：ObjectPushed（object_id + location + direction）
+        let mut obj_body = Vec::new();
+        obj_body.extend_from_slice(&state.object_id.to_le_bytes());
+        obj_body.extend_from_slice(&(nx as u32).to_le_bytes());
+        obj_body.extend_from_slice(&(ny as u32).to_le_bytes());
+        obj_body.push(reverse_dir);
+        let obj_pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectPushed as i16, &obj_body);
+        for (sid, _) in &self.players {
+            if *sid == session_id { continue; }
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: *sid,
+                data: obj_pkt.clone(),
+            }).await;
+        }
+        debug!("Push player {} {} tiles dir={} to ({},{})", session_id, steps, dir, nx, ny);
+        steps
+    }
+
     /// 发送 NPC 商店商品列表（DB 商品）
     pub(crate) fn send_npc_goods(&self, session_id: u64, npc: &NpcState) {
         let goods = self.npc_goods.get(&npc.db_index).cloned().unwrap_or_default();

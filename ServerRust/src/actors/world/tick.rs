@@ -1885,6 +1885,7 @@ impl Message<Tick> for WorldActor {
             let mut boss_summons: Vec<ai::BossSummon> = Vec::new();
             let mut boss_heals: Vec<(u32, i32)> = Vec::new();
             let mut boss_poisons: Vec<ai::PoisonPlayer> = Vec::new();
+            let mut boss_pushes: Vec<ai::PushPlayer> = Vec::new();
             // 召唤物过期队列（到期 tick 已过 → 移除，不掉落）
             let mut expired_monsters: Vec<u32> = Vec::new();
 
@@ -1922,6 +1923,7 @@ impl Message<Tick> for WorldActor {
                         out_summons: &mut boss_summons,
                         out_heals: &mut boss_heals,
                         out_poisons: &mut boss_poisons,
+                        out_pushes: &mut boss_pushes,
                     };
                     // 临时取出 behavior 避免 &mut monster + &mut behavior 双重借用
                     let mut behavior = std::mem::replace(
@@ -2569,6 +2571,11 @@ impl Message<Tick> for WorldActor {
                         poisons: vec![pp.poison],
                     }).await;
                 }
+            }
+            // Boss 推开玩家（C# MapObject.Pushed：逐格校验 walkable，移动 + Pushed/ObjectPushed）
+            for pp in &boss_pushes {
+                let moved = self.push_player(pp.session_id, pp.dir, pp.distance).await;
+                debug!("Boss pushed player {} {} tiles dir={}", pp.session_id, moved, pp.dir);
             }
             // Boss 怪物互疗
             for (target_oid, amount) in &boss_heals {
