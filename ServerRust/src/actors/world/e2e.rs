@@ -367,6 +367,104 @@ fn e2e_magic_cast_flow() {
     });
 }
 
+/// 双会话：B 先进图后 A 再 StartGame（#881 复现路径：双客户端并发进图 tokio 栈溢出回归）
+#[test]
+fn e2e_two_sessions_concurrent_start() {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(8 * 1024 * 1024)
+        .enable_time()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        // 单个 gate + 两个 session
+        let gate_ref = GateActor::spawn(());
+        let (tx5, mut rx5) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (tx6, mut rx6) = mpsc::unbounded_channel::<Vec<u8>>();
+        let _ = gate_ref.ask(SessionCreated { session_id: 5, sender: tx5.clone(), ip: "127.0.0.1".to_string() }).await;
+        let _ = gate_ref.ask(SessionCreated { session_id: 6, sender: tx6.clone(), ip: "127.0.0.1".to_string() }).await;
+
+        let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
+        let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool.clone()));
+        let _ = gate_ref.ask(SetAccountRef { account_ref }).await;
+
+        // 登录两个账号（同一 AccountActor）
+        async fn login(gate_ref: &GateActorRef, session_id: u64, rx: &mut RxChannel, username: &str) {
+            let cv_body = { let mut b = Vec::new(); let hash = b"test"; b.extend_from_slice(&(hash.len() as i32).to_le_bytes()); b.extend_from_slice(hash); b };
+            let _ = gate_ref.ask(ClientData { session_id, data: build_packet_bytes(mir2_shared::enums::ClientPacketIds::ClientVersion as i16, &cv_body) }).await;
+            let _ = gate_ref.ask(ClientData { session_id, data: build_packet_bytes(mir2_shared::enums::ClientPacketIds::NewAccount as i16, &[]) }).await;
+            let mut lb = Vec::new();
+            let _ = mir2_shared::binary::write_dotnet_string(&mut lb, username);
+            let _ = mir2_shared::binary::write_dotnet_string(&mut lb, "testpass");
+            let _ = gate_ref.ask(ClientData { session_id, data: build_packet_bytes(mir2_shared::enums::ClientPacketIds::Login as i16, &lb) }).await;
+            let ok = mir2_shared::enums::ServerPacketIds::LoginSuccess as i16;
+            loop {
+                let data = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await.expect("timeout").expect("closed");
+                if data.len() >= 4 && i16::from_le_bytes([data[2], data[3]]) == ok { break; }
+            }
+        }
+        login(&gate_ref, 5, &mut rx5, "testuser").await;
+        login(&gate_ref, 6, &mut rx6, "testuser2").await;
+
+        let social_ref = SocialActor::spawn(SocialActorArgs {
+            gate_ref: gate_ref.clone(), db_pool: db_pool.clone(), config: SocialActorConfig::default(),
+        });
+        let world_ref = WorldActor::spawn(WorldActorArgs {
+            tick_interval_ms: 100,
+            gate_ref: gate_ref.clone(),
+            map_dir: std::path::PathBuf::from("."),
+            spawn_dir: None,
+            quest_dir: std::path::PathBuf::from("."),
+            db_pool: db_pool.clone(),
+            social_ref,
+            conquest_cfg: crate::util::config::ConquestConfig::default(),
+            rested_cfg: crate::util::config::RestedConfig::default(),
+            pvp_cfg: crate::util::config::PvpConfig::default(),
+            health_regen_weight: 10,
+            mana_regen_weight: 10,
+            goods_hide_added_stats: true,
+            drop_rate: 1.0,
+            item_timeout_ticks: 300,
+            max_drop_gold: 2000,
+            rarity_cfg: crate::util::config::RarityConfig::default(),
+            notice_path: "Notice.txt".to_string(),
+            death_exp_penalty_percent: 0,
+        });
+        let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
+
+        async fn start_game(gate_ref: &GateActorRef, session_id: u64, rx: &mut RxChannel, char_name: &str) {
+            let nc_body = { let mut b = Vec::new(); let _ = mir2_shared::binary::write_dotnet_string(&mut b, char_name); b.push(0u8); b.push(0u8); b };
+            let _ = gate_ref.ask(ClientData { session_id, data: build_packet_bytes(mir2_shared::enums::ClientPacketIds::NewCharacter as i16, &nc_body) }).await;
+            let ncs = mir2_shared::enums::ServerPacketIds::NewCharacterSuccess as i16;
+            loop {
+                let data = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await.expect("timeout").expect("closed");
+                if data.len() >= 4 && i16::from_le_bytes([data[2], data[3]]) == ncs { break; }
+            }
+            let _ = gate_ref.ask(ClientData { session_id, data: build_packet_bytes(mir2_shared::enums::ClientPacketIds::StartGame as i16, &0i32.to_le_bytes().to_vec()) }).await;
+            // 等待 StartGame 响应
+            let sg = mir2_shared::enums::ServerPacketIds::StartGame as i16;
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            let mut found = false;
+            while tokio::time::Instant::now() < deadline {
+                let remaining = deadline - tokio::time::Instant::now();
+                if let Ok(Some(data)) = tokio::time::timeout(remaining, rx.recv()).await {
+                    if data.len() >= 4 && i16::from_le_bytes([data[2], data[3]]) == sg { found = true; break; }
+                } else { break; }
+            }
+            assert!(found, "session {} StartGame response not received", session_id);
+        }
+
+        // B(5) 先进图
+        start_game(&gate_ref, 5, &mut rx5, "CharB").await;
+        // A(6) 后进图（B 已在图内）—— #881 崩溃路径
+        start_game(&gate_ref, 6, &mut rx6, "CharA").await;
+
+        // 跑几秒 tick（100ms 间隔）验证不崩溃
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert!(!rx5.is_closed(), "session 5 channel alive");
+        assert!(!rx6.is_closed(), "session 6 channel alive");
+    });
+}
+
 #[test]
 fn e2e_attack_flow() {
     let rt = tokio::runtime::Builder::new_multi_thread()
