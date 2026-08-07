@@ -48,7 +48,7 @@ impl MonsterBehavior for DarkDevourerBehavior {
                 });
             } else {
                 // 远程 DC MACAgility（+500ms 冷却）
-                monster.next_attack_tick = ctx.tick_count + 10;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,

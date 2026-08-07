@@ -92,7 +92,7 @@ impl MonsterBehavior for WaterDragonBehavior {
             });
         } else {
             // 水系吐息：MC 弹道 + 5s 绿毒（C# ranged AttackTime + AttackSpeed + 500）
-            monster.next_attack_tick = ctx.tick_count + 10;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
             let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
             ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                 attacker_oid: monster.object_id,

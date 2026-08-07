@@ -52,7 +52,7 @@ impl MonsterBehavior for IceGuardBehavior {
         } else if dist <= ATTACK_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
                 // 远程冷却 +500ms（C# AttackSpeed + 500）
-                monster.next_attack_tick = ctx.tick_count + 10;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
                 let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
                 let is_ice = fastrand::i32(0..3) > 0; // 2/3 冰攻
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {

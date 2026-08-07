@@ -50,7 +50,7 @@ impl MonsterBehavior for MinotaurKingBehavior {
                 });
             } else {
                 // 远程：命中原目标 + 目标点 3 格内 AOE（C# CompleteRangeAttack 独有）
-                monster.next_attack_tick = ctx.tick_count + 10;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
                 // 先以 Aoe 在目标点施加溅射（含主目标）
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
                     attacker_oid: monster.object_id,

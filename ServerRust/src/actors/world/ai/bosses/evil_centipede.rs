@@ -97,7 +97,7 @@ impl MonsterBehavior for EvilCentipedeBehavior {
         if !has_target {
             return;
         }
-        monster.next_attack_tick = ctx.tick_count + 10; // AttackSpeed ≈ 1s
+        monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
         // 先收集目标避免借用冲突
         let targets: Vec<crate::actors::world::ai::PlayerSnap> =

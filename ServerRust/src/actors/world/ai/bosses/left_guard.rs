@@ -69,7 +69,7 @@ impl MonsterBehavior for LeftGuardBehavior {
             });
         } else {
             // 远程弹道：MAC（C# AttackTime + AttackSpeed + 500，冷却更长）
-            monster.next_attack_tick = ctx.tick_count + 10;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5;
             ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                 attacker_oid: monster.object_id,
                 target_session: target.session_id,
