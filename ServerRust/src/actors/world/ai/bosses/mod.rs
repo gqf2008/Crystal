@@ -92,6 +92,7 @@ pub mod vampire_spider;
 pub mod venom_spider;
 pub mod thunder_element;
 pub mod kirin;
+pub mod toxic_ghoul;
 pub mod troll_bomber;
 pub mod plague_crab;
 pub mod human_wizard;

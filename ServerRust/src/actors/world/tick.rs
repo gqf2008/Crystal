@@ -690,6 +690,11 @@ impl WorldActor {
         let mut die_delayed: Vec<ai::DelayedAttack> = Vec::new();
         let mut die_taunts: Vec<(u32, u32)> = Vec::new();
         {
+            // 死亡回调也提供玩家快照（C# Die 可 FindAllTargets；ToxicGhoul 死亡 AOE 毒等用）
+            let die_player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
+                .map(|(s, x, y, oid, _, hp, map)| ai::PlayerSnap {
+                    session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid,
+                }).collect();
             let mut ctx = AiCtx {
                 tick_count: self.tick_count,
                 monster_oid: monster.object_id,
@@ -698,7 +703,7 @@ impl WorldActor {
                     .map(|m| (m.width as i32, m.height as i32))
                     .unwrap_or((200, 200)),
                 dragon_level: 0,
-                players: &[],
+                players: &die_player_snaps,
                 monsters: &[],
                 out_moves: &mut die_moves,
                 out_attacks: &mut die_attacks,

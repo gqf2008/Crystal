@@ -97,6 +97,9 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("redmoonevil") || name.contains("red moon evil") || name.contains("红月恶魔") {
         return Box::new(bosses::red_moon_evil::RedMoonEvilBehavior::new());
     }
+    if name.contains("toxicghoul") || name.contains("toxic ghoul") || name.contains("毒尸") {
+        return Box::new(bosses::toxic_ghoul::ToxicGhoulBehavior::new());
+    }
     if name.contains("bugbagmaggot") || name.contains("bugbag maggot") || name.contains("虫袋蛆") {
         return Box::new(bosses::bug_bag_maggot::BugBagMaggotBehavior::new());
     }
@@ -336,6 +339,7 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("spittingspider") || name.contains("spitting spider") || name.contains("吐丝蜘蛛")
         || name.contains("stonetrap") || name.contains("stone trap") || name.contains("石阵")
         || name.contains("redmoonevil") || name.contains("red moon evil") || name.contains("红月恶魔")
+        || name.contains("toxicghoul") || name.contains("toxic ghoul") || name.contains("毒尸")
         || name.contains("bugbagmaggot") || name.contains("虫袋蛆")
         || name.contains("bombspider") || name.contains("bomb spider") || name.contains("炸弹蜘蛛")
         || name == "hugger"
