@@ -25,6 +25,14 @@ impl HellBombBehavior {
 }
 
 impl MonsterBehavior for HellBombBehavior {
+    fn on_attacked(&mut self, _damage: i32) -> i32 {
+        0 // C# Struck 返回 0：完全免疫伤害（只能等 10s 引信自爆）
+    }
+
+    fn on_poison(&mut self, _poison: crate::combat::poison::Poison) -> bool {
+        false // C# ApplyPoison 空实现：免疫毒
+    }
+
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         // C# ProcessTarget：Envir.Time > ExplosionTime → Die（10s 引信）
         if self.die_at_tick == 0 {
