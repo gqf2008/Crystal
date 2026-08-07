@@ -940,6 +940,8 @@ pub struct WorldActor {
     pub(crate) mine_spot_state: HashMap<(u16, i32, i32), MineSpotState>,
     /// 待处理的死亡回调（怪物 + 玩家快照；独立消息处理避免 Tick handler 栈溢出）
     pub(crate) pending_death_callbacks: Vec<(MonsterState, Vec<(u64, i32, i32, u32, i32, i32, u16)>)>,
+    /// 怪物回血计时（oid -> 下次回血 tick；C# MonsterObject.RegenTime，RegenDelay=10s）
+    pub(crate) monster_regen_ticks: HashMap<u32, u64>,
     /// 定时机器人任务
     pub(crate) robot_tasks: Vec<robot::RobotTask>,
     /// 机器人上次检查的分钟值
@@ -1127,6 +1129,7 @@ impl WorldActor {
             map_fire_next_tick: HashMap::new(),
             mine_spot_state: HashMap::new(),
             pending_death_callbacks: Vec::new(),
+            monster_regen_ticks: HashMap::new(),
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
@@ -3766,6 +3769,7 @@ impl Actor for WorldActor {
             map_fire_next_tick: HashMap::new(),
             mine_spot_state: HashMap::new(),
             pending_death_callbacks: Vec::new(),
+            monster_regen_ticks: HashMap::new(),
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
