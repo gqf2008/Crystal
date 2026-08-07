@@ -2774,8 +2774,21 @@ impl WorldActor {
             if caster_state.is_dead {
                 continue;
             }
-            let attacker_stats = caster_state.to_combat_stats();
-            let level_offset = caster_state.level.min(10) as u16;
+            // #1184：英雄弹道用英雄自身 CombatStats/等级结算（命中/暴击/等级差）
+            let (attacker_stats, level_offset) = if let Some(hs) = pending.hero_stats {
+                (
+                    hs,
+                    pending
+                        .hero_level
+                        .map(|l| l.min(10) as u16)
+                        .unwrap_or_else(|| caster_state.level.min(10) as u16),
+                )
+            } else {
+                (
+                    caster_state.to_combat_stats(),
+                    caster_state.level.min(10) as u16,
+                )
+            };
             let spell_enum = Spell::try_from(pending.spell).unwrap_or(Spell::None);
 
             // 弹道类法术目标可能是怪物或玩家
@@ -2838,10 +2851,14 @@ impl WorldActor {
         // 弓手被动 Focus（C# HumanObject CompleteRangeAttack：Random(5)<=Lv 时命中概率 ×2）
         let mut attacker_stats_owned = attacker_stats.clone();
         if is_archer {
-            if let Some(focus) = caster_state.magics.iter().find(|m| m.spell == 121) {
-                if fastrand::i32(0..5) <= focus.level as i32 {
-                    attacker_stats_owned.accuracy = attacker_stats_owned.accuracy.saturating_mul(2);
-                }
+            // #1184：英雄弹道查英雄技能（hero_magics 同 C# 编号）；普通玩家查玩家技能
+            let focus_lv = if pending.hero_stats.is_some() {
+                caster_state.hero_magics.iter().find(|m| m.spell == 121).map(|m| m.level).unwrap_or(0)
+            } else {
+                caster_state.magics.iter().find(|m| m.spell == 121).map(|m| m.level).unwrap_or(0)
+            };
+            if fastrand::i32(0..5) <= focus_lv as i32 {
+                attacker_stats_owned.accuracy = attacker_stats_owned.accuracy.saturating_mul(2);
             }
         }
 
@@ -3002,6 +3019,8 @@ impl WorldActor {
                                 target_y: ny,
                                 damage: pending.damage,
                                 magic_stat: pending.magic_stat,
+                                hero_stats: pending.hero_stats,
+                                hero_level: pending.hero_level,
                                 spell_level: pending.spell_level,
                                 bounce: pending.bounce - 1,
                             });

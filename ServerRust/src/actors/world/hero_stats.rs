@@ -35,6 +35,15 @@ pub struct HeroStats {
 }
 
 impl HeroStats {
+    /// 英雄职业对应的法术属性（C# HumanObject Magic：Wizard→MaxMC / Taoist→MaxSC / 其他→MaxDC）
+    pub fn effective_magic_attack(&self, class: MirClass) -> i32 {
+        match class {
+            MirClass::Wizard => self.max_mc,
+            MirClass::Taoist => self.max_sc,
+            _ => self.max_dc,
+        }
+    }
+
     /// 转换为战斗属性（供 resolve_attack / hero AI 使用）
     pub fn to_combat_stats(&self) -> crate::combat::attack::CombatStats {
         use crate::combat::attack::CombatStats;
@@ -170,6 +179,17 @@ mod tests {
         assert!(t.max_mac > 0 && t.min_mac > 0);
         assert!(t.max_sc > 0 && t.min_sc > 0);
         assert_eq!(t.max_dc, (0.0 + 30.0 / 7.0) as i32); // 4
+    }
+
+    #[test]
+    fn effective_magic_attack_per_class() {
+        let w = hero_base_stats(MirClass::Wizard, 30);
+        assert!(w.max_mc > 0);
+        assert_eq!(w.effective_magic_attack(MirClass::Wizard), w.max_mc);
+        let t = hero_base_stats(MirClass::Taoist, 30);
+        assert_eq!(t.effective_magic_attack(MirClass::Taoist), t.max_sc);
+        let a = hero_base_stats(MirClass::Archer, 30);
+        assert_eq!(a.effective_magic_attack(MirClass::Archer), a.max_dc);
     }
 
     #[test]
