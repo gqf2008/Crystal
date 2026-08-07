@@ -297,6 +297,7 @@ impl Message<StartGameRequest> for WorldActor {
         loaded_state.spell_recovery = b.spell_recovery;
         loaded_state.attack_speed = b.attack_speed;
         loaded_state.poison_resist = b.poison_resist;
+        loaded_state.holy = b.holy;
 
         // 给装备/背包物品补 ItemInfo（含 special_mode，供复活戒指等逻辑读取）
         for slot in loaded_state.inventory.equipment.iter_mut() {

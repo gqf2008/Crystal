@@ -4007,6 +4007,7 @@ impl WorldActor {
             spell_recovery: b.spell_recovery,
             attack_speed: b.attack_speed,
             poison_resist: b.poison_resist,
+            holy: b.holy,
         }).await;
         Some(state)
     }
@@ -4387,6 +4388,7 @@ pub struct EquipmentBonuses {
     pub freezing: i32, pub poison_attack: i32,
     pub health_recovery: i32, pub spell_recovery: i32,
     pub attack_speed: i32, pub poison_resist: i32,
+    pub holy: i32,
 }
 
 fn calculate_equipment_bonuses(
@@ -4428,7 +4430,135 @@ fn calculate_equipment_bonuses(
             b.poison_resist += get(Stat::PoisonResist);
         }
     }
+
+    // ===== 套装加成（C# HumanObject.RefreshItemSetStats / RefreshMirSetStats）=====
+    // set_type 为 C# ItemSet 值（DB 原始值；SharedRust 枚举 = C# + 3）
+    let mut set_entries: std::collections::HashMap<i32, Vec<(usize, i32)>> = std::collections::HashMap::new();
+    for (slot_idx, eq) in equipment.iter().enumerate() {
+        if let Some(eq) = eq {
+            if let Some(info) = item_infos.get(&eq.item_index) {
+                if info.set_type != 0 { // C# ItemSet.None = 0
+                    set_entries.entry(info.set_type).or_default().push((slot_idx, info.item_type));
+                }
+            }
+        }
+    }
+    for (set_type, entries) in &set_entries {
+        // 去重 item_type（C# ItemSets.Type 列表；Count = 不同部位数）
+        let mut types: Vec<i32> = Vec::new();
+        for (_, t) in entries {
+            if !types.contains(t) {
+                types.push(*t);
+            }
+        }
+        let count = types.len();
+        // 对戒加成（C#：Ring(7) + Bracelet(6) 同套）
+        if types.contains(&7) && types.contains(&6) {
+            apply_set_pair_bonus(&mut b, *set_type);
+        }
+        // 全套加成（Count >= Amount）
+        if count >= set_amount(*set_type) {
+            apply_set_complete_bonus(&mut b, *set_type);
+        }
+        // Mir 套装（C# RefreshMirSetStats：按槽位组合）
+        if *set_type == 12 {
+            let slots: Vec<usize> = entries.iter().map(|(s, _)| *s).collect();
+            apply_mir_set_bonus(&mut b, &slots);
+        }
+    }
     b
+}
+
+/// C# ItemSets.Amount：套装所需不同部位数
+fn set_amount(set_type: i32) -> usize {
+    match set_type {
+        // Mundane/NokChi/TaoProtect/Whisker1-5
+        9 | 10 | 11 | 21 | 22 | 23 | 24 | 25 => 2,
+        // RedOrchid/RedFlower/Smash/HwanDevil/Purity/FiveString/Bone/Bug/DarkGhost
+        3 | 4 | 5 | 6 | 7 | 8 | 13 | 14 | 38 => 3,
+        // Recall
+        2 => 4,
+        // Spirit/WhiteGold/WhiteGoldH/RedJade/RedJadeH/Nephrite/NephriteH/Hyeolryong/Monitor/Oppressive/Paeok/Sulgwan/BlueFrost/BlueFrostH
+        1 | 15 | 16 | 17 | 18 | 19 | 20 | 26 | 27 | 28 | 29 | 30 | 31 | 39 => 5,
+        _ => 0,
+    }
+}
+
+/// C# RefreshItemSetStats 对戒加成（Ring + Bracelet）
+fn apply_set_pair_bonus(b: &mut EquipmentBonuses, set_type: i32) {
+    match set_type {
+        5 => b.attack_speed += 2,       // Smash
+        7 => b.holy += 3,               // Purity
+        38 => b.hp += 25,               // DarkGhost
+        6 => {}                         // HwanDevil：WearWeight/BagWeight（Rust 未跟踪负重）
+        _ => {}
+    }
+}
+
+/// C# RefreshItemSetStats 全套加成（Count >= Amount）
+fn apply_set_complete_bonus(b: &mut EquipmentBonuses, set_type: i32) {
+    match set_type {
+        9 => b.hp += 50,                                                       // Mundane
+        10 => b.mp += 50,                                                      // NokChi
+        11 => { b.hp += 30; b.mp += 30; }                                      // TaoProtect
+        3 => b.accuracy += 2,                                                  // RedOrchid
+        4 => { b.hp += 50; b.mp -= 50; }                                       // RedFlower
+        5 => { b.min_atk += 1; b.max_atk += 3; }                               // Smash
+        6 => { b.min_mc += 1; b.max_mc += 2; }                                 // HwanDevil
+        7 => { b.min_sc += 1; b.max_sc += 2; }                                 // Purity
+        8 => { b.hp += b.hp * 30 / 100; b.min_ac += 2; b.max_ac += 2; }        // FiveString
+        1 => { b.min_atk += 2; b.max_atk += 5; b.attack_speed += 2; }          // Spirit
+        13 => { b.max_ac += 2; b.max_mc += 1; b.max_sc += 1; }                 // Bone
+        14 => { b.max_atk += 1; b.max_mc += 1; b.max_sc += 1; b.max_mac += 1; b.poison_resist += 1; } // Bug
+        15 => { b.max_atk += 2; b.max_ac += 2; }                               // WhiteGold
+        16 => { b.max_atk += 3; b.hp += 30; b.attack_speed += 2; }             // WhiteGoldH
+        17 => { b.max_mc += 2; b.max_mac += 2; }                               // RedJade
+        18 => { b.max_mc += 2; b.mp += 40; b.agility += 2; }                   // RedJadeH
+        19 => { b.max_sc += 2; b.max_ac += 1; b.max_mac += 1; }                // Nephrite
+        20 => { b.max_sc += 2; b.hp += 15; b.mp += 20; b.holy += 1; b.accuracy += 1; } // NephriteH
+        21 | 24 | 25 => b.max_atk += 1,                                        // Whisker1/4/5（BagWeight 未跟踪）
+        22 => b.max_mc += 1,                                                   // Whisker2
+        23 => b.max_sc += 1,                                                   // Whisker3
+        26 => { b.max_sc += 2; b.hp += 15; b.mp += 20; b.holy += 1; b.accuracy += 1; } // Hyeolryong
+        27 => { b.magic_resist += 1; b.poison_resist += 1; }                   // Monitor
+        28 => { b.max_ac += 1; b.agility += 1; }                               // Oppressive
+        31 => { b.min_atk += 1; b.max_atk += 1; b.min_mc += 1; b.max_mc += 1; } // BlueFrost
+        39 => { b.min_atk += 1; b.max_atk += 2; b.max_mc += 2; b.accuracy += 1; b.hp += 50; } // BlueFrostH
+        38 => { b.mp += 25; b.attack_speed += 2; }                             // DarkGhost
+        _ => {}
+    }
+}
+
+/// C# RefreshMirSetStats：Mir 套装按槽位组合加成（Rust 槽位：Weapon=0/Armour=1/Helmet=2/
+/// Necklace=3/BraceletL=4/BraceletR=5/RingL=6/RingR=7/Shoes=8/Pendant=9）
+fn apply_mir_set_bonus(b: &mut EquipmentBonuses, slots: &[usize]) {
+    let has = |s: usize| slots.contains(&s);
+    if slots.len() >= 10 {
+        b.max_ac += 1; b.max_mac += 1; b.luck += 2; b.attack_speed += 2;
+        b.hp += 70; b.mp += 80; b.magic_resist += 6; b.poison_resist += 6;
+    }
+    if has(6) && has(7) {
+        b.max_mac += 1; b.max_ac += 1;
+    }
+    if has(4) && has(5) {
+        b.min_ac += 1; b.min_mac += 1;
+    }
+    if (has(6) || has(7)) && (has(4) || has(5)) && has(3) {
+        b.max_mac += 1; b.max_ac += 1;
+    }
+    if has(6) && has(7) && has(4) && has(5) && has(3) {
+        b.max_mac += 1; b.max_ac += 1;
+    }
+    if has(1) && has(2) && has(0) {
+        b.max_atk += 2; b.max_mc += 1; b.max_sc += 1; b.agility += 1;
+    }
+    if has(1) && has(8) && has(9) {
+        b.max_atk += 1; b.max_mc += 1; b.max_sc += 1;
+    }
+    if has(1) && has(8) && has(9) && has(2) && has(0) {
+        b.min_atk += 1; b.max_atk += 1; b.min_mc += 1; b.max_mc += 1;
+        b.min_sc += 1; b.max_sc += 1;
+    }
 }
 
 fn send_equip_item_response(gate_ref: &ActorRef<GateActor>, session_id: u64, grid: u8, uid: u64, slot: i32, success: bool) {
@@ -5669,5 +5799,81 @@ mod hero_tests {
         assert_eq!(hero_create_result("   ", false), 1);
         assert_eq!(hero_create_result("Hero", true), 4);
         assert_eq!(hero_create_result("Hero", false), 10);
+    }
+}
+
+
+#[cfg(test)]
+mod set_bonus_tests {
+    use super::*;
+
+    #[test]
+    fn test_set_amount() {
+        // C# ItemSets.Amount
+        assert_eq!(set_amount(9), 2);  // Mundane
+        assert_eq!(set_amount(10), 2); // NokChi
+        assert_eq!(set_amount(21), 2); // Whisker1
+        assert_eq!(set_amount(5), 3);  // Smash
+        assert_eq!(set_amount(38), 3); // DarkGhost
+        assert_eq!(set_amount(2), 4);  // Recall
+        assert_eq!(set_amount(1), 5);  // Spirit
+        assert_eq!(set_amount(39), 5); // BlueFrostH
+        assert_eq!(set_amount(99), 0);
+    }
+
+    #[test]
+    fn test_set_pair_bonus() {
+        let mut b = EquipmentBonuses::default();
+        apply_set_pair_bonus(&mut b, 5); // Smash：AttackSpeed +2
+        assert_eq!(b.attack_speed, 2);
+        apply_set_pair_bonus(&mut b, 7); // Purity：Holy +3
+        assert_eq!(b.holy, 3);
+        apply_set_pair_bonus(&mut b, 38); // DarkGhost：HP +25
+        assert_eq!(b.hp, 25);
+    }
+
+    #[test]
+    fn test_set_complete_bonus() {
+        let mut b = EquipmentBonuses::default();
+        apply_set_complete_bonus(&mut b, 5); // Smash：MinDC+1/MaxDC+3
+        assert_eq!(b.min_atk, 1);
+        assert_eq!(b.max_atk, 3);
+        let mut b2 = EquipmentBonuses::default();
+        apply_set_complete_bonus(&mut b2, 1); // Spirit：MinDC+2/MaxDC+5/AttackSpeed+2
+        assert_eq!(b2.min_atk, 2);
+        assert_eq!(b2.max_atk, 5);
+        assert_eq!(b2.attack_speed, 2);
+        let mut b3 = EquipmentBonuses::default();
+        apply_set_complete_bonus(&mut b3, 14); // Bug：各 +1
+        assert_eq!(b3.max_atk, 1);
+        assert_eq!(b3.max_mc, 1);
+        assert_eq!(b3.max_sc, 1);
+        assert_eq!(b3.max_mac, 1);
+        assert_eq!(b3.poison_resist, 1);
+    }
+
+    #[test]
+    fn test_mir_set_bonus() {
+        // 10 件 Mir：HP+70/MP+80/Luck+2/AttackSpeed+2/MagicResist+6/PoisonResist+6/MaxAC+1/MaxMAC+1
+        let mut b = EquipmentBonuses::default();
+        apply_mir_set_bonus(&mut b, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(b.hp, 70);
+        assert_eq!(b.mp, 80);
+        assert_eq!(b.luck, 2);
+        assert_eq!(b.attack_speed, 2);
+        assert_eq!(b.magic_resist, 6);
+        assert_eq!(b.poison_resist, 6);
+        // 对戒（RingL+RingR）：MaxAC+1/MaxMAC+1
+        let mut c = EquipmentBonuses::default();
+        apply_mir_set_bonus(&mut c, &[6, 7]);
+        assert_eq!(c.max_ac, 1);
+        assert_eq!(c.max_mac, 1);
+        // 甲+盔+武：MaxDC+2/MaxMC+1/MaxSC+1/Agility+1
+        let mut d = EquipmentBonuses::default();
+        apply_mir_set_bonus(&mut d, &[0, 1, 2]);
+        assert_eq!(d.max_atk, 2);
+        assert_eq!(d.max_mc, 1);
+        assert_eq!(d.max_sc, 1);
+        assert_eq!(d.agility, 1);
     }
 }
