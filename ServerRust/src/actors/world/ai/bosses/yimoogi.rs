@@ -43,10 +43,17 @@ impl MonsterBehavior for YimoogiBehavior {
 
         // HP<10% 一次性传送 + 召唤 WhiteSnake（C# Yimoogi.cs:115-135）
         if !self.is_child && !self.final_teleport && monster.hp <= monster.max_hp / 10 {
-            // 传送（简化：随机走一步，C# 是全图 TeleportRandom(40,0)）
-            let (nx, ny, dir) = step_toward(monster.x, monster.y,
-                fastrand::i32(0..100), fastrand::i32(0..100));
-            ctx.out_moves.push((monster.object_id, nx, ny, dir));
+            // 传送：全图随机可行走格（C# TeleportRandom(40,0) → 随机 walkable cell）
+            // behavior 无法查 walkability，推多个候选；tick 端 out_moves 逐个校验 walkable，最后有效者生效
+            let (mw, mh) = ctx.map_size;
+            for _ in 0..10 {
+                ctx.out_moves.push((
+                    monster.object_id,
+                    fastrand::i32(0..mw.max(1)),
+                    fastrand::i32(0..mh.max(1)),
+                    monster.direction,
+                ));
+            }
             // 召唤 2 只 WhiteSnake（C# WhiteSerpent）
             for _ in 0..2 {
                 ctx.out_summons.push(crate::actors::world::ai::BossSummon {
