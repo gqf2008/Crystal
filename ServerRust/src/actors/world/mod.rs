@@ -163,6 +163,10 @@ pub struct MonsterSpawn {
     pub max_dmg: i32,
     pub xp: i32,
     pub map_index: u16,
+    /// 该出生点应生成的怪物数量（C# RespawnInfo.Count）
+    pub count: u32,
+    /// 出生点随机散布范围（C# RespawnInfo.Spread）
+    pub spread: i32,
 }
 
 /// NPC 延迟执行动作（TIMERECALL/DELAYGOTO，对齐 C# DelayedAction DelayedType.NPC）
@@ -219,6 +223,8 @@ fn load_spawn_config(map_name: &str, map_index: u16, spawn_dir: &Path) -> SpawnC
                         max_dmg: m.max_dmg,
                         xp: m.xp,
                         map_index,
+                        count: 1,
+                        spread: 0,
                     }).collect(),
                 }
             }
@@ -254,12 +260,17 @@ fn spawn_config_from_db(
         })
         .collect();
 
-    let monsters: Vec<MonsterSpawn> = map_info.respawns.iter().filter_map(|r| {
-        let mi = monster_infos.get(&r.monster_index)?;
+    let monsters: Vec<MonsterSpawn> = map_info.respawns.iter().flat_map(|r| {
+        let Some(mi) = monster_infos.get(&r.monster_index) else {
+            return Vec::new().into_iter();
+        };
         let hp = mi.stats.get(&(Stat::HP as u8)).copied().unwrap_or(50);
         let min_ac = mi.stats.get(&(Stat::MinAC as u8)).copied().unwrap_or(0);
         let max_ac = mi.stats.get(&(Stat::MaxAC as u8)).copied().unwrap_or(5);
-        Some(MonsterSpawn {
+        // C# RespawnInfo.Count：每个出生点生成 Count 只怪物（坐标在 spawn 时于
+        // ±Spread 内随机可走格落点，这里先生成 count 条定义）
+        let count = r.count.max(1) as usize;
+        (0..count).map(move |_| MonsterSpawn {
             name: mi.name.clone(),
             image: mi.image as u16,
             monster_index: mi.index,
@@ -271,7 +282,9 @@ fn spawn_config_from_db(
             max_dmg: max_ac,
             xp: mi.experience,
             map_index: map_info.index as u16,
-        })
+            count: 1,
+            spread: r.spread.max(0) as i32,
+        }).collect::<Vec<_>>().into_iter()
     }).collect();
 
     if !monsters.is_empty() || !npcs.is_empty() {
@@ -450,6 +463,8 @@ pub struct MonsterState {
     pub xp: i32,
     pub spawn_x: i32,
     pub spawn_y: i32,
+    /// 本出生组的散布范围（C# RespawnInfo.Spread），重生时用于随机落点
+    pub spawn_spread: i32,
     /// 所在地图索引（当前服务器单地图运行，默认 0）
     pub map_index: u16,
     /// 下次可攻击的 tick
@@ -501,6 +516,29 @@ pub struct MonsterState {
 
 fn dist_to_spawn(monster: &MonsterState) -> i32 {
     (monster.x - monster.spawn_x).abs() + (monster.y - monster.spawn_y).abs()
+}
+
+/// 在出生点 ±spread 内随机选取一个可走格（C# MapRespawn.WalkableCells 随机落点）。
+/// 最多尝试 32 次；全部失败时回退到出生点。
+fn random_spawn_pos(map: Option<&MapData>, cx: i32, cy: i32, spread: i32) -> (i32, i32) {
+    if spread <= 0 {
+        return (cx, cy);
+    }
+    if let Some(m) = map {
+        for _ in 0..32 {
+            let dx = fastrand::i32(-spread..=spread);
+            let dy = fastrand::i32(-spread..=spread);
+            let nx = cx + dx;
+            let ny = cy + dy;
+            if m.is_walkable(nx, ny) {
+                return (nx, ny);
+            }
+        }
+        if m.is_walkable(cx, cy) {
+            return (cx, cy);
+        }
+    }
+    (cx, cy)
 }
 
 /// 运行时 NPC 状态
@@ -2964,6 +3002,7 @@ impl WorldActor {
                                     xp: boss_xp,
                                     spawn_x: bx,
                                     spawn_y: by,
+                                    spawn_spread: 0,
                                     map_index: target_map_index,
                                     next_attack_tick: 0,
                                     next_move_tick: 0,
@@ -3010,6 +3049,8 @@ impl WorldActor {
                                         max_dmg: boss_max_dmg,
                                         xp: boss_xp,
                                         map_index: target_map_index,
+                                        count: 1,
+                                        spread: 0,
                                     }, boss_oid, &format!("[世界Boss] {}", monster_info.name));
                                 for session_id in self.players.keys() {
                                     let _ = self.gate_ref.tell(SendToClient {
@@ -3253,6 +3294,7 @@ impl WorldActor {
                                         x: npc.x, y: npc.y, direction: 0,
                                         hp, max_hp: hp, min_dmg, max_dmg, xp: info.experience,
                                         spawn_x: npc.x, spawn_y: npc.y, map_index,
+                                        spawn_spread: 0,
                                         next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
                                         ai_profile: MonsterAiProfile::from_info(&info),
                                         ai_state: MonsterAiState::Idle,
@@ -3899,6 +3941,8 @@ impl WorldActor {
                     max_dmg,
                     xp: info.experience,
                     map_index,
+                    count: 1,
+                    spread: 0,
                 },
                 oid,
                 &info.name,
@@ -3929,6 +3973,7 @@ impl WorldActor {
                 xp: info.experience,
                 spawn_x: x,
                 spawn_y: y,
+                spawn_spread: 0,
                 map_index,
                 next_attack_tick: 0,
                 next_move_tick: 0,
@@ -5863,6 +5908,7 @@ async fn spawn_npcs_and_monsters(
     session_id: u64,
     next_object_id: &mut u32,
     ctx: &SpawnContext<'_>,
+    walkable: Option<&MapData>,
 ) -> (Vec<NpcState>, Vec<MonsterState>) {
     // Try DB-loaded configs first, fall back to TOML
     let config = if let Some(mi) = ctx.map_info {
@@ -5904,6 +5950,12 @@ async fn spawn_npcs_and_monsters(
         let object_id = *next_object_id;
         *next_object_id += 1;
 
+        // C# RespawnInfo.Spread：本只怪物在出生点 ±spread 内随机可走格落点
+        let (mx, my) = random_spawn_pos(walkable, monster.x, monster.y, monster.spread);
+        let mut monster_pos = monster.clone();
+        monster_pos.x = mx;
+        monster_pos.y = my;
+
         // 精英判定（C# Settings.MonsterRarity* 配置化）
         let is_elite = fastrand::u8(1..=100) <= ctx.rarity.elite_chance_percent;
         let (name, hp, max_hp, min_dmg, max_dmg, xp) = if is_elite {
@@ -5919,7 +5971,7 @@ async fn spawn_npcs_and_monsters(
             (monster.name.clone(), monster.hp, monster.hp, monster.min_dmg, monster.max_dmg, monster.xp)
         };
 
-        let packet = build_object_monster_packet(monster, object_id, &name);
+        let packet = build_object_monster_packet(&monster_pos, object_id, &name);
         let _ = gate_ref.tell(SendToClient {
             session_id,
             data: packet,
@@ -5941,8 +5993,8 @@ async fn spawn_npcs_and_monsters(
             name: name.clone(),
             image: monster.image,
             monster_index: monster.monster_index,
-            x: monster.x,
-            y: monster.y,
+            x: mx,
+            y: my,
             direction: monster.direction,
             hp,
             max_hp,
@@ -5951,6 +6003,7 @@ async fn spawn_npcs_and_monsters(
             xp,
             spawn_x: monster.x,
             spawn_y: monster.y,
+            spawn_spread: monster.spread,
             map_index,
             next_attack_tick: 0,
             next_move_tick: 0,
@@ -6007,7 +6060,7 @@ async fn spawn_npcs_and_monsters(
                     let max_dmg = monster_db.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(100);
                     let xp = monster_db.experience;
                     let packet = build_object_monster_packet(
-                        &MonsterSpawn { name: dragon.monster_name.clone(), image: monster_db.image as u16, monster_index, x: dragon.location_x, y: dragon.location_y, direction: 0, hp, min_dmg, max_dmg, xp, map_index },
+                        &MonsterSpawn { name: dragon.monster_name.clone(), image: monster_db.image as u16, monster_index, x: dragon.location_x, y: dragon.location_y, direction: 0, hp, min_dmg, max_dmg, xp, map_index, count: 1, spread: 0 },
                         object_id,
                         &dragon.monster_name,
                     );
@@ -6028,6 +6081,7 @@ async fn spawn_npcs_and_monsters(
                         xp,
                         spawn_x: dragon.location_x,
                         spawn_y: dragon.location_y,
+                        spawn_spread: 0,
                         map_index,
                         next_attack_tick: 0,
                         next_move_tick: 0,
@@ -6133,6 +6187,7 @@ mod tests {
             xp: 5000,
             spawn_x: 100,
             spawn_y: 100,
+            spawn_spread: 0,
             map_index: 0,
             next_attack_tick: 0,
             next_move_tick: 0,

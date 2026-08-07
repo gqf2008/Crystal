@@ -2619,6 +2619,8 @@ impl Message<MagicRequest> for WorldActor {
                                 hp, min_dmg, max_dmg,
                                 xp: info.experience,
                                 map_index: state.map_index,
+                                count: 1,
+                                spread: 0,
                             };
                             let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
                             for sid in self.players.keys() {
@@ -2636,6 +2638,7 @@ impl Message<MagicRequest> for WorldActor {
                                 x: sx, y: sy, direction: msg.direction,
                                 hp, max_hp: hp, min_dmg, max_dmg, xp: spawn.xp,
                                 spawn_x: sx, spawn_y: sy, map_index: state.map_index,
+                                spawn_spread: 0,
                                 next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
                                 ai_profile, ai_state: MonsterAiState::Idle,
                                 target_session: None, provoked: false,
@@ -2795,6 +2798,8 @@ impl Message<MagicRequest> for WorldActor {
                                 max_dmg,
                                 xp: info.experience,
                                 map_index: state.map_index,
+                                count: 1,
+                                spread: 0,
                             };
                             let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
                             for sid in self.players.keys() {
@@ -2812,6 +2817,7 @@ impl Message<MagicRequest> for WorldActor {
                                 x: state.x, y: state.y, direction: msg.direction,
                                 hp, max_hp: hp, min_dmg, max_dmg, xp: spawn.xp,
                                 spawn_x: state.x, spawn_y: state.y, map_index: state.map_index,
+                                spawn_spread: 0,
                                 next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
                                 ai_profile, ai_state: MonsterAiState::Idle,
                                 target_session, provoked: target_session.is_some(),
@@ -3079,6 +3085,8 @@ impl Message<MagicRequest> for WorldActor {
                                 max_dmg,
                                 xp: info.experience,
                                 map_index: state.map_index,
+                                count: 1,
+                                spread: 0,
                             };
                             let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
                             for session_id in self.players.keys() {
@@ -3097,6 +3105,7 @@ impl Message<MagicRequest> for WorldActor {
                                 x: sx, y: sy, direction: dir as u8,
                                 hp, max_hp: hp, min_dmg, max_dmg, xp: spawn.xp,
                                 spawn_x: sx, spawn_y: sy, map_index: state.map_index,
+                                spawn_spread: 0,
                                 next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
                                 ai_profile, ai_state: MonsterAiState::Idle,
                                 target_session: Some(msg.session_id), provoked: true,
@@ -3179,6 +3188,8 @@ impl Message<MagicRequest> for WorldActor {
                                 max_dmg,
                                 xp: info.experience,
                                 map_index: state.map_index,
+                                count: 1,
+                                spread: 0,
                             };
                             let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
                             for session_id in self.players.keys() {
@@ -3198,6 +3209,7 @@ impl Message<MagicRequest> for WorldActor {
                                 x: sx, y: sy, direction: msg.direction,
                                 hp, max_hp: hp, min_dmg, max_dmg, xp: spawn.xp,
                                 spawn_x: sx, spawn_y: sy, map_index: state.map_index,
+                                spawn_spread: 0,
                                 next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
                                 ai_profile, ai_state: MonsterAiState::Idle,
                                 target_session: Some(msg.session_id), provoked: true,
