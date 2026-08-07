@@ -1740,77 +1740,28 @@ impl WorldActor {
         self.broadcast_player_appearance(session_id, &state).await;
     }
 
-/// 怪物死亡时生成掉落并广播给所有在线玩家
-    pub(crate) async fn spawn_single_drop(&mut self, monster: &MonsterState, item_index: i32, count: u16) {
+    /// 怪物死亡时生成掉落并广播给所有在线玩家
+    /// 金币拆堆落地（C# DropGold：每堆 ≤ Settings.MaxDropGold，超出拆多堆）
+    pub(crate) async fn spawn_gold_drop(&mut self, monster: &MonsterState, gold: u64) {
         let drop_oid = self.alloc_object_id();
-        if item_index == 0 {
-            // 对齐 C# Settings.MaxDropGold：每堆金币 ≤ max_drop_gold，超过拆成多堆
-            let total = count as u64;
-            let mut remaining = total;
-            let mut piles = 0u32;
-            while remaining > 0 {
-                let pile = remaining.min(self.max_drop_gold as u64) as u32;
-                remaining -= pile as u64;
-                let oid = if piles == 0 { drop_oid } else { self.alloc_object_id() };
-                let object_gold = mir2_shared::packets::server::ObjectGold {
-                    object_id: oid,
-                    gold: pile,
-                    location_x: monster.x,
-                    location_y: monster.y,
-                };
-                let mut buf = Vec::new();
-                if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_gold) {
-                    warn!("Failed to serialize ObjectGold: {}", e);
-                    continue;
-                }
-                for session_id in self.players.keys() {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: *session_id,
-                        data: buf.clone(),
-                    }).await;
-                }
-                self.ground_items.push(GroundItem {
-                    object_id: oid,
-                    item: mir2_shared::data::item::UserItem {
-                        item_index: 0,
-                        count: pile as u16,
-                        ..Default::default()
-                    },
-                    x: monster.x,
-                    y: monster.y,
-                    map_index: monster.map_index,
-                    dropper_session: None,
-                    drop_tick: self.tick_count,
-                    death_drop: false,
-                });
-                piles += 1;
-            }
-            debug!("Monster '{}' dropped {} gold ({} piles) at ({}, {})", monster.name, total, piles, monster.x, monster.y);
-        } else {
-            let mut item = mir2_shared::data::item::UserItem {
-                item_index,
-                unique_id: generate_item_uid(),
-                count,
-                ..Default::default()
-            };
-            if let Some(info) = self.item_infos.get(&item_index) {
-                item.max_dura = info.durability as u16;
-                item.current_dura = info.durability as u16;
-            }
-            // 补 ItemInfo（ObjectItem 携带 info 供客户端渲染名称/图标，与 M16 玩家丢弃路径一致）
-            enrich_item_info(&mut item, &self.item_infos);
-            // C#：掉落散落（Settings.DropRange）
-            let (dx, dy) = scatter_drop_position(self.maps.get(&monster.map_index), monster.x, monster.y, 4);
-            let object_item = mir2_shared::packets::server::ObjectItem {
-                object_id: drop_oid,
-                item: item.clone(),
-                location_x: dx,
-                location_y: dy,
+        // 对齐 C# Settings.MaxDropGold：每堆金币 ≤ max_drop_gold，超过拆成多堆
+        let total = gold;
+        let mut remaining = total;
+        let mut piles = 0u32;
+        while remaining > 0 {
+            let pile = remaining.min(self.max_drop_gold as u64) as u32;
+            remaining -= pile as u64;
+            let oid = if piles == 0 { drop_oid } else { self.alloc_object_id() };
+            let object_gold = mir2_shared::packets::server::ObjectGold {
+                object_id: oid,
+                gold: pile,
+                location_x: monster.x,
+                location_y: monster.y,
             };
             let mut buf = Vec::new();
-            if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item) {
-                warn!("Failed to serialize ObjectItem: {}", e);
-                return;
+            if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_gold) {
+                warn!("Failed to serialize ObjectGold: {}", e);
+                continue;
             }
             for session_id in self.players.keys() {
                 let _ = self.gate_ref.tell(SendToClient {
@@ -1819,18 +1770,75 @@ impl WorldActor {
                 }).await;
             }
             self.ground_items.push(GroundItem {
-                object_id: drop_oid,
-                item,
-                x: dx,
-                y: dy,
+                object_id: oid,
+                item: mir2_shared::data::item::UserItem {
+                    item_index: 0,
+                    count: pile as u16,
+                    ..Default::default()
+                },
+                x: monster.x,
+                y: monster.y,
                 map_index: monster.map_index,
                 dropper_session: None,
                 drop_tick: self.tick_count,
                 death_drop: false,
             });
-            debug!("Monster '{}' dropped item index={} count={} at ({}, {})", monster.name, item_index, count, dx, dy);
+            piles += 1;
         }
+        debug!("Monster '{}' dropped {} gold ({} piles) at ({}, {})", monster.name, total, piles, monster.x, monster.y);
     }
+
+    pub(crate) async fn spawn_single_drop(&mut self, monster: &MonsterState, item_index: i32, count: u16) {
+        if item_index == 0 {
+            // 金币：按 Settings.MaxDropGold 拆堆落地（C# DropGold）
+            self.spawn_gold_drop(monster, count as u64).await;
+            return;
+        }
+        let drop_oid = self.alloc_object_id();
+        let mut item = mir2_shared::data::item::UserItem {
+            item_index,
+            unique_id: generate_item_uid(),
+            count,
+            ..Default::default()
+        };
+        if let Some(info) = self.item_infos.get(&item_index) {
+            item.max_dura = info.durability as u16;
+            item.current_dura = info.durability as u16;
+        }
+        // 补 ItemInfo（ObjectItem 携带 info 供客户端渲染名称/图标，与 M16 玩家丢弃路径一致）
+        enrich_item_info(&mut item, &self.item_infos);
+        // C#：掉落散落（Settings.DropRange）
+        let (dx, dy) = scatter_drop_position(self.maps.get(&monster.map_index), monster.x, monster.y, 4);
+        let object_item = mir2_shared::packets::server::ObjectItem {
+            object_id: drop_oid,
+            item: item.clone(),
+            location_x: dx,
+            location_y: dy,
+        };
+        let mut buf = Vec::new();
+        if let Err(e) = mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut buf), &object_item) {
+            warn!("Failed to serialize ObjectItem: {}", e);
+            return;
+        }
+        for session_id in self.players.keys() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: *session_id,
+                data: buf.clone(),
+            }).await;
+        }
+        self.ground_items.push(GroundItem {
+            object_id: drop_oid,
+            item,
+            x: dx,
+            y: dy,
+            map_index: monster.map_index,
+            dropper_session: None,
+            drop_tick: self.tick_count,
+            death_drop: false,
+        });
+        debug!("Monster '{}' dropped item index={} count={} at ({}, {})", monster.name, item_index, count, dx, dy);
+    }
+
 
     pub(crate) async fn spawn_monster_drops(&mut self, monster: &MonsterState) {
         // C# MonsterObject.DropItem：NoDropMonster 地图不掉落（金币/物品）
@@ -1868,11 +1876,24 @@ impl WorldActor {
             1.0
         };
 
+        let global_gold_mul = if self.tick_count < self.global_exp_event_end_tick {
+            self.global_gold_multiplier
+        } else { 1.0 };
         for drop in &drops {
+            // C# Drop()：QuestRequired 条目普通掉落跳过（任务系统发放）
+            if drop.quest_required {
+                continue;
+            }
             let roll = fastrand::f64();
             // 全局掉落倍率（C# Settings.DropRate）+ 玩家掉落 Buff：chance * drop_rate * drop_buff，上限 1.0
             let effective_chance = (drop.chance * self.drop_rate * player_drop_mul).min(1.0);
             if roll > effective_chance {
+                continue;
+            }
+            // #995：金币条目（C# DropInfo.Gold → DropGold，按金币倍率）
+            if drop.gold > 0 {
+                let gold = (drop.gold as f64 * global_gold_mul).round() as u64;
+                self.spawn_gold_drop(monster, gold).await;
                 continue;
             }
             let count = if drop.max_count > drop.min_count {
@@ -1904,11 +1925,8 @@ impl WorldActor {
 
         // 世界Boss额外掉落：大量金币 + 全掉落保底
         if monster.is_boss {
-            let global_gold_mul = if self.tick_count < self.global_exp_event_end_tick {
-                self.global_gold_multiplier
-            } else { 1.0 };
             let gold_drop = (fastrand::u32(5000..=20000) as f64 * global_gold_mul).round() as u64;
-            self.spawn_single_drop(monster, 0, gold_drop as u16).await;
+            self.spawn_gold_drop(monster, gold_drop).await;
             for drop in &drops {
                 let count = if drop.max_count > drop.min_count {
                     fastrand::u16(drop.min_count..=drop.max_count).saturating_mul(2)
