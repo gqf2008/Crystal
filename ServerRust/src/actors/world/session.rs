@@ -1544,7 +1544,7 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -1672,6 +1672,146 @@ impl Message<ChatRequest> for WorldActor {
                                     }
                                 }
                             }
+                        }
+                        // @givegold [玩家] <数量>（C# case "GIVEGOLD" ~3071）
+                        "GIVEGOLD" => {
+                            let amount = parts.last().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                            if amount == 0 { return; }
+                            match parts.get(1).copied() {
+                                Some(n) if parts.len() >= 3 => {
+                                    let mut found = false;
+                                    for (_sid, other) in &self.players {
+                                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                            if os.name.eq_ignore_ascii_case(n) {
+                                                let _ = other.actor_ref.ask(crate::actors::player::AddGold { amount }).await;
+                                                send_system_message(&self.gate_ref, msg.session_id, &format!("已给 {} {} 金币", os.name, amount));
+                                                found = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if !found {
+                                        send_system_message(&self.gate_ref, msg.session_id, &format!("未找到在线玩家：{}", n));
+                                    }
+                                }
+                                _ => {
+                                    let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount }).await;
+                                    send_system_message(&self.gate_ref, msg.session_id, &format!("已获得 {} 金币", amount));
+                                }
+                            }
+                        }
+                        // @giveskill [玩家] <技能名> <等级0-3>（C# case "GIVESKILL" ~3167）
+                        "GIVESKILL" => {
+                            // 技能名：有 3+ 参数时是最后两个（[玩家] 技能 等级）；2 参数时是 (技能 等级)
+                            let (skill_arg, level_arg) = if parts.len() >= 3 {
+                                (parts.get(parts.len() - 2).copied().unwrap_or(""), parts.get(parts.len() - 1).copied().unwrap_or("0"))
+                            } else {
+                                (parts.get(1).copied().unwrap_or(""), parts.get(2).copied().unwrap_or("0"))
+                            };
+                            let Some(info) = self.magic_infos.values().find(|m| m.name.eq_ignore_ascii_case(skill_arg)).cloned() else {
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("未找到技能：{}", skill_arg));
+                                return;
+                            };
+                            let level = level_arg.parse::<u8>().unwrap_or(0).min(3);
+                            let target_sid = if parts.len() >= 4 {
+                                // [玩家] 技能 等级
+                                let name = parts.get(1).copied().unwrap_or("");
+                                let mut found = None;
+                                for (_sid, other) in &self.players {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if os.name.eq_ignore_ascii_case(name) {
+                                            found = Some((*_sid, other.actor_ref.clone()));
+                                            break;
+                                        }
+                                    }
+                                }
+                                found.map(|(sid, _)| sid)
+                            } else {
+                                Some(msg.session_id)
+                            };
+                            let Some(target_sid) = target_sid else {
+                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                return;
+                            };
+                            let target = match self.players.get(&target_sid) {
+                                Some(r) => r.clone(),
+                                None => return,
+                            };
+                            let mut state = match target.actor_ref.ask(GetPlayerState).await {
+                                Ok(Some(s)) => s,
+                                _ => return,
+                            };
+                            if !state.magics.iter().any(|m| m.spell == info.spell) {
+                                let mut m = crate::actors::player::PlayerMagic::new(info.spell);
+                                m.level = level;
+                                state.magics.push(m);
+                                let _ = target.actor_ref.ask(SetPlayerState { state }).await;
+                                self.send_new_magic_packet(target_sid, info.spell).await;
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("已传授技能 {}", info.name));
+                            } else {
+                                send_system_message(&self.gate_ref, msg.session_id, "对方已学会该技能");
+                            }
+                        }
+                        // @clearmob（C# case "CLEARMOB" ~3399；简化：清空当前地图怪物）
+                        "CLEARMOB" => {
+                            let state = match record.actor_ref.ask(GetPlayerState).await {
+                                Ok(Some(s)) => s,
+                                _ => return,
+                            };
+                            let map_index = state.map_index;
+                            let ids: Vec<u32> = self.monsters.iter()
+                                .filter(|(_, m)| m.map_index == map_index)
+                                .map(|(oid, _)| *oid)
+                                .collect();
+                            let mut removed = 0;
+                            for oid in &ids {
+                                if self.monsters.remove(oid).is_some() {
+                                    removed += 1;
+                                    let packet = Self::build_object_remove_packet(*oid);
+                                    for sid in self.players.keys() {
+                                        let _ = self.gate_ref.tell(SendToClient {
+                                            session_id: *sid,
+                                            data: packet.clone(),
+                                        }).await;
+                                    }
+                                }
+                            }
+                            send_system_message(&self.gate_ref, msg.session_id, &format!("已清除 {} 只怪物", removed));
+                        }
+                        // @adjustpkpoint [玩家] <点数>（C# case "ADJUSTPKPOINT" ~3494：直接设置 PK）
+                        "ADJUSTPKPOINT" => {
+                            let target_sid = if parts.len() >= 3 {
+                                let name = parts.get(1).copied().unwrap_or("");
+                                let mut found = None;
+                                for (_sid, other) in &self.players {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if os.name.eq_ignore_ascii_case(name) {
+                                            found = Some(*_sid);
+                                            break;
+                                        }
+                                    }
+                                }
+                                found
+                            } else {
+                                Some(msg.session_id)
+                            };
+                            let Some(target_sid) = target_sid else {
+                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                return;
+                            };
+                            let target = match self.players.get(&target_sid) {
+                                Some(r) => r.clone(),
+                                None => return,
+                            };
+                            let want = parts.last().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                            let state = match target.actor_ref.ask(GetPlayerState).await {
+                                Ok(Some(s)) => s,
+                                _ => return,
+                            };
+                            let delta = want - state.pk_points;
+                            let _ = target.actor_ref.ask(crate::actors::player::AddPkPoints { points: delta }).await;
+                            self.broadcast_viewer_colours(target_sid).await;
+                            send_system_message(&self.gate_ref, msg.session_id, &format!("已设置 PK 值为 {}", want));
                         }
                         _ => {}
                     }
