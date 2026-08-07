@@ -1430,42 +1430,42 @@ impl Message<MagicRequest> for WorldActor {
             }
             // MassHiding：组队隐身（简化：自身 + 附近组员）
             SPELL_MASS_HIDING => {
-                // 先给自身
-                let buff = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::Invisibility,
-                    (20 + spell_level as u32 * 10) * 10,
-                    5,
+                // C# 时长：value = GetAttackPower(MinSC,MaxSC)/2 + (Lv+1)*2 秒（HumanObject.cs:4500）
+                let sc_power = crate::combat::attack::get_attack_power(
+                    state.min_sc + state.bonus_min_sc,
+                    state.max_sc + state.bonus_max_sc,
+                    0,
                 );
-                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
-                self.invisible_sessions.insert(msg.session_id);
-            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
-                self.broadcast_object_hidden(st.object_id, true, st.map_index).await;
-            }
-                // 给附近组员（3 格内）
-                let group_id = state.group_id;
-                if let Some(gid) = group_id {
+                let duration_ticks = ((sc_power / 2 + (spell_level as i32 + 1) * 2).max(1) as u32) * 10;
+                // C# Map.cs MassHiding：目标点 3×3（±1）范围内友方（自己/同组）隐身
+                let cx = if target_x == 0 && target_y == 0 { state.x } else { target_x };
+                let cy = if target_x == 0 && target_y == 0 { state.y } else { target_y };
+                let mut targets: Vec<u64> = vec![msg.session_id];
+                if let Some(gid) = state.group_id {
                     for (sid, other) in &self.players {
                         if *sid == msg.session_id { continue; }
                         if let Ok(Some(s)) = other.actor_ref.ask(GetPlayerState).await {
-                            if s.group_id == Some(gid) {
-                                let dist = (s.x - state.x).abs() + (s.y - state.y).abs();
-                                if dist <= 3 {
-                                    let buff2 = crate::combat::buff::BuffInstance::new(
-                                        crate::combat::buff::BuffType::Invisibility,
-                                        (20 + spell_level as u32 * 10) * 10,
-                                        5,
-                                    );
-                                    let _ = other.actor_ref.ask(crate::actors::player::ApplyBuff { buff: buff2 }).await;
-                                    self.invisible_sessions.insert(*sid);
-                    if let Ok(Some(mst)) = other.actor_ref.ask(GetPlayerState).await {
-                        self.broadcast_object_hidden(mst.object_id, true, mst.map_index).await;
-                    }
-                                }
+                            if s.group_id == Some(gid)
+                                && (s.x - cx).abs() <= 1 && (s.y - cy).abs() <= 1 {
+                                targets.push(*sid);
                             }
                         }
                     }
                 }
-                debug!("Magic: {} casts MassHiding", state.name);
+                for sid in &targets {
+                    let buff = crate::combat::buff::BuffInstance::new(
+                        crate::combat::buff::BuffType::Invisibility,
+                        duration_ticks,
+                        5,
+                    );
+                    let Some(other) = self.players.get(sid) else { continue; };
+                    let _ = other.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                    self.invisible_sessions.insert(*sid);
+                    if let Ok(Some(st)) = other.actor_ref.ask(GetPlayerState).await {
+                        self.broadcast_object_hidden(st.object_id, true, st.map_index).await;
+                    }
+                }
+                debug!("Magic: {} casts MassHiding on {} targets ({}s)", state.name, targets.len(), duration_ticks / 10);
             }
             // Purification：解毒（清除自身所有 Poison，C# 清除 debuff）
             SPELL_PURIFICATION => {
