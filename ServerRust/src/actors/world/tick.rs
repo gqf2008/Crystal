@@ -57,11 +57,31 @@ impl Message<ProcessDeathCallbacks> for WorldActor {
 
 
 impl WorldActor {
+    /// C# Die()：主人死亡 → 宠物（master_session 匹配的召唤怪）消失
+    pub(crate) async fn despawn_master_pets(&mut self, session_id: u64) {
+        let pet_oids: Vec<u32> = self.monsters.iter()
+            .filter(|(_, m)| m.master_session == Some(session_id) && m.hp > 0)
+            .map(|(id, _)| *id)
+            .collect();
+        for oid in pet_oids {
+            if let Some(monster) = self.monsters.remove(&oid) {
+                let remove_packet = Self::build_object_remove_packet(oid);
+                for sid in self.players.keys() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: *sid, data: remove_packet.clone(),
+                    }).await;
+                }
+                debug!("Pet '{}' despawned on master death", monster.name);
+            }
+        }
+    }
+
     /// 玩家 Buff tick + 死亡复活（每 5 ticks）
     pub(crate) async fn tick_buffs_and_revive(&mut self) {
         if self.tick_count % 5 == 0 {
             let mut to_revive = Vec::new();
             let mut to_remove = Vec::new();
+            let mut to_despawn_pets = Vec::new();
             for (session_id, record) in &self.players {
                 let _ = record.actor_ref.ask(crate::actors::player::TickBuff).await;
                 if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
@@ -69,6 +89,8 @@ impl WorldActor {
                         match self.player_death_queue.get(session_id) {
                             None => {
                                 self.player_death_queue.insert(*session_id, self.tick_count);
+                                // C# Die()：主人死亡 → 宠物消失（循环外处理避免借用冲突）
+                                to_despawn_pets.push(*session_id);
                             }
                             Some(death_tick) => {
                                 if self.tick_count >= death_tick + 60 {
@@ -89,6 +111,9 @@ impl WorldActor {
                 if let Some(record) = self.players.get(&session_id) {
                     let _ = record.actor_ref.ask(crate::actors::player::Revive).await;
                 }
+            }
+            for session_id in to_despawn_pets {
+                self.despawn_master_pets(session_id).await;
             }
 
             // 怪物 Poison tick（与玩家同步，每 5 ticks 推进 1 秒）
