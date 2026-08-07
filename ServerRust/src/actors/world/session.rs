@@ -1794,6 +1794,24 @@ impl Message<ChatRequest> for WorldActor {
                     send_system_message(&self.gate_ref, msg.session_id, &format!("未找到在线玩家：{}", target_name));
                     return;
                 }
+                Some("LEAVEGUILD") => {
+                    // C# case "LEAVEGUILD"（~3251）：退会；开战期间禁止（CannotLeaveGuildAtWar）
+                    let state = match record.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(s)) => s,
+                        _ => return,
+                    };
+                    let Some(guild) = state.guild_name.clone() else {
+                        return;
+                    };
+                    if self.guild_wars.get(&guild).map(|s| !s.is_empty()).unwrap_or(false) {
+                        send_system_message(&self.gate_ref, msg.session_id, "行会战争中无法离开行会");
+                        return;
+                    }
+                    let _ = self.social_ref.ask(crate::actors::social::LeaveGuildRequest {
+                        session_id: msg.session_id,
+                    }).await;
+                    return;
+                }
                 Some("RECALL") => {
                     // C# case "RECALL"（~2471）：仅 GM——把指定玩家传送到自己面前（Teleport(CurrentMap, Front)）
                     let (is_gm, my_state) = match record.actor_ref.ask(GetPlayerState).await {
