@@ -1,8 +1,8 @@
 //! DemonGuard（恶魔守卫）behavior
 //!
 //! C# 参考：Server/MirObjects/Monsters/DemonGuard.cs（继承 ZumaMonster）
-//! 机制：2/3 物理近战（DC，ACAgility）/ 1/3 魔法近战（MC，ACAgility）
-//! 说明：C# 复活机制（Revive 1-2 次，25% 递减）依赖重生逻辑，暂不实现
+//! 机制：2/3 物理近战（DC，ACAgility）/ 1/3 魔法近战（MC，ACAgility）；
+//!      复活：LifeCount=random(0..3) 次，每次复活 HP=MaxHP*(100-25*次数)/100（C# Revive 4-20s 延迟，此处简化为即时复活）
 
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
@@ -11,16 +11,27 @@ use crate::actors::world::ai::helpers::*;
 
 const VIEW_RANGE: i32 = 12;
 
-pub struct DemonGuardBehavior;
+pub struct DemonGuardBehavior {
+    revival_count: u32,
+    life_count: u32,
+}
 
 impl DemonGuardBehavior {
     pub fn new() -> Self {
-        Self
+        // C#：LifeCount = Envir.Random.Next(3)（0-2 次复活）
+        Self { revival_count: 0, life_count: fastrand::i32(0..3) as u32 }
     }
 }
 
 impl MonsterBehavior for DemonGuardBehavior {
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
+        // C# ProcessAI：死亡且 RevivalTime 到且次数未满 → Revive（此处简化为即时复活）
+        if monster.hp <= 0 && self.revival_count < self.life_count {
+            self.revival_count += 1;
+            let newhp = (monster.max_hp as f32 * (100 - 25 * self.revival_count as i32) as f32 / 100.0) as i32;
+            monster.hp = newhp.max(1);
+            return;
+        }
         let target = match ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index) {
             Some(t) => *t,
             None => return,
