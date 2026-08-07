@@ -1763,6 +1763,7 @@ pub struct SetStatBonuses {
     pub spell_recovery: i32,
     pub attack_speed: i32,
     pub poison_resist: i32,
+    pub holy: i32,
 }
 
 impl Message<SetStatBonuses> for PlayerActor {
@@ -1851,6 +1852,7 @@ impl Message<SetStatBonuses> for PlayerActor {
         self.state.spell_recovery = msg.spell_recovery;
         self.state.attack_speed = msg.attack_speed;
         self.state.poison_resist = msg.poison_resist;
+        self.state.holy = msg.holy;
 
         if changed {
             self.send_user_information_refresh();
