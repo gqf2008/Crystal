@@ -169,6 +169,15 @@ impl Message<WorldAttackRequest> for WorldActor {
                         if self.tick_count < expire {
                             second_hit = (damage as f32 * (0.8 + 0.1 * lv as f32)) as i32;
                             monster.take_damage(second_hit);
+                            // TwinDrakeBlade 最终击：概率 Stun（C# HumanObject.cs:6803，Random(20)<=Lv+1）
+                            if kind == 0 && fastrand::i32(0..20) <= lv as i32 + 1 {
+                                crate::combat::poison::apply_poison(&mut monster.poison_list,
+                                    crate::combat::poison::Poison::new(
+                                        mir2_shared::enums::PoisonType::STUN, 2 + lv as u32, 0, 1000,
+                                    ));
+                                debug!("Player {} TwinDrakeBlade stunned '{}' ({}s)",
+                                       result.object_id, monster.name, 2 + lv as u32);
+                            }
                             let label = if kind == 0 { "TwinDrakeBlade" } else { "DoubleSlash" };
                             debug!("Player {} {} second hit +{} on '{}' (#{})",
                                    result.object_id, label, second_hit, monster.name, *oid);
