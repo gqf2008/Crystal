@@ -942,9 +942,10 @@ impl WorldActor {
                     h.dead = false;
                 }
             }
-            // 复活回满 HP（C# CurrentHero.HP = Hero.Stats[HP]）
+            // 复活回满 HP/MP（C# CurrentHero.HP = Hero.Stats[HP]、MP = Stats[MP]）
             if let Some(ai) = self.hero_ai_states.get_mut(&session_id) {
                 ai.hp = ai.max_hp;
+                ai.mp = ai.max_mp;
             }
             // DB 保存用更新后的列表：只复活当前英雄，其他英雄保持原 dead/sealed
             let db_heroes: Vec<db::DbHero> = self.player_heroes.get(&session_id)
