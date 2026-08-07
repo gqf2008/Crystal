@@ -1400,7 +1400,25 @@ impl WorldActor {
                         }
                     }
                 }
-                Spell::ExplosiveTrap | Spell::DelayedExplosion => {
+                Spell::ExplosiveTrap => {
+                    if !spell_obj.detonated {
+                        // C# ExplosiveTrap：可攻击目标踩中该格才引爆（单目标 MAC）
+                        let stepped: Option<u32> = self.monsters.iter()
+                            .find(|(_, m)| m.x == spell_obj.x && m.y == spell_obj.y && m.hp > 0 && m.map_index == spell_obj.map_index)
+                            .map(|(id, _)| *id);
+                        if let Some(mid) = stepped {
+                            debug!("SpellObject: ExplosiveTrap detonated at ({},{}) on monster {}", spell_obj.x, spell_obj.y, mid);
+                            spell_obj.detonated = true;
+                            spell_hits.push((
+                                spell_obj.caster_session, spell_obj.spell,
+                                spell_obj.x, spell_obj.y, spell_obj.tick_value, vec![mid],
+                            ));
+                            expired_ids.push(*obj_id);
+                        }
+                    }
+                }
+                Spell::DelayedExplosion => {
+                    // 定时引爆（简化：到点即爆 ±1 AoE；C# 为目标身上的 3 段毒，留作候选）
                     if !spell_obj.detonated {
                         debug!("SpellObject: {:?} detonated at ({},{})", spell_obj.spell, spell_obj.x, spell_obj.y);
                         spell_obj.detonated = true;
