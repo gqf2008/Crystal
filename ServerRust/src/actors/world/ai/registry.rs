@@ -102,6 +102,24 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name == "nadz" || name.contains("纳兹") {
         return Box::new(bosses::nadz::NadzBehavior::new());
     }
+    if name.contains("omawitchdoctor") || name.contains("oma witch doctor") || name.contains("奥玛巫医") {
+        return Box::new(bosses::oma_witch_doctor::OmaWitchDoctorBehavior::new());
+    }
+    if name.contains("swampwarrior") || name.contains("swamp warrior") || name.contains("沼泽战士") {
+        return Box::new(bosses::swamp_warrior::SwampWarriorBehavior::new());
+    }
+    if name.contains("omacannibal") || name.contains("oma cannibal") || name.contains("奥玛食人花") {
+        return Box::new(bosses::oma_cannibal::OmaCannibalBehavior::new());
+    }
+    if name.contains("burningzombie") || name.contains("burning zombie") || name.contains("燃烧僵尸") {
+        return Box::new(bosses::burning_zombie::BurningZombieBehavior::new());
+    }
+    if name.contains("antcommander") || name.contains("ant commander") || name.contains("蚁后指挥官") {
+        return Box::new(bosses::ant_commander::AntCommanderBehavior::new());
+    }
+    if name.contains("furbolgarcher") || name.contains("furbolg archer") || name.contains("兽人弓手") {
+        return Box::new(bosses::furbolg_archer::FurbolgArcherBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -386,6 +404,12 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("lightturtle") || name.contains("light turtle") || name.contains("光龟")
         || name.contains("hellcannibal") || name.contains("hell cannibal") || name.contains("地狱食人花")
         || name == "nadz" || name.contains("纳兹")
+        || name.contains("omawitchdoctor") || name.contains("oma witch doctor") || name.contains("奥玛巫医")
+        || name.contains("swampwarrior") || name.contains("swamp warrior") || name.contains("沼泽战士")
+        || name.contains("omacannibal") || name.contains("oma cannibal") || name.contains("奥玛食人花")
+        || name.contains("burningzombie") || name.contains("burning zombie") || name.contains("燃烧僵尸")
+        || name.contains("antcommander") || name.contains("ant commander") || name.contains("蚁后指挥官")
+        || name.contains("furbolgarcher") || name.contains("furbolg archer") || name.contains("兽人弓手")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
