@@ -1365,6 +1365,8 @@ impl Message<TakeDamage> for PlayerActor {
 /// 获得经验（从 WorldActor 转发）
 pub struct AddExperience {
     pub amount: i32,
+    /// C# Settings.ExperienceList（索引=Level-1）；空表时 PlayerActor 回退 ×1.5
+    pub experience_list: Vec<i64>,
 }
 
 impl Message<AddExperience> for PlayerActor {
@@ -1467,8 +1469,15 @@ impl Message<AddExperience> for PlayerActor {
                 }
             }
 
-            // 经验曲线（对齐 C# 每级增长）
-            self.state.max_experience = (self.state.max_experience as f64 * 1.5) as i64;
+            // 经验曲线（C# RefreshMaxExperience：MaxExperience = ExperienceList[Level-1]；空表回退 ×1.5）
+            let li = (self.state.level as usize).saturating_sub(1);
+            self.state.max_experience = if li < msg.experience_list.len() {
+                msg.experience_list[li]
+            } else if msg.experience_list.is_empty() {
+                (self.state.max_experience as f64 * 1.5) as i64
+            } else {
+                0 // 超出经验表：不再升级（C# 语义）
+            };
 
             info!("Player {} leveled up to {}! (hp={} mp={} atk={}-{} mc={}-{} sc={}-{})",
                   self.state.name, self.state.level, self.state.max_hp, self.state.max_mp,

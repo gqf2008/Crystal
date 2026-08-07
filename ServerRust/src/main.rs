@@ -153,6 +153,7 @@ async fn async_main() -> anyhow::Result<()> {
         pvp_cfg: cfg.pvp.clone(),
         drop_rate: cfg.server.drop_rate,
         exp_rate: 1.0, // C# Settings.ExpRate 默认 1
+        experience_list: cfg.server.experience_list.clone(),
         item_timeout_ticks: cfg.server.item_timeout_secs as u64 * 10,
         max_drop_gold: cfg.server.max_drop_gold,
         rarity_cfg: cfg.server.rarity.clone(),

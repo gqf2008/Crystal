@@ -96,6 +96,8 @@ pub struct WorldActorArgs {
     pub drop_rate: f64,
     /// 全局经验倍率（C# Settings.ExpRate，默认 1）
     pub exp_rate: f64,
+    /// 玩家升级经验曲线（C# Settings.ExperienceList；空表回退 ×1.5）
+    pub experience_list: Vec<i64>,
     /// 地面物品超时 ticks（= item_timeout_secs * 10，100ms/tick）
     pub item_timeout_ticks: u64,
     /// 金币掉落每堆上限（C# Settings.MaxDropGold = 2000）
@@ -961,6 +963,8 @@ pub struct WorldActor {
     pub(crate) drop_rate: f64,
     /// 全局经验倍率（C# Settings.ExpRate）
     pub(crate) exp_rate: f64,
+    /// 玩家升级经验曲线（C# Settings.ExperienceList；空表回退 ×1.5）
+    pub(crate) experience_list: Vec<i64>,
     /// 地面物品超时 ticks
     pub(crate) item_timeout_ticks: u64,
     /// 金币掉落每堆上限
@@ -1137,6 +1141,7 @@ impl WorldActor {
     pub fn new(gate_ref: ActorRef<GateActor>, map_dir: PathBuf, spawn_dir: Option<PathBuf>, db_pool: DbPool, social_ref: ActorRef<SocialActor>) -> Self {
         Self {
             tick_count: 0,
+            experience_list: Vec::new(),
             npc_timers: HashMap::new(),
             session_last_movement: HashMap::new(),
             npc_delayed_actions: HashMap::new(),
@@ -2819,7 +2824,7 @@ impl WorldActor {
                         let amount = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
                         if amount > 0 {
                             if let Some(record) = self.players.get(&session_id) {
-                                let _ = record.actor_ref.ask(crate::actors::player::AddExperience { amount: self.apply_global_exp_multiplier(amount) }).await;
+                                let _ = record.actor_ref.ask(crate::actors::player::AddExperience { amount: self.apply_global_exp_multiplier(amount) , experience_list: self.experience_list.clone()}).await;
                             }
                         }
                     }
@@ -3064,7 +3069,7 @@ impl WorldActor {
                                     }
                                 };
                                 if completed_quest.exp_reward > 0 {
-                                    let _ = record.actor_ref.ask(AddExperience { amount: self.apply_global_exp_multiplier(completed_quest.exp_reward as i32) }).await;
+                                    let _ = record.actor_ref.ask(AddExperience { amount: self.apply_global_exp_multiplier(completed_quest.exp_reward as i32) , experience_list: self.experience_list.clone()}).await;
                                 }
                                 if completed_quest.gold_reward > 0 {
                                     let _ = record.actor_ref.ask(AddGold { amount: completed_quest.gold_reward }).await;
@@ -4008,6 +4013,7 @@ impl Actor for WorldActor {
             pvp_cfg: args.pvp_cfg,
             drop_rate: args.drop_rate,
             exp_rate: args.exp_rate,
+            experience_list: args.experience_list,
             item_timeout_ticks: args.item_timeout_ticks,
             max_drop_gold: args.max_drop_gold,
             rarity_cfg: args.rarity_cfg,

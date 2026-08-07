@@ -1077,7 +1077,7 @@ impl WorldActor {
                     } else if roll < 95 {
                         // 经验 10~30
                         let xp = 10 + ((*session_id + self.tick_count) % 21) as i32;
-                        let _ = record.actor_ref.ask(crate::actors::player::AddExperience { amount: self.apply_global_exp_multiplier(xp) }).await;
+                        let _ = record.actor_ref.ask(crate::actors::player::AddExperience { amount: self.apply_global_exp_multiplier(xp) , experience_list: self.experience_list.clone()}).await;
                         send_system_message(&self.gate_ref, *session_id, &format!("钓到了经验珠！获得 {} 经验", xp));
                     } else {
                         send_system_message(&self.gate_ref, *session_id, "鱼跑了...");
@@ -4471,6 +4471,7 @@ impl Message<Tick> for WorldActor {
                                     if let Some(record) = self.players.get(sid).cloned() {
                                         let gained = record.actor_ref.ask(crate::actors::player::AddExperience {
                                             amount: self.apply_global_exp_multiplier(share),
+                                            experience_list: self.experience_list.clone(),
                                         }).await.unwrap_or(0);
                                         // C# GainExp：玩家获得经验时，同图 InRange(16) 存活宠物获得同等经验
                                         if gained > 0 {
@@ -4504,6 +4505,7 @@ impl Message<Tick> for WorldActor {
                             };
                             let gained = record.actor_ref.ask(crate::actors::player::AddExperience {
                                 amount: self.apply_global_exp_multiplier(xp_after),
+                                experience_list: self.experience_list.clone(),
                             }).await.unwrap_or(0);
                             // C# GainExp：玩家获得经验时，同图 InRange(16) 存活宠物获得同等经验
                             if gained > 0 {

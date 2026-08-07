@@ -328,6 +328,9 @@ pub struct ServerWorldConfig {
     /// 全局掉落倍率（C# Settings.DropRate，默认 1.0；影响掉落概率 chance * drop_rate）
     #[serde(default = "default_drop_rate")]
     pub drop_rate: f64,
+    /// 玩家升级经验曲线（C# Settings.ExperienceList，索引=Level-1；空表回退 ×1.5）
+    #[serde(default)]
+    pub experience_list: Vec<i64>,
     /// 地面物品超时秒数（C# Settings.ItemTimeOut = 30）
     #[serde(default = "default_item_timeout")]
     pub item_timeout_secs: u32,
@@ -469,6 +472,7 @@ impl Default for ServerConfig {
                 tick_ms: 100,
                 map_data_dir: "Data".to_string(),
                 drop_rate: default_drop_rate(),
+            experience_list: Vec::new(),
                 item_timeout_secs: default_item_timeout(),
                 max_drop_gold: default_max_drop_gold(),
                 health_regen_weight: default_health_regen_weight(),
