@@ -55,14 +55,112 @@ impl WorldActor {
             }
 
             // 怪物 Poison tick（与玩家同步，每 5 ticks 推进 1 秒）
+            // DelayedExplosion 毒（C# MonsterObject.ProcessDelayedExplosion）：每 2s（20 ticks）
+            // 推进阶段，广播 ObjectEffect(type=1/1/2)，阶段 2 在目标当前位置结算 3×3 AoE。
+            let mut delayed_effects: Vec<(u32, u8, u16)> = Vec::new(); // (object_id, stage, map_index)
+            let mut pending_explosions: Vec<(u64, u16, i32, i32, i32)> = Vec::new(); // (caster, map, x, y, value)
             for (_, monster) in &mut self.monsters {
                 if monster.poison_list.is_empty() {
                     continue;
+                }
+                if self.tick_count % 20 == 0 {
+                    let mut remove_delayed = false;
+                    if let Some(p) = monster.poison_list.iter_mut()
+                        .find(|p| p.p_type == mir2_shared::enums::PoisonType::DELAYED_EXPLOSION)
+                    {
+                        if monster.hp <= 0 {
+                            // 目标已死：C# ProcessDelayedExplosion 在 Dead 时直接结束
+                            remove_delayed = true;
+                        } else {
+                            if p.delayed_stage == 0 || self.tick_count >= p.delayed_next_tick {
+                                p.delayed_stage = p.delayed_stage.saturating_add(1);
+                            }
+                            match p.delayed_stage {
+                                1 => {
+                                    if p.delayed_next_tick == 0 {
+                                        p.delayed_next_tick = self.tick_count + 30;
+                                    }
+                                    delayed_effects.push((monster.object_id, 1, monster.map_index));
+                                }
+                                2 => {
+                                    delayed_effects.push((monster.object_id, 2, monster.map_index));
+                                    pending_explosions.push((
+                                        p.owner_session, monster.map_index,
+                                        monster.x, monster.y, p.value,
+                                    ));
+                                    remove_delayed = true;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    if remove_delayed {
+                        crate::combat::poison::remove_poison(
+                            &mut monster.poison_list,
+                            mir2_shared::enums::PoisonType::DELAYED_EXPLOSION,
+                        );
+                    }
                 }
                 let dmg = crate::combat::poison::tick_poisons(&mut monster.poison_list, 1);
                 if dmg > 0 {
                     monster.take_damage(dmg);
                 }
+            }
+            // 广播 DelayedExplosion 三级 ObjectEffect（同图玩家）
+            for (oid, stage, map_index) in &delayed_effects {
+                let effect = mir2_shared::packets::server::magic_combat::ObjectEffect {
+                    object_id: *oid,
+                    effect: mir2_shared::enums::SpellEffect::DelayedExplosion,
+                    effect_type: *stage as u32,
+                    delay_time: 0,
+                    time: 0,
+                };
+                let mut body = Vec::new();
+                if effect.write_body(&mut body).is_ok() {
+                    let pkt = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectEffect as i16, &body);
+                    for (sid, r) in &self.players {
+                        if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                            if os.map_index == *map_index {
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: *sid, data: pkt.clone(),
+                                }).await;
+                            }
+                        }
+                    }
+                }
+            }
+            // DelayedExplosion 阶段 2：目标当前位置 3×3 AoE MAC 伤害（C# Map.cs case DelayedExplosion）
+            for (caster_session, map_index, x, y, value) in pending_explosions {
+                let attacker_stats = match self.players.get(&caster_session) {
+                    Some(r) => match r.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(s)) if !s.is_dead => s.to_combat_stats(),
+                        _ => continue,
+                    },
+                    None => continue,
+                };
+                let hit_ids: Vec<u32> = self.monsters.iter()
+                    .filter(|(_, m)| {
+                        let dist = (m.x - x).abs() + (m.y - y).abs();
+                        dist <= 1 && m.hp > 0 && m.map_index == map_index
+                    })
+                    .map(|(id, _)| *id)
+                    .collect();
+                for mid in hit_ids {
+                    if let Some(monster) = self.monsters.get_mut(&mid) {
+                        let defender_stats = monster.to_combat_stats();
+                        let r = crate::combat::attack::resolve_attack(
+                            &attacker_stats, &defender_stats, value.max(1),
+                            mir2_shared::enums::DefenceType::Mac, 5,
+                        );
+                        if r.is_hit && r.damage > 0 {
+                            monster.take_damage(r.damage);
+                            monster.provoked = true;
+                            monster.target_session = Some(caster_session);
+                        }
+                    }
+                }
+                debug!("DelayedExplosion 3x3 AoE at ({},{}) map {} value {}", x, y, map_index, value);
             }
         }
     }
@@ -1319,7 +1417,7 @@ impl WorldActor {
         // 第一阶段：遍历 spell_objects，更新 tick 时间，收集命中怪物 id
         for (obj_id, spell_obj) in &mut self.spell_objects {
             let elapsed = now.duration_since(spell_obj.created_at).as_millis() as u64;
-            if spell_obj.is_expired(elapsed) {
+            if spell_obj.is_expired(elapsed) && spell_obj.spell != Spell::DelayedExplosion {
                 expired_ids.push(*obj_id);
                 continue;
             }
@@ -1418,22 +1516,38 @@ impl WorldActor {
                     }
                 }
                 Spell::DelayedExplosion => {
-                    // 定时引爆（简化：到点即爆 ±1 AoE；C# 为目标身上的 3 段毒，留作候选）
-                    if !spell_obj.detonated {
-                        debug!("SpellObject: {:?} detonated at ({},{})", spell_obj.spell, spell_obj.x, spell_obj.y);
+                    // C# HumanObject.cs:6462 DelayedType.Magic：延迟到期 → 对目标一次 MAC 伤害
+                    // + 挂 DelayedExplosion 毒（目标身上三级 ObjectEffect 后 3×3 AoE）。
+                    if !spell_obj.detonated && elapsed >= spell_obj.expires_at_ms {
+                        debug!("SpellObject: DelayedExplosion impact on target {:?} at ({},{})",
+                               spell_obj.target_id, spell_obj.x, spell_obj.y);
                         spell_obj.detonated = true;
-                        let hit_ids: Vec<u32> = self.monsters.iter()
-                            .filter(|(_, m)| {
-                                let dist = (m.x - spell_obj.x).abs() + (m.y - spell_obj.y).abs();
-                                dist <= 1 && m.hp > 0 && m.map_index == spell_obj.map_index
-                            })
-                            .map(|(id, _)| *id)
-                            .collect();
-                        if !hit_ids.is_empty() {
-                            spell_hits.push((
-                                spell_obj.caster_session, spell_obj.spell,
-                                spell_obj.x, spell_obj.y, spell_obj.tick_value, hit_ids,
-                            ));
+                        let target_info = spell_obj.target_id
+                            .and_then(|tid| self.monsters.get(&tid))
+                            .map(|t| (t.object_id, t.x, t.y,
+                                t.hp > 0 && t.map_index == spell_obj.map_index,
+                                t.poison_list.iter().any(|p| p.p_type == PoisonType::DELAYED_EXPLOSION)));
+                        if let Some((tid, tx, ty, alive, already_poisoned)) = target_info {
+                            if alive {
+                                // 1) 立即 MAC 伤害（spell_hits 第二阶段走 resolve_attack）
+                                spell_hits.push((
+                                    spell_obj.caster_session, spell_obj.spell,
+                                    tx, ty, spell_obj.tick_value, vec![tid],
+                                ));
+                                // 2) 挂 DelayedExplosion 毒；已有同类型毒则不重复（C# ApplyPoison 直接 return）
+                                if !already_poisoned {
+                                    if let Some(t) = self.monsters.get_mut(&tid) {
+                                        let mut p = poison::Poison::new(
+                                            PoisonType::DELAYED_EXPLOSION,
+                                            30, spell_obj.tick_value, 2000,
+                                        );
+                                        p.owner_session = spell_obj.caster_session;
+                                        // delayed_stage/delayed_next_tick 保持 0：首次 %20 推进时
+                                        // 进入阶段 1 并设置 +30 ticks（3s）的引爆窗口
+                                        poison::apply_poison(&mut t.poison_list, p);
+                                    }
+                                }
+                            }
                         }
                         expired_ids.push(*obj_id);
                     }
