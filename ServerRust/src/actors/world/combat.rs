@@ -1352,12 +1352,60 @@ impl Message<MagicRequest> for WorldActor {
         // 根据魔法类型执行不同效果
         match msg.spell {
             // --- 治愈类 ---
-            SPELL_HEALING | SPELL_MASS_HEALING | SPELL_HEALING_CIRCLE => {
-                let heal_amount = power.max(10);
-                let _ = record.actor_ref.ask(crate::actors::player::Heal {
-                    amount: heal_amount,
-                }).await;
-                debug!("Magic: {} casts Healing(spell={}) for {} HP", state.name, msg.spell, heal_amount);
+            // Healing：单目标友方（C# HumanObject.cs：health = GetDamage(SC*2) + Level）
+            // MassHealing：目标点 3×3 内自己+同组（C# Map.cs：value = GetDamage(SC)）
+            SPELL_HEALING | SPELL_MASS_HEALING => {
+                let sc_power = crate::combat::attack::get_attack_power(
+                    state.min_sc + state.bonus_min_sc,
+                    state.max_sc + state.bonus_max_sc,
+                    0,
+                );
+                if msg.spell == SPELL_HEALING {
+                    // 友方目标：点击自己/同组玩家
+                    let mut target_session = msg.session_id;
+                    if msg.target_id != 0 {
+                        for (sid, r) in &self.players {
+                            if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                                if os.object_id == msg.target_id {
+                                    let friendly = *sid == msg.session_id
+                                        || (os.group_id.is_some() && os.group_id == state.group_id);
+                                    if friendly {
+                                        target_session = *sid;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    let amount = sc_power * 2 + state.level as i32; // C# GetDamage(SC*2) + Level
+                    if let Some(r) = self.players.get(&target_session) {
+                        let _ = r.actor_ref.ask(crate::actors::player::Heal { amount }).await;
+                    }
+                    debug!("Magic: {} casts Healing on session {} (+{} HP)", state.name, target_session, amount);
+                } else {
+                    let cx = if target_x == 0 && target_y == 0 { state.x } else { target_x };
+                    let cy = if target_x == 0 && target_y == 0 { state.y } else { target_y };
+                    let amount = sc_power.max(1);
+                    let mut healed = 0u32;
+                    for (sid, r) in &self.players {
+                        if let Ok(Some(s)) = r.actor_ref.ask(GetPlayerState).await {
+                            let friendly = *sid == msg.session_id
+                                || (s.group_id.is_some() && s.group_id == state.group_id);
+                            if friendly && !s.is_dead
+                                && (s.x - cx).abs() <= 1 && (s.y - cy).abs() <= 1
+                            {
+                                let _ = r.actor_ref.ask(crate::actors::player::Heal { amount }).await;
+                                healed += 1;
+                            }
+                        }
+                    }
+                    debug!("Magic: {} casts MassHealing (3x3, healed {} players, +{} HP)",
+                           state.name, healed, amount);
+                }
+            }
+            // HealingCircle：持续治疗场由 SpellObject 每跳治疗（C# 无即时自疗）
+            SPELL_HEALING_CIRCLE => {
+                debug!("Magic: {} casts HealingCircle (persistent field)", state.name);
             }
             // --- Buff 类 ---
             // MagicShield：C# 用 Stat.DamageReductionPercent（百分比减伤），非 DefenseBoost
