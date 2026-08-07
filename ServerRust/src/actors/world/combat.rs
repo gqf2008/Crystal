@@ -1352,25 +1352,48 @@ impl Message<MagicRequest> for WorldActor {
                 }).await;
                 debug!("Magic: {} casts MagicShield (damage -{}%)", state.name, reduction_pct);
             }
-            // SoulShield：MAC 魔法防御 buff（C# Stat.MaxMAC/MinMAC）
-            SPELL_SOUL_SHIELD => {
-                let buff = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::MacDefenseBoost { bonus: (power / 3).max(3) },
-                    600, // 60秒
-                    5,
-                );
-                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
-                debug!("Magic: {} casts SoulShield (MAC defense +{})", state.name, (power / 3).max(3));
-            }
-            // BlessedArmour：AC 物理防御 buff（C# Stat.MaxAC/MinAC）
-            SPELL_BLESSED_ARMOUR => {
-                let buff = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::AcDefenseBoost { bonus: (power / 2).max(5) },
-                    600,
-                    5,
-                );
-                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
-                debug!("Magic: {} casts BlessedArmour (AC defense +{})", state.name, (power / 2).max(5));
+            // SoulShield / BlessedArmour：目标点 7×7 友方护盾（C# HumanObject.cs + Map.cs）
+            // bonus = 目标等级/7+4；时长 = SC*4 + (Lv+1)*50 秒
+            SPELL_SOUL_SHIELD | SPELL_BLESSED_ARMOUR => {
+                let is_soul = msg.spell == SPELL_SOUL_SHIELD;
+                let sc = state.effective_max_sc();
+                let duration_ticks = ((sc * 4 + (spell_level as i32 + 1) * 50).max(1) as u32) * 10;
+                let cx = if target_x == 0 && target_y == 0 { state.x } else { target_x };
+                let cy = if target_x == 0 && target_y == 0 { state.y } else { target_y };
+                let mut targets: Vec<u64> = vec![msg.session_id];
+                if let Some(gid) = state.group_id {
+                    for (sid, other) in &self.players {
+                        if *sid == msg.session_id { continue; }
+                        if let Ok(Some(s)) = other.actor_ref.ask(GetPlayerState).await {
+                            if s.group_id == Some(gid)
+                                && (s.x - cx).abs() <= 3 && (s.y - cy).abs() <= 3 {
+                                targets.push(*sid);
+                            }
+                        }
+                    }
+                }
+                for sid in &targets {
+                    let Some(other) = self.players.get(sid) else { continue; };
+                    let level = if *sid == msg.session_id {
+                        state.level
+                    } else {
+                        other.actor_ref.ask(GetPlayerState).await.ok().flatten().map(|s| s.level).unwrap_or(0)
+                    };
+                    let bonus = (level as i32 / 7 + 4).max(1);
+                    let buff = crate::combat::buff::BuffInstance::new(
+                        if is_soul {
+                            crate::combat::buff::BuffType::MacDefenseBoost { bonus }
+                        } else {
+                            crate::combat::buff::BuffType::AcDefenseBoost { bonus }
+                        },
+                        duration_ticks,
+                        5,
+                    );
+                    let _ = other.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                }
+                debug!("Magic: {} casts {} on {} targets (+{}, {}s)",
+                       state.name, if is_soul { "SoulShield" } else { "BlessedArmour" },
+                       targets.len(), state.level as i32 / 7 + 4, duration_ticks / 10);
             }
             // --- 道士 Debuff/控制类 ---
             // Poisoning：对目标怪物施毒（绿毒持续掉血/红毒降防御，C# Poisoning 消耗毒药物品）
