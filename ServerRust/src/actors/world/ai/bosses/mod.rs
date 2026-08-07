@@ -31,6 +31,7 @@ pub mod spitting_spider;
 pub mod bug_bag_maggot;
 pub mod bomb_spider;
 pub mod bone_spearman;
+pub mod sand_worm;
 pub mod hugger;
 pub mod guard;
 pub mod town_archer;
