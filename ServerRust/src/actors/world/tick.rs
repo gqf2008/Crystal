@@ -1354,6 +1354,21 @@ impl WorldActor {
             ).await;
         }
 
+        // C# EvilMir.ChangeHP：DragonLink 且受击（amount<0）→ DragonSystem.GainExp(Random(1,40))
+        if let Some(dragon) = self.dragon_state.as_mut() {
+            if let Some(oid) = dragon.evil_mir_oid {
+                if let Some(m) = self.monsters.get(&oid) {
+                    let prev = dragon.last_evil_mir_hp;
+                    if prev > m.hp && m.hp > 0 {
+                        let exp = fastrand::i32(1..40) as u64;
+                        let levels = dragon.gain_exp(exp);
+                        debug!("Dragon exp +{} from EvilMir hit (levels gained: {})", exp, levels);
+                    }
+                    dragon.last_evil_mir_hp = m.hp;
+                }
+            }
+        }
+
         // Dragon 系统：根据 dragon_info 配置在龙地图上有玩家时生成/维持 EvilMir 作为世界Boss。
         // 简化：当 dragon_info 存在、玩家在龙地图上、且当前无活跃 EvilMir → 生成。
         let dragon_info = match self.dragon_info.clone() {
