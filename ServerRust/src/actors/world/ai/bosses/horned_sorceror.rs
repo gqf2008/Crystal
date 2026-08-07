@@ -96,24 +96,30 @@ impl MonsterBehavior for HornedSorcerorBehavior {
             }
 
             if dist <= MELEE_RANGE {
-                // 近战：Thrust(DC 直线2)/Dust(MC 直线3) 简化为单体 + AOE
+                // 近战：3/5 Thrust(DC 直线2) / 2/5 Dust(MC 直线3)（C# LineAttack(damage, 2/3, 300)）
                 let is_thrust = fastrand::i32(0..5) > 2;
-                let (damage, radius) = if is_thrust {
+                let (damage, distance) = if is_thrust {
                     (crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1), 2)
                 } else {
                     (crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1), 3)
                 };
-                let dir = direction_towards(monster.x, monster.y, target.x, target.y);
-                let cx = monster.x + DIR_DX[dir as usize];
-                let cy = monster.y + DIR_DY[dir as usize];
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
-                    attacker_oid: monster.object_id,
-                    center_x: cx,
-                    center_y: cy,
-                    radius,
-                    damage,
-                    spell_id: 0,
-                });
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y) as usize % 8;
+                // 沿朝向直线每格命中第一个存活玩家
+                for i in 1..=distance {
+                    let tx = monster.x + DIR_DX[dir] * i;
+                    let ty = monster.y + DIR_DY[dir] * i;
+                    if let Some(p) = ctx.players.iter()
+                        .find(|p| p.map_index == monster.map_index && p.x == tx && p.y == ty && p.hp > 0)
+                    {
+                        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: p.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
+                    }
+                }
             } else {
                 // 远程：1/3 突进（直接近战伤害），否则 MoveTo（走追击分支）
                 if fastrand::i32(0..3) == 0 {
