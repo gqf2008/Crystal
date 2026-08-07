@@ -3347,7 +3347,7 @@ impl Message<Tick> for WorldActor {
 
             // 处理玩家死亡掉落（在怪物循环外，避免借用冲突）
             for (sid, x, y, map_index) in death_drops {
-                self.handle_player_death_drop(sid, x, y, map_index).await;
+                self.handle_player_death_drop(sid, x, y, map_index, false).await;
             }
             // 处理被怪物攻击后的自动下坐骑（在怪物循环外，避免借用冲突）
             for sid in dismount_sessions {
