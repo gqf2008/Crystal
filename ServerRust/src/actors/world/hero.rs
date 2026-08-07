@@ -400,6 +400,9 @@ enum HeroBuffKind {
     MagicShield,
     MagicBooster,
     Concentration,
+    SoulShield,
+    BlessedArmour,
+    UltimateEnhancer,
 }
 
 /// 英雄增益实例（#1190）
@@ -410,6 +413,8 @@ struct HeroBuff {
     expire_tick: u64,
     /// 技能等级（影响数值/时长）
     level: u8,
+    /// 英雄自身等级（#1192：SoulShield/BlessedArmour 按目标等级加成）
+    hero_level: u16,
 }
 
 /// 英雄 AI 运行时状态（每个出战英雄一个实例）
@@ -535,6 +540,10 @@ impl WorldActor {
             auto_mp_percent: u8,
             /// 自动喝蓝物品 index（C# MPItemIndex）
             mp_item_index: i32,
+            /// 装备的毒护符 shape（#1192：C# GetPoison：Amulet shape 1=绿毒 / 2=红毒；0=无）
+            hero_poison_shape: i32,
+            /// 是否装备普通护符（#1192：C# GetAmulet：Amulet shape 0）
+            hero_amulet: bool,
         }
 
         let mut snapshots: Vec<HeroSnapshot> = Vec::new();
@@ -592,6 +601,14 @@ impl WorldActor {
                     hp_item_index: state.auto_pot_hp_item,
                     auto_mp_percent: state.auto_pot_mp.min(100) as u8,
                     mp_item_index: state.auto_pot_mp_item,
+                    hero_poison_shape: hero_equip_poison_shape(
+                        &state.hero_inventory.equipment,
+                        &self.item_infos,
+                    ),
+                    hero_amulet: hero_has_amulet(
+                        &state.hero_inventory.equipment,
+                        &self.item_infos,
+                    ),
                 });
             }
         }
@@ -607,6 +624,9 @@ impl WorldActor {
             y: i32,
             max_hp: i32,
             map_index: u16,
+            /// #1192：目标是否已有绿毒/红毒（道士 Poisoning 条件）
+            has_green: bool,
+            has_red: bool,
         }
         let monster_snaps: Vec<MonsterSnap> = self.monsters.values()
             .filter(|m| m.hp > 0)
@@ -616,6 +636,8 @@ impl WorldActor {
                 y: m.y,
                 max_hp: m.max_hp,
                 map_index: m.map_index,
+                has_green: m.poison_list.iter().any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::GREEN)),
+                has_red: m.poison_list.iter().any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::RED)),
             })
             .collect();
 
@@ -632,6 +654,8 @@ impl WorldActor {
         let mut support_intents: Vec<(u64, u64, u8, bool)> = Vec::new();
         // 自动喝药意图：(hero_session_id, item_index, is_mp) —— 阶段 2.4 统一消耗（C# ProcessAutoPot/TryAutoPot）
         let mut autopot_intents: Vec<(u64, i32, bool)> = Vec::new();
+        // 道士毒意图：(hero_session_id, target_oid, poison_type, duration_s, value) —— 阶段 3e 应用（#1192）
+        let mut poison_intents: Vec<(u64, u32, mir2_shared::enums::PoisonType, u32, i32)> = Vec::new();
 
         for snap in &snapshots {
             // 确保该英雄有 AI 状态（首次出现则初始化）
@@ -653,7 +677,7 @@ impl WorldActor {
             // #1190：buff 对战斗属性/回蓝/冷却的影响（C# RefreshStats 对应项；hero_combat/hero_stats 为局部加 buff 副本）
             let mut hero_combat = snap.hero_combat;
             let mut hero_stats = snap.hero_stats;
-            let shield_pct = hero_apply_buffs(&ai_local.buffs, &mut hero_combat, &mut hero_stats);
+            let shield_pct = hero_apply_buffs(&ai_local.buffs, snap.class, &mut hero_combat, &mut hero_stats);
             let haste_ticks = ai_local
                 .buffs
                 .iter()
@@ -798,6 +822,8 @@ impl WorldActor {
                 .find(|(spell, kind)| {
                     hero_magic_level(&snap.hero_magics, *spell as u8) > 0
                         && !ai_local.buffs.iter().any(|b| b.kind == *kind)
+                        // #1192：道士护盾类增益需要普通护符
+                        && (snap.class != MirClass::Taoist || snap.hero_amulet)
                 })
                 .copied();
             if let Some((spell, kind)) = friend {
@@ -807,8 +833,9 @@ impl WorldActor {
                     ai_local.mp -= cost;
                     ai_local.buffs.push(HeroBuff {
                         kind,
-                        expire_tick: self.tick_count + hero_buff_duration(kind, buff_lv) * 10,
+                        expire_tick: self.tick_count + hero_buff_duration(kind, buff_lv, &snap.hero_stats) * 10,
                         level: buff_lv,
+                        hero_level: snap.hero_level,
                     });
                     support_intents.push((snap.session_id, snap.session_id, spell as u8, false));
                     ai_local.next_attack_tick = self.tick_count + 4;
@@ -970,6 +997,15 @@ impl WorldActor {
                         } else { 100 };
                         let healing_lv = hero_magic_level(&snap.hero_magics, Spell::Healing as u8);
                         let soulfire_lv = hero_magic_level(&snap.hero_magics, Spell::SoulFireBall as u8);
+                        // #1192：Poisoning 可用 = 已学 + 装备毒护符 + 目标无对应毒（C# TaoistHero）
+                        let poisoning_lv = hero_magic_level(&snap.hero_magics, Spell::Poisoning as u8);
+                        let can_poison = snap.hero_poison_shape > 0
+                            && poisoning_lv > 0
+                            && if snap.hero_poison_shape == 1 {
+                                !target.has_green
+                            } else {
+                                !target.has_red
+                            };
                         if healing_lv > 0 && owner_hp_pct < 90 {
                             // #1186：治疗也耗蓝（C# CanUseMagic）
                             let heal_cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Healing as u8);
@@ -980,6 +1016,39 @@ impl WorldActor {
                                     snap.session_id,
                                     Spell::Healing as u8,
                                     true,
+                                ));
+                                ai_local.next_attack_tick = self.tick_count + 10;
+                            } else {
+                                let _ = hero_melee_fallback(
+                                    snap.session_id, target.oid, target_dist,
+                                    &hero_combat, &mut attack_intents, &mut support_intents,
+                                );
+                                ai_local.next_attack_tick = self.tick_count + 10;
+                            }
+                        } else if can_poison {
+                            // #1192：C# Poisoning：value = GetDamage(SC)；Duration=value*2+(Lv+1)*7、TickSpeed 2000
+                            // 绿毒 Value = value/15 + Lv + 1（+Random PoisonAttack 近似省略）；红毒无伤害值（状态毒）
+                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Poisoning as u8);
+                            if ai_local.mp >= cost {
+                                ai_local.mp -= cost;
+                                let value = hero_attack_power_sc(&hero_stats).max(1);
+                                let duration = (value * 2 + (poisoning_lv as i32 + 1) * 7).max(1) as u32;
+                                let poison_value = if snap.hero_poison_shape == 1 {
+                                    (value / 15 + poisoning_lv as i32 + 1).max(1)
+                                } else {
+                                    0 // C# Red 毒无 Value（状态毒）
+                                };
+                                let p_type = if snap.hero_poison_shape == 1 {
+                                    mir2_shared::enums::PoisonType::GREEN
+                                } else {
+                                    mir2_shared::enums::PoisonType::RED
+                                };
+                                poison_intents.push((snap.session_id, target.oid, p_type, duration, poison_value));
+                                support_intents.push((
+                                    snap.session_id,
+                                    snap.session_id,
+                                    Spell::Poisoning as u8,
+                                    false,
                                 ));
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             } else {
@@ -1414,6 +1483,25 @@ impl WorldActor {
                 }).await;
             }
         }
+
+        // 3e. 应用道士 Poisoning（#1192：C# ApplyPoison，绿/红毒 TickSpeed 2000）
+        for (session_id, target_oid, p_type, duration, value) in &poison_intents {
+            if let Some(monster) = self.monsters.get_mut(target_oid) {
+                crate::combat::poison::apply_poison(
+                    &mut monster.poison_list,
+                    crate::combat::poison::Poison::new(*p_type, *duration, *value, 2000),
+                );
+                monster.provoked = true;
+                monster.last_hitter_session = Some(*session_id);
+                if monster.target_session.is_none() {
+                    monster.target_session = Some(*session_id);
+                }
+                debug!(
+                    "Hero Taoist poisoned monster {} ({:?} {}s {}dmg/tick)",
+                    target_oid, p_type, duration, value
+                );
+            }
+        }
     }
 
     /// 英雄阵亡处理（#1134，对齐 C# HeroObject.Die 的最小实现）：
@@ -1615,7 +1703,52 @@ fn hero_magic_level(hero_magics: &[(i32, u8)], spell_shared: u8) -> u8 {
         .unwrap_or(0)
 }
 
-/// 各职业 ProcessFriend 增益列表（#1190：C# 子类顺序，先 Rage 后 ProtectionField 等）
+/// 装备的毒护符 shape（#1192：C# GetPoison(1)：Amulet shape 1=绿毒 / 2=红毒；0=无）
+fn hero_equip_poison_shape(
+    equipment: &[Option<mir2_shared::data::item::UserItem>],
+    item_infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
+) -> i32 {
+    let Some(Some(item)) = equipment.get(crate::actors::inventory::EquipmentSlot::Pendant as usize) else {
+        return 0;
+    };
+    let Some(info) = item_infos.get(&item.item_index) else {
+        return 0;
+    };
+    // DB item_type 为 C# 原始值：8=Amulet
+    if info.item_type != 8 {
+        return 0;
+    }
+    if info.shape == 1 || info.shape == 2 {
+        info.shape
+    } else {
+        0
+    }
+}
+
+/// 是否装备普通护符（#1192：C# GetAmulet(1)：Amulet shape 0 且数量足够）
+fn hero_has_amulet(
+    equipment: &[Option<mir2_shared::data::item::UserItem>],
+    item_infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
+) -> bool {
+    let Some(Some(item)) = equipment.get(crate::actors::inventory::EquipmentSlot::Pendant as usize) else {
+        return false;
+    };
+    let Some(info) = item_infos.get(&item.item_index) else {
+        return false;
+    };
+    info.item_type == 8 && info.shape == 0 && item.count > 0
+}
+
+/// 道士英雄 SC 攻击力（#1192：C# GetAttackPower(MinSC, MaxSC) 的稳定近似）
+fn hero_attack_power_sc(stats: &super::hero_stats::HeroStats) -> i32 {
+    if stats.max_sc > stats.min_sc {
+        (stats.min_sc + stats.max_sc) / 2
+    } else {
+        stats.max_sc.max(1)
+    }
+}
+
+/// 各职业 ProcessFriend 增益列表（#1190/#1192：C# 子类顺序）
 fn hero_friend_buffs(
     class: mir2_shared::enums::MirClass,
 ) -> &'static [(mir2_shared::enums::Spell, HeroBuffKind)] {
@@ -1640,12 +1773,20 @@ fn hero_friend_buffs(
             ]
         }
         MirClass::Archer => &[(Spell::Concentration, HeroBuffKind::Concentration)],
+        MirClass::Taoist => {
+            &[
+                (Spell::SoulShield, HeroBuffKind::SoulShield),
+                (Spell::BlessedArmour, HeroBuffKind::BlessedArmour),
+                (Spell::UltimateEnhancer, HeroBuffKind::UltimateEnhancer),
+            ]
+        }
         _ => &[],
     }
 }
 
-/// 增益时长（秒，#1190：C# HumanObject 各 Spell 实现）
-fn hero_buff_duration(kind: HeroBuffKind, level: u8) -> u64 {
+/// 增益时长（秒，#1190/#1192：C# HumanObject 各 Spell 实现）
+/// SoulShield/BlessedArmour/UltimateEnhancer 时长依赖道士 SC（C# SC*4 + (Lv+1)*50）
+fn hero_buff_duration(kind: HeroBuffKind, level: u8, stats: &super::hero_stats::HeroStats) -> u64 {
     let level = level as u64;
     match kind {
         HeroBuffKind::Rage => 18 + 6 * level,
@@ -1656,12 +1797,23 @@ fn hero_buff_duration(kind: HeroBuffKind, level: u8) -> u64 {
         HeroBuffKind::MagicShield => 30 + 10 * level,
         HeroBuffKind::MagicBooster => 60,
         HeroBuffKind::Concentration => 45 + 15 * level,
+        HeroBuffKind::SoulShield
+        | HeroBuffKind::BlessedArmour
+        | HeroBuffKind::UltimateEnhancer => {
+            let sc = if stats.max_sc > stats.min_sc {
+                (stats.min_sc + stats.max_sc) / 2
+            } else {
+                stats.max_sc.max(1)
+            };
+            (sc * 4 + (level as i32 + 1) * 50).max(1) as u64
+        }
     }
 }
 
-/// 应用增益到英雄战斗属性（#1190：C# RefreshStats 对应项）；返回 MagicShield 减伤 %
+/// 应用增益到英雄战斗属性（#1190/#1192：C# RefreshStats 对应项）；返回 MagicShield 减伤 %
 fn hero_apply_buffs(
     buffs: &[HeroBuff],
+    class: mir2_shared::enums::MirClass,
     combat: &mut crate::combat::attack::CombatStats,
     stats: &mut super::hero_stats::HeroStats,
 ) -> i32 {
@@ -1693,6 +1845,30 @@ fn hero_apply_buffs(
             HeroBuffKind::MagicShield => {
                 // C#：DamageReductionPercent = (Lv+2)*10
                 shield_pct = (b.level as i32 + 2) * 10;
+            }
+            HeroBuffKind::SoulShield => {
+                // C#：MaxMAC = 目标Level/7 + 4
+                combat.max_mac += b.hero_level as i32 / 7 + 4;
+            }
+            HeroBuffKind::BlessedArmour => {
+                // C#：MaxAC = 目标Level/7 + 4
+                combat.max_ac += b.hero_level as i32 / 7 + 4;
+            }
+            HeroBuffKind::UltimateEnhancer => {
+                // C#：value = min(8, max(1, MaxSC/5))，按目标职业加 DC/MC/SC
+                let value = if stats.max_sc >= 5 {
+                    (stats.max_sc / 5).min(8)
+                } else {
+                    1
+                };
+                match class {
+                    mir2_shared::enums::MirClass::Warrior
+                    | mir2_shared::enums::MirClass::Assassin => combat.max_atk += value,
+                    mir2_shared::enums::MirClass::Wizard
+                    | mir2_shared::enums::MirClass::Archer => stats.max_mc += value,
+                    mir2_shared::enums::MirClass::Taoist => stats.max_sc += value,
+                    _ => {}
+                }
             }
             HeroBuffKind::Haste | HeroBuffKind::Concentration => {}
         }
@@ -2071,19 +2247,27 @@ mod tests {
         assert_eq!(hero_friend_buffs(MirClass::Assassin).len(), 2);
         assert_eq!(hero_friend_buffs(MirClass::Wizard).len(), 2);
         assert_eq!(hero_friend_buffs(MirClass::Archer).len(), 1);
-        assert_eq!(hero_friend_buffs(MirClass::Taoist).len(), 0);
+        // #1192：道士 SoulShield/BlessedArmour/UltimateEnhancer
+        assert_eq!(hero_friend_buffs(MirClass::Taoist).len(), 3);
         assert_eq!(hero_friend_buffs(MirClass::Warrior)[0].1, HeroBuffKind::Rage);
     }
 
     #[test]
     fn hero_buff_duration_matches_csharp() {
+        use mir2_shared::enums::MirClass;
+        let stats = super::hero_stats::hero_base_stats(MirClass::Taoist, 30);
         // Rage：18+6*Lv；Haste：25+15*Lv；LightBody：(Lv+1)*30；MagicBooster：60
-        assert_eq!(hero_buff_duration(HeroBuffKind::Rage, 2), 30);
-        assert_eq!(hero_buff_duration(HeroBuffKind::ProtectionField, 1), 60);
-        assert_eq!(hero_buff_duration(HeroBuffKind::Haste, 2), 55);
-        assert_eq!(hero_buff_duration(HeroBuffKind::LightBody, 1), 60);
-        assert_eq!(hero_buff_duration(HeroBuffKind::MagicBooster, 3), 60);
-        assert_eq!(hero_buff_duration(HeroBuffKind::Concentration, 1), 60);
+        assert_eq!(hero_buff_duration(HeroBuffKind::Rage, 2, &stats), 30);
+        assert_eq!(hero_buff_duration(HeroBuffKind::ProtectionField, 1, &stats), 60);
+        assert_eq!(hero_buff_duration(HeroBuffKind::Haste, 2, &stats), 55);
+        assert_eq!(hero_buff_duration(HeroBuffKind::LightBody, 1, &stats), 60);
+        assert_eq!(hero_buff_duration(HeroBuffKind::MagicBooster, 3, &stats), 60);
+        assert_eq!(hero_buff_duration(HeroBuffKind::Concentration, 1, &stats), 60);
+        // #1192：道士护盾 Duration = SC*4 + (Lv+1)*50 秒（Taoist Lv30 SC 中值 = 4）
+        assert_eq!(
+            hero_buff_duration(HeroBuffKind::SoulShield, 1, &stats),
+            4 * 4 + (1 + 1) * 50
+        );
     }
 
     #[test]
@@ -2093,10 +2277,10 @@ mod tests {
         let mut combat = base_stats.to_combat_stats();
         let mut stats = base_stats;
         let buffs = vec![
-            HeroBuff { kind: HeroBuffKind::Rage, expire_tick: 0, level: 3 },
-            HeroBuff { kind: HeroBuffKind::MagicShield, expire_tick: 0, level: 2 },
+            HeroBuff { kind: HeroBuffKind::Rage, expire_tick: 0, level: 3, hero_level: 30 },
+            HeroBuff { kind: HeroBuffKind::MagicShield, expire_tick: 0, level: 2, hero_level: 30 },
         ];
-        let shield = hero_apply_buffs(&buffs, &mut combat, &mut stats);
+        let shield = hero_apply_buffs(&buffs, MirClass::Warrior, &mut combat, &mut stats);
         // Rage：MaxDC*(0.12+0.03*3)；MagicShield：(2+2)*10=40%
         let rage_add = (base_stats.max_dc as f32 * 0.21).round() as i32;
         assert_eq!(combat.min_atk, base_stats.min_dc + rage_add);
@@ -2106,14 +2290,90 @@ mod tests {
         let wizard_base = super::hero_stats::hero_base_stats(MirClass::Wizard, 30);
         let mut stats2 = wizard_base;
         let mut combat2 = wizard_base.to_combat_stats();
-        let buffs2 = vec![HeroBuff { kind: HeroBuffKind::MagicBooster, expire_tick: 0, level: 2 }];
-        hero_apply_buffs(&buffs2, &mut combat2, &mut stats2);
+        let buffs2 = vec![HeroBuff { kind: HeroBuffKind::MagicBooster, expire_tick: 0, level: 2, hero_level: 30 }];
+        hero_apply_buffs(&buffs2, MirClass::Wizard, &mut combat2, &mut stats2);
         assert_eq!(stats2.max_mc, wizard_base.max_mc + 18);
         // LightBody：Agility + (Lv+1)*2
         let mut stats3 = base_stats;
         let mut combat3 = base_stats.to_combat_stats();
-        let buffs3 = vec![HeroBuff { kind: HeroBuffKind::LightBody, expire_tick: 0, level: 1 }];
-        hero_apply_buffs(&buffs3, &mut combat3, &mut stats3);
+        let buffs3 = vec![HeroBuff { kind: HeroBuffKind::LightBody, expire_tick: 0, level: 1, hero_level: 30 }];
+        hero_apply_buffs(&buffs3, MirClass::Assassin, &mut combat3, &mut stats3);
         assert_eq!(combat3.agility, base_stats.agility + 4);
+    }
+
+    #[test]
+    fn hero_apply_taoist_shields() {
+        use mir2_shared::enums::MirClass;
+        let base = super::hero_stats::hero_base_stats(MirClass::Taoist, 30);
+        // SoulShield：MaxMAC = Lv/7+4（30/7+4 = 8）
+        let mut c1 = base.to_combat_stats();
+        let mut s1 = base;
+        hero_apply_buffs(
+            &[HeroBuff { kind: HeroBuffKind::SoulShield, expire_tick: 0, level: 1, hero_level: 30 }],
+            MirClass::Taoist, &mut c1, &mut s1,
+        );
+        assert_eq!(c1.max_mac, base.max_mac + 8);
+        // BlessedArmour：MaxAC = Lv/7+4
+        let mut c2 = base.to_combat_stats();
+        let mut s2 = base;
+        hero_apply_buffs(
+            &[HeroBuff { kind: HeroBuffKind::BlessedArmour, expire_tick: 0, level: 1, hero_level: 28 }],
+            MirClass::Taoist, &mut c2, &mut s2,
+        );
+        assert_eq!(c2.max_ac, base.max_ac + 8); // 28/7+4 = 8
+        // UltimateEnhancer：道士 → MaxSC += min(8, max(1, MaxSC/5))
+        let mut c3 = base.to_combat_stats();
+        let mut s3 = base;
+        hero_apply_buffs(
+            &[HeroBuff { kind: HeroBuffKind::UltimateEnhancer, expire_tick: 0, level: 1, hero_level: 30 }],
+            MirClass::Taoist, &mut c3, &mut s3,
+        );
+        assert_eq!(s3.max_sc, base.max_sc + 1); // MaxSC=7 → 7/5=1
+    }
+
+    #[test]
+    fn hero_equip_poison_shape_and_amulet() {
+        use crate::actors::inventory::EquipmentSlot;
+        let mut item_infos = std::collections::HashMap::new();
+        // 毒护符：Amulet(type=8) shape 1（绿毒）
+        item_infos.insert(
+            100,
+            crate::db::ItemInfo {
+                index: 100,
+                name: String::from("PoisonAmulet"),
+                item_type: 8,
+                shape: 1,
+                ..Default::default()
+            },
+        );
+        // 普通护符：Amulet shape 0
+        item_infos.insert(
+            101,
+            crate::db::ItemInfo {
+                index: 101,
+                name: String::from("Amulet"),
+                item_type: 8,
+                shape: 0,
+                ..Default::default()
+            },
+        );
+        // 毒护符装备在 Pendant 槽
+        let mut eq: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; EquipmentSlot::COUNT];
+        let mut poison = mir2_shared::data::item::UserItem::new(100);
+        poison.count = 1;
+        eq[EquipmentSlot::Pendant as usize] = Some(poison);
+        assert_eq!(hero_equip_poison_shape(&eq, &item_infos), 1);
+        assert!(!hero_has_amulet(&eq, &item_infos));
+        // 普通护符
+        let mut eq2: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; EquipmentSlot::COUNT];
+        let mut amulet = mir2_shared::data::item::UserItem::new(101);
+        amulet.count = 1;
+        eq2[EquipmentSlot::Pendant as usize] = Some(amulet);
+        assert_eq!(hero_equip_poison_shape(&eq2, &item_infos), 0);
+        assert!(hero_has_amulet(&eq2, &item_infos));
+        // 未装备 → 0/false
+        let empty: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; EquipmentSlot::COUNT];
+        assert_eq!(hero_equip_poison_shape(&empty, &item_infos), 0);
+        assert!(!hero_has_amulet(&empty, &item_infos));
     }
 }
