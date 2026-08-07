@@ -665,7 +665,7 @@ impl Message<WorldMoveRequest> for WorldActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r,
+            Some(r) => r.clone(),
             None => {
                 warn!("Move request for unknown session {}", msg.session_id);
                 return;
@@ -705,6 +705,9 @@ impl Message<WorldMoveRequest> for WorldActor {
         } else {
             return;
         }
+
+        // C# HumanObject Walk/Run：移动打断专注（3s 内不提供专注加成）
+        self.interrupt_concentration(msg.session_id).await;
 
         // 获取移动后的状态并广播给其他玩家
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
@@ -1986,5 +1989,9 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         exp_multiplier_end_tick: 0,
             drop_multiplier: 1.0,
             drop_multiplier_end_tick: 0,
+            elements_level: 0,
+            has_elemental: false,
+            concentration_interrupted: false,
+            concentration_interrupt_time: 0,
     }
 }

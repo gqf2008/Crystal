@@ -1280,6 +1280,10 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         exp_multiplier_end_tick: 0,
             drop_multiplier: 1.0,
             drop_multiplier_end_tick: 0,
+            elements_level: 0,
+            has_elemental: false,
+            concentration_interrupted: false,
+            concentration_interrupt_time: 0,
     };
 
     Ok(Some(state))

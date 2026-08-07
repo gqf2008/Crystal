@@ -18,6 +18,21 @@ impl Message<ProcessDelayedActions> for WorldActor {
     }
 }
 
+/// 元素系统 tick（专注恢复/过期广播 + 攒元素队列），独立于 Tick 消息避免栈溢出
+pub struct ProcessElementalTick;
+
+impl Message<ProcessElementalTick> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        _msg: ProcessElementalTick,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.tick_elements().await;
+    }
+}
+
 
 impl WorldActor {
     /// 玩家 Buff tick + 死亡复活（每 5 ticks）
@@ -155,6 +170,7 @@ impl WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
+                            self.pending_gather.push(caster_session);
                             monster.provoked = true;
                             monster.target_session = Some(caster_session);
                         }
@@ -162,6 +178,42 @@ impl WorldActor {
                 }
                 debug!("DelayedExplosion 3x3 AoE at ({},{}) map {} value {}", x, y, map_index, value);
             }
+        }
+    }
+
+    /// 元素系统 tick（每 5 ticks，独立消息避免 Tick handler 栈溢出）：
+    /// - 专注打断 3s 后自动恢复、buff 过期广播 SetConcentration(false,false)
+    /// - 玩家伤害触发的元素攒取（C# GatherElement 每次命中）
+    pub(crate) async fn tick_elements(&mut self) {
+        if self.tick_count % 5 != 0 {
+            return;
+        }
+        for (sid, record) in &self.players {
+            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                let active = state.buffs.iter().any(|b| matches!(
+                    b.buff_type, crate::combat::buff::BuffType::MpRegenBoost { .. }));
+                if state.concentration_interrupted
+                    && self.tick_count as i64 * 100 >= state.concentration_interrupt_time
+                {
+                    let _ = record.actor_ref.ask(crate::actors::player::SetConcentrationInterrupt {
+                        interrupted: false,
+                        interrupt_time_ms: 0,
+                    }).await;
+                    self.broadcast_set_concentration(
+                        state.object_id, true, false, state.map_index).await;
+                }
+                let prev = self.concentration_visible.get(sid).copied().unwrap_or(false);
+                if active != prev {
+                    self.broadcast_set_concentration(
+                        state.object_id, active, false, state.map_index).await;
+                    self.concentration_visible.insert(*sid, active);
+                }
+            }
+        }
+        // 玩家伤害触发的元素攒取（C# 每次命中 GatherElement）
+        let gathers = std::mem::take(&mut self.pending_gather);
+        for sid in gathers {
+            self.gather_element(sid).await;
         }
     }
 
@@ -1588,6 +1640,7 @@ impl WorldActor {
                     );
                     if r.is_hit && r.damage > 0 {
                         monster.take_damage(r.damage);
+                        self.pending_gather.push(caster_session);
                         monster.provoked = true;
                         monster.target_session = Some(caster_session);
 
@@ -1835,6 +1888,7 @@ impl WorldActor {
             if result.is_hit && result.damage > 0 {
                 if let Some(monster) = self.monsters.get_mut(&target_id) {
                     monster.take_damage(result.damage);
+                    self.pending_gather.push(pending.session_id);
                     monster.provoked = true;
                     monster.target_session = Some(pending.session_id);
 
@@ -1963,6 +2017,7 @@ impl WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
+                            self.pending_gather.push(pending.session_id);
                             monster.provoked = true;
                             monster.target_session = Some(pending.session_id);
                             for p in &r.applied_poisons {

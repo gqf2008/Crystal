@@ -4,6 +4,7 @@
 // 子模块（已集成）
 mod awakening;
 mod combat;
+mod elements;
 pub mod ai;
 #[allow(dead_code)]
 mod conquest;
@@ -27,6 +28,7 @@ mod tick;
 // Re-export submodule structs for external access
 pub use tick::Tick;
 pub use tick::ProcessDelayedActions;
+pub use tick::ProcessElementalTick;
 pub use session::*;
 pub use item::*;
 pub use combat::*;
@@ -917,6 +919,10 @@ pub struct WorldActor {
     pub(crate) pending_spell_completions: Vec<PendingSpellCompletion>,
     /// tick_spell_completions 期间的吸血回血暂存（session_id, amount）
     pub(crate) vamp_heals: Vec<(u64, i32)>,
+    /// 玩家造成伤害后待攒元素的 session 队列（C# GatherElement 每次命中触发）
+    pub(crate) pending_gather: Vec<u64>,
+    /// 已广播的专注状态（session -> enabled），用于过期/恢复时只广播一次
+    pub(crate) concentration_visible: HashMap<u64, bool>,
     /// 定时机器人任务
     pub(crate) robot_tasks: Vec<robot::RobotTask>,
     /// 机器人上次检查的分钟值
@@ -1098,6 +1104,8 @@ impl WorldActor {
             spell_objects: HashMap::new(),
             pending_spell_completions: Vec::new(),
             vamp_heals: Vec::new(),
+            pending_gather: Vec::new(),
+            concentration_visible: HashMap::new(),
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
@@ -3384,6 +3392,7 @@ impl Actor for WorldActor {
                 interval.tick().await;
                 let _ = tick_ref.ask(Tick).await;
                 let _ = tick_ref.ask(ProcessDelayedActions).await;
+                let _ = tick_ref.ask(ProcessElementalTick).await;
             }
         });
 
@@ -3636,6 +3645,8 @@ impl Actor for WorldActor {
             spell_objects: HashMap::new(),
             pending_spell_completions: Vec::new(),
             vamp_heals: Vec::new(),
+            pending_gather: Vec::new(),
+            concentration_visible: HashMap::new(),
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
