@@ -1999,7 +1999,9 @@ impl WorldActor {
                         let upper_raw = child.gold + child.gold / 2;
                         let lower = lower_raw + (lower_raw as f64 * gold_pct / 100.0) as u64;
                         let gold_raw = fastrand::u64(lower as u64..=upper_raw as u64);
-                        let gold = (gold_raw as f64 * global_gold_mul).round() as u64;
+                        // C# ApplyGoldModifier：精英 GoldMultiplier=2.5 最后应用
+                        let rarity_gold_mul = if monster.is_elite { self.rarity_cfg.elite_gold_multiplier } else { 1.0 };
+                        let gold = (gold_raw as f64 * global_gold_mul * rarity_gold_mul).round() as u64;
                         self.spawn_gold_drop(monster, gold).await;
                     } else {
                         let ccount = if child.max_count > child.min_count {
@@ -2020,7 +2022,9 @@ impl WorldActor {
                 let upper_raw = drop.gold + drop.gold / 2;
                 let lower = lower_raw + (lower_raw as f64 * gold_pct / 100.0) as u64;
                 let gold_raw = fastrand::u64(lower as u64..=upper_raw as u64);
-                let gold = (gold_raw as f64 * global_gold_mul).round() as u64;
+                // C# ApplyGoldModifier：精英 GoldMultiplier=2.5 最后应用
+                let rarity_gold_mul = if monster.is_elite { self.rarity_cfg.elite_gold_multiplier } else { 1.0 };
+                let gold = (gold_raw as f64 * global_gold_mul * rarity_gold_mul).round() as u64;
                 self.spawn_gold_drop(monster, gold).await;
                 continue;
             }

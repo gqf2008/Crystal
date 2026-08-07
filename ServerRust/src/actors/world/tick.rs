@@ -1027,16 +1027,20 @@ impl WorldActor {
                     move_interval: 2,
                     flee_threshold: 0.0,
                 });
-            // 精英判定：3% 概率
-            let is_elite = fastrand::u8(1..=100) <= 3;
+            // 精英判定：用 RarityConfig（C# MonsterRarityEliteChancePercent=0.1，缺省 3 兼容旧配置）
+            let is_elite = fastrand::u8(1..=100) <= self.rarity_cfg.elite_chance_percent;
             let (name, hp, max_hp, min_dmg, max_dmg, xp) = if is_elite {
+                // 对齐 C# MonsterRarityData.Elite 倍率（config 驱动）
+                let hp_m = self.rarity_cfg.elite_hp_multiplier;
+                let dmg_m = self.rarity_cfg.elite_dmg_multiplier;
+                let xp_m = self.rarity_cfg.elite_xp_multiplier;
                 (
                     format!("[精英] {}", spawn.name),
-                    spawn.hp.saturating_mul(2),
-                    spawn.hp.saturating_mul(2),
-                    (spawn.min_dmg as f32 * 1.5) as i32,
-                    (spawn.max_dmg as f32 * 1.5) as i32,
-                    spawn.xp.saturating_mul(2),
+                    (spawn.hp as f64 * hp_m).max(1.0) as i32,
+                    (spawn.hp as f64 * hp_m).max(1.0) as i32,
+                    (spawn.min_dmg as f64 * dmg_m) as i32,
+                    (spawn.max_dmg as f64 * dmg_m) as i32,
+                    (spawn.xp as f64 * xp_m).max(1.0) as i32,
                 )
             } else {
                 (spawn.name.clone(), spawn.hp, spawn.hp, spawn.min_dmg, spawn.max_dmg, spawn.xp)
