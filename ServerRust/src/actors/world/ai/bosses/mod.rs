@@ -34,6 +34,7 @@ pub mod guard;
 pub mod town_archer;
 pub mod castle_gate;
 pub mod dig_out_zombie;
+pub mod red_moon_evil;
 pub mod reviving_zombie;
 pub mod jar1;
 pub mod armadillo;
