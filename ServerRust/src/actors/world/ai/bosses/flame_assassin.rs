@@ -39,10 +39,10 @@ impl MonsterBehavior for FlameAssassinBehavior {
                 damage,
                 spell_id: 0,
             });
-            // C# CompleteRangeAttack：PoisonTarget(1, MC, Slow, 1000)：100%、5s、值=MC
+            // C# CompleteRangeAttack：PoisonTarget(1, MC, Slow, 1000)：100%、时长=MC 攻秒数、值=MC（DC 近似）
             ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                 session_id: target.session_id,
-                poison: Poison::new(PoisonType::SLOW, 5, damage, 1000),
+                poison: Poison::new(PoisonType::SLOW, damage.max(1) as u32, damage, 1000),
             });
             return;
         }

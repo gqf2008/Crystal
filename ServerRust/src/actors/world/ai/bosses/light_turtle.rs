@@ -42,11 +42,12 @@ impl MonsterBehavior for LightTurtleBehavior {
                 spell_id: 0,
                 attack_type: if magic { 1 } else { 0 },
             });
-            // C# CompleteAttack（所有攻击）：PoisonTarget(4, SP, Green, 1000)：1/4、值=SP
+            // C# CompleteAttack（所有攻击）：PoisonTarget(4, SP, Green, 1000)
+            // 第二参=时长（SP 攻秒数），值=SP 攻；此处用 DC 攻近似 SP
             if fastrand::i32(0..4) == 0 {
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                     session_id: target.session_id,
-                    poison: Poison::new(PoisonType::GREEN, 5, damage, 1000),
+                    poison: Poison::new(PoisonType::GREEN, damage.max(1) as u32, damage, 1000),
                 });
             }
             return;
