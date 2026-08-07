@@ -3072,7 +3072,31 @@ impl WorldActor {
                                     let _ = record.actor_ref.ask(AddExperience { amount: self.apply_global_exp_multiplier(completed_quest.exp_reward as i32) , experience_list: self.experience_list.clone()}).await;
                                 }
                                 if completed_quest.gold_reward > 0 {
-                                    let _ = record.actor_ref.ask(AddGold { amount: completed_quest.gold_reward }).await;
+                                    // C# FinishQuest：GoldReward * Settings.DropRate
+                                    let gold = (completed_quest.gold_reward as f64 * self.drop_rate) as u64;
+                                    let _ = record.actor_ref.ask(AddGold { amount: gold }).await;
+                                }
+                                // C# FinishQuest：GainCredit(CreditReward)（账户积分，上限 uint.MaxValue）
+                                if completed_quest.credit_reward > 0 {
+                                    let username = record.account_username.clone();
+                                    let current = db::get_account_credit(&self.db_pool, &username).await.unwrap_or(0);
+                                    let remaining = (u32::MAX as u64).saturating_sub(current.min(u32::MAX as u64));
+                                    let delta = (completed_quest.credit_reward as u64).min(remaining) as i64;
+                                    if delta > 0 {
+                                        if let Err(e) = db::add_account_credit(&self.db_pool, &username, delta).await {
+                                            warn!("Quest CreditReward failed for {}: {}", username, e);
+                                        } else {
+                                            // C# GainCredit：S.GainedCredit（客户端积分浮字）
+                                            let packet = mir2_shared::packets::server::drops::GainedCredit { credit: delta as u32 };
+                                            let mut body = Vec::new();
+                                            if packet.write_body(&mut body).is_ok() {
+                                                let _ = self.gate_ref.tell(SendToClient {
+                                                    session_id,
+                                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainedCredit as i16, &body),
+                                                }).await;
+                                            }
+                                        }
+                                    }
                                 }
                                 if let Some(quest_db) = self.quest_infos.get(&quest_index) {
                                     for reward in &quest_db.fixed_rewards {
@@ -3091,7 +3115,7 @@ impl WorldActor {
                                         let _ = record.actor_ref.ask(crate::actors::player::CheckQuestItemProgress).await;
                                     }
                                 }
-                                send_system_message(&self.gate_ref, session_id, &format!("任务完成！获得 {} 经验，{} 金币", completed_quest.exp_reward, completed_quest.gold_reward));
+                                send_system_message(&self.gate_ref, session_id, &format!("任务完成！获得 {} 经验，{} 金币{}", completed_quest.exp_reward, completed_quest.gold_reward, if completed_quest.credit_reward > 0 { format!("，{} 信用", completed_quest.credit_reward) } else { String::new() }));
                                 send_quest_complete_packet(&self.gate_ref, session_id, completed_quest.quest_index);
                             }
                         }
@@ -4908,6 +4932,7 @@ fn make_quest_instance(qi: &db::QuestInfo, start_time: u64) -> QuestInstance {
         progress,
         exp_reward: qi.exp_reward as i64,
         gold_reward: qi.gold_reward.max(0) as u64,
+        credit_reward: qi.credit_reward as i64,
         start_time,
         time_limit_seconds: qi.time_limit_seconds,
     }

@@ -164,6 +164,7 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             progress_json TEXT NOT NULL DEFAULT '[]',
             exp_reward INTEGER NOT NULL DEFAULT 0,
             gold_reward INTEGER NOT NULL DEFAULT 0,
+            credit_reward INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (character_name, quest_index),
             FOREIGN KEY (character_name) REFERENCES characters(name)
         );
@@ -407,6 +408,7 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             quest_type INTEGER NOT NULL DEFAULT 0,
             exp_reward INTEGER NOT NULL DEFAULT 0,
             gold_reward INTEGER NOT NULL DEFAULT 0,
+            credit_reward INTEGER NOT NULL DEFAULT 0,
             goto_message TEXT,
             kill_message TEXT,
             item_message TEXT,
@@ -744,6 +746,12 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN bind_x INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN bind_y INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    // Migration: quests（角色任务）信用奖励列（#1161 任务奖励对齐）
+    let _ = sqlx::query("ALTER TABLE quests ADD COLUMN credit_reward INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    // Migration: quest_infos 信用奖励列（#1161 任务奖励对齐）
+    let _ = sqlx::query("ALTER TABLE quest_infos ADD COLUMN credit_reward INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     // Migration: guilds 行会经验/等级列（#1161）
     let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN experience INTEGER NOT NULL DEFAULT 0")
@@ -1822,8 +1830,8 @@ async fn save_quests(conn: &mut sqlx::sqlite::SqliteConnection, character_name: 
             QuestStatus::Failed => "Failed",
         };
         sqlx::query(
-            "INSERT INTO quests (character_name, quest_index, title, status, progress_json, exp_reward, gold_reward, start_time, time_limit_seconds)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO quests (character_name, quest_index, title, status, progress_json, exp_reward, gold_reward, credit_reward, start_time, time_limit_seconds)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(character_name)
         .bind(q.quest_index)
@@ -1832,6 +1840,7 @@ async fn save_quests(conn: &mut sqlx::sqlite::SqliteConnection, character_name: 
         .bind(&progress_json)
         .bind(q.exp_reward)
         .bind(q.gold_reward as i64)
+        .bind(q.credit_reward)
         .bind(q.start_time as i64)
         .bind(q.time_limit_seconds)
         .execute(&mut *conn).await?;
@@ -1850,7 +1859,7 @@ async fn load_quests(pool: &DbPool, character_name: &str) -> anyhow::Result<Ques
     let mut log = QuestLog::new();
 
     let rows = sqlx::query(
-        "SELECT quest_index, title, status, progress_json, exp_reward, gold_reward, start_time, time_limit_seconds
+        "SELECT quest_index, title, status, progress_json, exp_reward, gold_reward, credit_reward, start_time, time_limit_seconds
          FROM quests WHERE character_name = ?"
     )
     .bind(character_name)
@@ -1876,6 +1885,7 @@ async fn load_quests(pool: &DbPool, character_name: &str) -> anyhow::Result<Ques
             progress,
             exp_reward: row.get("exp_reward"),
             gold_reward: row.get::<i64, _>("gold_reward") as u64,
+            credit_reward: row.get("credit_reward"),
             start_time: row.get::<i64, _>("start_time") as u64,
             time_limit_seconds: row.get("time_limit_seconds"),
         });
@@ -2540,6 +2550,8 @@ pub struct QuestInfo {
     pub quest_type: i32,
     pub exp_reward: i32,
     pub gold_reward: i32,
+    /// 信用奖励（C# QuestInfo.CreditReward，[@CREDITREWARD]）
+    pub credit_reward: i32,
     pub goto_message: Option<String>,
     pub kill_message: Option<String>,
     pub item_message: Option<String>,
@@ -3359,6 +3371,7 @@ pub async fn load_quest_infos(pool: &DbPool) -> anyhow::Result<Vec<QuestInfo>> {
         quest_type: r.get("quest_type"),
         exp_reward: r.get("exp_reward"),
         gold_reward: r.get("gold_reward"),
+        credit_reward: r.get("credit_reward"),
         goto_message: r.get::<Option<String>, _>("goto_message"),
         kill_message: r.get::<Option<String>, _>("kill_message"),
         item_message: r.get::<Option<String>, _>("item_message"),
