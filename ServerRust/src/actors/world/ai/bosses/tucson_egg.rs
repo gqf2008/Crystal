@@ -27,6 +27,11 @@ impl MonsterBehavior for TucsonEggBehavior {
         false
     }
 
+    /// C# Attacked：任何攻击固定 ChangeHP(-1) 且返回 1——蛋每次只受 1 点伤害
+    fn on_attacked(&mut self, _damage: i32) -> i32 {
+        1
+    }
+
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         let target = match ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index) {
             Some(t) => *t,
