@@ -479,6 +479,8 @@ pub struct MonsterState {
     pub ai_state: MonsterAiState,
     /// 当前目标玩家 session（None = 无目标）
     pub target_session: Option<u64>,
+    /// 最后造成伤害的玩家/施法者 session（C# MapObject.LastHitter；死亡经验/掉落归属用）
+    pub last_hitter_session: Option<u64>,
     /// 是否已被激怒（Passive 怪物被攻击后变为 Aggressive）
     pub provoked: bool,
     /// 是否为精英怪物
@@ -3011,6 +3013,7 @@ impl WorldActor {
                                     ai_profile: MonsterAiProfile::from_info(&monster_info),
                                     ai_state: MonsterAiState::Idle,
                                     target_session: None,
+                                    last_hitter_session: None,
                                     provoked: true, // Boss is always aggressive
                                     is_elite: false,
                                     is_boss: true,
@@ -3299,7 +3302,8 @@ impl WorldActor {
                                         next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
                                         ai_profile: MonsterAiProfile::from_info(&info),
                                         ai_state: MonsterAiState::Idle,
-                                        target_session: None, provoked: false,
+                                        target_session: None,
+                                        last_hitter_session: None, provoked: false,
                                         is_elite: false, is_boss: false,
                                         min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
                                         agility: 0, accuracy: 0, armour_rate: 1.0, damage_rate: 1.0,
@@ -3982,6 +3986,7 @@ impl WorldActor {
                 ai_profile: MonsterAiProfile::from_info(&info),
                 ai_state: MonsterAiState::Idle,
                 target_session: None,
+                last_hitter_session: None,
                 provoked: false,
                 is_elite: false,
                 is_boss: false,
@@ -6012,6 +6017,7 @@ async fn spawn_npcs_and_monsters(
             ai_profile,
             ai_state: MonsterAiState::Idle,
             target_session: None,
+            last_hitter_session: None,
             provoked: false,
             is_elite,
             is_boss: false,
@@ -6090,6 +6096,7 @@ async fn spawn_npcs_and_monsters(
                         ai_profile,
                         ai_state: MonsterAiState::Idle,
                         target_session: None,
+                        last_hitter_session: None,
                         provoked: false,
                         is_elite: false,
                         is_boss: false,
@@ -6203,6 +6210,7 @@ mod tests {
             },
             ai_state: MonsterAiState::Idle,
             target_session: None,
+            last_hitter_session: None,
             provoked: false,
             is_elite: false,
             is_boss: true,
