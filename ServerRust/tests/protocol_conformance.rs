@@ -107,7 +107,7 @@ async fn start_server_with_world() -> u16 {
     let gate_ref = GateActor::spawn_with_mailbox((), kameo::mailbox::unbounded());
     let _ = gate_ref.ask(SetMaxConnections(1024)).await;
 
-    let db_pool = db::init_db_pool("sqlite:data/crystal.db").await.expect("init_db");
+    let db_pool = db::init_db_pool("sqlite::memory:").await.expect("init_db");
 
     // AccountActor
     let account_ref = AccountActor::spawn((gate_ref.clone(), db_pool.clone()));
@@ -134,6 +134,7 @@ async fn start_server_with_world() -> u16 {
         rested_cfg: Default::default(),
         pvp_cfg: Default::default(),
         drop_rate: 1.0,
+        exp_rate: 1.0,
         item_timeout_ticks: 300,
         max_drop_gold: 2000,
         rarity_cfg: Default::default(),
@@ -245,13 +246,19 @@ async fn test_login_full_flow() {
     cv_body.extend_from_slice(&(hash.len() as i32).to_le_bytes());
     cv_body.extend_from_slice(hash);
     stream.write_all(&make_packet(0, &cv_body)).await.expect("send CV");
-
     // 消费 ClientVersion 响应
     let _ = recv_packet(&mut stream).await;
 
-    // 3. 发送 NewAccount (opcode=3) — 服务端 auto-register
-    stream.write_all(&make_packet(3, &[])).await.expect("send NewAccount");
-
+    // 3. 发送 NewAccount (opcode=3) — 服务端按 C# 协议解析 account_id/password 等字段
+    let mut na_body = Vec::new();
+    mir2_shared::binary::write_dotnet_string(&mut na_body, "testuser").unwrap();
+    mir2_shared::binary::write_dotnet_string(&mut na_body, "testpass").unwrap();
+    na_body.extend_from_slice(&0i64.to_le_bytes()); // birth_date_binary
+    mir2_shared::binary::write_dotnet_string(&mut na_body, "Test User").unwrap();
+    mir2_shared::binary::write_dotnet_string(&mut na_body, "question").unwrap();
+    mir2_shared::binary::write_dotnet_string(&mut na_body, "answer").unwrap();
+    mir2_shared::binary::write_dotnet_string(&mut na_body, "test@example.com").unwrap();
+    stream.write_all(&make_packet(3, &na_body)).await.expect("send NewAccount");
     // 消费 NewAccount 响应
     let _ = recv_packet(&mut stream).await;
 
@@ -282,8 +289,15 @@ async fn test_login_full_flow() {
     }
 }
 
-#[tokio::test]
-async fn test_startgame_full_flow() {
+#[test]
+fn test_startgame_full_flow() {
+    // WorldActor Tick 为巨型 async 状态机：必须用 8MB 栈 runtime（同 e2e 测试，避免栈溢出）
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .thread_stack_size(8 * 1024 * 1024)
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
     let port = start_server_with_world().await;
     let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port))
         .await
@@ -300,8 +314,16 @@ async fn test_startgame_full_flow() {
     stream.write_all(&make_packet(0, &cv_body)).await.unwrap();
     let _ = recv_packet(&mut stream).await; // consume CV response
 
-    // 3. NewAccount (auto-register)
-    stream.write_all(&make_packet(3, &[])).await.unwrap();
+    // 3. NewAccount（对齐 C# 协议：account_id/password 等字段）
+    let mut na_body = Vec::new();
+    mir2_shared::binary::write_dotnet_string(&mut na_body, "e2euser").unwrap();
+    mir2_shared::binary::write_dotnet_string(&mut na_body, "e2epass").unwrap();
+    na_body.extend_from_slice(&0i64.to_le_bytes()); // birth_date_binary
+    mir2_shared::binary::write_dotnet_string(&mut na_body, "E2E User").unwrap();
+    mir2_shared::binary::write_dotnet_string(&mut na_body, "question").unwrap();
+    mir2_shared::binary::write_dotnet_string(&mut na_body, "answer").unwrap();
+    mir2_shared::binary::write_dotnet_string(&mut na_body, "e2e@example.com").unwrap();
+    stream.write_all(&make_packet(3, &na_body)).await.unwrap();
     let _ = recv_packet(&mut stream).await;
 
     // 4. Login
@@ -318,45 +340,58 @@ async fn test_startgame_full_flow() {
         if op == 9 { break; } // LoginSuccess
     }
 
-    // 5. StartGame (opcode=8, body = character_index: i32 = 0)
-    //    ServerPacketIds has StartGame=9 in client ids but ClientPacketIds::StartGame=8
-    let sg_body = 0i32.to_le_bytes();
-    stream.write_all(&make_packet(8, &sg_body)).await.unwrap();
-
-    // 6. Receive StartGame response sequence:
-    //    - StartGame (opcode=9 in ServerPacketIds, body: result + resolution)
-    //    - MapChanged (opcode=12)
-    //    - UserInformation (opcode varies)
-    //    - UserLocation (opcode varies)
-    //
-    //    We look for opcode=9 (StartGame) with result field in body.
-    //    Give 15s timeout for WorldActor actor round-trips.
-    let mut got_startgame = false;
-    let mut got_map_changed = false;
-    for _ in 0..10 {
-        let result = tokio::time::timeout(
-            Duration::from_secs(15),
-            recv_packet(&mut stream),
-        ).await;
-
-        match result {
-            Ok((op, body)) => {
-                tracing::info!("StartGame flow: received opcode={} body_len={}", op, body.len());
-                if op == 9 && !got_startgame {
-                    // ServerPacketIds::StartGame response
-                    got_startgame = true;
-                    if !body.is_empty() {
-                        let result_code = body[0];
-                        tracing::info!("  StartGame result={}", result_code);
-                    }
-                }
-                if got_startgame && got_map_changed {
-                    break;
-                }
-            }
-            Err(_) => break, // timeout
+    // 5. 先建角色（C# 对齐：StartGame 不再隐式建号）
+    let nc_body = {
+        let mut b = Vec::new();
+        let _ = mir2_shared::binary::write_dotnet_string(&mut b, "E2EChar");
+        b.push(0u8); // gender = Male
+        b.push(0u8); // class = Warrior
+        b
+    };
+    stream.write_all(&make_packet(6, &nc_body)).await.unwrap(); // ClientPacketIds::NewCharacter = 6
+    let nc_success = mir2_shared::enums::ServerPacketIds::NewCharacterSuccess as i16;
+    loop {
+        let (op, _) = tokio::time::timeout(Duration::from_secs(10), recv_packet(&mut stream))
+            .await
+            .expect("NewCharacterSuccess timeout");
+        if op == nc_success {
+            break;
         }
     }
 
-    assert!(got_startgame, "Expected StartGame response from server");
+    // 6. StartGame (ClientPacketIds::StartGame = 8, body = character_index: i32 = 0)
+    let sg_body = 0i32.to_le_bytes();
+    stream.write_all(&make_packet(8, &sg_body)).await.unwrap();
+
+    // 7. 接收 StartGame 响应序列（用枚举 opcode，避免硬编码漂移）：
+    //    StartGame / MapChanged / UserInformation / HealthChanged / UserLocation
+    let startgame_op = mir2_shared::enums::ServerPacketIds::StartGame as i16;
+    let mapchanged_op = mir2_shared::enums::ServerPacketIds::MapChanged as i16;
+    let userinfo_op = mir2_shared::enums::ServerPacketIds::UserInformation as i16;
+    let health_op = mir2_shared::enums::ServerPacketIds::HealthChanged as i16;
+    let loc_op = mir2_shared::enums::ServerPacketIds::UserLocation as i16;
+    let mut got_startgame = false;
+    let mut got_map_changed = false;
+    let mut got_userinfo = false;
+    let mut got_health = false;
+    let mut got_location = false;
+    for _ in 0..20 {
+        let result = tokio::time::timeout(Duration::from_secs(15), recv_packet(&mut stream)).await;
+        match result {
+            Ok((op, body)) => {
+                if op == startgame_op { got_startgame = true; }
+                if op == mapchanged_op { got_map_changed = true; }
+                if op == userinfo_op { got_userinfo = true; }
+                if op == health_op { got_health = true; }
+                if op == loc_op { got_location = true; }
+                if got_startgame && got_map_changed && got_userinfo && got_health && got_location {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    assert!(got_startgame, "Expected StartGame response from server (got map_changed={} userinfo={} health={} loc={})", got_map_changed, got_userinfo, got_health, got_location);
+    });
 }
