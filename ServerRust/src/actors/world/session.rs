@@ -722,6 +722,11 @@ impl Message<WorldMoveRequest> for WorldActor {
         // C# HumanObject Walk/Run：移动打断专注（3s 内不提供专注加成）
         self.interrupt_concentration(msg.session_id).await;
 
+        // C# HumanObject Walk/Run：骑乘移动扣坐骑忠诚度（Walk=1 / Run=2，LoyaltyDelay 限速）
+        let _ = record.actor_ref.tell(crate::actors::player::DecreaseMountLoyalty {
+            amount: if msg.is_run { 2 } else { 1 },
+        }).try_send();
+
         // C# HumanObject Walk/Run：进入安全区时更新绑定点（SetBindSafeZone）
         if let Ok(Some(post_state)) = record.actor_ref.ask(GetPlayerState).await {
             self.update_bind_safe_zone(msg.session_id, post_state.map_index, post_state.x, post_state.y).await;
@@ -2029,5 +2034,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
             brown_until_ms: 0,
+            mount_loyalty_decrease_time: 0,
+            mount_loyalty_increase_time: 0,
     }
 }
