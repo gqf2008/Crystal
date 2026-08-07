@@ -3169,7 +3169,18 @@ impl Message<Tick> for WorldActor {
                         }
                     }
                     // #471 宠物协战（自定义 AI 宠物）：攻击主人攻击的怪物，不主动攻击玩家
+                    // C# CanAttack：MoveOnly/None 不允许攻击（PetMode）
                     if let Some(master) = monster.master_session {
+                        let pet_may_attack = self.player_pet_modes
+                            .get(&master)
+                            .map(|m| matches!(m, mir2_shared::enums::PetMode::Both
+                                | mir2_shared::enums::PetMode::AttackOnly
+                                | mir2_shared::enums::PetMode::FocusMasterTarget))
+                            .unwrap_or(true); // 无缓存默认允许（C# 默认 Both）
+                        if !pet_may_attack {
+                            monster.target_session = None;
+                            continue;
+                        }
                         if let Some(tmid) = self.pet_targets.get(&monster.object_id).copied() {
                             let target_alive = monster_snapshot.iter()
                                 .any(|s| s.0 == tmid && s.3 > 0 && s.5 == monster.map_index);
@@ -3320,7 +3331,17 @@ impl Message<Tick> for WorldActor {
                 };
 
                 // #471：宠物——不主动攻击玩家；有协战目标则靠近/攻击
-                if monster.master_session.is_some() {
+                // C# CanAttack：MoveOnly/None 不允许攻击（PetMode）
+                let pet_may_attack = match monster.master_session {
+                    Some(master) => self.player_pet_modes
+                        .get(&master)
+                        .map(|m| matches!(m, mir2_shared::enums::PetMode::Both
+                            | mir2_shared::enums::PetMode::AttackOnly
+                            | mir2_shared::enums::PetMode::FocusMasterTarget))
+                        .unwrap_or(true), // 无缓存默认允许（C# 默认 Both）
+                    None => false,
+                };
+                if monster.master_session.is_some() && pet_may_attack {
                     nearest = None;
                     chase_target = None;
                     monster.target_session = None;

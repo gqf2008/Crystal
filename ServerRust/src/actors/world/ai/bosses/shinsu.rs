@@ -10,6 +10,8 @@
 //! ProcessAI（C# :26-47）：Target!=null → ModeTime=+30s；进/出 Mode 广播 Show/Hide。
 //! Attack（C# :63-82）：DC LineAttack(2)。
 
+use mir2_shared::enums::PetMode;
+
 use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
@@ -45,9 +47,14 @@ impl MonsterBehavior for ShinsuBehavior {
         }
 
         let target = ctx.pet_target(monster.x, monster.y, VIEW_RANGE, monster.map_index);
+        // C# ProcessAI：MoveOnly/None 时 Target=null（不攻击），协战怪物目标也不进攻击形态
+        let mode_allows_attack = match ctx.master_pet_mode {
+            Some(PetMode::MoveOnly) | Some(PetMode::None) => false,
+            _ => true, // 野生 / Both / AttackOnly / FocusMasterTarget
+        };
 
         // Mode 切换（C# ProcessAI）：有目标（含 #471 协战怪物目标）→ 攻击形态
-        if target.is_some() || ctx.has_master_monster_target {
+        if target.is_some() || (ctx.has_master_monster_target && mode_allows_attack) {
             // 有目标：刷新 ModeTime 并进入攻击形态
             self.mode_end_tick = ctx.tick_count + MODE_TICKS;
             if !self.mode {
