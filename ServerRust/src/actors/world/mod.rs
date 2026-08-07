@@ -557,8 +557,7 @@ const SPELL_TRAP: u8 = mir2_shared::enums::Spell::Trap as u8;                   
 const SPELL_FLAMING_SWORD: u8 = mir2_shared::enums::Spell::FlamingSword as u8;     // 8 战士·烈焰剑（下一次近战附加火焰加成）
 const SPELL_TWIN_DRAKE_BLADE: u8 = mir2_shared::enums::Spell::TwinDrakeBlade as u8;   // 6 战士·双龙斩（下一次近战双段伤害）
 const SPELL_SLASHING_BURST: u8 = mir2_shared::enums::Spell::SlashingBurst as u8;     // 15 战士·横扫千军（冲锋+伤害）
-#[allow(dead_code)]
-const SPELL_BLADE_AVALANCHE: u8 = mir2_shared::enums::Spell::BladeAvalanche as u8; // 14 冰刀斩（范围）
+const SPELL_BLADE_AVALANCHE: u8 = mir2_shared::enums::Spell::BladeAvalanche as u8; // 14 冰刀斩（3列×3行前向 AoE）
 // 弓箭手法术（Archer，弹道物理系 + 自身 buff）
 const SPELL_STRAIGHT_SHOT: u8 = mir2_shared::enums::Spell::StraightShot as u8;   // 125 直线弹道
 const SPELL_DOUBLE_SHOT: u8 = mir2_shared::enums::Spell::DoubleShot as u8;       // 126 双发弹道
