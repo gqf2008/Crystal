@@ -11,8 +11,7 @@ use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
 
 /// 睡眠唤醒延迟（5 分钟，单位 tick；100ms/tick → 5min=3000 ticks）
-#[allow(dead_code)]
-const SLEEP_DURATION_TICKS: u64 = 3000;
+pub(crate) const SLEEP_DURATION_TICKS: u64 = 3000;
 /// 攻击冷却（tick）
 const EVIL_MIR_ATTACK_COOLDOWN: u64 = 8;
 /// 行动间隔（tick）
@@ -33,6 +32,13 @@ impl EvilMirBehavior {
             mass_attack: false,
         }
     }
+
+    /// DragonLink 模式下死亡=睡眠 5 分钟（C# EvilMir.Die：不真死，睡眠后满血苏醒）
+    pub(crate) fn sleep_on_death(&mut self, tick_count: u64) {
+        self.sleeping = true;
+        self.wake_up_tick = tick_count + SLEEP_DURATION_TICKS;
+    }
+
 }
 
 impl MonsterBehavior for EvilMirBehavior {
@@ -127,8 +133,6 @@ impl MonsterBehavior for EvilMirBehavior {
     }
 
     fn on_die(&mut self, _monster: &mut MonsterState, _ctx: &mut AiCtx) {
-        // C# DragonLink 模式下死亡=睡眠 5 分钟。简化：真死（DragonLink TODO）
-        self.sleeping = true;
-        self.wake_up_tick = 0; // 不会再唤醒（真死）
+        // 真死路径（非 DragonLink）：无需特殊处理
     }
 }

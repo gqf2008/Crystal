@@ -2750,7 +2750,27 @@ impl Message<Tick> for WorldActor {
 
                 // 检查死亡
                 if monster.hp <= 0 {
-                    dead_monsters.push(*oid);
+                    // C# EvilMir.Die：DragonLink 模式下死亡=睡眠 5 分钟（满血苏醒），而非真死
+                    let is_dragon_evil_mir = self.dragon_state.as_ref()
+                        .map(|d| d.evil_mir_oid == Some(*oid))
+                        .unwrap_or(false);
+                    if is_dragon_evil_mir {
+                        let slept = monster.behavior.as_any_mut()
+                            .and_then(|a| a.downcast_mut::<crate::actors::world::ai::bosses::evil_mir::EvilMirBehavior>())
+                            .map(|b| {
+                                b.sleep_on_death(self.tick_count);
+                                monster.hp = monster.max_hp;
+                                true
+                            })
+                            .unwrap_or(false);
+                        if slept {
+                            debug!("EvilMir #{} DragonLink: slept 5min instead of dying", *oid);
+                        } else {
+                            dead_monsters.push(*oid);
+                        }
+                    } else {
+                        dead_monsters.push(*oid);
+                    }
                 }
             }
 
