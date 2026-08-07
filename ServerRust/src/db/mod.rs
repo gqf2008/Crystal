@@ -596,6 +596,9 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     // #899: 背包格数（C# CharacterInfo.Inventory.Length，扩容后重登不丢，safe to re-run）
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN backpack_size INTEGER NOT NULL DEFAULT 40")
         .execute(&pool).await;
+    // #932: 无经验地图（C# MapInfo.NoExperience，safe to re-run）
+    let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN no_experience INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     // #480: 密码错误锁定（C# WrongPasswordCount / ExpiryDate，safe to re-run）
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN wrong_password_count INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
@@ -2286,6 +2289,8 @@ pub struct MapInfo {
     pub no_intelligent_creatures: bool,
     /// 禁止英雄（C# MapInfo.NoHero；进入时解除）
     pub no_hero: bool,
+    /// 禁止获得经验（C# MapInfo.NoExperience；WinExp/GainExp 入口拦截）
+    pub no_experience: bool,
     pub music: bool,
     pub no_town_teleport: bool,
     pub no_reincarnation: bool,
@@ -2691,6 +2696,7 @@ pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
             no_pets: row.try_get::<i32, _>("no_pets").unwrap_or(0) != 0,
             no_intelligent_creatures: row.try_get::<i32, _>("no_intelligent_creatures").unwrap_or(0) != 0,
             no_hero: row.try_get::<i32, _>("no_hero").unwrap_or(0) != 0,
+            no_experience: row.try_get::<i32, _>("no_experience").unwrap_or(0) != 0,
             music: row.get::<i32, _>("music") != 0,
             no_town_teleport: row.get::<Option<i32>, _>("no_town_teleport").unwrap_or(0) != 0,
             no_reincarnation: row.get::<Option<i32>, _>("no_reincarnation").unwrap_or(0) != 0,

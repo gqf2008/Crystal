@@ -6366,3 +6366,18 @@ mod set_bonus_tests {
         assert!(!has_bind_flag(0, mir2_shared::enums::BindMode::BIND_ON_EQUIP.bits()));
     }
 }
+
+/// #932：查询地图是否禁止经验（C# MapInfo.NoExperience）
+pub struct IsNoExperienceMap {
+    pub map_index: u16,
+}
+
+impl Message<IsNoExperienceMap> for WorldActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: IsNoExperienceMap, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.map_infos.get(&(msg.map_index as i32))
+            .map(|m| m.no_experience)
+            .unwrap_or(false)
+    }
+}
