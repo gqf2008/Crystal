@@ -622,7 +622,6 @@ const SPELL_FLAME_DISRUPTOR: u8 = mir2_shared::enums::Spell::FlameDisruptor as u
 const SPELL_STORM_ESCAPE: u8 = mir2_shared::enums::Spell::StormEscape as u8;           // 55 法师·风遁（定点传送）
 // 道士系
 const SPELL_REVELATION: u8 = mir2_shared::enums::Spell::Revelation as u8;         // 70 道士·显血/反隐
-const SPELL_SPIRIT_SWORD: u8 = mir2_shared::enums::Spell::SpiritSword as u8;           // 62 道士·精神力剑（被动 accuracy）
 const SPELL_REINCARNATION: u8 = mir2_shared::enums::Spell::Reincarnation as u8;   // 79 道士·复活死亡玩家
 const SPELL_HALLUCINATION: u8 = mir2_shared::enums::Spell::Hallucination as u8;       // 76 道士·幻觉（怪物失目标不攻击）
 const SPELL_ULTIMATE_ENHANCER: u8 = mir2_shared::enums::Spell::UltimateEnhancer as u8; // 77 道士·终极强化（DC/MC/SC 提升 buff）

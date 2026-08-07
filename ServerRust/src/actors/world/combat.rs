@@ -1451,7 +1451,7 @@ impl Message<MagicRequest> for WorldActor {
             }
                 debug!("Magic: {} casts Hiding (invisible)", state.name);
             }
-            // MassHiding：组队隐身（简化：自身 + 附近组员）
+            // MassHiding：组队隐身（目标点 3×3 友方 + C# 时长公式）
             SPELL_MASS_HIDING => {
                 // C# 时长：value = GetAttackPower(MinSC,MaxSC)/2 + (Lv+1)*2 秒（HumanObject.cs:4500）
                 let sc_power = crate::combat::attack::get_attack_power(
@@ -1574,7 +1574,7 @@ impl Message<MagicRequest> for WorldActor {
                         .map(|m| m.is_walkable(nx, ny))
                         .unwrap_or(false);
                     if !walkable { break; }
-                    // 伤害路径上的怪物（推开效果简化为伤害）
+                    // 撞到路径上的怪物：伤害 + 推开 1 格（C# HumanObject.cs:5079）
                     let hit: Option<u32> = self.monsters.iter()
                         .find(|(_, m)| m.x == nx && m.y == ny && m.hp > 0)
                         .map(|(id, _)| *id);
@@ -1604,7 +1604,6 @@ impl Message<MagicRequest> for WorldActor {
                     state.name, new_x, new_y, pushed_damage);
             }
             // Thrusting：刺杀（直线穿透 2 格，打前方 2 个格子）
-            // 简化：作为直线 AoE 伤害前方 2 格的怪物
             SPELL_THRUSTING => {
                 let dir = msg.direction as usize % 8;
                 let attacker_stats = state.to_combat_stats();
