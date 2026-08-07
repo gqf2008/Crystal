@@ -295,6 +295,8 @@ pub struct PlayerState {
     pub bind_y: i32,
     /// 等级特效（C# HumanObject.LevelEffects：flags 990-998 派生，外观特效位掩码）
     pub level_effects: u16,
+    /// 是否为师徒关系中的导师（C# CharacterInfo.IsMentor；徒弟=false）
+    pub is_mentor: bool,
 }
 
 impl PlayerState {
@@ -618,6 +620,7 @@ impl PlayerActor {
             bind_x: 0,
             bind_y: 0,
             level_effects: 0,
+            is_mentor: false,
             },
             gate_ref,
             world_ref,
@@ -1276,8 +1279,16 @@ impl Message<AddExperience> for PlayerActor {
             })
             .await
             .unwrap_or(0);
+        // 徒弟经验加成（C# GainExp：Mentee 同图 + 同组 + 导师存活 → +MentorExpBoost%）
+        let mentee_bonus = self.world_ref
+            .ask(crate::actors::world::partners::GetMenteeExpBonus {
+                session_id: self.state.session_id,
+            })
+            .await
+            .unwrap_or(0);
         let amount = (base as f64 * self.state.exp_multiplier * rested_mul
-            * (1.0 + lover_bonus as f64 / 100.0)).round() as i64;
+            * (1.0 + lover_bonus as f64 / 100.0)
+            * (1.0 + mentee_bonus as f64 / 100.0)).round() as i64;
         self.state.experience += amount;
 
         debug!(
@@ -3431,6 +3442,8 @@ impl Message<SetAllowMentor> for PlayerActor {
 /// 设置导师名称
 pub struct SetMentor {
     pub mentor_name: Option<String>,
+    /// 是否导师（C# CharacterInfo.IsMentor；拜师接受方=true）
+    pub is_mentor: bool,
 }
 
 impl Message<SetMentor> for PlayerActor {
@@ -3438,6 +3451,7 @@ impl Message<SetMentor> for PlayerActor {
 
     async fn handle(&mut self, msg: SetMentor, _ctx: &mut Context<Self, Self::Reply>) {
         self.state.mentor_name = msg.mentor_name;
+        self.state.is_mentor = msg.is_mentor;
     }
 }
 
@@ -4591,6 +4605,7 @@ mod tests {
             bind_x: 0,
             bind_y: 0,
             level_effects: 0,
+            is_mentor: false,
         }
     }
 
