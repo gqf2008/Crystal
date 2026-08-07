@@ -2802,6 +2802,18 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                     send_system_message(&self.gate_ref, msg.session_id, "对方已有行会");
                     return;
                 }
+                // #910：C# PlayerObject（~9869）目标未开启 @ALLOWGUILD → 拒绝邀请
+                let target_invite_disabled = match self.players.get(&target) {
+                    Some(r) => match r.ask(GetPlayerState).await {
+                        Ok(Some(s)) => !s.enable_guild_invite,
+                        _ => true,
+                    },
+                    None => true,
+                };
+                if target_invite_disabled {
+                    send_system_message(&self.gate_ref, msg.session_id, "对方关闭了行会邀请（请对方先使用 @ALLOWGUILD 开启）");
+                    return;
+                }
                 // 已有待处理邀请
                 if self.pending_guild_invites.contains_key(&target) {
                     send_system_message(&self.gate_ref, msg.session_id, "邀请已发送，等待对方回复");

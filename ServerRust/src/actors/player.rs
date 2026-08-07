@@ -277,6 +277,8 @@ pub struct PlayerState {
     pub storage_password_last_set: i64,
     /// 是否允许其他玩家观察（C# PlayerObject.AllowObserve，@ALLOWOBSERVE 切换）
     pub allow_observe: bool,
+    /// 是否允许他人邀请加入行会（C# PlayerObject.EnableGuildInvite，@ALLOWGUILD 切换，默认 false）
+    pub enable_guild_invite: bool,
     /// 当前 Buff/Debuff 列表
     pub buffs: Vec<crate::combat::buff::BuffInstance>,
     /// 已学习的魔法/技能列表
@@ -635,6 +637,7 @@ impl PlayerActor {
                 require_storage_password: false,
                 storage_password_last_set: 0,
                 allow_observe: false,
+                enable_guild_invite: false,
                 buffs: Vec::new(),
                 magics: Vec::new(),
                 flags: std::collections::HashMap::new(),
@@ -4814,6 +4817,7 @@ mod tests {
             require_storage_password: false,
             storage_password_last_set: 0,
             allow_observe: false,
+            enable_guild_invite: false,
             is_dead: false,
             unlock_curse: false,
             last_revival_time: 0,
