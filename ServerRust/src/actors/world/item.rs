@@ -1311,7 +1311,7 @@ impl Message<EquipItemRequest> for WorldActor {
             let item = state.hero_inventory.backpack.iter().flatten()
                 .find(|s| s.item.unique_id == msg.unique_id)
                 .map(|s| s.item.clone());
-            // #1178：英雄等级/职业/性别覆盖主人值（统计需求 MaxAC 等无英雄属性，保留主人值近似）
+            // #1178/#1180：英雄等级/职业/性别/属性覆盖主人值（C# HumanObject.CanEquipItem this=HeroObject）
             let mut hero_state = state.clone();
             if let Some(hero) = self.player_heroes.get(&msg.session_id)
                 .and_then(|hs| hs.iter().find(|h| h.index as u8 == state.hero_index))
@@ -1319,6 +1319,21 @@ impl Message<EquipItemRequest> for WorldActor {
                 hero_state.level = hero.level;
                 hero_state.class = hero.class;
                 hero_state.gender = hero.gender;
+                let hs = super::hero_stats::compute_hero_stats(
+                    hero.class, hero.level as i32,
+                    &state.hero_inventory.equipment,
+                    &self.item_infos,
+                );
+                hero_state.min_ac = hs.min_ac;
+                hero_state.max_ac = hs.max_ac;
+                hero_state.min_mac = hs.min_mac;
+                hero_state.max_mac = hs.max_mac;
+                hero_state.min_attack = hs.min_dc;
+                hero_state.max_attack = hs.max_dc;
+                hero_state.min_mc = hs.min_mc;
+                hero_state.max_mc = hs.max_mc;
+                hero_state.min_sc = hs.min_sc;
+                hero_state.max_sc = hs.max_sc;
             }
             let equippable = item.as_ref().and_then(|it| self.item_infos.get(&it.item_index))
                 .map(|info| can_equip_item(info, slot, &hero_state))

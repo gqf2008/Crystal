@@ -115,6 +115,13 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             PRIMARY KEY (character_name, grid),
             FOREIGN KEY (character_name) REFERENCES characters(name)
         );
+        CREATE TABLE IF NOT EXISTS hero_inventory_equipment (
+            character_name TEXT NOT NULL,
+            slot INTEGER NOT NULL,
+            item_json TEXT NOT NULL,
+            PRIMARY KEY (character_name, slot),
+            FOREIGN KEY (character_name) REFERENCES characters(name)
+        );
         CREATE TABLE IF NOT EXISTS heroes (
             character_name TEXT NOT NULL,
             hero_index INTEGER NOT NULL,
@@ -1573,6 +1580,18 @@ async fn save_hero_inventory(conn: &mut sqlx::sqlite::SqliteConnection, characte
         }
     }
 
+    // #1180：英雄装备持久化（C# Hero 装备随角色保存；此前仅存背包，换线丢失）
+    sqlx::query("DELETE FROM hero_inventory_equipment WHERE character_name = ?")
+        .bind(character_name).execute(&mut *conn).await?;
+    for (slot, eq) in inv.equipment.iter().enumerate() {
+        if let Some(item) = eq {
+            let item_json = serde_json::to_string(item)?;
+            sqlx::query("INSERT INTO hero_inventory_equipment (character_name, slot, item_json) VALUES (?, ?, ?)")
+                .bind(character_name).bind(slot as i32).bind(&item_json)
+                .execute(&mut *conn).await?;
+        }
+    }
+
     Ok(())
 }
 
@@ -1594,6 +1613,23 @@ async fn load_hero_inventory(pool: &DbPool, character_name: &str) -> anyhow::Res
                 grid: grid as u8,
                 item,
             });
+        }
+    }
+
+    // #1180：英雄装备加载
+    let eq_rows = sqlx::query(
+        "SELECT slot, item_json FROM hero_inventory_equipment WHERE character_name = ?"
+    )
+    .bind(character_name)
+    .fetch_all(pool)
+    .await?;
+    for row in eq_rows {
+        let slot: i32 = row.get("slot");
+        let item_json: String = row.get("item_json");
+        if slot >= 0 && (slot as usize) < inv.equipment.len() {
+            if let Ok(item) = serde_json::from_str::<mir2_shared::data::item::UserItem>(&item_json) {
+                inv.equipment[slot as usize] = Some(item);
+            }
         }
     }
 
