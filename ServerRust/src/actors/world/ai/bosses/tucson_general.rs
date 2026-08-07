@@ -82,7 +82,7 @@ impl MonsterBehavior for TucsonGeneralBehavior {
 
         // ---- 攻击分支 ----
         if dist <= VIEW_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 6;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let melee = dist <= 2;
 
             if melee && fastrand::i32(0..4) > 0 {

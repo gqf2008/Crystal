@@ -59,7 +59,7 @@ impl MonsterBehavior for LeftGuardBehavior {
 
         if in_melee {
             // 近战：MACAgility
-            monster.next_attack_tick = ctx.tick_count + 5;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                 attacker_oid: monster.object_id,
                 target_session: target.session_id,

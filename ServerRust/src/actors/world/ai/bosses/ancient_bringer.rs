@@ -48,7 +48,7 @@ impl MonsterBehavior for AncientBringerBehavior {
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             if dist <= MELEE_RANGE {
                 // 近战 PoisonLineAttack(2)：4/5 普通 / 1/5 DC*2 + Paralysis
-                monster.next_attack_tick = ctx.tick_count + 8;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let strong = fastrand::i32(0..5) == 0;
                 let max_dc = if strong { monster.max_dmg * 2 } else { monster.max_dmg };
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, max_dc, 0).max(1);

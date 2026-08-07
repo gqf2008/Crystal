@@ -62,7 +62,7 @@ impl MonsterBehavior for StoningStatueBehavior {
 
         if ctx.tick_count < self.area_tick {
             // 普通期：LineAttack DC
-            monster.next_attack_tick = ctx.tick_count + 8;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
             ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                 attacker_oid: monster.object_id,

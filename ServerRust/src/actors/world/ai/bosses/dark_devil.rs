@@ -59,7 +59,7 @@ impl MonsterBehavior for DarkDevilBehavior {
             return;
         }
 
-        monster.next_attack_tick = ctx.tick_count + 8;
+        monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
         if in_area_mode {
             // AOE 模式：DC*3，朝向 2 格前方 1 格范围（C# PointMove(self,dir,2)）

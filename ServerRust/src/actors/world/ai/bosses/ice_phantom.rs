@@ -37,11 +37,11 @@ impl MonsterBehavior for IcePhantomBehavior {
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             let damage = if dist <= MELEE_RANGE {
                 // 近战 DC ACAgility
-                monster.next_attack_tick = ctx.tick_count + 6;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1)
             } else {
                 // 远程 MC MAC（冰系）
-                monster.next_attack_tick = ctx.tick_count + 8;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1)
             };
 

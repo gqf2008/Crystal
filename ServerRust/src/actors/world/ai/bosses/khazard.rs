@@ -62,7 +62,7 @@ impl MonsterBehavior for KhazardBehavior {
             // 远程：拉扯（冷却到期，C# Khazard.cs:68-81 PullAttack）
             if ctx.tick_count >= self.next_pull_tick && ctx.tick_count >= monster.next_attack_tick {
                 self.next_pull_tick = ctx.tick_count + PULL_COOLDOWN_TICKS;
-                monster.next_attack_tick = ctx.tick_count + 6;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 // 沿 Boss 朝向 i=1..4 找目标所在格；命中则朝自身方向拉 i 格（阻挡时停在 Boss 邻格）
                 let dir = monster.direction as usize % 8;
                 for i in 1..=PULL_MAX_DIST {
@@ -82,7 +82,7 @@ impl MonsterBehavior for KhazardBehavior {
         } else {
             // 近战：DC 单体
             if ctx.tick_count >= monster.next_attack_tick {
-                monster.next_attack_tick = ctx.tick_count + 6;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,

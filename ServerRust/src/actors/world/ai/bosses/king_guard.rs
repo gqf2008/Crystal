@@ -38,7 +38,7 @@ impl MonsterBehavior for KingGuardBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 8;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
             if dist <= MELEE_RANGE {
                 // 近战：4/5 普通 DC ACAgility；1/5 DC*2 AC AOE(3)

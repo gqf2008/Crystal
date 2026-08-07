@@ -39,7 +39,7 @@ impl MonsterBehavior for TrollKingBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 8;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
             if dist <= MELEE_RANGE {
                 // 近战：2/3 概率范围攻击，1/3 WalkAway（C# Random(2)==0 || !InRange(,2)）

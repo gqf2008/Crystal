@@ -77,7 +77,7 @@ impl MonsterBehavior for TurtleKingBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 5;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let in_close = dist <= CLOSE_RANGE;
             if in_close {
                 // 近战三形态（C# Random(5)）

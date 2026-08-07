@@ -37,7 +37,7 @@ impl MonsterBehavior for OmaMageBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= VIEW_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 6;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             if dist <= MELEE_RANGE {
                 // 近战 Type0 DC
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);

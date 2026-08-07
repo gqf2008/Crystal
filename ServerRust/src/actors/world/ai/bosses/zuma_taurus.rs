@@ -81,7 +81,7 @@ impl MonsterBehavior for ZumaTaurusBehavior {
             if ctx.tick_count < monster.next_attack_tick {
                 return;
             }
-            monster.next_attack_tick = ctx.tick_count + 5;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             // C# DefenceType.MACAgility：伤害用 DC（magic defence 判定由 attack 应用层处理）
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
             ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {

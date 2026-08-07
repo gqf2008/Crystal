@@ -46,7 +46,7 @@ impl MonsterBehavior for ThunderElementBehavior {
 
         if dist <= MELEE_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
-                monster.next_attack_tick = ctx.tick_count + 7;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 // 闪电链：自身 2 格范围全体 MAC（C# CompleteAttack FindAllTargets(2)）
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {

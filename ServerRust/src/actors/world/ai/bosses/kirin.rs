@@ -40,7 +40,7 @@ impl MonsterBehavior for KirinBehavior {
         let in_melee = dist <= MELEE_RANGE;
 
         if ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 8;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
             if in_melee {
                 // 4/5 基础近战，1/5 AC 强攻（C# Attack Random(5)==0）

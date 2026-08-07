@@ -50,7 +50,7 @@ impl MonsterBehavior for KingScorpionBehavior {
         if ctx.tick_count < monster.next_attack_tick {
             return;
         }
-        monster.next_attack_tick = ctx.tick_count + 7;
+        monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
         // 前方 2 格有目标 or 1/5 → MC 直线；否则 DC 直线
         let use_mc = fastrand::i32(0..5) == 0;

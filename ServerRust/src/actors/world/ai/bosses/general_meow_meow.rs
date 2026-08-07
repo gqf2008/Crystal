@@ -145,7 +145,7 @@ impl MonsterBehavior for GeneralMeowMeowBehavior {
             if ctx.tick_count < monster.next_attack_tick {
                 return;
             }
-            monster.next_attack_tick = ctx.tick_count + 5;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
             // C# GeneralMeowMeow.cs:93-110：8/9 普攻 / 1/9 Slam(DC*3)
             if fastrand::i32(0..9) != 0 {
@@ -173,7 +173,7 @@ impl MonsterBehavior for GeneralMeowMeowBehavior {
             if ctx.tick_count < monster.next_attack_tick {
                 return;
             }
-            monster.next_attack_tick = ctx.tick_count + 5;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
             ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                 attacker_oid: monster.object_id,

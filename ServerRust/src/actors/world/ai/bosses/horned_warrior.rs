@@ -86,7 +86,7 @@ impl MonsterBehavior for HornedWarriorBehavior {
 
         // ---- 正常战斗 ----
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 6;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             // C# 2/3 DC 单体；1/3 WideLineAttack(4)
             if fastrand::i32(0..3) > 0 {
                 // Type0 DC 单体

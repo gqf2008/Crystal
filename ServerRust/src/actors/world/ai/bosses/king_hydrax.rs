@@ -42,7 +42,7 @@ impl MonsterBehavior for KingHydraxBehavior {
         if dist <= MELEE_RANGE {
             // 近战 DC 单体
             if ctx.tick_count >= monster.next_attack_tick {
-                monster.next_attack_tick = ctx.tick_count + 6;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
@@ -55,7 +55,7 @@ impl MonsterBehavior for KingHydraxBehavior {
         } else if dist <= VIEW_RANGE {
             // 远程双弹道
             if ctx.tick_count >= monster.next_attack_tick {
-                monster.next_attack_tick = ctx.tick_count + 6;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
                 if fastrand::i32(0..2) == 0 {
                     // Type0 即时弹道 + Paralysis

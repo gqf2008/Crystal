@@ -60,7 +60,7 @@ impl MonsterBehavior for EarthGolemBehavior {
         if dist <= ATTACK_RANGE && ctx.tick_count < self.fear_end_tick
             && ctx.tick_count >= monster.next_attack_tick
         {
-            monster.next_attack_tick = ctx.tick_count + 8;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
             if dist <= MELEE_RANGE && fastrand::i32(0..3) > 0 {
                 // 近战 DC MAC（C# 2/3 概率）

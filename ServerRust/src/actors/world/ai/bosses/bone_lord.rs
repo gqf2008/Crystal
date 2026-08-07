@@ -62,7 +62,7 @@ impl MonsterBehavior for BoneLordBehavior {
 
         if dist <= MELEE_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
-                monster.next_attack_tick = ctx.tick_count + 5;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
@@ -75,7 +75,7 @@ impl MonsterBehavior for BoneLordBehavior {
         } else if dist <= ATTACK_RANGE {
             // 远程掷骨弹道
             if ctx.tick_count >= monster.next_attack_tick {
-                monster.next_attack_tick = ctx.tick_count + 8;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                     attacker_oid: monster.object_id,

@@ -72,7 +72,7 @@ impl MonsterBehavior for ShinsuBehavior {
         // 攻击形态：DC LineAttack(2)
         if dist <= LINE_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
-                monster.next_attack_tick = ctx.tick_count + 6;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
                 // 直线 2 格：对朝目标方向前 2 格内的玩家施放（近似 LineAttack）
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y);

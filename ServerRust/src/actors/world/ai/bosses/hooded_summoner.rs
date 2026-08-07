@@ -48,7 +48,7 @@ impl MonsterBehavior for HoodedSummonerBehavior {
         if dist <= VIEW_RANGE && ctx.tick_count < self.fear_end_tick
             && ctx.tick_count >= monster.next_attack_tick
         {
-            monster.next_attack_tick = ctx.tick_count + 8;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let roll = fastrand::i32(0..6);
 
             match roll {

@@ -67,7 +67,7 @@ impl MonsterBehavior for RhinoPriestBehavior {
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             if dist <= MELEE_RANGE {
                 // 近战 DC ACAgility
-                monster.next_attack_tick = ctx.tick_count + 7;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
@@ -78,7 +78,7 @@ impl MonsterBehavior for RhinoPriestBehavior {
                 });
             } else {
                 // 远程 MC：2/3 普通(MACAgility,Debuff) / 1/3 蓝圈(MAC,Slow/Frozen)
-                monster.next_attack_tick = ctx.tick_count + 9;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
                 let blue_circle = fastrand::i32(0..3) == 0;
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {

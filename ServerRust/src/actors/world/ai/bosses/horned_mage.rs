@@ -36,7 +36,7 @@ impl MonsterBehavior for HornedMageBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 8;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             if dist <= CLOSE_RANGE {
                 // 近距 MC AOE（FindAllTargets(3)）
                 let hits: Vec<crate::actors::world::ai::PlayerSnap> =

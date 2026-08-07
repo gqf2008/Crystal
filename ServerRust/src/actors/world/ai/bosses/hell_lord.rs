@@ -74,7 +74,7 @@ impl MonsterBehavior for HellLordBehavior {
         // C# 语义：Knight 被玩家杀死 → KnightKilled() → stage += 1 + 狂暴 2min（由死亡回调 advance_stage 触发）；
         // 狂暴到期只补刷下一只 Knight（stage 不变）
 
-        monster.next_attack_tick = ctx.tick_count + 6;
+        monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
         // 狂暴到期 或 初次 → 召唤当前阶段 Knight（C# ProcessTarget）
         if (self.raged && ctx.tick_count >= self.rage_end_tick && self.stage < 4) || self.begin {

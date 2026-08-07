@@ -47,7 +47,7 @@ impl MonsterBehavior for BehemothBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 5;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let base = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
 
             if dist <= MELEE_RANGE {

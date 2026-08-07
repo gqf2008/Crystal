@@ -80,7 +80,7 @@ impl MonsterBehavior for YimoogiBehavior {
             });
             self.child_spawned = true;
             self.no_attack = false;
-            monster.next_attack_tick = ctx.tick_count + 5;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             return;
         }
 
@@ -100,7 +100,7 @@ impl MonsterBehavior for YimoogiBehavior {
 
         if ctx.tick_count >= monster.next_attack_tick && dist <= ATTACK_RANGE {
             // 攻击（C# Yimoogi.cs:67-113）
-            monster.next_attack_tick = ctx.tick_count + 5;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
 
             let in_melee = dist <= 2;

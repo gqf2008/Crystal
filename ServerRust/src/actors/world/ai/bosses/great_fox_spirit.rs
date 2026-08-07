@@ -81,7 +81,7 @@ impl MonsterBehavior for GreatFoxSpiritBehavior {
         if ctx.tick_count < monster.next_attack_tick {
             return;
         }
-        monster.next_attack_tick = ctx.tick_count + 6;
+        monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
         let ranged = dist > 2;
         let radius = if ranged { ATTACK_RANGE } else { MELEE_RADIUS };

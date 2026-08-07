@@ -59,13 +59,13 @@ impl MonsterBehavior for ManectricKingBehavior {
                     spell_id: 0,
                 });
             }
-            monster.next_attack_tick = ctx.tick_count + 8;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             return;
         }
 
         // ---- 攻击范围判定（十字/对角，AttackRange=3）----
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 6;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let close = dist <= ATTACK_RANGE - 1;
             if close && fastrand::i32(0..3) == 0 {
                 // Type1 DC LineAttack（带推回，用 attack_type=1 标记）

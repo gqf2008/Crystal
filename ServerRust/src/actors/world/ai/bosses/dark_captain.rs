@@ -51,7 +51,7 @@ impl MonsterBehavior for DarkCaptainBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= VIEW_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 6;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
             // ---- Thunder（2 格 AOE）----
             if ctx.tick_count >= self.next_thunder_tick {

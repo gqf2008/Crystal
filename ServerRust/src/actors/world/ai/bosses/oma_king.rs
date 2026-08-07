@@ -74,7 +74,7 @@ impl MonsterBehavior for OmaKingBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 5;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let is_melee = dist <= MELEE_RANGE;
             if is_melee && fastrand::i32(0..3) > 0 {
                 // 2/3：LineAttack（DC）—— C# LineAttack(damage, 2, 300)：沿朝向每格命中第一个目标

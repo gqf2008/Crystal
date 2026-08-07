@@ -48,7 +48,7 @@ impl MonsterBehavior for WingedTigerLordBehavior {
         // ---- 远程 tornado 连招 ----
         if dist > MELEE_RANGE && self.pending_tornado && dist <= ATTACK_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
-                monster.next_attack_tick = ctx.tick_count + 8;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 self.pending_tornado = false;
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
                 // C# FindAllTargets(1, Target.CurrentLocation) AOE
@@ -89,12 +89,12 @@ impl MonsterBehavior for WingedTigerLordBehavior {
 
         // ---- 近战攻击 ----
         if ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 6;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
             // stomp 连招优先
             if self.pending_stomp {
                 self.pending_stomp = false;
-                monster.next_attack_tick = ctx.tick_count + 8;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
                 // C# 周围 8 格 AOE
                 let hits: Vec<crate::actors::world::ai::PlayerSnap> =

@@ -40,7 +40,7 @@ impl MonsterBehavior for CrystalSpiderBehavior {
         let in_line = dx == 0 || dy == 0 || dx == dy;
 
         if in_line && dx.max(dy) <= LINE_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 6;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let dir = direction_towards(monster.x, monster.y, target.x, target.y);
             let melee = dx.max(dy) <= MELEE_RANGE;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);

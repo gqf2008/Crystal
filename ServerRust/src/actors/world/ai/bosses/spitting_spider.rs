@@ -49,7 +49,7 @@ impl MonsterBehavior for SpittingSpiderBehavior {
 
         if in_range {
             if ctx.tick_count >= monster.next_attack_tick {
-                monster.next_attack_tick = ctx.tick_count + 8;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
                 // C# LineAttack(damage, 2, 300, ACAgility)：沿朝向 2 格直线每格首目标
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y) as usize % 8;

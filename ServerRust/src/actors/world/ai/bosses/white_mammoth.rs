@@ -36,7 +36,7 @@ impl MonsterBehavior for WhiteMammothBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= MELEE_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 6;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let roll8 = fastrand::i32(0..8);
 
             if roll8 > 0 {

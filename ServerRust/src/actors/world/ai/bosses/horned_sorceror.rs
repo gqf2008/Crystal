@@ -57,7 +57,7 @@ impl MonsterBehavior for HornedSorcerorBehavior {
         let hp_pct = if monster.max_hp > 0 { monster.hp * 100 / monster.max_hp } else { 100 };
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 8;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
             // Charged Stomp：HP<90 且冷却到 且 1/4 概率
             if hp_pct < 90 && ctx.tick_count >= self.stomp_tick && fastrand::i32(0..4) == 0 {

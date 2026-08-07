@@ -35,7 +35,7 @@ impl MonsterBehavior for CrazyManwormBehavior {
 
         if dist <= MELEE_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
-                monster.next_attack_tick = ctx.tick_count + 6;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 // C# Random(3)>0 → DC（Type0）；else MC（Type1）
                 let use_mc = fastrand::i32(0..3) == 0;
                 let damage = if use_mc {

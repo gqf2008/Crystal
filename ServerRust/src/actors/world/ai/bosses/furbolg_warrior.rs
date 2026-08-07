@@ -51,7 +51,7 @@ impl MonsterBehavior for FurbolgWarriorBehavior {
         if ctx.tick_count < monster.next_attack_tick {
             return;
         }
-        monster.next_attack_tick = ctx.tick_count + 7;
+        monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
         let base = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
         let ranged = dx > 1 || dy > 1;
