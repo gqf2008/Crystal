@@ -1362,6 +1362,71 @@ impl WorldActor {
         steps
     }
 
+    /// 推开怪物（C# MonsterObject.Pushed：受 Info.CanPush 限制，逐格校验 walkable + 怪物占用，
+    /// 移动后广播 ObjectPushed；朝向取反）
+    pub(crate) async fn push_monster(&mut self, oid: u32, dir: u8, distance: i32) -> usize {
+        if dir >= 8 || distance <= 0 {
+            return 0;
+        }
+        let (map_index, start_x, start_y, can_push) = match self.monsters.get(&oid) {
+            Some(m) => {
+                let can = self.monster_infos.get(&m.monster_index)
+                    .map(|i| i.can_push)
+                    .unwrap_or(true);
+                (m.map_index, m.x, m.y, can)
+            }
+            None => return 0,
+        };
+        if !can_push {
+            return 0;
+        }
+        let (dx, dy) = (MON_DIR_DX[dir as usize], MON_DIR_DY[dir as usize]);
+        let mut occupied: std::collections::HashSet<(i32, i32)> = self.monsters.values()
+            .filter(|m| m.hp > 0)
+            .map(|m| (m.x, m.y))
+            .collect();
+        let mut nx = start_x;
+        let mut ny = start_y;
+        let mut steps = 0usize;
+        for _ in 0..distance {
+            let tx = nx + dx;
+            let ty = ny + dy;
+            let walkable = self.maps.get(&map_index)
+                .map(|m| m.is_walkable(tx, ty))
+                .unwrap_or(false);
+            if !walkable || occupied.contains(&(tx, ty)) {
+                break;
+            }
+            nx = tx;
+            ny = ty;
+            steps += 1;
+        }
+        if steps == 0 {
+            return 0;
+        }
+        let reverse_dir = ((dir as usize + 4) % 8) as u8;
+        if let Some(m) = self.monsters.get_mut(&oid) {
+            m.x = nx;
+            m.y = ny;
+            m.direction = reverse_dir;
+            m.provoked = true;
+        }
+        let mut obj_body = Vec::new();
+        obj_body.extend_from_slice(&oid.to_le_bytes());
+        obj_body.extend_from_slice(&(nx as u32).to_le_bytes());
+        obj_body.extend_from_slice(&(ny as u32).to_le_bytes());
+        obj_body.push(reverse_dir);
+        let obj_pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectPushed as i16, &obj_body);
+        for (sid, _) in &self.players {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: *sid,
+                data: obj_pkt.clone(),
+            }).await;
+        }
+        debug!("Push monster {} {} tiles dir={} to ({},{})", oid, steps, dir, nx, ny);
+        steps
+    }
+
     /// 发送 NPC 商店商品列表（DB 商品）
     pub(crate) fn send_npc_goods(&self, session_id: u64, npc: &NpcState) {
         let goods = self.npc_goods.get(&npc.db_index).cloned().unwrap_or_default();

@@ -1616,10 +1616,24 @@ impl WorldActor {
             );
 
             if result.is_hit && result.damage > 0 {
+                // ElementalShot 击退参数（在 get_mut 块内计算、块外应用，避免借用冲突）
+                let mut elemental_knockback: Option<(u8, i32)> = None;
                 if let Some(monster) = self.monsters.get_mut(&target_id) {
                     monster.take_damage(result.damage);
                     monster.provoked = true;
                     monster.target_session = Some(pending.session_id);
+
+                    // ElementalShot：击退判定（C# HumanObject.cs:5660 DoKnockback；在块开头计算避免后续借用冲突）
+                    if spell == Spell::ElementalShot {
+                        let mlevel = self.monster_infos.get(&monster.monster_index).map(|i| i.level).unwrap_or(0);
+                        if fastrand::i32(0..20) < 6 + pending.spell_level as i32 * 3 + caster_state.level as i32 - mlevel {
+                            let distance = 1 + (pending.spell_level as i32 - 1).max(0) + fastrand::i32(0..2);
+                            elemental_knockback = Some((
+                                crate::actors::world::ai::direction_towards(caster_state.x, caster_state.y, monster.x, monster.y),
+                                distance,
+                            ));
+                        }
+                    }
 
                     // FrostCrunch：概率 Slow/Frozen（C# HumanObject.cs:5962）
                     if spell == Spell::FrostCrunch {
@@ -1715,6 +1729,12 @@ impl WorldActor {
                                 target_id, next_id, pending.bounce - 1);
                         }
                     }
+                }
+
+                // ElementalShot：击退怪物（在 get_mut 块外应用）
+                if let Some((dir, distance)) = elemental_knockback {
+                    let _ = self.push_monster(target_id, dir, distance).await;
+                    debug!("ElementalShot knocked back monster {} {} tiles", target_id, distance);
                 }
             } else {
                 debug!("Projectile {:?} missed/blocked target {}", spell, target_id);
