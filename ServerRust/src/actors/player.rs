@@ -325,6 +325,8 @@ pub struct PlayerState {
     pub level_effects: u16,
     /// 是否为师徒关系中的导师（C# CharacterInfo.IsMentor；徒弟=false）
     pub is_mentor: bool,
+    /// 徒弟经验积累（C# PlayerObject.MenteeEXP：GainExp 时 += amount * MenteeExpBank(1)/100）
+    pub mentee_exp: i64,
     /// 导师伤害加成是否激活（C# HasBuff(Mentor)：徒弟近身同组时 true）
     pub mentor_damage_bonus: bool,
     /// 新手行会经验 buff（C# BuffType.Newbie：在 NewbieGuild 且开关开启时 true）
@@ -683,6 +685,7 @@ allow_group: false,
             bind_y: 0,
             level_effects: 0,
             is_mentor: false,
+            mentee_exp: 0,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
             exp_bonus_lover_percent: 0,
@@ -1398,6 +1401,11 @@ impl Message<AddExperience> for PlayerActor {
             * (1.0 + mentee_bonus as f64 / 100.0)
             * (1.0 + newbie_bonus as f64 / 100.0)).round() as i64;
         self.state.experience += amount;
+
+        // C# GainExp：徒弟经验积累 MenteeEXP += amount * Settings.MenteeExpBank(1) / 100
+        if self.state.mentor_name.is_some() && !self.state.is_mentor {
+            self.state.mentee_exp += (amount * 1) / 100;
+        }
 
         debug!(
             "Player {} gained {} exp (base={} x{:.1}) (total={}/{})",
@@ -5124,6 +5132,7 @@ allow_group: false,
             bind_y: 0,
             level_effects: 0,
             is_mentor: false,
+            mentee_exp: 0,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
             exp_bonus_lover_percent: 0,

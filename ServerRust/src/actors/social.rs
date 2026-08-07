@@ -1720,7 +1720,8 @@ impl Message<SocialPlayerJoined> for SocialActor {
                             partner_name,
                             partner_state.level as u32,
                             true,
-                            0,
+                            // C# MentorUpdate.MenteeEXP：徒弟经验积累（msg.session_id 视角）
+                            state.mentee_exp,
                         );
                         // 对方视角：上线者信息
                         send_mentor_update_packet(
@@ -1729,7 +1730,7 @@ impl Message<SocialPlayerJoined> for SocialActor {
                             &state.name,
                             state.level as u32,
                             true,
-                            0,
+                            state.mentee_exp,
                         );
                         let rel = if partner_state.mentor_name.as_deref() == Some(state.name.as_str()) {
                             "徒弟"
@@ -3623,7 +3624,7 @@ impl Message<SocialMentorReply> for SocialActor {
             &requester_state.name,
             requester_state.level as u32,
             true,
-            0,
+            requester_state.mentee_exp,
         );
         send_mentor_update_packet(
             &self.gate_ref,
@@ -3631,7 +3632,7 @@ impl Message<SocialMentorReply> for SocialActor {
             &replier_state.name,
             replier_state.level as u32,
             true,
-            0,
+            requester_state.mentee_exp,
         );
         debug!("Mentor: {} is mentor of {}", replier_state.name, requester_state.name);
     }
