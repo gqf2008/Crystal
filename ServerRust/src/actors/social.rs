@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 use std::sync::Arc;
 use tracing::{debug, warn, info};
 
-use crate::actors::player::{PlayerActor, GetPlayerState, SetGroupId, SetSpouse, SetGuildInfo, SetAllowMentor, SetMentor, SetPlayerPosition, SetLastRecallTime, SetEnableGroupRecall, AddFriendToSelf, RemoveFriendFromSelf, SetFriendMemo, AddGold, DeductGold, AddItemToInventory, RemoveItemFromInventory, GetItemInfo, CanGainItems, CanGainGold};
+use crate::actors::player::{PlayerActor, GetPlayerState, SetPlayerState, SetGroupId, SetSpouse, SetGuildInfo, SetAllowMentor, SetMentor, SetPlayerPosition, SetLastRecallTime, SetEnableGroupRecall, AddFriendToSelf, RemoveFriendFromSelf, SetFriendMemo, AddGold, DeductGold, AddItemToInventory, RemoveItemFromInventory, GetItemInfo, CanGainItems, CanGainGold};
 use crate::actors::inventory::EquipmentSlot;
 use crate::actors::group::{Group, GroupMember};
 use crate::actors::trade::TradeSession;
@@ -776,6 +776,8 @@ impl Actor for SocialActor {
             next_group_id: 1,
             pending_invites: HashMap::new(),
             active_trades: HashMap::new(),
+            last_trade_request: HashMap::new(),
+            last_group_invite: HashMap::new(),
             guilds,
             pending_guild_invites: HashMap::new(),
             pending_marriage_invites: HashMap::new(),
@@ -799,6 +801,10 @@ pub struct SocialActor {
 
     // === 交易状态 ===
     active_trades: HashMap<u64, TradeSession>,
+    /// #919：交易邀请冷却（C# Settings.TradeDelay=2000ms，session -> 上次时间戳 ms）
+    last_trade_request: HashMap<u64, i64>,
+    /// #919：组队邀请冷却（C# Settings.GroupInviteDelay=2000ms，session -> 上次时间戳 ms）
+    last_group_invite: HashMap<u64, i64>,
 
     // === 行会状态 ===
     guilds: HashMap<String, Guild>,
@@ -1874,6 +1880,20 @@ impl Message<GroupInviteRequest> for SocialActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: GroupInviteRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        // #919：C# AddMember——NextGroupInviteTime 防刷（GroupInviteDelay=2000ms）
+        const GROUP_INVITE_DELAY_MS: i64 = 2000;
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        if let Some(last) = self.last_group_invite.get(&msg.session_id).copied() {
+            if now_ms - last < GROUP_INVITE_DELAY_MS {
+                send_system_message(&self.gate_ref, msg.session_id, "操作过于频繁，请稍后再试");
+                return;
+            }
+        }
+        self.last_group_invite.insert(msg.session_id, now_ms);
+
         let inviter_record = match self.players.get(&msg.session_id) {
             Some(r) => r,
             None => return,
@@ -2051,6 +2071,20 @@ impl Message<TradeStartRequest> for SocialActor {
             Ok(Some(s)) => s,
             _ => return,
         };
+
+        // #919：C# StartTrade——NextTradeTime 防刷（TradeDelay=2000ms）
+        const TRADE_DELAY_MS: i64 = 2000;
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        if let Some(last) = self.last_trade_request.get(&msg.session_id).copied() {
+            if now_ms - last < TRADE_DELAY_MS {
+                send_system_message(&self.gate_ref, msg.session_id, "操作过于频繁，请稍后再试");
+                return;
+            }
+        }
+        self.last_trade_request.insert(msg.session_id, now_ms);
 
         // 检查是否已有交易
         if self.active_trades.contains_key(&msg.session_id) {
@@ -2702,6 +2736,11 @@ impl Message<GuildInviteReply> for SocialActor {
                 guild_name: Some(guild_name.clone()),
                 rank: GuildRank::Member,
             }).await;
+            // #918：C# JoinGuild（~10005）——加入行会后 EnableGuildInvite 重置 false
+            if let Ok(Some(mut st)) = record.ask(GetPlayerState).await {
+                st.enable_guild_invite = false;
+                let _ = record.ask(SetPlayerState { state: st }).await;
+            }
             send_guild_status_packet(&self.gate_ref, msg.session_id, true);
         }
 
