@@ -573,16 +573,23 @@ M7（真实网络）→ M8（HUD+控制）→ M9（对话框 1→4 批）→ M10
 | 数据依赖 | 复用 Client-Macroquad/Data，`resolve_data_path` 自动解析 |
 
 
+---
 
+## 六、2026-08-07/08 服务端对齐 + E2E 基建批次（追加）
 
+M63 之后（2026-08-03）以「一个 worktree 一批 issue」推进的服务端/测试基建对齐，全部已合入 master：
 
+### 服务端对齐（参考原版 C#）
+- **怪物 AI**（#990）：仇恨丢失距离 DataRange(16)、无目标巡逻、DB 攻速/移速、Boss 专属行为（AI 6/57/58 等）、精英倍率
+- **掉落**（#999/#1140）：掉落表 Gold/QuestRequired、GroupedDrop、4 档稀有度（Uncommon 3%/Rare 0.75%/Elite）概率与倍率
+- **召唤**（#981）：NoPets 地图、宠物上限、PetLevel 属性、Shinsu 形态切换广播
+- **经验**（#1160/#1164）：WinExp/GainExp 切比雪夫 InRange(16)、死亡成员不计经验、删除重复双发加成、MenteeEXP、经验曲线配置化、宠物经验、行会经验
+- **行会战**（#1170）：宣战扣行会金币（不足拒绝）、目标/开战校验、时限到期自动结束
+- **英雄**（#1129/#1137/#1143/#1165）：断线存档保留 heroes、NewMagic(hero) 路由、HP 战斗损耗/脱战回血/阵亡 + HeroHealthChanged、英雄头顶血条 ObjectHealth、英雄经验/等级链路（GainHeroExperience/HeroLevelChanged）、LastHitter 归属
+- **装备**（#1172/#1175）：补 Torch/Belt/Stone 三槽（EquipmentSlot 14）、双击装备左右手/戒指智能选择
 
-
-
-
-
-
-
-
-
-
+### 真实服 E2E 基建（scripts/）
+- run_real_e2e.ps1 严格标记判定（按用例成功标记，杜绝登录 ✅ 误判）
+- e2e_setup_db.py 测试库自动准备：安全出生点(267,256) + 交易面对面摆位 + 金币/背包物品/鱼竿/带鞍坐骑恢复
+- Guard(ai=6/58/113) 只攻击红名修复（城镇不再被守卫围杀）
+- 当前：真实服 E2E **12/12**；ServerRust 227 测试；Client-Bevy 79 测试
