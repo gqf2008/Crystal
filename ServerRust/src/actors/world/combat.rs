@@ -2125,6 +2125,54 @@ impl Message<MagicRequest> for WorldActor {
                 }
                 debug!("Magic: {} casts HeavenlySword (line 3 AoE)", state.name);
             }
+            // BladeAvalanche：冰刀斩（C# HumanObject.cs:4903）——3 列（前左/前/前右）×3 行前向 AoE
+            // 前 2 行全额、第 3 行 60%；幸运暴击翻倍；MAC 防御
+            SPELL_BLADE_AVALANCHE => {
+                let mut raw = crate::combat::attack::get_attack_power(
+                    state.min_attack + state.bonus_min_attack,
+                    state.max_attack + state.bonus_max_attack,
+                    state.luck,
+                ).max(1);
+                // C#：Random(0..100) <= 1+Luck → 翻倍
+                if fastrand::i32(0..100) <= 1 + state.luck {
+                    raw *= 2;
+                }
+                let attacker_stats = state.to_combat_stats();
+                let level_offset = state.level.min(10) as u16;
+                let dir = msg.direction as usize % 8;
+                let prev = (dir + 7) % 8;
+                let next = (dir + 1) % 8;
+                let mut hit_count = 0;
+                for col_dir in [prev, dir, next] {
+                    let start_x = state.x + MON_DIR_DX[col_dir];
+                    let start_y = state.y + MON_DIR_DY[col_dir];
+                    for j in 0..3i32 {
+                        let hx = start_x + MON_DIR_DX[dir] * j;
+                        let hy = start_y + MON_DIR_DY[dir] * j;
+                        let cell_dmg = if j <= 1 { raw } else { ((raw as f64) * 0.6) as i32 };
+                        let hit_ids: Vec<u32> = self.monsters.iter()
+                            .filter(|(_, m)| m.x == hx && m.y == hy && m.hp > 0)
+                            .map(|(id, _)| *id)
+                            .collect();
+                        for mid in hit_ids {
+                            if let Some(monster) = self.monsters.get_mut(&mid) {
+                                let ds = monster.to_combat_stats();
+                                let r = combat_attack::resolve_attack(
+                                    &attacker_stats, &ds, cell_dmg,
+                                    mir2_shared::enums::DefenceType::Mac, level_offset,
+                                );
+                                if r.is_hit && r.damage > 0 {
+                                    monster.take_damage(r.damage);
+                                    monster.provoked = true;
+                                    monster.target_session = Some(msg.session_id);
+                                    hit_count += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                debug!("Magic: {} casts BladeAvalanche (3x3 front, hits {})", state.name, hit_count);
+            }
             // CrescentSlash：前方扇形 AoE（前+左前+右前 3 格）
             SPELL_CRESCENT_SLASH => {
                 let dir = msg.direction as usize % 8;
