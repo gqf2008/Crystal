@@ -28,6 +28,19 @@ impl VampireSpiderBehavior {
 
 impl MonsterBehavior for VampireSpiderBehavior {
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
+        // C# VampireSpider.Process：主人同图 15 格外 / 离线 → 自爆（Die 爆炸 + 吸血）
+        if let Some(master) = monster.master_session {
+            let near = ctx.players.iter().any(|p| {
+                p.session_id == master
+                    && p.map_index == monster.map_index
+                    && ((p.x - monster.x).abs() + (p.y - monster.y).abs()) <= 15
+            });
+            if !near {
+                monster.hp = 0; // 触发死亡流程 → on_die（10*PetLevel 爆炸 + MasterVampire）
+                return;
+            }
+        }
+
         let target = match ctx.pet_target(monster.x, monster.y, VIEW_RANGE, monster.map_index) {
             Some(t) => t,
             None => return,

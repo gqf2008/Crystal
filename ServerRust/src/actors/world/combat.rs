@@ -3199,9 +3199,30 @@ impl Message<MagicRequest> for WorldActor {
                                 count: 1,
                                 spread: 0,
                             };
-                            // C# Shinsu.GetInfo：Extra = Summoned（召唤物标记）
+                            // C# MonsterObject.Name：宠物名字 = 怪物名(主人名)
+                            let display_name = format!("{}({})", spawn.name, state.name);
+                            // C# RefreshNameColour：宠物名字颜色按 PetLevel（ARGB）
+                            let name_colour: i32 = (if pet_level == 0 {
+                                0xFFFFFFFFu32
+                            } else {
+                                match pet_level {
+                                    1 => 0xFF00FFFFu32, // Aqua
+                                    2 => 0xFF7FFFD4u32, // Aquamarine
+                                    3 => 0xFF20B2AAu32, // LightSeaGreen
+                                    4 => 0xFF6A5ACDu32, // SlateBlue
+                                    5 => 0xFF4682B4u32, // SteelBlue
+                                    6 => 0xFF0000FFu32, // Blue
+                                    7 => 0xFF000080u32, // Navy
+                                    _ => 0xFFFFFFFFu32, // White
+                                }
+                            }) as i32;
+                            // C# Shinsu/HolyDeva/VampireSpider.GetInfo：Extra = Summoned（召唤物标记）
+                            let extra = matches!(
+                                msg.spell,
+                                SPELL_SUMMON_SHINSU | SPELL_SUMMON_HOLY_DEVA | SPELL_SUMMON_VAMPIRE
+                            );
                             let packet = build_object_monster_packet_extra(
-                                &spawn, new_oid, &spawn.name, msg.spell == SPELL_SUMMON_SHINSU);
+                                &spawn, new_oid, &display_name, extra, name_colour);
                             for session_id in self.players.keys() {
                                 let _ = self.gate_ref.tell(SendToClient {
                                     session_id: *session_id,

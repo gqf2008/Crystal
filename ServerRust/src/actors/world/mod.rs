@@ -5928,24 +5928,26 @@ fn build_object_npc_packet(npc: &NpcSpawn, object_id: u32) -> Vec<u8> {
     build_packet_bytes(ServerPacketIds::ObjectNpc as i16, &body)
 }
 
-/// 构建 ObjectMonster 数据包（extra=false）
+/// 构建 ObjectMonster 数据包（extra=false，name_colour=0）
 fn build_object_monster_packet(monster: &MonsterSpawn, object_id: u32, name: &str) -> Vec<u8> {
-    build_object_monster_packet_extra(monster, object_id, name, false)
+    build_object_monster_packet_extra(monster, object_id, name, false, 0)
 }
 
-/// 构建 ObjectMonster 数据包；extra 对应 C# ObjectMonster.Extra（如 Shinsu Extra=Summoned）
+/// 构建 ObjectMonster 数据包；extra 对应 C# ObjectMonster.Extra（如 Shinsu Extra=Summoned），
+/// name_colour 为 ARGB（C# Color.ToArgb，宠物按 PetLevel 着色）
 fn build_object_monster_packet_extra(
     monster: &MonsterSpawn,
     object_id: u32,
     name: &str,
     extra: bool,
+    name_colour: i32,
 ) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
 
     body.extend_from_slice(&object_id.to_le_bytes());   // object_id
     write_dotnet_string(&mut body, name);               // name
-    body.extend_from_slice(&0i32.to_le_bytes());        // name_colour
+    body.extend_from_slice(&name_colour.to_le_bytes()); // name_colour
     body.extend_from_slice(&monster.x.to_le_bytes());   // location_x
     body.extend_from_slice(&monster.y.to_le_bytes());   // location_y
     body.extend_from_slice(&monster.image.to_le_bytes()); // image (Monster enum)
