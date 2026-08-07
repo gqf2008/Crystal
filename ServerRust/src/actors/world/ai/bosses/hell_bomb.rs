@@ -25,10 +25,8 @@ impl HellBombBehavior {
 }
 
 impl MonsterBehavior for HellBombBehavior {
-    fn on_attacked(&mut self, _damage: i32) -> i32 {
-        0 // C# Struck 返回 0：完全免疫伤害（只能等 10s 引信自爆）
-    }
-
+    // C#：只覆写 Struck（SpellObject 法术场伤害）返回 0；Attacked（普通攻击）仍可造成伤害，
+    // 玩家可提前击破。Rust 引擎不区分 Attacked/Struck，此处保持可被普通攻击击杀（on_attacked 默认）。
     fn on_poison(&mut self, _poison: crate::combat::poison::Poison) -> bool {
         false // C# ApplyPoison 空实现：免疫毒
     }
