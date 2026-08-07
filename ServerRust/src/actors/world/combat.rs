@@ -113,9 +113,17 @@ impl Message<WorldAttackRequest> for WorldActor {
                     // 命中怪物 - 使用完整战斗公式（命中/护甲/暴击/反伤/吸血/负面）
                     let attacker_stats = state.to_combat_stats();
                     let defender_stats = monster.to_combat_stats();
-                    let raw_damage = combat_attack::get_attack_power(
+                    let mut raw_damage = combat_attack::get_attack_power(
                         attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck,
                     );
+                    // C# Hemorrhage：武装状态（下次命中触发）时触发击伤害 = base × (0.2+0.05Lv)
+                    let hemorrhage_armed = self.hemorrhage_armed.remove(&msg.session_id);
+                    if hemorrhage_armed {
+                        if let Some(magic) = state.magics.iter().find(|m| m.spell == (SPELL_HEMORRHAGE as i32 - 3)) {
+                            let lv = magic.level as i32;
+                            raw_damage = ((raw_damage as f32) * (0.2 + 0.05 * lv as f32)).max(1.0) as i32;
+                        }
+                    }
                     // LevelOffset: 防御方等级高于攻击方时为 0，否则取等级差上限 10
                     // 怪物暂无 level 字段（按 0 处理），玩家攻击怪物时 level_offset = min(10, player_level)
                     let level_offset = state.level.min(10) as u16;
@@ -198,14 +206,15 @@ impl Message<WorldAttackRequest> for WorldActor {
                             debug!("Player {} MPEater restored {} MP", result.object_id, add_mp);
                         }
                     }
-                    // #345：Hemorrhage —— 近战被动放血（C# HumanObject.cs:3110）
+                    // #345：Hemorrhage —— 近战被动放血（C# HumanObject.cs:3110：count>=55 武装，下次命中触发）
                     if let Some(magic) = state.magics.iter().find(|m| m.spell == (SPELL_HEMORRHAGE as i32 - 3)) {
                         let lv = magic.level as i32;
                         let add = fastrand::i32(1..=(1 + lv * 2));
                         let count = self.hemorrhage_count.entry(msg.session_id).or_insert(0);
                         *count += add;
                         debug!("Player {} Hemorrhage count={} (add={})", result.object_id, *count, add);
-                        if *count >= 55 {
+                        if hemorrhage_armed {
+                            // C#：武装命中 → 施放流血毒 + 复位
                             let duration = hemorrhage_duration(lv, state.luck).max(1) as u32;
                             let value = hemorrhage_value(state.effective_max_attack());
                             crate::combat::poison::apply_poison(
@@ -217,6 +226,9 @@ impl Message<WorldAttackRequest> for WorldActor {
                             *count = 0;
                             debug!("Player {} Hemorrhage bleeding on '{}' (dur={}s value={})",
                                    result.object_id, monster.name, duration, value);
+                        } else if *count >= 55 {
+                            // C#：武装（下次命中触发）
+                            self.hemorrhage_armed.insert(msg.session_id);
                         }
                     }
                     // HalfMoon / CrossHalfMoon：C# 需 toggle 开启（HumanObject.cs:2929/3001）
