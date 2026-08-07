@@ -84,6 +84,24 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("incarnatedzt") || name.contains("incarnated zt") || name.contains("附身祖玛") {
         return Box::new(bosses::incarnated_zt::IncarnatedZTBehavior::new());
     }
+    if name.contains("mantis") || name.contains("螳螂") {
+        return Box::new(bosses::mantis::MantisBehavior::new());
+    }
+    if name.contains("sandsnail") || name.contains("sand snail") || name.contains("沙蜗牛") {
+        return Box::new(bosses::sand_snail::SandSnailBehavior::new());
+    }
+    if name.contains("scalybeast") || name.contains("scaly beast") || name.contains("鳞兽") {
+        return Box::new(bosses::scaly_beast::ScalyBeastBehavior::new());
+    }
+    if name.contains("lightturtle") || name.contains("light turtle") || name.contains("光龟") {
+        return Box::new(bosses::light_turtle::LightTurtleBehavior::new());
+    }
+    if name.contains("hellcannibal") || name.contains("hell cannibal") || name.contains("地狱食人花") {
+        return Box::new(bosses::hell_cannibal::HellCannibalBehavior::new());
+    }
+    if name == "nadz" || name.contains("纳兹") {
+        return Box::new(bosses::nadz::NadzBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -362,6 +380,12 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("mudzombie") || name.contains("mud zombie") || name.contains("泥僵尸") || name.contains("泥沼僵尸")
         || name.contains("incarnatedghoul") || name.contains("incarnated ghoul") || name.contains("附身尸")
         || name.contains("incarnatedzt") || name.contains("incarnated zt") || name.contains("附身祖玛")
+        || name.contains("mantis") || name.contains("螳螂")
+        || name.contains("sandsnail") || name.contains("sand snail") || name.contains("沙蜗牛")
+        || name.contains("scalybeast") || name.contains("scaly beast") || name.contains("鳞兽")
+        || name.contains("lightturtle") || name.contains("light turtle") || name.contains("光龟")
+        || name.contains("hellcannibal") || name.contains("hell cannibal") || name.contains("地狱食人花")
+        || name == "nadz" || name.contains("纳兹")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
