@@ -3476,28 +3476,39 @@ impl Message<MagicRequest> for WorldActor {
                 }
                 debug!("Magic: {} casts Repulsion", state.name);
             }
-            // ElectricShock：驯服怪物（对齐 C# WizardObject.ElectricShock）
-            // 概率将目标怪物变为召唤物（master_session=施法者），受 can_tame 限制
+            // ElectricShock：驯服怪物（对齐 C# HumanObject.cs ElectricShock）
             SPELL_ELECTRIC_SHOCK => {
                 let target_mid: Option<u32> = self.monsters.iter()
                     .find(|(_, m)| {
                         let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
-                        dist <= 1 && m.hp > 0 && m.master_session.is_none()
+                        dist <= 1 && m.hp > 0
                     })
                     .map(|(id, _)| *id);
                 if let Some(mid) = target_mid {
+                    // 已驯服宠物：眩晕（ShockTime = (Lv*5+10)s）并清除目标（C# target.Master == this）
+                    if self.monsters.get(&mid).map(|m| m.master_session == Some(msg.session_id)).unwrap_or(false) {
+                        if let Some(monster) = self.monsters.get_mut(&mid) {
+                            crate::combat::poison::apply_poison(&mut monster.poison_list,
+                                crate::combat::poison::Poison::new(
+                                    mir2_shared::enums::PoisonType::STUN, spell_level as u32 * 5 + 10, 0, 1000,
+                                ));
+                            monster.target_session = None;
+                            debug!("Magic: {} ElectricShock stunned own pet {}", state.name, mid);
+                        }
+                        return;
+                    }
                     let can_tame = self.monsters.get(&mid)
                         .and_then(|m| self.monster_infos.get(&m.monster_index))
                         .map(|i| i.can_tame).unwrap_or(false);
                     if can_tame {
-                        // 成功率：基础 20% + 法术等级*15%，封顶 80%
-                        let chance = (20 + spell_level as i32 * 15).min(80);
-                        if fastrand::i32(0..100) < chance {
+                        // C# 成功率：Random(4-Lv) == 0（Lv0=25% → Lv3=100%）
+                        let n = (4 - spell_level as i32).max(1);
+                        if fastrand::i32(0..n) == 0 {
                             if let Some(monster) = self.monsters.get_mut(&mid) {
                                 monster.master_session = Some(msg.session_id);
                                 monster.target_session = None;
                                 monster.provoked = false;
-                                monster.recall_at_tick = self.tick_count + 12000; // 20 分钟后消失
+                                monster.recall_at_tick = 0; // C# 驯服宠物不消失
                                 debug!("Magic: {} casts ElectricShock (tamed monster {})", state.name, mid);
                                 send_system_message(&self.gate_ref, msg.session_id, "驯服成功！");
                             }
