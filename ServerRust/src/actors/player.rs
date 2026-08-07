@@ -1321,6 +1321,16 @@ impl Message<AddExperience> for PlayerActor {
         if !self.state.can_gain_exp {
             return;
         }
+        // #932：C# MapInfo.NoExperience——无经验地图不给经验（GainExp/WinExp 入口拦截）
+        if self.world_ref
+            .ask(crate::actors::world::IsNoExperienceMap {
+                map_index: self.state.map_index,
+            })
+            .await
+            .unwrap_or(false)
+        {
+            return;
+        }
         let base = msg.amount.max(0) as i64;
         // 休息经验加成（C# BuffType.Rested ExpRatePercent 累加到 ExpRatePercent）
         let rested_mul = 1.0 + self.state.rested_exp_percent as f64 / 100.0;
