@@ -409,16 +409,28 @@ impl MonsterAiProfile {
     fn from_info(info: &db::MonsterInfo) -> Self {
         let ai_type = MonsterAiType::from_db_ai(info.ai);
         let view_range = info.view_range.max(3);
-        let (aggro_range, attack_range, attack_cooldown, move_interval) = match ai_type {
-            MonsterAiType::Passive => (view_range, 1, 10, 2),
-            MonsterAiType::Aggressive => (view_range, 1, 5, 2),
-            MonsterAiType::Coward => (view_range / 2, 1, 8, 1),
-            MonsterAiType::Guard => (view_range, 1, 5, 2),
-            MonsterAiType::Boss => (view_range * 2, 2, 3, 1),
-            MonsterAiType::Ranged => (view_range, 4, 6, 2),
-            MonsterAiType::Mage => (view_range, 6, 8, 2),
-            MonsterAiType::Healer => (view_range, 4, 8, 2),
-            MonsterAiType::Summoner => (view_range, 1, 5, 2),
+        let (aggro_range, attack_range) = match ai_type {
+            MonsterAiType::Passive => (view_range, 1),
+            MonsterAiType::Aggressive => (view_range, 1),
+            MonsterAiType::Coward => (view_range / 2, 1),
+            MonsterAiType::Guard => (view_range, 1),
+            MonsterAiType::Boss => (view_range * 2, 2),
+            MonsterAiType::Ranged => (view_range, 4),
+            MonsterAiType::Mage => (view_range, 6),
+            MonsterAiType::Healer => (view_range, 4),
+            MonsterAiType::Summoner => (view_range, 1),
+        };
+        // C# MonsterInfo.AttackSpeed/MoveSpeed（ms）：DB >0 用 DB，=0 用 C# 默认
+        // （2500ms / 1800ms；Rust tick=100ms → 25 / 18 tick）
+        let attack_cooldown = if info.attack_speed > 0 {
+            (info.attack_speed as u64 / 100).max(1)
+        } else {
+            25
+        };
+        let move_interval = if info.move_speed > 0 {
+            (info.move_speed as u64 / 100).max(1)
+        } else {
+            18
         };
         Self {
             ai_type,
