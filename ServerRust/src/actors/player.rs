@@ -29,11 +29,13 @@ pub struct PlayerMagic {
     pub toggled: bool,
     /// 上次施法时间（毫秒时间戳，用于 CD 检查）
     pub cast_time: i64,
+    /// #937：装备临时技能（C# UserMagic.IsTempSpell；不持久化，卸装/换装时移除）
+    pub temp_skill: bool,
 }
 
 impl PlayerMagic {
     pub fn new(spell: i32) -> Self {
-        Self { spell, level: 0, experience: 0, key: 0, toggled: false, cast_time: 0 }
+        Self { spell, level: 0, experience: 0, key: 0, toggled: false, cast_time: 0, temp_skill: false }
     }
 }
 

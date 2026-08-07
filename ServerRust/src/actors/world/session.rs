@@ -408,6 +408,9 @@ impl Message<StartGameRequest> for WorldActor {
 
         // 行会在线状态由 SocialActor 管理
 
+        // #937：登录进图后同步装备临时技能（C# RefreshEquipmentStats → AddTempSkills）
+        self.sync_temp_skills(msg.session_id).await;
+
         // 发送玩家自身的 ObjectPlayer（客户端据此生成本地玩家实体并驱动移动/拾取）
         let self_weapon = loaded_state.inventory.get_equipment(EquipmentSlot::Weapon)
             .and_then(|item| self.item_infos.get(&item.item_index))
@@ -2475,6 +2478,10 @@ impl Message<RemoveSlotItemRequest> for WorldActor {
             session_id: msg.session_id,
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveSlotItem as i16, &body),
         }).await;
+        // #937：卸装/换装后临时技能同步
+        if success {
+            self.sync_temp_skills(msg.session_id).await;
+        }
     }
 }
 

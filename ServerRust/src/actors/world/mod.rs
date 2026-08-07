@@ -4115,6 +4115,104 @@ impl WorldActor {
         )
     }
 
+    /// #937：下发 S.NewMagic（C# SendMagicInfo）
+    async fn send_new_magic_packet(&self, session_id: u64, spell: i32) {
+        let Some(info) = self.magic_infos.get(&(spell as u32)) else { return };
+        let magic = mir2_shared::data::client_data::ClientMagic {
+            name: info.name.clone(),
+            spell: mir2_shared::enums::Spell::try_from(spell as u8).unwrap_or(mir2_shared::enums::Spell::None),
+            base_cost: info.base_cost as u8,
+            level_cost: info.level_cost as u8,
+            icon: info.icon as u8,
+            level1: info.level1 as u8,
+            level2: info.level2 as u8,
+            level3: info.level3 as u8,
+            need1: info.need1 as u16,
+            need2: info.need2 as u16,
+            need3: info.need3 as u16,
+            level: 0,
+            key: 0,
+            experience: 0,
+            delay: info.delay_base as i64,
+            range: info.range as u8,
+            cast_time: 0,
+        };
+        let new_magic = mir2_shared::packets::server::magic::NewMagic { magic, hero: false };
+        let mut body = Vec::new();
+        if new_magic.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NewMagic as i16, &body),
+            }).await;
+        }
+    }
+
+    /// #937：下发 S.RemoveMagic（C# RemoveTempSkills）
+    async fn send_remove_magic_packet(&self, session_id: u64, spell: i32) {
+        let pkt = mir2_shared::packets::server::magic::RemoveMagic {
+            spell: mir2_shared::enums::Spell::try_from(spell as u8).unwrap_or(mir2_shared::enums::Spell::None),
+            hero: false,
+        };
+        let mut body = Vec::new();
+        if pkt.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveMagic as i16, &body),
+            }).await;
+        }
+    }
+
+    /// #937：同步装备临时技能（C# AddTempSkills/RemoveTempSkills：
+    /// Flame→FireBall / Healing→Healing / Blink→Blink，卸装/换装时增减）
+    pub(crate) async fn sync_temp_skills(&self, session_id: u64) {
+        let record = match self.players.get(&session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        use mir2_shared::enums::{SpecialItemMode, Spell};
+        let mut desired: Vec<i32> = Vec::new();
+        for eq in state.inventory.equipment.iter().flatten() {
+            let Some(unique) = eq.info.as_ref().map(|i| i.unique) else { continue };
+            for (flag, spell) in [
+                (SpecialItemMode::FLAME, Spell::FireBall as i32),
+                (SpecialItemMode::HEALING, Spell::Healing as i32),
+                (SpecialItemMode::BLINK, Spell::Blink as i32),
+            ] {
+                if unique.contains(flag) && !desired.contains(&spell) {
+                    desired.push(spell);
+                }
+            }
+        }
+        let mut new_state = state;
+        let to_remove: Vec<i32> = new_state.magics.iter()
+            .filter(|m| m.temp_skill && !desired.contains(&m.spell))
+            .map(|m| m.spell)
+            .collect();
+        new_state.magics.retain(|m| !(m.temp_skill && !desired.contains(&m.spell)));
+        let mut to_add: Vec<i32> = Vec::new();
+        for spell in &desired {
+            if !new_state.magics.iter().any(|m| m.spell == *spell) {
+                let mut m = crate::actors::player::PlayerMagic::new(*spell);
+                m.temp_skill = true;
+                new_state.magics.push(m);
+                to_add.push(*spell);
+            }
+        }
+        if !to_remove.is_empty() || !to_add.is_empty() {
+            let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+        }
+        for spell in to_remove {
+            self.send_remove_magic_packet(session_id, spell).await;
+        }
+        for spell in to_add {
+            self.send_new_magic_packet(session_id, spell).await;
+        }
+    }
+
     /// #921：向所有在线玩家广播目标的名字颜色（逐观众计算，C# HumanObject.BroadcastColourChange）
     async fn broadcast_viewer_colours(&mut self, target_session: u64) {
         let target = match self.players.get(&target_session).cloned() {

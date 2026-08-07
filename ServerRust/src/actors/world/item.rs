@@ -1416,6 +1416,9 @@ impl Message<EquipItemRequest> for WorldActor {
                     }
                 }
 
+                // #937：装备临时技能同步（Flame/Healing/Blink）
+                self.sync_temp_skills(msg.session_id).await;
+
                 // 重新计算装备加成 + 广播视觉变化
                 if let Some(state) = self.recalculate_and_set_stat_bonuses(msg.session_id).await {
                     self.broadcast_equipment_visuals(msg.session_id, &state).await;
@@ -1491,6 +1494,9 @@ impl Message<RemoveItemRequest> for WorldActor {
                 }
                 debug!("Player session={} unequipped item uid={} from slot {:?}", msg.session_id, msg.unique_id, slot);
                 send_remove_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, true);
+
+                // #937：卸装后临时技能同步
+                self.sync_temp_skills(msg.session_id).await;
 
                 // C# 卸下坐骑 → 下马 + 广播 MountUpdate
                 if slot == crate::actors::inventory::EquipmentSlot::Mount {
