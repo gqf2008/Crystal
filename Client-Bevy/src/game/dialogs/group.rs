@@ -371,6 +371,9 @@ fn group_server_events(
             ServerEvent::GroupMemberLeft { name } => {
                 group.members.retain(|m| m.name != *name);
             }
+            ServerEvent::GroupAllowChanged { allow_group } => {
+                group.allow_group = *allow_group;
+            }
             _ => {}
         }
     }

@@ -570,6 +570,20 @@ impl Message<StartGameRequest> for WorldActor {
             &self.item_infos,
         ).await;
 
+        // C# PlayerObject 构造（~1219）：登录下发 S.SwitchGroup 同步客户端“允许组队”开关
+        {
+            let sg = mir2_shared::packets::server::group::SwitchGroup {
+                allow_group: loaded_state.allow_group,
+            };
+            let mut sg_body = Vec::new();
+            if sg.write_body(&mut sg_body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SwitchGroup as i16, &sg_body),
+                }).await;
+            }
+        }
+
         // 发送地图上的 NPC 和怪物
         let spawn_dir = self.spawn_dir.clone();
         let spawn_ctx = SpawnContext {
@@ -3301,6 +3315,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         allow_observe: false,
         enable_guild_invite: false,
         allow_trade: false,
+        allow_group: false,
         pk_points: 0,
         pk_kill_count: 0,
         buffs: Vec::new(),

@@ -662,6 +662,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             allow_observe: false,
             enable_guild_invite: false,
             allow_trade: false,
+            allow_group: false,
             pk_points: 0,
             pk_kill_count: 0,
             buffs: Vec::new(),

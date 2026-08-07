@@ -589,10 +589,13 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                 tracing::info!("📦 AddMember 解码");
             }
         }
-        // #291：C# 服务端包面收尾（SwitchGroup）
+        // #291：C# 服务端包面收尾（SwitchGroup）——同步客户端“允许组队”开关
         x if x == ServerPacketIds::SwitchGroup as i16 => {
-            if group::SwitchGroup::read_body(&mut cur).is_ok() {
-                tracing::info!("📦 SwitchGroup 解码");
+            if let Ok(p) = group::SwitchGroup::read_body(&mut cur) {
+                tracing::info!("📦 SwitchGroup 解码 allow_group={}", p.allow_group);
+                server_events.write(ServerEvent::GroupAllowChanged {
+                    allow_group: p.allow_group,
+                });
             }
         }
         // #291：C# 服务端包面收尾（CancelReincarnation）
