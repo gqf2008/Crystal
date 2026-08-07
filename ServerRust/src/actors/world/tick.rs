@@ -1927,6 +1927,7 @@ impl Message<Tick> for WorldActor {
             let mut boss_heals: Vec<(u32, i32)> = Vec::new();
             let mut boss_poisons: Vec<ai::PoisonPlayer> = Vec::new();
             let mut boss_pushes: Vec<ai::PushPlayer> = Vec::new();
+            let mut boss_player_teleports: Vec<(u64, i32, i32, u8)> = Vec::new();
             // 召唤物过期队列（到期 tick 已过 → 移除，不掉落）
             let mut expired_monsters: Vec<u32> = Vec::new();
 
@@ -1968,6 +1969,7 @@ impl Message<Tick> for WorldActor {
                         out_heals: &mut boss_heals,
                         out_poisons: &mut boss_poisons,
                         out_pushes: &mut boss_pushes,
+                        out_player_teleports: &mut boss_player_teleports,
                     };
                     // 临时取出 behavior 避免 &mut monster + &mut behavior 双重借用
                     let mut behavior = std::mem::replace(
@@ -2620,6 +2622,24 @@ impl Message<Tick> for WorldActor {
             for pp in &boss_pushes {
                 let moved = self.push_player(pp.session_id, pp.dir, pp.distance).await;
                 debug!("Boss pushed player {} {} tiles dir={}", pp.session_id, moved, pp.dir);
+            }
+            // Boss 传送玩家（C# Target.Teleport：TurtleKing 拉拽等）
+            for (sid, tx, ty, dir) in &boss_player_teleports {
+                if let Some(record) = self.players.get(sid) {
+                    if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                        let walkable = self.maps.get(&st.map_index)
+                            .map(|m| m.is_walkable(*tx, *ty))
+                            .unwrap_or(false);
+                        if walkable {
+                            let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                                x: *tx, y: *ty, direction: *dir,
+                                map_index: None, is_mounted: None,
+                            }).await;
+                            self.broadcast_position_change(*sid, *tx, *ty, *dir).await;
+                            debug!("Boss teleported player {} to ({},{})", sid, tx, ty);
+                        }
+                    }
+                }
             }
             // Boss 怪物互疗
             for (target_oid, amount) in &boss_heals {
