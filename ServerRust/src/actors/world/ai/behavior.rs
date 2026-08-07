@@ -46,4 +46,9 @@ pub trait MonsterBehavior: Send + Sync + 'static {
 
     /// 出生初始化（对齐 C# Spawned；TreeQueen 设定时器）
     fn on_spawned(&mut self, _monster: &mut MonsterState) {}
+
+    /// 运行时 downcast 支持（跨行为回调，如 HellLord 的 Knight 死亡推进阶段）
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        None
+    }
 }

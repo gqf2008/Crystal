@@ -42,6 +42,10 @@ impl MonsterBehavior for HellLordBehavior {
     fn can_regen(&self) -> bool { false }
     fn on_poison(&mut self, _poison: Poison) -> bool { false } // 完全免疫毒
 
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        Some(self)
+    }
+
     fn on_attacked(&mut self, damage: i32) -> i32 {
         // C# HellLord.cs:47-64：stage<4 时完全无敌
         if self.stage < 4 {
@@ -67,18 +71,13 @@ impl MonsterBehavior for HellLordBehavior {
         }
 
         // ===== 阶段推进检测 =====
-        // C# 语义：Knight 被玩家杀死 → KnightKilled() → stage += 1 + 狂暴 2min
-        // Rust 简化：狂暴到期（rage_end_tick）= Knight 已被杀 → 推进 stage + 召唤下一阶段 Knight
-        // （2 分钟内玩家必须杀掉 Knight，否则狂暴到期自动推进）
+        // C# 语义：Knight 被玩家杀死 → KnightKilled() → stage += 1 + 狂暴 2min（由死亡回调 advance_stage 触发）；
+        // 狂暴到期只补刷下一只 Knight（stage 不变）
 
         monster.next_attack_tick = ctx.tick_count + 6;
 
-        // 狂暴到期 或 初次 → 推进阶段 + 召唤下一阶段 Knight（C# ProcessTarget + KnightKilled）
+        // 狂暴到期 或 初次 → 召唤当前阶段 Knight（C# ProcessTarget）
         if (self.raged && ctx.tick_count >= self.rage_end_tick && self.stage < 4) || self.begin {
-            if self.raged {
-                // Knight 被杀推进阶段（狂暴到期=Knight 已死）
-                self.stage = (self.stage + 1).min(4);
-            }
             self.begin = false;
             self.raged = false;
             let knight_names = ["HellKnight1", "HellKnight2", "HellKnight3", "HellKnight4"];

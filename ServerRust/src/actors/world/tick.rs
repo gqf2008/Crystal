@@ -2779,20 +2779,23 @@ impl Message<Tick> for WorldActor {
                     // 1. HellKnight 死亡 → 推进同地图 HellLord 阶段
                     let monster_name_lower = monster.name.to_lowercase();
                     if monster_name_lower.contains("hellknight") {
-                        // 标记同地图 HellLord 需要推进阶段（HellLord 自己在 process_tick 里检测）
-                        // 简化：直接找 HellLord 并用 knight_killed 标志
+                        // C# KnightKilled：HellKnight 死亡 → HellLord stage+1 + 狂暴 2min
                         let helllord_oids: Vec<u32> = self.monsters.iter()
                             .filter(|(_, m)| m.name.to_lowercase().contains("helllord"))
                             .map(|(id, _)| *id)
                             .collect();
                         for hl_oid in helllord_oids {
-                            if let Some(_hl) = self.monsters.get_mut(&hl_oid) {
-                                // HellLord 的 stage 推进：直接修改（通过 take_damage 的 on_attacked 路径不适用）
-                                // 这里用 field 直接推进（HellLord 的 behavior 会读 stage）
-                                // 注意：behavior 是 trait object，无法直接 downcast
-                                // 替代方案：在 HellLord process_tick 里检测 Knight 是否存活
-                                debug!("HellKnight died, HellLord #{} should advance", hl_oid);
-                            }
+                            let advanced = {
+                                let lord = self.monsters.get_mut(&hl_oid);
+                                match lord {
+                                    Some(lord) => lord.behavior.as_any_mut()
+                                        .and_then(|a| a.downcast_mut::<crate::actors::world::ai::bosses::hell_lord::HellLordBehavior>())
+                                        .map(|hl| hl.advance_stage(self.tick_count)),
+                                    None => None,
+                                }
+                            };
+                            let _ = advanced;
+                            debug!("HellKnight died, HellLord #{} stage advanced", hl_oid);
                         }
                     }
                     // 发送 ObjectDied（死亡动画）
