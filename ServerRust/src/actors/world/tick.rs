@@ -1584,8 +1584,7 @@ impl WorldActor {
                     debug!("Projectile spell {:?} missed target {} (moved {} tiles)", spell, target_id, dist);
                     return;
                 }
-                // ThunderBolt 亡灵 +50%（C# HumanObject.cs:4126）
-                // 注意：Rust MonsterState 暂无 undead 标记字段，跳过该加成（TODO）
+                // ThunderBolt 亡灵 +50%（C# HumanObject.cs:4126），下方 final_damage 分支按 m.undead 加成
                 Some((m.x, m.y, m.to_combat_stats()))
             } else {
                 None

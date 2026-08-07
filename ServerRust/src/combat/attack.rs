@@ -187,8 +187,8 @@ pub fn apply_critical(damage: i32, critical_damage: i32) -> i32 {
 /// 触发攻击者的负面效果（麻痹/冰冻→减速/毒攻击→绿毒）。
 /// 仅物理系攻击触发（type 非 MAC/MACAgility）。返回应施加的 Poison 列表。
 ///
-/// 注意：C# 此处依赖 `SpecialMode.Paralize`（特殊装备戒指），Rust 暂未实现 SpecialMode，
-/// 因此 Paralize 分支暂不触发（返回空）；Freezing/PoisonAttack 按 Stats 触发。
+/// 注意：C# 此处依赖 `SpecialMode.Paralize`（特殊装备戒指，1/14 概率麻痹 5s）；
+/// Freezing/PoisonAttack 按 Stats 触发。
 pub fn apply_negative_effects(
     attacker: &CombatStats,
     defence_type: DefenceType,
@@ -200,7 +200,10 @@ pub fn apply_negative_effects(
         return poisons;
     }
 
-    // Paralize：需 SpecialMode，暂跳过（TODO: 接入 SpecialMode 后补）
+    // Paralize：特殊装备戒指，非 MAC 攻击 1/14 概率麻痹 5s（C# MapObject.cs:509 Random.Next(1,15)==1）
+    if attacker.paralize && rand_below(14) == 0 {
+        poisons.push(Poison::new(PoisonType::PARALYSIS, 5, 0, 1000));
+    }
 
     // Freezing → Slow（level_offset==0 时 C# Random(0) 抛异常被吞，等效不触发）
     if attacker.freezing > 0 && level_offset > 0 {
@@ -563,6 +566,34 @@ mod tests {
         let attacker = CombatStats { freezing: 100, poison_attack: 100, ..Default::default() };
         let poisons = apply_negative_effects(&attacker, DefenceType::Mac, 0);
         assert!(poisons.is_empty(), "MAC attack should not trigger physical negative effects");
+    }
+
+    #[test]
+    fn test_apply_negative_effects_paralize_requires_ring() {
+        // 无 Paralize 戒指：100 次攻击绝不麻痹
+        let attacker = CombatStats::default();
+        for _ in 0..100 {
+            let poisons = apply_negative_effects(&attacker, DefenceType::AcAgility, 5);
+            assert!(!poisons.iter().any(|p| p.p_type == PoisonType::PARALYSIS), "no ring should never paralyze");
+        }
+    }
+
+    #[test]
+    fn test_apply_negative_effects_paralize_triggers() {
+        // Paralize 戒指：非 MAC 攻击 1/14 概率麻痹 5s（C# Random.Next(1,15)==1）
+        let attacker = CombatStats { paralize: true, ..Default::default() };
+        let mut para_count = 0;
+        for _ in 0..500 {
+            let poisons = apply_negative_effects(&attacker, DefenceType::AcAgility, 5);
+            for p in poisons.iter().filter(|p| p.p_type == PoisonType::PARALYSIS) {
+                para_count += 1;
+                assert_eq!(p.duration_s, 5, "paralysis duration should be 5s");
+            }
+        }
+        assert!(para_count > 5, "paralize ring should paralyze ~1/14, got {}/500", para_count);
+        // MAC 攻击不触发
+        let poisons = apply_negative_effects(&attacker, DefenceType::Mac, 5);
+        assert!(!poisons.iter().any(|p| p.p_type == PoisonType::PARALYSIS), "MAC attack should not paralyze");
     }
 
     #[test]
