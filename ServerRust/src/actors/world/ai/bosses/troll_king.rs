@@ -58,7 +58,7 @@ impl MonsterBehavior for TrollKingBehavior {
                     // WalkAway（拉开）
                     let (nx, ny, dir) = step_away(monster.x, monster.y, target.x, target.y);
                     ctx.out_moves.push((monster.object_id, nx, ny, dir));
-                    monster.next_move_tick = ctx.tick_count + 2;
+                    monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
                 }
             } else {
                 // 远程投石：目标点 3 格 AOE（ACAgility）+ 命中后 Dazed（C# DefenceType.ACAgility）
@@ -89,7 +89,7 @@ impl MonsterBehavior for TrollKingBehavior {
                 step_away(monster.x, monster.y, target.x, target.y)
             };
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

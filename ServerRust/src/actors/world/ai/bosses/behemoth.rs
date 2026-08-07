@@ -107,7 +107,7 @@ impl MonsterBehavior for BehemothBehavior {
                     // 追击
                     let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
                     ctx.out_moves.push((monster.object_id, nx, ny, dir));
-                    monster.next_move_tick = ctx.tick_count + 2;
+                    monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
                 } else if fastrand::i32(0..2) == 0 {
                     // SpawnSlaves：投掷 huggers（数量 = min(8, targets*5)）
                     let targets_count = ctx.find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index).len();
@@ -149,7 +149,7 @@ impl MonsterBehavior for BehemothBehavior {
         } else if dist > ATTACK_RANGE && ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

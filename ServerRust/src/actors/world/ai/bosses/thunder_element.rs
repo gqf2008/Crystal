@@ -63,7 +63,7 @@ impl MonsterBehavior for ThunderElementBehavior {
                 let nx = target.x + fastrand::i32(-1..=1);
                 let ny = target.y + fastrand::i32(-1..=1);
                 ctx.out_moves.push((monster.object_id, nx, ny, monster.direction));
-                monster.next_move_tick = ctx.tick_count + 2;
+                monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             }
             return;
         }
@@ -72,7 +72,7 @@ impl MonsterBehavior for ThunderElementBehavior {
         if ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }
