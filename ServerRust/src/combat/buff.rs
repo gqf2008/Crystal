@@ -53,6 +53,8 @@ pub enum BuffType {
     Frozen,
     /// 变身（C# BuffType.Transform：使用 Transform 面具/卷轴，values=shape 客户端渲染变身外观）
     Transform { shape: i16 },
+    /// 传送后魔法惩罚（C# BuffType.TemporalFlux：Teleport/Blink/StormEscape 后 30s，施法耗蓝 +30%）
+    TeleportManaPenalty { percent: i32 },
 }
 
 /// Buff 实例
