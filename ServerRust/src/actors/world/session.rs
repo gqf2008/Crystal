@@ -1544,7 +1544,7 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -1812,6 +1812,63 @@ impl Message<ChatRequest> for WorldActor {
                             let _ = target.actor_ref.ask(crate::actors::player::AddPkPoints { points: delta }).await;
                             self.broadcast_viewer_colours(target_sid).await;
                             send_system_message(&self.gate_ref, msg.session_id, &format!("已设置 PK 值为 {}", want));
+                        }
+                        // @changegender [玩家]（C# case "CHANGEGENDER" ~2237：切换性别）
+                        "CHANGEGENDER" => {
+                            let target_sid = if let Some(n) = parts.get(1).copied() {
+                                let mut found = None;
+                                for (_sid, other) in &self.players {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if os.name.eq_ignore_ascii_case(n) {
+                                            found = Some(*_sid);
+                                            break;
+                                        }
+                                    }
+                                }
+                                found
+                            } else {
+                                Some(msg.session_id)
+                            };
+                            let Some(target_sid) = target_sid else {
+                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                return;
+                            };
+                            let target = match self.players.get(&target_sid) {
+                                Some(r) => r.clone(),
+                                None => return,
+                            };
+                            let mut state = match target.actor_ref.ask(GetPlayerState).await {
+                                Ok(Some(s)) => s,
+                                _ => return,
+                            };
+                            state.gender = match state.gender {
+                                mir2_shared::enums::MirGender::Male => mir2_shared::enums::MirGender::Female,
+                                mir2_shared::enums::MirGender::Female => mir2_shared::enums::MirGender::Male,
+                            };
+                            let _ = target.actor_ref.ask(SetPlayerState { state }).await;
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                if target_sid == msg.session_id {
+                                    "性别已修改，请重新登录生效"
+                                } else {
+                                    "已修改目标性别（重登生效）"
+                                },
+                            );
+                        }
+                        // @hair [发型0-8]（C# case "HAIR" ~3458：设置自己发型）
+                        "HAIR" => {
+                            let hair = match parts.get(1).copied() {
+                                Some(h) => h.parse::<u8>().ok().unwrap_or(0).min(8),
+                                None => fastrand::u8(0..9),
+                            };
+                            let mut state = match record.actor_ref.ask(GetPlayerState).await {
+                                Ok(Some(s)) => s,
+                                _ => return,
+                            };
+                            state.hair = hair;
+                            let _ = record.actor_ref.ask(SetPlayerState { state }).await;
+                            send_system_message(&self.gate_ref, msg.session_id, &format!("发型已设置为 {}", hair));
                         }
                         _ => {}
                     }
