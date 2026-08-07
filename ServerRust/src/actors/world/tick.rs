@@ -18,6 +18,23 @@ impl Message<ProcessDelayedActions> for WorldActor {
     }
 }
 
+/// C# DateTime.ToBinary Kind 位掩码（去掉 Kind 标志后比较 Ticks）
+const DOTNET_BINARY_TICKS_MASK: i64 = 0x3FFF_FFFF_FFFF_FFFF;
+
+/// 当前时间对应的 .NET Ticks（本地墙钟，C# Envir.Now.Ticks 语义）
+fn dotnet_now_ticks() -> i64 {
+    let now = chrono::Local::now().naive_local();
+    let as_utc = now.and_utc();
+    as_utc.timestamp() * 10_000_000
+        + 621_355_968_000_000_000
+        + as_utc.timestamp_subsec_nanos() as i64 / 100
+}
+
+/// #916：物品/租赁是否已到期（C# ExpireInfo.ExpiryDate <= Envir.Now）
+fn item_expired(expiry_date_binary: i64, now_ticks: i64) -> bool {
+    (expiry_date_binary & DOTNET_BINARY_TICKS_MASK) <= now_ticks
+}
+
 /// #914：C# HumanObject.ReduceExp——等级差经验衰减
 /// （玩家等级 >= 怪物等级+10 时：amount - Round(Max(amount/15,1)*(Level-(targetLevel+10)))，最低 1；
 ///  C# Settings.ExpMobLevelDifference 默认开启）
@@ -1335,6 +1352,124 @@ impl WorldActor {
                             session_id: *session_id,
                             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
                         }).await;
+                    }
+                }
+            }
+        }
+    }
+
+    /// #916：物品过期/租赁到期清理（C# HumanObject.ProcessItems：每 60s 扫描背包/装备/仓库）
+    pub(crate) async fn tick_item_expiry(&mut self) {
+        if !self.tick_count.is_multiple_of(600) {
+            return;
+        }
+        let now_ticks = dotnet_now_ticks();
+        for (session_id, record) in &self.players {
+            if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
+                let mut expired_backpack: Vec<usize> = Vec::new();
+                let mut expired_equip: Vec<usize> = Vec::new();
+                let mut expired_storage: Vec<usize> = Vec::new();
+                let mut deleted_packets: Vec<(u64, u32)> = Vec::new();
+                let mut any_change = false;
+
+                // 背包
+                for (i, slot) in state.inventory.backpack.iter_mut().enumerate() {
+                    if let Some(s) = slot {
+                        let mut remove = false;
+                        if let Some(exp) = &s.item.expire_info {
+                            if item_expired(exp.expiry_date_binary, now_ticks) {
+                                remove = true;
+                            }
+                        }
+                        if let Some(rental) = &mut s.item.rental_information {
+                            if rental.rental_locked && item_expired(rental.expiry_date_binary, now_ticks) {
+                                // C#：租赁锁定到期 → 清掉 RentalInformation（解锁）
+                                s.item.rental_information = None;
+                                any_change = true;
+                            }
+                        }
+                        if remove {
+                            expired_backpack.push(i);
+                            deleted_packets.push((s.item.unique_id, s.item.count as u32));
+                            any_change = true;
+                        }
+                    }
+                }
+                // 装备
+                for (i, slot) in state.inventory.equipment.iter_mut().enumerate() {
+                    if let Some(item) = slot {
+                        let mut remove = false;
+                        if let Some(exp) = &item.expire_info {
+                            if item_expired(exp.expiry_date_binary, now_ticks) {
+                                remove = true;
+                            }
+                        }
+                        if let Some(rental) = &mut item.rental_information {
+                            if rental.rental_locked && item_expired(rental.expiry_date_binary, now_ticks) {
+                                item.rental_information = None;
+                                any_change = true;
+                            }
+                        }
+                        if remove {
+                            expired_equip.push(i);
+                            deleted_packets.push((item.unique_id, item.count as u32));
+                            any_change = true;
+                        }
+                    }
+                }
+                // 仓库
+                for (i, slot) in state.inventory.storage.iter_mut().enumerate() {
+                    if let Some(s) = slot {
+                        let mut remove = false;
+                        if let Some(exp) = &s.item.expire_info {
+                            if item_expired(exp.expiry_date_binary, now_ticks) {
+                                remove = true;
+                            }
+                        }
+                        if let Some(rental) = &mut s.item.rental_information {
+                            if rental.rental_locked && item_expired(rental.expiry_date_binary, now_ticks) {
+                                s.item.rental_information = None;
+                                any_change = true;
+                            }
+                        }
+                        if remove {
+                            expired_storage.push(i);
+                            deleted_packets.push((s.item.unique_id, s.item.count as u32));
+                            any_change = true;
+                        }
+                    }
+                }
+
+                if !any_change {
+                    continue;
+                }
+                for i in expired_backpack {
+                    state.inventory.backpack[i] = None;
+                }
+                let equip_removed = !expired_equip.is_empty();
+                for i in expired_equip {
+                    state.inventory.equipment[i] = None;
+                }
+                for i in expired_storage {
+                    state.inventory.storage[i] = None;
+                }
+                let _ = record.actor_ref.ask(SetPlayerState { state }).await;
+                for (uid, count) in &deleted_packets {
+                    let pkt = mir2_shared::packets::server::experience::DeleteItem { unique_id: *uid, count: *count };
+                    let mut body = Vec::new();
+                    if pkt.write_body(&mut body).is_ok() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *session_id,
+                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DeleteItem as i16, &body),
+                        }).await;
+                    }
+                }
+                if !deleted_packets.is_empty() {
+                    send_system_message(&self.gate_ref, *session_id, "部分物品已过期并被移除。");
+                }
+                if equip_removed {
+                    if let Some(st) = self.recalculate_and_set_stat_bonuses(*session_id).await {
+                        self.broadcast_equipment_visuals(*session_id, &st).await;
                     }
                 }
             }
@@ -3626,11 +3761,7 @@ impl Message<Tick> for WorldActor {
                                 let near_count = member_levels.len().clamp(1, PARTY_EXP_RATE.len());
                                 let rate = PARTY_EXP_RATE[near_count - 1];
                                 for (sid, lv) in &member_levels {
-                                    let share = if sum_level > 0 {
-                                        (xp_after_reduce as f64 * rate * (*lv as f64) / (sum_level as f64)) as i32
-                                    } else {
-                                        xp_after_reduce
-                                    };
+                                    let share = party_exp_share(xp_after_reduce, rate, *lv, sum_level);
                                     if let Some(record) = self.players.get(sid) {
                                         let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
                                             amount: self.apply_global_exp_multiplier(share),
@@ -3856,6 +3987,8 @@ impl Message<Tick> for WorldActor {
 
         self.tick_auto_save().await;
 
+        self.tick_item_expiry().await;
+
         self.tick_auction_expiry().await;
 
         self.tick_rental_expiry().await;
@@ -3876,7 +4009,7 @@ impl Message<Tick> for WorldActor {
 
 #[cfg(test)]
 mod tests {
-    use super::{safe_zone_heal_hp, reduce_exp, party_exp_share, PARTY_EXP_RATE};
+    use super::{safe_zone_heal_hp, reduce_exp, party_exp_share, PARTY_EXP_RATE, item_expired, dotnet_now_ticks};
 
     #[test]
     fn test_safe_zone_heal_hp() {
@@ -3913,5 +4046,28 @@ mod tests {
         assert_eq!(party_exp_share(1000, 1.0, 70, 100), 700);
         // sum_level<=0 回退全额
         assert_eq!(party_exp_share(1000, 1.0, 50, 0), 1000);
+    }
+
+    #[test]
+    fn test_item_expired() {
+        // #916：C# ExpireInfo.ExpiryDate(DateTime.ToBinary) <= Envir.Now；Kind 位需掩码
+        let now = dotnet_now_ticks();
+        // 过去时间（含 Local Kind 高位 0x8000...）→ 已过期
+        let past = (now - 60_000) | i64::MIN; // Local Kind 位 = 0x8000_0000_0000_0000
+        assert!(item_expired(past, now));
+        // 未来时间 → 未过期
+        let future = (now + 60_000) | 0x4000_0000_0000_0000i64; // UTC Kind 位
+        assert!(!item_expired(future, now));
+        // 精确相等 → 过期（C# <=）
+        assert!(item_expired(now, now));
+        // 0（无时间）→ 视为已过期（C# DateTime.MinValue <= Now 恒真；调用方仅在字段存在时调用）
+        assert!(item_expired(0, now));
+    }
+
+    #[test]
+    fn test_dotnet_now_ticks_sane() {
+        // #916：.NET Ticks 应大于 2023 年基线（638000000000000000）
+        let now = dotnet_now_ticks();
+        assert!(now > 638_000_000_000_000_000, "unexpected ticks: {}", now);
     }
 }
