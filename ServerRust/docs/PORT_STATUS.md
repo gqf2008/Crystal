@@ -1,6 +1,6 @@
 # Crystal Mir2 Rust 移植状态
 
-> 最后更新: 2026-04-26 | 测试: 106 passed, 0 failed | 编译: 0 warnings
+> 最后更新: 2026-08-08 | 测试: ServerRust 227 + protocol_conformance 5 | Client-Bevy 79 | 真实服 E2E 12/12
 
 ---
 
@@ -76,16 +76,24 @@
 | 征服/攻城 | ConquestObject.cs (969行) | `world/conquest.rs` (215行) | ✅ |
 | 城门/城墙 | Gate.cs, Wall.cs, CastleGate.cs | `world/conquest.rs` SiegeStructure | ✅ |
 
-### 待补齐 ⚠️
+### 待补齐 ⚠️（2026-08 更新）
 
 | 功能 | 阻塞原因 |
 |------|----------|
-| HTTP 后台 | 代码已写 (`http.rs`)，需 axum 依赖 |
-| 怪物掉落表 | 表结构就绪，数据需从 C# 独立文件导入 |
-| NPC 商品 | 同上 |
-| NPC 脚本 | 同上 |
-| 地图数据 | DB 误删需重新从 MirDB 迁移 |
-| 91 法术逐差异化效果 | 框架就绪，需逐法术实现具体逻辑（半月弯刀/狮子吼/召唤骷髅等） |
+| HTTP 后台 | 代码已写 (`http.rs`)，需 axum 依赖（可选，未启用） |
+| 91 法术逐差异化效果 | 已大部分实现（FireWall/Blizzard/Meteor/HellFire/IceThrust/Curse/Lightning/FireBang/IceStorm/Poisoning/TrapHexagon/传送/召唤等均有 C# 专属逻辑）；剩余为个别法术细节 |
+| 精灵 Atlas 性能优化 | 可选优化项（客户端 CPU/内存基线） |
+
+### 2026-08-07/08 服务端/客户端对齐批次（已合入 master）
+
+- 怪物 AI 对齐 C#：仇恨/巡逻/攻速移速/Boss 专属行为（#990）
+- 掉落对齐 C#：Gold/QuestRequired/稀有度 Uncommon/Rare/Elite/掉落率（#999/#1140）
+- 召唤系对齐 C#：NoPets/宠物上限/PetLevel/Shinsu 形态（#981）
+- 经验发放对齐 C#：WinExp/GainExp/InRange 切比雪夫 16/死亡成员不计经验（#1160）
+- 宠物/行会经验 + 经验曲线配置化（#1164）；行会战对齐 C#（宣战费用/时限自动结束，#1170）
+- 英雄系统：HP 同步/阵亡/经验等级链路/LastHitter（#1129/#1137/#1143/#1165）
+- 装备槽补 Torch/Belt/Stone + 双击 L/R 智能选择（#1172/#1175）
+- 真实服 E2E 回归基建：严格标记判定 + 测试库自动准备（#1144/#1152/#1162/#1166/#1167/#1173）
 
 ---
 
