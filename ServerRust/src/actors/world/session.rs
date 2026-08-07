@@ -1544,7 +1544,7 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -1889,6 +1889,54 @@ impl Message<ChatRequest> for WorldActor {
                                 self.send_time_of_day(*sid, setting);
                             }
                             send_system_message(&self.gate_ref, msg.session_id, &format!("光照已设置为 {:?}", setting));
+                        }
+                        // @levelhero <等级> / @levelhero <玩家> <等级>（C# case "LEVELHERO" ~2312）
+                        "LEVELHERO" => {
+                            let (target_sid, level) = if parts.len() >= 3 {
+                                let name = parts.get(1).copied().unwrap_or("");
+                                let lv = parts.get(2).and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
+                                let mut found = None;
+                                for (_sid, other) in &self.players {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if os.name.eq_ignore_ascii_case(name) {
+                                            found = Some(*_sid);
+                                            break;
+                                        }
+                                    }
+                                }
+                                (found, lv)
+                            } else {
+                                (Some(msg.session_id), parts.get(1).and_then(|s| s.parse::<u16>().ok()).unwrap_or(0))
+                            };
+                            let Some(target_sid) = target_sid else {
+                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                return;
+                            };
+                            if level == 0 { return; }
+                            let target = match self.players.get(&target_sid) {
+                                Some(r) => r.clone(),
+                                None => return,
+                            };
+                            let state = match target.actor_ref.ask(GetPlayerState).await {
+                                Ok(Some(s)) => s,
+                                _ => return,
+                            };
+                            let hero_index = state.hero_index as i32;
+                            let old = self.player_heroes.get(&target_sid)
+                                .and_then(|hs| hs.iter().find(|h| h.index == hero_index))
+                                .map(|h| h.level);
+                            if let Some(heroes) = self.player_heroes.get_mut(&target_sid) {
+                                if let Some(hero) = heroes.iter_mut().find(|h| h.index == hero_index) {
+                                    hero.level = level;
+                                }
+                            }
+                            let heroes = self.player_heroes.get(&target_sid).cloned().unwrap_or_default();
+                            super::send_manage_heroes_packet(&self.gate_ref, target_sid, &state, &heroes);
+                            self.send_hero_information_packet(target_sid).await;
+                            match old {
+                                Some(old) => send_system_message(&self.gate_ref, msg.session_id, &format!("英雄等级 {} -> {}", old, level)),
+                                None => send_system_message(&self.gate_ref, msg.session_id, &format!("英雄等级已设为 {}", level)),
+                            }
                         }
                         _ => {}
                     }
