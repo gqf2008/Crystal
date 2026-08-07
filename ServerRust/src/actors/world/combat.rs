@@ -2147,16 +2147,22 @@ impl Message<MagicRequest> for WorldActor {
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
                 debug!("Magic: {} casts Concentration (MP regen +{})", state.name, bonus);
             }
-            // ElementalBarrier：自身减伤 buff（DamageReduction），持续 30s
-            // 与 MagicShield 同机制（用 ApplyDamageReduction 设 PlayerState.damage_reduction_percent）
+            // ElementalBarrier：自身减伤 buff（DamageReduction）
+            // C# 时长 = magic.GetPower(MC随机) + barrierPower(0) = MC 随机秒（HumanObject.cs:3726/6417）
             SPELL_ELEMENTAL_BARRIER => {
                 let reduction_pct = ((spell_level as i32 + 1) * 10).min(80);
-                let duration_ticks = 300; // 30s = 300 ticks
+                let mc_power = crate::combat::attack::get_attack_power(
+                    state.min_mc + state.bonus_min_mc,
+                    state.max_mc + state.bonus_max_mc,
+                    0,
+                ).max(1);
+                let duration_ticks = (mc_power as u32) * 10;
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyDamageReduction {
                     percent: reduction_pct,
                     duration_ticks,
                 }).await;
-                debug!("Magic: {} casts ElementalBarrier (damage -{}%)", state.name, reduction_pct);
+                debug!("Magic: {} casts ElementalBarrier (damage -{}%, {}s)",
+                       state.name, reduction_pct, mc_power);
             }
             // Mirroring：分身术（C# HumanObject.cs Mirroring）——召唤 Clone 分身宠物（Settings.CloneName="Clone"）
             SPELL_MIRRORING => {
