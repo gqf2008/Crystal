@@ -1581,12 +1581,12 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} casts Entrapment -> monster {} pulled {} tiles ({}s paralysis)",
                     state.name, mid, moved, duration);
             }
-            // ShoulderDash：野蛮冲撞（向前冲刺 2 格，推开/伤害路径上的怪物）
+            // ShoulderDash：野蛮冲撞（C# HumanObject.cs：只冲刺 2 格 + 推开路径上等级更低的目标 1 格，无伤害）
             SPELL_SHOULDER_DASH => {
                 let dir = msg.direction as usize % 8;
                 let mut new_x = state.x;
                 let mut new_y = state.y;
-                let mut pushed_damage = 0i32;
+                let mut pushed = 0usize;
                 for step in 0..2 {
                     let nx = new_x + MON_DIR_DX[dir];
                     let ny = new_y + MON_DIR_DY[dir];
@@ -1594,20 +1594,15 @@ impl Message<MagicRequest> for WorldActor {
                         .map(|m| m.is_walkable(nx, ny))
                         .unwrap_or(false);
                     if !walkable { break; }
-                    // 撞到路径上的怪物：伤害 + 推开 1 格（C# HumanObject.cs:5079）
-                    let hit: Option<u32> = self.monsters.iter()
+                    // C#：路径上等级 < 施法等级的目标才推送
+                    let hit: Option<(u32, i32)> = self.monsters.iter()
                         .find(|(_, m)| m.x == nx && m.y == ny && m.hp > 0)
-                        .map(|(id, _)| *id);
-                    if let Some(mid) = hit {
-                        let dmg = (state.effective_max_attack() / 2).max(5);
-                        if let Some(m) = self.monsters.get_mut(&mid) {
-                            m.take_damage(dmg);
-                            m.provoked = true;
-                            m.target_session = Some(msg.session_id);
-                            pushed_damage += dmg;
+                        .map(|(id, m)| (*id, self.monster_infos.get(&m.monster_index).map(|i| i.level).unwrap_or(0)));
+                    if let Some((mid, mlevel)) = hit {
+                        if mlevel < state.level as i32 {
+                            let _ = self.push_monster(mid, dir as u8, 1).await;
+                            pushed += 1;
                         }
-                        // C# HumanObject.cs:5079：撞到怪物推开 1 格（沿冲撞方向）
-                        let _ = self.push_monster(mid, dir as u8, 1).await;
                     }
                     new_x = nx;
                     new_y = ny;
@@ -1620,8 +1615,8 @@ impl Message<MagicRequest> for WorldActor {
                     }).await;
                     self.broadcast_position_change(msg.session_id, new_x, new_y, msg.direction).await;
                 }
-                debug!("Magic: {} casts ShoulderDash (dashed to {},{}, dealt {} dmg)",
-                    state.name, new_x, new_y, pushed_damage);
+                debug!("Magic: {} casts ShoulderDash (dashed to {},{}, pushed {} monsters)",
+                    state.name, new_x, new_y, pushed);
             }
             // Thrusting：刺杀（直线穿透 2 格，打前方 2 个格子）
             SPELL_THRUSTING => {
