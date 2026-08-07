@@ -144,6 +144,7 @@ async fn start_server_with_world() -> u16 {
         mana_regen_weight: 1,
         goods_hide_added_stats: false,
         safe_zone_healing: false,
+        experience_list: Vec::new(),
     });
     let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
 
