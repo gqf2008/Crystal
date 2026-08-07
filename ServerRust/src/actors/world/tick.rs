@@ -3869,7 +3869,8 @@ impl Message<Tick> for WorldActor {
 
                     // #1001/#1003：任务击杀进度（C# MonsterObject.Die → EXPOwner.CheckGroupQuestKill）
                     // 击杀者 = target_session（最后命中者，与掉落归属一致）；同组同图 16 格内未死成员共享
-                    if let Some(killer) = monster.target_session {
+                    // #1016：击杀归属用 LastHitter（C# EXPOwner），回退 target_session
+                    if let Some(killer) = monster.last_hitter_session.or(monster.target_session) {
                         // 击杀者 + 同组同图 16 格内未死成员（C# CheckGroupQuestKill）
                         let quest_sessions = self.quest_participants(
                             killer, monster.map_index, monster.x, monster.y).await;

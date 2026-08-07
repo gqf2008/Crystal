@@ -1871,7 +1871,8 @@ impl WorldActor {
         item_index: i32,
         count: u16,
     ) -> bool {
-        let Some(killer) = monster.target_session else { return false };
+        // #1016：击杀归属用 LastHitter（C# EXPOwner），回退 target_session
+        let Some(killer) = monster.last_hitter_session.or(monster.target_session) else { return false };
         let mut item = mir2_shared::data::item::UserItem {
             item_index,
             unique_id: generate_item_uid(),
@@ -1918,7 +1919,8 @@ impl WorldActor {
         // 玩家掉落相关（C# EXPOwner）：掉落 Buff（Potion shape 5 Drop）+ 装备掉落率加成（#1000）
         // 返回 (drop_multiplier, item_drop_rate_percent, gold_drop_rate_percent)
         let (player_drop_mul, item_drop_pct, gold_drop_pct): (f64, f64, f64) =
-            if let Some(sid) = monster.target_session {
+            // #1016：击杀归属用 LastHitter（C# EXPOwner），回退 target_session
+            if let Some(sid) = monster.last_hitter_session.or(monster.target_session) {
                 if let Some(record) = self.players.get(&sid) {
                     if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                         let drop_mul = if self.tick_count < state.drop_multiplier_end_tick {
