@@ -5294,7 +5294,7 @@ fn build_user_information_packet(
     body.extend_from_slice(&0i32.to_le_bytes());              // intelligent creatures count=0
     body.push(0u8);                                           // summoned_creature_type
     body.push(0u8);                                           // creature_summoned=false
-    body.push(0u8);                                           // allow_observe=false
+    body.push(if state.allow_observe { 1u8 } else { 0u8 }); // allow_observe
     body.push(0u8);                                           // observer=false
 
     // #208：角色面板属性段（18 x i32；最终值 = 基础 + 装备加成）
