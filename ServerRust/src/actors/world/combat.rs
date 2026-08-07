@@ -2683,11 +2683,23 @@ impl Message<MagicRequest> for WorldActor {
                     debug!("Magic: {} casts Trap (no target at {},{})", state.name, target_x, target_y);
                 }
             }
-            // #345：MoonMist —— 隐身 + 自身周围 3×3 DC 范围伤害（C# HumanObject.cs:4565，简化 3×3）
+            // #345：MoonMist —— 隐身 + 自身周围 5×5 AC 范围伤害（C# HumanObject.cs:4565 + Map.cs:1347）
             SPELL_MOON_MIST => {
+                // C#：已有 MoonLight buff 时不重复施放
+                if self.invisible_sessions.contains(&msg.session_id) {
+                    debug!("Magic: {} casts MoonMist but already invisible, skipped", state.name);
+                    return;
+                }
+                // C# 时长：(GetAttackPower(MinAC, MaxAC) + (Lv+1)*5) * 500ms
+                let ac_power = crate::combat::attack::get_attack_power(
+                    state.min_ac + state.bonus_min_ac,
+                    state.max_ac + state.bonus_max_ac,
+                    0,
+                );
+                let duration_ticks = ((ac_power + (spell_level as i32 + 1) * 5).max(1) as u32) * 5;
                 let buff = crate::combat::buff::BuffInstance::new(
                     crate::combat::buff::BuffType::Invisibility,
-                    (30 + spell_level as u32 * 10) * 10,
+                    duration_ticks,
                     5,
                 );
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
@@ -2698,7 +2710,8 @@ impl Message<MagicRequest> for WorldActor {
                 let raw_damage = (magic_stat + (power as i32) / 2).max(1);
                 let attacker_stats = state.to_combat_stats();
                 let level_offset = state.level.min(10) as u16;
-                let cells = plague_cells(state.x, state.y);
+                // C# Map.cs:1347：location ±2 = 5×5
+                let cells = curse_cells_5x5(state.x, state.y);
                 let hit_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y)))
                     .map(|(id, _)| *id)
@@ -2709,7 +2722,7 @@ impl Message<MagicRequest> for WorldActor {
                         let ds = monster.to_combat_stats();
                         let r = combat_attack::resolve_attack(
                             &attacker_stats, &ds, raw_damage,
-                            mir2_shared::enums::DefenceType::AcAgility, level_offset,
+                            mir2_shared::enums::DefenceType::Ac, level_offset,
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
@@ -2720,8 +2733,8 @@ impl Message<MagicRequest> for WorldActor {
                     }
                 }
                 self.broadcast_spell_hit(&spell_hits, object_id).await;
-                debug!("Magic: {} casts MoonMist (invisible + 3x3 dmg={} hits={})",
-                       state.name, raw_damage, spell_hits.len());
+                debug!("Magic: {} casts MoonMist (invisible {}s + 5x5 AC dmg={} hits={})",
+                       state.name, duration_ticks / 10, raw_damage, spell_hits.len());
             }
             // #395：ImmortalSkin —— AC 提升 buff（C# HumanObject.cs:6171，60s+Lv；DC 交换项简化跳过）
             SPELL_IMMORTAL_SKIN => {
