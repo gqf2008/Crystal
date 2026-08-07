@@ -18,6 +18,7 @@ use crate::actors::guild::{Guild, GuildRank};
 use crate::db::{self, DbPool};
 use crate::gate::actor::{GateActor, SendToClient};
 use crate::actors::social_packets::*;
+use crate::actors::world::ai::{direction_towards, max_distance};
 use crate::util::wire::build_packet_bytes;
 use mir2_shared::enums::ServerPacketIds;
 
@@ -822,7 +823,19 @@ pub struct SocialActor {
     config: SocialActorConfig,
 }
 
-const TRADE_RANGE: i32 = 3;
+/// C# Functions.FacingEachOther：双方朝向彼此
+fn facing_each_other(
+    dir_a: u8, ax: i32, ay: i32,
+    dir_b: u8, bx: i32, by: i32,
+) -> bool {
+    dir_a == direction_towards(ax, ay, bx, by) && dir_b == direction_towards(bx, by, ax, ay)
+}
+
+/// C# Functions.PointMove(location, direction, 1)：前方一格
+fn front_tile(x: i32, y: i32, dir: u8) -> (i32, i32) {
+    let d = (dir % 8) as usize;
+    (x + DIR_DX[d], y + DIR_DY[d])
+}
 
 /// 行会创建费用：金币（对应 C# Settings.Guild_CreationCostList gold entry）
 // 创建行会所需金币来自 cfg.server.toml (social.guild_creation_cost_gold),
@@ -1147,7 +1160,9 @@ impl SocialActor {
                 !a.is_dead
                     && !b.is_dead
                     && a.map_index == b.map_index
-                    && (a.x - b.x).abs() + (a.y - b.y).abs() <= TRADE_RANGE
+                    // C# 10803：InRange(TradePartner, Globals.DataRange=16) + FacingEachOther
+                    && max_distance(a.x, a.y, b.x, b.y) <= 16
+                    && facing_each_other(a.direction, a.x, a.y, b.direction, b.x, b.y)
             }
             _ => false,
         };
@@ -1720,7 +1735,8 @@ impl Message<SocialPlayerJoined> for SocialActor {
                             partner_name,
                             partner_state.level as u32,
                             true,
-                            0,
+                            // C# MentorUpdate.MenteeEXP：徒弟经验积累（msg.session_id 视角）
+                            state.mentee_exp,
                         );
                         // 对方视角：上线者信息
                         send_mentor_update_packet(
@@ -1729,7 +1745,7 @@ impl Message<SocialPlayerJoined> for SocialActor {
                             &state.name,
                             state.level as u32,
                             true,
-                            0,
+                            state.mentee_exp,
                         );
                         let rel = if partner_state.mentor_name.as_deref() == Some(state.name.as_str()) {
                             "徒弟"
@@ -2164,9 +2180,16 @@ impl Message<TradeStartRequest> for SocialActor {
                         found_trade_closed = true;
                         continue;
                     }
-                    let dist = (other_state.x - player_pos.0).abs() + (other_state.y - player_pos.1).abs();
-                    if dist <= TRADE_RANGE {
-                        nearest_target = Some((*sid, dist));
+                    // C# TradeRequest：目标必须在前方一格（PointMove 1）且双方面对面（10634-10666）
+                    let (fx, fy) = front_tile(player_pos.0, player_pos.1, state.direction);
+                    if other_state.x == fx
+                        && other_state.y == fy
+                        && facing_each_other(
+                            state.direction, player_pos.0, player_pos.1,
+                            other_state.direction, other_state.x, other_state.y,
+                        )
+                    {
+                        nearest_target = Some((*sid, 1));
                         break;
                     }
                 }
@@ -3623,7 +3646,7 @@ impl Message<SocialMentorReply> for SocialActor {
             &requester_state.name,
             requester_state.level as u32,
             true,
-            0,
+            requester_state.mentee_exp,
         );
         send_mentor_update_packet(
             &self.gate_ref,
@@ -3631,7 +3654,7 @@ impl Message<SocialMentorReply> for SocialActor {
             &replier_state.name,
             replier_state.level as u32,
             true,
-            0,
+            requester_state.mentee_exp,
         );
         debug!("Mentor: {} is mentor of {}", replier_state.name, requester_state.name);
     }
@@ -3754,3 +3777,33 @@ impl SocialActor {
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::{facing_each_other, front_tile};
+
+    /// #1159：C# Functions.FacingEachOther——双方朝向彼此才为 true
+    #[test]
+    fn test_facing_each_other() {
+        // A(0,0) 朝右(2)，B(1,0) 朝左(6)：面对面
+        assert!(facing_each_other(2, 0, 0, 6, 1, 0));
+        // A 朝上(0)，B 朝下(4)：面对面
+        assert!(facing_each_other(0, 5, 5, 4, 5, 4));
+        // 同向（都朝右）不是面对面
+        assert!(!facing_each_other(2, 0, 0, 2, 1, 0));
+        // 背对不是面对面
+        assert!(!facing_each_other(6, 0, 0, 6, 1, 0));
+    }
+
+    /// #1159：C# Functions.PointMove(location, direction, 1)——前方一格
+    #[test]
+    fn test_front_tile() {
+        assert_eq!(front_tile(5, 5, 0), (5, 4)); // Up
+        assert_eq!(front_tile(5, 5, 2), (6, 5)); // Right
+        assert_eq!(front_tile(5, 5, 4), (5, 6)); // Down
+        assert_eq!(front_tile(5, 5, 6), (4, 5)); // Left
+        assert_eq!(front_tile(5, 5, 1), (6, 4)); // UpRight
+    }
+}
+

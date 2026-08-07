@@ -1390,6 +1390,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
             bind_y: row.try_get("bind_y").unwrap_or(0),
             level_effects: row.try_get("level_effects").unwrap_or(0) as u16,
             is_mentor: row.try_get("is_mentor").unwrap_or(0) != 0,
+            mentee_exp: 0,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
             exp_bonus_lover_percent: 0,

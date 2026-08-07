@@ -385,6 +385,8 @@ impl Message<StartGameRequest> for WorldActor {
                 gender: mir2_shared::enums::MirGender::try_from(h.gender).unwrap_or(mir2_shared::enums::MirGender::Male),
                 dead: h.dead,
                 sealed: h.sealed,
+                experience: 0,
+                max_experience: 100,
             }).collect());
         }
         let heroes = self.player_heroes.get(&msg.session_id).cloned().unwrap_or_default();
@@ -3028,8 +3030,9 @@ impl Message<ChangePModeRequest> for WorldActor {
             None => return,
         };
 
-        // 更新玩家宠物模式
+        // 更新玩家宠物模式（WorldActor 缓存供宠物 AI 读取；PlayerActor 持久化）
         let _ = record.actor_ref.ask(SetPetMode { mode: msg.mode }).await;
+        self.player_pet_modes.insert(msg.session_id, msg.mode);
 
         // 发送 ChangePMode 确认包给客户端
         let body = vec![msg.mode as u8];
@@ -3353,6 +3356,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
             bind_y: 0,
             level_effects: 0,
             is_mentor: false,
+            mentee_exp: 0,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
             exp_bonus_lover_percent: 0,

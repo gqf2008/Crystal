@@ -32,8 +32,8 @@ impl HolyDevaBehavior {
 
 impl MonsterBehavior for HolyDevaBehavior {
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
-        let target = match ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index) {
-            Some(t) => *t,
+        let target = match ctx.pet_target(monster.x, monster.y, VIEW_RANGE, monster.map_index) {
+            Some(t) => t,
             None => return,
         };
         monster.target_session = Some(target.session_id);

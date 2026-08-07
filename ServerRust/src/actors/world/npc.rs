@@ -684,6 +684,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             bind_y: 0,
             level_effects: 0,
             is_mentor: false,
+            mentee_exp: 0,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
             exp_bonus_lover_percent: 0,
@@ -852,6 +853,8 @@ impl Message<NewHeroRequest> for WorldActor {
                 gender: msg.gender,
                 dead: false,
                 sealed: false,
+                experience: 0,
+                max_experience: 100,
             });
             // C# CreateHero（PlayerObject.cs:9610）：有封印符配置（HeroSealItemName）且背包有空位时，
             // 英雄以"英雄封印符"形式发放（不出战，使用后恢复）；否则直接创建为出战英雄。

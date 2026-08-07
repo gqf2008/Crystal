@@ -895,6 +895,10 @@ pub struct WorldActor {
     pub(crate) pet_targets: HashMap<u32, u32>,
     /// #1013 怪物互伤目标（怪物 oid → 目标怪物 oid；C# StoneTrap 嘲讽）
     pub(crate) monster_targets: HashMap<u32, u32>,
+    /// 玩家当前攻击目标（session → 目标 object_id；C# HumanObject.TargetID，宠物 FocusMasterTarget 用）
+    pub(crate) player_targets: HashMap<u64, u32>,
+    /// 玩家宠物模式（session → PetMode；C# PlayerObject.PMode，AI 按模式选择目标）
+    pub(crate) player_pet_modes: HashMap<u64, mir2_shared::enums::PetMode>,
     /// 活跃 NPC（按 object_id 索引）
     pub(crate) npcs: HashMap<u32, NpcState>,
     /// 等待重生的怪物 (object_id → 重生 tick)
@@ -1066,6 +1070,10 @@ pub struct HeroInfo {
     pub dead: bool,
     /// 是否封印（SEALHERO，对齐 C# Hero.Sealed）
     pub sealed: bool,
+    /// 英雄经验（运行时；C# Hero.Experience。等级持久化，经验重启清零）
+    pub experience: u32,
+    /// 当前等级所需经验（C# Hero.MaxExperience；初始 100，升级 ×1.5）
+    pub max_experience: u32,
 }
 
 
@@ -1155,6 +1163,8 @@ impl WorldActor {
             revealed_hp: HashMap::new(),
             pet_targets: HashMap::new(),
             monster_targets: HashMap::new(),
+            player_targets: HashMap::new(),
+            player_pet_modes: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
@@ -3959,6 +3969,8 @@ impl Actor for WorldActor {
             revealed_hp: HashMap::new(),
             pet_targets: HashMap::new(),
             monster_targets: HashMap::new(),
+            player_targets: HashMap::new(),
+            player_pet_modes: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
@@ -6069,14 +6081,26 @@ fn build_object_npc_packet(npc: &NpcSpawn, object_id: u32) -> Vec<u8> {
     build_packet_bytes(ServerPacketIds::ObjectNpc as i16, &body)
 }
 
-/// 构建 ObjectMonster 数据包
+/// 构建 ObjectMonster 数据包（extra=false，name_colour=0）
 fn build_object_monster_packet(monster: &MonsterSpawn, object_id: u32, name: &str) -> Vec<u8> {
+    build_object_monster_packet_extra(monster, object_id, name, false, 0)
+}
+
+/// 构建 ObjectMonster 数据包；extra 对应 C# ObjectMonster.Extra（如 Shinsu Extra=Summoned），
+/// name_colour 为 ARGB（C# Color.ToArgb，宠物按 PetLevel 着色）
+fn build_object_monster_packet_extra(
+    monster: &MonsterSpawn,
+    object_id: u32,
+    name: &str,
+    extra: bool,
+    name_colour: i32,
+) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
 
     body.extend_from_slice(&object_id.to_le_bytes());   // object_id
     write_dotnet_string(&mut body, name);               // name
-    body.extend_from_slice(&0i32.to_le_bytes());        // name_colour
+    body.extend_from_slice(&name_colour.to_le_bytes()); // name_colour
     body.extend_from_slice(&monster.x.to_le_bytes());   // location_x
     body.extend_from_slice(&monster.y.to_le_bytes());   // location_y
     body.extend_from_slice(&monster.image.to_le_bytes()); // image (Monster enum)
@@ -6090,7 +6114,7 @@ fn build_object_monster_packet(monster: &MonsterSpawn, object_id: u32, name: &st
     body.push(0u8);                                     // hidden=false
     body.extend_from_slice(&0i64.to_le_bytes());        // shock_time
     body.push(0u8);                                     // binding_shot_center=false
-    body.push(0u8);                                     // extra=false
+    body.push(if extra { 1 } else { 0 });               // extra（C# Shinsu Extra=Summoned）
     body.push(0u8);                                     // extra_byte
     body.extend_from_slice(&0i32.to_le_bytes());        // buffs count=0
 

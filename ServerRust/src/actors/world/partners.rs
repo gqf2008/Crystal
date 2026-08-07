@@ -186,7 +186,8 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
                             if os.map_index != state.map_index {
                                 continue;
                             }
-                            let dist = (os.x - state.x).abs() + (os.y - state.y).abs();
+                            // C# Functions.InRange = 切比雪夫
+                            let dist = (os.x - state.x).abs().max((os.y - state.y).abs());
                             if dist > DATA_RANGE {
                                 continue;
                             }
@@ -237,7 +238,8 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
                         if os.is_dead || !os.name.eq_ignore_ascii_case(&spouse) || os.map_index != state.map_index {
                             continue;
                         }
-                        if (os.x - state.x).abs() + (os.y - state.y).abs() <= DATA_RANGE {
+                        // C# Functions.InRange = 切比雪夫
+                        if (os.x - state.x).abs().max((os.y - state.y).abs()) <= DATA_RANGE {
                             lover = LOVER_EXP_BONUS;
                             break;
                         }
@@ -253,7 +255,8 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
                             if os.is_dead || !os.name.eq_ignore_ascii_case(&mentor_name) || os.map_index != state.map_index {
                                 continue;
                             }
-                            if (os.x - state.x).abs() + (os.y - state.y).abs() <= DATA_RANGE
+                            // C# Functions.InRange = 切比雪夫
+                            if (os.x - state.x).abs().max((os.y - state.y).abs()) <= DATA_RANGE
                                 && os.group_id.is_some() && os.group_id == state.group_id
                             {
                                 mentee = MENTEE_EXP_BONUS;
