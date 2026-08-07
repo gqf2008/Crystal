@@ -1494,6 +1494,12 @@ impl Message<Revive> for PlayerActor {
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
         }).await;
 
+        // 发送 S.Revived（空 body）：客户端靠它清除死亡状态恢复输入（#55 实测缺失会导致卡死）
+        let _ = self.gate_ref.tell(SendToClient {
+            session_id: self.state.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Revived as i16, &[]),
+        }).await;
+
         debug!("Player {} revived (hp={} mp={})", self.state.name, self.state.hp, self.state.mp);
     }
 }
