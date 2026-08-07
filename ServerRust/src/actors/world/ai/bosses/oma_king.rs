@@ -77,16 +77,24 @@ impl MonsterBehavior for OmaKingBehavior {
             monster.next_attack_tick = ctx.tick_count + 5;
             let is_melee = dist <= MELEE_RANGE;
             if is_melee && fastrand::i32(0..3) > 0 {
-                // 2/3：LineAttack（DC）—— 简化为对自身前方 2 格 AOE + 概率推开/麻痹
+                // 2/3：LineAttack（DC）—— C# LineAttack(damage, 2, 300)：沿朝向每格命中第一个目标
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                // C# LineAttack(damage, 2, 300)：自身朝目标方向 2 格直线
-                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                    attacker_oid: monster.object_id,
-                    target_session: target.session_id,
-                    damage,
-                    spell_id: 0,
-                    attack_type: 0,
-                });
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y) as usize % 8;
+                for i in 1..=2i32 {
+                    let tx = monster.x + DIR_DX[dir] * i;
+                    let ty = monster.y + DIR_DY[dir] * i;
+                    if let Some(p) = ctx.players.iter()
+                        .find(|p| p.map_index == monster.map_index && p.x == tx && p.y == ty && p.hp > 0)
+                    {
+                        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
+                            attacker_oid: monster.object_id,
+                            target_session: p.session_id,
+                            damage,
+                            spell_id: 0,
+                            attack_type: 0,
+                        });
+                    }
+                }
                 // 概率麻痹（C# Random(8)==0 → Paralysis 5s）
                 if fastrand::i32(0..8) == 0 {
                     ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
