@@ -2521,6 +2521,10 @@ impl Message<AddWeaponLuck> for PlayerActor {
         let new_luck = (w.added_stats.get(Stat::Luck) + msg.delta).clamp(-10, 7);
         w.added_stats.set(Stat::Luck, new_luck);
         self.send_equipment_changed();
+        // #967：C# 诅咒/祝福油后 S.RefreshItem 即时刷新客户端武器显示
+        if let Some(w) = self.state.inventory.equipment[slot].as_ref() {
+            self.send_refresh_item(w);
+        }
         true
     }
 }
@@ -2552,7 +2556,10 @@ impl Message<RepairWeapon> for PlayerActor {
                 w.current_dura = (w.current_dura as u32 + 5000).min(w.max_dura as u32) as u16;
             }
             w.dura_changed = true;
-            Some((w.unique_id, w.max_dura, w.current_dura))
+            // #967：C# 修理油后 S.RefreshItem 即时刷新客户端武器耐久显示（先快照结束借用）
+            let weapon_snapshot = w.clone();
+            self.send_refresh_item(&weapon_snapshot);
+            Some((weapon_snapshot.unique_id, weapon_snapshot.max_dura, weapon_snapshot.current_dura))
         };
         self.send_equipment_changed();
         result
@@ -4726,6 +4733,18 @@ impl PlayerActor {
     fn send_equipment_changed(&self) {
         // 发送 UserInformation 刷新装备状态
         self.send_user_information_refresh();
+    }
+
+    /// #967：下发 S.RefreshItem（C# 幸运/耐久变化后客户端即时刷新物品显示）
+    fn send_refresh_item(&self, item: &mir2_shared::data::item::UserItem) {
+        let pkt = mir2_shared::packets::server::item::RefreshItem { item: item.clone() };
+        let mut body = Vec::new();
+        if pkt.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RefreshItem as i16, &body),
+            }).try_send();
+        }
     }
 
     fn send_gold_changed(&self) {
