@@ -1249,15 +1249,17 @@ fn can_equip_by_weight(
     old_weight: i32,
     wear_weight: i32,
     hand_weight: i32,
+    inventory: &crate::actors::inventory::PlayerInventory,
     class: mir2_shared::enums::MirClass,
     level: u16,
+    item_infos: &std::collections::HashMap<i32, db::ItemInfo>,
 ) -> bool {
     if slot == crate::actors::inventory::EquipmentSlot::Weapon {
         new_weight - old_weight + hand_weight
-            <= super::base_weight_limit(class, level, mir2_shared::enums::Stat::HandWeight)
+            <= super::weight_limit(inventory, class, level, mir2_shared::enums::Stat::HandWeight, item_infos)
     } else {
         new_weight - old_weight + wear_weight
-            <= super::base_weight_limit(class, level, mir2_shared::enums::Stat::WearWeight)
+            <= super::weight_limit(inventory, class, level, mir2_shared::enums::Stat::WearWeight, item_infos)
     }
 }
 
@@ -1350,8 +1352,10 @@ impl Message<EquipItemRequest> for WorldActor {
                 old_weight,
                 wear_weight,
                 hand_weight,
+                &state.inventory,
                 state.class,
                 state.level,
+                &self.item_infos,
             ) {
                 send_system_message(&self.gate_ref, msg.session_id, "穿戴重量超限，无法装备！");
                 send_equip_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, msg.slot, false);
@@ -2601,13 +2605,18 @@ impl Message<DisassembleItemRequest> for WorldActor {
 #[cfg(test)]
 mod tests {
     use super::can_equip_by_weight;
-    use crate::actors::inventory::EquipmentSlot;
+    use crate::actors::inventory::{EquipmentSlot, PlayerInventory};
     use mir2_shared::enums::MirClass;
+
+    fn empty_ctx() -> (PlayerInventory, std::collections::HashMap<i32, crate::db::ItemInfo>) {
+        (PlayerInventory::new(), std::collections::HashMap::new())
+    }
 
     fn warrior_lv1_limits() -> (i32, i32) {
         // 取 1 级战士 Hand/Wear 上限
-        let hand = super::super::base_weight_limit(MirClass::Warrior, 1, mir2_shared::enums::Stat::HandWeight);
-        let wear = super::super::base_weight_limit(MirClass::Warrior, 1, mir2_shared::enums::Stat::WearWeight);
+        let (inv, infos) = empty_ctx();
+        let hand = super::super::weight_limit(&inv, MirClass::Warrior, 1, mir2_shared::enums::Stat::HandWeight, &infos);
+        let wear = super::super::weight_limit(&inv, MirClass::Warrior, 1, mir2_shared::enums::Stat::WearWeight, &infos);
         (hand, wear)
     }
 
@@ -2615,21 +2624,23 @@ mod tests {
     fn test_can_equip_by_weight_weapon() {
         // #903：武器走 HandWeight；换下旧武器可腾出空间
         let (hand_limit, _) = warrior_lv1_limits();
+        let (inv, infos) = empty_ctx();
         // 空手（hand=0）戴轻武器：允许
-        assert!(can_equip_by_weight(EquipmentSlot::Weapon, 1, 0, 0, 0, MirClass::Warrior, 1));
+        assert!(can_equip_by_weight(EquipmentSlot::Weapon, 1, 0, 0, 0, &inv, MirClass::Warrior, 1, &infos));
         // 超重武器：拒绝
-        assert!(!can_equip_by_weight(EquipmentSlot::Weapon, hand_limit + 100, 0, 0, 0, MirClass::Warrior, 1));
+        assert!(!can_equip_by_weight(EquipmentSlot::Weapon, hand_limit + 100, 0, 0, 0, &inv, MirClass::Warrior, 1, &infos));
         // 换下旧武器（old_weight=200，当前 hand=200）后重量回落：允许
-        assert!(can_equip_by_weight(EquipmentSlot::Weapon, 10, 200, 0, 200, MirClass::Warrior, 1));
+        assert!(can_equip_by_weight(EquipmentSlot::Weapon, 10, 200, 0, 200, &inv, MirClass::Warrior, 1, &infos));
     }
 
     #[test]
     fn test_can_equip_by_weight_wear() {
         // #903：非武器槽走 WearWeight；换下旧装备腾空间
         let (_, wear_limit) = warrior_lv1_limits();
-        assert!(can_equip_by_weight(EquipmentSlot::Armour, 1, 0, 0, 0, MirClass::Warrior, 1));
-        assert!(!can_equip_by_weight(EquipmentSlot::Armour, wear_limit + 100, 0, 0, 0, MirClass::Warrior, 1));
+        let (inv, infos) = empty_ctx();
+        assert!(can_equip_by_weight(EquipmentSlot::Armour, 1, 0, 0, 0, &inv, MirClass::Warrior, 1, &infos));
+        assert!(!can_equip_by_weight(EquipmentSlot::Armour, wear_limit + 100, 0, 0, 0, &inv, MirClass::Warrior, 1, &infos));
         // 已有穿戴 50，新装备 10，换下旧装备 200：允许（50 - 200 + 10 <= limit）
-        assert!(can_equip_by_weight(EquipmentSlot::Armour, 10, 200, 50, 0, MirClass::Warrior, 1));
+        assert!(can_equip_by_weight(EquipmentSlot::Armour, 10, 200, 50, 0, &inv, MirClass::Warrior, 1, &infos));
     }
 }

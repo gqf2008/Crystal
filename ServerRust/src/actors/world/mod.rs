@@ -4484,6 +4484,10 @@ pub struct EquipmentBonuses {
     pub health_recovery: i32, pub spell_recovery: i32,
     pub attack_speed: i32, pub poison_resist: i32,
     pub holy: i32,
+    // #908：负重上限加成（C# RefreshItemSetStats/RefreshMirSetStats/RefreshEquipmentStats）
+    pub bag_weight: i32, pub wear_weight: i32, pub hand_weight: i32,
+    /// C# SpecialItemMode.Muscle（0x20）：负重上限翻倍
+    pub muscle: bool,
 }
 
 fn calculate_equipment_bonuses(
@@ -4523,6 +4527,13 @@ fn calculate_equipment_bonuses(
             b.spell_recovery += get(Stat::SpellRecovery);
             b.attack_speed += get(Stat::AttackSpeed);
             b.poison_resist += get(Stat::PoisonResist);
+            b.bag_weight += get(Stat::BagWeight);
+            b.wear_weight += get(Stat::WearWeight);
+            b.hand_weight += get(Stat::HandWeight);
+            // C# SpecialItemMode.Muscle = 0x0020：负重上限翻倍
+            if info.special_mode as u16 & mir2_shared::enums::SpecialItemMode::MUSCLE.bits() != 0 {
+                b.muscle = true;
+            }
         }
     }
 
@@ -4585,7 +4596,7 @@ fn apply_set_pair_bonus(b: &mut EquipmentBonuses, set_type: i32) {
         5 => b.attack_speed += 2,       // Smash
         7 => b.holy += 3,               // Purity
         38 => b.hp += 25,               // DarkGhost
-        6 => {}                         // HwanDevil：WearWeight/BagWeight（Rust 未跟踪负重）
+        6 => { b.wear_weight += 5; b.bag_weight += 20; } // HwanDevil：WearWeight+5/BagWeight+20
         _ => {}
     }
 }
@@ -4611,13 +4622,16 @@ fn apply_set_complete_bonus(b: &mut EquipmentBonuses, set_type: i32) {
         18 => { b.max_mc += 2; b.mp += 40; b.agility += 2; }                   // RedJadeH
         19 => { b.max_sc += 2; b.max_ac += 1; b.max_mac += 1; }                // Nephrite
         20 => { b.max_sc += 2; b.hp += 15; b.mp += 20; b.holy += 1; b.accuracy += 1; } // NephriteH
-        21 | 24 | 25 => b.max_atk += 1,                                        // Whisker1/4/5（BagWeight 未跟踪）
-        22 => b.max_mc += 1,                                                   // Whisker2
-        23 => b.max_sc += 1,                                                   // Whisker3
+        21 => { b.max_atk += 1; b.bag_weight += 25; }                          // Whisker1
+        22 => { b.max_mc += 1; b.bag_weight += 17; }                           // Whisker2
+        23 => { b.max_sc += 1; b.bag_weight += 17; }                           // Whisker3
+        24 => { b.max_atk += 1; b.bag_weight += 20; }                          // Whisker4
+        25 => { b.max_atk += 1; b.bag_weight += 17; }                          // Whisker5
         26 => { b.max_sc += 2; b.hp += 15; b.mp += 20; b.holy += 1; b.accuracy += 1; } // Hyeolryong
         27 => { b.magic_resist += 1; b.poison_resist += 1; }                   // Monitor
         28 => { b.max_ac += 1; b.agility += 1; }                               // Oppressive
-        31 => { b.min_atk += 1; b.max_atk += 1; b.min_mc += 1; b.max_mc += 1; } // BlueFrost
+        31 => { b.min_atk += 1; b.max_atk += 1; b.min_mc += 1; b.max_mc += 1;
+                 b.hand_weight += 1; b.wear_weight += 2; }                      // BlueFrost（Hand+1/Wear+2）
         39 => { b.min_atk += 1; b.max_atk += 2; b.max_mc += 2; b.accuracy += 1; b.hp += 50; } // BlueFrostH
         38 => { b.mp += 25; b.attack_speed += 2; }                             // DarkGhost
         _ => {}
@@ -4631,6 +4645,7 @@ fn apply_mir_set_bonus(b: &mut EquipmentBonuses, slots: &[usize]) {
     if slots.len() >= 10 {
         b.max_ac += 1; b.max_mac += 1; b.luck += 2; b.attack_speed += 2;
         b.hp += 70; b.mp += 80; b.magic_resist += 6; b.poison_resist += 6;
+        b.bag_weight += 70; // C# Mir 10 件 BagWeight+70
     }
     if has(6) && has(7) {
         b.max_mac += 1; b.max_ac += 1;
@@ -4640,19 +4655,23 @@ fn apply_mir_set_bonus(b: &mut EquipmentBonuses, slots: &[usize]) {
     }
     if (has(6) || has(7)) && (has(4) || has(5)) && has(3) {
         b.max_mac += 1; b.max_ac += 1;
+        b.bag_weight += 30; b.wear_weight += 17; // C# BagWeight+30/WearWeight+17
     }
     if has(6) && has(7) && has(4) && has(5) && has(3) {
         b.max_mac += 1; b.max_ac += 1;
+        b.bag_weight += 20; b.wear_weight += 10; // C# BagWeight+20/WearWeight+10
     }
     if has(1) && has(2) && has(0) {
         b.max_atk += 2; b.max_mc += 1; b.max_sc += 1; b.agility += 1;
     }
     if has(1) && has(8) && has(9) {
         b.max_atk += 1; b.max_mc += 1; b.max_sc += 1;
+        b.hand_weight += 17; // C# 甲+靴+腰带 HandWeight+17（Rust Shoes/Pendant 近似靴/腰带）
     }
     if has(1) && has(8) && has(9) && has(2) && has(0) {
         b.min_atk += 1; b.max_atk += 1; b.min_mc += 1; b.max_mc += 1;
         b.min_sc += 1; b.max_sc += 1;
+        b.hand_weight += 17; // C# 甲+靴+腰带+盔+武 HandWeight+17
     }
 }
 
@@ -5265,17 +5284,33 @@ fn compute_player_weights(
 
 /// 基础负重上限（C# Settings.ClassBaseStats[Class] 的 Bag/Wear/HandWeight 公式按等级计算；
 /// 注意：不含套装/特殊模式加成，后续可扩展）
-fn base_weight_limit(
+fn weight_limit(
+    inventory: &crate::actors::inventory::PlayerInventory,
     class: mir2_shared::enums::MirClass,
     level: u16,
     stat: mir2_shared::enums::Stat,
+    item_infos: &std::collections::HashMap<i32, db::ItemInfo>,
 ) -> i32 {
-    mir2_shared::data::stats::BaseStats::new(class)
+    // 基础公式（C# Settings.ClassBaseStats[Class]）
+    let mut base = mir2_shared::data::stats::BaseStats::new(class)
         .stats
         .iter()
         .find(|bs| bs.stat == stat)
         .map(|bs| bs.calculate(class, level as i32))
-        .unwrap_or(0)
+        .unwrap_or(0);
+    // 装备套装/单件属性加成（C# RefreshItemSetStats/RefreshMirSetStats/RefreshEquipmentStats）
+    let b = calculate_equipment_bonuses(&inventory.equipment, item_infos);
+    match stat {
+        mir2_shared::enums::Stat::BagWeight => base += b.bag_weight,
+        mir2_shared::enums::Stat::WearWeight => base += b.wear_weight,
+        mir2_shared::enums::Stat::HandWeight => base += b.hand_weight,
+        _ => {}
+    }
+    // C# SpecialItemMode.Muscle：负重上限翻倍
+    if b.muscle {
+        base *= 2;
+    }
+    base
 }
 
 fn build_user_information_packet(
@@ -6086,15 +6121,77 @@ mod set_bonus_tests {
     }
 
     #[test]
-    fn test_base_weight_limit() {
-        // #902：C# ClassBaseStats BagWeight 公式按等级计算，等级越高上限越高
-        let lv1 = base_weight_limit(mir2_shared::enums::MirClass::Warrior, 1, mir2_shared::enums::Stat::BagWeight);
-        let lv50 = base_weight_limit(mir2_shared::enums::MirClass::Warrior, 50, mir2_shared::enums::Stat::BagWeight);
+    fn test_weight_limit_base() {
+        // #902/#908：C# ClassBaseStats BagWeight 公式按等级计算，等级越高上限越高
+        use crate::actors::inventory::PlayerInventory;
+        let inv = PlayerInventory::new();
+        let infos = std::collections::HashMap::new();
+        let lv1 = weight_limit(&inv, mir2_shared::enums::MirClass::Warrior, 1, mir2_shared::enums::Stat::BagWeight, &infos);
+        let lv50 = weight_limit(&inv, mir2_shared::enums::MirClass::Warrior, 50, mir2_shared::enums::Stat::BagWeight, &infos);
         assert!(lv1 > 0, "Warrior BagWeight base should be > 0, got {}", lv1);
         assert!(lv50 > lv1, "BagWeight should grow with level: {} -> {}", lv1, lv50);
 
         // 各职业基础负重不同（Warrior 高于 Wizard）
-        let wiz = base_weight_limit(mir2_shared::enums::MirClass::Wizard, 1, mir2_shared::enums::Stat::BagWeight);
+        let wiz = weight_limit(&inv, mir2_shared::enums::MirClass::Wizard, 1, mir2_shared::enums::Stat::BagWeight, &infos);
         assert!(wiz > 0);
+    }
+
+    #[test]
+    fn test_weight_limit_set_bonuses() {
+        // #908：HwanDevil 对戒 BagWeight+20/WearWeight+5；Whisker1 全套 BagWeight+25
+        use crate::actors::inventory::{EquipmentSlot, InventorySlot, PlayerInventory};
+        use mir2_shared::data::item::UserItem;
+
+        let mut infos = std::collections::HashMap::new();
+        // HwanDevil set_type=6（Ring type=7 / Bracelet type=6）
+        infos.insert(1, test_item_info(1, 1));
+        infos.get_mut(&1).unwrap().set_type = 6;
+        infos.get_mut(&1).unwrap().item_type = 7;
+        infos.insert(2, test_item_info(2, 1));
+        infos.get_mut(&2).unwrap().set_type = 6;
+        infos.get_mut(&2).unwrap().item_type = 6;
+
+        let mut inv = PlayerInventory::new();
+        inv.equipment[EquipmentSlot::RingL as usize] = Some(UserItem { item_index: 1, count: 1, ..Default::default() });
+        inv.equipment[EquipmentSlot::BraceletL as usize] = Some(UserItem { item_index: 2, count: 1, ..Default::default() });
+
+        let base = weight_limit(&PlayerInventory::new(), mir2_shared::enums::MirClass::Warrior, 1, mir2_shared::enums::Stat::BagWeight, &infos);
+        let with_hwan = weight_limit(&inv, mir2_shared::enums::MirClass::Warrior, 1, mir2_shared::enums::Stat::BagWeight, &infos);
+        assert_eq!(with_hwan, base + 20, "HwanDevil pair BagWeight+20");
+        let wear_base = weight_limit(&PlayerInventory::new(), mir2_shared::enums::MirClass::Warrior, 1, mir2_shared::enums::Stat::WearWeight, &infos);
+        let wear_hwan = weight_limit(&inv, mir2_shared::enums::MirClass::Warrior, 1, mir2_shared::enums::Stat::WearWeight, &infos);
+        assert_eq!(wear_hwan, wear_base + 5, "HwanDevil pair WearWeight+5");
+
+        // Whisker1 全套（set_type=21，2 个不同部位）
+        let mut infos2 = std::collections::HashMap::new();
+        infos2.insert(3, test_item_info(3, 1));
+        infos2.get_mut(&3).unwrap().set_type = 21;
+        infos2.get_mut(&3).unwrap().item_type = 1;
+        infos2.insert(4, test_item_info(4, 1));
+        infos2.get_mut(&4).unwrap().set_type = 21;
+        infos2.get_mut(&4).unwrap().item_type = 4;
+        let mut inv2 = PlayerInventory::new();
+        inv2.equipment[EquipmentSlot::Armour as usize] = Some(UserItem { item_index: 3, count: 1, ..Default::default() });
+        inv2.equipment[EquipmentSlot::Helmet as usize] = Some(UserItem { item_index: 4, count: 1, ..Default::default() });
+        let whisker = weight_limit(&inv2, mir2_shared::enums::MirClass::Warrior, 1, mir2_shared::enums::Stat::BagWeight, &infos2);
+        let whisker_base = weight_limit(&PlayerInventory::new(), mir2_shared::enums::MirClass::Warrior, 1, mir2_shared::enums::Stat::BagWeight, &infos2);
+        assert_eq!(whisker, whisker_base + 25, "Whisker1 complete BagWeight+25");
+    }
+
+    #[test]
+    fn test_weight_limit_muscle() {
+        // #908：SpecialItemMode.Muscle（0x20）负重上限 x2
+        use crate::actors::inventory::{EquipmentSlot, PlayerInventory};
+        use mir2_shared::data::item::UserItem;
+
+        let mut infos = std::collections::HashMap::new();
+        infos.insert(5, test_item_info(5, 1));
+        infos.get_mut(&5).unwrap().special_mode = 0x20; // MUSCLE
+
+        let base = weight_limit(&PlayerInventory::new(), mir2_shared::enums::MirClass::Warrior, 1, mir2_shared::enums::Stat::BagWeight, &infos);
+        let mut inv = PlayerInventory::new();
+        inv.equipment[EquipmentSlot::Armour as usize] = Some(UserItem { item_index: 5, count: 1, ..Default::default() });
+        let muscle = weight_limit(&inv, mir2_shared::enums::MirClass::Warrior, 1, mir2_shared::enums::Stat::BagWeight, &infos);
+        assert_eq!(muscle, base * 2, "Muscle doubles weight limit");
     }
 }

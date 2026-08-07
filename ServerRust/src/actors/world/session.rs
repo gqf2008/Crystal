@@ -709,7 +709,7 @@ impl Message<WorldMoveRequest> for WorldActor {
             // #902：负重限制（C# HumanObject.CanMove/CanRun：CurrentBagWeight > Stats[BagWeight] 不能移动；
             // Run 退化为 Walk，Walk 直接失败并回发 S.UserLocation 同步当前位置）
             let (bag_weight, _, _) = super::compute_player_weights(&state.inventory, &self.item_infos);
-            let limit = super::base_weight_limit(state.class, state.level, mir2_shared::enums::Stat::BagWeight);
+            let limit = super::weight_limit(&state.inventory, state.class, state.level, mir2_shared::enums::Stat::BagWeight, &self.item_infos);
             if bag_weight > limit {
                 let mut body = Vec::new();
                 body.push(state.direction);
