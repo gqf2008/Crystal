@@ -672,6 +672,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             level_effects: 0,
             is_mentor: false,
             mentor_damage_bonus: false,
+            newbie_exp_bonus: false,
         };
         debug!("NewCharacter: saving '{}' ...", msg.name);
         match db::save_character(&self.db_pool, &default_state, &msg.account_username).await {

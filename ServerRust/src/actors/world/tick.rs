@@ -32,6 +32,8 @@ impl Message<ProcessElementalTick> for WorldActor {
         self.tick_elements().await;
         // 导师伤害加成刷新（C# ProcessBuffs Mentor buff + Attacked 判定）
         crate::actors::world::partners::tick_partner_bonuses(self).await;
+        // 新手行会经验 buff 刷新（C# ProcessBuffs BuffType.Newbie）
+        self.tick_newbie_bonus().await;
     }
 }
 

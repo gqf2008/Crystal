@@ -142,6 +142,12 @@ pub struct SocialConfig {
     /// 新手行会名称（C# Settings.NewbieGuild，非 GM 禁止创建该名称）
     #[serde(default = "default_newbie_guild")]
     pub newbie_guild: String,
+    /// 新手行会经验 buff 开关（C# Settings.NewbieGuildBuffEnabled = true）
+    #[serde(default = "default_newbie_guild_buff_enabled")]
+    pub newbie_guild_buff_enabled: bool,
+    /// 新手行会经验加成 %（C# Settings.NewbieGuildExpBuff = 5）
+    #[serde(default = "default_newbie_guild_exp_buff")]
+    pub newbie_guild_exp_buff: i32,
     /// 是否允许创建角色（C# Settings.AllowNewCharacter = true）
     #[serde(default = "default_allow_new_character")]
     pub allow_new_character: bool,
@@ -229,6 +235,14 @@ fn default_guild_required_level() -> u16 {
     22
 }
 
+fn default_newbie_guild_buff_enabled() -> bool {
+    true
+}
+
+fn default_newbie_guild_exp_buff() -> i32 {
+    5
+}
+
 fn default_newbie_guild() -> String {
     "NewbieGuild".to_string()
 }
@@ -244,6 +258,8 @@ impl Default for SocialConfig {
             wedding_ring_recall_enabled: default_wedding_ring_recall(),
             guild_required_level: default_guild_required_level(),
             newbie_guild: default_newbie_guild(),
+            newbie_guild_buff_enabled: default_newbie_guild_buff_enabled(),
+            newbie_guild_exp_buff: default_newbie_guild_exp_buff(),
             allow_new_character: default_allow_new_character(),
             allow_delete_character: default_allow_delete_character(),
             allow_create_assassin: default_true(),

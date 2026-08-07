@@ -39,6 +39,33 @@ impl WorldActor {
         debug!("LevelEffects: {} -> {:04x}", state.name, effects);
     }
 
+    /// 每 50 ticks 刷新新手行会经验 buff（C# ProcessBuffs 维护 BuffType.Newbie：
+    /// 行会 == Settings.NewbieGuild 且开关开启时获得 ExpRatePercent 加成）
+    pub(crate) async fn tick_newbie_bonus(&mut self) {
+        use super::*;
+        if self.tick_count % 50 != 0 {
+            return;
+        }
+        let (newbie_guild, enabled, _exp) = self.social_ref
+            .ask(crate::actors::social::NpcGetNewbieGuildConfig)
+            .await
+            .unwrap_or(("NewbieGuild".to_string(), true, 5));
+        let mut updates: Vec<(u64, bool)> = Vec::new();
+        for (sid, record) in &self.players {
+            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                let active = enabled && state.guild_name.as_deref() == Some(newbie_guild.as_str());
+                if active != state.newbie_exp_bonus {
+                    updates.push((*sid, active));
+                }
+            }
+        }
+        for (sid, active) in updates {
+            if let Some(record) = self.players.get(&sid) {
+                let _ = record.actor_ref.ask(crate::actors::player::SetNewbieExpBonus { active }).await;
+            }
+        }
+    }
+
     /// 广播 ObjectLevelEffects（C# RefreshEffects：Enqueue 自己 + Broadcast 同图）
     pub(crate) async fn broadcast_level_effects(&self, session_id: u64) {
         let record = match self.players.get(&session_id) {

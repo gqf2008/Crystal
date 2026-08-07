@@ -100,6 +100,20 @@ impl Message<GetMenteeExpBonus> for WorldActor {
     }
 }
 
+/// WorldActor 转发：查询新手行会配置（PlayerActor 无 social_ref，经 world 转发）
+pub struct GetNewbieGuildConfig;
+
+impl Message<GetNewbieGuildConfig> for WorldActor {
+    type Reply = (String, bool, i32);
+
+    async fn handle(&mut self, _msg: GetNewbieGuildConfig, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.social_ref
+            .ask(crate::actors::social::NpcGetNewbieGuildConfig)
+            .await
+            .unwrap_or(("NewbieGuild".to_string(), true, 5))
+    }
+}
+
 /// 每 50 ticks 刷新导师伤害加成（C# ProcessBuffs 维护 BuffType.Mentor +
 /// MonsterObject.Attacked 的 MentorDamageRatePercent 判定：导师 + 徒弟近身同组存活）
 pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {

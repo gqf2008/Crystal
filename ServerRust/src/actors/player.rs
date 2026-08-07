@@ -299,6 +299,8 @@ pub struct PlayerState {
     pub is_mentor: bool,
     /// 导师伤害加成是否激活（C# HasBuff(Mentor)：徒弟近身同组时 true）
     pub mentor_damage_bonus: bool,
+    /// 新手行会经验 buff（C# BuffType.Newbie：在 NewbieGuild 且开关开启时 true）
+    pub newbie_exp_bonus: bool,
 }
 
 impl PlayerState {
@@ -626,6 +628,7 @@ impl PlayerActor {
             level_effects: 0,
             is_mentor: false,
             mentor_damage_bonus: false,
+            newbie_exp_bonus: false,
             },
             gate_ref,
             world_ref,
@@ -1291,9 +1294,20 @@ impl Message<AddExperience> for PlayerActor {
             })
             .await
             .unwrap_or(0);
+        // 新手行会经验加成（C# BuffType.Newbie → ExpRatePercent；仅新手工会在行会时查询一次）
+        let newbie_bonus = if self.state.newbie_exp_bonus {
+            self.world_ref
+                .ask(crate::actors::world::partners::GetNewbieGuildConfig)
+                .await
+                .map(|(_, _, exp)| exp)
+                .unwrap_or(0)
+        } else {
+            0
+        };
         let amount = (base as f64 * self.state.exp_multiplier * rested_mul
             * (1.0 + lover_bonus as f64 / 100.0)
-            * (1.0 + mentee_bonus as f64 / 100.0)).round() as i64;
+            * (1.0 + mentee_bonus as f64 / 100.0)
+            * (1.0 + newbie_bonus as f64 / 100.0)).round() as i64;
         self.state.experience += amount;
 
         debug!(
@@ -3479,6 +3493,23 @@ impl Message<SetMentorDamageBonus> for PlayerActor {
     }
 }
 
+/// 设置新手行会经验 buff 激活状态（C# BuffType.Newbie 存在性）
+pub struct SetNewbieExpBonus {
+    pub active: bool,
+}
+
+impl Message<SetNewbieExpBonus> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetNewbieExpBonus,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.newbie_exp_bonus = msg.active;
+    }
+}
+
 /// 设置宠物信息
 pub struct SetCreature {
     pub creature_log: CreatureLog,
@@ -4631,6 +4662,7 @@ mod tests {
             level_effects: 0,
             is_mentor: false,
             mentor_damage_bonus: false,
+            newbie_exp_bonus: false,
         }
     }
 
