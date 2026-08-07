@@ -62,7 +62,7 @@ impl Plugin for PlayerControlPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (player_input_system, key_pickup_system, hold_move_system, auto_attack_system, pickup_arrival_system)
+            (advance_attack_timer_system, autorun_toggle_system, right_click_move_system, left_click_interact_system, key_pickup_system, hold_move_system, auto_attack_system, pickup_arrival_system)
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -90,33 +90,46 @@ fn over_chat_panel(screen: Vec2) -> bool {
     screen.x <= 380.0 && screen.y >= 768.0 - 150.0 - 190.0
 }
 
-/// 物品选中/弹窗打开时屏蔽世界左键点击（原版 C# SelectedCell/Modal）
-/// 合并三个守卫参数，避免系统参数超过 Bevy 16 上限
-#[derive(SystemParam)]
-struct InteractionGuards<'w> {
-    click: Res<'w, crate::game::dialogs::inventory::InvClickState>,
-    amount: Res<'w, crate::game::dialogs::amount_box::AmountBoxState>,
-    confirm: Res<'w, crate::game::dialogs::inventory::InvDropConfirm>,
-}
 
-fn player_input_system(
-    mut commands: Commands,
+
+/// 推进攻击计时（原 player_input_system 末尾逻辑独立成系统；保持既有行为）
+fn advance_attack_timer_system(
     time: Res<Time>,
     mut control: ResMut<ControlState>,
-    net: Res<NetConnection>,
+    hud: Res<HudState>,
+) {
+    if hud.dead {
+        return;
+    }
+    control.last_attack += time.delta_secs();
+}
+
+/// 中键：AutoRun 切换（原版 GameScene.OnMouseClick Middle）
+fn autorun_toggle_system(
+    mut control: ResMut<ControlState>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    hud: Res<HudState>,
+) {
+    if hud.dead {
+        return;
+    }
+    if mouse.just_pressed(MouseButton::Middle) {
+        control.autorun = !control.autorun;
+        tracing::info!("🏃 AutoRun: {}", control.autorun);
+    }
+}
+
+/// 右键：寻路移动（原版 NewMove + PathFinder.FindPath）
+fn right_click_move_system(
+    mut commands: Commands,
+    control: Res<ControlState>,
     game_data: Res<GameData>,
     mut libs: ResMut<GameLibraries>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     camera: Query<&Transform, (With<Camera2d>, Without<UiButton>, Without<crate::ui::sprite_ui::UiEntity>)>,
-    players: Query<
-        (Entity, &Transform, &mut ActorAnim),
-        (With<LocalPlayer>, With<NetObjectId>),
-    >,
-    actors: Query<(&NetObjectId, &Transform, Has<Npc>)>,
-    items: Query<(&NetObjectId, &Transform), (With<GroundItem>, Without<LocalPlayer>)>,
+    players: Query<(Entity, &Transform, &mut ActorAnim), (With<LocalPlayer>, With<NetObjectId>)>,
     buttons: Query<&UiButton>,
-    guards: InteractionGuards,
     hud: Res<HudState>,
 ) {
     if hud.dead {
@@ -126,154 +139,164 @@ fn player_input_system(
     let Some(cursor) = window.physical_cursor_position() else { return };
     let Some(cursor_logical) = window.cursor_position() else { return };
     let Ok(cam_tf) = camera.single() else { return };
-
-    // UI 按钮点击时不处理地图交互（按钮 rect 是逻辑坐标，必须用逻辑光标比较；
-    // 之前误用物理光标 → DPI 1.5 下坐标错位，右下大部分点击被当成主对话框忽略）
     let over_ui = buttons.iter().any(|b| {
         let (x, y, w, h) = b.rect;
         cursor_logical.x >= x && cursor_logical.x <= x + w && cursor_logical.y >= y && cursor_logical.y <= y + h
     });
+    if !mouse.just_pressed(MouseButton::Right) || over_ui || over_main_dialog(cursor_logical) || over_chat_panel(cursor_logical) {
+        return;
+    }
+    let Some(map) = &game_data.map else { return };
+    let world = screen_to_world(cursor, cam_tf, window);
+    let target_tile = world_to_tile(world.x, world.y);
+    let Ok((pe, ptf, _)) = players.single() else { return };
+    let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
+    libs.0.ensure_initialized();
+    if let Some(p) = pathfinding::find_path(map, from_tile, target_tile) {
+        if p.is_empty() {
+            tracing::debug!("🚫 目标不可达: {:?}", target_tile);
+        } else {
+            let len = p.len();
+            commands.entity(pe).insert(LocalMove {
+                path: p.into(),
+                step_timer_ms: 0.0,
+                run: control.autorun,
+                last: None,
+                step_origin: None,
+                turn_acc: 0.0,
+            });
+            tracing::info!("🚶 寻路 {} -> {}（{} 格）", from_tile.0, from_tile.1, len);
+        }
+    } else {
+        tracing::debug!("🚫 目标不可达: {:?}", target_tile);
+    }
+}
 
-    // DPI 环境下物理/逻辑坐标可能不一致，两个换算点都参与命中
+/// 左键：点击 NPC → CallNPC；点击怪物 → 攻击目标；点击物品 → 拾取/走过去拾取
+fn left_click_interact_system(
+    mut commands: Commands,
+    mut control: ResMut<ControlState>,
+    net: Res<NetConnection>,
+    game_data: Res<GameData>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    camera: Query<&Transform, (With<Camera2d>, Without<UiButton>, Without<crate::ui::sprite_ui::UiEntity>)>,
+    players: Query<(Entity, &Transform, &mut ActorAnim), (With<LocalPlayer>, With<NetObjectId>)>,
+    actors: Query<(&NetObjectId, &Transform, Has<Npc>)>,
+    items: Query<(&NetObjectId, &Transform), (With<GroundItem>, Without<LocalPlayer>)>,
+    buttons: Query<&UiButton>,
+    click: Res<crate::game::dialogs::inventory::InvClickState>,
+    amount: Res<crate::game::dialogs::amount_box::AmountBoxState>,
+    confirm: Res<crate::game::dialogs::inventory::InvDropConfirm>,
+    hud: Res<HudState>,
+) {
+    if hud.dead {
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.physical_cursor_position() else { return };
+    let Some(cursor_logical) = window.cursor_position() else { return };
+    let Ok(cam_tf) = camera.single() else { return };
+    let over_ui = buttons.iter().any(|b| {
+        let (x, y, w, h) = b.rect;
+        cursor_logical.x >= x && cursor_logical.x <= x + w && cursor_logical.y >= y && cursor_logical.y <= y + h
+    });
     let world = screen_to_world(cursor, cam_tf, window);
     let world_logical = screen_to_world(cursor_logical, cam_tf, window);
-
-    // 中键：AutoRun 切换（原版 GameScene.OnMouseClick Middle）
-    if mouse.just_pressed(MouseButton::Middle) {
-        control.autorun = !control.autorun;
-        tracing::info!("🏃 AutoRun: {}", control.autorun);
-    }
-
-    // 右键：寻路移动（原版 NewMove + PathFinder.FindPath）
-    if mouse.just_pressed(MouseButton::Right) && !over_ui && !over_main_dialog(cursor_logical) && !over_chat_panel(cursor_logical) {
-        let Some(map) = &game_data.map else { return };
-        let target_tile = world_to_tile(world.x, world.y);
-        let Ok((pe, ptf, _)) = players.single() else { return };
-        let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
-        libs.0.ensure_initialized();
-        if let Some(p) = pathfinding::find_path(map, from_tile, target_tile) {
-            if p.is_empty() {
-                tracing::debug!("🚫 目标不可达: {:?}", target_tile);
-            } else {
-                let len = p.len();
-                commands.entity(pe).insert(LocalMove {
-                    path: p.into(),
-                    step_timer_ms: 0.0,
-                    run: control.autorun,
-                    last: None,
-                    step_origin: None,
-                    turn_acc: 0.0,
-                });
-                tracing::info!("🚶 寻路 {} -> {}（{} 格）", from_tile.0, from_tile.1, len);
-            }
-        } else {
-            tracing::debug!("🚫 目标不可达: {:?}", target_tile);
-        }
-    }
-
-    // 左键：点击 NPC → CallNPC；点击怪物 → 攻击目标
     // （选中物品/数量框/确认框打开时不处理世界点击——丢弃流程由背包系统接管）
-    if mouse.just_pressed(MouseButton::Left)
-        && guards.click.selected.is_none()
-        && !guards.amount.visible
-        && !guards.confirm.visible
-        && !over_ui
-        && !over_main_dialog(cursor_logical)
-        && !over_chat_panel(cursor_logical)
+    if !mouse.just_pressed(MouseButton::Left)
+        || click.selected.is_some()
+        || amount.visible
+        || confirm.visible
+        || over_ui
+        || over_main_dialog(cursor_logical)
+        || over_chat_panel(cursor_logical)
     {
-        tracing::debug!("🖱️ 左键点击 screen=({},{}) world=({:.0},{:.0})", cursor.x, cursor.y, world.x, world.y);
-        // 命中测试：世界坐标下最近的对象（20px 内）
-        let mut best: Option<(u32, f32)> = None;
-        for (id, tf, app) in &actors {
-            let d1 = Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length();
-            let d2 = Vec2::new(tf.translation.x - world_logical.x, tf.translation.y - world_logical.y).length();
-            let dist = d1.min(d2);
-            if dist < 60.0 && best.map(|(_, d)| dist < d).unwrap_or(true) {
-                best = Some((id.0, dist));
-            }
-            let _ = app;
+        return;
+    }
+    tracing::debug!("🖱️ 左键点击 screen=({},{}) world=({:.0},{:.0})", cursor.x, cursor.y, world.x, world.y);
+    let mut best: Option<(u32, f32)> = None;
+    for (id, tf, app) in &actors {
+        let d1 = Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length();
+        let d2 = Vec2::new(tf.translation.x - world_logical.x, tf.translation.y - world_logical.y).length();
+        let dist = d1.min(d2);
+        if dist < 60.0 && best.map(|(_, d)| dist < d).unwrap_or(true) {
+            best = Some((id.0, dist));
         }
-        tracing::info!("[HITDBG] best_actor={:?}", best);
-        // 地面物品命中（原版 C# ItemObject：点击物品 → 邻近拾取 / 远距离走过去拾取）
-        let mut best_item: Option<(u32, f32)> = None;
-        for (id, tf) in &items {
-            let d1 = Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length();
-            let d2 = Vec2::new(tf.translation.x - world_logical.x, tf.translation.y - world_logical.y).length();
-            let dist = d1.min(d2);
-            if dist < 45.0 && best_item.map(|(_, d)| dist < d).unwrap_or(true) {
-                best_item = Some((id.0, dist));
-            }
+        let _ = app;
+    }
+    tracing::info!("[HITDBG] best_actor={:?}", best);
+    let mut best_item: Option<(u32, f32)> = None;
+    for (id, tf) in &items {
+        let d1 = Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length();
+        let d2 = Vec2::new(tf.translation.x - world_logical.x, tf.translation.y - world_logical.y).length();
+        let dist = d1.min(d2);
+        if dist < 45.0 && best_item.map(|(_, d)| dist < d).unwrap_or(true) {
+            best_item = Some((id.0, dist));
         }
-        if let Some((item_id, item_d)) = best_item {
-            let actor_d = best.map(|(_, d)| d);
-            if actor_d.map(|d| item_d < d).unwrap_or(true) {
-                let Ok((pe, ptf, _)) = players.single() else { return };
-                let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
-                let item_tile = items
-                    .iter()
-                    .find(|(id, _)| id.0 == item_id)
-                    .map(|(_, tf)| world_to_tile(tf.translation.x, tf.translation.y));
-                if let Some(item_tile) = item_tile {
-                    let adjacent = (item_tile.0 - from_tile.0).abs() <= 1
-                        && (item_tile.1 - from_tile.1).abs() <= 1;
-                    if adjacent {
-                        net.send_packet(&mir2_shared::packets::client::item::PickUp {});
-                        control.attack_target = None;
-                        tracing::info!("🎒 拾取地面物品 id={}", item_id);
-                    } else if let Some(map) = &game_data.map {
-                        if let Some(p) = pathfinding::find_path(map, from_tile, item_tile) {
-                            if p.is_empty() {
-                                tracing::debug!("🚫 物品不可达: {:?}", item_tile);
-                            } else {
-                                let len = p.len();
-                                commands.entity(pe).insert(LocalMove {
-                                    path: p.into(),
-                                    step_timer_ms: 0.0,
-                                    run: control.autorun,
-                                    last: None,
-                                    step_origin: None,
-                                    turn_acc: 0.0,
-                                });
-                                control.attack_target = None;
-                                control.pickup_target = Some(item_id);
-                                tracing::info!("🚶 走向物品 id={}（{} 格）", item_id, len);
-                            }
+    }
+    if let Some((item_id, item_d)) = best_item {
+        let actor_d = best.map(|(_, d)| d);
+        if actor_d.map(|d| item_d < d).unwrap_or(true) {
+            let Ok((pe, ptf, _)) = players.single() else { return };
+            let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
+            let item_tile = items
+                .iter()
+                .find(|(id, _)| id.0 == item_id)
+                .map(|(_, tf)| world_to_tile(tf.translation.x, tf.translation.y));
+            if let Some(item_tile) = item_tile {
+                let adjacent = (item_tile.0 - from_tile.0).abs() <= 1
+                    && (item_tile.1 - from_tile.1).abs() <= 1;
+                if adjacent {
+                    net.send_packet(&mir2_shared::packets::client::item::PickUp {});
+                    control.attack_target = None;
+                    tracing::info!("🎒 拾取地面物品 id={}", item_id);
+                } else if let Some(map) = &game_data.map {
+                    if let Some(p) = pathfinding::find_path(map, from_tile, item_tile) {
+                        if p.is_empty() {
+                            tracing::debug!("🚫 物品不可达: {:?}", item_tile);
+                        } else {
+                            let len = p.len();
+                            commands.entity(pe).insert(LocalMove {
+                                path: p.into(),
+                                step_timer_ms: 0.0,
+                                run: control.autorun,
+                                last: None,
+                                step_origin: None,
+                                turn_acc: 0.0,
+                            });
+                            control.attack_target = None;
+                            control.pickup_target = Some(item_id);
+                            tracing::info!("🚶 走向物品 id={}（{} 格）", item_id, len);
                         }
                     }
                 }
-                return;
             }
-        }
-        if let Some((object_id, _)) = best {
-            // 区分 NPC 与怪物/玩家
-            let is_npc = actors
-                .iter()
-                .find(|(id, _, _)| id.0 == object_id)
-                .map(|(_, _, is_npc)| is_npc)
-                .unwrap_or(false);
-            if is_npc {
-                net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
-                    object_id,
-                    key: "[@Main]".to_string(),
-                });
-                tracing::info!("🧙 CallNPC {}", object_id);
-            } else {
-                control.attack_target = Some(object_id);
-                control.last_attack = 0.0; // 立即攻击
-                tracing::info!("⚔️ 攻击目标 {}", object_id);
-            }
-        } else {
-            // 点击空地：取消当前攻击目标
-            control.attack_target = None;
+            return;
         }
     }
-
-    // 自动攻击：每 attack_interval 秒对目标发 Attack
-    control.last_attack += time.delta_secs();
-    let _ = &mut libs;
+    if let Some((object_id, _)) = best {
+        let is_npc = actors
+            .iter()
+            .find(|(id, _, _)| id.0 == object_id)
+            .map(|(_, _, is_npc)| is_npc)
+            .unwrap_or(false);
+        if is_npc {
+            net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                object_id,
+                key: "[@Main]".to_string(),
+            });
+            tracing::info!("🧙 CallNPC {}", object_id);
+        } else {
+            control.attack_target = Some(object_id);
+            control.last_attack = 0.0; // 立即攻击
+            tracing::info!("⚔️ 攻击目标 {}", object_id);
+        }
+    } else {
+        control.attack_target = None;
+    }
 }
 
-/// 拾取到达：寻路结束后自动 PickUp（原版 C# 点击物品 → 移动 → 拾取）
 fn pickup_arrival_system(
     mut control: ResMut<ControlState>,
     net: Res<NetConnection>,
