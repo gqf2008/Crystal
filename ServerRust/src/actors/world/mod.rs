@@ -109,6 +109,8 @@ pub struct WorldActorArgs {
     pub mana_regen_weight: u32,
     /// 商店隐藏附加属性（C# Settings.GoodsHideAddedStats）
     pub goods_hide_added_stats: bool,
+    /// 安全区回血（C# Settings.SafeZoneHealing，默认 false；开启后安全区内每 2 秒 +25 HP）
+    pub safe_zone_healing: bool,
 }
 
 /// 世界中的玩家记录
@@ -896,6 +898,8 @@ pub struct WorldActor {
     pub(crate) mana_regen_weight: u32,
     /// 商店隐藏附加属性（C# Settings.GoodsHideAddedStats）
     pub(crate) goods_hide_added_stats: bool,
+    /// 安全区回血（C# Settings.SafeZoneHealing，默认 false）
+    pub(crate) safe_zone_healing: bool,
     /// 全局经验倍率事件
     pub(crate) global_exp_multiplier: f64,
     /// 全局掉落倍率
@@ -1107,6 +1111,7 @@ impl WorldActor {
             health_regen_weight: 10,
             mana_regen_weight: 10,
             goods_hide_added_stats: true,
+            safe_zone_healing: false,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
@@ -3747,6 +3752,7 @@ impl Actor for WorldActor {
             health_regen_weight: args.health_regen_weight,
             mana_regen_weight: args.mana_regen_weight,
             goods_hide_added_stats: args.goods_hide_added_stats,
+            safe_zone_healing: args.safe_zone_healing,
             global_exp_multiplier: 1.0,
             global_drop_multiplier: 1.0,
             global_gold_multiplier: 1.0,
