@@ -37,6 +37,24 @@ impl Message<ProcessElementalTick> for WorldActor {
     }
 }
 
+/// 死亡回调处理消息（独立于 Tick 消息避免栈溢出）
+pub struct ProcessDeathCallbacks;
+
+impl Message<ProcessDeathCallbacks> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        _msg: ProcessDeathCallbacks,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let pending = std::mem::take(&mut self.pending_death_callbacks);
+        for (mut monster, player_positions) in pending {
+            self.apply_death_callbacks(&mut monster, &player_positions).await;
+        }
+    }
+}
+
 
 impl WorldActor {
     /// 玩家 Buff tick + 死亡复活（每 5 ticks）
@@ -491,6 +509,185 @@ impl WorldActor {
     }
 
 /// PK 值衰减 + 名字颜色广播（C# MapObject.Process：每 Settings.PKDelay=12 秒衰减 1 点）
+    /// 死亡回调：调用 behavior.on_die 并应用其输出（C# Die 覆盖；
+    /// 此前 on_die 从未被接线，HumanAssassin 死亡爆炸 / KingHydrax 死亡召唤等机制失效）。
+    /// player_positions 为 AI 循环预收集的玩家快照 (session,x,y,oid,pk,hp,map)。
+    async fn apply_death_callbacks(
+        &mut self,
+        monster: &mut MonsterState,
+        player_positions: &[(u64, i32, i32, u32, i32, i32, u16)],
+    ) {
+        use crate::actors::world::ai::{self, AiCtx};
+        let mut die_moves: Vec<(u32, i32, i32, u8)> = Vec::new();
+        let mut die_attacks: Vec<ai::AttackAction> = Vec::new();
+        let mut die_spell_fields: Vec<ai::SpellFieldSpawn> = Vec::new();
+        let mut die_summons: Vec<ai::BossSummon> = Vec::new();
+        let mut die_heals: Vec<(u32, i32)> = Vec::new();
+        let mut die_poisons: Vec<ai::PoisonPlayer> = Vec::new();
+        let mut die_pushes: Vec<ai::PushPlayer> = Vec::new();
+        let mut die_teleports: Vec<(u64, i32, i32, u8)> = Vec::new();
+        let mut die_delayed: Vec<ai::DelayedAttack> = Vec::new();
+        {
+            let mut ctx = AiCtx {
+                tick_count: self.tick_count,
+                monster_oid: monster.object_id,
+                monster_index: monster.monster_index,
+                map_size: self.maps.get(&monster.map_index)
+                    .map(|m| (m.width as i32, m.height as i32))
+                    .unwrap_or((200, 200)),
+                players: &[],
+                monsters: &[],
+                out_moves: &mut die_moves,
+                out_attacks: &mut die_attacks,
+                out_spell_fields: &mut die_spell_fields,
+                out_summons: &mut die_summons,
+                out_heals: &mut die_heals,
+                out_poisons: &mut die_poisons,
+                out_pushes: &mut die_pushes,
+                out_player_teleports: &mut die_teleports,
+                out_delayed_attacks: &mut die_delayed,
+            };
+            // 临时取出 behavior 避免 &mut monster + &mut behavior 双重借用（与 AI 循环一致）
+            let mut behavior = std::mem::replace(
+                &mut monster.behavior,
+                Box::new(crate::actors::world::ai::DefaultBehavior::new()),
+            );
+            behavior.on_die(monster, &mut ctx);
+            monster.behavior = behavior;
+        }
+        // 应用死亡攻击（HumanAssassin 16 方向爆炸 → 半径 2 AOE）
+        for atk in &die_attacks {
+            let (attacker_oid, damage, cx, cy, radius) = match atk {
+                ai::AttackAction::Aoe { attacker_oid, center_x, center_y, radius, damage, .. } => {
+                    (*attacker_oid, *damage, *center_x, *center_y, *radius)
+                }
+                ai::AttackAction::Melee { attacker_oid, target_session, damage, .. } => {
+                    let _ = target_session;
+                    (*attacker_oid, *damage, monster.x, monster.y, 0)
+                }
+                ai::AttackAction::Range { attacker_oid, target_session, damage, .. } => {
+                    let _ = target_session;
+                    (*attacker_oid, *damage, monster.x, monster.y, 0)
+                }
+            };
+            // 广播 ObjectAttack（死亡爆炸动画）
+            let mut attack_body = Vec::new();
+            attack_body.extend_from_slice(&attacker_oid.to_le_bytes());
+            attack_body.extend_from_slice(&(monster.x as u32).to_le_bytes());
+            attack_body.extend_from_slice(&(monster.y as u32).to_le_bytes());
+            attack_body.push(monster.direction);
+            attack_body.push(0u8);
+            attack_body.extend_from_slice(&0u16.to_le_bytes());
+            attack_body.push(0u8);
+            let attack_packet = build_packet_bytes(
+                mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
+            for sid in self.players.keys() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: *sid, data: attack_packet.clone(),
+                }).await;
+            }
+            // 对范围内玩家造成伤害
+            for (sid, px, py, _, _, _, pmap) in player_positions {
+                if *pmap != monster.map_index { continue; }
+                let dx = (px - cx).abs();
+                let dy = (py - cy).abs();
+                if dx.max(dy) > radius { continue; }
+                if let Some(record) = self.players.get(sid) {
+                    let _ = record.actor_ref.ask(crate::actors::player::TakeDamage {
+                        attacker_id: attacker_oid,
+                        attacker_session: *sid,
+                        damage,
+                    }).await;
+                }
+            }
+        }
+        // 应用死亡召唤（KingHydrax 死亡召唤 2 只 slave）
+        for bs in &die_summons {
+            let mon_index = self.monster_name_index.get(&bs.monster_name.to_lowercase()).copied();
+            if let Some(idx) = mon_index {
+                let info_opt = self.monster_infos.get(&idx).cloned();
+                if let Some(info) = info_opt {
+                    let new_oid = self.alloc_object_id();
+                    let hp = info.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(50);
+                    let min_dmg = info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(5);
+                    let max_dmg = info.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(10);
+                    let map_index = monster.map_index;
+                    let spawn = MonsterSpawn {
+                        name: info.name.clone(),
+                        image: info.image as u16,
+                        monster_index: idx,
+                        x: bs.x, y: bs.y, direction: 0,
+                        hp, min_dmg, max_dmg, xp: info.experience,
+                        map_index,
+                    };
+                    let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
+                    for session_id in self.players.keys() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *session_id, data: packet.clone(),
+                        }).await;
+                    }
+                    let ai_profile = MonsterAiProfile::from_info(&info);
+                    self.monsters.insert(new_oid, MonsterState {
+                        object_id: new_oid,
+                        name: spawn.name.clone(),
+                        image: spawn.image,
+                        monster_index: idx,
+                        x: bs.x, y: bs.y, direction: 0,
+                        hp, max_hp: hp, min_dmg, max_dmg, xp: spawn.xp,
+                        spawn_x: bs.x, spawn_y: bs.y, map_index,
+                        next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
+                        ai_profile, ai_state: MonsterAiState::Idle,
+                        target_session: None, provoked: false,
+                        is_elite: false, is_boss: false,
+                        min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
+                        agility: 0, accuracy: 0,
+                        armour_rate: 1.0, damage_rate: 1.0,
+                        magic_resist: 0, critical_rate: 0, critical_damage: 0,
+                        luck: 0, reflect: 0, damage_reduction_percent: 0,
+                        poison_list: Vec::new(),
+                        undead: false,
+                        master_session: None,
+                        recall_at_tick: 0,
+                        behavior: crate::actors::world::ai::make_behavior(&spawn.name),
+                    });
+                    if let Some(m) = self.monsters.get_mut(&new_oid) {
+                        m.fill_combat_stats(&info);
+                    }
+                    debug!("Death callback summoned '{}' as #{} at ({},{}) slave={}",
+                           spawn.name, new_oid, bs.x, bs.y, bs.is_slave);
+                }
+            }
+        }
+        // 应用死亡 poison / 推开 / 传送 / 延迟攻击
+        for pp in &die_poisons {
+            if let Some(record) = self.players.get(&pp.session_id) {
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
+                    poisons: vec![pp.poison],
+                }).await;
+            }
+        }
+        for pp in &die_pushes {
+            let _ = self.push_player(pp.session_id, pp.dir, pp.distance).await;
+        }
+        for (sid, tx, ty, dir) in &die_teleports {
+            if let Some(record) = self.players.get(sid) {
+                if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                    let walkable = self.maps.get(&st.map_index)
+                        .map(|m| m.is_walkable(*tx, *ty))
+                        .unwrap_or(false);
+                    if walkable {
+                        let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                            x: *tx, y: *ty, direction: *dir, map_index: None, is_mounted: None,
+                        }).await;
+                    }
+                }
+            }
+        }
+        for atk in &die_delayed {
+            self.boss_pending_attacks.push((self.tick_count + atk.delay_ticks, *atk));
+        }
+    }
+
     pub(crate) async fn tick_pk_decay(&mut self) {
         if self.tick_count % 120 == 0 { // 12s × 10 ticks/s
             let mut colour_changes = Vec::new();
@@ -3117,7 +3314,7 @@ impl Message<Tick> for WorldActor {
 
             // 处理死亡怪物
             for oid in &dead_monsters {
-                if let Some(monster) = self.monsters.remove(oid) {
+                if let Some(mut monster) = self.monsters.remove(oid) {
                     debug!("Monster '{}' (#{}) died", monster.name, oid);
 
                     // ===== on_die 集成 =====
@@ -3367,6 +3564,9 @@ impl Message<Tick> for WorldActor {
                         map_index: monster.map_index,
                     };
                     self.respawn_queue.insert(*oid, (spawn, respawn_tick));
+                    // 死亡回调（C# Die 覆盖：HumanAssassin 爆炸 / KingHydrax 召唤等）——
+                    // 入队由独立消息 ProcessDeathCallbacks 处理（避免 Tick handler 巨型状态机栈溢出）
+                    self.pending_death_callbacks.push((monster, player_positions.clone()));
                 }
             }
 

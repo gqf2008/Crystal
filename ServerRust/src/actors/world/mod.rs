@@ -32,6 +32,7 @@ mod tick;
 pub use tick::Tick;
 pub use tick::ProcessDelayedActions;
 pub use tick::ProcessElementalTick;
+pub use tick::ProcessDeathCallbacks;
 pub use session::*;
 pub use item::*;
 pub use combat::*;
@@ -937,6 +938,8 @@ pub struct WorldActor {
     pub(crate) map_fire_next_tick: HashMap<u16, u64>,
     /// 矿脉储量状态（map,(x,y) -> 剩余石头/再生 tick；C# MineSpot）
     pub(crate) mine_spot_state: HashMap<(u16, i32, i32), MineSpotState>,
+    /// 待处理的死亡回调（怪物 + 玩家快照；独立消息处理避免 Tick handler 栈溢出）
+    pub(crate) pending_death_callbacks: Vec<(MonsterState, Vec<(u64, i32, i32, u32, i32, i32, u16)>)>,
     /// 定时机器人任务
     pub(crate) robot_tasks: Vec<robot::RobotTask>,
     /// 机器人上次检查的分钟值
@@ -1123,6 +1126,7 @@ impl WorldActor {
             map_lightning_next_tick: HashMap::new(),
             map_fire_next_tick: HashMap::new(),
             mine_spot_state: HashMap::new(),
+            pending_death_callbacks: Vec::new(),
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
@@ -3426,6 +3430,7 @@ impl Actor for WorldActor {
                 let _ = tick_ref.ask(Tick).await;
                 let _ = tick_ref.ask(ProcessDelayedActions).await;
                 let _ = tick_ref.ask(ProcessElementalTick).await;
+                let _ = tick_ref.ask(ProcessDeathCallbacks).await;
             }
         });
 
@@ -3683,6 +3688,7 @@ impl Actor for WorldActor {
             map_lightning_next_tick: HashMap::new(),
             map_fire_next_tick: HashMap::new(),
             mine_spot_state: HashMap::new(),
+            pending_death_callbacks: Vec::new(),
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
