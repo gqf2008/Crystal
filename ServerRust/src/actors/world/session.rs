@@ -1697,6 +1697,22 @@ impl Message<ChatRequest> for WorldActor {
                     send_system_message(&self.gate_ref, msg.session_id, &format!("未找到在线玩家：{}", target_name));
                     return;
                 }
+                Some("ALLOWGUILD") => {
+                    // C# case "ALLOWGUILD"（~2466）：切换 EnableGuildInvite + 提示
+                    let mut new_state = match record.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(s)) => s,
+                        _ => return,
+                    };
+                    new_state.enable_guild_invite = !new_state.enable_guild_invite;
+                    let enabled = new_state.enable_guild_invite;
+                    let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        if enabled { "已开启行会邀请（他人可邀请你加入行会）" } else { "已关闭行会邀请" },
+                    );
+                    return;
+                }
                 Some("ALLOWOBSERVE") => {
                     // C# case "ALLOWOBSERVE"：AllowObserve = !AllowObserve + S.AllowObserve
                     let mut new_state = match record.actor_ref.ask(GetPlayerState).await {
@@ -2378,6 +2394,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         require_storage_password: false,
         storage_password_last_set: 0,
         allow_observe: false,
+        enable_guild_invite: false,
         pk_points: 0,
         pk_kill_count: 0,
         buffs: Vec::new(),

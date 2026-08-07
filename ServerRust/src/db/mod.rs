@@ -1330,6 +1330,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         require_storage_password: false,
         storage_password_last_set: 0,
         allow_observe: false,
+        enable_guild_invite: false,
         pk_points: row.get::<i32, _>("pk_points"),
         pk_kill_count: row.get::<i32, _>("pk_kill_count") as u32,
         buffs: Vec::new(),
