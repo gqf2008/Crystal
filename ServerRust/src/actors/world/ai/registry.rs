@@ -309,6 +309,40 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("demonguard") || name.contains("demon guard") || name.contains("恶魔守卫") {
         return Box::new(bosses::demon_guard::DemonGuardBehavior::new());
     }
+    if name.contains("traprock") || name.contains("trap rock") || name.contains("陷阱岩") {
+        return Box::new(bosses::trap_rock::TrapRockBehavior::new());
+    }
+    if name.contains("sepwarrior") || name.contains("sep warrior") || name.contains("圣战战士") {
+        return Box::new(bosses::sep_warrior::SepWarriorBehavior::new());
+    }
+    if name.contains("separcher") || name.contains("sep archer") || name.contains("圣战弓手") {
+        return Box::new(bosses::sep_archer::SepArcherBehavior::new());
+    }
+    if name.contains("septaoist") || name.contains("sep taoist") || name.contains("圣战道士") {
+        return Box::new(bosses::sep_taoist::SepTaoistBehavior::new());
+    }
+    if name.contains("sepwizard") || name.contains("sep wizard") || name.contains("圣战法师") {
+        return Box::new(bosses::sep_wizard::SepWizardBehavior::new());
+    }
+    if name.contains("sepassassin") || name.contains("sep assassin") || name.contains("圣战刺客") {
+        return Box::new(bosses::sep_assassin::SepAssassinBehavior::new());
+    }
+    // SepHigh* 高级变体复用对应基础行为
+    if name.contains("sephighwarrior") || name.contains("sep high warrior") {
+        return Box::new(bosses::sep_warrior::SepWarriorBehavior::new());
+    }
+    if name.contains("sephigharcher") || name.contains("sep high archer") {
+        return Box::new(bosses::sep_archer::SepArcherBehavior::new());
+    }
+    if name.contains("sephightaoist") || name.contains("sep high taoist") {
+        return Box::new(bosses::sep_taoist::SepTaoistBehavior::new());
+    }
+    if name.contains("sephighwizard") || name.contains("sep high wizard") {
+        return Box::new(bosses::sep_wizard::SepWizardBehavior::new());
+    }
+    if name.contains("sephighassassin") || name.contains("sep high assassin") {
+        return Box::new(bosses::sep_assassin::SepAssassinBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -662,6 +696,17 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("yindevi") || name.contains("yin devil") || name.contains("阴魔")
         || name.contains("powerbead") || name.contains("power bead") || name.contains("能量珠")
         || name.contains("demonguard") || name.contains("demon guard") || name.contains("恶魔守卫")
+        || name.contains("traprock") || name.contains("trap rock") || name.contains("陷阱岩")
+        || name.contains("sepwarrior") || name.contains("sep warrior") || name.contains("圣战战士")
+        || name.contains("separcher") || name.contains("sep archer") || name.contains("圣战弓手")
+        || name.contains("septaoist") || name.contains("sep taoist") || name.contains("圣战道士")
+        || name.contains("sepwizard") || name.contains("sep wizard") || name.contains("圣战法师")
+        || name.contains("sepassassin") || name.contains("sep assassin") || name.contains("圣战刺客")
+        || name.contains("sephighwarrior") || name.contains("sep high warrior")
+        || name.contains("sephigharcher") || name.contains("sep high archer")
+        || name.contains("sephightaoist") || name.contains("sep high taoist")
+        || name.contains("sephighwizard") || name.contains("sep high wizard")
+        || name.contains("sephighassassin") || name.contains("sep high assassin")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
