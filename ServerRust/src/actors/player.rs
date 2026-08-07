@@ -3519,6 +3519,43 @@ impl Message<ProcessKillQuest> for PlayerActor {
     }
 }
 
+/// 任务物品拾取（C# CheckNeedQuestItem）：活跃任务含该物品 ItemTask 且未完成 →
+/// 入背包 + 更新任务进度。返回是否拾取（背包满返回 false，掉落仍落地）。
+pub struct TryQuestItemPickup {
+    pub item: mir2_shared::data::item::UserItem,
+}
+
+impl Message<TryQuestItemPickup> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: TryQuestItemPickup, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let item_index = msg.item.item_index;
+        // C# CheckNeedQuestItem：活跃任务含该物品 ItemTask 且未完成
+        let needed = self.state.quest_log.quests.iter().any(|q| {
+            q.progress.iter().any(|p| p.progress_id == item_index && p.current < p.target)
+        });
+        if !needed {
+            return false;
+        }
+        let ok = self.state.inventory.add_item(msg.item).is_some();
+        if ok {
+            self.send_inventory_changed();
+            // 更新物品任务进度（C# ProcessItem：按背包数量对齐进度）
+            for quest in &mut self.state.quest_log.quests {
+                for p in &mut quest.progress {
+                    let count = self.state.inventory.count_item_by_index(p.progress_id) as i32;
+                    if count > p.current && count <= p.target {
+                        p.current = count;
+                    } else if count >= p.target && p.current < p.target {
+                        p.current = p.target;
+                    }
+                }
+            }
+        }
+        ok
+    }
+}
+
 pub struct CheckQuestItemProgress;
 
 impl Message<CheckQuestItemProgress> for PlayerActor {

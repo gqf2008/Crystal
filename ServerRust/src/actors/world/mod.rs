@@ -1841,6 +1841,61 @@ impl WorldActor {
     }
 
 
+    /// C# CheckGroupQuestKill/CheckGroupQuestItem：击杀者 + 同组同图 16 格内未死成员
+    pub(crate) async fn quest_participants(&self, killer: u64, map_index: u16, x: i32, y: i32) -> Vec<u64> {
+        let mut sessions: Vec<u64> = vec![killer];
+        let Some(krecord) = self.players.get(&killer) else { return sessions };
+        let Ok(Some(kstate)) = krecord.actor_ref.ask(crate::actors::player::GetPlayerState).await else { return sessions };
+        let Some(gid) = kstate.group_id else { return sessions };
+        for other in self.players.values() {
+            if other.session_id == killer { continue; }
+            if let Ok(Some(os)) = other.actor_ref.ask(crate::actors::player::GetPlayerState).await {
+                if os.group_id == Some(gid)
+                    && os.map_index == map_index
+                    && !os.is_dead
+                    && ((os.x - x).abs() + (os.y - y).abs()) <= 16
+                {
+                    sessions.push(os.session_id);
+                }
+            }
+        }
+        sessions
+    }
+
+    /// #1004：C# CheckGroupQuestItem——任务物品优先入击杀者/组队成员背包并更新进度；已拾取返回 true
+    pub(crate) async fn try_give_quest_item(
+        &mut self,
+        monster: &MonsterState,
+        item_index: i32,
+        count: u16,
+    ) -> bool {
+        let Some(killer) = monster.target_session else { return false };
+        let mut item = mir2_shared::data::item::UserItem {
+            item_index,
+            unique_id: generate_item_uid(),
+            count,
+            ..Default::default()
+        };
+        if let Some(info) = self.item_infos.get(&item_index) {
+            item.max_dura = info.durability as u16;
+            item.current_dura = info.durability as u16;
+        }
+        enrich_item_info(&mut item, &self.item_infos);
+        let sessions = self.quest_participants(killer, monster.map_index, monster.x, monster.y).await;
+        for sid in sessions {
+            if let Some(record) = self.players.get(&sid) {
+                let ok = record.actor_ref.ask(crate::actors::player::TryQuestItemPickup {
+                    item: item.clone(),
+                }).await.unwrap_or(false);
+                if ok {
+                    send_system_message(&self.gate_ref, sid, "任务进度更新：获得任务物品");
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     pub(crate) async fn spawn_monster_drops(&mut self, monster: &MonsterState) {
         // C# MonsterObject.DropItem：NoDropMonster 地图不掉落（金币/物品）
         if self.map_infos.get(&(monster.map_index as i32))
@@ -1954,6 +2009,10 @@ impl WorldActor {
                 drop.min_count.saturating_mul(count_mul)
             };
             let adjusted = (count as f64 * global_drop_mul * player_drop_mul).round() as u16;
+            // #1004：任务物品优先给击杀者/组队成员（C# CheckGroupQuestItem），入背包+进度，不落地
+            if self.try_give_quest_item(monster, drop.item_index, adjusted.max(1)).await {
+                continue;
+            }
             self.spawn_single_drop(monster, drop.item_index, adjusted.max(1)).await;
         }
 

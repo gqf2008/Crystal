@@ -3859,29 +3859,9 @@ impl Message<Tick> for WorldActor {
                     // #1001/#1003：任务击杀进度（C# MonsterObject.Die → EXPOwner.CheckGroupQuestKill）
                     // 击杀者 = target_session（最后命中者，与掉落归属一致）；同组同图 16 格内未死成员共享
                     if let Some(killer) = monster.target_session {
-                        let mut quest_sessions: Vec<u64> = vec![killer];
-                        if let Some(krecord) = self.players.get(&killer) {
-                            if let Ok(Some(kstate)) = krecord.actor_ref
-                                .ask(crate::actors::player::GetPlayerState).await
-                            {
-                                if let Some(gid) = kstate.group_id {
-                                    for other in self.players.values() {
-                                        if other.session_id == killer { continue; }
-                                        if let Ok(Some(os)) = other.actor_ref
-                                            .ask(crate::actors::player::GetPlayerState).await
-                                        {
-                                            if os.group_id == Some(gid)
-                                                && os.map_index == monster.map_index
-                                                && !os.is_dead
-                                                && ((os.x - monster.x).abs() + (os.y - monster.y).abs()) <= 16
-                                            {
-                                                quest_sessions.push(os.session_id);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        // 击杀者 + 同组同图 16 格内未死成员（C# CheckGroupQuestKill）
+                        let quest_sessions = self.quest_participants(
+                            killer, monster.map_index, monster.x, monster.y).await;
                         for sid in quest_sessions {
                             if let Some(record) = self.players.get(&sid) {
                                 let updates = record.actor_ref.ask(crate::actors::player::ProcessKillQuest {
