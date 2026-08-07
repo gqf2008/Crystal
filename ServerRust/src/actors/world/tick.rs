@@ -4,6 +4,8 @@ use super::*;
 const DATA_RANGE: i32 = 16;
 /// 怪物巡逻间隔（C# MonsterObject.RoamDelay = 1000ms = 10 ticks）
 const ROAM_DELAY_TICKS: u64 = 10;
+/// 怪物索敌间隔（C# MonsterObject.SearchDelay = 3000ms = 30 ticks）
+const SEARCH_DELAY_TICKS: u64 = 30;
 
 /// 游戏主循环 Tick
 pub struct Tick;
@@ -3088,13 +3090,12 @@ impl Message<Tick> for WorldActor {
                     }
                 }
 
-                // 更新目标：优先视野内最近玩家；已有目标时按 C# DataRange(16) 保留
-                //（C# MonsterObject.Process：跨图/不可攻击/超距 → Target = null）
+                // 目标粘性 + 索敌（C# MonsterObject）：
+                // - 已有目标：DataRange(16) 内保留（跨图/死亡/超距 → Target=null 仇恨丢失）
+                // - 无目标：ProcessSearch（SearchDelay 3s 到点）→ 视野内最近玩家
+                // - 有目标但到重搜时间：1/3 概率重新 FindTarget（可能切换目标）
                 let mut chase_target: Option<(u64, i32, i32, i32)> = None; // (session, px, py, dist)
-                if let Some((sess, px, py, dist)) = nearest {
-                    monster.target_session = Some(sess);
-                    chase_target = Some((sess, px, py, dist));
-                } else if let Some(ts) = monster.target_session {
+                if let Some(ts) = monster.target_session {
                     if let Some((sid, px, py, _, _, hp, map)) =
                         player_positions.iter().find(|(s, _, _, _, _, _, _)| *s == ts)
                     {
@@ -3107,6 +3108,22 @@ impl Message<Tick> for WorldActor {
                     } else {
                         monster.target_session = None;
                     }
+                }
+                let search_due = self.monster_search_ticks.get(oid).copied().unwrap_or(0) <= self.tick_count;
+                if chase_target.is_none() {
+                    if let Some((sess, px, py, dist)) = nearest {
+                        monster.target_session = Some(sess);
+                        chase_target = Some((sess, px, py, dist));
+                    }
+                } else if search_due && fastrand::i32(0..3) == 0 {
+                    // C# ProcessSearch：Target != null 时 1/3 概率重新搜索
+                    if let Some((sess, px, py, dist)) = nearest {
+                        monster.target_session = Some(sess);
+                        chase_target = Some((sess, px, py, dist));
+                    }
+                }
+                if search_due {
+                    self.monster_search_ticks.insert(*oid, self.tick_count + SEARCH_DELAY_TICKS);
                 }
 
                 // 被动环境物体（Deer/Doe/Football 等）：不主动攻击/追击玩家，
