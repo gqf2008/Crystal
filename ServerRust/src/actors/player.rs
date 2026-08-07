@@ -2051,6 +2051,17 @@ impl Message<AddItemToInventory> for PlayerActor {
     type Reply = bool;
 
     async fn handle(&mut self, msg: AddItemToInventory, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        // 金币（item_index=0）：直接加 gold，不占背包（C# 金币独立于背包）
+        if msg.item.item_index == 0 {
+            self.state.inventory.gold = self.state.inventory.gold.saturating_add(msg.item.count as u64);
+            let mut body = Vec::new();
+            body.extend_from_slice(&(msg.item.count as u32).to_le_bytes());
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LoseGold as i16, &body),
+            }).await;
+            return true;
+        }
         match self.state.inventory.add_item(msg.item) {
             Some((_grid, _uid)) => {
                 // 发送 ItemChanged 通知客户端更新背包
