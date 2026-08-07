@@ -2140,33 +2140,123 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} casts SwiftFeet (move speed +{}%)", state.name, spd_pct);
             }
             // MoonLight：隐身（刺客版，怪物失去目标）
+            // C# 时长：(GetAttackPower(MinAC,MaxAC) + (Lv+1)*5) * 500ms
             SPELL_MOON_LIGHT => {
+                let ac_power = crate::combat::attack::get_attack_power(
+                    state.min_ac + state.bonus_min_ac,
+                    state.max_ac + state.bonus_max_ac,
+                    0,
+                );
+                let duration_ticks = ((ac_power + (spell_level as i32 + 1) * 5).max(1) as u32) * 5;
                 let buff = crate::combat::buff::BuffInstance::new(
                     crate::combat::buff::BuffType::Invisibility,
-                    (30 + spell_level as u32 * 10) * 10, 5);
+                    duration_ticks, 5);
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
                 self.invisible_sessions.insert(msg.session_id);
             if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
                 self.broadcast_object_hidden(st.object_id, true, st.map_index).await;
             }
-                debug!("Magic: {} casts MoonLight (invisible)", state.name);
+                debug!("Magic: {} casts MoonLight (invisible {}s)", state.name, duration_ticks / 10);
             }
-            // DarkBody：隐身 + 攻击力（刺客终极隐身）
+            // DarkBody：刺客分身（C# HumanObject.cs:5323）——召唤 AssassinClone 宠物；已有存活分身则移除
             SPELL_DARK_BODY => {
-                let atk_bonus = (power / 4).max(3);
-                let buff1 = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::Invisibility,
-                    (20 + spell_level as u32 * 10) * 10, 5);
-                let buff2 = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::AttackBoost { bonus: atk_bonus },
-                    (20 + spell_level as u32 * 10) * 10, 5);
-                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: buff1 }).await;
-                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: buff2 }).await;
-                self.invisible_sessions.insert(msg.session_id);
-            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
-                self.broadcast_object_hidden(st.object_id, true, st.map_index).await;
-            }
-                debug!("Magic: {} casts DarkBody (invisible + attack {})", state.name, atk_bonus);
+                const CLONE_NAME: &str = "AssassinClone";
+                // 已有存活分身 → 移除（C# monster.Die()）
+                let existing: Option<u32> = self.monsters.iter()
+                    .find(|(_, m)| m.master_session == Some(msg.session_id)
+                        && m.name.eq_ignore_ascii_case(CLONE_NAME) && m.hp > 0)
+                    .map(|(id, _)| *id);
+                if let Some(oid) = existing {
+                    if self.monsters.remove(&oid).is_some() {
+                        let rm = Self::build_object_remove_packet(oid);
+                        for sid in self.players.keys() {
+                            let _ = self.gate_ref.tell(SendToClient {
+                                session_id: *sid,
+                                data: rm.clone(),
+                            }).await;
+                        }
+                    }
+                    debug!("Magic: {} DarkBody removed existing clone #{}", state.name, oid);
+                    return;
+                }
+                // 目标玩家 session（C# monster.Target = 点击目标）
+                let target_session: Option<u64> = if msg.target_id != 0 {
+                    let mut found = None;
+                    for (sid, r) in &self.players {
+                        if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                            if os.object_id == msg.target_id {
+                                found = Some(*sid);
+                                break;
+                            }
+                        }
+                    }
+                    found
+                } else {
+                    None
+                };
+                let mon_index = self.monster_name_index.get(CLONE_NAME.to_lowercase().as_str()).copied();
+                match mon_index {
+                    Some(idx) => {
+                        if let Some(info) = self.monster_infos.get(&idx).cloned() {
+                            let new_oid = self.alloc_object_id();
+                            let hp = info.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(50);
+                            let min_dmg = info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(5);
+                            let max_dmg = info.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(10);
+                            let spawn = MonsterSpawn {
+                                name: info.name.clone(),
+                                image: info.image as u16,
+                                monster_index: idx,
+                                x: state.x,
+                                y: state.y,
+                                direction: msg.direction,
+                                hp,
+                                min_dmg,
+                                max_dmg,
+                                xp: info.experience,
+                                map_index: state.map_index,
+                            };
+                            let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
+                            for sid in self.players.keys() {
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: *sid,
+                                    data: packet.clone(),
+                                }).await;
+                            }
+                            let ai_profile = MonsterAiProfile::from_info(&info);
+                            self.monsters.insert(new_oid, MonsterState {
+                                object_id: new_oid,
+                                name: spawn.name.clone(),
+                                image: spawn.image,
+                                monster_index: idx,
+                                x: state.x, y: state.y, direction: msg.direction,
+                                hp, max_hp: hp, min_dmg, max_dmg, xp: spawn.xp,
+                                spawn_x: state.x, spawn_y: state.y, map_index: state.map_index,
+                                next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
+                                ai_profile, ai_state: MonsterAiState::Idle,
+                                target_session, provoked: target_session.is_some(),
+                                is_elite: false, is_boss: false,
+                                min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
+                                agility: 0, accuracy: 0,
+                                armour_rate: 1.0, damage_rate: 1.0,
+                                magic_resist: 0, critical_rate: 0, critical_damage: 0,
+                                luck: 0, reflect: 0, damage_reduction_percent: 0,
+                                poison_list: Vec::new(),
+                                undead: info.undead,
+                                master_session: Some(msg.session_id),
+                                recall_at_tick: 0,
+                                behavior: crate::actors::world::ai::make_behavior(&spawn.name),
+                            });
+                            self.pet_levels.insert(new_oid, spell_level as i32);
+                            debug!("Magic: {} casts DarkBody -> clone #{} at ({},{})",
+                                   state.name, new_oid, state.x, state.y);
+                        } else {
+                            warn!("DarkBody '{}' found index {} but no MonsterInfo", CLONE_NAME, idx);
+                        }
+                    }
+                    None => {
+                        warn!("DarkBody '{}' not in monster_name_index (DB may lack this mob)", CLONE_NAME);
+                    }
+                }
             }
             // HeavenlySword：直线 3 格 AoE（物理 AC 防御，类似 Thrusting 但更长）
             SPELL_HEAVENLY_SWORD => {
