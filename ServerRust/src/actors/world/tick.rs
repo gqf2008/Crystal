@@ -3145,7 +3145,9 @@ impl Message<Tick> for WorldActor {
                 // Guard AI：优先攻击红名玩家（PK 值 > 0）
                 let mut nearest: Option<(u64, i32, i32, i32)> = None;
                 if profile.ai_type == MonsterAiType::Guard {
-                    // 先找范围内的红名玩家
+                    // C# Guard（ai=6/58/113）：只攻击红名玩家（PK>0），绝不攻击清白玩家
+                    // PlayerObject.IsAttackTarget(MonsterObject)：AI==6/58/113 → PKPoints >= 200
+                    // #1157：去掉“无红名时回退任意玩家”，避免城镇守卫围杀 PK=0 玩家
                     let mut red_nearest: Option<(u64, i32, i32, i32)> = None;
                     for (session, px, py, _, pk, _, _, _) in &player_positions {
                         let dist = (monster.x - px).abs() + (monster.y - py).abs();
@@ -3155,18 +3157,7 @@ impl Message<Tick> for WorldActor {
                             }
                         }
                     }
-                    if red_nearest.is_some() {
-                        nearest = red_nearest;
-                    } else {
-                        for (session, px, py, _, _, _, _, _) in &player_positions {
-                            let dist = (monster.x - px).abs() + (monster.y - py).abs();
-                            if dist <= profile.aggro_range {
-                                if nearest.is_none_or(|n| dist < n.3) {
-                                    nearest = Some((*session, *px, *py, dist));
-                                }
-                            }
-                        }
-                    }
+                    nearest = red_nearest;
                 } else {
                     for (session, px, py, _, _, _, _, _) in &player_positions {
                         let dist = (monster.x - px).abs() + (monster.y - py).abs();
