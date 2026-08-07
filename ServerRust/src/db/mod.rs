@@ -2086,8 +2086,8 @@ async fn save_magics(conn: &mut sqlx::sqlite::SqliteConnection, character_name: 
     sqlx::query("DELETE FROM player_magics WHERE character_name = ?")
         .bind(character_name)
         .execute(&mut *conn).await?;
-    // Insert current magics
-    for magic in magics {
+    // Insert current magics（#937：临时技能不持久化，C# IsTempSpell）
+    for magic in magics.iter().filter(|m| !m.temp_skill) {
         sqlx::query(
             "INSERT INTO player_magics (character_name, spell, level, experience, key, toggled) VALUES (?, ?, ?, ?, ?, ?)"
         )
@@ -2115,6 +2115,7 @@ async fn load_magics(pool: &DbPool, character_name: &str) -> anyhow::Result<Vec<
             key: r.try_get::<i32, _>("key").unwrap_or(0) as u8,
             toggled: r.try_get::<i32, _>("toggled").unwrap_or(0) != 0,
             cast_time: 0,
+            temp_skill: false,
         });
     }
     Ok(magics)
@@ -2165,6 +2166,7 @@ async fn load_hero_magics(
             key: r.try_get::<i32, _>("key").unwrap_or(0) as u8,
             toggled: r.try_get::<i32, _>("toggled").unwrap_or(0) != 0,
             cast_time: 0,
+            temp_skill: false,
         });
     }
     Ok(magics)
