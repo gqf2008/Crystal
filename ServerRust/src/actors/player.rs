@@ -325,6 +325,14 @@ pub struct PlayerState {
     pub mentor_damage_bonus: bool,
     /// 新手行会经验 buff（C# BuffType.Newbie：在 NewbieGuild 且开关开启时 true）
     pub newbie_exp_bonus: bool,
+    /// 配偶经验加成百分比缓存（C# Settings.LoverEXPBonus；tick_partner_bonuses 刷新，避免 AddExperience 反向 ask WorldActor 死锁）
+    pub exp_bonus_lover_percent: i32,
+    /// 徒弟经验加成百分比缓存（C# Settings.MentorExpBoost）
+    pub exp_bonus_mentee_percent: i32,
+    /// 新手行会经验加成百分比缓存（C# Settings.NewbieGuildExpBuff）
+    pub exp_bonus_newbie_percent: i32,
+    /// 当前地图是否无经验（C# MapInfo.NoExperience，#932；set_map_data 时从地图数据缓存，避免 AddExperience 反向 ask WorldActor 死锁）
+    pub no_experience_map: bool,
     /// 灰名截止时间（毫秒；C# HumanObject.BrownTime，攻击低 PK 玩家后 1 分钟）
     pub brown_until_ms: i64,
     /// 坐骑忠诚度下降限速（毫秒；C# DecreaseLoyaltyTime，LoyaltyDelay=1000ms）
@@ -671,6 +679,10 @@ allow_group: false,
             is_mentor: false,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
+            exp_bonus_lover_percent: 0,
+            exp_bonus_mentee_percent: 0,
+            exp_bonus_newbie_percent: 0,
+            no_experience_map: false,
             brown_until_ms: 0,
             mount_loyalty_decrease_time: 0,
             mount_loyalty_increase_time: 0,
@@ -683,6 +695,7 @@ allow_group: false,
 
     /// 设置地图数据
     pub fn set_map_data(&mut self, map: MapData) {
+        self.state.no_experience_map = map.no_experience;
         self.map_data = Some(map);
     }
 
@@ -1357,40 +1370,20 @@ impl Message<AddExperience> for PlayerActor {
         if !self.state.can_gain_exp {
             return;
         }
-        // #932：C# MapInfo.NoExperience——无经验地图不给经验（GainExp/WinExp 入口拦截）
-        if self.world_ref
-            .ask(crate::actors::world::IsNoExperienceMap {
-                map_index: self.state.map_index,
-            })
-            .await
-            .unwrap_or(false)
-        {
+        // #932：C# MapInfo.NoExperience——无经验地图不给经验（GainExp/WinExp 入口拦截）。
+        // 使用 set_map_data 时缓存的标志，避免 WorldActor tick 内反向 ask 死锁。
+        if self.state.no_experience_map {
             return;
         }
         let base = msg.amount.max(0) as i64;
         // 休息经验加成（C# BuffType.Rested ExpRatePercent 累加到 ExpRatePercent）
         let rested_mul = 1.0 + self.state.rested_exp_percent as f64 / 100.0;
-        // 配偶经验加成（C# GainExp：Lover 同图 + InRange(16) + 存活 → +LoverEXPBonus%）
-        let lover_bonus = self.world_ref
-            .ask(crate::actors::world::partners::GetLoverExpBonus {
-                session_id: self.state.session_id,
-            })
-            .await
-            .unwrap_or(0);
-        // 徒弟经验加成（C# GainExp：Mentee 同图 + 同组 + 导师存活 → +MentorExpBoost%）
-        let mentee_bonus = self.world_ref
-            .ask(crate::actors::world::partners::GetMenteeExpBonus {
-                session_id: self.state.session_id,
-            })
-            .await
-            .unwrap_or(0);
-        // 新手行会经验加成（C# BuffType.Newbie → ExpRatePercent；仅新手工会在行会时查询一次）
+        // 配偶/徒弟/新手行会经验加成：使用 tick_partner_bonuses 缓存的百分比
+        //（C# GainExp 语义；避免在 WorldActor tick 内反向 ask WorldActor 造成死锁）
+        let lover_bonus = self.state.exp_bonus_lover_percent;
+        let mentee_bonus = self.state.exp_bonus_mentee_percent;
         let newbie_bonus = if self.state.newbie_exp_bonus {
-            self.world_ref
-                .ask(crate::actors::world::partners::GetNewbieGuildConfig)
-                .await
-                .map(|(_, _, exp)| exp)
-                .unwrap_or(0)
+            self.state.exp_bonus_newbie_percent
         } else {
             0
         };
@@ -5017,6 +5010,10 @@ allow_group: false,
             is_mentor: false,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
+            exp_bonus_lover_percent: 0,
+            exp_bonus_mentee_percent: 0,
+            exp_bonus_newbie_percent: 0,
+            no_experience_map: false,
             brown_until_ms: 0,
             mount_loyalty_decrease_time: 0,
             mount_loyalty_increase_time: 0,
