@@ -1203,6 +1203,30 @@ impl Message<TakeDamage> for PlayerActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let damage = msg.damage.max(0);
+        // #942：C# SpecialItemMode.Protection——装备含 Protection 且 MP>0 时伤害全部由 MP 吸收
+        // （HumanObject.ChangeHP → ChangeMP(amount)，不致死；Struck 动画照常）
+        if damage > 0
+            && self.state.mp > 0
+            && self.state.inventory.equipment.iter().flatten()
+                .any(|it| it.info.as_ref().map(|i| i.unique.contains(mir2_shared::enums::SpecialItemMode::PROTECTION)).unwrap_or(false))
+        {
+            self.state.mp = (self.state.mp - damage).max(0);
+            let mut struck_body = Vec::new();
+            struck_body.extend_from_slice(&msg.attacker_id.to_le_bytes());
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Struck as i16, &struck_body),
+            }).await;
+            let mut hb = Vec::new();
+            hb.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
+            hb.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &hb),
+            }).await;
+            debug!("Player {} absorbed {} damage with MP (Protection)", self.state.name, damage);
+            return false;
+        }
         self.state.hp = (self.state.hp - damage).max(0);
 
         // C# HumanObject.Attacked：被玩家攻击时攻击者获得灰名（BrownTime，世界侧校验 PK/开战）
@@ -4248,6 +4272,13 @@ impl PlayerState {
         if magic.level >= 3 {
             return None;
         }
+        // #942：C# SpecialItemMode.Skill——技能经验 ×3（Stats[SkillGainMultiplier]=3）
+        let mut amount = amount;
+        if self.inventory.equipment.iter().flatten()
+            .any(|it| it.info.as_ref().map(|i| i.unique.contains(mir2_shared::enums::SpecialItemMode::SKILL)).unwrap_or(false))
+        {
+            amount = amount.saturating_mul(3);
+        }
         magic.experience = magic.experience.saturating_add(amount);
         let xp_needed = (magic.level as u16 + 1) * 1000;
         if magic.experience >= xp_needed && magic.level < 3 {
@@ -5123,5 +5154,27 @@ mod tests {
         assert_eq!(spirit_sword_accuracy(&s.magics), 5);
         s.magics[0].level = 3;
         assert_eq!(spirit_sword_accuracy(&s.magics), 8);
+    }
+
+    // ---- #942 特殊装备 Skill：技能经验 ×3 ----
+    #[test]
+    fn test_skill_special_exp_multiplier() {
+        let mut s = make_state();
+        use crate::actors::inventory::EquipmentSlot;
+        use mir2_shared::data::item::UserItem;
+        // 学习火球（C# 编号 31；gain_spell_exp 入参为 SharedRust +3 = 34）
+        assert!(s.learn_magic(31));
+        // 无 Skill 特殊：经验 100
+        let _ = s.gain_spell_exp(34, 100);
+        assert_eq!(s.magics.iter().find(|m| m.spell == 31).unwrap().experience, 100);
+        // 装备 Skill 特殊装备：经验 ×3
+        let mut info = mir2_shared::data::item::ItemInfo::default();
+        info.unique = mir2_shared::enums::SpecialItemMode::SKILL;
+        s.inventory.equipment[EquipmentSlot::Armour as usize] = Some(UserItem {
+            info: Some(info),
+            ..Default::default()
+        });
+        let _ = s.gain_spell_exp(34, 100);
+        assert_eq!(s.magics.iter().find(|m| m.spell == 31).unwrap().experience, 400); // 100 + 300
     }
 }
