@@ -535,6 +535,7 @@ impl WorldActor {
                 map_size: self.maps.get(&monster.map_index)
                     .map(|m| (m.width as i32, m.height as i32))
                     .unwrap_or((200, 200)),
+                dragon_level: 0,
                 players: &[],
                 monsters: &[],
                 out_moves: &mut die_moves,
@@ -2543,6 +2544,7 @@ impl Message<Tick> for WorldActor {
                         map_size: self.maps.get(&monster.map_index)
                             .map(|m| (m.width as i32, m.height as i32))
                             .unwrap_or((200, 200)),
+                        dragon_level: self.dragon_state.as_ref().map(|d| d.level).unwrap_or(0),
                         players: &player_snaps,
                         monsters: &monster_snaps,
                         out_moves: &mut boss_moves,

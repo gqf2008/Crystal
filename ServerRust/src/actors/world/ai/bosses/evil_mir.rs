@@ -96,7 +96,14 @@ impl MonsterBehavior for EvilMirBehavior {
         let is_mass = fastrand::i32(0..8) == 0;
         self.mass_attack = is_mass;
 
-        let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck);
+        // C# EvilMir.Attack：DragonLink 时 MaxDC + (DragonLevel-1)*10（按意图修正 C# 运算符优先级）
+        let dragon_bonus = if ctx.dragon_level > 0 {
+            (ctx.dragon_level as i32 - 1) * 10
+        } else {
+            0
+        };
+        let damage = crate::combat::attack::get_attack_power(
+            monster.min_dmg, monster.max_dmg + dragon_bonus, monster.luck);
         let final_damage = if is_mass { damage } else { (damage as f32 * 0.75) as i32 }.max(1);
 
         // C# EvilMir.cs:139-150：MAC 伤害 + 绿毒 + 麻痹
