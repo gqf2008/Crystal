@@ -101,10 +101,17 @@ impl MonsterBehavior for WoomaTaurusBehavior {
             self.next_tele_tick = ctx.tick_count + TELE_CHECK_TICKS;
             let near_count = ctx.find_targets_in_range(monster.x, monster.y, 1, monster.map_index).len();
             if near_count >= 4 {
-                // 闪现到随机位置（简化：原地 +-6 格）
-                let nx = monster.x + fastrand::i32(-6..=6);
-                let ny = monster.y + fastrand::i32(-6..=6);
-                ctx.out_moves.push((monster.object_id, nx, ny, 0));
+                // 逃跑传送：全图随机 walkable 格（C# TeleportRandom(4,0)）；
+                // 推多个候选，tick 端校验 walkable，最后有效者生效
+                let (mw, mh) = ctx.map_size;
+                for _ in 0..10 {
+                    ctx.out_moves.push((
+                        monster.object_id,
+                        fastrand::i32(0..mw.max(1)),
+                        fastrand::i32(0..mh.max(1)),
+                        monster.direction,
+                    ));
+                }
                 return;
             }
         }
