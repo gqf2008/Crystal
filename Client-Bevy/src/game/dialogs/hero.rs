@@ -753,6 +753,16 @@ fn hero_server_events(
                     hero.message = format!("英雄技能 {:?} 升级 Lv.{}", spell, level);
                 }
             }
+            ServerEvent::HeroMagicLearned { magic } => {
+                // #1128：英雄技能书学会 → upsert 到 HeroState.magics（面板即时刷新）
+                if let Some(existing) = hero.magics.iter_mut().find(|m| m.spell == magic.spell) {
+                    *existing = magic.clone();
+                } else {
+                    hero.magics.push(magic.clone());
+                }
+                hero.message = format!("英雄学会技能: {}", magic.name);
+                tracing::info!("🦸 英雄学会技能: {} ({:?})", magic.name, magic.spell);
+            }
             ServerEvent::HeroInformation {
                 object_id,
                 inventory,

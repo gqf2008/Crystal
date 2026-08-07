@@ -855,6 +855,7 @@ fn hud_server_events(
             | ServerEvent::WorldMapSetup { .. }
             | ServerEvent::MagicLearned { .. }
             | ServerEvent::MagicLeveled { .. }
+            | ServerEvent::HeroMagicLearned { .. }
             | ServerEvent::TimeOfDay { .. }
             | ServerEvent::ObjectColourChanged { .. }
             | ServerEvent::StoragePasswordResult { .. }
