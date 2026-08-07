@@ -10,8 +10,29 @@ use super::*;
 
 /// 元素经验档位（C# Settings.OrbsExpList 默认：Orb i = i*50）
 pub(crate) const ORBS_EXP_LIST: [i32; 4] = [50, 100, 150, 200];
+/// 元素攻击加成（C# Settings.OrbsDmgList 默认：Orb i = i*4）
+pub(crate) const ORBS_DMG_LIST: [i32; 4] = [4, 8, 12, 16];
+/// 元素防御加成（C# Settings.OrbsDefList 默认：Orb i = i*2）
+pub(crate) const ORBS_DEF_LIST: [i32; 4] = [2, 4, 6, 8];
 /// 冥想每级上限（C# Settings.GatherOrbsPerLevel 默认 true）
 pub(crate) const GATHER_ORBS_PER_LEVEL: bool = true;
+
+/// 元素球数量（C# HumanObject.GetElementalOrbCount：满足 ElementsLevel >= OrbsExpList[i]
+/// 的档位数；OrbsExpList 升序 [50,100,150,200]，故为升序计数）
+pub(crate) fn elemental_orb_count(elements_level: i32) -> usize {
+    ORBS_EXP_LIST.iter().filter(|exp| elements_level >= **exp).count()
+}
+
+/// 元素球加成（C# HumanObject.GetElementalOrbPower：无元素返回 0；
+/// defensive 用 OrbsDefList，否则 OrbsDmgList，取当前球数档位）
+pub(crate) fn elemental_orb_power(elements_level: i32, defensive: bool) -> i32 {
+    let count = elemental_orb_count(elements_level);
+    if count == 0 {
+        return 0;
+    }
+    let list = if defensive { ORBS_DEF_LIST } else { ORBS_DMG_LIST };
+    list[count - 1]
+}
 
 impl WorldActor {
     /// 当前世界时间（毫秒，近似 C# Envir.Time）
@@ -63,6 +84,43 @@ impl WorldActor {
                 }
             }
         }
+    }
+
+    /// 广播 ObjectEffect（C# CurrentMap.Broadcast，ElementalBarrierUp/Down 等）
+    pub(crate) async fn broadcast_object_effect(
+        &self, object_id: u32, effect: mir2_shared::enums::SpellEffect, map_index: u16,
+    ) {
+        let packet = mir2_shared::packets::server::magic_combat::ObjectEffect {
+            object_id, effect, effect_type: 0, delay_time: 0, time: 0,
+        };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            let pkt = build_packet_bytes(
+                mir2_shared::enums::ServerPacketIds::ObjectEffect as i16, &body);
+            for (sid, r) in &self.players {
+                if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                    if os.map_index == map_index {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *sid, data: pkt.clone(),
+                        }).await;
+                    }
+                }
+            }
+        }
+    }
+
+    /// 消耗元素（C# ElementalShot/ElementalBarrier 命中后 `ElementsLevel=0; ObtainElement(false)`：
+    /// 等级归零再 +1 = 1，HasElemental=false，广播 SetElemental）
+    pub(crate) async fn consume_elemental(&mut self, session_id: u64) {
+        let record = match self.players.get(&session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+        let _ = record.actor_ref.ask(crate::actors::player::SetElements {
+            level: 0,
+            has_elemental: false,
+        }).await;
+        self.obtain_element(session_id, false).await;
     }
 
     /// 专注打断：玩家移动/被推时调用（C# HumanObject Walk/Run/Pushed）
@@ -190,5 +248,32 @@ impl WorldActor {
             state.object_id, has_elemental, level as u32, orb_type,
             max_orbs as i64, state.map_index,
         ).await;
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_orb_count_and_power() {
+        // C# GetElementalOrbCount：OrbsExpList=[50,100,150,200]
+        assert_eq!(elemental_orb_count(0), 0);
+        assert_eq!(elemental_orb_count(49), 0);
+        assert_eq!(elemental_orb_count(50), 1);
+        assert_eq!(elemental_orb_count(100), 2);
+        assert_eq!(elemental_orb_count(150), 3);
+        assert_eq!(elemental_orb_count(200), 4);
+        assert_eq!(elemental_orb_count(999), 4);
+        // C# GetElementalOrbPower：攻击 OrbsDmgList=[4,8,12,16]，防御 OrbsDefList=[2,4,6,8]
+        assert_eq!(elemental_orb_power(0, false), 0);
+        assert_eq!(elemental_orb_power(50, false), 4);
+        assert_eq!(elemental_orb_power(100, false), 8);
+        assert_eq!(elemental_orb_power(150, false), 12);
+        assert_eq!(elemental_orb_power(200, false), 16);
+        assert_eq!(elemental_orb_power(50, true), 2);
+        assert_eq!(elemental_orb_power(100, true), 4);
+        assert_eq!(elemental_orb_power(200, true), 8);
     }
 }
