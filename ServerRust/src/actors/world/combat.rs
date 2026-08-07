@@ -1466,24 +1466,33 @@ impl Message<MagicRequest> for WorldActor {
             // --- 道士 Debuff/控制类 ---
             // Poisoning：对目标怪物施毒（绿毒持续掉血/红毒降防御，C# Poisoning 消耗毒药物品）
             SPELL_POISONING => {
-                let hit_ids: Vec<u32> = self.monsters.iter()
-                    .filter(|(_, m)| {
-                        let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
-                        dist <= spell_range.max(1) && m.hp > 0
-                    })
-                    .map(|(id, _)| *id)
-                    .collect();
-                // 绿毒（持续掉血），value 基于 SC
-                let poison_value = (magic_stat / 4).max(3).min(10);
-                for mid in hit_ids {
+                // C# HumanObject.cs:6043：单目标（点击格首个怪物），value = GetDamage(SC)
+                let value = crate::combat::attack::get_attack_power(
+                    state.min_sc + state.bonus_min_sc,
+                    state.max_sc + state.bonus_max_sc,
+                    0,
+                ).max(1);
+                let mid = self.monsters.iter()
+                    .find(|(_, m)| (m.x - target_x).abs() <= 1 && (m.y - target_y).abs() <= 1 && m.hp > 0)
+                    .map(|(id, _)| *id);
+                if let Some(mid) = mid {
                     if let Some(monster) = self.monsters.get_mut(&mid) {
+                        // C# Shape1 绿毒：Duration = value*2 + (Lv+1)*7；Value = value/15 + Lv + 1 + Random(PoisonAttack)
+                        let duration = (value * 2 + (spell_level as i32 + 1) * 7).max(1) as u32;
+                        let poison_value = (value / 15 + spell_level as i32 + 1
+                            + fastrand::i32(0..state.poison_attack.max(1))).max(1);
                         crate::combat::poison::apply_poison(&mut monster.poison_list,
-                            crate::combat::poison::Poison::new(mir2_shared::enums::PoisonType::GREEN, 10, poison_value, 2000));
+                            crate::combat::poison::Poison::new(
+                                mir2_shared::enums::PoisonType::GREEN, duration, poison_value, 2000,
+                            ));
                         monster.provoked = true;
                         monster.target_session = Some(msg.session_id);
+                        debug!("Magic: {} casts Poisoning -> monster {} ({}s, {}dmg/tick)",
+                               state.name, mid, duration, poison_value);
                     }
+                } else {
+                    debug!("Magic: {} casts Poisoning (no target near {},{})", state.name, target_x, target_y);
                 }
-                debug!("Magic: {} casts Poisoning (green poison {}dmg/tick)", state.name, poison_value);
             }
             // TrapHexagon：定身目标怪物（C# 限制移动，施加 Slow/Paralysis）
             SPELL_TRAP_HEXAGON => {
