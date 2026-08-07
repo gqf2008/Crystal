@@ -690,6 +690,7 @@ impl WorldActor {
         let mut die_delayed: Vec<ai::DelayedAttack> = Vec::new();
         let mut die_taunts: Vec<(u32, u32)> = Vec::new();
         let mut die_monster_teleports: Vec<(u32, i32, i32)> = Vec::new();
+        let mut die_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
         {
             // 死亡回调也提供玩家快照（C# Die 可 FindAllTargets；ToxicGhoul 死亡 AOE 毒等用）
             let die_player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
@@ -717,6 +718,7 @@ impl WorldActor {
                 out_delayed_attacks: &mut die_delayed,
                 out_monster_taunts: &mut die_taunts,
                 out_monster_teleports: &mut die_monster_teleports,
+                out_player_buffs: &mut die_player_buffs,
             };
             // 临时取出 behavior 避免 &mut monster + &mut behavior 双重借用（与 AI 循环一致）
             let mut behavior = std::mem::replace(
@@ -891,7 +893,13 @@ impl WorldActor {
                 }
             }
         }
+        for (sid, buff) in &die_player_buffs {
+            if let Some(record) = self.players.get(sid) {
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: buff.clone() }).await;
+            }
+        }
     }
+
 
     pub(crate) async fn tick_pk_decay(&mut self) {
         if self.tick_count % 120 == 0 { // 12s × 10 ticks/s
@@ -3042,6 +3050,7 @@ impl Message<Tick> for WorldActor {
             let mut boss_delayed_attacks: Vec<ai::DelayedAttack> = Vec::new();
             let mut boss_taunts: Vec<(u32, u32)> = Vec::new();
             let mut boss_monster_teleports: Vec<(u32, i32, i32)> = Vec::new();
+            let mut boss_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
             // 召唤物过期队列（到期 tick 已过 → 移除，不掉落）
             let mut expired_monsters: Vec<u32> = Vec::new();
 
@@ -3088,6 +3097,7 @@ impl Message<Tick> for WorldActor {
                         out_delayed_attacks: &mut boss_delayed_attacks,
                         out_monster_taunts: &mut boss_taunts,
                         out_monster_teleports: &mut boss_monster_teleports,
+                        out_player_buffs: &mut boss_player_buffs,
                     };
                     // 临时取出 behavior 避免 &mut monster + &mut behavior 双重借用
                     let mut behavior = std::mem::replace(
@@ -3776,6 +3786,12 @@ impl Message<Tick> for WorldActor {
                 if walkable {
                     let dir = self.monsters.get(&oid).map(|m| m.direction).unwrap_or(0);
                     moved_monsters.push((oid, tx, ty, dir));
+                }
+            }
+            // Boss 给玩家加 buff（C# AddBuff：YinDevilNode/PowerBead 等）
+            for (sid, buff) in boss_player_buffs.drain(..) {
+                if let Some(record) = self.players.get(&sid) {
+                    let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
                 }
             }
             // Boss 攻击：广播 ObjectAttack + 对命中的玩家造成伤害

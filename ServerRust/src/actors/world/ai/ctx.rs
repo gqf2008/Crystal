@@ -158,6 +158,8 @@ pub struct AiCtx<'a> {
     pub out_monster_taunts: &'a mut Vec<(u32, u32)>,
     /// 输出：怪物自传送 (oid, x, y)（C# TeleportRandom/Teleport：RedFoxman/WhiteFoxman 等）
     pub out_monster_teleports: &'a mut Vec<(u32, i32, i32)>,
+    /// 输出：给玩家加 buff (session, BuffInstance)（C# AddBuff：YinDevilNode/PowerBead 等）
+    pub out_player_buffs: &'a mut Vec<(u64, crate::combat::buff::BuffInstance)>,
 }
 
 impl<'a> AiCtx<'a> {

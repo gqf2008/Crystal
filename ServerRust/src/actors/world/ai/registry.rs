@@ -300,6 +300,15 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("flameassassin") || name.contains("flame assassin") || name.contains("火焰刺客") {
         return Box::new(bosses::flame_assassin::FlameAssassinBehavior::new());
     }
+    if name.contains("yindevi") || name.contains("yin devil") || name.contains("阴魔") {
+        return Box::new(bosses::yin_devil_node::YinDevilNodeBehavior::new());
+    }
+    if name.contains("powerbead") || name.contains("power bead") || name.contains("能量珠") {
+        return Box::new(bosses::power_bead::PowerBeadBehavior::new());
+    }
+    if name.contains("demonguard") || name.contains("demon guard") || name.contains("恶魔守卫") {
+        return Box::new(bosses::demon_guard::DemonGuardBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -650,6 +659,9 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("axeplant") || name.contains("axe plant") || name.contains("斧头植物")
         || name.contains("hedgekektal") || name.contains("hedge kek tal") || name.contains("刺猬凯克塔")
         || name.contains("flameassassin") || name.contains("flame assassin") || name.contains("火焰刺客")
+        || name.contains("yindevi") || name.contains("yin devil") || name.contains("阴魔")
+        || name.contains("powerbead") || name.contains("power bead") || name.contains("能量珠")
+        || name.contains("demonguard") || name.contains("demon guard") || name.contains("恶魔守卫")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
