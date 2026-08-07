@@ -3377,41 +3377,67 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} casts MagicBooster (MC +{})", state.name, bonus);
             }
             // --- 道士系 ---
-            // Revelation：显血/反隐（对齐 C# TaoistObject.Revelation）
-            // 简化：移除范围内敌方玩家隐身 + 标记自身可看见隐身单位（持续 buff）
+            // Revelation：显血（C# HumanObject.cs:6284）——单目标（点击玩家/怪物），
+            // Random(4)<=Lv 成功，value 秒内显示目标 HP（value = GetAttackPower(MinSC,MaxSC)+GetPower(0)）
             SPELL_REVELATION => {
-                let reveal_range = spell_range.max(3).min(8);
-                let duration_ticks = (30 + spell_level as u32 * 10) * 10; // 30-60s
-                // 自身获得反隐 buff（用 Invisibility 标记自身可见隐身不可行，此处用 Reflect 占位）
-                // 实际效果：移除附近敌方隐身玩家
-                let mut revealed: Vec<u64> = Vec::new();
-                for (sid, other) in &self.players {
-                    if *sid == msg.session_id { continue; }
-                    if self.invisible_sessions.contains(sid) {
-                        if let Ok(Some(s)) = other.actor_ref.ask(GetPlayerState).await {
-                            if !s.is_dead && s.map_index == state.map_index {
-                                let dist = (s.x - state.x).abs() + (s.y - state.y).abs();
-                                if dist <= reveal_range {
-                                    revealed.push(*sid);
-                                }
-                            }
+                if fastrand::i32(0..4) > spell_level as i32 {
+                    debug!("Magic: {} casts Revelation (failed)", state.name);
+                    return;
+                }
+                let value = crate::combat::attack::get_attack_power(
+                    state.min_sc + state.bonus_min_sc,
+                    state.max_sc + state.bonus_max_sc,
+                    0,
+                ).max(1);
+                let until = self.tick_count + (value as u64) * 10;
+                // 目标：点击的玩家优先，其次点击格怪物
+                let mut target_oid: Option<u32> = None;
+                for (_sid, r) in &self.players {
+                    if let Ok(Some(s)) = r.actor_ref.ask(GetPlayerState).await {
+                        if s.object_id == msg.target_id {
+                            target_oid = Some(s.object_id);
+                            break;
                         }
                     }
                 }
-                for sid in &revealed {
-                    self.invisible_sessions.remove(sid);
-                    if let Some(other) = self.players.get(sid) {
-                        let _ = other.actor_ref.ask(crate::actors::player::RemoveBuff {
-                            buff_type: crate::combat::buff::BuffType::Invisibility,
+                if target_oid.is_none() {
+                    target_oid = self.monsters.iter()
+                        .find(|(_, m)| (m.x - target_x).abs() <= 1 && (m.y - target_y).abs() <= 1 && m.hp > 0)
+                        .map(|(id, _)| *id);
+                }
+                if let Some(oid) = target_oid {
+                    self.revealed_hp.insert(oid, until);
+                    // 广播一次 ObjectHealth（客户端显示血条）
+                    let (hp, max_hp) = if let Some(m) = self.monsters.get(&oid) {
+                        (m.hp, m.max_hp)
+                    } else {
+                        let mut pos = (0i32, 1i32);
+                        for (_sid, r) in &self.players {
+                            if let Ok(Some(s)) = r.actor_ref.ask(GetPlayerState).await {
+                                if s.object_id == oid {
+                                    pos = (s.hp, s.max_hp);
+                                    break;
+                                }
+                            }
+                        }
+                        pos
+                    };
+                    let percent = ((hp.max(0) as f32 / max_hp.max(1) as f32) * 100.0) as u8;
+                    let mut body = Vec::new();
+                    body.extend_from_slice(&oid.to_le_bytes());
+                    body.push(percent);
+                    body.extend_from_slice(&3u16.to_le_bytes());
+                    let pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &body);
+                    for sid in self.players.keys() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *sid,
+                            data: pkt.clone(),
                         }).await;
                     }
+                    debug!("Magic: {} casts Revelation -> oid {} ({}s)", state.name, oid, value);
+                } else {
+                    debug!("Magic: {} casts Revelation (no target at {},{})", state.name, target_x, target_y);
                 }
-                // 给自身一个占位 buff 记录持续时间（反隐能力）
-                let buff = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::Reflect { percent: 0 }, duration_ticks, 5);
-                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
-                debug!("Magic: {} casts Revelation (revealed {} hidden players)",
-                    state.name, revealed.len());
             }
             // Reincarnation：复活死亡玩家（对齐 C# TaoistObject.Reincarnation）
             // 简化：找附近（3格内）死亡玩家，原地半血复活
