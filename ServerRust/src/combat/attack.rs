@@ -49,6 +49,8 @@ pub struct CombatStats {
     pub armour_rate: f32,
     /// 伤害倍率（C# DamageRate，默认 1.0）
     pub damage_rate: f32,
+    /// 攻击者伤害倍率（C# MentorDamageRatePercent：导师近身加成；0=按 1.0 处理）
+    pub attacker_damage_rate: f32,
     /// 冰冻攻击（ApplyNegativeEffects 用）
     pub freezing: i32,
     /// 毒物攻击（ApplyNegativeEffects 用）
@@ -277,7 +279,8 @@ pub fn resolve_attack(
 
     // [2] ArmourRate / DamageRate 倍率（clamp i32，对齐 C# decimal 钳位）
     let armour = clamp_i32((armour as f32 * defender.armour_rate) as i64);
-    let mut damage = clamp_i32((raw_damage as f32 * defender.damage_rate) as i64);
+    let mut damage = clamp_i32((raw_damage as f32 * defender.damage_rate
+        * if attacker.attacker_damage_rate > 0.0 { attacker.attacker_damage_rate } else { 1.0 }) as i64);
 
     // [3] AttackBonus
     damage = clamp_i32(damage as i64 + attacker.attack_bonus as i64);

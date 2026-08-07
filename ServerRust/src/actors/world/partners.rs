@@ -99,3 +99,56 @@ impl Message<GetMenteeExpBonus> for WorldActor {
         0
     }
 }
+
+/// 每 50 ticks 刷新导师伤害加成（C# ProcessBuffs 维护 BuffType.Mentor +
+/// MonsterObject.Attacked 的 MentorDamageRatePercent 判定：导师 + 徒弟近身同组存活）
+pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
+    use super::*;
+    if world.tick_count % 50 != 0 {
+        return;
+    }
+    const DATA_RANGE: i32 = 16;
+    let mut updates: Vec<(u64, bool)> = Vec::new(); // (session, active)
+    for (sid, record) in &world.players {
+        if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+            // 只有导师且徒弟在线时可能激活
+            let active = if state.is_mentor {
+                if let Some(mentee_name) = state.mentor_name.clone() {
+                    let mut found = false;
+                    for (_, other) in &world.players {
+                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                            if os.is_dead || !os.name.eq_ignore_ascii_case(&mentee_name) {
+                                continue;
+                            }
+                            if os.map_index != state.map_index {
+                                continue;
+                            }
+                            let dist = (os.x - state.x).abs() + (os.y - state.y).abs();
+                            if dist > DATA_RANGE {
+                                continue;
+                            }
+                            // C#：徒弟需与导师同组（MonsterObject.Attacked 中 GroupMembers.Contains）
+                            if os.group_id.is_some() && os.group_id == state.group_id {
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                    found
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            if active != state.mentor_damage_bonus {
+                updates.push((*sid, active));
+            }
+        }
+    }
+    for (sid, active) in updates {
+        if let Some(record) = world.players.get(&sid) {
+            let _ = record.actor_ref.ask(crate::actors::player::SetMentorDamageBonus { active }).await;
+        }
+    }
+}
