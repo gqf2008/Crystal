@@ -5,6 +5,7 @@
 mod awakening;
 mod bind;
 mod combat;
+mod effects;
 mod elements;
 pub mod ai;
 #[allow(dead_code)]
@@ -1194,6 +1195,7 @@ impl WorldActor {
             state.class, state.gender, state.hair,
             weapon, weapon_effect, armor,
             state.mount_type, state.is_mounted,
+            state.level_effects,
         );
         for (sid, record) in &self.players {
             if *sid == session_id { continue; }
@@ -1642,6 +1644,7 @@ impl WorldActor {
             state.class, state.gender, state.hair,
             weapon, weapon_effect, armor,
             state.mount_type, state.is_mounted,
+            state.level_effects,
         );
         let player_map_index = state.map_index;
         for (sid, other_record) in &self.players {
@@ -2614,6 +2617,11 @@ impl WorldActor {
                                 }
                             }
                         }
+                    }
+                    "REFRESHEFFECTS" => {
+                        // C# ActionType.RefreshEffects：按 flags 990-998 刷新等级特效并广播
+                        self.refresh_level_effects(session_id).await;
+                        self.broadcast_level_effects(session_id).await;
                     }
                     "SETFLAG" => {
                         let key = parts.next().unwrap_or("").to_string();
@@ -4992,7 +5000,7 @@ fn build_user_information_packet(
     body.extend_from_slice(&state.mp.to_le_bytes());          // mp
     body.extend_from_slice(&state.experience.to_le_bytes());  // experience
     body.extend_from_slice(&state.max_experience.to_le_bytes()); // max_experience
-    body.extend_from_slice(&0u16.to_le_bytes());              // level_effects
+    body.extend_from_slice(&state.level_effects.to_le_bytes()); // level_effects
     body.push(0u8);                                           // has_hero=false
     body.push(state.hero_behaviour);                // hero_behaviour (C# 0..3)
 
@@ -5132,6 +5140,7 @@ pub(crate) fn build_object_player_packet(
     hair: u8,
     weapon: i16, weapon_effect: i16, armor: i16,
     mount_type: i16, is_mounted: bool,
+    level_effects: u16,
 ) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
@@ -5167,7 +5176,7 @@ pub(crate) fn build_object_player_packet(
     body.extend_from_slice(&0u32.to_le_bytes());        // element_orb_lvl
     body.extend_from_slice(&0u32.to_le_bytes());        // element_orb_max
     body.extend_from_slice(&0i32.to_le_bytes());        // buffs count=0
-    body.extend_from_slice(&0u16.to_le_bytes());        // level_effects=None (client reads u16)
+    body.extend_from_slice(&level_effects.to_le_bytes()); // level_effects (client reads u16)
 
     build_packet_bytes(ServerPacketIds::ObjectPlayer as i16, &body)
 }
