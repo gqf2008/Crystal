@@ -51,6 +51,9 @@ fn reduce_exp(amount: i32, level: u16, target_level: i32) -> i32 {
 /// C# PlayerObject.WinExp partyExpRate（nearCount 1..11，上限 11 人）
 const PARTY_EXP_RATE: [f64; 11] = [1.0, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.1, 2.2];
 
+/// #954：攻城箭塔单次伤害（C# ConquestArcher 攻击力简化常量）
+const ARCHER_DAMAGE: i32 = 30;
+
 /// C# WinExp 组队单成员分配：expPoint * rate * memberLevel / sumLevel
 fn party_exp_share(exp_after_reduce: i32, rate: f64, member_level: u16, sum_level: i32) -> i32 {
     if sum_level <= 0 {
@@ -2047,6 +2050,60 @@ impl WorldActor {
             broadcast_system_message(&self.gate_ref, &self.players,
                 &format!("💥 区域内的{}（#{}）被攻城器摧毁！进攻方可以长驱直入！", type_name, oid));
             debug!("Conquest siege structure #{} ({}) destroyed", oid, type_name);
+        }
+
+        // 4) 箭塔自动攻击（C# ConquestArcher：战争期间攻击非守方玩家；每 30 ticks = 3s 一轮）
+        if self.tick_count % 30 == 0 {
+            // 预收集玩家 (session, map, x, y, guild)
+            let player_snaps: Vec<(u64, u16, i32, i32, Option<String>)> = {
+                let mut out = Vec::new();
+                for (_sid, record) in &self.players {
+                    if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                        if !state.is_dead {
+                            out.push((state.session_id, state.map_index, state.x, state.y, state.guild_name.clone()));
+                        }
+                    }
+                }
+                out
+            };
+            let mut archer_attacks: Vec<(u32, u64, i32)> = Vec::new();
+            for cid in &active_conquest_ids {
+                let owner = self.conquest_instances.iter()
+                    .find(|c| c.id == *cid)
+                    .and_then(|c| c.owner_guild.clone());
+                let conquest_map = self.conquest_instances.iter()
+                    .find(|c| c.id == *cid)
+                    .map(|c| c.map_index as u16)
+                    .unwrap_or(u16::MAX);
+                for (oid, s) in &self.siege_structures {
+                    if s.conquest_id != *cid
+                        || s.structure_type != conquest::SiegeStructureType::ArcherTower
+                        || s.is_destroyed()
+                    {
+                        continue;
+                    }
+                    // 简化：箭塔坐标当前为占位（未接入地图坐标），按全地图覆盖近似；
+                    // 后续接入坐标后改为 s.x/s.y + ARCHER_RANGE 过滤
+                    for (sid, map, _x, _y, guild) in &player_snaps {
+                        if *map != conquest_map { continue; }
+                        // C# FindTarget：跳过守方（owner 行会）玩家
+                        if let (Some(owner), Some(g)) = (&owner, guild) {
+                            if g == owner { continue; }
+                        }
+                        archer_attacks.push((*oid, *sid, ARCHER_DAMAGE));
+                        break;
+                    }
+                }
+            }
+            for (oid, sid, damage) in archer_attacks {
+                if let Some(record) = self.players.get(&sid) {
+                    let _ = record.actor_ref.ask(crate::actors::player::TakeDamage {
+                        attacker_id: oid,
+                        attacker_session: 0,
+                        damage,
+                    }).await;
+                }
+            }
         }
 
         // 3) 控制点占领判定（ControlPoints 模式）：每 60 ticks 检查玩家位置
