@@ -81,6 +81,11 @@ pub(crate) async fn send_hero_information_packet(&self, session_id: u64) {
         .map(|s| s.map(|item| enrich(item)))
         .collect();
     let ai_hp = self.hero_ai_states.get(&session_id).map(|ai| ai.hp).unwrap_or(0);
+    let ai_mp = self
+        .hero_ai_states
+        .get(&session_id)
+        .map(|ai| ai.mp)
+        .unwrap_or(0);
 
     let packet = mir2_shared::packets::server::hero::HeroInformation {
         object_id: hero_oid,
@@ -90,7 +95,7 @@ pub(crate) async fn send_hero_information_packet(&self, session_id: u64) {
         level: hero.level,
         hair: 0,
         hp: ai_hp,
-        mp: 0,
+        mp: ai_mp,
         experience: 0,
         max_experience: 100,
         inventory: Some(inventory),
@@ -410,15 +415,24 @@ pub struct HeroCombatAI {
     pub last_sent_hp: i32,
     /// 药水累计待回复 HP（#1182 C# PotHealthAmount，NormalPotion 累加）
     pub pot_health: u32,
+    /// 药水累计待回复 MP（#1186 C# PotManaAmount，NormalPotion 累加）
+    pub pot_mana: u32,
     /// 下次自动喝药检查 tick（#1182 C# AutoPotTime）
     pub next_autopot_tick: u64,
+    /// 当前 MP（#1186：C# Stats[MP]，施法耗蓝/回蓝）
+    pub mp: i32,
+    /// 最大 MP（#1186：C# Stats[MP]）
+    pub max_mp: i32,
+    /// 上次已下发主人的 MP（#1186：避免每 tick 重复发 HeroHealthChanged）
+    pub last_sent_mp: i32,
 }
 
 impl HeroCombatAI {
     /// 以主人状态初始化英雄 AI（主人后方 1 格出生）
-    fn new_for_owner(owner_x: i32, owner_y: i32, hero_max_hp: i32) -> Self {
-        // #1180：英雄 HP 用自身属性（C# Stats[HP]），不再按主人 60% 近似
+    fn new_for_owner(owner_x: i32, owner_y: i32, hero_max_hp: i32, hero_max_mp: i32) -> Self {
+        // #1180/#1186：英雄 HP/MP 用自身属性（C# Stats[HP]/Stats[MP]）
         let max_hp = hero_max_hp.max(1);
+        let max_mp = hero_max_mp.max(1);
         Self {
             x: owner_x,
             y: owner_y.saturating_add(1),
@@ -431,7 +445,11 @@ impl HeroCombatAI {
             max_hp,
             last_sent_hp: max_hp,
             pot_health: 0,
+            pot_mana: 0,
             next_autopot_tick: 0,
+            mp: max_mp,
+            max_mp,
+            last_sent_mp: max_mp,
         }
     }
 }
@@ -476,14 +494,22 @@ impl WorldActor {
             hero_combat: crate::combat::attack::CombatStats,
             /// 英雄自身最大 HP（#1180）
             hero_max_hp: i32,
+            /// 英雄自身最大 MP（#1186：C# Stats[MP]）
+            hero_max_mp: i32,
             /// 英雄完整自身属性（#1184：DC/MC/SC 齐备，施法/治疗用自身属性）
             hero_stats: super::hero_stats::HeroStats,
             /// 英雄自身等级（#1182 C# PerTickRegen = 5 + Level/10）
             hero_level: u16,
+            /// 已学技能 (C# spell, level)（#1186：施法耗蓝按实际等级）
+            hero_magics: Vec<(i32, u8)>,
             /// 自动喝药 HP 阈值（0=关闭，C# AutoHPPercent）
             auto_hp_percent: u8,
             /// 自动喝药物品 index（C# HPItemIndex）
             hp_item_index: i32,
+            /// 自动喝药 MP 阈值（0=关闭，C# AutoMPPercent）
+            auto_mp_percent: u8,
+            /// 自动喝蓝物品 index（C# MPItemIndex）
+            mp_item_index: i32,
         }
 
         let mut snapshots: Vec<HeroSnapshot> = Vec::new();
@@ -527,12 +553,20 @@ impl WorldActor {
                         .map(|s| s.to_combat_stats())
                         .unwrap_or_else(|| state.to_combat_stats()),
                     hero_max_hp: hero_stats.map(|s| s.max_hp).unwrap_or(100),
+                    hero_max_mp: hero_stats.map(|s| s.max_mp).unwrap_or(60),
                     hero_stats: hero_stats.unwrap_or_else(|| {
                         super::hero_stats::hero_base_stats(state.class, state.level as i32)
                     }),
                     hero_level,
+                    hero_magics: state
+                        .hero_magics
+                        .iter()
+                        .map(|m| (m.spell, m.level))
+                        .collect(),
                     auto_hp_percent: state.auto_pot_hp.min(100) as u8,
                     hp_item_index: state.auto_pot_hp_item,
+                    auto_mp_percent: state.auto_pot_mp.min(100) as u8,
+                    mp_item_index: state.auto_pot_mp_item,
                 });
             }
         }
@@ -571,14 +605,22 @@ impl WorldActor {
         // 辅助意图（道士治疗主人 / 战士 buff）：暂时简化为发送 ObjectAttack 广播但不造伤害
         // (hero_session_id, target_session_or_zero, spell_id, is_heal)
         let mut support_intents: Vec<(u64, u64, u8, bool)> = Vec::new();
-        // 自动喝药意图：(hero_session_id, item_index) —— 阶段 2.4 统一消耗（C# ProcessAutoPot/TryAutoPot）
-        let mut autopot_intents: Vec<(u64, i32)> = Vec::new();
+        // 自动喝药意图：(hero_session_id, item_index, is_mp) —— 阶段 2.4 统一消耗（C# ProcessAutoPot/TryAutoPot）
+        let mut autopot_intents: Vec<(u64, i32, bool)> = Vec::new();
 
         for snap in &snapshots {
             // 确保该英雄有 AI 状态（首次出现则初始化）
-            let ai = self.hero_ai_states
+            let ai = self
+                .hero_ai_states
                 .entry(snap.session_id)
-                .or_insert_with(|| HeroCombatAI::new_for_owner(snap.owner_x, snap.owner_y, snap.hero_max_hp));
+                .or_insert_with(|| {
+                    HeroCombatAI::new_for_owner(
+                        snap.owner_x,
+                        snap.owner_y,
+                        snap.hero_max_hp,
+                        snap.hero_max_mp,
+                    )
+                });
             // 暴露可变副本用于本 tick 决策（循环内不写回 self）
             let mut ai_local = ai.clone();
             // #1134：英雄 HP 不再每 tick 强制满血——改为脱战缓慢回血（C# Stats 回血近似）
@@ -598,8 +640,26 @@ impl WorldActor {
                 ai_local.hp += regen as i32;
                 ai_local.pot_health -= regen;
             }
-            // #1182：自动喝药检查（C# HeroObject.ProcessAutoPot，AutoPotDelay=1000ms）
-            // 条件：HP% < AutoHPPercent && HPItemIndex>0 && PotHealthAmount<=0
+            // #1186：自然回蓝（C# ProcessRegen：CanRegen 时 (int)(Stats[MP]*0.03)+1）
+            if !snap.owner_dead
+                && ai_local.mp > 0
+                && ai_local.mp < ai_local.max_mp
+                && ai_local.target_oid.is_none()
+            {
+                let regen = (ai_local.max_mp * 3 / 100 + 1).max(1);
+                ai_local.mp = (ai_local.mp + regen).min(ai_local.max_mp);
+            }
+            // #1186：药水持续回蓝（C# ProcessRegen：PerTickRegen 从 PotManaAmount 扣除）
+            if ai_local.mp > 0 && ai_local.mp < ai_local.max_mp && ai_local.pot_mana > 0 {
+                let per_tick = (5 + snap.hero_level as i32 / 10).max(1) as u32;
+                let need = (ai_local.max_mp - ai_local.mp) as u32;
+                let regen = per_tick.min(ai_local.pot_mana).min(need);
+                ai_local.mp += regen as i32;
+                ai_local.pot_mana -= regen;
+            }
+            // #1182/#1186：自动喝药检查（C# HeroObject.ProcessAutoPot，AutoPotDelay=1000ms）
+            // HP：HP% < AutoHPPercent && HPItemIndex>0 && PotHealthAmount<=0
+            // MP：MP% < AutoMPPercent && MPItemIndex>0 && PotManaAmount<=0
             if ai_local.hp > 0 && self.tick_count >= ai_local.next_autopot_tick {
                 ai_local.next_autopot_tick = self.tick_count + HERO_AUTOPOT_INTERVAL_TICKS;
                 let hp_pct = if ai_local.max_hp > 0 {
@@ -607,10 +667,24 @@ impl WorldActor {
                 } else {
                     100
                 };
-                if snap.auto_hp_percent > 0 && snap.hp_item_index > 0
-                    && ai_local.pot_health == 0 && hp_pct < snap.auto_hp_percent
+                let mp_pct = if ai_local.max_mp > 0 {
+                    (ai_local.mp * 100 / ai_local.max_mp) as u8
+                } else {
+                    100
+                };
+                if snap.auto_hp_percent > 0
+                    && snap.hp_item_index > 0
+                    && ai_local.pot_health == 0
+                    && hp_pct < snap.auto_hp_percent
                 {
-                    autopot_intents.push((snap.session_id, snap.hp_item_index));
+                    autopot_intents.push((snap.session_id, snap.hp_item_index, false));
+                }
+                if snap.auto_mp_percent > 0
+                    && snap.mp_item_index > 0
+                    && ai_local.pot_mana == 0
+                    && mp_pct < snap.auto_mp_percent
+                {
+                    autopot_intents.push((snap.session_id, snap.mp_item_index, true));
                 }
             }
 
@@ -733,11 +807,41 @@ impl WorldActor {
                         let spell = Spell::FireBall;
                         // #1184：法师法术伤害用英雄自身 MC（C# WizardHero BeginMagic → 自身 Stats）
                         let raw = hero_spell_damage(&snap.hero_stats, snap.class);
-                        spell_intents.push((
-                            snap.session_id, spell as u8, target.oid,
-                            target.x, target.y, raw, self.tick_count + 4, // 弹道延迟 ~400ms
-                        ));
-                        ai_local.next_attack_tick = self.tick_count + 8;
+                        // #1186：耗蓝（C# CanUseMagic：MagicCost > MP → 无法施法）
+                        let cost =
+                            hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+                        if ai_local.mp >= cost {
+                            ai_local.mp -= cost;
+                            spell_intents.push((
+                                snap.session_id,
+                                spell as u8,
+                                target.oid,
+                                target.x,
+                                target.y,
+                                raw,
+                                self.tick_count + 4, // 弹道延迟 ~400ms
+                            ));
+                            ai_local.next_attack_tick = self.tick_count + 8;
+                        } else {
+                            // 蓝不足：1 格内近战兜底（C# WizardHero 无蓝时 ProcessTarget 退避/近战）
+                            if target_dist <= 1 {
+                                let mraw = hero_attack_power(&snap.hero_combat);
+                                attack_intents.push((
+                                    snap.session_id,
+                                    target.oid,
+                                    mraw,
+                                    DefenceType::Ac,
+                                    false,
+                                ));
+                                support_intents.push((
+                                    snap.session_id,
+                                    0,
+                                    Spell::None as u8,
+                                    false,
+                                ));
+                            }
+                            ai_local.next_attack_tick = self.tick_count + 6;
+                        }
                     }
                     MirClass::Taoist => {
                         // 道士：辅助为主（治疗主人/上盾）+ 毒 + SoulFireBall 弹道
@@ -745,29 +849,97 @@ impl WorldActor {
                         let owner_hp_pct = if snap.owner_max_hp > 0 {
                             snap.owner_hp * 100 / snap.owner_max_hp
                         } else { 100 };
-                        if owner_hp_pct < 70 {
-                            support_intents.push((snap.session_id, snap.session_id, Spell::Healing as u8, true));
-                        } else {
-                            // 否则施毒 + 弹道
-                            let spell = Spell::SoulFireBall;
-                            // #1184：道士符伤害用英雄自身 SC
-                            let raw = hero_spell_damage(&snap.hero_stats, snap.class);
-                            spell_intents.push((
-                                snap.session_id, spell as u8, target.oid,
-                                target.x, target.y, raw, self.tick_count + 4,
+                        // #1186：治疗也耗蓝（C# CanUseMagic）
+                        let heal_cost = hero_spell_cost(
+                            &self.magic_infos,
+                            &snap.hero_magics,
+                            Spell::Healing as u8,
+                        );
+                        if owner_hp_pct < 70 && ai_local.mp >= heal_cost {
+                            ai_local.mp -= heal_cost;
+                            support_intents.push((
+                                snap.session_id,
+                                snap.session_id,
+                                Spell::Healing as u8,
+                                true,
                             ));
+                            ai_local.next_attack_tick = self.tick_count + 10;
+                        } else {
+                            // 否则施毒 + 弹道（#1184：道士符伤害用英雄自身 SC）
+                            let spell = Spell::SoulFireBall;
+                            let raw = hero_spell_damage(&snap.hero_stats, snap.class);
+                            let cost =
+                                hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+                            if ai_local.mp >= cost {
+                                ai_local.mp -= cost;
+                                spell_intents.push((
+                                    snap.session_id,
+                                    spell as u8,
+                                    target.oid,
+                                    target.x,
+                                    target.y,
+                                    raw,
+                                    self.tick_count + 4,
+                                ));
+                            } else if target_dist <= 1 {
+                                // 蓝不足：1 格内近战兜底
+                                let mraw = hero_attack_power(&snap.hero_combat);
+                                attack_intents.push((
+                                    snap.session_id,
+                                    target.oid,
+                                    mraw,
+                                    DefenceType::Ac,
+                                    false,
+                                ));
+                                support_intents.push((
+                                    snap.session_id,
+                                    0,
+                                    Spell::None as u8,
+                                    false,
+                                ));
+                            }
+                            ai_local.next_attack_tick = self.tick_count + 10;
                         }
-                        ai_local.next_attack_tick = self.tick_count + 10;
                     }
                     MirClass::Archer => {
                         // 弓箭手远程：StraightShot（AC 防御的物理弹道）
                         let spell = Spell::StraightShot;
                         let raw = hero_attack_power(&snap.hero_combat);
-                        spell_intents.push((
-                            snap.session_id, spell as u8, target.oid,
-                            target.x, target.y, raw, self.tick_count + 4,
-                        ));
-                        ai_local.next_attack_tick = self.tick_count + 7;
+                        // #1186：弓箭技能耗蓝（C# CanUseMagic）
+                        let cost =
+                            hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+                        if ai_local.mp >= cost {
+                            ai_local.mp -= cost;
+                            spell_intents.push((
+                                snap.session_id,
+                                spell as u8,
+                                target.oid,
+                                target.x,
+                                target.y,
+                                raw,
+                                self.tick_count + 4,
+                            ));
+                            ai_local.next_attack_tick = self.tick_count + 7;
+                        } else {
+                            // 蓝不足：1 格内近战兜底
+                            if target_dist <= 1 {
+                                let mraw = hero_attack_power(&snap.hero_combat);
+                                attack_intents.push((
+                                    snap.session_id,
+                                    target.oid,
+                                    mraw,
+                                    DefenceType::Ac,
+                                    false,
+                                ));
+                                support_intents.push((
+                                    snap.session_id,
+                                    0,
+                                    Spell::None as u8,
+                                    false,
+                                ));
+                            }
+                            ai_local.next_attack_tick = self.tick_count + 6;
+                        }
                     }
                 }
                 // 战斗时英雄 HP 模拟损耗（敌人反击的近似，#1134 增强到可感知）
@@ -789,48 +961,85 @@ impl WorldActor {
         }
 
         // ===== 阶段 2.4：自动喝药（C# HeroObject.ProcessAutoPot → TryAutoPot → UseItem） =====
-        // 每 HERO_AUTOPOT_INTERVAL_TICKS（约 1s）检查一次；仅在无待回复量且 HP%<阈值时喝 1 瓶。
-        // NormalPotion（shape 0）：PotHealthAmount += Stats[HP]，后续每 AI tick 回复 PerTickRegen。
-        for (session_id, item_index) in &autopot_intents {
-            let Some(record) = self.players.get(session_id).map(|r| r.clone()) else { continue };
+        // 每 HERO_AUTOPOT_INTERVAL_TICKS（约 1s）检查一次；仅在无待回复量且百分比低于阈值时喝 1 瓶。
+        // shape 0 NormalPotion：PotHealthAmount/PotManaAmount += Stats（每 AI tick 回复 PerTickRegen）；
+        // shape 1 SunPotion：立即回血回蓝（C# ChangeHP/ChangeMP）。
+        for (session_id, item_index, is_mp) in &autopot_intents {
+            let Some(record) = self.players.get(session_id).map(|r| r.clone()) else {
+                continue;
+            };
             // TryAutoPot：英雄背包里找第一个同 item_index 的药水
-            let potion = record.actor_ref
-                .ask(crate::actors::player::GetHeroPotionByItemIndex { item_index: *item_index })
+            let potion = record
+                .actor_ref
+                .ask(crate::actors::player::GetHeroPotionByItemIndex {
+                    item_index: *item_index,
+                })
                 .await
                 .unwrap_or(None);
             let Some(potion) = potion else { continue };
-            let Some(db) = self.item_infos.get(&potion.item_index) else { continue };
-            // DB item_type 为 C# 原始值：13=Potion；仅 NormalPotion（shape 0）累计持续回复
-            if db.item_type != 13 || db.shape != 0 {
+            let Some(db) = self.item_infos.get(&potion.item_index) else {
+                continue;
+            };
+            // DB item_type 为 C# 原始值：13=Potion
+            if db.item_type != 13 {
                 continue;
             }
-            let hp_pool = db.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(0) as u32;
-            if hp_pool == 0 {
+            let hp_pool = db
+                .stats
+                .get(&(mir2_shared::enums::Stat::HP as u8))
+                .copied()
+                .unwrap_or(0) as u32;
+            let mp_pool = db
+                .stats
+                .get(&(mir2_shared::enums::Stat::MP as u8))
+                .copied()
+                .unwrap_or(0) as u32;
+            // 目标维度必须有效（HP 意图看 HP、MP 意图看 MP）
+            let valid = if *is_mp { mp_pool > 0 } else { hp_pool > 0 };
+            if !valid {
                 continue;
             }
-            let consumed = record.actor_ref
-                .ask(crate::actors::player::ConsumeHeroItem { unique_id: potion.unique_id })
+            let consumed = record
+                .actor_ref
+                .ask(crate::actors::player::ConsumeHeroItem {
+                    unique_id: potion.unique_id,
+                })
                 .await
                 .unwrap_or(false);
             if !consumed {
                 continue;
             }
-            // C#：PotHealthAmount = min(ushort::MAX, PotHealthAmount + Stats[HP])
             if let Some(ai) = self.hero_ai_states.get_mut(session_id) {
-                ai.pot_health = (ai.pot_health + hp_pool).min(u16::MAX as u32);
+                if db.shape == 0 {
+                    // NormalPotion：累计持续回复（C# PotHealthAmount/PotManaAmount += Stats，min ushort::MAX）
+                    if hp_pool > 0 {
+                        ai.pot_health = (ai.pot_health + hp_pool).min(u16::MAX as u32);
+                    }
+                    if mp_pool > 0 {
+                        ai.pot_mana = (ai.pot_mana + mp_pool).min(u16::MAX as u32);
+                    }
+                } else if db.shape == 1 {
+                    // SunPotion：立即回血回蓝（C# ChangeHP/ChangeMP）
+                    if hp_pool > 0 && ai.hp > 0 {
+                        ai.hp = (ai.hp + hp_pool as i32).min(ai.max_hp);
+                    }
+                    if mp_pool > 0 && ai.mp > 0 {
+                        ai.mp = (ai.mp + mp_pool as i32).min(ai.max_mp);
+                    }
+                }
             }
             // 刷新英雄背包 UI（消耗后的数量）
             self.send_hero_information_packet(*session_id).await;
             debug!(
-                "Hero auto-pot: session={} item_index={} uid={} hp_pool={}",
-                session_id, item_index, potion.unique_id, hp_pool
+                "Hero auto-pot: session={} item_index={} uid={} is_mp={} shape={} hp_pool={} mp_pool={}",
+                session_id, item_index, potion.unique_id, is_mp, db.shape, hp_pool, mp_pool
             );
         }
 
-        // ===== 阶段 2.5：英雄 HP 实时同步 + 阵亡处理（#1134） =====
+        // ===== 阶段 2.5：英雄 HP/MP 实时同步 + 阵亡处理（#1134/#1186） =====
         for snap in &snapshots {
-            let hp = match self.hero_ai_states.get(&snap.session_id) {
-                Some(ai) => ai.hp.max(0),
+            let (hp, mp) = match self.hero_ai_states.get(&snap.session_id) {
+                Some(ai) => (ai.hp.max(0), ai.mp.max(0)),
                 None => continue,
             };
             if hp <= 0 {
@@ -838,14 +1047,23 @@ impl WorldActor {
                 self.hero_die(snap.session_id).await;
                 continue;
             }
-            let last_sent = self.hero_ai_states.get(&snap.session_id).map(|ai| ai.last_sent_hp).unwrap_or(hp);
-            if hp == last_sent {
+            let last_hp = self
+                .hero_ai_states
+                .get(&snap.session_id)
+                .map(|ai| ai.last_sent_hp)
+                .unwrap_or(hp);
+            let last_mp = self
+                .hero_ai_states
+                .get(&snap.session_id)
+                .map(|ai| ai.last_sent_mp)
+                .unwrap_or(mp);
+            if hp == last_hp && mp == last_mp {
                 continue;
             }
             // 下发 S.HeroHealthChanged（C# HeroObject.SendHealthChanged → Owner.Enqueue）
             let packet = mir2_shared::packets::server::combat::HeroHealthChanged {
                 hp: hp as u32,
-                mp: 0,
+                mp: mp as u32,
             };
             let mut body = Vec::new();
             if packet.write_body(&mut body).is_ok() {
@@ -859,6 +1077,7 @@ impl WorldActor {
             }
             if let Some(ai) = self.hero_ai_states.get_mut(&snap.session_id) {
                 ai.last_sent_hp = hp;
+                ai.last_sent_mp = mp;
             }
             // #1141：英雄头顶血条（C# S.ObjectHealth：percent + expire 秒，客户端挂 ActorHp）
             if let Some(record) = self.players.get(&snap.session_id) {
@@ -1271,6 +1490,25 @@ fn hero_heal_amount(stats: &super::hero_stats::HeroStats, level: u16) -> i32 {
     (sc * 2).max(1) + level as i32
 }
 
+/// 英雄法术 MP 费用（#1186：C# MagicCost = base_cost + level*level_cost；技能等级用英雄已学等级）
+/// spell_shared 为 SharedRust 枚举值（C# = shared - 3）
+fn hero_spell_cost(
+    magic_infos: &std::collections::HashMap<u32, crate::db::MagicInfo>,
+    hero_magics: &[(i32, u8)],
+    spell_shared: u8,
+) -> i32 {
+    let spell_cs = (spell_shared as i32).saturating_sub(3);
+    let level = hero_magics
+        .iter()
+        .find(|(s, _)| *s == spell_cs)
+        .map(|(_, l)| *l)
+        .unwrap_or(1);
+    magic_infos
+        .get(&(spell_cs as u32))
+        .map(|info| crate::combat::magic::magic_cost(info, level))
+        .unwrap_or(5)
+}
+
 /// 广播英雄弹道/施法的 ObjectAttack 包
 async fn broadcast_hero_attack(
     world: &WorldActor,
@@ -1387,5 +1625,52 @@ impl WorldActor {
                 data: packet.clone(),
             }).await;
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn magic_info(base_cost: i32, level_cost: i32) -> crate::db::MagicInfo {
+        crate::db::MagicInfo {
+            name: String::new(),
+            spell: 0,
+            base_cost,
+            level_cost,
+            icon: 0,
+            level1: 0,
+            level2: 0,
+            level3: 0,
+            need1: 0,
+            need2: 0,
+            need3: 0,
+            delay_base: 0,
+            delay_reduction: 0,
+            power_base: 0,
+            power_bonus: 0,
+            mpower_base: 0,
+            mpower_bonus: 0,
+            range: 0,
+            multiplier_base: 0.0,
+            multiplier_bonus: 0.0,
+        }
+    }
+
+    #[test]
+    fn hero_spell_cost_uses_learned_level() {
+        use mir2_shared::enums::Spell;
+        let shared = Spell::FireBall as u8;
+        let cs = shared.saturating_sub(3) as u32;
+        let mut map = std::collections::HashMap::new();
+        map.insert(cs, magic_info(5, 2));
+        // 已学 3 级：base + 3*level_cost
+        assert_eq!(hero_spell_cost(&map, &[(cs as i32, 3)], shared), 5 + 3 * 2);
+        // 已学 0 级：base
+        assert_eq!(hero_spell_cost(&map, &[(cs as i32, 0)], shared), 5);
+        // 未学 → 默认 1 级
+        assert_eq!(hero_spell_cost(&map, &[], shared), 5 + 2);
+        // 无配置 → 兜底 5
+        let empty = std::collections::HashMap::new();
+        assert_eq!(hero_spell_cost(&empty, &[], shared), 5);
     }
 }
