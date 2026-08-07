@@ -303,6 +303,10 @@ pub struct PlayerState {
     pub newbie_exp_bonus: bool,
     /// 灰名截止时间（毫秒；C# HumanObject.BrownTime，攻击低 PK 玩家后 1 分钟）
     pub brown_until_ms: i64,
+    /// 坐骑忠诚度下降限速（毫秒；C# DecreaseLoyaltyTime，LoyaltyDelay=1000ms）
+    pub mount_loyalty_decrease_time: i64,
+    /// 坐骑忠诚度自动恢复时间（毫秒；C# IncreaseLoyaltyTime，每 LoyaltyDelay*60）
+    pub mount_loyalty_increase_time: i64,
 }
 
 impl PlayerState {
@@ -632,6 +636,8 @@ impl PlayerActor {
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
             brown_until_ms: 0,
+            mount_loyalty_decrease_time: 0,
+            mount_loyalty_increase_time: 0,
             },
             gate_ref,
             world_ref,
@@ -1699,6 +1705,34 @@ impl Message<TickBuff> for PlayerActor {
         _msg: TickBuff,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        // C# HumanObject.Process：Mount.HasMount 且每 LoyaltyDelay*60（60s）→ IncreaseMountLoyalty(1)
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        if now_ms >= self.state.mount_loyalty_increase_time {
+            self.state.mount_loyalty_increase_time = now_ms + 60_000;
+            let slot = crate::actors::inventory::EquipmentSlot::Mount as usize;
+            if let Some(mount) = self.state.inventory.equipment[slot].as_mut() {
+                if mount.current_dura < mount.max_dura {
+                    mount.current_dura = mount.current_dura.saturating_add(1);
+                    mount.dura_changed = true;
+                    // S.ItemRepaired（C# IncreaseMountLoyalty）
+                    let ir = mir2_shared::packets::server::ItemRepaired {
+                        unique_id: mount.unique_id,
+                        max_dura: mount.max_dura,
+                        current_dura: mount.current_dura,
+                    };
+                    let mut body = Vec::new();
+                    if ir.write_body(&mut body).is_ok() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: self.state.session_id,
+                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ItemRepaired as i16, &body),
+                        }).await;
+                    }
+                }
+            }
+        }
         if self.state.buffs.is_empty() {
             return;
         }
@@ -3555,6 +3589,73 @@ impl Message<SetBrownTime> for PlayerActor {
     }
 }
 
+/// 骑乘移动时扣坐骑忠诚度（C# HumanObject.DecreaseMountLoyalty：LoyaltyDelay=1000ms 限速）
+pub struct DecreaseMountLoyalty {
+    pub amount: u16,
+}
+
+impl Message<DecreaseMountLoyalty> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: DecreaseMountLoyalty,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        if now_ms < self.state.mount_loyalty_decrease_time {
+            return;
+        }
+        self.state.mount_loyalty_decrease_time = now_ms + 1000; // C# LoyaltyDelay
+        let slot = crate::actors::inventory::EquipmentSlot::Mount as usize;
+        if !self.state.is_mounted {
+            return;
+        }
+        if let Some(mount) = self.state.inventory.equipment[slot].as_mut() {
+            if mount.current_dura == 0 {
+                return;
+            }
+            // C# DamageItem(mount, amount)：NoDuraLoss 免疫、Strong 减免
+            let no_dura_loss = mount.info.as_ref()
+                .map(|i| i.unique.contains(mir2_shared::enums::SpecialItemMode::NO_DURA_LOSS))
+                .unwrap_or(false);
+            if no_dura_loss {
+                return;
+            }
+            let strong = mount.info.as_ref()
+                .map(|i| i.stats.get(mir2_shared::enums::Stat::Strong))
+                .unwrap_or(0)
+                .max(0) as u16;
+            let amount = msg.amount.saturating_sub(strong).max(1);
+            mount.current_dura = mount.current_dura.saturating_sub(amount);
+            mount.dura_changed = true;
+            // S.DuraChanged
+            let dc = mir2_shared::packets::server::experience::DuraChanged {
+                unique_id: mount.unique_id,
+                current_dura: mount.current_dura,
+            };
+            let mut body = Vec::new();
+            if dc.write_body(&mut body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DuraChanged as i16, &body),
+                }).await;
+            }
+            if mount.current_dura == 0 {
+                // C# RefreshMount：耐久归零自动下坐骑
+                self.state.inventory.equipment[slot] = None;
+                self.state.is_mounted = false;
+                self.state.mount_type = 0;
+                self.send_equipment_changed();
+                crate::actors::world::send_system_message(&self.gate_ref, self.state.session_id, "坐骑忠诚度耗尽，已自动下马");
+            }
+        }
+    }
+}
+
 /// 设置宠物信息
 pub struct SetCreature {
     pub creature_log: CreatureLog,
@@ -4709,6 +4810,8 @@ mod tests {
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
             brown_until_ms: 0,
+            mount_loyalty_decrease_time: 0,
+            mount_loyalty_increase_time: 0,
         }
     }
 
