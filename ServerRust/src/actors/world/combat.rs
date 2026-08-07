@@ -133,13 +133,12 @@ impl Message<WorldAttackRequest> for WorldActor {
                     }
 
                     // ===== 战士近战技能触发 =====
-                    // Slaying（攻杀）：学了且按等级概率触发，额外伤害（C# 攻杀 = 暴击型额外伤害）
+                    // Slaying（攻杀）：C# Envir.cs 无倍率配置 → GetDamage = base×1.0（无额外伤害，仅技能经验）
                     let mut slaying_bonus = 0i32;
                     if let Some(lv) = state.magics.iter().find(|m| m.spell == SPELL_SLAYING as i32).map(|m| m.level) {
                         // 概率：level/5（C# 攻杀触发率与等级相关）
                         if fastrand::i32(0..5) < lv as i32 {
-                            slaying_bonus = (damage as f32 * (0.5 + lv as f32 * 0.3)) as i32;
-                            monster.take_damage(slaying_bonus);
+                            debug!("Player {} Slaying triggered (level {})", result.object_id, lv);
                         }
                     }
                     // #312：FlamingSword —— C# Envir.cs MultiplierBase=1.4（无等级加成）：单次 1.4×
