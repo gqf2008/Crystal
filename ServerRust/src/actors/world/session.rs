@@ -1528,6 +1528,86 @@ impl Message<ChatRequest> for WorldActor {
             }
         }
 
+        // #888：@ADDSTORAGE —— 1,000,000 金币购买 10 天仓库扩容（C# PlayerObject case "ADDSTORAGE"，
+        // 无 GM 校验；首次 80→160，已扩容则 +10 天续期；下发 LoseGold + ResizeStorage + 系统消息）
+        if let Some(cmd_rest) = message.strip_prefix('@') {
+            let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
+            if parts.first().is_some_and(|c| c.eq_ignore_ascii_case("ADDSTORAGE")) {
+                const COST: u64 = 1_000_000;
+                const ADDED_SECS: i64 = 10 * 24 * 60 * 60; // C# new TimeSpan(10,0,0,0) = 10 天
+
+                if let Some(record) = self.players.get(&msg.session_id) {
+                    // 金币校验（C# Account.Gold >= cost；不足 → LowGold 系统消息）
+                    if !record.actor_ref.ask(crate::actors::player::HasGold { amount: COST }).await.unwrap_or(false) {
+                        send_system_message(&self.gate_ref, msg.session_id, "金币不足，无法购买仓库扩容（需要 1,000,000 金币）。");
+                        return;
+                    }
+                    let deducted = record.actor_ref.ask(crate::actors::player::DeductGold { amount: COST }).await.unwrap_or(false);
+                    if !deducted {
+                        return;
+                    }
+                    // C# S.LoseGold（DeductGold 只刷 UserInformation，这里补发扣金包）
+                    send_gold_changed_packet(&self.gate_ref, msg.session_id, COST);
+
+                    let now_unix = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+
+                    let mut new_state = match record.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(s)) => s,
+                        _ => return,
+                    };
+                    // 扩容（C# Account.ExpandStorage：80 → 160）
+                    let new_len = new_state.inventory.expand_storage();
+                    new_state.has_expanded_storage = true;
+                    // 到期时间：已激活则 +10 天，否则从现在起 +10 天（C# ExpandedStorageExpiryDate）
+                    let expiry = if new_state.expanded_storage_expiry_date > now_unix {
+                        new_state.expanded_storage_expiry_date + ADDED_SECS
+                    } else {
+                        now_unix + ADDED_SECS
+                    };
+                    new_state.expanded_storage_expiry_date = expiry;
+                    let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+
+                    // C# S.ResizeStorage{Size, HasExpandedStorage=true, ExpiryTime}
+                    let resize = mir2_shared::packets::server::ui_events::ResizeStorage {
+                        size: new_len as i32,
+                        has_expanded_storage: true,
+                        expiry_time: expiry,
+                    };
+                    let mut resize_body = Vec::new();
+                    if resize.write_body(&mut resize_body).is_ok() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: msg.session_id,
+                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ResizeStorage as i16, &resize_body),
+                        }).await;
+                    }
+
+                    // DB 持久化（重启不丢；C# AccountInfo 存档）
+                    if let Err(e) = db::update_account_storage_expansion(
+                        &self.db_pool,
+                        &record.account_username,
+                        true,
+                        expiry,
+                    ).await {
+                        warn!("Failed to persist storage expansion for {}: {}", record.name, e);
+                    }
+
+                    // C# ExpandedStorageExpiresOn + 到期时间
+                    let dt = chrono::DateTime::from_timestamp(expiry, 0)
+                        .map(|d| d.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S").to_string())
+                        .unwrap_or_else(|| expiry.to_string());
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        &format!("仓库扩容成功！仓库已扩容至 {} 格，到期时间：{}", new_len, dt),
+                    );
+                }
+                return;
+            }
+        }
+
         // Check for social chat commands and forward to SocialActor
         let parts: Vec<&str> = message.split_whitespace().collect();
         // 去掉前导 @（C# 客户端命令如 @ride 均带 @）
