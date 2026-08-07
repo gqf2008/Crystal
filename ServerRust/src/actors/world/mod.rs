@@ -3,6 +3,7 @@
 
 // 子模块（已集成）
 mod awakening;
+mod bind;
 mod combat;
 mod elements;
 pub mod ai;
@@ -1371,6 +1372,8 @@ impl WorldActor {
             x: nx, y: ny, direction: reverse_dir,
             map_index: None, is_mounted: None,
         }).await;
+        // C# HumanObject.Pushed：被推入安全区时更新绑定点（SetBindSafeZone）
+        self.update_bind_safe_zone(session_id, map_index, nx, ny).await;
         // 本人：Pushed（location + direction）
         let mut self_body = Vec::new();
         self_body.extend_from_slice(&(nx as u32).to_le_bytes());

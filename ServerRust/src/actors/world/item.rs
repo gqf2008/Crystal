@@ -328,7 +328,7 @@ impl Message<UseItemRequest> for WorldActor {
 
     async fn handle(&mut self, msg: UseItemRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r,
+            Some(r) => r.clone(),
             None => return,
         };
 
@@ -544,10 +544,13 @@ impl Message<UseItemRequest> for WorldActor {
                         // C#：Buff 药水，时长 = Durability * Settings.Minute（60000ms → 600 ticks）
                         let ticks = (db.durability.max(1) as u32).saturating_mul(600);
                         let mut applied = false;
-                        let apply = |bt: BuffType| async move {
-                            let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff {
-                                buff: BuffInstance::new(bt, ticks, 1),
-                            }).await;
+                        let apply = |bt: BuffType| {
+                            let rec = record.clone();
+                            async move {
+                                let _ = rec.actor_ref.ask(crate::actors::player::ApplyBuff {
+                                    buff: BuffInstance::new(bt, ticks, 1),
+                                }).await;
+                            }
                         };
                         if get(Stat::MaxDC) > 0 || get(Stat::MinDC) > 0 {
                             apply(BuffType::AttackBoost { bonus: get(Stat::MaxDC).max(get(Stat::MinDC)) }).await;
@@ -619,42 +622,70 @@ impl Message<UseItemRequest> for WorldActor {
                     match shape {
                         // 0 DungeonEscape（C# TeleportEscape(20)：传回绑定点±100）
                         // 1 TownTeleport（C# Teleport(BindMap, BindLocation)）
-                        // Rust 暂无绑定点系统，回退到当前地图安全区中心
                         0 | 1 => {
-                            let (tx, ty) = self.maps.get(&player_state.map_index)
-                                .and_then(|m| m.safe_zone_rects.first())
-                                .map(|(x1, y1, x2, y2)| ((x1 + x2) / 2, (y1 + y2) / 2))
-                                .unwrap_or((330, 330));
-                            let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
-                                x: tx,
-                                y: ty,
-                                direction: player_state.direction,
-                                map_index: None,
-                                is_mounted: None,
-                            }).await;
-                            // C# Teleport：UserLocation 自身 + BroadcastMovement 同图其他玩家
-                            let mut loc = Vec::new();
-                            loc.extend_from_slice(&tx.to_le_bytes());
-                            loc.extend_from_slice(&ty.to_le_bytes());
-                            loc.push(player_state.direction);
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: msg.session_id,
-                                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &loc),
-                            }).await;
-                            let others: Vec<_> = self.other_players(msg.session_id).into_iter().map(|r| r.actor_ref.clone()).collect();
-                            for other in others {
-                                let _ = other.ask(crate::actors::player::BroadcastMovement {
-                                    object_id: player_state.object_id,
+                            let bind_map = player_state.bind_map_index;
+                            if self.map_infos.get(&bind_map).is_some() {
+                                // 确保绑定地图已加载（供 DungeonEscape 随机落点校验）
+                                let _ = self.bind_map_size(bind_map);
+                                // C#：shape 0 在绑定点 ±100 内随机（20 次尝试），shape 1 精确到绑定点
+                                let (tx, ty) = if shape == 0 {
+                                    let mut ok = (player_state.bind_x, player_state.bind_y);
+                                    if let Some(map) = self.maps.get(&(bind_map as u16)) {
+                                        for _ in 0..20 {
+                                            let rx = player_state.bind_x + fastrand::i32(-100..=100);
+                                            let ry = player_state.bind_y + fastrand::i32(-100..=100);
+                                            if map.is_valid(rx, ry) && map.is_walkable(rx, ry) {
+                                                ok = (rx, ry);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    ok
+                                } else {
+                                    (player_state.bind_x, player_state.bind_y)
+                                };
+                                crate::actors::world::npc_script::teleport_player(
+                                    self, msg.session_id, bind_map as u16, tx, ty).await;
+                                send_system_message(&self.gate_ref, msg.session_id,
+                                    if shape == 0 { "已脱离迷宫，返回安全区" } else { "已返回安全区" });
+                                debug!("Scroll: {} shape={} teleported to bind map {} ({},{})",
+                                       player_state.name, shape, bind_map, tx, ty);
+                            } else {
+                                // 无绑定点配置：回退到当前地图安全区中心（旧行为）
+                                let (tx, ty) = self.maps.get(&player_state.map_index)
+                                    .and_then(|m| m.safe_zone_rects.first())
+                                    .map(|(x1, y1, x2, y2)| ((x1 + x2) / 2, (y1 + y2) / 2))
+                                    .unwrap_or((330, 330));
+                                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
                                     x: tx,
                                     y: ty,
                                     direction: player_state.direction,
-                                    move_type: crate::actors::player::MoveType::Walk,
-                                    exclude_session: msg.session_id,
+                                    map_index: None,
+                                    is_mounted: None,
                                 }).await;
+                                let mut loc = Vec::new();
+                                loc.extend_from_slice(&tx.to_le_bytes());
+                                loc.extend_from_slice(&ty.to_le_bytes());
+                                loc.push(player_state.direction);
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: msg.session_id,
+                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &loc),
+                                }).await;
+                                let others: Vec<_> = self.other_players(msg.session_id).into_iter().map(|r| r.actor_ref.clone()).collect();
+                                for other in others {
+                                    let _ = other.ask(crate::actors::player::BroadcastMovement {
+                                        object_id: player_state.object_id,
+                                        x: tx,
+                                        y: ty,
+                                        direction: player_state.direction,
+                                        move_type: crate::actors::player::MoveType::Walk,
+                                        exclude_session: msg.session_id,
+                                    }).await;
+                                }
+                                send_system_message(&self.gate_ref, msg.session_id,
+                                    if shape == 0 { "已脱离迷宫，返回安全区" } else { "已返回安全区" });
+                                debug!("Scroll: {} shape={} teleported to safe zone ({}, {})", player_state.name, shape, tx, ty);
                             }
-                            send_system_message(&self.gate_ref, msg.session_id,
-                                if shape == 0 { "已脱离迷宫，返回安全区" } else { "已返回安全区" });
-                            debug!("Scroll: {} shape={} teleported to safe zone ({}, {})", player_state.name, shape, tx, ty);
                         }
                         // 2 RandomTeleport（C# TeleportRandom(200, Durability)：随机可行走格）
                         2 => {

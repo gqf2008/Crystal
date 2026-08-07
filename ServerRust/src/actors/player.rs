@@ -287,6 +287,12 @@ pub struct PlayerState {
     pub concentration_interrupted: bool,
     /// 专注打断恢复时间（毫秒，C# Concentration buff InterruptTime）
     pub concentration_interrupt_time: i64,
+    /// 绑定点地图（C# CharacterInfo.BindMapIndex）
+    pub bind_map_index: i32,
+    /// 绑定点 X（C# CharacterInfo.BindLocation.X）
+    pub bind_x: i32,
+    /// 绑定点 Y（C# CharacterInfo.BindLocation.Y）
+    pub bind_y: i32,
 }
 
 impl PlayerState {
@@ -605,6 +611,9 @@ impl PlayerActor {
             has_elemental: false,
             concentration_interrupted: false,
             concentration_interrupt_time: 0,
+            bind_map_index: 0,
+            bind_x: 0,
+            bind_y: 0,
             },
             gate_ref,
             world_ref,
@@ -1468,6 +1477,27 @@ impl Message<SetConcentrationInterrupt> for PlayerActor {
     ) -> Self::Reply {
         self.state.concentration_interrupted = msg.interrupted;
         self.state.concentration_interrupt_time = msg.interrupt_time_ms;
+    }
+}
+
+/// 设置绑定点（C# CharacterInfo.BindMapIndex/BindLocation）
+pub struct SetBind {
+    pub map_index: i32,
+    pub x: i32,
+    pub y: i32,
+}
+
+impl Message<SetBind> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetBind,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.bind_map_index = msg.map_index;
+        self.state.bind_x = msg.x;
+        self.state.bind_y = msg.y;
     }
 }
 
@@ -4528,6 +4558,9 @@ mod tests {
             has_elemental: false,
             concentration_interrupted: false,
             concentration_interrupt_time: 0,
+            bind_map_index: 0,
+            bind_x: 0,
+            bind_y: 0,
         }
     }
 
