@@ -1956,6 +1956,9 @@ impl Message<Tick> for WorldActor {
                     let mut ctx = ai::AiCtx {
                         tick_count: self.tick_count,
                         monster_oid, monster_index,
+                        map_size: self.maps.get(&monster.map_index)
+                            .map(|m| (m.width as i32, m.height as i32))
+                            .unwrap_or((200, 200)),
                         players: &player_snaps,
                         monsters: &monster_snaps,
                         out_moves: &mut boss_moves,

@@ -104,6 +104,8 @@ pub struct AiCtx<'a> {
     pub monster_oid: u32,
     /// 当前怪物的 monster_index（Boss 注册用）
     pub monster_index: i32,
+    /// 地图尺寸 (宽, 高)，用于全图随机传送等（缺省 200×200）
+    pub map_size: (i32, i32),
     /// 玩家快照（全图，behavior 自行按距离/map 过滤）
     pub players: &'a [PlayerSnap],
     /// 怪物快照（全图，供 Boss 互查）
