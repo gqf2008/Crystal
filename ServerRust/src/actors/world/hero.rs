@@ -748,6 +748,30 @@ impl WorldActor {
             if let Some(ai) = self.hero_ai_states.get_mut(&snap.session_id) {
                 ai.last_sent_hp = hp;
             }
+            // #1141：英雄头顶血条（C# S.ObjectHealth：percent + expire 秒，客户端挂 ActorHp）
+            if let Some(record) = self.players.get(&snap.session_id) {
+                let hero_oid = record.object_id.wrapping_add(HERO_OID_OFFSET);
+                let max_hp = self.hero_ai_states.get(&snap.session_id).map(|ai| ai.max_hp).unwrap_or(hp);
+                let percent = (hp * 100 / max_hp.max(1)).min(100) as u8;
+                let ohealth = mir2_shared::packets::server::object::ObjectHealth {
+                    object_id: hero_oid,
+                    percent,
+                    expire: 3,
+                };
+                let mut ohealth_body = Vec::new();
+                if ohealth.write_body(&mut ohealth_body).is_ok() {
+                    let data = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectHealth as i16,
+                        &ohealth_body,
+                    );
+                    for sid in self.players.keys() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *sid,
+                            data: data.clone(),
+                        }).await;
+                    }
+                }
+            }
             debug!("Hero HP changed: session={} hp={}", snap.session_id, hp);
         }
 
