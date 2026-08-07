@@ -2605,7 +2605,8 @@ impl Message<MagicRequest> for WorldActor {
                 self.double_hit_melee.insert(msg.session_id, (self.tick_count + 100, spell_level, 1));
                 debug!("Magic: {} casts DoubleSlash (next melee double-hit, 10s)", state.name);
             }
-            // #318：SlashingBurst —— 当前格 DC 伤害 + 向前冲刺 2 格（C# HumanObject.cs:5159，对齐 ShoulderDash）
+            // #318：SlashingBurst —— 前方第 1 格 DC 伤害（AC 防御）+ 向前冲刺 2 格
+            // （C# HumanObject.cs:5159 + Map.cs：count=1 只结算 1 格，DefenceType.AC）
             SPELL_SLASHING_BURST => {
                 let dir = msg.direction as usize % 8;
                 let raw_damage = if let Some(info) = spell_db {
@@ -2626,18 +2627,21 @@ impl Message<MagicRequest> for WorldActor {
                         .map(|(id, _)| *id);
                     if let Some(mid) = hit {
                         if let Some(m) = self.monsters.get_mut(&mid) {
-                            let attacker_stats = state.to_combat_stats();
-                            let defender_stats = m.to_combat_stats();
-                            let level_offset = state.level.min(10) as u16;
-                            let r = combat_attack::resolve_attack(
-                                &attacker_stats, &defender_stats, raw_damage,
-                                mir2_shared::enums::DefenceType::AcAgility, level_offset,
-                            );
-                            if r.is_hit && r.damage > 0 {
-                                m.take_damage(r.damage);
-                                m.provoked = true;
-                                m.target_session = Some(msg.session_id);
-                                slashed_damage += r.damage;
+                            // C#：只结算前方第 1 格（Map.cs SlashingBurst count=1），AC 防御
+                            if step == 0 {
+                                let attacker_stats = state.to_combat_stats();
+                                let defender_stats = m.to_combat_stats();
+                                let level_offset = state.level.min(10) as u16;
+                                let r = combat_attack::resolve_attack(
+                                    &attacker_stats, &defender_stats, raw_damage,
+                                    mir2_shared::enums::DefenceType::Ac, level_offset,
+                                );
+                                if r.is_hit && r.damage > 0 {
+                                    m.take_damage(r.damage);
+                                    m.provoked = true;
+                                    m.target_session = Some(msg.session_id);
+                                    slashed_damage += r.damage;
+                                }
                             }
                         }
                     }
