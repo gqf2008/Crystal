@@ -117,7 +117,7 @@ pub struct RepairItemRequest {
 /// 物品单价（对齐 C# Shared/Data/ItemData.cs Price() 去掉 *Count 部分）：
 /// p = floor(p/2 + (p/2)*(CurrentDura/MaxDura) + Price/2)（Durability>0 时），
 /// p *= AddedStats.Count*0.1 + 1
-fn compute_item_price_per_unit(item: &mir2_shared::data::item::UserItem, info: &db::ItemInfo) -> u64 {
+pub(crate) fn compute_item_price_per_unit(item: &mir2_shared::data::item::UserItem, info: &db::ItemInfo) -> u64 {
     let mut p = info.price as f64;
     if info.durability > 0 {
         let r = (info.price as f64 / 2.0) / info.durability as f64;
