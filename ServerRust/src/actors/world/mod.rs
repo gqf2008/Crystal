@@ -790,6 +790,8 @@ pub struct WorldActor {
     pub(crate) mp_eater_count: HashMap<u64, i32>,
     /// #345 Hemorrhage 计数（session → 累计）
     pub(crate) hemorrhage_count: HashMap<u64, i32>,
+    /// Hemorrhage 武装标记（C# bool Hemorrhage：count>=55 后下次命中触发）
+    pub(crate) hemorrhage_armed: HashSet<u64>,
     /// #395 幻觉状态（怪物 oid → 到期 tick，期内不攻击）
     pub(crate) hallucinated: HashMap<u32, u64>,
     /// #409 精神状态（session → 0 攻击/1 特技/2 组队模式）
@@ -1031,6 +1033,7 @@ impl WorldActor {
             double_hit_melee: HashMap::new(),
             mp_eater_count: HashMap::new(),
             hemorrhage_count: HashMap::new(),
+            hemorrhage_armed: HashSet::new(),
             hallucinated: HashMap::new(),
             mental_state: HashMap::new(),
             fatal_sword_armed: HashSet::new(),
@@ -3567,6 +3570,7 @@ impl Actor for WorldActor {
             double_hit_melee: HashMap::new(),
             mp_eater_count: HashMap::new(),
             hemorrhage_count: HashMap::new(),
+            hemorrhage_armed: HashSet::new(),
             hallucinated: HashMap::new(),
             mental_state: HashMap::new(),
             fatal_sword_armed: HashSet::new(),
