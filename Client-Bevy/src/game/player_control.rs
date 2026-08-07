@@ -491,7 +491,7 @@ fn hold_move_system(
 }
 
 
-/// 按键拾取最近物品（#158 C# KeybindOptions.Pickup：默认空格）
+/// 按键拾取最近物品（#158 C# KeybindOptions.Pickup：默认 Tab；保留 Space 为次键）
 fn key_pickup_system(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
@@ -502,7 +502,13 @@ fn key_pickup_system(
     items: Query<(&crate::actor::NetObjectId, &Transform), With<crate::actor::GroundItem>>,
     players: Query<(Entity, &Transform), (With<LocalPlayer>, Without<crate::actor::GroundItem>)>,
 ) {
-    let Some(b) = kb.bindings.iter().find(|b| b.action == "拾取") else { return };
+    let Some(b) = kb
+        .bindings
+        .iter()
+        .find(|b| b.action == "拾取" || b.action == "拾取2")
+    else {
+        return;
+    };
     if !keys.just_pressed(b.key) {
         return;
     }

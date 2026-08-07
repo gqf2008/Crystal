@@ -63,22 +63,28 @@ pub fn key_name(key: KeyCode) -> String {
     }
 }
 
-/// 默认键位（参考 macroquad keyboard_layout_dialog.rs + C# 常用键位）
+/// 默认键位（对齐 C# KeyBindSettings.New()：背包 F9/I、角色 F10/C、技能 F11/S、
+/// 任务 Q、小地图 V、设置 F12/O、拾取 Tab；攻击模式切换 C# Ctrl+H 已在 combat.rs 硬编码）
 pub fn default_bindings() -> Vec<KeyBinding> {
     vec![
         KeyBinding::new("向上移动", "移动", KeyCode::KeyW),
         KeyBinding::new("向左移动", "移动", KeyCode::KeyA),
         KeyBinding::new("向下移动", "移动", KeyCode::KeyS),
         KeyBinding::new("向右移动", "移动", KeyCode::KeyD),
-        KeyBinding::new("攻击", "战斗", KeyCode::KeyQ),
-        KeyBinding::new("切换攻击模式", "战斗", KeyCode::KeyH), // C# Ctrl+H
-        KeyBinding::new("拾取", "交互", KeyCode::Space),
+        KeyBinding::new("拾取", "交互", KeyCode::Tab),
+        KeyBinding::new("拾取2", "交互", KeyCode::Space),
         KeyBinding::new("聊天", "交互", KeyCode::Enter),
-        KeyBinding::new("背包", "界面", KeyCode::KeyB),
-        KeyBinding::new("角色", "界面", KeyCode::KeyC),
-        KeyBinding::new("技能", "界面", KeyCode::KeyK),
+        KeyBinding::new("背包", "界面", KeyCode::F9),
+        KeyBinding::new("背包2", "界面", KeyCode::KeyI),
+        KeyBinding::new("角色", "界面", KeyCode::F10),
+        KeyBinding::new("角色2", "界面", KeyCode::KeyC),
+        KeyBinding::new("技能", "界面", KeyCode::F11),
+        KeyBinding::new("技能2", "界面", KeyCode::KeyS),
         KeyBinding::new("行会", "界面", KeyCode::KeyG),
-        KeyBinding::new("小地图", "界面", KeyCode::KeyM),
+        KeyBinding::new("小地图", "界面", KeyCode::KeyV),
+        KeyBinding::new("任务", "界面", KeyCode::KeyQ),
+        KeyBinding::new("设置", "系统", KeyCode::F12),
+        KeyBinding::new("设置2", "系统", KeyCode::KeyO),
         KeyBinding::new("技能栏1", "技能", KeyCode::F1),
         KeyBinding::new("技能栏2", "技能", KeyCode::F2),
         KeyBinding::new("技能栏3", "技能", KeyCode::F3),
@@ -88,7 +94,6 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("技能栏7", "技能", KeyCode::F7),
         KeyBinding::new("技能栏8", "技能", KeyCode::F8),
         KeyBinding::new("帮助", "系统", KeyCode::KeyH),
-        KeyBinding::new("设置", "系统", KeyCode::KeyO),
         KeyBinding::new("关闭全部", "系统", KeyCode::Escape),
     ]
 }
@@ -509,14 +514,19 @@ fn dialog_hotkey_system(
     kb: Res<KeyboardState>,
     mut mgr: ResMut<DialogManager>,
 ) {
-    let map: [(&str, DialogKind); 7] = [
+    // #795：主/次绑定（对齐 C# KeyBindSettings 主键 + 备用键）
+    let map: [(&str, DialogKind); 11] = [
         ("背包", DialogKind::Inventory),
+        ("背包2", DialogKind::Inventory),
         ("角色", DialogKind::Character),
+        ("角色2", DialogKind::Character),
         ("技能", DialogKind::Skills),
+        ("技能2", DialogKind::Skills),
         ("行会", DialogKind::Guild),
         ("小地图", DialogKind::Minimap),
         ("任务", DialogKind::QuestLog),
         ("设置", DialogKind::Settings),
+        ("设置2", DialogKind::Settings),
     ];
     for (action, kind) in map {
         let Some(b) = kb.bindings.iter().find(|b| b.action == action) else { continue };
