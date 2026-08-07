@@ -97,6 +97,19 @@ pub struct PushPlayer {
     pub distance: i32,
 }
 
+/// Boss 延迟攻击（C# DelayedAction DelayedType.Damage：到点对范围内玩家造成伤害）
+#[derive(Debug, Clone, Copy)]
+pub struct DelayedAttack {
+    /// 相对当前 tick 的延迟（100ms/tick）
+    pub delay_ticks: u64,
+    pub center_x: i32,
+    pub center_y: i32,
+    pub radius: i32,
+    pub damage: i32,
+    pub attacker_oid: u32,
+    pub map_index: u16,
+}
+
 /// AI 上下文（每 tick 每怪构建一次）
 pub struct AiCtx<'a> {
     pub tick_count: u64,
@@ -126,6 +139,8 @@ pub struct AiCtx<'a> {
     pub out_pushes: &'a mut Vec<PushPlayer>,
     /// 输出：传送玩家（C# Target.Teleport；session, x, y, dir）
     pub out_player_teleports: &'a mut Vec<(u64, i32, i32, u8)>,
+    /// 输出：延迟攻击（C# DelayedAction DelayedType.Damage）
+    pub out_delayed_attacks: &'a mut Vec<DelayedAttack>,
 }
 
 impl<'a> AiCtx<'a> {
