@@ -18,6 +18,7 @@ mod item;
 mod mail;
 mod market;
 mod npc;
+pub(crate) mod partners;
 mod npc_script;
 mod quest;
 mod report;

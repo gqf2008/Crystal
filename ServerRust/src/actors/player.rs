@@ -1269,7 +1269,15 @@ impl Message<AddExperience> for PlayerActor {
         let base = msg.amount.max(0) as i64;
         // 休息经验加成（C# BuffType.Rested ExpRatePercent 累加到 ExpRatePercent）
         let rested_mul = 1.0 + self.state.rested_exp_percent as f64 / 100.0;
-        let amount = (base as f64 * self.state.exp_multiplier * rested_mul).round() as i64;
+        // 配偶经验加成（C# GainExp：Lover 同图 + InRange(16) + 存活 → +LoverEXPBonus%）
+        let lover_bonus = self.world_ref
+            .ask(crate::actors::world::partners::GetLoverExpBonus {
+                session_id: self.state.session_id,
+            })
+            .await
+            .unwrap_or(0);
+        let amount = (base as f64 * self.state.exp_multiplier * rested_mul
+            * (1.0 + lover_bonus as f64 / 100.0)).round() as i64;
         self.state.experience += amount;
 
         debug!(
