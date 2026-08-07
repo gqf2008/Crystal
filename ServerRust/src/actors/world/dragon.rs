@@ -23,6 +23,8 @@ pub struct DragonState {
     pub active: bool,
     /// 当前 EvilMir 怪物 object_id（None = 未生成/已被击杀）
     pub evil_mir_oid: Option<u32>,
+    /// 上次记录的 EvilMir HP（用于受击给龙加经验，C# EvilMir.ChangeHP → DragonSystem.GainExp）
+    pub last_evil_mir_hp: i32,
 }
 
 impl DragonState {
@@ -36,6 +38,7 @@ impl DragonState {
             last_spawn_check: 0,
             active: true,
             evil_mir_oid: None,
+            last_evil_mir_hp: 0,
         }
     }
 
