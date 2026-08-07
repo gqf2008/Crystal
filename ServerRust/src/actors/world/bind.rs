@@ -82,6 +82,32 @@ impl WorldActor {
         }
     }
 
+    /// 回城复活落点（C# TownRevive 绑定点分支）：优先绑定点，无效回退当前地图安全区出生点
+    pub(crate) fn default_revive_spot(
+        &mut self, state: &crate::actors::player::PlayerState,
+    ) -> (u16, i32, i32) {
+        let bind_valid = if let Some(mi) = self.map_infos.get(&state.bind_map_index).cloned() {
+            let map_index = mi.index as u16;
+            self.get_or_load_map(&mi.file_name, map_index);
+            self.maps.get(&map_index)
+                .map(|m| m.is_valid(state.bind_x, state.bind_y))
+                .unwrap_or(true)
+        } else {
+            false
+        };
+        if bind_valid {
+            (state.bind_map_index as u16, state.bind_x, state.bind_y)
+        } else {
+            let (sx, sy) = self
+                .map_infos
+                .get(&(state.map_index as i32))
+                .and_then(|mi| mi.safe_zones.iter().find(|s| s.start_point))
+                .map(|sz| (sz.x, sz.y))
+                .unwrap_or((DEFAULT_SPAWN_X, DEFAULT_SPAWN_Y));
+            (state.map_index, sx, sy)
+        }
+    }
+
     /// 绑定点地图数据（用于 MagicTeleport / TeleportEscape 的随机范围）
     pub(crate) fn bind_map_size(&mut self, bind_map_index: i32) -> Option<(i32, i32)> {
         let mi = self.map_infos.get(&bind_map_index).cloned()?;

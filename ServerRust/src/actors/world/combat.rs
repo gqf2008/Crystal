@@ -934,30 +934,22 @@ impl Message<TownReviveRequest> for WorldActor {
         };
         if !state.is_dead { return; }
 
-        // 复活：重置 HP/MP 到最大值，回到绑定点（C# PlayerObject.TownRevive）
-        // PKPoints>=200 时 C# 会送到 PK 城（Settings.PKTownMapName），Rust 暂未配置 PK 城，统一回绑定点；
-        // 绑定点无效时回退到当前地图安全区出生点
-        let (revive_map, spawn_x, spawn_y) = {
-            let bind_valid = if let Some(mi) = self.map_infos.get(&state.bind_map_index).cloned() {
-                let map_index = mi.index as u16;
-                self.get_or_load_map(&mi.file_name, map_index);
-                self.maps.get(&map_index)
-                    .map(|m| m.is_valid(state.bind_x, state.bind_y))
-                    .unwrap_or(true)
-            } else {
-                false
-            };
-            if bind_valid {
-                (state.bind_map_index as u16, state.bind_x, state.bind_y)
-            } else {
-                let (sx, sy) = self
-                    .map_infos
-                    .get(&(state.map_index as i32))
-                    .and_then(|mi| mi.safe_zones.iter().find(|s| s.start_point))
-                    .map(|sz| (sz.x, sz.y))
-                    .unwrap_or((DEFAULT_SPAWN_X, DEFAULT_SPAWN_Y));
-                (state.map_index, sx, sy)
+        // 复活：重置 HP/MP 到最大值（C# PlayerObject.TownRevive）：
+        // - PKPoints >= 200 → PK 城（Settings.PKTownMapName="3" / (848,677)），PK 城地图缺失则回绑定点
+        // - 否则回绑定点；绑定点无效回退当前地图安全区出生点
+        let (revive_map, spawn_x, spawn_y) = if state.pk_points >= 200 {
+            let pk_town_map = self.map_infos.values()
+                .find(|m| {
+                    let f = m.file_name.to_lowercase();
+                    f == "3" || f.starts_with("3.") || f.contains("mongchon") || f.contains("pranja")
+                })
+                .map(|m| m.index as u16);
+            match pk_town_map {
+                Some(m) => (m, PK_TOWN_X, PK_TOWN_Y),
+                None => self.default_revive_spot(&state),
             }
+        } else {
+            self.default_revive_spot(&state)
         };
 
         let _ = record.actor_ref.ask(crate::actors::player::RevivePlayer {
