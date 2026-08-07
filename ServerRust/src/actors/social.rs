@@ -1817,7 +1817,7 @@ impl Message<SocialChatCommand> for SocialActor {
                     self.handle_recall_member(msg.session_id, &msg.args[0]).await;
                 }
             }
-            "RECALL" => {
+            "RECALLLOVER" => {
                 self.handle_recall_lover(msg.session_id).await;
             }
             "ENABLEGROUPRECALL" => {
