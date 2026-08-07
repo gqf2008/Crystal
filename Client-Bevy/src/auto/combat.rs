@@ -324,7 +324,7 @@ pub(crate) fn auto_equip_system(
     }
     *fired = true;
     if let Some(item) = hud.inventory.items.iter().flatten().find(|i| i.is_equipment()) {
-        if let Some(to) = item.equip_slot() {
+        if let Some(to) = item.equip_slot_occupied(|s| hud.equipment.get(s).and_then(|x| x.as_ref()).is_some()) {
             net.send_packet(&mir2_shared::packets::client::item::EquipItem {
                 grid: mir2_shared::enums::MirGridType::Inventory,
                 unique_id: item.unique_id,
