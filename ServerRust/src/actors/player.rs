@@ -478,6 +478,7 @@ fn buff_tag(t: &crate::combat::buff::BuffType) -> u8 {
         BuffType::McBoost { .. } => 21,
         BuffType::ScBoost { .. } => 22,
         BuffType::Transform { .. } => 23,
+        BuffType::TeleportManaPenalty { .. } => 24,
     }
 }
 

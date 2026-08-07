@@ -1462,7 +1462,15 @@ impl Message<MagicRequest> for WorldActor {
             }
         }
 
-        let mp_cost = spell_db.map(|m| crate::combat::magic::magic_cost(m, spell_level)).unwrap_or(5);
+        let mp_cost = {
+            let base = spell_db.map(|m| crate::combat::magic::magic_cost(m, spell_level)).unwrap_or(5);
+            // C# HumanObject.cs:3381：TemporalFlux（Teleport/Blink/StormEscape 后 30s）施法耗蓝 +30%
+            let penalty = state.buffs.iter().find_map(|b| match b.buff_type {
+                crate::combat::buff::BuffType::TeleportManaPenalty { percent } => Some(percent),
+                _ => None,
+            }).unwrap_or(0);
+            base + base * penalty / 100
+        };
 
         // Decide which stat feeds this spell
         let magic_stat = match state.class {
@@ -2018,6 +2026,13 @@ impl Message<MagicRequest> for WorldActor {
                 if let Some((rx, ry)) = dest {
                     crate::actors::world::npc_script::teleport_player(
                         self, msg.session_id, bind_map as u16, rx, ry).await;
+                    // C#：传送成功后 TemporalFlux（30s 施法耗蓝 +30%）
+                    let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff {
+                        buff: crate::combat::buff::BuffInstance::new(
+                            crate::combat::buff::BuffType::TeleportManaPenalty { percent: 30 },
+                            300, 1,
+                        ),
+                    }).await;
                     debug!("Magic: {} MagicTeleport to bind map {} ({},{})", state.name, bind_map, rx, ry);
                 } else {
                     send_system_message(&self.gate_ref, msg.session_id, "传送失败，未找到合适位置");
@@ -2061,6 +2076,13 @@ impl Message<MagicRequest> for WorldActor {
                     is_mounted: None,
                 }).await;
                 self.broadcast_position_change(msg.session_id, tx, ty, msg.direction).await;
+                // C#：闪现/风遁成功后 TemporalFlux（30s 施法耗蓝 +30%）
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff {
+                    buff: crate::combat::buff::BuffInstance::new(
+                        crate::combat::buff::BuffType::TeleportManaPenalty { percent: 30 },
+                        300, 1,
+                    ),
+                }).await;
                 debug!("Magic: {} blinks to ({}, {})", state.name, tx, ty);
             }
             // --- 弹道类法术（任务3）：FireBall/GreatFireBall/ThunderBolt/FrostCrunch/Vampirism ---
