@@ -96,3 +96,16 @@ impl WorldActor {
         }
     }
 }
+
+/// #963：刷新玩家等级特效（GM @SETFLAG 后即时生效，C# SetLevelEffects）
+pub struct RefreshLevelEffects {
+    pub session_id: u64,
+}
+
+impl Message<RefreshLevelEffects> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: RefreshLevelEffects, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.refresh_level_effects(msg.session_id).await;
+    }
+}

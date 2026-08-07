@@ -1544,7 +1544,7 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -1937,6 +1937,133 @@ impl Message<ChatRequest> for WorldActor {
                                 Some(old) => send_system_message(&self.gate_ref, msg.session_id, &format!("英雄等级 {} -> {}", old, level)),
                                 None => send_system_message(&self.gate_ref, msg.session_id, &format!("英雄等级已设为 {}", level)),
                             }
+                        }
+                        // @info [玩家名]（C# case "INFO" ~3724：查看玩家/怪物信息）
+                        "INFO" => {
+                            match parts.get(1).copied() {
+                                Some(n) => {
+                                    let mut found_player = false;
+                                    for (_sid, other) in &self.players {
+                                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                            if os.name.eq_ignore_ascii_case(n) {
+                                                send_system_message(
+                                                    &self.gate_ref,
+                                                    msg.session_id,
+                                                    &format!("玩家信息：{} 等级={} 位置=({}, {}) 地图={} HP={}/{} MP={}/{}",
+                                                        os.name, os.level, os.x, os.y, os.map_index, os.hp, os.max_hp, os.mp, os.max_mp),
+                                                );
+                                                found_player = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if !found_player {
+                                        if let Some(m) = self.monsters.values().find(|m| m.name.eq_ignore_ascii_case(n)) {
+                                            send_system_message(
+                                                &self.gate_ref,
+                                                msg.session_id,
+                                                &format!("怪物信息：#{} {} HP={}/{} 位置=({}, {}) 地图={}",
+                                                    m.monster_index, m.name, m.hp, m.max_hp, m.x, m.y, m.map_index),
+                                            );
+                                        } else {
+                                            send_system_message(&self.gate_ref, msg.session_id, &format!("未找到目标：{}", n));
+                                        }
+                                    }
+                                }
+                                None => {
+                                    if let Ok(Some(s)) = record.actor_ref.ask(GetPlayerState).await {
+                                        send_system_message(
+                                            &self.gate_ref,
+                                            msg.session_id,
+                                            &format!("玩家信息：{} 等级={} 位置=({}, {}) 地图={} HP={}/{} MP={}/{}",
+                                                s.name, s.level, s.x, s.y, s.map_index, s.hp, s.max_hp, s.mp, s.max_mp),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        // @setflag <index> [玩家]（C# case "SETFLAG" ~3351：切换 flag）
+                        "SETFLAG" => {
+                            let Some(flag) = parts.get(1).and_then(|s| s.parse::<i32>().ok()) else {
+                                send_system_message(&self.gate_ref, msg.session_id, "用法：@setflag <index> [玩家]");
+                                return;
+                            };
+                            let target_sid = if let Some(n) = parts.get(2).copied() {
+                                let mut found = None;
+                                for (_sid, other) in &self.players {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if os.name.eq_ignore_ascii_case(n) {
+                                            found = Some(*_sid);
+                                            break;
+                                        }
+                                    }
+                                }
+                                found
+                            } else {
+                                Some(msg.session_id)
+                            };
+                            let Some(target_sid) = target_sid else {
+                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                return;
+                            };
+                            let target = match self.players.get(&target_sid) {
+                                Some(r) => r.clone(),
+                                None => return,
+                            };
+                            let mut state = match target.actor_ref.ask(GetPlayerState).await {
+                                Ok(Some(s)) => s,
+                                _ => return,
+                            };
+                            let key = format!("NPC_FLAG_{}", flag);
+                            let cur = state.flags.get(&key).copied().unwrap_or(0);
+                            state.flags.insert(key, if cur == 0 { 1 } else { 0 });
+                            let _ = target.actor_ref.ask(SetPlayerState { state }).await;
+                            // 990-998 等级特效即时刷新
+                            if (990..=998).contains(&flag) {
+                                if let Some(world_ref) = self.self_ref.clone() {
+                                    let _ = world_ref.tell(crate::actors::world::effects::RefreshLevelEffects {
+                                        session_id: target_sid,
+                                    }).try_send();
+                                }
+                            }
+                            send_system_message(&self.gate_ref, msg.session_id, &format!("已切换 flag {} -> {}", flag, 1 - cur));
+                        }
+                        // @clearflags [玩家]（C# case "CLEARFLAGS" ~3383：清空 flags）
+                        "CLEARFLAGS" => {
+                            let target_sid = if let Some(n) = parts.get(1).copied() {
+                                let mut found = None;
+                                for (_sid, other) in &self.players {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if os.name.eq_ignore_ascii_case(n) {
+                                            found = Some(*_sid);
+                                            break;
+                                        }
+                                    }
+                                }
+                                found
+                            } else {
+                                Some(msg.session_id)
+                            };
+                            let Some(target_sid) = target_sid else {
+                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                return;
+                            };
+                            let target = match self.players.get(&target_sid) {
+                                Some(r) => r.clone(),
+                                None => return,
+                            };
+                            let mut state = match target.actor_ref.ask(GetPlayerState).await {
+                                Ok(Some(s)) => s,
+                                _ => return,
+                            };
+                            state.flags.clear();
+                            let _ = target.actor_ref.ask(SetPlayerState { state }).await;
+                            if let Some(world_ref) = self.self_ref.clone() {
+                                let _ = world_ref.tell(crate::actors::world::effects::RefreshLevelEffects {
+                                    session_id: target_sid,
+                                }).try_send();
+                            }
+                            send_system_message(&self.gate_ref, msg.session_id, "flags 已清空");
                         }
                         _ => {}
                     }
