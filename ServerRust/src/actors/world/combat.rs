@@ -2829,10 +2829,15 @@ impl Message<MagicRequest> for WorldActor {
             }
             // #328：Trap —— 目标怪物 60 秒麻痹（C# Map.cs:2048 ShockTime）
             SPELL_TRAP => {
-                let hit: Option<u32> = self.monsters.iter()
+                // C# Map.cs Trap：目标等级 >= 施法等级+2 时跳过
+                let hit: Option<(u32, i32)> = self.monsters.iter()
                     .find(|(_, m)| m.x == target_x && m.y == target_y && m.hp > 0)
-                    .map(|(id, _)| *id);
-                if let Some(mid) = hit {
+                    .map(|(id, m)| (*id, self.monster_infos.get(&m.monster_index).map(|i| i.level).unwrap_or(0)));
+                if let Some((mid, mlevel)) = hit {
+                    if mlevel >= state.level as i32 + 2 {
+                        debug!("Magic: {} casts Trap -> monster {} level {} too high", state.name, mid, mlevel);
+                        return;
+                    }
                     if let Some(monster) = self.monsters.get_mut(&mid) {
                         crate::combat::poison::apply_poison(
                             &mut monster.poison_list,
