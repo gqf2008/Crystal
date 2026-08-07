@@ -43,7 +43,31 @@ def main() -> int:
     #    其余配对用例（组队/私聊/邮件/好友）按名称/在线表，不受相邻影响。
     cur.execute("UPDATE characters SET direction=4 WHERE name='bevychar'")
     cur.execute("UPDATE characters SET x=267, y=257, direction=0 WHERE name='bevy2char'")
-    # 2) bevychar 背包为空则恢复（item 194 BraceletOfAgony / 430 BoundlessRing）
+    # 2) bevychar 装备恢复（fishing/mount 用例依赖）：
+    #    Weapon 槽 = BlueFishingRod(793)、Mount 槽 = BengalTiger(764)
+    cur.execute("SELECT COUNT(*) FROM inventory_equipment WHERE character_name='bevychar' AND slot IN (0,10)")
+    if cur.fetchone()[0] < 2:
+        cur.execute("SELECT item_json FROM inventory_backpack WHERE character_name='bevy2char' AND grid=0 LIMIT 1")
+        row = cur.fetchone()
+        template = json.loads(row[0]) if row else {}
+        def eq_item(uid, item_index, mount=False):
+            d = json.loads(json.dumps(template))
+            d['unique_id'] = uid; d['item_index'] = item_index; d['count'] = 1
+            d['info'] = None  # 服务端 UserInformation enrich
+            if mount:
+                # 坐骑需 5 孔且 slots[2]=鞍（C# Ride 校验，social.rs RIDE has_saddle）
+                saddle = json.loads(json.dumps(d))
+                saddle['unique_id'] = uid + 1; saddle['item_index'] = 782; saddle['slots'] = []
+                d['slots'] = [None, None, saddle, None, None]
+            return json.dumps(d, ensure_ascii=False)
+        for slot, uid, idx in ((0, 79301, 793), (10, 76401, 764)):
+            cur.execute("SELECT COUNT(*) FROM inventory_equipment WHERE character_name='bevychar' AND slot=?", (slot,))
+            if cur.fetchone()[0] == 0:
+                cur.execute(
+                    "INSERT INTO inventory_equipment (character_name, slot, item_json) VALUES ('bevychar', ?, ?)",
+                    (slot, eq_item(uid, idx, mount=(slot == 10))),
+                )
+    # 3) bevychar 背包为空则恢复（item 194 BraceletOfAgony / 430 BoundlessRing）
     cur.execute("SELECT COUNT(*) FROM inventory_backpack WHERE character_name='bevychar'")
     if cur.fetchone()[0] == 0:
         cur.execute(
