@@ -41,13 +41,16 @@ impl MonsterBehavior for WitchDoctorBehavior {
             let hp_pct = if monster.max_hp > 0 { monster.hp * 100 / monster.max_hp } else { 100 };
 
             if roll == 0 {
-                // 传送（C# TeleportRandom：目标附近 ±AttackRange 随机点）
-                // POC：用 move 槽近似传送，跳到目标附近随机格
-                let off = fastrand::i32(-ATTACK_RANGE..=ATTACK_RANGE);
-                let off2 = fastrand::i32(-ATTACK_RANGE..=ATTACK_RANGE);
-                let nx = target.x + off;
-                let ny = target.y + off2;
-                ctx.out_moves.push((monster.object_id, nx, ny, monster.direction));
+                // 传送（C# TeleportRandom(10, AttackRange)：目标附近 ±AttackRange 随机点）
+                // 推多个候选，tick 端 out_moves 校验 walkable，最后有效者生效
+                for _ in 0..5 {
+                    ctx.out_moves.push((
+                        monster.object_id,
+                        target.x + fastrand::i32(-ATTACK_RANGE..=ATTACK_RANGE),
+                        target.y + fastrand::i32(-ATTACK_RANGE..=ATTACK_RANGE),
+                        monster.direction,
+                    ));
+                }
             } else if hp_pct < 50 && fastrand::i32(0..3) == 0 {
                 // 自我治疗 HP/4（C# ChangeHP(HP/4)）
                 let heal = monster.max_hp / 4;
