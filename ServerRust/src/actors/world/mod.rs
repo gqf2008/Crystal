@@ -513,6 +513,9 @@ const MON_DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
 
 /// 默认复活点
 const DEFAULT_SPAWN_X: i32 = 330;
+// PK 城（C# Settings.PKTownMapName="3" / PKTownPositionX=848 / PKTownPositionY=677）
+const PK_TOWN_X: i32 = 848;
+const PK_TOWN_Y: i32 = 677;
 const DEFAULT_SPAWN_Y: i32 = 330;
 
 // 魔法 spell ID 常量。值必须与 SharedRust `Spell` 枚举一致（DB 存的是枚举值）。
