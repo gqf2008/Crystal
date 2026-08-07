@@ -75,10 +75,13 @@ impl MonsterBehavior for KingGuardBehavior {
                         spell_id: 0,
                     });
                     // C# PoisonTarget(target,10,5,Green,1000)
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::GREEN, 10, damage, 1000),
-                    });
+                    // C# PoisonTarget(10,5,Green,1000)：1/10
+                    if fastrand::i32(0..10) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::GREEN, 5, damage, 1000),
+                        });
+                    }
                 } else {
                     // 重击 MC*2 + AOE(AttackRange) Slow/Paralysis
                     let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac * 2, 0).max(1);
@@ -91,10 +94,13 @@ impl MonsterBehavior for KingGuardBehavior {
                         spell_id: 0,
                     });
                     // C# PoisonTarget Slow/Paralysis（分支恒真，用 Slow 近似）
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::SLOW, 5, 10, 1000),
-                    });
+                    // C# PoisonTarget(5,10,Slow,1000)：1/5
+                    if fastrand::i32(0..5) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::SLOW, 10, 0, 1000),
+                        });
+                    }
                 }
             }
             return;

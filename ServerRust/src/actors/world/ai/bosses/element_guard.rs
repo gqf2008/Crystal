@@ -48,11 +48,13 @@ impl MonsterBehavior for ElementGuardBehavior {
                     spell_id: 0,
                     attack_type: 0,
                 });
-                // C# 1/2 Red 毒（CompleteAttack poison=true）
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::RED, 5, damage, 1000),
-                });
+                // C# PoisonTarget(5,5,Red,1000)：1/5
+                if fastrand::i32(0..5) == 0 {
+                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(PoisonType::RED, 5, damage, 1000),
+                    });
+                }
             }
         } else if dist <= VIEW_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
@@ -65,11 +67,13 @@ impl MonsterBehavior for ElementGuardBehavior {
                     damage,
                     spell_id: 0,
                 });
-                // C# Green 毒（CompleteRangeAttack poison=true）
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::GREEN, 5, 3, 1000),
-                });
+                // C# PoisonTarget(5,3,Green,1000)：1/5、3s、值=SP
+                if fastrand::i32(0..5) == 0 {
+                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(PoisonType::GREEN, 3, damage, 1000),
+                    });
+                }
             }
         } else if ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);

@@ -102,10 +102,13 @@ impl MonsterBehavior for WaterDragonBehavior {
                 spell_id: 0,
             });
             // finalDamage>0 → Green 7s（C# PoisonTarget(target,7,5,Green,1000)）
-            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                session_id: target.session_id,
-                poison: Poison::new(PoisonType::GREEN, 7, damage, 1000),
-            });
+            // C# PoisonTarget(7,5,Green,1000)：1/7
+            if fastrand::i32(0..7) == 0 {
+                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                    session_id: target.session_id,
+                    poison: Poison::new(PoisonType::GREEN, 5, damage, 1000),
+                });
+            }
         }
     }
 }

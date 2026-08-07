@@ -70,10 +70,13 @@ impl MonsterBehavior for CrystalSpiderBehavior {
                             spell_id: 0,
                             attack_type: 1,
                         });
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: h.session_id,
-                            poison: Poison::new(PoisonType::GREEN, 8, damage, 2000),
-                        });
+                        // C# PoisonTarget(8,5,Green,2000)：1/8
+                        if fastrand::i32(0..8) == 0 {
+                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: h.session_id,
+                                poison: Poison::new(PoisonType::GREEN, 5, damage, 2000),
+                            });
+                        }
                         hit_any = true;
                     }
                 }
@@ -86,10 +89,13 @@ impl MonsterBehavior for CrystalSpiderBehavior {
                         spell_id: 0,
                         attack_type: 1,
                     });
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::GREEN, 8, damage, 2000),
-                    });
+                    // C# PoisonTarget(8,5,Green,2000)：1/8
+                    if fastrand::i32(0..8) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::GREEN, 5, damage, 2000),
+                        });
+                    }
                 }
             }
             return;

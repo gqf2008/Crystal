@@ -60,10 +60,13 @@ impl MonsterBehavior for VenomSpiderBehavior {
                         spell_id: 0,
                         attack_type: 0,
                     });
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::GREEN, 8, damage, 1000),
-                    });
+                    // C# PoisonTarget(8,5,Green,1000)：1/8
+                    if fastrand::i32(0..8) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::GREEN, 5, damage, 1000),
+                        });
+                    }
                 } else {
                     for h in hits {
                         ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
@@ -73,10 +76,13 @@ impl MonsterBehavior for VenomSpiderBehavior {
                             spell_id: 0,
                             attack_type: 0,
                         });
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: h.session_id,
-                            poison: Poison::new(PoisonType::GREEN, 8, damage, 1000),
-                        });
+                        // C# PoisonTarget(8,5,Green,1000)：1/8
+                        if fastrand::i32(0..8) == 0 {
+                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: h.session_id,
+                                poison: Poison::new(PoisonType::GREEN, 5, damage, 1000),
+                            });
+                        }
                     }
                 }
             }
