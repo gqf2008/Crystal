@@ -343,6 +343,24 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("sephighassassin") || name.contains("sep high assassin") {
         return Box::new(bosses::sep_assassin::SepAssassinBehavior::new());
     }
+    if name.contains("dragonwarrior") || name.contains("dragon warrior") || name.contains("龙战士") {
+        return Box::new(bosses::dragon_warrior::DragonWarriorBehavior::new());
+    }
+    if name.contains("sackwarrior") || name.contains("sack warrior") || name.contains("布袋战士") {
+        return Box::new(bosses::sack_warrior::SackWarriorBehavior::new());
+    }
+    if name.contains("archerguard") || name.contains("archer guard") || name.contains("弓箭守卫") {
+        return Box::new(bosses::archer_guard::ArcherGuardBehavior::new());
+    }
+    if name.contains("conquestarcher") || name.contains("conquest archer") || name.contains("征服弓手") {
+        return Box::new(bosses::town_archer::TownArcherBehavior::new());
+    }
+    if name.contains("dragonstatue") || name.contains("dragon statue") || name.contains("龙雕像") {
+        return Box::new(bosses::dragon_statue::DragonStatueBehavior::new());
+    }
+    if name.contains("floatingrock") || name.contains("floating rock") || name.contains("浮石") {
+        return Box::new(bosses::floating_rock::FloatingRockBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -707,6 +725,12 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("sephightaoist") || name.contains("sep high taoist")
         || name.contains("sephighwizard") || name.contains("sep high wizard")
         || name.contains("sephighassassin") || name.contains("sep high assassin")
+        || name.contains("dragonwarrior") || name.contains("dragon warrior") || name.contains("龙战士")
+        || name.contains("sackwarrior") || name.contains("sack warrior") || name.contains("布袋战士")
+        || name.contains("archerguard") || name.contains("archer guard") || name.contains("弓箭守卫")
+        || name.contains("conquestarcher") || name.contains("conquest archer") || name.contains("征服弓手")
+        || name.contains("dragonstatue") || name.contains("dragon statue") || name.contains("龙雕像")
+        || name.contains("floatingrock") || name.contains("floating rock") || name.contains("浮石")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
@@ -834,10 +858,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn archer_guard_not_boss() {
-        // #471 修复：ArcherGuard 等普通守卫不应被当作 Boss（否则跳过 tick 死亡判定 → 无敌）
-        assert!(!is_registered_boss("ArcherGuard"));
-        assert!(!is_registered_boss("archerguard"));
+    fn archer_guard_registered() {
+        // #471 时代注册 Boss 会跳过 tick 死亡判定导致无敌；该问题已在 #1013 修复（Boss hp<=0 进 dead_monsters）。
+        // ArcherGuard 现注册专属行为（静态远程守卫），死亡判定安全。
+        assert!(is_registered_boss("ArcherGuard"));
+        assert!(is_registered_boss("archerguard"));
     }
 
     #[test]
