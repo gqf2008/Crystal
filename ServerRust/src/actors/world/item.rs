@@ -225,14 +225,29 @@ impl Message<PickUpRequest> for WorldActor {
 
         // 查找附近可拾取的物品（1 格内，同地图）
         const OWNERSHIP_TICKS: u64 = 300; // ~30 秒保护期
+        // 预取在线玩家组号（C# IsGroupMember：保护期内同组队员可拾取掉落者的物品）
+        let mut player_groups: std::collections::HashMap<u64, Option<u64>> = std::collections::HashMap::new();
+        for (sid, rec) in &self.players {
+            if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                player_groups.insert(*sid, s.group_id);
+            }
+        }
+        let picker_group = state.group_id;
         let pickup_idx = self.ground_items.iter().position(|gi| {
             if gi.map_index != state.map_index { return false; }
             if (gi.x - player_pos.0).abs() > 1 { return false; }
             if (gi.y - player_pos.1).abs() > 1 { return false; }
-            // 所有权保护：保护期内只有掉落者可拾取
+            // 所有权保护：保护期内只有掉落者可拾取（C# PickUp：同组队员也可拾取）
             if let Some(dropper) = gi.dropper_session {
                 if self.tick_count < gi.drop_tick + OWNERSHIP_TICKS && dropper != msg.session_id {
-                    return false;
+                    // C# IsGroupMember(owner)：掉落者为同组队员时允许拾取
+                    let group_ok = match (player_groups.get(&dropper).copied().flatten(), picker_group) {
+                        (Some(dg), Some(pg)) => dg == pg,
+                        _ => false,
+                    };
+                    if !group_ok {
+                        return false;
+                    }
                 }
             }
             true
