@@ -268,6 +268,38 @@ impl Message<StartGameRequest> for WorldActor {
             }
         }
 
+        // C# StartGame（PlayerObject.cs:1073）：当前地图 NoReconnect → 登录时传送到 NoReconnectMap 随机点
+        if let Some(mi) = self.map_infos.get(&(map_index as i32)).cloned() {
+            if mi.no_reconnect && !mi.no_reconnect_map.is_empty() {
+                if let Some(dest_mi) = self.map_infos.values()
+                    .find(|m| m.file_name.eq_ignore_ascii_case(&mi.no_reconnect_map))
+                    .cloned()
+                {
+                    let dest_map_index = dest_mi.index as u16;
+                    self.get_or_load_map(&dest_mi.file_name, dest_map_index);
+                    let (rx, ry) = if let Some(map) = self.maps.get(&dest_map_index) {
+                        let mut pt = (map.width as i32 / 2, map.height as i32 / 2);
+                        for _ in 0..40 {
+                            let cx = fastrand::i32(0..map.width as i32);
+                            let cy = fastrand::i32(0..map.height as i32);
+                            if map.is_walkable(cx, cy) {
+                                pt = (cx, cy);
+                                break;
+                            }
+                        }
+                        pt
+                    } else {
+                        (330, 330)
+                    };
+                    info!("NoReconnect: moving {} from map {} to {} ({},{})",
+                          player_name, map_index, dest_mi.file_name, rx, ry);
+                    loaded_state.map_index = dest_map_index;
+                    loaded_state.x = rx;
+                    loaded_state.y = ry;
+                }
+            }
+        }
+
         // 初始化装备属性加成（从已装备物品计算）
         let b = calculate_equipment_bonuses(&loaded_state.inventory.equipment, &self.item_infos);
         loaded_state.bonus_min_attack = b.min_atk;
