@@ -1655,6 +1655,8 @@ impl Message<SocialPlayerJoined> for SocialActor {
 
     async fn handle(&mut self, msg: SocialPlayerJoined, _ctx: &mut Context<Self, Self::Reply>) {
         self.players.insert(msg.session_id, msg.actor_ref.clone());
+        // C# MirConnection.cs:701：登录时主动下发好友列表（GetFriends → S.FriendUpdate）
+        self.send_friends_list(msg.session_id).await;
         // 同步行会成员在线状态（服务端重启后行会从 DB 加载，成员 session 为 None；
         // 不更新则行会广播/在线显示失效）
         let state = match msg.actor_ref.ask(GetPlayerState).await {
