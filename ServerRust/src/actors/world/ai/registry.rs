@@ -120,6 +120,24 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("furbolgarcher") || name.contains("furbolg archer") || name.contains("兽人弓手") {
         return Box::new(bosses::furbolg_archer::FurbolgArcherBehavior::new());
     }
+    if name.contains("hellslasher") || name.contains("hell slasher") || name.contains("地狱斩击者") {
+        return Box::new(bosses::hell_slasher::HellSlasherBehavior::new());
+    }
+    if name.contains("omablest") || name.contains("oma blest") || name.contains("奥玛祝福者") {
+        return Box::new(bosses::oma_blest::OmaBlestBehavior::new());
+    }
+    if name.contains("elephantman") || name.contains("elephant man") || name.contains("象人") {
+        return Box::new(bosses::elephant_man::ElephantManBehavior::new());
+    }
+    if name.contains("treeguardian") || name.contains("tree guardian") || name.contains("树卫") {
+        return Box::new(bosses::tree_guardian::TreeGuardianBehavior::new());
+    }
+    if name.contains("frozenknight") || name.contains("frozen knight") || name.contains("冰霜骑士") {
+        return Box::new(bosses::frozen_knight::FrozenKnightBehavior::new());
+    }
+    if name.contains("glacierbeast") || name.contains("glacier beast") || name.contains("冰川兽") {
+        return Box::new(bosses::glacier_beast::GlacierBeastBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -410,6 +428,12 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("burningzombie") || name.contains("burning zombie") || name.contains("燃烧僵尸")
         || name.contains("antcommander") || name.contains("ant commander") || name.contains("蚁后指挥官")
         || name.contains("furbolgarcher") || name.contains("furbolg archer") || name.contains("兽人弓手")
+        || name.contains("hellslasher") || name.contains("hell slasher") || name.contains("地狱斩击者")
+        || name.contains("omablest") || name.contains("oma blest") || name.contains("奥玛祝福者")
+        || name.contains("elephantman") || name.contains("elephant man") || name.contains("象人")
+        || name.contains("treeguardian") || name.contains("tree guardian") || name.contains("树卫")
+        || name.contains("frozenknight") || name.contains("frozen knight") || name.contains("冰霜骑士")
+        || name.contains("glacierbeast") || name.contains("glacier beast") || name.contains("冰川兽")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
