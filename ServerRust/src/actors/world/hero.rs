@@ -476,6 +476,8 @@ impl WorldActor {
             hero_combat: crate::combat::attack::CombatStats,
             /// 英雄自身最大 HP（#1180）
             hero_max_hp: i32,
+            /// 英雄完整自身属性（#1184：DC/MC/SC 齐备，施法/治疗用自身属性）
+            hero_stats: super::hero_stats::HeroStats,
             /// 英雄自身等级（#1182 C# PerTickRegen = 5 + Level/10）
             hero_level: u16,
             /// 自动喝药 HP 阈值（0=关闭，C# AutoHPPercent）
@@ -495,6 +497,19 @@ impl WorldActor {
                 }
                 // hero_behaviour == 1 (Follow) 时英雄纯跟随，不参战
                 // 但仍需移动跟随主人，所以保留快照（AI 内部判断 behaviour）
+                // #1184：英雄自身属性只算一次（基础 + 装备加成）
+                let hero = self.player_heroes.get(session_id)
+                    .and_then(|hs| hs.iter().find(|h| h.index as u8 == state.hero_index))
+                    .cloned();
+                let hero_stats = hero.as_ref().map(|h| {
+                    super::hero_stats::compute_hero_stats(
+                        h.class,
+                        h.level as i32,
+                        &state.hero_inventory.equipment,
+                        &self.item_infos,
+                    )
+                });
+                let hero_level = hero.as_ref().map(|h| h.level).unwrap_or(state.level);
                 snapshots.push(HeroSnapshot {
                     session_id: *session_id,
                     owner_x: state.x,
@@ -507,29 +522,15 @@ impl WorldActor {
                     owner_max_hp: state.max_hp,
                     owner_stats: state.to_combat_stats(),
                     owner_level: state.level,
-                    // #1180：英雄自身属性（C# BaseStats + 英雄装备加成）
-                    hero_combat: self.player_heroes.get(session_id)
-                        .and_then(|hs| hs.iter().find(|h| h.index as u8 == state.hero_index))
-                        .map(|h| {
-                            super::hero_stats::compute_hero_stats(
-                                h.class, h.level as i32,
-                                &state.hero_inventory.equipment,
-                                &self.item_infos,
-                            ).to_combat_stats()
-                        })
+                    // #1180/#1184：英雄自身属性（C# BaseStats + 英雄装备加成）
+                    hero_combat: hero_stats
+                        .map(|s| s.to_combat_stats())
                         .unwrap_or_else(|| state.to_combat_stats()),
-                    hero_max_hp: self.player_heroes.get(session_id)
-                        .and_then(|hs| hs.iter().find(|h| h.index as u8 == state.hero_index))
-                        .map(|h| super::hero_stats::compute_hero_stats(
-                            h.class, h.level as i32,
-                            &state.hero_inventory.equipment,
-                            &self.item_infos,
-                        ).max_hp)
-                        .unwrap_or(100),
-                    hero_level: self.player_heroes.get(session_id)
-                        .and_then(|hs| hs.iter().find(|h| h.index as u8 == state.hero_index))
-                        .map(|h| h.level)
-                        .unwrap_or(state.level),
+                    hero_max_hp: hero_stats.map(|s| s.max_hp).unwrap_or(100),
+                    hero_stats: hero_stats.unwrap_or_else(|| {
+                        super::hero_stats::hero_base_stats(state.class, state.level as i32)
+                    }),
+                    hero_level,
                     auto_hp_percent: state.auto_pot_hp.min(100) as u8,
                     hp_item_index: state.auto_pot_hp_item,
                 });
@@ -707,7 +708,7 @@ impl WorldActor {
                 match snap.class {
                     MirClass::Warrior => {
                         // 战士近战：基础 DC 伤害，偶尔触发 Slaying（攻杀）
-                        let raw = hero_attack_power(&snap.hero_combat, true);
+                        let raw = hero_attack_power(&snap.hero_combat);
                         let spell_id = if self.tick_count % 7 == 0 { Spell::Slaying as u8 } else { Spell::None as u8 };
                         attack_intents.push((snap.session_id, target.oid, raw, defence, false));
                         // 广播带 spell_id 的 ObjectAttack（循环外广播）
@@ -716,7 +717,7 @@ impl WorldActor {
                     }
                     MirClass::Assassin => {
                         // 刺客突进 + 近战：DoubleSlash 双击
-                        let raw = hero_attack_power(&snap.hero_combat, true);
+                        let raw = hero_attack_power(&snap.hero_combat);
                         attack_intents.push((snap.session_id, target.oid, raw, defence, false));
                         // 偶尔突进（FlashDash）：模拟为额外一次伤害
                         if self.tick_count % 10 == 0 {
@@ -730,7 +731,8 @@ impl WorldActor {
                     MirClass::Wizard => {
                         // 法师弹道：FireBall / ThunderBolt（亡灵 +50% 由 tick_spell_completions 处理）
                         let spell = Spell::FireBall;
-                        let raw = hero_spell_damage(&snap.hero_combat, true);
+                        // #1184：法师法术伤害用英雄自身 MC（C# WizardHero BeginMagic → 自身 Stats）
+                        let raw = hero_spell_damage(&snap.hero_stats, snap.class);
                         spell_intents.push((
                             snap.session_id, spell as u8, target.oid,
                             target.x, target.y, raw, self.tick_count + 4, // 弹道延迟 ~400ms
@@ -748,7 +750,8 @@ impl WorldActor {
                         } else {
                             // 否则施毒 + 弹道
                             let spell = Spell::SoulFireBall;
-                            let raw = hero_spell_damage(&snap.hero_combat, false);
+                            // #1184：道士符伤害用英雄自身 SC
+                            let raw = hero_spell_damage(&snap.hero_stats, snap.class);
                             spell_intents.push((
                                 snap.session_id, spell as u8, target.oid,
                                 target.x, target.y, raw, self.tick_count + 4,
@@ -759,7 +762,7 @@ impl WorldActor {
                     MirClass::Archer => {
                         // 弓箭手远程：StraightShot（AC 防御的物理弹道）
                         let spell = Spell::StraightShot;
-                        let raw = hero_attack_power(&snap.hero_combat, false);
+                        let raw = hero_attack_power(&snap.hero_combat);
                         spell_intents.push((
                             snap.session_id, spell as u8, target.oid,
                             target.x, target.y, raw, self.tick_count + 4,
@@ -920,7 +923,7 @@ impl WorldActor {
             };
             let level_offset = snapshots.iter()
                 .find(|s| s.session_id == *session_id)
-                .map(|s| s.owner_level.min(10) as u16)
+                .map(|s| s.hero_level.min(10) as u16)
                 .unwrap_or(0);
 
             let defender_stats = match self.monsters.get(target_oid) {
@@ -953,6 +956,8 @@ impl WorldActor {
         for (session_id, spell, target_oid, tx, ty, damage, fire_at_tick) in &spell_intents {
             // 广播 ObjectAttack 作为弹道发射动画
             broadcast_hero_attack(self, *session_id, *spell).await;
+            // #1184：英雄弹道用英雄自身属性结算（命中/暴击/等级）
+            let hero_snap = snapshots.iter().find(|s| s.session_id == *session_id);
             self.pending_spell_completions.push(PendingSpellCompletion {
                 fire_at_tick: *fire_at_tick,
                 session_id: *session_id,
@@ -961,10 +966,11 @@ impl WorldActor {
                 target_x: *tx,
                 target_y: *ty,
                 damage: *damage,
-                magic_stat: snapshots.iter()
-                    .find(|s| s.session_id == *session_id)
-                    .map(|s| s.owner_stats.max_atk)
+                magic_stat: hero_snap
+                    .map(|s| hero_spell_damage(&s.hero_stats, s.class))
                     .unwrap_or(10),
+                hero_stats: hero_snap.map(|s| s.hero_combat),
+                hero_level: hero_snap.map(|s| s.hero_level),
                 spell_level: 1,
                 bounce: 0,
             });
@@ -1007,11 +1013,11 @@ impl WorldActor {
         // 3d. 广播近战 ObjectAttack（带 spell_id）+ 道士治疗
         for (session_id, heal_target_session, spell_id, is_heal) in &support_intents {
             if *is_heal {
-                // 道士治疗主人：直接 Heal
+                // 道士治疗主人：直接 Heal（#1184：C# Healing = GetAttackPower(MinSC,MaxSC)*2 + Level）
                 if let Some(record) = self.players.get(heal_target_session) {
-                    let amount = 30 + snapshots.iter()
+                    let amount = snapshots.iter()
                         .find(|s| s.session_id == *session_id)
-                        .map(|s| s.owner_stats.max_atk / 4)
+                        .map(|s| hero_heal_amount(&s.hero_stats, s.hero_level))
                         .unwrap_or(5);
                     let _ = record.actor_ref.ask(crate::actors::player::Heal { amount }).await;
                     debug!("Hero healed owner {} for {} HP", heal_target_session, amount);
@@ -1228,23 +1234,41 @@ fn direction_towards(from_x: i32, from_y: i32, to_x: i32, to_y: i32) -> u8 {
     best_dir
 }
 
-/// 英雄物理攻击力（基于主人属性，战士/刺客/弓箭手用，近战 true 走 DC，远程 false 走 DC×0.9 近似）
-fn hero_attack_power(stats: &crate::combat::attack::CombatStats, melee: bool) -> i32 {
-    let base = if stats.max_atk > stats.min_atk {
+/// 英雄物理攻击力（#1184：C# GetAttackPower(Stats[MinDC], Stats[MaxDC]) 的稳定近似，取中值）
+fn hero_attack_power(stats: &crate::combat::attack::CombatStats) -> i32 {
+    if stats.max_atk > stats.min_atk {
         (stats.min_atk + stats.max_atk) / 2
     } else {
         stats.max_atk.max(1)
-    };
-    if melee { base } else { (base as f32 * 0.9) as i32 }
+    }
 }
 
-/// 英雄法术伤害（法师 MC / 道士 SC）
-///
-/// 注意：CombatStats 把 DC/MC/SC 折叠到统一的 atk 字段，这里按职业取不同倍率近似：
-/// 法师弹道（is_mc=true）走 max_atk；道士符（is_mc=false）走 max_atk 的 0.8 倍。
-fn hero_spell_damage(stats: &crate::combat::attack::CombatStats, is_mc: bool) -> i32 {
-    let base = stats.max_atk.max(6);
-    if is_mc { base.max(8) } else { ((base as f32) * 0.8) as i32 }
+/// 英雄法术伤害（#1184：C# HumanObject Magic 用英雄自身 Stats）
+/// Wizard→MC / Taoist→SC / 其他→DC，取对应属性中值作为稳定近似。
+fn hero_spell_damage(
+    stats: &super::hero_stats::HeroStats,
+    class: mir2_shared::enums::MirClass,
+) -> i32 {
+    let (min_v, max_v) = match class {
+        mir2_shared::enums::MirClass::Wizard => (stats.min_mc, stats.max_mc),
+        mir2_shared::enums::MirClass::Taoist => (stats.min_sc, stats.max_sc),
+        _ => (stats.min_dc, stats.max_dc),
+    };
+    if max_v > min_v {
+        (min_v + max_v) / 2
+    } else {
+        max_v.max(1)
+    }
+}
+
+/// 道士英雄治疗量（#1184：C# Healing = magic.GetDamage(GetAttackPower(MinSC,MaxSC)*2) + Level 的简化稳定近似）
+fn hero_heal_amount(stats: &super::hero_stats::HeroStats, level: u16) -> i32 {
+    let sc = if stats.max_sc > stats.min_sc {
+        (stats.min_sc + stats.max_sc) / 2
+    } else {
+        stats.max_sc.max(1)
+    };
+    (sc * 2).max(1) + level as i32
 }
 
 /// 广播英雄弹道/施法的 ObjectAttack 包

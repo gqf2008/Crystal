@@ -1265,6 +1265,10 @@ pub struct PendingSpellCompletion {
     pub damage: i32,
     /// 施法者魔法属性（MC），用于 Vampirism 吸血计算
     pub magic_stat: i32,
+    /// 英雄弹道专用：施法者战斗属性（英雄自身 CombatStats；None = 普通玩家，#1184）
+    pub hero_stats: Option<crate::combat::attack::CombatStats>,
+    /// 英雄弹道专用：施法者等级（英雄自身等级；None = 普通玩家，#1184）
+    pub hero_level: Option<u16>,
     /// 法术等级
     pub spell_level: u8,
     /// FireBounce 剩余弹跳次数（0 = 非链式法术；C# bounce = magic.Level + 2）
@@ -2202,6 +2206,8 @@ impl Message<MagicRequest> for WorldActor {
                     target_y,
                     damage: raw_damage,
                     magic_stat,
+                    hero_stats: None,
+                    hero_level: None,
                     spell_level,
                     bounce: 0,
                 });
@@ -2218,6 +2224,8 @@ impl Message<MagicRequest> for WorldActor {
                             target_y: *sy,
                             damage: (raw_damage / 2).max(1),
                             magic_stat,
+                            hero_stats: None,
+                            hero_level: None,
                             spell_level,
                             bounce: 0,
                         });
@@ -2243,6 +2251,8 @@ impl Message<MagicRequest> for WorldActor {
                     target_y,
                     damage: raw_damage,
                     magic_stat,
+                    hero_stats: None,
+                    hero_level: None,
                     spell_level,
                     bounce: spell_level as i32 + 2, // C# bounce = magic.Level + 2
                 });
@@ -2549,6 +2559,8 @@ impl Message<MagicRequest> for WorldActor {
                     target_y,
                     damage: raw_damage,
                     magic_stat,
+                    hero_stats: None,
+                    hero_level: None,
                     spell_level,
                     bounce: 0,
                 });
@@ -2564,6 +2576,8 @@ impl Message<MagicRequest> for WorldActor {
                         target_y,
                         damage: raw_damage,
                         magic_stat,
+                        hero_stats: None,
+                        hero_level: None,
                         spell_level,
                         bounce: 0,
                     });
