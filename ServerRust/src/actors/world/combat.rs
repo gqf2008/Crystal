@@ -1466,6 +1466,50 @@ impl Message<MagicRequest> for WorldActor {
                 let _ = record.actor_ref.ask(crate::actors::player::PurifyPoisons).await;
                 debug!("Magic: {} casts Purification (cleared poisons)", state.name);
             }
+            // Entrapment：困魔咒（C# HumanObject.cs:4893 + CompleteMagic 6315）——
+            // 拉拽目标怪物朝施法者反方向靠近（对角 min(|dx|,|dy|)，十字轴 |axis|-2），并麻痹 round((Lv+1)*0.8) 秒
+            SPELL_ENTRAPMENT => {
+                let mid = self.monsters.iter()
+                    .filter(|(_, m)| m.hp > 0 && (m.x - target_x).abs() <= 1 && (m.y - target_y).abs() <= 1)
+                    .map(|(id, _)| *id)
+                    .next();
+                let Some(mid) = mid else { return; };
+                let (mx, my, mlevel) = match self.monsters.get(&mid) {
+                    Some(m) => (m.x, m.y, self.monster_infos.get(&m.monster_index).map(|i| i.level).unwrap_or(0)),
+                    None => return,
+                };
+                let dist = (state.x - mx).abs().max((state.y - my).abs());
+                // C#：MaxDistance > 7 或目标等级 >= 施法等级 + 5 + Random(8) → 失败
+                if dist > 7 || mlevel >= state.level as i32 + 5 + fastrand::i32(0..8) {
+                    return;
+                }
+                // C#：Random(30) >= (Lv+1)*3 + (Level - targetLevel + 9) → 失败
+                let levelgap = state.level as i32 - mlevel + 9;
+                if fastrand::i32(0..30) >= ((spell_level as i32 + 1) * 3) + levelgap {
+                    return;
+                }
+                // 麻痹时长（怪物）：round((Lv+1)*0.8)
+                let duration = (((spell_level as i32 + 1) as f64) * 0.8).round() as u32;
+                if duration > 0 {
+                    if let Some(monster) = self.monsters.get_mut(&mid) {
+                        crate::combat::poison::apply_poison(&mut monster.poison_list,
+                            crate::combat::poison::Poison::new(mir2_shared::enums::PoisonType::PARALYSIS, duration, 0, 1000));
+                    }
+                }
+                // 拉拽方向 = 施法者朝向的反方向（C# (Direction - 4) % 8）
+                let pull_dir = ((msg.direction as usize + 4) % 8) as u8;
+                let pulldistance = if pull_dir % 2 > 0 {
+                    ((state.x - mx).abs().min((state.y - my).abs())).max(0)
+                } else {
+                    match pull_dir {
+                        0 | 4 => ((state.y - my).abs() - 2).max(0), // Up/Down
+                        _ => ((state.x - mx).abs() - 2).max(0),      // Left/Right
+                    }
+                };
+                let moved = self.push_monster(mid, pull_dir, pulldistance.max(1)).await;
+                debug!("Magic: {} casts Entrapment -> monster {} pulled {} tiles ({}s paralysis)",
+                    state.name, mid, moved, duration);
+            }
             // ShoulderDash：野蛮冲撞（向前冲刺 2 格，推开/伤害路径上的怪物）
             SPELL_SHOULDER_DASH => {
                 let dir = msg.direction as usize % 8;
@@ -1491,6 +1535,8 @@ impl Message<MagicRequest> for WorldActor {
                             m.target_session = Some(msg.session_id);
                             pushed_damage += dmg;
                         }
+                        // C# HumanObject.cs:5079：撞到怪物推开 1 格（沿冲撞方向）
+                        let _ = self.push_monster(mid, dir as u8, 1).await;
                     }
                     new_x = nx;
                     new_y = ny;
@@ -2432,55 +2478,6 @@ impl Message<MagicRequest> for WorldActor {
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
                 debug!("Magic: {} casts CounterAttack (reflect {}% for {}s)",
                     state.name, reflect_pct, duration_ticks / 10);
-            }
-            // Entrapment：拉拽目标到自身附近 + 麻痹（对齐 C# AssassinObject/Warrior Entrapment）
-            // 简化：将目标格子怪物移到施法者前方 1 格，并施加 Paralysis
-            SPELL_ENTRAPMENT => {
-                let dir = msg.direction as usize % 8;
-                let pull_x = state.x + MON_DIR_DX[dir];
-                let pull_y = state.y + MON_DIR_DY[dir];
-                // 找目标位置怪物（target_x/target_y 或前方 1 格）
-                let target_mid: Option<u32> = self.monsters.iter()
-                    .find(|(_, m)| {
-                        (m.x == target_x && m.y == target_y && m.hp > 0)
-                            || (m.x == pull_x && m.y == pull_y && m.hp > 0)
-                    })
-                    .map(|(id, _)| *id);
-                if let Some(mid) = target_mid {
-                    let walkable = self.maps.get(&state.map_index)
-                        .map(|m| m.is_walkable(pull_x, pull_y))
-                        .unwrap_or(true);
-                    if let Some(monster) = self.monsters.get_mut(&mid) {
-                        if walkable {
-                            monster.x = pull_x;
-                            monster.y = pull_y;
-                            monster.direction = ((dir + 4) % 8) as u8; // 朝向施法者
-                        }
-                        // 麻痹 2-5 秒
-                        let para_dur = (2 + spell_level as u32).min(5);
-                        crate::combat::poison::apply_poison(&mut monster.poison_list,
-                            crate::combat::poison::Poison::new(
-                                mir2_shared::enums::PoisonType::PARALYSIS, para_dur, 0, 1000));
-                        monster.provoked = true;
-                        monster.target_session = Some(msg.session_id);
-                        // 广播移动
-                        let mut walk_body = Vec::new();
-                        walk_body.extend_from_slice(&mid.to_le_bytes());
-                        walk_body.extend_from_slice(&monster.x.to_le_bytes());
-                        walk_body.extend_from_slice(&monster.y.to_le_bytes());
-                        walk_body.push(monster.direction);
-                        let walk_packet = build_packet_bytes(
-                            mir2_shared::enums::ServerPacketIds::ObjectWalk as i16, &walk_body);
-                        for session_id in self.players.keys() {
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: *session_id,
-                                data: walk_packet.clone(),
-                            }).await;
-                        }
-                        debug!("Magic: {} casts Entrapment (pulled monster {} paralysis {}s)",
-                            state.name, mid, para_dur);
-                    }
-                }
             }
             // --- 法师系 ---
             // TurnUndead：秒杀低级亡灵（对齐 C# WizardObject.TurnUndead）
