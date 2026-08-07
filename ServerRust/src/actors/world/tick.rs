@@ -3094,6 +3094,8 @@ impl Message<Tick> for WorldActor {
                 // - 已有目标：DataRange(16) 内保留（跨图/死亡/超距 → Target=null 仇恨丢失）
                 // - 无目标：ProcessSearch（SearchDelay 3s 到点）→ 视野内最近玩家
                 // - 有目标但到重搜时间：1/3 概率重新 FindTarget（可能切换目标）
+                // C# ProcessTarget：目标死亡/丢失 → 立即重新索敌（不等 SearchDelay）
+                let had_target = monster.target_session.is_some();
                 let mut chase_target: Option<(u64, i32, i32, i32)> = None; // (session, px, py, dist)
                 if let Some(ts) = monster.target_session {
                     if let Some((sid, px, py, _, _, hp, map)) =
@@ -3108,6 +3110,10 @@ impl Message<Tick> for WorldActor {
                     } else {
                         monster.target_session = None;
                     }
+                }
+                if chase_target.is_none() && had_target {
+                    // 目标刚丢失（死亡/超距/跨图）：重置索敌计时，下一 tick 立即搜索
+                    self.monster_search_ticks.insert(*oid, 0);
                 }
                 let search_due = self.monster_search_ticks.get(oid).copied().unwrap_or(0) <= self.tick_count;
                 if chase_target.is_none() {
