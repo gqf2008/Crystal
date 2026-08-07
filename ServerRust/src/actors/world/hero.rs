@@ -390,6 +390,28 @@ const HERO_RANGED_RANGE: i32 = 7;
 /// 英雄自动喝药检查间隔（tick 数，C# AutoPotDelay=1000ms）
 const HERO_AUTOPOT_INTERVAL_TICKS: u64 = 10;
 
+/// 英雄自身增益类型（#1190：C# HumanObject 各职业 ProcessFriend 自增益）
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HeroBuffKind {
+    Rage,
+    ProtectionField,
+    Haste,
+    LightBody,
+    MagicShield,
+    MagicBooster,
+    Concentration,
+}
+
+/// 英雄增益实例（#1190）
+#[derive(Clone, Copy, Debug)]
+struct HeroBuff {
+    kind: HeroBuffKind,
+    /// 到期 tick（WorldActor.tick_count）
+    expire_tick: u64,
+    /// 技能等级（影响数值/时长）
+    level: u8,
+}
+
 /// 英雄 AI 运行时状态（每个出战英雄一个实例）
 #[derive(Clone)]
 pub struct HeroCombatAI {
@@ -425,6 +447,8 @@ pub struct HeroCombatAI {
     pub max_mp: i32,
     /// 上次已下发主人的 MP（#1186：避免每 tick 重复发 HeroHealthChanged）
     pub last_sent_mp: i32,
+    /// 自身增益列表（#1190：C# Buffs）
+    pub buffs: Vec<HeroBuff>,
 }
 
 impl HeroCombatAI {
@@ -450,6 +474,7 @@ impl HeroCombatAI {
             mp: max_mp,
             max_mp,
             last_sent_mp: max_mp,
+            buffs: Vec::new(),
         }
     }
 }
@@ -623,6 +648,19 @@ impl WorldActor {
                 });
             // 暴露可变副本用于本 tick 决策（循环内不写回 self）
             let mut ai_local = ai.clone();
+            // #1190：清理过期增益
+            ai_local.buffs.retain(|b| b.expire_tick > self.tick_count);
+            // #1190：buff 对战斗属性/回蓝/冷却的影响（C# RefreshStats 对应项；hero_combat/hero_stats 为局部加 buff 副本）
+            let mut hero_combat = snap.hero_combat;
+            let mut hero_stats = snap.hero_stats;
+            let shield_pct = hero_apply_buffs(&ai_local.buffs, &mut hero_combat, &mut hero_stats);
+            let haste_ticks = ai_local
+                .buffs
+                .iter()
+                .find(|b| b.kind == HeroBuffKind::Haste)
+                .map(|b| (b.level as i32 * 2 + 2) as u64)
+                .unwrap_or(0);
+            let concentrating = ai_local.buffs.iter().any(|b| b.kind == HeroBuffKind::Concentration);
             // #1134：英雄 HP 不再每 tick 强制满血——改为脱战缓慢回血（C# Stats 回血近似）
             // 上一 tick 无锁定目标视为脱战（战斗中不回血，损耗可见）
             if !snap.owner_dead && ai_local.hp > 0 && ai_local.hp < ai_local.max_hp
@@ -646,7 +684,11 @@ impl WorldActor {
                 && ai_local.mp < ai_local.max_mp
                 && ai_local.target_oid.is_none()
             {
-                let regen = (ai_local.max_mp * 3 / 100 + 1).max(1);
+                let mut regen = (ai_local.max_mp * 3 / 100 + 1).max(1);
+                // #1190：Concentration 专注回蓝增强（近似 ×2）
+                if concentrating {
+                    regen *= 2;
+                }
                 ai_local.mp = (ai_local.mp + regen).min(ai_local.max_mp);
             }
             // #1186：药水持续回蓝（C# ProcessRegen：PerTickRegen 从 PotManaAmount 扣除）
@@ -749,6 +791,32 @@ impl WorldActor {
             let can_attack = self.tick_count >= ai_local.next_attack_tick;
             let can_move = self.tick_count >= ai_local.next_move_tick;
 
+            // #1190：ProcessFriend 自增益（C# 各子类：有目标且已学且无同 buff 且蓝足够 → 施放）
+            // 施放当 tick 不攻击（C# ProcessFriend return 后跳过 ProcessAttack）
+            let friend = hero_friend_buffs(snap.class)
+                .iter()
+                .find(|(spell, kind)| {
+                    hero_magic_level(&snap.hero_magics, *spell as u8) > 0
+                        && !ai_local.buffs.iter().any(|b| b.kind == *kind)
+                })
+                .copied();
+            if let Some((spell, kind)) = friend {
+                let buff_lv = hero_magic_level(&snap.hero_magics, spell as u8);
+                let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+                if ai_local.mp >= cost {
+                    ai_local.mp -= cost;
+                    ai_local.buffs.push(HeroBuff {
+                        kind,
+                        expire_tick: self.tick_count + hero_buff_duration(kind, buff_lv) * 10,
+                        level: buff_lv,
+                    });
+                    support_intents.push((snap.session_id, snap.session_id, spell as u8, false));
+                    ai_local.next_attack_tick = self.tick_count + 4;
+                    *ai = ai_local;
+                    continue;
+                }
+            }
+
             // HP 低于阈值：后撤（对应 ArcherHero ProcessTarget 的远离逻辑 + 自动喝药）
             let hp_pct = if ai_local.max_hp > 0 {
                 ai_local.hp * 100 / ai_local.max_hp
@@ -785,10 +853,17 @@ impl WorldActor {
                 if let Some(spell) = ranged2_skill {
                     if hero_magic_level(&snap.hero_magics, spell as u8) > 0 {
                         ai_local.direction = direction_towards(ai_local.x, ai_local.y, target.x, target.y);
-                        let raw = hero_attack_power(&snap.hero_combat);
+                        let raw = hero_attack_power(&hero_combat);
                         attack_intents.push((snap.session_id, target.oid, raw, DefenceType::Ac, true));
                         support_intents.push((snap.session_id, 0, spell as u8, false));
                         ai_local.next_attack_tick = self.tick_count + 6;
+                        // #1190：Haste 缩短攻击冷却
+                        if haste_ticks > 0 {
+                            ai_local.next_attack_tick = ai_local
+                                .next_attack_tick
+                                .saturating_sub(haste_ticks)
+                                .max(self.tick_count + 2);
+                        }
                         *ai = ai_local;
                         continue;
                     }
@@ -802,7 +877,7 @@ impl WorldActor {
                 match snap.class {
                     MirClass::Warrior => {
                         // #1188：C# WarriorHero.Attack 优先级取已学技能（Thrusting 已在距离 2 分支处理）
-                        let raw = hero_attack_power(&snap.hero_combat);
+                        let raw = hero_attack_power(&hero_combat);
                         let learned = first_learned_spell(
                             &snap.hero_magics,
                             &[
@@ -821,7 +896,7 @@ impl WorldActor {
                     }
                     MirClass::Assassin => {
                         // #1188：C# AssassinHero.Attack：DoubleSlash（已学）；HeavenlySword 已在距离 2 分支处理
-                        let raw = hero_attack_power(&snap.hero_combat);
+                        let raw = hero_attack_power(&hero_combat);
                         let spell_id = if hero_magic_level(&snap.hero_magics, Spell::DoubleSlash as u8) > 0 {
                             Spell::DoubleSlash as u8
                         } else {
@@ -851,7 +926,7 @@ impl WorldActor {
                                     &self.magic_infos,
                                     &snap.hero_magics,
                                     spell as u8,
-                                    &snap.hero_stats,
+                                    &hero_stats,
                                     snap.class,
                                 );
                                 // #1186：耗蓝（C# CanUseMagic：MagicCost > MP → 无法施法）
@@ -873,7 +948,7 @@ impl WorldActor {
                                     // 蓝不足：1 格内近战兜底（C# WizardHero 无蓝时 ProcessTarget 退避/近战）
                                     let _ = hero_melee_fallback(
                                         snap.session_id, target.oid, target_dist,
-                                        &snap.hero_combat, &mut attack_intents, &mut support_intents,
+                                        &hero_combat, &mut attack_intents, &mut support_intents,
                                     );
                                     ai_local.next_attack_tick = self.tick_count + 6;
                                 }
@@ -882,7 +957,7 @@ impl WorldActor {
                                 // 未学任何弹道技能：近战兜底
                                 let _ = hero_melee_fallback(
                                     snap.session_id, target.oid, target_dist,
-                                    &snap.hero_combat, &mut attack_intents, &mut support_intents,
+                                    &hero_combat, &mut attack_intents, &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 6;
                             }
@@ -910,7 +985,7 @@ impl WorldActor {
                             } else {
                                 let _ = hero_melee_fallback(
                                     snap.session_id, target.oid, target_dist,
-                                    &snap.hero_combat, &mut attack_intents, &mut support_intents,
+                                    &hero_combat, &mut attack_intents, &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             }
@@ -920,7 +995,7 @@ impl WorldActor {
                                 &self.magic_infos,
                                 &snap.hero_magics,
                                 Spell::SoulFireBall as u8,
-                                &snap.hero_stats,
+                                &hero_stats,
                                 snap.class,
                             );
                             let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::SoulFireBall as u8);
@@ -940,14 +1015,14 @@ impl WorldActor {
                             } else {
                                 let _ = hero_melee_fallback(
                                     snap.session_id, target.oid, target_dist,
-                                    &snap.hero_combat, &mut attack_intents, &mut support_intents,
+                                    &hero_combat, &mut attack_intents, &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             }
                         } else {
                             let _ = hero_melee_fallback(
                                 snap.session_id, target.oid, target_dist,
-                                &snap.hero_combat, &mut attack_intents, &mut support_intents,
+                                &hero_combat, &mut attack_intents, &mut support_intents,
                             );
                             ai_local.next_attack_tick = self.tick_count + 10;
                         }
@@ -956,7 +1031,7 @@ impl WorldActor {
                         // #1188：C# ArcherHero：StraightShot（已学）
                         let straight_lv = hero_magic_level(&snap.hero_magics, Spell::StraightShot as u8);
                         if straight_lv > 0 {
-                            let raw = hero_attack_power(&snap.hero_combat);
+                            let raw = hero_attack_power(&hero_combat);
                             // #1186：弓箭技能耗蓝（C# CanUseMagic）
                             let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::StraightShot as u8);
                             if ai_local.mp >= cost {
@@ -975,22 +1050,33 @@ impl WorldActor {
                             } else {
                                 let _ = hero_melee_fallback(
                                     snap.session_id, target.oid, target_dist,
-                                    &snap.hero_combat, &mut attack_intents, &mut support_intents,
+                                    &hero_combat, &mut attack_intents, &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 6;
                             }
                         } else {
                             let _ = hero_melee_fallback(
                                 snap.session_id, target.oid, target_dist,
-                                &snap.hero_combat, &mut attack_intents, &mut support_intents,
+                                &hero_combat, &mut attack_intents, &mut support_intents,
                             );
                             ai_local.next_attack_tick = self.tick_count + 6;
                         }
                     }
                 }
                 // 战斗时英雄 HP 模拟损耗（敌人反击的近似，#1134 增强到可感知）
-                let counter = (target.max_hp / 10).max(5);
+                let mut counter = (target.max_hp / 10).max(5);
+                // #1190：MagicShield 减伤（C# DamageReductionPercent = (Lv+2)*10）
+                if shield_pct > 0 {
+                    counter = counter * (100 - shield_pct) / 100;
+                }
                 ai_local.hp = ai_local.hp.saturating_sub(counter / 3);
+                // #1190：Haste 缩短攻击冷却（C# AttackSpeed = Lv*2+2）
+                if haste_ticks > 0 {
+                    ai_local.next_attack_tick = ai_local
+                        .next_attack_tick
+                        .saturating_sub(haste_ticks)
+                        .max(self.tick_count + 2);
+                }
 
             } else if target_dist > attack_range && can_move {
                 // ===== 不在攻击范围：移动靠近目标（ProcessTarget.MoveTo） =====
@@ -1529,6 +1615,91 @@ fn hero_magic_level(hero_magics: &[(i32, u8)], spell_shared: u8) -> u8 {
         .unwrap_or(0)
 }
 
+/// 各职业 ProcessFriend 增益列表（#1190：C# 子类顺序，先 Rage 后 ProtectionField 等）
+fn hero_friend_buffs(
+    class: mir2_shared::enums::MirClass,
+) -> &'static [(mir2_shared::enums::Spell, HeroBuffKind)] {
+    use mir2_shared::enums::{MirClass, Spell};
+    match class {
+        MirClass::Warrior => {
+            &[
+                (Spell::Rage, HeroBuffKind::Rage),
+                (Spell::ProtectionField, HeroBuffKind::ProtectionField),
+            ]
+        }
+        MirClass::Assassin => {
+            &[
+                (Spell::Haste, HeroBuffKind::Haste),
+                (Spell::LightBody, HeroBuffKind::LightBody),
+            ]
+        }
+        MirClass::Wizard => {
+            &[
+                (Spell::MagicShield, HeroBuffKind::MagicShield),
+                (Spell::MagicBooster, HeroBuffKind::MagicBooster),
+            ]
+        }
+        MirClass::Archer => &[(Spell::Concentration, HeroBuffKind::Concentration)],
+        _ => &[],
+    }
+}
+
+/// 增益时长（秒，#1190：C# HumanObject 各 Spell 实现）
+fn hero_buff_duration(kind: HeroBuffKind, level: u8) -> u64 {
+    let level = level as u64;
+    match kind {
+        HeroBuffKind::Rage => 18 + 6 * level,
+        HeroBuffKind::ProtectionField => 45 + 15 * level,
+        HeroBuffKind::Haste => 25 + 15 * level,
+        HeroBuffKind::LightBody => (level + 1) * 30,
+        // C# MagicShield 时长按 power 计（magic.GetPower(MC+15)），此处稳定近似
+        HeroBuffKind::MagicShield => 30 + 10 * level,
+        HeroBuffKind::MagicBooster => 60,
+        HeroBuffKind::Concentration => 45 + 15 * level,
+    }
+}
+
+/// 应用增益到英雄战斗属性（#1190：C# RefreshStats 对应项）；返回 MagicShield 减伤 %
+fn hero_apply_buffs(
+    buffs: &[HeroBuff],
+    combat: &mut crate::combat::attack::CombatStats,
+    stats: &mut super::hero_stats::HeroStats,
+) -> i32 {
+    let mut shield_pct = 0;
+    for b in buffs {
+        match b.kind {
+            HeroBuffKind::Rage => {
+                // C#：MaxDC * (0.12 + 0.03*Lv) 加到 MinDC/MaxDC
+                let add = (stats.max_dc as f32 * (0.12 + 0.03 * b.level as f32)).round() as i32;
+                combat.min_atk += add;
+                combat.max_atk += add;
+            }
+            HeroBuffKind::ProtectionField => {
+                // C#：MaxAC * (0.2 + 0.03*Lv) 加到 MinAC/MaxAC
+                let add = (stats.max_ac as f32 * (0.2 + 0.03 * b.level as f32)).round() as i32;
+                combat.min_ac += add;
+                combat.max_ac += add;
+            }
+            HeroBuffKind::LightBody => {
+                // C#：Agility = (Lv+1)*2
+                combat.agility += (b.level as i32 + 1) * 2;
+            }
+            HeroBuffKind::MagicBooster => {
+                // C#：MinMC=MaxMC = 6 + Lv*6
+                let add = 6 + b.level as i32 * 6;
+                stats.min_mc += add;
+                stats.max_mc += add;
+            }
+            HeroBuffKind::MagicShield => {
+                // C#：DamageReductionPercent = (Lv+2)*10
+                shield_pct = (b.level as i32 + 2) * 10;
+            }
+            HeroBuffKind::Haste | HeroBuffKind::Concentration => {}
+        }
+    }
+    shield_pct
+}
+
 /// 按优先级取第一个已学技能（#1188：C# 各子类 ProcessAttack/Attack 顺序）
 fn first_learned_spell(
     hero_magics: &[(i32, u8)],
@@ -1891,5 +2062,58 @@ mod tests {
         let hit2 = hero_melee_fallback(1, 100, 2, &combat, &mut atk, &mut sup);
         assert!(!hit2);
         assert_eq!(atk.len(), 1);
+    }
+
+    #[test]
+    fn hero_friend_buffs_per_class() {
+        use mir2_shared::enums::MirClass;
+        assert_eq!(hero_friend_buffs(MirClass::Warrior).len(), 2);
+        assert_eq!(hero_friend_buffs(MirClass::Assassin).len(), 2);
+        assert_eq!(hero_friend_buffs(MirClass::Wizard).len(), 2);
+        assert_eq!(hero_friend_buffs(MirClass::Archer).len(), 1);
+        assert_eq!(hero_friend_buffs(MirClass::Taoist).len(), 0);
+        assert_eq!(hero_friend_buffs(MirClass::Warrior)[0].1, HeroBuffKind::Rage);
+    }
+
+    #[test]
+    fn hero_buff_duration_matches_csharp() {
+        // Rage：18+6*Lv；Haste：25+15*Lv；LightBody：(Lv+1)*30；MagicBooster：60
+        assert_eq!(hero_buff_duration(HeroBuffKind::Rage, 2), 30);
+        assert_eq!(hero_buff_duration(HeroBuffKind::ProtectionField, 1), 60);
+        assert_eq!(hero_buff_duration(HeroBuffKind::Haste, 2), 55);
+        assert_eq!(hero_buff_duration(HeroBuffKind::LightBody, 1), 60);
+        assert_eq!(hero_buff_duration(HeroBuffKind::MagicBooster, 3), 60);
+        assert_eq!(hero_buff_duration(HeroBuffKind::Concentration, 1), 60);
+    }
+
+    #[test]
+    fn hero_apply_buffs_stats() {
+        use mir2_shared::enums::MirClass;
+        let base_stats = super::hero_stats::hero_base_stats(MirClass::Warrior, 30);
+        let mut combat = base_stats.to_combat_stats();
+        let mut stats = base_stats;
+        let buffs = vec![
+            HeroBuff { kind: HeroBuffKind::Rage, expire_tick: 0, level: 3 },
+            HeroBuff { kind: HeroBuffKind::MagicShield, expire_tick: 0, level: 2 },
+        ];
+        let shield = hero_apply_buffs(&buffs, &mut combat, &mut stats);
+        // Rage：MaxDC*(0.12+0.03*3)；MagicShield：(2+2)*10=40%
+        let rage_add = (base_stats.max_dc as f32 * 0.21).round() as i32;
+        assert_eq!(combat.min_atk, base_stats.min_dc + rage_add);
+        assert_eq!(combat.max_atk, base_stats.max_dc + rage_add);
+        assert_eq!(shield, 40);
+        // MagicBooster：MC + 6+Lv*6（用法师基准，战士 MC 未启用会算出 i32::MAX）
+        let wizard_base = super::hero_stats::hero_base_stats(MirClass::Wizard, 30);
+        let mut stats2 = wizard_base;
+        let mut combat2 = wizard_base.to_combat_stats();
+        let buffs2 = vec![HeroBuff { kind: HeroBuffKind::MagicBooster, expire_tick: 0, level: 2 }];
+        hero_apply_buffs(&buffs2, &mut combat2, &mut stats2);
+        assert_eq!(stats2.max_mc, wizard_base.max_mc + 18);
+        // LightBody：Agility + (Lv+1)*2
+        let mut stats3 = base_stats;
+        let mut combat3 = base_stats.to_combat_stats();
+        let buffs3 = vec![HeroBuff { kind: HeroBuffKind::LightBody, expire_tick: 0, level: 1 }];
+        hero_apply_buffs(&buffs3, &mut combat3, &mut stats3);
+        assert_eq!(combat3.agility, base_stats.agility + 4);
     }
 }
