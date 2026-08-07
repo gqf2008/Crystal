@@ -418,8 +418,14 @@ impl Message<StartGameRequest> for WorldActor {
         let self_weapon_effect = loaded_state.inventory.get_equipment(EquipmentSlot::Weapon)
             .and_then(|item| self.item_infos.get(&item.item_index))
             .map(|info| info.effect as i16).unwrap_or(0);
+        // #934：C# MapInfo.NoNames——该地图实体名字显示 ?????（含自身）
+        let self_display_name = if self.map_infos.get(&(loaded_state.map_index as i32)).map(|m| m.no_names).unwrap_or(false) {
+            "?????"
+        } else {
+            player_name.as_str()
+        };
         let self_packet = build_object_player_packet(
-            &player_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction,
+            self_display_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction,
             loaded_state.level, self.self_name_colour(&loaded_state),
             loaded_state.class, loaded_state.gender, loaded_state.hair,
             self_weapon, self_weapon_effect, self_armor,
@@ -468,8 +474,14 @@ impl Message<StartGameRequest> for WorldActor {
                     at_war,
                     enemy,
                 );
+                // #934：C# MapInfo.NoNames——按目标所在地图掩码
+                let ep_display_name = if self.map_infos.get(&(ep_state.map_index as i32)).map(|m| m.no_names).unwrap_or(false) {
+                    "?????"
+                } else {
+                    ep_state.name.as_str()
+                };
                 let packet = build_object_player_packet(
-                    &ep_state.name, ep_state.object_id, ep_state.x, ep_state.y, ep_state.direction, ep_state.level,
+                    ep_display_name, ep_state.object_id, ep_state.x, ep_state.y, ep_state.direction, ep_state.level,
                     ep_colour,
                     ep_state.class, ep_state.gender, ep_state.hair,
                     ep_weapon, ep_weapon_effect, ep_armor,
@@ -519,8 +531,14 @@ impl Message<StartGameRequest> for WorldActor {
                     at_war,
                     enemy,
                 );
+                // #934：C# MapInfo.NoNames——新玩家所在地图 no_names 时掩码
+                let new_display_name = if self.map_infos.get(&(loaded_state.map_index as i32)).map(|m| m.no_names).unwrap_or(false) {
+                    "?????"
+                } else {
+                    player_name.as_str()
+                };
                 let new_player_packet = build_object_player_packet(
-                    &player_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction, loaded_state.level,
+                    new_display_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction, loaded_state.level,
                     new_colour,
                     loaded_state.class, loaded_state.gender, loaded_state.hair,
                     new_weapon, new_weapon_effect, new_armor,
@@ -872,6 +890,19 @@ impl Message<WorldMoveRequest> for WorldActor {
                     if dest_mi.no_teleport {
                         debug!("Movement trigger blocked: map {} has no_teleport", dest_map_index);
                         return;
+                    }
+                    // #935：C# RequiredGroup——必须组队才能进入（GM 豁免）
+                    if dest_mi.required_group && !state.is_gm {
+                        let required = 2.max(dest_mi.required_group_size);
+                        let have = self.group_member_count(msg.session_id).await;
+                        if (have as i32) < required {
+                            send_system_message(
+                                &self.gate_ref,
+                                msg.session_id,
+                                &format!("该地图需要至少 {} 人组队才能进入", required),
+                            );
+                            return;
+                        }
                     }
                     // Check no_escape on source map
                     if let Some(src_mi) = self.map_infos.get(&(state.map_index as i32)) {
