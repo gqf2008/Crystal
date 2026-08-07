@@ -1971,9 +1971,19 @@ impl Message<MagicRequest> for WorldActor {
             // #306：Curse —— 7×7 区域 40% 概率 Slow 毒 + 减伤（C# Map.cs:1837，value2=1+(Lv+1)*2）
             SPELL_CURSE => {
                 let value2 = 1 + (spell_level as i32 + 1) * 2;
-                let damage = if let Some(info) = spell_db {
-                    crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
-                } else { fastrand::i32(5..=12) }.max(1);
+                // C# Curse：Random(10-(Lv+1)*2) > 2 失败（Lv0≈37.5% → Lv3=100%）
+                let chance_n = (10 - (spell_level as i32 + 1) * 2).max(1);
+                if fastrand::i32(0..chance_n) > 2 {
+                    debug!("Magic: {} casts Curse (failed, n={})", state.name, chance_n);
+                    return;
+                }
+                // C# damage = magic.GetDamage(SC)，Envir.cs MPowerBase=20 → +5(Lv+1)
+                let sc_power = crate::combat::attack::get_attack_power(
+                    state.min_sc + state.bonus_min_sc,
+                    state.max_sc + state.bonus_max_sc,
+                    0,
+                );
+                let damage = (sc_power + 5 * (spell_level as i32 + 1)).max(1);
                 let cells = curse_cells(target_x, target_y);
                 let hit_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y)))
@@ -1981,10 +1991,6 @@ impl Message<MagicRequest> for WorldActor {
                     .collect();
                 let candidate_count = hit_ids.len();
                 for mid in hit_ids {
-                    // C#：Envir.Random.Next(10) >= 4 → 跳过（约 40% 命中）
-                    if fastrand::i32(0..10) >= 4 {
-                        continue;
-                    }
                     if let Some(monster) = self.monsters.get_mut(&mid) {
                         // Slow 毒（C# Duration=damage 秒，Value=value2）
                         crate::combat::poison::apply_poison(
