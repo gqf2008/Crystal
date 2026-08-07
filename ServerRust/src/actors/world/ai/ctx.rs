@@ -119,6 +119,8 @@ pub struct AiCtx<'a> {
     pub monster_index: i32,
     /// 地图尺寸 (宽, 高)，用于全图随机传送等（缺省 200×200）
     pub map_size: (i32, i32),
+    /// 龙系统当前等级（0=未激活；EvilMir DragonLink 攻击加成用）
+    pub dragon_level: u8,
     /// 玩家快照（全图，behavior 自行按距离/map 过滤）
     pub players: &'a [PlayerSnap],
     /// 怪物快照（全图，供 Boss 互查）
