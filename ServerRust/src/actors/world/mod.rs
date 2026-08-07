@@ -383,7 +383,8 @@ impl MonsterAiType {
             // C# 8=AxeSkeleton（远程掷斧 Range Projectile）
             8 => Self::Ranged,
             // C# 10=FlamingWooma（近战，MAC 判定）
-            20 | 21 | 22 => Self::Mage,
+            // C# 20=DarkDevil（远程 RangeAttack）→ Mage；21/22=IncarnatedGhoul/ZT 为近战 → 默认 Aggressive
+            20 => Self::Mage,
             30 | 31 => Self::Healer,
             40 | 41 => Self::Summoner,
             _ => Self::Aggressive,
