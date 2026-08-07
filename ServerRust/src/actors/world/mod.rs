@@ -913,6 +913,10 @@ pub struct WorldActor {
     pub(crate) global_event_name: Option<String>,
     /// 隐身中的玩家 session 集合（用于视野管理）
     pub(crate) invisible_sessions: std::collections::HashSet<u64>,
+    /// #940：@MOVE 传送冷却（C# LastTeleportTime=10s，session -> ms）
+    pub(crate) last_teleport_time: std::collections::HashMap<u64, i64>,
+    /// #940：@FIND 探测冷却（C# LastProbeTime=180s，session -> ms）
+    pub(crate) last_probe_time: std::collections::HashMap<u64, i64>,
     /// Phase 1.4: 反作弊 — 每个玩家上次移动时间戳(用于速度 hack 检测)
     pub(crate) last_move_time: std::collections::HashMap<u64, std::time::Instant>,
     /// 当前光照设置（0=Normal, 1=Dawn, 2=Day, 3=Evening, 4=Night）
@@ -1119,6 +1123,8 @@ impl WorldActor {
             global_exp_event_end_tick: 0,
             global_event_name: None,
             invisible_sessions: HashSet::new(),
+            last_teleport_time: std::collections::HashMap::new(),
+            last_probe_time: std::collections::HashMap::new(),
             last_move_time: std::collections::HashMap::new(),
             current_light: Self::light_for_hour(chrono::Local::now().hour()),
             auctions: Vec::new(),
@@ -3764,6 +3770,8 @@ impl Actor for WorldActor {
             global_exp_event_end_tick: 0,
             global_event_name: None,
             invisible_sessions: HashSet::new(),
+            last_teleport_time: std::collections::HashMap::new(),
+            last_probe_time: std::collections::HashMap::new(),
             last_move_time: std::collections::HashMap::new(),
             current_light: Self::light_for_hour(chrono::Local::now().hour()),
             auctions,
@@ -5374,6 +5382,12 @@ fn guild_war_flags(
 /// #926：物品绑定标志判定（C# BindMode.HasFlag；db::ItemInfo.bind_mode 与 SharedRust 位值一致）
 pub(crate) fn has_bind_flag(bind_mode: i32, flag: u16) -> bool {
     (bind_mode as u16 & flag) != 0
+}
+
+/// #940：是否装备了含指定特殊模式的物品（C# SpecialMode.HasFlag）
+fn has_special_equipped(state: &PlayerState, flag: mir2_shared::enums::SpecialItemMode) -> bool {
+    state.inventory.equipment.iter().flatten()
+        .any(|it| it.info.as_ref().map(|i| i.unique.contains(flag)).unwrap_or(false))
 }
 
 /// 检查攻击者是否可以在当前攻击模式下攻击目标玩家

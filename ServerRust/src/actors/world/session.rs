@@ -1541,7 +1541,7 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "TELEPORT" | "MAKE" | "MONSTER") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -1559,19 +1559,6 @@ impl Message<ChatRequest> for WorldActor {
                             let g = parts.get(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
                             let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount: g }).await;
                             send_system_message(&self.gate_ref, msg.session_id, &format!("已获得 {} 金币", g));
-                        }
-                        // @teleport <x> <y>
-                        "TELEPORT" => {
-                            let x = parts.get(1).and_then(|s| s.parse::<i32>().ok());
-                            let y = parts.get(2).and_then(|s| s.parse::<i32>().ok());
-                            if let (Some(x), Some(y)) = (x, y) {
-                                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
-                                    x, y, direction: 4, map_index: None, is_mounted: None,
-                                }).await;
-                                send_system_message(&self.gate_ref, msg.session_id, &format!("已传送至 ({}, {})", x, y));
-                            } else {
-                                send_system_message(&self.gate_ref, msg.session_id, "用法：@teleport <x> <y>");
-                            }
                         }
                         // @make <物品名> [数量]
                         "MAKE" => {
@@ -1714,6 +1701,94 @@ impl Message<ChatRequest> for WorldActor {
                         ("未知地图".to_string(), String::new())
                     };
                     send_system_message(&self.gate_ref, msg.session_id, &format!("你所在的地图：{} ({})", map_title, map_file));
+                    return;
+                }
+                Some("TELEPORT") | Some("MOVE") => {
+                    // C# case "MOVE"（~2850）：GM 或 Teleport 特殊装备可用；10s 冷却；NoPosition 地图非 GM 禁止
+                    let state = match record.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(s)) => s,
+                        _ => return,
+                    };
+                    let has_tp = super::has_special_equipped(&state, mir2_shared::enums::SpecialItemMode::TELEPORT);
+                    if !state.is_gm && !has_tp {
+                        send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
+                        return;
+                    }
+                    if !state.is_gm
+                        && self.map_infos.get(&(state.map_index as i32)).map(|m| m.no_position).unwrap_or(false)
+                    {
+                        send_system_message(&self.gate_ref, msg.session_id, "该地图禁止传送");
+                        return;
+                    }
+                    if !state.is_gm {
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as i64)
+                            .unwrap_or(0);
+                        if let Some(last) = self.last_teleport_time.get(&msg.session_id).copied() {
+                            if now_ms - last < 10_000 {
+                                send_system_message(&self.gate_ref, msg.session_id, "传送冷却中，请稍后再试");
+                                return;
+                            }
+                        }
+                        self.last_teleport_time.insert(msg.session_id, now_ms);
+                    }
+                    let x = parts.get(1).and_then(|s| s.parse::<i32>().ok());
+                    let y = parts.get(2).and_then(|s| s.parse::<i32>().ok());
+                    if let (Some(x), Some(y)) = (x, y) {
+                        let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                            x, y, direction: 4, map_index: None, is_mounted: None,
+                        }).await;
+                        send_system_message(&self.gate_ref, msg.session_id, &format!("已传送至 ({}, {})", x, y));
+                    } else {
+                        send_system_message(&self.gate_ref, msg.session_id, "用法：@move <x> <y>");
+                    }
+                    return;
+                }
+                Some("FIND") => {
+                    // C# case "FIND"（~3229）：GM 或 Probe 特殊装备可用；非 GM 180s 冷却
+                    let state = match record.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(s)) => s,
+                        _ => return,
+                    };
+                    let has_probe = super::has_special_equipped(&state, mir2_shared::enums::SpecialItemMode::PROBE);
+                    if !state.is_gm && !has_probe {
+                        send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
+                        return;
+                    }
+                    let Some(target_name) = parts.get(1).copied() else {
+                        send_system_message(&self.gate_ref, msg.session_id, "用法：@find <玩家名>");
+                        return;
+                    };
+                    if !state.is_gm {
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as i64)
+                            .unwrap_or(0);
+                        if let Some(last) = self.last_probe_time.get(&msg.session_id).copied() {
+                            if now_ms - last < 180_000 {
+                                send_system_message(&self.gate_ref, msg.session_id, "探测冷却中，请稍后再试");
+                                return;
+                            }
+                        }
+                        self.last_probe_time.insert(msg.session_id, now_ms);
+                    }
+                    for (_sid, other) in &self.players {
+                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                            if os.name.eq_ignore_ascii_case(target_name) {
+                                let title = self.map_infos.get(&(os.map_index as i32))
+                                    .map(|m| m.title.clone())
+                                    .unwrap_or_else(|| "未知地图".to_string());
+                                send_system_message(
+                                    &self.gate_ref,
+                                    msg.session_id,
+                                    &format!("{} 在 {} ({}, {})", os.name, title, os.x, os.y),
+                                );
+                                return;
+                            }
+                        }
+                    }
+                    send_system_message(&self.gate_ref, msg.session_id, &format!("未找到在线玩家：{}", target_name));
                     return;
                 }
                 Some("RECALL") => {
