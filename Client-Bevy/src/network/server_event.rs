@@ -240,6 +240,8 @@ pub enum ServerEvent {
     GroupDeleted,
     /// DeleteMember：成员离开
     GroupMemberLeft { name: String },
+    /// SwitchGroup：服务端同步“允许组队”开关（登录/切换时）
+    GroupAllowChanged { allow_group: bool },
     /// MentorRequest：收到拜师邀请
     MentorInvite { name: String, level: u16 },
     /// MentorUpdate：师徒信息更新

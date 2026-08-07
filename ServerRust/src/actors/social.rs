@@ -1893,6 +1893,11 @@ impl Message<SwitchGroupRequest> for SocialActor {
             _ => return,
         };
 
+        // C# PlayerObject.SwitchGroup：保存开关（CharacterInfo.AllowGroup 持久化）
+        let mut new_state = state.clone();
+        new_state.allow_group = msg.allow_group;
+        let _ = record.ask(SetPlayerState { state: new_state }).await;
+
         if !msg.allow_group {
             // 禁止组队 → 离开当前组队
             if let Some(group_id) = state.group_id {
@@ -1949,6 +1954,12 @@ impl Message<GroupInviteRequest> for SocialActor {
             _ => return,
         };
 
+        // C# AddMember（PlayerObject.cs ~9310）：目标关闭组队 → 拒绝
+        if !target_state.allow_group {
+            send_system_message(&self.gate_ref, msg.session_id, "对方未开启组队（请对方先开启允许组队）");
+            return;
+        }
+
         // 检查是否已在同一组队
         if let (Some(g1), Some(g2)) = (inviter_state.group_id, target_state.group_id) {
             if g1 == g2 {
@@ -1987,10 +1998,16 @@ impl Message<GroupInviteReply> for SocialActor {
             }
         };
 
-        let _inviter_state = match inviter_record.ask(GetPlayerState).await {
+        let inviter_state = match inviter_record.ask(GetPlayerState).await {
             Ok(Some(s)) => s,
             _ => return,
         };
+
+        // C# GroupInviteReply（PlayerObject.cs ~9407）：邀请方关闭组队 → 拒绝
+        if !inviter_state.allow_group {
+            send_system_message(&self.gate_ref, msg.session_id, "邀请者已关闭组队");
+            return;
+        }
 
         // 邀请者接受：将回复者加入邀请者的组队
         let reply_name = {

@@ -81,6 +81,7 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             is_dead INTEGER NOT NULL DEFAULT 0,
             allow_trade INTEGER NOT NULL DEFAULT 0,
             allow_observe INTEGER NOT NULL DEFAULT 0,
+            allow_group INTEGER NOT NULL DEFAULT 0,
             pk_points INTEGER NOT NULL DEFAULT 0,
             pk_kill_count INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (account_username) REFERENCES accounts(username),
@@ -626,6 +627,8 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN allow_observe INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN allow_group INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN is_mounted INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN mount_type INTEGER NOT NULL DEFAULT 0")
@@ -1074,9 +1077,9 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
             gold, group_id, guild_name, guild_rank,
             spouse_name, allow_mentor, mentor_name, hero_index, hero_behaviour,
             auto_pot_hp, auto_pot_mp, auto_pot_hp_item, auto_pot_mp_item,
-            is_fishing, fishing_autocast, is_dead, allow_trade, allow_observe, pk_points, pk_kill_count, can_gain_exp, pearl_count,
+            is_fishing, fishing_autocast, is_dead, allow_trade, allow_observe, allow_group, pk_points, pk_kill_count, can_gain_exp, pearl_count,
             last_access, bind_map_index, bind_x, bind_y, is_mentor, backpack_size
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(&state.name)
     .bind(account_username)
@@ -1128,6 +1131,7 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     .bind(if state.is_dead { 1 } else { 0 })
     .bind(if state.allow_trade { 1 } else { 0 })
     .bind(if state.allow_observe { 1 } else { 0 })
+    .bind(if state.allow_group { 1 } else { 0 })
     .bind(state.pk_points)
     .bind(state.pk_kill_count as i32)
     .bind(if state.can_gain_exp { 1 } else { 0 })
@@ -1349,6 +1353,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         allow_observe: row.get::<Option<i32>, _>("allow_observe").map(|v| v != 0).unwrap_or(false),
         enable_guild_invite: false,
         allow_trade: row.get::<Option<i32>, _>("allow_trade").map(|v| v != 0).unwrap_or(false),
+        allow_group: row.get::<Option<i32>, _>("allow_group").map(|v| v != 0).unwrap_or(false),
         pk_points: row.get::<i32, _>("pk_points"),
         pk_kill_count: row.get::<i32, _>("pk_kill_count") as u32,
         buffs: Vec::new(),

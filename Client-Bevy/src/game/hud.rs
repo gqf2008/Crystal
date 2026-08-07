@@ -802,6 +802,7 @@ fn hud_server_events(
             | ServerEvent::GroupInvite { .. }
             | ServerEvent::GroupDeleted
             | ServerEvent::GroupMemberLeft { .. }
+            | ServerEvent::GroupAllowChanged { .. }
             | ServerEvent::MentorInvite { .. }
             | ServerEvent::MentorUpdate { .. }
             | ServerEvent::FriendUpdated { .. }
