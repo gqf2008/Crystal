@@ -291,6 +291,7 @@ impl Plugin for ChatPlugin {
                 chat_option_system.after(crate::ui::controls::checkbox_system),
                 chat_size_system,
                 chat_wheel_system,
+                chat_key_scroll_system,
                 chat_input_system,
                 chat_display_system,
                 chat_server_events,
@@ -764,6 +765,69 @@ fn chat_wheel_system(
         .clamp(0, max_scroll as i32) as usize;
 }
 
+/// 键盘滚动聊天历史（#802，对齐 C# ChatPanel_KeyDown）：
+/// Up/Down = 行；Home/End = 最旧/最新；PageUp/PageDown = 页（visible_lines）。
+/// 门控：输入框未激活 + 鼠标悬停在聊天面板区域（与 chat_wheel_system 一致，
+/// 近似 C# 面板焦点，避免与其它可滚动对话框的 Up/Down 冲突）。
+fn chat_key_scroll_system(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut chat: ResMut<ChatState>,
+    windows: Query<&Window>,
+) {
+    if chat.input_active {
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    const PANEL: (f32, f32, f32, f32) = (6.0, 428.0, 360.0, 172.0);
+    if cursor.x < PANEL.0
+        || cursor.x > PANEL.0 + PANEL.2
+        || cursor.y < PANEL.1
+        || cursor.y > PANEL.1 + PANEL.3
+    {
+        return;
+    }
+    let max_scroll = chat.lines.len().saturating_sub(chat.visible_lines);
+    let page = chat.visible_lines.max(1);
+    if keys.just_pressed(KeyCode::ArrowUp) {
+        chat.scroll_up = apply_key_scroll(chat.scroll_up, max_scroll, page, KeyScroll::Up);
+    } else if keys.just_pressed(KeyCode::ArrowDown) {
+        chat.scroll_up = apply_key_scroll(chat.scroll_up, max_scroll, page, KeyScroll::Down);
+    } else if keys.just_pressed(KeyCode::Home) {
+        chat.scroll_up = apply_key_scroll(chat.scroll_up, max_scroll, page, KeyScroll::Home);
+    } else if keys.just_pressed(KeyCode::End) {
+        chat.scroll_up = apply_key_scroll(chat.scroll_up, max_scroll, page, KeyScroll::End);
+    } else if keys.just_pressed(KeyCode::PageUp) {
+        chat.scroll_up = apply_key_scroll(chat.scroll_up, max_scroll, page, KeyScroll::PageUp);
+    } else if keys.just_pressed(KeyCode::PageDown) {
+        chat.scroll_up = apply_key_scroll(chat.scroll_up, max_scroll, page, KeyScroll::PageDown);
+    }
+}
+
+/// 键盘滚动动作（#802，C# ChatPanel_KeyDown 语义；0=最新）
+#[derive(Clone, Copy)]
+enum KeyScroll {
+    Up,
+    Down,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+}
+
+/// 纯函数：根据动作计算新的 scroll_up（便于单测）
+fn apply_key_scroll(scroll_up: usize, max_scroll: usize, page: usize, action: KeyScroll) -> usize {
+    let page = page.max(1);
+    match action {
+        KeyScroll::Up => (scroll_up + 1).min(max_scroll),
+        KeyScroll::Down => scroll_up.saturating_sub(1),
+        KeyScroll::Home => max_scroll,
+        KeyScroll::End => 0,
+        KeyScroll::PageUp => (scroll_up + page).min(max_scroll),
+        KeyScroll::PageDown => scroll_up.saturating_sub(page),
+    }
+}
+
 /// 显示：按页签过滤聊天行 + 输入行（单查询避免 B0001）
 fn chat_display_system(
     chat: Res<ChatState>,
@@ -1058,5 +1122,35 @@ fn chat_item_click_system(
             chat_item_id: uid,
         });
         tracing::info!("💬 聊天物品 uid={} 未缓存，已请求", uid);
+    }
+}
+
+#[cfg(test)]
+mod chat_scroll_tests {
+    use super::{apply_key_scroll, KeyScroll};
+
+    #[test]
+    fn up_down_line_scroll() {
+        assert_eq!(apply_key_scroll(0, 10, 8, KeyScroll::Up), 1);
+        assert_eq!(apply_key_scroll(1, 10, 8, KeyScroll::Down), 0);
+        // 边界
+        assert_eq!(apply_key_scroll(10, 10, 8, KeyScroll::Up), 10);
+        assert_eq!(apply_key_scroll(0, 10, 8, KeyScroll::Down), 0);
+    }
+
+    #[test]
+    fn home_end_jump() {
+        assert_eq!(apply_key_scroll(3, 10, 8, KeyScroll::Home), 10);
+        assert_eq!(apply_key_scroll(3, 10, 8, KeyScroll::End), 0);
+        // 空历史
+        assert_eq!(apply_key_scroll(0, 0, 8, KeyScroll::Home), 0);
+    }
+
+    #[test]
+    fn page_scroll() {
+        assert_eq!(apply_key_scroll(0, 20, 8, KeyScroll::PageUp), 8);
+        assert_eq!(apply_key_scroll(8, 20, 8, KeyScroll::PageDown), 0);
+        assert_eq!(apply_key_scroll(15, 20, 8, KeyScroll::PageUp), 20);
+        assert_eq!(apply_key_scroll(5, 20, 8, KeyScroll::PageDown), 0);
     }
 }
