@@ -2955,6 +2955,8 @@ impl Message<Tick> for WorldActor {
             // 对每个怪物执行 AI
             let mut dead_monsters = Vec::new();
             let mut moved_monsters = Vec::new();
+            // 巡逻转身广播（C# ProcessRoam Turn → ObjectTurn）
+            let mut monster_turns: Vec<(u32, u8, i32, i32)> = Vec::new();
             let mut moved_targets: HashSet<(i32, i32)> = HashSet::new();
             let mut death_drops: Vec<(u64, i32, i32, u16)> = Vec::new();
             let mut broken_armor: Vec<(u64, EquipmentSlot)> = Vec::new();
@@ -3445,20 +3447,26 @@ impl Message<Tick> for WorldActor {
                     monster.next_move_tick = self.tick_count + profile.move_interval;
                     monster.ai_state = MonsterAiState::Return;
                 } else {
-                    // C# ProcessRoam：无目标时按 RoamDelay(1s) 1/10 概率随机走动
-                    //（C# 1/3 转身、2/3 沿当前方向走；转身广播暂简化为原地）
+                    // C# ProcessRoam：无目标时按 RoamDelay(1s) 1/10 概率随机转身/走动
                     let roam_next = self.monster_roam_ticks.get(oid).copied().unwrap_or(0);
                     if can_move && self.tick_count >= roam_next {
                         self.monster_roam_ticks.insert(*oid, self.tick_count + ROAM_DELAY_TICKS);
-                        if fastrand::i32(0..10) == 0 && fastrand::i32(0..3) != 0 {
-                            let dir = monster.direction as usize % 8;
-                            let (nx, ny) = (monster.x + MON_DIR_DX[dir], monster.y + MON_DIR_DY[dir]);
-                            if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(false)
-                                && !monster_positions.contains(&(nx, ny))
-                                && moved_targets.insert((nx, ny))
-                            {
-                                moved_monsters.push((*oid, nx, ny, monster.direction));
-                                monster.next_move_tick = self.tick_count + profile.move_interval;
+                        if fastrand::i32(0..10) == 0 {
+                            if fastrand::i32(0..3) == 0 {
+                                // C# Turn：随机转身 + 广播 ObjectTurn
+                                monster.direction = fastrand::i32(0..8) as u8;
+                                monster_turns.push((*oid, monster.direction, monster.x, monster.y));
+                            } else {
+                                // C# Walk：沿当前方向走一步
+                                let dir = monster.direction as usize % 8;
+                                let (nx, ny) = (monster.x + MON_DIR_DX[dir], monster.y + MON_DIR_DY[dir]);
+                                if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(false)
+                                    && !monster_positions.contains(&(nx, ny))
+                                    && moved_targets.insert((nx, ny))
+                                {
+                                    moved_monsters.push((*oid, nx, ny, monster.direction));
+                                    monster.next_move_tick = self.tick_count + profile.move_interval;
+                                }
                             }
                         }
                     }
@@ -3820,6 +3828,23 @@ impl Message<Tick> for WorldActor {
                             data: walk_packet.clone(),
                         }).await;
                     }
+                }
+            }
+
+            // 广播 ObjectTurn（C# ProcessRoam 转身；ObjectID + Location(i32,i32) + Direction(u8)）
+            for (oid, dir, x, y) in &monster_turns {
+                let mut turn_body = Vec::new();
+                turn_body.extend_from_slice(&oid.to_le_bytes());
+                turn_body.extend_from_slice(&x.to_le_bytes());
+                turn_body.extend_from_slice(&y.to_le_bytes());
+                turn_body.push(*dir);
+                let turn_packet = build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::ObjectTurn as i16, &turn_body);
+                for session_id in self.players.keys() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: *session_id,
+                        data: turn_packet.clone(),
+                    }).await;
                 }
             }
 
