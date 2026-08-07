@@ -404,6 +404,29 @@ impl Message<WorldAttackRequest> for WorldActor {
                             other_state.x, other_state.y, other_state.direction, damage, other_state.map_index,
                         ).await;
                     }
+                    // CounterAttack：受击方 7s 窗口激活时反击攻击者（C# HumanObject.cs 7212/7302）
+                    if let Some((expire, lv)) = self.counter_attack.get(&other_session).copied() {
+                        if self.tick_count <= expire {
+                            self.counter_attack.remove(&other_session);
+                            let counter_dmg = combat_attack::get_attack_power(
+                                other_state.min_attack + other_state.bonus_min_attack,
+                                other_state.max_attack + other_state.bonus_max_attack,
+                                other_state.luck,
+                            ).max(1);
+                            let _ = record.actor_ref.ask(TakeDamage {
+                                attacker_id: other_state.object_id,
+                                attacker_session: other_session,
+                                damage: counter_dmg,
+                            }).await;
+                            // 攻击者吃 Stun（Lv+1）秒
+                            let _ = record.actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
+                                poisons: vec![crate::combat::poison::Poison::new(
+                                    mir2_shared::enums::PoisonType::STUN, lv as u32 + 1, 0, 1000)],
+                            }).await;
+                            debug!("Player {} counter-attacked player {} ({} dmg)",
+                                   other_session, msg.session_id, counter_dmg);
+                        }
+                    }
                     if other_actor.ask(TakeDamage {
                                 attacker_id: result.object_id,
                                 attacker_session: msg.session_id,
@@ -2821,17 +2844,14 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} casts ProtectionField (AC +{}, {}s)",
                        state.name, add_value.max(1), 45 + spell_level as i32 * 15);
             }
-            // CounterAttack：反击 buff（对齐 C# Stat.CounterAttack，受击时反弹伤害）
-            // 简化：用 Reflect buff 近似（反伤百分比）
+            // CounterAttack：反击（C# HumanObject.cs:8550）——施放进入 7 秒窗口，受击时反击并消耗
             SPELL_COUNTER_ATTACK => {
-                let reflect_pct = 15 + spell_level as i32 * 10;
-                let duration_ticks = (15 + spell_level as u32 * 5) * 10; // 15-30s
-                let buff = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::Reflect { percent: reflect_pct },
-                    duration_ticks, 5);
-                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
-                debug!("Magic: {} casts CounterAttack (reflect {}% for {}s)",
-                    state.name, reflect_pct, duration_ticks / 10);
+                if self.counter_attack.contains_key(&msg.session_id) {
+                    debug!("Magic: {} casts CounterAttack but already active", state.name);
+                    return;
+                }
+                self.counter_attack.insert(msg.session_id, (self.tick_count + 70, spell_level));
+                debug!("Magic: {} arms CounterAttack (7s window)", state.name);
             }
             // --- 法师系 ---
             // TurnUndead：秒杀低级亡灵（对齐 C# WizardObject.TurnUndead）
