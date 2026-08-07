@@ -1241,6 +1241,26 @@ async fn broadcast_mount_update(world: &WorldActor, object_id: u32, mount_type: 
     }
 }
 
+/// #903：装备穿戴重量判定（C# HumanObject.CanEquipItem：换装后 Hand/WearWeight 不超上限；
+/// weapon → HandWeight，其他槽 → WearWeight）
+fn can_equip_by_weight(
+    slot: crate::actors::inventory::EquipmentSlot,
+    new_weight: i32,
+    old_weight: i32,
+    wear_weight: i32,
+    hand_weight: i32,
+    class: mir2_shared::enums::MirClass,
+    level: u16,
+) -> bool {
+    if slot == crate::actors::inventory::EquipmentSlot::Weapon {
+        new_weight - old_weight + hand_weight
+            <= super::base_weight_limit(class, level, mir2_shared::enums::Stat::HandWeight)
+    } else {
+        new_weight - old_weight + wear_weight
+            <= super::base_weight_limit(class, level, mir2_shared::enums::Stat::WearWeight)
+    }
+}
+
 impl Message<EquipItemRequest> for WorldActor {
     type Reply = ();
 
@@ -1313,6 +1333,30 @@ impl Message<EquipItemRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "该物品无法装备到此位置");
             send_equip_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, msg.slot, false);
             return;
+        }
+
+        // #903：穿戴重量校验（C# HumanObject.CanEquipItem：换装后 Hand/WearWeight 不能超上限）
+        {
+            let item_info = self.item_infos.get(&state.inventory.backpack[grid_idx].as_ref().unwrap().item.item_index);
+            let new_weight = item_info.map(|i| i.weight).unwrap_or(0);
+            let old_weight = state.inventory.get_equipment(slot)
+                .and_then(|i| self.item_infos.get(&i.item_index))
+                .map(|i| i.weight)
+                .unwrap_or(0);
+            let (_, wear_weight, hand_weight) = super::compute_player_weights(&state.inventory, &self.item_infos);
+            if !can_equip_by_weight(
+                slot,
+                new_weight,
+                old_weight,
+                wear_weight,
+                hand_weight,
+                state.class,
+                state.level,
+            ) {
+                send_system_message(&self.gate_ref, msg.session_id, "穿戴重量超限，无法装备！");
+                send_equip_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, msg.slot, false);
+                return;
+            }
         }
 
         // C# EquipItem：NeedIdentify 且未鉴定 → 自动鉴定（PlayerObject.cs:5660）
@@ -2551,5 +2595,41 @@ impl Message<DisassembleItemRequest> for WorldActor {
                 &format!("分解成功！背包已满，{} x{} 已掉落在地", mat_name, mat_count));
         }
         debug!("DisassembleItem: {} disassembled {} into {} x{}", state.name, item_name, mat_name, mat_count);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::can_equip_by_weight;
+    use crate::actors::inventory::EquipmentSlot;
+    use mir2_shared::enums::MirClass;
+
+    fn warrior_lv1_limits() -> (i32, i32) {
+        // 取 1 级战士 Hand/Wear 上限
+        let hand = super::super::base_weight_limit(MirClass::Warrior, 1, mir2_shared::enums::Stat::HandWeight);
+        let wear = super::super::base_weight_limit(MirClass::Warrior, 1, mir2_shared::enums::Stat::WearWeight);
+        (hand, wear)
+    }
+
+    #[test]
+    fn test_can_equip_by_weight_weapon() {
+        // #903：武器走 HandWeight；换下旧武器可腾出空间
+        let (hand_limit, _) = warrior_lv1_limits();
+        // 空手（hand=0）戴轻武器：允许
+        assert!(can_equip_by_weight(EquipmentSlot::Weapon, 1, 0, 0, 0, MirClass::Warrior, 1));
+        // 超重武器：拒绝
+        assert!(!can_equip_by_weight(EquipmentSlot::Weapon, hand_limit + 100, 0, 0, 0, MirClass::Warrior, 1));
+        // 换下旧武器（old_weight=200，当前 hand=200）后重量回落：允许
+        assert!(can_equip_by_weight(EquipmentSlot::Weapon, 10, 200, 0, 200, MirClass::Warrior, 1));
+    }
+
+    #[test]
+    fn test_can_equip_by_weight_wear() {
+        // #903：非武器槽走 WearWeight；换下旧装备腾空间
+        let (_, wear_limit) = warrior_lv1_limits();
+        assert!(can_equip_by_weight(EquipmentSlot::Armour, 1, 0, 0, 0, MirClass::Warrior, 1));
+        assert!(!can_equip_by_weight(EquipmentSlot::Armour, wear_limit + 100, 0, 0, 0, MirClass::Warrior, 1));
+        // 已有穿戴 50，新装备 10，换下旧装备 200：允许（50 - 200 + 10 <= limit）
+        assert!(can_equip_by_weight(EquipmentSlot::Armour, 10, 200, 50, 0, MirClass::Warrior, 1));
     }
 }
