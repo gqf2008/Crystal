@@ -3695,7 +3695,15 @@ impl Message<Tick> for WorldActor {
                 } else if let Some(master) = monster.master_session {
                     // ===== 召唤物无目标 → 跟随主人 =====
                     // 简化版：有 master 且主人在线且距离>5 则 step_toward 主人位置
-                    if can_move {
+                    // C# CanMove/ProcessAI：仅 MoveOnly/Both/FocusMasterTarget 允许跟随/召回
+                    //（AttackOnly/None 不移动，原地待命）
+                    let pet_can_follow = self.player_pet_modes
+                        .get(&master)
+                        .map(|m| matches!(m, mir2_shared::enums::PetMode::MoveOnly
+                            | mir2_shared::enums::PetMode::Both
+                            | mir2_shared::enums::PetMode::FocusMasterTarget))
+                        .unwrap_or(true); // 无缓存默认允许（C# 默认 Both）
+                    if pet_can_follow && can_move {
                         let master_pos = player_positions.iter()
                             .find(|(sid, _, _, _, _, _, _, _)| *sid == master)
                             .map(|(_, x, y, _, _, _, _, _)| (*x, *y));
