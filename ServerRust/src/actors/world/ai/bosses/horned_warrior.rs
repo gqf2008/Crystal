@@ -99,23 +99,32 @@ impl MonsterBehavior for HornedWarriorBehavior {
                     attack_type: 0,
                 });
             } else {
-                // Type1 WideLine(4)：朝向方向直线 4 格全体
-                let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                // Type1 WideLine(4)：C# WideLineAttack(damage, 4, width=3) —— 3 条平行车道 × 4 格
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y) as usize % 8;
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                let hits: Vec<crate::actors::world::ai::PlayerSnap> =
-                    ctx.find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
-                        .into_iter().copied().collect();
-                for h in hits {
-                    // 仅击中朝向方向上的目标（近似 WideLine）
-                    let hd = direction_towards(monster.x, monster.y, h.x, h.y);
-                    if hd == dir {
-                        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                            attacker_oid: monster.object_id,
-                            target_session: h.session_id,
-                            damage,
-                            spell_id: 0,
-                            attack_type: 1,
-                        });
+                // 起始 3 点：自身 + 左车道 + 右车道（C# Functions.Left/Right）
+                let left = (dir + 7) % 8;
+                let right = (dir + 1) % 8;
+                let lanes = [
+                    (monster.x, monster.y),
+                    (monster.x + DIR_DX[left], monster.y + DIR_DY[left]),
+                    (monster.x + DIR_DX[right], monster.y + DIR_DY[right]),
+                ];
+                for (lx, ly) in lanes {
+                    for i in 1..=4i32 {
+                        let tx = lx + DIR_DX[dir] * i;
+                        let ty = ly + DIR_DY[dir] * i;
+                        if let Some(p) = ctx.players.iter()
+                            .find(|p| p.map_index == monster.map_index && p.x == tx && p.y == ty && p.hp > 0)
+                        {
+                            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
+                                attacker_oid: monster.object_id,
+                                target_session: p.session_id,
+                                damage,
+                                spell_id: 0,
+                                attack_type: 1,
+                            });
+                        }
                     }
                 }
             }
