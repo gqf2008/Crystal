@@ -282,6 +282,24 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("snaketotem") || name.contains("snake totem") || name.contains("蛇图腾") {
         return Box::new(bosses::snake_totem::SnakeTotemBehavior::new());
     }
+    if name.contains("jar2") || name.contains("坛子2") {
+        return Box::new(bosses::jar2::Jar2Behavior::new());
+    }
+    if name.contains("assassinbird") || name.contains("assassin bird") || name.contains("刺客鸟") {
+        return Box::new(bosses::assassin_bird::AssassinBirdBehavior::new());
+    }
+    if name.contains("armadilloelder") || name.contains("armadillo elder") || name.contains("犰狳长老") {
+        return Box::new(bosses::armadillo_elder::ArmadilloElderBehavior::new());
+    }
+    if name.contains("axeplant") || name.contains("axe plant") || name.contains("斧头植物") {
+        return Box::new(bosses::axe_plant::AxePlantBehavior::new());
+    }
+    if name.contains("hedgekektal") || name.contains("hedge kek tal") || name.contains("刺猬凯克塔") {
+        return Box::new(bosses::hedge_kek_tal::HedgeKekTalBehavior::new());
+    }
+    if name.contains("flameassassin") || name.contains("flame assassin") || name.contains("火焰刺客") {
+        return Box::new(bosses::flame_assassin::FlameAssassinBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -626,6 +644,12 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("tucsonegg") || name.contains("tucson egg") || name.contains("图森之蛋")
         || name.contains("deathcrawler") || name.contains("death crawler") || name.contains("死亡爬行者")
         || name.contains("snaketotem") || name.contains("snake totem") || name.contains("蛇图腾")
+        || name.contains("jar2") || name.contains("坛子2")
+        || name.contains("assassinbird") || name.contains("assassin bird") || name.contains("刺客鸟")
+        || name.contains("armadilloelder") || name.contains("armadillo elder") || name.contains("犰狳长老")
+        || name.contains("axeplant") || name.contains("axe plant") || name.contains("斧头植物")
+        || name.contains("hedgekektal") || name.contains("hedge kek tal") || name.contains("刺猬凯克塔")
+        || name.contains("flameassassin") || name.contains("flame assassin") || name.contains("火焰刺客")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
