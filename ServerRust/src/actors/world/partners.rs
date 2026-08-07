@@ -48,3 +48,54 @@ impl Message<GetLoverExpBonus> for WorldActor {
         0
     }
 }
+
+/// 查询徒弟经验加成百分比（C# GainExp：Mentee 同图 + InRange(16) + 同组 + 导师存活 → +MentorExpBoost%）
+pub struct GetMenteeExpBonus {
+    pub session_id: u64,
+}
+
+impl Message<GetMenteeExpBonus> for WorldActor {
+    type Reply = i32;
+
+    async fn handle(&mut self, msg: GetMenteeExpBonus, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        // C# Settings.MentorExpBoost 默认 10
+        const MENTEE_EXP_BONUS: i32 = 10;
+        // C# Globals.DataRange = 16
+        const DATA_RANGE: i32 = 16;
+
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return 0,
+        };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return 0,
+        };
+        // 只有徒弟（有导师且非导师）享受加成（C# Info.Mentor != 0 && !Info.IsMentor）
+        let Some(mentor_name) = state.mentor_name.clone() else {
+            return 0;
+        };
+        if state.is_mentor {
+            return 0;
+        }
+        for (_, other) in &self.players {
+            if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                if os.is_dead || !os.name.eq_ignore_ascii_case(&mentor_name) {
+                    continue;
+                }
+                if os.map_index != state.map_index {
+                    continue;
+                }
+                let dist = (os.x - state.x).abs() + (os.y - state.y).abs();
+                if dist > DATA_RANGE {
+                    continue;
+                }
+                // C#：需与导师同组
+                if os.group_id.is_some() && os.group_id == state.group_id {
+                    return MENTEE_EXP_BONUS;
+                }
+            }
+        }
+        0
+    }
+}

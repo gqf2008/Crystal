@@ -3417,8 +3417,9 @@ impl Message<SocialMentorReply> for SocialActor {
         };
 
         // 双方互相记录（C#：student.Info.Mentor = mentor；mentor.Info.Mentor = student）
-        let _ = replier_record.ask(SetMentor { mentor_name: Some(requester_state.name.clone()) }).await;
-        let _ = requester_record.ask(SetMentor { mentor_name: Some(replier_state.name.clone()) }).await;
+        // C#：student.Info.Mentor = 导师；导师 Info.IsMentor = true（PlayerObject.cs:13637-13640）
+        let _ = replier_record.ask(SetMentor { mentor_name: Some(requester_state.name.clone()), is_mentor: true }).await;
+        let _ = requester_record.ask(SetMentor { mentor_name: Some(replier_state.name.clone()), is_mentor: false }).await;
 
         send_system_message(&self.gate_ref, replier_session, &format!("收徒成功，你的徒弟是: {}", requester_state.name));
         send_system_message(&self.gate_ref, requester_session, &format!("拜师成功，你的导师是: {}", replier_state.name));
@@ -3481,14 +3482,14 @@ impl Message<SocialCancelMentor> for SocialActor {
         }
 
         let partner_name = state.mentor_name.clone().unwrap_or_default();
-        let _ = record.ask(SetMentor { mentor_name: None }).await;
+        let _ = record.ask(SetMentor { mentor_name: None, is_mentor: false }).await;
         send_mentor_cancel_packet(&self.gate_ref, msg.session_id);
         send_system_message(&self.gate_ref, msg.session_id, "已解除师徒关系");
 
         // 对方在线则同步清除（C# 双方 Info.Mentor 同时清空）
         if let Some(partner_sid) = self.find_player_by_name(&partner_name, msg.session_id).await {
             if let Some(partner_record) = self.players.get(&partner_sid) {
-                let _ = partner_record.ask(SetMentor { mentor_name: None }).await;
+                let _ = partner_record.ask(SetMentor { mentor_name: None, is_mentor: false }).await;
                 send_mentor_cancel_packet(&self.gate_ref, partner_sid);
                 send_system_message(&self.gate_ref, partner_sid, &format!("{} 解除了师徒关系", state.name));
             }

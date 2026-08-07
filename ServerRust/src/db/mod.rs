@@ -697,6 +697,8 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN bind_map_index INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN is_mentor INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN bind_x INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN bind_y INTEGER NOT NULL DEFAULT 0")
@@ -1024,8 +1026,8 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
             spouse_name, allow_mentor, mentor_name, hero_index, hero_behaviour,
             auto_pot_hp, auto_pot_mp, auto_pot_hp_item, auto_pot_mp_item,
             is_fishing, fishing_autocast, is_dead, pk_points, pk_kill_count, can_gain_exp, pearl_count,
-            last_access, bind_map_index, bind_x, bind_y
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+            last_access, bind_map_index, bind_x, bind_y, is_mentor
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(&state.name)
     .bind(account_username)
@@ -1083,6 +1085,7 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     .bind(state.bind_map_index)
     .bind(state.bind_x)
     .bind(state.bind_y)
+    .bind(if state.is_mentor { 1 } else { 0 })
     .execute(&mut *tx)
     .await?;
 
@@ -1300,6 +1303,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
 
             bind_y: row.try_get("bind_y").unwrap_or(0),
             level_effects: row.try_get("level_effects").unwrap_or(0) as u16,
+            is_mentor: row.try_get("is_mentor").unwrap_or(0) != 0,
     };
 
     Ok(Some(state))

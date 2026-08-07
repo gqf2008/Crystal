@@ -2013,5 +2013,6 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
             bind_x: 0,
             bind_y: 0,
             level_effects: 0,
+            is_mentor: false,
     }
 }
