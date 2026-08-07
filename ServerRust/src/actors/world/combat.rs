@@ -424,6 +424,53 @@ impl Message<WorldAttackRequest> for WorldActor {
                             other_state.x, other_state.y, other_state.direction, damage, other_state.map_index,
                         ).await;
                     }
+                    // PvP 近战技能（C# 对玩家同样走 melee 技能逻辑）
+                    // TwinDrakeBlade/DoubleSlash 第二段
+                    if let Some((expire, lv, kind)) = self.double_hit_melee.get(&msg.session_id).copied() {
+                        self.double_hit_melee.remove(&msg.session_id);
+                        if self.tick_count < expire {
+                            let second = (damage as f32 * (0.8 + 0.1 * lv as f32)) as i32;
+                            let _ = other_actor.ask(TakeDamage {
+                                attacker_id: result.object_id,
+                                attacker_session: msg.session_id,
+                                damage: second,
+                            }).await;
+                            // TwinDrakeBlade PvP 眩晕受 PvpCanResistPoison 门控（默认 false，跳过）
+                            debug!("Player {} {} second hit +{} on player {}",
+                                   result.object_id, if kind == 0 { "TwinDrakeBlade" } else { "DoubleSlash" },
+                                   second, other_session);
+                        }
+                    }
+                    // FlamingSword：1.4+0.4Lv 单次（追加 0.4+0.4Lv）
+                    if let Some((expire, lv)) = self.flaming_sword.get(&msg.session_id).copied() {
+                        self.flaming_sword.remove(&msg.session_id);
+                        if self.tick_count < expire {
+                            let bonus = (damage as f32 * (0.4 + 0.4 * lv as f32)) as i32;
+                            let _ = other_actor.ask(TakeDamage {
+                                attacker_id: result.object_id,
+                                attacker_session: msg.session_id,
+                                damage: bonus,
+                            }).await;
+                            debug!("Player {} FlamingSword bonus +{} on player {}", result.object_id, bonus, other_session);
+                        }
+                    }
+                    // FatalSword 被动：10% 触发武装，下一击 +5*(Lv+1)
+                    let fatal_armed = self.fatal_sword_armed.remove(&msg.session_id);
+                    if fatal_armed {
+                        if let Some(magic) = state.magics.iter().find(|m| m.spell == (SPELL_FATAL_SWORD as i32 - 3)) {
+                            let bonus = 5 * (magic.level as i32 + 1);
+                            let _ = other_actor.ask(TakeDamage {
+                                attacker_id: result.object_id,
+                                attacker_session: msg.session_id,
+                                damage: bonus,
+                            }).await;
+                            debug!("Player {} FatalSword bonus +{} on player {}", result.object_id, bonus, other_session);
+                        }
+                    } else if state.magics.iter().any(|m| m.spell == (SPELL_FATAL_SWORD as i32 - 3))
+                        && fastrand::i32(0..10) == 0 {
+                        self.fatal_sword_armed.insert(msg.session_id);
+                        debug!("Player {} FatalSword armed", result.object_id);
+                    }
                     // CounterAttack：受击方 7s 窗口激活时反击攻击者（C# HumanObject.cs 7212/7302）
                     if let Some((expire, lv)) = self.counter_attack.get(&other_session).copied() {
                         if self.tick_count <= expire {
