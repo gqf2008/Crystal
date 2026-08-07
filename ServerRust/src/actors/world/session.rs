@@ -1631,6 +1631,30 @@ impl Message<ChatRequest> for WorldActor {
                     send_system_message(&self.gate_ref, msg.session_id, &format!("你所在的地图：{} ({})", map_title, map_file));
                     return;
                 }
+                Some("ALLOWOBSERVE") => {
+                    // C# case "ALLOWOBSERVE"：AllowObserve = !AllowObserve + S.AllowObserve
+                    let mut new_state = match record.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(s)) => s,
+                        _ => return,
+                    };
+                    new_state.allow_observe = !new_state.allow_observe;
+                    let allowed = new_state.allow_observe;
+                    let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+                    let pkt = mir2_shared::packets::server::miscellaneous::AllowObserve { allowed };
+                    let mut observe_body = Vec::new();
+                    if pkt.write_body(&mut observe_body).is_ok() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: msg.session_id,
+                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::AllowObserve as i16, &observe_body),
+                        }).await;
+                    }
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        if allowed { "已允许其他玩家观察你" } else { "已禁止其他玩家观察你" },
+                    );
+                    return;
+                }
                 Some("ROLL") => {
                     // C#：Envir.Random.Next(5) + 1（1~5）；GroupMembers == null 直接 return；
                     // 向所有组员发 ChatType.Group 消息 HasRolledNumber
@@ -2250,6 +2274,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         has_storage_password: false,
         require_storage_password: false,
         storage_password_last_set: 0,
+        allow_observe: false,
         pk_points: 0,
         pk_kill_count: 0,
         buffs: Vec::new(),

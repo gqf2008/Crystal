@@ -275,6 +275,8 @@ pub struct PlayerState {
     pub require_storage_password: bool,
     /// 仓库密码最后设置时间（unix 秒；C# AccountInfo.StoragePasswordLastSet）
     pub storage_password_last_set: i64,
+    /// 是否允许其他玩家观察（C# PlayerObject.AllowObserve，@ALLOWOBSERVE 切换）
+    pub allow_observe: bool,
     /// 当前 Buff/Debuff 列表
     pub buffs: Vec<crate::combat::buff::BuffInstance>,
     /// 已学习的魔法/技能列表
@@ -632,6 +634,7 @@ impl PlayerActor {
                 has_storage_password: false,
                 require_storage_password: false,
                 storage_password_last_set: 0,
+                allow_observe: false,
                 buffs: Vec::new(),
                 magics: Vec::new(),
                 flags: std::collections::HashMap::new(),
@@ -4639,7 +4642,7 @@ impl PlayerActor {
         body.extend_from_slice(&0i32.to_le_bytes());                    // creature_count=0
         body.push(0u8);                                                 // summoned_creature_type
         body.push(0u8);                                                 // creature_summoned=false
-        body.push(0u8);                                                 // allow_observe=false
+        body.push(if self.state.allow_observe { 1u8 } else { 0u8 }); // allow_observe
         body.push(0u8);                                                 // observer=false
 
         // #208：角色面板属性段（18 x i32；最终值 = 基础 + 装备加成）
@@ -4810,6 +4813,7 @@ mod tests {
             has_storage_password: false,
             require_storage_password: false,
             storage_password_last_set: 0,
+            allow_observe: false,
             is_dead: false,
             unlock_curse: false,
             last_revival_time: 0,

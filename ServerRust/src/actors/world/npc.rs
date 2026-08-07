@@ -658,6 +658,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             has_storage_password: false,
             require_storage_password: false,
             storage_password_last_set: 0,
+            allow_observe: false,
             pk_points: 0,
             pk_kill_count: 0,
             buffs: Vec::new(),
