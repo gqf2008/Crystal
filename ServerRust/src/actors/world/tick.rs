@@ -18,6 +18,26 @@ impl Message<ProcessDelayedActions> for WorldActor {
     }
 }
 
+/// #898：安全区回血量（C# SpellObject.Value=25，不超过 max_hp）
+fn safe_zone_heal_hp(hp: i32, max_hp: i32) -> i32 {
+    (hp + 25).min(max_hp)
+}
+
+/// #898：安全区回血 tick（C# Settings.SafeZoneHealing），独立于 Tick 消息避免栈溢出
+pub struct ProcessSafeZoneHealing;
+
+impl Message<ProcessSafeZoneHealing> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        _msg: ProcessSafeZoneHealing,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.tick_safe_zone_healing().await;
+    }
+}
+
 /// 元素系统 tick（专注恢复/过期广播 + 攒元素队列），独立于 Tick 消息避免栈溢出
 pub struct ProcessElementalTick;
 
@@ -1254,6 +1274,43 @@ impl WorldActor {
                         ).await {
                             warn!("Failed to persist storage expansion expiry for {}: {}", record.name, e);
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    /// #898：安全区回血（C# Settings.SafeZoneHealing：开启后安全区内每 2 秒 +25 HP，
+    /// 等效 C# Map 加载时放置的永久 Healing SpellObject Value=25 / TickSpeed=2000ms）
+    pub(crate) async fn tick_safe_zone_healing(&mut self) {
+        if !self.safe_zone_healing {
+            return;
+        }
+        if self.tick_count.is_multiple_of(20) {
+            for (session_id, record) in &self.players {
+                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    if state.is_dead || state.hp >= state.max_hp {
+                        continue;
+                    }
+                    let in_safe = self.maps.get(&state.map_index)
+                        .map(|m| m.is_safe_zone(state.x, state.y))
+                        .unwrap_or(false);
+                    if !in_safe {
+                        continue;
+                    }
+                    let new_hp = safe_zone_heal_hp(state.hp, state.max_hp);
+                    if new_hp != state.hp {
+                        let mp = state.mp;
+                        let mut new_state = state.clone();
+                        new_state.hp = new_hp;
+                        let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+                        let mut body = Vec::new();
+                        body.extend_from_slice(&(new_hp as u32).to_le_bytes());
+                        body.extend_from_slice(&(mp as u32).to_le_bytes());
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *session_id,
+                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &body),
+                        }).await;
                     }
                 }
             }
@@ -3736,6 +3793,13 @@ impl Message<Tick> for WorldActor {
         self.tick_refine_complete().await;
         self.tick_regen_and_hunger().await;
 
+        // #898：安全区回血由独立消息处理（避免内联进 Tick handler 巨型状态机导致 tokio 栈溢出，#881 经验）
+        if self.safe_zone_healing {
+            if let Some(world_ref) = self.self_ref.clone() {
+                let _ = world_ref.tell(ProcessSafeZoneHealing).try_send();
+            }
+        }
+
         self.tick_day_night().await;
 
         self.tick_auto_save().await;
@@ -3755,5 +3819,19 @@ impl Message<Tick> for WorldActor {
         self.tick_dragon().await;
 
         self.tick_conquest().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_zone_heal_hp;
+
+    #[test]
+    fn test_safe_zone_heal_hp() {
+        // #898：C# 安全区 Healing SpellObject Value=25 / TickSpeed=2000ms
+        assert_eq!(safe_zone_heal_hp(100, 500), 125);
+        assert_eq!(safe_zone_heal_hp(490, 500), 500); // 不超过 max_hp
+        assert_eq!(safe_zone_heal_hp(500, 500), 500); // 满血不溢出
+        assert_eq!(safe_zone_heal_hp(0, 500), 25);
     }
 }
