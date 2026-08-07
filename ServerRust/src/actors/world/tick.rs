@@ -3054,6 +3054,16 @@ impl Message<Tick> for WorldActor {
                     monster.ai_state = MonsterAiState::Idle;
                 }
 
+                // C# MonsterObject.ProcessRegen：每 RegenDelay(10s) 回 2.2% max HP + 1（can_regen 时）
+                if monster.behavior.can_regen() && monster.hp < monster.max_hp {
+                    let next = self.monster_regen_ticks.get(oid).copied().unwrap_or(0);
+                    if self.tick_count >= next {
+                        self.monster_regen_ticks.insert(*oid, self.tick_count + 100); // 10s = 100 ticks
+                        let regen = (monster.max_hp as f32 * 0.022) as i32 + 1;
+                        monster.hp = (monster.hp + regen).min(monster.max_hp);
+                    }
+                }
+
                 // 检查死亡
                 if monster.hp <= 0 {
                     // C# EvilMir.Die：DragonLink 模式下死亡=睡眠 5 分钟（满血苏醒），而非真死
