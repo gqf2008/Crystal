@@ -300,6 +300,37 @@ impl Message<NpcSetGuildBuffs> for SocialActor {
     }
 }
 
+/// WorldActor -> SocialActor: 行会获得经验（C# GuildObject.GainExp）
+pub struct GuildGainExp {
+    pub guild_name: String,
+    pub amount: i64,
+}
+
+impl Message<GuildGainExp> for SocialActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: GuildGainExp, _ctx: &mut Context<Self, Self::Reply>) {
+        let Some(guild) = self.guilds.get_mut(&msg.guild_name) else { return };
+        // C# GuildObject.GainExp（644-690）
+        let leveled = guild.apply_gain_exp(
+            msg.amount,
+            self.config.guild_exp_rate,
+            self.config.guild_point_per_level,
+            &self.config.guild_experience_list,
+            &self.config.guild_membercap_list,
+        );
+        if leveled {
+            debug!("Guild '{}' leveled to {} (exp={} cap={})", guild.name, guild.level, guild.experience, guild.member_cap);
+            // C# NextExpUpdate=now+10s 后广播 GuildStatus 给在线成员
+            let sessions: Vec<u64> = guild.members.iter().filter_map(|m| m.session_id).collect();
+            for sid in sessions {
+                send_guild_status_packet(&self.gate_ref, sid, true);
+            }
+            self.save_guild_to_db(&msg.guild_name).await;
+        }
+    }
+}
+
 /// WorldActor(NPC 脚本) -> SocialActor: 查询玩家是否队长（对齐 C# CheckType.Groupleader）
 pub struct NpcIsGroupLeader {
     pub session_id: u64,
@@ -684,6 +715,14 @@ pub struct SocialActorConfig {
     pub newbie_guild_buff_enabled: bool,
     /// 新手行会经验加成 %（C# Settings.NewbieGuildExpBuff = 5）
     pub newbie_guild_exp_buff: i32,
+    /// 行会经验倍率（C# Settings.Guild_ExpRate = 0.01）
+    pub guild_exp_rate: f64,
+    /// 行会每级分配点数（C# Settings.Guild_PointPerLevel = 0）
+    pub guild_point_per_level: u8,
+    /// 行会各级所需经验（C# Settings.Guild_ExperienceList，索引=等级）
+    pub guild_experience_list: Vec<i64>,
+    /// 行会各级成员上限（C# Settings.Guild_MembercapList，索引=等级）
+    pub guild_membercap_list: Vec<i32>,
     /// 是否允许创建角色（C# Settings.AllowNewCharacter）
     pub allow_new_character: bool,
     /// 是否允许删除角色（C# Settings.AllowDeleteCharacter）
@@ -728,6 +767,10 @@ impl Default for SocialActorConfig {
             newbie_guild: "NewbieGuild".to_string(),
             newbie_guild_buff_enabled: true,
             newbie_guild_exp_buff: 5,
+            guild_exp_rate: 0.01,
+            guild_point_per_level: 0,
+            guild_experience_list: Vec::new(),
+            guild_membercap_list: Vec::new(),
             allow_new_character: true,
             allow_delete_character: true,
             allow_create_assassin: true,

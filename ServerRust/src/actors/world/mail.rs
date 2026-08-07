@@ -98,7 +98,10 @@ impl Message<SendMailRequest> for WorldActor {
             for uid in &msg.item_uids {
                 if let Some(item) = sender_state.inventory.get_item(*uid) {
                     if let Some(info) = self.item_infos.get(&item.item_index) {
-                        item_fee += (info.price as u64) / 100 * mail_insurance_pct as u64;
+                        // C# GetMailCost：item.Price()（含耐久比例/附加属性）× Count
+                        let price = super::item::compute_item_price_per_unit(&item, info)
+                            .saturating_mul(item.count as u64);
+                        item_fee += price / 100 * mail_insurance_pct as u64;
                     }
                 }
             }

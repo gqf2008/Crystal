@@ -111,6 +111,10 @@ async fn async_main() -> anyhow::Result<()> {
         newbie_guild: cfg.social.newbie_guild.clone(),
         newbie_guild_buff_enabled: cfg.social.newbie_guild_buff_enabled,
         newbie_guild_exp_buff: cfg.social.newbie_guild_exp_buff,
+        guild_exp_rate: cfg.social.guild_exp_rate,
+        guild_point_per_level: cfg.social.guild_point_per_level,
+        guild_experience_list: cfg.social.guild_experience_list.clone(),
+        guild_membercap_list: cfg.social.guild_membercap_list.clone(),
         allow_new_character: cfg.social.allow_new_character,
         allow_delete_character: cfg.social.allow_delete_character,
         allow_create_assassin: cfg.social.allow_create_assassin,
@@ -149,6 +153,7 @@ async fn async_main() -> anyhow::Result<()> {
         pvp_cfg: cfg.pvp.clone(),
         drop_rate: cfg.server.drop_rate,
         exp_rate: 1.0, // C# Settings.ExpRate 默认 1
+        experience_list: cfg.server.experience_list.clone(),
         item_timeout_ticks: cfg.server.item_timeout_secs as u64 * 10,
         max_drop_gold: cfg.server.max_drop_gold,
         rarity_cfg: cfg.server.rarity.clone(),

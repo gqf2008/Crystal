@@ -36,6 +36,8 @@ pub struct QuestInstance {
     pub exp_reward: i64,
     /// 奖励金币
     pub gold_reward: u64,
+    /// 奖励信用（C# QuestInfo.CreditReward）
+    pub credit_reward: i64,
     /// 任务接受时的 Unix 时间戳（秒）
     pub start_time: u64,
     /// 时间限制（秒，0=无限制）
@@ -154,6 +156,7 @@ mod tests {
             ],
             exp_reward: 1000,
             gold_reward: 500,
+            credit_reward: 0,
             start_time: 0,
             time_limit_seconds: 0,
         }

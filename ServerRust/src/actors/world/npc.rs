@@ -1628,7 +1628,7 @@ impl Message<NPCConfirmInputRequest> for WorldActor {
                         if quest.status == QuestStatus::InProgress {
                             let _ = record.actor_ref.ask(CompleteQuest { quest_index: quest_db.index }).await;
                             // Grant rewards
-                            let _ = record.actor_ref.ask(AddExperience { amount: self.apply_global_exp_multiplier(quest_db.exp_reward) }).await;
+                            let _ = record.actor_ref.ask(AddExperience { amount: self.apply_global_exp_multiplier(quest_db.exp_reward) , experience_list: self.experience_list.clone()}).await;
                             let _ = record.actor_ref.ask(AddGold { amount: quest_db.gold_reward.max(0) as u64 }).await;
                             send_system_message(&self.gate_ref, msg.session_id,
                                 &format!("任务完成: +{}经验, +{}金币", quest_db.exp_reward, quest_db.gold_reward.max(0)));

@@ -96,6 +96,8 @@ pub struct WorldActorArgs {
     pub drop_rate: f64,
     /// 全局经验倍率（C# Settings.ExpRate，默认 1）
     pub exp_rate: f64,
+    /// 玩家升级经验曲线（C# Settings.ExperienceList；空表回退 ×1.5）
+    pub experience_list: Vec<i64>,
     /// 地面物品超时 ticks（= item_timeout_secs * 10，100ms/tick）
     pub item_timeout_ticks: u64,
     /// 金币掉落每堆上限（C# Settings.MaxDropGold = 2000）
@@ -534,6 +536,12 @@ pub struct MonsterState {
     pub master_session: Option<u64>,
     /// 召唤物到期 tick（0=永不过期；>0 时到点自动消失，对齐 C# 召唤时限）
     pub recall_at_tick: u64,
+    /// 宠物经验积累（C# MonsterObject.PetExperience）
+    pub pet_experience: u64,
+    /// 宠物最大等级（C# MonsterObject.MaxPetLevel）
+    pub max_pet_level: u8,
+    /// 稀有度（0=普通 1=Uncommon 2=Rare 3=Elite；C# MonsterRarityData）
+    pub rarity: u8,
     /// AI 行为（Boss=专属 impl，普通怪=DefaultBehavior）
     pub behavior: Box<dyn crate::actors::world::ai::MonsterBehavior + Send + Sync>,
 }
@@ -957,6 +965,8 @@ pub struct WorldActor {
     pub(crate) drop_rate: f64,
     /// 全局经验倍率（C# Settings.ExpRate）
     pub(crate) exp_rate: f64,
+    /// 玩家升级经验曲线（C# Settings.ExperienceList；空表回退 ×1.5）
+    pub(crate) experience_list: Vec<i64>,
     /// 地面物品超时 ticks
     pub(crate) item_timeout_ticks: u64,
     /// 金币掉落每堆上限
@@ -1133,6 +1143,7 @@ impl WorldActor {
     pub fn new(gate_ref: ActorRef<GateActor>, map_dir: PathBuf, spawn_dir: Option<PathBuf>, db_pool: DbPool, social_ref: ActorRef<SocialActor>) -> Self {
         Self {
             tick_count: 0,
+            experience_list: Vec::new(),
             npc_timers: HashMap::new(),
             session_last_movement: HashMap::new(),
             npc_delayed_actions: HashMap::new(),
@@ -1986,13 +1997,16 @@ impl WorldActor {
         let global_gold_mul = if self.tick_count < self.global_exp_event_end_tick {
             self.global_gold_multiplier
         } else { 1.0 };
-        // #1005：稀有度掉落加成（C# MonsterRarityProfile；Rust 仅 Elite）
-        let rarity_item_bonus = if monster.is_elite {
-            self.rarity_cfg.elite_item_drop_bonus_percent as f64
-        } else { 0.0 };
-        let rarity_gold_bonus = if monster.is_elite {
-            self.rarity_cfg.elite_gold_drop_bonus_percent as f64
-        } else { 0.0 };
+        // #1005/#1140：稀有度掉落加成（C# MonsterRarityProfile：Uncommon/Rare/Elite 档）
+        let (rarity_item_bonus, rarity_gold_bonus) = match monster.rarity {
+            3 => (self.rarity_cfg.elite_item_drop_bonus_percent as f64,
+                  self.rarity_cfg.elite_gold_drop_bonus_percent as f64),
+            2 => (self.rarity_cfg.rare_item_drop_bonus_percent as f64,
+                  self.rarity_cfg.rare_gold_drop_bonus_percent as f64),
+            1 => (self.rarity_cfg.uncommon_item_drop_bonus_percent as f64,
+                  self.rarity_cfg.uncommon_gold_drop_bonus_percent as f64),
+            _ => (0.0, 0.0),
+        };
         for drop in &drops {
             // C# Drop()：QuestRequired 条目普通掉落跳过（任务系统发放）
             if drop.quest_required {
@@ -2815,7 +2829,7 @@ impl WorldActor {
                         let amount = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
                         if amount > 0 {
                             if let Some(record) = self.players.get(&session_id) {
-                                let _ = record.actor_ref.ask(crate::actors::player::AddExperience { amount: self.apply_global_exp_multiplier(amount) }).await;
+                                let _ = record.actor_ref.ask(crate::actors::player::AddExperience { amount: self.apply_global_exp_multiplier(amount) , experience_list: self.experience_list.clone()}).await;
                             }
                         }
                     }
@@ -3060,10 +3074,34 @@ impl WorldActor {
                                     }
                                 };
                                 if completed_quest.exp_reward > 0 {
-                                    let _ = record.actor_ref.ask(AddExperience { amount: self.apply_global_exp_multiplier(completed_quest.exp_reward as i32) }).await;
+                                    let _ = record.actor_ref.ask(AddExperience { amount: self.apply_global_exp_multiplier(completed_quest.exp_reward as i32) , experience_list: self.experience_list.clone()}).await;
                                 }
                                 if completed_quest.gold_reward > 0 {
-                                    let _ = record.actor_ref.ask(AddGold { amount: completed_quest.gold_reward }).await;
+                                    // C# FinishQuest：GoldReward * Settings.DropRate
+                                    let gold = (completed_quest.gold_reward as f64 * self.drop_rate) as u64;
+                                    let _ = record.actor_ref.ask(AddGold { amount: gold }).await;
+                                }
+                                // C# FinishQuest：GainCredit(CreditReward)（账户积分，上限 uint.MaxValue）
+                                if completed_quest.credit_reward > 0 {
+                                    let username = record.account_username.clone();
+                                    let current = db::get_account_credit(&self.db_pool, &username).await.unwrap_or(0);
+                                    let remaining = (u32::MAX as u64).saturating_sub(current.min(u32::MAX as u64));
+                                    let delta = (completed_quest.credit_reward as u64).min(remaining) as i64;
+                                    if delta > 0 {
+                                        if let Err(e) = db::add_account_credit(&self.db_pool, &username, delta).await {
+                                            warn!("Quest CreditReward failed for {}: {}", username, e);
+                                        } else {
+                                            // C# GainCredit：S.GainedCredit（客户端积分浮字）
+                                            let packet = mir2_shared::packets::server::drops::GainedCredit { credit: delta as u32 };
+                                            let mut body = Vec::new();
+                                            if packet.write_body(&mut body).is_ok() {
+                                                let _ = self.gate_ref.tell(SendToClient {
+                                                    session_id,
+                                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainedCredit as i16, &body),
+                                                }).await;
+                                            }
+                                        }
+                                    }
                                 }
                                 if let Some(quest_db) = self.quest_infos.get(&quest_index) {
                                     for reward in &quest_db.fixed_rewards {
@@ -3082,7 +3120,7 @@ impl WorldActor {
                                         let _ = record.actor_ref.ask(crate::actors::player::CheckQuestItemProgress).await;
                                     }
                                 }
-                                send_system_message(&self.gate_ref, session_id, &format!("任务完成！获得 {} 经验，{} 金币", completed_quest.exp_reward, completed_quest.gold_reward));
+                                send_system_message(&self.gate_ref, session_id, &format!("任务完成！获得 {} 经验，{} 金币{}", completed_quest.exp_reward, completed_quest.gold_reward, if completed_quest.credit_reward > 0 { format!("，{} 信用", completed_quest.credit_reward) } else { String::new() }));
                                 send_quest_complete_packet(&self.gate_ref, session_id, completed_quest.quest_index);
                             }
                         }
@@ -3222,6 +3260,9 @@ impl WorldActor {
                                     last_hit_damage: 0,
             undead: false,
                                     master_session: None,
+                                rarity: 0,
+                                pet_experience: 0,
+                                max_pet_level: 0,
                                     recall_at_tick: 0,
                                     behavior: ai::make_behavior(&monster_info.name),
                                 };
@@ -3499,6 +3540,9 @@ impl WorldActor {
                                         luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
                                         poison_list: Vec::new(),
                                         last_hit_damage: 0, undead: info.undead,
+                                rarity: 0,
+                                pet_experience: 0,
+                                max_pet_level: 0,
                                         master_session: None, recall_at_tick: 0,
                                         behavior: ai::make_behavior(&info.name),
                                     });
@@ -4000,6 +4044,7 @@ impl Actor for WorldActor {
             pvp_cfg: args.pvp_cfg,
             drop_rate: args.drop_rate,
             exp_rate: args.exp_rate,
+            experience_list: args.experience_list,
             item_timeout_ticks: args.item_timeout_ticks,
             max_drop_gold: args.max_drop_gold,
             rarity_cfg: args.rarity_cfg,
@@ -4204,6 +4249,9 @@ impl WorldActor {
                 last_hit_damage: 0,
                 undead: info.undead,
                 master_session: None,
+                                rarity: 0,
+                                pet_experience: 0,
+                                max_pet_level: 0,
                 recall_at_tick: 0,
                 behavior: ai::make_behavior(&info.name),
             });
@@ -4702,6 +4750,35 @@ impl WorldActor {
     }
 }
 /// #283：玩家升级 → 向同图其他玩家广播 ObjectLeveled（C# 升级表现）
+/// PlayerActor -> WorldActor: 玩家获得经验（含全部加成后）→ 转发给行会（C# GainExp MyGuild.GainExp）
+pub struct GuildExpEarned {
+    pub session_id: u64,
+    pub amount: i64,
+}
+
+impl Message<GuildExpEarned> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: GuildExpEarned, _ctx: &mut Context<Self, Self::Reply>) {
+        let guild_name = match self.players.get(&msg.session_id) {
+            Some(r) => match r.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(s)) => s.guild_name,
+                _ => None,
+            },
+            None => None,
+        };
+        let Some(name) = guild_name else { return };
+        // C#：新手行会不积累经验（MyGuild.Name != Settings.NewbieGuild）
+        if name.eq_ignore_ascii_case(&self.social_ref.ask(crate::actors::social::NpcGetNewbieGuildConfig).await.map(|c| c.0).unwrap_or_else(|_| "NewbieGuild".to_string())) {
+            return;
+        }
+        let _ = self.social_ref.ask(crate::actors::social::GuildGainExp {
+            guild_name: name,
+            amount: msg.amount,
+        }).await;
+    }
+}
+
 pub struct PlayerLeveled {
     pub session_id: u64,
     pub object_id: u32,
@@ -4863,6 +4940,7 @@ fn make_quest_instance(qi: &db::QuestInfo, start_time: u64) -> QuestInstance {
         progress,
         exp_reward: qi.exp_reward as i64,
         gold_reward: qi.gold_reward.max(0) as u64,
+        credit_reward: qi.credit_reward as i64,
         start_time,
         time_limit_seconds: qi.time_limit_seconds,
     }
@@ -5640,6 +5718,34 @@ fn guild_war_flags(
     (at_war, enemy)
 }
 
+/// C# MonsterRarityData.Roll：basis points（percent×100），random.Next(10000)
+/// 返回 0=普通 1=Uncommon 2=Rare 3=Elite
+fn roll_rarity(cfg: &crate::util::config::RarityConfig) -> u8 {
+    let elite_bp = (cfg.elite_chance_percent as f64 * 100.0).round() as i32;
+    let rare_bp = (cfg.rare_chance_percent * 100.0).round() as i32;
+    let uncommon_bp = (cfg.uncommon_chance_percent * 100.0).round() as i32;
+    let roll = fastrand::i32(0..10000);
+    if roll < elite_bp {
+        3
+    } else if roll < elite_bp + rare_bp {
+        2
+    } else if roll < elite_bp + rare_bp + uncommon_bp {
+        1
+    } else {
+        0
+    }
+}
+
+/// 稀有度显示前缀（C# 用 NameColour；Rust 客户端未实现颜色，用前缀近似）
+fn rarity_prefix(rarity: u8) -> &'static str {
+    match rarity {
+        3 => "[精英] ",
+        2 => "[稀有] ",
+        1 => "[罕见] ",
+        _ => "",
+    }
+}
+
 /// #926：物品绑定标志判定（C# BindMode.HasFlag；db::ItemInfo.bind_mode 与 SharedRust 位值一致）
 pub(crate) fn has_bind_flag(bind_mode: i32, flag: u16) -> bool {
     (bind_mode as u16 & flag) != 0
@@ -6178,16 +6284,28 @@ async fn spawn_npcs_and_monsters(
         monster_pos.x = mx;
         monster_pos.y = my;
 
-        // 精英判定（C# Settings.MonsterRarity* 配置化）
-        let is_elite = fastrand::u8(1..=100) <= ctx.rarity.elite_chance_percent;
-        let (name, hp, max_hp, min_dmg, max_dmg, xp) = if is_elite {
+        // 稀有度判定（C# MonsterRarityData.Roll：Uncommon/Rare/Elite）
+        let rarity = roll_rarity(&ctx.rarity);
+        let is_elite = rarity >= 3;
+        let (hp_m, dmg_m, xp_m, def_m) = match rarity {
+            3 => (ctx.rarity.elite_hp_multiplier, ctx.rarity.elite_dmg_multiplier,
+                  ctx.rarity.elite_xp_multiplier, ctx.rarity.elite_defense_multiplier),
+            2 => (ctx.rarity.rare_hp_multiplier, ctx.rarity.rare_damage_multiplier,
+                  ctx.rarity.rare_exp_multiplier, ctx.rarity.rare_defense_multiplier),
+            1 => (ctx.rarity.uncommon_hp_multiplier, ctx.rarity.uncommon_damage_multiplier,
+                  ctx.rarity.uncommon_exp_multiplier, ctx.rarity.uncommon_defense_multiplier),
+            _ => (1.0, 1.0, 1.0, 1.0),
+        };
+        let _def_m = def_m;
+        let prefix = rarity_prefix(rarity);
+        let (name, hp, max_hp, min_dmg, max_dmg, xp) = if rarity > 0 {
             (
-                format!("[精英] {}", monster.name),
-                (monster.hp as f64 * ctx.rarity.elite_hp_multiplier).max(1.0) as i32,
-                (monster.hp as f64 * ctx.rarity.elite_hp_multiplier).max(1.0) as i32,
-                (monster.min_dmg as f64 * ctx.rarity.elite_dmg_multiplier) as i32,
-                (monster.max_dmg as f64 * ctx.rarity.elite_dmg_multiplier) as i32,
-                (monster.xp as f64 * ctx.rarity.elite_xp_multiplier).max(1.0) as i32,
+                format!("{}{}", prefix, monster.name),
+                (monster.hp as f64 * hp_m).max(1.0) as i32,
+                (monster.hp as f64 * hp_m).max(1.0) as i32,
+                (monster.min_dmg as f64 * dmg_m) as i32,
+                (monster.max_dmg as f64 * dmg_m) as i32,
+                (monster.xp as f64 * xp_m).max(1.0) as i32,
             )
         } else {
             (monster.name.clone(), monster.hp, monster.hp, monster.min_dmg, monster.max_dmg, monster.xp)
@@ -6237,6 +6355,7 @@ async fn spawn_npcs_and_monsters(
             target_session: None,
             last_hitter_session: None,
             provoked: false,
+            rarity,
             is_elite,
             is_boss: false,
             min_ac: 0,
@@ -6259,6 +6378,8 @@ async fn spawn_npcs_and_monsters(
             last_hit_damage: 0,
             undead: ctx.monster_infos.get(&monster.monster_index).map(|i| i.undead).unwrap_or(false),
             master_session: None,
+                                pet_experience: 0,
+                                max_pet_level: 0,
             recall_at_tick: 0,
             behavior: ai::make_behavior(&name),
         });
@@ -6341,6 +6462,9 @@ async fn spawn_npcs_and_monsters(
                         last_hit_damage: 0,
             undead: false,
                         master_session: None,
+                                rarity: 0,
+                                pet_experience: 0,
+                                max_pet_level: 0,
                         recall_at_tick: 0,
                         behavior: ai::make_behavior(&dragon.monster_name),
                     });
@@ -6458,6 +6582,9 @@ mod tests {
             last_hit_damage: 0,
             undead: false,
             master_session: None,
+                                rarity: 0,
+                                pet_experience: 0,
+                                max_pet_level: 0,
             recall_at_tick: 0,
             behavior: ai::make_behavior("TestBoss"),
         };
@@ -6520,6 +6647,24 @@ mod tests {
 
         awake.levels = vec![1, 1, 1, 1, 1];
         assert!(awake.is_max_level());
+    }
+    /// #1140：C# MonsterRarityData——稀有度前缀（Uncommon/Rare/Elite）
+    #[test]
+    fn test_rarity_prefix() {
+        assert_eq!(rarity_prefix(3), "[精英] ");
+        assert_eq!(rarity_prefix(2), "[稀有] ");
+        assert_eq!(rarity_prefix(1), "[罕见] ");
+        assert_eq!(rarity_prefix(0), "");
+    }
+
+    /// #1140：roll_rarity 返回值域 0..=3
+    #[test]
+    fn test_roll_rarity_range() {
+        let cfg = crate::util::config::RarityConfig::default();
+        for _ in 0..200 {
+            let r = roll_rarity(&cfg);
+            assert!(r <= 3);
+        }
     }
 }
 

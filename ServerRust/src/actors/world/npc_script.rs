@@ -1616,7 +1616,7 @@ async fn exec_action(
         "GIVEEXP" | "ADDEXP" | "ADD EXP" => {
             let amt = arg0().parse::<i32>().unwrap_or(0);
             let boosted = world.apply_global_exp_multiplier(amt);
-            send_player_msg(world, session_id, AddExperience { amount: boosted }).await;
+            send_player_msg(world, session_id, AddExperience { amount: boosted , experience_list: world.experience_list.clone()}).await;
         }
         // GOTO @section
         "GOTO" => {

@@ -148,6 +148,18 @@ pub struct SocialConfig {
     /// 新手行会经验加成 %（C# Settings.NewbieGuildExpBuff = 5）
     #[serde(default = "default_newbie_guild_exp_buff")]
     pub newbie_guild_exp_buff: i32,
+    /// 行会经验倍率（C# Settings.Guild_ExpRate = 0.01）
+    #[serde(default = "default_guild_exp_rate")]
+    pub guild_exp_rate: f64,
+    /// 行会每级分配点数（C# Settings.Guild_PointPerLevel = 0）
+    #[serde(default = "default_guild_point_per_level")]
+    pub guild_point_per_level: u8,
+    /// 行会各级所需经验（C# Settings.Guild_ExperienceList，索引=等级）
+    #[serde(default)]
+    pub guild_experience_list: Vec<i64>,
+    /// 行会各级成员上限（C# Settings.Guild_MembercapList，索引=等级）
+    #[serde(default)]
+    pub guild_membercap_list: Vec<i32>,
     /// 是否允许创建角色（C# Settings.AllowNewCharacter = true）
     #[serde(default = "default_allow_new_character")]
     pub allow_new_character: bool,
@@ -243,6 +255,14 @@ fn default_newbie_guild_exp_buff() -> i32 {
     5
 }
 
+fn default_guild_exp_rate() -> f64 {
+    0.01
+}
+
+fn default_guild_point_per_level() -> u8 {
+    0
+}
+
 fn default_newbie_guild() -> String {
     "NewbieGuild".to_string()
 }
@@ -260,6 +280,10 @@ impl Default for SocialConfig {
             newbie_guild: default_newbie_guild(),
             newbie_guild_buff_enabled: default_newbie_guild_buff_enabled(),
             newbie_guild_exp_buff: default_newbie_guild_exp_buff(),
+            guild_exp_rate: default_guild_exp_rate(),
+            guild_point_per_level: default_guild_point_per_level(),
+            guild_experience_list: Vec::new(),
+            guild_membercap_list: Vec::new(),
             allow_new_character: default_allow_new_character(),
             allow_delete_character: default_allow_delete_character(),
             allow_create_assassin: default_true(),
@@ -304,6 +328,9 @@ pub struct ServerWorldConfig {
     /// 全局掉落倍率（C# Settings.DropRate，默认 1.0；影响掉落概率 chance * drop_rate）
     #[serde(default = "default_drop_rate")]
     pub drop_rate: f64,
+    /// 玩家升级经验曲线（C# Settings.ExperienceList，索引=Level-1；空表回退 ×1.5）
+    #[serde(default)]
+    pub experience_list: Vec<i64>,
     /// 地面物品超时秒数（C# Settings.ItemTimeOut = 30）
     #[serde(default = "default_item_timeout")]
     pub item_timeout_secs: u32,
@@ -364,9 +391,48 @@ pub struct RarityConfig {
     /// 精英概率百分比（1..=100）
     #[serde(default = "default_elite_chance")]
     pub elite_chance_percent: u8,
+    /// Uncommon 概率百分比（C# Settings.MonsterRarityUncommonChancePercent = 3.0）
+    #[serde(default = "default_uncommon_chance")]
+    pub uncommon_chance_percent: f64,
+    /// Rare 概率百分比（C# Settings.MonsterRarityRareChancePercent = 0.75）
+    #[serde(default = "default_rare_chance")]
+    pub rare_chance_percent: f64,
+    /// Uncommon 倍率（C# MonsterRarityUncommon*）
+    #[serde(default = "default_uncommon_hp")]
+    pub uncommon_hp_multiplier: f64,
+    #[serde(default = "default_uncommon_defense")]
+    pub uncommon_defense_multiplier: f64,
+    #[serde(default = "default_uncommon_damage")]
+    pub uncommon_damage_multiplier: f64,
+    #[serde(default = "default_uncommon_exp")]
+    pub uncommon_exp_multiplier: f64,
+    #[serde(default = "default_uncommon_gold")]
+    pub uncommon_gold_multiplier: f64,
+    #[serde(default = "default_uncommon_item_bonus")]
+    pub uncommon_item_drop_bonus_percent: i32,
+    #[serde(default = "default_uncommon_gold_bonus")]
+    pub uncommon_gold_drop_bonus_percent: i32,
+    /// Rare 倍率（C# MonsterRarityRare*）
+    #[serde(default = "default_rare_hp")]
+    pub rare_hp_multiplier: f64,
+    #[serde(default = "default_rare_defense")]
+    pub rare_defense_multiplier: f64,
+    #[serde(default = "default_rare_damage")]
+    pub rare_damage_multiplier: f64,
+    #[serde(default = "default_rare_exp")]
+    pub rare_exp_multiplier: f64,
+    #[serde(default = "default_rare_gold")]
+    pub rare_gold_multiplier: f64,
+    #[serde(default = "default_rare_item_bonus")]
+    pub rare_item_drop_bonus_percent: i32,
+    #[serde(default = "default_rare_gold_bonus")]
+    pub rare_gold_drop_bonus_percent: i32,
     /// 精英 HP 倍率
     #[serde(default = "default_elite_hp_multiplier")]
     pub elite_hp_multiplier: f64,
+    /// 精英防御倍率（C# MonsterRarityEliteDefenseMultiplier = 1.55）
+    #[serde(default = "default_elite_defense_multiplier")]
+    pub elite_defense_multiplier: f64,
     /// 精英伤害倍率
     #[serde(default = "default_elite_dmg_multiplier")]
     pub elite_dmg_multiplier: f64,
@@ -387,6 +453,31 @@ pub struct RarityConfig {
 fn default_elite_chance() -> u8 {
     3
 }
+
+fn default_elite_defense_multiplier() -> f64 {
+    1.55
+}
+
+fn default_uncommon_chance() -> f64 {
+    3.0
+}
+fn default_rare_chance() -> f64 {
+    0.75
+}
+fn default_uncommon_hp() -> f64 { 1.25 }
+fn default_uncommon_defense() -> f64 { 1.15 }
+fn default_uncommon_damage() -> f64 { 1.15 }
+fn default_uncommon_exp() -> f64 { 1.20 }
+fn default_uncommon_gold() -> f64 { 1.25 }
+fn default_uncommon_item_bonus() -> i32 { 15 }
+fn default_uncommon_gold_bonus() -> i32 { 15 }
+fn default_rare_hp() -> f64 { 1.60 }
+fn default_rare_defense() -> f64 { 1.30 }
+fn default_rare_damage() -> f64 { 1.35 }
+fn default_rare_exp() -> f64 { 1.60 }
+fn default_rare_gold() -> f64 { 1.75 }
+fn default_rare_item_bonus() -> i32 { 35 }
+fn default_rare_gold_bonus() -> i32 { 35 }
 
 fn default_elite_hp_multiplier() -> f64 {
     2.25 // C# MonsterRarityData.Elite HpMultiplier
@@ -416,7 +507,24 @@ impl Default for RarityConfig {
     fn default() -> Self {
         Self {
             elite_chance_percent: default_elite_chance(),
+            uncommon_chance_percent: default_uncommon_chance(),
+            rare_chance_percent: default_rare_chance(),
+            uncommon_hp_multiplier: default_uncommon_hp(),
+            uncommon_defense_multiplier: default_uncommon_defense(),
+            uncommon_damage_multiplier: default_uncommon_damage(),
+            uncommon_exp_multiplier: default_uncommon_exp(),
+            uncommon_gold_multiplier: default_uncommon_gold(),
+            uncommon_item_drop_bonus_percent: default_uncommon_item_bonus(),
+            uncommon_gold_drop_bonus_percent: default_uncommon_gold_bonus(),
+            rare_hp_multiplier: default_rare_hp(),
+            rare_defense_multiplier: default_rare_defense(),
+            rare_damage_multiplier: default_rare_damage(),
+            rare_exp_multiplier: default_rare_exp(),
+            rare_gold_multiplier: default_rare_gold(),
+            rare_item_drop_bonus_percent: default_rare_item_bonus(),
+            rare_gold_drop_bonus_percent: default_rare_gold_bonus(),
             elite_hp_multiplier: default_elite_hp_multiplier(),
+            elite_defense_multiplier: default_elite_defense_multiplier(),
             elite_dmg_multiplier: default_elite_dmg_multiplier(),
             elite_xp_multiplier: default_elite_xp_multiplier(),
             elite_item_drop_bonus_percent: default_elite_item_drop_bonus_percent(),
@@ -445,6 +553,7 @@ impl Default for ServerConfig {
                 tick_ms: 100,
                 map_data_dir: "Data".to_string(),
                 drop_rate: default_drop_rate(),
+            experience_list: Vec::new(),
                 item_timeout_secs: default_item_timeout(),
                 max_drop_gold: default_max_drop_gold(),
                 health_regen_weight: default_health_regen_weight(),
