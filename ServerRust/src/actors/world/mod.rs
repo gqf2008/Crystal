@@ -2472,8 +2472,46 @@ impl WorldActor {
                         }
                     }
                     "REPAIR" => {
+                        // C# PlayerObject.RepairItem：按 RepairPrice() 收费（全修价，含附加属性加成）
                         if let Some(record) = self.players.get(&session_id) {
-                            let _ = record.actor_ref.ask(crate::actors::player::RepairAllEquipment).await;
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                let mut total_cost: u64 = 0;
+                                let mut needs_repair = false;
+                                for slot in state.inventory.equipment.iter().flatten() {
+                                    if slot.current_dura >= slot.max_dura {
+                                        continue;
+                                    }
+                                    needs_repair = true;
+                                    let Some(info) = self.item_infos.get(&slot.item_index) else { continue };
+                                    if info.durability == 0 || info.price <= 0 {
+                                        continue;
+                                    }
+                                    // C# UserItem.RepairPrice：p = Floor(maxDura*((price/2)/dura) + price/2) * (stats*0.1+1)
+                                    let price = info.price.max(0) as f64;
+                                    let dura = info.durability.max(1) as f64;
+                                    let max_dura = slot.max_dura as f64;
+                                    let mut p = (max_dura * ((price / 2.0) / dura) + price / 2.0).floor();
+                                    p = p * (slot.added_stats.len() as f64 * 0.1 + 1.0);
+                                    total_cost += (p * slot.count as f64) as u64;
+                                }
+                                if needs_repair && total_cost > state.inventory.gold {
+                                    send_system_message(&self.gate_ref, session_id,
+                                        &format!("金币不足，修理需要 {} 金币", total_cost));
+                                } else {
+                                    if total_cost > 0 {
+                                        let _ = record.actor_ref.ask(crate::actors::player::DeductGold {
+                                            amount: total_cost,
+                                        }).await;
+                                    }
+                                    let _ = record.actor_ref.ask(crate::actors::player::RepairAllEquipment).await;
+                                    if total_cost > 0 {
+                                        send_system_message(&self.gate_ref, session_id,
+                                            &format!("修理完成，花费 {} 金币", total_cost));
+                                    } else {
+                                        send_system_message(&self.gate_ref, session_id, "修理完成");
+                                    }
+                                }
+                            }
                         }
                     }
                     "RESURRECT" => {
