@@ -31,7 +31,7 @@ impl MonsterBehavior for StoneTrapBehavior {
             let near = ctx.players.iter().any(|p| {
                 p.session_id == master
                     && p.map_index == monster.map_index
-                    && ((p.x - monster.x).abs() + (p.y - monster.y).abs()) <= 15
+                    && (p.x - monster.x).abs().max((p.y - monster.y).abs()) <= 15 // C# InRange=切比雪夫
             });
             if !near {
                 monster.hp = 0;
