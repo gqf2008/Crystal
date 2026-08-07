@@ -94,6 +94,8 @@ pub struct WorldActorArgs {
     pub pvp_cfg: crate::util::config::PvpConfig,
     /// 全局掉落倍率（C# Settings.DropRate）
     pub drop_rate: f64,
+    /// 全局经验倍率（C# Settings.ExpRate，默认 1）
+    pub exp_rate: f64,
     /// 地面物品超时 ticks（= item_timeout_secs * 10，100ms/tick）
     pub item_timeout_ticks: u64,
     /// 金币掉落每堆上限（C# Settings.MaxDropGold = 2000）
@@ -883,6 +885,8 @@ pub struct WorldActor {
     pub(crate) pvp_cfg: crate::util::config::PvpConfig,
     /// 全局掉落倍率
     pub(crate) drop_rate: f64,
+    /// 全局经验倍率（C# Settings.ExpRate）
+    pub(crate) exp_rate: f64,
     /// 地面物品超时 ticks
     pub(crate) item_timeout_ticks: u64,
     /// 金币掉落每堆上限
@@ -1108,6 +1112,7 @@ impl WorldActor {
             rested_cfg: crate::util::config::RestedConfig::default(),
             pvp_cfg: crate::util::config::PvpConfig::default(),
             drop_rate: 1.0,
+            exp_rate: 1.0,
             item_timeout_ticks: 600,
             max_drop_gold: 2000,
             rarity_cfg: crate::util::config::RarityConfig::default(),
@@ -3755,6 +3760,7 @@ impl Actor for WorldActor {
             rested_cfg: args.rested_cfg,
             pvp_cfg: args.pvp_cfg,
             drop_rate: args.drop_rate,
+            exp_rate: args.exp_rate,
             item_timeout_ticks: args.item_timeout_ticks,
             max_drop_gold: args.max_drop_gold,
             rarity_cfg: args.rarity_cfg,

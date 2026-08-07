@@ -1346,6 +1346,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         magics,
         flags,
         exp_multiplier: 1.0,
+        exp_rate: 1.0,
         exp_multiplier_end_tick: 0,
             drop_multiplier: 1.0,
             drop_multiplier_end_tick: 0,
