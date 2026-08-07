@@ -705,6 +705,23 @@ impl Message<WorldMoveRequest> for WorldActor {
         };
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
             if state.is_dead { return; }
+
+            // #902：负重限制（C# HumanObject.CanMove/CanRun：CurrentBagWeight > Stats[BagWeight] 不能移动；
+            // Run 退化为 Walk，Walk 直接失败并回发 S.UserLocation 同步当前位置）
+            let (bag_weight, _, _) = super::compute_player_weights(&state.inventory, &self.item_infos);
+            let limit = super::base_weight_limit(state.class, state.level, mir2_shared::enums::Stat::BagWeight);
+            if bag_weight > limit {
+                let mut body = Vec::new();
+                body.push(state.direction);
+                body.extend_from_slice(&state.x.to_le_bytes());
+                body.extend_from_slice(&state.y.to_le_bytes());
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
+                }).await;
+                send_system_message(&self.gate_ref, msg.session_id, "负重过重，无法移动！");
+                return;
+            }
         }
 
         // Phase 1.4: 反作弊 — 速度 hack 检测

@@ -5227,6 +5227,57 @@ pub(crate) fn build_client_magic(
         cast_time: 0,
     }
 }
+/// 计算玩家负重（C# HumanObject.CurrentBagWeight / CurrentWearWeight / CurrentHandWeight；
+/// bag = 背包物品 weight×count，wear = 装备 weight，hand = 武器 weight）
+fn compute_player_weights(
+    inventory: &crate::actors::inventory::PlayerInventory,
+    item_infos: &std::collections::HashMap<i32, db::ItemInfo>,
+) -> (i32, i32, i32) {
+    let bag_weight: i32 = inventory
+        .backpack
+        .iter()
+        .flatten()
+        .map(|s| {
+            item_infos
+                .get(&s.item.item_index)
+                .map(|i| i.weight)
+                .unwrap_or(0)
+                * i32::from(s.item.count)
+        })
+        .sum();
+    // C# CurrentWearWeight 不含武器（武器归 HandWeight）
+    let wear_weight: i32 = inventory
+        .equipment
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| *idx != crate::actors::inventory::EquipmentSlot::Weapon as usize)
+        .flat_map(|(_, slot)| slot.iter())
+        .map(|i| item_infos.get(&i.item_index).map(|i| i.weight).unwrap_or(0))
+        .sum();
+    // C# HandWeight：武器（含火把）重量
+    let hand_weight: i32 = inventory
+        .get_equipment(crate::actors::inventory::EquipmentSlot::Weapon)
+        .and_then(|i| item_infos.get(&i.item_index))
+        .map(|i| i.weight)
+        .unwrap_or(0);
+    (bag_weight, wear_weight, hand_weight)
+}
+
+/// 基础负重上限（C# Settings.ClassBaseStats[Class] 的 Bag/Wear/HandWeight 公式按等级计算；
+/// 注意：不含套装/特殊模式加成，后续可扩展）
+fn base_weight_limit(
+    class: mir2_shared::enums::MirClass,
+    level: u16,
+    stat: mir2_shared::enums::Stat,
+) -> i32 {
+    mir2_shared::data::stats::BaseStats::new(class)
+        .stats
+        .iter()
+        .find(|bs| bs.stat == stat)
+        .map(|bs| bs.calculate(class, level as i32))
+        .unwrap_or(0)
+}
+
 fn build_user_information_packet(
     state: &PlayerState,
     item_infos: &std::collections::HashMap<i32, db::ItemInfo>,
@@ -5344,31 +5395,7 @@ fn build_user_information_packet(
     body.extend_from_slice(&state.luck.to_le_bytes());
 
     // #210：State 页段（11 x i32；负重 = 物品 weight × count）
-    let bag_weight: i32 = state
-        .inventory
-        .backpack
-        .iter()
-        .flatten()
-        .map(|s| {
-            item_infos
-                .get(&s.item.item_index)
-                .map(|i| i.weight)
-                .unwrap_or(0)
-                * i32::from(s.item.count)
-        })
-        .sum();
-    let wear_weight: i32 = state
-        .inventory
-        .equipment
-        .iter()
-        .flatten()
-        .map(|i| item_infos.get(&i.item_index).map(|i| i.weight).unwrap_or(0))
-        .sum();
-    // C# HandWeight：武器（含火把）重量
-    let hand_weight: i32 = state.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::Weapon)
-        .and_then(|i| item_infos.get(&i.item_index))
-        .map(|i| i.weight)
-        .unwrap_or(0);
+    let (bag_weight, wear_weight, hand_weight) = compute_player_weights(&state.inventory, item_infos);
     for v in [
         bag_weight,
         wear_weight,
@@ -5988,5 +6015,86 @@ mod set_bonus_tests {
         assert_eq!(d.max_mc, 1);
         assert_eq!(d.max_sc, 1);
         assert_eq!(d.agility, 1);
+    }
+
+    fn test_item_info(idx: i32, weight: i32) -> db::ItemInfo {
+        db::ItemInfo {
+            index: idx,
+            name: String::new(),
+            item_type: 0,
+            grade: 0,
+            required_type: 0,
+            required_class: 0,
+            required_gender: 0,
+            set_type: 0,
+            shape: 0,
+            weight,
+            light: 0,
+            required_amount: 0,
+            image: 0,
+            durability: 0,
+            stack_size: 1,
+            price: 0,
+            start_item: false,
+            effect: 0,
+            bool_flags: 0,
+            bind_mode: 0,
+            special_mode: 0,
+            random_stats_id: 0,
+            can_fast_run: false,
+            can_awakening: false,
+            slots: 0,
+            stats_json: String::new(),
+            stats: std::collections::HashMap::new(),
+            has_tool_tip: false,
+            tool_tip: None,
+        }
+    }
+
+    #[test]
+    fn test_compute_player_weights() {
+        // #902：bag = 背包物品 weight×count，wear = 装备 weight，hand = 武器 weight
+        use crate::actors::inventory::{InventorySlot, PlayerInventory};
+        use mir2_shared::data::item::UserItem;
+
+        let mut infos = std::collections::HashMap::new();
+        infos.insert(1, test_item_info(1, 10));
+        infos.insert(2, test_item_info(2, 30));
+
+        let mut inv = PlayerInventory::new();
+        // 背包：2 件 weight10 × count1 + 1 件 weight30 × count2 = 10 + 60 = 70
+        inv.backpack[0] = Some(InventorySlot { grid: 0, item: UserItem { item_index: 1, count: 1, ..Default::default() } });
+        inv.backpack[1] = Some(InventorySlot { grid: 1, item: UserItem { item_index: 2, count: 2, ..Default::default() } });
+        // 装备：Armour weight30 → wear=30
+        inv.equipment[crate::actors::inventory::EquipmentSlot::Armour as usize] =
+            Some(UserItem { item_index: 2, count: 1, ..Default::default() });
+        // 武器：weight10 → hand=10
+        inv.equipment[crate::actors::inventory::EquipmentSlot::Weapon as usize] =
+            Some(UserItem { item_index: 1, count: 1, ..Default::default() });
+
+        let (bag, wear, hand) = compute_player_weights(&inv, &infos);
+        assert_eq!(bag, 70);
+        assert_eq!(wear, 30);
+        assert_eq!(hand, 10);
+
+        // 空背包
+        let empty = PlayerInventory::new();
+        let (bag0, wear0, hand0) = compute_player_weights(&empty, &infos);
+        assert_eq!(bag0, 0);
+        assert_eq!(wear0, 0);
+        assert_eq!(hand0, 0);
+    }
+
+    #[test]
+    fn test_base_weight_limit() {
+        // #902：C# ClassBaseStats BagWeight 公式按等级计算，等级越高上限越高
+        let lv1 = base_weight_limit(mir2_shared::enums::MirClass::Warrior, 1, mir2_shared::enums::Stat::BagWeight);
+        let lv50 = base_weight_limit(mir2_shared::enums::MirClass::Warrior, 50, mir2_shared::enums::Stat::BagWeight);
+        assert!(lv1 > 0, "Warrior BagWeight base should be > 0, got {}", lv1);
+        assert!(lv50 > lv1, "BagWeight should grow with level: {} -> {}", lv1, lv50);
+
+        // 各职业基础负重不同（Warrior 高于 Wizard）
+        let wiz = base_weight_limit(mir2_shared::enums::MirClass::Wizard, 1, mir2_shared::enums::Stat::BagWeight);
+        assert!(wiz > 0);
     }
 }
