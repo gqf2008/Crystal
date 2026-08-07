@@ -707,6 +707,16 @@ impl MonsterState {
     /// 构建战斗公式用的属性快照
     pub fn to_combat_stats(&self) -> crate::combat::attack::CombatStats {
         use crate::combat::attack::CombatStats;
+        // C# ProcessPoison：红毒降防（-0.5）/ 眩晕增伤（+0.5）
+        let (mut armour_rate, mut damage_rate) = (self.armour_rate, self.damage_rate);
+        for p in &self.poison_list {
+            if p.p_type.intersects(mir2_shared::enums::PoisonType::RED) {
+                armour_rate -= 0.5;
+            }
+            if p.p_type.intersects(mir2_shared::enums::PoisonType::STUN) {
+                damage_rate += 0.5;
+            }
+        }
         CombatStats {
             min_atk: self.min_dmg,
             max_atk: self.max_dmg,
@@ -722,8 +732,8 @@ impl MonsterState {
             magic_resist: self.magic_resist,
             reflect: self.reflect,
             damage_reduction_percent: self.damage_reduction_percent,
-            armour_rate: self.armour_rate,
-            damage_rate: self.damage_rate,
+            armour_rate,
+            damage_rate,
             ..Default::default()
         }
     }

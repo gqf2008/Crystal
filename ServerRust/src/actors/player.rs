@@ -362,6 +362,16 @@ impl PlayerState {
     pub fn to_combat_stats(&self) -> crate::combat::attack::CombatStats {
         use crate::combat::attack::CombatStats;
         use crate::combat::buff::{get_stat_bonus, BuffType};
+        // C# ProcessPoison：红毒降防（-0.10）/ 眩晕增伤（+0.20）
+        let (mut armour_rate, mut damage_rate) = (1.0f32, 1.0f32);
+        for p in &self.poison_list {
+            if p.p_type.intersects(mir2_shared::enums::PoisonType::RED) {
+                armour_rate -= 0.10;
+            }
+            if p.p_type.intersects(mir2_shared::enums::PoisonType::STUN) {
+                damage_rate += 0.20;
+            }
+        }
         CombatStats {
             min_atk: self.effective_min_attack(),
             max_atk: self.effective_max_attack(),
@@ -381,8 +391,8 @@ impl PlayerState {
             hp_drain_rate_percent: self.hp_drain_rate_percent,
             energy_shield_percent: self.energy_shield_percent,
             energy_shield_hp_gain: self.energy_shield_hp_gain,
-            armour_rate: 1.0,
-            damage_rate: 1.0,
+            armour_rate,
+            damage_rate,
             freezing: self.freezing,
             poison_attack: self.poison_attack,
             // C# SpecialItemMode.Paralize：任意装备带 Paralize 特殊模式（1/14 概率麻痹，Random.Next(1,15)==1）
