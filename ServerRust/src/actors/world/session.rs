@@ -1000,6 +1000,9 @@ impl Message<PlayerDisconnected> for WorldActor {
 
         info!("Player removed from world (session={})", msg.session_id);
 
+        // #835：断线即离队——先清 group_id 再保存，避免陈旧组队引用被持久化
+        let _ = record.actor_ref.ask(crate::actors::player::SetGroupId { group_id: None }).await;
+
         // 保存玩家数据到数据库
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
             if let Err(e) = db::save_character(&self.db_pool, &state, &record.account_username).await {
@@ -1104,6 +1107,13 @@ impl Message<PlayerLogOut> for WorldActor {
             session_id: msg.session_id,
         }).try_send();
 
+            // #835：断线即离队——先清 group_id 再保存，避免陈旧组队引用被持久化
+            let _ = record.actor_ref.ask(crate::actors::player::SetGroupId { group_id: None }).await;
+            // 重新取状态（group_id 已清）
+            let state = match record.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(s)) => s,
+                _ => return,
+            };
             // 保存玩家数据到数据库
             if let Err(e) = db::save_character(&self.db_pool, &state, &record.account_username).await {
                 warn!("Failed to save player {} on logout: {}", record.name, e);

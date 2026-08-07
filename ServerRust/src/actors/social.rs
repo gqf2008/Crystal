@@ -1029,37 +1029,56 @@ impl SocialActor {
                 send_system_message(&self.gate_ref, joiner_session, &format!("已加入队伍 #{}", target_group_id));
                 self.broadcast_group_update(target_group_id);
                 debug!("Player {} joined group #{}", joiner_name, target_group_id);
+            } else {
+                // #835：目标 group_id 指向已不存在的组（陈旧引用）——清掉并新建组队，
+                // 否则旧成员永远无法再次组队
+                debug!("Player {} has stale group_id {} (group gone); creating new group", target_state.name, target_group_id);
+                if let Some(record) = self.players.get(&target_session) {
+                    let _ = record.ask(SetGroupId { group_id: None }).await;
+                }
+                self.create_new_group(joiner_session, &joiner_name, joiner_member, target_session, target_state).await;
             }
         } else {
-            // 创建新组队
-            let group_id = self.next_group_id;
-            self.next_group_id += 1;
-
-            let target_member = GroupMember {
-                session_id: target_session,
-                name: target_state.name.clone(),
-                is_leader: true,
-                online: true,
-            };
-
-            let mut group = Group::new(group_id, target_member);
-            group.add_member(joiner_member);
-
-            // 更新两个玩家的 group_id
-            if let Some(record) = self.players.get(&target_session) {
-                let _ = record.ask(SetGroupId { group_id: Some(group_id) }).await;
-            }
-            if let Some(record) = self.players.get(&joiner_session) {
-                let _ = record.ask(SetGroupId { group_id: Some(group_id) }).await;
-            }
-
-            self.groups.insert(group_id, group);
-            send_system_message(&self.gate_ref, joiner_session, &format!("队伍 #{} 已创建", group_id));
-            send_system_message(&self.gate_ref, target_session, &format!("队伍 #{} 已创建", group_id));
-            // 创建后广播成员列表（C# 语义：双方立即看到组队面板）
-            self.broadcast_group_update(group_id);
-            debug!("Created group #{} with {} and {}", group_id, target_state.name, joiner_name);
+            self.create_new_group(joiner_session, &joiner_name, joiner_member, target_session, target_state).await;
         }
+    }
+
+    /// 创建新组队（C# Group 创建语义：目标为队长，加入者为队员）
+    async fn create_new_group(
+        &mut self,
+        joiner_session: u64,
+        joiner_name: &str,
+        joiner_member: GroupMember,
+        target_session: u64,
+        target_state: crate::actors::player::PlayerState,
+    ) {
+        let group_id = self.next_group_id;
+        self.next_group_id += 1;
+
+        let target_member = GroupMember {
+            session_id: target_session,
+            name: target_state.name.clone(),
+            is_leader: true,
+            online: true,
+        };
+
+        let mut group = Group::new(group_id, target_member);
+        group.add_member(joiner_member);
+
+        // 更新两个玩家的 group_id
+        if let Some(record) = self.players.get(&target_session) {
+            let _ = record.ask(SetGroupId { group_id: Some(group_id) }).await;
+        }
+        if let Some(record) = self.players.get(&joiner_session) {
+            let _ = record.ask(SetGroupId { group_id: Some(group_id) }).await;
+        }
+
+        self.groups.insert(group_id, group);
+        send_system_message(&self.gate_ref, joiner_session, &format!("队伍 #{} 已创建", group_id));
+        send_system_message(&self.gate_ref, target_session, &format!("队伍 #{} 已创建", group_id));
+        // 创建后广播成员列表（C# 语义：双方立即看到组队面板）
+        self.broadcast_group_update(group_id);
+        debug!("Created group #{} with {} and {}", group_id, target_state.name, joiner_name);
     }
 
     /// 离开组队
@@ -1742,11 +1761,26 @@ impl Message<SocialPlayerLeft> for SocialActor {
             }
         }
 
-        // 处理组队离线标记
-        for group in self.groups.values_mut() {
-            if let Some(member) = group.members.iter_mut().find(|m| m.session_id == msg.session_id) {
-                member.online = false;
+        // 处理组队：断线即离队（C# PlayerObject.LeaveGroup —— 断线不再保留离线成员，
+        // 避免旧成员 group_id 残留导致无法再次组队）
+        let mut group_to_remove: Option<u64> = None;
+        let mut group_to_notify: Option<u64> = None;
+        for (gid, group) in self.groups.iter_mut() {
+            if group.remove_member(msg.session_id).is_some() {
+                if group.member_count() == 0 {
+                    group_to_remove = Some(*gid);
+                } else {
+                    group_to_notify = Some(*gid);
+                }
+                break;
             }
+        }
+        if let Some(gid) = group_to_remove {
+            self.groups.remove(&gid);
+            debug!("SocialActor: group #{} removed (all members offline)", gid);
+        }
+        if let Some(gid) = group_to_notify {
+            self.broadcast_group_update(gid);
         }
 
         // 清理交易
