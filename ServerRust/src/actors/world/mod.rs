@@ -1938,6 +1938,13 @@ impl WorldActor {
         let global_gold_mul = if self.tick_count < self.global_exp_event_end_tick {
             self.global_gold_multiplier
         } else { 1.0 };
+        // #1005：稀有度掉落加成（C# MonsterRarityProfile；Rust 仅 Elite）
+        let rarity_item_bonus = if monster.is_elite {
+            self.rarity_cfg.elite_item_drop_bonus_percent as f64
+        } else { 0.0 };
+        let rarity_gold_bonus = if monster.is_elite {
+            self.rarity_cfg.elite_gold_drop_bonus_percent as f64
+        } else { 0.0 };
         for drop in &drops {
             // C# Drop()：QuestRequired 条目普通掉落跳过（任务系统发放）
             if drop.quest_required {
@@ -1948,8 +1955,8 @@ impl WorldActor {
                 continue;
             }
             let roll = fastrand::f64();
-            // 全局掉落倍率（C# Settings.DropRate）+ 玩家掉落 Buff + 装备 ItemDropRatePercent（#1000）
-            let item_factor = 1.0 + item_drop_pct / 100.0;
+            // 全局掉落倍率（C# Settings.DropRate）+ 玩家掉落 Buff + 装备/稀有度加成（#1000/#1005）
+            let item_factor = 1.0 + (item_drop_pct + rarity_item_bonus) / 100.0;
             let effective_chance = (drop.chance * self.drop_rate * player_drop_mul * item_factor).min(1.0);
             if roll > effective_chance {
                 continue;
@@ -1981,7 +1988,7 @@ impl WorldActor {
                 };
                 for child in picked {
                     if child.gold > 0 {
-                        let gold_factor = 1.0 + gold_drop_pct / 100.0;
+                        let gold_factor = 1.0 + (gold_drop_pct + rarity_gold_bonus) / 100.0;
                         let gold = (child.gold as f64 * global_gold_mul * gold_factor).round() as u64;
                         self.spawn_gold_drop(monster, gold).await;
                     } else {
@@ -1998,7 +2005,7 @@ impl WorldActor {
             }
             // #995：金币条目（C# DropInfo.Gold → DropGold，按金币倍率 + GoldDropRatePercent）
             if drop.gold > 0 {
-                let gold_factor = 1.0 + gold_drop_pct / 100.0;
+                let gold_factor = 1.0 + (gold_drop_pct + rarity_gold_bonus) / 100.0;
                 let gold = (drop.gold as f64 * global_gold_mul * gold_factor).round() as u64;
                 self.spawn_gold_drop(monster, gold).await;
                 continue;
@@ -2016,28 +2023,8 @@ impl WorldActor {
             self.spawn_single_drop(monster, drop.item_index, adjusted.max(1)).await;
         }
 
-        // 精英怪额外掉落判定（50% 原概率）
-        if monster.is_elite {
-            for drop in &drops {
-                // #1002：组合条目（父/子）不在额外循环处理
-                if drop.group_parent_id != 0 || drop.group_random || drop.group_first {
-                    continue;
-                }
-                // #1000：装备 ItemDropRatePercent 对精英额外判定同样生效（C# AttemptDrop 共用加成）
-                let bonus_chance = drop.chance * 0.5 * (1.0 + item_drop_pct / 100.0);
-                let roll = fastrand::f64();
-                if roll > bonus_chance {
-                    continue;
-                }
-                let count = if drop.max_count > drop.min_count {
-                    fastrand::u16(drop.min_count..=drop.max_count)
-                } else {
-                    drop.min_count
-                };
-                let adjusted = (count as f64 * global_drop_mul * player_drop_mul).round() as u16;
-                self.spawn_single_drop(monster, drop.item_index, adjusted.max(1)).await;
-            }
-        }
+        // #1005：精英稀有度加成已在上方主循环 item/gold factor 应用（C# AttemptDrop 语义），
+        // 移除原先非 C# 的"精英额外 50% 再掷一次"循环。
 
         // 世界Boss额外掉落：大量金币 + 全掉落保底
         if monster.is_boss {
