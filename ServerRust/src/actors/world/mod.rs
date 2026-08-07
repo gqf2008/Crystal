@@ -1854,6 +1854,7 @@ impl WorldActor {
         x: i32,
         y: i32,
         map_index: u16,
+        killed_by_player: bool,
     ) {
         // C# DeathDrop：NoDropPlayer 地图直接返回；安全区也不掉落（保留现有保护）
         if self.map_infos.get(&(map_index as i32)).map(|m| m.no_drop_player).unwrap_or(false) {
@@ -1878,7 +1879,13 @@ impl WorldActor {
         let mut dropped_items: Vec<mir2_shared::data::item::UserItem> = Vec::new();
 
         // ===== 装备槽位（C# DeathDrop 先遍历装备） =====
+        // C# RedDeathDrop：红名（PK>200）被玩家击杀时跳过装备掉落（killer.Race == Player 分支），
+        // 只掉背包；被怪物/环境击杀才按红名高概率掉装备。
+        let equipment_drops = !(red && killed_by_player);
         for slot_idx in 0..crate::actors::inventory::EquipmentSlot::COUNT {
+            if !equipment_drops {
+                break;
+            }
             let Some(slot) = crate::actors::inventory::EquipmentSlot::from_i32(slot_idx as i32) else {
                 continue;
             };

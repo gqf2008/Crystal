@@ -563,7 +563,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                                         data: died_packet.clone(),
                                     }).await;
                                 }
-                                self.handle_player_death_drop(other_session, other_state.x, other_state.y, other_state.map_index).await;
+                                self.handle_player_death_drop(other_session, other_state.x, other_state.y, other_state.map_index, true).await;
 
                                 // 击杀玩家：增加 PK 值并广播名字颜色变化
                                 let _ = record.actor_ref.ask(crate::actors::player::AddPkPoints { points: 100 }).await;
@@ -1132,7 +1132,7 @@ impl Message<RangeAttackRequest> for WorldActor {
                                     data: died_packet.clone(),
                                 }).await;
                             }
-                            self.handle_player_death_drop(other.session_id, other_state.x, other_state.y, other_state.map_index).await;
+                            self.handle_player_death_drop(other.session_id, other_state.x, other_state.y, other_state.map_index, true).await;
 
                             // 增加 PK 值
                             let _ = record.actor_ref.ask(crate::actors::player::AddPkPoints { points: 100 }).await;
