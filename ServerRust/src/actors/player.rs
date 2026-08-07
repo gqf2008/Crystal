@@ -1927,16 +1927,24 @@ impl Message<DamageEquipment> for PlayerActor {
                 .unwrap_or(false);
             if no_dura_loss {
                 false
-            } else if item.current_dura > msg.amount {
-                item.current_dura -= msg.amount;
-                item.dura_changed = true;
-                changed = true;
-                false
             } else {
-                item.current_dura = 0;
-                item.dura_changed = true;
-                changed = true;
-                true
+                // C# DamageItem：Strong 属性减少耐久损耗（最少 1）
+                let strong = item.info.as_ref()
+                    .map(|i| i.stats.get(mir2_shared::enums::Stat::Strong))
+                    .unwrap_or(0)
+                    .max(0) as u16;
+                let amount = msg.amount.saturating_sub(strong).max(1);
+                if item.current_dura > amount {
+                    item.current_dura -= amount;
+                    item.dura_changed = true;
+                    changed = true;
+                    false
+                } else {
+                    item.current_dura = 0;
+                    item.dura_changed = true;
+                    changed = true;
+                    true
+                }
             }
         } else {
             false
