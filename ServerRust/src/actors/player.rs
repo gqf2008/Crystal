@@ -3505,6 +3505,20 @@ impl Message<ProcessMonsterKill> for PlayerActor {
 }
 
 /// 检查任务物品进度（在背包变化后调用）
+/// 怪物击杀任务进度（C# QuestInfo Kill 任务；WorldActor 怪物死亡时调用）
+/// 返回 (quest_index, progress_id, is_complete)
+pub struct ProcessKillQuest {
+    pub monster_index: i32,
+}
+
+impl Message<ProcessKillQuest> for PlayerActor {
+    type Reply = Vec<(i32, i32, bool)>;
+
+    async fn handle(&mut self, msg: ProcessKillQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.quest_log.process_kill(msg.monster_index)
+    }
+}
+
 pub struct CheckQuestItemProgress;
 
 impl Message<CheckQuestItemProgress> for PlayerActor {

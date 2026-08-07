@@ -3856,6 +3856,27 @@ impl Message<Tick> for WorldActor {
                     // 生成掉落物品
                     self.spawn_monster_drops(&monster).await;
 
+                    // #1001：任务击杀进度（C# MonsterObject.Die → EXPOwner → QuestInfo Kill 任务）
+                    // 击杀者 = target_session（最后命中者，与掉落归属一致）
+                    if let Some(killer) = monster.target_session {
+                        if let Some(record) = self.players.get(&killer) {
+                            let updates = record.actor_ref.ask(crate::actors::player::ProcessKillQuest {
+                                monster_index: monster.monster_index,
+                            }).await.unwrap_or_default();
+                            if !updates.is_empty() {
+                                for (quest_index, _, _) in &updates {
+                                    if let Ok(Some(q)) = record.actor_ref.ask(crate::actors::player::GetQuest {
+                                        quest_index: *quest_index,
+                                    }).await {
+                                        crate::actors::social_packets::send_quest_change_packet(
+                                            &self.gate_ref, killer, &q);
+                                    }
+                                }
+                                send_system_message(&self.gate_ref, killer, "任务进度更新：击杀目标");
+                            }
+                        }
+                    }
+
                     // 世界Boss被击败广播
                     if monster.is_boss {
                         self.world_boss_queue.remove(oid);
