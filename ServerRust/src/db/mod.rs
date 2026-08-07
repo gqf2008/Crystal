@@ -593,6 +593,9 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
     // #516: 强制改密标记（C# AccountInfo.RequirePasswordChange，safe to re-run）
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN require_password_change INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    // #899: 背包格数（C# CharacterInfo.Inventory.Length，扩容后重登不丢，safe to re-run）
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN backpack_size INTEGER NOT NULL DEFAULT 40")
+        .execute(&pool).await;
     // #480: 密码错误锁定（C# WrongPasswordCount / ExpiryDate，safe to re-run）
     let _ = sqlx::query("ALTER TABLE accounts ADD COLUMN wrong_password_count INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
@@ -1058,8 +1061,8 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
             spouse_name, allow_mentor, mentor_name, hero_index, hero_behaviour,
             auto_pot_hp, auto_pot_mp, auto_pot_hp_item, auto_pot_mp_item,
             is_fishing, fishing_autocast, is_dead, pk_points, pk_kill_count, can_gain_exp, pearl_count,
-            last_access, bind_map_index, bind_x, bind_y, is_mentor
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+            last_access, bind_map_index, bind_x, bind_y, is_mentor, backpack_size
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(&state.name)
     .bind(account_username)
@@ -1118,6 +1121,7 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     .bind(state.bind_x)
     .bind(state.bind_y)
     .bind(if state.is_mentor { 1 } else { 0 })
+    .bind(state.inventory.backpack.len() as i32)
     .execute(&mut *tx)
     .await?;
 
@@ -1172,6 +1176,11 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
     let mut inventory = load_inventory(pool, character_name).await?;
     // 金币持久化：load_inventory 不读 gold，这里从 characters.gold 恢复
     inventory.gold = row.get::<i64, _>("gold").max(0) as u64;
+    // #899：背包扩容持久化（C# CharacterInfo.Inventory.Length；旧存档默认 40）
+    let backpack_size = row.try_get::<i64, _>("backpack_size").unwrap_or(40).max(40) as usize;
+    if inventory.backpack.len() < backpack_size {
+        inventory.backpack.resize(backpack_size, None);
+    }
     let friend_list = load_friends(pool, character_name).await?;
     let mailbox = load_mail(pool, character_name).await?;
     let quest_log = load_quests(pool, character_name).await?;

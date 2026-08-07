@@ -1655,6 +1655,43 @@ impl Message<ChatRequest> for WorldActor {
                     );
                     return;
                 }
+                Some("ADDINVENTORY") => {
+                    // C# case "ADDINVENTORY"（~3644）：cost = 1M + openLevel*1M，
+                    // openLevel = (Inventory.Length - 46) / 4（Rust 基线 40 → (len-40)/4）；
+                    // ResizeInventory 首次 +8 之后 +4 上限 86；成功发 LoseGold + ResizeInventory
+                    let mut new_state = match record.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(s)) => s,
+                        _ => return,
+                    };
+                    let level = (new_state.inventory.backpack.len() as i64
+                        - crate::actors::inventory::BACKPACK_SIZE as i64).max(0) / 4;
+                    let cost = 1_000_000u64 + (level as u64) * 1_000_000u64;
+                    if !record.actor_ref.ask(crate::actors::player::HasGold { amount: cost }).await.unwrap_or(false) {
+                        send_system_message(&self.gate_ref, msg.session_id, "金币不足，无法扩展背包。");
+                        return;
+                    }
+                    let deducted = record.actor_ref.ask(crate::actors::player::DeductGold { amount: cost }).await.unwrap_or(false);
+                    if !deducted {
+                        return;
+                    }
+                    // C# S.LoseGold（DeductGold 只刷 UserInformation，这里补发扣金包）
+                    send_gold_changed_packet(&self.gate_ref, msg.session_id, cost);
+
+                    let new_len = new_state.inventory.resize_inventory();
+                    let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+
+                    // C# S.ResizeInventory{Size}
+                    let resize = mir2_shared::packets::server::ui_events::ResizeInventory { size: new_len as i32 };
+                    let mut resize_body = Vec::new();
+                    if resize.write_body(&mut resize_body).is_ok() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: msg.session_id,
+                            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ResizeInventory as i16, &resize_body),
+                        }).await;
+                    }
+                    send_system_message(&self.gate_ref, msg.session_id, &format!("背包扩容成功！背包已扩容至 {} 格", new_len));
+                    return;
+                }
                 Some("ROLL") => {
                     // C#：Envir.Random.Next(5) + 1（1~5）；GroupMembers == null 直接 return；
                     // 向所有组员发 ChatType.Group 消息 HasRolledNumber

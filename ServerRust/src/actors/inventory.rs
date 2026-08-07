@@ -75,8 +75,8 @@ pub const STORAGE_SIZE: usize = 80;
 pub struct PlayerInventory {
     /// 金币
     pub gold: u64,
-    /// 背包格子（40 格，索引 = grid 字段）
-    pub backpack: [Option<InventorySlot>; BACKPACK_SIZE],
+    /// 背包格子（默认 40 格，可扩容到 86；索引 = grid 字段，C# Inventory 46→86）
+    pub backpack: Vec<Option<InventorySlot>>,
     /// 装备槽位（12 个）
     pub equipment: [Option<UserItem>; EquipmentSlot::COUNT],
     /// 仓库格子（80 格）
@@ -87,7 +87,7 @@ impl Default for PlayerInventory {
     fn default() -> Self {
         Self {
             gold: 0,
-            backpack: [const { None }; BACKPACK_SIZE],
+            backpack: vec![None; BACKPACK_SIZE],
             equipment: [const { None }; EquipmentSlot::COUNT],
             storage: vec![None; STORAGE_SIZE],
         }
@@ -125,7 +125,7 @@ impl PlayerInventory {
         }
 
         // 找空位
-        for grid in 0..BACKPACK_SIZE {
+        for grid in 0..self.backpack.len() {
             if self.backpack[grid].is_none() {
                 item.unique_id = self.next_unique_id();
                 let uid = item.unique_id;
@@ -142,7 +142,7 @@ impl PlayerInventory {
 
     /// 尝试将物品放入指定背包格子，如果该格为空则成功
     pub fn try_place_item_at(&mut self, item: UserItem, idx: usize) -> bool {
-        if idx >= BACKPACK_SIZE { return false; }
+        if idx >= self.backpack.len() { return false; }
         if self.backpack[idx].is_some() { return false; }
         self.backpack[idx] = Some(InventorySlot {
             grid: idx as u8,
@@ -175,7 +175,7 @@ impl PlayerInventory {
     /// 从指定格子移除物品
     pub fn remove_item_by_grid(&mut self, grid: u8) -> Option<UserItem> {
         let idx = grid as usize;
-        if idx >= BACKPACK_SIZE {
+        if idx >= self.backpack.len() {
             return None;
         }
         self.backpack[idx].take().map(|s| s.item)
@@ -204,7 +204,7 @@ impl PlayerInventory {
     /// 查询物品（按格子索引）
     pub fn get_item_by_grid(&self, grid: u8) -> Option<&UserItem> {
         let idx = grid as usize;
-        if idx >= BACKPACK_SIZE {
+        if idx >= self.backpack.len() {
             return None;
         }
         self.backpack[idx].as_ref().map(|s| &s.item)
@@ -215,7 +215,7 @@ impl PlayerInventory {
     pub fn move_item(&mut self, from_grid: u8, to_grid: u8) -> bool {
         let fi = from_grid as usize;
         let ti = to_grid as usize;
-        if fi >= BACKPACK_SIZE || ti >= BACKPACK_SIZE || fi == ti {
+        if fi >= self.backpack.len() || ti >= self.backpack.len() || fi == ti {
             return false;
         }
 
@@ -237,7 +237,7 @@ impl PlayerInventory {
     pub fn merge_item(&mut self, from_grid: u8, to_grid: u8) -> bool {
         let fi = from_grid as usize;
         let ti = to_grid as usize;
-        if fi >= BACKPACK_SIZE || ti >= BACKPACK_SIZE || fi == ti {
+        if fi >= self.backpack.len() || ti >= self.backpack.len() || fi == ti {
             return false;
         }
 
@@ -272,7 +272,7 @@ impl PlayerInventory {
     /// 拆分物品：从 grid 拆出 count 数量到空位
     pub fn split_item(&mut self, grid: u8, count: u16) -> bool {
         let idx = grid as usize;
-        if idx >= BACKPACK_SIZE {
+        if idx >= self.backpack.len() {
             return false;
         }
 
@@ -287,7 +287,7 @@ impl PlayerInventory {
 
         // 找空位
         let mut new_grid = None;
-        for g in 0..BACKPACK_SIZE {
+        for g in 0..self.backpack.len() {
             if self.backpack[g].is_none() && g != idx {
                 new_grid = Some(g);
                 break;
@@ -330,7 +330,7 @@ impl PlayerInventory {
             None => return false,
         };
         let mut new_grid = None;
-        for g in 0..BACKPACK_SIZE {
+        for g in 0..self.backpack.len() {
             if self.backpack[g].is_none() && g != idx {
                 new_grid = Some(g);
                 break;
@@ -518,7 +518,7 @@ impl PlayerInventory {
     /// 返回 (旧装备 Option<UserItem>, 新装备 unique_id) 或 None
     pub fn equip_item(&mut self, grid: u8, slot: EquipmentSlot) -> Option<(Option<UserItem>, u64)> {
         let idx = grid as usize;
-        if idx >= BACKPACK_SIZE {
+        if idx >= self.backpack.len() {
             return None;
         }
 
@@ -533,7 +533,7 @@ impl PlayerInventory {
         let item = self.equipment[slot as usize].take()?;
 
         // 找空位
-        for grid in 0..BACKPACK_SIZE {
+        for grid in 0..self.backpack.len() {
             if self.backpack[grid].is_none() {
                 self.backpack[grid] = Some(InventorySlot {
                     grid: grid as u8,
@@ -588,7 +588,7 @@ impl PlayerInventory {
     /// 返回 (物品, 仓库格子) 或 None
     pub fn store_item(&mut self, grid: u8) -> Option<(UserItem, usize)> {
         let idx = grid as usize;
-        if idx >= BACKPACK_SIZE {
+        if idx >= self.backpack.len() {
             return None;
         }
         let item = self.backpack[idx].take()?.item;
@@ -619,7 +619,7 @@ impl PlayerInventory {
         let item = self.storage[sidx].take()?.item;
 
         // 找背包空位
-        for grid in 0..BACKPACK_SIZE {
+        for grid in 0..self.backpack.len() {
             if self.backpack[grid].is_none() {
                 self.backpack[grid] = Some(InventorySlot {
                     grid: grid as u8,
@@ -640,7 +640,7 @@ impl PlayerInventory {
     /// 存入仓库指定格（C# StoreItem{From=背包格, To=仓库格} 语义）：优先目标格，占用则找第一个空位
     pub fn store_item_to(&mut self, from: i32, to: i32) -> Option<(UserItem, usize)> {
         let idx = from as usize;
-        if idx >= BACKPACK_SIZE {
+        if idx >= self.backpack.len() {
             return None;
         }
         let item = self.backpack[idx].take()?.item;
@@ -663,7 +663,7 @@ impl PlayerInventory {
         }
         let item = self.storage[sidx].take()?.item;
         let mut target = to;
-        if target < 0 || target as usize >= BACKPACK_SIZE || self.backpack[target as usize].is_some() {
+        if target < 0 || target as usize >= self.backpack.len() || self.backpack[target as usize].is_some() {
             target = self.backpack.iter().position(|s| s.is_none())? as i32;
         }
         self.backpack[target as usize] = Some(InventorySlot {
@@ -686,12 +686,26 @@ impl PlayerInventory {
         }
         self.storage.len()
     }
+
+    /// 背包扩容（C# CharacterInfo.ResizeInventory：首次 +8，之后每次 +4，上限 86；
+    /// Rust 基线 40 格起步，相对增长模式与 C# 一致）
+    pub fn resize_inventory(&mut self) -> usize {
+        const MAX_INVENTORY_SIZE: usize = 86; // C# ResizeInventory 上限 86
+        let len = self.backpack.len();
+        if len >= MAX_INVENTORY_SIZE {
+            return len;
+        }
+        let grow = if len == BACKPACK_SIZE { 8 } else { 4 };
+        let new_len = (len + grow).min(MAX_INVENTORY_SIZE);
+        self.backpack.resize(new_len, None);
+        new_len
+    }
     /// 镶嵌宝石：将 from_grid 的宝石插入 to_grid 装备的第一个空槽位
     /// 返回 (source_uid, target_uid) 或 None
     pub fn socket_gem(&mut self, from_grid: u8, to_grid: u8, target_slot_count: usize) -> Option<(u64, u64)> {
         let fi = from_grid as usize;
         let ti = to_grid as usize;
-        if fi >= BACKPACK_SIZE || ti >= BACKPACK_SIZE || fi == ti {
+        if fi >= self.backpack.len() || ti >= self.backpack.len() || fi == ti {
             return None;
         }
 
@@ -893,6 +907,34 @@ mod tests {
         }
         assert!(!inv.storage_has_space());
         assert_eq!(inv.storage.iter().filter(|s| s.is_some()).count(), STORAGE_SIZE * 2);
+    }
+
+    #[test]
+    fn test_resize_inventory() {
+        // #899：C# CharacterInfo.ResizeInventory：首次 +8，之后 +4，上限 86
+        let mut inv = PlayerInventory::new();
+        assert_eq!(inv.backpack.len(), BACKPACK_SIZE);
+        // 首次 40 → 48
+        assert_eq!(inv.resize_inventory(), 48);
+        assert_eq!(inv.backpack.len(), 48);
+        // 之后每次 +4：48→52→56→…→86
+        assert_eq!(inv.resize_inventory(), 52);
+        assert_eq!(inv.resize_inventory(), 56);
+        // 快速扩到上限
+        for _ in 0..20 { inv.resize_inventory(); }
+        assert_eq!(inv.backpack.len(), 86);
+        // 上限后不再增长
+        assert_eq!(inv.resize_inventory(), 86);
+        assert_eq!(inv.backpack.len(), 86);
+        // 扩容后新格子可用（48 格可全部占用）
+        let mut inv2 = PlayerInventory::new();
+        inv2.resize_inventory();
+        for g in 0..48 {
+            inv2.backpack[g] = Some(InventorySlot { grid: g as u8, item: make_item(9, 1) });
+        }
+        assert_eq!(inv2.backpack.iter().filter(|s| s.is_some()).count(), 48);
+        // 越界校验按当前长度
+        assert!(inv2.store_item(48).is_none()); // 48 已在扩容后范围内（格子满则返回 None 前已取走）
     }
 
     #[test]
