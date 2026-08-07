@@ -457,6 +457,28 @@ impl Message<ConsignItemRequest> for WorldActor {
             return;
         }
 
+        // C# ConsignItem：需先与市场 NPC 对话（NPCPage）+ InRange(NPC, DataRange=16)
+        let npc_oid = match self.session_npc.get(&msg.session_id) {
+            Some(o) => *o,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "请先与市场 NPC 对话");
+                return;
+            }
+        };
+        let npc = match self.npcs.get(&npc_oid) {
+            Some(n) => n,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "找不到该 NPC");
+                return;
+            }
+        };
+        if state.map_index != npc.map_index
+            || crate::actors::world::ai::max_distance(state.x, state.y, npc.x, npc.y) > 16
+        {
+            send_system_message(&self.gate_ref, msg.session_id, "距离 NPC 太远，无法寄售");
+            return;
+        }
+
         let item = match record.actor_ref.ask(crate::actors::player::GetItemInfo { unique_id: msg.unique_id }).await {
             Ok(Some(i)) => i,
             _ => {
