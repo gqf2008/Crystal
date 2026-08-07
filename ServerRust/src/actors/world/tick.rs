@@ -299,6 +299,8 @@ impl WorldActor {
                 let dmg = crate::combat::poison::tick_poisons(&mut monster.poison_list, 1);
                 if dmg > 0 {
                     monster.take_damage(dmg);
+                    // C# MonsterObject.Process：毒伤归属毒源（LastHitter = poison.Owner）
+                    monster.last_hitter_session = monster.poison_list.iter().find(|p| p.owner_session != 0).map(|p| p.owner_session);
                 }
             }
             // 广播 DelayedExplosion 三级 ObjectEffect（同图玩家）
@@ -350,6 +352,7 @@ impl WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
+                            monster.last_hitter_session = Some(caster_session);
                             self.pending_gather.push(caster_session);
                             monster.provoked = true;
                             monster.target_session = Some(caster_session);
@@ -801,7 +804,8 @@ impl WorldActor {
                         spawn_spread: 0,
                         next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
                         ai_profile, ai_state: MonsterAiState::Idle,
-                        target_session: None, provoked: false,
+                        target_session: None,
+                        last_hitter_session: None, provoked: false,
                         is_elite: false, is_boss: false,
                         min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
                         agility: 0, accuracy: 0,
@@ -1069,6 +1073,7 @@ impl WorldActor {
                 ai_profile,
                 ai_state: MonsterAiState::Idle,
                 target_session: None,
+                last_hitter_session: None,
                 provoked: false,
                 is_elite,
                 is_boss: false,
@@ -1885,6 +1890,7 @@ impl WorldActor {
             ai_profile: MonsterAiProfile::from_info(&monster_info),
             ai_state: MonsterAiState::Idle,
             target_session: None,
+            last_hitter_session: None,
             provoked: true,
             is_elite: false,
             is_boss: true,
@@ -2417,6 +2423,7 @@ impl WorldActor {
                     );
                     if r.is_hit && r.damage > 0 {
                         monster.take_damage(r.damage);
+                        monster.last_hitter_session = Some(caster_session);
                         self.pending_gather.push(caster_session);
                         monster.provoked = true;
                         monster.target_session = Some(caster_session);
@@ -2666,6 +2673,7 @@ impl WorldActor {
             if result.is_hit && result.damage > 0 {
                 if let Some(monster) = self.monsters.get_mut(&target_id) {
                     monster.take_damage(result.damage);
+                    monster.last_hitter_session = Some(pending.session_id);
                     self.pending_gather.push(pending.session_id);
                     monster.provoked = true;
                     monster.target_session = Some(pending.session_id);
@@ -2795,6 +2803,7 @@ impl WorldActor {
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
+                            monster.last_hitter_session = Some(pending.session_id);
                             self.pending_gather.push(pending.session_id);
                             monster.provoked = true;
                             monster.target_session = Some(pending.session_id);
@@ -3670,6 +3679,7 @@ impl Message<Tick> for WorldActor {
                     ai_profile,
                     ai_state: MonsterAiState::Idle,
                     target_session: None,
+                    last_hitter_session: None,
                     provoked: false,
                     is_elite: false,
                     is_boss: false,
@@ -3839,7 +3849,8 @@ impl Message<Tick> for WorldActor {
                             spawn_spread: 0,
                             next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
                             ai_profile, ai_state: MonsterAiState::Idle,
-                            target_session: None, provoked: false,
+                            target_session: None,
+                            last_hitter_session: None, provoked: false,
                             is_elite: false, is_boss: false,
                             min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
                             agility: 0, accuracy: 0,
@@ -4028,11 +4039,13 @@ impl Message<Tick> for WorldActor {
                     }
 
                     // 发放经验（支持组队平分）
-                    // C#：经验归属 LastHitter（最后一次伤害者，≈ monster.target_session），组内平分
+                    // C#：经验归属 LastHitter（最后造成伤害者），组内平分；
+                    // 无 last_hitter 记录时回退 target_session（召唤物/宠物等路径）
                     let mut nearest_session: Option<u64> = None;
                     let mut nearest_group_id: Option<u64> = None;
                     let mut killer_level: u16 = 0;
-                    if let Some(sid) = monster.target_session.filter(|sid| self.players.contains_key(sid)) {
+                    let killer = monster.last_hitter_session.or(monster.target_session);
+                    if let Some(sid) = killer.filter(|sid| self.players.contains_key(sid)) {
                         if let Some(record) = self.players.get(&sid) {
                             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                                 if !state.is_dead {
