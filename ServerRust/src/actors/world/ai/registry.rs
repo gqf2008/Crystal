@@ -264,6 +264,24 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("spittingtoad") || name.contains("spitting toad") || name.contains("吐毒蟾蜍") {
         return Box::new(bosses::spitting_toad::SpittingToadBehavior::new());
     }
+    if name.contains("charmedsnake") || name.contains("charmed snake") || name.contains("魅惑蛇") {
+        return Box::new(bosses::charmed_snake::CharmedSnakeBehavior::new());
+    }
+    if name.contains("flyingstatue") || name.contains("flying statue") || name.contains("飞石像") {
+        return Box::new(bosses::flying_statue::FlyingStatueBehavior::new());
+    }
+    if name.contains("demonwolf") || name.contains("demon wolf") || name.contains("恶魔狼") {
+        return Box::new(bosses::demon_wolf::DemonWolfBehavior::new());
+    }
+    if name.contains("tucsonegg") || name.contains("tucson egg") || name.contains("图森之蛋") {
+        return Box::new(bosses::tucson_egg::TucsonEggBehavior::new());
+    }
+    if name.contains("deathcrawler") || name.contains("death crawler") || name.contains("死亡爬行者") {
+        return Box::new(bosses::death_crawler::DeathCrawlerBehavior::new());
+    }
+    if name.contains("snaketotem") || name.contains("snake totem") || name.contains("蛇图腾") {
+        return Box::new(bosses::snake_totem::SnakeTotemBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -602,6 +620,12 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("frosttiger") || name.contains("frost tiger") || name.contains("霜虎")
         || name.contains("restlessjar") || name.contains("restless jar") || name.contains("躁动之坛")
         || name.contains("spittingtoad") || name.contains("spitting toad") || name.contains("吐毒蟾蜍")
+        || name.contains("charmedsnake") || name.contains("charmed snake") || name.contains("魅惑蛇")
+        || name.contains("flyingstatue") || name.contains("flying statue") || name.contains("飞石像")
+        || name.contains("demonwolf") || name.contains("demon wolf") || name.contains("恶魔狼")
+        || name.contains("tucsonegg") || name.contains("tucson egg") || name.contains("图森之蛋")
+        || name.contains("deathcrawler") || name.contains("death crawler") || name.contains("死亡爬行者")
+        || name.contains("snaketotem") || name.contains("snake totem") || name.contains("蛇图腾")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
