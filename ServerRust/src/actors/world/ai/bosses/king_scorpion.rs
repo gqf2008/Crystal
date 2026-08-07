@@ -42,7 +42,7 @@ impl MonsterBehavior for KingScorpionBehavior {
             if ctx.tick_count >= monster.next_move_tick {
                 let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
                 ctx.out_moves.push((monster.object_id, nx, ny, dir));
-                monster.next_move_tick = ctx.tick_count + 2;
+                monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
                 monster.ai_state = crate::actors::world::MonsterAiState::Chase;
             }
             return;
@@ -50,7 +50,7 @@ impl MonsterBehavior for KingScorpionBehavior {
         if ctx.tick_count < monster.next_attack_tick {
             return;
         }
-        monster.next_attack_tick = ctx.tick_count + 7;
+        monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
         // 前方 2 格有目标 or 1/5 → MC 直线；否则 DC 直线
         let use_mc = fastrand::i32(0..5) == 0;

@@ -37,7 +37,7 @@ impl MonsterBehavior for OmaMageBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= VIEW_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 6;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             if dist <= MELEE_RANGE {
                 // 近战 Type0 DC
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
@@ -50,7 +50,7 @@ impl MonsterBehavior for OmaMageBehavior {
                 });
             } else {
                 // 远程 MC 弹道 + Slow + Frozen
-                monster.next_attack_tick = ctx.tick_count + 11; // C# +500 额外冷却
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 5; // C# AttackSpeed + 500
                 let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                     attacker_oid: monster.object_id,
@@ -60,14 +60,20 @@ impl MonsterBehavior for OmaMageBehavior {
                     spell_id: 0,
                 });
                 // C# PoisonTarget Slow 6s + Frozen 9s
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::SLOW, 6, 5, 2000),
-                });
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::FROZEN, 9, 5, 2000),
-                });
+                // C# PoisonTarget 1/6
+                    if fastrand::i32(0..6) == 0 {
+                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(PoisonType::SLOW, 5, damage, 2000),
+                    });
+                    }
+                // C# PoisonTarget 1/9
+                    if fastrand::i32(0..9) == 0 {
+                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(PoisonType::FROZEN, 5, damage, 2000),
+                    });
+                    }
             }
             return;
         }
@@ -76,7 +82,7 @@ impl MonsterBehavior for OmaMageBehavior {
         if dist > VIEW_RANGE && ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

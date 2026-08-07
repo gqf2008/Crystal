@@ -75,7 +75,7 @@ impl MonsterBehavior for SnowWolfKingBehavior {
                         dir,
                     ));
                     monster.target_session = Some(wsession);
-                    monster.next_attack_tick = ctx.tick_count + 2;
+                    monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 }
             }
         }
@@ -111,7 +111,7 @@ impl MonsterBehavior for SnowWolfKingBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= MELEE_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 5;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let base = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
 
             // 2/3 概率普攻（Type 0）
@@ -139,22 +139,13 @@ impl MonsterBehavior for SnowWolfKingBehavior {
                     spell_id: 0,
                     attack_type,
                 });
-                // 冰系形态施加冰冻（任务核心"冰冻"）
-                if freeze {
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::FROZEN, 3, 0, 1000),
-                    });
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::SLOW, 5, 0, 1000),
-                    });
-                }
+                // C# SnowWolfKing 无毒（DelayedAction 的 poison/aoe 标志在 CompleteAttack 被忽略）
+                let _ = freeze;
             }
         } else if dist > MELEE_RANGE && ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

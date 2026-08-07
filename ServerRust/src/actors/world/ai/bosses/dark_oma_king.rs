@@ -127,7 +127,7 @@ impl MonsterBehavior for DarkOmaKingBehavior {
             if ctx.tick_count < monster.next_attack_tick {
                 return;
             }
-            monster.next_attack_tick = ctx.tick_count + 5;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
             // C# DarkOmaKing.cs:87-133：ranged=false 时
             if fastrand::i32(0..4) > 0 {
@@ -177,7 +177,7 @@ impl MonsterBehavior for DarkOmaKingBehavior {
             if ctx.tick_count < monster.next_attack_tick {
                 return;
             }
-            monster.next_attack_tick = ctx.tick_count + 5;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             if fastrand::i32(0..3) == 0 {
                 let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
@@ -192,7 +192,7 @@ impl MonsterBehavior for DarkOmaKingBehavior {
             // 追击（C# 标准 MoveTo）
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

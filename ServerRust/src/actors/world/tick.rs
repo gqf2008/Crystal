@@ -1,5 +1,12 @@
 use super::*;
 
+/// 怪物仇恨保留距离（C# Globals.DataRange = 16；超距/跨图/死亡 → 丢失目标）
+const DATA_RANGE: i32 = 16;
+/// 怪物巡逻间隔（C# MonsterObject.RoamDelay = 1000ms = 10 ticks）
+const ROAM_DELAY_TICKS: u64 = 10;
+/// 怪物索敌间隔（C# MonsterObject.SearchDelay = 3000ms = 30 ticks）
+const SEARCH_DELAY_TICKS: u64 = 30;
+
 /// 游戏主循环 Tick
 pub struct Tick;
 
@@ -669,7 +676,7 @@ impl WorldActor {
     async fn apply_death_callbacks(
         &mut self,
         monster: &mut MonsterState,
-        player_positions: &[(u64, i32, i32, u32, i32, i32, u16)],
+        player_positions: &[(u64, i32, i32, u32, i32, i32, u16, u16)],
     ) {
         use crate::actors::world::ai::{self, AiCtx};
         let mut die_moves: Vec<(u32, i32, i32, u8)> = Vec::new();
@@ -681,7 +688,15 @@ impl WorldActor {
         let mut die_pushes: Vec<ai::PushPlayer> = Vec::new();
         let mut die_teleports: Vec<(u64, i32, i32, u8)> = Vec::new();
         let mut die_delayed: Vec<ai::DelayedAttack> = Vec::new();
+        let mut die_taunts: Vec<(u32, u32)> = Vec::new();
+        let mut die_monster_teleports: Vec<(u32, i32, i32)> = Vec::new();
+        let mut die_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
         {
+            // 死亡回调也提供玩家快照（C# Die 可 FindAllTargets；ToxicGhoul 死亡 AOE 毒等用）
+            let die_player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
+                .map(|(s, x, y, oid, _, hp, map, lvl)| ai::PlayerSnap {
+                    session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl,
+                }).collect();
             let mut ctx = AiCtx {
                 tick_count: self.tick_count,
                 monster_oid: monster.object_id,
@@ -690,7 +705,7 @@ impl WorldActor {
                     .map(|m| (m.width as i32, m.height as i32))
                     .unwrap_or((200, 200)),
                 dragon_level: 0,
-                players: &[],
+                players: &die_player_snaps,
                 monsters: &[],
                 out_moves: &mut die_moves,
                 out_attacks: &mut die_attacks,
@@ -701,6 +716,9 @@ impl WorldActor {
                 out_pushes: &mut die_pushes,
                 out_player_teleports: &mut die_teleports,
                 out_delayed_attacks: &mut die_delayed,
+                out_monster_taunts: &mut die_taunts,
+                out_monster_teleports: &mut die_monster_teleports,
+                out_player_buffs: &mut die_player_buffs,
             };
             // 临时取出 behavior 避免 &mut monster + &mut behavior 双重借用（与 AI 循环一致）
             let mut behavior = std::mem::replace(
@@ -724,6 +742,10 @@ impl WorldActor {
                     let _ = target_session;
                     (*attacker_oid, *damage, monster.x, monster.y, 0)
                 }
+                // #1020：死亡回调直线攻击近似为半径=range 的 AOE
+                ai::AttackAction::Line { attacker_oid, origin_x, origin_y, range, damage, .. } => {
+                    (*attacker_oid, *damage, *origin_x, *origin_y, *range)
+                }
             };
             // 广播 ObjectAttack（死亡爆炸动画）
             let mut attack_body = Vec::new();
@@ -742,7 +764,7 @@ impl WorldActor {
                 }).await;
             }
             // 对范围内玩家造成伤害
-            for (sid, px, py, _, _, _, pmap) in player_positions {
+            for (sid, px, py, _, _, _, pmap, _) in player_positions {
                 if *pmap != monster.map_index { continue; }
                 let dx = (px - cx).abs();
                 let dy = (py - cy).abs();
@@ -802,8 +824,9 @@ impl WorldActor {
                         agility: 0, accuracy: 0,
                         armour_rate: 1.0, damage_rate: 1.0,
                         magic_resist: 0, critical_rate: 0, critical_damage: 0,
-                        luck: 0, reflect: 0, damage_reduction_percent: 0,
+                        luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
                         poison_list: Vec::new(),
+                        last_hit_damage: 0,
                         undead: false,
                         master_session: None,
                         recall_at_tick: 0,
@@ -845,7 +868,38 @@ impl WorldActor {
         for atk in &die_delayed {
             self.boss_pending_attacks.push((self.tick_count + atk.delay_ticks, *atk));
         }
+        for (oid, tx, ty) in &die_monster_teleports {
+            if let Some(m) = self.monsters.get_mut(oid) {
+                let walkable = self.maps.get(&m.map_index)
+                    .map(|mm| mm.is_walkable(*tx, *ty))
+                    .unwrap_or(false);
+                if walkable {
+                    m.x = *tx;
+                    m.y = *ty;
+                    // 广播位置更新（ObjectWalk 近似 ObjectMonster）
+                    let mut walk_body = Vec::new();
+                    walk_body.extend_from_slice(&oid.to_le_bytes());
+                    walk_body.extend_from_slice(&m.x.to_le_bytes());
+                    walk_body.extend_from_slice(&m.y.to_le_bytes());
+                    walk_body.push(m.direction);
+                    let walk_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectWalk as i16, &walk_body);
+                    for session_id in self.players.keys() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *session_id,
+                            data: walk_packet.clone(),
+                        }).await;
+                    }
+                }
+            }
+        }
+        for (sid, buff) in &die_player_buffs {
+            if let Some(record) = self.players.get(sid) {
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: buff.clone() }).await;
+            }
+        }
     }
+
 
     pub(crate) async fn tick_pk_decay(&mut self) {
         if self.tick_count % 120 == 0 { // 12s × 10 ticks/s
@@ -1016,8 +1070,8 @@ impl WorldActor {
                     data: packet.clone(),
                 }).await;
             }
-            let ai_profile = self.monster_infos
-                .get(&spawn.monster_index)
+            let monster_info_opt = self.monster_infos.get(&spawn.monster_index);
+            let ai_profile = monster_info_opt
                 .map(MonsterAiProfile::from_info)
                 .unwrap_or_else(|| MonsterAiProfile {
                     ai_type: MonsterAiType::Aggressive,
@@ -1029,6 +1083,8 @@ impl WorldActor {
                 });
             // 精英判定：用 RarityConfig（C# MonsterRarityEliteChancePercent=0.1，缺省 3 兼容旧配置）
             let is_elite = fastrand::u8(1..=100) <= self.rarity_cfg.elite_chance_percent;
+            let monster_level = monster_info_opt.map(|i| i.level).unwrap_or(0);
+            let monster_effect = monster_info_opt.map(|i| i.effect).unwrap_or(0);
             let (name, hp, max_hp, min_dmg, max_dmg, xp) = if is_elite {
                 // 对齐 C# MonsterRarityData.Elite 倍率（config 驱动）
                 let hp_m = self.rarity_cfg.elite_hp_multiplier;
@@ -1085,8 +1141,11 @@ impl WorldActor {
                 critical_damage: 0,
                 luck: 0,
                 reflect: 0,
+                level: monster_level,
+                effect: monster_effect,
                 damage_reduction_percent: 0,
                 poison_list: Vec::new(),
+                last_hit_damage: 0,
             undead: false,
                 master_session: None,
                 recall_at_tick: 0,
@@ -1895,9 +1954,10 @@ impl WorldActor {
             armour_rate: 1.0, damage_rate: 1.0,
             magic_resist: 0,
             critical_rate: 0, critical_damage: 0,
-            luck: 0, reflect: 0,
+            luck: 0, reflect: 0, level: monster_info.level, effect: monster_info.effect,
             damage_reduction_percent: 0,
             poison_list: Vec::new(),
+            last_hit_damage: 0,
             undead: false,
             master_session: None,
             recall_at_tick: 0,
@@ -2937,7 +2997,7 @@ impl Message<Tick> for WorldActor {
         if !self.monsters.is_empty() && !self.players.is_empty() {
             // 收集所有玩家位置（避免在循环中借用 self）
             // 预收集玩家位置 + PK 值（用于 Guard AI 红名优先）
-            let player_positions: Vec<(u64, i32, i32, u32, i32, i32, u16)> = {
+            let player_positions: Vec<(u64, i32, i32, u32, i32, i32, u16, u16)> = {
                 let mut results = Vec::new();
                 let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
                 for (session_id, record) in &self.players {
@@ -2951,8 +3011,8 @@ impl Message<Tick> for WorldActor {
                                 .map(|m| m.is_safe_zone(state.x, state.y))
                                 .unwrap_or(false);
                             if !in_safe {
-                                // (session, x, y, object_id, pk_points, hp, map_index)
-                                results.push((*session_id, state.x, state.y, state.object_id, state.pk_points, state.hp, state.map_index));
+                                // (session, x, y, object_id, pk_points, hp, map_index, level)
+                                results.push((*session_id, state.x, state.y, state.object_id, state.pk_points, state.hp, state.map_index, state.level));
                             }
                         }
                     }
@@ -2963,6 +3023,8 @@ impl Message<Tick> for WorldActor {
             // 对每个怪物执行 AI
             let mut dead_monsters = Vec::new();
             let mut moved_monsters = Vec::new();
+            // 巡逻转身广播（C# ProcessRoam Turn → ObjectTurn）
+            let mut monster_turns: Vec<(u32, u8, i32, i32)> = Vec::new();
             let mut moved_targets: HashSet<(i32, i32)> = HashSet::new();
             let mut death_drops: Vec<(u64, i32, i32, u16)> = Vec::new();
             let mut broken_armor: Vec<(u64, EquipmentSlot)> = Vec::new();
@@ -2977,6 +3039,8 @@ impl Message<Tick> for WorldActor {
             let mut heal_actions: Vec<(u32, i32)> = Vec::new();
             // #471 宠物协战动作（pet_oid, target_oid, damage, master_session，循环后应用）
             let mut pet_attacks: Vec<(u32, u32, i32, u64)> = Vec::new();
+            // #1013 怪物互伤（C# StoneTrap 嘲讽后怪物攻击目标）：(attacker, target, damage)
+            let mut monster_attacks: Vec<(u32, u32, i32)> = Vec::new();
             let mut summon_spawns: Vec<MonsterSpawn> = Vec::new();
             // Boss AI 输出队列（在循环后应用）
             let mut boss_moves: Vec<(u32, i32, i32, u8)> = Vec::new();
@@ -2988,6 +3052,9 @@ impl Message<Tick> for WorldActor {
             let mut boss_pushes: Vec<ai::PushPlayer> = Vec::new();
             let mut boss_player_teleports: Vec<(u64, i32, i32, u8)> = Vec::new();
             let mut boss_delayed_attacks: Vec<ai::DelayedAttack> = Vec::new();
+            let mut boss_taunts: Vec<(u32, u32)> = Vec::new();
+            let mut boss_monster_teleports: Vec<(u32, i32, i32)> = Vec::new();
+            let mut boss_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
             // 召唤物过期队列（到期 tick 已过 → 移除，不掉落）
             let mut expired_monsters: Vec<u32> = Vec::new();
 
@@ -3005,8 +3072,8 @@ impl Message<Tick> for WorldActor {
                     let _monster_map = monster.map_index;
                     let monster_name = monster.name.clone();
                     let player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
-                        .map(|(s, x, y, oid, _, hp, map)| ai::PlayerSnap {
-                            session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid,
+                        .map(|(s, x, y, oid, _, hp, map, lvl)| ai::PlayerSnap {
+                            session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl,
                         }).collect();
                     // monster_snaps 从循环外预收集的 monster_snapshot 构建（避免 &mut self.monsters 借用冲突）
                     let monster_snaps: Vec<ai::MonsterSnap> = monster_snapshot.iter()
@@ -3032,6 +3099,9 @@ impl Message<Tick> for WorldActor {
                         out_pushes: &mut boss_pushes,
                         out_player_teleports: &mut boss_player_teleports,
                         out_delayed_attacks: &mut boss_delayed_attacks,
+                        out_monster_taunts: &mut boss_taunts,
+                        out_monster_teleports: &mut boss_monster_teleports,
+                        out_player_buffs: &mut boss_player_buffs,
                     };
                     // 临时取出 behavior 避免 &mut monster + &mut behavior 双重借用
                     let mut behavior = std::mem::replace(
@@ -3040,6 +3110,20 @@ impl Message<Tick> for WorldActor {
                     );
                     behavior.process_tick(monster, &mut ctx);
                     monster.behavior = behavior;
+
+                    // 死亡检查：注册 Boss（含 StoneTrap 等）hp<=0 时进 dead_monsters
+                    //（此前 Boss 分支直接 continue，hp<=0 永不消失/不触发 on_die）
+                    if monster.hp <= 0 {
+                        dead_monsters.push(*oid);
+                        continue;
+                    }
+
+                    // #1013：应用怪物嘲讽（C# StoneTrap）→ monster_targets
+                    for (target, taunter) in boss_taunts.drain(..) {
+                        if target != monster.object_id {
+                            self.monster_targets.insert(target, taunter);
+                        }
+                    }
                     debug!("Boss '{}' AI tick processed", monster_name);
                     continue;
                 }
@@ -3063,7 +3147,7 @@ impl Message<Tick> for WorldActor {
                 if profile.ai_type == MonsterAiType::Guard {
                     // 先找范围内的红名玩家
                     let mut red_nearest: Option<(u64, i32, i32, i32)> = None;
-                    for (session, px, py, _, pk, _, _) in &player_positions {
+                    for (session, px, py, _, pk, _, _, _) in &player_positions {
                         let dist = (monster.x - px).abs() + (monster.y - py).abs();
                         if dist <= profile.aggro_range && *pk > 0 {
                             if red_nearest.is_none_or(|n| dist < n.3) {
@@ -3074,7 +3158,7 @@ impl Message<Tick> for WorldActor {
                     if red_nearest.is_some() {
                         nearest = red_nearest;
                     } else {
-                        for (session, px, py, _, _, _, _) in &player_positions {
+                        for (session, px, py, _, _, _, _, _) in &player_positions {
                             let dist = (monster.x - px).abs() + (monster.y - py).abs();
                             if dist <= profile.aggro_range {
                                 if nearest.is_none_or(|n| dist < n.3) {
@@ -3084,7 +3168,7 @@ impl Message<Tick> for WorldActor {
                         }
                     }
                 } else {
-                    for (session, px, py, _, _, _, _) in &player_positions {
+                    for (session, px, py, _, _, _, _, _) in &player_positions {
                         let dist = (monster.x - px).abs() + (monster.y - py).abs();
                         if dist <= profile.aggro_range {
                             if nearest.is_none_or(|n| dist < n.3) {
@@ -3094,11 +3178,46 @@ impl Message<Tick> for WorldActor {
                     }
                 }
 
-                // 更新目标
-                if let Some((sess, _, _, _)) = nearest {
-                    monster.target_session = Some(sess);
-                } else {
-                    monster.target_session = None;
+                // 目标粘性 + 索敌（C# MonsterObject）：
+                // - 已有目标：DataRange(16) 内保留（跨图/死亡/超距 → Target=null 仇恨丢失）
+                // - 无目标：ProcessSearch（SearchDelay 3s 到点）→ 视野内最近玩家
+                // - 有目标但到重搜时间：1/3 概率重新 FindTarget（可能切换目标）
+                // C# ProcessTarget：目标死亡/丢失 → 立即重新索敌（不等 SearchDelay）
+                let had_target = monster.target_session.is_some();
+                let mut chase_target: Option<(u64, i32, i32, i32)> = None; // (session, px, py, dist)
+                if let Some(ts) = monster.target_session {
+                    if let Some((sid, px, py, _, _, hp, map, _)) =
+                        player_positions.iter().find(|(s, _, _, _, _, _, _, _)| *s == ts)
+                    {
+                        let d = (monster.x - px).abs() + (monster.y - py).abs();
+                        if *map == monster.map_index && *hp > 0 && d <= DATA_RANGE {
+                            chase_target = Some((*sid, *px, *py, d));
+                        } else {
+                            monster.target_session = None; // 仇恨丢失
+                        }
+                    } else {
+                        monster.target_session = None;
+                    }
+                }
+                if chase_target.is_none() && had_target {
+                    // 目标刚丢失（死亡/超距/跨图）：重置索敌计时，下一 tick 立即搜索
+                    self.monster_search_ticks.insert(*oid, 0);
+                }
+                let search_due = self.monster_search_ticks.get(oid).copied().unwrap_or(0) <= self.tick_count;
+                if chase_target.is_none() {
+                    if let Some((sess, px, py, dist)) = nearest {
+                        monster.target_session = Some(sess);
+                        chase_target = Some((sess, px, py, dist));
+                    }
+                } else if search_due && fastrand::i32(0..3) == 0 {
+                    // C# ProcessSearch：Target != null 时 1/3 概率重新搜索
+                    if let Some((sess, px, py, dist)) = nearest {
+                        monster.target_session = Some(sess);
+                        chase_target = Some((sess, px, py, dist));
+                    }
+                }
+                if search_due {
+                    self.monster_search_ticks.insert(*oid, self.tick_count + SEARCH_DELAY_TICKS);
                 }
 
                 // 被动环境物体（Deer/Doe/Football 等）：不主动攻击/追击玩家，
@@ -3120,13 +3239,14 @@ impl Message<Tick> for WorldActor {
                 // Passive 怪物：未激怒时不主动攻击
                 let should_chase = match profile.ai_type {
                     MonsterAiType::Passive => monster.provoked,
-                    MonsterAiType::Guard => nearest.is_some_and(|(_, _, _, d)| d <= profile.aggro_range) && dist_to_spawn(monster) <= profile.aggro_range * 2,
-                    _ => nearest.is_some(),
+                    MonsterAiType::Guard => chase_target.is_some_and(|(_, _, _, d)| d <= profile.aggro_range) && dist_to_spawn(monster) <= profile.aggro_range * 2,
+                    _ => chase_target.is_some(),
                 };
 
                 // #471：宠物——不主动攻击玩家；有协战目标则靠近/攻击
                 if monster.master_session.is_some() {
                     nearest = None;
+                    chase_target = None;
                     monster.target_session = None;
                     if let Some(tmid) = self.pet_targets.get(&monster.object_id).copied() {
                         let target_alive = monster_snapshot.iter().any(|s| s.0 == tmid && s.3 > 0 && s.5 == monster.map_index);
@@ -3155,7 +3275,42 @@ impl Message<Tick> for WorldActor {
                     }
                 }
 
-                if let Some((target_session, px, py, dist)) = nearest {
+                // #1013：怪物互伤目标（C# StoneTrap 嘲讽）——优先于玩家索敌
+                let mut monster_target_active = false;
+                if let Some(tmid) = self.monster_targets.get(oid).copied() {
+                    let target_alive = monster_snapshot.iter()
+                        .any(|s| s.0 == tmid && s.3 > 0 && s.5 == monster.map_index);
+                    if !target_alive {
+                        self.monster_targets.remove(oid);
+                    } else if let Some((_, tx, ty, _, _, _, _, _, _, _)) =
+                        monster_snapshot.iter().find(|s| s.0 == tmid)
+                    {
+                        monster_target_active = true;
+                        monster.target_session = None;
+                        let dist = (tx - monster.x).abs() + (ty - monster.y).abs();
+                        if dist <= 1 && can_attack {
+                            let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
+                            let damage = ((self.tick_count.wrapping_add(*oid as u64).wrapping_mul(17)) as i32 % dmg_range) + monster.min_dmg;
+                            monster_attacks.push((*oid, tmid, damage));
+                            monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
+                            monster.ai_state = MonsterAiState::Attack;
+                        } else if can_move {
+                            let (nx, ny, dir) = monster.step_toward(*tx, *ty);
+                            if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
+                                && !monster_positions.contains(&(nx, ny))
+                                && moved_targets.insert((nx, ny))
+                            {
+                                moved_monsters.push((*oid, nx, ny, dir));
+                            }
+                            monster.next_move_tick = self.tick_count + profile.move_interval;
+                            monster.ai_state = MonsterAiState::Chase;
+                        }
+                    }
+                }
+
+                if monster_target_active {
+                    // 已在上面处理怪物互伤攻击/移动，跳过玩家索敌
+                } else if let Some((target_session, px, py, dist)) = chase_target {
                     // #395：幻觉——期内不攻击/不追击（C# HallucinationTime）
                     if self.hallucinated.get(&monster.object_id).is_some_and(|u| self.tick_count < *u) {
                         monster.target_session = None;
@@ -3404,8 +3559,8 @@ impl Message<Tick> for WorldActor {
                     // 简化版：有 master 且主人在线且距离>5 则 step_toward 主人位置
                     if can_move {
                         let master_pos = player_positions.iter()
-                            .find(|(sid, _, _, _, _, _, _)| *sid == master)
-                            .map(|(_, x, y, _, _, _, _)| (*x, *y));
+                            .find(|(sid, _, _, _, _, _, _, _)| *sid == master)
+                            .map(|(_, x, y, _, _, _, _, _)| (*x, *y));
                         if let Some((mx, my)) = master_pos {
                             let dist_master = (monster.x - mx).abs() + (monster.y - my).abs();
                             if dist_master > 5 {
@@ -3438,6 +3593,29 @@ impl Message<Tick> for WorldActor {
                     monster.next_move_tick = self.tick_count + profile.move_interval;
                     monster.ai_state = MonsterAiState::Return;
                 } else {
+                    // C# ProcessRoam：无目标时按 RoamDelay(1s) 1/10 概率随机转身/走动
+                    let roam_next = self.monster_roam_ticks.get(oid).copied().unwrap_or(0);
+                    if can_move && self.tick_count >= roam_next {
+                        self.monster_roam_ticks.insert(*oid, self.tick_count + ROAM_DELAY_TICKS);
+                        if fastrand::i32(0..10) == 0 {
+                            if fastrand::i32(0..3) == 0 {
+                                // C# Turn：随机转身 + 广播 ObjectTurn
+                                monster.direction = fastrand::i32(0..8) as u8;
+                                monster_turns.push((*oid, monster.direction, monster.x, monster.y));
+                            } else {
+                                // C# Walk：沿当前方向走一步
+                                let dir = monster.direction as usize % 8;
+                                let (nx, ny) = (monster.x + MON_DIR_DX[dir], monster.y + MON_DIR_DY[dir]);
+                                if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(false)
+                                    && !monster_positions.contains(&(nx, ny))
+                                    && moved_targets.insert((nx, ny))
+                                {
+                                    moved_monsters.push((*oid, nx, ny, monster.direction));
+                                    monster.next_move_tick = self.tick_count + profile.move_interval;
+                                }
+                            }
+                        }
+                    }
                     monster.ai_state = MonsterAiState::Idle;
                 }
 
@@ -3494,6 +3672,28 @@ impl Message<Tick> for WorldActor {
                 }
             }
 
+            // #1013：怪物互伤伤害（C# StoneTrap 嘲讽后怪物攻击目标；循环外应用）
+            for (aid, tmid, damage) in &monster_attacks {
+                if let Some(tm) = self.monsters.get_mut(tmid) {
+                    tm.take_damage(*damage);
+                    tm.provoked = true;
+                    // 广播 ObjectAttack（怪 A 攻击怪 B）
+                    let mut attack_body = Vec::new();
+                    attack_body.extend_from_slice(&aid.to_le_bytes());
+                    attack_body.push(0u8); // direction
+                    attack_body.push(0u8); // spell=0
+                    let attack_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
+                    for sid in self.players.keys() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *sid,
+                            data: attack_packet.clone(),
+                        }).await;
+                    }
+                    debug!("Monster #{} hits '{}' (#{}) for {} dmg (monster-vs-monster)", aid, tm.name, tmid, damage);
+                }
+            }
+
             // 应用 Summoner 召唤（在循环外创建新怪物）
             for spawn in &summon_spawns {
                 let new_oid = self.alloc_object_id();
@@ -3504,8 +3704,8 @@ impl Message<Tick> for WorldActor {
                         data: packet.clone(),
                     }).await;
                 }
-                let ai_profile = self.monster_infos
-                    .get(&spawn.monster_index)
+                let monster_info_opt = self.monster_infos.get(&spawn.monster_index);
+                let ai_profile = monster_info_opt
                     .map(MonsterAiProfile::from_info)
                     .unwrap_or_else(|| MonsterAiProfile {
                         ai_type: MonsterAiType::Aggressive,
@@ -3515,6 +3715,8 @@ impl Message<Tick> for WorldActor {
                         move_interval: 2,
                         flee_threshold: 0.0,
                     });
+                let monster_level = monster_info_opt.map(|i| i.level).unwrap_or(0);
+                let monster_effect = monster_info_opt.map(|i| i.effect).unwrap_or(0);
                 self.monsters.insert(new_oid, MonsterState {
                     object_id: new_oid,
                     name: spawn.name.clone(),
@@ -3555,8 +3757,11 @@ impl Message<Tick> for WorldActor {
                     critical_damage: 0,
                     luck: 0,
                     reflect: 0,
+                    level: monster_level,
+                    effect: monster_effect,
                     damage_reduction_percent: 0,
                     poison_list: Vec::new(),
+                    last_hit_damage: 0,
             undead: false,
                     master_session: None,
                     recall_at_tick: 0,
@@ -3576,6 +3781,23 @@ impl Message<Tick> for WorldActor {
                     moved_monsters.push((oid, nx, ny, dir));
                 }
             }
+            // Boss 怪物自传送（C# TeleportRandom/Teleport：RedFoxman/WhiteFoxman 等）
+            for (oid, tx, ty) in boss_monster_teleports.drain(..) {
+                let map_idx = self.monsters.get(&oid).map(|m| m.map_index).unwrap_or(0);
+                let walkable = self.maps.get(&map_idx)
+                    .map(|m| m.is_walkable(tx, ty))
+                    .unwrap_or(false);
+                if walkable {
+                    let dir = self.monsters.get(&oid).map(|m| m.direction).unwrap_or(0);
+                    moved_monsters.push((oid, tx, ty, dir));
+                }
+            }
+            // Boss 给玩家加 buff（C# AddBuff：YinDevilNode/PowerBead 等）
+            for (sid, buff) in boss_player_buffs.drain(..) {
+                if let Some(record) = self.players.get(&sid) {
+                    let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                }
+            }
             // Boss 攻击：广播 ObjectAttack + 对命中的玩家造成伤害
             for atk in &boss_attacks {
                 let (attacker_oid, targets, damage, spell_id, attack_type, atk_x, atk_y, atk_dir) = match atk {
@@ -3587,14 +3809,31 @@ impl Message<Tick> for WorldActor {
                     }
                     ai::AttackAction::Aoe { attacker_oid, center_x, center_y, radius, damage, .. } => {
                         let tgts: Vec<u64> = player_positions.iter()
-                            .filter(|(_, px, py, _, _, _, _)| {
+                            .filter(|(_, px, py, _, _, _, _, _)| {
                                 let dx = (px - center_x).abs();
                                 let dy = (py - center_y).abs();
                                 dx.max(dy) <= *radius
                             })
-                            .map(|(s, _, _, _, _, _, _)| *s)
+                            .map(|(s, _, _, _, _, _, _, _)| *s)
                             .collect();
                         (*attacker_oid, tgts, *damage, 0u8, 0u8, *center_x, *center_y, 0u8)
+                    }
+                    // #1020：直线攻击（C# LineAttack：沿 direction 逐格命中）
+                    ai::AttackAction::Line { attacker_oid, origin_x, origin_y, direction, range, damage, .. } => {
+                        let dir = (*direction as usize) % 8;
+                        let (ldx, ldy) = (MON_DIR_DX[dir], MON_DIR_DY[dir]);
+                        let tgts: Vec<u64> = player_positions.iter()
+                            .filter(|(_, px, py, _, _, _, _, _)| {
+                                for k in 1..=*range {
+                                    if *px == origin_x + ldx * k && *py == origin_y + ldy * k {
+                                        return true;
+                                    }
+                                }
+                                false
+                            })
+                            .map(|(s, _, _, _, _, _, _, _)| *s)
+                            .collect();
+                        (*attacker_oid, tgts, *damage, 0u8, 0u8, *origin_x, *origin_y, *direction)
                     }
                 };
                 // 获取 Boss 位置用于广播
@@ -3715,8 +3954,9 @@ impl Message<Tick> for WorldActor {
                             agility: 0, accuracy: 0,
                             armour_rate: 1.0, damage_rate: 1.0,
                             magic_resist: 0, critical_rate: 0, critical_damage: 0,
-                            luck: 0, reflect: 0, damage_reduction_percent: 0,
+                            luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
                             poison_list: Vec::new(),
+                            last_hit_damage: 0,
             undead: false,
                             master_session: None,
                             recall_at_tick: 0,
@@ -3798,6 +4038,23 @@ impl Message<Tick> for WorldActor {
                             data: walk_packet.clone(),
                         }).await;
                     }
+                }
+            }
+
+            // 广播 ObjectTurn（C# ProcessRoam 转身；ObjectID + Location(i32,i32) + Direction(u8)）
+            for (oid, dir, x, y) in &monster_turns {
+                let mut turn_body = Vec::new();
+                turn_body.extend_from_slice(&oid.to_le_bytes());
+                turn_body.extend_from_slice(&x.to_le_bytes());
+                turn_body.extend_from_slice(&y.to_le_bytes());
+                turn_body.push(*dir);
+                let turn_packet = build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::ObjectTurn as i16, &turn_body);
+                for session_id in self.players.keys() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: *session_id,
+                        data: turn_packet.clone(),
+                    }).await;
                 }
             }
 
@@ -4108,11 +4365,21 @@ impl Message<Tick> for WorldActor {
                     }
 
                     // 加入重生队列（延迟从 map_respawns.delay（秒）读取；C# RespawnInfo.Delay）
+                    // #1017：C# Map.cs——delay = max(1, Delay - RandomDelay + Random.Next(RandomDelay*2))
                     let respawn_delay_ticks: u64 = self.map_infos.get(&(monster.map_index as i32))
                         .and_then(|mi| mi.respawns.iter().find(|r| {
                             r.monster_index == monster.monster_index && r.x == monster.spawn_x && r.y == monster.spawn_y
                         }))
-                        .map(|r| (r.delay.max(1) as u64) * 10)
+                        .map(|r| {
+                            let base = r.delay.max(1) as i64;
+                            let rd = r.random_delay.max(0) as i64;
+                            let secs = if rd > 0 {
+                                (base - rd + fastrand::i64(0..(rd * 2))).max(1)
+                            } else {
+                                base
+                            };
+                            (secs as u64) * 10
+                        })
                         .unwrap_or(1800);
                     let respawn_tick = self.tick_count + respawn_delay_ticks;
                     let spawn = MonsterSpawn {

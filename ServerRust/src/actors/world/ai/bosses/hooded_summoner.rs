@@ -48,7 +48,7 @@ impl MonsterBehavior for HoodedSummonerBehavior {
         if dist <= VIEW_RANGE && ctx.tick_count < self.fear_end_tick
             && ctx.tick_count >= monster.next_attack_tick
         {
-            monster.next_attack_tick = ctx.tick_count + 8;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let roll = fastrand::i32(0..6);
 
             match roll {
@@ -103,7 +103,7 @@ impl MonsterBehavior for HoodedSummonerBehavior {
                 step_toward(monster.x, monster.y, target.x, target.y)
             };
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

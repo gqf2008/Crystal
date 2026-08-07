@@ -34,7 +34,7 @@ impl MonsterBehavior for FlameMageBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 8;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             // 命中目标 + 溅射 2 格内全体
             let splash: Vec<crate::actors::world::ai::PlayerSnap> =
                 ctx.find_targets_in_range(target.x, target.y, 2, monster.map_index)
@@ -62,7 +62,7 @@ impl MonsterBehavior for FlameMageBehavior {
                 return;
             };
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

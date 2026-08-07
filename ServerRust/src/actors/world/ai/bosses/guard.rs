@@ -44,7 +44,7 @@ impl MonsterBehavior for GuardBehavior {
         if targets.is_empty() {
             return;
         }
-        monster.next_attack_tick = ctx.tick_count + 5;
+        monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
         for t in targets {
             // 守卫对玩家用正常 DC（怪物秒杀逻辑不适用于玩家目标）
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);

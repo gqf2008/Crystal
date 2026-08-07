@@ -53,6 +53,329 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("cannibalplant") || name.contains("cannibal plant") || name.contains("食人花") {
         return Box::new(bosses::cannibal_plant::CannibalPlantBehavior::new());
     }
+    if name.contains("cavemaggot") || name.contains("cave maggot") || name.contains("洞穴蛆") {
+        return Box::new(bosses::cave_maggot::CaveMaggotBehavior::new());
+    }
+    if name.contains("bonespearman") || name.contains("bone spearman") || name.contains("骷髅枪兵") {
+        return Box::new(bosses::bone_spearman::BoneSpearmanBehavior::new());
+    }
+    if name.contains("sandworm") || name.contains("sand worm") || name.contains("沙虫") {
+        return Box::new(bosses::sand_worm::SandWormBehavior::new());
+    }
+    if name.contains("shamanzombie") || name.contains("shaman zombie") || name.contains("巫师僵尸") || name.contains("萨满僵尸") {
+        return Box::new(bosses::shaman_zombie::ShamanZombieBehavior::new());
+    }
+    if name.contains("straycat") || name.contains("stray cat") || name.contains("流浪猫") {
+        return Box::new(bosses::stray_cat::StrayCatBehavior::new());
+    }
+    if name.contains("darkbeast") || name.contains("dark beast") || name.contains("暗兽") {
+        return Box::new(bosses::dark_beast::DarkBeastBehavior::new());
+    }
+    // 注意：SnowWolf 判定放在 SnowWolfKing 之后（先匹配到 King 会提前 return）
+    if name.contains("snowwolf") || name.contains("snow wolf") || name.contains("雪狼") {
+        return Box::new(bosses::snow_wolf::SnowWolfBehavior::new());
+    }
+    if name.contains("mudzombie") || name.contains("mud zombie") || name.contains("泥僵尸") || name.contains("泥沼僵尸") {
+        return Box::new(bosses::mud_zombie::MudZombieBehavior::new());
+    }
+    if name.contains("incarnatedghoul") || name.contains("incarnated ghoul") || name.contains("附身尸") {
+        return Box::new(bosses::incarnated_ghoul::IncarnatedGhoulBehavior::new());
+    }
+    if name.contains("incarnatedzt") || name.contains("incarnated zt") || name.contains("附身祖玛") {
+        return Box::new(bosses::incarnated_zt::IncarnatedZTBehavior::new());
+    }
+    if name.contains("mantis") || name.contains("螳螂") {
+        return Box::new(bosses::mantis::MantisBehavior::new());
+    }
+    if name.contains("sandsnail") || name.contains("sand snail") || name.contains("沙蜗牛") {
+        return Box::new(bosses::sand_snail::SandSnailBehavior::new());
+    }
+    if name.contains("scalybeast") || name.contains("scaly beast") || name.contains("鳞兽") {
+        return Box::new(bosses::scaly_beast::ScalyBeastBehavior::new());
+    }
+    if name.contains("lightturtle") || name.contains("light turtle") || name.contains("光龟") {
+        return Box::new(bosses::light_turtle::LightTurtleBehavior::new());
+    }
+    if name.contains("hellcannibal") || name.contains("hell cannibal") || name.contains("地狱食人花") {
+        return Box::new(bosses::hell_cannibal::HellCannibalBehavior::new());
+    }
+    if name == "nadz" || name.contains("纳兹") {
+        return Box::new(bosses::nadz::NadzBehavior::new());
+    }
+    if name.contains("omawitchdoctor") || name.contains("oma witch doctor") || name.contains("奥玛巫医") {
+        return Box::new(bosses::oma_witch_doctor::OmaWitchDoctorBehavior::new());
+    }
+    if name.contains("swampwarrior") || name.contains("swamp warrior") || name.contains("沼泽战士") {
+        return Box::new(bosses::swamp_warrior::SwampWarriorBehavior::new());
+    }
+    if name.contains("omacannibal") || name.contains("oma cannibal") || name.contains("奥玛食人花") {
+        return Box::new(bosses::oma_cannibal::OmaCannibalBehavior::new());
+    }
+    if name.contains("burningzombie") || name.contains("burning zombie") || name.contains("燃烧僵尸") {
+        return Box::new(bosses::burning_zombie::BurningZombieBehavior::new());
+    }
+    if name.contains("antcommander") || name.contains("ant commander") || name.contains("蚁后指挥官") {
+        return Box::new(bosses::ant_commander::AntCommanderBehavior::new());
+    }
+    if name.contains("furbolgarcher") || name.contains("furbolg archer") || name.contains("兽人弓手") {
+        return Box::new(bosses::furbolg_archer::FurbolgArcherBehavior::new());
+    }
+    if name.contains("hellslasher") || name.contains("hell slasher") || name.contains("地狱斩击者") {
+        return Box::new(bosses::hell_slasher::HellSlasherBehavior::new());
+    }
+    if name.contains("omablest") || name.contains("oma blest") || name.contains("奥玛祝福者") {
+        return Box::new(bosses::oma_blest::OmaBlestBehavior::new());
+    }
+    if name.contains("elephantman") || name.contains("elephant man") || name.contains("象人") {
+        return Box::new(bosses::elephant_man::ElephantManBehavior::new());
+    }
+    if name.contains("treeguardian") || name.contains("tree guardian") || name.contains("树卫") {
+        return Box::new(bosses::tree_guardian::TreeGuardianBehavior::new());
+    }
+    if name.contains("frozenknight") || name.contains("frozen knight") || name.contains("冰霜骑士") {
+        return Box::new(bosses::frozen_knight::FrozenKnightBehavior::new());
+    }
+    if name.contains("glacierbeast") || name.contains("glacier beast") || name.contains("冰川兽") {
+        return Box::new(bosses::glacier_beast::GlacierBeastBehavior::new());
+    }
+    if name.contains("redfoxman") || name.contains("red foxman") || name.contains("红狐人") {
+        return Box::new(bosses::red_foxman::RedFoxmanBehavior::new());
+    }
+    if name.contains("whitefoxman") || name.contains("white foxman") || name.contains("白狐人") {
+        return Box::new(bosses::white_foxman::WhiteFoxmanBehavior::new());
+    }
+    if name.contains("snowyeti") || name.contains("snow yeti") || name.contains("雪猿") {
+        return Box::new(bosses::snow_yeti::SnowYetiBehavior::new());
+    }
+    if name.contains("furbolgguard") || name.contains("furbolg guard") || name.contains("兽人守卫") {
+        return Box::new(bosses::furbolg_guard::FurbolgGuardBehavior::new());
+    }
+    if name.contains("furbolgcommander") || name.contains("furbolg commander") || name.contains("兽人指挥官") {
+        return Box::new(bosses::furbolg_commander::FurbolgCommanderBehavior::new());
+    }
+    if name.contains("chieftainarcher") || name.contains("chieftain archer") || name.contains("酋长弓手") {
+        return Box::new(bosses::chieftain_archer::ChieftainArcherBehavior::new());
+    }
+    if name.contains("redthunderzuma") || name.contains("red thunder zuma") || name.contains("红雷祖玛") {
+        return Box::new(bosses::red_thunder_zuma::RedThunderZumaBehavior::new());
+    }
+    if name.contains("weretiger") || name.contains("were tiger") || name.contains("虎人") {
+        return Box::new(bosses::were_tiger::WereTigerBehavior::new());
+    }
+    if name.contains("darkwraith") || name.contains("dark wraith") || name.contains("黑暗幽灵") {
+        return Box::new(bosses::dark_wraith::DarkWraithBehavior::new());
+    }
+    if name.contains("peacockspider") || name.contains("peacock spider") || name.contains("孔雀蜘蛛") {
+        return Box::new(bosses::peacock_spider::PeacockSpiderBehavior::new());
+    }
+    if name.contains("mantree") || name.contains("man tree") || name.contains("树人") {
+        return Box::new(bosses::man_tree::ManTreeBehavior::new());
+    }
+    if name.contains("frozenmagician") || name.contains("frozen magician") || name.contains("冰霜法师") {
+        return Box::new(bosses::frozen_magician::FrozenMagicianBehavior::new());
+    }
+    if name.contains("frozenzombie") || name.contains("frozen zombie") || name.contains("冰霜僵尸") {
+        return Box::new(bosses::frozen_zombie::FrozenZombieBehavior::new());
+    }
+    if name.contains("frozenaxeman") || name.contains("frozen axeman") || name.contains("冰霜斧手") {
+        return Box::new(bosses::frozen_axeman::FrozenAxemanBehavior::new());
+    }
+    if name.contains("icecrystalsoldier") || name.contains("ice crystal soldier") || name.contains("冰晶士兵") {
+        return Box::new(bosses::ice_crystal_soldier::IceCrystalSoldierBehavior::new());
+    }
+    if name.contains("blackfoxman") || name.contains("black foxman") || name.contains("黑狐人") {
+        return Box::new(bosses::black_foxman::BlackFoxmanBehavior::new());
+    }
+    if name.contains("blackhammercat") || name.contains("black hammer cat") || name.contains("黑锤猫") {
+        return Box::new(bosses::black_hammer_cat::BlackHammerCatBehavior::new());
+    }
+    if name.contains("hellpirate") || name.contains("hell pirate") || name.contains("地狱海盗") {
+        return Box::new(bosses::hell_pirate::HellPirateBehavior::new());
+    }
+    if name.contains("cannibaltentacles") || name.contains("cannibal tentacles") || name.contains("食人触手") {
+        return Box::new(bosses::cannibal_tentacles::CannibalTentaclesBehavior::new());
+    }
+    if name.contains("tucsonwarrior") || name.contains("tucson warrior") || name.contains("图森战士") {
+        return Box::new(bosses::tucson_warrior::TucsonWarriorBehavior::new());
+    }
+    if name.contains("turtlegrass") || name.contains("turtle grass") || name.contains("龟草") {
+        return Box::new(bosses::turtlegrass::TurtlegrassBehavior::new());
+    }
+    if name.contains("finialturtle") || name.contains("finial turtle") || name.contains("终结龟") {
+        return Box::new(bosses::finial_turtle::FinialTurtleBehavior::new());
+    }
+    if name.contains("avengingspirit") || name.contains("avenging spirit") || name.contains("复仇之魂") {
+        return Box::new(bosses::avenging_spirit::AvengingSpiritBehavior::new());
+    }
+    if name.contains("bluesoul") || name.contains("blue soul") || name.contains("蓝魂") {
+        return Box::new(bosses::blue_soul::BlueSoulBehavior::new());
+    }
+    if name.contains("flamescythe") || name.contains("flame scythe") || name.contains("火焰镰刀") {
+        return Box::new(bosses::flame_scythe::FlameScytheBehavior::new());
+    }
+    if name.contains("flamespear") || name.contains("flame spear") || name.contains("火焰长矛") {
+        return Box::new(bosses::flame_spear::FlameSpearBehavior::new());
+    }
+    if name.contains("avengingwarrior") || name.contains("avenging warrior") || name.contains("复仇战士") {
+        return Box::new(bosses::avenging_warrior::AvengingWarriorBehavior::new());
+    }
+    if name.contains("blacktortoise") || name.contains("black tortoise") || name.contains("黑龟") {
+        return Box::new(bosses::black_tortoise::BlackTortoiseBehavior::new());
+    }
+    if name.contains("manectricclaw") || name.contains("manectric claw") || name.contains("雷兽之爪") {
+        return Box::new(bosses::manectric_claw::ManectricClawBehavior::new());
+    }
+    if name.contains("hardenrhino") || name.contains("harden rhino") || name.contains("硬皮犀牛") {
+        return Box::new(bosses::harden_rhino::HardenRhinoBehavior::new());
+    }
+    if name.contains("creeperplant") || name.contains("creeper plant") || name.contains("爬行植物") {
+        return Box::new(bosses::creeper_plant::CreeperPlantBehavior::new());
+    }
+    if name.contains("hellbomb") || name.contains("hell bomb") || name.contains("地狱炸弹") {
+        return Box::new(bosses::hell_bomb::HellBombBehavior::new());
+    }
+    if name.contains("frozenminer") || name.contains("frozen miner") || name.contains("冰霜矿工") {
+        return Box::new(bosses::frozen_miner::FrozenMinerBehavior::new());
+    }
+    if name.contains("glaciersnail") || name.contains("glacier snail") || name.contains("冰川蜗牛") {
+        return Box::new(bosses::glacier_snail::GlacierSnailBehavior::new());
+    }
+    if name.contains("omaslasher") || name.contains("oma slasher") || name.contains("奥玛斩击者") {
+        return Box::new(bosses::oma_slasher::OmaSlasherBehavior::new());
+    }
+    if name.contains("manectricblest") || name.contains("manectric blest") || name.contains("雷兽祝福") {
+        return Box::new(bosses::manectric_blest::ManectricBlestBehavior::new());
+    }
+    if name.contains("glacierwarrior") || name.contains("glacier warrior") || name.contains("冰川战士") {
+        return Box::new(bosses::glacier_warrior::GlacierWarriorBehavior::new());
+    }
+    if name.contains("mutatedmanworm") || name.contains("mutated manworm") || name.contains("变异蠕虫") {
+        return Box::new(bosses::mutated_manworm::MutatedManwormBehavior::new());
+    }
+    if name.contains("mandrill") || name.contains("山魈") {
+        return Box::new(bosses::mandrill::MandrillBehavior::new());
+    }
+    if name.contains("frosttiger") || name.contains("frost tiger") || name.contains("霜虎") {
+        return Box::new(bosses::frost_tiger::FrostTigerBehavior::new());
+    }
+    if name.contains("restlessjar") || name.contains("restless jar") || name.contains("躁动之坛") {
+        return Box::new(bosses::restless_jar::RestlessJarBehavior::new());
+    }
+    if name.contains("spittingtoad") || name.contains("spitting toad") || name.contains("吐毒蟾蜍") {
+        return Box::new(bosses::spitting_toad::SpittingToadBehavior::new());
+    }
+    if name.contains("charmedsnake") || name.contains("charmed snake") || name.contains("魅惑蛇") {
+        return Box::new(bosses::charmed_snake::CharmedSnakeBehavior::new());
+    }
+    if name.contains("flyingstatue") || name.contains("flying statue") || name.contains("飞石像") {
+        return Box::new(bosses::flying_statue::FlyingStatueBehavior::new());
+    }
+    if name.contains("demonwolf") || name.contains("demon wolf") || name.contains("恶魔狼") {
+        return Box::new(bosses::demon_wolf::DemonWolfBehavior::new());
+    }
+    if name.contains("tucsonegg") || name.contains("tucson egg") || name.contains("图森之蛋") {
+        return Box::new(bosses::tucson_egg::TucsonEggBehavior::new());
+    }
+    if name.contains("deathcrawler") || name.contains("death crawler") || name.contains("死亡爬行者") {
+        return Box::new(bosses::death_crawler::DeathCrawlerBehavior::new());
+    }
+    if name.contains("snaketotem") || name.contains("snake totem") || name.contains("蛇图腾") {
+        return Box::new(bosses::snake_totem::SnakeTotemBehavior::new());
+    }
+    if name.contains("jar2") || name.contains("坛子2") {
+        return Box::new(bosses::jar2::Jar2Behavior::new());
+    }
+    if name.contains("assassinbird") || name.contains("assassin bird") || name.contains("刺客鸟") {
+        return Box::new(bosses::assassin_bird::AssassinBirdBehavior::new());
+    }
+    if name.contains("armadilloelder") || name.contains("armadillo elder") || name.contains("犰狳长老") {
+        return Box::new(bosses::armadillo_elder::ArmadilloElderBehavior::new());
+    }
+    if name.contains("axeplant") || name.contains("axe plant") || name.contains("斧头植物") {
+        return Box::new(bosses::axe_plant::AxePlantBehavior::new());
+    }
+    if name.contains("hedgekektal") || name.contains("hedge kek tal") || name.contains("刺猬凯克塔") {
+        return Box::new(bosses::hedge_kek_tal::HedgeKekTalBehavior::new());
+    }
+    if name.contains("flameassassin") || name.contains("flame assassin") || name.contains("火焰刺客") {
+        return Box::new(bosses::flame_assassin::FlameAssassinBehavior::new());
+    }
+    if name.contains("yindevi") || name.contains("yin devil") || name.contains("阴魔") {
+        return Box::new(bosses::yin_devil_node::YinDevilNodeBehavior::new());
+    }
+    if name.contains("powerbead") || name.contains("power bead") || name.contains("能量珠") {
+        return Box::new(bosses::power_bead::PowerBeadBehavior::new());
+    }
+    if name.contains("demonguard") || name.contains("demon guard") || name.contains("恶魔守卫") {
+        return Box::new(bosses::demon_guard::DemonGuardBehavior::new());
+    }
+    if name.contains("traprock") || name.contains("trap rock") || name.contains("陷阱岩") {
+        return Box::new(bosses::trap_rock::TrapRockBehavior::new());
+    }
+    if name.contains("sepwarrior") || name.contains("sep warrior") || name.contains("圣战战士") {
+        return Box::new(bosses::sep_warrior::SepWarriorBehavior::new());
+    }
+    if name.contains("separcher") || name.contains("sep archer") || name.contains("圣战弓手") {
+        return Box::new(bosses::sep_archer::SepArcherBehavior::new());
+    }
+    if name.contains("septaoist") || name.contains("sep taoist") || name.contains("圣战道士") {
+        return Box::new(bosses::sep_taoist::SepTaoistBehavior::new());
+    }
+    if name.contains("sepwizard") || name.contains("sep wizard") || name.contains("圣战法师") {
+        return Box::new(bosses::sep_wizard::SepWizardBehavior::new());
+    }
+    if name.contains("sepassassin") || name.contains("sep assassin") || name.contains("圣战刺客") {
+        return Box::new(bosses::sep_assassin::SepAssassinBehavior::new());
+    }
+    // SepHigh* 高级变体复用对应基础行为
+    if name.contains("sephighwarrior") || name.contains("sep high warrior") {
+        return Box::new(bosses::sep_warrior::SepWarriorBehavior::new());
+    }
+    if name.contains("sephigharcher") || name.contains("sep high archer") {
+        return Box::new(bosses::sep_archer::SepArcherBehavior::new());
+    }
+    if name.contains("sephightaoist") || name.contains("sep high taoist") {
+        return Box::new(bosses::sep_taoist::SepTaoistBehavior::new());
+    }
+    if name.contains("sephighwizard") || name.contains("sep high wizard") {
+        return Box::new(bosses::sep_wizard::SepWizardBehavior::new());
+    }
+    if name.contains("sephighassassin") || name.contains("sep high assassin") {
+        return Box::new(bosses::sep_assassin::SepAssassinBehavior::new());
+    }
+    if name.contains("dragonwarrior") || name.contains("dragon warrior") || name.contains("龙战士") {
+        return Box::new(bosses::dragon_warrior::DragonWarriorBehavior::new());
+    }
+    if name.contains("sackwarrior") || name.contains("sack warrior") || name.contains("布袋战士") {
+        return Box::new(bosses::sack_warrior::SackWarriorBehavior::new());
+    }
+    if name.contains("archerguard") || name.contains("archer guard") || name.contains("弓箭守卫") {
+        return Box::new(bosses::archer_guard::ArcherGuardBehavior::new());
+    }
+    if name.contains("conquestarcher") || name.contains("conquest archer") || name.contains("征服弓手") {
+        return Box::new(bosses::town_archer::TownArcherBehavior::new());
+    }
+    if name.contains("dragonstatue") || name.contains("dragon statue") || name.contains("龙雕像") {
+        return Box::new(bosses::dragon_statue::DragonStatueBehavior::new());
+    }
+    if name.contains("floatingrock") || name.contains("floating rock") || name.contains("浮石") {
+        return Box::new(bosses::floating_rock::FloatingRockBehavior::new());
+    }
+    if name.contains("hoodedsummonerscroll") || name.contains("hooded summoner scroll") || name.contains("兜帽召唤卷轴") {
+        return Box::new(bosses::hooded_summoner_scrolls::HoodedSummonerScrollsBehavior::new());
+    }
+    if name.contains("siege") || name.contains("攻城") {
+        return Box::new(bosses::siege::SiegeBehavior::new());
+    }
+    if name.contains("woodbox") || name.contains("wood box") || name.contains("木箱") {
+        return Box::new(bosses::wood_box::WoodBoxBehavior::new());
+    }
+    if name.contains("icepillar") || name.contains("ice pillar") || name.contains("冰柱") {
+        return Box::new(bosses::ice_pillar::IcePillarBehavior::new());
+    }
+    if name.contains("boulderspirit") || name.contains("boulder spirit") || name.contains("巨石之灵") || name.contains("巨石") {
+        return Box::new(bosses::boulder_spirit::BoulderSpiritBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -87,6 +410,15 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     }
     if name.contains("spittingspider") || name.contains("spitting spider") || name.contains("吐丝蜘蛛") {
         return Box::new(bosses::spitting_spider::SpittingSpiderBehavior::new());
+    }
+    if name.contains("stonetrap") || name.contains("stone trap") || name.contains("石阵") {
+        return Box::new(bosses::stone_trap::StoneTrapBehavior::new());
+    }
+    if name.contains("redmoonevil") || name.contains("red moon evil") || name.contains("红月恶魔") {
+        return Box::new(bosses::red_moon_evil::RedMoonEvilBehavior::new());
+    }
+    if name.contains("toxicghoul") || name.contains("toxic ghoul") || name.contains("毒尸") {
+        return Box::new(bosses::toxic_ghoul::ToxicGhoulBehavior::new());
     }
     if name.contains("bugbagmaggot") || name.contains("bugbag maggot") || name.contains("虫袋蛆") {
         return Box::new(bosses::bug_bag_maggot::BugBagMaggotBehavior::new());
@@ -180,6 +512,10 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
         return Box::new(bosses::town_archer::TownArcherBehavior::new());
     }
     if name.contains("castlegate") || name.contains("castle gate") || name.contains("城门") {
+        return Box::new(bosses::castle_gate::CastleGateBehavior::new());
+    }
+    if name == "gate" || name == "gate2" {
+        // C# Gate.cs：CastleGate 子类（仅覆写 GetDamageLevel），复用城门行为
         return Box::new(bosses::castle_gate::CastleGateBehavior::new());
     }
     if name.contains("digoutzombie") || name.contains("digout zombie") || name.contains("钻地僵尸") {
@@ -312,6 +648,113 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("zumataurus") || name.contains("zuma taurus") || name.contains("祖玛教主") || name.contains("祖玛金牛")
         || name.contains("evilcentipede") || name.contains("evil centipede") || name.contains("地蜈蚣") || name.contains("触角恶魔")
         || name.contains("cannibalplant") || name.contains("cannibal plant") || name.contains("食人花")
+        || name.contains("cavemaggot") || name.contains("cave maggot") || name.contains("洞穴蛆")
+        || name.contains("bonespearman") || name.contains("bone spearman") || name.contains("骷髅枪兵")
+        || name.contains("sandworm") || name.contains("sand worm") || name.contains("沙虫")
+        || name.contains("shamanzombie") || name.contains("shaman zombie") || name.contains("巫师僵尸") || name.contains("萨满僵尸")
+        || name.contains("straycat") || name.contains("stray cat") || name.contains("流浪猫")
+        || name.contains("darkbeast") || name.contains("dark beast") || name.contains("暗兽")
+        || name.contains("snowwolf") || name.contains("snow wolf") || name.contains("雪狼")
+        || name.contains("mudzombie") || name.contains("mud zombie") || name.contains("泥僵尸") || name.contains("泥沼僵尸")
+        || name.contains("incarnatedghoul") || name.contains("incarnated ghoul") || name.contains("附身尸")
+        || name.contains("incarnatedzt") || name.contains("incarnated zt") || name.contains("附身祖玛")
+        || name.contains("mantis") || name.contains("螳螂")
+        || name.contains("sandsnail") || name.contains("sand snail") || name.contains("沙蜗牛")
+        || name.contains("scalybeast") || name.contains("scaly beast") || name.contains("鳞兽")
+        || name.contains("lightturtle") || name.contains("light turtle") || name.contains("光龟")
+        || name.contains("hellcannibal") || name.contains("hell cannibal") || name.contains("地狱食人花")
+        || name == "nadz" || name.contains("纳兹")
+        || name.contains("omawitchdoctor") || name.contains("oma witch doctor") || name.contains("奥玛巫医")
+        || name.contains("swampwarrior") || name.contains("swamp warrior") || name.contains("沼泽战士")
+        || name.contains("omacannibal") || name.contains("oma cannibal") || name.contains("奥玛食人花")
+        || name.contains("burningzombie") || name.contains("burning zombie") || name.contains("燃烧僵尸")
+        || name.contains("antcommander") || name.contains("ant commander") || name.contains("蚁后指挥官")
+        || name.contains("furbolgarcher") || name.contains("furbolg archer") || name.contains("兽人弓手")
+        || name.contains("hellslasher") || name.contains("hell slasher") || name.contains("地狱斩击者")
+        || name.contains("omablest") || name.contains("oma blest") || name.contains("奥玛祝福者")
+        || name.contains("elephantman") || name.contains("elephant man") || name.contains("象人")
+        || name.contains("treeguardian") || name.contains("tree guardian") || name.contains("树卫")
+        || name.contains("frozenknight") || name.contains("frozen knight") || name.contains("冰霜骑士")
+        || name.contains("glacierbeast") || name.contains("glacier beast") || name.contains("冰川兽")
+        || name.contains("redfoxman") || name.contains("red foxman") || name.contains("红狐人")
+        || name.contains("whitefoxman") || name.contains("white foxman") || name.contains("白狐人")
+        || name.contains("snowyeti") || name.contains("snow yeti") || name.contains("雪猿")
+        || name.contains("furbolgguard") || name.contains("furbolg guard") || name.contains("兽人守卫")
+        || name.contains("furbolgcommander") || name.contains("furbolg commander") || name.contains("兽人指挥官")
+        || name.contains("chieftainarcher") || name.contains("chieftain archer") || name.contains("酋长弓手")
+        || name.contains("redthunderzuma") || name.contains("red thunder zuma") || name.contains("红雷祖玛")
+        || name.contains("weretiger") || name.contains("were tiger") || name.contains("虎人")
+        || name.contains("darkwraith") || name.contains("dark wraith") || name.contains("黑暗幽灵")
+        || name.contains("peacockspider") || name.contains("peacock spider") || name.contains("孔雀蜘蛛")
+        || name.contains("mantree") || name.contains("man tree") || name.contains("树人")
+        || name.contains("frozenmagician") || name.contains("frozen magician") || name.contains("冰霜法师")
+        || name.contains("frozenzombie") || name.contains("frozen zombie") || name.contains("冰霜僵尸")
+        || name.contains("frozenaxeman") || name.contains("frozen axeman") || name.contains("冰霜斧手")
+        || name.contains("icecrystalsoldier") || name.contains("ice crystal soldier") || name.contains("冰晶士兵")
+        || name.contains("blackfoxman") || name.contains("black foxman") || name.contains("黑狐人")
+        || name.contains("blackhammercat") || name.contains("black hammer cat") || name.contains("黑锤猫")
+        || name.contains("hellpirate") || name.contains("hell pirate") || name.contains("地狱海盗")
+        || name.contains("cannibaltentacles") || name.contains("cannibal tentacles") || name.contains("食人触手")
+        || name.contains("tucsonwarrior") || name.contains("tucson warrior") || name.contains("图森战士")
+        || name.contains("turtlegrass") || name.contains("turtle grass") || name.contains("龟草")
+        || name.contains("finialturtle") || name.contains("finial turtle") || name.contains("终结龟")
+        || name.contains("avengingspirit") || name.contains("avenging spirit") || name.contains("复仇之魂")
+        || name.contains("bluesoul") || name.contains("blue soul") || name.contains("蓝魂")
+        || name.contains("flamescythe") || name.contains("flame scythe") || name.contains("火焰镰刀")
+        || name.contains("flamespear") || name.contains("flame spear") || name.contains("火焰长矛")
+        || name.contains("avengingwarrior") || name.contains("avenging warrior") || name.contains("复仇战士")
+        || name.contains("blacktortoise") || name.contains("black tortoise") || name.contains("黑龟")
+        || name.contains("manectricclaw") || name.contains("manectric claw") || name.contains("雷兽之爪")
+        || name.contains("hardenrhino") || name.contains("harden rhino") || name.contains("硬皮犀牛")
+        || name.contains("creeperplant") || name.contains("creeper plant") || name.contains("爬行植物")
+        || name.contains("hellbomb") || name.contains("hell bomb") || name.contains("地狱炸弹")
+        || name.contains("frozenminer") || name.contains("frozen miner") || name.contains("冰霜矿工")
+        || name.contains("glaciersnail") || name.contains("glacier snail") || name.contains("冰川蜗牛")
+        || name.contains("omaslasher") || name.contains("oma slasher") || name.contains("奥玛斩击者")
+        || name.contains("manectricblest") || name.contains("manectric blest") || name.contains("雷兽祝福")
+        || name.contains("glacierwarrior") || name.contains("glacier warrior") || name.contains("冰川战士")
+        || name.contains("mutatedmanworm") || name.contains("mutated manworm") || name.contains("变异蠕虫")
+        || name.contains("mandrill") || name.contains("山魈")
+        || name.contains("frosttiger") || name.contains("frost tiger") || name.contains("霜虎")
+        || name.contains("restlessjar") || name.contains("restless jar") || name.contains("躁动之坛")
+        || name.contains("spittingtoad") || name.contains("spitting toad") || name.contains("吐毒蟾蜍")
+        || name.contains("charmedsnake") || name.contains("charmed snake") || name.contains("魅惑蛇")
+        || name.contains("flyingstatue") || name.contains("flying statue") || name.contains("飞石像")
+        || name.contains("demonwolf") || name.contains("demon wolf") || name.contains("恶魔狼")
+        || name.contains("tucsonegg") || name.contains("tucson egg") || name.contains("图森之蛋")
+        || name.contains("deathcrawler") || name.contains("death crawler") || name.contains("死亡爬行者")
+        || name.contains("snaketotem") || name.contains("snake totem") || name.contains("蛇图腾")
+        || name.contains("jar2") || name.contains("坛子2")
+        || name.contains("assassinbird") || name.contains("assassin bird") || name.contains("刺客鸟")
+        || name.contains("armadilloelder") || name.contains("armadillo elder") || name.contains("犰狳长老")
+        || name.contains("axeplant") || name.contains("axe plant") || name.contains("斧头植物")
+        || name.contains("hedgekektal") || name.contains("hedge kek tal") || name.contains("刺猬凯克塔")
+        || name.contains("flameassassin") || name.contains("flame assassin") || name.contains("火焰刺客")
+        || name.contains("yindevi") || name.contains("yin devil") || name.contains("阴魔")
+        || name.contains("powerbead") || name.contains("power bead") || name.contains("能量珠")
+        || name.contains("demonguard") || name.contains("demon guard") || name.contains("恶魔守卫")
+        || name.contains("traprock") || name.contains("trap rock") || name.contains("陷阱岩")
+        || name.contains("sepwarrior") || name.contains("sep warrior") || name.contains("圣战战士")
+        || name.contains("separcher") || name.contains("sep archer") || name.contains("圣战弓手")
+        || name.contains("septaoist") || name.contains("sep taoist") || name.contains("圣战道士")
+        || name.contains("sepwizard") || name.contains("sep wizard") || name.contains("圣战法师")
+        || name.contains("sepassassin") || name.contains("sep assassin") || name.contains("圣战刺客")
+        || name.contains("sephighwarrior") || name.contains("sep high warrior")
+        || name.contains("sephigharcher") || name.contains("sep high archer")
+        || name.contains("sephightaoist") || name.contains("sep high taoist")
+        || name.contains("sephighwizard") || name.contains("sep high wizard")
+        || name.contains("sephighassassin") || name.contains("sep high assassin")
+        || name.contains("dragonwarrior") || name.contains("dragon warrior") || name.contains("龙战士")
+        || name.contains("sackwarrior") || name.contains("sack warrior") || name.contains("布袋战士")
+        || name.contains("archerguard") || name.contains("archer guard") || name.contains("弓箭守卫")
+        || name.contains("conquestarcher") || name.contains("conquest archer") || name.contains("征服弓手")
+        || name.contains("dragonstatue") || name.contains("dragon statue") || name.contains("龙雕像")
+        || name.contains("floatingrock") || name.contains("floating rock") || name.contains("浮石")
+        || name.contains("hoodedsummonerscroll") || name.contains("hooded summoner scroll") || name.contains("兜帽召唤卷轴")
+        || name.contains("siege") || name.contains("攻城")
+        || name.contains("woodbox") || name.contains("wood box") || name.contains("木箱")
+        || name.contains("icepillar") || name.contains("ice pillar") || name.contains("冰柱")
+        || name.contains("boulderspirit") || name.contains("boulder spirit") || name.contains("巨石之灵") || name.contains("巨石")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
@@ -324,12 +767,16 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("zumamonster") || name.contains("zuma monster") || name.contains("祖玛怪")
         || name.contains("axeskeleton") || name.contains("axe skeleton") || name.contains("掷斧骷髅") || name.contains("斧骷髅")
         || name.contains("spittingspider") || name.contains("spitting spider") || name.contains("吐丝蜘蛛")
+        || name.contains("stonetrap") || name.contains("stone trap") || name.contains("石阵")
+        || name.contains("redmoonevil") || name.contains("red moon evil") || name.contains("红月恶魔")
+        || name.contains("toxicghoul") || name.contains("toxic ghoul") || name.contains("毒尸")
         || name.contains("bugbagmaggot") || name.contains("虫袋蛆")
         || name.contains("bombspider") || name.contains("bomb spider") || name.contains("炸弹蜘蛛")
         || name == "hugger"
         || name == "guard" || (name.starts_with("guard") && !name.contains("town") && !name.contains("guardian") && !name.contains("vanguard") && !name.contains("bodyguard"))
         || name.contains("townarcher") || name.contains("town archer") || name.contains("城镇弓箭手")
         || name.contains("castlegate") || name.contains("castle gate") || name.contains("城门")
+        || name == "gate" || name == "gate2"
         || name.contains("digoutzombie") || name.contains("digout zombie") || name.contains("钻地僵尸")
         || name.contains("revivingzombie") || name.contains("reviving zombie") || name.contains("复活僵尸")
         || name == "jar1" || name.contains("坛子")
@@ -407,12 +854,9 @@ pub fn is_static_object(monster_name: &str) -> bool {
     name == "tree"
         || name == "wall"
         || name == "cavestatue" || name.contains("cave statue") || name.contains("洞穴雕像")
-        || name == "boulderspirit" || name.contains("boulder spirit") || name.contains("巨石之灵")
         || name == "evilmirbody" || name.contains("evil mir body") || name.contains("邪龙身躯")
-        || name == "icepillar" || name.contains("ice pillar") || name.contains("冰柱")
-        || name == "woodbox" || name.contains("wood box") || name.contains("木箱")
         || name == "cargobox" || name.contains("cargo box") || name.contains("货箱")
-        || name == "restlessjar" || name.contains("restless jar") || name.contains("躁动之坛")
+        // 注意：RestlessJar 曾在此列表（CanMove=false），但它 CanAttack=true，已改由专属 RestlessJarBehavior 处理（#1089）
         || name == "purplefaeflower" || name.contains("purple fae flower") || name.contains("紫妖花")
         || name == "blockingobject" || name.contains("blocking object") || name.contains("阻挡物")
 }
@@ -436,15 +880,67 @@ mod tests {
     use super::*;
 
     #[test]
-    fn archer_guard_not_boss() {
-        // #471 修复：ArcherGuard 等普通守卫不应被当作 Boss（否则跳过 tick 死亡判定 → 无敌）
-        assert!(!is_registered_boss("ArcherGuard"));
-        assert!(!is_registered_boss("archerguard"));
+    fn archer_guard_registered() {
+        // #471 时代注册 Boss 会跳过 tick 死亡判定导致无敌；该问题已在 #1013 修复（Boss hp<=0 进 dead_monsters）。
+        // ArcherGuard 现注册专属行为（静态远程守卫），死亡判定安全。
+        assert!(is_registered_boss("ArcherGuard"));
+        assert!(is_registered_boss("archerguard"));
     }
 
     #[test]
     fn plain_guard_still_boss_behavior() {
         assert!(is_registered_boss("Guard"));
         assert!(is_registered_boss("Guard2"));
+    }
+
+    #[test]
+    fn monster_ai_batch_registered() {
+        // #1022-#1120 批次的特殊怪全部注册（覆盖 40+ 新怪抽查）
+        for name in [
+            "SandWorm", "ShamanZombie", "StrayCat", "DarkBeast", "SnowWolf", "MudZombie",
+            "IncarnatedGhoul", "IncarnatedZT", "Mantis", "SandSnail", "ScalyBeast", "LightTurtle",
+            "HellCannibal", "Nadz", "OmaWitchDoctor", "SwampWarrior", "OmaCannibal", "BurningZombie",
+            "AntCommander", "FurbolgArcher", "HellSlasher", "OmaBlest", "ElephantMan", "TreeGuardian",
+            "FrozenKnight", "GlacierBeast", "RedFoxman", "WhiteFoxman", "SnowYeti", "FurbolgGuard",
+            "FurbolgCommander", "ChieftainArcher", "RedThunderZuma", "WereTiger", "DarkWraith",
+            "PeacockSpider", "ManTree", "FrozenMagician", "FrozenZombie", "FrozenAxeman",
+            "IceCrystalSoldier", "BlackFoxman", "BlackHammerCat", "HellPirate", "CannibalTentacles",
+            "TucsonWarrior", "Turtlegrass", "FinialTurtle", "AvengingSpirit", "BlueSoul",
+            "FlameScythe", "FlameSpear", "AvengingWarrior", "BlackTortoise", "ManectricClaw",
+            "HardenRhino", "CreeperPlant", "HellBomb", "FrozenMiner", "GlacierSnail", "OmaSlasher",
+            "ManectricBlest", "GlacierWarrior", "MutatedManworm", "Mandrill", "FrostTiger",
+            "RestlessJar", "SpittingToad", "CharmedSnake", "FlyingStatue", "DemonWolf",
+            "TucsonEgg", "DeathCrawler", "SnakeTotem", "Jar2", "AssassinBird", "ArmadilloElder",
+            "AxePlant", "HedgeKekTal", "FlameAssassin", "YinDevilNode", "PowerBead", "DemonGuard",
+            "TrapRock", "SepWarrior", "SepArcher", "SepTaoist", "SepWizard", "SepAssassin",
+            "SepHighWarrior", "SepHighArcher", "SepHighTaoist", "SepHighWizard", "SepHighAssassin",
+            "DragonWarrior", "SackWarrior", "ArcherGuard", "ConquestArcher", "DragonStatue",
+            "FloatingRock", "HoodedSummonerScrolls", "Siege",
+        ] {
+            assert!(is_registered_boss(name), "{} should be registered", name);
+            // make_behavior 注册命中（DefaultBehavior 无 as_any_mut 区分，仅验证注册 + 可构建）
+            let _b = make_behavior(name);
+        }
+    }
+
+    #[test]
+    fn static_and_passive_stay_default() {
+        for name in ["Tree", "Wall", "CaveStatue",
+                      "CargoBox", "PurpleFaeFlower", "BlockingObject", "EvilMirBody",
+                      "Deer", "Doe", "Football"] {
+            assert!(!is_registered_boss(name), "{} should not be registered", name);
+        }
+        // WoodBox/IcePillar/BoulderSpirit 现注册专属行为（#1130-#1132 死亡/受击机制），不再走静态拦截
+        assert!(is_registered_boss("WoodBox"));
+        assert!(is_registered_boss("IcePillar"));
+        assert!(is_registered_boss("BoulderSpirit"));
+        assert!(!is_static_object("WoodBox"));
+        assert!(!is_static_object("IcePillar"));
+        assert!(!is_static_object("BoulderSpirit"));
+        assert!(is_static_object("Tree"));
+        assert!(is_static_object("Wall"));
+        assert!(is_static_object("CaveStatue"));
+        assert!(is_passive_object("Deer"));
+        assert!(is_passive_object("Football"));
     }
 }

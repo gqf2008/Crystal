@@ -36,7 +36,7 @@ impl MonsterBehavior for TownArcherBehavior {
             None => return,
         };
         monster.target_session = Some(target.session_id);
-        monster.next_attack_tick = ctx.tick_count + 8;
+        monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
         let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
         ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {

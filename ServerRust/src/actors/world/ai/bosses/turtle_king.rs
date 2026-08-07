@@ -77,7 +77,7 @@ impl MonsterBehavior for TurtleKingBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 5;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let in_close = dist <= CLOSE_RANGE;
             if in_close {
                 // 近战三形态（C# Random(5)）
@@ -110,10 +110,13 @@ impl MonsterBehavior for TurtleKingBehavior {
                         damage,
                         spell_id: 0,
                     });
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::DAZED, 3, 0, 1000),
-                    });
+                    // C# PoisonTarget 1/8
+                        if fastrand::i32(0..8) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::DAZED, 3, damage, 1000),
+                        });
+                        }
                 }
             } else {
                 // 远程三形态（C# TurtleKing.cs:78-95：1/4 拉拽玩家 / 1/4 自身瞬移 / 1/2 远程）
@@ -147,20 +150,26 @@ impl MonsterBehavior for TurtleKingBehavior {
                         damage,
                         spell_id: 0,
                     });
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::SLOW, 5, 0, 1000),
-                    });
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::PARALYSIS, 2, 0, 1000),
-                    });
+                    // C# PoisonTarget 1/5
+                        if fastrand::i32(0..5) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::SLOW, 15, damage, 1000),
+                        });
+                        }
+                    // C# PoisonTarget 1/5
+                        if fastrand::i32(0..5) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 1000),
+                        });
+                        }
                 }
             }
         } else if dist > ATTACK_RANGE && ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

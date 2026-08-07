@@ -97,7 +97,7 @@ impl MonsterBehavior for EvilCentipedeBehavior {
         if !has_target {
             return;
         }
-        monster.next_attack_tick = ctx.tick_count + 10; // AttackSpeed ≈ 1s
+        monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
         // 先收集目标避免借用冲突
         let targets: Vec<crate::actors::world::ai::PlayerSnap> =
@@ -115,15 +115,21 @@ impl MonsterBehavior for EvilCentipedeBehavior {
                 attack_type: 0,
             });
             // Green 15s（C# PoisonTarget(Target, 5, 15, Green, 2000)）
-            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                session_id: t.session_id,
-                poison: Poison::new(PoisonType::GREEN, 15, 8, 2000),
-            });
+            // C# PoisonTarget 1/5
+                if fastrand::i32(0..5) == 0 {
+                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                    session_id: t.session_id,
+                    poison: Poison::new(PoisonType::GREEN, 15, damage, 2000),
+                });
+                }
             // Paralysis 5s（C# PoisonTarget(Target, 15, 5, Paralysis, 2000)）
-            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                session_id: t.session_id,
-                poison: Poison::new(PoisonType::PARALYSIS, 5, 0, 1000),
-            });
+            // C# PoisonTarget 1/15
+                if fastrand::i32(0..15) == 0 {
+                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                    session_id: t.session_id,
+                    poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 1000),
+                });
+                }
         }
     }
 }

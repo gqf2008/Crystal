@@ -37,7 +37,7 @@ impl MonsterBehavior for TrollBomberBehavior {
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             // 投弹：主目标全额 + 目标点 2 格 AOE 半额（C# CompleteRangeAttack）
-            monster.next_attack_tick = ctx.tick_count + 8;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let full = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
             let half = (full / 2).max(1);
 
@@ -71,7 +71,7 @@ impl MonsterBehavior for TrollBomberBehavior {
                 return;
             };
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

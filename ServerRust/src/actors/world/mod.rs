@@ -375,12 +375,16 @@ impl MonsterAiType {
     /// 从 DB 的 ai 字段解析
     fn from_db_ai(ai: i32) -> Self {
         match ai {
-            0 | 1 => Self::Passive,
+            // C# GetMonster：1/2=Deer、3=Tree（被动/静态）
+            0 | 1 | 2 | 3 => Self::Passive,
             64 | 81 | 82 | 252 => Self::Boss,
-            4 | 5 => Self::Coward,
+            // C# 4=SpittingSpider（主动近战+毒线）、5=CannibalPlant（埋伏主动），均非逃跑
             6 => Self::Guard,
-            10 | 11 | 12 => Self::Ranged,
-            20 | 21 | 22 => Self::Mage,
+            // C# 8=AxeSkeleton（远程掷斧 Range Projectile）
+            8 => Self::Ranged,
+            // C# 10=FlamingWooma（近战，MAC 判定）
+            // C# 20=DarkDevil（远程 RangeAttack）→ Mage；21/22=IncarnatedGhoul/ZT 为近战 → 默认 Aggressive
+            20 => Self::Mage,
             30 | 31 => Self::Healer,
             40 | 41 => Self::Summoner,
             _ => Self::Aggressive,
@@ -409,16 +413,28 @@ impl MonsterAiProfile {
     fn from_info(info: &db::MonsterInfo) -> Self {
         let ai_type = MonsterAiType::from_db_ai(info.ai);
         let view_range = info.view_range.max(3);
-        let (aggro_range, attack_range, attack_cooldown, move_interval) = match ai_type {
-            MonsterAiType::Passive => (view_range, 1, 10, 2),
-            MonsterAiType::Aggressive => (view_range, 1, 5, 2),
-            MonsterAiType::Coward => (view_range / 2, 1, 8, 1),
-            MonsterAiType::Guard => (view_range, 1, 5, 2),
-            MonsterAiType::Boss => (view_range * 2, 2, 3, 1),
-            MonsterAiType::Ranged => (view_range, 4, 6, 2),
-            MonsterAiType::Mage => (view_range, 6, 8, 2),
-            MonsterAiType::Healer => (view_range, 4, 8, 2),
-            MonsterAiType::Summoner => (view_range, 1, 5, 2),
+        let (aggro_range, attack_range) = match ai_type {
+            MonsterAiType::Passive => (view_range, 1),
+            MonsterAiType::Aggressive => (view_range, 1),
+            MonsterAiType::Coward => (view_range / 2, 1),
+            MonsterAiType::Guard => (view_range, 1),
+            MonsterAiType::Boss => (view_range * 2, 2),
+            MonsterAiType::Ranged => (view_range, 4),
+            MonsterAiType::Mage => (view_range, 6),
+            MonsterAiType::Healer => (view_range, 4),
+            MonsterAiType::Summoner => (view_range, 1),
+        };
+        // C# MonsterInfo.AttackSpeed/MoveSpeed（ms）：DB >0 用 DB，=0 用 C# 默认
+        // （2500ms / 1800ms；Rust tick=100ms → 25 / 18 tick）
+        let attack_cooldown = if info.attack_speed > 0 {
+            (info.attack_speed as u64 / 100).max(1)
+        } else {
+            25
+        };
+        let move_interval = if info.move_speed > 0 {
+            (info.move_speed as u64 / 100).max(1)
+        } else {
+            18
         };
         Self {
             ai_type,
@@ -504,6 +520,12 @@ pub struct MonsterState {
     pub luck: i32,
     pub reflect: i32,
     pub damage_reduction_percent: i32,
+    /// DB MonsterInfo.level（C# Monster.Level；StrayCat 推挤等级判定等用）
+    pub level: i32,
+    /// DB MonsterInfo.effect（C# Info.Effect；DarkBeast 出血毒开关等用）
+    pub effect: i32,
+    /// 最近一次受击伤害（C# Attacked 反制：GlacierWarrior/MutatedManworm 等换目标传送用）
+    pub last_hit_damage: i32,
     /// 运行时中毒/负面状态列表
     pub poison_list: Vec<crate::combat::poison::Poison>,
     /// 是否为亡灵类型（ThunderBolt +50%、TurnUndead 秒杀用，C# MonsterInfo.Undead）
@@ -700,6 +722,8 @@ impl MonsterState {
         let actual = behavior.on_attacked(damage);
         self.behavior = behavior;
         self.hp = self.hp.saturating_sub(actual);
+        // C# Attacked 反制：记录实际承伤，behavior 下一 tick 读取（GlacierWarrior 等换目标传送）
+        self.last_hit_damage = actual;
         actual
     }
 
@@ -869,6 +893,8 @@ pub struct WorldActor {
     pub(crate) boss_pending_attacks: Vec<(u64, ai::DelayedAttack)>,
     /// #471 宠物协战（宠物 oid → 主人攻击的怪物 oid）
     pub(crate) pet_targets: HashMap<u32, u32>,
+    /// #1013 怪物互伤目标（怪物 oid → 目标怪物 oid；C# StoneTrap 嘲讽）
+    pub(crate) monster_targets: HashMap<u32, u32>,
     /// 活跃 NPC（按 object_id 索引）
     pub(crate) npcs: HashMap<u32, NpcState>,
     /// 等待重生的怪物 (object_id → 重生 tick)
@@ -992,9 +1018,13 @@ pub struct WorldActor {
     /// 矿脉储量状态（map,(x,y) -> 剩余石头/再生 tick；C# MineSpot）
     pub(crate) mine_spot_state: HashMap<(u16, i32, i32), MineSpotState>,
     /// 待处理的死亡回调（怪物 + 玩家快照；独立消息处理避免 Tick handler 栈溢出）
-    pub(crate) pending_death_callbacks: Vec<(MonsterState, Vec<(u64, i32, i32, u32, i32, i32, u16)>)>,
+    pub(crate) pending_death_callbacks: Vec<(MonsterState, Vec<(u64, i32, i32, u32, i32, i32, u16, u16)>)>,
     /// 怪物回血计时（oid -> 下次回血 tick；C# MonsterObject.RegenTime，RegenDelay=10s）
     pub(crate) monster_regen_ticks: HashMap<u32, u64>,
+    /// 怪物巡逻计时（oid → 下次巡逻 tick；C# MonsterObject.RoamTime，ProcessRoam 用）
+    pub(crate) monster_roam_ticks: HashMap<u32, u64>,
+    /// 怪物搜索计时（oid → 下次索敌 tick；C# MonsterObject.SearchTime，SearchDelay=3s）
+    pub(crate) monster_search_ticks: HashMap<u32, u64>,
     /// 定时机器人任务
     pub(crate) robot_tasks: Vec<robot::RobotTask>,
     /// 机器人上次检查的分钟值
@@ -1124,6 +1154,7 @@ impl WorldActor {
             counter_attack: HashMap::new(),
             revealed_hp: HashMap::new(),
             pet_targets: HashMap::new(),
+            monster_targets: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
@@ -1187,6 +1218,8 @@ impl WorldActor {
             mine_spot_state: HashMap::new(),
             pending_death_callbacks: Vec::new(),
             monster_regen_ticks: HashMap::new(),
+            monster_roam_ticks: HashMap::new(),
+            monster_search_ticks: HashMap::new(),
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
@@ -3172,8 +3205,11 @@ impl WorldActor {
                                     critical_damage: 0,
                                     luck: 0,
                                     reflect: 0,
+                                    level: monster_info.level,
+                                    effect: monster_info.effect,
                                     damage_reduction_percent: 0,
                                     poison_list: Vec::new(),
+                                    last_hit_damage: 0,
             undead: false,
                                     master_session: None,
                                     recall_at_tick: 0,
@@ -3450,8 +3486,9 @@ impl WorldActor {
                                         min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
                                         agility: 0, accuracy: 0, armour_rate: 1.0, damage_rate: 1.0,
                                         magic_resist: 0, critical_rate: 0, critical_damage: 0,
-                                        luck: 0, reflect: 0, damage_reduction_percent: 0,
-                                        poison_list: Vec::new(), undead: info.undead,
+                                        luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
+                                        poison_list: Vec::new(),
+                                        last_hit_damage: 0, undead: info.undead,
                                         master_session: None, recall_at_tick: 0,
                                         behavior: ai::make_behavior(&info.name),
                                     });
@@ -3921,6 +3958,7 @@ impl Actor for WorldActor {
             counter_attack: HashMap::new(),
             revealed_hp: HashMap::new(),
             pet_targets: HashMap::new(),
+            monster_targets: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
@@ -3984,6 +4022,8 @@ impl Actor for WorldActor {
             mine_spot_state: HashMap::new(),
             pending_death_callbacks: Vec::new(),
             monster_regen_ticks: HashMap::new(),
+            monster_roam_ticks: HashMap::new(),
+            monster_search_ticks: HashMap::new(),
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
@@ -4145,8 +4185,11 @@ impl WorldActor {
                 critical_damage: 0,
                 luck: 0,
                 reflect: 0,
+                level: info.level,
+                effect: info.effect,
                 damage_reduction_percent: 0,
                 poison_list: Vec::new(),
+                last_hit_damage: 0,
                 undead: info.undead,
                 master_session: None,
                 recall_at_tick: 0,
@@ -6132,8 +6175,8 @@ async fn spawn_npcs_and_monsters(
             data: packet,
         }).await;
 
-        let ai_profile = ctx.monster_infos
-            .get(&monster.monster_index)
+        let monster_info_opt = ctx.monster_infos.get(&monster.monster_index);
+        let ai_profile = monster_info_opt
             .map(MonsterAiProfile::from_info)
             .unwrap_or_else(|| MonsterAiProfile {
                 ai_type: MonsterAiType::Aggressive,
@@ -6143,6 +6186,8 @@ async fn spawn_npcs_and_monsters(
                 move_interval: 2,
                 flee_threshold: 0.0,
             });
+        let monster_level = monster_info_opt.map(|i| i.level).unwrap_or(0);
+        let monster_effect = monster_info_opt.map(|i| i.effect).unwrap_or(0);
         monsters.push(MonsterState {
             object_id,
             name: name.clone(),
@@ -6183,8 +6228,11 @@ async fn spawn_npcs_and_monsters(
             critical_damage: 0,
             luck: 0,
             reflect: 0,
+            level: monster_level,
+            effect: monster_effect,
             damage_reduction_percent: 0,
             poison_list: Vec::new(),
+            last_hit_damage: 0,
             undead: ctx.monster_infos.get(&monster.monster_index).map(|i| i.undead).unwrap_or(false),
             master_session: None,
             recall_at_tick: 0,
@@ -6262,8 +6310,11 @@ async fn spawn_npcs_and_monsters(
                         critical_damage: 0,
                         luck: 0,
                         reflect: 0,
+                        level: monster_db.level,
+                        effect: monster_db.effect,
                         damage_reduction_percent: 0,
                         poison_list: Vec::new(),
+                        last_hit_damage: 0,
             undead: false,
                         master_session: None,
                         recall_at_tick: 0,
@@ -6376,8 +6427,11 @@ mod tests {
             critical_damage: 0,
             luck: 0,
             reflect: 0,
+            level: 50,
+            effect: 0,
             damage_reduction_percent: 0,
             poison_list: Vec::new(),
+            last_hit_damage: 0,
             undead: false,
             master_session: None,
             recall_at_tick: 0,

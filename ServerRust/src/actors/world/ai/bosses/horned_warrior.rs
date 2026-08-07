@@ -79,14 +79,14 @@ impl MonsterBehavior for HornedWarriorBehavior {
             if ctx.tick_count >= monster.next_move_tick {
                 let (nx, ny, dir) = step_away(monster.x, monster.y, target.x, target.y);
                 ctx.out_moves.push((monster.object_id, nx, ny, dir));
-                monster.next_move_tick = ctx.tick_count + 2;
+                monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             }
             return;
         }
 
         // ---- 正常战斗 ----
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 6;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             // C# 2/3 DC 单体；1/3 WideLineAttack(4)
             if fastrand::i32(0..3) > 0 {
                 // Type0 DC 单体
@@ -135,7 +135,7 @@ impl MonsterBehavior for HornedWarriorBehavior {
         if !shielded && ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

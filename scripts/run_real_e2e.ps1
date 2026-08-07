@@ -43,6 +43,38 @@ $tmp = Join-Path $env:TEMP "crystal_e2e"
 New-Item -ItemType Directory -Path $tmp -Force | Out-Null
 $results = [System.Collections.Generic.List[object]]::new()
 
+# 用例成功判定标记（A=发起方/单客户端日志，B=接受方日志；全部命中才 PASS，防止登录 ✅ 误判）
+$CaseRequired = @{
+    "fishing-test"  = @{ A = @('\[FISHTEST\] ✅ 收获消息'); B = @() }
+    "mount-test"    = @{ A = @('\[MOUNT\] ✅ 下马成功'); B = @() }
+    "gameshop-test" = @{ A = @('\[SHOPTEST\] ✅ 完成（购买 #'); B = @() }
+    "ranking-test"  = @{ A = @('\[RANKTEST\] ✅ 排行榜'); B = @() }
+    "refine-test"   = @{ A = @('\[REFINETEST\] ✅ 精炼已开始'); B = @() }
+    "report-test"   = @{ A = @('\[REPORTTEST\] ✅ 举报已提交确认'); B = @() }
+    "level-fx-test" = @{ A = @('\[LEVELFX\] ✅ PASS 升级生效'); B = @() }
+    "group"         = @{ A = @('\[GROUPTEST\] ✅ 组队成功'); B = @('\[GROUPACCEPT\] ✅ 接受邀请') }
+    "whisper"       = @{ A = @(); B = @('\[WHCHECK\] ✅ 收到私聊') }
+    "mail"          = @{ A = @(); B = @('\[MAILREAD\] ✅ 已读取邮件') }
+    "trade"         = @{ A = @('\[TRADETEST\] ✅ 交易窗口已打开'); B = @('\[TRADEACCEPT\] ✅ 接受邀请') }
+    "friend"        = @{ A = @('\[FRIENDTEST\] ✅ 好友列表包含'); B = @() }
+}
+
+function Test-Marks {
+    param([string]$LogPath, [string[]]$Patterns)
+    if ($Patterns.Count -eq 0) { return $true }
+    foreach ($pat in $Patterns) {
+        $hit = Select-String -Path $LogPath -Pattern $pat -ErrorAction SilentlyContinue
+        if (-not $hit) { return $false }
+    }
+    return $true
+}
+
+function Get-Marks {
+    param([string]$LogPath, [int]$Last = 4)
+    Select-String -Path $LogPath -Pattern "✅|❌" -ErrorAction SilentlyContinue |
+        Select-Object -Last $Last | ForEach-Object { ($_.Line -replace '^.*? (INFO|WARN|ERROR) ', '') -replace "\x1b\[[0-9;]*m", '' }
+}
+
 function Run-Client {
     param([string]$Name, [string[]]$ClientArgs, [int]$Timeout)
     $err = Join-Path $tmp "$Name.err.log"
@@ -51,16 +83,21 @@ function Run-Client {
     $done = $p.WaitForExit($Timeout * 1000)
     if (-not $done) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Milliseconds 400
-    $marks = Select-String -Path $err -Pattern "✅|❌" -ErrorAction SilentlyContinue |
-        Select-Object -Last 4 | ForEach-Object { ($_.Line -replace '^.*? (INFO|WARN|ERROR) ', '') -replace "\x1b\[[0-9;]*m", '' }
-    return ,$marks
+    return ,(Get-Marks $err)
 }
 
 function Invoke-Case {
     param([string]$Name, [string[]]$Flags)
     $argsAll = @("--real-net","--auto-enter") + $Flags + @("--e2e-user",$TestUser,"--e2e-pass",$TestPass)
+    $err = Join-Path $tmp "$Name.err.log"
     $marks = Run-Client $Name $argsAll $TimeoutSec
-    $pass = ($marks | Where-Object { $_ -match "✅" }).Count -gt 0
+    $req = $CaseRequired[$Name]
+    if ($null -eq $req) {
+        # 自定义用例：退回任意 ✅ 判定
+        $pass = ($marks | Where-Object { $_ -match "✅" }).Count -gt 0
+    } else {
+        $pass = Test-Marks $err $req.A
+    }
     $results.Add([pscustomobject]@{ Case=$Name; Pass=$pass; Marks=($marks -join " | ") })
     Write-Output ("[{0}] {1}" -f $(if($pass){"PASS"}else{"FAIL"}), $Name)
     if ($marks) { $marks | ForEach-Object { Write-Output ("    " + $_) } }
@@ -79,9 +116,14 @@ function Invoke-PairCase {
     if (-not $done) { Stop-Process -Id $a.Id -Force -ErrorAction SilentlyContinue }
     Stop-Process -Id $b.Id -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 400
-    $mA = Select-String -Path $aErr -Pattern "✅|❌" -ErrorAction SilentlyContinue | Select-Object -Last 3 | ForEach-Object { ($_.Line -replace '^.*? (INFO|WARN|ERROR) ', '') -replace "\x1b\[[0-9;]*m", '' }
-    $mB = Select-String -Path $bErr -Pattern "✅|❌" -ErrorAction SilentlyContinue | Select-Object -Last 3 | ForEach-Object { ($_.Line -replace '^.*? (INFO|WARN|ERROR) ', '') -replace "\x1b\[[0-9;]*m", '' }
-    $pass = ($mA -match "✅").Count -gt 0 -and ($mB -match "✅").Count -gt 0
+    $mA = Get-Marks $aErr 3
+    $mB = Get-Marks $bErr 3
+    $req = $CaseRequired[$Name]
+    if ($null -eq $req) {
+        $pass = ($mA -match "✅").Count -gt 0 -and ($mB -match "✅").Count -gt 0
+    } else {
+        $pass = (Test-Marks $aErr $req.A) -and (Test-Marks $bErr $req.B)
+    }
     $results.Add([pscustomobject]@{ Case=$Name; Pass=$pass; Marks=("A: " + ($mA -join " | ") + "  B: " + ($mB -join " | ")) })
     Write-Output ("[{0}] {1}" -f $(if($pass){"PASS"}else{"FAIL"}), $Name)
     $mA | ForEach-Object { Write-Output ("    A " + $_) }

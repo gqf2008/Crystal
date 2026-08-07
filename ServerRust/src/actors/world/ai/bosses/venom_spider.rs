@@ -36,7 +36,7 @@ impl MonsterBehavior for VenomSpiderBehavior {
 
         if dist <= LINE_RANGE {
             if ctx.tick_count >= monster.next_attack_tick {
-                monster.next_attack_tick = ctx.tick_count + 7;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
                 // LineAttack(2)：朝目标方向直线 2 格命中 + 主目标
                 let dir = direction_towards(monster.x, monster.y, target.x, target.y);
@@ -60,10 +60,13 @@ impl MonsterBehavior for VenomSpiderBehavior {
                         spell_id: 0,
                         attack_type: 0,
                     });
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::GREEN, 8, 5, 1000),
-                    });
+                    // C# PoisonTarget(8,5,Green,1000)：1/8
+                    if fastrand::i32(0..8) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::GREEN, 5, damage, 1000),
+                        });
+                    }
                 } else {
                     for h in hits {
                         ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
@@ -73,10 +76,13 @@ impl MonsterBehavior for VenomSpiderBehavior {
                             spell_id: 0,
                             attack_type: 0,
                         });
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: h.session_id,
-                            poison: Poison::new(PoisonType::GREEN, 8, 5, 1000),
-                        });
+                        // C# PoisonTarget(8,5,Green,1000)：1/8
+                        if fastrand::i32(0..8) == 0 {
+                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: h.session_id,
+                                poison: Poison::new(PoisonType::GREEN, 5, damage, 1000),
+                            });
+                        }
                     }
                 }
             }
@@ -87,7 +93,7 @@ impl MonsterBehavior for VenomSpiderBehavior {
         if ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

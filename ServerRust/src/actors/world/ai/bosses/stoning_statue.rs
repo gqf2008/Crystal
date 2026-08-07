@@ -62,7 +62,7 @@ impl MonsterBehavior for StoningStatueBehavior {
 
         if ctx.tick_count < self.area_tick {
             // 普通期：LineAttack DC
-            monster.next_attack_tick = ctx.tick_count + 8;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
             ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                 attacker_oid: monster.object_id,
@@ -87,12 +87,14 @@ impl MonsterBehavior for StoningStatueBehavior {
                     spell_id: 0,
                     attack_type: 1,
                 });
-                // C# PoisonTarget(2, Random(5,10), Dazed, 1000)
-                let dur = fastrand::i32(5..10) as u32;
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: h.session_id,
-                    poison: Poison::new(PoisonType::DAZED, dur, 0, 1000),
-                });
+                // C# PoisonTarget(2, Random(5,10), Dazed, 1000)：1/2、时长 5-10s
+                if fastrand::i32(0..2) == 0 {
+                    let dur = fastrand::i32(5..10) as u32;
+                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: h.session_id,
+                        poison: Poison::new(PoisonType::DAZED, dur, 0, 1000),
+                    });
+                }
             }
         }
     }

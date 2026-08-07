@@ -47,7 +47,7 @@ impl MonsterBehavior for BehemothBehavior {
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
-            monster.next_attack_tick = ctx.tick_count + 5;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let base = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
 
             if dist <= MELEE_RANGE {
@@ -86,23 +86,28 @@ impl MonsterBehavior for BehemothBehavior {
                         dir: monster.direction,
                         distance: 4,
                     });
+                    // C# PoisonTarget(3, 15, Dazed, 1000)：1/3、15s
+                    if fastrand::i32(0..3) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::DAZED, 15, base, 1000),
+                        });
+                    }
+                }
+                // 近战命中后 Bleeding 15s（C# PoisonTarget(15, 5, Bleeding)：1/15 概率、值=SP）
+                if fastrand::i32(0..15) == 0 {
                     ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                         session_id: target.session_id,
-                        poison: Poison::new(PoisonType::DAZED, 3, 0, 1000),
+                        poison: Poison::new(PoisonType::BLEEDING, 15, base, 1000),
                     });
                 }
-                // 近战命中后 Bleeding 15s（C# PoisonTarget(Target, 15, 5, Bleeding)）
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::BLEEDING, 15, 5, 1000),
-                });
             } else {
                 // ---- 远程：1/2 追击；1/2 SpawnSlaves / 弹道 ----
                 if fastrand::i32(0..2) == 0 {
                     // 追击
                     let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
                     ctx.out_moves.push((monster.object_id, nx, ny, dir));
-                    monster.next_move_tick = ctx.tick_count + 2;
+                    monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
                 } else if fastrand::i32(0..2) == 0 {
                     // SpawnSlaves：投掷 huggers（数量 = min(8, targets*5)）
                     let targets_count = ctx.find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index).len();
@@ -131,17 +136,20 @@ impl MonsterBehavior for BehemothBehavior {
                     let hit_sessions: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
                         .iter().map(|p| p.session_id).collect();
                     for sid in hit_sessions {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: sid,
-                            poison: Poison::new(PoisonType::PARALYSIS, 5, 0, 1000),
-                        });
+                        // C# PoisonTarget 1/15
+                            if fastrand::i32(0..15) == 0 {
+                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: sid,
+                                poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 1000),
+                            });
+                            }
                     }
                 }
             }
         } else if dist > ATTACK_RANGE && ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

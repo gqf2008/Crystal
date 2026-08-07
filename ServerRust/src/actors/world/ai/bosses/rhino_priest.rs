@@ -67,7 +67,7 @@ impl MonsterBehavior for RhinoPriestBehavior {
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             if dist <= MELEE_RANGE {
                 // 近战 DC ACAgility
-                monster.next_attack_tick = ctx.tick_count + 7;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
@@ -78,7 +78,7 @@ impl MonsterBehavior for RhinoPriestBehavior {
                 });
             } else {
                 // 远程 MC：2/3 普通(MACAgility,Debuff) / 1/3 蓝圈(MAC,Slow/Frozen)
-                monster.next_attack_tick = ctx.tick_count + 9;
+                monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
                 let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
                 let blue_circle = fastrand::i32(0..3) == 0;
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
@@ -89,16 +89,18 @@ impl MonsterBehavior for RhinoPriestBehavior {
                     spell_id: if blue_circle { 1 } else { 0 },
                 });
                 if blue_circle {
-                    // 3/4 Slow 2s，1/4 Frozen 4s
+                    // C# CompleteRangeAttack：3/4 Slow 分支（内层 1/2，5s）/ 1/4 Frozen 分支（内层 1/4，5s）
                     if fastrand::i32(0..4) > 0 {
+                        if fastrand::i32(0..2) == 0 {
+                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: target.session_id,
+                                poison: Poison::new(PoisonType::SLOW, 5, 0, 1000),
+                            });
+                        }
+                    } else if fastrand::i32(0..4) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: target.session_id,
-                            poison: Poison::new(PoisonType::SLOW, 2, 5, 1000),
-                        });
-                    } else {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: target.session_id,
-                            poison: Poison::new(PoisonType::FROZEN, 4, 5, 1000),
+                            poison: Poison::new(PoisonType::FROZEN, 5, 0, 1000),
                         });
                     }
                 }
@@ -123,7 +125,7 @@ impl MonsterBehavior for RhinoPriestBehavior {
                 return;
             };
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }

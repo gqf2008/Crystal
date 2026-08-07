@@ -44,7 +44,7 @@ impl MonsterBehavior for HolyDevaBehavior {
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick
             && (is_pet || ctx.tick_count < self.fear_end_tick)
         {
-            monster.next_attack_tick = ctx.tick_count + 8;
+            monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
             ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                 attacker_oid: monster.object_id,
@@ -69,7 +69,7 @@ impl MonsterBehavior for HolyDevaBehavior {
                 step_toward(monster.x, monster.y, target.x, target.y)
             };
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
-            monster.next_move_tick = ctx.tick_count + 2;
+            monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;
             monster.ai_state = crate::actors::world::MonsterAiState::Chase;
         }
     }
