@@ -1239,9 +1239,10 @@ impl Message<TakeDamage> for PlayerActor {
                 }
             }
             self.state.is_dead = true;
-            // 只移除标记 RemoveOnDeath 的 buff（C# 保留部分 buff 如 Exp/Drop）
-            // 简化：清除所有 debuff 但保留系统 buff（Exp/Drop/Gold 等）
+            // C# Die()：RemoveBuff(MagicShield/ElementalBarrier) + BrownTime = Envir.Time
+            // 简化：清除所有 buff（覆盖护盾移除）；灰名重置为 0
             self.state.buffs.clear();
+            self.state.brown_until_ms = 0;
             debug!("Player {} died (attacker={})", self.state.name, msg.attacker_id);
 
             // 发送 S.Death 包给死亡玩家（C# Shared/ServerPackets.cs Death: [Location Point][Direction u8]）
