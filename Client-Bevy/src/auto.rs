@@ -66,6 +66,14 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--mail-read") {
         app.add_systems(Update, auto_mail_read);
     }
+    // --whisper-send: 真实服私聊发送（配合 --whisper-check 双开验证 /w 链路）
+    if std::env::args().any(|a| a == "--whisper-send") {
+        app.add_systems(Update, auto_whisper_send);
+    }
+    // --whisper-check: 真实服私聊接收校验（WhisperIn 显示 + last_pm 记录，#813）
+    if std::env::args().any(|a| a == "--whisper-check") {
+        app.add_systems(Update, auto_whisper_check);
+    }
     // --trade-test: 自动交易链路（发起者，配合 --trade-accept）
     if std::env::args().any(|a| a == "--trade-test") {
         app.add_systems(Update, auto_trade_test);
@@ -877,6 +885,72 @@ fn auto_group_accept(
         tracing::info!("[GROUPACCEPT] ✅ 接受邀请: {}", inv.inviter_name);
         group.invite = None;
         *accepted = true;
+    }
+}
+
+/// --whisper-send：进游戏 8s 后发送一次私聊 `/w bevy2char whisper-e2e`（真实服双开验证）
+fn auto_whisper_send(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut t: Local<f32>,
+    mut sent: Local<bool>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game || *sent {
+        return;
+    }
+    *t += time.delta_secs();
+    if *t < 8.0 {
+        return;
+    }
+    *sent = true;
+    net.send_packet(&mir2_shared::packets::client::chat::Chat {
+        message: "/w bevy2char whisper-e2e".to_string(),
+        linked_items: Vec::new(),
+    });
+    tracing::info!("[WHSEND] 发送私聊 /w bevy2char whisper-e2e");
+}
+
+/// --whisper-check：轮询聊天历史是否收到 `whisper-e2e` 私聊行 + last_pm 记录（#813）
+fn auto_whisper_check(
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    chat: Res<client_bevy::game::chat::ChatState>,
+    mut t: Local<f32>,
+    mut done: Local<bool>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game || *done {
+        return;
+    }
+    *t += time.delta_secs();
+    let hit = chat
+        .lines
+        .iter()
+        .rev()
+        .take(100)
+        .find(|(text, _, _, _)| text.contains("whisper-e2e"))
+        .map(|(text, _, ch, _)| (text.clone(), *ch));
+    if let Some((text, ch)) = hit {
+        let pm_ok = chat.last_pm.as_deref() == Some("bevychar");
+        tracing::info!(
+            "[WHCHECK] ✅ 收到私聊（channel={:?}）: {}；last_pm={}",
+            ch,
+            text,
+            chat.last_pm.clone().unwrap_or_default()
+        );
+        if pm_ok {
+            tracing::info!("[WHCHECK] ✅ last_pm 记录正确（bevychar）");
+        } else {
+            tracing::warn!("[WHCHECK] ⚠️ last_pm 未记录（{:?}）", chat.last_pm);
+        }
+        *done = true;
+        return;
+    }
+    if *t >= 60.0 {
+        tracing::warn!("[WHCHECK] ❌ 60s 未收到私聊 whisper-e2e");
+        *done = true;
     }
 }
 
