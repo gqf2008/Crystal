@@ -2346,7 +2346,24 @@ impl Message<GetHeroItemInfo> for PlayerActor {
     }
 }
 
-/// 消耗英雄背包物品（#218）
+/// 按 item_index 在英雄背包查找药水（#1182 自动药 TryAutoPot：找第一个同 index 的堆叠）
+pub struct GetHeroPotionByItemIndex {
+    pub item_index: i32,
+}
+
+impl Message<GetHeroPotionByItemIndex> for PlayerActor {
+    type Reply = Option<mir2_shared::data::item::UserItem>;
+
+    async fn handle(
+        &mut self,
+        msg: GetHeroPotionByItemIndex,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.find_hero_potion(msg.item_index)
+    }
+}
+
+/// 消耗英雄背包物品（#218；#1182 起支持堆叠：count>1 时 -1，否则移除整格）
 pub struct ConsumeHeroItem {
     pub unique_id: u64,
 }
@@ -2359,15 +2376,7 @@ impl Message<ConsumeHeroItem> for PlayerActor {
         msg: ConsumeHeroItem,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        for slot in self.state.hero_inventory.backpack.iter_mut() {
-            if let Some(s) = slot {
-                if s.item.unique_id == msg.unique_id {
-                    *slot = None;
-                    return true;
-                }
-            }
-        }
-        false
+        self.state.consume_hero_item(msg.unique_id)
     }
 }
 
@@ -4457,6 +4466,34 @@ impl PlayerState {
             false
         }
     }
+
+    /// 按 item_index 查找英雄背包里的药水（#1182 自动药 TryAutoPot：找第一个同 index 的堆叠）
+    pub fn find_hero_potion(&self, item_index: i32) -> Option<mir2_shared::data::item::UserItem> {
+        self.hero_inventory
+            .backpack
+            .iter()
+            .flatten()
+            .find(|s| s.item.item_index == item_index && s.item.count > 0)
+            .map(|s| s.item.clone())
+    }
+
+    /// 消耗英雄背包物品（#218；#1182 起支持堆叠：count>1 时 -1，否则移除整格）
+    pub fn consume_hero_item(&mut self, unique_id: u64) -> bool {
+        for slot in self.hero_inventory.backpack.iter_mut() {
+            if let Some(s) = slot {
+                if s.item.unique_id == unique_id {
+                    // 堆叠物品（药水）只消耗 1 个；非堆叠（书/卷轴）移除整格
+                    if s.item.count > 1 {
+                        s.item.count -= 1;
+                    } else {
+                        *slot = None;
+                    }
+                    return true;
+                }
+            }
+        }
+        false
+    }
 }
 /// 技能经验/升级（#214）
 impl PlayerState {
@@ -5285,6 +5322,50 @@ allow_group: false,
             .backpack
             .iter()
             .any(|s| s.as_ref().is_some_and(|s| s.item.unique_id == 9102)));
+    }
+
+    // ---- #1182 英雄自动药（背包药水查找/消耗） ----
+    #[test]
+    fn test_find_hero_potion_by_item_index() {
+        let mut s = make_state();
+        let mut potion = mir2_shared::data::item::UserItem::new(13); // item_index=13
+        potion.unique_id = 9201;
+        potion.count = 5;
+        s.hero_inventory.backpack[0] = Some(crate::actors::inventory::InventorySlot {
+            grid: 0,
+            item: potion,
+        });
+        put_item(&mut s.hero_inventory, 2, 9202);
+        // 按 item_index 找到药水（与格位无关）
+        let found = s.find_hero_potion(13).expect("potion should be found");
+        assert_eq!(found.unique_id, 9201);
+        assert_eq!(found.count, 5);
+        // 不存在的 index 返回 None
+        assert!(s.find_hero_potion(999).is_none());
+        // count=0 的堆叠不返回
+        s.hero_inventory.backpack[0].as_mut().unwrap().item.count = 0;
+        assert!(s.find_hero_potion(13).is_none());
+    }
+
+    #[test]
+    fn test_consume_hero_item_stack_and_single() {
+        let mut s = make_state();
+        let mut potion = mir2_shared::data::item::UserItem::new(13);
+        potion.unique_id = 9203;
+        potion.count = 3;
+        s.hero_inventory.backpack[0] = Some(crate::actors::inventory::InventorySlot {
+            grid: 0,
+            item: potion,
+        });
+        // 堆叠：每次消耗 1 个，格子保留
+        assert!(s.consume_hero_item(9203));
+        assert_eq!(s.hero_inventory.backpack[0].as_ref().unwrap().item.count, 2);
+        assert!(s.consume_hero_item(9203));
+        assert_eq!(s.hero_inventory.backpack[0].as_ref().unwrap().item.count, 1);
+        assert!(s.consume_hero_item(9203));
+        assert!(s.hero_inventory.backpack[0].is_none());
+        // 未知 uid 失败
+        assert!(!s.consume_hero_item(9999));
     }
 
     // ---- #218 英雄技能 ----
