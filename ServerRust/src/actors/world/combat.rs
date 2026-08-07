@@ -2396,6 +2396,8 @@ impl Message<MagicRequest> for WorldActor {
                                 recall_at_tick: self.tick_count + 6000,
                                 behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                             });
+                            // 记录召唤物等级（C# MonsterObject.PetLevel = magic.Level）
+                            self.pet_levels.insert(new_oid, spell_level as i32);
                             debug!("Magic: {} casts summon '{}' as #{} at ({},{}) (slave of {})",
                                 state.name, summon_name, new_oid, sx, sy, msg.session_id);
                         } else {
@@ -2941,17 +2943,23 @@ impl Message<MagicRequest> for WorldActor {
             SPELL_FATAL_SWORD => {
                 debug!("Magic: {} casts FatalSword (passive-only in C#, no active effect)", state.name);
             }
-            // #448：PetEnhancer —— 召唤宠物 DC/AC 提升（C# HumanObject.cs:6363；Rust 宠物无等级，按 2/4 简化）
+            // #448：PetEnhancer —— 召唤宠物 DC/AC 提升（C# HumanObject.cs:6363 CompleteMagic）
+            // dcInc = 2 + 宠物等级*2；acInc = 4 + 宠物等级；时长 ≈ SC 秒（GetPower 默认 0）
             SPELL_PET_ENHANCER => {
-                let duration_s = (magic_stat / 2).max(5) as u32; // SC 强度近似
+                let sc = state.effective_max_sc();
+                let duration_s = sc.max(1) as u32;
                 let until = self.tick_count + (duration_s as u64) * 10;
                 let pet: Option<u32> = self.monsters.iter()
                     .find(|(_, m)| m.master_session == Some(msg.session_id)
                         && (m.x - target_x).abs() <= 2 && (m.y - target_y).abs() <= 2)
                     .map(|(id, _)| *id);
                 if let Some(pid) = pet {
-                    self.pet_enhanced.insert(pid, (until, 2, 4));
-                    debug!("Magic: {} casts PetEnhancer -> pet {} (DC+2 AC+4, {}s)", state.name, pid, duration_s);
+                    let pet_lv = self.pet_levels.get(&pid).copied().unwrap_or(0);
+                    let dc_inc = 2 + pet_lv * 2;
+                    let ac_inc = 4 + pet_lv;
+                    self.pet_enhanced.insert(pid, (until, dc_inc, ac_inc));
+                    debug!("Magic: {} casts PetEnhancer -> pet {} (DC+{} AC+{}, {}s)",
+                           state.name, pid, dc_inc, ac_inc, duration_s);
                 } else {
                     debug!("Magic: {} casts PetEnhancer (no pet near {},{})", state.name, target_x, target_y);
                 }
