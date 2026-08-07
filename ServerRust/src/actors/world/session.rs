@@ -1747,6 +1747,56 @@ impl Message<ChatRequest> for WorldActor {
                     );
                     return;
                 }
+                Some("STARTCONQUEST") | Some("RESETCONQUEST") => {
+                    // C# case "STARTCONQUEST"（~3854）/ "RESETCONQUEST"（~3900）：攻城 GM 命令
+                    let (is_gm, my_guild) = match record.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(s)) => (s.is_gm, s.guild_name),
+                        _ => return,
+                    };
+                    if !is_gm {
+                        send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
+                        return;
+                    }
+                    let Some(guild) = my_guild else {
+                        send_system_message(&self.gate_ref, msg.session_id, "需要行会才能使用攻城命令");
+                        return;
+                    };
+                    let Some(id_str) = parts.get(1) else {
+                        send_system_message(&self.gate_ref, msg.session_id, &format!("用法：@{} <领地ID>", parts[0].to_lowercase()));
+                        return;
+                    };
+                    let Ok(conquest_id) = id_str.parse::<i32>() else { return; };
+
+                    let is_start = parts[0].eq_ignore_ascii_case("STARTCONQUEST");
+                    let mut found = false;
+                    if let Some(inst) = self.conquest_instances.iter_mut().find(|c| c.id == conquest_id) {
+                        found = true;
+                        if is_start {
+                            if inst.state == crate::actors::world::conquest::WarState::InProgress {
+                                inst.end_war();
+                                broadcast_system_message(
+                                    &self.gate_ref, &self.players,
+                                    &format!("攻城战 {} 已停止", conquest_id),
+                                );
+                            } else {
+                                inst.start_war(&guild);
+                                broadcast_system_message(
+                                    &self.gate_ref, &self.players,
+                                    &format!("攻城战 {} 已开始（攻击方：{}）", conquest_id, guild),
+                                );
+                            }
+                        } else if inst.state != crate::actors::world::conquest::WarState::InProgress {
+                            inst.reset();
+                            send_system_message(&self.gate_ref, msg.session_id, &format!("领地 {} 已重置", conquest_id));
+                        } else {
+                            send_system_message(&self.gate_ref, msg.session_id, "攻城进行中无法重置");
+                        }
+                    }
+                    if !found {
+                        send_system_message(&self.gate_ref, msg.session_id, &format!("未找到领地：{}", conquest_id));
+                    }
+                    return;
+                }
                 Some("ALLOWGUILD") => {
                     // C# case "ALLOWGUILD"（~2466）：切换 EnableGuildInvite + 提示
                     let mut new_state = match record.actor_ref.ask(GetPlayerState).await {
