@@ -3088,7 +3088,8 @@ impl Message<MagicRequest> for WorldActor {
                     debug!("Magic: {} casts Hallucination (failed)", state.name);
                 }
             }
-            // #409：OneWithNature —— 5×5 AoE MAC 伤害 + 40% Green 毒（C# Map.cs:2101，毒箭 buff 依赖简化）
+            // #409：OneWithNature —— 5×5 AoE MAC 伤害 + 必中 Green 毒（C# Map.cs：持有 PoisonShot buff 时）
+            // 吸血（VampireShot buff）暂不模拟
             SPELL_ONE_WITH_NATURE => {
                 let raw_damage = if let Some(info) = spell_db {
                     crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
@@ -3114,15 +3115,15 @@ impl Message<MagicRequest> for WorldActor {
                             monster.target_session = Some(msg.session_id);
                             spell_hits.push((mid, monster.x, monster.y, monster.direction, r.damage));
                         }
-                        // 40% 概率施加 Green 毒（模拟持有毒箭 buff）
-                        if fastrand::i32(0..100) < 40 {
-                            let dur = (raw_damage * 2 + (spell_level as i32 + 1) * 7).max(1) as u32;
-                            let val = (raw_damage / 15 + spell_level as i32 + 1).max(1);
-                            crate::combat::poison::apply_poison(&mut monster.poison_list,
-                                crate::combat::poison::Poison::new(
-                                    mir2_shared::enums::PoisonType::GREEN, dur, val, 2000,
-                                ));
-                        }
+                        // C#：持有 PoisonShot buff 时必中绿毒（Duration = value*2 + (Lv+1)*7；
+                        // Value = value/15 + Lv + 1 + Random(PoisonAttack)）
+                        let dur = (raw_damage * 2 + (spell_level as i32 + 1) * 7).max(1) as u32;
+                        let val = (raw_damage / 15 + spell_level as i32 + 1
+                            + fastrand::i32(0..state.poison_attack.max(1))).max(1);
+                        crate::combat::poison::apply_poison(&mut monster.poison_list,
+                            crate::combat::poison::Poison::new(
+                                mir2_shared::enums::PoisonType::GREEN, dur, val, 2000,
+                            ));
                     }
                 }
                 self.broadcast_spell_hit(&spell_hits, object_id).await;
