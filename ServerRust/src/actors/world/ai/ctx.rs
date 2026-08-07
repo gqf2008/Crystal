@@ -57,6 +57,16 @@ pub enum AttackAction {
         damage: i32,
         spell_id: u8,
     },
+    /// 直线攻击（C# LineAttack(damage, range)：沿 direction 逐格命中第一个目标）
+    Line {
+        attacker_oid: u32,
+        origin_x: i32,
+        origin_y: i32,
+        direction: u8,
+        range: i32,
+        damage: i32,
+        spell_id: u8,
+    },
 }
 
 /// 地面法术场生成（Boss 投放 SpellObject，如 TreeQueen 根刺、HornedCommander RockSpike）

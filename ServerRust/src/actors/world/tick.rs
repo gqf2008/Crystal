@@ -738,6 +738,10 @@ impl WorldActor {
                     let _ = target_session;
                     (*attacker_oid, *damage, monster.x, monster.y, 0)
                 }
+                // #1020：死亡回调直线攻击近似为半径=range 的 AOE
+                ai::AttackAction::Line { attacker_oid, origin_x, origin_y, range, damage, .. } => {
+                    (*attacker_oid, *damage, *origin_x, *origin_y, *range)
+                }
             };
             // 广播 ObjectAttack（死亡爆炸动画）
             let mut attack_body = Vec::new();
@@ -3741,6 +3745,23 @@ impl Message<Tick> for WorldActor {
                             .map(|(s, _, _, _, _, _, _)| *s)
                             .collect();
                         (*attacker_oid, tgts, *damage, 0u8, 0u8, *center_x, *center_y, 0u8)
+                    }
+                    // #1020：直线攻击（C# LineAttack：沿 direction 逐格命中）
+                    ai::AttackAction::Line { attacker_oid, origin_x, origin_y, direction, range, damage, .. } => {
+                        let dir = (*direction as usize) % 8;
+                        let (ldx, ldy) = (MON_DIR_DX[dir], MON_DIR_DY[dir]);
+                        let tgts: Vec<u64> = player_positions.iter()
+                            .filter(|(_, px, py, _, _, _, _)| {
+                                for k in 1..=*range {
+                                    if *px == origin_x + ldx * k && *py == origin_y + ldy * k {
+                                        return true;
+                                    }
+                                }
+                                false
+                            })
+                            .map(|(s, _, _, _, _, _, _)| *s)
+                            .collect();
+                        (*attacker_oid, tgts, *damage, 0u8, 0u8, *origin_x, *origin_y, *direction)
                     }
                 };
                 // 获取 Boss 位置用于广播
