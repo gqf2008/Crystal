@@ -375,11 +375,14 @@ impl MonsterAiType {
     /// 从 DB 的 ai 字段解析
     fn from_db_ai(ai: i32) -> Self {
         match ai {
-            0 | 1 => Self::Passive,
+            // C# GetMonster：1/2=Deer、3=Tree（被动/静态）
+            0 | 1 | 2 | 3 => Self::Passive,
             64 | 81 | 82 | 252 => Self::Boss,
-            4 | 5 => Self::Coward,
+            // C# 4=SpittingSpider（主动近战+毒线）、5=CannibalPlant（埋伏主动），均非逃跑
             6 => Self::Guard,
-            10 | 11 | 12 => Self::Ranged,
+            // C# 8=AxeSkeleton（远程掷斧 Range Projectile）
+            8 => Self::Ranged,
+            // C# 10=FlamingWooma（近战，MAC 判定）
             20 | 21 | 22 => Self::Mage,
             30 | 31 => Self::Healer,
             40 | 41 => Self::Summoner,
