@@ -908,7 +908,6 @@ pub struct WorldActor {
     pub(crate) npc_scripts: HashMap<(i32, String), Vec<String>>,
     /// 游戏配置：任务信息
     pub(crate) quest_infos: HashMap<i32, db::QuestInfo>,
-    pub(crate) conquest_infos: HashMap<i32, db::ConquestInfo>,
     /// 游戏配置：魔法信息（key = spell ID）
     pub(crate) magic_infos: HashMap<u32, db::MagicInfo>,
     /// 游戏配置：龙信息
@@ -1144,7 +1143,6 @@ impl WorldActor {
             session_npc: HashMap::new(),
             npc_scripts: HashMap::new(),
             quest_infos: HashMap::new(),
-            conquest_infos: HashMap::new(),
             magic_infos: HashMap::new(),
             dragon_info: None,
             game_shop_items: Vec::new(),
@@ -3681,13 +3679,6 @@ impl Actor for WorldActor {
         info!("Resolved {} kill tasks, {} item tasks, {} flag tasks from quest files", resolved_kill, resolved_item, resolved_flag);
         let quest_infos: HashMap<i32, db::QuestInfo> = quest_infos_list.into_iter().map(|q| (q.index, q)).collect();
 
-        // 攻城战配置（C# ConquestInfo.cs）
-        let conquest_infos_list = match db::load_conquest_infos(&args.db_pool).await {
-            Ok(m) => { info!("Loaded {} conquest configs from database", m.len()); m }
-            Err(e) => { warn!("Failed to load conquest_infos from DB: {}", e); Vec::new() }
-        };
-        let conquest_infos: HashMap<i32, db::ConquestInfo> = conquest_infos_list.into_iter().map(|c| (c.index, c)).collect();
-
         let magic_infos_list = match db::load_magic_infos(&args.db_pool).await {
             Ok(m) => { info!("Loaded {} magic configs from database", m.len()); m }
             Err(e) => { warn!("Failed to load magic_infos from DB: {}", e); Vec::new() }
@@ -3807,7 +3798,6 @@ impl Actor for WorldActor {
             session_npc: HashMap::new(),
             npc_scripts,
             quest_infos,
-            conquest_infos,
             magic_infos,
             dragon_info,
             game_shop_items,
