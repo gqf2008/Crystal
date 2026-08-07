@@ -883,6 +883,8 @@ pub struct WorldActor {
     pub(crate) boss_pending_attacks: Vec<(u64, ai::DelayedAttack)>,
     /// #471 宠物协战（宠物 oid → 主人攻击的怪物 oid）
     pub(crate) pet_targets: HashMap<u32, u32>,
+    /// #1013 怪物互伤目标（怪物 oid → 目标怪物 oid；C# StoneTrap 嘲讽）
+    pub(crate) monster_targets: HashMap<u32, u32>,
     /// 活跃 NPC（按 object_id 索引）
     pub(crate) npcs: HashMap<u32, NpcState>,
     /// 等待重生的怪物 (object_id → 重生 tick)
@@ -1142,6 +1144,7 @@ impl WorldActor {
             counter_attack: HashMap::new(),
             revealed_hp: HashMap::new(),
             pet_targets: HashMap::new(),
+            monster_targets: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),
@@ -3797,6 +3800,7 @@ impl Actor for WorldActor {
             counter_attack: HashMap::new(),
             revealed_hp: HashMap::new(),
             pet_targets: HashMap::new(),
+            monster_targets: HashMap::new(),
             npcs: HashMap::new(),
             respawn_queue: HashMap::new(),
             world_boss_queue: HashMap::new(),

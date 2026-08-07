@@ -143,6 +143,8 @@ pub struct AiCtx<'a> {
     pub out_player_teleports: &'a mut Vec<(u64, i32, i32, u8)>,
     /// 输出：延迟攻击（C# DelayedAction DelayedType.Damage）
     pub out_delayed_attacks: &'a mut Vec<DelayedAttack>,
+    /// 输出：怪物嘲讽（C# StoneTrap：target_oid 攻击 taunter_oid）→ monster_targets
+    pub out_monster_taunts: &'a mut Vec<(u32, u32)>,
 }
 
 impl<'a> AiCtx<'a> {

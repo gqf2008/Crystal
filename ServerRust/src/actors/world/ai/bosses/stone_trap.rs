@@ -37,5 +37,20 @@ impl MonsterBehavior for StoneTrapBehavior {
                 monster.hp = 0;
             }
         }
+
+        // C# ProcessAI：嘲讽视野内怪物攻击自己（怪物互伤，monster_targets 由上层应用）
+        let view_range = monster.ai_profile.aggro_range.max(1) as i32;
+        for snap in ctx.monsters.iter() {
+            if snap.object_id == monster.object_id {
+                continue;
+            }
+            if snap.map_index != monster.map_index || snap.hp <= 0 {
+                continue;
+            }
+            let d = (snap.x - monster.x).abs() + (snap.y - monster.y).abs();
+            if d <= view_range {
+                ctx.out_monster_taunts.push((monster.object_id, snap.object_id));
+            }
+        }
     }
 }

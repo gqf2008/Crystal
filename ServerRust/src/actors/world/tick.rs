@@ -685,6 +685,7 @@ impl WorldActor {
         let mut die_pushes: Vec<ai::PushPlayer> = Vec::new();
         let mut die_teleports: Vec<(u64, i32, i32, u8)> = Vec::new();
         let mut die_delayed: Vec<ai::DelayedAttack> = Vec::new();
+        let mut die_taunts: Vec<(u32, u32)> = Vec::new();
         {
             let mut ctx = AiCtx {
                 tick_count: self.tick_count,
@@ -705,6 +706,7 @@ impl WorldActor {
                 out_pushes: &mut die_pushes,
                 out_player_teleports: &mut die_teleports,
                 out_delayed_attacks: &mut die_delayed,
+                out_monster_taunts: &mut die_taunts,
             };
             // 临时取出 behavior 避免 &mut monster + &mut behavior 双重借用（与 AI 循环一致）
             let mut behavior = std::mem::replace(
@@ -2973,6 +2975,8 @@ impl Message<Tick> for WorldActor {
             let mut heal_actions: Vec<(u32, i32)> = Vec::new();
             // #471 宠物协战动作（pet_oid, target_oid, damage, master_session，循环后应用）
             let mut pet_attacks: Vec<(u32, u32, i32, u64)> = Vec::new();
+            // #1013 怪物互伤（C# StoneTrap 嘲讽后怪物攻击目标）：(attacker, target, damage)
+            let mut monster_attacks: Vec<(u32, u32, i32)> = Vec::new();
             let mut summon_spawns: Vec<MonsterSpawn> = Vec::new();
             // Boss AI 输出队列（在循环后应用）
             let mut boss_moves: Vec<(u32, i32, i32, u8)> = Vec::new();
@@ -2984,6 +2988,7 @@ impl Message<Tick> for WorldActor {
             let mut boss_pushes: Vec<ai::PushPlayer> = Vec::new();
             let mut boss_player_teleports: Vec<(u64, i32, i32, u8)> = Vec::new();
             let mut boss_delayed_attacks: Vec<ai::DelayedAttack> = Vec::new();
+            let mut boss_taunts: Vec<(u32, u32)> = Vec::new();
             // 召唤物过期队列（到期 tick 已过 → 移除，不掉落）
             let mut expired_monsters: Vec<u32> = Vec::new();
 
@@ -3028,6 +3033,7 @@ impl Message<Tick> for WorldActor {
                         out_pushes: &mut boss_pushes,
                         out_player_teleports: &mut boss_player_teleports,
                         out_delayed_attacks: &mut boss_delayed_attacks,
+                        out_monster_taunts: &mut boss_taunts,
                     };
                     // 临时取出 behavior 避免 &mut monster + &mut behavior 双重借用
                     let mut behavior = std::mem::replace(
@@ -3036,6 +3042,20 @@ impl Message<Tick> for WorldActor {
                     );
                     behavior.process_tick(monster, &mut ctx);
                     monster.behavior = behavior;
+
+                    // 死亡检查：注册 Boss（含 StoneTrap 等）hp<=0 时进 dead_monsters
+                    //（此前 Boss 分支直接 continue，hp<=0 永不消失/不触发 on_die）
+                    if monster.hp <= 0 {
+                        dead_monsters.push(*oid);
+                        continue;
+                    }
+
+                    // #1013：应用怪物嘲讽（C# StoneTrap）→ monster_targets
+                    for (target, taunter) in boss_taunts.drain(..) {
+                        if target != monster.object_id {
+                            self.monster_targets.insert(target, taunter);
+                        }
+                    }
                     debug!("Boss '{}' AI tick processed", monster_name);
                     continue;
                 }
@@ -3187,7 +3207,42 @@ impl Message<Tick> for WorldActor {
                     }
                 }
 
-                if let Some((target_session, px, py, dist)) = chase_target {
+                // #1013：怪物互伤目标（C# StoneTrap 嘲讽）——优先于玩家索敌
+                let mut monster_target_active = false;
+                if let Some(tmid) = self.monster_targets.get(oid).copied() {
+                    let target_alive = monster_snapshot.iter()
+                        .any(|s| s.0 == tmid && s.3 > 0 && s.5 == monster.map_index);
+                    if !target_alive {
+                        self.monster_targets.remove(oid);
+                    } else if let Some((_, tx, ty, _, _, _, _, _, _, _)) =
+                        monster_snapshot.iter().find(|s| s.0 == tmid)
+                    {
+                        monster_target_active = true;
+                        monster.target_session = None;
+                        let dist = (tx - monster.x).abs() + (ty - monster.y).abs();
+                        if dist <= 1 && can_attack {
+                            let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
+                            let damage = ((self.tick_count.wrapping_add(*oid as u64).wrapping_mul(17)) as i32 % dmg_range) + monster.min_dmg;
+                            monster_attacks.push((*oid, tmid, damage));
+                            monster.next_attack_tick = self.tick_count + profile.attack_cooldown;
+                            monster.ai_state = MonsterAiState::Attack;
+                        } else if can_move {
+                            let (nx, ny, dir) = monster.step_toward(*tx, *ty);
+                            if self.maps.get(&monster.map_index).map(|m| m.is_walkable(nx, ny)).unwrap_or(true)
+                                && !monster_positions.contains(&(nx, ny))
+                                && moved_targets.insert((nx, ny))
+                            {
+                                moved_monsters.push((*oid, nx, ny, dir));
+                            }
+                            monster.next_move_tick = self.tick_count + profile.move_interval;
+                            monster.ai_state = MonsterAiState::Chase;
+                        }
+                    }
+                }
+
+                if monster_target_active {
+                    // 已在上面处理怪物互伤攻击/移动，跳过玩家索敌
+                } else if let Some((target_session, px, py, dist)) = chase_target {
                     // #395：幻觉——期内不攻击/不追击（C# HallucinationTime）
                     if self.hallucinated.get(&monster.object_id).is_some_and(|u| self.tick_count < *u) {
                         monster.target_session = None;
@@ -3546,6 +3601,28 @@ impl Message<Tick> for WorldActor {
                     tm.provoked = true;
                     tm.target_session = Some(*master);
                     debug!("Pet #{} assists hitting '{}' (#{}) for {} dmg", pid, tm.name, tmid, damage);
+                }
+            }
+
+            // #1013：怪物互伤伤害（C# StoneTrap 嘲讽后怪物攻击目标；循环外应用）
+            for (aid, tmid, damage) in &monster_attacks {
+                if let Some(tm) = self.monsters.get_mut(tmid) {
+                    tm.take_damage(*damage);
+                    tm.provoked = true;
+                    // 广播 ObjectAttack（怪 A 攻击怪 B）
+                    let mut attack_body = Vec::new();
+                    attack_body.extend_from_slice(&aid.to_le_bytes());
+                    attack_body.push(0u8); // direction
+                    attack_body.push(0u8); // spell=0
+                    let attack_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
+                    for sid in self.players.keys() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *sid,
+                            data: attack_packet.clone(),
+                        }).await;
+                    }
+                    debug!("Monster #{} hits '{}' (#{}) for {} dmg (monster-vs-monster)", aid, tm.name, tmid, damage);
                 }
             }
 
