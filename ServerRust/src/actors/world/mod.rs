@@ -2975,17 +2975,21 @@ impl WorldActor {
                             let _ = record.actor_ref.ask(crate::actors::player::SetHair { hair }).await;
                         }
                     }
-                    // TIMERECALL：定时召回（简化：立即召回，TODO: 加定时）
+                    // TIMERECALL <秒> [section]：延迟执行当前 NPC 脚本段（对齐 C# ActionType.TimeRecall + DelayedAction DelayedType.NPC）
                     "TIMERECALL" => {
-                        let _seconds = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
-                        if let Some(record) = self.players.get(&session_id) {
-                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
-                                    x: npc.x, y: npc.y, direction: state.direction,
-                                    map_index: None, is_mounted: None,
-                                }).await;
-                            }
-                        }
+                        let secs = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                        let section = parts.next()
+                            .map(|s| s.trim_matches(|c| c == '[' || c == ']').to_string())
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or_else(|| "main".to_string());
+                        let expire_tick = self.tick_count.saturating_add(secs * 10);
+                        self.npc_delayed_actions.entry(session_id).or_default().push(DelayedNpcAction {
+                            expire_tick,
+                            npc_object_id: npc.object_id,
+                            section: section.clone(),
+                            target_db_index: None,
+                        });
+                        debug!("NPC TIMERECALL: session={} section='{}' in {}s (expire {})", session_id, section, secs, expire_tick);
                     }
                     // GROUPTELEPORT：组队传送（简化：传送玩家 + 同图组员到目标点）
                     "GROUPTELEPORT" => {
@@ -3600,6 +3604,33 @@ impl WorldActor {
             let Some(lines) = self.npc_scripts.get(&script_key).cloned() else { continue };
             let joined = lines.join("\n");
             if !npc_script::is_csharp_format(&joined) {
+                // 旧 <CMD> 格式：延迟到期后用旧引擎执行该页（对齐 C# DelayedAction 到点执行脚本页）
+                let mut lines = lines;
+                let (name, level) = match self.players.get(&session_id) {
+                    Some(r) => match r.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(st)) => (st.name.clone(), st.level),
+                        _ => (String::new(), 0),
+                    },
+                    None => (String::new(), 0),
+                };
+                for line in &mut lines {
+                    *line = line.replace("$USERNAME", &name)
+                                .replace("$NPCNAME", &npc.name)
+                                .replace("$LEVEL", &level.to_string());
+                }
+                // eval_npc_script 的 Future 极大，直接内联会把 tick 任务栈打爆；Box::pin 放到堆上
+                let (out, _goto) = Box::pin(async { self.eval_npc_script(&mut lines, session_id, &npc).await }).await;
+                if !out.is_empty() {
+                    let mut body = Vec::new();
+                    body.extend_from_slice(&(out.len() as i32).to_le_bytes());
+                    for line in &out {
+                        write_dotnet_string(&mut body, line);
+                    }
+                    let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCResponse as i16, &body);
+                    let _ = self.gate_ref.tell(SendToClient { session_id, data: packet }).await;
+                    debug!("NPC delayed action (old format) fired: session={} npc={} section='{}' say_lines={}",
+                           session_id, npc.name, act.section, out.len());
+                }
                 continue;
             }
             let parsed = npc_script::ParsedScript::parse(&joined);
