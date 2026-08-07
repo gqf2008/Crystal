@@ -66,6 +66,7 @@ pub mod element_guard;
 pub mod winged_tiger_lord;
 pub mod great_fox_spirit;
 pub mod stone_golem;
+pub mod stone_trap;
 pub mod tucson_mage;
 pub mod oma_mage;
 pub mod flaming_mutant;
