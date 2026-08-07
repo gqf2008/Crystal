@@ -2570,31 +2570,42 @@ impl Message<MagicRequest> for WorldActor {
                 let sx = (state.x + MON_DIR_DX[dir]).clamp(0, max_x - 1);
                 let sy = (state.y + MON_DIR_DY[dir]).clamp(0, max_y - 1);
 
-                // 限制同一主人同时拥有的召唤物数量（C# 默认 1，高级技能 2）
-                let max_slaves = if msg.spell == SPELL_SUMMON_SHINSU
-                    || msg.spell == SPELL_SUMMON_SNAKES { 2 } else { 1 };
-                let current_slaves = self.monsters.values()
-                    .filter(|m| m.master_session == Some(msg.session_id))
-                    .count();
-                if current_slaves >= max_slaves {
-                    // 已达上限：移除最早的召唤物（按 object_id 最小者）
-                    if let Some(victim_id) = self.monsters.iter()
-                        .filter(|(_, m)| m.master_session == Some(msg.session_id))
-                        .map(|(id, _)| *id)
-                        .min() {
-                        if self.monsters.remove(&victim_id).is_some() {
-                            let rm_pkt = Self::build_object_remove_packet(victim_id);
-                            for sid in self.players.keys() {
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *sid,
-                                    data: rm_pkt.clone(),
-                                }).await;
-                            }
-                            debug!("Magic: {} reached slave cap, recalled monster {}",
-                                state.name, victim_id);
+                // C# SummonXxx：已有同名存活宠物 → 召回（传送到施法者前方 1 格）并返回，不重复生成
+                let existing: Option<u32> = self.monsters.iter()
+                    .find(|(_, m)| m.master_session == Some(msg.session_id)
+                        && m.name.eq_ignore_ascii_case(summon_name) && m.hp > 0)
+                    .map(|(id, _)| *id);
+                if let Some(oid) = existing {
+                    if let Some(m) = self.monsters.get_mut(&oid) {
+                        m.x = sx;
+                        m.y = sy;
+                        m.direction = dir as u8;
+                        let mut walk_body = Vec::new();
+                        walk_body.extend_from_slice(&oid.to_le_bytes());
+                        walk_body.extend_from_slice(&sx.to_le_bytes());
+                        walk_body.extend_from_slice(&sy.to_le_bytes());
+                        walk_body.push(dir as u8);
+                        let walk_packet = build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::ObjectWalk as i16, &walk_body);
+                        for sid in self.players.keys() {
+                            let _ = self.gate_ref.tell(SendToClient {
+                                session_id: *sid,
+                                data: walk_packet.clone(),
+                            }).await;
                         }
+                        debug!("Magic: {} recalls existing summon '{}' #{}", state.name, summon_name, oid);
                     }
+                    return;
                 }
+
+                // C#：道士/法师召唤永久；弓手召唤 AliveTime：
+                // Vampire=Lv*1500+15000ms，Toad=Lv*2000+25000ms，Snakes=Lv*1500+20000ms
+                let recall_at_tick = match msg.spell {
+                    SPELL_SUMMON_VAMPIRE => spell_level as u64 * 15 + 150,
+                    SPELL_SUMMON_TOAD => spell_level as u64 * 20 + 250,
+                    SPELL_SUMMON_SNAKES => spell_level as u64 * 15 + 200,
+                    _ => 0,
+                };
 
                 // 按 monster_name_index 查 MonsterInfo（lowercase key，对齐 tick.rs boss_summons）
                 let mon_index = self.monster_name_index.get(&summon_name.to_lowercase()).copied();
@@ -2650,7 +2661,7 @@ impl Message<MagicRequest> for WorldActor {
                                 poison_list: Vec::new(),
                                 undead: info.undead,
                                 master_session: Some(msg.session_id),
-                                recall_at_tick: self.tick_count + 6000,
+                                recall_at_tick: if recall_at_tick > 0 { self.tick_count + recall_at_tick } else { 0 },
                                 behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                             });
                             // 记录召唤物等级（C# MonsterObject.PetLevel = magic.Level）
