@@ -830,11 +830,53 @@ impl Message<NewHeroRequest> for WorldActor {
                 dead: false,
                 sealed: false,
             });
-            let _ = record.actor_ref.ask(SetHeroIndex { hero_index: 1 }).await;
-            // #198：创建成功后生成英雄对象
-            self.broadcast_hero_spawn(msg.session_id).await;
-            // #203：下发完整英雄信息（背包/装备/自动药）
-            self.send_hero_information_packet(msg.session_id).await;
+            // C# CreateHero（PlayerObject.cs:9610）：有封印符配置（HeroSealItemName）且背包有空位时，
+            // 英雄以"英雄封印符"形式发放（不出战，使用后恢复）；否则直接创建为出战英雄。
+            let seal_item = self.item_infos.values()
+                .find(|i| i.name.eq_ignore_ascii_case("SealedHero"))
+                .cloned();
+            if let Some(si) = seal_item {
+                if state.inventory.has_space() {
+                    if let Some(hs) = self.player_heroes.get_mut(&msg.session_id) {
+                        if let Some(h) = hs.iter_mut().find(|h| h.index == 1) {
+                            h.sealed = true;
+                        }
+                    }
+                    let item = mir2_shared::data::item::UserItem {
+                        item_index: si.index,
+                        count: 1,
+                        added_stats: {
+                            let mut m = mir2_shared::data::stats::Stats::default();
+                            m.set(mir2_shared::enums::Stat::Hero, 1);
+                            m
+                        },
+                        ..Default::default()
+                    };
+                    let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+                    send_system_message(&self.gate_ref, msg.session_id,
+                        "英雄已创建，封印符已放入背包，使用后即可出战");
+                } else {
+                    let _ = record.actor_ref.ask(SetHeroIndex { hero_index: 1 }).await;
+                    self.broadcast_hero_spawn(msg.session_id).await;
+                    self.send_hero_information_packet(msg.session_id).await;
+                }
+            } else {
+                let _ = record.actor_ref.ask(SetHeroIndex { hero_index: 1 }).await;
+                // #198：创建成功后生成英雄对象
+                self.broadcast_hero_spawn(msg.session_id).await;
+                // #203：下发完整英雄信息（背包/装备/自动药）
+                self.send_hero_information_packet(msg.session_id).await;
+            }
+            // 持久化英雄
+            let heroes = self.player_heroes.get(&msg.session_id).cloned().unwrap_or_default();
+            let db_heroes: Vec<db::DbHero> = heroes.iter().map(|h| db::DbHero {
+                index: h.index, name: h.name.clone(), level: h.level,
+                class: h.class as u8, gender: h.gender as u8,
+                dead: h.dead, sealed: h.sealed,
+            }).collect();
+            if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
+                warn!("Failed to save heroes on NewHero: {}", e);
+            }
         }
         let body = vec![result];
         let _ = self.gate_ref.tell(SendToClient {
