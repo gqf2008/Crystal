@@ -790,6 +790,8 @@ pub struct WorldActor {
     pub(crate) fatal_sword_armed: HashSet<u64>,
     /// #448 宠物强化（怪物 oid → (到期 tick, DC 加成, AC 加成)）
     pub(crate) pet_enhanced: HashMap<u32, (u64, i32, i32)>,
+    /// Boss 延迟攻击队列（到期 tick → 攻击；C# DelayedAction DelayedType.Damage）
+    pub(crate) boss_pending_attacks: Vec<(u64, ai::DelayedAttack)>,
     /// #471 宠物协战（宠物 oid → 主人攻击的怪物 oid）
     pub(crate) pet_targets: HashMap<u32, u32>,
     /// 活跃 NPC（按 object_id 索引）
@@ -1017,6 +1019,7 @@ impl WorldActor {
             hallucinated: HashMap::new(),
             mental_state: HashMap::new(),
             fatal_sword_armed: HashSet::new(),
+            boss_pending_attacks: Vec::new(),
             pet_enhanced: HashMap::new(),
             pet_targets: HashMap::new(),
             npcs: HashMap::new(),
@@ -3549,6 +3552,7 @@ impl Actor for WorldActor {
             hallucinated: HashMap::new(),
             mental_state: HashMap::new(),
             fatal_sword_armed: HashSet::new(),
+            boss_pending_attacks: Vec::new(),
             pet_enhanced: HashMap::new(),
             pet_targets: HashMap::new(),
             npcs: HashMap::new(),

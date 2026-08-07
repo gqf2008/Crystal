@@ -1472,6 +1472,39 @@ impl WorldActor {
     pub(crate) async fn tick_spell_completions(&mut self) {
         use mir2_shared::enums::Spell;
 
+        // Boss 延迟攻击结算（C# DelayedAction DelayedType.Damage）
+        if !self.boss_pending_attacks.is_empty() {
+            let now = self.tick_count;
+            let mut due: Vec<ai::DelayedAttack> = Vec::new();
+            self.boss_pending_attacks.retain(|(fire, atk)| {
+                if *fire <= now {
+                    due.push(*atk);
+                    false
+                } else {
+                    true
+                }
+            });
+            for atk in due {
+                for (sid, r) in &self.players {
+                    if let Ok(Some(st)) = r.actor_ref.ask(GetPlayerState).await {
+                        if !st.is_dead
+                            && st.map_index == atk.map_index
+                            && (st.x - atk.center_x).abs() <= atk.radius
+                            && (st.y - atk.center_y).abs() <= atk.radius
+                        {
+                            let _ = r.actor_ref.ask(TakeDamage {
+                                attacker_id: atk.attacker_oid,
+                                attacker_session: *sid,
+                                damage: atk.damage,
+                            }).await;
+                        }
+                    }
+                }
+                debug!("Boss delayed attack hit at ({},{}) radius {} dmg {}",
+                       atk.center_x, atk.center_y, atk.radius, atk.damage);
+            }
+        }
+
         if self.pending_spell_completions.is_empty() {
             return;
         }
@@ -1928,6 +1961,7 @@ impl Message<Tick> for WorldActor {
             let mut boss_poisons: Vec<ai::PoisonPlayer> = Vec::new();
             let mut boss_pushes: Vec<ai::PushPlayer> = Vec::new();
             let mut boss_player_teleports: Vec<(u64, i32, i32, u8)> = Vec::new();
+            let mut boss_delayed_attacks: Vec<ai::DelayedAttack> = Vec::new();
             // 召唤物过期队列（到期 tick 已过 → 移除，不掉落）
             let mut expired_monsters: Vec<u32> = Vec::new();
 
@@ -1970,6 +2004,7 @@ impl Message<Tick> for WorldActor {
                         out_poisons: &mut boss_poisons,
                         out_pushes: &mut boss_pushes,
                         out_player_teleports: &mut boss_player_teleports,
+                        out_delayed_attacks: &mut boss_delayed_attacks,
                     };
                     // 临时取出 behavior 避免 &mut monster + &mut behavior 双重借用
                     let mut behavior = std::mem::replace(
@@ -2622,6 +2657,10 @@ impl Message<Tick> for WorldActor {
             for pp in &boss_pushes {
                 let moved = self.push_player(pp.session_id, pp.dir, pp.distance).await;
                 debug!("Boss pushed player {} {} tiles dir={}", pp.session_id, moved, pp.dir);
+            }
+            // Boss 延迟攻击：入队（C# DelayedAction DelayedType.Damage）
+            for atk in &boss_delayed_attacks {
+                self.boss_pending_attacks.push((self.tick_count + atk.delay_ticks, *atk));
             }
             // Boss 传送玩家（C# Target.Teleport：TurtleKing 拉拽等）
             for (sid, tx, ty, dir) in &boss_player_teleports {
