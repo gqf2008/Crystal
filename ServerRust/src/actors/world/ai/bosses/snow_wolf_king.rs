@@ -25,22 +25,61 @@ const SLAVE_NAMES: [&str; 3] = ["SnowWolf", "FrostWolf", "IceWolf"];
 
 pub struct SnowWolfKingBehavior {
     spawned_slaves: bool,
+    /// 受击记录（C# Attacked override → FindWeakerTarget 判定用）
+    switch_pending: bool,
+    last_damage: i32,
 }
 
 impl SnowWolfKingBehavior {
     pub fn new() -> Self {
-        Self { spawned_slaves: false }
+        Self {
+            spawned_slaves: false,
+            switch_pending: false,
+            last_damage: 0,
+        }
     }
 }
 
 impl MonsterBehavior for SnowWolfKingBehavior {
-    /// 受击时若伤害高于自身攻击力，概率切换到更弱目标（C# Attacked override）
-    fn on_attacked(&mut self, _damage: i32) -> i32 {
-        // 目标切换需 target 信息，此处只保留伤害（切换在 process_tick 内按 hp 态势处理）
-        _damage
+    /// 受击记录（C# Attacked override：伤害 > 0 时记下，process_tick 内做 FindWeakerTarget 判定）
+    fn on_attacked(&mut self, damage: i32) -> i32 {
+        if damage > 0 {
+            self.last_damage = damage;
+            self.switch_pending = true;
+        }
+        damage
     }
 
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
+        // C# FindWeakerTarget（SnowWolfKing.cs:30-65）：受击伤害 > 自身随机 DC 且 Random(2)==0
+        if self.switch_pending {
+            self.switch_pending = false;
+            let own_dmg = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
+            if self.last_damage > own_dmg && fastrand::i32(0..2) == 0 {
+                // 视野内找更弱目标（C# 按 MinDC；PlayerSnap 无 DC，用 hp 近似）
+                let weakest_opt: Option<(u64, i32, i32)> = {
+                    let targets = ctx.find_targets_in_range(monster.x, monster.y, VIEW_RANGE, monster.map_index);
+                    if targets.len() >= 2 {
+                        targets.iter().min_by_key(|p| p.hp).map(|p| (p.session_id, p.x, p.y))
+                    } else {
+                        None
+                    }
+                };
+                if let Some((wsession, wx, wy)) = weakest_opt {
+                    // C# TeleportToTarget：传送自身到目标背后 1 格（用 玩家→狼 方向近似）
+                    let dir = direction_towards(wx, wy, monster.x, monster.y);
+                    ctx.out_moves.push((
+                        monster.object_id,
+                        wx + DIR_DX[dir as usize],
+                        wy + DIR_DY[dir as usize],
+                        dir,
+                    ));
+                    monster.target_session = Some(wsession);
+                    monster.next_attack_tick = ctx.tick_count + 2;
+                }
+            }
+        }
+
         let hp_pct = if monster.max_hp > 0 {
             (monster.hp * 100) / monster.max_hp
         } else {
