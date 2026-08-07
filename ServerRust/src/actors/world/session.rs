@@ -1544,7 +1544,7 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -2065,6 +2065,49 @@ impl Message<ChatRequest> for WorldActor {
                             }
                             send_system_message(&self.gate_ref, msg.session_id, "flags 已清空");
                         }
+                        // @deleteskill [玩家] <技能名>（C# case "DELETESKILL" ~4075）
+                        "DELETESKILL" => {
+                            let (target_sid, skill_arg) = if parts.len() >= 3 {
+                                let name = parts.get(1).copied().unwrap_or("");
+                                let mut found = None;
+                                for (_sid, other) in &self.players {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if os.name.eq_ignore_ascii_case(name) {
+                                            found = Some(*_sid);
+                                            break;
+                                        }
+                                    }
+                                }
+                                (found, parts.get(2).copied().unwrap_or(""))
+                            } else {
+                                (Some(msg.session_id), parts.get(1).copied().unwrap_or(""))
+                            };
+                            let Some(target_sid) = target_sid else {
+                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                return;
+                            };
+                            let Some(info) = self.magic_infos.values().find(|m| m.name.eq_ignore_ascii_case(skill_arg)).cloned() else {
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("未找到技能：{}", skill_arg));
+                                return;
+                            };
+                            let target = match self.players.get(&target_sid) {
+                                Some(r) => r.clone(),
+                                None => return,
+                            };
+                            let mut state = match target.actor_ref.ask(GetPlayerState).await {
+                                Ok(Some(s)) => s,
+                                _ => return,
+                            };
+                            let before = state.magics.len();
+                            state.magics.retain(|m| m.spell != info.spell);
+                            if state.magics.len() != before {
+                                let _ = target.actor_ref.ask(SetPlayerState { state }).await;
+                                self.send_remove_magic_packet(target_sid, info.spell).await;
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("已删除技能 {}", info.name));
+                            } else {
+                                send_system_message(&self.gate_ref, msg.session_id, "对方未学会该技能");
+                            }
+                        }
                         _ => {}
                     }
                     return;
@@ -2288,6 +2331,12 @@ impl Message<ChatRequest> for WorldActor {
                         self.broadcast_hero_remove(object_id).await;
                         send_system_message(&self.gate_ref, msg.session_id, "英雄已收起");
                     }
+                    return;
+                }
+                Some("CLEARBUFFS") => {
+                    // C# case "CLEARBUFFS"（~2411）：清除自己全部 Buff（无 GM 校验）
+                    let _ = record.actor_ref.ask(crate::actors::player::ClearAllBuffs).await;
+                    send_system_message(&self.gate_ref, msg.session_id, "已清除全部状态效果");
                     return;
                 }
                 Some("LEAVEGUILD") => {
