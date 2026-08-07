@@ -38,6 +38,11 @@ def main() -> int:
         "UPDATE characters SET x=?, y=?, gold=1000000 WHERE name IN ('bevychar','bevy2char')",
         (SAFE_X, SAFE_Y),
     )
+    # 2) 配对摆位（#1166）：交易邀请要求目标在正前方一格且面对面（C# 语义）。
+    #    bevychar（发起方）(267,256) 朝下 → 正前方 (267,257)；bevy2char（接受方）(267,257) 朝上。
+    #    其余配对用例（组队/私聊/邮件/好友）按名称/在线表，不受相邻影响。
+    cur.execute("UPDATE characters SET direction=4 WHERE name='bevychar'")
+    cur.execute("UPDATE characters SET x=267, y=257, direction=0 WHERE name='bevy2char'")
     # 2) bevychar 背包为空则恢复（item 194 BraceletOfAgony / 430 BoundlessRing）
     cur.execute("SELECT COUNT(*) FROM inventory_backpack WHERE character_name='bevychar'")
     if cur.fetchone()[0] == 0:
