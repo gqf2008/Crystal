@@ -669,6 +669,24 @@ impl WorldActor {
         }
     }
 
+    /// 广播对象显示/隐藏（C# S.ObjectShow / S.ObjectHide：Shinsu 形态切换等）
+    async fn broadcast_object_show_hide(&self, object_id: u32, visible: bool) {
+        let mut body = Vec::new();
+        body.extend_from_slice(&object_id.to_le_bytes());
+        let opcode = if visible {
+            mir2_shared::enums::ServerPacketIds::ObjectShow as i16
+        } else {
+            mir2_shared::enums::ServerPacketIds::ObjectHide as i16
+        };
+        let packet = build_packet_bytes(opcode, &body);
+        for sid in self.players.keys() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: *sid,
+                data: packet.clone(),
+            }).await;
+        }
+    }
+
 /// PK 值衰减 + 名字颜色广播（C# MapObject.Process：每 Settings.PKDelay=12 秒衰减 1 点）
     /// 死亡回调：调用 behavior.on_die 并应用其输出（C# Die 覆盖；
     /// 此前 on_die 从未被接线，HumanAssassin 死亡爆炸 / KingHydrax 死亡召唤等机制失效）。
@@ -691,6 +709,7 @@ impl WorldActor {
         let mut die_taunts: Vec<(u32, u32)> = Vec::new();
         let mut die_monster_teleports: Vec<(u32, i32, i32)> = Vec::new();
         let mut die_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
+        let mut die_show_hide: Vec<(u32, bool)> = Vec::new();
         {
             // 死亡回调也提供玩家快照（C# Die 可 FindAllTargets；ToxicGhoul 死亡 AOE 毒等用）
             let die_player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
@@ -719,6 +738,7 @@ impl WorldActor {
                 out_monster_taunts: &mut die_taunts,
                 out_monster_teleports: &mut die_monster_teleports,
                 out_player_buffs: &mut die_player_buffs,
+                out_show_hide: &mut die_show_hide,
             };
             // 临时取出 behavior 避免 &mut monster + &mut behavior 双重借用（与 AI 循环一致）
             let mut behavior = std::mem::replace(
@@ -3051,6 +3071,7 @@ impl Message<Tick> for WorldActor {
             let mut boss_taunts: Vec<(u32, u32)> = Vec::new();
             let mut boss_monster_teleports: Vec<(u32, i32, i32)> = Vec::new();
             let mut boss_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
+            let mut boss_show_hide: Vec<(u32, bool)> = Vec::new();
             // 召唤物过期队列（到期 tick 已过 → 移除，不掉落）
             let mut expired_monsters: Vec<u32> = Vec::new();
 
@@ -3098,6 +3119,7 @@ impl Message<Tick> for WorldActor {
                         out_monster_taunts: &mut boss_taunts,
                         out_monster_teleports: &mut boss_monster_teleports,
                         out_player_buffs: &mut boss_player_buffs,
+                        out_show_hide: &mut boss_show_hide,
                     };
                     // 临时取出 behavior 避免 &mut monster + &mut behavior 双重借用
                     let mut behavior = std::mem::replace(
@@ -3767,6 +3789,10 @@ impl Message<Tick> for WorldActor {
             }
 
             // ===== 应用 Boss AI 输出队列 =====
+            // Boss 显示/隐藏广播（C# ObjectShow/ObjectHide，如 Shinsu 形态切换）
+            for (oid, visible) in boss_show_hide.drain(..) {
+                self.broadcast_object_show_hide(oid, visible).await;
+            }
             // Boss 移动（合并到 moved_monsters 复用广播逻辑），校验 walkable 避免穿墙
             for (oid, nx, ny, dir) in boss_moves.drain(..) {
                 let map_idx = self.monsters.get(&oid).map(|m| m.map_index).unwrap_or(0);

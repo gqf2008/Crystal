@@ -27,11 +27,13 @@ pub struct ShinsuBehavior {
     /// Mode 到期 tick（C# ModeTime）
     mode_end_tick: u64,
     spawned: bool,
+    /// 基础贴图（C# Monster.Shinsu；攻击形态为 +1 的 Shinsu1）
+    base_image: u16,
 }
 
 impl ShinsuBehavior {
     pub fn new() -> Self {
-        Self { mode: false, mode_end_tick: 0, spawned: false }
+        Self { mode: false, mode_end_tick: 0, spawned: false, base_image: 0 }
     }
 }
 
@@ -39,9 +41,11 @@ impl MonsterBehavior for ShinsuBehavior {
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         if !self.spawned {
             self.spawned = true;
+            self.base_image = monster.image;
         }
 
-        let target = ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index);
+        let target = ctx.nearest_target(monster.x, monster.y, VIEW_RANGE, monster.map_index)
+            .copied(); // 立即转为 owned，避免借用 ctx 期间无法 push out_show_hide
 
         // Mode 切换（C# ProcessAI）
         if let Some(t) = target {
@@ -49,11 +53,16 @@ impl MonsterBehavior for ShinsuBehavior {
             self.mode_end_tick = ctx.tick_count + MODE_TICKS;
             if !self.mode {
                 self.mode = true; // C# Mode=true + ObjectShow
+                // 攻击形态贴图 Shinsu1（C# GetInfo：Image = Mode ? Shinsu1 : Shinsu）
+                monster.image = self.base_image.saturating_add(1);
+                ctx.out_show_hide.push((monster.object_id, true));
             }
             monster.target_session = Some(t.session_id);
         } else if ctx.tick_count >= self.mode_end_tick && self.mode {
             // 超时退出攻击形态（C# Mode=false + ObjectHide）
             self.mode = false;
+            monster.image = self.base_image;
+            ctx.out_show_hide.push((monster.object_id, false));
             monster.target_session = None;
             return;
         }
@@ -64,7 +73,7 @@ impl MonsterBehavior for ShinsuBehavior {
         }
 
         let target = match target {
-            Some(t) => *t,
+            Some(t) => t,
             None => return,
         };
         let dist = max_distance(monster.x, monster.y, target.x, target.y);

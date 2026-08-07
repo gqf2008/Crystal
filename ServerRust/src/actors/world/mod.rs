@@ -5920,8 +5920,18 @@ fn build_object_npc_packet(npc: &NpcSpawn, object_id: u32) -> Vec<u8> {
     build_packet_bytes(ServerPacketIds::ObjectNpc as i16, &body)
 }
 
-/// 构建 ObjectMonster 数据包
+/// 构建 ObjectMonster 数据包（extra=false）
 fn build_object_monster_packet(monster: &MonsterSpawn, object_id: u32, name: &str) -> Vec<u8> {
+    build_object_monster_packet_extra(monster, object_id, name, false)
+}
+
+/// 构建 ObjectMonster 数据包；extra 对应 C# ObjectMonster.Extra（如 Shinsu Extra=Summoned）
+fn build_object_monster_packet_extra(
+    monster: &MonsterSpawn,
+    object_id: u32,
+    name: &str,
+    extra: bool,
+) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
 
@@ -5941,7 +5951,7 @@ fn build_object_monster_packet(monster: &MonsterSpawn, object_id: u32, name: &st
     body.push(0u8);                                     // hidden=false
     body.extend_from_slice(&0i64.to_le_bytes());        // shock_time
     body.push(0u8);                                     // binding_shot_center=false
-    body.push(0u8);                                     // extra=false
+    body.push(if extra { 1 } else { 0 });               // extra（C# Shinsu Extra=Summoned）
     body.push(0u8);                                     // extra_byte
     body.extend_from_slice(&0i32.to_le_bytes());        // buffs count=0
 

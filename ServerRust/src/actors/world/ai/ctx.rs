@@ -160,6 +160,8 @@ pub struct AiCtx<'a> {
     pub out_monster_teleports: &'a mut Vec<(u32, i32, i32)>,
     /// 输出：给玩家加 buff (session, BuffInstance)（C# AddBuff：YinDevilNode/PowerBead 等）
     pub out_player_buffs: &'a mut Vec<(u64, crate::combat::buff::BuffInstance)>,
+    /// 输出：对象显示/隐藏广播（C# ObjectShow/ObjectHide，如 Shinsu 形态切换）
+    pub out_show_hide: &'a mut Vec<(u32, bool)>,
 }
 
 impl<'a> AiCtx<'a> {

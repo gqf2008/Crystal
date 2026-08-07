@@ -3064,6 +3064,14 @@ impl Message<MagicRequest> for WorldActor {
             // --- 召唤系法术（道士/法师/弓箭手）：在施法者前方 1 格 spawn 一只战斗召唤物 ---
             SPELL_SUMMON_SKELETON | SPELL_SUMMON_SHINSU | SPELL_SUMMON_HOLY_DEVA
             | SPELL_SUMMON_VAMPIRE | SPELL_SUMMON_TOAD | SPELL_SUMMON_SNAKES => {
+                // C# HumanObject.SummonXxx：NoPets 地图禁止召唤（CurrentMap.Info.NoPets → ReceiveChat + return）
+                if self.map_infos.get(&(state.map_index as i32))
+                    .map(|m| m.no_pets)
+                    .unwrap_or(false)
+                {
+                    send_system_message(&self.gate_ref, msg.session_id, "该地图禁止召唤宠物");
+                    return;
+                }
                 // 召唤物名映射（对齐 C# HumanObject.SummonXxx，名需在 DB monster_infos 里）
                 let summon_name: &str = match msg.spell {
                     SPELL_SUMMON_SKELETON => "Skeleton",
@@ -3110,6 +3118,14 @@ impl Message<MagicRequest> for WorldActor {
                     return;
                 }
 
+                // C# SummonXxx：Pets.Count(x => x.Race == ObjectType.Monster) >= 2 拒绝（静默）
+                let pet_count = self.monsters.values()
+                    .filter(|m| m.master_session == Some(msg.session_id) && m.hp > 0)
+                    .count();
+                if pet_count >= 2 {
+                    return;
+                }
+
                 // C#：道士/法师召唤永久；弓手召唤 AliveTime：
                 // Vampire=Lv*1500+15000ms，Toad=Lv*2000+25000ms，Snakes=Lv*1500+20000ms
                 let recall_at_tick = match msg.spell {
@@ -3127,9 +3143,20 @@ impl Message<MagicRequest> for WorldActor {
                         let info_opt = self.monster_infos.get(&idx).cloned();
                         if let Some(info) = info_opt {
                             let new_oid = self.alloc_object_id();
-                            let hp = info.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(50);
-                            let min_dmg = info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(5);
-                            let max_dmg = info.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(10);
+                            // C# MonsterObject.RefreshAll：PetLevel 属性加成
+                            // HP += PetLevel*20；DC += PetLevel；AC/MAC += PetLevel*2（AC/MAC 在 insert 后补）
+                            let pet_level = spell_level as i32;
+                            let max_pet_level = if msg.spell == SPELL_SUMMON_SKELETON {
+                                4 + pet_level
+                            } else {
+                                1 + pet_level * 2
+                            };
+                            let base_hp = info.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(50);
+                            let base_min_dmg = info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(5);
+                            let base_max_dmg = info.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(10);
+                            let hp = base_hp + pet_level * 20;
+                            let min_dmg = base_min_dmg + pet_level;
+                            let max_dmg = base_max_dmg + pet_level;
                             // 广播 ObjectMonster 给所有玩家（spawn 通知）
                             let spawn = MonsterSpawn {
                                 name: info.name.clone(),
@@ -3146,7 +3173,9 @@ impl Message<MagicRequest> for WorldActor {
                                 count: 1,
                                 spread: 0,
                             };
-                            let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
+                            // C# Shinsu.GetInfo：Extra = Summoned（召唤物标记）
+                            let packet = build_object_monster_packet_extra(
+                                &spawn, new_oid, &spawn.name, msg.spell == SPELL_SUMMON_SHINSU);
                             for session_id in self.players.keys() {
                                 let _ = self.gate_ref.tell(SendToClient {
                                     session_id: *session_id,
@@ -3181,6 +3210,22 @@ impl Message<MagicRequest> for WorldActor {
                                 recall_at_tick: if recall_at_tick > 0 { self.tick_count + recall_at_tick } else { 0 },
                                 behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                             });
+                            // 补 DB 基础 AC/MAC（原实现遗漏）并叠加 PetLevel 加成（C# RefreshAll）
+                            if let Some(m) = self.monsters.get_mut(&new_oid) {
+                                m.fill_combat_stats(&info);
+                                m.min_ac += pet_level * 2;
+                                m.max_ac += pet_level * 2;
+                                m.min_mac += pet_level * 2;
+                                m.max_mac += pet_level * 2;
+                                // C# RefreshAll：Skeleton/Shinsu/Angel 按 MaxPetLevel 加速
+                                // （自定义 AI 宠物的移动/攻击 tick 在 behavior 内硬编码，此处作用于默认 AI 路径）
+                                if matches!(msg.spell, SPELL_SUMMON_SKELETON | SPELL_SUMMON_SHINSU | SPELL_SUMMON_HOLY_DEVA) {
+                                    let move_save = (max_pet_level as u64).saturating_mul(13) / 10; // ≈ MaxPetLevel*130ms
+                                    let atk_save = (max_pet_level as u64).saturating_mul(7) / 10;   // ≈ MaxPetLevel*70ms
+                                    m.ai_profile.move_interval = m.ai_profile.move_interval.saturating_sub(move_save).max(1);
+                                    m.ai_profile.attack_cooldown = m.ai_profile.attack_cooldown.saturating_sub(atk_save).max(1);
+                                }
+                            }
                             // 记录召唤物等级（C# MonsterObject.PetLevel = magic.Level）
                             self.pet_levels.insert(new_oid, spell_level as i32);
                             debug!("Magic: {} casts summon '{}' as #{} at ({},{}) (slave of {})",
