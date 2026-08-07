@@ -161,7 +161,14 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             let mut mock_guild_invite_since: Option<std::time::Instant> = None;
             // #720：市场状态（(auction_id, item, seller, price)）
             let mut mock_market_listings: Vec<(u64, mir2_shared::data::item::UserItem, String, u32)> =
-                Vec::new();
+                if std::env::args().any(|a| a == "--market-buy") {
+                    // #769：买家侧预置卖家 bevychar 的商品（uid=100 / item_index=853）
+                    let mut seed = market_item(853);
+                    seed.unique_id = 100;
+                    vec![(4000u64, seed, "bevychar".to_string(), 100u32)]
+                } else {
+                    Vec::new()
+                };
             let mut mock_next_auction: u64 = 5000;
             // #283：首次击杀触发本地升级演示（LevelChanged + ObjectLeveled）
             let mut mock_leveled_up = false;
@@ -1156,6 +1163,61 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             },
                                         );
                                         tracing::info!("🧑‍🏫 [MOCK] 解除师徒回发 MentorUpdate");
+                                    }
+                                }
+                                // #769：租赁（--rental-test，wire [target_name dotnet]）
+                                x if x == ClientPacketIds::ItemRentalRequest as i16 => {
+                                    let _target =
+                                        mir2_shared::binary::read_dotnet_string(&mut cur)
+                                            .unwrap_or_default();
+                                    send(
+                                        &to_client,
+                                        &MockUpdateRentalItem { fee: 100, period: 24 },
+                                    );
+                                    tracing::info!("📦 [MOCK] 租赁更新回发（has_item）");
+                                }
+                                x if x == ClientPacketIds::ItemRentalLockFee as i16 => {
+                                    if let Ok(_p) =
+                                        client::item::ItemRentalLockFee::read_body(&mut cur)
+                                    {
+                                        send(&to_client, &MockRentalCanConfirm);
+                                        tracing::info!("📦 [MOCK] 租赁可确认回发");
+                                    }
+                                }
+                                x if x == ClientPacketIds::ConfirmItemRental as i16 => {
+                                    if let Ok(_p) =
+                                        client::item::ConfirmItemRental::read_body(&mut cur)
+                                    {
+                                        send(&to_client, &MockRentalConfirm);
+                                        tracing::info!("📦 [MOCK] 租赁成交确认回发");
+                                    }
+                                }
+                                // #769：市场购买（--market-buy，wire [listing_id u32]）
+                                x if x == ClientPacketIds::MarketBuy as i16 => {
+                                    use byteorder::{LittleEndian, ReadBytesExt};
+                                    let listing_id = cur.read_u32::<LittleEndian>().unwrap_or(0) as u64;
+                                    let pos = mock_market_listings
+                                        .iter()
+                                        .position(|(aid, _, _, _)| *aid == listing_id);
+                                    if let Some(pos) = pos {
+                                        let (_, item, _, _) = mock_market_listings.remove(pos);
+                                        if let Some(empty) =
+                                            player_inventory.iter_mut().find(|s| s.is_none())
+                                        {
+                                            *empty = Some(item.clone());
+                                        }
+                                        // 物品入包通知（--market-buy 校验 item_index=853）
+                                        send(&to_client, &server::drops::GainedItem { item: item.clone() });
+                                        send(
+                                            &to_client,
+                                            &MockMarketSuccess {
+                                                message: "购买成功".to_string(),
+                                            },
+                                        );
+                                        tracing::info!(
+                                            "🏪 [MOCK] 购买 auction={} 物品入背包",
+                                            listing_id
+                                        );
                                     }
                                 }
                                 x if x == ClientPacketIds::Attack as i16 => {
@@ -3299,6 +3361,80 @@ impl Packet for MockMentorUpdate {
         writer.write_i32::<LittleEndian>(self.level)?;
         writer.write_u8(if self.online { 1 } else { 0 })?;
         writer.write_i64::<LittleEndian>(self.exp)?;
+        Ok(())
+    }
+}
+
+/// #769：租赁更新（客户端格式 [hasdata u8][fee u32][period i32]）
+struct MockUpdateRentalItem {
+    fee: u32,
+    period: i32,
+}
+
+impl Packet for MockUpdateRentalItem {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::UpdateRentalItem as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u8(1)?; // hasdata
+        writer.write_u32::<LittleEndian>(self.fee)?;
+        writer.write_i32::<LittleEndian>(self.period)?;
+        Ok(())
+    }
+}
+
+/// #769：租赁可确认（客户端格式 [u8]）
+struct MockRentalCanConfirm;
+
+impl Packet for MockRentalCanConfirm {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::CanConfirmItemRental as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u8(1)?;
+        Ok(())
+    }
+}
+
+/// #769：租赁成交确认（客户端格式 [u8]）
+struct MockRentalConfirm;
+
+impl Packet for MockRentalConfirm {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::ConfirmItemRental as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u8(1)?;
+        Ok(())
+    }
+}
+
+/// #769：市场成功消息（客户端格式 [msg dotnet]）
+struct MockMarketSuccess {
+    message: String,
+}
+
+impl Packet for MockMarketSuccess {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::MarketSuccess as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        mir2_shared::binary::write_dotnet_string(writer, &self.message)?;
         Ok(())
     }
 }
