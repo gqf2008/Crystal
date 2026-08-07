@@ -1593,6 +1593,21 @@ impl WorldActor {
         };
 
         if let Some((mx, my, defender_stats)) = monster_hit {
+            // ElementalShot 击退：命中即结算（C# CompleteMagic 中 Attacked 后无条件 DoKnockback）
+            let mut elemental_knockback: Option<(u8, i32)> = None;
+            if spell == Spell::ElementalShot {
+                let mlevel = self.monsters.get(&target_id)
+                    .and_then(|m| self.monster_infos.get(&m.monster_index))
+                    .map(|i| i.level)
+                    .unwrap_or(0);
+                if fastrand::i32(0..20) < 6 + pending.spell_level as i32 * 3 + caster_state.level as i32 - mlevel {
+                    let distance = 1 + (pending.spell_level as i32 - 1).max(0) + fastrand::i32(0..2);
+                    elemental_knockback = Some((
+                        crate::actors::world::ai::direction_towards(caster_state.x, caster_state.y, mx, my),
+                        distance,
+                    ));
+                }
+            }
             // 法术特化伤害
             let final_damage = match spell {
                 // ThunderBolt 对亡灵 +50%（C# HumanObject.cs:4126）
@@ -1616,24 +1631,10 @@ impl WorldActor {
             );
 
             if result.is_hit && result.damage > 0 {
-                // ElementalShot 击退参数（在 get_mut 块内计算、块外应用，避免借用冲突）
-                let mut elemental_knockback: Option<(u8, i32)> = None;
                 if let Some(monster) = self.monsters.get_mut(&target_id) {
                     monster.take_damage(result.damage);
                     monster.provoked = true;
                     monster.target_session = Some(pending.session_id);
-
-                    // ElementalShot：击退判定（C# HumanObject.cs:5660 DoKnockback；在块开头计算避免后续借用冲突）
-                    if spell == Spell::ElementalShot {
-                        let mlevel = self.monster_infos.get(&monster.monster_index).map(|i| i.level).unwrap_or(0);
-                        if fastrand::i32(0..20) < 6 + pending.spell_level as i32 * 3 + caster_state.level as i32 - mlevel {
-                            let distance = 1 + (pending.spell_level as i32 - 1).max(0) + fastrand::i32(0..2);
-                            elemental_knockback = Some((
-                                crate::actors::world::ai::direction_towards(caster_state.x, caster_state.y, monster.x, monster.y),
-                                distance,
-                            ));
-                        }
-                    }
 
                     // FrostCrunch：概率 Slow/Frozen（C# HumanObject.cs:5962）
                     if spell == Spell::FrostCrunch {
@@ -1731,11 +1732,6 @@ impl WorldActor {
                     }
                 }
 
-                // ElementalShot：击退怪物（在 get_mut 块外应用）
-                if let Some((dir, distance)) = elemental_knockback {
-                    let _ = self.push_monster(target_id, dir, distance).await;
-                    debug!("ElementalShot knocked back monster {} {} tiles", target_id, distance);
-                }
             } else {
                 debug!("Projectile {:?} missed/blocked target {}", spell, target_id);
             }
@@ -1769,11 +1765,18 @@ impl WorldActor {
                 }
                 debug!("NapalmShot exploded at ({},{}) 3x3 splash", mx, my);
             }
+
+            // ElementalShot：击退怪物（命中即结算，与是否造成伤害无关）
+            if let Some((dir, distance)) = elemental_knockback {
+                let _ = self.push_monster(target_id, dir, distance).await;
+                debug!("ElementalShot knocked back monster {} {} tiles", target_id, distance);
+            }
             return;
         }
 
         // 目标不是怪物，查玩家（PvP 弹道，如 SoulFireBall 打玩家）
-        for (_other_session, other_record) in &self.players {
+        let mut pvp_knockback: Option<(u64, u8, i32)> = None;
+        for (other_session, other_record) in &self.players {
             if let Ok(Some(other_state)) = other_record.actor_ref.ask(GetPlayerState).await {
                 if other_state.object_id != target_id {
                     continue;
@@ -1824,10 +1827,28 @@ impl WorldActor {
                         }).await;
                     }
 
+                    // ElementalShot：击退玩家（C# DoKnockback 同样作用于玩家，HumanObject.cs:5660）
+                    if spell == Spell::ElementalShot {
+                        if fastrand::i32(0..20) < 6 + pending.spell_level as i32 * 3 + caster_state.level as i32 - other_state.level as i32 {
+                            let distance = 1 + (pending.spell_level as i32 - 1).max(0) + fastrand::i32(0..2);
+                            pvp_knockback = Some((
+                                *other_session,
+                                crate::actors::world::ai::direction_towards(caster_state.x, caster_state.y, other_state.x, other_state.y),
+                                distance,
+                            ));
+                        }
+                    }
+
                     debug!("Projectile {:?} hit player {} for {} dmg", spell, target_id, damage);
                 }
                 break;
             }
+        }
+
+        // ElementalShot：击退玩家（循环外应用，避免借用冲突）
+        if let Some((sid, dir, distance)) = pvp_knockback {
+            let _ = self.push_player(sid, dir, distance).await;
+            debug!("ElementalShot knocked back player {} {} tiles", sid, distance);
         }
     }
 }
