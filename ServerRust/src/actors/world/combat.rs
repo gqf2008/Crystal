@@ -2537,36 +2537,19 @@ impl Message<MagicRequest> for WorldActor {
                 }
                 debug!("Magic: {} casts LionRoar (taunted {} monsters)", state.name, count);
             }
-            // ProtectionField：群体减伤（自身 + 附近组员，对齐 C# WarriorObject.ProtectionField）
-            // 简化：自身 + 3 格内同组玩家获得 DamageReduction buff
+            // ProtectionField：防护领域（C# HumanObject.cs ProtectionField）——
+            // 仅自身 AC 提升：MaxAC/MinAC += round(MaxAC*(0.2+0.03Lv))，时长 45+15Lv 秒
             SPELL_PROTECTION_FIELD => {
-                let reduction_pct = ((spell_level as i32 + 1) * 10).min(50);
-                let duration_ticks = (30 + spell_level as u32 * 10) * 10; // 30-60s
-                let group_id = state.group_id;
-                // 自身
-                let _ = record.actor_ref.ask(crate::actors::player::ApplyDamageReduction {
-                    percent: reduction_pct, duration_ticks,
-                }).await;
-                let mut protected = 1u32;
-                // 附近组员
-                if let Some(gid) = group_id {
-                    for (sid, other) in &self.players {
-                        if *sid == msg.session_id { continue; }
-                        if let Ok(Some(s)) = other.actor_ref.ask(GetPlayerState).await {
-                            if s.group_id == Some(gid) && !s.is_dead {
-                                let dist = (s.x - state.x).abs() + (s.y - state.y).abs();
-                                if dist <= 3 {
-                                    let _ = other.actor_ref.ask(crate::actors::player::ApplyDamageReduction {
-                                        percent: reduction_pct, duration_ticks,
-                                    }).await;
-                                    protected += 1;
-                                }
-                            }
-                        }
-                    }
-                }
-                debug!("Magic: {} casts ProtectionField (protected {} players, -{}%)",
-                    state.name, protected, reduction_pct);
+                let add_value = (state.max_ac as f32 * (0.2 + 0.03 * spell_level as f32)).round() as i32;
+                let duration_ticks = (45 + spell_level as u32 * 15) * 10;
+                let buff = crate::combat::buff::BuffInstance::new(
+                    crate::combat::buff::BuffType::AcDefenseBoost { bonus: add_value.max(1) },
+                    duration_ticks,
+                    5,
+                );
+                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                debug!("Magic: {} casts ProtectionField (AC +{}, {}s)",
+                       state.name, add_value.max(1), 45 + spell_level as i32 * 15);
             }
             // CounterAttack：反击 buff（对齐 C# Stat.CounterAttack，受击时反弹伤害）
             // 简化：用 Reflect buff 近似（反伤百分比）
