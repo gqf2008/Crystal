@@ -3328,19 +3328,42 @@ impl Message<MagicRequest> for WorldActor {
                 }
             }
             // --- 刺客系 ---
-            // PoisonSword：武器涂毒 buff（对齐 C# AssassinObject.PoisonSword）
-            // 简化：用 AttackBoost + 占位记录（攻击触发由 attack.rs 检测 buff 实现）
-            // 此处给自身一个短时攻击 buff（数值=绿毒强度近似）
+            // PoisonSword：C# HumanObject.cs:5289 —— 前左起 5 格弧即时涂绿毒（需毒药道具，Rust 不实现门槛）
             SPELL_POISON_SWORD => {
-                let poison_value = (magic_stat / 6).max(3).min(15);
-                let duration_ticks = (30 + spell_level as u32 * 10) * 10; // 30-60s
-                // 攻击力小幅提升 + 记录涂毒状态（用 Reflect percent=0 占位标记，attack.rs 可检测）
-                let buff1 = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::AttackBoost { bonus: poison_value / 2 },
-                    duration_ticks, 5);
-                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: buff1 }).await;
-                debug!("Magic: {} casts PoisonSword (attack +{}, poison {} ready)",
-                    state.name, poison_value / 2, poison_value);
+                // C# power = magic.GetDamage(GetAttackPower(MinDC,MaxDC))；PoisonSword 无倍率/MPower 配置 → = DC
+                let power = crate::combat::attack::get_attack_power(
+                    state.min_attack + state.bonus_min_attack,
+                    state.max_attack + state.bonus_max_attack,
+                    state.luck,
+                ).max(1);
+                let front = msg.direction as usize % 8;
+                let mut poisoned = 0;
+                for k in 0..5usize {
+                    let d = (front + 7 + k) % 8; // PreviousDir 起顺时针 5 个方向
+                    let hx = state.x + MON_DIR_DX[d];
+                    let hy = state.y + MON_DIR_DY[d];
+                    let mid = self.monsters.iter()
+                        .find(|(_, m)| m.x == hx && m.y == hy && m.hp > 0)
+                        .map(|(id, _)| *id);
+                    if let Some(mid) = mid {
+                        if let Some(monster) = self.monsters.get_mut(&mid) {
+                            // C#：Duration = 3 + power/10 + Lv*3；Value = power/10 + Lv + 1 + Random(PoisonAttack)
+                            let duration = (3 + power / 10 + spell_level as i32 * 3).max(1) as u32;
+                            let value = (power / 10 + spell_level as i32 + 1
+                                + fastrand::i32(0..state.poison_attack.max(1))).max(1);
+                            crate::combat::poison::apply_poison(
+                                &mut monster.poison_list,
+                                crate::combat::poison::Poison::new(
+                                    mir2_shared::enums::PoisonType::GREEN, duration, value, 1000,
+                                ),
+                            );
+                            monster.provoked = true;
+                            monster.target_session = Some(msg.session_id);
+                            poisoned += 1;
+                        }
+                    }
+                }
+                debug!("Magic: {} casts PoisonSword (arc 5, poisoned {})", state.name, poisoned);
             }
             // --- 默认：其他伤害类（接入战斗公式 MAC）---
             _ => {
