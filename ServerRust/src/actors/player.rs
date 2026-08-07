@@ -2141,6 +2141,33 @@ impl Message<SetItemSoulBound> for PlayerActor {
     }
 }
 
+/// #950：清空背包（GM @CLEARBAG；C# 逐格 S.DeleteItem + 清空 + RefreshStats）
+pub struct ClearBackpack;
+
+impl Message<ClearBackpack> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, _msg: ClearBackpack, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let mut removed: Vec<(u64, u32)> = Vec::new();
+        for slot in self.state.inventory.backpack.iter_mut() {
+            if let Some(s) = slot.take() {
+                removed.push((s.item.unique_id, s.item.count as u32));
+            }
+        }
+        for (uid, count) in removed {
+            let pkt = mir2_shared::packets::server::experience::DeleteItem { unique_id: uid, count };
+            let mut body = Vec::new();
+            if pkt.write_body(&mut body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DeleteItem as i16, &body),
+                }).await;
+            }
+        }
+        self.send_inventory_changed();
+    }
+}
+
 // ============================================================
 // 背包操作消息 Handler
 // ============================================================

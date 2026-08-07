@@ -1544,7 +1544,7 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -1595,6 +1595,83 @@ impl Message<ChatRequest> for WorldActor {
                                 format!("未找到怪物：{}", name)
                             };
                             send_system_message(&self.gate_ref, msg.session_id, &msg_text);
+                        }
+                        // @goto <玩家名>：传送到目标身边（C# case "GOTO" ~2915；独立消息处理）
+                        "GOTO" => {
+                            let Some(target_name) = parts.get(1).copied() else { return; };
+                            if let Some(world_ref) = self.self_ref.clone() {
+                                let _ = world_ref.tell(crate::actors::world::GmGotoRequest {
+                                    session_id: msg.session_id,
+                                    target_name: target_name.to_string(),
+                                }).try_send();
+                            }
+                        }
+                        // @recallmob <怪物名|id> [数量] [x] [y]（C# case "RECALLMOB" ~2992）
+                        "RECALLMOB" => {
+                            let Some(name) = parts.get(1).copied() else { return; };
+                            let count = parts.get(2).and_then(|s| s.parse::<u32>().ok()).unwrap_or(1).max(1);
+                            let state = match record.actor_ref.ask(GetPlayerState).await {
+                                Ok(Some(s)) => s,
+                                _ => return,
+                            };
+                            let x = parts.get(3).and_then(|s| s.parse::<i32>().ok()).unwrap_or(state.x);
+                            let y = parts.get(4).and_then(|s| s.parse::<i32>().ok()).unwrap_or(state.y);
+                            let spawned = self.spawn_monster_named(name, x, y, count, state.map_index).await;
+                            if spawned > 0 {
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("已召唤 {} x{}", name, spawned));
+                            } else {
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("未找到怪物：{}", name));
+                            }
+                        }
+                        // @clearbag [玩家名]（C# case "CLEARBAG" ~2419）
+                        "CLEARBAG" => {
+                            match parts.get(1).copied() {
+                                None => {
+                                    let _ = record.actor_ref.ask(crate::actors::player::ClearBackpack).await;
+                                    send_system_message(&self.gate_ref, msg.session_id, "背包已清空");
+                                }
+                                Some(n) => {
+                                    let mut found = false;
+                                    for (_sid, other) in &self.players {
+                                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                            if os.name.eq_ignore_ascii_case(n) {
+                                                let _ = other.actor_ref.ask(crate::actors::player::ClearBackpack).await;
+                                                send_system_message(&self.gate_ref, msg.session_id, &format!("已清空 {} 的背包", os.name));
+                                                found = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if !found {
+                                        send_system_message(&self.gate_ref, msg.session_id, &format!("未找到在线玩家：{}", n));
+                                    }
+                                }
+                            }
+                        }
+                        // @revive [玩家名]（C# case "REVIVE" ~4055）
+                        "REVIVE" => {
+                            match parts.get(1).copied() {
+                                None => {
+                                    let _ = record.actor_ref.ask(crate::actors::player::Revive).await;
+                                    send_system_message(&self.gate_ref, msg.session_id, "你已复活");
+                                }
+                                Some(n) => {
+                                    let mut found = false;
+                                    for (_sid, other) in &self.players {
+                                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                            if os.name.eq_ignore_ascii_case(n) {
+                                                let _ = other.actor_ref.ask(crate::actors::player::Revive).await;
+                                                send_system_message(&self.gate_ref, msg.session_id, &format!("已复活 {}", os.name));
+                                                found = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if !found {
+                                        send_system_message(&self.gate_ref, msg.session_id, &format!("未找到在线玩家：{}", n));
+                                    }
+                                }
+                            }
                         }
                         _ => {}
                     }

@@ -6521,3 +6521,52 @@ impl Message<IsNoExperienceMap> for WorldActor {
             .unwrap_or(false)
     }
 }
+
+/// #950：GM @GOTO——传送到指定玩家身边（独立消息，避免 Chat handler 借用冲突）
+pub struct GmGotoRequest {
+    pub session_id: u64,
+    pub target_name: String,
+}
+
+impl Message<GmGotoRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: GmGotoRequest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let target = {
+            let mut found = None;
+            for (_sid, other) in &self.players {
+                if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                    if os.name.eq_ignore_ascii_case(&msg.target_name) {
+                        found = Some((os.name.clone(), os.map_index, os.x, os.y));
+                        break;
+                    }
+                }
+            }
+            found
+        };
+        let Some((name, dest_map, dest_x, dest_y)) = target else {
+            send_system_message(&self.gate_ref, msg.session_id, &format!("未找到在线玩家：{}", msg.target_name));
+            return;
+        };
+        if let Some(mi) = self.map_infos.get(&(dest_map as i32)).cloned() {
+            if self.get_or_load_map(&mi.file_name, dest_map).is_some() {
+                if let Some(map_data) = self.maps.get(&dest_map).cloned() {
+                    if let Some(record) = self.players.get(&msg.session_id) {
+                        let _ = record.actor_ref.ask(SetMapData { map: map_data }).await;
+                    }
+                }
+            }
+            if let Some(record) = self.players.get(&msg.session_id) {
+                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                    x: dest_x, y: dest_y, direction: 4, map_index: Some(dest_map), is_mounted: None,
+                }).await;
+            }
+            let map_pkt = build_map_changed_packet(dest_map, &mi.file_name, &mi.title, dest_x, dest_y, false);
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: map_pkt,
+            }).await;
+        }
+        send_system_message(&self.gate_ref, msg.session_id, &format!("已传送到 {} 身边", name));
+    }
+}
