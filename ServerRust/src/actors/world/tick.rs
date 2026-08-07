@@ -1517,6 +1517,7 @@ impl WorldActor {
             match spell_enum {
                 Spell::FireBall | Spell::GreatFireBall | Spell::ThunderBolt | Spell::FrostCrunch
                 | Spell::Vampirism | Spell::FlameDisruptor | Spell::SoulFireBall
+                | Spell::MeteorShower | Spell::FireBounce
                 // 弓箭手弹道物理系（命中后按 AC 防御结算，BindingShot/NapalmShot 附加效果）
                 | Spell::StraightShot | Spell::DoubleShot
                 | Spell::BindingShot | Spell::NapalmShot
@@ -1680,6 +1681,40 @@ impl WorldActor {
 
                     debug!("Projectile {:?} hit monster {} for {} dmg (crit={})",
                         spell, target_id, result.damage, result.is_critical);
+
+                    // FireBounce：命中怪物后向周围 3 格随机目标继续弹射（C# HumanObject.cs:5944）
+                    if spell == Spell::FireBounce && pending.bounce > 0 {
+                        let candidates: Vec<(u32, i32, i32)> = self.monsters.iter()
+                            .filter(|(id, m)| {
+                                **id != target_id
+                                    && m.hp > 0
+                                    && (m.x - mx).abs() <= 3
+                                    && (m.y - my).abs() <= 3
+                            })
+                            .map(|(id, m)| (*id, m.x, m.y))
+                            .collect();
+                        if !candidates.is_empty() {
+                            let idx = fastrand::usize(0..candidates.len());
+                            let (next_id, nx, ny) = candidates[idx];
+                            let next_dist = ((mx - nx).abs() + (my - ny).abs()) as u64;
+                            let next_delay_ms = next_dist * 50; // 后续弹跳无 +500
+                            let next_fire = self.tick_count + (next_delay_ms / 100).max(1);
+                            self.pending_spell_completions.push(PendingSpellCompletion {
+                                fire_at_tick: next_fire,
+                                session_id: pending.session_id,
+                                spell: pending.spell,
+                                target_id: next_id,
+                                target_x: nx,
+                                target_y: ny,
+                                damage: pending.damage,
+                                magic_stat: pending.magic_stat,
+                                spell_level: pending.spell_level,
+                                bounce: pending.bounce - 1,
+                            });
+                            debug!("FireBounce bounces {} -> {} (bounce left {})",
+                                target_id, next_id, pending.bounce - 1);
+                        }
+                    }
                 }
             } else {
                 debug!("Projectile {:?} missed/blocked target {}", spell, target_id);
