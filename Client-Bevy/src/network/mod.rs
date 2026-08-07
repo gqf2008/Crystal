@@ -410,14 +410,50 @@ pub(crate) fn network_system(
     time: Res<Time>,
     addr: Res<NetServerAddr>,
 ) {
-    // M58：断线自动重连（真实 TCP，指数退避）
-    if net.mode == NetworkMode::Real && net.reconnecting && net.to_server.is_none() {
+    // M58：断线自动重连（真实 TCP / Mock 通道，指数退避）
+    if net.reconnecting && net.to_server.is_none() {
         net.reconnect_timer -= time.delta_secs();
         if net.reconnect_timer <= 0.0 {
-            match tcp::connect(&addr.0, net.client_version_hash) {
-                Ok(conn) => {
-                    net.to_server = Some(conn.to_server);
-                    net.tcp_events = Some(conn.from_server);
+            match net.mode {
+                NetworkMode::Real => match tcp::connect(&addr.0, net.client_version_hash) {
+                    Ok(conn) => {
+                        net.to_server = Some(conn.to_server);
+                        net.tcp_events = Some(conn.from_server);
+                        net.client_version_sent = false;
+                        net.state = NetState::LoggingIn;
+                        auth.login_error = Some("连接已恢复，正在重新登录...".to_string());
+                        let creds = net.saved_login.lock().ok().map(|g| g.clone()).flatten();
+                        if let Some((acct, pass)) = creds {
+                            net.send_packet(&mir2_shared::packets::client::account::Login {
+                                account_id: acct,
+                                password: pass,
+                            });
+                            tracing::info!("🔌 自动重连成功，已重新发送登录请求");
+                        } else {
+                            net.reconnecting = false;
+                            auth.login_error = Some("连接已恢复，请重新登录".to_string());
+                        }
+                    }
+                    Err(e) => {
+                        net.reconnect_attempts += 1;
+                        net.reconnect_delay = (net.reconnect_delay * 2.0).min(30.0);
+                        net.reconnect_timer = net.reconnect_delay;
+                        auth.login_error = Some(format!(
+                            "重连失败（{}），{:.0} 秒后重试（第 {} 次）",
+                            e, net.reconnect_delay, net.reconnect_attempts
+                        ));
+                        tracing::warn!("🔌 重连失败: {}（第 {} 次）", e, net.reconnect_attempts);
+                    }
+                },
+                NetworkMode::Mock => {
+                    // #643：重建 mock 通道并重新登录
+                    let (to_server, from_client) =
+                        crossbeam_channel::bounded::<Vec<u8>>(1024);
+                    let (to_client, from_server) =
+                        crossbeam_channel::bounded::<Vec<u8>>(1024);
+                    net.to_server = Some(to_server);
+                    net.from_server = Some(from_server);
+                    mock::spawn_mock(to_client, from_client);
                     net.client_version_sent = false;
                     net.state = NetState::LoggingIn;
                     auth.login_error = Some("连接已恢复，正在重新登录...".to_string());
@@ -427,21 +463,11 @@ pub(crate) fn network_system(
                             account_id: acct,
                             password: pass,
                         });
-                        tracing::info!("🔌 自动重连成功，已重新发送登录请求");
+                        tracing::info!("🔌 Mock 自动重连成功，已重新发送登录请求");
                     } else {
                         net.reconnecting = false;
                         auth.login_error = Some("连接已恢复，请重新登录".to_string());
                     }
-                }
-                Err(e) => {
-                    net.reconnect_attempts += 1;
-                    net.reconnect_delay = (net.reconnect_delay * 2.0).min(30.0);
-                    net.reconnect_timer = net.reconnect_delay;
-                    auth.login_error = Some(format!(
-                        "重连失败（{}），{:.0} 秒后重试（第 {} 次）",
-                        e, net.reconnect_delay, net.reconnect_attempts
-                    ));
-                    tracing::warn!("🔌 重连失败: {}（第 {} 次）", e, net.reconnect_attempts);
                 }
             }
         }
@@ -494,7 +520,16 @@ pub(crate) fn network_system(
         return;
     };
     let mut buf: Vec<u8> = Vec::new();
-    while let Ok(bytes) = rx.try_recv() {
+    let mut mock_disconnected = false;
+    loop {
+        let bytes = match rx.try_recv() {
+            Ok(b) => b,
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                mock_disconnected = true;
+                break;
+            }
+            Err(_) => break,
+        };
         buf.extend_from_slice(&bytes);
         loop {
             match codec::decode(&buf) {
@@ -526,6 +561,23 @@ pub(crate) fn network_system(
                 }
                 None => break,
             }
+        }
+    }
+    // #643：Mock 通道关闭 → 与 TCP 断线同路径（disconnected + 自动重连）
+    if mock_disconnected {
+        tracing::warn!("🔌 Mock 服务器断开");
+        net.state = NetState::Offline;
+        net.disconnected = Some("mock-server-closed".to_string());
+        auth.login_success = false;
+        net.to_server = None;
+        net.from_server = None;
+        if net.auto_reconnect {
+            net.reconnecting = true;
+            net.reconnect_delay = 2.0;
+            net.reconnect_timer = 2.0;
+            auth.login_error = Some("连接断开，2 秒后自动重连...（mock）".to_string());
+        } else {
+            auth.login_error = Some("与服务器断开连接（mock）".to_string());
         }
     }
 }
