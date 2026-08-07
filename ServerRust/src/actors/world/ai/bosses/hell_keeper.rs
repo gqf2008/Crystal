@@ -71,10 +71,13 @@ impl MonsterBehavior for HellKeeperBehavior {
             });
             if is_mc {
                 // C# PoisonTarget(Target, 10, damage, Dazed, 1000)
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: t.session_id,
-                    poison: Poison::new(PoisonType::DAZED, 5, 0, 1000),
-                });
+                // C# PoisonTarget 1/10
+                    if fastrand::i32(0..10) == 0 {
+                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: t.session_id,
+                        poison: Poison::new(PoisonType::DAZED, damage.max(1) as u32, damage, 1000),
+                    });
+                    }
             }
         }
     }

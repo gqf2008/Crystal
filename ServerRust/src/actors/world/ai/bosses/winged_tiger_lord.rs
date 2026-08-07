@@ -106,10 +106,13 @@ impl MonsterBehavior for WingedTigerLordBehavior {
                         spell_id: 0,
                         attack_type: 2,
                     });
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: h.session_id,
-                        poison: Poison::new(PoisonType::PARALYSIS, 2, 5, 2000),
-                    });
+                    // C# PoisonTarget 1/2
+                        if fastrand::i32(0..2) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: h.session_id,
+                            poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 2000),
+                        });
+                        }
                 }
                 return;
             }

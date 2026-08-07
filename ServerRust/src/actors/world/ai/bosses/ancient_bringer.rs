@@ -77,10 +77,13 @@ impl MonsterBehavior for AncientBringerBehavior {
                     });
                     // 强攻附加 Paralysis 5s（C# PoisonTarget 5,5,Paralysis,2000）
                     if strong {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: h.session_id,
-                            poison: Poison::new(PoisonType::PARALYSIS, 5, 5, 2000),
-                        });
+                        // C# PoisonTarget 1/5
+                            if fastrand::i32(0..5) == 0 {
+                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: h.session_id,
+                                poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 2000),
+                            });
+                            }
                     }
                 }
             } else {

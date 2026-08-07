@@ -128,14 +128,20 @@ impl MonsterBehavior for EvilMirBehavior {
         let hit_sessions: Vec<u64> = ctx.find_targets_in_range(center_x, center_y, radius, monster.map_index)
             .iter().map(|p| p.session_id).collect();
         for sid in hit_sessions {
-            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                session_id: sid,
-                poison: Poison::new(PoisonType::GREEN, 15, 8, 2000),
-            });
-            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                session_id: sid,
-                poison: Poison::new(PoisonType::PARALYSIS, 5, 0, 1000),
-            });
+            // C# PoisonTarget 1/5
+                if fastrand::i32(0..5) == 0 {
+                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                    session_id: sid,
+                    poison: Poison::new(PoisonType::GREEN, 15, damage, 2000),
+                });
+                }
+            // C# PoisonTarget 1/5
+                if fastrand::i32(0..5) == 0 {
+                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                    session_id: sid,
+                    poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 1000),
+                });
+                }
         }
     }
 

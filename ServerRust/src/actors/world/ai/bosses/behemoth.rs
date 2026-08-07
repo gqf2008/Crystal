@@ -86,10 +86,13 @@ impl MonsterBehavior for BehemothBehavior {
                         dir: monster.direction,
                         distance: 4,
                     });
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::DAZED, 3, 0, 1000),
-                    });
+                    // C# PoisonTarget(3, 15, Dazed, 1000)：1/3、15s
+                    if fastrand::i32(0..3) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::DAZED, 15, base, 1000),
+                        });
+                    }
                 }
                 // 近战命中后 Bleeding 15s（C# PoisonTarget(15, 5, Bleeding)：1/15 概率、值=SP）
                 if fastrand::i32(0..15) == 0 {
@@ -133,10 +136,13 @@ impl MonsterBehavior for BehemothBehavior {
                     let hit_sessions: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
                         .iter().map(|p| p.session_id).collect();
                     for sid in hit_sessions {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: sid,
-                            poison: Poison::new(PoisonType::PARALYSIS, 5, 0, 1000),
-                        });
+                        // C# PoisonTarget 1/15
+                            if fastrand::i32(0..15) == 0 {
+                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: sid,
+                                poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 1000),
+                            });
+                            }
                     }
                 }
             }

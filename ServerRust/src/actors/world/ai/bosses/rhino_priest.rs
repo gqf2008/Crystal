@@ -89,16 +89,18 @@ impl MonsterBehavior for RhinoPriestBehavior {
                     spell_id: if blue_circle { 1 } else { 0 },
                 });
                 if blue_circle {
-                    // 3/4 Slow 2s，1/4 Frozen 4s
+                    // C# CompleteRangeAttack：3/4 Slow 分支（内层 1/2，5s）/ 1/4 Frozen 分支（内层 1/4，5s）
                     if fastrand::i32(0..4) > 0 {
+                        if fastrand::i32(0..2) == 0 {
+                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: target.session_id,
+                                poison: Poison::new(PoisonType::SLOW, 5, 0, 1000),
+                            });
+                        }
+                    } else if fastrand::i32(0..4) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: target.session_id,
-                            poison: Poison::new(PoisonType::SLOW, 2, 5, 1000),
-                        });
-                    } else {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: target.session_id,
-                            poison: Poison::new(PoisonType::FROZEN, 4, 5, 1000),
+                            poison: Poison::new(PoisonType::FROZEN, 5, 0, 1000),
                         });
                     }
                 }

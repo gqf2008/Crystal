@@ -99,14 +99,20 @@ impl MonsterBehavior for GreatFoxSpiritBehavior {
                 attack_type: if ranged { 0 } else { 1 },
             });
             // C# CompleteAttack: Slow 15s + Paralysis 5s
-            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                session_id: h.session_id,
-                poison: Poison::new(PoisonType::SLOW, 5, 15, 1000),
-            });
-            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                session_id: h.session_id,
-                poison: Poison::new(PoisonType::PARALYSIS, 5, 5, 1000),
-            });
+            // C# PoisonTarget 1/5
+                if fastrand::i32(0..5) == 0 {
+                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                    session_id: h.session_id,
+                    poison: Poison::new(PoisonType::SLOW, 15, damage, 1000),
+                });
+                }
+            // C# PoisonTarget 1/5
+                if fastrand::i32(0..5) == 0 {
+                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                    session_id: h.session_id,
+                    poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 1000),
+                });
+                }
         }
     }
 }

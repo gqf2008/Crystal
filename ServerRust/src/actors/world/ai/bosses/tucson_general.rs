@@ -110,10 +110,13 @@ impl MonsterBehavior for TucsonGeneralBehavior {
                             spell_id: 0,
                             attack_type: 1,
                         });
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: h.session_id,
-                            poison: Poison::new(PoisonType::PARALYSIS, 3, 5, 1000),
-                        });
+                        // C# PoisonTarget 1/3
+                            if fastrand::i32(0..3) == 0 {
+                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: h.session_id,
+                                poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 1000),
+                            });
+                            }
                     }
                 }
             } else if fastrand::i32(0..4) > 0 {

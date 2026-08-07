@@ -87,11 +87,7 @@ impl MonsterBehavior for CannibalPlantBehavior {
             // 找攻击范围内最远的玩家"吞噬"（简化：单体拉拽 + 束缚）
             if let Some(t) = ctx.nearest_target(monster.x, monster.y, APPEAR_RANGE, monster.map_index).copied() {
                 let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
-                // 束缚（麻痹 2s）
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: t.session_id,
-                    poison: Poison::new(PoisonType::PARALYSIS, 2, 0, 1000),
-                });
+                // C# CannibalPlant 无毒（原实现凭空加的束缚麻痹，移除）
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
                     target_session: t.session_id,

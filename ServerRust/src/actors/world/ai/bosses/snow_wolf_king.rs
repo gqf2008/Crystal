@@ -139,17 +139,8 @@ impl MonsterBehavior for SnowWolfKingBehavior {
                     spell_id: 0,
                     attack_type,
                 });
-                // 冰系形态施加冰冻（任务核心"冰冻"）
-                if freeze {
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::FROZEN, 3, 0, 1000),
-                    });
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::SLOW, 5, 0, 1000),
-                    });
-                }
+                // C# SnowWolfKing 无毒（DelayedAction 的 poison/aoe 标志在 CompleteAttack 被忽略）
+                let _ = freeze;
             }
         } else if dist > MELEE_RANGE && ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);

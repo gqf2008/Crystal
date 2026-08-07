@@ -115,15 +115,21 @@ impl MonsterBehavior for EvilCentipedeBehavior {
                 attack_type: 0,
             });
             // Green 15s（C# PoisonTarget(Target, 5, 15, Green, 2000)）
-            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                session_id: t.session_id,
-                poison: Poison::new(PoisonType::GREEN, 15, 8, 2000),
-            });
+            // C# PoisonTarget 1/5
+                if fastrand::i32(0..5) == 0 {
+                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                    session_id: t.session_id,
+                    poison: Poison::new(PoisonType::GREEN, 15, damage, 2000),
+                });
+                }
             // Paralysis 5s（C# PoisonTarget(Target, 15, 5, Paralysis, 2000)）
-            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                session_id: t.session_id,
-                poison: Poison::new(PoisonType::PARALYSIS, 5, 0, 1000),
-            });
+            // C# PoisonTarget 1/15
+                if fastrand::i32(0..15) == 0 {
+                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                    session_id: t.session_id,
+                    poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 1000),
+                });
+                }
         }
     }
 }

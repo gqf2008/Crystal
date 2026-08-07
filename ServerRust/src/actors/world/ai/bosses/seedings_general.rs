@@ -78,10 +78,13 @@ impl MonsterBehavior for SeedingsGeneralBehavior {
                         damage,
                         spell_id: 0,
                     });
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::SLOW, 5, 5, 1000),
-                    });
+                    // C# PoisonTarget 1/5
+                        if fastrand::i32(0..5) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::SLOW, 5, damage, 1000),
+                        });
+                        }
                 } else {
                     // Type1 stomp AOE 2 格 + Frozen
                     let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
@@ -96,10 +99,13 @@ impl MonsterBehavior for SeedingsGeneralBehavior {
                             spell_id: 0,
                             attack_type: 1,
                         });
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: h.session_id,
-                            poison: Poison::new(PoisonType::FROZEN, 5, 5, 1000),
-                        });
+                        // C# PoisonTarget 1/5
+                            if fastrand::i32(0..5) == 0 {
+                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: h.session_id,
+                                poison: Poison::new(PoisonType::FROZEN, 5, damage, 1000),
+                            });
+                            }
                     }
                 }
             }

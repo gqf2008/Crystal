@@ -66,10 +66,13 @@ impl MonsterBehavior for KingHydraxBehavior {
                         damage,
                         spell_id: 0,
                     });
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::PARALYSIS, 3, 10, 1000),
-                    });
+                    // C# PoisonTarget 1/3
+                        if fastrand::i32(0..3) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::PARALYSIS, 10, damage, 1000),
+                        });
+                        }
                 } else {
                     // Type1 延迟弹道 + Green
                     ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
@@ -79,10 +82,13 @@ impl MonsterBehavior for KingHydraxBehavior {
                         damage,
                         spell_id: 1,
                     });
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::GREEN, 2, 10, 1000),
-                    });
+                    // C# PoisonTarget 1/2
+                        if fastrand::i32(0..2) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::GREEN, 10, damage, 1000),
+                        });
+                        }
                 }
             }
         } else if ctx.tick_count >= monster.next_move_tick {

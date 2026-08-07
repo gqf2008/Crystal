@@ -60,14 +60,20 @@ impl MonsterBehavior for OmaMageBehavior {
                     spell_id: 0,
                 });
                 // C# PoisonTarget Slow 6s + Frozen 9s
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::SLOW, 6, 5, 2000),
-                });
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: target.session_id,
-                    poison: Poison::new(PoisonType::FROZEN, 9, 5, 2000),
-                });
+                // C# PoisonTarget 1/6
+                    if fastrand::i32(0..6) == 0 {
+                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(PoisonType::SLOW, 5, damage, 2000),
+                    });
+                    }
+                // C# PoisonTarget 1/9
+                    if fastrand::i32(0..9) == 0 {
+                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(PoisonType::FROZEN, 5, damage, 2000),
+                    });
+                    }
             }
             return;
         }

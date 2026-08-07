@@ -64,14 +64,20 @@ impl MonsterBehavior for IceGuardBehavior {
                 });
                 if is_ice {
                     // Slow 5s + Frozen 3s（C# PoisonTarget Slow + Frozen）
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::SLOW, 5, 5, 1000),
-                    });
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: target.session_id,
-                        poison: Poison::new(PoisonType::FROZEN, 3, 0, 1000),
-                    });
+                    // C# PoisonTarget 1/5
+                        if fastrand::i32(0..5) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::SLOW, 5, damage, 1000),
+                        });
+                        }
+                    // C# PoisonTarget 1/10
+                        if fastrand::i32(0..10) == 0 {
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: target.session_id,
+                            poison: Poison::new(PoisonType::FROZEN, 3, damage, 1000),
+                        });
+                        }
                 }
             }
         } else if ctx.tick_count >= monster.next_move_tick {
