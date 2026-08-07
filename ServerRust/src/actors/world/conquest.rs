@@ -150,6 +150,20 @@ impl ConquestInstance {
         winner
     }
 
+    /// 重置领地（C# ConquestObject.Reset：清空占领/攻击方/积分/控制点，恢复 Idle）
+    pub fn reset(&mut self) {
+        self.state = WarState::Idle;
+        self.owner_guild = None;
+        self.attacker_guild = None;
+        self.war_start_time = 0;
+        self.scores.clear();
+        for cp in &mut self.control_point_owners {
+            cp.owner_guild = None;
+            cp.progress = 0;
+            cp.contesting_guild = None;
+        }
+    }
+
     /// 给指定公会加积分
     pub fn add_score(&mut self, guild: &str, points: i32) {
         let entry = self.scores.entry(guild.to_string()).or_insert(0);
@@ -388,6 +402,30 @@ mod tests {
         assert!(!inst.is_breached(&structures));
         structures.get_mut(&1).unwrap().hp = 0;
         assert!(inst.is_breached(&structures));
+    }
+
+    #[test]
+    fn test_conquest_war_lifecycle() {
+        // #928：@STARTCONQUEST / @RESETCONQUEST 依赖的状态流转
+        let mut inst = ConquestInstance::new(1, 3, 2, ConquestGame::CapturePalace);
+        assert_eq!(inst.state, WarState::Idle);
+        inst.start_war("攻击行会");
+        assert_eq!(inst.state, WarState::InProgress);
+        assert_eq!(inst.attacker_guild.as_deref(), Some("攻击行会"));
+        inst.add_score("攻击行会", 5);
+        inst.add_score("守方行会", 8);
+        let winner = inst.end_war();
+        assert_eq!(inst.state, WarState::Ended);
+        assert_eq!(winner.as_deref(), Some("守方行会"));
+        assert_eq!(inst.owner_guild.as_deref(), Some("守方行会"));
+        inst.reset();
+        assert_eq!(inst.state, WarState::Idle);
+        assert!(inst.owner_guild.is_none());
+        assert!(inst.attacker_guild.is_none());
+        assert!(inst.scores.is_empty());
+        inst.start_war("新攻击方");
+        assert_eq!(inst.state, WarState::InProgress);
+        assert_eq!(inst.attacker_guild.as_deref(), Some("新攻击方"));
     }
 }
 
