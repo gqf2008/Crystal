@@ -404,6 +404,8 @@ pub struct HeroCombatAI {
     pub hp: i32,
     /// 最大 HP
     pub max_hp: i32,
+    /// 上次已下发主人的 HP（#1134：避免每 tick 重复发 HeroHealthChanged）
+    pub last_sent_hp: i32,
 }
 
 impl HeroCombatAI {
@@ -420,6 +422,7 @@ impl HeroCombatAI {
             target_oid: None,
             hp: max_hp,
             max_hp,
+            last_sent_hp: max_hp,
         }
     }
 }
@@ -466,7 +469,9 @@ impl WorldActor {
         for (session_id, record) in &self.players {
             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                 // hero_index > 0 表示有出战英雄
-                if state.hero_index == 0 || state.is_dead || state.hero_despawned {
+                // #1134：AI HP<=0 视为阵亡，不再参与战斗（REVIVEHERO 回满后恢复）
+                let hero_dead = self.hero_ai_states.get(session_id).map(|ai| ai.hp <= 0).unwrap_or(false);
+                if state.hero_index == 0 || state.is_dead || state.hero_despawned || hero_dead {
                     continue;
                 }
                 // hero_behaviour == 1 (Follow) 时英雄纯跟随，不参战
@@ -529,9 +534,13 @@ impl WorldActor {
                 .or_insert_with(|| HeroCombatAI::new_for_owner(snap.owner_x, snap.owner_y, snap.owner_stats.max_atk.max(10) * 10));
             // 暴露可变副本用于本 tick 决策（循环内不写回 self）
             let mut ai_local = ai.clone();
-            // 同步英雄 HP 到主人存活状态（简化：主人活着则英雄满血）
-            if !snap.owner_dead {
-                ai_local.hp = ai_local.max_hp;
+            // #1134：英雄 HP 不再每 tick 强制满血——改为脱战缓慢回血（C# Stats 回血近似）
+            // 上一 tick 无锁定目标视为脱战（战斗中不回血，损耗可见）
+            if !snap.owner_dead && ai_local.hp > 0 && ai_local.hp < ai_local.max_hp
+                && ai_local.target_oid.is_none()
+            {
+                let regen = (ai_local.max_hp / 100).max(1);
+                ai_local.hp = (ai_local.hp + regen).min(ai_local.max_hp);
             }
 
             let behaviour_follow = snap.behaviour == 1; // Follow 模式：纯跟随
@@ -688,8 +697,8 @@ impl WorldActor {
                         ai_local.next_attack_tick = self.tick_count + 7;
                     }
                 }
-                // 战斗时英雄 HP 模拟损耗（敌人反击的近似）
-                let counter = (target.max_hp / 20).max(2);
+                // 战斗时英雄 HP 模拟损耗（敌人反击的近似，#1134 增强到可感知）
+                let counter = (target.max_hp / 10).max(5);
                 ai_local.hp = ai_local.hp.saturating_sub(counter / 3);
             } else if target_dist > attack_range && can_move {
                 // ===== 不在攻击范围：移动靠近目标（ProcessTarget.MoveTo） =====
@@ -704,6 +713,66 @@ impl WorldActor {
             }
 
             *ai = ai_local;
+        }
+
+        // ===== 阶段 2.5：英雄 HP 实时同步 + 阵亡处理（#1134） =====
+        for snap in &snapshots {
+            let hp = match self.hero_ai_states.get(&snap.session_id) {
+                Some(ai) => ai.hp.max(0),
+                None => continue,
+            };
+            if hp <= 0 {
+                // 阵亡：标记死亡 + 移除英雄对象 + 下发 HP=0（REVIVEHERO 复用现有复活）
+                self.hero_die(snap.session_id).await;
+                continue;
+            }
+            let last_sent = self.hero_ai_states.get(&snap.session_id).map(|ai| ai.last_sent_hp).unwrap_or(hp);
+            if hp == last_sent {
+                continue;
+            }
+            // 下发 S.HeroHealthChanged（C# HeroObject.SendHealthChanged → Owner.Enqueue）
+            let packet = mir2_shared::packets::server::combat::HeroHealthChanged {
+                hp: hp as u32,
+                mp: 0,
+            };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: snap.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::HeroHealthChanged as i16,
+                        &body,
+                    ),
+                }).await;
+            }
+            if let Some(ai) = self.hero_ai_states.get_mut(&snap.session_id) {
+                ai.last_sent_hp = hp;
+            }
+            // #1141：英雄头顶血条（C# S.ObjectHealth：percent + expire 秒，客户端挂 ActorHp）
+            if let Some(record) = self.players.get(&snap.session_id) {
+                let hero_oid = record.object_id.wrapping_add(HERO_OID_OFFSET);
+                let max_hp = self.hero_ai_states.get(&snap.session_id).map(|ai| ai.max_hp).unwrap_or(hp);
+                let percent = (hp * 100 / max_hp.max(1)).min(100) as u8;
+                let ohealth = mir2_shared::packets::server::object::ObjectHealth {
+                    object_id: hero_oid,
+                    percent,
+                    expire: 3,
+                };
+                let mut ohealth_body = Vec::new();
+                if ohealth.write_body(&mut ohealth_body).is_ok() {
+                    let data = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectHealth as i16,
+                        &ohealth_body,
+                    );
+                    for sid in self.players.keys() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *sid,
+                            data: data.clone(),
+                        }).await;
+                    }
+                }
+            }
+            debug!("Hero HP changed: session={} hp={}", snap.session_id, hp);
         }
 
         // ===== 阶段 3：循环外应用意图（避免借用冲突） =====
@@ -864,6 +933,53 @@ impl WorldActor {
                 }).await;
             }
         }
+    }
+
+    /// 英雄阵亡处理（#1134，对齐 C# HeroObject.Die 的最小实现）：
+    /// 标记死亡（DB 持久化）+ 移除英雄对象 + 下发 S.HeroHealthChanged(0) + 系统消息。
+    /// 复活复用现有 REVIVEHERO（npc.rs 已按 hero.dead / AI HP<=0 判定）。
+    async fn hero_die(&mut self, session_id: u64) {
+        let Some(record) = self.players.get(&session_id).cloned() else { return };
+        let state = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(s)) => s,
+            _ => return,
+        };
+        // 标记当前出战英雄死亡（REVIVEHERO 判定 + DB 持久化）
+        let mut died = false;
+        if let Some(hs) = self.player_heroes.get_mut(&session_id) {
+            if let Some(h) = hs.iter_mut().find(|h| h.index as u8 == state.hero_index) {
+                h.dead = true;
+                died = true;
+            }
+        }
+        if died {
+            let db_heroes: Vec<db::DbHero> = self.player_heroes.get(&session_id)
+                .map(|hs| hs.iter().map(|h| db::DbHero {
+                    index: h.index, name: h.name.clone(), level: h.level,
+                    class: h.class as u8, gender: h.gender as u8,
+                    dead: h.dead, sealed: h.sealed,
+                }).collect())
+                .unwrap_or_default();
+            if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
+                warn!("Failed to save heroes on hero death: {}", e);
+            }
+        }
+        // 移除英雄对象（客户端消失）
+        self.broadcast_hero_remove(record.object_id).await;
+        // 下发 HP=0（客户端面板归零）
+        let packet = mir2_shared::packets::server::combat::HeroHealthChanged { hp: 0, mp: 0 };
+        let mut body = Vec::new();
+        if packet.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::HeroHealthChanged as i16,
+                    &body,
+                ),
+            }).await;
+        }
+        send_system_message(&self.gate_ref, session_id, "英雄已阵亡，请找 NPC 复活（REVIVEHERO）");
+        info!("Hero died: session={} hero_index={}", session_id, state.hero_index);
     }
 }
 

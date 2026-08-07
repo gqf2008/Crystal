@@ -71,6 +71,8 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
                     percent: p.percent,
                     expire: p.expire,
                 });
+                // #1141：英雄头顶血条验证（ActorHp 挂载）
+                tracing::debug!("❤️ ObjectHealth: oid={} percent={} expire={}", p.object_id, p.percent, p.expire);
             }
         }
         x if x == ServerPacketIds::ObjectMana as i16 => {
