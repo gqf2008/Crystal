@@ -98,6 +98,8 @@ impl Message<WorldAttackRequest> for WorldActor {
             let mut hit_monster = false;
             // HalfMoon/CrossHalfMoon 溅射目标（循环外应用，避免借用冲突）
             let mut halfmoon_splash: Vec<(u32, i32)> = Vec::new();
+            // C# 弧/十字几何命中的格子（围绕玩家）
+            let mut halfmoon_cells: Vec<(i32, i32)> = Vec::new();
             let mut primary_target_oid: u32 = 0; // 主目标 oid（溅射排除用）
             for (oid, monster) in &mut self.monsters {
                 let dist = (monster.x - target_x).abs() + (monster.y - target_y).abs();
@@ -218,15 +220,35 @@ impl Message<WorldAttackRequest> for WorldActor {
                                    result.object_id, monster.name, duration, value);
                         }
                     }
-                    // HalfMoon（半月）/ CrossHalfMoon（十字半月）：学了则溅射周围怪物
-                    let halfmoon_lv = state.magics.iter()
-                        .find(|m| m.spell == SPELL_HALFMOON as i32 || m.spell == SPELL_CROSS_HALFMOON as i32)
-                        .map(|m| m.level);
-                    if let Some(_lv) = halfmoon_lv {
-                        // HalfMoon 溅射：记录溅射参数，循环外应用（避免 &self.monsters 借用冲突）
-                        let splash_dmg = (damage / 2).max(1);
-                        halfmoon_splash.push((0, splash_dmg)); // 标记触发，object_id=0 表示待循环外填充
-                        let _ = target_x; // 循环外用 target_x/target_y 收集
+                    // HalfMoon / CrossHalfMoon：C# 需 toggle 开启（HumanObject.cs:2929/3001）
+                    // 倍率：HalfMoon 0.3+0.1Lv / CrossHalfMoon 0.4+0.1Lv（Envir.cs UpdateMagicInfo）
+                    let halfmoon = state.magics.iter()
+                        .find(|m| (m.spell == SPELL_HALFMOON as i32 || m.spell == SPELL_CROSS_HALFMOON as i32) && m.toggled)
+                        .map(|m| (m.spell, m.level));
+                    if let Some((spell_id, lv)) = halfmoon {
+                        let mult = if spell_id == SPELL_HALFMOON as i32 {
+                            0.3 + 0.1 * lv as f32
+                        } else {
+                            0.4 + 0.1 * lv as f32
+                        };
+                        let splash_dmg = ((damage as f32) * mult).max(1.0) as i32;
+                        halfmoon_splash.push((0, splash_dmg)); // 标记触发
+                        // C# 几何：HalfMoon 从正前方逆时针起 4 格弧；CrossHalfMoon 周围 8 格（都跳过正前方）
+                        if halfmoon_cells.is_empty() {
+                            let front = atk_dir;
+                            if spell_id == SPELL_HALFMOON as i32 {
+                                for k in 0..4usize {
+                                    let d = (front + 7 + k) % 8;
+                                    if d == front { continue; }
+                                    halfmoon_cells.push((state.x + MON_DIR_DX[d], state.y + MON_DIR_DY[d]));
+                                }
+                            } else {
+                                for d in 0..8usize {
+                                    if d == front { continue; }
+                                    halfmoon_cells.push((state.x + MON_DIR_DX[d], state.y + MON_DIR_DY[d]));
+                                }
+                            }
+                        }
                     }
                     let total_dmg = damage + slaying_bonus;
                     debug!("Player {} hit monster '{}' (#{}) for {} dmg (crit={}, slaying={}) (hp={}/{})",
@@ -286,23 +308,19 @@ impl Message<WorldAttackRequest> for WorldActor {
                 }
             }
 
-            // 应用 HalfMoon/CrossHalfMoon 溅射（循环外，避免借用冲突）
+            // 应用 HalfMoon/CrossHalfMoon 溅射（循环外，避免借用冲突；C# 每格命中第一个目标）
             if !halfmoon_splash.is_empty() {
-                let splash_dmg = halfmoon_splash[0].1; // 所有溅射伤害相同
-                let splash_targets: Vec<u32> = self.monsters.iter()
-                    .filter(|(id, m)| {
-                        **id != primary_target_oid // 排除主目标（C# HalfMoon 不重复打主目标）
-                            && m.hp > 0
-                            && (m.x - target_x).abs() <= 1
-                            && (m.y - target_y).abs() <= 1
-                    })
-                    .map(|(id, _)| *id)
-                    .collect();
-                for sid in splash_targets {
-                    if let Some(sm) = self.monsters.get_mut(&sid) {
-                        sm.take_damage(splash_dmg);
-                        sm.provoked = true;
-                        sm.target_session = Some(msg.session_id);
+                let splash_dmg = halfmoon_splash[0].1;
+                for (cx, cy) in &halfmoon_cells {
+                    let mid = self.monsters.iter()
+                        .find(|(id, m)| **id != primary_target_oid && m.hp > 0 && m.x == *cx && m.y == *cy)
+                        .map(|(id, _)| *id);
+                    if let Some(mid) = mid {
+                        if let Some(sm) = self.monsters.get_mut(&mid) {
+                            sm.take_damage(splash_dmg);
+                            sm.provoked = true;
+                            sm.target_session = Some(msg.session_id);
+                        }
                     }
                 }
             }
