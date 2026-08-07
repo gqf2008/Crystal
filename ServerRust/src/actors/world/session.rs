@@ -1608,6 +1608,60 @@ impl Message<ChatRequest> for WorldActor {
             }
         }
 
+        // #891：@TIME / @MAP / @ROLL（C# 非 GM 聊天命令：PlayerObject case "TIME"/"MAP"/"ROLL"）
+        if let Some(cmd_rest) = message.strip_prefix('@') {
+            let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
+            let cmd = parts.first().map(|s| s.to_uppercase());
+            match cmd.as_deref() {
+                Some("TIME") => {
+                    // C#：TheTimeIs + Envir.Now.ToString("hh:mm tt")（12 小时制 AM/PM）
+                    let now = chrono::Local::now().format("%I:%M %p").to_string();
+                    send_system_message(&self.gate_ref, msg.session_id, &format!("服务器时间：{}", now));
+                    return;
+                }
+                Some("MAP") => {
+                    // C#：YouAreInMapId + CurrentMap.Info.Title / FileName
+                    let (map_title, map_file) = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                        self.map_infos.get(&(state.map_index as i32))
+                            .map(|m| (m.title.clone(), m.file_name.clone()))
+                            .unwrap_or_else(|| ("未知地图".to_string(), String::new()))
+                    } else {
+                        ("未知地图".to_string(), String::new())
+                    };
+                    send_system_message(&self.gate_ref, msg.session_id, &format!("你所在的地图：{} ({})", map_title, map_file));
+                    return;
+                }
+                Some("ROLL") => {
+                    // C#：Envir.Random.Next(5) + 1（1~5）；GroupMembers == null 直接 return；
+                    // 向所有组员发 ChatType.Group 消息 HasRolledNumber
+                    let (player_name, group_id) = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                        (state.name.clone(), state.group_id)
+                    } else {
+                        return;
+                    };
+                    let Some(gid) = group_id else { return; };
+                    let dice = fastrand::i32(1..=5);
+                    let text = format_roll_message(&player_name, dice);
+                    let mut body = Vec::new();
+                    write_dotnet_string(&mut body, &text);
+                    body.push(mir2_shared::enums::ChatType::Group as u8);
+                    let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
+                    for (sid, other) in &self.players {
+                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                            if os.group_id == Some(gid) {
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: *sid,
+                                    data: packet.clone(),
+                                }).await;
+                            }
+                        }
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         // Check for social chat commands and forward to SocialActor
         let parts: Vec<&str> = message.split_whitespace().collect();
         // 去掉前导 @（C# 客户端命令如 @ride 均带 @）
@@ -2219,5 +2273,30 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
             brown_until_ms: 0,
             mount_loyalty_decrease_time: 0,
             mount_loyalty_increase_time: 0,
+    }
+}
+
+/// #891：@ROLL 组队掷骰消息（C# HasRolledNumber："{Name} 掷出了 {N} 点"）
+fn format_roll_message(player_name: &str, dice: i32) -> String {
+    format!("{} 掷出了 {} 点", player_name, dice)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_roll_message;
+
+    #[test]
+    fn test_roll_message_format() {
+        assert_eq!(format_roll_message("张三", 4), "张三 掷出了 4 点");
+        assert_eq!(format_roll_message("Legacy", 1), "Legacy 掷出了 1 点");
+    }
+
+    #[test]
+    fn test_roll_dice_in_range() {
+        // fastrand 1..=5 范围校验（C# Envir.Random.Next(5) + 1）
+        for _ in 0..200 {
+            let d = fastrand::i32(1..=5);
+            assert!((1..=5).contains(&d), "dice out of range: {}", d);
+        }
     }
 }
