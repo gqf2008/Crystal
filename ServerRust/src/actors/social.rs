@@ -1133,6 +1133,35 @@ impl SocialActor {
         let items_a: Vec<_> = trade_data.side_a.items.to_vec();
         let items_b: Vec<_> = trade_data.side_b.items.to_vec();
 
+        // #924：锁定后复检（C# TradeConfirm——!InRange || 不同地图 || 死亡 → TradeCancel）
+        let a_state = match self.players.get(&s1) {
+            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(st)) => Some(st), _ => None },
+            None => None,
+        };
+        let b_state = match self.players.get(&s2) {
+            Some(r) => match r.ask(GetPlayerState).await { Ok(Some(st)) => Some(st), _ => None },
+            None => None,
+        };
+        let recheck_ok = match (a_state, b_state) {
+            (Some(a), Some(b)) => {
+                !a.is_dead
+                    && !b.is_dead
+                    && a.map_index == b.map_index
+                    && (a.x - b.x).abs() + (a.y - b.y).abs() <= TRADE_RANGE
+            }
+            _ => false,
+        };
+        if !recheck_ok {
+            send_system_message(&self.gate_ref, s1, "距离过远或状态异常，交易已取消");
+            send_system_message(&self.gate_ref, s2, "距离过远或状态异常，交易已取消");
+            send_trade_cancel_packet(&self.gate_ref, s1);
+            send_trade_cancel_packet(&self.gate_ref, s2);
+            send_trade_close_packet(&self.gate_ref, s1);
+            send_trade_close_packet(&self.gate_ref, s2);
+            self.active_trades.remove(&trade_data.side_a.session_id);
+            return;
+        }
+
         // 容量检查（对应 C# CanGainItems / CanGainGold）
         // A 能否接收 B 的物品和金币
         let a_can_receive = match self.players.get(&s1) {
@@ -2273,31 +2302,57 @@ impl Message<TradeAddItem> for SocialActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: TradeAddItem, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r.clone(),
+            None => return,
+        };
+
         // C# CanTradeItem：BindMode.DontTrade(0x10) 物品不可交易
-        if let Some(record) = self.players.get(&msg.session_id) {
-            if let Ok(Some(state)) = record.ask(GetPlayerState).await {
-                let infos = self.config.item_infos.read().await;
-                let bind = state.inventory.get_item(msg.unique_id)
-                    .and_then(|it| infos.get(&it.item_index).map(|i| i.bind_mode))
-                    .unwrap_or(0);
-                if (bind & 0x0010) != 0 {
-                    send_system_message(&self.gate_ref, msg.session_id, "该物品无法交易");
-                    return;
-                }
+        if let Ok(Some(state)) = record.ask(GetPlayerState).await {
+            let infos = self.config.item_infos.read().await;
+            let bind = state.inventory.get_item(msg.unique_id)
+                .and_then(|it| infos.get(&it.item_index).map(|i| i.bind_mode))
+                .unwrap_or(0);
+            if (bind & 0x0010) != 0 {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品无法交易");
+                return;
             }
         }
-        let trade = match self.find_trade_mut(msg.session_id) {
-            Some(t) => t, None => return,
+
+        // #923：C# TradeItem——放入交易即从背包移除并锁定（防交易中消耗/重复放入）
+        let removed = record.ask(RemoveItemFromInventory { unique_id: msg.unique_id }).await.ok().flatten();
+        let Some(item_data) = removed else {
+            send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
+            return;
         };
 
-        let side = match trade.side_of_mut(msg.session_id) {
-            Some(s) => s, None => return,
+        // 交易不存在/已锁定 → 回滚归还
+        let other_session = {
+            let trade = match self.find_trade_mut(msg.session_id) {
+                Some(t) => t,
+                None => {
+                    let _ = record.ask(AddItemToInventory { item: item_data }).await;
+                    return;
+                }
+            };
+            let side = match trade.side_of_mut(msg.session_id) {
+                Some(s) => s,
+                None => {
+                    let _ = record.ask(AddItemToInventory { item: item_data }).await;
+                    return;
+                }
+            };
+            if side.locked {
+                let _ = record.ask(AddItemToInventory { item: item_data }).await;
+                return;
+            }
+            side.add_item(msg.unique_id, msg.grid, msg.count, Some(item_data));
+            side.unlock();
+            trade.other_session(msg.session_id)
         };
-        side.add_item(msg.unique_id, msg.grid, msg.count, None);
-        side.unlock();
 
         // 通知对方
-        if let Some(other) = trade.other_session(msg.session_id) {
+        if let Some(other) = other_session {
             send_trade_item_update_packet(&self.gate_ref, other, msg.unique_id, msg.grid, msg.count, true);
         }
     }
