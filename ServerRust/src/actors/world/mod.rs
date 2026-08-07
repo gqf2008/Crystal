@@ -14,6 +14,7 @@ mod conquest;
 mod dragon;
 mod guild;
 mod hero;
+pub(crate) mod hero_stats;
 mod item;
 mod mail;
 mod market;
@@ -5029,7 +5030,7 @@ pub struct EquipmentBonuses {
     pub muscle: bool,
 }
 
-fn calculate_equipment_bonuses(
+pub(crate) fn calculate_equipment_bonuses(
     equipment: &[Option<mir2_shared::data::item::UserItem>],
     item_infos: &std::collections::HashMap<i32, crate::db::ItemInfo>,
 ) -> EquipmentBonuses {

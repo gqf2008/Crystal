@@ -410,8 +410,9 @@ pub struct HeroCombatAI {
 
 impl HeroCombatAI {
     /// 以主人状态初始化英雄 AI（主人后方 1 格出生）
-    fn new_for_owner(owner_x: i32, owner_y: i32, owner_max_hp: i32) -> Self {
-        let max_hp = (owner_max_hp as f32 * 0.6) as i32;
+    fn new_for_owner(owner_x: i32, owner_y: i32, hero_max_hp: i32) -> Self {
+        // #1180：英雄 HP 用自身属性（C# Stats[HP]），不再按主人 60% 近似
+        let max_hp = hero_max_hp.max(1);
         Self {
             x: owner_x,
             y: owner_y.saturating_add(1),
@@ -463,6 +464,10 @@ impl WorldActor {
             owner_stats: crate::combat::attack::CombatStats,
             /// 主人等级（level_offset 用）
             owner_level: u16,
+            /// 英雄自身战斗属性（#1180：C# BaseStats 移植，替代主人属性）
+            hero_combat: crate::combat::attack::CombatStats,
+            /// 英雄自身最大 HP（#1180）
+            hero_max_hp: i32,
         }
 
         let mut snapshots: Vec<HeroSnapshot> = Vec::new();
@@ -488,6 +493,25 @@ impl WorldActor {
                     owner_max_hp: state.max_hp,
                     owner_stats: state.to_combat_stats(),
                     owner_level: state.level,
+                    // #1180：英雄自身属性（C# BaseStats + 英雄装备加成）
+                    hero_combat: self.player_heroes.get(session_id)
+                        .and_then(|hs| hs.iter().find(|h| h.index as u8 == state.hero_index))
+                        .map(|h| {
+                            super::hero_stats::compute_hero_stats(
+                                h.class, h.level as i32,
+                                &state.hero_inventory.equipment,
+                                &self.item_infos,
+                            ).to_combat_stats()
+                        })
+                        .unwrap_or_else(|| state.to_combat_stats()),
+                    hero_max_hp: self.player_heroes.get(session_id)
+                        .and_then(|hs| hs.iter().find(|h| h.index as u8 == state.hero_index))
+                        .map(|h| super::hero_stats::compute_hero_stats(
+                            h.class, h.level as i32,
+                            &state.hero_inventory.equipment,
+                            &self.item_infos,
+                        ).max_hp)
+                        .unwrap_or(100),
                 });
             }
         }
@@ -531,7 +555,7 @@ impl WorldActor {
             // 确保该英雄有 AI 状态（首次出现则初始化）
             let ai = self.hero_ai_states
                 .entry(snap.session_id)
-                .or_insert_with(|| HeroCombatAI::new_for_owner(snap.owner_x, snap.owner_y, snap.owner_stats.max_atk.max(10) * 10));
+                .or_insert_with(|| HeroCombatAI::new_for_owner(snap.owner_x, snap.owner_y, snap.hero_max_hp));
             // 暴露可变副本用于本 tick 决策（循环内不写回 self）
             let mut ai_local = ai.clone();
             // #1134：英雄 HP 不再每 tick 强制满血——改为脱战缓慢回血（C# Stats 回血近似）
@@ -637,7 +661,7 @@ impl WorldActor {
                 match snap.class {
                     MirClass::Warrior => {
                         // 战士近战：基础 DC 伤害，偶尔触发 Slaying（攻杀）
-                        let raw = hero_attack_power(&snap.owner_stats, true);
+                        let raw = hero_attack_power(&snap.hero_combat, true);
                         let spell_id = if self.tick_count % 7 == 0 { Spell::Slaying as u8 } else { Spell::None as u8 };
                         attack_intents.push((snap.session_id, target.oid, raw, defence, false));
                         // 广播带 spell_id 的 ObjectAttack（循环外广播）
@@ -646,7 +670,7 @@ impl WorldActor {
                     }
                     MirClass::Assassin => {
                         // 刺客突进 + 近战：DoubleSlash 双击
-                        let raw = hero_attack_power(&snap.owner_stats, true);
+                        let raw = hero_attack_power(&snap.hero_combat, true);
                         attack_intents.push((snap.session_id, target.oid, raw, defence, false));
                         // 偶尔突进（FlashDash）：模拟为额外一次伤害
                         if self.tick_count % 10 == 0 {
@@ -660,7 +684,7 @@ impl WorldActor {
                     MirClass::Wizard => {
                         // 法师弹道：FireBall / ThunderBolt（亡灵 +50% 由 tick_spell_completions 处理）
                         let spell = Spell::FireBall;
-                        let raw = hero_spell_damage(&snap.owner_stats, true);
+                        let raw = hero_spell_damage(&snap.hero_combat, true);
                         spell_intents.push((
                             snap.session_id, spell as u8, target.oid,
                             target.x, target.y, raw, self.tick_count + 4, // 弹道延迟 ~400ms
@@ -678,7 +702,7 @@ impl WorldActor {
                         } else {
                             // 否则施毒 + 弹道
                             let spell = Spell::SoulFireBall;
-                            let raw = hero_spell_damage(&snap.owner_stats, false);
+                            let raw = hero_spell_damage(&snap.hero_combat, false);
                             spell_intents.push((
                                 snap.session_id, spell as u8, target.oid,
                                 target.x, target.y, raw, self.tick_count + 4,
@@ -689,7 +713,7 @@ impl WorldActor {
                     MirClass::Archer => {
                         // 弓箭手远程：StraightShot（AC 防御的物理弹道）
                         let spell = Spell::StraightShot;
-                        let raw = hero_attack_power(&snap.owner_stats, false);
+                        let raw = hero_attack_power(&snap.hero_combat, false);
                         spell_intents.push((
                             snap.session_id, spell as u8, target.oid,
                             target.x, target.y, raw, self.tick_count + 4,
@@ -806,7 +830,7 @@ impl WorldActor {
         // 3b. 应用物理攻击（近战/远程 AC）—— 走 combat_attack::resolve_attack
         for (session_id, target_oid, raw_damage, defence, _is_ranged) in &attack_intents {
             let attacker_stats = match snapshots.iter().find(|s| s.session_id == *session_id) {
-                Some(s) => s.owner_stats,
+                Some(s) => s.hero_combat,
                 None => continue,
             };
             let level_offset = snapshots.iter()
@@ -1014,7 +1038,8 @@ impl WorldActor {
         while hero.experience >= hero.max_experience && hero.level < u16::MAX {
             hero.experience -= hero.max_experience;
             hero.level += 1;
-            hero.max_experience = (hero.max_experience as f64 * 1.5) as u32;
+            // #1180：C# HeroExpList 默认每级 100（Settings.HeroExpList[Level-1]）
+            hero.max_experience = super::hero_stats::HERO_MAX_EXPERIENCE;
             leveled = true;
         }
         let hero_name = hero.name.clone();
