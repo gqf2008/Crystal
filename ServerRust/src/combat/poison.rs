@@ -18,11 +18,22 @@ pub struct Poison {
     pub value: i32,
     /// tick 间隔（毫秒）
     pub tick_ms: u64,
+    /// DelayedExplosion 毒：施法者 session（0=无）
+    pub owner_session: u64,
+    /// DelayedExplosion 毒：当前阶段（0 未开始 / 1 等待引爆 / 2 引爆）
+    pub delayed_stage: u8,
+    /// DelayedExplosion 毒：下一阶段推进的世界 tick（0=未设置）
+    pub delayed_next_tick: u64,
 }
 
 impl Poison {
     pub fn new(p_type: PoisonType, duration_s: u32, value: i32, tick_ms: u64) -> Self {
-        Self { p_type, duration_s, value, tick_ms }
+        Self {
+            p_type, duration_s, value, tick_ms,
+            owner_session: 0,
+            delayed_stage: 0,
+            delayed_next_tick: 0,
+        }
     }
 
     /// 是否为"完全失控"状态（无法移动/攻击）
@@ -117,6 +128,25 @@ mod tests {
         let dmg = tick_poisons(&mut list, 3);
         assert_eq!(dmg, 9);
         assert!(list.is_empty());
+    }
+
+    #[test]
+    fn test_delayed_explosion_poison_fields() {
+        // DelayedExplosion 毒：owner/stage/next_tick 在 apply/replace 时保持或重置
+        let mut p = Poison::new(PoisonType::DELAYED_EXPLOSION, 30, 100, 2000);
+        p.owner_session = 42;
+        p.delayed_stage = 1;
+        p.delayed_next_tick = 123;
+        let mut list = Vec::new();
+        apply_poison(&mut list, p);
+        assert_eq!(list[0].owner_session, 42);
+        assert_eq!(list[0].delayed_stage, 1);
+        assert_eq!(list[0].delayed_next_tick, 123);
+        // 同类型替换会重置为新毒（C# 重复施放同类型毒时直接 return，不会走到这里）
+        apply_poison(&mut list, Poison::new(PoisonType::DELAYED_EXPLOSION, 10, 50, 2000));
+        assert_eq!(list[0].delayed_stage, 0);
+        assert_eq!(list[0].owner_session, 0);
+        assert_eq!(list[0].delayed_next_tick, 0);
     }
 
     #[test]

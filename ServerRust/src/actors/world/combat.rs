@@ -1465,7 +1465,21 @@ impl Message<MagicRequest> for WorldActor {
         } else {
             None
         };
-        if let Some(spell_obj) = persistent_spell {
+        if let Some(mut spell_obj) = persistent_spell {
+            // DelayedExplosion（C# HumanObject.DelayedExplosion）：施法后按距离延迟
+            // `距离*50 + 500ms` 才触发；且要挂到目标身上（target_id 用于引爆命中）。
+            if spell_obj.spell == mir2_shared::enums::Spell::DelayedExplosion {
+                let (tx, ty) = if target_x == 0 && target_y == 0 {
+                    self.monsters.get(&msg.target_id)
+                        .map(|m| (m.x, m.y))
+                        .unwrap_or((state.x, state.y))
+                } else {
+                    (target_x, target_y)
+                };
+                let dist = (state.x - tx).abs() + (state.y - ty).abs();
+                spell_obj.expires_at_ms = (dist * 50 + 500).max(500) as u64;
+                spell_obj.target_id = if msg.target_id != 0 { Some(msg.target_id) } else { None };
+            }
             let spell_type = mir2_shared::enums::Spell::try_from(msg.spell)
                 .unwrap_or(mir2_shared::enums::Spell::None);
             let object_spell = mir2_shared::packets::server::magic_combat::ObjectSpell {

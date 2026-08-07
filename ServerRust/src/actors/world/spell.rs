@@ -45,6 +45,8 @@ pub struct SpellObject {
     pub detonated: bool,
     /// 关联的陷阱 ID（用于连锁爆炸）
     pub linked_trap_id: Option<u32>,
+    /// 目标对象 ID（DelayedExplosion 挂毒用）
+    pub target_id: Option<u32>,
 }
 
 impl SpellObject {
@@ -84,6 +86,7 @@ impl SpellObject {
             bonus,
             detonated: false,
             linked_trap_id: None,
+            target_id: None,
         }
     }
 
@@ -146,8 +149,9 @@ fn make_spell_config(
         },
         Spell::DelayedExplosion => SpellConfig {
             spell: Spell::DelayedExplosion,
+            // expires_at_ms 在施法时按距离覆盖（距离*50+500ms），tick 间隔调小以便及时引爆
             duration_ms: 60_000,
-            tick_interval_ms: 3000,
+            tick_interval_ms: 100,
             tick_value: stat.max(30) * 2,
         },
         Spell::Portal => SpellConfig {
