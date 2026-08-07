@@ -478,6 +478,53 @@ impl Message<WorldAttackRequest> for WorldActor {
                         self.fatal_sword_armed.insert(msg.session_id);
                         debug!("Player {} FatalSword armed", result.object_id);
                     }
+                    // HalfMoon/CrossHalfMoon PvP 溅射（C# 对玩家同样生效；toggle + 倍率 + 弧/十字几何）
+                    if let Some((spell_id, lv)) = state.magics.iter()
+                        .find(|m| (m.spell == SPELL_HALFMOON as i32 || m.spell == SPELL_CROSS_HALFMOON as i32) && m.toggled)
+                        .map(|m| (m.spell, m.level))
+                    {
+                        let mult = if spell_id == SPELL_HALFMOON as i32 {
+                            0.3 + 0.1 * lv as f32
+                        } else {
+                            0.4 + 0.1 * lv as f32
+                        };
+                        let splash_dmg = ((damage as f32) * mult).max(1.0) as i32;
+                        let front = atk_dir;
+                        let mut cells: Vec<(i32, i32)> = Vec::new();
+                        if spell_id == SPELL_HALFMOON as i32 {
+                            for k in 0..4usize {
+                                let d = (front + 7 + k) % 8;
+                                if d == front { continue; }
+                                cells.push((state.x + MON_DIR_DX[d], state.y + MON_DIR_DY[d]));
+                            }
+                        } else {
+                            for d in 0..8usize {
+                                if d == front { continue; }
+                                cells.push((state.x + MON_DIR_DX[d], state.y + MON_DIR_DY[d]));
+                            }
+                        }
+                        let mut splash_hits: Vec<u64> = Vec::new();
+                        for (sid, r) in &self.players {
+                            if *sid == msg.session_id { continue; }
+                            if let Ok(Some(s)) = r.actor_ref.ask(GetPlayerState).await {
+                                if !s.is_dead && s.map_index == state.map_index && cells.contains(&(s.x, s.y)) {
+                                    splash_hits.push(*sid);
+                                }
+                            }
+                        }
+                        for sid in &splash_hits {
+                            if let Some(r) = self.players.get(sid) {
+                                let _ = r.actor_ref.ask(TakeDamage {
+                                    attacker_id: result.object_id,
+                                    attacker_session: msg.session_id,
+                                    damage: splash_dmg,
+                                }).await;
+                            }
+                        }
+                        debug!("Player {} {} PvP splash dmg={} on {} players",
+                               result.object_id, if spell_id == SPELL_HALFMOON as i32 { "HalfMoon" } else { "CrossHalfMoon" },
+                               splash_dmg, splash_hits.len());
+                    }
                     // CounterAttack：受击方 7s 窗口激活时反击攻击者（C# HumanObject.cs 7212/7302）
                     if let Some((expire, lv)) = self.counter_attack.get(&other_session).copied() {
                         if self.tick_count <= expire {
