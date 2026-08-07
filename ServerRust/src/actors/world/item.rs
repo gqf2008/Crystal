@@ -1013,6 +1013,54 @@ impl Message<UseItemRequest> for WorldActor {
                         &format!("变身效果已生效，持续 {} 秒", db.durability.max(1)));
                     debug!("Transform: {} used transform item shape={} ticks={}", player_state.name, db.shape, ticks);
                 }
+                // SealedHero（C# UseItem ItemType.SealedHero=42：使用封印符恢复英雄，
+                // heroInfo = Envir.GetHeroInfo(item.AddedStats[Stat.Hero]) → AddHero）
+                t if t == 42 => {
+                    use mir2_shared::enums::Stat;
+                    let hero_idx = player_state.inventory.backpack.iter().flatten()
+                        .find(|s| s.item.unique_id == msg.unique_id)
+                        .map(|s| s.item.added_stats.get(Stat::Hero))
+                        .unwrap_or(0);
+                    if hero_idx == 0 {
+                        send_system_message(&self.gate_ref, msg.session_id, "封印符无效");
+                        return;
+                    }
+                    if player_state.hero_index != 0 {
+                        send_system_message(&self.gate_ref, msg.session_id, "请先收起当前英雄");
+                        return;
+                    }
+                    // 解除封印 + 出战该英雄
+                    let hero_name = {
+                        let found = self.player_heroes.get_mut(&msg.session_id)
+                            .and_then(|hs| hs.iter_mut().find(|h| h.index == hero_idx as i32 && h.sealed));
+                        match found {
+                            Some(h) => { h.sealed = false; h.name.clone() }
+                            None => {
+                                send_system_message(&self.gate_ref, msg.session_id, "封印符无效：未找到对应英雄");
+                                return;
+                            }
+                        }
+                    };
+                    let _ = record.actor_ref.ask(crate::actors::player::SetHeroIndex {
+                        hero_index: hero_idx as u8,
+                    }).await;
+                    crate::actors::social_packets::send_hero_update_packet(
+                        &self.gate_ref, msg.session_id, hero_idx as u8);
+                    self.broadcast_hero_spawn(msg.session_id).await;
+                    self.send_hero_information_packet(msg.session_id).await;
+                    // 持久化
+                    let heroes = self.player_heroes.get(&msg.session_id).cloned().unwrap_or_default();
+                    let db_heroes: Vec<db::DbHero> = heroes.iter().map(|h| db::DbHero {
+                        index: h.index, name: h.name.clone(), level: h.level,
+                        class: h.class as u8, gender: h.gender as u8,
+                        dead: h.dead, sealed: h.sealed,
+                    }).collect();
+                    if let Err(e) = db::save_heroes(&self.db_pool, &player_state.name, &db_heroes).await {
+                        warn!("Failed to save heroes on unseal: {}", e);
+                    }
+                    send_system_message(&self.gate_ref, msg.session_id,
+                        &format!("英雄 {} 已从封印符中恢复", hero_name));
+                }
                 _ => {}
             }
         }

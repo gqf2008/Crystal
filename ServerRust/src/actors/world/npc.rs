@@ -894,7 +894,10 @@ impl WorldActor {
         debug!("NPC ReviveHero: session={}", session_id);
     }
 
-    /// NPC 脚本 SEALHERO：封印当前英雄（对齐 C# ActionType.SealHero，简化：置 sealed 标记）
+    /// NPC 脚本 SEALHERO：封印当前英雄（对齐 C# ActionType.SealHero）
+    ///
+    /// C# SealHero：背包有空位 → 生成"英雄封印符"物品（AddedStats[Stat.Hero]=英雄索引）、
+    /// 收起出战英雄、英雄置 sealed；之后可用封印符恢复。
     pub(crate) async fn npc_seal_hero(&mut self, session_id: u64) {
         let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
@@ -902,28 +905,61 @@ impl WorldActor {
             send_system_message(&self.gate_ref, session_id, "你没有英雄");
             return;
         };
-        let Some(hero) = heroes.iter().find(|h| h.index as u8 == state.hero_index).cloned() else { return };
+        let Some(hero) = heroes.iter().find(|h| h.index as u8 == state.hero_index).cloned() else {
+            send_system_message(&self.gate_ref, session_id, "你没有出战的英雄");
+            return;
+        };
         // C# SealHero：背包无空位时封印失败（FreeSpace == 0 → return）
         if !state.inventory.has_space() {
             send_system_message(&self.gate_ref, session_id, "背包没有空位，无法封印英雄");
             return;
         }
-        if !hero.sealed {
-            if let Some(hs) = self.player_heroes.get_mut(&session_id) {
-                if let Some(h) = hs.iter_mut().find(|h| h.index == hero.index) {
-                    h.sealed = true;
-                }
+        // C# Settings.HeroSealItemName = "SealedHero"：找不到封印符物品则无法封印
+        let seal_item = match self.item_infos.values().find(|i| i.name.eq_ignore_ascii_case("SealedHero")).cloned() {
+            Some(it) => it,
+            None => {
+                send_system_message(&self.gate_ref, session_id, "无法封印英雄（缺少封印符配置）");
+                return;
             }
-            let db_heroes: Vec<db::DbHero> = heroes.iter().map(|h| db::DbHero {
-                index: h.index, name: h.name.clone(), level: h.level,
-                class: h.class as u8, gender: h.gender as u8,
-                dead: h.dead, sealed: true,
-            }).collect();
-            if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
-                warn!("Failed to save heroes on SealHero: {}", e);
-            }
-            send_system_message(&self.gate_ref, session_id, &format!("英雄 {} 已被封印", hero.name));
+        };
+        if hero.sealed {
+            send_system_message(&self.gate_ref, session_id, "英雄已被封印");
+            return;
         }
+        // 收起出战英雄（C# DespawnHero + UpdateHeroSpawnState(None)）
+        let _ = record.actor_ref.ask(crate::actors::player::SetHeroIndex { hero_index: 0 }).await;
+        crate::actors::social_packets::send_hero_update_packet(&self.gate_ref, session_id, 0);
+        self.broadcast_hero_remove(state.object_id).await;
+        // 英雄置 sealed
+        if let Some(hs) = self.player_heroes.get_mut(&session_id) {
+            if let Some(h) = hs.iter_mut().find(|h| h.index == hero.index) {
+                h.sealed = true;
+            }
+        }
+        // 生成封印符物品：AddedStats[Stat.Hero] = 英雄索引（C# item.AddedStats[Stat.Hero] = CurrentHero.Index）
+        let item = mir2_shared::data::item::UserItem {
+            item_index: seal_item.index,
+            count: 1,
+            added_stats: {
+                let mut m = mir2_shared::data::stats::Stats::default();
+                m.set(mir2_shared::enums::Stat::Hero, hero.index);
+                m
+            },
+            ..Default::default()
+        };
+        let _ = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await;
+        // 持久化
+        let heroes_now = self.player_heroes.get(&session_id).cloned().unwrap_or_default();
+        let db_heroes: Vec<db::DbHero> = heroes_now.iter().map(|h| db::DbHero {
+            index: h.index, name: h.name.clone(), level: h.level,
+            class: h.class as u8, gender: h.gender as u8,
+            dead: h.dead, sealed: h.sealed,
+        }).collect();
+        if let Err(e) = db::save_heroes(&self.db_pool, &state.name, &db_heroes).await {
+            warn!("Failed to save heroes on SealHero: {}", e);
+        }
+        send_system_message(&self.gate_ref, session_id,
+            &format!("英雄 {} 已封印，封印符已放入背包", hero.name));
         debug!("NPC SealHero: session={}", session_id);
     }
 
