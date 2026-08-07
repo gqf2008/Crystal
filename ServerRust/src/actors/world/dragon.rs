@@ -98,20 +98,36 @@ impl DragonState {
 /// 返回 Some(SpawnEvilMirRequest) 当需要生成新 EvilMir（level 提升且当前无活跃 EvilMir）。
 pub async fn tick_dragon_delevel(
     dragon: &mut DragonState,
-    _tick_count: u64,
+    tick_count: u64,
     _gate_ref: &ActorRef<GateActor>,
 ) {
     if !dragon.active { return; }
-    if dragon.level < 12 { return; }
-    if dragon.max_level_time == 0 { return; }
 
-    let now = chrono::Utc::now().timestamp();
-    // 6 hours = 21600 seconds（C# DeLevelDelay = 60 * 60 * 1000 ms = 1 小时；C# Process 用 6 * DeLevelDelay = 6 小时）
-    if now - dragon.max_level_time >= 21600 {
-        dragon.level = 1;
-        dragon.experience = 0;
-        dragon.max_level_time = 0;
-        tracing::info!("Dragon deleveled to {}", dragon.level);
+    // C# Dragon.Process：满级保持 6*DeLevelDelay（6 小时）后重置 1 级
+    if dragon.level >= 12 && dragon.max_level_time != 0 {
+        let now = chrono::Utc::now().timestamp();
+        // 6 hours = 21600 seconds（C# DeLevelDelay = 60*60*1000 ms = 1 小时；6 * DeLevelDelay = 6 小时）
+        if now - dragon.max_level_time >= 21600 {
+            dragon.level = 1;
+            dragon.experience = 0;
+            dragon.max_level_time = 0;
+            dragon.last_delevel_check = tick_count;
+            tracing::info!("Dragon reset to level 1 after max-level hold");
+            return;
+        }
+    }
+
+    // C# Dragon.Process：level>1 时每 DeLevelDelay（1 小时 = 36000 ticks）降一级
+    const DELEVEL_INTERVAL_TICKS: u64 = 36_000;
+    if dragon.level > 1 {
+        if dragon.last_delevel_check == 0 {
+            dragon.last_delevel_check = tick_count;
+        } else if tick_count.saturating_sub(dragon.last_delevel_check) >= DELEVEL_INTERVAL_TICKS {
+            dragon.level -= 1;
+            dragon.experience = 0;
+            dragon.last_delevel_check = tick_count;
+            tracing::info!("Dragon deleveled to {}", dragon.level);
+        }
     }
 }
 
