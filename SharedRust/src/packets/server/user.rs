@@ -42,6 +42,9 @@ pub struct UserInformation {
     pub gold: u32,
     pub credit: u32,
     pub has_expanded_storage: bool,
+    pub has_storage_password: bool,
+    pub require_storage_password: bool,
+    pub storage_password_last_set: i64,
     pub expanded_storage_expiry_time: i64,
     pub magics: Vec<ClientMagic>,
     pub summoned_creature_type: u8,
@@ -171,6 +174,9 @@ impl Packet for UserInformation {
         let gold = reader.read_u32::<LittleEndian>()?;
         let credit = reader.read_u32::<LittleEndian>()?;
         let has_expanded_storage = reader.read_u8()? != 0;
+        let has_storage_password = reader.read_u8()? != 0;
+        let require_storage_password = reader.read_u8()? != 0;
+        let storage_password_last_set = reader.read_i64::<LittleEndian>()?;
         let expanded_storage_expiry_time = reader.read_i64::<LittleEndian>()?;
 
         // Read magics
@@ -276,6 +282,9 @@ impl Packet for UserInformation {
             gold,
             credit,
             has_expanded_storage,
+            has_storage_password,
+            require_storage_password,
+            storage_password_last_set,
             expanded_storage_expiry_time,
             magics,
             summoned_creature_type,
@@ -382,6 +391,9 @@ impl Packet for UserInformation {
         writer.write_u32::<LittleEndian>(self.gold)?;
         writer.write_u32::<LittleEndian>(self.credit)?;
         writer.write_u8(self.has_expanded_storage as u8)?;
+        writer.write_u8(self.has_storage_password as u8)?;
+        writer.write_u8(self.require_storage_password as u8)?;
+        writer.write_i64::<LittleEndian>(self.storage_password_last_set)?;
         writer.write_i64::<LittleEndian>(self.expanded_storage_expiry_time)?;
 
         // Write magics
@@ -549,5 +561,108 @@ impl Packet for UserSlotsRefresh {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    fn sample_user_info() -> UserInformation {
+        UserInformation {
+            object_id: 100,
+            real_id: 1,
+            name: "TestPlayer".to_string(),
+            guild_name: String::new(),
+            guild_rank: String::new(),
+            name_colour: 0,
+            class: MirClass::Warrior,
+            gender: MirGender::Male,
+            level: 1,
+            location_x: 330,
+            location_y: 330,
+            direction: MirDirection::Down,
+            hair: 0,
+            hp: 120,
+            mp: 60,
+            experience: 0,
+            max_experience: 100,
+            level_effects: LevelEffects::empty(),
+            has_hero: false,
+            hero_behaviour: HeroBehaviour::Attack,
+            inventory: None,
+            equipment: None,
+            quest_inventory: None,
+            gold: 1000,
+            credit: 0,
+            has_expanded_storage: true,
+            has_storage_password: true,
+            require_storage_password: true,
+            storage_password_last_set: 1_700_000_000,
+            expanded_storage_expiry_time: 1_800_000_000,
+            magics: Vec::new(),
+            summoned_creature_type: 0,
+            creature_summoned: false,
+            allow_observe: false,
+            observer: false,
+            max_hp: 120,
+            max_mp: 60,
+            ac: [0, 0],
+            mac: [0, 0],
+            dc: [0, 0],
+            mc: [0, 0],
+            sc: [0, 0],
+            critical_rate: 0,
+            critical_damage: 0,
+            attack_speed: 0,
+            accuracy: 0,
+            agility: 0,
+            luck: 0,
+            bag_weight: 0,
+            wear_weight: 0,
+            hand_weight: 0,
+            magic_resist: 0,
+            poison_resist: 0,
+            health_recovery: 0,
+            spell_recovery: 0,
+            poison_recovery: 0,
+            holy: 0,
+            freezing: 0,
+            poison_atk: 0,
+        }
+    }
+
+    #[test]
+    fn test_user_information_storage_fields_roundtrip() {
+        // #887：C# UserInformation Credit 后 5 段
+        // HasExpandedStorage / HasStoragePassword / RequireStoragePassword / StoragePasswordLastSet / ExpandedStorageExpiryTime
+        let pkt = sample_user_info();
+        let mut buf = Vec::new();
+        pkt.write_body(&mut buf).unwrap();
+        let mut cur = Cursor::new(&buf);
+        let read = UserInformation::read_body(&mut cur).unwrap();
+        assert!(read.has_expanded_storage);
+        assert!(read.has_storage_password);
+        assert!(read.require_storage_password);
+        assert_eq!(read.storage_password_last_set, 1_700_000_000);
+        assert_eq!(read.expanded_storage_expiry_time, 1_800_000_000);
+
+        // 无扩容/无密码场景
+        let mut pkt2 = sample_user_info();
+        pkt2.has_expanded_storage = false;
+        pkt2.has_storage_password = false;
+        pkt2.require_storage_password = false;
+        pkt2.storage_password_last_set = 0;
+        pkt2.expanded_storage_expiry_time = 0;
+        let mut buf2 = Vec::new();
+        pkt2.write_body(&mut buf2).unwrap();
+        let mut cur2 = Cursor::new(&buf2);
+        let read2 = UserInformation::read_body(&mut cur2).unwrap();
+        assert!(!read2.has_expanded_storage);
+        assert!(!read2.has_storage_password);
+        assert!(!read2.require_storage_password);
+        assert_eq!(read2.storage_password_last_set, 0);
+        assert_eq!(read2.expanded_storage_expiry_time, 0);
     }
 }

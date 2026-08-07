@@ -1945,7 +1945,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         );
                                         send(
                                             &to_client,
-                                            &server::ui_events::ResizeStorage { size: 80 },
+                                            &server::ui_events::ResizeStorage { size: 80, has_expanded_storage: false, expiry_time: 0 },
                                         );
                                         // #256：公告 + 杂项协议
                                         send(
@@ -3982,6 +3982,9 @@ fn send_user_information(
             gold,
             credit: 0,
             has_expanded_storage: false,
+            has_storage_password: false,
+            require_storage_password: false,
+            storage_password_last_set: 0,
             expanded_storage_expiry_time: 0,
             magics: vec![
                 ClientMagic {
@@ -4479,6 +4482,9 @@ mod roundtrip_tests {
             gold: 10000,
             credit: 0,
             has_expanded_storage: false,
+            has_storage_password: false,
+            require_storage_password: false,
+            storage_password_last_set: 0,
             expanded_storage_expiry_time: 0,
             magics: vec![],
             summoned_creature_type: 0,

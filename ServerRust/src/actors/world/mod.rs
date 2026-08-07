@@ -5283,8 +5283,13 @@ fn build_user_information_packet(
     body.push(0u8);                                           // has_quest_inventory=false
     body.extend_from_slice(&(state.inventory.gold as u32).to_le_bytes()); // gold
     body.extend_from_slice(&0u32.to_le_bytes());              // credit
-    body.push(0u8);                                           // has_expanded_storage=false
-    body.extend_from_slice(&0i64.to_le_bytes());              // expanded_storage_expiry_time
+    // 仓库扩容/仓库密码（C# UserInformation：HasExpandedStorage/HasStoragePassword/
+    // RequireStoragePassword/StoragePasswordLastSet/ExpandedStorageExpiryTime）
+    body.push(if state.has_expanded_storage { 1u8 } else { 0u8 }); // has_expanded_storage
+    body.push(if state.has_storage_password { 1u8 } else { 0u8 }); // has_storage_password
+    body.push(if state.require_storage_password { 1u8 } else { 0u8 }); // require_storage_password
+    body.extend_from_slice(&state.storage_password_last_set.to_le_bytes()); // storage_password_last_set
+    body.extend_from_slice(&state.expanded_storage_expiry_date.to_le_bytes()); // expanded_storage_expiry_time
     body.extend_from_slice(&0i32.to_le_bytes());              // magic_count=0
     body.extend_from_slice(&0i32.to_le_bytes());              // intelligent creatures count=0
     body.push(0u8);                                           // summoned_creature_type

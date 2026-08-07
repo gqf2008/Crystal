@@ -245,6 +245,16 @@ impl Message<StartGameRequest> for WorldActor {
         loaded_state.object_id = object_id;
         loaded_state.session_id = msg.session_id;
 
+        // #887：仓库扩容/仓库密码状态（C# AccountInfo + Settings.RequireStoragePassword，
+        // 登录进图时从 accounts 表加载，UserInformation 下发真实值）
+        if let Ok(Some(account)) = db::load_account(&self.db_pool, &msg.account_username).await {
+            loaded_state.has_expanded_storage = account.has_expanded_storage;
+            loaded_state.expanded_storage_expiry_date = account.expanded_storage_expiry_date;
+            loaded_state.has_storage_password = account.has_storage_password();
+            loaded_state.require_storage_password = true; // C# Settings.RequireStoragePassword 默认 true
+            loaded_state.storage_password_last_set = account.storage_password_last_set;
+        }
+
         // 位置为 (0,0) 或不可走时，放回地图安全区出生点（#57：
         // Type1 地图解析修正前保存的坐标可能是墙内孤岛，导致玩家无法移动/寻路）
         let pos_walkable = self
@@ -2101,6 +2111,11 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         mount_type: 0,
         allow_lover_recall: false,
         is_gm: false,
+        has_expanded_storage: false,
+        expanded_storage_expiry_date: 0,
+        has_storage_password: false,
+        require_storage_password: false,
+        storage_password_last_set: 0,
         pk_points: 0,
         pk_kill_count: 0,
         buffs: Vec::new(),

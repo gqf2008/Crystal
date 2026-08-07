@@ -265,6 +265,16 @@ pub struct PlayerState {
     pub allow_lover_recall: bool,
     /// 是否为 GM（对应 C# IsGM / AccountInfo.AdminAccount）
     pub is_gm: bool,
+    /// 是否已购买仓库扩容（C# AccountInfo.HasExpandedStorage；登录时从 accounts 表加载）
+    pub has_expanded_storage: bool,
+    /// 仓库扩容到期时间（unix 秒；0 = 无，C# AccountInfo.ExpandedStorageExpiryDate）
+    pub expanded_storage_expiry_date: i64,
+    /// 是否设置了仓库密码（C# AccountInfo.HasStoragePassword）
+    pub has_storage_password: bool,
+    /// 是否启用仓库密码保护（C# Settings.RequireStoragePassword，默认 true）
+    pub require_storage_password: bool,
+    /// 仓库密码最后设置时间（unix 秒；C# AccountInfo.StoragePasswordLastSet）
+    pub storage_password_last_set: i64,
     /// 当前 Buff/Debuff 列表
     pub buffs: Vec<crate::combat::buff::BuffInstance>,
     /// 已学习的魔法/技能列表
@@ -617,6 +627,11 @@ impl PlayerActor {
                 last_recall_time: 0,
                 allow_lover_recall: false,
                 is_gm: false,
+                has_expanded_storage: false,
+                expanded_storage_expiry_date: 0,
+                has_storage_password: false,
+                require_storage_password: false,
+                storage_password_last_set: 0,
                 buffs: Vec::new(),
                 magics: Vec::new(),
                 flags: std::collections::HashMap::new(),
@@ -4613,8 +4628,13 @@ impl PlayerActor {
         body.push(0u8);                                                 // has_quest_inventory=false
         body.extend_from_slice(&(self.state.inventory.gold as u32).to_le_bytes()); // gold
         body.extend_from_slice(&0u32.to_le_bytes());                    // credit=0
-        body.push(0u8);                                                 // has_expanded_storage=false
-        body.extend_from_slice(&0i64.to_le_bytes());                    // expanded_storage_expiry_time
+        // 仓库扩容/仓库密码（C# UserInformation：HasExpandedStorage/HasStoragePassword/
+        // RequireStoragePassword/StoragePasswordLastSet/ExpandedStorageExpiryTime）
+        body.push(if self.state.has_expanded_storage { 1u8 } else { 0u8 }); // has_expanded_storage
+        body.push(if self.state.has_storage_password { 1u8 } else { 0u8 }); // has_storage_password
+        body.push(if self.state.require_storage_password { 1u8 } else { 0u8 }); // require_storage_password
+        body.extend_from_slice(&self.state.storage_password_last_set.to_le_bytes()); // storage_password_last_set
+        body.extend_from_slice(&self.state.expanded_storage_expiry_date.to_le_bytes()); // expanded_storage_expiry_time
         body.extend_from_slice(&0i32.to_le_bytes());                    // magic_count=0
         body.extend_from_slice(&0i32.to_le_bytes());                    // creature_count=0
         body.push(0u8);                                                 // summoned_creature_type
@@ -4785,6 +4805,11 @@ mod tests {
             last_recall_time: 0,
             allow_lover_recall: false,
             is_gm: false,
+            has_expanded_storage: false,
+            expanded_storage_expiry_date: 0,
+            has_storage_password: false,
+            require_storage_password: false,
+            storage_password_last_set: 0,
             is_dead: false,
             unlock_curse: false,
             last_revival_time: 0,

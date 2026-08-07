@@ -85,6 +85,10 @@ pub struct AccountInfo {
     pub banned_until: i64,
     /// 是否强制改密（C# AccountInfo.RequirePasswordChange；登录返回 Result=5）
     pub require_password_change: bool,
+    /// 是否已购买仓库扩容（C# AccountInfo.HasExpandedStorage）
+    pub has_expanded_storage: bool,
+    /// 仓库扩容到期时间（unix 秒；0 = 无，C# AccountInfo.ExpandedStorageExpiryDate）
+    pub expanded_storage_expiry_date: i64,
 }
 
 impl AccountInfo {
@@ -130,6 +134,8 @@ impl AccountActor {
                 wrong_password_count: 0,
                 banned_until: 0,
                 require_password_change: false,
+                has_expanded_storage: false,
+                expanded_storage_expiry_date: 0,
             },
         );
 
@@ -155,6 +161,8 @@ impl AccountActor {
                 wrong_password_count: 0,
                 banned_until: 0,
                 require_password_change: false,
+                has_expanded_storage: false,
+                expanded_storage_expiry_date: 0,
             },
         );
 

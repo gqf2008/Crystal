@@ -29,9 +29,12 @@ impl Packet for ResizeInventory {
 }
 
 /// ResizeStorage - 调整仓库大小 (236)
+/// C# S.ResizeStorage：Size + HasExpandedStorage + ExpiryTime（DateTime.ToBinary）
 #[derive(Debug, Clone)]
 pub struct ResizeStorage {
     pub size: i32, // 新大小
+    pub has_expanded_storage: bool, // 是否仍处于扩容状态
+    pub expiry_time: i64, // 扩容到期时间（C# DateTime.ToBinary；0 = 无）
 }
 
 impl Packet for ResizeStorage {
@@ -41,13 +44,19 @@ impl Packet for ResizeStorage {
         use byteorder::WriteBytesExt;
 
         writer.write_i32::<LittleEndian>(self.size)?;
+        writer.write_u8(self.has_expanded_storage as u8)?;
+        writer.write_i64::<LittleEndian>(self.expiry_time)?;
 
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+
         let size = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { size })
+        let has_expanded_storage = reader.read_u8()? != 0;
+        let expiry_time = reader.read_i64::<LittleEndian>()?;
+        Ok(Self { size, has_expanded_storage, expiry_time })
     }
 }
 
@@ -360,5 +369,41 @@ impl Packet for RemoveDelayedExplosion {
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let object_id = reader.read_u32::<LittleEndian>()?;
         Ok(Self { object_id })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_resize_storage_roundtrip_with_expansion_fields() {
+        // #887：C# S.ResizeStorage = Size(i32) + HasExpandedStorage(bool) + ExpiryTime(Int64)
+        let pkt = ResizeStorage {
+            size: 160,
+            has_expanded_storage: true,
+            expiry_time: 1_800_000_000,
+        };
+        let mut buf = Vec::new();
+        pkt.write_body(&mut buf).unwrap();
+        let mut cur = Cursor::new(&buf);
+        let read = ResizeStorage::read_body(&mut cur).unwrap();
+        assert_eq!(read.size, 160);
+        assert!(read.has_expanded_storage);
+        assert_eq!(read.expiry_time, 1_800_000_000);
+
+        let pkt2 = ResizeStorage {
+            size: 80,
+            has_expanded_storage: false,
+            expiry_time: 0,
+        };
+        let mut buf2 = Vec::new();
+        pkt2.write_body(&mut buf2).unwrap();
+        let mut cur2 = Cursor::new(&buf2);
+        let read2 = ResizeStorage::read_body(&mut cur2).unwrap();
+        assert_eq!(read2.size, 80);
+        assert!(!read2.has_expanded_storage);
+        assert_eq!(read2.expiry_time, 0);
     }
 }
