@@ -1992,8 +1992,13 @@ impl WorldActor {
                 };
                 for child in picked {
                     if child.gold > 0 {
-                        let gold_factor = 1.0 + (gold_drop_pct + rarity_gold_bonus) / 100.0;
-                        let gold = (child.gold as f64 * global_gold_mul * gold_factor).round() as u64;
+                        // C# AttemptDrop：gold = Random(Gold/2, Gold+Gold/2)，金币加成只缩放下限
+                        let gold_pct = gold_drop_pct + rarity_gold_bonus;
+                        let lower_raw = child.gold / 2;
+                        let upper_raw = child.gold + child.gold / 2;
+                        let lower = lower_raw + (lower_raw as f64 * gold_pct / 100.0) as u64;
+                        let gold_raw = fastrand::u64(lower as u64..=upper_raw as u64);
+                        let gold = (gold_raw as f64 * global_gold_mul).round() as u64;
                         self.spawn_gold_drop(monster, gold).await;
                     } else {
                         let ccount = if child.max_count > child.min_count {
@@ -2007,10 +2012,14 @@ impl WorldActor {
                 }
                 continue;
             }
-            // #995：金币条目（C# DropInfo.Gold → DropGold，按金币倍率 + GoldDropRatePercent）
+            // #995：金币条目（C# AttemptDrop：gold = Random(Gold/2, Gold+Gold/2)，金币加成只缩放下限，全局倍率最后应用）
             if drop.gold > 0 {
-                let gold_factor = 1.0 + (gold_drop_pct + rarity_gold_bonus) / 100.0;
-                let gold = (drop.gold as f64 * global_gold_mul * gold_factor).round() as u64;
+                let gold_pct = gold_drop_pct + rarity_gold_bonus;
+                let lower_raw = drop.gold / 2;
+                let upper_raw = drop.gold + drop.gold / 2;
+                let lower = lower_raw + (lower_raw as f64 * gold_pct / 100.0) as u64;
+                let gold_raw = fastrand::u64(lower as u64..=upper_raw as u64);
+                let gold = (gold_raw as f64 * global_gold_mul).round() as u64;
                 self.spawn_gold_drop(monster, gold).await;
                 continue;
             }
