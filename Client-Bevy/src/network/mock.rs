@@ -170,6 +170,17 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                     Vec::new()
                 };
             let mut mock_next_auction: u64 = 5000;
+            // #788：接受方推送状态（--mail-read / --marriage-accept / --mentor-accept）
+            let mut mock_mail_pushed = false;
+            let mut mock_mail_since: Option<std::time::Instant> = None;
+            let mut mock_marriage_invite_sent = false;
+            let mut mock_marriage_divorce_sent = false;
+            let mut mock_married = false;
+            let mut mock_marriage_since: Option<std::time::Instant> = None;
+            let mut mock_mentor_invite_sent = false;
+            let mut mock_mentor_cleared = false;
+            let mut mock_mentor_accepted = false;
+            let mut mock_mentor_since: Option<std::time::Instant> = None;
             // #283：首次击杀触发本地升级演示（LevelChanged + ObjectLeveled）
             let mut mock_leveled_up = false;
             // #297：精炼流程状态（(物品 uid, 是否已开始)）
@@ -1218,6 +1229,57 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             "🏪 [MOCK] 购买 auction={} 物品入背包",
                                             listing_id
                                         );
+                                    }
+                                }
+                                // #788：接受方回复（--mail-read / --marriage-accept / --mentor-accept）
+                                x if x == ClientPacketIds::ReadMail as i16 => {
+                                    if let Ok(_p) = client::mail::ReadMail::read_body(&mut cur) {
+                                        send(
+                                            &to_client,
+                                            &MockMailEntry {
+                                                sender: "bevy2char".to_string(),
+                                                subject: "测试邮件".to_string(),
+                                                body: "邮件正文 M26 测试".to_string(),
+                                            },
+                                        );
+                                        tracing::info!("📧 [MOCK] 邮件详情回发");
+                                    }
+                                }
+                                x if x == ClientPacketIds::MarriageReply as i16 => {
+                                    if let Ok(p) = client::misc::MarriageReply::read_body(&mut cur) {
+                                        if p.accept_invite {
+                                            mock_married = true;
+                                            mock_marriage_since = Some(std::time::Instant::now());
+                                            send(&to_client, &MockLoverUpdate { married: true });
+                                            tracing::info!("💍 [MOCK] 接受求婚，回发已婚");
+                                        }
+                                    }
+                                }
+                                x if x == ClientPacketIds::DivorceReply as i16 => {
+                                    if let Ok(p) = client::misc::DivorceReply::read_body(&mut cur) {
+                                        if p.accept_invite {
+                                            mock_married = false;
+                                            send(&to_client, &MockLoverUpdate { married: false });
+                                            tracing::info!("💔 [MOCK] 接受离婚，回发未婚");
+                                        }
+                                    }
+                                }
+                                x if x == ClientPacketIds::MentorReply as i16 => {
+                                    if let Ok(p) = client::misc::MentorReply::read_body(&mut cur) {
+                                        if p.accept_invite {
+                                            mock_mentor_accepted = true;
+                                            mock_mentor_since = Some(std::time::Instant::now());
+                                            send(
+                                                &to_client,
+                                                &MockMentorUpdate {
+                                                    name: "bevychar".to_string(),
+                                                    level: 30,
+                                                    online: true,
+                                                    exp: 0,
+                                                },
+                                            );
+                                            tracing::info!("🧑‍🏫 [MOCK] 接受拜师，回发 MentorUpdate");
+                                        }
                                     }
                                 }
                                 x if x == ClientPacketIds::Attack as i16 => {
@@ -2901,6 +2963,73 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                         tracing::info!("🏰 [MOCK] 推送行会邀请 TestGuild");
                     }
                 }
+                // #788：--mail-read 进游戏 2s 后推送邮件
+                if in_game
+                    && std::env::args().any(|a| a == "--mail-read")
+                    && !mock_mail_pushed
+                {
+                    let since = *mock_mail_since.get_or_insert_with(std::time::Instant::now);
+                    if since.elapsed() >= std::time::Duration::from_secs(2) {
+                        mock_mail_pushed = true;
+                        send(
+                            &to_client,
+                            &MockMailEntry {
+                                sender: "bevy2char".to_string(),
+                                subject: "测试邮件".to_string(),
+                                body: "邮件正文 M26 测试".to_string(),
+                            },
+                        );
+                        tracing::info!("📧 [MOCK] 推送邮件");
+                    }
+                }
+                // #788：--marriage-accept 进游戏 2s 推求婚，婚后 3s 推离婚
+                if in_game && std::env::args().any(|a| a == "--marriage-accept") {
+                    if !mock_marriage_invite_sent {
+                        let since = *mock_marriage_since.get_or_insert_with(std::time::Instant::now);
+                        if since.elapsed() >= std::time::Duration::from_secs(2) {
+                            mock_marriage_invite_sent = true;
+                            send(&to_client, &MockMarriageRequest);
+                            tracing::info!("💍 [MOCK] 推送求婚");
+                        }
+                    } else if mock_married && !mock_marriage_divorce_sent {
+                        if mock_marriage_since
+                            .map(|t| t.elapsed() >= std::time::Duration::from_secs(3))
+                            .unwrap_or(false)
+                        {
+                            mock_marriage_divorce_sent = true;
+                            send(&to_client, &MockDivorceRequest);
+                            tracing::info!("💔 [MOCK] 推送离婚请求");
+                        }
+                    }
+                }
+                // #788：--mentor-accept 进游戏 2s 推拜师，接受后 10s 推解除
+                if in_game && std::env::args().any(|a| a == "--mentor-accept") {
+                    if !mock_mentor_invite_sent {
+                        let since = *mock_mentor_since.get_or_insert_with(std::time::Instant::now);
+                        if since.elapsed() >= std::time::Duration::from_secs(2) {
+                            mock_mentor_invite_sent = true;
+                            send(&to_client, &MockMentorRequest);
+                            tracing::info!("🧑‍🏫 [MOCK] 推送拜师邀请");
+                        }
+                    } else if mock_mentor_accepted && !mock_mentor_cleared {
+                        if mock_mentor_since
+                            .map(|t| t.elapsed() >= std::time::Duration::from_secs(8))
+                            .unwrap_or(false)
+                        {
+                            mock_mentor_cleared = true;
+                            send(
+                                &to_client,
+                                &MockMentorUpdate {
+                                    name: String::new(),
+                                    level: 0,
+                                    online: false,
+                                    exp: 0,
+                                },
+                            );
+                            tracing::info!("🧑‍🏫 [MOCK] 推送解除师徒");
+                        }
+                    }
+                }
             }
         })
         .expect("spawn mock thread");
@@ -3435,6 +3564,90 @@ impl Packet for MockMarketSuccess {
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
         mir2_shared::binary::write_dotnet_string(writer, &self.message)?;
+        Ok(())
+    }
+}
+
+/// #788：邮件条目（客户端 parse_receive_mail 完整格式）
+struct MockMailEntry {
+    sender: String,
+    subject: String,
+    body: String,
+}
+
+impl Packet for MockMailEntry {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::ReceiveMail as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u64::<LittleEndian>(9100)?; // mail_id
+        mir2_shared::binary::write_dotnet_string(writer, &self.sender)?;
+        mir2_shared::binary::write_dotnet_string(writer, &self.subject)?;
+        mir2_shared::binary::write_dotnet_string(writer, &self.body)?;
+        writer.write_i64::<LittleEndian>(0)?; // timestamp
+        writer.write_u8(0)?; // read
+        writer.write_u8(0)?; // collected
+        writer.write_u32::<LittleEndian>(0)?; // gold
+        writer.write_u8(1)?; // item_count
+        writer.write_u64::<LittleEndian>(9101)?; // uid
+        writer.write_u32::<LittleEndian>(1)?; // idx
+        mir2_shared::binary::write_dotnet_string(writer, "金创药(小)")?;
+        writer.write_u16::<LittleEndian>(1)?; // count
+        writer.write_u16::<LittleEndian>(1)?; // cd
+        writer.write_u16::<LittleEndian>(1)?; // md
+        Ok(())
+    }
+}
+
+/// #788：拜师邀请（客户端格式 [name dotnet][level u16]）
+struct MockMentorRequest;
+
+impl Packet for MockMentorRequest {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::MentorRequest as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        mir2_shared::binary::write_dotnet_string(writer, "bevychar")?;
+        writer.write_u16::<LittleEndian>(30)?;
+        Ok(())
+    }
+}
+
+/// #788：求婚邀请（客户端格式 [name dotnet]）
+struct MockMarriageRequest;
+
+impl Packet for MockMarriageRequest {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::MarriageRequest as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        mir2_shared::binary::write_dotnet_string(writer, "bevychar")?;
+        Ok(())
+    }
+}
+
+/// #788：离婚请求（空包）
+struct MockDivorceRequest;
+
+impl Packet for MockDivorceRequest {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::DivorceRequest as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, _writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
         Ok(())
     }
 }
