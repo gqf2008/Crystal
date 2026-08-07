@@ -27,6 +27,8 @@ pub struct MapData {
     pub cells: Vec<Vec<CellInfo>>,
     /// 安全区矩形列表（左闭右闭）
     pub safe_zone_rects: Vec<SafeZoneRect>,
+    /// 无经验地图（C# MapInfo.NoExperience，#932）
+    pub no_experience: bool,
 }
 
 impl MapData {
@@ -182,6 +184,7 @@ fn load_type_100(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
         height,
         cells,
         safe_zone_rects: Vec::new(),
+        no_experience: false,
     })
 }
 
@@ -262,6 +265,7 @@ fn load_type_1(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
         height: height as i16,
         cells,
         safe_zone_rects: Vec::new(),
+        no_experience: false,
     })
 }
 
@@ -341,6 +345,7 @@ fn load_type_0(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
         height,
         cells,
         safe_zone_rects: Vec::new(),
+        no_experience: false,
     })
 }
 

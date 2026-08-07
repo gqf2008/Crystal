@@ -1292,6 +1292,7 @@ impl WorldActor {
                         if mi.no_fight {
                             map.safe_zone_rects.push((0, 0, map.width as i32 - 1, map.height as i32 - 1));
                         }
+                        map.no_experience = mi.no_experience;
                     }
                     Self::apply_hardcoded_safe_zones(file_name, &mut map);
                     self.maps.insert(map_index, map);
