@@ -435,7 +435,14 @@ impl Message<WorldAttackRequest> for WorldActor {
                                 attacker_session: msg.session_id,
                                 damage: second,
                             }).await;
-                            // TwinDrakeBlade PvP 眩晕受 PvpCanResistPoison 门控（默认 false，跳过）
+                            // TwinDrakeBlade PvP 眩晕：需 PvpCanResistPoison 开启（C# 6803）
+                            if kind == 0 && self.pvp_cfg.can_resist_poison && fastrand::i32(0..40) <= lv as i32 + 1 {
+                                let _ = other_actor.ask(crate::actors::player::ApplyCombatPoisons {
+                                    poisons: vec![crate::combat::poison::Poison::new(
+                                        mir2_shared::enums::PoisonType::STUN, 2 + lv as u32, 0, 1000)],
+                                }).await;
+                                debug!("Player {} TwinDrakeBlade stunned player {}", result.object_id, other_session);
+                            }
                             debug!("Player {} {} second hit +{} on player {}",
                                    result.object_id, if kind == 0 { "TwinDrakeBlade" } else { "DoubleSlash" },
                                    second, other_session);

@@ -14,6 +14,9 @@ pub struct ServerConfig {
     /// 休息经验加成配置（C# Settings.Rested*）
     #[serde(default)]
     pub rested: RestedConfig,
+    /// PvP 开关配置（C# Settings.PvpCan*）
+    #[serde(default)]
+    pub pvp: PvpConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -55,6 +58,26 @@ impl Default for ConquestConfig {
             extend_gold: default_conquest_extend_gold(),
             gt_sale_min_price: default_conquest_gt_sale_min(),
             gt_days: default_conquest_gt_days(),
+        }
+    }
+}
+
+/// PvP 开关（C# Settings.cs：PvpCanFreeze/PvpCanResistPoison，默认 false）
+#[derive(Debug, Deserialize, Clone)]
+pub struct PvpConfig {
+    /// PvP 中是否允许冰冻（C# PvpCanFreeze；CatTongue 玩家冰冻门控）
+    #[serde(default)]
+    pub can_freeze: bool,
+    /// PvP 中是否允许毒抗/眩晕（C# PvpCanResistPoison；TwinDrakeBlade 玩家眩晕门控）
+    #[serde(default)]
+    pub can_resist_poison: bool,
+}
+
+impl Default for PvpConfig {
+    fn default() -> Self {
+        Self {
+            can_freeze: false,
+            can_resist_poison: false,
         }
     }
 }
@@ -394,6 +417,7 @@ impl Default for ServerConfig {
             social: SocialConfig::default(),
             conquest: ConquestConfig::default(),
             rested: RestedConfig::default(),
+            pvp: PvpConfig::default(),
         }
     }
 }
