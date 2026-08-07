@@ -131,10 +131,15 @@ impl MonsterBehavior for TreeQueenBehavior {
                         damage, spell_id: 0,
                     });
                 } else {
-                    // PushAttack：自身 1 格 + 推开（简化为单体伤害）
+                    // PushAttack：自身 1 格 + 推开 5 格（C# TreeQueen.cs:130 Pushed(..., DirectionFromPoint, 5)）
                     ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                     attacker_oid: monster.object_id,
                         target_session: t.session_id, damage, spell_id: 0, attack_type: 1,
+                    });
+                    ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                        session_id: t.session_id,
+                        dir: crate::actors::world::ai::direction_towards(monster.x, monster.y, t.x, t.y),
+                        distance: 5,
                     });
                 }
             }

@@ -89,6 +89,14 @@ pub struct PoisonPlayer {
     pub poison: Poison,
 }
 
+/// 推开玩家（C# MapObject.Pushed：沿 dir 推 distance 格，遇阻挡停止）
+#[derive(Debug, Clone, Copy)]
+pub struct PushPlayer {
+    pub session_id: u64,
+    pub dir: u8,
+    pub distance: i32,
+}
+
 /// AI 上下文（每 tick 每怪构建一次）
 pub struct AiCtx<'a> {
     pub tick_count: u64,
@@ -112,6 +120,8 @@ pub struct AiCtx<'a> {
     pub out_heals: &'a mut Vec<(u32, i32)>,
     /// 输出：对玩家的 poison
     pub out_poisons: &'a mut Vec<PoisonPlayer>,
+    /// 输出：推开玩家
+    pub out_pushes: &'a mut Vec<PushPlayer>,
 }
 
 impl<'a> AiCtx<'a> {

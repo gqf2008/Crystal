@@ -73,13 +73,18 @@ impl MonsterBehavior for BehemothBehavior {
                         spell_id: 0,
                     });
                 } else {
-                    // Push back 4 格（简化为单体 + Dazed）
+                    // Push back 4 格（C# Behemoth.cs:158 t.Pushed(this, Direction, 4)）+ Dazed
                     ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
                         attacker_oid: monster.object_id,
                         target_session: target.session_id,
                         damage: 1,
                         spell_id: 0,
                         attack_type: 1,
+                    });
+                    ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                        session_id: target.session_id,
+                        dir: monster.direction,
+                        distance: 4,
                     });
                     ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                         session_id: target.session_id,

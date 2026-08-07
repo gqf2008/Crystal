@@ -94,6 +94,12 @@ impl MonsterBehavior for OmaKingBehavior {
                         poison: Poison::new(PoisonType::PARALYSIS, 5, 0, 1000),
                     });
                 }
+                // C# OmaKing.cs:86 Pushed(..., DirectionFromPoint, 3 + Random(3))
+                ctx.out_pushes.push(crate::actors::world::ai::PushPlayer {
+                    session_id: target.session_id,
+                    dir: crate::actors::world::ai::direction_towards(monster.x, monster.y, target.x, target.y),
+                    distance: 3 + fastrand::i32(0..3),
+                });
             } else {
                 // 1/3 或远距离：远程 MC 弹道（C# Type=1，DefenceType.MAC）
                 let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, 0).max(1);
