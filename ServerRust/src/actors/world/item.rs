@@ -1990,13 +1990,25 @@ impl Message<RepairItemRequest> for WorldActor {
             }
         };
 
+        // C# RepairItem：BindMode.DontRepair(0x20) 不可修理；NoSRepair(0x400) 不可特殊修理
+        let item_db = self.item_infos.get(&item_data.item_index).cloned();
+        if let Some(info) = &item_db {
+            if super::has_bind_flag(info.bind_mode, 0x20) {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品无法修理");
+                return;
+            }
+            if msg.special && super::has_bind_flag(info.bind_mode, 0x400) {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品无法特殊修理");
+                return;
+            }
+        }
+
         // 计算耐久缺失和修理费（C# ItemData.RepairPrice）
         let dura_deficit = item_data.max_dura.saturating_sub(item_data.current_dura) as u64;
         if dura_deficit == 0 {
             send_system_message(&self.gate_ref, msg.session_id, "该物品不需要修理");
             return;
         }
-        let item_db = self.item_infos.get(&item_data.item_index).cloned();
         let repair_cost = item_db
             .as_ref()
             .map(|info| compute_repair_cost(&item_data, info, msg.special))
@@ -2016,7 +2028,10 @@ impl Message<RepairItemRequest> for WorldActor {
         let _ = record.actor_ref.ask(DeductGold { amount: repair_cost }).await;
 
         // 执行修理
-        let success = record.actor_ref.ask(crate::actors::player::RepairItem { unique_id: msg.unique_id }).await.unwrap_or(false);
+        let success = record.actor_ref.ask(crate::actors::player::RepairItem {
+            unique_id: msg.unique_id,
+            special: msg.special,
+        }).await.unwrap_or(false);
         if success {
             send_system_message(&self.gate_ref, msg.session_id, &format!("修理成功（花费 {} 金币）", repair_cost));
             // C# RepairItem/SRepairItem：Enqueue(S.RepairItem { UniqueID })

@@ -2779,13 +2779,15 @@ impl Message<MergeInventoryItemByUid> for PlayerActor {
 /// 修理物品
 pub struct RepairItem {
     pub unique_id: u64,
+    /// C# RepairItem(bool special)：SRepair 特殊修理（费用×3、不衰减 MaxDura）
+    pub special: bool,
 }
 
 impl Message<RepairItem> for PlayerActor {
     type Reply = bool;
 
     async fn handle(&mut self, msg: RepairItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        let success = self.state.inventory.repair_item(msg.unique_id);
+        let success = self.state.inventory.repair_item(msg.unique_id, msg.special);
         if success {
             self.send_inventory_changed();
         }
