@@ -69,6 +69,11 @@ fn party_exp_share(exp_after_reduce: i32, rate: f64, member_level: u16, sum_leve
     (exp_after_reduce as f64 * rate * (member_level as f64) / (sum_level as f64)) as i32
 }
 
+/// C# Functions.InRange：切比雪夫距离（Abs(dx)<=range && Abs(dy)<=range）
+fn in_range(ax: i32, ay: i32, bx: i32, by: i32, range: i32) -> bool {
+    (ax - bx).abs().max((ay - by).abs()) <= range
+}
+
 /// #898：安全区回血量（C# SpellObject.Value=25，不超过 max_hp）
 fn safe_zone_heal_hp(hp: i32, max_hp: i32) -> i32 {
     (hp + 25).min(max_hp)
@@ -4357,8 +4362,9 @@ impl Message<Tick> for WorldActor {
                             for (sid, record) in &self.players {
                                 if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                                     if state.group_id == Some(group_id) {
-                                        let dist = (state.x - monster.x).abs() + (state.y - monster.y).abs();
-                                        if dist <= 12 && state.map_index == monster.map_index {
+                                        // C# WinExp：Functions.InRange(..., Globals.DataRange=16) 切比雪夫
+                                        if in_range(state.x, state.y, monster.x, monster.y, 16)
+                                            && state.map_index == monster.map_index {
                                             group_sessions.push(*sid);
                                         }
                                     }
@@ -4369,18 +4375,22 @@ impl Message<Tick> for WorldActor {
                                 let mon_level = self.monster_infos.get(&monster.monster_index).map(|m| m.level).unwrap_or(0);
                                 let xp_after_reduce = reduce_exp(monster.xp, killer_level, mon_level);
                                 let mut sum_level = 0i32;
-                                let mut member_levels: Vec<(u64, u16)> = Vec::new();
+                                let mut member_levels: Vec<(u64, u16, bool)> = Vec::new();
                                 for sid in &group_sessions {
                                     if let Some(record) = self.players.get(sid) {
                                         if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
                                             sum_level += st.level as i32;
-                                            member_levels.push((*sid, st.level));
+                                            member_levels.push((*sid, st.level, !st.is_dead));
                                         }
                                     }
                                 }
                                 let near_count = member_levels.len().clamp(1, PARTY_EXP_RATE.len());
                                 let rate = PARTY_EXP_RATE[near_count - 1];
-                                for (sid, lv) in &member_levels {
+                                for (sid, lv, alive) in &member_levels {
+                                    // C# WinExp：仅存活成员获得经验（死亡成员等级仍计入 sumLevel）
+                                    if !*alive {
+                                        continue;
+                                    }
                                     let share = party_exp_share(xp_after_reduce, rate, *lv, sum_level);
                                     if let Some(record) = self.players.get(sid) {
                                         let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
@@ -4389,59 +4399,6 @@ impl Message<Tick> for WorldActor {
                                     }
                                 }
                                 debug!("GroupXP: {} members split {} xp (rate={}) from '{}' (reduced from {})", member_levels.len(), xp_after_reduce, rate, monster.name, monster.xp);
-                            }
-                            // 组队师徒/夫妻经验加成
-                            for sid in &group_sessions {
-                                if let Some(record) = self.players.get(sid) {
-                                    if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                                        // 师徒加成
-                                        if let Some(ref mentor_name) = state.mentor_name {
-                                            for (other_sid, other_record) in &self.players {
-                                                if *other_sid == *sid { continue; }
-                                                if let Ok(Some(other_state)) = other_record.actor_ref.ask(GetPlayerState).await {
-                                                    if other_state.name.eq_ignore_ascii_case(mentor_name)
-                                                        && other_state.map_index == state.map_index {
-                                                        let dist = (other_state.x - state.x).abs() + (other_state.y - state.y).abs();
-                                                        if dist <= 12 {
-                                                            let bonus = (monster.xp as f64 * 0.10).round() as i32;
-                                                            let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
-                                                                amount: self.apply_global_exp_multiplier(bonus),
-                                                            }).await;
-                                                            let _ = other_record.actor_ref.ask(crate::actors::player::AddExperience {
-                                                                amount: self.apply_global_exp_multiplier(bonus),
-                                                            }).await;
-                                                            send_system_message(&self.gate_ref, *sid, "师徒同心，额外获得经验！");
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        // 夫妻加成
-                                        if let Some(ref spouse_name) = state.spouse_name {
-                                            for (other_sid, other_record) in &self.players {
-                                                if *other_sid == *sid { continue; }
-                                                if let Ok(Some(other_state)) = other_record.actor_ref.ask(GetPlayerState).await {
-                                                    if other_state.name.eq_ignore_ascii_case(spouse_name)
-                                                        && other_state.map_index == state.map_index {
-                                                        let dist = (other_state.x - state.x).abs() + (other_state.y - state.y).abs();
-                                                        if dist <= 12 {
-                                                            let bonus = (monster.xp as f64 * 0.10).round() as i32;
-                                                            let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
-                                                                amount: self.apply_global_exp_multiplier(bonus),
-                                                            }).await;
-                                                            let _ = other_record.actor_ref.ask(crate::actors::player::AddExperience {
-                                                                amount: self.apply_global_exp_multiplier(bonus),
-                                                            }).await;
-                                                            send_system_message(&self.gate_ref, *sid, "夫妻同心，额外获得经验！");
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
                             }
                             // 组队任务击杀进度
                             for sid in &group_sessions {
@@ -4641,7 +4598,7 @@ impl Message<Tick> for WorldActor {
 
 #[cfg(test)]
 mod tests {
-    use super::{safe_zone_heal_hp, reduce_exp, party_exp_share, PARTY_EXP_RATE, item_expired, dotnet_now_ticks};
+    use super::{safe_zone_heal_hp, reduce_exp, party_exp_share, in_range, PARTY_EXP_RATE, item_expired, dotnet_now_ticks};
 
     #[test]
     fn test_safe_zone_heal_hp() {
@@ -4701,6 +4658,35 @@ mod tests {
         // #916：.NET Ticks 应大于 2023 年基线（638000000000000000）
         let now = dotnet_now_ticks();
         assert!(now > 638_000_000_000_000_000, "unexpected ticks: {}", now);
+    }
+
+    /// #1159：C# Functions.InRange = 切比雪夫（DataRange=16），斜向成员不应被曼哈顿误排除
+    #[test]
+    fn test_in_range_chebyshev() {
+        // 斜向 10,10：曼哈顿=20 > 旧 12 会误排除；切比雪夫=10 <= 16 应包含
+        assert!(in_range(0, 0, 10, 10, 16));
+        // 正斜 16,0：切比雪夫=16 边界包含
+        assert!(in_range(0, 0, 16, 0, 16));
+        // 超界 17,0 排除
+        assert!(!in_range(0, 0, 17, 0, 16));
+        // 斜向 12,12：曼哈顿 24 超旧 12；切比雪夫 12 <= 16 包含
+        assert!(in_range(0, 0, 12, 12, 16));
+        assert!(!in_range(0, 0, 12, 12, 11));
+    }
+
+    /// #1159：C# WinExp 组队单成员分配 = exp * rate * level / sumLevel（等级权重）
+    #[test]
+    fn test_party_exp_share_level_weighted() {
+        // 1000 xp、rate=1.0、2 人（30 级 + 70 级，sum=100）
+        let share_low = party_exp_share(1000, 1.0, 30, 100);
+        let share_high = party_exp_share(1000, 1.0, 70, 100);
+        assert_eq!(share_low, 300);
+        assert_eq!(share_high, 700);
+        assert_eq!(share_low + share_high, 1000);
+        // rate=1.3（2 人）：C# partyExpRate[1]=1.3
+        assert_eq!(party_exp_share(1000, 1.3, 50, 100), 650);
+        // sum=0 兜底返回原值
+        assert_eq!(party_exp_share(1000, 1.0, 30, 0), 1000);
     }
 }
 

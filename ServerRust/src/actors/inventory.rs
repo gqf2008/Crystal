@@ -553,22 +553,29 @@ impl PlayerInventory {
         self.equipment[slot as usize].take()
     }
 
-    /// 修理物品：恢复耐久到最大值
+    /// 修理物品：恢复耐久到最大值（C# RepairItem：非特殊修理 MaxDura 衰减 1/30 缺口）
     /// 返回是否成功
-    pub fn repair_item(&mut self, uid: u64) -> bool {
+    pub fn repair_item(&mut self, uid: u64, special: bool) -> bool {
+        // C#：if (!special) MaxDura = max(0, MaxDura - (MaxDura - CurrentDura) / 30)
+        let apply_decay = |item: &mut mir2_shared::data::item::UserItem| {
+            if !special {
+                let gap = item.max_dura.saturating_sub(item.current_dura);
+                item.max_dura = item.max_dura.saturating_sub(gap / 30);
+            }
+            item.current_dura = item.max_dura;
+            item.dura_changed = true;
+        };
         // 检查背包
         for s in self.backpack.iter_mut().flatten() {
             if s.item.unique_id == uid {
-                s.item.current_dura = s.item.max_dura;
-                s.item.dura_changed = true;
+                apply_decay(&mut s.item);
                 return true;
             }
         }
         // 检查装备
         for e in self.equipment.iter_mut().flatten() {
             if e.unique_id == uid {
-                e.current_dura = e.max_dura;
-                e.dura_changed = true;
+                apply_decay(e);
                 return true;
             }
         }
@@ -987,14 +994,14 @@ mod tests {
         }
 
         // 修理
-        assert!(inv.repair_item(uid));
+        assert!(inv.repair_item(uid, false));
         if let Some(s) = &inv.backpack[grid as usize] {
             assert_eq!(s.item.current_dura, s.item.max_dura);
             assert!(s.item.dura_changed);
         }
 
         // 修理不存在的物品
-        assert!(!inv.repair_item(99999));
+        assert!(!inv.repair_item(99999, false));
     }
 
     #[test]
@@ -1055,5 +1062,31 @@ mod tests {
 
         // 同格子镶嵌应失败
         assert!(inv.socket_gem(0, 0, 2).is_none());
+    }
+
+    /// #1159：C# RepairItem——非特殊修理 MaxDura 衰减 (MaxDura-CurrentDura)/30，特殊修理不衰减
+    #[test]
+    fn test_repair_item_max_dura_decay() {
+        let mut inv = PlayerInventory::new();
+        let mut item = make_item(100, 1);
+        item.unique_id = 100;
+        item.max_dura = 1000;
+        item.current_dura = 700; // 缺口 300 → 衰减 300/30=10
+        inv.backpack[0] = Some(InventorySlot { grid: 0, item });
+        assert!(inv.repair_item(100, false));
+        let it = inv.backpack[0].as_ref().unwrap().item.clone();
+        assert_eq!(it.max_dura, 990);
+        assert_eq!(it.current_dura, 990);
+
+        // 特殊修理：不衰减 MaxDura
+        let mut item2 = make_item(101, 1);
+        item2.unique_id = 101;
+        item2.max_dura = 1000;
+        item2.current_dura = 500;
+        inv.backpack[1] = Some(InventorySlot { grid: 1, item: item2 });
+        assert!(inv.repair_item(101, true));
+        let it2 = inv.backpack[1].as_ref().unwrap().item.clone();
+        assert_eq!(it2.max_dura, 1000);
+        assert_eq!(it2.current_dura, 1000);
     }
 }

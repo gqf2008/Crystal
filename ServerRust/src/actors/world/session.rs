@@ -3354,6 +3354,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
             bind_y: 0,
             level_effects: 0,
             is_mentor: false,
+            mentee_exp: 0,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
             exp_bonus_lover_percent: 0,

@@ -154,6 +154,12 @@ fn compute_repair_cost(item: &mir2_shared::data::item::UserItem, info: &db::Item
     cost
 }
 
+/// C# 与 NPC 交互距离校验（Functions.InRange(..., Globals.DataRange=16) + 同图）
+fn npc_in_range(player_map: u16, px: i32, py: i32, npc: &NpcState) -> bool {
+    player_map == npc.map_index
+        && crate::actors::world::ai::max_distance(px, py, npc.x, npc.y) <= 16
+}
+
 /// 快捷装备栏装备
 pub struct EquipSlotItemRequest {
     pub session_id: u64,
@@ -225,14 +231,29 @@ impl Message<PickUpRequest> for WorldActor {
 
         // 查找附近可拾取的物品（1 格内，同地图）
         const OWNERSHIP_TICKS: u64 = 300; // ~30 秒保护期
+        // 预取在线玩家组号（C# IsGroupMember：保护期内同组队员可拾取掉落者的物品）
+        let mut player_groups: std::collections::HashMap<u64, Option<u64>> = std::collections::HashMap::new();
+        for (sid, rec) in &self.players {
+            if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                player_groups.insert(*sid, s.group_id);
+            }
+        }
+        let picker_group = state.group_id;
         let pickup_idx = self.ground_items.iter().position(|gi| {
             if gi.map_index != state.map_index { return false; }
             if (gi.x - player_pos.0).abs() > 1 { return false; }
             if (gi.y - player_pos.1).abs() > 1 { return false; }
-            // 所有权保护：保护期内只有掉落者可拾取
+            // 所有权保护：保护期内只有掉落者可拾取（C# PickUp：同组队员也可拾取）
             if let Some(dropper) = gi.dropper_session {
                 if self.tick_count < gi.drop_tick + OWNERSHIP_TICKS && dropper != msg.session_id {
-                    return false;
+                    // C# IsGroupMember(owner)：掉落者为同组队员时允许拾取
+                    let group_ok = match (player_groups.get(&dropper).copied().flatten(), picker_group) {
+                        (Some(dg), Some(pg)) => dg == pg,
+                        _ => false,
+                    };
+                    if !group_ok {
+                        return false;
+                    }
                 }
             }
             true
@@ -1770,6 +1791,13 @@ impl Message<BuyItemRequest> for WorldActor {
                 return;
             }
         };
+        // C# BuyItem：InRange(NPC, Globals.DataRange=16) 距离校验
+        if let Some(npc) = self.npcs.get(&npc_oid) {
+            if !npc_in_range(state.map_index, state.x, state.y, npc) {
+                send_system_message(&self.gate_ref, msg.session_id, "距离 NPC 太远，无法购买");
+                return;
+            }
+        }
 
         // 获取商品列表（可变引用以便扣减库存）
         let goods_list = match self.npc_goods.get_mut(&npc_db_index) {
@@ -1888,6 +1916,26 @@ impl Message<SellItemRequest> for WorldActor {
             _ => return,
         };
 
+        // C# SellItem：需先与买卖 NPC 对话（NPCPage）+ InRange(NPC, DataRange=16)
+        let npc_oid = match self.session_npc.get(&msg.session_id) {
+            Some(o) => *o,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "请先与 NPC 对话");
+                return;
+            }
+        };
+        let npc = match self.npcs.get(&npc_oid) {
+            Some(n) => n,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "找不到该 NPC");
+                return;
+            }
+        };
+        if !npc_in_range(state.map_index, state.x, state.y, npc) {
+            send_system_message(&self.gate_ref, msg.session_id, "距离 NPC 太远，无法出售");
+            return;
+        }
+
         // 检查物品是否在背包中
         let item_data = match state.inventory.get_item(msg.unique_id) {
             Some(i) => i.clone(),
@@ -1966,6 +2014,26 @@ impl Message<RepairItemRequest> for WorldActor {
             _ => return,
         };
 
+        // C# RepairItem：需先与修理 NPC 对话（NPCPage）+ InRange(NPC, DataRange=16)
+        let npc_oid = match self.session_npc.get(&msg.session_id) {
+            Some(o) => *o,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "请先与修理 NPC 对话");
+                return;
+            }
+        };
+        let npc = match self.npcs.get(&npc_oid) {
+            Some(n) => n,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "找不到该 NPC");
+                return;
+            }
+        };
+        if !npc_in_range(state.map_index, state.x, state.y, npc) {
+            send_system_message(&self.gate_ref, msg.session_id, "距离 NPC 太远，无法修理");
+            return;
+        }
+
         // 获取物品信息计算修理费
         let item_data = match state.inventory.get_item(msg.unique_id) {
             Some(i) => i.clone(),
@@ -1975,13 +2043,25 @@ impl Message<RepairItemRequest> for WorldActor {
             }
         };
 
+        // C# RepairItem：BindMode.DontRepair(0x20) 不可修理；NoSRepair(0x400) 不可特殊修理
+        let item_db = self.item_infos.get(&item_data.item_index).cloned();
+        if let Some(info) = &item_db {
+            if super::has_bind_flag(info.bind_mode, 0x20) {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品无法修理");
+                return;
+            }
+            if msg.special && super::has_bind_flag(info.bind_mode, 0x400) {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品无法特殊修理");
+                return;
+            }
+        }
+
         // 计算耐久缺失和修理费（C# ItemData.RepairPrice）
         let dura_deficit = item_data.max_dura.saturating_sub(item_data.current_dura) as u64;
         if dura_deficit == 0 {
             send_system_message(&self.gate_ref, msg.session_id, "该物品不需要修理");
             return;
         }
-        let item_db = self.item_infos.get(&item_data.item_index).cloned();
         let repair_cost = item_db
             .as_ref()
             .map(|info| compute_repair_cost(&item_data, info, msg.special))
@@ -2001,7 +2081,10 @@ impl Message<RepairItemRequest> for WorldActor {
         let _ = record.actor_ref.ask(DeductGold { amount: repair_cost }).await;
 
         // 执行修理
-        let success = record.actor_ref.ask(crate::actors::player::RepairItem { unique_id: msg.unique_id }).await.unwrap_or(false);
+        let success = record.actor_ref.ask(crate::actors::player::RepairItem {
+            unique_id: msg.unique_id,
+            special: msg.special,
+        }).await.unwrap_or(false);
         if success {
             send_system_message(&self.gate_ref, msg.session_id, &format!("修理成功（花费 {} 金币）", repair_cost));
             // C# RepairItem/SRepairItem：Enqueue(S.RepairItem { UniqueID })
@@ -2620,7 +2703,7 @@ impl Message<DisassembleItemRequest> for WorldActor {
 
 #[cfg(test)]
 mod tests {
-    use super::can_equip_by_weight;
+    use super::{can_equip_by_weight, npc_in_range, NpcState};
     use crate::actors::inventory::{EquipmentSlot, PlayerInventory};
     use mir2_shared::enums::MirClass;
 
@@ -2659,4 +2742,18 @@ mod tests {
         // 已有穿戴 50，新装备 10，换下旧装备 200：允许（50 - 200 + 10 <= limit）
         assert!(can_equip_by_weight(EquipmentSlot::Armour, 10, 200, 50, 0, &inv, MirClass::Warrior, 1, &infos));
     }
+    /// #1159：C# 与 NPC 交互距离校验（切比雪夫 DataRange=16 + 同图）
+    #[test]
+    fn test_npc_in_range() {
+        // 同图、斜向 10,10（切比雪夫 10 <= 16）→ 在范围内
+        let npc_near = NpcState { object_id: 1, name: "n".into(), x: 110, y: 110, direction: 0, db_index: 1, map_index: 3 };
+        assert!(npc_in_range(3, 100, 100, &npc_near));
+        // 超 16（20,0）→ 不在
+        let npc_far = NpcState { object_id: 2, name: "n".into(), x: 120, y: 100, direction: 0, db_index: 1, map_index: 3 };
+        assert!(!npc_in_range(3, 100, 100, &npc_far));
+        // 不同图 → 不在
+        let npc_other_map = NpcState { object_id: 3, name: "n".into(), x: 100, y: 100, direction: 0, db_index: 1, map_index: 4 };
+        assert!(!npc_in_range(3, 100, 100, &npc_other_map));
+    }
+
 }
