@@ -62,6 +62,28 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("sandworm") || name.contains("sand worm") || name.contains("沙虫") {
         return Box::new(bosses::sand_worm::SandWormBehavior::new());
     }
+    if name.contains("shamanzombie") || name.contains("shaman zombie") || name.contains("巫师僵尸") || name.contains("萨满僵尸") {
+        return Box::new(bosses::shaman_zombie::ShamanZombieBehavior::new());
+    }
+    if name.contains("straycat") || name.contains("stray cat") || name.contains("流浪猫") {
+        return Box::new(bosses::stray_cat::StrayCatBehavior::new());
+    }
+    if name.contains("darkbeast") || name.contains("dark beast") || name.contains("暗兽") {
+        return Box::new(bosses::dark_beast::DarkBeastBehavior::new());
+    }
+    // 注意：SnowWolf 判定放在 SnowWolfKing 之后（先匹配到 King 会提前 return）
+    if name.contains("snowwolf") || name.contains("snow wolf") || name.contains("雪狼") {
+        return Box::new(bosses::snow_wolf::SnowWolfBehavior::new());
+    }
+    if name.contains("mudzombie") || name.contains("mud zombie") || name.contains("泥僵尸") || name.contains("泥沼僵尸") {
+        return Box::new(bosses::mud_zombie::MudZombieBehavior::new());
+    }
+    if name.contains("incarnatedghoul") || name.contains("incarnated ghoul") || name.contains("附身尸") {
+        return Box::new(bosses::incarnated_ghoul::IncarnatedGhoulBehavior::new());
+    }
+    if name.contains("incarnatedzt") || name.contains("incarnated zt") || name.contains("附身祖玛") {
+        return Box::new(bosses::incarnated_zt::IncarnatedZTBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -333,6 +355,13 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("cavemaggot") || name.contains("cave maggot") || name.contains("洞穴蛆")
         || name.contains("bonespearman") || name.contains("bone spearman") || name.contains("骷髅枪兵")
         || name.contains("sandworm") || name.contains("sand worm") || name.contains("沙虫")
+        || name.contains("shamanzombie") || name.contains("shaman zombie") || name.contains("巫师僵尸") || name.contains("萨满僵尸")
+        || name.contains("straycat") || name.contains("stray cat") || name.contains("流浪猫")
+        || name.contains("darkbeast") || name.contains("dark beast") || name.contains("暗兽")
+        || name.contains("snowwolf") || name.contains("snow wolf") || name.contains("雪狼")
+        || name.contains("mudzombie") || name.contains("mud zombie") || name.contains("泥僵尸") || name.contains("泥沼僵尸")
+        || name.contains("incarnatedghoul") || name.contains("incarnated ghoul") || name.contains("附身尸")
+        || name.contains("incarnatedzt") || name.contains("incarnated zt") || name.contains("附身祖玛")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
