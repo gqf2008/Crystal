@@ -2941,7 +2941,36 @@ pub async fn import_drops_from_dir(
         };
         matched_monsters += 1;
 
-        let raw_lines: Vec<&str> = content.lines().map(|l| l.trim()).collect();
+        // #1006：C# ParseInsert——`#INSERT [相对路径]` 引入共享掉落表（递归展开，防循环）
+        let mut drop_lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+        for _ in 0..8 {
+            let mut appended = false;
+            let mut next: Vec<String> = Vec::new();
+            for line in &drop_lines {
+                let t = line.trim();
+                if let Some(rest) = t.strip_prefix("#INSERT") {
+                    let sub = rest.trim().trim_start_matches('[').trim_end_matches(']').trim();
+                    if !sub.is_empty() {
+                        let sub_path = drop_dir.join(sub);
+                        if let Ok(sub_content) = std::fs::read_to_string(&sub_path) {
+                            next.extend(sub_content.lines().map(|l| l.to_string()));
+                            appended = true;
+                            tracing::debug!("Drop #INSERT expanded: {} -> {}", drop_dir.display(), sub);
+                        } else {
+                            tracing::warn!("Drop #INSERT file not found: {}", sub_path.display());
+                        }
+                    }
+                    // #INSERT 行本身不保留
+                } else {
+                    next.push(line.clone());
+                }
+            }
+            drop_lines = next;
+            if !appended {
+                break;
+            }
+        }
+        let raw_lines: Vec<&str> = drop_lines.iter().map(|l| l.trim()).collect();
         let mut li = 0usize;
         while li < raw_lines.len() {
             let line = raw_lines[li];
