@@ -1829,7 +1829,10 @@ impl Message<MagicRequest> for WorldActor {
                                 mir2_shared::enums::PoisonType::GREEN, duration, poison_value, 2000,
                             ));
                         monster.provoked = true;
-                        monster.target_session = Some(msg.session_id);
+                        // C# MonsterObject.ApplyPoison：仅当无目标时锁定施毒者（Target == null 才设置）
+                        if monster.target_session.is_none() {
+                            monster.target_session = Some(msg.session_id);
+                        }
                         debug!("Magic: {} casts Poisoning -> monster {} ({}s, {}dmg/tick)",
                                state.name, mid, duration, poison_value);
                     }
@@ -3812,8 +3815,7 @@ impl Message<MagicRequest> for WorldActor {
                             monster.x = nx;
                             monster.y = ny;
                             monster.direction = ((pdir + 4) % 8) as u8; // 朝向施法者
-                            monster.provoked = true;
-                            monster.target_session = Some(msg.session_id);
+                            // C# MonsterObject.Pushed：仅转身朝向施法者，不改目标、不激怒
                             moved_packets.push((mid, nx, ny, monster.direction));
                         }
                     }
