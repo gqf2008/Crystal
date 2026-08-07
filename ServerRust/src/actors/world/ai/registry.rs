@@ -192,6 +192,24 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("hellpirate") || name.contains("hell pirate") || name.contains("地狱海盗") {
         return Box::new(bosses::hell_pirate::HellPirateBehavior::new());
     }
+    if name.contains("cannibaltentacles") || name.contains("cannibal tentacles") || name.contains("食人触手") {
+        return Box::new(bosses::cannibal_tentacles::CannibalTentaclesBehavior::new());
+    }
+    if name.contains("tucsonwarrior") || name.contains("tucson warrior") || name.contains("图森战士") {
+        return Box::new(bosses::tucson_warrior::TucsonWarriorBehavior::new());
+    }
+    if name.contains("turtlegrass") || name.contains("turtle grass") || name.contains("龟草") {
+        return Box::new(bosses::turtlegrass::TurtlegrassBehavior::new());
+    }
+    if name.contains("finialturtle") || name.contains("finial turtle") || name.contains("终结龟") {
+        return Box::new(bosses::finial_turtle::FinialTurtleBehavior::new());
+    }
+    if name.contains("avengingspirit") || name.contains("avenging spirit") || name.contains("复仇之魂") {
+        return Box::new(bosses::avenging_spirit::AvengingSpiritBehavior::new());
+    }
+    if name.contains("bluesoul") || name.contains("blue soul") || name.contains("蓝魂") {
+        return Box::new(bosses::blue_soul::BlueSoulBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -506,6 +524,12 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("blackfoxman") || name.contains("black foxman") || name.contains("黑狐人")
         || name.contains("blackhammercat") || name.contains("black hammer cat") || name.contains("黑锤猫")
         || name.contains("hellpirate") || name.contains("hell pirate") || name.contains("地狱海盗")
+        || name.contains("cannibaltentacles") || name.contains("cannibal tentacles") || name.contains("食人触手")
+        || name.contains("tucsonwarrior") || name.contains("tucson warrior") || name.contains("图森战士")
+        || name.contains("turtlegrass") || name.contains("turtle grass") || name.contains("龟草")
+        || name.contains("finialturtle") || name.contains("finial turtle") || name.contains("终结龟")
+        || name.contains("avengingspirit") || name.contains("avenging spirit") || name.contains("复仇之魂")
+        || name.contains("bluesoul") || name.contains("blue soul") || name.contains("蓝魂")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
