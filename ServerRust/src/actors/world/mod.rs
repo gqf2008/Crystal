@@ -924,6 +924,10 @@ pub struct WorldActor {
     pub(crate) pending_gather: Vec<u64>,
     /// 已广播的专注状态（session -> enabled），用于过期/恢复时只广播一次
     pub(crate) concentration_visible: HashMap<u64, bool>,
+    /// 各图雷暴下一波打击 tick（C# Map.LightningTime）
+    pub(crate) map_lightning_next_tick: HashMap<u16, u64>,
+    /// 各图火海/岩浆下一波打击 tick（C# Map.FireTime）
+    pub(crate) map_fire_next_tick: HashMap<u16, u64>,
     /// 定时机器人任务
     pub(crate) robot_tasks: Vec<robot::RobotTask>,
     /// 机器人上次检查的分钟值
@@ -1107,6 +1111,8 @@ impl WorldActor {
             vamp_heals: Vec::new(),
             pending_gather: Vec::new(),
             concentration_visible: HashMap::new(),
+            map_lightning_next_tick: HashMap::new(),
+            map_fire_next_tick: HashMap::new(),
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
@@ -3650,6 +3656,8 @@ impl Actor for WorldActor {
             vamp_heals: Vec::new(),
             pending_gather: Vec::new(),
             concentration_visible: HashMap::new(),
+            map_lightning_next_tick: HashMap::new(),
+            map_fire_next_tick: HashMap::new(),
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,

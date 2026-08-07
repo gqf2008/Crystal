@@ -217,34 +217,121 @@ impl WorldActor {
         }
     }
 
-    /// 地图环境伤害 + 禁止坐骑地图自动下坐骑（每 20 ticks）
+    /// 地图环境伤害（C# Map.cs MapLightning/MapLava：随机落雷/岩浆，3~15s 一波）
+    /// + 禁止坐骑地图自动下坐骑（每 20 ticks）
     pub(crate) async fn tick_environment_damage(&mut self) {
         if self.tick_count % 20 == 0 {
-            for (session_id, record) in &self.players {
-                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                    if state.is_dead { continue; }
-                    if let Some(mi) = self.map_infos.get(&(state.map_index as i32)) {
-                        if mi.fire || mi.lightning {
-                            let in_safe = self.maps.get(&state.map_index)
-                                .map(|m| m.is_safe_zone(state.x, state.y))
-                                .unwrap_or(false);
-                            if in_safe { continue; }
-                            let damage = if mi.fire { mi.fire_damage } else { mi.lightning_damage };
-                            if damage > 0 {
-                                let died = record.actor_ref.ask(TakeDamage {
-                                    attacker_id: 0, // environment
-                                    attacker_session: 0,
-                                    damage,
-                                }).await.unwrap_or(false);
-                                if died {
-                                    self.player_death_queue.insert(*session_id, self.tick_count);
-                                    broadcast_system_message(&self.gate_ref, &self.players,
-                                        &format!("{} 在{}中倒下了", state.name,
-                                            if mi.fire { "火海" } else { "雷暴" }));
+            // C# Map.cs：Info.Lightning/Fire 且到时 → 对每个玩家生成一次落雷/岩浆
+            // （25% 落在玩家脚下，75% 在 ±10 格内随机），值 = Random(0..damage)
+            let mut strikes: Vec<(u16, i32, i32, bool)> = Vec::new(); // (map, x, y, is_lightning)
+            for (map_index, mi) in self.map_infos.iter() {
+                let map_index_u16 = *map_index as u16;
+                if mi.lightning && mi.lightning_damage > 0 {
+                    let next = self.map_lightning_next_tick.get(&map_index_u16).copied().unwrap_or(0);
+                    if self.tick_count >= next {
+                        self.map_lightning_next_tick.insert(
+                            map_index_u16, self.tick_count + fastrand::i32(30..=150) as u64);
+                        for (_, record) in &self.players {
+                            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                                if st.is_dead || st.map_index != map_index_u16 { continue; }
+                                let (sx, sy) = if fastrand::i32(0..4) == 0 {
+                                    (st.x, st.y)
                                 } else {
-                                    let msg = if mi.fire { "你受到了火焰伤害！" } else { "你受到了闪电伤害！" };
-                                    send_system_message(&self.gate_ref, *session_id, msg);
+                                    (st.x - 10 + fastrand::i32(0..20), st.y - 10 + fastrand::i32(0..20))
+                                };
+                                let valid = self.maps.get(&map_index_u16)
+                                    .map(|m| m.is_valid(sx, sy))
+                                    .unwrap_or(false);
+                                if valid {
+                                    strikes.push((map_index_u16, sx, sy, true));
                                 }
+                            }
+                        }
+                    }
+                }
+                if mi.fire && mi.fire_damage > 0 {
+                    let next = self.map_fire_next_tick.get(&map_index_u16).copied().unwrap_or(0);
+                    if self.tick_count >= next {
+                        self.map_fire_next_tick.insert(
+                            map_index_u16, self.tick_count + fastrand::i32(30..=150) as u64);
+                        for (_, record) in &self.players {
+                            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                                if st.is_dead || st.map_index != map_index_u16 { continue; }
+                                let (sx, sy) = if fastrand::i32(0..4) == 0 {
+                                    (st.x, st.y)
+                                } else {
+                                    (st.x - 10 + fastrand::i32(0..20), st.y - 10 + fastrand::i32(0..20))
+                                };
+                                let valid = self.maps.get(&map_index_u16)
+                                    .map(|m| m.is_valid(sx, sy))
+                                    .unwrap_or(false);
+                                if valid {
+                                    strikes.push((map_index_u16, sx, sy, false));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // 结算打击：广播 ObjectSpell 视觉 + 落点玩家受 MAC 伤害（C# SpellObject MapLightning/MapLava）
+            for (map_index, sx, sy, is_lightning) in strikes {
+                let damage = self.map_infos.get(&(map_index as i32))
+                    .map(|mi| if is_lightning { mi.lightning_damage } else { mi.fire_damage })
+                    .unwrap_or(0);
+                if damage <= 0 { continue; }
+                let value = fastrand::i32(0..damage);
+                let spell = if is_lightning {
+                    mir2_shared::enums::Spell::MapLightning
+                } else {
+                    mir2_shared::enums::Spell::MapLava
+                };
+                // ObjectSpell 广播（客户端视觉）
+                let object_spell = mir2_shared::packets::server::magic_combat::ObjectSpell {
+                    object_id: 0,
+                    location_x: sx,
+                    location_y: sy,
+                    spell,
+                };
+                let mut ob = Vec::new();
+                if object_spell.write_body(&mut ob).is_ok() {
+                    let pkt = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectSpell as i16, &ob);
+                    for (sid, r) in &self.players {
+                        if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                            if os.map_index == map_index {
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: *sid, data: pkt.clone(),
+                                }).await;
+                            }
+                        }
+                    }
+                }
+                // 落点玩家 MAC 伤害（C# player.Struck(Value, MAC)，无攻击者）
+                let neutral = crate::combat::attack::CombatStats::default();
+                for (sid, record) in &self.players {
+                    if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                        if st.is_dead || st.map_index != map_index || st.x != sx || st.y != sy {
+                            continue;
+                        }
+                        let defender = st.to_combat_stats();
+                        let r = crate::combat::attack::resolve_attack(
+                            &neutral, &defender, value.max(0),
+                            mir2_shared::enums::DefenceType::Mac, 0,
+                        );
+                        if r.is_hit && r.damage > 0 {
+                            let died = record.actor_ref.ask(TakeDamage {
+                                attacker_id: 0, // environment
+                                attacker_session: 0,
+                                damage: r.damage,
+                            }).await.unwrap_or(false);
+                            if died {
+                                self.player_death_queue.insert(*sid, self.tick_count);
+                                broadcast_system_message(&self.gate_ref, &self.players,
+                                    &format!("{} 在{}中倒下了", st.name,
+                                        if is_lightning { "雷暴" } else { "火海" }));
+                            } else {
+                                let msg = if is_lightning { "你受到了闪电伤害！" } else { "你受到了火焰伤害！" };
+                                send_system_message(&self.gate_ref, *sid, msg);
                             }
                         }
                     }
