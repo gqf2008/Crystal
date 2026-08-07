@@ -2994,6 +2994,66 @@ impl WorldActor {
                         });
                         debug!("NPC TIMERECALL: session={} section='{}' in {}s (expire {})", session_id, section, secs, expire_tick);
                     }
+                    // TIMERECALLGROUP <秒> [section]：给所有组员注册延迟执行（对齐 C# ActionType.TimeRecallGroup）
+                    "TIMERECALLGROUP" => {
+                        let secs = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                        let section = parts.next()
+                            .map(|s| s.trim_matches(|c| c == '[' || c == ']').to_string())
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or_else(|| "main".to_string());
+                        let gid = if let Some(record) = self.players.get(&session_id) {
+                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                                state.group_id
+                            } else { None }
+                        } else { None };
+                        let mut targets = vec![session_id];
+                        if let Some(gid) = gid {
+                            for (sid, r) in &self.players {
+                                if *sid == session_id { continue; }
+                                if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                                    if os.group_id == Some(gid) {
+                                        targets.push(*sid);
+                                    }
+                                }
+                            }
+                        }
+                        let expire_tick = self.tick_count.saturating_add(secs * 10);
+                        for sid in &targets {
+                            self.npc_delayed_actions.entry(*sid).or_default().push(DelayedNpcAction {
+                                expire_tick,
+                                npc_object_id: npc.object_id,
+                                section: section.clone(),
+                                target_db_index: None,
+                            });
+                        }
+                        debug!("NPC TIMERECALLGROUP: session={} targets={} section='{}' in {}s",
+                            session_id, targets.len(), section, secs);
+                    }
+                    // DELAYGOTO <秒> <section>：延迟跳转到脚本段（对齐 C# ActionType.DelayGoto）
+                    "DELAYGOTO" => {
+                        let secs = parts.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                        let section = parts.next()
+                            .map(|s| s.trim_matches(|c| c == '[' || c == ']').to_string())
+                            .filter(|s| !s.is_empty());
+                        match section {
+                            Some(section) => {
+                                let expire_tick = self.tick_count.saturating_add(secs * 10);
+                                self.npc_delayed_actions.entry(session_id).or_default().push(DelayedNpcAction {
+                                    expire_tick,
+                                    npc_object_id: npc.object_id,
+                                    section: section.clone(),
+                                    target_db_index: None,
+                                });
+                                debug!("NPC DELAYGOTO: session={} section='{}' in {}s", session_id, section, secs);
+                            }
+                            None => warn!("NPC DELAYGOTO: missing section (session={})", session_id),
+                        }
+                    }
+                    // BREAKTIMERECALL：取消该玩家所有 NPC 延迟执行（对齐 C# ActionType.BreakTimeRecall）
+                    "BREAKTIMERECALL" => {
+                        self.npc_delayed_actions.remove(&session_id);
+                        debug!("NPC BREAKTIMERECALL: session={}", session_id);
+                    }
                     // GROUPTELEPORT：组队传送（简化：传送玩家 + 同图组员到目标点）
                     "GROUPTELEPORT" => {
                         let tx = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(npc.x);
