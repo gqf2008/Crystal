@@ -2162,27 +2162,30 @@ impl Message<MagicRequest> for WorldActor {
                 }
             }
             // ===== 刺客法术（Assassin，buff 系 + 位移系 + 物理攻击系）=====
-            // Haste：攻击速度提升（降低攻击冷却，C# Stat.AttackSpeed）
+            // Haste：攻击速度提升（C# CompleteMagic 6149：AttackSpeed stat += Lv*2+2，时长 25+15Lv 秒）
             SPELL_HASTE => {
-                let pct = 15 + spell_level as i32 * 10;
+                // stat 2..8 ≈ 20..80% 冷却缩减（近似）
+                let pct = (2 + spell_level as i32 * 2) * 10;
                 let buff = crate::combat::buff::BuffInstance::new(
                     crate::combat::buff::BuffType::AttackSpeedBoost { percent: pct },
-                    600, // 60s
+                    (25 + spell_level as u32 * 15) * 10,
                     5,
                 );
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
-                debug!("Magic: {} casts Haste (attack speed +{}%)", state.name, pct);
+                debug!("Magic: {} casts Haste (attack speed +{}%, {}s)",
+                       state.name, pct, 25 + spell_level as i32 * 15);
             }
-            // LightBody：敏捷+移动速度（C# Agility + MoveSpeed）
+            // LightBody：敏捷提升（C# CompleteMagic 6187：Agility += (Lv+1)*2，时长 (Lv+1)*30 秒）
             SPELL_LIGHT_BODY => {
-                let agi_bonus = 5 + spell_level as i32 * 3;
+                let agi_bonus = (spell_level as i32 + 1) * 2;
                 let buff1 = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::AgilityBoost { bonus: agi_bonus }, 600, 5);
-                let buff2 = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::MoveSpeedBoost { percent: 10 }, 600, 5);
+                    crate::combat::buff::BuffType::AgilityBoost { bonus: agi_bonus },
+                    (spell_level as u32 + 1) * 300,
+                    5,
+                );
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: buff1 }).await;
-                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff: buff2 }).await;
-                debug!("Magic: {} casts LightBody (agility +{}, speed +10%)", state.name, agi_bonus);
+                debug!("Magic: {} casts LightBody (agility +{}, {}s)",
+                       state.name, agi_bonus, (spell_level as i32 + 1) * 30);
             }
             // Fury：攻速提升（C# CompleteMagic 6160：Stat.AttackSpeed=4，时长 60+10Lv 秒）
             SPELL_FURY => {
@@ -3293,15 +3296,16 @@ impl Message<MagicRequest> for WorldActor {
                     }
                 }
             }
-            // MagicBooster：MP 上限提升 buff（对齐 C# Stat.MaxMP）
+            // MagicBooster：MC 提升（C# HumanObject.cs:4345 + CompleteMagic 6228：MinMC/MaxMC += 6+Lv*6，60s）
             SPELL_MAGIC_BOOSTER => {
-                let bonus = (power / 2).max(20);
-                let duration_ticks = (60 + spell_level as u32 * 15) * 10; // 60-105s
+                let bonus = 6 + spell_level as i32 * 6;
                 let buff = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::MaxMpBoost { bonus },
-                    duration_ticks, 5);
+                    crate::combat::buff::BuffType::McBoost { bonus },
+                    600, // 60s
+                    5,
+                );
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
-                debug!("Magic: {} casts MagicBooster (MaxMP +{})", state.name, bonus);
+                debug!("Magic: {} casts MagicBooster (MC +{})", state.name, bonus);
             }
             // --- 道士系 ---
             // Revelation：显血/反隐（对齐 C# TaoistObject.Revelation）
