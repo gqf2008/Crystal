@@ -382,6 +382,8 @@ const HERO_FLEE_HP_PERCENT: i32 = 30;
 const HERO_MELEE_RANGE: i32 = 1;
 /// 英雄远程攻击范围（法师/道士/弓箭手）
 const HERO_RANGED_RANGE: i32 = 7;
+/// 英雄自动喝药检查间隔（tick 数，C# AutoPotDelay=1000ms）
+const HERO_AUTOPOT_INTERVAL_TICKS: u64 = 10;
 
 /// 英雄 AI 运行时状态（每个出战英雄一个实例）
 #[derive(Clone)]
@@ -406,6 +408,10 @@ pub struct HeroCombatAI {
     pub max_hp: i32,
     /// 上次已下发主人的 HP（#1134：避免每 tick 重复发 HeroHealthChanged）
     pub last_sent_hp: i32,
+    /// 药水累计待回复 HP（#1182 C# PotHealthAmount，NormalPotion 累加）
+    pub pot_health: u32,
+    /// 下次自动喝药检查 tick（#1182 C# AutoPotTime）
+    pub next_autopot_tick: u64,
 }
 
 impl HeroCombatAI {
@@ -424,6 +430,8 @@ impl HeroCombatAI {
             hp: max_hp,
             max_hp,
             last_sent_hp: max_hp,
+            pot_health: 0,
+            next_autopot_tick: 0,
         }
     }
 }
@@ -468,6 +476,12 @@ impl WorldActor {
             hero_combat: crate::combat::attack::CombatStats,
             /// 英雄自身最大 HP（#1180）
             hero_max_hp: i32,
+            /// 英雄自身等级（#1182 C# PerTickRegen = 5 + Level/10）
+            hero_level: u16,
+            /// 自动喝药 HP 阈值（0=关闭，C# AutoHPPercent）
+            auto_hp_percent: u8,
+            /// 自动喝药物品 index（C# HPItemIndex）
+            hp_item_index: i32,
         }
 
         let mut snapshots: Vec<HeroSnapshot> = Vec::new();
@@ -512,6 +526,12 @@ impl WorldActor {
                             &self.item_infos,
                         ).max_hp)
                         .unwrap_or(100),
+                    hero_level: self.player_heroes.get(session_id)
+                        .and_then(|hs| hs.iter().find(|h| h.index as u8 == state.hero_index))
+                        .map(|h| h.level)
+                        .unwrap_or(state.level),
+                    auto_hp_percent: state.auto_pot_hp.min(100) as u8,
+                    hp_item_index: state.auto_pot_hp_item,
                 });
             }
         }
@@ -550,6 +570,8 @@ impl WorldActor {
         // 辅助意图（道士治疗主人 / 战士 buff）：暂时简化为发送 ObjectAttack 广播但不造伤害
         // (hero_session_id, target_session_or_zero, spell_id, is_heal)
         let mut support_intents: Vec<(u64, u64, u8, bool)> = Vec::new();
+        // 自动喝药意图：(hero_session_id, item_index) —— 阶段 2.4 统一消耗（C# ProcessAutoPot/TryAutoPot）
+        let mut autopot_intents: Vec<(u64, i32)> = Vec::new();
 
         for snap in &snapshots {
             // 确保该英雄有 AI 状态（首次出现则初始化）
@@ -565,6 +587,30 @@ impl WorldActor {
             {
                 let regen = (ai_local.max_hp / 100).max(1);
                 ai_local.hp = (ai_local.hp + regen).min(ai_local.max_hp);
+            }
+            // #1182：药水持续回复（C# HumanObject.ProcessRegen：PerTickRegen = 5 + Level/10）
+            // 每 AI tick 从 PotHealthAmount 扣除，战斗中也生效（与自然回血叠加）
+            if ai_local.hp > 0 && ai_local.hp < ai_local.max_hp && ai_local.pot_health > 0 {
+                let per_tick = (5 + snap.hero_level as i32 / 10).max(1) as u32;
+                let need = (ai_local.max_hp - ai_local.hp) as u32;
+                let regen = per_tick.min(ai_local.pot_health).min(need);
+                ai_local.hp += regen as i32;
+                ai_local.pot_health -= regen;
+            }
+            // #1182：自动喝药检查（C# HeroObject.ProcessAutoPot，AutoPotDelay=1000ms）
+            // 条件：HP% < AutoHPPercent && HPItemIndex>0 && PotHealthAmount<=0
+            if ai_local.hp > 0 && self.tick_count >= ai_local.next_autopot_tick {
+                ai_local.next_autopot_tick = self.tick_count + HERO_AUTOPOT_INTERVAL_TICKS;
+                let hp_pct = if ai_local.max_hp > 0 {
+                    (ai_local.hp * 100 / ai_local.max_hp) as u8
+                } else {
+                    100
+                };
+                if snap.auto_hp_percent > 0 && snap.hp_item_index > 0
+                    && ai_local.pot_health == 0 && hp_pct < snap.auto_hp_percent
+                {
+                    autopot_intents.push((snap.session_id, snap.hp_item_index));
+                }
             }
 
             let behaviour_follow = snap.behaviour == 1; // Follow 模式：纯跟随
@@ -737,6 +783,45 @@ impl WorldActor {
             }
 
             *ai = ai_local;
+        }
+
+        // ===== 阶段 2.4：自动喝药（C# HeroObject.ProcessAutoPot → TryAutoPot → UseItem） =====
+        // 每 HERO_AUTOPOT_INTERVAL_TICKS（约 1s）检查一次；仅在无待回复量且 HP%<阈值时喝 1 瓶。
+        // NormalPotion（shape 0）：PotHealthAmount += Stats[HP]，后续每 AI tick 回复 PerTickRegen。
+        for (session_id, item_index) in &autopot_intents {
+            let Some(record) = self.players.get(session_id).map(|r| r.clone()) else { continue };
+            // TryAutoPot：英雄背包里找第一个同 item_index 的药水
+            let potion = record.actor_ref
+                .ask(crate::actors::player::GetHeroPotionByItemIndex { item_index: *item_index })
+                .await
+                .unwrap_or(None);
+            let Some(potion) = potion else { continue };
+            let Some(db) = self.item_infos.get(&potion.item_index) else { continue };
+            // DB item_type 为 C# 原始值：13=Potion；仅 NormalPotion（shape 0）累计持续回复
+            if db.item_type != 13 || db.shape != 0 {
+                continue;
+            }
+            let hp_pool = db.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(0) as u32;
+            if hp_pool == 0 {
+                continue;
+            }
+            let consumed = record.actor_ref
+                .ask(crate::actors::player::ConsumeHeroItem { unique_id: potion.unique_id })
+                .await
+                .unwrap_or(false);
+            if !consumed {
+                continue;
+            }
+            // C#：PotHealthAmount = min(ushort::MAX, PotHealthAmount + Stats[HP])
+            if let Some(ai) = self.hero_ai_states.get_mut(session_id) {
+                ai.pot_health = (ai.pot_health + hp_pool).min(u16::MAX as u32);
+            }
+            // 刷新英雄背包 UI（消耗后的数量）
+            self.send_hero_information_packet(*session_id).await;
+            debug!(
+                "Hero auto-pot: session={} item_index={} uid={} hp_pool={}",
+                session_id, item_index, potion.unique_id, hp_pool
+            );
         }
 
         // ===== 阶段 2.5：英雄 HP 实时同步 + 阵亡处理（#1134） =====
