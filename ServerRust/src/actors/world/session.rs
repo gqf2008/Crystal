@@ -1697,6 +1697,22 @@ impl Message<ChatRequest> for WorldActor {
                     send_system_message(&self.gate_ref, msg.session_id, &format!("未找到在线玩家：{}", target_name));
                     return;
                 }
+                Some("ALLOWTRADE") => {
+                    // C# case "ALLOWTRADE"（~3309）：切换 AllowTrade + 系统消息
+                    let mut new_state = match record.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(s)) => s,
+                        _ => return,
+                    };
+                    new_state.allow_trade = !new_state.allow_trade;
+                    let enabled = new_state.allow_trade;
+                    let _ = record.actor_ref.ask(SetPlayerState { state: new_state }).await;
+                    send_system_message(
+                        &self.gate_ref,
+                        msg.session_id,
+                        if enabled { "已开启交易（其他玩家可向你发起交易）" } else { "已关闭交易" },
+                    );
+                    return;
+                }
                 Some("ALLOWGUILD") => {
                     // C# case "ALLOWGUILD"（~2466）：切换 EnableGuildInvite + 提示
                     let mut new_state = match record.actor_ref.ask(GetPlayerState).await {
@@ -2395,6 +2411,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         storage_password_last_set: 0,
         allow_observe: false,
         enable_guild_invite: false,
+        allow_trade: false,
         pk_points: 0,
         pk_kill_count: 0,
         buffs: Vec::new(),
