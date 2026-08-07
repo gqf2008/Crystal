@@ -424,6 +424,25 @@ impl Message<NpcGetAllowNewCharacter> for SocialActor {
 }
 
 /// WorldActor(NPC 脚本) -> SocialActor: 查询行会宣战费用/时长（C# Settings.Guild_WarCost/Guild_WarTime，<$GUILDWARFEE>/<$GUILDWARTIME>）
+/// 查询新手行会配置（名称/开关/加成%）
+pub struct NpcGetNewbieGuildConfig;
+
+impl Message<NpcGetNewbieGuildConfig> for SocialActor {
+    type Reply = (String, bool, i32);
+
+    async fn handle(
+        &mut self,
+        _msg: NpcGetNewbieGuildConfig,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        (
+            self.config.newbie_guild.clone(),
+            self.config.newbie_guild_buff_enabled,
+            self.config.newbie_guild_exp_buff,
+        )
+    }
+}
+
 pub struct NpcGetGuildWarSettings;
 
 impl Message<NpcGetGuildWarSettings> for SocialActor {
@@ -660,6 +679,10 @@ pub struct SocialActorConfig {
     pub guild_required_level: u16,
     /// 新手行会名称（C# Settings.NewbieGuild）
     pub newbie_guild: String,
+    /// 新手行会经验 buff 开关（C# Settings.NewbieGuildBuffEnabled = true）
+    pub newbie_guild_buff_enabled: bool,
+    /// 新手行会经验加成 %（C# Settings.NewbieGuildExpBuff = 5）
+    pub newbie_guild_exp_buff: i32,
     /// 是否允许创建角色（C# Settings.AllowNewCharacter）
     pub allow_new_character: bool,
     /// 是否允许删除角色（C# Settings.AllowDeleteCharacter）
@@ -702,6 +725,8 @@ impl Default for SocialActorConfig {
             wedding_ring_recall_enabled: true,
             guild_required_level: 22,
             newbie_guild: "NewbieGuild".to_string(),
+            newbie_guild_buff_enabled: true,
+            newbie_guild_exp_buff: 5,
             allow_new_character: true,
             allow_delete_character: true,
             allow_create_assassin: true,
