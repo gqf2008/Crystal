@@ -583,7 +583,7 @@ const SPELL_VAMPIRE_SHOT: u8 = mir2_shared::enums::Spell::VampireShot as u8;    
 const SPELL_POISON_SHOT: u8 = mir2_shared::enums::Spell::PoisonShot as u8;             // 135 弓手·毒箭（弹道+绿毒）
 const SPELL_CRIPPLE_SHOT: u8 = mir2_shared::enums::Spell::CrippleShot as u8;           // 136 弓手·减速箭（弹道+减速）
 const SPELL_MOON_LIGHT: u8 = mir2_shared::enums::Spell::MoonLight as u8;         // 103 隐身
-const SPELL_FATAL_SWORD: u8 = mir2_shared::enums::Spell::FatalSword as u8;           // 91 刺客·致命一击（下一次近战暴击）
+const SPELL_FATAL_SWORD: u8 = mir2_shared::enums::Spell::FatalSword as u8;           // 91 刺客·致命一击（被动：10% 触发，下一击 +5*(Lv+1)）
 const SPELL_SWIFT_FEET: u8 = mir2_shared::enums::Spell::SwiftFeet as u8;         // 105 移动速度+
 const SPELL_DARK_BODY: u8 = mir2_shared::enums::Spell::DarkBody as u8;           // 106 隐身+攻击
 const SPELL_CRESCENT_SLASH: u8 = mir2_shared::enums::Spell::CrescentSlash as u8; // 108 扇形AoE
@@ -786,7 +786,8 @@ pub struct WorldActor {
     /// #409 精神状态（session → 0 攻击/1 特技/2 组队模式）
     pub(crate) mental_state: HashMap<u64, u8>,
     /// #448 致命一击状态（session → (到期 tick, 等级)）
-    pub(crate) fatal_sword: HashMap<u64, (u64, u8)>,
+    /// FatalSword 被动已触发（C# bool FatalSword，下一击消耗）
+    pub(crate) fatal_sword_armed: HashSet<u64>,
     /// #448 宠物强化（怪物 oid → (到期 tick, DC 加成, AC 加成)）
     pub(crate) pet_enhanced: HashMap<u32, (u64, i32, i32)>,
     /// #471 宠物协战（宠物 oid → 主人攻击的怪物 oid）
@@ -1015,7 +1016,7 @@ impl WorldActor {
             hemorrhage_count: HashMap::new(),
             hallucinated: HashMap::new(),
             mental_state: HashMap::new(),
-            fatal_sword: HashMap::new(),
+            fatal_sword_armed: HashSet::new(),
             pet_enhanced: HashMap::new(),
             pet_targets: HashMap::new(),
             npcs: HashMap::new(),
@@ -3547,7 +3548,7 @@ impl Actor for WorldActor {
             hemorrhage_count: HashMap::new(),
             hallucinated: HashMap::new(),
             mental_state: HashMap::new(),
-            fatal_sword: HashMap::new(),
+            fatal_sword_armed: HashSet::new(),
             pet_enhanced: HashMap::new(),
             pet_targets: HashMap::new(),
             npcs: HashMap::new(),

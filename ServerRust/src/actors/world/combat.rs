@@ -163,13 +163,19 @@ impl Message<WorldAttackRequest> for WorldActor {
                                    result.object_id, label, second_hit, monster.name, *oid);
                         }
                     }
-                    // #448：FatalSword —— 下一次近战攻击暴击（×2 总伤害，一次性）
-                    if let Some((expire, _lv)) = self.fatal_sword.get(&msg.session_id).copied() {
-                        self.fatal_sword.remove(&msg.session_id);
-                        if self.tick_count < expire {
-                            monster.take_damage(damage);
-                            debug!("Player {} FatalSword crit +{} on '{}' (#{})",
-                                   result.object_id, damage, monster.name, *oid);
+                    // #448：FatalSword —— 被动：每次近战 10% 概率触发，下一击 +5*(Lv+1) 平伤
+                    // （C# HumanObject.cs:3063 触发 / 6789 消费；defence=Agility 由 resolve 阶段近似）
+                    let fatal_armed = self.fatal_sword_armed.remove(&msg.session_id);
+                    if let Some(magic) = state.magics.iter().find(|m| m.spell == (SPELL_FATAL_SWORD as i32 - 3)) {
+                        if !fatal_armed && fastrand::i32(0..10) == 0 {
+                            self.fatal_sword_armed.insert(msg.session_id);
+                            debug!("Player {} FatalSword armed", result.object_id);
+                        }
+                        if fatal_armed {
+                            let fatal_bonus = 5 * (magic.level as i32 + 1); // C# GetPower = (MPowerBase 20/4)*(Lv+1)
+                            monster.take_damage(fatal_bonus);
+                            debug!("Player {} FatalSword bonus +{} on '{}' (#{})",
+                                   result.object_id, fatal_bonus, monster.name, *oid);
                         }
                     }
                     // #345：MPEater —— 近战被动吸蓝（C# HumanObject.cs:3078）
@@ -2840,10 +2846,9 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} casts UltimateEnhancer ({} +{}, {}s)",
                        state.name, label, value, duration_ticks / 10);
             }
-            // #448：FatalSword —— 施放后 10s 内下一次近战攻击暴击（C# 配置 MPowerBase=20，简化 ×2）
+            // #448：FatalSword —— C# 中为被动技能（近战 10% 触发），无主动施放分支；施放不消耗
             SPELL_FATAL_SWORD => {
-                self.fatal_sword.insert(msg.session_id, (self.tick_count + 100, spell_level));
-                debug!("Magic: {} casts FatalSword (next melee crit, 10s)", state.name);
+                debug!("Magic: {} casts FatalSword (passive-only in C#, no active effect)", state.name);
             }
             // #448：PetEnhancer —— 召唤宠物 DC/AC 提升（C# HumanObject.cs:6363；Rust 宠物无等级，按 2/4 简化）
             SPELL_PET_ENHANCER => {
