@@ -1404,6 +1404,16 @@ impl Message<EquipItemRequest> for WorldActor {
                             }).await;
                         }
                     }
+                    // #926：C# BindMode.BindOnEquip(0x200)：装备即绑定（SoulBoundId 置 1）
+                    if self.item_infos.get(&idx)
+                        .map(|i| super::has_bind_flag(i.bind_mode, mir2_shared::enums::BindMode::BIND_ON_EQUIP.bits()))
+                        .unwrap_or(false)
+                    {
+                        let _ = record.actor_ref.ask(crate::actors::player::SetItemSoulBound {
+                            unique_id: msg.unique_id,
+                            bound: true,
+                        }).await;
+                    }
                 }
 
                 // 重新计算装备加成 + 广播视觉变化
