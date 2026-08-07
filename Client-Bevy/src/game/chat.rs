@@ -185,6 +185,8 @@ pub struct ChatState {
     pub scroll_up: usize,
     /// 窗口尺寸档（0/1/2 → 行数 4/7/11，C# ChangeSize）
     pub size: usize,
+    /// #813：最近私聊对象（C# ChatPanel LastPM；/ 键召回）
+    pub last_pm: Option<String>,
 }
 
 impl Default for ChatState {
@@ -197,6 +199,7 @@ impl Default for ChatState {
             visible_lines: 8,
             scroll_up: 0,
             size: 1,
+            last_pm: None,
         }
     }
 }
@@ -936,6 +939,20 @@ pub fn chat_color(t: mir2_shared::enums::ChatType) -> Color {
     }
 }
 
+/// #813：从私聊行解析对方名字（C# ChatPanel LastPM）
+/// WhisperIn 格式 `名字: 内容`；WhisperOut 格式 `-> 名字: 内容`（ServerRust session.rs）
+fn whisper_partner(text: &str, chat_type: mir2_shared::enums::ChatType) -> Option<String> {
+    use mir2_shared::enums::ChatType;
+    match chat_type {
+        ChatType::WhisperIn => text.split_once(": ").map(|(n, _)| n.trim().to_string()),
+        ChatType::WhisperOut => text
+            .strip_prefix("-> ")
+            .and_then(|s| s.split_once(": "))
+            .map(|(n, _)| n.trim().to_string()),
+        _ => None,
+    }
+}
+
 /// 消费服务端聊天事件更新 ChatState（网络层只广播 ServerEvent）
 fn chat_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
@@ -948,6 +965,14 @@ fn chat_server_events(
             // #116 聊天过滤：屏蔽对应频道
             if filter.get(chat_filter_kind(*chat_type)) {
                 continue;
+            }
+            // #813：记录最近私聊对象（C# ChatPanel LastPM）
+            if *chat_type == mir2_shared::enums::ChatType::WhisperIn
+                || *chat_type == mir2_shared::enums::ChatType::WhisperOut
+            {
+                if let Some(name) = whisper_partner(text, *chat_type) {
+                    chat.last_pm = Some(name);
+                }
             }
             // #285/#287：含物品链接 `%名字#uid%` 的行用蓝色并记录 uid（C# ChatLink）
             if let Some(uid) = first_item_uid(text) {
@@ -1152,5 +1177,25 @@ mod chat_scroll_tests {
         assert_eq!(apply_key_scroll(8, 20, 8, KeyScroll::PageDown), 0);
         assert_eq!(apply_key_scroll(15, 20, 8, KeyScroll::PageUp), 20);
         assert_eq!(apply_key_scroll(5, 20, 8, KeyScroll::PageDown), 0);
+    }
+}
+
+#[cfg(test)]
+mod whisper_partner_tests {
+    use super::whisper_partner;
+    use mir2_shared::enums::ChatType;
+
+    #[test]
+    fn parse_in_and_out() {
+        assert_eq!(
+            whisper_partner("张三: 你好", ChatType::WhisperIn),
+            Some("张三".to_string())
+        );
+        assert_eq!(
+            whisper_partner("-> 李四: 在吗", ChatType::WhisperOut),
+            Some("李四".to_string())
+        );
+        assert_eq!(whisper_partner("普通消息", ChatType::Normal), None);
+        assert_eq!(whisper_partner("没有分隔符", ChatType::WhisperIn), None);
     }
 }
