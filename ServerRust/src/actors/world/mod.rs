@@ -600,6 +600,7 @@ const SPELL_SUMMON_HOLY_DEVA: u8 = mir2_shared::enums::Spell::SummonHolyDeva as 
 const SPELL_SUMMON_VAMPIRE: u8 = mir2_shared::enums::Spell::SummonVampire as u8;  // 135 弓箭手·召唤血蝠
 const SPELL_SUMMON_TOAD: u8 = mir2_shared::enums::Spell::SummonToad as u8;        // 137 弓箭手·召唤蟾蜍
 const SPELL_SUMMON_SNAKES: u8 = mir2_shared::enums::Spell::SummonSnakes as u8;    // 140 弓箭手·召唤蛇
+const SPELL_STONETRAP: u8 = mir2_shared::enums::Spell::Stonetrap as u8;           // 133 弓手·石阵（召唤 StoneTrap 宠物，持续 (Lv*5+10)s）
 
 // ===== 特殊/辅助类法术（任务：补齐剩余主动法术）=====
 // 战士系

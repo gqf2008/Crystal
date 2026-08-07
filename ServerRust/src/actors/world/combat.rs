@@ -2266,6 +2266,104 @@ impl Message<MagicRequest> for WorldActor {
                     }
                 }
             }
+            // Stonetrap：召唤“石头”宠物到目标点（C# HumanObject.cs:5739 ArcherSummonStone / 6724 CompleteMagic）
+            SPELL_STONETRAP => {
+                const STONE_NAME: &str = "StoneTrap";
+                let (max_x, max_y) = self.maps.get(&state.map_index)
+                    .map(|m| (m.width as i32, m.height as i32))
+                    .unwrap_or((i32::MAX, i32::MAX));
+                let sx = target_x.clamp(0, max_x - 1);
+                let sy = target_y.clamp(0, max_y - 1);
+
+                // 已存在存活石头 → 拒绝（C# Only one active Stone alive）
+                let has_alive_stone = self.monsters.values().any(|m| {
+                    m.master_session == Some(msg.session_id)
+                        && m.name.eq_ignore_ascii_case(STONE_NAME)
+                        && m.hp > 0
+                });
+                if has_alive_stone {
+                    send_system_message(&self.gate_ref, msg.session_id, "已有一只存活的石阵，无法重复召唤");
+                    return;
+                }
+                // 宠物数量超限 → 拒绝（C# Pets.Count >= magic.Level + 1）
+                let pet_count = self.monsters.values()
+                    .filter(|m| m.master_session == Some(msg.session_id))
+                    .count();
+                if pet_count >= spell_level as usize + 1 {
+                    send_system_message(&self.gate_ref, msg.session_id, "召唤物数量已达上限");
+                    return;
+                }
+
+                // 按名查 MonsterInfo（lowercase key，对齐 tick.rs boss_summons）
+                let mon_index = self.monster_name_index.get(&STONE_NAME.to_lowercase()).copied();
+                match mon_index {
+                    Some(idx) => {
+                        let info_opt = self.monster_infos.get(&idx).cloned();
+                        if let Some(info) = info_opt {
+                            let new_oid = self.alloc_object_id();
+                            let hp = info.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(50);
+                            let min_dmg = info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(5);
+                            let max_dmg = info.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(10);
+                            let spawn = MonsterSpawn {
+                                name: info.name.clone(),
+                                image: info.image as u16,
+                                monster_index: idx,
+                                x: sx,
+                                y: sy,
+                                direction: msg.direction,
+                                hp,
+                                min_dmg,
+                                max_dmg,
+                                xp: info.experience,
+                                map_index: state.map_index,
+                            };
+                            let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
+                            for session_id in self.players.keys() {
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: *session_id,
+                                    data: packet.clone(),
+                                }).await;
+                            }
+                            let ai_profile = MonsterAiProfile::from_info(&info);
+                            // 石阵存活时长：C# DieTime = now + (level*5+10) 秒
+                            let duration_ticks = (spell_level as u64 * 5 + 10) * 10;
+                            self.monsters.insert(new_oid, MonsterState {
+                                object_id: new_oid,
+                                name: spawn.name.clone(),
+                                image: spawn.image,
+                                monster_index: idx,
+                                x: sx, y: sy, direction: msg.direction,
+                                hp, max_hp: hp, min_dmg, max_dmg, xp: spawn.xp,
+                                spawn_x: sx, spawn_y: sy, map_index: state.map_index,
+                                next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
+                                ai_profile, ai_state: MonsterAiState::Idle,
+                                target_session: Some(msg.session_id), provoked: true,
+                                is_elite: false, is_boss: false,
+                                min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
+                                agility: 0, accuracy: 0,
+                                armour_rate: 1.0, damage_rate: 1.0,
+                                magic_resist: 0, critical_rate: 0, critical_damage: 0,
+                                luck: 0, reflect: 0, damage_reduction_percent: 0,
+                                poison_list: Vec::new(),
+                                undead: info.undead,
+                                master_session: Some(msg.session_id),
+                                recall_at_tick: self.tick_count + duration_ticks,
+                                behavior: crate::actors::world::ai::make_behavior(&spawn.name),
+                            });
+                            debug!("Magic: {} casts Stonetrap '{}' as #{} at ({},{}) ({}s)",
+                                state.name, STONE_NAME, new_oid, sx, sy, spell_level as u64 * 5 + 10);
+                        } else {
+                            warn!("Stonetrap '{}' found index {} but no MonsterInfo (DB missing mob)",
+                                STONE_NAME, idx);
+                            send_system_message(&self.gate_ref, msg.session_id, "召唤失败：怪物资料缺失");
+                        }
+                    }
+                    None => {
+                        warn!("Stonetrap '{}' not in monster_name_index (DB may lack this mob)", STONE_NAME);
+                        send_system_message(&self.gate_ref, msg.session_id, "召唤失败：未知怪物");
+                    }
+                }
+            }
             // ===== 特殊/辅助类法术（任务：补齐剩余主动法术）=====
             // --- 战士系 ---
             // LionRoar：嘲讽范围内怪物（吸引仇恨，对齐 C# WarriorObject.LionRoar）
