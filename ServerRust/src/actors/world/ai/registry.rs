@@ -361,6 +361,12 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("floatingrock") || name.contains("floating rock") || name.contains("浮石") {
         return Box::new(bosses::floating_rock::FloatingRockBehavior::new());
     }
+    if name.contains("hoodedsummonerscroll") || name.contains("hooded summoner scroll") || name.contains("兜帽召唤卷轴") {
+        return Box::new(bosses::hooded_summoner_scrolls::HoodedSummonerScrollsBehavior::new());
+    }
+    if name.contains("siege") || name.contains("攻城") {
+        return Box::new(bosses::siege::SiegeBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -731,6 +737,8 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("conquestarcher") || name.contains("conquest archer") || name.contains("征服弓手")
         || name.contains("dragonstatue") || name.contains("dragon statue") || name.contains("龙雕像")
         || name.contains("floatingrock") || name.contains("floating rock") || name.contains("浮石")
+        || name.contains("hoodedsummonerscroll") || name.contains("hooded summoner scroll") || name.contains("兜帽召唤卷轴")
+        || name.contains("siege") || name.contains("攻城")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")

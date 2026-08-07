@@ -125,6 +125,8 @@ pub mod sack_warrior;
 pub mod archer_guard;
 pub mod dragon_statue;
 pub mod floating_rock;
+pub mod hooded_summoner_scrolls;
+pub mod siege;
 pub mod hugger;
 pub mod guard;
 pub mod town_archer;
