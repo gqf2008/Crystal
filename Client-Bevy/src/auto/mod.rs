@@ -219,6 +219,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--hero-battle-test") {
         app.add_systems(Update, auto_hero_battle_test);
     }
+    // --hero-exp-test: 英雄经验增长（#1142/#1163：部署英雄 → 等 GainHeroExperience 使 hero_exp>0）
+    if std::env::args().any(|a| a == "--hero-exp-test") {
+        app.add_systems(Update, auto_hero_exp_test);
+    }
     // --reincarnation-test: 轮回术确认链路（死亡 → 收到 offer → 接受 → 复活）
     if std::env::args().any(|a| a == "--reincarnation-test") {
         app.add_systems(Update, auto_reincarnation_test);
