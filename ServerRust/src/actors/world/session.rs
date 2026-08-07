@@ -1631,6 +1631,55 @@ impl Message<ChatRequest> for WorldActor {
                     send_system_message(&self.gate_ref, msg.session_id, &format!("你所在的地图：{} ({})", map_title, map_file));
                     return;
                 }
+                Some("RECALL") => {
+                    // C# case "RECALL"（~2471）：仅 GM——把指定玩家传送到自己面前（Teleport(CurrentMap, Front)）
+                    let (is_gm, my_state) = match record.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(s)) => (s.is_gm, s),
+                        _ => return,
+                    };
+                    if !is_gm {
+                        send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
+                        return;
+                    }
+                    let target_name = match parts.get(1) {
+                        Some(n) => *n,
+                        None => {
+                            send_system_message(&self.gate_ref, msg.session_id, "用法：@recall <玩家名>");
+                            return;
+                        }
+                    };
+                    // 面前格子（C# Front）
+                    const DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
+                    const DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
+                    let dir = (my_state.direction as usize) % 8;
+                    let fx = my_state.x + DIR_DX[dir];
+                    let fy = my_state.y + DIR_DY[dir];
+                    for (sid, other) in &self.players {
+                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                            if os.name.eq_ignore_ascii_case(target_name) {
+                                let _ = other.actor_ref.ask(crate::actors::player::SetPlayerPosition {
+                                    x: fx,
+                                    y: fy,
+                                    direction: os.direction,
+                                    map_index: Some(my_state.map_index),
+                                    is_mounted: None,
+                                }).await;
+                                let mut body = Vec::new();
+                                body.push(os.direction);
+                                body.extend_from_slice(&fx.to_le_bytes());
+                                body.extend_from_slice(&fy.to_le_bytes());
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: *sid,
+                                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
+                                }).await;
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("已将 {} 传送到你身边", os.name));
+                                return;
+                            }
+                        }
+                    }
+                    send_system_message(&self.gate_ref, msg.session_id, &format!("未找到在线玩家：{}", target_name));
+                    return;
+                }
                 Some("ALLOWOBSERVE") => {
                     // C# case "ALLOWOBSERVE"：AllowObserve = !AllowObserve + S.AllowObserve
                     let mut new_state = match record.actor_ref.ask(GetPlayerState).await {
@@ -1728,7 +1777,7 @@ impl Message<ChatRequest> for WorldActor {
         // 去掉前导 @（C# 客户端命令如 @ride 均带 @）
         let cmd = parts.first().unwrap_or(&"").trim_start_matches('@').to_uppercase();
         match cmd.as_str() {
-            "GROUPRECALL" | "RECALLMEMBER" | "RECALL" | "ENABLEGROUPRECALL" | "DISABLEGROUPRECALL" | "RIDE" => {
+            "GROUPRECALL" | "RECALLMEMBER" | "RECALLLOVER" | "ENABLEGROUPRECALL" | "DISABLEGROUPRECALL" | "RIDE" => {
                 let args: Vec<String> = parts.iter().skip(1).map(|s| s.to_string()).collect();
                 let _ = self.social_ref.ask(SocialChatCommand {
                     session_id: msg.session_id,
