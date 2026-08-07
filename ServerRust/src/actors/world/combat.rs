@@ -143,10 +143,11 @@ impl Message<WorldAttackRequest> for WorldActor {
                     // #312：FlamingSword —— C# Envir.cs MultiplierBase=1.4（无等级加成）：单次 1.4×
                     // Rust 主击已按 base 结算，此处追加 0.4× 近似合计 1.4×（防御只算一次）
                     let mut flaming_bonus = 0i32;
-                    if let Some((expire, _lv)) = self.flaming_sword.get(&msg.session_id).copied() {
+                    if let Some((expire, lv)) = self.flaming_sword.get(&msg.session_id).copied() {
                         self.flaming_sword.remove(&msg.session_id);
                         if self.tick_count < expire {
-                            flaming_bonus = (damage as f32 * 0.4) as i32;
+                            // C# Envir.cs FlamingSword：1.4+0.4Lv 单次（主击已计 base，追加 0.4+0.4Lv）
+                            flaming_bonus = (damage as f32 * (0.4 + 0.4 * lv as f32)) as i32;
                             monster.take_damage(flaming_bonus);
                             debug!("Player {} FlamingSword bonus +{} on '{}' (#{})",
                                    result.object_id, flaming_bonus, monster.name, *oid);
@@ -1609,9 +1610,11 @@ impl Message<MagicRequest> for WorldActor {
                 let dir = msg.direction as usize % 8;
                 let attacker_stats = state.to_combat_stats();
                 let level_offset = state.level.min(10) as u16;
-                let raw_damage = crate::combat::attack::get_attack_power(
+                let raw = crate::combat::attack::get_attack_power(
                     attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck,
                 );
+                // C# Envir.cs Thrusting：倍率 0.25+0.25Lv（GetDamage = base × Multiplier）
+                let raw_damage = ((raw as f32) * (0.25 + 0.25 * spell_level as f32)).max(1.0) as i32;
                 let mut cx = state.x;
                 let mut cy = state.y;
                 for _ in 0..2 {
@@ -2188,6 +2191,8 @@ impl Message<MagicRequest> for WorldActor {
                 if fastrand::i32(0..100) <= 1 + state.luck {
                     raw *= 2;
                 }
+                // C# Envir.cs BladeAvalanche：倍率 1+0.4Lv（幸运翻倍保留）
+                let raw = ((raw as f32) * (1.0 + 0.4 * spell_level as f32)).max(1.0) as i32;
                 let attacker_stats = state.to_combat_stats();
                 let level_offset = state.level.min(10) as u16;
                 let dir = msg.direction as usize % 8;
@@ -2229,8 +2234,10 @@ impl Message<MagicRequest> for WorldActor {
                 let dir = msg.direction as usize % 8;
                 let attacker_stats = state.to_combat_stats();
                 let level_offset = state.level.min(10) as u16;
-                let raw_damage = crate::combat::attack::get_attack_power(
+                let raw = crate::combat::attack::get_attack_power(
                     attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck);
+                // C# Envir.cs CrescentSlash：倍率 1+0.4Lv
+                let raw_damage = ((raw as f32) * (1.0 + 0.4 * spell_level as f32)).max(1.0) as i32;
                 // 扇形：前方 dir + 左前 (dir+7)%8 + 右前 (dir+1)%8
                 let fan_dirs = [dir, (dir + 7) % 8, (dir + 1) % 8];
                 let mut hit_ids: Vec<u32> = Vec::new();
@@ -2610,9 +2617,13 @@ impl Message<MagicRequest> for WorldActor {
             // （C# HumanObject.cs:5159 + Map.cs：count=1 只结算 1 格，DefenceType.AC）
             SPELL_SLASHING_BURST => {
                 let dir = msg.direction as usize % 8;
-                let raw_damage = if let Some(info) = spell_db {
-                    crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
-                } else { fastrand::i32(5..=15) }.max(1);
+                // C# Envir.cs SlashingBurst：倍率 3.25+0.25Lv（DC）
+                let raw = crate::combat::attack::get_attack_power(
+                    state.min_attack + state.bonus_min_attack,
+                    state.max_attack + state.bonus_max_attack,
+                    state.luck,
+                );
+                let raw_damage = ((raw as f32) * (3.25 + 0.25 * spell_level as f32)).max(1.0) as i32;
                 let mut new_x = state.x;
                 let mut new_y = state.y;
                 let mut slashed_damage = 0i32;
