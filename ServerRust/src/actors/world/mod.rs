@@ -1723,6 +1723,7 @@ impl WorldActor {
                     map_index: monster.map_index,
                     dropper_session: None,
                     drop_tick: self.tick_count,
+                    death_drop: false,
                 });
                 piles += 1;
             }
@@ -1767,6 +1768,7 @@ impl WorldActor {
                 map_index: monster.map_index,
                 dropper_session: None,
                 drop_tick: self.tick_count,
+                death_drop: false,
             });
             debug!("Monster '{}' dropped item index={} count={} at ({}, {})", monster.name, item_index, count, dx, dy);
         }
@@ -2053,7 +2055,7 @@ impl WorldActor {
             for sid in self.players.keys() {
                 let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: buf.clone() }).await;
             }
-            self.ground_items.push(GroundItem { object_id: drop_oid, item, x: drop_x, y: drop_y, map_index, dropper_session: Some(session_id), drop_tick: self.tick_count });
+            self.ground_items.push(GroundItem { object_id: drop_oid, item, x: drop_x, y: drop_y, map_index, dropper_session: Some(session_id), drop_tick: self.tick_count, death_drop: true });
         }
     }
 

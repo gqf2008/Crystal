@@ -1535,6 +1535,7 @@ impl Message<DropItemRequest> for WorldActor {
                 map_index: state.map_index,
                 dropper_session: Some(msg.session_id),
                 drop_tick: self.tick_count,
+                death_drop: false,
             });
 
             send_drop_item_response(&self.gate_ref, msg.session_id, msg.unique_id, msg.count as u32, true);
@@ -1667,6 +1668,7 @@ impl Message<DropGoldRequest> for WorldActor {
                 map_index: state.map_index,
                 dropper_session: Some(msg.session_id),
                 drop_tick: self.tick_count,
+                death_drop: false,
             });
 
             // 通知客户端金币变化
@@ -2542,6 +2544,7 @@ impl Message<DisassembleItemRequest> for WorldActor {
                     map_index: state.map_index,
                     dropper_session: Some(msg.session_id),
                     drop_tick: self.tick_count,
+                    death_drop: false,
                 });
             }
             send_system_message(&self.gate_ref, msg.session_id,
