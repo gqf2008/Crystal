@@ -1027,6 +1027,7 @@ impl WorldActor {
             armor,
             state.mount_type,
             state.is_mounted,
+            0, // 英雄无等级特效
         );
         for sid in self.players.keys() {
             let _ = self.gate_ref.tell(SendToClient {

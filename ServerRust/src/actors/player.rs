@@ -293,6 +293,8 @@ pub struct PlayerState {
     pub bind_x: i32,
     /// 绑定点 Y（C# CharacterInfo.BindLocation.Y）
     pub bind_y: i32,
+    /// 等级特效（C# HumanObject.LevelEffects：flags 990-998 派生，外观特效位掩码）
+    pub level_effects: u16,
 }
 
 impl PlayerState {
@@ -614,6 +616,7 @@ impl PlayerActor {
             bind_map_index: 0,
             bind_x: 0,
             bind_y: 0,
+            level_effects: 0,
             },
             gate_ref,
             world_ref,
@@ -1498,6 +1501,23 @@ impl Message<SetBind> for PlayerActor {
         self.state.bind_map_index = msg.map_index;
         self.state.bind_x = msg.x;
         self.state.bind_y = msg.y;
+    }
+}
+
+/// 设置等级特效（C# HumanObject.SetLevelEffects：flags 990-998 派生）
+pub struct SetLevelEffects {
+    pub effects: u16,
+}
+
+impl Message<SetLevelEffects> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetLevelEffects,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.level_effects = msg.effects;
     }
 }
 
@@ -4561,6 +4581,7 @@ mod tests {
             bind_map_index: 0,
             bind_x: 0,
             bind_y: 0,
+            level_effects: 0,
         }
     }
 

@@ -1299,6 +1299,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
             bind_x: row.try_get("bind_x").unwrap_or(0),
 
             bind_y: row.try_get("bind_y").unwrap_or(0),
+            level_effects: row.try_get("level_effects").unwrap_or(0) as u16,
     };
 
     Ok(Some(state))

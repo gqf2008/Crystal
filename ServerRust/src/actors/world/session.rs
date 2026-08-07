@@ -328,6 +328,11 @@ impl Message<StartGameRequest> for WorldActor {
         // C# PlayerObject.SetBind：确保绑定点有效（无绑定点/无效时随机出生安全区）
         self.ensure_bind(msg.session_id).await;
 
+        // C# PlayerObject.StartGame → SetLevelEffects：按 flags 990-998 刷新等级特效
+        self.refresh_level_effects(msg.session_id).await;
+        // 广播 ObjectLevelEffects（覆盖初始 ObjectPlayer 的 0 特效；C# Enqueue + Broadcast）
+        self.broadcast_level_effects(msg.session_id).await;
+
         // C# StartGame：下发玩家所属行会的激活 Buff 列表（S.GuildBuffList）
         if let Some(guild_name) = &loaded_state.guild_name {
             let buffs = self.social_ref.ask(crate::actors::social::NpcGetGuildBuffs {
@@ -398,6 +403,7 @@ impl Message<StartGameRequest> for WorldActor {
             loaded_state.class, loaded_state.gender, loaded_state.hair,
             self_weapon, self_weapon_effect, self_armor,
             loaded_state.mount_type, loaded_state.is_mounted,
+            loaded_state.level_effects,
         );
         let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
@@ -432,6 +438,7 @@ impl Message<StartGameRequest> for WorldActor {
                     ep_state.class, ep_state.gender, ep_state.hair,
                     ep_weapon, ep_weapon_effect, ep_armor,
                     ep_state.mount_type, ep_state.is_mounted,
+                    ep_state.level_effects,
                 );
                 let _ = self.gate_ref.tell(SendToClient {
                     session_id: msg.session_id,
@@ -462,6 +469,7 @@ impl Message<StartGameRequest> for WorldActor {
                 loaded_state.class, loaded_state.gender, loaded_state.hair,
                 new_weapon, new_weapon_effect, new_armor,
                 loaded_state.mount_type, loaded_state.is_mounted,
+                loaded_state.level_effects,
             );
             for existing in &existing_players {
                 let _ = self.gate_ref.tell(SendToClient {
@@ -2004,5 +2012,6 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
             bind_map_index: 0,
             bind_x: 0,
             bind_y: 0,
+            level_effects: 0,
     }
 }

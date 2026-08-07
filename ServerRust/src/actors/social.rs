@@ -3540,6 +3540,7 @@ impl SocialActor {
             armor,
             state.mount_type,
             state.is_mounted,
+            state.level_effects,
         );
         let _ = self
             .gate_ref
