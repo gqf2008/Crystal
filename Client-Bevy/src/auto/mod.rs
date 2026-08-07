@@ -438,6 +438,11 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--spell-verify") {
         app.add_systems(Update, auto_spell_verify);
     }
+    // --auto-walk-diag: 对角线移动方向稳定性验证（#1145）——真实寻路 + LocalMove + 记录方向序列
+    if std::env::args().any(|a| a == "--auto-walk-diag") {
+        app.init_resource::<AutoWalkDiag>();
+        app.add_systems(Update, auto_walk_diag_system);
+    }
     // --auto-walk <up|down|left|right>: 调试 chunk 流式（每帧驱动玩家平移）
     {
         let dir = std::env::args()
@@ -524,6 +529,99 @@ fn auto_walk_system(
             return;
         }
         tf.translation += step;
+    }
+}
+
+
+/// --auto-walk-diag 状态（#1145）：记录对角线移动过程中的方向序列
+#[derive(Resource, Default)]
+struct AutoWalkDiag {
+    started: bool,
+    seq: Vec<u8>,
+}
+
+/// 对角线移动方向稳定性验证（#1145）：
+/// 进图 8s 后从玩家位置向 +20/+15 对角寻路，插入真实 LocalMove；
+/// 记录每步 anim.direction 变化，结束时打印序列（应稳定无来回跳）。
+fn auto_walk_diag_system(
+    mut t: Local<f32>,
+    mut state: ResMut<AutoWalkDiag>,
+    time: Res<Time>,
+    game_data: Res<client_bevy::map_renderer::GameData>,
+    mut commands: Commands,
+    // 本地玩家（LocalMove 可能不存在，移动时才插入）：用 Option 避免查询冲突（B0001）
+    mut players: Query<
+        (
+            Entity,
+            &Transform,
+            &mut client_bevy::actor::ActorAnim,
+            Option<&client_bevy::game::movement::LocalMove>,
+        ),
+        (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>),
+    >,
+) {
+    use client_bevy::game::movement::{world_to_tile, LocalMove as LM};
+    use client_bevy::map_renderer::GameData as GD;
+    if !state.started {
+        *t += time.delta_secs();
+        if *t < 8.0 {
+            return;
+        }
+        tracing::info!("[DIAGWALK] 开始（t={} map={}）", *t, game_data.map.is_some());
+        let Ok((pe, ptf, mut anim, _)) = players.single_mut() else {
+            tracing::warn!("[DIAGWALK] ❌ 本地玩家查询失败");
+            return;
+        };
+        let Some(map) = &game_data.map else {
+            tracing::warn!("[DIAGWALK] ❌ 地图未就绪");
+            return;
+        };
+        let from = world_to_tile(ptf.translation.x, ptf.translation.y);
+        let to = (from.0 + 20, from.1 + 15); // 纯 45° 对角
+        if let Some(p) = client_bevy::game::pathfinding::find_path(map, from, to) {
+            if p.is_empty() {
+                tracing::warn!("[DIAGWALK] ❌ 对角路径不可达 {:?} -> {:?}", from, to);
+                return;
+            }
+            let first = p[0];
+            if let Some(d) =
+                client_bevy::game::movement::direction_from_delta(first.0 - from.0, first.1 - from.1)
+            {
+                anim.direction = d as u8;
+            }
+            let path_len = p.len();
+            commands.entity(pe).insert(LM {
+                path: p.into(),
+                step_timer_ms: 0.0,
+                run: false,
+                last: None,
+                step_origin: None,
+                turn_acc: 0.0,
+            });
+            state.seq.push(anim.direction);
+            tracing::info!("[DIAGWALK] 对角寻路 {:?} -> {:?} 路径 {} 步", from, to, path_len);
+        }
+        state.started = true;
+        return;
+    }
+    let Ok((_, _, anim, lm_opt)) = players.single() else { return };
+    let Some(lm) = lm_opt else { return };
+    if lm.path.is_empty() && anim.action == mir2_shared::enums::MirAction::Standing {
+        // 结束：输出方向序列 + 抖动检查（相邻方向差 4 = 反向抖动）
+        let seq = std::mem::take(&mut state.seq);
+        let jitter = seq.windows(2).filter(|w| {
+            let d = (w[1] as i32 - w[0] as i32).rem_euclid(8);
+            d == 4
+        }).count();
+        let verdict = if jitter == 0 { "✅ 稳定" } else { "❌ 抖动" };
+        tracing::info!("[DIAGWALK] {} 方向序列 {:?}（反向抖动 {} 次）", verdict, seq, jitter);
+        state.started = false;
+        return;
+    }
+    if anim.action != mir2_shared::enums::MirAction::Standing
+        && state.seq.last() != Some(&anim.direction)
+    {
+        state.seq.push(anim.direction);
     }
 }
 
