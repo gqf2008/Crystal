@@ -1855,7 +1855,8 @@ impl WorldActor {
                 if os.group_id == Some(gid)
                     && os.map_index == map_index
                     && !os.is_dead
-                    && ((os.x - x).abs() + (os.y - y).abs()) <= 16
+                    // C# CheckGroupQuestKill：Functions.InRange = 切比雪夫 ≤ Globals.DataRange(16)
+                    && (os.x - x).abs().max((os.y - y).abs()) <= 16
                 {
                     sessions.push(os.session_id);
                 }
