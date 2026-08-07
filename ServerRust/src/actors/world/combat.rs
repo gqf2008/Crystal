@@ -140,12 +140,13 @@ impl Message<WorldAttackRequest> for WorldActor {
                             monster.take_damage(slaying_bonus);
                         }
                     }
-                    // #312：FlamingSword —— 下一次近战攻击附加火焰加成（C# HumanObject.cs 一次性）
+                    // #312：FlamingSword —— C# Envir.cs MultiplierBase=1.4（无等级加成）：单次 1.4×
+                    // Rust 主击已按 base 结算，此处追加 0.4× 近似合计 1.4×（防御只算一次）
                     let mut flaming_bonus = 0i32;
-                    if let Some((expire, lv)) = self.flaming_sword.get(&msg.session_id).copied() {
+                    if let Some((expire, _lv)) = self.flaming_sword.get(&msg.session_id).copied() {
                         self.flaming_sword.remove(&msg.session_id);
                         if self.tick_count < expire {
-                            flaming_bonus = (damage as f32 * (1.4 + 0.4 * lv as f32)) as i32;
+                            flaming_bonus = (damage as f32 * 0.4) as i32;
                             monster.take_damage(flaming_bonus);
                             debug!("Player {} FlamingSword bonus +{} on '{}' (#{})",
                                    result.object_id, flaming_bonus, monster.name, *oid);
