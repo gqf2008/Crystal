@@ -63,12 +63,14 @@ impl MonsterBehavior for WingedTigerLordBehavior {
                         damage,
                         spell_id: 0,
                     });
-                    // C# PoisonTarget Dazed
-                    let poison_time = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(2);
-                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                        session_id: h.session_id,
-                        poison: Poison::new(PoisonType::DAZED, 2, poison_time, 2000),
-                    });
+                    // C# PoisonTarget(2, poisonTime, Dazed, 2000)：1/2、时长=poisonTime（DC 近似）
+                    if fastrand::i32(0..2) == 0 {
+                        let poison_time = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(2) as u32;
+                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                            session_id: h.session_id,
+                            poison: Poison::new(PoisonType::DAZED, poison_time, 0, 2000),
+                        });
+                    }
                 }
             }
             return;

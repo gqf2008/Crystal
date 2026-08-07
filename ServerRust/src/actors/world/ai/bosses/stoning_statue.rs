@@ -87,12 +87,14 @@ impl MonsterBehavior for StoningStatueBehavior {
                     spell_id: 0,
                     attack_type: 1,
                 });
-                // C# PoisonTarget(2, Random(5,10), Dazed, 1000)
-                let dur = fastrand::i32(5..10) as u32;
-                ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                    session_id: h.session_id,
-                    poison: Poison::new(PoisonType::DAZED, dur, 0, 1000),
-                });
+                // C# PoisonTarget(2, Random(5,10), Dazed, 1000)：1/2、时长 5-10s
+                if fastrand::i32(0..2) == 0 {
+                    let dur = fastrand::i32(5..10) as u32;
+                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: h.session_id,
+                        poison: Poison::new(PoisonType::DAZED, dur, 0, 1000),
+                    });
+                }
             }
         }
     }
