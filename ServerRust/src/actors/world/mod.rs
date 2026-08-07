@@ -33,6 +33,7 @@ pub use tick::Tick;
 pub use tick::ProcessDelayedActions;
 pub use tick::ProcessElementalTick;
 pub use tick::ProcessDeathCallbacks;
+pub use tick::ProcessRevives;
 pub use session::*;
 pub use item::*;
 pub use combat::*;

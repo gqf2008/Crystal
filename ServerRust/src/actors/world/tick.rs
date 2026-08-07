@@ -117,7 +117,66 @@ impl Message<ProcessDeathCallbacks> for WorldActor {
 }
 
 
+/// 自动复活处理消息（独立于 Tick 消息，避免巨型 async 状态机内联进 Tick handler 导致 tokio 栈溢出，#881 回归）
+pub struct ProcessRevives {
+    pub sessions: Vec<u64>,
+}
+
+impl Message<ProcessRevives> for WorldActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: ProcessRevives,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.process_revives(msg.sessions).await;
+    }
+}
+
 impl WorldActor {
+
+    /// 处理自动复活（C# Revive）：Revive + NoReconnect 传送 + ObjectRevived 广播。
+    /// 独立消息处理：避免在 Tick handler 巨型状态机内联多个 ask/广播循环导致 tokio 栈溢出（#881）。
+    pub(crate) async fn process_revives(&mut self, sessions: Vec<u64>) {
+        for session_id in sessions {
+            self.player_death_queue.remove(&session_id);
+            let Some(record) = self.players.get(&session_id).cloned() else { continue };
+            // 死亡地图 NoReconnect：由独立消息 ApplyNoReconnect 处理传送
+            //（避免 handler 内同步加载大图导致 tokio 栈溢出，#881 回归）
+            let (needs_noreconnect, object_id) = match record.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(state)) => {
+                    let nn = self.map_infos.get(&(state.map_index as i32))
+                        .map(|mi| mi.no_reconnect && !mi.no_reconnect_map.is_empty())
+                        .unwrap_or(false);
+                    (nn, state.object_id)
+                }
+                _ => (false, 0),
+            };
+            let _ = record.actor_ref.ask(crate::actors::player::Revive).await;
+            if needs_noreconnect {
+                if let Some(world_ref) = self.self_ref.clone() {
+                    let _ = world_ref.tell(crate::actors::world::ApplyNoReconnect {
+                        session_id,
+                    }).try_send();
+                }
+            }
+            // C# Revive：广播 ObjectRevived（其他玩家看到复活动画）
+            if object_id != 0 {
+                let mut obj_body = Vec::new();
+                obj_body.extend_from_slice(&object_id.to_le_bytes());
+                obj_body.push(1u8); // effect
+                let revived_packet = build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::ObjectRevived as i16, &obj_body);
+                for sid in self.players.keys() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: *sid,
+                        data: revived_packet.clone(),
+                    }).await;
+                }
+            }
+        }
+    }
     /// C# Die()：主人死亡 → 宠物（master_session 匹配的召唤怪）消失
     pub(crate) async fn despawn_master_pets(&mut self, session_id: u64) {
         let pet_oids: Vec<u32> = self.monsters.iter()
@@ -167,40 +226,13 @@ impl WorldActor {
             for session_id in to_remove {
                 self.player_death_queue.remove(&session_id);
             }
-            for session_id in to_revive {
-                self.player_death_queue.remove(&session_id);
-                if let Some(record) = self.players.get(&session_id).cloned() {
-                    // 死亡地图 NoReconnect：由独立消息 ApplyNoReconnect 处理传送
-                    //（避免 Tick handler 内同步加载大图导致 tokio 栈溢出，#881 回归）
-                    let needs_noreconnect = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                        self.map_infos.get(&(state.map_index as i32))
-                            .map(|mi| mi.no_reconnect && !mi.no_reconnect_map.is_empty())
-                            .unwrap_or(false)
-                    } else {
-                        false
-                    };
-                    let _ = record.actor_ref.ask(crate::actors::player::Revive).await;
-                    if needs_noreconnect {
-                        if let Some(world_ref) = self.self_ref.clone() {
-                            let _ = world_ref.tell(crate::actors::world::ApplyNoReconnect {
-                                session_id,
-                            }).try_send();
-                        }
-                    }
-                    // C# Revive：广播 ObjectRevived（其他玩家看到复活动画）
-                    if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                        let mut obj_body = Vec::new();
-                        obj_body.extend_from_slice(&state.object_id.to_le_bytes());
-                        obj_body.push(1u8); // effect
-                        let revived_packet = build_packet_bytes(
-                            mir2_shared::enums::ServerPacketIds::ObjectRevived as i16, &obj_body);
-                        for sid in self.players.keys() {
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: *sid,
-                                data: revived_packet.clone(),
-                            }).await;
-                        }
-                    }
+            if !to_revive.is_empty() {
+                // 自动复活由独立消息 ProcessRevives 处理（避免 Tick handler 巨型状态机
+                // 内联多个 ask/广播循环导致 tokio 栈溢出，#881 回归）
+                if let Some(world_ref) = self.self_ref.clone() {
+                    let _ = world_ref.tell(crate::actors::world::ProcessRevives {
+                        sessions: to_revive,
+                    }).try_send();
                 }
             }
             for session_id in to_despawn_pets {

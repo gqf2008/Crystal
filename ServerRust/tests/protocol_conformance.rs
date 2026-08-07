@@ -130,6 +130,19 @@ async fn start_server_with_world() -> u16 {
         quest_dir: PathBuf::from("Daneo1989/Envir/Quests"),
         db_pool: db_pool.clone(),
         social_ref: social_ref.clone(),
+        conquest_cfg: Default::default(),
+        rested_cfg: Default::default(),
+        pvp_cfg: Default::default(),
+        drop_rate: 1.0,
+        item_timeout_ticks: 300,
+        max_drop_gold: 2000,
+        rarity_cfg: Default::default(),
+        notice_path: String::new(),
+        death_exp_penalty_percent: 0,
+        health_regen_weight: 1,
+        mana_regen_weight: 1,
+        goods_hide_added_stats: false,
+        safe_zone_healing: false,
     });
     let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
 
