@@ -124,6 +124,8 @@ pub struct AiCtx<'a> {
     pub out_poisons: &'a mut Vec<PoisonPlayer>,
     /// 输出：推开玩家
     pub out_pushes: &'a mut Vec<PushPlayer>,
+    /// 输出：传送玩家（C# Target.Teleport；session, x, y, dir）
+    pub out_player_teleports: &'a mut Vec<(u64, i32, i32, u8)>,
 }
 
 impl<'a> AiCtx<'a> {

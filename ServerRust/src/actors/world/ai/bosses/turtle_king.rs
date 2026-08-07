@@ -116,17 +116,27 @@ impl MonsterBehavior for TurtleKingBehavior {
                     });
                 }
             } else {
-                // 远程三形态（C# 远距离：1/4 拉拽玩家 / 1/4 自身瞬移 / 其余远程）
+                // 远程三形态（C# TurtleKing.cs:78-95：1/4 拉拽玩家 / 1/4 自身瞬移 / 1/2 远程）
                 let roll = fastrand::i32(0..4);
                 if roll == 0 {
-                    // 拉拽玩家到身前（简化：触发一次近距离攻击 + 麻痹）
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
-                        attacker_oid: monster.object_id,
-                        target_session: target.session_id,
-                        damage: 1,
-                        spell_id: 0,
-                        attack_type: 2,
-                    });
+                    // 拉拽玩家到身前（C# Target.Teleport(PointMove(CurrentLocation, Direction, 1))）
+                    let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                    ctx.out_player_teleports.push((
+                        target.session_id,
+                        monster.x + DIR_DX[dir as usize],
+                        monster.y + DIR_DY[dir as usize],
+                        dir,
+                    ));
+                } else if roll == 1 {
+                    // 自身瞬移到玩家前方 1 格（C# Teleport(PointMove(Target.Location, Target.Direction, 1))；
+                    // PlayerSnap 无朝向，用乌龟→玩家方向近似）
+                    let dir = direction_towards(target.x, target.y, monster.x, monster.y);
+                    ctx.out_moves.push((
+                        monster.object_id,
+                        target.x + DIR_DX[dir as usize],
+                        target.y + DIR_DY[dir as usize],
+                        dir,
+                    ));
                 } else {
                     // 远程 MAC + Slow + Paralysis（C# CompleteRangeAttack）
                     let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
