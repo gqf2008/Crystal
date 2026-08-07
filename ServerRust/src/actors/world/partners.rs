@@ -214,4 +214,72 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
             let _ = record.actor_ref.ask(crate::actors::player::SetMentorDamageBonus { active }).await;
         }
     }
+
+    // ===== 经验加成百分比缓存（#989 死锁修复）=====
+    // AddExperience 原实现会反向 ask WorldActor（GetLoverExpBonus/GetMenteeExpBonus/
+    // GetNewbieGuildConfig），当击杀经验在 WorldActor tick 内发放时形成互相等待死锁。
+    // 这里在独立消息（ProcessElementalTick）中把加成缓存进 PlayerState，
+    // AddExperience 只读缓存，不再反向 ask。
+    const LOVER_EXP_BONUS: i32 = 5;   // C# Settings.LoverEXPBonus
+    const MENTEE_EXP_BONUS: i32 = 10; // C# Settings.MentorExpBoost
+    let newbie_cfg = world.social_ref
+        .ask(crate::actors::social::NpcGetNewbieGuildConfig)
+        .await
+        .unwrap_or(("NewbieGuild".to_string(), true, 5));
+    let mut exp_updates: Vec<(u64, i32, i32, i32)> = Vec::new();
+    for (sid, record) in &world.players {
+        if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+            // 配偶加成（C# GainExp：Lover 同图 + InRange(16) + 存活）
+            let mut lover = 0i32;
+            if let Some(spouse) = state.spouse_name.clone() {
+                for (_, other) in &world.players {
+                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                        if os.is_dead || !os.name.eq_ignore_ascii_case(&spouse) || os.map_index != state.map_index {
+                            continue;
+                        }
+                        if (os.x - state.x).abs() + (os.y - state.y).abs() <= DATA_RANGE {
+                            lover = LOVER_EXP_BONUS;
+                            break;
+                        }
+                    }
+                }
+            }
+            // 徒弟加成（C# GainExp：Mentee 同图 + InRange(16) + 同组 + 导师存活）
+            let mut mentee = 0i32;
+            if !state.is_mentor {
+                if let Some(mentor_name) = state.mentor_name.clone() {
+                    for (_, other) in &world.players {
+                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                            if os.is_dead || !os.name.eq_ignore_ascii_case(&mentor_name) || os.map_index != state.map_index {
+                                continue;
+                            }
+                            if (os.x - state.x).abs() + (os.y - state.y).abs() <= DATA_RANGE
+                                && os.group_id.is_some() && os.group_id == state.group_id
+                            {
+                                mentee = MENTEE_EXP_BONUS;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            let newbie = if state.newbie_exp_bonus { newbie_cfg.2 } else { 0 };
+            if lover != state.exp_bonus_lover_percent
+                || mentee != state.exp_bonus_mentee_percent
+                || newbie != state.exp_bonus_newbie_percent
+            {
+                exp_updates.push((*sid, lover, mentee, newbie));
+            }
+        }
+    }
+    for (sid, lover, mentee, newbie) in exp_updates {
+        if let Some(record) = world.players.get(&sid) {
+            if let Ok(Some(mut st)) = record.actor_ref.ask(GetPlayerState).await {
+                st.exp_bonus_lover_percent = lover;
+                st.exp_bonus_mentee_percent = mentee;
+                st.exp_bonus_newbie_percent = newbie;
+                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerState { state: st }).await;
+            }
+        }
+    }
 }
