@@ -69,6 +69,72 @@ fn party_exp_share(exp_after_reduce: i32, rate: f64, member_level: u16, sum_leve
     (exp_after_reduce as f64 * rate * (member_level as f64) / (sum_level as f64)) as i32
 }
 
+/// C# MonsterObject.PetExp：玩家获得经验时，同图 InRange(16) 存活宠物获得同等经验
+/// （Skeleton/Shinsu/Angel ×3）；PetExperience >= (PetLevel+1)*20000 升级一次，
+/// RefreshAll：HP+20/级、AC/MAC+2/级、DC+1/级 + BroadcastHealthChange
+async fn grant_pet_exp(world: &mut WorldActor, master: u64, amount: i64, map_index: u16, mx: i32, my: i32) {
+    use crate::actors::world::ai::max_distance;
+    let mut pet_targets: Vec<(u32, i64)> = Vec::new();
+    for (oid, m) in &world.monsters {
+        if m.master_session == Some(master) && m.hp > 0
+            && m.map_index == map_index && max_distance(m.x, m.y, mx, my) <= 16
+        {
+            let gain = pet_exp_gain(&m.name, amount);
+            pet_targets.push((*oid, gain));
+        }
+    }
+    for (oid, gain) in pet_targets {
+        let Some(m) = world.monsters.get_mut(&oid) else { continue };
+        m.pet_experience = m.pet_experience.saturating_add(gain as u64);
+        let pet_level = world.pet_levels.get(&oid).copied().unwrap_or(0);
+        let max_lv = m.max_pet_level as i32;
+        if pet_level >= max_lv {
+            continue;
+        }
+        let threshold = ((pet_level + 1) as u64) * 20_000;
+        if m.pet_experience < threshold {
+            continue;
+        }
+        // C# PetExp：只升一级（每次 GainExp 至多一次）
+        m.pet_experience -= threshold;
+        let new_level = pet_level + 1;
+        world.pet_levels.insert(oid, new_level);
+        // C# RefreshAll：HP += PetLevel*20；AC/MAC += PetLevel*2；DC += PetLevel
+        m.max_hp += 20;
+        m.hp = m.max_hp;
+        m.min_ac += 2;
+        m.max_ac += 2;
+        m.min_mac += 2;
+        m.max_mac += 2;
+        m.min_dmg += 1;
+        m.max_dmg += 1;
+        debug!("Pet '{}' #{} leveled to {} (exp={})", m.name, oid, new_level, m.pet_experience);
+        // C# BroadcastHealthChange：ObjectHealth 百分比血条广播
+        let percent = ((m.hp.max(0) as f32 / m.max_hp as f32) * 100.0) as u8;
+        let mut health_body = Vec::new();
+        health_body.extend_from_slice(&oid.to_le_bytes());
+        health_body.push(percent);
+        health_body.extend_from_slice(&3u16.to_le_bytes());
+        let health_packet = build_packet_bytes(
+            mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &health_body);
+        for session_id in world.players.keys() {
+            let _ = world.gate_ref.tell(SendToClient {
+                session_id: *session_id,
+                data: health_packet.clone(),
+            }).await;
+        }
+    }
+}
+
+/// C# MonsterObject.PetExp：Skeleton/Shinsu/Angel 宠物经验 ×3
+fn pet_exp_gain(name: &str, amount: i64) -> i64 {
+    if matches!(name, "Skeleton" | "Shinsu" | "Angel") {
+        amount * 3
+    } else {
+        amount
+    }
+}
+
 /// C# Functions.InRange：切比雪夫距离（Abs(dx)<=range && Abs(dy)<=range）
 fn in_range(ax: i32, ay: i32, bx: i32, by: i32, range: i32) -> bool {
     (ax - bx).abs().max((ay - by).abs()) <= range
@@ -878,6 +944,8 @@ impl WorldActor {
                         last_hit_damage: 0,
                         undead: false,
                         master_session: None,
+                                pet_experience: 0,
+                                max_pet_level: 0,
                         recall_at_tick: 0,
                         behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                     });
@@ -1197,6 +1265,8 @@ impl WorldActor {
                 last_hit_damage: 0,
             undead: false,
                 master_session: None,
+                                pet_experience: 0,
+                                max_pet_level: 0,
                 recall_at_tick: 0,
                 behavior: crate::actors::world::ai::make_behavior(&name),
             });
@@ -2009,6 +2079,8 @@ impl WorldActor {
             last_hit_damage: 0,
             undead: false,
             master_session: None,
+                                pet_experience: 0,
+                                max_pet_level: 0,
             recall_at_tick: 0,
             behavior: ai::make_behavior(&monster_info.name),
         };
@@ -3905,6 +3977,8 @@ impl Message<Tick> for WorldActor {
                     last_hit_damage: 0,
             undead: false,
                     master_session: None,
+                                pet_experience: 0,
+                                max_pet_level: 0,
                     recall_at_tick: 0,
                     behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                 });
@@ -4111,6 +4185,8 @@ impl Message<Tick> for WorldActor {
                             last_hit_damage: 0,
             undead: false,
                             master_session: None,
+                                pet_experience: 0,
+                                max_pet_level: 0,
                             recall_at_tick: 0,
                             behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                         });
@@ -4392,10 +4468,14 @@ impl Message<Tick> for WorldActor {
                                         continue;
                                     }
                                     let share = party_exp_share(xp_after_reduce, rate, *lv, sum_level);
-                                    if let Some(record) = self.players.get(sid) {
-                                        let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
+                                    if let Some(record) = self.players.get(sid).cloned() {
+                                        let gained = record.actor_ref.ask(crate::actors::player::AddExperience {
                                             amount: self.apply_global_exp_multiplier(share),
-                                        }).await;
+                                        }).await.unwrap_or(0);
+                                        // C# GainExp：玩家获得经验时，同图 InRange(16) 存活宠物获得同等经验
+                                        if gained > 0 {
+                                            grant_pet_exp(self, *sid, gained, monster.map_index, monster.x, monster.y).await;
+                                        }
                                     }
                                 }
                                 debug!("GroupXP: {} members split {} xp (rate={}) from '{}' (reduced from {})", member_levels.len(), xp_after_reduce, rate, monster.name, monster.xp);
@@ -4414,7 +4494,7 @@ impl Message<Tick> for WorldActor {
                                     }
                                 }
                             }
-                        } else if let Some(record) = self.players.get(&session_id) {
+                        } else if let Some(record) = self.players.get(&session_id).cloned() {
                             // C# WinExp：单人路径同样做等级差衰减
                             let mon_level = self.monster_infos.get(&monster.monster_index).map(|m| m.level).unwrap_or(0);
                             let xp_after = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
@@ -4422,59 +4502,12 @@ impl Message<Tick> for WorldActor {
                             } else {
                                 monster.xp
                             };
-                            let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
+                            let gained = record.actor_ref.ask(crate::actors::player::AddExperience {
                                 amount: self.apply_global_exp_multiplier(xp_after),
-                            }).await;
-                            // 单人师徒/夫妻经验加成
-                            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                                // 师徒加成
-                                if let Some(ref mentor_name) = state.mentor_name {
-                                    for (other_sid, other_record) in &self.players {
-                                        if *other_sid == session_id { continue; }
-                                        if let Ok(Some(other_state)) = other_record.actor_ref.ask(GetPlayerState).await {
-                                            if other_state.name.eq_ignore_ascii_case(mentor_name)
-                                                && other_state.map_index == state.map_index {
-                                                let dist = (other_state.x - state.x).abs() + (other_state.y - state.y).abs();
-                                                if dist <= 12 {
-                                                    let bonus = (monster.xp as f64 * 0.10).round() as i32;
-                                                    let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
-                                                        amount: self.apply_global_exp_multiplier(bonus),
-                                                    }).await;
-                                                    let _ = other_record.actor_ref.ask(crate::actors::player::AddExperience {
-                                                        amount: self.apply_global_exp_multiplier(bonus),
-                                                    }).await;
-                                                    send_system_message(
-                                                        &self.gate_ref, session_id, "师徒同心，额外获得经验！");
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                // 夫妻加成
-                                if let Some(ref spouse_name) = state.spouse_name {
-                                    for (other_sid, other_record) in &self.players {
-                                        if *other_sid == session_id { continue; }
-                                        if let Ok(Some(other_state)) = other_record.actor_ref.ask(GetPlayerState).await {
-                                            if other_state.name.eq_ignore_ascii_case(spouse_name)
-                                                && other_state.map_index == state.map_index {
-                                                let dist = (other_state.x - state.x).abs() + (other_state.y - state.y).abs();
-                                                if dist <= 12 {
-                                                    let bonus = (monster.xp as f64 * 0.10).round() as i32;
-                                                    let _ = record.actor_ref.ask(crate::actors::player::AddExperience {
-                                                        amount: self.apply_global_exp_multiplier(bonus),
-                                                    }).await;
-                                                    let _ = other_record.actor_ref.ask(crate::actors::player::AddExperience {
-                                                        amount: self.apply_global_exp_multiplier(bonus),
-                                                    }).await;
-                                                    send_system_message(
-                                                        &self.gate_ref, session_id, "夫妻同心，额外获得经验！");
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                            }).await.unwrap_or(0);
+                            // C# GainExp：玩家获得经验时，同图 InRange(16) 存活宠物获得同等经验
+                            if gained > 0 {
+                                grant_pet_exp(self, session_id, gained, monster.map_index, monster.x, monster.y).await;
                             }
                             // 单人任务击杀进度
                             let updates = record.actor_ref.ask(crate::actors::player::ProcessMonsterKill {
@@ -4618,7 +4651,7 @@ impl Message<Tick> for WorldActor {
 
 #[cfg(test)]
 mod tests {
-    use super::{safe_zone_heal_hp, reduce_exp, party_exp_share, in_range, PARTY_EXP_RATE, item_expired, dotnet_now_ticks};
+    use super::{safe_zone_heal_hp, reduce_exp, party_exp_share, in_range, pet_exp_gain, PARTY_EXP_RATE, item_expired, dotnet_now_ticks};
 
     #[test]
     fn test_safe_zone_heal_hp() {
@@ -4707,6 +4740,16 @@ mod tests {
         assert_eq!(party_exp_share(1000, 1.3, 50, 100), 650);
         // sum=0 兜底返回原值
         assert_eq!(party_exp_share(1000, 1.0, 30, 0), 1000);
+    }
+
+    /// #1161：C# MonsterObject.PetExp——Skeleton/Shinsu/Angel 经验 ×3，其它 ×1
+    #[test]
+    fn test_pet_exp_gain_triple_for_special() {
+        assert_eq!(pet_exp_gain("Skeleton", 100), 300);
+        assert_eq!(pet_exp_gain("Shinsu", 100), 300);
+        assert_eq!(pet_exp_gain("Angel", 100), 300);
+        assert_eq!(pet_exp_gain("HolyDeva", 100), 100);
+        assert_eq!(pet_exp_gain("Vampire", 100), 100);
     }
 }
 

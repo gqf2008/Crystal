@@ -1368,7 +1368,8 @@ pub struct AddExperience {
 }
 
 impl Message<AddExperience> for PlayerActor {
-    type Reply = ();
+    /// 返回实际获得经验（扣除前基础量、含全部加成后的最终值；C# GainExp 宠物经验用）
+    type Reply = i64;
 
     async fn handle(
         &mut self,
@@ -1377,12 +1378,12 @@ impl Message<AddExperience> for PlayerActor {
     ) -> Self::Reply {
         // 对齐 C# CanGainExp：关闭时不给经验
         if !self.state.can_gain_exp {
-            return;
+            return 0;
         }
         // #932：C# MapInfo.NoExperience——无经验地图不给经验（GainExp/WinExp 入口拦截）。
         // 使用 set_map_data 时缓存的标志，避免 WorldActor tick 内反向 ask 死锁。
         if self.state.no_experience_map {
-            return;
+            return 0;
         }
         let base = msg.amount.max(0) as i64;
         // 休息经验加成（C# BuffType.Rested ExpRatePercent 累加到 ExpRatePercent）
@@ -1477,6 +1478,7 @@ impl Message<AddExperience> for PlayerActor {
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LevelChanged as i16, &lv_body),
             }).await;
         }
+        amount
     }
 }
 

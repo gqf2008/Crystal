@@ -2705,6 +2705,8 @@ impl Message<MagicRequest> for WorldActor {
                                 last_hit_damage: 0,
                                 undead: info.undead,
                                 master_session: Some(msg.session_id),
+                                pet_experience: 0,
+                                max_pet_level: 0,
                                 recall_at_tick: 0,
                                 behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                             });
@@ -2886,6 +2888,8 @@ impl Message<MagicRequest> for WorldActor {
                                 last_hit_damage: 0,
                                 undead: info.undead,
                                 master_session: Some(msg.session_id),
+                                pet_experience: 0,
+                                max_pet_level: 0,
                                 recall_at_tick: 0,
                                 behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                             });
@@ -3254,6 +3258,8 @@ impl Message<MagicRequest> for WorldActor {
                                 last_hit_damage: 0,
                                 undead: info.undead,
                                 master_session: Some(msg.session_id),
+                                pet_experience: 0,
+                                max_pet_level: max_pet_level as u8,
                                 recall_at_tick: if recall_at_tick > 0 { self.tick_count + recall_at_tick } else { 0 },
                                 behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                             });
@@ -3378,6 +3384,8 @@ impl Message<MagicRequest> for WorldActor {
                                 last_hit_damage: 0,
                                 undead: info.undead,
                                 master_session: Some(msg.session_id),
+                                pet_experience: 0,
+                                max_pet_level: 0,
                                 recall_at_tick: self.tick_count + duration_ticks,
                                 behavior: crate::actors::world::ai::make_behavior(&spawn.name),
                             });

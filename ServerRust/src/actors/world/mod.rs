@@ -534,6 +534,10 @@ pub struct MonsterState {
     pub master_session: Option<u64>,
     /// 召唤物到期 tick（0=永不过期；>0 时到点自动消失，对齐 C# 召唤时限）
     pub recall_at_tick: u64,
+    /// 宠物经验积累（C# MonsterObject.PetExperience）
+    pub pet_experience: u64,
+    /// 宠物最大等级（C# MonsterObject.MaxPetLevel）
+    pub max_pet_level: u8,
     /// AI 行为（Boss=专属 impl，普通怪=DefaultBehavior）
     pub behavior: Box<dyn crate::actors::world::ai::MonsterBehavior + Send + Sync>,
 }
@@ -3222,6 +3226,8 @@ impl WorldActor {
                                     last_hit_damage: 0,
             undead: false,
                                     master_session: None,
+                                pet_experience: 0,
+                                max_pet_level: 0,
                                     recall_at_tick: 0,
                                     behavior: ai::make_behavior(&monster_info.name),
                                 };
@@ -3499,6 +3505,8 @@ impl WorldActor {
                                         luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
                                         poison_list: Vec::new(),
                                         last_hit_damage: 0, undead: info.undead,
+                                pet_experience: 0,
+                                max_pet_level: 0,
                                         master_session: None, recall_at_tick: 0,
                                         behavior: ai::make_behavior(&info.name),
                                     });
@@ -4204,6 +4212,8 @@ impl WorldActor {
                 last_hit_damage: 0,
                 undead: info.undead,
                 master_session: None,
+                                pet_experience: 0,
+                                max_pet_level: 0,
                 recall_at_tick: 0,
                 behavior: ai::make_behavior(&info.name),
             });
@@ -6259,6 +6269,8 @@ async fn spawn_npcs_and_monsters(
             last_hit_damage: 0,
             undead: ctx.monster_infos.get(&monster.monster_index).map(|i| i.undead).unwrap_or(false),
             master_session: None,
+                                pet_experience: 0,
+                                max_pet_level: 0,
             recall_at_tick: 0,
             behavior: ai::make_behavior(&name),
         });
@@ -6341,6 +6353,8 @@ async fn spawn_npcs_and_monsters(
                         last_hit_damage: 0,
             undead: false,
                         master_session: None,
+                                pet_experience: 0,
+                                max_pet_level: 0,
                         recall_at_tick: 0,
                         behavior: ai::make_behavior(&dragon.monster_name),
                     });
@@ -6458,6 +6472,8 @@ mod tests {
             last_hit_damage: 0,
             undead: false,
             master_session: None,
+                                pet_experience: 0,
+                                max_pet_level: 0,
             recall_at_tick: 0,
             behavior: ai::make_behavior("TestBoss"),
         };
