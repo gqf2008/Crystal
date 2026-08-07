@@ -1187,6 +1187,10 @@ fn can_equip_item(item_info: &db::ItemInfo, slot: crate::actors::inventory::Equi
         EquipmentSlot::Shoes => item_info.item_type == 10,
         EquipmentSlot::Pendant => item_info.item_type == 8,
         EquipmentSlot::Mount => item_info.item_type == 19,
+        // #1136：C# ItemType Torch=12 / Belt=9 / Stone=11
+        EquipmentSlot::Torch => item_info.item_type == 12,
+        EquipmentSlot::Belt => item_info.item_type == 9,
+        EquipmentSlot::Stone => item_info.item_type == 11,
         _ => false,
     };
     if !type_ok {

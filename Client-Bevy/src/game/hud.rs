@@ -75,7 +75,7 @@ impl Default for HudState {
             reincarnation_offered: false,
             pot_cooldown: 0.0,
             inventory: Default::default(),
-            equipment: vec![None; 12],
+            equipment: vec![None; 14], // #1136：服务端补 Torch/Belt/Stone 共 14 槽
         }
     }
 }
