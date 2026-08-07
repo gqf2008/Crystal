@@ -520,6 +520,10 @@ pub struct MonsterState {
     pub luck: i32,
     pub reflect: i32,
     pub damage_reduction_percent: i32,
+    /// DB MonsterInfo.level（C# Monster.Level；StrayCat 推挤等级判定等用）
+    pub level: i32,
+    /// DB MonsterInfo.effect（C# Info.Effect；DarkBeast 出血毒开关等用）
+    pub effect: i32,
     /// 运行时中毒/负面状态列表
     pub poison_list: Vec<crate::combat::poison::Poison>,
     /// 是否为亡灵类型（ThunderBolt +50%、TurnUndead 秒杀用，C# MonsterInfo.Undead）
@@ -1010,7 +1014,7 @@ pub struct WorldActor {
     /// 矿脉储量状态（map,(x,y) -> 剩余石头/再生 tick；C# MineSpot）
     pub(crate) mine_spot_state: HashMap<(u16, i32, i32), MineSpotState>,
     /// 待处理的死亡回调（怪物 + 玩家快照；独立消息处理避免 Tick handler 栈溢出）
-    pub(crate) pending_death_callbacks: Vec<(MonsterState, Vec<(u64, i32, i32, u32, i32, i32, u16)>)>,
+    pub(crate) pending_death_callbacks: Vec<(MonsterState, Vec<(u64, i32, i32, u32, i32, i32, u16, u16)>)>,
     /// 怪物回血计时（oid -> 下次回血 tick；C# MonsterObject.RegenTime，RegenDelay=10s）
     pub(crate) monster_regen_ticks: HashMap<u32, u64>,
     /// 怪物巡逻计时（oid → 下次巡逻 tick；C# MonsterObject.RoamTime，ProcessRoam 用）
@@ -3055,6 +3059,8 @@ impl WorldActor {
                                     critical_damage: 0,
                                     luck: 0,
                                     reflect: 0,
+                                    level: monster_info.level,
+                                    effect: monster_info.effect,
                                     damage_reduction_percent: 0,
                                     poison_list: Vec::new(),
             undead: false,
@@ -3333,7 +3339,7 @@ impl WorldActor {
                                         min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
                                         agility: 0, accuracy: 0, armour_rate: 1.0, damage_rate: 1.0,
                                         magic_resist: 0, critical_rate: 0, critical_damage: 0,
-                                        luck: 0, reflect: 0, damage_reduction_percent: 0,
+                                        luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
                                         poison_list: Vec::new(), undead: info.undead,
                                         master_session: None, recall_at_tick: 0,
                                         behavior: ai::make_behavior(&info.name),
@@ -4031,6 +4037,8 @@ impl WorldActor {
                 critical_damage: 0,
                 luck: 0,
                 reflect: 0,
+                level: info.level,
+                effect: info.effect,
                 damage_reduction_percent: 0,
                 poison_list: Vec::new(),
                 undead: info.undead,
@@ -6011,8 +6019,8 @@ async fn spawn_npcs_and_monsters(
             data: packet,
         }).await;
 
-        let ai_profile = ctx.monster_infos
-            .get(&monster.monster_index)
+        let monster_info_opt = ctx.monster_infos.get(&monster.monster_index);
+        let ai_profile = monster_info_opt
             .map(MonsterAiProfile::from_info)
             .unwrap_or_else(|| MonsterAiProfile {
                 ai_type: MonsterAiType::Aggressive,
@@ -6022,6 +6030,8 @@ async fn spawn_npcs_and_monsters(
                 move_interval: 2,
                 flee_threshold: 0.0,
             });
+        let monster_level = monster_info_opt.map(|i| i.level).unwrap_or(0);
+        let monster_effect = monster_info_opt.map(|i| i.effect).unwrap_or(0);
         monsters.push(MonsterState {
             object_id,
             name: name.clone(),
@@ -6062,6 +6072,8 @@ async fn spawn_npcs_and_monsters(
             critical_damage: 0,
             luck: 0,
             reflect: 0,
+            level: monster_level,
+            effect: monster_effect,
             damage_reduction_percent: 0,
             poison_list: Vec::new(),
             undead: ctx.monster_infos.get(&monster.monster_index).map(|i| i.undead).unwrap_or(false),
@@ -6141,6 +6153,8 @@ async fn spawn_npcs_and_monsters(
                         critical_damage: 0,
                         luck: 0,
                         reflect: 0,
+                        level: monster_db.level,
+                        effect: monster_db.effect,
                         damage_reduction_percent: 0,
                         poison_list: Vec::new(),
             undead: false,
@@ -6255,6 +6269,8 @@ mod tests {
             critical_damage: 0,
             luck: 0,
             reflect: 0,
+            level: 50,
+            effect: 0,
             damage_reduction_percent: 0,
             poison_list: Vec::new(),
             undead: false,

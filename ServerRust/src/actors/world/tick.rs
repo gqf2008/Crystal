@@ -676,7 +676,7 @@ impl WorldActor {
     async fn apply_death_callbacks(
         &mut self,
         monster: &mut MonsterState,
-        player_positions: &[(u64, i32, i32, u32, i32, i32, u16)],
+        player_positions: &[(u64, i32, i32, u32, i32, i32, u16, u16)],
     ) {
         use crate::actors::world::ai::{self, AiCtx};
         let mut die_moves: Vec<(u32, i32, i32, u8)> = Vec::new();
@@ -692,8 +692,8 @@ impl WorldActor {
         {
             // 死亡回调也提供玩家快照（C# Die 可 FindAllTargets；ToxicGhoul 死亡 AOE 毒等用）
             let die_player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
-                .map(|(s, x, y, oid, _, hp, map)| ai::PlayerSnap {
-                    session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid,
+                .map(|(s, x, y, oid, _, hp, map, lvl)| ai::PlayerSnap {
+                    session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl,
                 }).collect();
             let mut ctx = AiCtx {
                 tick_count: self.tick_count,
@@ -760,7 +760,7 @@ impl WorldActor {
                 }).await;
             }
             // 对范围内玩家造成伤害
-            for (sid, px, py, _, _, _, pmap) in player_positions {
+            for (sid, px, py, _, _, _, pmap, _) in player_positions {
                 if *pmap != monster.map_index { continue; }
                 let dx = (px - cx).abs();
                 let dy = (py - cy).abs();
@@ -820,7 +820,7 @@ impl WorldActor {
                         agility: 0, accuracy: 0,
                         armour_rate: 1.0, damage_rate: 1.0,
                         magic_resist: 0, critical_rate: 0, critical_damage: 0,
-                        luck: 0, reflect: 0, damage_reduction_percent: 0,
+                        luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
                         poison_list: Vec::new(),
                         undead: false,
                         master_session: None,
@@ -1034,8 +1034,8 @@ impl WorldActor {
                     data: packet.clone(),
                 }).await;
             }
-            let ai_profile = self.monster_infos
-                .get(&spawn.monster_index)
+            let monster_info_opt = self.monster_infos.get(&spawn.monster_index);
+            let ai_profile = monster_info_opt
                 .map(MonsterAiProfile::from_info)
                 .unwrap_or_else(|| MonsterAiProfile {
                     ai_type: MonsterAiType::Aggressive,
@@ -1045,6 +1045,8 @@ impl WorldActor {
                     move_interval: 2,
                     flee_threshold: 0.0,
                 });
+            let monster_level = monster_info_opt.map(|i| i.level).unwrap_or(0);
+            let monster_effect = monster_info_opt.map(|i| i.effect).unwrap_or(0);
             // 精英判定：3% 概率
             let is_elite = fastrand::u8(1..=100) <= 3;
             let (name, hp, max_hp, min_dmg, max_dmg, xp) = if is_elite {
@@ -1099,6 +1101,8 @@ impl WorldActor {
                 critical_damage: 0,
                 luck: 0,
                 reflect: 0,
+                level: monster_level,
+                effect: monster_effect,
                 damage_reduction_percent: 0,
                 poison_list: Vec::new(),
             undead: false,
@@ -1909,7 +1913,7 @@ impl WorldActor {
             armour_rate: 1.0, damage_rate: 1.0,
             magic_resist: 0,
             critical_rate: 0, critical_damage: 0,
-            luck: 0, reflect: 0,
+            luck: 0, reflect: 0, level: monster_info.level, effect: monster_info.effect,
             damage_reduction_percent: 0,
             poison_list: Vec::new(),
             undead: false,
@@ -2951,7 +2955,7 @@ impl Message<Tick> for WorldActor {
         if !self.monsters.is_empty() && !self.players.is_empty() {
             // 收集所有玩家位置（避免在循环中借用 self）
             // 预收集玩家位置 + PK 值（用于 Guard AI 红名优先）
-            let player_positions: Vec<(u64, i32, i32, u32, i32, i32, u16)> = {
+            let player_positions: Vec<(u64, i32, i32, u32, i32, i32, u16, u16)> = {
                 let mut results = Vec::new();
                 let invis_tag = std::mem::discriminant(&crate::combat::buff::BuffType::Invisibility);
                 for (session_id, record) in &self.players {
@@ -2965,8 +2969,8 @@ impl Message<Tick> for WorldActor {
                                 .map(|m| m.is_safe_zone(state.x, state.y))
                                 .unwrap_or(false);
                             if !in_safe {
-                                // (session, x, y, object_id, pk_points, hp, map_index)
-                                results.push((*session_id, state.x, state.y, state.object_id, state.pk_points, state.hp, state.map_index));
+                                // (session, x, y, object_id, pk_points, hp, map_index, level)
+                                results.push((*session_id, state.x, state.y, state.object_id, state.pk_points, state.hp, state.map_index, state.level));
                             }
                         }
                     }
@@ -3024,8 +3028,8 @@ impl Message<Tick> for WorldActor {
                     let _monster_map = monster.map_index;
                     let monster_name = monster.name.clone();
                     let player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
-                        .map(|(s, x, y, oid, _, hp, map)| ai::PlayerSnap {
-                            session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid,
+                        .map(|(s, x, y, oid, _, hp, map, lvl)| ai::PlayerSnap {
+                            session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl,
                         }).collect();
                     // monster_snaps 从循环外预收集的 monster_snapshot 构建（避免 &mut self.monsters 借用冲突）
                     let monster_snaps: Vec<ai::MonsterSnap> = monster_snapshot.iter()
@@ -3097,7 +3101,7 @@ impl Message<Tick> for WorldActor {
                 if profile.ai_type == MonsterAiType::Guard {
                     // 先找范围内的红名玩家
                     let mut red_nearest: Option<(u64, i32, i32, i32)> = None;
-                    for (session, px, py, _, pk, _, _) in &player_positions {
+                    for (session, px, py, _, pk, _, _, _) in &player_positions {
                         let dist = (monster.x - px).abs() + (monster.y - py).abs();
                         if dist <= profile.aggro_range && *pk > 0 {
                             if red_nearest.is_none_or(|n| dist < n.3) {
@@ -3108,7 +3112,7 @@ impl Message<Tick> for WorldActor {
                     if red_nearest.is_some() {
                         nearest = red_nearest;
                     } else {
-                        for (session, px, py, _, _, _, _) in &player_positions {
+                        for (session, px, py, _, _, _, _, _) in &player_positions {
                             let dist = (monster.x - px).abs() + (monster.y - py).abs();
                             if dist <= profile.aggro_range {
                                 if nearest.is_none_or(|n| dist < n.3) {
@@ -3118,7 +3122,7 @@ impl Message<Tick> for WorldActor {
                         }
                     }
                 } else {
-                    for (session, px, py, _, _, _, _) in &player_positions {
+                    for (session, px, py, _, _, _, _, _) in &player_positions {
                         let dist = (monster.x - px).abs() + (monster.y - py).abs();
                         if dist <= profile.aggro_range {
                             if nearest.is_none_or(|n| dist < n.3) {
@@ -3136,8 +3140,8 @@ impl Message<Tick> for WorldActor {
                 let had_target = monster.target_session.is_some();
                 let mut chase_target: Option<(u64, i32, i32, i32)> = None; // (session, px, py, dist)
                 if let Some(ts) = monster.target_session {
-                    if let Some((sid, px, py, _, _, hp, map)) =
-                        player_positions.iter().find(|(s, _, _, _, _, _, _)| *s == ts)
+                    if let Some((sid, px, py, _, _, hp, map, _)) =
+                        player_positions.iter().find(|(s, _, _, _, _, _, _, _)| *s == ts)
                     {
                         let d = (monster.x - px).abs() + (monster.y - py).abs();
                         if *map == monster.map_index && *hp > 0 && d <= DATA_RANGE {
@@ -3509,8 +3513,8 @@ impl Message<Tick> for WorldActor {
                     // 简化版：有 master 且主人在线且距离>5 则 step_toward 主人位置
                     if can_move {
                         let master_pos = player_positions.iter()
-                            .find(|(sid, _, _, _, _, _, _)| *sid == master)
-                            .map(|(_, x, y, _, _, _, _)| (*x, *y));
+                            .find(|(sid, _, _, _, _, _, _, _)| *sid == master)
+                            .map(|(_, x, y, _, _, _, _, _)| (*x, *y));
                         if let Some((mx, my)) = master_pos {
                             let dist_master = (monster.x - mx).abs() + (monster.y - my).abs();
                             if dist_master > 5 {
@@ -3654,8 +3658,8 @@ impl Message<Tick> for WorldActor {
                         data: packet.clone(),
                     }).await;
                 }
-                let ai_profile = self.monster_infos
-                    .get(&spawn.monster_index)
+                let monster_info_opt = self.monster_infos.get(&spawn.monster_index);
+                let ai_profile = monster_info_opt
                     .map(MonsterAiProfile::from_info)
                     .unwrap_or_else(|| MonsterAiProfile {
                         ai_type: MonsterAiType::Aggressive,
@@ -3665,6 +3669,8 @@ impl Message<Tick> for WorldActor {
                         move_interval: 2,
                         flee_threshold: 0.0,
                     });
+                let monster_level = monster_info_opt.map(|i| i.level).unwrap_or(0);
+                let monster_effect = monster_info_opt.map(|i| i.effect).unwrap_or(0);
                 self.monsters.insert(new_oid, MonsterState {
                     object_id: new_oid,
                     name: spawn.name.clone(),
@@ -3705,6 +3711,8 @@ impl Message<Tick> for WorldActor {
                     critical_damage: 0,
                     luck: 0,
                     reflect: 0,
+                    level: monster_level,
+                    effect: monster_effect,
                     damage_reduction_percent: 0,
                     poison_list: Vec::new(),
             undead: false,
@@ -3737,12 +3745,12 @@ impl Message<Tick> for WorldActor {
                     }
                     ai::AttackAction::Aoe { attacker_oid, center_x, center_y, radius, damage, .. } => {
                         let tgts: Vec<u64> = player_positions.iter()
-                            .filter(|(_, px, py, _, _, _, _)| {
+                            .filter(|(_, px, py, _, _, _, _, _)| {
                                 let dx = (px - center_x).abs();
                                 let dy = (py - center_y).abs();
                                 dx.max(dy) <= *radius
                             })
-                            .map(|(s, _, _, _, _, _, _)| *s)
+                            .map(|(s, _, _, _, _, _, _, _)| *s)
                             .collect();
                         (*attacker_oid, tgts, *damage, 0u8, 0u8, *center_x, *center_y, 0u8)
                     }
@@ -3751,7 +3759,7 @@ impl Message<Tick> for WorldActor {
                         let dir = (*direction as usize) % 8;
                         let (ldx, ldy) = (MON_DIR_DX[dir], MON_DIR_DY[dir]);
                         let tgts: Vec<u64> = player_positions.iter()
-                            .filter(|(_, px, py, _, _, _, _)| {
+                            .filter(|(_, px, py, _, _, _, _, _)| {
                                 for k in 1..=*range {
                                     if *px == origin_x + ldx * k && *py == origin_y + ldy * k {
                                         return true;
@@ -3759,7 +3767,7 @@ impl Message<Tick> for WorldActor {
                                 }
                                 false
                             })
-                            .map(|(s, _, _, _, _, _, _)| *s)
+                            .map(|(s, _, _, _, _, _, _, _)| *s)
                             .collect();
                         (*attacker_oid, tgts, *damage, 0u8, 0u8, *origin_x, *origin_y, *direction)
                     }
@@ -3882,7 +3890,7 @@ impl Message<Tick> for WorldActor {
                             agility: 0, accuracy: 0,
                             armour_rate: 1.0, damage_rate: 1.0,
                             magic_resist: 0, critical_rate: 0, critical_damage: 0,
-                            luck: 0, reflect: 0, damage_reduction_percent: 0,
+                            luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
                             poison_list: Vec::new(),
             undead: false,
                             master_session: None,
