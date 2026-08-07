@@ -3230,7 +3230,9 @@ impl Message<MagicRequest> for WorldActor {
                                 count: 1,
                                 spread: 0,
                             };
-                            let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
+                            // C# StoneTrap.Name：宠物名 = 怪物名(主人名)
+                            let display_name = format!("{}({})", spawn.name, state.name);
+                            let packet = build_object_monster_packet(&spawn, new_oid, &display_name);
                             for session_id in self.players.keys() {
                                 let _ = self.gate_ref.tell(SendToClient {
                                     session_id: *session_id,
