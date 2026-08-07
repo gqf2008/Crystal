@@ -620,7 +620,7 @@ fn hero_inv_click_system(
         if last_i == i && now - last_t < 0.4 {
             *last_hero_click = None;
             if let Some(item) = hero.inventory.get(i).and_then(|s| s.as_ref()) {
-                if let Some(to) = item.equip_slot() {
+                if let Some(to) = item.equip_slot_occupied(|s| hero.equipment.get(s).and_then(|x| x.as_ref()).is_some()) {
                     net.send_packet(&mir2_shared::packets::client::item::EquipItem {
                         grid: mir2_shared::enums::MirGridType::HeroInventory,
                         unique_id: item.unique_id,

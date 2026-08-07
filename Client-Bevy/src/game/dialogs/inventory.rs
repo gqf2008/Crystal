@@ -67,8 +67,14 @@ impl InvItem {
         )
     }
 
-    /// 计算装备目标槽位（ServerRust EquipmentSlot 值 0..10，见 actors/inventory.rs）
+    /// 计算装备目标槽位（ServerRust EquipmentSlot 值 0..13，见 actors/inventory.rs）
     pub fn equip_slot(&self) -> Option<i32> {
+        self.equip_slot_occupied(|_| false)
+    }
+
+    /// 状态感知装备槽（#1174，对齐 C# MirItemCell 双击 UseItem）：
+    /// - 固定槽不变；手镯/戒指优先右槽（空位），占位回退左槽；都占用则不装备（None）
+    pub fn equip_slot_occupied(&self, occupied: impl Fn(usize) -> bool) -> Option<i32> {
         use mir2_shared::enums::ItemType;
         let t = ItemType::try_from(self.item_type).ok()?;
         let s: i32 = match t {
@@ -76,8 +82,26 @@ impl InvItem {
             ItemType::Armour => 1,   // Armour
             ItemType::Helmet => 2,   // Helmet
             ItemType::Necklace => 3, // Necklace
-            ItemType::Bracelet => 5, // BraceletR
-            ItemType::Ring => 7,     // RingR
+            // C# Bracelet：优先 BraceletR（空位或装护身符），否则 BraceletL；都占用不装备
+            ItemType::Bracelet => {
+                if !occupied(5) {
+                    5
+                } else if !occupied(4) {
+                    4
+                } else {
+                    return None;
+                }
+            }
+            // C# Ring：优先 RingR（空位），否则 RingL；都占用不装备
+            ItemType::Ring => {
+                if !occupied(7) {
+                    7
+                } else if !occupied(6) {
+                    6
+                } else {
+                    return None;
+                }
+            }
             ItemType::Amulet => 9,   // Pendant
             ItemType::Boots => 8,    // Shoes
             ItemType::Mount => 10,   // Mount
@@ -671,9 +695,9 @@ fn inv_selection_system(
 
 
 
-fn use_or_equip(item: &InvItem, net: &NetConnection) {
+fn use_or_equip(item: &InvItem, net: &NetConnection, hud: &HudState) {
     if item.is_equipment() {
-        if let Some(to) = item.equip_slot() {
+        if let Some(to) = item.equip_slot_occupied(|s| hud.equipment.get(s).and_then(|x| x.as_ref()).is_some()) {
             net.send_packet(&mir2_shared::packets::client::item::EquipItem {
                 // 协议字段为 MirGridType；服务端按 unique_id 定位背包格
                 grid: MirGridType::Inventory,
@@ -919,7 +943,7 @@ fn inv_item_action_system(
     // 双击：使用/装备
     if let Some(i) = dbl {
         if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
-            use_or_equip(item, &net);
+            use_or_equip(item, &net, &hud);
         }
     }
 
@@ -941,7 +965,7 @@ fn inv_item_action_system(
     if mouse.just_pressed(MouseButton::Right) {
         if let Some(i) = slot_at(cursor.x, cursor.y) {
             if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
-                use_or_equip(item, &net);
+                use_or_equip(item, &net, &hud);
             }
         }
     }
@@ -1039,3 +1063,51 @@ fn inv_item_action_system(
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mir2_shared::enums::ItemType;
+
+    fn item_with_type(t: ItemType) -> InvItem {
+        InvItem {
+            unique_id: 1,
+            item_index: 1,
+            name: "test".into(),
+            image: 0,
+            count: 1,
+            item_type: t as u8,
+            shape: 0,
+            current_dura: 100,
+            max_dura: 100,
+            slots: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn equip_slot_bracelet_prefers_right_then_left() {
+        let b = item_with_type(ItemType::Bracelet);
+        // 右空 → BraceletR(5)
+        assert_eq!(b.equip_slot_occupied(|_| false), Some(5));
+        // 右占 → 回退 BraceletL(4)
+        assert_eq!(b.equip_slot_occupied(|s| s == 5), Some(4));
+        // 双占 → 不装备（C# 语义）
+        assert_eq!(b.equip_slot_occupied(|s| s == 5 || s == 4), None);
+    }
+
+    #[test]
+    fn equip_slot_ring_prefers_right_then_left() {
+        let r = item_with_type(ItemType::Ring);
+        assert_eq!(r.equip_slot_occupied(|_| false), Some(7));
+        assert_eq!(r.equip_slot_occupied(|s| s == 7), Some(6));
+        assert_eq!(r.equip_slot_occupied(|s| s == 7 || s == 6), None);
+    }
+
+    #[test]
+    fn equip_slot_fixed_slots_unchanged() {
+        assert_eq!(item_with_type(ItemType::Torch).equip_slot(), Some(11));
+        assert_eq!(item_with_type(ItemType::Belt).equip_slot(), Some(12));
+        assert_eq!(item_with_type(ItemType::Stone).equip_slot(), Some(13));
+        assert_eq!(item_with_type(ItemType::Weapon).equip_slot(), Some(0));
+    }
+}
