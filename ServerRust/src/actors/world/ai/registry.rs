@@ -156,6 +156,24 @@ pub fn make_behavior(monster_name: &str) -> Box<dyn MonsterBehavior + Send + Syn
     if name.contains("chieftainarcher") || name.contains("chieftain archer") || name.contains("酋长弓手") {
         return Box::new(bosses::chieftain_archer::ChieftainArcherBehavior::new());
     }
+    if name.contains("redthunderzuma") || name.contains("red thunder zuma") || name.contains("红雷祖玛") {
+        return Box::new(bosses::red_thunder_zuma::RedThunderZumaBehavior::new());
+    }
+    if name.contains("weretiger") || name.contains("were tiger") || name.contains("虎人") {
+        return Box::new(bosses::were_tiger::WereTigerBehavior::new());
+    }
+    if name.contains("darkwraith") || name.contains("dark wraith") || name.contains("黑暗幽灵") {
+        return Box::new(bosses::dark_wraith::DarkWraithBehavior::new());
+    }
+    if name.contains("peacockspider") || name.contains("peacock spider") || name.contains("孔雀蜘蛛") {
+        return Box::new(bosses::peacock_spider::PeacockSpiderBehavior::new());
+    }
+    if name.contains("mantree") || name.contains("man tree") || name.contains("树人") {
+        return Box::new(bosses::man_tree::ManTreeBehavior::new());
+    }
+    if name.contains("frozenmagician") || name.contains("frozen magician") || name.contains("冰霜法师") {
+        return Box::new(bosses::frozen_magician::FrozenMagicianBehavior::new());
+    }
     if name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王") {
         return Box::new(bosses::oma_king::OmaKingBehavior::new());
     }
@@ -458,6 +476,12 @@ pub fn is_registered_boss(monster_name: &str) -> bool {
         || name.contains("furbolgguard") || name.contains("furbolg guard") || name.contains("兽人守卫")
         || name.contains("furbolgcommander") || name.contains("furbolg commander") || name.contains("兽人指挥官")
         || name.contains("chieftainarcher") || name.contains("chieftain archer") || name.contains("酋长弓手")
+        || name.contains("redthunderzuma") || name.contains("red thunder zuma") || name.contains("红雷祖玛")
+        || name.contains("weretiger") || name.contains("were tiger") || name.contains("虎人")
+        || name.contains("darkwraith") || name.contains("dark wraith") || name.contains("黑暗幽灵")
+        || name.contains("peacockspider") || name.contains("peacock spider") || name.contains("孔雀蜘蛛")
+        || name.contains("mantree") || name.contains("man tree") || name.contains("树人")
+        || name.contains("frozenmagician") || name.contains("frozen magician") || name.contains("冰霜法师")
         || name.contains("omaking") || name.contains("oma king") || name.contains("奥玛王")
         || name.contains("woomataurus") || name.contains("wooma taurus") || name.contains("沃玛教主")
         || name.contains("flamequeen") || name.contains("flame queen") || name.contains("火焰女王") || name.contains("烈焰女王")
