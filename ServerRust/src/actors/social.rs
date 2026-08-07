@@ -2068,6 +2068,7 @@ impl Message<TradeStartRequest> for SocialActor {
         let player_pos = (state.x, state.y);
 
         let mut nearest_target: Option<(u64, i32)> = None;
+        let mut found_trade_closed = false;
         for sid in self.players.keys() {
             if *sid == msg.session_id {
                 continue;
@@ -2078,6 +2079,11 @@ impl Message<TradeStartRequest> for SocialActor {
             if let Some(rec) = self.players.get(sid) {
                 if let Ok(Some(other_state)) = rec.ask(GetPlayerState).await {
                     if other_state.is_dead { continue; } // 死亡状态下无法交易
+                    // #911：C# PlayerObject（~10686）目标关闭交易（@ALLOWTRADE）→ 拒绝
+                    if !other_state.allow_trade {
+                        found_trade_closed = true;
+                        continue;
+                    }
                     let dist = (other_state.x - player_pos.0).abs() + (other_state.y - player_pos.1).abs();
                     if dist <= TRADE_RANGE {
                         nearest_target = Some((*sid, dist));
@@ -2092,6 +2098,8 @@ impl Message<TradeStartRequest> for SocialActor {
             self.pending_invites.insert(target, msg.session_id);
             send_trade_invite_packet(&self.gate_ref, target, &state.name);
             debug!("Trade request: {} -> session {} (dist={})", state.name, target, _dist);
+        } else if found_trade_closed {
+            send_system_message(&self.gate_ref, msg.session_id, "附近玩家关闭了交易（请对方先使用 @ALLOWTRADE 开启）");
         } else {
             send_system_message(&self.gate_ref, msg.session_id, "附近没有其他玩家");
         }

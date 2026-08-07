@@ -279,6 +279,8 @@ pub struct PlayerState {
     pub allow_observe: bool,
     /// 是否允许他人邀请加入行会（C# PlayerObject.EnableGuildInvite，@ALLOWGUILD 切换，默认 false）
     pub enable_guild_invite: bool,
+    /// 是否允许交易（C# CharacterInfo.AllowTrade，@ALLOWTRADE 切换，默认 false）
+    pub allow_trade: bool,
     /// 当前 Buff/Debuff 列表
     pub buffs: Vec<crate::combat::buff::BuffInstance>,
     /// 已学习的魔法/技能列表
@@ -638,6 +640,7 @@ impl PlayerActor {
                 storage_password_last_set: 0,
                 allow_observe: false,
                 enable_guild_invite: false,
+                allow_trade: false,
                 buffs: Vec::new(),
                 magics: Vec::new(),
                 flags: std::collections::HashMap::new(),
@@ -4818,6 +4821,7 @@ mod tests {
             storage_password_last_set: 0,
             allow_observe: false,
             enable_guild_invite: false,
+            allow_trade: false,
             is_dead: false,
             unlock_curse: false,
             last_revival_time: 0,
