@@ -12,6 +12,7 @@ use mir2_shared::enums::{
     MirGender, PoisonType, Spell, SpellEffect, Stat,
 };
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use mir2_shared::packets::base::{serialize_packet, Packet, PacketHeader};
 use mir2_shared::packets::{client, server};
 
@@ -77,6 +78,9 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
         .name("mock-server".into())
         .spawn(move || {
             let mut in_game = false;
+            // #643：--reconnect-test 一次性断线（防止重连后再次断开）
+            static MOCK_RECONNECT_DISCONNECTED: AtomicBool = AtomicBool::new(false);
+            let mut mock_in_game_since: Option<std::time::Instant> = None;
             let mut characters: Vec<SelectInfo> = Vec::new();
             let mut last_ping = std::time::Instant::now();
             // ---- 玩法闭环状态（#next：战斗/掉落/拾取/技能/怪物AI/装备）----
@@ -228,6 +232,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             },
                                         );
                                         in_game = true;
+                                        mock_in_game_since = Some(std::time::Instant::now());
                                     }
                                 }
                                 x if x == ClientPacketIds::NewCharacter as i16 => {
@@ -766,6 +771,22 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     let _request = cur.read_u8().unwrap_or(0);
                                     send(&to_client, &MockCreatureList);
                                     tracing::info!("🐾 [MOCK] 宠物列表回发");
+                                }
+                                // #643：举报（--report-test，wire [issue_type u32][description dotnet]）
+                                x if x == ClientPacketIds::ReportIssue as i16 => {
+                                    use byteorder::{LittleEndian, ReadBytesExt};
+                                    let _issue_type = cur.read_u32::<LittleEndian>().unwrap_or(0);
+                                    let _desc =
+                                        mir2_shared::binary::read_dotnet_string(&mut cur)
+                                            .unwrap_or_default();
+                                    send(
+                                        &to_client,
+                                        &server::chat::Chat {
+                                            message: "举报信息已提交".to_string(),
+                                            chat_type: ChatType::System,
+                                        },
+                                    );
+                                    tracing::info!("📮 [MOCK] 举报已提交");
                                 }
                                 x if x == ClientPacketIds::Attack as i16 => {
                                     // 攻击反馈：怪物受击动画 + 伤害飘字 + 血量/死亡/掉落
@@ -2424,6 +2445,18 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                         }
                     }
                 }
+                // #643：--reconnect-test 一次性断线模拟（进游戏 6s 后断开通道）
+                if in_game
+                    && std::env::args().any(|a| a == "--reconnect-test")
+                    && !MOCK_RECONNECT_DISCONNECTED.load(Ordering::SeqCst)
+                    && mock_in_game_since
+                        .map(|t| t.elapsed() >= std::time::Duration::from_secs(6))
+                        .unwrap_or(false)
+                {
+                    MOCK_RECONNECT_DISCONNECTED.store(true, Ordering::SeqCst);
+                    tracing::info!("🔌 [MOCK] 模拟断线（--reconnect-test）");
+                    break;
+                }
             }
         })
         .expect("spawn mock thread");
@@ -3153,6 +3186,28 @@ fn send_map_and_objects(
 
     send_user_information(to_client, char_index, inventory, equipment, gold, stats);
 
+    // #643：排行榜推送（--ranking-test）
+    send(
+        to_client,
+        &server::special_systems::Rankings {
+            rankings: vec![
+                server::special_systems::RankInfo {
+                    rank: 1,
+                    player_name: "刀客".to_string(),
+                    class: MirClass::Warrior as u8,
+                    level: 30,
+                    experience: 12000,
+                },
+                server::special_systems::RankInfo {
+                    rank: 2,
+                    player_name: "bevy2char".to_string(),
+                    class: MirClass::Warrior as u8,
+                    level: 30,
+                    experience: 10000,
+                },
+            ],
+        },
+    );
 
     // 初始地面物品（拾取验收用）：金创药 @ (353,352)（玩家左侧 1 格）
     send(
