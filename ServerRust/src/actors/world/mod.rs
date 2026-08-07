@@ -801,6 +801,8 @@ pub struct WorldActor {
     pub(crate) pet_enhanced: HashMap<u32, (u64, i32, i32)>,
     /// 召唤物等级（怪物 oid → 等级；C# MonsterObject.PetLevel = magic.Level）
     pub(crate) pet_levels: HashMap<u32, i32>,
+    /// CounterAttack 反击窗口（session → (到期 tick, 等级)；C# 7s 窗口，受击消耗）
+    pub(crate) counter_attack: HashMap<u64, (u64, u8)>,
     /// Revelation 显血窗口（对象 oid → 到期 tick；C# RevTime）
     pub(crate) revealed_hp: HashMap<u32, u64>,
     /// Boss 延迟攻击队列（到期 tick → 攻击；C# DelayedAction DelayedType.Damage）
@@ -1035,6 +1037,7 @@ impl WorldActor {
             boss_pending_attacks: Vec::new(),
             pet_enhanced: HashMap::new(),
             pet_levels: HashMap::new(),
+            counter_attack: HashMap::new(),
             revealed_hp: HashMap::new(),
             pet_targets: HashMap::new(),
             npcs: HashMap::new(),
@@ -3570,6 +3573,7 @@ impl Actor for WorldActor {
             boss_pending_attacks: Vec::new(),
             pet_enhanced: HashMap::new(),
             pet_levels: HashMap::new(),
+            counter_attack: HashMap::new(),
             revealed_hp: HashMap::new(),
             pet_targets: HashMap::new(),
             npcs: HashMap::new(),

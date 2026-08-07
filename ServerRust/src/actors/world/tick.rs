@@ -2576,6 +2576,29 @@ impl Message<Tick> for WorldActor {
                             attacker_session: *sid,
                             damage,
                         }).await;
+                        // CounterAttack：受击方 7s 窗口激活时反击 Boss（C# HumanObject.cs 7212/7302）
+                        if let Some((expire, lv)) = self.counter_attack.get(sid).copied() {
+                            if self.tick_count <= expire {
+                                self.counter_attack.remove(sid);
+                                let counter_dmg = if let Ok(Some(vs)) = record.actor_ref.ask(GetPlayerState).await {
+                                    crate::combat::attack::get_attack_power(
+                                        vs.min_attack + vs.bonus_min_attack,
+                                        vs.max_attack + vs.bonus_max_attack,
+                                        vs.luck,
+                                    ).max(1)
+                                } else { 1 };
+                                if let Some(m) = self.monsters.get_mut(&attacker_oid) {
+                                    m.take_damage(counter_dmg);
+                                    m.provoked = true;
+                                    m.target_session = Some(*sid);
+                                    crate::combat::poison::apply_poison(&mut m.poison_list,
+                                        crate::combat::poison::Poison::new(
+                                            mir2_shared::enums::PoisonType::STUN, lv as u32 + 1, 0, 1000,
+                                        ));
+                                    debug!("Player {} counter-attacked boss {} ({} dmg)", sid, attacker_oid, counter_dmg);
+                                }
+                            }
+                        }
                     }
                 }
             }
