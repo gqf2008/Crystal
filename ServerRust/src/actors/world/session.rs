@@ -779,6 +779,19 @@ impl Message<WorldMoveRequest> for WorldActor {
                     }
                 }
 
+                // C# MovementInfo.ConquestIndex：行会需拥有对应攻城领地才能传送
+                if mv.conquest_index > 0 {
+                    let owns = state.guild_name.as_ref().is_some_and(|guild| {
+                        self.conquest_instances.iter().any(|c| {
+                            c.id == mv.conquest_index && c.owner_guild.as_deref() == Some(guild.as_str())
+                        })
+                    });
+                    if !owns {
+                        send_system_message(&self.gate_ref, msg.session_id, "你的行会未拥有该领地，无法通过");
+                        return;
+                    }
+                }
+
                 let dest_map_index = mv.map_index;
                 let dest_x = mv.dest_x;
                 let dest_y = mv.dest_y;
