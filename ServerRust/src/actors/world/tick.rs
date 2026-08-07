@@ -110,6 +110,20 @@ impl WorldActor {
                 self.player_death_queue.remove(&session_id);
                 if let Some(record) = self.players.get(&session_id) {
                     let _ = record.actor_ref.ask(crate::actors::player::Revive).await;
+                    // C# Revive：广播 ObjectRevived（其他玩家看到复活动画）
+                    if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                        let mut obj_body = Vec::new();
+                        obj_body.extend_from_slice(&state.object_id.to_le_bytes());
+                        obj_body.push(1u8); // effect
+                        let revived_packet = build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::ObjectRevived as i16, &obj_body);
+                        for sid in self.players.keys() {
+                            let _ = self.gate_ref.tell(SendToClient {
+                                session_id: *sid,
+                                data: revived_packet.clone(),
+                            }).await;
+                        }
+                    }
                 }
             }
             for session_id in to_despawn_pets {
