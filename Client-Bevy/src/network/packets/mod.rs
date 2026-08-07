@@ -5,13 +5,18 @@ use mir2_shared::packets::base::{Packet, PacketHeader};
 use super::*;
 use crate::ui::login::AuthFeedback;
 
-mod handle_auth;
 mod handle_guild;
 mod handle_npc_items;
 mod handle_progress;
 mod handle_social;
 
-use handle_auth::handle_auth;
+mod handle_login;
+mod handle_player;
+mod handle_world;
+
+use handle_login::handle_login;
+use handle_player::handle_player;
+use handle_world::handle_world;
 use handle_guild::handle_guild;
 use handle_npc_items::handle_npc_items;
 use handle_progress::handle_progress;
@@ -40,7 +45,13 @@ pub(crate) fn handle_packet(    net: &mut NetConnection,
         return;
     };
     let opcode = header.opcode;
-    if handle_auth(net, session, auth, game_data, net_objects, net_removals, motions, combat_evt, effects, server_events, control, next, payload) {
+    if handle_login(net, session, auth, game_data, net_objects, net_removals, motions, combat_evt, effects, server_events, control, next, payload) {
+        return;
+    }
+    if handle_world(net, session, auth, game_data, net_objects, net_removals, motions, combat_evt, effects, server_events, control, next, payload) {
+        return;
+    }
+    if handle_player(net, session, auth, game_data, net_objects, net_removals, motions, combat_evt, effects, server_events, control, next, payload) {
         return;
     }
     if handle_npc_items(net, session, auth, game_data, net_objects, net_removals, motions, combat_evt, effects, server_events, control, next, payload) {
