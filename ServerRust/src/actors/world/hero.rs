@@ -784,6 +784,7 @@ impl WorldActor {
                     .map(|s| s.owner_stats.max_atk)
                     .unwrap_or(10),
                 spell_level: 1,
+                bounce: 0,
             });
             // #220：英雄施法技能经验（spell 为 SharedRust 值，升级发 S.MagicLeveled）
             if let Some(record) = self.players.get(session_id) {

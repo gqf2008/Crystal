@@ -909,6 +909,8 @@ pub struct PendingSpellCompletion {
     pub magic_stat: i32,
     /// 法术等级
     pub spell_level: u8,
+    /// FireBounce 剩余弹跳次数（0 = 非链式法术；C# bounce = magic.Level + 2）
+    pub bounce: i32,
 }
 
 /// 技能释放请求
@@ -1222,6 +1224,31 @@ impl Message<MagicRequest> for WorldActor {
             }).await;
         }
 
+        // MeteorShower：主目标是怪物时，取周围 4 格内最多 3 个副目标（伤害减半，C# HumanObject.cs:5835）
+        let meteor_secondary: Vec<(u32, i32, i32)> =
+            if spell_enum == mir2_shared::enums::Spell::MeteorShower {
+                let mut ids = Vec::new();
+                if let Some(m) = self.monsters.get(&msg.target_id) {
+                    if m.hp > 0 {
+                        let mut nearby: Vec<(u32, i32, i32)> = self.monsters.iter()
+                            .filter(|(id, mm)| {
+                                **id != msg.target_id
+                                    && mm.hp > 0
+                                    && (mm.x - m.x).abs() <= 4
+                                    && (mm.y - m.y).abs() <= 4
+                            })
+                            .map(|(id, mm)| (*id, mm.x, mm.y))
+                            .collect();
+                        // 按距离升序取前 3（近似 C# FindAllNearby(4)）
+                        nearby.sort_by_key(|(_, x, y)| (x - m.x).abs() + (y - m.y).abs());
+                        ids = nearby.into_iter().take(3).collect();
+                    }
+                }
+                ids
+            } else {
+                Vec::new()
+            };
+
         // 广播 ObjectMagic 给其他玩家
         let others: Vec<_> = self.other_players(msg.session_id)
             .into_iter().cloned()
@@ -1239,7 +1266,7 @@ impl Message<MagicRequest> for WorldActor {
             cast: true,
             level: spell_level,
             self_broadcast: false,
-            secondary_target_ids: Vec::new(),
+            secondary_target_ids: meteor_secondary.iter().map(|(id, _, _)| *id).collect(),
         };
         let mut om_body = Vec::new();
         if object_magic.write_body(&mut om_body).is_ok() {
@@ -1561,7 +1588,8 @@ impl Message<MagicRequest> for WorldActor {
             // --- 弹道类法术（任务3）：FireBall/GreatFireBall/ThunderBolt/FrostCrunch/Vampirism ---
             // 对齐 C# HumanObject Fireball()/ThunderBolt()/Vampirism()：创建 DelayedAction，延迟后结算
             SPELL_FIREBALL | SPELL_GREAT_FIREBALL | SPELL_THUNDERBOLT
-            | SPELL_FROST_CRUNCH | SPELL_VAMPIRISM | SPELL_FLAME_DISRUPTOR | SPELL_SOUL_FIREBALL => {
+            | SPELL_FROST_CRUNCH | SPELL_VAMPIRISM | SPELL_FLAME_DISRUPTOR | SPELL_SOUL_FIREBALL
+            | SPELL_METEOR_SHOWER => {
                 let raw_damage = if let Some(info) = spell_db {
                     crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
                 } else {
@@ -1571,7 +1599,7 @@ impl Message<MagicRequest> for WorldActor {
                 // 弹道延迟：FireBall 系 = 距离×50ms + 500ms；ThunderBolt/Vampirism = 固定 500ms
                 let target_dist = ((state.x - target_x).abs() + (state.y - target_y).abs()) as u64;
                 let delay_ms = match msg.spell {
-                    SPELL_FIREBALL | SPELL_GREAT_FIREBALL | SPELL_FROST_CRUNCH => {
+                    SPELL_FIREBALL | SPELL_GREAT_FIREBALL | SPELL_FROST_CRUNCH | SPELL_METEOR_SHOWER => {
                         target_dist * 50 + 500
                     }
                     _ => 500, // ThunderBolt / Vampirism 固定 500ms
@@ -1589,9 +1617,51 @@ impl Message<MagicRequest> for WorldActor {
                     damage: raw_damage,
                     magic_stat,
                     spell_level,
+                    bounce: 0,
                 });
-                debug!("Magic: {} casts projectile spell={} dmg={} delay={}ms (fires @tick {})",
-                    state.name, msg.spell, raw_damage, delay_ms, fire_at_tick);
+
+                // MeteorShower：副目标（最多 3 个，周围 4 格）各吃 50% 伤害（C# HumanObject.cs:5852）
+                if msg.spell == SPELL_METEOR_SHOWER {
+                    for (sid, sx, sy) in &meteor_secondary {
+                        self.pending_spell_completions.push(PendingSpellCompletion {
+                            fire_at_tick,
+                            session_id: msg.session_id,
+                            spell: msg.spell,
+                            target_id: *sid,
+                            target_x: *sx,
+                            target_y: *sy,
+                            damage: (raw_damage / 2).max(1),
+                            magic_stat,
+                            spell_level,
+                            bounce: 0,
+                        });
+                    }
+                }
+                debug!("Magic: {} casts projectile spell={} dmg={} delay={}ms secondary={} (fires @tick {})",
+                    state.name, msg.spell, raw_damage, delay_ms, meteor_secondary.len(), fire_at_tick);
+            }
+            // FireBounce：链式弹射（C# HumanObject.cs:5811；首跳延迟=距离×50+500ms，后续每跳=距离×50ms）
+            SPELL_FIRE_BOUNCE => {
+                let raw_damage = if let Some(info) = spell_db {
+                    crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
+                } else { fastrand::i32(5..=15) }.max(1);
+                let target_dist = ((state.x - target_x).abs() + (state.y - target_y).abs()) as u64;
+                let delay_ms = target_dist * 50 + 500;
+                let fire_at_tick = self.tick_count + (delay_ms / 100).max(1);
+                self.pending_spell_completions.push(PendingSpellCompletion {
+                    fire_at_tick,
+                    session_id: msg.session_id,
+                    spell: msg.spell,
+                    target_id: msg.target_id,
+                    target_x,
+                    target_y,
+                    damage: raw_damage,
+                    magic_stat,
+                    spell_level,
+                    bounce: spell_level as i32 + 2, // C# bounce = magic.Level + 2
+                });
+                debug!("Magic: {} casts FireBounce dmg={} bounce={} delay={}ms",
+                    state.name, raw_damage, spell_level as i32 + 2, delay_ms);
             }
             // --- 即时 AoE 类法术（任务4）---
             // FireBang/IceStorm：3×3 AoE，MAC 伤害（C# Map.cs:952）
@@ -1844,6 +1914,7 @@ impl Message<MagicRequest> for WorldActor {
                     damage: raw_damage,
                     magic_stat,
                     spell_level,
+                    bounce: 0,
                 });
 
                 // DoubleShot：额外发一发，延迟 +200ms（2 ticks）
@@ -1858,6 +1929,7 @@ impl Message<MagicRequest> for WorldActor {
                         damage: raw_damage,
                         magic_stat,
                         spell_level,
+                        bounce: 0,
                     });
                 }
                 debug!("Magic: {} casts Archer projectile spell={} dmg={} delay={}ms (DoubleShot={})",
