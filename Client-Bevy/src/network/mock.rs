@@ -142,6 +142,18 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             let mut mock_riding = false;
             // #573：钓鱼收获计时（FishingCast 后 5s 回发系统聊天）
             let mut mock_fishing: Option<std::time::Instant> = None;
+            // #672：行会状态机（GuildNameReturn 创建；公告/金币/仓库/成员演示）
+            let mut mock_guild_name: Option<String> = None;
+            let mut mock_guild_notice: Vec<String> = Vec::new();
+            let mut mock_guild_gold: u32 = 0;
+            let mut mock_guild_storage: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 40];
+            let mut mock_guild_members: Vec<String> = vec!["刀客".to_string()];
+            // #672：行会领地（(id, map_index, owner, state)）
+            let mut mock_territories: Vec<(i32, i32, String, u8)> = vec![
+                (1, 0, String::new(), 0),
+                (2, 1, String::new(), 0),
+                (3, 2, "敌对行会".to_string(), 0),
+            ];
             // #283：首次击杀触发本地升级演示（LevelChanged + ObjectLeveled）
             let mut mock_leveled_up = false;
             // #297：精炼流程状态（(物品 uid, 是否已开始)）
@@ -787,6 +799,167 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         },
                                     );
                                     tracing::info!("📮 [MOCK] 举报已提交");
+                                }
+                                // #672：行会状态机（GuildNameReturn 创建 → GuildStatus 完整信息）
+                                x if x == ClientPacketIds::GuildNameReturn as i16 => {
+                                    if let Ok(p) = client::guild::GuildNameReturn::read_body(&mut cur) {
+                                        mock_guild_name = Some(p.name.clone());
+                                        mock_guild_members = vec!["刀客".to_string()];
+                                        mock_guild_notice.clear();
+                                        mock_guild_gold = 0;
+                                        send(
+                                            &to_client,
+                                            &MockGuildStatus {
+                                                name: p.name,
+                                                leader: "刀客".to_string(),
+                                                notice: mock_guild_notice.clone(),
+                                                members: mock_guild_members
+                                                    .iter()
+                                                    .map(|n| (n.clone(), 1u8, true))
+                                                    .collect(),
+                                                gold: mock_guild_gold,
+                                            },
+                                        );
+                                        tracing::info!("🏰 [MOCK] 创建行会并回发 GuildStatus");
+                                    }
+                                }
+                                x if x == ClientPacketIds::EditGuildNotice as i16 => {
+                                    if let Ok(p) = client::guild::EditGuildNotice::read_body(&mut cur) {
+                                        mock_guild_notice = p.notice_lines.clone();
+                                        send(
+                                            &to_client,
+                                            &MockGuildNoticeChange { lines: p.notice_lines },
+                                        );
+                                        tracing::info!("🏰 [MOCK] 行会公告更新");
+                                    }
+                                }
+                                x if x == ClientPacketIds::GuildStorageGoldChange as i16 => {
+                                    if let Ok(p) = client::guild::GuildStorageGoldChange::read_body(&mut cur) {
+                                        if p.change_type == 0 {
+                                            mock_guild_gold += p.amount;
+                                        } else {
+                                            mock_guild_gold = mock_guild_gold.saturating_sub(p.amount);
+                                        }
+                                        send(
+                                            &to_client,
+                                            &server::GuildStorageGoldChange {
+                                                amount: p.amount,
+                                                change_type: p.change_type,
+                                                name: "刀客".to_string(),
+                                            },
+                                        );
+                                        tracing::info!(
+                                            "💰 [MOCK] 行会金币 {} {}（余额 {}）",
+                                            p.change_type,
+                                            p.amount,
+                                            mock_guild_gold
+                                        );
+                                    }
+                                }
+                                x if x == ClientPacketIds::GuildStorageItemChange as i16 => {
+                                    use byteorder::{LittleEndian, ReadBytesExt};
+                                    let change_type = cur.read_u8().unwrap_or(0);
+                                    let _grid = cur.read_u8().unwrap_or(0);
+                                    let unique_id = cur.read_u64::<LittleEndian>().unwrap_or(0);
+                                    let _count = cur.read_u32::<LittleEndian>().unwrap_or(0);
+                                    match change_type {
+                                        3 => {
+                                            // 请求列表
+                                            send_guild_storage_list(&to_client, &mock_guild_storage);
+                                            tracing::info!("🏰 [MOCK] 行会仓库列表回发");
+                                        }
+                                        0 => {
+                                            // 存入
+                                            let idx = player_inventory
+                                                .iter()
+                                                .position(|s| {
+                                                    s.as_ref().map(|i| i.unique_id) == Some(unique_id)
+                                                });
+                                            if let Some(idx) = idx {
+                                                if let Some(item) = player_inventory[idx].take() {
+                                                    mock_guild_storage[0] = Some(item.clone());
+                                                    send(
+                                                        &to_client,
+                                                        &server::GuildStorageItemChange {
+                                                            change_type: 0,
+                                                            to: 0,
+                                                            from: idx as i32,
+                                                            user: 100,
+                                                            item: Some((100, item)),
+                                                        },
+                                                    );
+                                                    send_guild_storage_list(&to_client, &mock_guild_storage);
+                                                    tracing::info!("🏰 [MOCK] 存入行会仓库 uid={}", unique_id);
+                                                }
+                                            }
+                                        }
+                                        1 => {
+                                            // 取出
+                                            if let Some(item) = mock_guild_storage[0].take() {
+                                                if let Some(empty) =
+                                                    player_inventory.iter_mut().find(|s| s.is_none())
+                                                {
+                                                    *empty = Some(item);
+                                                } else {
+                                                    mock_guild_storage[0] = Some(item);
+                                                }
+                                                send(
+                                                    &to_client,
+                                                    &server::GuildStorageItemChange {
+                                                        change_type: 1,
+                                                        to: 0,
+                                                        from: 0,
+                                                        user: 100,
+                                                        item: None,
+                                                    },
+                                                );
+                                                send_guild_storage_list(&to_client, &mock_guild_storage);
+                                                tracing::info!("🏰 [MOCK] 取出行会仓库");
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                x if x == ClientPacketIds::EditGuildMember as i16 => {
+                                    if let Ok(p) = client::guild::EditGuildMember::read_body(&mut cur) {
+                                        if p.change_type == 0 && !mock_guild_members.contains(&p.name) {
+                                            mock_guild_members.push(p.name.clone());
+                                            send(&to_client, &MockGuildMemberJoined { name: p.name });
+                                            tracing::info!("🏰 [MOCK] 行会成员加入");
+                                        }
+                                    }
+                                }
+                                // #672：行会领地（wire [page u32] / [territory_id u32]）
+                                x if x == ClientPacketIds::GuildTerritoryPage as i16 => {
+                                    use byteorder::{LittleEndian, ReadBytesExt};
+                                    let _page = cur.read_u32::<LittleEndian>().unwrap_or(0);
+                                    send(
+                                        &to_client,
+                                        &MockTerritoryPage { rows: mock_territories.clone() },
+                                    );
+                                    tracing::info!("🏯 [MOCK] 领地列表回发");
+                                }
+                                x if x == ClientPacketIds::PurchaseGuildTerritory as i16 => {
+                                    use byteorder::{LittleEndian, ReadBytesExt};
+                                    let tid = cur.read_u32::<LittleEndian>().unwrap_or(0);
+                                    let owner = mock_guild_name
+                                        .clone()
+                                        .unwrap_or_else(|| "TestGuild4".to_string());
+                                    for row in mock_territories.iter_mut() {
+                                        if row.0 as u32 == tid {
+                                            row.2 = owner.clone();
+                                        }
+                                    }
+                                    tracing::info!("🏯 [MOCK] 购买领地 #{} 归属 {}", tid, owner);
+                                }
+                                x if x == ClientPacketIds::GuildWarReturn as i16 => {
+                                    if let Ok(p) = client::guild::GuildWarReturn::read_body(&mut cur) {
+                                        send(
+                                            &to_client,
+                                            &MockGuildRequestWar { guild_name: p.guild_name },
+                                        );
+                                        tracing::info!("🏯 [MOCK] 宣战确认");
+                                    }
                                 }
                                 x if x == ClientPacketIds::Attack as i16 => {
                                     // 攻击反馈：怪物受击动画 + 伤害飘字 + 血量/死亡/掉落
@@ -2561,6 +2734,143 @@ impl Packet for MockPlayerInspect {
         writer.write_i32::<LittleEndian>(12)?; // max_dura
         Ok(())
     }
+}
+
+/// #672：行会完整信息（客户端 handle_guild 双格式：name/leader dotnet + notice_count u8 + member_count u8 + gold u32）
+struct MockGuildStatus {
+    name: String,
+    leader: String,
+    notice: Vec<String>,
+    members: Vec<(String, u8, bool)>,
+    gold: u32,
+}
+
+impl Packet for MockGuildStatus {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::GuildStatus as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        mir2_shared::binary::write_dotnet_string(writer, &self.name)?;
+        mir2_shared::binary::write_dotnet_string(writer, &self.leader)?;
+        writer.write_u8(self.notice.len() as u8)?;
+        for line in &self.notice {
+            mir2_shared::binary::write_dotnet_string(writer, line)?;
+        }
+        writer.write_u8(self.members.len() as u8)?;
+        for (name, rank, online) in &self.members {
+            mir2_shared::binary::write_dotnet_string(writer, name)?;
+            writer.write_u8(*rank)?;
+            writer.write_u8(if *online { 1 } else { 0 })?;
+        }
+        writer.write_u32::<byteorder::LittleEndian>(self.gold)?;
+        Ok(())
+    }
+}
+
+/// #672：行会公告（客户端格式 [count u8][lines dotnet]）
+struct MockGuildNoticeChange {
+    lines: Vec<String>,
+}
+
+impl Packet for MockGuildNoticeChange {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::GuildNoticeChange as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u8(self.lines.len() as u8)?;
+        for line in &self.lines {
+            mir2_shared::binary::write_dotnet_string(writer, line)?;
+        }
+        Ok(())
+    }
+}
+
+/// #672：行会成员加入（客户端格式 [joined u8][name dotnet]）
+struct MockGuildMemberJoined {
+    name: String,
+}
+
+impl Packet for MockGuildMemberJoined {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::GuildMemberChange as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u8(1)?; // joined
+        mir2_shared::binary::write_dotnet_string(writer, &self.name)?;
+        Ok(())
+    }
+}
+
+/// #672：行会领地页（客户端格式 [count i32][per: id i32][map_index i32][owner dotnet][state u8]）
+struct MockTerritoryPage {
+    rows: Vec<(i32, i32, String, u8)>,
+}
+
+impl Packet for MockTerritoryPage {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::GuildTerritoryPage as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_i32::<LittleEndian>(self.rows.len() as i32)?;
+        for (id, map_index, owner, state) in &self.rows {
+            writer.write_i32::<LittleEndian>(*id)?;
+            writer.write_i32::<LittleEndian>(*map_index)?;
+            mir2_shared::binary::write_dotnet_string(writer, owner)?;
+            writer.write_u8(*state)?;
+        }
+        Ok(())
+    }
+}
+
+/// #672：宣战确认（客户端格式 [guild_name dotnet]）
+struct MockGuildRequestWar {
+    guild_name: String,
+}
+
+impl Packet for MockGuildRequestWar {
+    const OPCODE: i16 = mir2_shared::enums::ServerPacketIds::GuildRequestWar as i16;
+
+    fn read_body<R: std::io::Read>(_: &mut R) -> mir2_shared::data::stats::SharedResult<Self> {
+        unreachable!("mock 只发送不解析")
+    }
+
+    fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
+        mir2_shared::binary::write_dotnet_string(writer, &self.guild_name)?;
+        Ok(())
+    }
+}
+
+/// #672：行会仓库列表回发
+fn send_guild_storage_list(
+    to_client: &Sender<Vec<u8>>,
+    storage: &[Option<mir2_shared::data::item::UserItem>],
+) {
+    let items: Vec<Option<mir2_shared::data::client_data::GuildStorageItem>> = storage
+        .iter()
+        .map(|s| {
+            s.as_ref().map(|it| mir2_shared::data::client_data::GuildStorageItem {
+                item: it.clone(),
+                user_id: 100,
+            })
+        })
+        .collect();
+    send(to_client, &server::guild::GuildStorageList { items });
 }
 
 fn send<P: Packet>(to_client: &Sender<Vec<u8>>, packet: &P) {
