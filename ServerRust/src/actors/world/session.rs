@@ -1544,7 +1544,7 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -1869,6 +1869,26 @@ impl Message<ChatRequest> for WorldActor {
                             state.hair = hair;
                             let _ = record.actor_ref.ask(SetPlayerState { state }).await;
                             send_system_message(&self.gate_ref, msg.session_id, &format!("发型已设置为 {}", hair));
+                        }
+                        // @setlight <0-4>（C# case "SETLIGHT" ~4137：设置当前光照并广播）
+                        "SETLIGHT" => {
+                            let light_val = parts.get(1).and_then(|s| s.parse::<u8>().ok()).unwrap_or(255);
+                            let setting = match light_val {
+                                0 => mir2_shared::enums::LightSetting::Normal,
+                                1 => mir2_shared::enums::LightSetting::Dawn,
+                                2 => mir2_shared::enums::LightSetting::Day,
+                                3 => mir2_shared::enums::LightSetting::Evening,
+                                4 => mir2_shared::enums::LightSetting::Night,
+                                _ => {
+                                    send_system_message(&self.gate_ref, msg.session_id, "用法：@setlight <0=Normal 1=Dawn 2=Day 3=Evening 4=Night>");
+                                    return;
+                                }
+                            };
+                            self.current_light = setting;
+                            for sid in self.players.keys() {
+                                self.send_time_of_day(*sid, setting);
+                            }
+                            send_system_message(&self.gate_ref, msg.session_id, &format!("光照已设置为 {:?}", setting));
                         }
                         _ => {}
                     }
