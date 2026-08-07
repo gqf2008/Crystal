@@ -695,6 +695,12 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN energy_shield_hp_gain INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN bind_map_index INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN bind_x INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN bind_y INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     // Migration: add weather_particles to old map_infos (from migrate_mirdb)
     let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN weather_particles INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
@@ -1018,8 +1024,8 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
             spouse_name, allow_mentor, mentor_name, hero_index, hero_behaviour,
             auto_pot_hp, auto_pot_mp, auto_pot_hp_item, auto_pot_mp_item,
             is_fishing, fishing_autocast, is_dead, pk_points, pk_kill_count, can_gain_exp, pearl_count,
-            last_access
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+            last_access, bind_map_index, bind_x, bind_y
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
     )
     .bind(&state.name)
     .bind(account_username)
@@ -1074,6 +1080,9 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     .bind(if state.can_gain_exp { 1 } else { 0 })
     .bind(state.pearl_count)
     .bind(state.last_access)
+    .bind(state.bind_map_index)
+    .bind(state.bind_x)
+    .bind(state.bind_y)
     .execute(&mut *tx)
     .await?;
 
@@ -1284,6 +1293,12 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
             has_elemental: false,
             concentration_interrupted: false,
             concentration_interrupt_time: 0,
+
+            bind_map_index: row.try_get("bind_map_index").unwrap_or(0),
+
+            bind_x: row.try_get("bind_x").unwrap_or(0),
+
+            bind_y: row.try_get("bind_y").unwrap_or(0),
     };
 
     Ok(Some(state))

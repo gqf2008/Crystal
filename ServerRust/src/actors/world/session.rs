@@ -325,6 +325,9 @@ impl Message<StartGameRequest> for WorldActor {
         info!("Player {} entered world (object_id={}, session={})",
               player_name, object_id, msg.session_id);
 
+        // C# PlayerObject.SetBind：确保绑定点有效（无绑定点/无效时随机出生安全区）
+        self.ensure_bind(msg.session_id).await;
+
         // C# StartGame：下发玩家所属行会的激活 Buff 列表（S.GuildBuffList）
         if let Some(guild_name) = &loaded_state.guild_name {
             let buffs = self.social_ref.ask(crate::actors::social::NpcGetGuildBuffs {
@@ -708,6 +711,11 @@ impl Message<WorldMoveRequest> for WorldActor {
 
         // C# HumanObject Walk/Run：移动打断专注（3s 内不提供专注加成）
         self.interrupt_concentration(msg.session_id).await;
+
+        // C# HumanObject Walk/Run：进入安全区时更新绑定点（SetBindSafeZone）
+        if let Ok(Some(post_state)) = record.actor_ref.ask(GetPlayerState).await {
+            self.update_bind_safe_zone(msg.session_id, post_state.map_index, post_state.x, post_state.y).await;
+        }
 
         // 获取移动后的状态并广播给其他玩家
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
@@ -1993,5 +2001,8 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
             has_elemental: false,
             concentration_interrupted: false,
             concentration_interrupt_time: 0,
+            bind_map_index: 0,
+            bind_x: 0,
+            bind_y: 0,
     }
 }

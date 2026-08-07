@@ -822,7 +822,7 @@ impl Message<TownReviveRequest> for WorldActor {
 
     async fn handle(&mut self, msg: TownReviveRequest, _ctx: &mut Context<Self, Self::Reply>) {
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r,
+            Some(r) => r.clone(),
             None => return,
         };
 
@@ -832,19 +832,36 @@ impl Message<TownReviveRequest> for WorldActor {
         };
         if !state.is_dead { return; }
 
-        // 复活：重置 HP/MP 到最大值，回到地图安全区出生点
-        // （#57：硬编码 DEFAULT_SPAWN (330,330) 在 0.map 上不可走，复活后玩家卡墙内无法移动）
-        let (spawn_x, spawn_y) = self
-            .map_infos
-            .get(&(state.map_index as i32))
-            .and_then(|mi| mi.safe_zones.iter().find(|s| s.start_point))
-            .map(|sz| (sz.x, sz.y))
-            .unwrap_or((DEFAULT_SPAWN_X, DEFAULT_SPAWN_Y));
+        // 复活：重置 HP/MP 到最大值，回到绑定点（C# PlayerObject.TownRevive）
+        // PKPoints>=200 时 C# 会送到 PK 城（Settings.PKTownMapName），Rust 暂未配置 PK 城，统一回绑定点；
+        // 绑定点无效时回退到当前地图安全区出生点
+        let (revive_map, spawn_x, spawn_y) = {
+            let bind_valid = if let Some(mi) = self.map_infos.get(&state.bind_map_index).cloned() {
+                let map_index = mi.index as u16;
+                self.get_or_load_map(&mi.file_name, map_index);
+                self.maps.get(&map_index)
+                    .map(|m| m.is_valid(state.bind_x, state.bind_y))
+                    .unwrap_or(true)
+            } else {
+                false
+            };
+            if bind_valid {
+                (state.bind_map_index as u16, state.bind_x, state.bind_y)
+            } else {
+                let (sx, sy) = self
+                    .map_infos
+                    .get(&(state.map_index as i32))
+                    .and_then(|mi| mi.safe_zones.iter().find(|s| s.start_point))
+                    .map(|sz| (sz.x, sz.y))
+                    .unwrap_or((DEFAULT_SPAWN_X, DEFAULT_SPAWN_Y));
+                (state.map_index, sx, sy)
+            }
+        };
 
         let _ = record.actor_ref.ask(crate::actors::player::RevivePlayer {
             x: spawn_x,
             y: spawn_y,
-            map_index: state.map_index,
+            map_index: revive_map,
         }).await;
 
         // 发送 HealthChanged 通知
@@ -874,7 +891,7 @@ impl Message<TownReviveRequest> for WorldActor {
             }).await;
         }
 
-        debug!("TownRevive: {} revived at ({}, {})", state.name, spawn_x, spawn_y);
+        debug!("TownRevive: {} revived at map {} ({}, {})", state.name, revive_map, spawn_x, spawn_y);
     }
 }
 
@@ -1875,9 +1892,44 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} casts Thrusting (line pierce 2)", state.name);
             }
             // --- 传送类 ---
-            // Teleport：随机传送（C# MagicTeleport 选随机点）
+            // Teleport：法师回城（C# MagicTeleport：传送到绑定点附近，半径 = 绑定地图尺寸/(Lv+1)）
             // Blink：定点传送，距离上限=Range，成功率=(level+1)/4
-            SPELL_TELEPORT | SPELL_BLINK | SPELL_STORM_ESCAPE => {
+            // StormEscape：同 Blink（C# 同逻辑）
+            SPELL_TELEPORT => {
+                if let Some(mi) = self.map_infos.get(&(state.map_index as i32)) {
+                    if mi.no_teleport {
+                        send_system_message(&self.gate_ref, msg.session_id, "该地图无法使用传送魔法");
+                        return;
+                    }
+                }
+                // C# MagicTeleport：以绑定点为中心随机偏移（地图尺寸/(Lv+1)），最多 200 次尝试
+                let bind_map = state.bind_map_index;
+                let Some((map_w, map_h)) = self.bind_map_size(bind_map) else {
+                    send_system_message(&self.gate_ref, msg.session_id, "未设置绑定点");
+                    return;
+                };
+                let size_x = (map_w / (spell_level as i32 + 1)).max(1);
+                let size_y = (map_h / (spell_level as i32 + 1)).max(1);
+                let mut dest = None;
+                if let Some(map) = self.maps.get(&(bind_map as u16)) {
+                    for _ in 0..200 {
+                        let rx = state.bind_x + fastrand::i32(-size_x..=size_x);
+                        let ry = state.bind_y + fastrand::i32(-size_y..=size_y);
+                        if map.is_valid(rx, ry) && map.is_walkable(rx, ry) {
+                            dest = Some((rx, ry));
+                            break;
+                        }
+                    }
+                }
+                if let Some((rx, ry)) = dest {
+                    crate::actors::world::npc_script::teleport_player(
+                        self, msg.session_id, bind_map as u16, rx, ry).await;
+                    debug!("Magic: {} MagicTeleport to bind map {} ({},{})", state.name, bind_map, rx, ry);
+                } else {
+                    send_system_message(&self.gate_ref, msg.session_id, "传送失败，未找到合适位置");
+                }
+            }
+            SPELL_BLINK | SPELL_STORM_ESCAPE => {
                 if let Some(mi) = self.map_infos.get(&(state.map_index as i32)) {
                     if mi.no_teleport {
                         send_system_message(&self.gate_ref, msg.session_id, "该地图无法使用传送魔法");
@@ -1893,18 +1945,16 @@ impl Message<MagicRequest> for WorldActor {
                     .unwrap_or((i32::MAX, i32::MAX));
 
                 // Blink/StormEscape：距离校验 + 成功率（C# Random(4) >= Lv+1 失败）
-                if msg.spell == SPELL_BLINK || msg.spell == SPELL_STORM_ESCAPE {
-                    let dist = ((state.x - target_x).abs() + (state.y - target_y).abs()) as i32;
-                    let range = spell_db.map(|m| m.range as i32).unwrap_or(10);
-                    if dist > range {
-                        send_system_message(&self.gate_ref, msg.session_id, "距离超出闪现范围");
-                        return;
-                    }
-                    // 成功率 (level+1)/4：Random(4) >= level+1 则失败
-                    if fastrand::i32(0..4) >= spell_level as i32 + 1 {
-                        debug!("Magic: {} Blink failed (random miss)", state.name);
-                        return;
-                    }
+                let dist = ((state.x - target_x).abs() + (state.y - target_y).abs()) as i32;
+                let range = spell_db.map(|m| m.range as i32).unwrap_or(10);
+                if dist > range {
+                    send_system_message(&self.gate_ref, msg.session_id, "距离超出闪现范围");
+                    return;
+                }
+                // 成功率 (level+1)/4：Random(4) >= level+1 则失败
+                if fastrand::i32(0..4) >= spell_level as i32 + 1 {
+                    debug!("Magic: {} Blink failed (random miss)", state.name);
+                    return;
                 }
 
                 let tx = target_x.clamp(0, max_x - 1);
@@ -1917,7 +1967,7 @@ impl Message<MagicRequest> for WorldActor {
                     is_mounted: None,
                 }).await;
                 self.broadcast_position_change(msg.session_id, tx, ty, msg.direction).await;
-                debug!("Magic: {} teleports/blinks to ({}, {})", state.name, tx, ty);
+                debug!("Magic: {} blinks to ({}, {})", state.name, tx, ty);
             }
             // --- 弹道类法术（任务3）：FireBall/GreatFireBall/ThunderBolt/FrostCrunch/Vampirism ---
             // 对齐 C# HumanObject Fireball()/ThunderBolt()/Vampirism()：创建 DelayedAction，延迟后结算
