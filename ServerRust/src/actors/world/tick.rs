@@ -944,6 +944,7 @@ impl WorldActor {
                         last_hit_damage: 0,
                         undead: false,
                         master_session: None,
+                                rarity: 0,
                                 pet_experience: 0,
                                 max_pet_level: 0,
                         recall_at_tick: 0,
@@ -1198,17 +1199,31 @@ impl WorldActor {
                     move_interval: 2,
                     flee_threshold: 0.0,
                 });
-            // 精英判定：用 RarityConfig（C# MonsterRarityEliteChancePercent=0.1，缺省 3 兼容旧配置）
-            let is_elite = fastrand::u8(1..=100) <= self.rarity_cfg.elite_chance_percent;
+            // 稀有度判定（C# MonsterRarityData.Roll：Uncommon/Rare/Elite）
+            let rarity = crate::actors::world::roll_rarity(&self.rarity_cfg);
+            let is_elite = rarity >= 3;
             let monster_level = monster_info_opt.map(|i| i.level).unwrap_or(0);
             let monster_effect = monster_info_opt.map(|i| i.effect).unwrap_or(0);
-            let (name, hp, max_hp, min_dmg, max_dmg, xp) = if is_elite {
-                // 对齐 C# MonsterRarityData.Elite 倍率（config 驱动）
-                let hp_m = self.rarity_cfg.elite_hp_multiplier;
-                let dmg_m = self.rarity_cfg.elite_dmg_multiplier;
-                let xp_m = self.rarity_cfg.elite_xp_multiplier;
+            let (hp_m, dmg_m, xp_m, def_m) = match rarity {
+                3 => (self.rarity_cfg.elite_hp_multiplier,
+                      self.rarity_cfg.elite_dmg_multiplier,
+                      self.rarity_cfg.elite_xp_multiplier,
+                      self.rarity_cfg.elite_defense_multiplier),
+                2 => (self.rarity_cfg.rare_hp_multiplier,
+                      self.rarity_cfg.rare_damage_multiplier,
+                      self.rarity_cfg.rare_exp_multiplier,
+                      self.rarity_cfg.rare_defense_multiplier),
+                1 => (self.rarity_cfg.uncommon_hp_multiplier,
+                      self.rarity_cfg.uncommon_damage_multiplier,
+                      self.rarity_cfg.uncommon_exp_multiplier,
+                      self.rarity_cfg.uncommon_defense_multiplier),
+                _ => (1.0, 1.0, 1.0, 1.0),
+            };
+            let prefix = crate::actors::world::rarity_prefix(rarity);
+            let _def_m = def_m; // 防御倍率接线（Rust 怪物基础 AC 为 0，实际无效果）
+            let (name, hp, max_hp, min_dmg, max_dmg, xp) = if rarity > 0 {
                 (
-                    format!("[精英] {}", spawn.name),
+                    format!("{}{}", prefix, spawn.name),
                     (spawn.hp as f64 * hp_m).max(1.0) as i32,
                     (spawn.hp as f64 * hp_m).max(1.0) as i32,
                     (spawn.min_dmg as f64 * dmg_m) as i32,
@@ -1243,6 +1258,7 @@ impl WorldActor {
                 target_session: None,
                 last_hitter_session: None,
                 provoked: false,
+                rarity,
                 is_elite,
                 is_boss: false,
                 min_ac: 0,
@@ -1270,11 +1286,11 @@ impl WorldActor {
                 recall_at_tick: 0,
                 behavior: crate::actors::world::ai::make_behavior(&name),
             });
-            if is_elite {
+            if rarity > 0 {
                 let map_name = self.map_infos.get(&(spawn.map_index as i32)).map(|m| m.title.clone()).unwrap_or_else(|| "未知地图".to_string());
                 broadcast_system_message(&self.gate_ref, &self.players,
-                    &format!("一只 [精英]{} 出现在 {}！勇士们，前往讨伐！", spawn.name, map_name));
-                debug!("Elite monster '{}' spawned as #{} at ({},{})", name, new_oid, spawn.x, spawn.y);
+                    &format!("一只 {}{} 出现在 {}！勇士们，前往讨伐！", prefix.trim(), spawn.name, map_name));
+                debug!("Rarity monster '{}' (tier {}) spawned as #{} at ({},{})", name, rarity, new_oid, spawn.x, spawn.y);
             } else {
                 debug!("Monster '{}' respawned as #{}", spawn.name, new_oid);
             }
@@ -2079,6 +2095,7 @@ impl WorldActor {
             last_hit_damage: 0,
             undead: false,
             master_session: None,
+                                rarity: 0,
                                 pet_experience: 0,
                                 max_pet_level: 0,
             recall_at_tick: 0,
@@ -3977,6 +3994,7 @@ impl Message<Tick> for WorldActor {
                     last_hit_damage: 0,
             undead: false,
                     master_session: None,
+                                rarity: 0,
                                 pet_experience: 0,
                                 max_pet_level: 0,
                     recall_at_tick: 0,
@@ -4185,6 +4203,7 @@ impl Message<Tick> for WorldActor {
                             last_hit_damage: 0,
             undead: false,
                             master_session: None,
+                                rarity: 0,
                                 pet_experience: 0,
                                 max_pet_level: 0,
                             recall_at_tick: 0,

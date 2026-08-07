@@ -640,7 +640,7 @@ impl Message<StartGameRequest> for WorldActor {
         }
         // 先收集精英广播信息（move 前遍历）
         let elite_broadcasts: Vec<String> = new_monsters.iter()
-            .filter(|m| m.is_elite)
+            .filter(|m| m.rarity > 0)
             .map(|m| m.name.clone())
             .collect();
         for monster in new_monsters {
@@ -651,7 +651,7 @@ impl Message<StartGameRequest> for WorldActor {
         for name in &elite_broadcasts {
             let map_name = self.map_infos.get(&(map_index as i32)).map(|m| m.title.clone()).unwrap_or_else(|| "未知地图".to_string());
             broadcast_system_message(&self.gate_ref, &self.players,
-                &format!("一只 [精英]{} 出现在 {}！勇士们，前往讨伐！", name.strip_prefix("[精英] ").unwrap_or(name), map_name));
+                &format!("一只 {} 出现在 {}！勇士们，前往讨伐！", name, map_name));
         }
 
         // 同步当前地图上的地面物品给新玩家
@@ -1040,7 +1040,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                             self.npcs.insert(npc.object_id, npc);
                         }
                         let elite_broadcasts: Vec<String> = new_monsters.iter()
-                            .filter(|m| m.is_elite).map(|m| m.name.clone()).collect();
+                            .filter(|m| m.rarity > 0).map(|m| m.name.clone()).collect();
                         for monster in new_monsters {
                             self.monsters.insert(monster.object_id, monster);
                         }
@@ -1050,7 +1050,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                             let map_name = self.map_infos.get(&(dest_map_index)).map(|m| m.title.clone()).unwrap_or_else(|| "未知地图".to_string());
                             broadcast_system_message(
                                 &self.gate_ref, &self.players,
-                                &format!("一只 [精英]{} 出现在 {}！勇士们，前往讨伐！", name.strip_prefix("[精英] ").unwrap_or(name), map_name));
+                                &format!("一只 {} 出现在 {}！勇士们，前往讨伐！", name, map_name));
                         }
 
                         // 同步新地图上的地面物品

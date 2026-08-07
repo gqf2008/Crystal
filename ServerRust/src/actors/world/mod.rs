@@ -540,6 +540,8 @@ pub struct MonsterState {
     pub pet_experience: u64,
     /// 宠物最大等级（C# MonsterObject.MaxPetLevel）
     pub max_pet_level: u8,
+    /// 稀有度（0=普通 1=Uncommon 2=Rare 3=Elite；C# MonsterRarityData）
+    pub rarity: u8,
     /// AI 行为（Boss=专属 impl，普通怪=DefaultBehavior）
     pub behavior: Box<dyn crate::actors::world::ai::MonsterBehavior + Send + Sync>,
 }
@@ -1995,13 +1997,16 @@ impl WorldActor {
         let global_gold_mul = if self.tick_count < self.global_exp_event_end_tick {
             self.global_gold_multiplier
         } else { 1.0 };
-        // #1005：稀有度掉落加成（C# MonsterRarityProfile；Rust 仅 Elite）
-        let rarity_item_bonus = if monster.is_elite {
-            self.rarity_cfg.elite_item_drop_bonus_percent as f64
-        } else { 0.0 };
-        let rarity_gold_bonus = if monster.is_elite {
-            self.rarity_cfg.elite_gold_drop_bonus_percent as f64
-        } else { 0.0 };
+        // #1005/#1140：稀有度掉落加成（C# MonsterRarityProfile：Uncommon/Rare/Elite 档）
+        let (rarity_item_bonus, rarity_gold_bonus) = match monster.rarity {
+            3 => (self.rarity_cfg.elite_item_drop_bonus_percent as f64,
+                  self.rarity_cfg.elite_gold_drop_bonus_percent as f64),
+            2 => (self.rarity_cfg.rare_item_drop_bonus_percent as f64,
+                  self.rarity_cfg.rare_gold_drop_bonus_percent as f64),
+            1 => (self.rarity_cfg.uncommon_item_drop_bonus_percent as f64,
+                  self.rarity_cfg.uncommon_gold_drop_bonus_percent as f64),
+            _ => (0.0, 0.0),
+        };
         for drop in &drops {
             // C# Drop()：QuestRequired 条目普通掉落跳过（任务系统发放）
             if drop.quest_required {
@@ -3255,6 +3260,7 @@ impl WorldActor {
                                     last_hit_damage: 0,
             undead: false,
                                     master_session: None,
+                                rarity: 0,
                                 pet_experience: 0,
                                 max_pet_level: 0,
                                     recall_at_tick: 0,
@@ -3534,6 +3540,7 @@ impl WorldActor {
                                         luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
                                         poison_list: Vec::new(),
                                         last_hit_damage: 0, undead: info.undead,
+                                rarity: 0,
                                 pet_experience: 0,
                                 max_pet_level: 0,
                                         master_session: None, recall_at_tick: 0,
@@ -4242,6 +4249,7 @@ impl WorldActor {
                 last_hit_damage: 0,
                 undead: info.undead,
                 master_session: None,
+                                rarity: 0,
                                 pet_experience: 0,
                                 max_pet_level: 0,
                 recall_at_tick: 0,
@@ -5710,6 +5718,34 @@ fn guild_war_flags(
     (at_war, enemy)
 }
 
+/// C# MonsterRarityData.Roll：basis points（percent×100），random.Next(10000)
+/// 返回 0=普通 1=Uncommon 2=Rare 3=Elite
+fn roll_rarity(cfg: &crate::util::config::RarityConfig) -> u8 {
+    let elite_bp = (cfg.elite_chance_percent as f64 * 100.0).round() as i32;
+    let rare_bp = (cfg.rare_chance_percent * 100.0).round() as i32;
+    let uncommon_bp = (cfg.uncommon_chance_percent * 100.0).round() as i32;
+    let roll = fastrand::i32(0..10000);
+    if roll < elite_bp {
+        3
+    } else if roll < elite_bp + rare_bp {
+        2
+    } else if roll < elite_bp + rare_bp + uncommon_bp {
+        1
+    } else {
+        0
+    }
+}
+
+/// 稀有度显示前缀（C# 用 NameColour；Rust 客户端未实现颜色，用前缀近似）
+fn rarity_prefix(rarity: u8) -> &'static str {
+    match rarity {
+        3 => "[精英] ",
+        2 => "[稀有] ",
+        1 => "[罕见] ",
+        _ => "",
+    }
+}
+
 /// #926：物品绑定标志判定（C# BindMode.HasFlag；db::ItemInfo.bind_mode 与 SharedRust 位值一致）
 pub(crate) fn has_bind_flag(bind_mode: i32, flag: u16) -> bool {
     (bind_mode as u16 & flag) != 0
@@ -6248,16 +6284,28 @@ async fn spawn_npcs_and_monsters(
         monster_pos.x = mx;
         monster_pos.y = my;
 
-        // 精英判定（C# Settings.MonsterRarity* 配置化）
-        let is_elite = fastrand::u8(1..=100) <= ctx.rarity.elite_chance_percent;
-        let (name, hp, max_hp, min_dmg, max_dmg, xp) = if is_elite {
+        // 稀有度判定（C# MonsterRarityData.Roll：Uncommon/Rare/Elite）
+        let rarity = roll_rarity(&ctx.rarity);
+        let is_elite = rarity >= 3;
+        let (hp_m, dmg_m, xp_m, def_m) = match rarity {
+            3 => (ctx.rarity.elite_hp_multiplier, ctx.rarity.elite_dmg_multiplier,
+                  ctx.rarity.elite_xp_multiplier, ctx.rarity.elite_defense_multiplier),
+            2 => (ctx.rarity.rare_hp_multiplier, ctx.rarity.rare_damage_multiplier,
+                  ctx.rarity.rare_exp_multiplier, ctx.rarity.rare_defense_multiplier),
+            1 => (ctx.rarity.uncommon_hp_multiplier, ctx.rarity.uncommon_damage_multiplier,
+                  ctx.rarity.uncommon_exp_multiplier, ctx.rarity.uncommon_defense_multiplier),
+            _ => (1.0, 1.0, 1.0, 1.0),
+        };
+        let _def_m = def_m;
+        let prefix = rarity_prefix(rarity);
+        let (name, hp, max_hp, min_dmg, max_dmg, xp) = if rarity > 0 {
             (
-                format!("[精英] {}", monster.name),
-                (monster.hp as f64 * ctx.rarity.elite_hp_multiplier).max(1.0) as i32,
-                (monster.hp as f64 * ctx.rarity.elite_hp_multiplier).max(1.0) as i32,
-                (monster.min_dmg as f64 * ctx.rarity.elite_dmg_multiplier) as i32,
-                (monster.max_dmg as f64 * ctx.rarity.elite_dmg_multiplier) as i32,
-                (monster.xp as f64 * ctx.rarity.elite_xp_multiplier).max(1.0) as i32,
+                format!("{}{}", prefix, monster.name),
+                (monster.hp as f64 * hp_m).max(1.0) as i32,
+                (monster.hp as f64 * hp_m).max(1.0) as i32,
+                (monster.min_dmg as f64 * dmg_m) as i32,
+                (monster.max_dmg as f64 * dmg_m) as i32,
+                (monster.xp as f64 * xp_m).max(1.0) as i32,
             )
         } else {
             (monster.name.clone(), monster.hp, monster.hp, monster.min_dmg, monster.max_dmg, monster.xp)
@@ -6307,6 +6355,7 @@ async fn spawn_npcs_and_monsters(
             target_session: None,
             last_hitter_session: None,
             provoked: false,
+            rarity,
             is_elite,
             is_boss: false,
             min_ac: 0,
@@ -6413,6 +6462,7 @@ async fn spawn_npcs_and_monsters(
                         last_hit_damage: 0,
             undead: false,
                         master_session: None,
+                                rarity: 0,
                                 pet_experience: 0,
                                 max_pet_level: 0,
                         recall_at_tick: 0,
@@ -6532,6 +6582,7 @@ mod tests {
             last_hit_damage: 0,
             undead: false,
             master_session: None,
+                                rarity: 0,
                                 pet_experience: 0,
                                 max_pet_level: 0,
             recall_at_tick: 0,
@@ -6596,6 +6647,24 @@ mod tests {
 
         awake.levels = vec![1, 1, 1, 1, 1];
         assert!(awake.is_max_level());
+    }
+    /// #1140：C# MonsterRarityData——稀有度前缀（Uncommon/Rare/Elite）
+    #[test]
+    fn test_rarity_prefix() {
+        assert_eq!(rarity_prefix(3), "[精英] ");
+        assert_eq!(rarity_prefix(2), "[稀有] ");
+        assert_eq!(rarity_prefix(1), "[罕见] ");
+        assert_eq!(rarity_prefix(0), "");
+    }
+
+    /// #1140：roll_rarity 返回值域 0..=3
+    #[test]
+    fn test_roll_rarity_range() {
+        let cfg = crate::util::config::RarityConfig::default();
+        for _ in 0..200 {
+            let r = roll_rarity(&cfg);
+            assert!(r <= 3);
+        }
     }
 }
 
