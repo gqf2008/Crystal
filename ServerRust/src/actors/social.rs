@@ -270,6 +270,39 @@ impl Message<NpcGetGuildMemberOptions> for SocialActor {
     }
 }
 
+/// WorldActor -> SocialActor: 行会金币扣除（宣战费用 C# Guild_WarCost）
+pub struct GuildDeductGold {
+    pub guild_name: String,
+    pub amount: u64,
+}
+
+impl Message<GuildDeductGold> for SocialActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: GuildDeductGold, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let Some(guild) = self.guilds.get_mut(&msg.guild_name) else { return false };
+        if guild.gold < msg.amount {
+            return false;
+        }
+        guild.gold -= msg.amount;
+        self.save_guild_to_db(&msg.guild_name).await;
+        true
+    }
+}
+
+/// WorldActor -> SocialActor: 查询行会是否存在（宣战目标校验）
+pub struct NpcGuildExists {
+    pub guild_name: String,
+}
+
+impl Message<NpcGuildExists> for SocialActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: NpcGuildExists, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.guilds.contains_key(&msg.guild_name)
+    }
+}
+
 /// WorldActor -> SocialActor: 读取行会激活的 Buff 列表（C# GuildObject.BuffList）
 pub struct NpcGetGuildBuffs {
     pub guild_name: String,
