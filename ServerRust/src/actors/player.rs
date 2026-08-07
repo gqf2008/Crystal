@@ -2049,6 +2049,13 @@ impl Message<RepairAllEquipment> for PlayerActor {
         let mut any_repaired = false;
         for slot_idx in 0..crate::actors::inventory::EquipmentSlot::COUNT {
             if let Some(ref mut item) = self.state.inventory.equipment[slot_idx] {
+                // #926：C# BindMode.DontRepair(0x20)：不可修理
+                let dont_repair = item.info.as_ref()
+                    .map(|i| i.bind.contains(mir2_shared::enums::BindMode::DONT_REPAIR))
+                    .unwrap_or(false);
+                if dont_repair {
+                    continue;
+                }
                 if item.current_dura < item.max_dura {
                     item.current_dura = item.max_dura;
                     item.dura_changed = true;
@@ -2058,6 +2065,36 @@ impl Message<RepairAllEquipment> for PlayerActor {
         }
         if any_repaired {
             self.send_equipment_changed();
+        }
+    }
+}
+
+/// #926：设置物品灵魂绑定（C# BindOnEquip → SoulBoundId = 角色 Index；Rust 用 1 作已绑定哨兵）
+pub struct SetItemSoulBound {
+    pub unique_id: u64,
+    pub bound: bool,
+}
+
+impl Message<SetItemSoulBound> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetItemSoulBound,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        let value = if msg.bound { 1 } else { 0 };
+        for slot in self.state.inventory.equipment.iter_mut().flatten() {
+            if slot.unique_id == msg.unique_id {
+                slot.soul_bound_id = value;
+                return;
+            }
+        }
+        for s in self.state.inventory.backpack.iter_mut().flatten() {
+            if s.item.unique_id == msg.unique_id {
+                s.item.soul_bound_id = value;
+                return;
+            }
         }
     }
 }

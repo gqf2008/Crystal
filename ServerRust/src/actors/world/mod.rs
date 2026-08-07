@@ -2500,6 +2500,10 @@ impl WorldActor {
                                     }
                                     needs_repair = true;
                                     let Some(info) = self.item_infos.get(&slot.item_index) else { continue };
+                                    // #926：C# BindMode.DontRepair(0x20)：不可修理（不计费不修）
+                                    if has_bind_flag(info.bind_mode, mir2_shared::enums::BindMode::DONT_REPAIR.bits()) {
+                                        continue;
+                                    }
                                     if info.durability == 0 || info.price <= 0 {
                                         continue;
                                     }
@@ -5247,6 +5251,11 @@ fn guild_war_flags(
     (at_war, enemy)
 }
 
+/// #926：物品绑定标志判定（C# BindMode.HasFlag；db::ItemInfo.bind_mode 与 SharedRust 位值一致）
+pub(crate) fn has_bind_flag(bind_mode: i32, flag: u16) -> bool {
+    (bind_mode as u16 & flag) != 0
+}
+
 /// 检查攻击者是否可以在当前攻击模式下攻击目标玩家
 fn can_attack_player(attacker: &PlayerState, target: &PlayerState) -> bool {
     use mir2_shared::enums::AttackMode;
@@ -6341,5 +6350,19 @@ mod set_bonus_tests {
         // 非战：PK>=100 → Yellow；否则 White(0)
         assert_eq!(name_colour_for_viewer(150, false, false, None, None, false, false), 0xFFFFFF00u32 as i32);
         assert_eq!(name_colour_for_viewer(50, false, false, None, None, false, false), 0);
+    }
+
+    #[test]
+    fn test_has_bind_flag() {
+        // #926：C# BindMode 位值
+        use super::has_bind_flag;
+        let bind = mir2_shared::enums::BindMode::DONT_DROP.bits()
+            | mir2_shared::enums::BindMode::DONT_STORE.bits()
+            | mir2_shared::enums::BindMode::DONT_REPAIR.bits();
+        assert!(has_bind_flag(bind as i32, mir2_shared::enums::BindMode::DONT_DROP.bits()));
+        assert!(has_bind_flag(bind as i32, mir2_shared::enums::BindMode::DONT_STORE.bits()));
+        assert!(has_bind_flag(bind as i32, mir2_shared::enums::BindMode::DONT_REPAIR.bits()));
+        assert!(!has_bind_flag(bind as i32, mir2_shared::enums::BindMode::DONT_TRADE.bits()));
+        assert!(!has_bind_flag(0, mir2_shared::enums::BindMode::BIND_ON_EQUIP.bits()));
     }
 }

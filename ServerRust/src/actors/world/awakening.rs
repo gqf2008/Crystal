@@ -20,8 +20,17 @@ impl Message<DepositRefineItemRequest> for WorldActor {
         };
 
         // 检查物品是否在背包中
-        if state.inventory.get_item(msg.unique_id).is_none() {
+        let Some(item) = state.inventory.get_item(msg.unique_id) else {
             send_system_message(&self.gate_ref, msg.session_id, "物品不存在");
+            return;
+        };
+
+        // #926：C# BindMode.DontUpgrade(0x40)：不可精炼/升级
+        if self.item_infos.get(&item.item_index)
+            .map(|i| super::has_bind_flag(i.bind_mode, mir2_shared::enums::BindMode::DONT_UPGRADE.bits()))
+            .unwrap_or(false)
+        {
+            send_system_message(&self.gate_ref, msg.session_id, "该物品无法精炼");
             return;
         }
 
