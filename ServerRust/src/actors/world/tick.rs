@@ -771,6 +771,8 @@ impl WorldActor {
                         x: bs.x, y: bs.y, direction: 0,
                         hp, min_dmg, max_dmg, xp: info.experience,
                         map_index,
+                        count: 1,
+                        spread: 0,
                     };
                     let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
                     for session_id in self.players.keys() {
@@ -787,6 +789,7 @@ impl WorldActor {
                         x: bs.x, y: bs.y, direction: 0,
                         hp, max_hp: hp, min_dmg, max_dmg, xp: spawn.xp,
                         spawn_x: bs.x, spawn_y: bs.y, map_index,
+                        spawn_spread: 0,
                         next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
                         ai_profile, ai_state: MonsterAiState::Idle,
                         target_session: None, provoked: false,
@@ -997,7 +1000,12 @@ impl WorldActor {
         for (oid, spawn) in to_respawn {
             self.respawn_queue.remove(&oid);
             let new_oid = self.alloc_object_id();
-            let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
+            // C# RespawnInfo.Spread：重生时在出生点 ±spread 内随机可走格落点
+            let (rx, ry) = random_spawn_pos(self.maps.get(&spawn.map_index), spawn.x, spawn.y, spawn.spread);
+            let mut respawn_pos = spawn.clone();
+            respawn_pos.x = rx;
+            respawn_pos.y = ry;
+            let packet = build_object_monster_packet(&respawn_pos, new_oid, &spawn.name);
             for session_id in self.players.keys() {
                 let _ = self.gate_ref.tell(SendToClient {
                     session_id: *session_id,
@@ -1034,8 +1042,8 @@ impl WorldActor {
                 name: name.clone(),
                 image: spawn.image,
                 monster_index: spawn.monster_index,
-                x: spawn.x,
-                y: spawn.y,
+                x: rx,
+                y: ry,
                 direction: spawn.direction,
                 hp,
                 max_hp,
@@ -1044,6 +1052,7 @@ impl WorldActor {
                 xp,
                 spawn_x: spawn.x,
                 spawn_y: spawn.y,
+                spawn_spread: spawn.spread,
                 map_index: spawn.map_index,
                 next_attack_tick: 0,
                 next_move_tick: 0,
@@ -1859,6 +1868,7 @@ impl WorldActor {
             xp: boss_xp,
             spawn_x: dragon_info.location_x,
             spawn_y: dragon_info.location_y,
+            spawn_spread: 0,
             map_index: dragon_map_u16,
             next_attack_tick: 0,
             next_move_tick: 0,
@@ -1902,6 +1912,8 @@ impl WorldActor {
                 max_dmg: boss_max_dmg,
                 xp: boss_xp,
                 map_index: dragon_map_u16,
+                count: 1,
+                spread: 0,
             }, spawn_oid, &format!("[龙] {}", monster_info.name),
         );
         for session_id in self.players.keys() {
@@ -3215,6 +3227,8 @@ impl Message<Tick> for WorldActor {
                                             max_dmg: (monster.max_dmg / 2).max(1),
                                             xp: (monster.xp / 2).max(1),
                                             map_index: monster.map_index,
+                                            count: 1,
+                                            spread: 0,
                                         });
                                         spawn_count += 1;
                                     }
@@ -3503,6 +3517,7 @@ impl Message<Tick> for WorldActor {
                     xp: spawn.xp,
                     spawn_x: spawn.x,
                     spawn_y: spawn.y,
+                    spawn_spread: 0,
                     map_index: spawn.map_index,
                     next_attack_tick: 0,
                     next_move_tick: 0,
@@ -3657,6 +3672,8 @@ impl Message<Tick> for WorldActor {
                             max_dmg,
                             xp: info.experience,
                             map_index,
+                            count: 1,
+                            spread: 0,
                         };
                         let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
                         for session_id in self.players.keys() {
@@ -3674,6 +3691,7 @@ impl Message<Tick> for WorldActor {
                             x: bs.x, y: bs.y, direction: 0,
                             hp, max_hp: hp, min_dmg, max_dmg, xp: spawn.xp,
                             spawn_x: bs.x, spawn_y: bs.y, map_index,
+                            spawn_spread: 0,
                             next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
                             ai_profile, ai_state: MonsterAiState::Idle,
                             target_session: None, provoked: false,
@@ -4065,6 +4083,8 @@ impl Message<Tick> for WorldActor {
                         max_dmg: monster.max_dmg,
                         xp: monster.xp,
                         map_index: monster.map_index,
+                        count: 1,
+                        spread: monster.spawn_spread,
                     };
                     self.respawn_queue.insert(*oid, (spawn, respawn_tick));
                     // 死亡回调（C# Die 覆盖：HumanAssassin 爆炸 / KingHydrax 召唤等）——

@@ -587,6 +587,7 @@ impl Message<StartGameRequest> for WorldActor {
             msg.session_id,
             &mut self.next_object_id,
             &spawn_ctx,
+            self.maps.get(&map_slot),
         ).await;
         for npc in new_npcs {
             self.npcs.insert(npc.object_id, npc);
@@ -1017,6 +1018,7 @@ impl Message<WorldMoveRequest> for WorldActor {
                             msg.session_id,
                             &mut self.next_object_id,
                             &spawn_ctx,
+                            self.maps.get(&(dest_map_index as u16)),
                         ).await;
                         for npc in new_npcs {
                             self.npcs.insert(npc.object_id, npc);
