@@ -490,9 +490,9 @@ impl WorldActor {
         }
     }
 
-/// PK 值衰减 + 名字颜色广播（每 10 ticks）
+/// PK 值衰减 + 名字颜色广播（C# MapObject.Process：每 Settings.PKDelay=12 秒衰减 1 点）
     pub(crate) async fn tick_pk_decay(&mut self) {
-        if self.tick_count % 10 == 0 {
+        if self.tick_count % 120 == 0 { // 12s × 10 ticks/s
             let mut colour_changes = Vec::new();
             for (session_id, record) in &self.players {
                 let _ = record.actor_ref.ask(crate::actors::player::DecayPkPoints).await;
