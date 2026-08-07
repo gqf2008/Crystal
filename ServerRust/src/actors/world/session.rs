@@ -319,6 +319,7 @@ impl Message<StartGameRequest> for WorldActor {
             name: player_name.clone(),
             account_username: msg.account_username.clone(),
             last_pk_points: loaded_state.pk_points,
+            last_colour: 0,
             object_id: loaded_state.object_id,
             world_map_setup_sent: false,
         });
@@ -400,7 +401,7 @@ impl Message<StartGameRequest> for WorldActor {
             .map(|info| info.effect as i16).unwrap_or(0);
         let self_packet = build_object_player_packet(
             &player_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction,
-            loaded_state.level, name_colour_for_pk(loaded_state.pk_points),
+            loaded_state.level, name_colour_for_pk(loaded_state.pk_points, is_brown(loaded_state.brown_until_ms)),
             loaded_state.class, loaded_state.gender, loaded_state.hair,
             self_weapon, self_weapon_effect, self_armor,
             loaded_state.mount_type, loaded_state.is_mounted,
@@ -435,7 +436,7 @@ impl Message<StartGameRequest> for WorldActor {
                     .map(|info| info.effect as i16).unwrap_or(0);
                 let packet = build_object_player_packet(
                     &ep_state.name, ep_state.object_id, ep_state.x, ep_state.y, ep_state.direction, ep_state.level,
-                    name_colour_for_pk(ep_state.pk_points),
+                    name_colour_for_pk(ep_state.pk_points, is_brown(ep_state.brown_until_ms)),
                     ep_state.class, ep_state.gender, ep_state.hair,
                     ep_weapon, ep_weapon_effect, ep_armor,
                     ep_state.mount_type, ep_state.is_mounted,
@@ -466,7 +467,7 @@ impl Message<StartGameRequest> for WorldActor {
                 .map(|info| info.effect as i16).unwrap_or(0);
             let new_player_packet = build_object_player_packet(
                 &player_name, object_id, loaded_state.x, loaded_state.y, loaded_state.direction, loaded_state.level,
-                name_colour_for_pk(loaded_state.pk_points),
+                name_colour_for_pk(loaded_state.pk_points, is_brown(loaded_state.brown_until_ms)),
                 loaded_state.class, loaded_state.gender, loaded_state.hair,
                 new_weapon, new_weapon_effect, new_armor,
                 loaded_state.mount_type, loaded_state.is_mounted,
@@ -2017,5 +2018,6 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
             is_mentor: false,
             mentor_damage_bonus: false,
             newbie_exp_bonus: false,
+            brown_until_ms: 0,
     }
 }

@@ -580,7 +580,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                                 if let Ok(Some(attacker_state)) = record.actor_ref.ask(GetPlayerState).await {
                                     let colour_packet = build_object_colour_changed_packet(
                                         attacker_state.object_id,
-                                        name_colour_for_pk(attacker_state.pk_points),
+                                        name_colour_for_pk(attacker_state.pk_points, is_brown(attacker_state.brown_until_ms)),
                                     );
                                     for (sid, _) in &self.players {
                                         let _ = self.gate_ref.tell(SendToClient {
@@ -1149,7 +1149,7 @@ impl Message<RangeAttackRequest> for WorldActor {
                             if let Ok(Some(attacker_state)) = record.actor_ref.ask(GetPlayerState).await {
                                 let colour_packet = build_object_colour_changed_packet(
                                     attacker_state.object_id,
-                                    name_colour_for_pk(attacker_state.pk_points),
+                                    name_colour_for_pk(attacker_state.pk_points, is_brown(attacker_state.brown_until_ms)),
                                 );
                                 for (sid, _) in &self.players {
                                     let _ = self.gate_ref.tell(SendToClient {
