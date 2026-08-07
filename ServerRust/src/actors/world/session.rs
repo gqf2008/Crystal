@@ -1797,6 +1797,84 @@ impl Message<ChatRequest> for WorldActor {
                     }
                     return;
                 }
+                Some("GATES") => {
+                    // C# case "GATES"（~3932）：行会城门开关（领地拥有者 + 副会长/会长 + 非开战）
+                    let state = match record.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(s)) => s,
+                        _ => return,
+                    };
+                    let Some(guild) = state.guild_name.clone() else {
+                        send_system_message(&self.gate_ref, msg.session_id, "没有行会，无法控制城门");
+                        return;
+                    };
+                    if state.guild_rank == crate::actors::guild::GuildRank::Member {
+                        send_system_message(&self.gate_ref, msg.session_id, "没有权限控制城门");
+                        return;
+                    }
+                    let Some(inst) = self.conquest_instances.iter()
+                        .find(|c| c.owner_guild.as_deref() == Some(guild.as_str()))
+                        .cloned()
+                    else {
+                        send_system_message(&self.gate_ref, msg.session_id, "你的行会没有领地");
+                        return;
+                    };
+                    if inst.state == crate::actors::world::conquest::WarState::InProgress {
+                        send_system_message(&self.gate_ref, msg.session_id, "攻城期间无法控制城门");
+                        return;
+                    }
+                    // 参数：OPEN / CLOSE / 无参（逐门翻转，C# 按各门当前 Closed 状态）
+                    let cmd = parts.get(1).map(|s| s.to_uppercase());
+                    let force_close = match cmd.as_deref() {
+                        Some("CLOSE") => Some(true),
+                        Some("OPEN") => Some(false),
+                        None => None,
+                        Some(_) => {
+                            send_system_message(&self.gate_ref, msg.session_id, "用法：@gates [open|close]");
+                            return;
+                        }
+                    };
+                    // 收集领地城门（排序与 find_siege_structure 的 1-based id 一致）
+                    let mut gates: Vec<u32> = self.siege_structures.iter()
+                        .filter(|(_, s)| {
+                            s.conquest_id == inst.id
+                                && s.structure_type == crate::actors::world::conquest::SiegeStructureType::CastleGate
+                                && s.hp > 0
+                        })
+                        .map(|(oid, _)| *oid)
+                        .collect();
+                    gates.sort();
+                    let map_index = inst.map_index as u16;
+                    let mut any_closed = false;
+                    for (i, oid) in gates.iter().enumerate() {
+                        let gate_id = (i + 1) as u8;
+                        let close = match force_close {
+                            Some(c) => c,
+                            None => !self.siege_structures.get(oid).map(|s| s.is_open).unwrap_or(false),
+                        };
+                        if let Some(s) = self.siege_structures.get_mut(oid) {
+                            s.is_open = !close;
+                        }
+                        any_closed |= close;
+                        super::broadcast_opendoor_async(
+                            &self.gate_ref,
+                            &self.players,
+                            map_index,
+                            gate_id,
+                            close,
+                            msg.session_id,
+                        ).await;
+                    }
+                    if !gates.is_empty() {
+                        send_system_message(
+                            &self.gate_ref,
+                            msg.session_id,
+                            if any_closed { "城门已关闭" } else { "城门已打开" },
+                        );
+                    } else {
+                        send_system_message(&self.gate_ref, msg.session_id, "领地没有可控制的城门");
+                    }
+                    return;
+                }
                 Some("ALLOWGUILD") => {
                     // C# case "ALLOWGUILD"（~2466）：切换 EnableGuildInvite + 提示
                     let mut new_state = match record.actor_ref.ask(GetPlayerState).await {
