@@ -303,6 +303,10 @@ pub struct PlayerState {
     pub drop_multiplier: f64,
     /// 掉落倍率过期时间（WorldActor tick count）
     pub drop_multiplier_end_tick: u64,
+    /// 装备掉落率加成 %（C# Stat.ItemDropRatePercent）
+    pub item_drop_rate_percent: i32,
+    /// 装备金币掉落率加成 %（C# Stat.GoldDropRatePercent）
+    pub gold_drop_rate_percent: i32,
     /// 元素等级（C# HumanObject.ElementsLevel，弓手元素球）
     pub elements_level: i32,
     /// 是否已有元素（C# HumanObject.HasElemental）
@@ -668,6 +672,8 @@ allow_group: false,
                 exp_multiplier_end_tick: 0,
             drop_multiplier: 1.0,
             drop_multiplier_end_tick: 0,
+            item_drop_rate_percent: 0,
+            gold_drop_rate_percent: 0,
             elements_level: 0,
             has_elemental: false,
             concentration_interrupted: false,
@@ -1915,6 +1921,9 @@ pub struct SetStatBonuses {
     pub attack_speed: i32,
     pub poison_resist: i32,
     pub holy: i32,
+    /// #1000：装备掉落率加成（C# Stat.ItemDropRatePercent/GoldDropRatePercent）
+    pub item_drop_rate_percent: i32,
+    pub gold_drop_rate_percent: i32,
 }
 
 impl Message<SetStatBonuses> for PlayerActor {
@@ -2004,6 +2013,9 @@ impl Message<SetStatBonuses> for PlayerActor {
         self.state.attack_speed = msg.attack_speed;
         self.state.poison_resist = msg.poison_resist;
         self.state.holy = msg.holy;
+        // #1000：掉落率加成（非战斗属性，直接覆盖）
+        self.state.item_drop_rate_percent = msg.item_drop_rate_percent;
+        self.state.gold_drop_rate_percent = msg.gold_drop_rate_percent;
 
         if changed {
             self.send_user_information_refresh();
@@ -4994,6 +5006,8 @@ allow_group: false,
             exp_multiplier_end_tick: 0,
             drop_multiplier: 1.0,
             drop_multiplier_end_tick: 0,
+            item_drop_rate_percent: 0,
+            gold_drop_rate_percent: 0,
             auto_pot_hp: 0,
             auto_pot_mp: 0,
             auto_pot_hp_item: -1,

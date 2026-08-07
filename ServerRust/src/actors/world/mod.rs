@@ -1858,24 +1858,27 @@ impl WorldActor {
         let global_drop_mul = if self.tick_count < self.global_exp_event_end_tick {
             self.global_drop_multiplier
         } else { 1.0 };
-        // 玩家掉落 Buff（Potion shape 5 Drop，C# BuffType.Drop）：按击杀目标 target_session 查找
-        let player_drop_mul: f64 = if let Some(sid) = monster.target_session {
-            if let Some(record) = self.players.get(&sid) {
-                if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                    if self.tick_count < state.drop_multiplier_end_tick {
-                        state.drop_multiplier
+        // 玩家掉落相关（C# EXPOwner）：掉落 Buff（Potion shape 5 Drop）+ 装备掉落率加成（#1000）
+        // 返回 (drop_multiplier, item_drop_rate_percent, gold_drop_rate_percent)
+        let (player_drop_mul, item_drop_pct, gold_drop_pct): (f64, f64, f64) =
+            if let Some(sid) = monster.target_session {
+                if let Some(record) = self.players.get(&sid) {
+                    if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                        let drop_mul = if self.tick_count < state.drop_multiplier_end_tick {
+                            state.drop_multiplier
+                        } else {
+                            1.0
+                        };
+                        (drop_mul, state.item_drop_rate_percent as f64, state.gold_drop_rate_percent as f64)
                     } else {
-                        1.0
+                        (1.0, 0.0, 0.0)
                     }
                 } else {
-                    1.0
+                    (1.0, 0.0, 0.0)
                 }
             } else {
-                1.0
-            }
-        } else {
-            1.0
-        };
+                (1.0, 0.0, 0.0)
+            };
 
         let global_gold_mul = if self.tick_count < self.global_exp_event_end_tick {
             self.global_gold_multiplier
@@ -1886,14 +1889,16 @@ impl WorldActor {
                 continue;
             }
             let roll = fastrand::f64();
-            // 全局掉落倍率（C# Settings.DropRate）+ 玩家掉落 Buff：chance * drop_rate * drop_buff，上限 1.0
-            let effective_chance = (drop.chance * self.drop_rate * player_drop_mul).min(1.0);
+            // 全局掉落倍率（C# Settings.DropRate）+ 玩家掉落 Buff + 装备 ItemDropRatePercent（#1000）
+            let item_factor = 1.0 + item_drop_pct / 100.0;
+            let effective_chance = (drop.chance * self.drop_rate * player_drop_mul * item_factor).min(1.0);
             if roll > effective_chance {
                 continue;
             }
-            // #995：金币条目（C# DropInfo.Gold → DropGold，按金币倍率）
+            // #995：金币条目（C# DropInfo.Gold → DropGold，按金币倍率 + GoldDropRatePercent）
             if drop.gold > 0 {
-                let gold = (drop.gold as f64 * global_gold_mul).round() as u64;
+                let gold_factor = 1.0 + gold_drop_pct / 100.0;
+                let gold = (drop.gold as f64 * global_gold_mul * gold_factor).round() as u64;
                 self.spawn_gold_drop(monster, gold).await;
                 continue;
             }
@@ -1909,7 +1914,8 @@ impl WorldActor {
         // 精英怪额外掉落判定（50% 原概率）
         if monster.is_elite {
             for drop in &drops {
-                let bonus_chance = drop.chance * 0.5;
+                // #1000：装备 ItemDropRatePercent 对精英额外判定同样生效（C# AttemptDrop 共用加成）
+                let bonus_chance = drop.chance * 0.5 * (1.0 + item_drop_pct / 100.0);
                 let roll = fastrand::f64();
                 if roll > bonus_chance {
                     continue;
@@ -1926,7 +1932,9 @@ impl WorldActor {
 
         // 世界Boss额外掉落：大量金币 + 全掉落保底
         if monster.is_boss {
-            let gold_drop = (fastrand::u32(5000..=20000) as f64 * global_gold_mul).round() as u64;
+            // #1000：装备 GoldDropRatePercent 对 Boss 金币同样生效
+            let gold_factor = 1.0 + gold_drop_pct / 100.0;
+            let gold_drop = (fastrand::u32(5000..=20000) as f64 * global_gold_mul * gold_factor).round() as u64;
             self.spawn_gold_drop(monster, gold_drop).await;
             for drop in &drops {
                 let count = if drop.max_count > drop.min_count {
@@ -4371,6 +4379,8 @@ impl WorldActor {
             attack_speed: b.attack_speed,
             poison_resist: b.poison_resist,
             holy: b.holy,
+            item_drop_rate_percent: b.item_drop_rate_percent,
+            gold_drop_rate_percent: b.gold_drop_rate_percent,
         }).await;
         Some(state)
     }
@@ -4752,6 +4762,9 @@ pub struct EquipmentBonuses {
     pub health_recovery: i32, pub spell_recovery: i32,
     pub attack_speed: i32, pub poison_resist: i32,
     pub holy: i32,
+    // #1000：装备掉落率加成（C# Stat.ItemDropRatePercent/GoldDropRatePercent）
+    pub item_drop_rate_percent: i32,
+    pub gold_drop_rate_percent: i32,
     // #908：负重上限加成（C# RefreshItemSetStats/RefreshMirSetStats/RefreshEquipmentStats）
     pub bag_weight: i32, pub wear_weight: i32, pub hand_weight: i32,
     /// C# SpecialItemMode.Muscle（0x20）：负重上限翻倍
@@ -4795,6 +4808,8 @@ fn calculate_equipment_bonuses(
             b.spell_recovery += get(Stat::SpellRecovery);
             b.attack_speed += get(Stat::AttackSpeed);
             b.poison_resist += get(Stat::PoisonResist);
+            b.item_drop_rate_percent += get(Stat::ItemDropRatePercent);
+            b.gold_drop_rate_percent += get(Stat::GoldDropRatePercent);
             b.bag_weight += get(Stat::BagWeight);
             b.wear_weight += get(Stat::WearWeight);
             b.hand_weight += get(Stat::HandWeight);
