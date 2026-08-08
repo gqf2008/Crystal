@@ -57,6 +57,8 @@ pub struct Guild {
     pub notice: Vec<String>,
     /// 成员列表
     pub members: Vec<GuildMember>,
+    /// 职务名（3 固定职务，C# 自定义职务名的简化；可改名）
+    pub rank_names: [String; 3],
     /// 行会金币（仓库）
     pub gold: u64,
     /// 行会仓库物品（最多 100 格）
@@ -87,6 +89,11 @@ impl Guild {
                 "".to_string(),
                 "".to_string(),
                 "".to_string(),
+            ],
+            rank_names: [
+                "会长".to_string(),
+                "副会长".to_string(),
+                "成员".to_string(),
             ],
             members: vec![GuildMember {
                 name: leader_name,

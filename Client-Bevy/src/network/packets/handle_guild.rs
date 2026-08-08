@@ -100,6 +100,15 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
                 let mut cur = std::io::Cursor::new(body);
                 let name = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
                 let leader = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
+                // #1362：职务名（3 个，C# 自定义职务名简化）
+                let mut rank_names = [
+                    "会长".to_string(),
+                    "副会长".to_string(),
+                    "成员".to_string(),
+                ];
+                for slot in rank_names.iter_mut() {
+                    *slot = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
+                }
                 let notice_count = cur.read_u8().unwrap_or(0) as usize;
                 let mut notice = Vec::new();
                 for _ in 0..notice_count {
@@ -126,6 +135,7 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
                 server_events.write(ServerEvent::GuildData {
                     name,
                     leader,
+                    rank_names,
                     notice,
                     members,
                     gold,
