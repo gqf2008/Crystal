@@ -45,6 +45,12 @@ pub struct GameShopState {
     pub item_names: HashMap<i32, String>,
     /// 搜索关键词（C# GameshopDialog Search，本地按名称过滤）
     pub search: String,
+    /// 分类列表（第 0 项 = 全部，C# Filters[22]；服务端 category 去重保序）
+    pub categories: Vec<String>,
+    /// 当前选中分类（空 = 全部）
+    pub category: String,
+    /// 分类列表翻页（每页 10 行，C# Up/Down/PositionBar）
+    pub category_page: usize,
 }
 
 #[derive(Component)]
@@ -59,16 +65,27 @@ pub struct GameShopBuy;
 #[derive(Component)]
 pub struct GameShopLine(usize);
 
-/// 按名称过滤商城商品（C# GameshopDialog Search：FriendlyName.Contains(keyword)，返回 items 下标）
-fn filter_shop_items(items: &[ShopItem], search: &str) -> Vec<usize> {
+#[derive(Component)]
+pub struct GameShopCat(usize);
+
+#[derive(Component)]
+pub struct GameShopCatUp;
+
+#[derive(Component)]
+pub struct GameShopCatDown;
+
+/// 按名称+分类过滤商城商品（C# GameshopDialog Search + Filters：FriendlyName.Contains / category 相等，返回 items 下标）
+fn filter_shop_items(items: &[ShopItem], search: &str, category: &str) -> Vec<usize> {
     let kw = search.trim().to_lowercase();
-    if kw.is_empty() {
-        return (0..items.len()).collect();
-    }
     items
         .iter()
         .enumerate()
-        .filter(|(_, it)| it.name.to_lowercase().contains(&kw))
+        .filter(|(_, it)| {
+            if !category.is_empty() && it.category != category {
+                return false;
+            }
+            kw.is_empty() || it.name.to_lowercase().contains(&kw)
+        })
         .map(|(i, _)| i)
         .collect()
 }
@@ -145,6 +162,34 @@ fn spawn_game_shop(
             DialogRoot(DialogKind::GameShop),
             GameShopWidget,
         ));
+    }
+    // 分类页签（C# GameshopDialog Filters + Up/Down/PositionBar；第 0 项 = 全部）
+    for i in 0..10usize {
+        let e = spawn_ui_text(
+            &mut commands, &font, "",
+            108.0, 130.0 + i as f32 * 20.0,
+            12.0, Color::srgb(0.9, 0.9, 0.9), 8.0,
+        );
+        commands.entity(e).insert((
+            GameShopCat(i),
+            DialogRoot(DialogKind::GameShop),
+            GameShopWidget,
+        ));
+    }
+    // 分类翻页（Prguse2 197/198/199 上，207/208/209 下，16x14）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Prguse2, 197, 198, 199,
+        108.0, 335.0, 8.3, 16.0, 14.0,
+    ) {
+        commands.entity(e).insert((GameShopCatUp, DialogRoot(DialogKind::GameShop), GameShopWidget));
+    }
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Prguse2, 207, 208, 209,
+        128.0, 335.0, 8.3, 16.0, 14.0,
+    ) {
+        commands.entity(e).insert((GameShopCatDown, DialogRoot(DialogKind::GameShop), GameShopWidget));
     }
     // 状态行（金币/消息）
     for i in 10..=11usize {
@@ -230,6 +275,9 @@ fn game_shop_ui_system(
     windows: Query<&Window>,
     mut widgets: Query<&mut Visibility, With<GameShopWidget>>,
     mut lines: Query<(&mut Text2d, &GameShopLine)>,
+    mut cats: Query<(&mut Text2d, &GameShopCat)>,
+    cat_up: Query<&UiButton, With<GameShopCatUp>>,
+    cat_down: Query<&UiButton, With<GameShopCatDown>>,
     mut requested: Local<bool>,
 ) {
     let open = mgr.is_open(DialogKind::GameShop);
@@ -257,7 +305,7 @@ fn game_shop_ui_system(
     if let Some(t) = input.texts.get(31) {
         shop.search = t.clone();
     }
-    let filtered = filter_shop_items(&shop.items, &shop.search);
+    let filtered = filter_shop_items(&shop.items, &shop.search, &shop.category);
     for btn in &close {
         if btn.clicked {
             mgr.close(DialogKind::GameShop);
@@ -284,6 +332,32 @@ fn game_shop_ui_system(
             _ => String::new(),
         };
     }
+    // 分类渲染（C# Filters：第 0 项 = 全部；每页 10 行，▶ 标记当前选中）
+    let cat_pages = shop.categories.len().div_ceil(10).max(1);
+    if shop.category_page >= cat_pages {
+        shop.category_page = cat_pages - 1;
+    }
+    for (mut text, row) in &mut cats {
+        let idx = shop.category_page * 10 + row.0;
+        text.0 = match shop.categories.get(idx) {
+            Some(c) => {
+                let label = if c.is_empty() { "全部".to_string() } else { c.clone() };
+                if *c == shop.category { format!("▶ {}", label) } else { label }
+            }
+            None => String::new(),
+        };
+    }
+    // 分类翻页（C# UpButton/DownButton）
+    for btn in &cat_up {
+        if btn.clicked && shop.category_page > 0 {
+            shop.category_page -= 1;
+        }
+    }
+    for btn in &cat_down {
+        if btn.clicked && shop.category_page + 1 < cat_pages {
+            shop.category_page += 1;
+        }
+    }
     // 行点击选中
     if mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = windows.single() {
@@ -300,6 +374,24 @@ fn game_shop_ui_system(
                                 it.name,
                                 it.gold_price
                             );
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    // 分类点击（x 108..200，行高 20；C# Filters.Click → SetCategories）
+    if mouse.just_pressed(MouseButton::Left) {
+        if let Ok(window) = windows.single() {
+            if let Some(cursor) = window.cursor_position() {
+                for i in 0..10usize {
+                    let y = 130.0 + i as f32 * 20.0;
+                    if cursor.x >= 108.0 && cursor.x <= 200.0 && cursor.y >= y && cursor.y <= y + 18.0 {
+                        let idx = shop.category_page * 10 + i;
+                        if let Some(c) = shop.categories.get(idx).cloned() {
+                            shop.category = c;
+                            tracing::info!("🛒 商城分类: {}", if shop.category.is_empty() { "全部" } else { &shop.category });
                         }
                         break;
                     }
@@ -350,6 +442,16 @@ fn shop_server_events(
                     })
                     .collect();
                 shop.gold = *gold;
+                // #1334：分类列表 = 全部 + 服务端 category 去重保序（C# Filters）
+                let mut cats: Vec<String> = vec![String::new()];
+                for it in &shop.items {
+                    if !it.category.is_empty() && !cats.iter().any(|c| c == &it.category) {
+                        cats.push(it.category.clone());
+                    }
+                }
+                shop.categories = cats;
+                shop.category = String::new();
+                shop.category_page = 0;
             }
             ServerEvent::ShopStock { item_id, stock } => {
                 shop.message = format!("商品 #{} 库存剩余 {}", item_id, stock);
@@ -382,15 +484,34 @@ mod tests {
         }
     }
 
+    fn item_cat(name: &str, category: &str) -> ShopItem {
+        ShopItem { category: category.to_string(), ..item(name) }
+    }
+
+    #[test]
+    fn shop_category_filters() {
+        let items = vec![
+            item_cat("金创药", "药品"),
+            item_cat("太阳水", "药品"),
+            item_cat("回城卷", "卷轴"),
+        ];
+        assert_eq!(filter_shop_items(&items, "", "药品").len(), 2);
+        assert_eq!(filter_shop_items(&items, "", "卷轴").len(), 1);
+        assert_eq!(filter_shop_items(&items, "", "不存在").len(), 0);
+        // 分类 + 名称 叠加过滤
+        assert_eq!(filter_shop_items(&items, "金创", "药品").len(), 1);
+        assert_eq!(filter_shop_items(&items, "金创", "卷轴").len(), 0);
+    }
+
     #[test]
     fn shop_search_filters_by_name() {
         let items = vec![item("金创药"), item("太阳水"), item("回城卷")];
-        assert_eq!(filter_shop_items(&items, "").len(), 3);
-        assert_eq!(filter_shop_items(&items, "药").len(), 1);
-        assert_eq!(filter_shop_items(&items, "水").len(), 1);
-        assert_eq!(filter_shop_items(&items, "不存在").len(), 0);
-        assert_eq!(filter_shop_items(&items, "  药  ").len(), 1);
-        assert_eq!(filter_shop_items(&items, "JINCHUANG").len(), 0);
+        assert_eq!(filter_shop_items(&items, "", "").len(), 3);
+        assert_eq!(filter_shop_items(&items, "药", "").len(), 1);
+        assert_eq!(filter_shop_items(&items, "水", "").len(), 1);
+        assert_eq!(filter_shop_items(&items, "不存在", "").len(), 0);
+        assert_eq!(filter_shop_items(&items, "  药  ", "").len(), 1);
+        assert_eq!(filter_shop_items(&items, "JINCHUANG", "").len(), 0);
     }
 
     #[test]
@@ -401,7 +522,7 @@ mod tests {
             item("回城卷"),
             item("金创药·大"),
         ];
-        let idx = filter_shop_items(&items, "金创药");
+        let idx = filter_shop_items(&items, "金创药", "");
         assert_eq!(idx, vec![0, 3]);
     }
 }
