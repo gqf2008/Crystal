@@ -28,6 +28,9 @@ pub enum MenuAction {
     Fishing,
     Friends,
     Mentor,
+    Relationship,
+    Group,
+    Guild,
 }
 
 #[derive(Component)]
@@ -58,6 +61,9 @@ const MENU_BUTTONS: &[(MenuAction, LibraryName, usize, usize, usize, f32)] = &[
     (MenuAction::Fishing, LibraryName::Prguse, 1979, 1980, 1981, 164.0),
     (MenuAction::Friends, LibraryName::Prguse, 1982, 1983, 1984, 183.0),
     (MenuAction::Mentor, LibraryName::Prguse, 1985, 1986, 1987, 202.0),
+    (MenuAction::Relationship, LibraryName::Prguse, 1988, 1989, 1990, 221.0),
+    (MenuAction::Group, LibraryName::Prguse, 1991, 1992, 1993, 240.0),
+    (MenuAction::Guild, LibraryName::Prguse, 1994, 1995, 1996, 259.0),
 ];
 
 pub struct MenuDialogPlugin;
@@ -157,6 +163,17 @@ fn spawn_menu_dialog(
     commands.entity(t).insert((MenuExitConfirm, DialogRoot(DialogKind::Menu)));
 }
 
+/// #1330：菜单按钮 → 对应面板显隐切换（C# MenuDialog Click：已开则 Hide，未开则 Show）
+fn menu_open_toggle(mgr: &mut DialogManager, kind: DialogKind, name: &str) {
+    tracing::info!("🎮 打开面板: {}", name);
+    if mgr.is_open(kind) {
+        mgr.close(kind);
+    } else {
+        mgr.open(kind);
+    }
+    mgr.close(DialogKind::Menu);
+}
+
 fn menu_ui_system(
     mut mgr: ResMut<DialogManager>,
     net: Res<crate::network::NetConnection>,
@@ -207,10 +224,17 @@ fn menu_ui_system(
                     mgr.open(DialogKind::Mount);
                     mgr.close(DialogKind::Menu);
                 }
-                other => {
-                    tracing::info!("🎮 菜单: {:?}", other);
-                    mgr.close(DialogKind::Menu);
-                }
+                // #1330：对齐 C# MenuDialog Click → Show/Hide 对应面板
+                MenuAction::Help => menu_open_toggle(&mut mgr, DialogKind::Help, "帮助"),
+                MenuAction::Keyboard => menu_open_toggle(&mut mgr, DialogKind::KeyboardLayout, "键盘设置"),
+                MenuAction::Ranking => menu_open_toggle(&mut mgr, DialogKind::Ranking, "排行榜"),
+                MenuAction::Creature => menu_open_toggle(&mut mgr, DialogKind::Creature, "宠物"),
+                MenuAction::Fishing => menu_open_toggle(&mut mgr, DialogKind::Fishing, "钓鱼"),
+                MenuAction::Friends => menu_open_toggle(&mut mgr, DialogKind::Friend, "好友"),
+                MenuAction::Mentor => menu_open_toggle(&mut mgr, DialogKind::Mentor, "师徒"),
+                MenuAction::Relationship => menu_open_toggle(&mut mgr, DialogKind::Relationship, "夫妻"),
+                MenuAction::Group => menu_open_toggle(&mut mgr, DialogKind::Group, "队伍"),
+                MenuAction::Guild => menu_open_toggle(&mut mgr, DialogKind::Guild, "行会"),
             }
         }
     }
