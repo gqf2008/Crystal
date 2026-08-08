@@ -734,6 +734,7 @@ fn char_skill_system(
     mgr: Res<DialogManager>,
     page: Res<CharPage>,
     magics: Res<MagicsState>,
+    cd: Res<crate::game::skills::MagicCooldowns>,
     mut start: ResMut<CharSkillStart>,
     mut assign_key: ResMut<AssignKeyState>,
     mut libs: ResMut<GameLibraries>,
@@ -795,9 +796,19 @@ fn char_skill_system(
                 if let Some(h) =
                     ui_image(&mut libs, &mut images, &mut cache, LibraryName::MagIcon2, frame)
                 {
+                    // #1378：冷却暗化（对齐 C# MagicButton.CoolDown，按剩余比例变暗）
+                    let frac = cd.fraction(m.spell);
                     for (mut sprite, ic) in &mut icons {
-                        if ic.0 == row.0 && sprite.image != h {
-                            sprite.image = h.clone();
+                        if ic.0 == row.0 {
+                            if sprite.image != h {
+                                sprite.image = h.clone();
+                            }
+                            if frac > 0.0 {
+                                let k = 1.0 - 0.7 * frac;
+                                sprite.color = Color::srgba(k, k, k, 1.0);
+                            } else {
+                                sprite.color = Color::WHITE;
+                            }
                         }
                     }
                 }
