@@ -155,42 +155,46 @@ impl Packet for IntelligentCreaturePickup {
     }
 }
 
-/// NPCPearlGoods - NPC珍珠商品 (241)
+/// NPCPearlGoods - NPC珍珠商品 (241)（对齐 C#：List<UserItem> + Rate f32 + Type u8；
+/// 物品含 info 供客户端显示名称/珍珠价格）
 #[derive(Debug, Clone)]
 pub struct NPCPearlGoods {
-    pub rate: i32,           // 汇率
-    pub item_list: Vec<i32>, // 物品列表
+    pub list: Vec<crate::data::item::UserItem>,
+    pub rate: f32,
+    pub panel_type: crate::enums::PanelType,
 }
 
 impl Packet for NPCPearlGoods {
     const OPCODE: i16 = ServerPacketIds::NPCPearlGoods as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
-
-        // Note: C# writes List<UserItem> + Rate(f32) + Type(u8)
-        // Rust has rate(i32) + item_list(Vec<i32>)
-        writer.write_i32::<LittleEndian>(self.item_list.len() as i32)?;
-
-        for &item_id in &self.item_list {
-            writer.write_i32::<LittleEndian>(item_id)?;
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_i32::<LittleEndian>(self.list.len() as i32)?;
+        for item in &self.list {
+            item.write_to_with_info(writer)?;
         }
-
-        writer.write_i32::<LittleEndian>(self.rate)?;
-
+        writer.write_f32::<LittleEndian>(self.rate)?;
+        writer.write_u8(self.panel_type as u8)?;
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let rate = reader.read_i32::<LittleEndian>()?;
+        use byteorder::{LittleEndian, ReadBytesExt};
         let count = reader.read_i32::<LittleEndian>()?;
-        let mut item_list = Vec::with_capacity(count as usize);
-
-        for _ in 0..count {
-            item_list.push(reader.read_i32::<LittleEndian>()?);
+        if !(0..=2000).contains(&count) {
+            return Err(crate::data::stats::SharedError::LengthTooLarge {
+                field: "pearl_goods_count",
+                length: count,
+                max: 2000,
+            });
         }
-
-        Ok(Self { rate, item_list })
+        let mut list = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            list.push(crate::data::item::UserItem::read_from_with_info(reader)?);
+        }
+        let rate = reader.read_f32::<LittleEndian>()?;
+        let panel_type = crate::enums::PanelType::try_from(reader.read_u8()?)?;
+        Ok(Self { list, rate, panel_type })
     }
 }
 

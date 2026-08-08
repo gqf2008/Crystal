@@ -288,8 +288,31 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
             }
         }
         x if x == ServerPacketIds::NPCPearlGoods as i16 => {
+            // #珍珠商店：S.NPCPearlGoods（List<UserItem>+Rate f32+Type u8）
             if let Ok(p) = special_systems::NPCPearlGoods::read_body(&mut cur) {
-                tracing::info!("🫧 珍珠商品: {:?}", p);
+                let goods: Vec<crate::game::dialogs::npc_goods::GoodsEntry> = p
+                    .list
+                    .iter()
+                    .map(|item| crate::game::dialogs::npc_goods::GoodsEntry {
+                        item_index: item.item_index,
+                        unique_id: item.unique_id,
+                        name: item
+                            .info
+                            .as_ref()
+                            .map(|i| i.name.clone())
+                            .unwrap_or_else(|| format!("#{}", item.item_index)),
+                        price: item.info.as_ref().map(|i| i.price).unwrap_or(0),
+                        count: item.count,
+                        image: item.info.as_ref().map(|i| i.image).unwrap_or(0),
+                        item_type: item.info.as_ref().map(|i| i.item_type as u8).unwrap_or(0),
+                        tool_tip: item.info.as_ref().and_then(|i| i.tool_tip.clone()),
+                        stack_size: item.info.as_ref().map(|i| i.stack_size).unwrap_or(1),
+                    })
+                    .collect();
+                let rate = p.rate;
+                let pearl_count = goods.len();
+                server_events.write(ServerEvent::PearlShop { goods, rate });
+                tracing::info!("🫧 NPC 珍珠商品: {} 件 (rate={})", pearl_count, rate);
             }
         }
         x if x == ServerPacketIds::NPCRequestInput as i16 => {
