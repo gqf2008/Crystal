@@ -326,7 +326,7 @@ impl Packet for AllowMentorWire {
 /// 市场客户端包（M34）
 /// ServerRust gate 实际解析 wire 与 SharedRust 客户端包结构不一致，手动构造：
 ///   ConsignItem: [unique_id u32][price u32][duration u32]（gate 要求 ≥12 字节）
-///   MarketSearch: [item_index u32]   MarketPage: [page u32]
+///   MarketSearch: [keyword DotNetString] MarketPage: [page u32]
 ///   MarketBuy: [listing_id u32]      MarketGetBack: [listing_id u32]
 ///   MarketSellNow: [unique_id u32][price u32]
 #[derive(Debug, Clone, Copy)]
@@ -362,9 +362,10 @@ impl Packet for MarketConsignWire {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct MarketSearchWire {
-    pub item_index: u32,
+    /// 搜索关键字（C# MarketSearch.Match：名称子串；纯数字兼容按编号）
+    pub keyword: String,
 }
 
 impl Packet for MarketSearchWire {
@@ -373,9 +374,8 @@ impl Packet for MarketSearchWire {
     fn read_body<R: std::io::Read>(
         reader: &mut R,
     ) -> mir2_shared::data::stats::SharedResult<Self> {
-        use byteorder::{LittleEndian, ReadBytesExt};
         Ok(Self {
-            item_index: reader.read_u32::<LittleEndian>()?,
+            keyword: mir2_shared::binary::read_dotnet_string(reader)?,
         })
     }
 
@@ -383,8 +383,7 @@ impl Packet for MarketSearchWire {
         &self,
         writer: &mut W,
     ) -> mir2_shared::data::stats::SharedResult<()> {
-        use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_u32::<LittleEndian>(self.item_index)?;
+        mir2_shared::binary::write_dotnet_string(writer, &self.keyword)?;
         Ok(())
     }
 }
