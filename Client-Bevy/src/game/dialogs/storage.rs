@@ -691,17 +691,8 @@ fn storage_tooltip_system(
         tooltip.update(3, false, String::new(), Vec::new(), cursor.x, cursor.y);
         return;
     };
-    let mut lines = Vec::new();
-    if item.count > 1 {
-        lines.push(format!("数量: {}", item.count));
-    }
-    lines.push(format!(
-        "类型: {}",
-        crate::game::dialogs::inventory::item_type_name(item.item_type)
-    ));
-    if item.is_equipment() {
-        lines.push(format!("耐久: {}/{}", item.current_dura, item.max_dura));
-    }
+    // 与背包一致：完整属性行（#1244 item_tooltip_lines）
+    let lines = crate::game::dialogs::inventory::item_tooltip_lines(&item);
     tooltip.update(3, true, item.name.clone(), lines, cursor.x, cursor.y);
 }
 
@@ -866,3 +857,4 @@ fn storage_grid_sync_system(
             .insert((StorageSlot(i), DialogRoot(DialogKind::Storage), StorageWidget));
     }
 }
+
