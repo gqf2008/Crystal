@@ -5544,6 +5544,31 @@ fn send_inspect_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, state: &
     }).try_send();
 }
 
+/// 排行榜查看离线玩家：按 DB 角色信息发基础 PlayerInspect（无装备，C# 离线同样可看）
+fn send_basic_inspect_packet(
+    gate_ref: &ActorRef<GateActor>,
+    session_id: u64,
+    name: &str,
+    guild: &str,
+    level: u16,
+    class: u8,
+    gender: u8,
+) {
+    use mir2_shared::enums::ServerPacketIds;
+    let mut body = Vec::new();
+    body.extend_from_slice(&0u32.to_le_bytes()); // object_id = 0（离线）
+    write_dotnet_string(&mut body, name);
+    write_dotnet_string(&mut body, guild);
+    body.extend_from_slice(&level.to_le_bytes());
+    body.push(class);
+    body.push(gender);
+    body.push(0u8); // 装备数 = 0
+    let _ = gate_ref.tell(SendToClient {
+        session_id,
+        data: build_packet_bytes(ServerPacketIds::PlayerInspect as i16, &body),
+    }).try_send();
+}
+
 // ============================================================
 // 任务系统网络辅助函数
 // ============================================================

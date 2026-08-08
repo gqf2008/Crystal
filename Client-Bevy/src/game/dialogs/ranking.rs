@@ -20,6 +20,8 @@ use crate::ui::sprite_ui::{spawn_ui_text, UiButton, UiEntity, UiFont, UiImageCac
 #[derive(Debug, Clone, Default)]
 pub struct RankEntry {
     pub rank: i32,
+    /// 玩家 object_id（离线角色为 0；排行榜行点击查看用）
+    pub player_id: u32,
     pub player_name: String,
     pub class: u8,
     pub level: i32,
@@ -356,6 +358,30 @@ fn ranking_ui_system(
             None => String::new(),
         };
     }
+    // 行点击查看（C# RankingRow.Click → Inspect{Ranking=true}）
+    if mouse.just_pressed(MouseButton::Left) {
+        if let Ok(window) = windows.single() {
+            if let Some(cursor) = window.cursor_position() {
+                for i in 0..10usize {
+                    let y = 190.0 + i as f32 * 28.0;
+                    if cursor.x >= 210.0 && cursor.x <= 500.0 && cursor.y >= y && cursor.y <= y + 26.0 {
+                        if let Some(e) = filtered.get(i) {
+                            if !mgr.is_open(DialogKind::Inspect) {
+                                mgr.open(DialogKind::Inspect);
+                            }
+                            net.send_packet(&mir2_shared::packets::client::chat::Inspect {
+                                object_id: e.player_id,
+                                ranking: true,
+                                name: e.player_name.clone(),
+                            });
+                            tracing::info!("🔍 查看排行榜玩家 {} (id={})", e.player_name, e.player_id);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
     // 点击右上角关闭
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
@@ -394,6 +420,7 @@ mod tests {
     fn entry(rank: i32, class: u8) -> RankEntry {
         RankEntry {
             rank,
+            player_id: 0,
             player_name: format!("p{}", rank),
             class,
             level: 10,

@@ -187,6 +187,9 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
                     let mut rb = [0u8; 4];
                     if std::io::Read::read_exact(&mut cur, &mut rb).is_err() { ok = false; break; }
                     let rank = i32::from_le_bytes(rb);
+                    let mut pb = [0u8; 4];
+                    if std::io::Read::read_exact(&mut cur, &mut pb).is_err() { ok = false; break; }
+                    let player_id = u32::from_le_bytes(pb);
                     let player_name = match mir2_shared::binary::read_dotnet_string(&mut cur) {
                         Ok(n) => n,
                         Err(_) => { ok = false; break; }
@@ -198,7 +201,7 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
                     let mut eb = [0u8; 8];
                     if std::io::Read::read_exact(&mut cur, &mut eb).is_err() { ok = false; break; }
                     let experience = i64::from_le_bytes(eb);
-                    entries.push(RankEntry { rank, player_name, class, level, experience });
+                    entries.push(RankEntry { rank, player_id, player_name, class, level, experience });
                 }
                 if ok {
                     let count = entries.len();

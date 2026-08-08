@@ -221,6 +221,8 @@ fn player_menu_ui_system(
             PlayerMenuAction::Inspect => {
                 net.send_packet(&mir2_shared::packets::client::chat::Inspect {
                     object_id: state.object_id,
+                    ranking: false,
+                    name: String::new(),
                 });
                 tracing::info!("🔍 查看玩家 {}", state.name);
             }

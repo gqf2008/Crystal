@@ -1379,7 +1379,11 @@ mod tests {
 
     #[test]
     fn roundtrip_inspect() -> SharedResult<()> {
-        roundtrip(&client::Inspect { object_id: 5555 })
+        roundtrip(&client::Inspect {
+            object_id: 5555,
+            ranking: false,
+            name: String::new(),
+        })
     }
 
     #[test]

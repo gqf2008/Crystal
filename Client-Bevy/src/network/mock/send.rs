@@ -535,6 +535,7 @@ pub(crate) fn send_map_and_objects(
             rankings: vec![
                 server::special_systems::RankInfo {
                     rank: 1,
+                    player_id: 0,
                     player_name: "刀客".to_string(),
                     class: MirClass::Warrior as u8,
                     level: 30,
@@ -542,6 +543,7 @@ pub(crate) fn send_map_and_objects(
                 },
                 server::special_systems::RankInfo {
                     rank: 2,
+                    player_id: 0,
                     player_name: "bevy2char".to_string(),
                     class: MirClass::Warrior as u8,
                     level: 30,

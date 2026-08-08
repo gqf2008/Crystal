@@ -66,9 +66,13 @@ impl Packet for Chat {
 }
 
 /// Client requests to inspect another object
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Inspect {
     pub object_id: u32,
+    /// 排行榜查看（C# Inspect.Ranking）
+    pub ranking: bool,
+    /// 排行榜查看时离线玩家回查（Rust 无持久化角色 id，用名字查 DB）
+    pub name: String,
 }
 
 impl Packet for Inspect {
@@ -76,11 +80,19 @@ impl Packet for Inspect {
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let object_id = reader.read_u32::<byteorder::LittleEndian>()?;
-        Ok(Self { object_id })
+        let ranking = reader.read_u8()? != 0;
+        let name = read_dotnet_string(reader)?;
+        Ok(Self {
+            object_id,
+            ranking,
+            name,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_u32::<byteorder::LittleEndian>(self.object_id)?;
+        writer.write_u8(self.ranking as u8)?;
+        write_dotnet_string(writer, &self.name)?;
         Ok(())
     }
 }

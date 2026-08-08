@@ -1702,15 +1702,40 @@ fn handle_drop_gold(world_ref: &Option<ActorRef<crate::actors::world::WorldActor
 }
 
 /// Inspect (查看玩家): [target_id: u32]
-fn handle_inspect(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 4 {
+/// Inspect (查看玩家): [target_id: u32][ranking: u8][name dotnet]
+fn handle_inspect(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.len() < 5 {
         debug!("Inspect: session={} payload too short", session_id);
         return;
     }
     let target_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    debug!("Inspect: session={} target={}", session_id, target_id);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::InspectPlayerRequest { session_id, target_id }).try_send();
+    let ranking = payload[4] != 0;
+    let mut name = String::new();
+    if ranking && payload.len() > 5 {
+        use mir2_shared::binary::read_dotnet_string;
+        let mut cursor = std::io::Cursor::new(&payload[5..]);
+        name = read_dotnet_string(&mut cursor).unwrap_or_default();
+    }
+    debug!(
+        "Inspect: session={} target={} ranking={} name={}",
+        session_id, target_id, ranking, name
+    );
+    let world_ref = match world_ref {
+        Some(w) => w,
+        None => return,
+    };
+    let _ = world_ref
+        .tell(crate::actors::world::InspectPlayerRequest {
+            session_id,
+            target_id,
+            ranking,
+            name,
+        })
+        .try_send();
 }
 
 /// ChangeAMode (切换攻击模式): [mode: u8]
