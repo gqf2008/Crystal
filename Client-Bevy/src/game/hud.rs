@@ -785,7 +785,7 @@ fn hud_server_events(
     for ev in events.read() {
         match ev {
             // #1342：任务物品格增量更新由 inventory.rs quest_inventory_events 处理
-            ServerEvent::QuestItemGained { .. } | ServerEvent::QuestItemDeleted { .. } => {}
+            ServerEvent::QuestItemGained { .. } | ServerEvent::QuestItemDeleted { .. } | ServerEvent::NpcAwakePanel { .. } => {}
             ServerEvent::HealthChanged { hp, mp } => {
                 hud.hp = *hp;
                 hud.mp = *mp;

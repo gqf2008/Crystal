@@ -472,6 +472,9 @@ pub enum ServerEvent {
     /// DeleteQuestItem：任务物品移除（C# S.DeleteQuestItem UniqueID+Count）
     QuestItemDeleted { unique_id: u64, count: u16 },
 
+    /// #1356：NPC 觉醒面板打开（0=觉醒 1=分解 2=降级 3=重置；C# S.NPCAwakening 等）
+    NpcAwakePanel { service: u8 },
+
     /// HeroInformation：英雄完整信息（C# S.HeroInformation : UserInformation + autopot，#203）
     HeroInformation {
         object_id: u32,
