@@ -64,6 +64,11 @@ def main() -> int:
                 saddle = json.loads(json.dumps(d))
                 saddle['unique_id'] = uid + 1; saddle['item_index'] = 782; saddle['slots'] = []
                 d['slots'] = [None, None, saddle, None, None]
+            elif item_index == 793:
+                # #1319：鱼竿 Bait 槽（slots[2]）装鱼饵（#1313 抛竿消耗鱼饵，无饵不能抛竿）
+                bait = json.loads(json.dumps(d))
+                bait['unique_id'] = uid + 2; bait['item_index'] = 798; bait['count'] = 50; bait['slots'] = []
+                d['slots'] = [None, None, bait, None, None]
             return json.dumps(d, ensure_ascii=False)
         for slot, uid, idx in ((0, 79301, 793), (10, 76401, 764)):
             cur.execute("SELECT COUNT(*) FROM inventory_equipment WHERE character_name='bevychar' AND slot=?", (slot,))
@@ -72,6 +77,26 @@ def main() -> int:
                     "INSERT INTO inventory_equipment (character_name, slot, item_json) VALUES ('bevychar', ?, ?)",
                     (slot, eq_item(uid, idx, mount=(slot == 10))),
                 )
+    # 确保已有鱼竿也带鱼饵（#1319：#1313 抛竿消耗 Bait 槽鱼饵，无饵钓鱼失败）
+    cur.execute("SELECT item_json FROM inventory_equipment WHERE character_name='bevychar' AND slot=0")
+    rod_row = cur.fetchone()
+    if rod_row:
+        rod = json.loads(rod_row[0])
+        slots = rod.get('slots') or [None] * 5
+        while len(slots) < 5:
+            slots.append(None)
+        if not slots[2]:
+            bait = dict(rod)
+            bait['unique_id'] = rod.get('unique_id', 79301) + 2
+            bait['item_index'] = 798
+            bait['count'] = 50
+            bait['slots'] = []
+            slots[2] = bait
+            rod['slots'] = slots
+            cur.execute(
+                "UPDATE inventory_equipment SET item_json=? WHERE character_name='bevychar' AND slot=0",
+                (json.dumps(rod, ensure_ascii=False),),
+            )
     # 3) bevychar 背包为空则恢复（item 194 BraceletOfAgony / 430 BoundlessRing）
     cur.execute("SELECT COUNT(*) FROM inventory_backpack WHERE character_name='bevychar'")
     if cur.fetchone()[0] == 0:
