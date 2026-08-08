@@ -89,10 +89,15 @@ pub enum HudButtonKind {
     Option,
     Menu,
     GameShop,
+    Hero,
 }
 
 #[derive(Component)]
 pub struct HudButton(pub HudButtonKind);
+
+/// #1331：HUD 英雄按钮（C# HeroMenuButton，有英雄才显示）
+#[derive(Component)]
+pub struct HeroBtn;
 
 /// HUD 显示数据快照（#70 试点：挂 HUD 根实体；值变化时才写组件，
 /// hud_update_system 用 Changed<HudData> 门控，血条/文字只在数据变化帧更新）
@@ -109,6 +114,14 @@ pub struct HudData {
     pub name: String,
 }
 
+/// #1331：英雄按钮显隐（C# HeroMenuButton.Visible = 有英雄）
+fn hero_btn_system(hero: Res<crate::game::dialogs::hero::HeroState>, mut btns: Query<&mut Visibility, With<HeroBtn>>) {
+    let show = hero.current.is_some();
+    for mut v in &mut btns {
+        *v = if show { Visibility::Visible } else { Visibility::Hidden };
+    }
+}
+
 /// HUD 按钮 → 对话框开关（M9：接入 DialogManager）
 fn hud_button_system(mut mgr: ResMut<DialogManager>, buttons: Query<(&UiButton, &HudButton)>) {
     for (btn, kind) in &buttons {
@@ -122,6 +135,7 @@ fn hud_button_system(mut mgr: ResMut<DialogManager>, buttons: Query<(&UiButton, 
                 HudButtonKind::Option => mgr.toggle(DialogKind::Settings),
                 HudButtonKind::Menu => mgr.toggle(DialogKind::Menu),
                 HudButtonKind::GameShop => mgr.toggle(DialogKind::GameShop),
+                HudButtonKind::Hero => mgr.toggle(DialogKind::Hero),
             }
         }
     }
@@ -194,6 +208,7 @@ impl Plugin for HudPlugin {
                 hud_update_system,
                 death_overlay_system,
                 attack_mode_text_system,
+                hero_btn_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -435,6 +450,27 @@ fn spawn_hud(
         commands
             .entity(e)
             .insert(HudButton(HudButtonKind::GameShop));
+    }
+    // 英雄按钮（C# MainDialog HeroMenuButton：Prguse 2164/2165/2166，(Width-160, 65)，20x20）
+    // #1331：点击打开英雄面板；有英雄（HeroState.current）才显示
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands,
+        &mut libs,
+        &mut images,
+        &mut cache,
+        LibraryName::Prguse,
+        2164,
+        2165,
+        2166,
+        main_x + bg_w - 160.0,
+        main_y + 65.0,
+        3.0,
+        20.0,
+        20.0,
+    ) {
+        commands
+            .entity(e)
+            .insert((HudButton(HudButtonKind::Hero), HeroBtn, Visibility::Hidden));
     }
 
     // 死亡遮罩（#46）：全屏半透明 + 提示 + 复活按钮，默认隐藏

@@ -6,22 +6,33 @@ use super::*;
 
 pub struct MarketSearchRequest {
     pub session_id: u64,
-    pub item_index: u32,
+    /// 搜索关键字（C# MarketSearch.Match：名称子串；纯数字兼容按编号）
+    pub keyword: String,
 }
 
 impl Message<MarketSearchRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: MarketSearchRequest, _ctx: &mut Context<Self, Self::Reply>) {
-        debug!("MarketSearch: session={} item={}", msg.session_id, msg.item_index);
+        debug!("MarketSearch: session={} kw={}", msg.session_id, msg.keyword);
 
-        // Collect indices of unsold auctions matching criteria
+        // Collect indices of unsold auctions matching criteria（C# MarketSearch：名称 Contains + 编号兼容）
+        let kw = msg.keyword.trim().to_lowercase();
+        let kw_index = kw.parse::<u32>().ok();
         let mut results: Vec<usize> = Vec::new();
         for (idx, auction) in self.auctions.iter().enumerate() {
             if auction.sold {
                 continue;
             }
-            if msg.item_index > 0 && auction.item.item_index != msg.item_index as i32 {
-                continue;
+            if !kw.is_empty() {
+                let name = self
+                    .item_infos
+                    .get(&auction.item.item_index)
+                    .map(|i| i.name.to_lowercase())
+                    .unwrap_or_default();
+                let by_index = kw_index.map(|k| auction.item.item_index == k as i32).unwrap_or(false);
+                if !name.contains(&kw) && !by_index {
+                    continue;
+                }
             }
             results.push(idx);
         }
