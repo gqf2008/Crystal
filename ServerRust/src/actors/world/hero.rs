@@ -628,6 +628,8 @@ impl WorldActor {
             /// #1192：目标是否已有绿毒/红毒（道士 Poisoning 条件）
             has_green: bool,
             has_red: bool,
+            /// #1196：目标是否已有减速毒（道士 Curse 条件）
+            has_slow: bool,
         }
         let monster_snaps: Vec<MonsterSnap> = self.monsters.values()
             .filter(|m| m.hp > 0)
@@ -639,6 +641,7 @@ impl WorldActor {
                 map_index: m.map_index,
                 has_green: m.poison_list.iter().any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::GREEN)),
                 has_red: m.poison_list.iter().any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::RED)),
+                has_slow: m.poison_list.iter().any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::SLOW)),
             })
             .collect();
 
@@ -655,8 +658,8 @@ impl WorldActor {
         let mut support_intents: Vec<(u64, u64, u8, bool)> = Vec::new();
         // 自动喝药意图：(hero_session_id, item_index, is_mp) —— 阶段 2.4 统一消耗（C# ProcessAutoPot/TryAutoPot）
         let mut autopot_intents: Vec<(u64, i32, bool)> = Vec::new();
-        // 道士毒意图：(hero_session_id, target_oid, poison_type, duration_s, value) —— 阶段 3e 应用（#1192）
-        let mut poison_intents: Vec<(u64, u32, mir2_shared::enums::PoisonType, u32, i32)> = Vec::new();
+        // 毒意图：(hero_session_id, target_oid, poison_type, duration_s, value, tick_ms) —— 阶段 3e 应用（#1192/#1196）
+        let mut poison_intents: Vec<(u64, u32, mir2_shared::enums::PoisonType, u32, i32, u64)> = Vec::new();
 
         for snap in &snapshots {
             // 确保该英雄有 AI 状态（首次出现则初始化）
@@ -1007,6 +1010,9 @@ impl WorldActor {
                             } else {
                                 !target.has_red
                             };
+                        // #1196：Curse 可用 = 已学 + 普通护符 + 目标无减速毒（C# TaoistHero 无 Curse buff 近似）
+                        let curse_lv = hero_magic_level(&snap.hero_magics, Spell::Curse as u8);
+                        let can_curse = curse_lv > 0 && snap.hero_amulet && !target.has_slow;
                         if healing_lv > 0 && owner_hp_pct < 90 {
                             // #1186：治疗也耗蓝（C# CanUseMagic）
                             let heal_cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Healing as u8);
@@ -1044,13 +1050,52 @@ impl WorldActor {
                                 } else {
                                     mir2_shared::enums::PoisonType::RED
                                 };
-                                poison_intents.push((snap.session_id, target.oid, p_type, duration, poison_value));
+                                poison_intents.push((snap.session_id, target.oid, p_type, duration, poison_value, 2000));
                                 support_intents.push((
                                     snap.session_id,
                                     snap.session_id,
                                     Spell::Poisoning as u8,
                                     false,
                                 ));
+                                ai_local.next_attack_tick = self.tick_count + 10;
+                            } else {
+                                let _ = hero_melee_fallback(
+                                    snap.session_id, target.oid, target_dist,
+                                    &hero_combat, &mut attack_intents, &mut support_intents,
+                                );
+                                ai_local.next_attack_tick = self.tick_count + 10;
+                            }
+                        } else if can_curse {
+                            // #1196：C# TaoistHero Curse：护符 + 目标无 Curse（本服怪物无 buff，实现 Slow 毒部分）
+                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Curse as u8);
+                            if ai_local.mp >= cost {
+                                ai_local.mp -= cost;
+                                support_intents.push((
+                                    snap.session_id,
+                                    snap.session_id,
+                                    Spell::Curse as u8,
+                                    false,
+                                ));
+                                // C# Map.cs：40% 概率附加 Slow 毒（Duration=1+(Lv+1)*2、TickSpeed 1000、Value=GetDamage(SC)）
+                                if fastrand::i32(0..10) < 4 {
+                                    let value = hero_spell_damage(
+                                        &self.magic_infos,
+                                        &snap.hero_magics,
+                                        Spell::Curse as u8,
+                                        &hero_stats,
+                                        snap.class,
+                                    )
+                                    .max(1);
+                                    let (cdur, cval) = hero_curse_slow(curse_lv, value);
+                                    poison_intents.push((
+                                        snap.session_id,
+                                        target.oid,
+                                        mir2_shared::enums::PoisonType::SLOW,
+                                        cdur,
+                                        cval,
+                                        1000,
+                                    ));
+                                }
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             } else {
                                 let _ = hero_melee_fallback(
@@ -1175,6 +1220,7 @@ impl WorldActor {
                                         mir2_shared::enums::PoisonType::GREEN,
                                         duration,
                                         pv,
+                                        2000,
                                     ));
                                     ai_local.buffs.retain(|b| b.kind != HeroBuffKind::PoisonShot);
                                 }
@@ -1440,8 +1486,21 @@ impl WorldActor {
         for (session_id, spell, target_oid, tx, ty, damage, fire_at_tick, level) in &spell_intents {
             // 广播 ObjectAttack 作为弹道发射动画
             broadcast_hero_attack(self, *session_id, *spell).await;
-            // #1184：英雄弹道用英雄自身属性结算（命中/暴击/等级）
+            // #1184/#1196：英雄弹道用英雄自身（含增益）属性结算（LightBody 命中/MagicBooster MC 等生效）
             let hero_snap = snapshots.iter().find(|s| s.session_id == *session_id);
+            let (buffed_combat, buffed_stats) = if let Some(s) = hero_snap {
+                let mut combat = s.hero_combat;
+                let mut stats = s.hero_stats;
+                if let Some(ai) = self.hero_ai_states.get(&s.session_id) {
+                    hero_apply_buffs(&ai.buffs, s.class, &mut combat, &mut stats);
+                }
+                (combat, stats)
+            } else {
+                (
+                    crate::combat::attack::CombatStats::default(),
+                    super::hero_stats::HeroStats::default(),
+                )
+            };
             self.pending_spell_completions.push(PendingSpellCompletion {
                 fire_at_tick: *fire_at_tick,
                 session_id: *session_id,
@@ -1450,19 +1509,19 @@ impl WorldActor {
                 target_x: *tx,
                 target_y: *ty,
                 damage: *damage,
-                // #1188：magic_stat 也用英雄自身魔法表伤害（Vampirism 等吸血/附加用）
+                // #1188/#1196：magic_stat 用英雄自身（含增益）魔法表伤害（Vampirism 等吸血/附加用）
                 magic_stat: hero_snap
                     .map(|s| {
                         hero_spell_damage(
                             &self.magic_infos,
                             &s.hero_magics,
                             *spell,
-                            &s.hero_stats,
+                            &buffed_stats,
                             s.class,
                         )
                     })
                     .unwrap_or(10),
-                hero_stats: hero_snap.map(|s| s.hero_combat),
+                hero_stats: Some(buffed_combat),
                 hero_level: hero_snap.map(|s| s.hero_level),
                 // #1188：施放等级用英雄已学实际等级（影响法术附加/经验/效果）
                 spell_level: *level,
@@ -1547,12 +1606,12 @@ impl WorldActor {
             }
         }
 
-        // 3e. 应用道士 Poisoning（#1192：C# ApplyPoison，绿/红毒 TickSpeed 2000）
-        for (session_id, target_oid, p_type, duration, value) in &poison_intents {
+        // 3e. 应用毒意图（#1192/#1196：C# ApplyPoison；道士 Poisoning/弓箭手毒箭 TickSpeed 2000、道士 Curse 1000）
+        for (session_id, target_oid, p_type, duration, value, tick_ms) in &poison_intents {
             if let Some(monster) = self.monsters.get_mut(target_oid) {
                 crate::combat::poison::apply_poison(
                     &mut monster.poison_list,
-                    crate::combat::poison::Poison::new(*p_type, *duration, *value, 2000),
+                    crate::combat::poison::Poison::new(*p_type, *duration, *value, *tick_ms),
                 );
                 monster.provoked = true;
                 monster.last_hitter_session = Some(*session_id);
@@ -1560,8 +1619,8 @@ impl WorldActor {
                     monster.target_session = Some(*session_id);
                 }
                 debug!(
-                    "Hero Taoist poisoned monster {} ({:?} {}s {}dmg/tick)",
-                    target_oid, p_type, duration, value
+                    "Hero poisoned monster {} ({:?} {}s {}dmg/tick {}ms)",
+                    target_oid, p_type, duration, value, tick_ms
                 );
             }
         }
@@ -1809,6 +1868,12 @@ fn hero_attack_power_sc(stats: &super::hero_stats::HeroStats) -> i32 {
     } else {
         stats.max_sc.max(1)
     }
+}
+
+/// 道士 Curse 的 Slow 毒参数（#1196：C# Duration=1+(Lv+1)*2、TickSpeed 1000、Value=GetDamage(SC)）
+fn hero_curse_slow(level: u8, value: i32) -> (u32, i32) {
+    let duration = (1 + (level as i32 + 1) * 2).max(1) as u32;
+    (duration, value.max(1))
 }
 
 /// 各职业 ProcessFriend 增益列表（#1190/#1192：C# 子类顺序）
@@ -2475,5 +2540,13 @@ mod tests {
         let mc = (stats.min_mc + stats.max_mc) / 2;
         assert_eq!(dmg, crate::combat::magic::calc_magic_damage(map.get(&cs).unwrap(), 1, mc));
         assert!(dmg > 0);
+    }
+
+    #[test]
+    fn hero_curse_slow_params() {
+        // C#：Duration = 1 + (Lv+1)*2；Value = GetDamage(SC)（至少 1）
+        assert_eq!(hero_curse_slow(0, 30), (3, 30));
+        assert_eq!(hero_curse_slow(2, 30), (7, 30));
+        assert_eq!(hero_curse_slow(1, 0), (5, 1));
     }
 }
