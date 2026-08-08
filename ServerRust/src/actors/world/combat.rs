@@ -142,6 +142,39 @@ fn cast_disabled_by_poison(poison_list: &[crate::combat::poison::Poison]) -> boo
     })
 }
 
+/// #1299：目标类弹道法术（C# Fireball/Poisoning 等 `if (!xxx(target)) cast=false`；
+/// 位置类 MeteorShower 不在此列——无需目标即可施放）
+const TARGET_PROJECTILE_SPELLS: [u8; 17] = [
+    SPELL_FIREBALL,
+    SPELL_GREAT_FIREBALL,
+    SPELL_THUNDERBOLT,
+    SPELL_FROST_CRUNCH,
+    SPELL_VAMPIRISM,
+    SPELL_FLAME_DISRUPTOR,
+    SPELL_SOUL_FIREBALL,
+    SPELL_FIRE_BOUNCE,
+    SPELL_STRAIGHT_SHOT,
+    SPELL_DOUBLE_SHOT,
+    SPELL_BINDING_SHOT,
+    SPELL_NAPALM_SHOT,
+    SPELL_VAMPIRE_SHOT,
+    SPELL_POISON_SHOT,
+    SPELL_CRIPPLE_SHOT,
+    SPELL_ELEMENTAL_SHOT,
+    SPELL_CAT_TONGUE,
+];
+
+/// #1299：C# Magic()——目标类弹道法术无目标（target_id==0）时 cast=false，不加技能经验
+fn should_grant_cast_exp(spell: u8, target_id: u32, basic: bool, electric_handled: bool) -> bool {
+    if basic || electric_handled {
+        return false;
+    }
+    if TARGET_PROJECTILE_SPELLS.contains(&spell) && target_id == 0 {
+        return false;
+    }
+    true
+}
+
 /// 采集请求（从 GateActor 转发）
 pub struct HarvestRequest {
     pub session_id: u64,
@@ -4507,7 +4540,12 @@ impl Message<MagicRequest> for WorldActor {
         }
 
         // Spell XP gain and cast_time update
-        if !basic_spells.contains(&msg.spell) && !electric_shock_exp_handled {
+        if should_grant_cast_exp(
+            msg.spell,
+            msg.target_id,
+            basic_spells.contains(&msg.spell),
+            electric_shock_exp_handled,
+        ) {
             // #1230：C# LevelMagic exp = Random.Next(3)+1；DB 信息用于等级门控/阈值/升级延迟
             let info = self.magic_infos.get(&(spell_cs as u32)).cloned();
             let _ = record.actor_ref.ask(crate::actors::player::GainSpellExp {
@@ -4668,8 +4706,9 @@ mod spell_geometry_tests {
 mod tests {
     use super::{
         attack_disabled_by_poison, cast_disabled_by_poison, find_attack_skill,
-        player_attack_speed_ms, ATTACK_SKILL_SPELLS, DAMAGE_DURA_ARMOR_SLOTS, SPELL_CROSS_HALFMOON,
-        SPELL_HALFMOON, SPELL_SLAYING,
+        player_attack_speed_ms, should_grant_cast_exp, ATTACK_SKILL_SPELLS,
+        DAMAGE_DURA_ARMOR_SLOTS, SPELL_CROSS_HALFMOON, SPELL_FIREBALL, SPELL_HALFMOON,
+        SPELL_METEOR_SHOWER, SPELL_SLAYING,
     };
     use crate::actors::inventory::EquipmentSlot;
     use crate::actors::player::PlayerMagic;
@@ -4715,6 +4754,23 @@ mod tests {
         assert!(!cast_disabled_by_poison(&[Poison::new(PoisonType::LR_PARALYSIS, 5, 0, 1000)]));
         assert!(!cast_disabled_by_poison(&[Poison::new(PoisonType::RED, 5, 3, 1000)]));
         assert!(!cast_disabled_by_poison(&[Poison::new(PoisonType::GREEN, 5, 3, 1000)]));
+    }
+
+    #[test]
+    fn test_should_grant_cast_exp() {
+        // #1299：C# Magic()——目标类弹道法术无目标（target_id==0）cast=false 不加经验
+        // FireBall 无目标：不加
+        assert!(!should_grant_cast_exp(SPELL_FIREBALL, 0, false, false));
+        // FireBall 有目标：加
+        assert!(should_grant_cast_exp(SPELL_FIREBALL, 100, false, false));
+        // MeteorShower 位置类：无目标也可加（C# 位置施放）
+        assert!(should_grant_cast_exp(SPELL_METEOR_SHOWER, 0, false, false));
+        // 基础攻击：不加
+        assert!(!should_grant_cast_exp(SPELL_FIREBALL, 100, true, false));
+        // ElectricShock 已处理：不加（避免重复）
+        assert!(!should_grant_cast_exp(SPELL_FIREBALL, 100, false, true));
+        // 非目标类法术（如 Hiding 隐身的 SharedRust 值）无目标也加
+        assert!(should_grant_cast_exp(SPELL_HALFMOON, 0, false, false));
     }
 
     #[test]
