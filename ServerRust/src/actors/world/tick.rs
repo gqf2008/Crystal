@@ -1534,6 +1534,12 @@ impl WorldActor {
         }
     }
 
+    /// #1283：C# ProcessRegen——每 10s 自然回血量 = (max*3% + 1) + (该值 * Recovery / Weight)
+    fn natural_regen_amount(max_value: i32, recovery: i32, weight: u32) -> i32 {
+        let base = (max_value * 3 / 100) + 1;
+        base + base * recovery / (weight.max(1) as i32)
+    }
+
     /// HP/MP 回复 + 宠物饥饿 tick（每 100 ticks）
     pub(crate) async fn tick_regen_and_hunger(&mut self) {
         if self.tick_count.is_multiple_of(100) {
@@ -1556,15 +1562,31 @@ impl WorldActor {
                 let _ = record.actor_ref.ask(TickCreatureHunger { dt_seconds: 10 }).await;
 
                 if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                    // C# HumanObject.Process（≈1s/次）：healthRegen += maxHP*3% + 1，
-                    // 再叠加 healthRegen * HealthRecovery / Settings.HealthRegenWeight(10)
-                    let hp_base = (state.max_hp * 3 / 100) + 1;
-                    let mp_base = (state.max_mp * 3 / 100) + 1;
-                    let hp_per_sec = hp_base + hp_base * state.health_recovery / self.health_regen_weight.max(1) as i32;
-                    let mp_per_sec = mp_base + mp_base * state.spell_recovery / self.mana_regen_weight.max(1) as i32;
-                    // 本 tick 每 10 秒一次
-                    let hp_regen = hp_per_sec * 10;
-                    let mp_regen = mp_per_sec * 10;
+                    // #1283：C# ProcessRegen——每 RegenDelay=10s 回 (max*3%+1) + Recovery 加成
+                    // （此前 ×10 导致 10 倍过量）；受击（Attacked 重置 RegenTime）后 10s 内不回血
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as i64)
+                        .unwrap_or(0);
+                    let regen_blocked = now_ms - state.last_damage_ms < 10_000;
+                    let hp_regen = if regen_blocked {
+                        0
+                    } else {
+                        Self::natural_regen_amount(
+                            state.max_hp,
+                            state.health_recovery,
+                            self.health_regen_weight,
+                        )
+                    };
+                    let mp_regen = if regen_blocked {
+                        0
+                    } else {
+                        Self::natural_regen_amount(
+                            state.max_mp,
+                            state.spell_recovery,
+                            self.mana_regen_weight,
+                        )
+                    };
                     let new_hp = (state.hp + hp_regen).min(state.max_hp);
                     let new_mp = (state.mp + mp_regen).min(state.max_mp);
 
@@ -4796,7 +4818,24 @@ impl Message<Tick> for WorldActor {
 
 #[cfg(test)]
 mod tests {
-    use super::{safe_zone_heal_hp, reduce_exp, party_exp_share, in_range, pet_exp_gain, PARTY_EXP_RATE, item_expired, dotnet_now_ticks};
+    use super::{
+        dotnet_now_ticks, in_range, item_expired, party_exp_share, pet_exp_gain, reduce_exp,
+        safe_zone_heal_hp, PARTY_EXP_RATE,
+    };
+
+    #[test]
+    fn test_natural_regen_amount() {
+        use super::WorldActor;
+        // #1283：C# ProcessRegen——每 10s 回 (max*3%+1) + 该值*Recovery/Weight（非 ×10）
+        // max=1000, recovery=0, weight=10：30+1 = 31
+        assert_eq!(WorldActor::natural_regen_amount(1000, 0, 10), 31);
+        // max=1000, recovery=10, weight=10：31 + 31*10/10 = 62
+        assert_eq!(WorldActor::natural_regen_amount(1000, 10, 10), 62);
+        // max=100, recovery=0：3+1 = 4
+        assert_eq!(WorldActor::natural_regen_amount(100, 0, 10), 4);
+        // weight=0 → max(1) 防除零
+        assert_eq!(WorldActor::natural_regen_amount(100, 10, 0), 4 + 4 * 10 / 1);
+    }
 
     #[test]
     fn test_safe_zone_heal_hp() {

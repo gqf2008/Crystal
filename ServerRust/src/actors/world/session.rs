@@ -3369,6 +3369,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
             mount_loyalty_decrease_time: 0,
             mount_loyalty_increase_time: 0,
             torch_burn_time: 0,
+            last_damage_ms: 0,
     }
 }
 
