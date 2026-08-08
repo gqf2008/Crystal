@@ -451,13 +451,20 @@ fn creature_action_system(
         Has<CreatureRenameOk>,
         Has<CreatureReleaseOk>,
     )>,
-    mut btn_vis: Query<(&mut Visibility, Has<CreatureDismissBtn>, Has<CreatureSummonBtn>)>,
-    mut input_vis: Query<(
-        &mut Visibility,
-        Has<CreatureRenameInput>,
-        Has<CreatureReleaseInput>,
-        Has<CreatureRenameOk>,
-        Has<CreatureReleaseOk>,
+    // #1299：Bevy B0001——两个 &mut Visibility Query 冲突，用 ParamSet 顺序访问（#1298 合并后启动 panic）
+    mut vis: ParamSet<(
+        Query<(
+            &mut Visibility,
+            Has<CreatureDismissBtn>,
+            Has<CreatureSummonBtn>,
+        )>,
+        Query<(
+            &mut Visibility,
+            Has<CreatureRenameInput>,
+            Has<CreatureReleaseInput>,
+            Has<CreatureRenameOk>,
+            Has<CreatureReleaseOk>,
+        )>,
     )>,
 ) {
     let selected = state.creatures.get(state.selected).cloned();
@@ -467,14 +474,14 @@ fn creature_action_system(
     let sel_name = selected.as_ref().map(|c| c.name.clone()).unwrap_or_default();
 
     // 解散仅对激活宠物显示；召唤对未激活的选中宠物显示（C# Summon/Dismiss 同位置切换）
-    for (mut vis, is_dismiss, is_summon) in &mut btn_vis {
+    for (mut vis, is_dismiss, is_summon) in &mut vis.p0() {
         if is_dismiss {
             *vis = if is_active { Visibility::Visible } else { Visibility::Hidden };
         } else if is_summon {
             *vis = if selected.is_some() && !is_active { Visibility::Visible } else { Visibility::Hidden };
         }
     }
-    for (mut vis, is_ri, is_reli, is_rok, is_relok) in &mut input_vis {
+    for (mut vis, is_ri, is_reli, is_rok, is_relok) in &mut vis.p1() {
         if is_ri {
             *vis = if state.rename_open { Visibility::Visible } else { Visibility::Hidden };
         }
@@ -656,10 +663,43 @@ fn creature_options_system(
     cancel_btn: Query<&UiButton, With<CreatureOptionsCancel>>,
     grade_btns: Query<(&UiButton, Has<CreatureGradePrev>, Has<CreatureGradeNext>)>,
     mut lines: Query<(&mut Text2d, Option<&CreatureOptionsLine>, Has<CreatureGradeText>)>,
-    mut widgets: Query<&mut Visibility, (With<CreatureOptionsWidget>, Without<CreatureOptionsLine>)>,
-    mut line_vis: Query<&mut Visibility, (With<CreatureOptionsLine>, Without<CreatureOptionsSave>)>,
-    mut save_vis: Query<&mut Visibility, (With<CreatureOptionsSave>, Without<CreatureOptionsCancel>)>,
-    mut cancel_vis: Query<&mut Visibility, (With<CreatureOptionsCancel>, Without<CreatureOptionsSave>)>,
+    // #1299：Bevy B0001——四个 &mut Visibility Query 需互相 Without（#1298 合并后启动 panic）
+    mut widgets: Query<
+        &mut Visibility,
+        (
+            With<CreatureOptionsWidget>,
+            Without<CreatureOptionsLine>,
+            Without<CreatureOptionsSave>,
+            Without<CreatureOptionsCancel>,
+        ),
+    >,
+    mut line_vis: Query<
+        &mut Visibility,
+        (
+            With<CreatureOptionsLine>,
+            Without<CreatureOptionsWidget>,
+            Without<CreatureOptionsSave>,
+            Without<CreatureOptionsCancel>,
+        ),
+    >,
+    mut save_vis: Query<
+        &mut Visibility,
+        (
+            With<CreatureOptionsSave>,
+            Without<CreatureOptionsWidget>,
+            Without<CreatureOptionsLine>,
+            Without<CreatureOptionsCancel>,
+        ),
+    >,
+    mut cancel_vis: Query<
+        &mut Visibility,
+        (
+            With<CreatureOptionsCancel>,
+            Without<CreatureOptionsWidget>,
+            Without<CreatureOptionsLine>,
+            Without<CreatureOptionsSave>,
+        ),
+    >,
 ) {
     for btn in &opts_btn {
         if btn.clicked {
