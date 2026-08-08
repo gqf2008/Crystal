@@ -403,6 +403,7 @@ enum HeroBuffKind {
     SoulShield,
     BlessedArmour,
     UltimateEnhancer,
+    PoisonShot,
 }
 
 /// 英雄增益实例（#1190）
@@ -1097,11 +1098,60 @@ impl WorldActor {
                         }
                     }
                     MirClass::Archer => {
-                        // #1188：C# ArcherHero：StraightShot（已学）
+                        // #1194：C# ArcherHero：PoisonShot（已学+目标无绿毒+无 buff）→ StraightShot（MC/MAC）→ 近战
+                        let poison_lv = hero_magic_level(&snap.hero_magics, Spell::PoisonShot as u8);
                         let straight_lv = hero_magic_level(&snap.hero_magics, Spell::StraightShot as u8);
-                        if straight_lv > 0 {
-                            let raw = hero_attack_power(&hero_combat);
-                            // #1186：弓箭技能耗蓝（C# CanUseMagic）
+                        let has_poison_buff = ai_local.buffs.iter().any(|b| b.kind == HeroBuffKind::PoisonShot);
+                        if poison_lv > 0 && !target.has_green && !has_poison_buff {
+                            // #1194：C# SpecialArrowShot：PoisonShot 魔法箭（MC 伤害/MAC 防御）
+                            let raw = hero_spell_damage(
+                                &self.magic_infos,
+                                &snap.hero_magics,
+                                Spell::PoisonShot as u8,
+                                &hero_stats,
+                                snap.class,
+                            );
+                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::PoisonShot as u8);
+                            if ai_local.mp >= cost {
+                                ai_local.mp -= cost;
+                                spell_intents.push((
+                                    snap.session_id,
+                                    Spell::PoisonShot as u8,
+                                    target.oid,
+                                    target.x,
+                                    target.y,
+                                    raw,
+                                    self.tick_count + 4,
+                                    poison_lv,
+                                ));
+                                // C# SpecialArrowShot：40% 概率附加 PoisonShot buff（5+5*Lv 秒）
+                                if fastrand::i32(0..20) >= 8 {
+                                    ai_local.buffs.push(HeroBuff {
+                                        kind: HeroBuffKind::PoisonShot,
+                                        expire_tick: self.tick_count
+                                            + hero_buff_duration(HeroBuffKind::PoisonShot, poison_lv, &snap.hero_stats)
+                                                * 10,
+                                        level: poison_lv,
+                                        hero_level: snap.hero_level,
+                                    });
+                                }
+                                ai_local.next_attack_tick = self.tick_count + 8;
+                            } else {
+                                let _ = hero_melee_fallback(
+                                    snap.session_id, target.oid, target_dist,
+                                    &hero_combat, &mut attack_intents, &mut support_intents,
+                                );
+                                ai_local.next_attack_tick = self.tick_count + 6;
+                            }
+                        } else if straight_lv > 0 {
+                            // #1194：C# StraightShot 用 MC 伤害（原 DC 为误对齐）
+                            let raw = hero_spell_damage(
+                                &self.magic_infos,
+                                &snap.hero_magics,
+                                Spell::StraightShot as u8,
+                                &hero_stats,
+                                snap.class,
+                            );
                             let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::StraightShot as u8);
                             if ai_local.mp >= cost {
                                 ai_local.mp -= cost;
@@ -1115,6 +1165,19 @@ impl WorldActor {
                                     self.tick_count + 4,
                                     straight_lv,
                                 ));
+                                // #1194：PoisonShot buff 生效时本次射击附加绿毒（C# CompleteRangeAttack 取消 buff 并 ApplyPoison）
+                                if has_poison_buff {
+                                    let duration = (raw * 2 + (straight_lv as i32 + 1) * 7).max(1) as u32;
+                                    let pv = (raw / 25 + straight_lv as i32 + 1).max(1);
+                                    poison_intents.push((
+                                        snap.session_id,
+                                        target.oid,
+                                        mir2_shared::enums::PoisonType::GREEN,
+                                        duration,
+                                        pv,
+                                    ));
+                                    ai_local.buffs.retain(|b| b.kind != HeroBuffKind::PoisonShot);
+                                }
                                 ai_local.next_attack_tick = self.tick_count + 7;
                             } else {
                                 let _ = hero_melee_fallback(
@@ -1797,6 +1860,8 @@ fn hero_buff_duration(kind: HeroBuffKind, level: u8, stats: &super::hero_stats::
         HeroBuffKind::MagicShield => 30 + 10 * level,
         HeroBuffKind::MagicBooster => 60,
         HeroBuffKind::Concentration => 45 + 15 * level,
+        // #1194：C# SpecialArrowShot：PoisonShot buff = 5 + 5*Lv 秒
+        HeroBuffKind::PoisonShot => 5 + 5 * level,
         HeroBuffKind::SoulShield
         | HeroBuffKind::BlessedArmour
         | HeroBuffKind::UltimateEnhancer => {
@@ -1870,7 +1935,8 @@ fn hero_apply_buffs(
                     _ => {}
                 }
             }
-            HeroBuffKind::Haste | HeroBuffKind::Concentration => {}
+            // #1194：PoisonShot 是标记 buff（无属性，命中附加绿毒）
+            HeroBuffKind::Haste | HeroBuffKind::Concentration | HeroBuffKind::PoisonShot => {}
         }
     }
     shield_pct
@@ -1901,6 +1967,8 @@ fn hero_spell_damage(
     let (min_v, max_v) = match class {
         mir2_shared::enums::MirClass::Wizard => (stats.min_mc, stats.max_mc),
         mir2_shared::enums::MirClass::Taoist => (stats.min_sc, stats.max_sc),
+        // #1194：C# 弓箭手技能（StraightShot/PoisonShot）用 MC
+        mir2_shared::enums::MirClass::Archer => (stats.min_mc, stats.max_mc),
         _ => (stats.min_dc, stats.max_dc),
     };
     let base = if max_v > min_v {
@@ -2375,5 +2443,37 @@ mod tests {
         let empty: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; EquipmentSlot::COUNT];
         assert_eq!(hero_equip_poison_shape(&empty, &item_infos), 0);
         assert!(!hero_has_amulet(&empty, &item_infos));
+    }
+
+    #[test]
+    fn hero_poison_shot_duration_and_no_stat() {
+        use mir2_shared::enums::MirClass;
+        let stats = super::hero_stats::hero_base_stats(MirClass::Archer, 30);
+        // C#：PoisonShot buff = 5 + 5*Lv 秒
+        assert_eq!(hero_buff_duration(HeroBuffKind::PoisonShot, 2, &stats), 15);
+        // PoisonShot 无属性加成
+        let mut combat = stats.to_combat_stats();
+        let mut s = stats;
+        let shield = hero_apply_buffs(
+            &[HeroBuff { kind: HeroBuffKind::PoisonShot, expire_tick: 0, level: 2, hero_level: 30 }],
+            MirClass::Archer, &mut combat, &mut s,
+        );
+        assert_eq!(shield, 0);
+        assert_eq!(combat.max_atk, stats.max_dc);
+    }
+
+    #[test]
+    fn hero_spell_damage_archer_uses_mc() {
+        use mir2_shared::enums::{MirClass, Spell};
+        let shared = Spell::StraightShot as u8;
+        let cs = shared.saturating_sub(3) as u32;
+        let mut map = std::collections::HashMap::new();
+        map.insert(cs, magic_info_damage(40, 0, 5, 0, 1.0, 0.1));
+        let stats = super::hero_stats::hero_base_stats(MirClass::Archer, 30);
+        let dmg = hero_spell_damage(&map, &[(cs as i32, 1)], shared, &stats, MirClass::Archer);
+        // C# 弓箭手技能用 MC（非 DC）
+        let mc = (stats.min_mc + stats.max_mc) / 2;
+        assert_eq!(dmg, crate::combat::magic::calc_magic_damage(map.get(&cs).unwrap(), 1, mc));
+        assert!(dmg > 0);
     }
 }

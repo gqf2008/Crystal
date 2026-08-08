@@ -2841,12 +2841,21 @@ impl WorldActor {
         let target_id = pending.target_id;
         let raw_damage = pending.damage;
 
-        // 弓箭手弹道走 AC 防御（物理），法师弹道走 MAC（魔法）
+        // 弓箭手弹道：普通玩家走 AC 防御（物理），英雄弹道按 C# 走 MAC（StraightShot/PoisonShot 为魔法箭）
         let is_archer = matches!(spell,
             Spell::StraightShot | Spell::DoubleShot | Spell::BindingShot | Spell::NapalmShot
             | Spell::VampireShot | Spell::PoisonShot | Spell::CrippleShot | Spell::ElementalShot
             | Spell::CatTongue);
-        let defence = if is_archer { DefenceType::Ac } else { DefenceType::Mac };
+        // #1194：英雄弓箭手弹道（pending.hero_stats 有值）按 C# 用 MAC 防御
+        let defence = if is_archer {
+            if pending.hero_stats.is_some() {
+                DefenceType::Mac
+            } else {
+                DefenceType::Ac
+            }
+        } else {
+            DefenceType::Mac
+        };
 
         // 弓手被动 Focus（C# HumanObject CompleteRangeAttack：Random(5)<=Lv 时命中概率 ×2）
         let mut attacker_stats_owned = attacker_stats.clone();
