@@ -1174,10 +1174,10 @@ pub(crate) fn auto_market_test(
                 .find_map(|(i, s)| s.as_ref().map(|it| (i, it)));
             match first {
                 Some((_i, item)) => {
-                    net.send_packet(&client_bevy::network::MarketConsignWire {
-                        unique_id: item.unique_id as u32,
+                    net.send_packet(&mir2_shared::packets::client::market::ConsignItem {
+                        unique_id: item.unique_id,
                         price: 500,
-                        duration: 0,
+                        panel_type: mir2_shared::enums::MarketPanelType::Consign,
                     });
                     tracing::info!(
                         "[MARKETTEST] 寄售 [{}] uid={} 价格500",
@@ -1217,10 +1217,10 @@ pub(crate) fn auto_market_test(
                 .find_map(|(i, s)| s.as_ref().map(|it| (i, it)));
             match first {
                 Some((_i, item)) => {
-                    net.send_packet(&client_bevy::network::MarketConsignWire {
-                        unique_id: item.unique_id as u32,
+                    net.send_packet(&mir2_shared::packets::client::market::ConsignItem {
+                        unique_id: item.unique_id,
                         price: 600,
-                        duration: 0,
+                        panel_type: mir2_shared::enums::MarketPanelType::Consign,
                     });
                     tracing::info!(
                         "[MARKETTEST] 寄售第二件 [{}] uid={} 价格600",
@@ -1362,8 +1362,9 @@ pub(crate) fn auto_market_buy(
                 .cloned();
             if let Some(it) = target {
                 *bought_id = Some(it.auction_id);
-                net.send_packet(&client_bevy::network::MarketBuyWire {
-                    listing_id: it.auction_id as u32,
+                net.send_packet(&mir2_shared::packets::client::market::MarketBuy {
+                    auction_id: it.auction_id,
+                    bid_price: 0,
                 });
                 tracing::info!(
                     "[MARKETBUY] 购买商品 {} [{}] {}金币",

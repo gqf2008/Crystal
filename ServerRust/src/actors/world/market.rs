@@ -205,6 +205,8 @@ pub struct MarketBuyRequest {
     pub session_id: u64,
     pub listing_id: u64,
     pub count: u32,
+    /// 拍卖出价（C# MarketBuy.BidPrice；寄售忽略）
+    pub bid_price: u32,
 }
 
 impl Message<MarketBuyRequest> for WorldActor {
@@ -226,7 +228,7 @@ impl Message<MarketBuyRequest> for WorldActor {
             return;
         }
 
-        let auction_idx = match self.auctions.iter().position(|a| a.auction_id == msg.listing_id && !a.sold) {
+        let auction_idx = match self.auctions.iter().position(|a| a.auction_id == msg.listing_id && !a.sold && !a.expired) {
             Some(idx) => idx,
             None => {
                 send_system_message(&self.gate_ref, msg.session_id, "该商品已下架");
@@ -236,7 +238,73 @@ impl Message<MarketBuyRequest> for WorldActor {
 
         // Prevent buying own listing
         if self.auctions[auction_idx].seller_name == buyer_state.name {
-            send_system_message(&self.gate_ref, msg.session_id, "不能购买自己的商品");
+            send_system_message(&self.gate_ref, msg.session_id, "不能购买/竞价自己的商品");
+            return;
+        }
+
+        // #1325：拍卖竞价（C# MarketBuy 对 Auction 类型：出价 > 当前价，退还被超价者）
+        if self.auctions[auction_idx].item_type == 1 {
+            let (current_bid, current_buyer) = {
+                let a = &self.auctions[auction_idx];
+                (a.current_bid, a.current_buyer.clone())
+            };
+            let bid = msg.bid_price as u64;
+            if let Err(e) = auction_bid_validate(self.auctions[auction_idx].price as u64, current_bid, bid) {
+                send_system_message(&self.gate_ref, msg.session_id, e);
+                return;
+            }
+            let has_gold = record.actor_ref.ask(crate::actors::player::HasGold { amount: bid }).await.unwrap_or(false);
+            if !has_gold {
+                send_system_message(&self.gate_ref, msg.session_id, "金币不足");
+                return;
+            }
+            if let Some(prev_buyer) = current_buyer {
+                // 退还被超价者之前的出价（C# OutbidRefundGold 邮件）
+                let mail = MailMessage {
+                    mail_id: generate_mail_id(),
+                    sender_name: "市场交易".to_string(),
+                    receiver_name: prev_buyer.clone(),
+                    subject: "竞拍被超价".to_string(),
+                    body: format!("你的出价 {} 金币已被超过，金币已退回", current_bid),
+                    timestamp: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0),
+                    read: false,
+                    collected: false,
+                    locked: false,
+                    gold: current_bid,
+                    items: Vec::new(),
+                };
+                let _ = db::insert_mail(&self.db_pool, &prev_buyer, &mail).await;
+            }
+            let deducted = record.actor_ref.ask(DeductGold { amount: bid }).await.unwrap_or(false);
+            if !deducted {
+                send_system_message(&self.gate_ref, msg.session_id, "金币扣除失败");
+                return;
+            }
+            if let Some(a) = self.auctions.get_mut(auction_idx) {
+                a.current_bid = bid;
+                a.current_buyer = Some(buyer_state.name.clone());
+            }
+            send_system_message(&self.gate_ref, msg.session_id, &format!("已出价 {} 金币", bid));
+            let packet = mir2_shared::packets::server::market_system::MarketSuccess {
+                message: "出价成功".to_string(),
+            };
+            let mut body = Vec::new();
+            if packet.write_body(&mut body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::MarketSuccess as i16, &body),
+                }).await;
+            }
+            if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
+                let packet = super::build_user_information_packet(&new_state, &self.item_infos);
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: packet,
+                }).await;
+            }
             return;
         }
 
@@ -391,6 +459,111 @@ impl Message<MarketGetBackRequest> for WorldActor {
     }
 }
 
+/// #1325：拍卖出价校验（C#：bidPrice 需 >= 起始价 且 > 当前价）
+pub fn auction_bid_validate(starting_price: u64, current_bid: u64, bid_price: u64) -> Result<(), &'static str> {
+    if bid_price < starting_price {
+        return Err("出价低于起始价");
+    }
+    if bid_price <= current_bid {
+        return Err("出价需高于当前价");
+    }
+    Ok(())
+}
+
+/// 寄售/拍卖期限（C# Globals.ConsignmentLength 天；配置近似 7 天）
+const CONSIGNMENT_LENGTH_SECS: i64 = 7 * 24 * 3600;
+
+/// #1325：到期结算（C# Envir.ProcessAuction）
+/// - 拍卖且有人出价 → 成交：物品给买家（离线邮件）、金币给卖家（离线邮件）
+/// - 无出价 → 标记过期，卖家可取回（MarketGetBack）
+pub(crate) async fn resolve_expired_auctions(world: &mut WorldActor) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let mut resolved: Vec<(u64, bool, Option<String>, u64, String, String)> = Vec::new();
+    for a in world.auctions.iter() {
+        if a.sold || a.expired { continue; }
+        if now < a.consignment_date + CONSIGNMENT_LENGTH_SECS { continue; }
+        if a.item_type == 1 && a.current_buyer.is_some() {
+            let winner = a.current_buyer.clone().unwrap_or_default();
+            let bid = a.current_bid;
+            resolved.push((a.auction_id, true, Some(winner), bid, a.seller_name.clone(), a.item.info.as_ref().map(|i| i.name.clone()).unwrap_or_default()));
+        } else {
+            resolved.push((a.auction_id, false, None, 0, a.seller_name.clone(), a.item.info.as_ref().map(|i| i.name.clone()).unwrap_or_default()));
+        }
+    }
+    for (id, sold, winner, bid, seller, item_name) in resolved {
+        if sold {
+            let Some(winner) = winner else { continue };
+            // 物品给买家（在线直接给，离线邮件）
+            let item = world.auctions.iter().find(|a| a.auction_id == id).map(|a| a.item.clone());
+            if let Some(item) = item {
+                let mut delivered = false;
+                for (_, record) in &world.players {
+                    if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                        if st.name == winner {
+                            let _ = record.actor_ref.ask(AddItemToInventory { item: item.clone() }).await;
+                            send_system_message(&world.gate_ref, record.session_id, &format!("你以 {} 金币拍得 {}", bid, item_name));
+                            delivered = true;
+                            break;
+                        }
+                    }
+                }
+                if !delivered {
+                    let mail = MailMessage {
+                        mail_id: generate_mail_id(),
+                        sender_name: "市场交易".to_string(),
+                        receiver_name: winner.clone(),
+                        subject: "拍卖成交".to_string(),
+                        body: format!("你以 {} 金币拍得 {}", bid, item_name),
+                        timestamp: now,
+                        read: false, collected: false, locked: false,
+                        gold: 0,
+                        items: vec![item],
+                    };
+                    let _ = db::insert_mail(&world.db_pool, &winner, &mail).await;
+                }
+            }
+            // 金币给卖家（在线直接给，离线邮件）
+            let mut seller_online = false;
+            for (_, record) in &world.players {
+                if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                    if st.name == seller {
+                        let _ = record.actor_ref.ask(AddGold { amount: bid }).await;
+                        send_system_message(&world.gate_ref, record.session_id, &format!("你的 {} 以 {} 金币成交", item_name, bid));
+                        seller_online = true;
+                        break;
+                    }
+                }
+            }
+            if !seller_online {
+                let mail = MailMessage {
+                    mail_id: generate_mail_id(),
+                    sender_name: "市场交易".to_string(),
+                    receiver_name: seller.clone(),
+                    subject: "拍卖成交".to_string(),
+                    body: format!("你的 {} 以 {} 金币成交", item_name, bid),
+                    timestamp: now,
+                    read: false, collected: false, locked: false,
+                    gold: bid,
+                    items: Vec::new(),
+                };
+                let _ = db::insert_mail(&world.db_pool, &seller, &mail).await;
+            }
+            let _ = db::mark_auction_sold(&world.db_pool, id as i64, &winner).await;
+            if let Some(a) = world.auctions.iter_mut().find(|a| a.auction_id == id) {
+                a.sold = true;
+                a.buyer_name = Some(winner);
+            }
+        } else {
+            if let Some(a) = world.auctions.iter_mut().find(|a| a.auction_id == id) {
+                a.expired = true;
+            }
+        }
+    }
+}
+
 pub struct MarketSellNowRequest {
     pub session_id: u64,
     pub unique_id: u64,
@@ -444,6 +617,8 @@ pub struct ConsignItemRequest {
     pub session_id: u64,
     pub unique_id: u64,
     pub price: u64,
+    /// 0=寄售 1=拍卖（C# MarketItemType）
+    pub market_type: u8,
 }
 
 impl Message<ConsignItemRequest> for WorldActor {
@@ -502,22 +677,21 @@ impl Message<ConsignItemRequest> for WorldActor {
         }
 
         let price = msg.price as u32;
-        // C# Globals.MinConsignment=5000 / MaxConsignment=50000000
-        if price < 5000 || price > 50_000_000 {
+        // #1325：寄售/拍卖价格与费用（C# Globals：Consign 5000-50M / Auction 起始价 5000-50M，费用均为 5000）
+        const CONSIGN_FEE: u64 = 5000;
+        const MIN_PRICE: u32 = 5000;
+        const MAX_PRICE: u32 = 50_000_000;
+        if price < MIN_PRICE || price > MAX_PRICE {
             send_system_message(&self.gate_ref, msg.session_id, "价格无效（5000 - 50,000,000）");
             return;
         }
-
-        // 寄售费用 = 5000 金币
-        const CONSIGN_FEE: u64 = 5000;
-        let has_gold = record.actor_ref.ask(crate::actors::player::HasGold { amount: CONSIGN_FEE }).await.unwrap_or(false);
+        let fee = CONSIGN_FEE;
+        let has_gold = record.actor_ref.ask(crate::actors::player::HasGold { amount: fee }).await.unwrap_or(false);
         if !has_gold {
-            send_system_message(&self.gate_ref, msg.session_id, &format!("寄售需要 {} 金币", CONSIGN_FEE));
+            send_system_message(&self.gate_ref, msg.session_id, &format!("{}需要 {} 金币", if msg.market_type == 1 { "拍卖" } else { "寄售" }, fee));
             return;
         }
-
-        // 扣除费用
-        let fee_ok = record.actor_ref.ask(crate::actors::player::DeductGold { amount: CONSIGN_FEE }).await.unwrap_or(false);
+        let fee_ok = record.actor_ref.ask(crate::actors::player::DeductGold { amount: fee }).await.unwrap_or(false);
         if !fee_ok {
             send_system_message(&self.gate_ref, msg.session_id, "金币扣除失败");
             return;
@@ -551,12 +725,12 @@ impl Message<ConsignItemRequest> for WorldActor {
         };
 
         // 保存到数据库
-        if let Err(e) = db::save_auction(&self.db_pool, auction_id as i64, &state.name, &item_json, price as i64, now, 0,
+        if let Err(e) = db::save_auction(&self.db_pool, auction_id as i64, &state.name, &item_json, price as i64, now, msg.market_type as i32,
         ).await {
             warn!("Failed to save auction: {}", e);
             // Rollback: return item and refund fee
             let _ = record.actor_ref.ask(AddItemToInventory { item: item.clone() }).await;
-            let _ = record.actor_ref.ask(AddGold { amount: CONSIGN_FEE }).await;
+            let _ = record.actor_ref.ask(AddGold { amount: fee }).await;
             send_system_message(&self.gate_ref, msg.session_id, "寄售失败：数据库错误，物品和金币已退回");
             return;
         }
@@ -570,7 +744,10 @@ impl Message<ConsignItemRequest> for WorldActor {
             consignment_date: now,
             sold: false,
             buyer_name: None,
-            item_type: 0,
+            item_type: msg.market_type,
+            current_bid: if msg.market_type == 1 { price as u64 } else { 0 },
+            current_buyer: None,
+            expired: false,
         });
 
         // 发送成功响应
@@ -1088,5 +1265,19 @@ impl Message<GetRentedItemsRequest> for WorldActor {
         let packet = mir2_shared::packets::server::rental_system::GetRentedItems { items };
         self.send_rental_packet(msg.session_id, packet);
         debug!("GetRentedItems: {} count={}", state.name, self.player_rentals.get(&state.name).map(|v| v.len()).unwrap_or(0));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auction_bid_validation() {
+        // 起始价 1000，当前价 1000（初始=起始价）
+        assert!(auction_bid_validate(1000, 1000, 1000).is_err(), "等于当前价应拒绝");
+        assert!(auction_bid_validate(1000, 1000, 1001).is_ok(), "高于当前价应通过");
+        assert!(auction_bid_validate(1000, 2000, 1500).is_err(), "低于当前价应拒绝");
+        assert!(auction_bid_validate(1000, 2000, 2001).is_ok());
     }
 }

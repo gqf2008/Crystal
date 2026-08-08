@@ -3330,6 +3330,8 @@ impl Message<Tick> for WorldActor {
         // 组队位置广播（C# Group 周期 SendLocations；每 50 tick ≈ 5s，#1309）
         if self.tick_count % 50 == 0 {
             crate::actors::world::broadcast_group_locations(self).await;
+            // #1325：寄售/拍卖到期结算（C# Envir.ProcessAuction）
+            crate::actors::world::market::resolve_expired_auctions(self).await;
         }
 
 

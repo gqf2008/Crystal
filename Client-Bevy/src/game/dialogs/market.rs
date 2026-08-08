@@ -472,7 +472,7 @@ fn market_action_system(
         if btn.clicked {
             if let Some(idx) = market.selected {
                 let id = market.listings[idx].auction_id;
-                net.send_packet(&crate::network::MarketBuyWire { listing_id: id as u32 });
+                net.send_packet(&mir2_shared::packets::client::market::MarketBuy { auction_id: id, bid_price: 0 });
                 tracing::info!("🏪 购买商品 {}", id);
             } else {
                 market.message = "请先点击选中一个商品".to_string();
@@ -500,10 +500,10 @@ fn market_action_system(
                         market.message = "价格无效".to_string();
                         continue;
                     }
-                    net.send_packet(&crate::network::MarketConsignWire {
-                        unique_id: item.unique_id as u32,
+                    net.send_packet(&mir2_shared::packets::client::market::ConsignItem {
+                        unique_id: item.unique_id,
                         price,
-                        duration: 0,
+                        panel_type: mir2_shared::enums::MarketPanelType::Consign,
                     });
                     tracing::info!(
                         "🏪 寄售物品 [{}] uid={} 价格={}",
