@@ -72,7 +72,11 @@ pub struct MarketListing {
     pub auction_id: u64,       // 拍卖ID
     pub item: UserItem,        // 物品
     pub seller_name: String,   // 卖家名称
-    pub price: u32,            // 价格
+    pub price: u32,            // 价格（寄售=一口价，拍卖=起始价）
+    /// 0=寄售 1=拍卖（C# MarketItemType）
+    pub item_type: u8,
+    /// 拍卖当前最高出价（寄售=0）
+    pub current_bid: u32,
     pub consignment_date: i64, // 寄售日期
 }
 
@@ -90,6 +94,8 @@ impl Packet for NPCMarketPage {
             listing.item.write_to(writer)?;
             write_dotnet_string(writer, &listing.seller_name)?;
             writer.write_u32::<LittleEndian>(listing.price)?;
+            writer.write_u8(listing.item_type)?;
+            writer.write_u32::<LittleEndian>(listing.current_bid)?;
             writer.write_i64::<LittleEndian>(listing.consignment_date)?;
         }
 
@@ -108,6 +114,8 @@ impl Packet for NPCMarketPage {
             let seller_name = read_dotnet_string(reader)?;
 
             let price = reader.read_u32::<LittleEndian>()?;
+            let item_type = reader.read_u8()?;
+            let current_bid = reader.read_u32::<LittleEndian>()?;
             let consignment_date = reader.read_i64::<LittleEndian>()?;
 
             listings.push(MarketListing {
@@ -115,6 +123,8 @@ impl Packet for NPCMarketPage {
                 item,
                 seller_name,
                 price,
+                item_type,
+                current_bid,
                 consignment_date,
             });
         }

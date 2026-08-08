@@ -112,13 +112,19 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             // #702：--guild-accept 行会邀请推送（进游戏 2s 后）
             let mut mock_guild_invite_sent = false;
             let mut mock_guild_invite_since: Option<std::time::Instant> = None;
-            // #720：市场状态（(auction_id, item, seller, price)）
-            let mut mock_market_listings: Vec<(u64, mir2_shared::data::item::UserItem, String, u32)> =
+            // #720：市场状态（(auction_id, item, seller, price, item_type, current_bid)）
+            let mut mock_market_listings: Vec<(u64, mir2_shared::data::item::UserItem, String, u32, u8, u32)> =
                 if std::env::args().any(|a| a == "--market-buy") {
                     // #769：买家侧预置卖家 bevychar 的商品（uid=100 / item_index=853）
                     let mut seed = market_item(853);
                     seed.unique_id = 100;
-                    vec![(4000u64, seed, "bevychar".to_string(), 100u32)]
+                    // #1325：拍卖行展示（uid=200，item_type=1，当前价 150）
+                    let mut seed2 = market_item(853);
+                    seed2.unique_id = 200;
+                    vec![
+                        (4000u64, seed, "bevychar".to_string(), 100u32, 0u8, 0u32),
+                        (4001u64, seed2, "bevychar".to_string(), 100u32, 1u8, 150u32),
+                    ]
                 } else {
                     Vec::new()
                 };
@@ -1037,6 +1043,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 item.clone(),
                                                 "bevychar".to_string(),
                                                 price,
+                                                0u8,
+                                                0u32,
                                             ));
                                             send(
                                                 &to_client,
@@ -1056,9 +1064,9 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     let listing_id = cur.read_u32::<LittleEndian>().unwrap_or(0) as u64;
                                     let pos = mock_market_listings
                                         .iter()
-                                        .position(|(aid, _, _, _)| *aid == listing_id);
+                                        .position(|(aid, _, _, _, _, _)| *aid == listing_id);
                                     if let Some(pos) = pos {
-                                        let (_, item, _, _) = mock_market_listings.remove(pos);
+                                        let (_, item, _, _, _, _) = mock_market_listings.remove(pos);
                                         if let Some(empty) =
                                             player_inventory.iter_mut().find(|s| s.is_none())
                                         {
@@ -1162,9 +1170,9 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     let _bid_price = cur.read_u32::<LittleEndian>().unwrap_or(0);
                                     let pos = mock_market_listings
                                         .iter()
-                                        .position(|(aid, _, _, _)| *aid == listing_id);
+                                        .position(|(aid, _, _, _, _, _)| *aid == listing_id);
                                     if let Some(pos) = pos {
-                                        let (_, item, _, _) = mock_market_listings.remove(pos);
+                                        let (_, item, _, _, _, _) = mock_market_listings.remove(pos);
                                         if let Some(empty) =
                                             player_inventory.iter_mut().find(|s| s.is_none())
                                         {
