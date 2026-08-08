@@ -15,6 +15,7 @@ use bevy::prelude::*;
 use std::fs;
 
 use crate::game::dialogs::settings_file;
+use crate::network::NetConnection;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
@@ -328,7 +329,7 @@ impl Plugin for KeyboardPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_keyboard_layout);
         app.add_systems(
             Update,
-            (dialog_hotkey_system, keyboard_layout_ui_system, ui_button_system)
+            (dialog_hotkey_system, secondary_hotkey_system, keyboard_layout_ui_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -664,6 +665,61 @@ fn dialog_hotkey_system(
     if let Some(b) = kb.bindings.iter().find(|b| b.action == "腰带") {
         if keys.just_pressed(b.key) {
             potion_belt_visible.0 = !potion_belt_visible.0;
+        }
+    }
+}
+
+/// #1373：次级快捷键（C# KeyBindSettings 默认，含修饰键；修饰键暂不可重绑为简化）
+/// 英雄背包 Ctrl+I / 英雄装备 Ctrl+C / 英雄技能 Ctrl+S / 坐骑 M(@ride) /
+/// 退出 Alt+Q / 下线 Alt+X / 腰带 1-8（使用药水，C# Belt1..8）
+fn secondary_hotkey_system(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut mgr: ResMut<DialogManager>,
+    net: Res<NetConnection>,
+    belt: Res<crate::game::dialogs::potion_belt::PotionBeltState>,
+) {
+    let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    let alt = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+    if ctrl && keys.just_pressed(KeyCode::KeyI) {
+        mgr.toggle(DialogKind::HeroInventory);
+    }
+    if ctrl && keys.just_pressed(KeyCode::KeyC) {
+        mgr.toggle(DialogKind::HeroEquipment);
+    }
+    if ctrl && keys.just_pressed(KeyCode::KeyS) {
+        mgr.toggle(DialogKind::HeroSkill);
+    }
+    if keys.just_pressed(KeyCode::KeyM) {
+        net.send_packet(&mir2_shared::packets::client::chat::Chat {
+            message: "@ride".to_string(),
+            linked_items: Vec::new(),
+        });
+        tracing::info!("🐴 M 请求骑乘/下马 (@ride)");
+    }
+    if alt && keys.just_pressed(KeyCode::KeyQ) {
+        tracing::info!("🎮 Alt+Q 退出游戏");
+        std::process::exit(0);
+    }
+    if alt && keys.just_pressed(KeyCode::KeyX) {
+        net.send_packet(&mir2_shared::packets::client::character::LogOut);
+        tracing::info!("🎮 Alt+X 下线");
+    }
+    // 腰带 1-8（C# Belt1..8：D1..D8 / NumPad1..8）
+    let digits = [
+        KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4,
+        KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8,
+    ];
+    let numpads = [
+        KeyCode::Numpad1, KeyCode::Numpad2, KeyCode::Numpad3, KeyCode::Numpad4,
+        KeyCode::Numpad5, KeyCode::Numpad6, KeyCode::Numpad7, KeyCode::Numpad8,
+    ];
+    for i in 0..8usize {
+        let pressed = keys.just_pressed(digits[i]) || keys.just_pressed(numpads[i]);
+        if pressed {
+            if let Some(uid) = belt.slots.get(i).and_then(|u| u.as_ref()).copied() {
+                net.send_packet(&mir2_shared::packets::client::item::UseItem { unique_id: uid });
+                tracing::info!("🧪 腰带 {} 使用 uid={}", i + 1, uid);
+            }
         }
     }
 }
