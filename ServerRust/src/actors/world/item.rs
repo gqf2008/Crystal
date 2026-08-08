@@ -287,6 +287,20 @@ impl Message<PickUpRequest> for WorldActor {
                 msg.session_id, ground_item.item.unique_id, ground_item.x, ground_item.y
             );
 
+            // #1274：提前取 ShowGroupPickup 标志（ground_item 在背包满分支会被移动）
+            let notify_group_pickup = ground_item
+                .item
+                .info
+                .as_ref()
+                .map(|i| i.show_group_pickup)
+                .unwrap_or(false);
+            let notify_item_name = ground_item
+                .item
+                .info
+                .as_ref()
+                .map(|i| i.name.clone())
+                .unwrap_or_default();
+
             // 通知 PlayerActor 添加到背包
             let mut picked_up = false;
             if let Ok(success) = record.actor_ref.ask(AddItemToInventory {
@@ -334,6 +348,23 @@ impl Message<PickUpRequest> for WorldActor {
                 }
                 for (quest_index, _item_index, complete) in updates {
                     debug!("QuestItem: session={} quest={} complete={}", msg.session_id, quest_index, complete);
+                }
+                // #1274：C# PickUp ShowGroupPickup——拾取组队可见物品时向同组成员广播（含自己）
+                if notify_group_pickup {
+                    if let Some(gid) = picker_group {
+                        let picker_name = state.name.clone();
+                        for (sid, rec) in &self.players {
+                            if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                                if s.group_id == Some(gid) {
+                                    send_system_message(
+                                        &self.gate_ref,
+                                        *sid,
+                                        &format!("{} 拾取了 {}", picker_name, notify_item_name),
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
             }
         } else {
