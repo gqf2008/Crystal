@@ -410,3 +410,61 @@ mod tests {
         assert_eq!(r.target_id, 0x12345678);
     }
 }
+/// 大地图 NPC 搜索（gate 解析 [keyword: u16 len + bytes]，对齐 C# BigMapDialog SearchButton → C.SearchMap）
+#[derive(Debug, Clone, Default)]
+pub struct SearchMapWire {
+    pub keyword: String,
+}
+
+impl Packet for SearchMapWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::SearchMap as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        let len = reader.read_u16::<byteorder::LittleEndian>()? as usize;
+        let mut buf = vec![0u8; len];
+        reader.read_exact(&mut buf)?;
+        Ok(Self {
+            keyword: String::from_utf8_lossy(&buf).to_string(),
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        let bytes = self.keyword.as_bytes();
+        writer.write_u16::<byteorder::LittleEndian>(bytes.len() as u16)?;
+        writer.write_all(bytes)?;
+        Ok(())
+    }
+}
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+
+    #[test]
+    fn search_map_wire_roundtrip() {
+        let w = SearchMapWire { keyword: "比奇".to_string() };
+        let mut buf = Vec::new();
+        w.write_body(&mut buf).unwrap();
+        // gate 解析 [keyword: u16 len + bytes]
+        let len = u16::from_le_bytes([buf[0], buf[1]]) as usize;
+        assert_eq!(len, "比奇".len());
+        assert_eq!(&buf[2..], "比奇".as_bytes());
+        let mut cur = std::io::Cursor::new(buf);
+        let r = SearchMapWire::read_body(&mut cur).unwrap();
+        assert_eq!(r.keyword, "比奇");
+    }
+
+    #[test]
+    fn search_map_wire_empty_keyword() {
+        let w = SearchMapWire::default();
+        let mut buf = Vec::new();
+        w.write_body(&mut buf).unwrap();
+        assert_eq!(buf, vec![0, 0]);
+    }
+}
