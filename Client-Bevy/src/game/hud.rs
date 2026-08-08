@@ -784,6 +784,8 @@ fn hud_server_events(
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
         match ev {
+            // #1342：任务物品格增量更新由 inventory.rs quest_inventory_events 处理
+            ServerEvent::QuestItemGained { .. } | ServerEvent::QuestItemDeleted { .. } => {}
             ServerEvent::HealthChanged { hp, mp } => {
                 hud.hp = *hp;
                 hud.mp = *mp;
@@ -1013,6 +1015,7 @@ fn hud_server_events(
                 object_id,
                 inventory,
                 equipment,
+                quest_inventory,
                 max_hp,
                 max_mp,
                 ac,
@@ -1051,6 +1054,7 @@ fn hud_server_events(
                 hud.class = *class;
                 hud.player_object_id = Some(*object_id);
                 hud.inventory.items = inventory.clone();
+                hud.inventory.quest_inventory = quest_inventory.clone();
                 hud.inventory.gold = *gold;
                 hud.equipment = equipment.clone();
                 // #208：角色面板属性

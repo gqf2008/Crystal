@@ -109,6 +109,13 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             PRIMARY KEY (character_name, grid),
             FOREIGN KEY (character_name) REFERENCES characters(name)
         );
+        CREATE TABLE IF NOT EXISTS quest_inventory_backpack (
+            character_name TEXT NOT NULL,
+            grid INTEGER NOT NULL,
+            item_json TEXT NOT NULL,
+            PRIMARY KEY (character_name, grid),
+            FOREIGN KEY (character_name) REFERENCES characters(name)
+        );
         CREATE TABLE IF NOT EXISTS hero_inventory_backpack (
             character_name TEXT NOT NULL,
             grid INTEGER NOT NULL,
@@ -1101,7 +1108,7 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     // 先删子表行：INSERT OR REPLACE 会先删旧角色行再插入，
     // 若子表仍有引用会触发立即 FK 冲突（尤其是有背包物品的角色）。
     for tbl in [
-        "inventory_backpack", "inventory_equipment", "inventory_storage",
+        "inventory_backpack", "inventory_equipment", "inventory_storage", "quest_inventory_backpack",
         "hero_inventory_backpack", "heroes", "friends", "blocked_list", "mail",
         "quests", "completed_quests", "player_magics", "player_flags",
         "creatures", "refine_log",
@@ -1482,6 +1489,8 @@ async fn save_inventory(conn: &mut sqlx::sqlite::SqliteConnection, character_nam
         .bind(character_name).execute(&mut *conn).await?;
     sqlx::query("DELETE FROM inventory_storage WHERE character_name = ?")
         .bind(character_name).execute(&mut *conn).await?;
+    sqlx::query("DELETE FROM quest_inventory_backpack WHERE character_name = ?")
+        .bind(character_name).execute(&mut *conn).await?;
 
     // Backpack
     for (grid, slot) in inv.backpack.iter().enumerate() {
@@ -1508,6 +1517,16 @@ async fn save_inventory(conn: &mut sqlx::sqlite::SqliteConnection, character_nam
         if let Some(s) = slot {
             let item_json = serde_json::to_string(&s.item)?;
             sqlx::query("INSERT INTO inventory_storage (character_name, grid, item_json) VALUES (?, ?, ?)")
+                .bind(character_name).bind(grid as i32).bind(&item_json)
+                .execute(&mut *conn).await?;
+        }
+    }
+
+    // Quest inventory（C# QuestInventory 40 格）
+    for (grid, item) in inv.quest_inventory.iter().enumerate() {
+        if let Some(item) = item {
+            let item_json = serde_json::to_string(item)?;
+            sqlx::query("INSERT INTO quest_inventory_backpack (character_name, grid, item_json) VALUES (?, ?, ?)")
                 .bind(character_name).bind(grid as i32).bind(&item_json)
                 .execute(&mut *conn).await?;
         }
@@ -1570,6 +1589,24 @@ async fn load_inventory(pool: &DbPool, character_name: &str) -> anyhow::Result<P
                 grid: grid as u8,
                 item,
             });
+        }
+    }
+
+    // Quest inventory（C# QuestInventory 40 格）
+    let quest_rows = sqlx::query(
+        "SELECT grid, item_json FROM quest_inventory_backpack WHERE character_name = ?"
+    )
+    .bind(character_name)
+    .fetch_all(pool)
+    .await?;
+
+    for row in quest_rows {
+        let grid: i32 = row.get("grid");
+        let item_json: String = row.get("item_json");
+        if let Ok(item) = serde_json::from_str::<mir2_shared::data::item::UserItem>(&item_json) {
+            if (grid as usize) < inv.quest_inventory.len() {
+                inv.quest_inventory[grid as usize] = Some(item);
+            }
         }
     }
 

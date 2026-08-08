@@ -152,6 +152,8 @@ impl InvItem {
 
 /// 背包最大格数（C# Grid 8x10=80，扩容上限；超出部分不渲染）
 pub const MAX_INV_SLOTS: usize = 80;
+/// 背包扩容上限（C# CharacterInfo.ResizeInventory 上限 86，AddButton 满格隐藏）
+pub const MAX_INV_EXPAND: usize = 86;
 
 /// 背包数据（网络 UserInformation.inventory 写入）
 #[derive(Resource, Default)]
@@ -161,6 +163,8 @@ pub struct InventoryState {
     pub gold: u32,
     pub weight: u32,
     pub max_weight: u32,
+    /// 任务物品格（C# QuestInventory 40 格；UserInformation.quest_inventory 写入）
+    pub quest_inventory: Vec<Option<InvItem>>,
     /// 当前背包页（0=道具 1=道具2 2=任务；#276 双页扩容）
     pub page: usize,
 }
@@ -181,6 +185,7 @@ const DIALOG_X: f32 = 182.0;
 const DIALOG_Y: f32 = 217.0;
 const GRID_COLS: usize = 8;
 const GRID_ROWS: usize = 5;
+const QUEST_GRID_SIZE: usize = GRID_COLS * GRID_ROWS; // 任务格 8x5=40（C# QuestInventory）
 const CELL_W: f32 = 36.0;
 const CELL_H: f32 = 32.0;
 
@@ -192,7 +197,7 @@ pub struct InventoryPanel;
 pub struct DialogWidget;
 
 #[derive(Component)]
-pub struct InvTab(pub usize); // 0=道具 1=道具2（2=任务页签按 #1333 方案B 暂不生成）
+pub struct InvTab(pub usize); // 0=道具 1=道具2 2=任务（#1342 QuestGrid）
 
 #[derive(Component)]
 pub struct InvGoldText;
@@ -219,11 +224,48 @@ impl Plugin for InventoryDialogPlugin {
                 inv_tooltip_system,
                 inv_item_action_system,
                 inv_confirm_system,
+                inv_add_del_buttons_system,
+                quest_inventory_events,
                 ui_button_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
+    }
+}
+
+/// #1342：GainedQuestItem/DeleteQuestItem 增量更新任务格（C# QuestInventory）
+fn quest_inventory_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut hud: ResMut<HudState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::QuestItemGained { item } => {
+                if let Some(slot) = hud.inventory.quest_inventory.iter_mut().find(|s| s.is_none()) {
+                    *slot = Some(item.clone());
+                } else {
+                    hud.inventory.quest_inventory.push(Some(item.clone()));
+                }
+                hud.inventory.quest_inventory.truncate(QUEST_GRID_SIZE);
+            }
+            ServerEvent::QuestItemDeleted { unique_id, count } => {
+                for slot in hud.inventory.quest_inventory.iter_mut() {
+                    if let Some(it) = slot {
+                        if it.unique_id == *unique_id {
+                            if it.count > *count {
+                                it.count -= *count;
+                            } else {
+                                *slot = None;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -265,12 +307,12 @@ fn spawn_inventory_dialog(
         ));
     }
 
-    // 标签页按钮（Title 737/197 道具，738/168 道具2）
-    // #1333 方案B：任务页签暂不生成（服务端 has_quest_inventory=false，任务物品入普通背包；
-    // C# QuestGrid 独立任务物品格待后续大批对齐，差异已记入 #1225）
-    let tabs: [(usize, usize, usize, f32); 2] = [
+    // 标签页按钮（Title 737/197 道具，738/168 道具2，739/198 任务）
+    // #1342：任务页签（QuestGrid 8x5，C# QuestInventory）
+    let tabs: [(usize, usize, usize, f32); 3] = [
         (0, 737, 197, 6.0),
         (1, 738, 168, 76.0),
+        (2, 739, 198, 146.0),
     ];
     for (idx, normal, hover, x) in tabs {
         if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
@@ -347,12 +389,36 @@ fn spawn_inventory_dialog(
         DialogWidget,
     ));
 
+    // 扩展背包格购买按钮（C# InventoryDialog AddButton：Title 483/484/485 @(235,5)）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 483, 484, 485,
+        DIALOG_X + 235.0, DIALOG_Y + 5.0, 7.0, 23.0, 23.0,
+    ) {
+        commands.entity(e).insert((InvAddBtn, DialogRoot(DialogKind::Inventory), DialogWidget));
+    }
+    // 删除模式按钮（C# InventoryDialog DelItemButton：Prguse2 366/367/368 @(291,212)）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Prguse2, 366, 367, 368,
+        DIALOG_X + 291.0, DIALOG_Y + 212.0, 7.0, 20.0, 20.0,
+    ) {
+        commands.entity(e).insert((InvDelBtn, DialogRoot(DialogKind::Inventory), DialogWidget));
+    }
+
     // 格子背景不在此预生成：#276 由 inv_grid_sync_system 按 InventoryState.items.len()
     // 动态生成/移除（进图 UserInformation 到达前 items 为空，避免先建后删抖动）
 }
 
 #[derive(Component)]
 struct InvCloseBtn;
+
+/// #1346：扩展背包格购买按钮（C# InventoryDialog AddButton）
+#[derive(Component)]
+struct InvAddBtn;
+/// #1346：删除模式按钮（C# InventoryDialog DelItemButton）
+#[derive(Component)]
+struct InvDelBtn;
 
 /// 光标坐标 → 背包格（按当前页与格数）；供仓库/交易/英雄对话框复用。
 /// 对齐 C# InventoryDialog：page 0=道具（0..min(40,size)），1=道具2（40..size-1），
@@ -387,6 +453,8 @@ pub struct InvClickState {
     pub selected: Option<usize>,
     /// 英雄背包选中格（#203：与主背包双向转移共用选择态）
     pub hero_selected: Option<usize>,
+    /// #1346：删除模式（C# DelItemButton ToggleDeleteMode）
+    pub delete_mode: bool,
 }
 
 /// 丢弃确认框（原版 C# MirMessageBox YesNo：DropTip）
@@ -396,6 +464,8 @@ pub struct InvDropConfirm {
     pub text: String,
     pub unique_id: u64,
     pub count: u16,
+    /// #1346：0=丢弃 1=删除 2=背包扩容
+    pub mode: u8,
 }
 
 /// 数量框待处理操作（拆分/丢弃，原版 C# MirAmountBox OK 回调）
@@ -403,6 +473,8 @@ pub struct InvDropConfirm {
 pub struct InvPendingAmount {
     pub split_uid: Option<u64>,
     pub drop_uid: Option<u64>,
+    /// #1346：删除数量框待确认物品
+    pub delete_uid: Option<u64>,
 }
 
 #[derive(Component)]
@@ -459,7 +531,7 @@ fn inventory_ui_system(
     let inv = &hud.inventory;
     let open = mgr.is_open(DialogKind::Inventory);
     let size = inv.items.len().min(MAX_INV_SLOTS);
-    // 格子弹页显隐（#276）：道具=0..min(40,size)，道具2=40..size-1，任务页隐藏
+    // 格子弹页显隐（#276）：道具=0..min(40,size)，道具2=40..size-1，任务页=0..40（QuestGrid）
     for (mut vis, slot) in &mut all_vis {
         let visible = if !open {
             false
@@ -468,6 +540,8 @@ fn inventory_ui_system(
                 Some(s) => match inv.page {
                     0 => s.0 < size.min(GRID_COLS * GRID_ROWS),
                     1 => s.0 >= GRID_COLS * GRID_ROWS && s.0 < size,
+                    // #1342：任务页签显示 QuestGrid 40 格（C# QuestInventory 8x5）
+                    2 => s.0 < QUEST_GRID_SIZE,
                     _ => false,
                 },
                 None => true, // 背景/标签/关闭按钮
@@ -485,7 +559,11 @@ fn inventory_ui_system(
 
     // 物品数据 → 通用 ItemCell（图标/数量/耐久条由 item_cell_system 渲染，#90 续）
     for (slot, mut data) in &mut cells_data {
-        let item = inv.items.get(slot.0).and_then(|s| s.as_ref());
+        let item = if inv.page == 2 {
+            inv.quest_inventory.get(slot.0).and_then(|s| s.as_ref())
+        } else {
+            inv.items.get(slot.0).and_then(|s| s.as_ref())
+        };
         match item {
             Some(item) => {
                 let handle = ui_image(
@@ -540,6 +618,7 @@ fn inv_tooltip_system(
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
+
     let page = inv.inventory.page;
     let size = inv.inventory.items.len().min(MAX_INV_SLOTS);
     let mut hit: Option<InvItem> = None;
@@ -549,6 +628,7 @@ fn inv_tooltip_system(
         let visible = match page {
             0 => i < size.min(GRID_COLS * GRID_ROWS),
             1 => i >= GRID_COLS * GRID_ROWS && i < size,
+            2 => i < QUEST_GRID_SIZE,
             _ => false,
         };
         if !visible {
@@ -559,7 +639,11 @@ fn inv_tooltip_system(
         let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
         let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
         if cursor.x >= sx && cursor.x <= sx + CELL_W && cursor.y >= sy && cursor.y <= sy + CELL_H {
-            hit = inv.inventory.items.get(i).and_then(|s| s.as_ref()).cloned();
+            hit = if page == 2 {
+                inv.inventory.quest_inventory.get(i).and_then(|s| s.as_ref()).cloned()
+            } else {
+                inv.inventory.items.get(i).and_then(|s| s.as_ref()).cloned()
+            };
             break;
         }
     }
@@ -822,6 +906,53 @@ fn use_or_equip(item: &InvItem, net: &NetConnection, hud: &HudState) {
     }
 }
 
+/// #1346：扩展背包购买/删除模式按钮（C# InventoryDialog AddButton / DelItemButton）
+#[allow(clippy::too_many_arguments)]
+fn inv_add_del_buttons_system(
+    mut hud: ResMut<HudState>,
+    mut click: ResMut<InvClickState>,
+    mut confirm: ResMut<InvDropConfirm>,
+    add_btn: Query<&UiButton, With<InvAddBtn>>,
+    del_btn: Query<&UiButton, With<InvDelBtn>>,
+    mut add_vis: Query<&mut Visibility, With<InvAddBtn>>,
+    mut del_sprite: Query<&mut Sprite, With<InvDelBtn>>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+) {
+    let len = hud.inventory.items.len();
+    // C# AddButton.Visible = openLevel < 10（上限 86 格）
+    let can_expand = len < MAX_INV_EXPAND;
+    for mut vis in &mut add_vis {
+        *vis = if can_expand { Visibility::Visible } else { Visibility::Hidden };
+    }
+    // 删除模式图标（C# DelItemButton.Index 366 ↔ 368）
+    let del_idx = if click.delete_mode { 368 } else { 366 };
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse2, del_idx) {
+        for mut s in &mut del_sprite {
+            s.image = h.clone();
+        }
+    }
+    for btn in &add_btn {
+        if btn.clicked && can_expand {
+            // C# cost = 1M + openLevel*1M（openLevel = (len-46)/4；Rust 基线 40）
+            let level = len.saturating_sub(GRID_COLS * GRID_ROWS) / 4;
+            let cost = 1_000_000u64 + (level as u64) * 1_000_000u64;
+            confirm.text = format!("花费 {} 金币扩展背包格？", cost);
+            confirm.mode = 2;
+            confirm.visible = true;
+        }
+    }
+    for btn in &del_btn {
+        if btn.clicked {
+            click.delete_mode = !click.delete_mode;
+            if !click.delete_mode {
+                click.selected = None;
+            }
+        }
+    }
+}
+
 /// 生成丢弃确认框（原版 C# MirMessageBox：Prguse[360] 456x190，Yes/No Title[206-208]/[210-212]）
 fn spawn_inv_confirm(
     mut commands: Commands,
@@ -883,16 +1014,34 @@ fn inv_confirm_system(
     }
     for btn in &yes {
         if btn.clicked {
-            net.send_packet(&mir2_shared::packets::client::item::DropItem {
-                unique_id: confirm.unique_id,
-                count: confirm.count as u32,
-                hero_inventory: false,
-            });
-            tracing::info!(
-                "🗑️ 确认丢弃 uid={} count={}",
-                confirm.unique_id,
-                confirm.count
-            );
+            match confirm.mode {
+                1 => {
+                    // #1346：删除模式（C# PromptDelete → C.DeleteItem），删除后退出删除模式
+                    net.send_packet(&mir2_shared::packets::client::item::DeleteItem {
+                        unique_id: confirm.unique_id,
+                        count: confirm.count,
+                        hero_inventory: false,
+                    });
+                    click.delete_mode = false;
+                    tracing::info!("🗑️ 确认删除 uid={} count={}", confirm.unique_id, confirm.count);
+                }
+                2 => {
+                    // #1346：背包扩容（C# AddButton → C.Chat"@ADDINVENTORY"）
+                    net.send_packet(&mir2_shared::packets::client::chat::Chat {
+                        message: "@ADDINVENTORY".to_string(),
+                        linked_items: Vec::new(),
+                    });
+                    tracing::info!("📦 请求背包扩容");
+                }
+                _ => {
+                    net.send_packet(&mir2_shared::packets::client::item::DropItem {
+                        unique_id: confirm.unique_id,
+                        count: confirm.count as u32,
+                        hero_inventory: false,
+                    });
+                    tracing::info!("🗑️ 确认丢弃 uid={} count={}", confirm.unique_id, confirm.count);
+                }
+            }
             confirm.visible = false;
             click.selected = None;
         }
@@ -931,6 +1080,11 @@ fn inv_item_action_system(
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
 
+    // #1342：任务物品格只读（C# MirGridType.QuestInventory 不可移动/使用）
+    if hud.inventory.page == 2 {
+        return;
+    }
+
     // 数量框结果：拆分/丢弃
     for r in result.read() {
         let Some(n) = r.0 else {
@@ -955,6 +1109,15 @@ fn inv_item_action_system(
                 hero_inventory: false,
             });
             tracing::info!("🗑️ 丢弃物品 uid={} count={}", uid, n);
+        } else if let Some(uid) = pending.delete_uid.take() {
+            // #1346：删除模式数量框确认（C# PromptDelete DoDelete）
+            click.delete_mode = false;
+            net.send_packet(&mir2_shared::packets::client::item::DeleteItem {
+                unique_id: uid,
+                count: n as u16,
+                hero_inventory: false,
+            });
+            tracing::info!("🗑️ 删除物品 uid={} count={}", uid, n);
         }
     }
 
@@ -985,6 +1148,25 @@ fn inv_item_action_system(
     *last_modal = modal_now;
     if modal_was || modal_now {
         return;
+    }
+
+    // #1346：删除模式左键点物品 → 数量框/确认 → C.DeleteItem（C# PromptDelete）
+    if click.delete_mode && mouse.just_pressed(MouseButton::Left) {
+        if let Some(i) = slot_at(cursor.x, cursor.y) {
+            if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
+                if item.count > 1 {
+                    pending.delete_uid = Some(item.unique_id);
+                    amount.ask(format!("删除 {} 数量", item.name), item.count as u32);
+                } else {
+                    confirm.text = format!("确定删除 {} 吗？", item.name);
+                    confirm.unique_id = item.unique_id;
+                    confirm.count = 1;
+                    confirm.mode = 1;
+                    confirm.visible = true;
+                }
+                return;
+            }
+        }
     }
 
     // 双击/单击检测（原版 C# MirItemCell.OnMouseDoubleClick / OnMouseClick）
@@ -1046,6 +1228,12 @@ fn inv_item_action_system(
         if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
             use_or_equip(item, &net, &hud);
         }
+    }
+
+    // #1346：删除模式下右键取消（C# OnMouseClick right-click cancels bin toggle）
+    if mouse.just_pressed(MouseButton::Right) && click.delete_mode {
+        click.delete_mode = false;
+        return;
     }
 
     // Ctrl+右键：打开镶嵌面板（C# MirItemCell.OpenItem）

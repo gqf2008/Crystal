@@ -1734,11 +1734,18 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         );
                                         send(
                                             &to_client,
-                                            &server::miscellaneous::GainedQuestItem { item_id: 1001 },
+                                            &server::miscellaneous::GainedQuestItem {
+                                            item: mir2_shared::data::item::UserItem {
+                                                unique_id: 1001,
+                                                item_index: 1001,
+                                                count: 1,
+                                                ..Default::default()
+                                            },
+                                        },
                                         );
                                         send(
                                             &to_client,
-                                            &server::miscellaneous::DeleteQuestItem { item_id: 1002 },
+                                            &server::miscellaneous::DeleteQuestItem { unique_id: 1002, count: 1 },
                                         );
                                         // #262：配方 / Buff 暂停 / 杂项
                                         send(

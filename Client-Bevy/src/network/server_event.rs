@@ -433,6 +433,8 @@ pub enum ServerEvent {
         magics: Vec<ClientMagic>,
         inventory: Vec<Option<InvItem>>,
         equipment: Vec<Option<InvItem>>,
+        /// #1342：任务物品格（C# QuestInventory）
+        quest_inventory: Vec<Option<InvItem>>,
         item_names: Vec<(i32, String)>,
         /// #208：角色面板属性（服务端最终值）
         max_hp: i32,
@@ -461,6 +463,11 @@ pub enum ServerEvent {
         freezing: i32,
         poison_atk: i32,
     },
+    /// GainedQuestItem：任务物品进入任务格（C# S.GainedQuestItem）
+    QuestItemGained { item: InvItem },
+    /// DeleteQuestItem：任务物品移除（C# S.DeleteQuestItem UniqueID+Count）
+    QuestItemDeleted { unique_id: u64, count: u16 },
+
     /// HeroInformation：英雄完整信息（C# S.HeroInformation : UserInformation + autopot，#203）
     HeroInformation {
         object_id: u32,
