@@ -4760,14 +4760,27 @@ impl WorldActor {
             .and_then(|item| self.item_infos.get(&item.item_index))
             .map(|info| info.effect as i16)
             .unwrap_or(0);
-        let light: u8 = state.inventory.get_equipment(EquipmentSlot::Weapon)
-            .and_then(|item| self.item_infos.get(&item.item_index))
-            .map(|info| info.light as u8)
-            .unwrap_or(0)
-            .max(state.inventory.get_equipment(EquipmentSlot::Armour)
-                .and_then(|item| self.item_infos.get(&item.item_index))
+        // #1246：C# RefreshStats——破损装备不提供灯光（Light 在 continue 之后计算）；
+        // 外观 shape/effect 保留（Looks 在 continue 之前设置）
+        let light_of = |item: &mir2_shared::data::item::UserItem| -> u8 {
+            self.item_infos
+                .get(&item.item_index)
+                .filter(|info| item.current_dura > 0 || info.durability == 0)
                 .map(|info| info.light as u8)
-                .unwrap_or(0));
+                .unwrap_or(0)
+        };
+        let light: u8 = state
+            .inventory
+            .get_equipment(EquipmentSlot::Weapon)
+            .map(&light_of)
+            .unwrap_or(0)
+            .max(
+                state
+                    .inventory
+                    .get_equipment(EquipmentSlot::Armour)
+                    .map(&light_of)
+                    .unwrap_or(0),
+            );
         for other in self.other_players(session_id) {
             send_player_update(
                 &self.gate_ref, other.session_id, state.object_id,
@@ -5156,6 +5169,11 @@ pub(crate) fn calculate_equipment_bonuses(
 
     for eq in equipment.iter().flatten() {
         if let Some(info) = item_infos.get(&eq.item_index) {
+            // #1246：C# RefreshStats——耐久归零且物品有耐久上限 → 属性/套装/特殊模式失效
+            //（穿戴重量在 C# continue 之前计入，由 compute_player_weights 单独处理）
+            if eq.current_dura == 0 && info.durability > 0 {
+                continue;
+            }
             let get = |s: Stat| info.stats.get(&(s as u8)).copied().unwrap_or(0);
             b.min_atk += get(Stat::MinDC);
             b.max_atk += get(Stat::MaxDC);
@@ -5202,6 +5220,10 @@ pub(crate) fn calculate_equipment_bonuses(
     for (slot_idx, eq) in equipment.iter().enumerate() {
         if let Some(eq) = eq {
             if let Some(info) = item_infos.get(&eq.item_index) {
+                // #1246：破损装备不参与套装（C# ItemSets 在 continue 之后收集）
+                if eq.current_dura == 0 && info.durability > 0 {
+                    continue;
+                }
                 if info.set_type != 0 { // C# ItemSet.None = 0
                     set_entries.entry(info.set_type).or_default().push((slot_idx, info.item_type));
                 }
@@ -6937,6 +6959,92 @@ mod set_bonus_tests {
         assert_eq!(d.max_mc, 1);
         assert_eq!(d.max_sc, 1);
         assert_eq!(d.agility, 1);
+    }
+
+    #[test]
+    fn test_broken_equipment_no_stats_or_set() {
+        // #1246：C# RefreshStats——耐久归零（且 Durability>0）装备属性/套装失效
+        use mir2_shared::data::item::UserItem;
+        let mut info = test_item_info(1, 10);
+        info.durability = 1000;
+        info.set_type = 5; // Smash
+        info.stats.insert(mir2_shared::enums::Stat::MaxDC as u8, 10);
+        let mut infos = std::collections::HashMap::new();
+        infos.insert(1, info);
+
+        let mut eq: Vec<Option<UserItem>> =
+            vec![None; crate::actors::inventory::EquipmentSlot::COUNT as usize];
+        // 未破损：属性生效
+        eq[crate::actors::inventory::EquipmentSlot::Armour as usize] = Some(UserItem {
+            item_index: 1,
+            current_dura: 500,
+            max_dura: 1000,
+            ..Default::default()
+        });
+        let b = calculate_equipment_bonuses(&eq, &infos);
+        assert_eq!(b.max_atk, 10);
+        // 破损：属性失效（C# continue）
+        eq[crate::actors::inventory::EquipmentSlot::Armour as usize]
+            .as_mut()
+            .unwrap()
+            .current_dura = 0;
+        let b2 = calculate_equipment_bonuses(&eq, &infos);
+        assert_eq!(b2.max_atk, 0);
+        // Durability == 0 的物品（无耐久概念）耐久为 0 仍给属性（C# `Durability > 0` 条件）
+        let mut info0 = test_item_info(2, 10);
+        info0.durability = 0;
+        info0.stats.insert(mir2_shared::enums::Stat::MaxDC as u8, 7);
+        infos.insert(2, info0);
+        eq[crate::actors::inventory::EquipmentSlot::Armour as usize] = Some(UserItem {
+            item_index: 2,
+            current_dura: 0,
+            max_dura: 0,
+            ..Default::default()
+        });
+        let b3 = calculate_equipment_bonuses(&eq, &infos);
+        assert_eq!(b3.max_atk, 7);
+    }
+
+    #[test]
+    fn test_broken_equipment_excluded_from_set() {
+        // #1246：破损装备不参与套装计数（C# ItemSets 在 continue 之后收集）
+        use mir2_shared::data::item::UserItem;
+        // Smash 对戒：Ring(7) + Bracelet(6) 同套 → AttackSpeed +2
+        let mut ring = test_item_info(1, 5);
+        ring.durability = 1000;
+        ring.set_type = 5;
+        ring.item_type = 7;
+        let mut brac = test_item_info(2, 5);
+        brac.durability = 1000;
+        brac.set_type = 5;
+        brac.item_type = 6;
+        let mut infos = std::collections::HashMap::new();
+        infos.insert(1, ring);
+        infos.insert(2, brac);
+
+        let mut eq: Vec<Option<UserItem>> =
+            vec![None; crate::actors::inventory::EquipmentSlot::COUNT as usize];
+        eq[crate::actors::inventory::EquipmentSlot::RingL as usize] = Some(UserItem {
+            item_index: 1,
+            current_dura: 500,
+            max_dura: 1000,
+            ..Default::default()
+        });
+        eq[crate::actors::inventory::EquipmentSlot::BraceletL as usize] = Some(UserItem {
+            item_index: 2,
+            current_dura: 500,
+            max_dura: 1000,
+            ..Default::default()
+        });
+        let b = calculate_equipment_bonuses(&eq, &infos);
+        assert_eq!(b.attack_speed, 2);
+        // 戒指破损 → 套装失效（bracelet 仍完好）
+        eq[crate::actors::inventory::EquipmentSlot::RingL as usize]
+            .as_mut()
+            .unwrap()
+            .current_dura = 0;
+        let b2 = calculate_equipment_bonuses(&eq, &infos);
+        assert_eq!(b2.attack_speed, 0);
     }
 
     fn test_item_info(idx: i32, weight: i32) -> db::ItemInfo {
