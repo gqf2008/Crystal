@@ -150,6 +150,10 @@ pub struct HeroAutoPotLabel;
 #[derive(Component)]
 pub struct HeroBehaviourBtn(usize);
 
+/// 英雄阵亡复活按钮（#1216：C# HeroPanel 复活按钮，hero_hp<=0 时显示）
+#[derive(Component)]
+pub struct HeroReviveBtn;
+
 /// 创建面板
 #[derive(Component)]
 pub struct HeroCreatePanel;
@@ -189,10 +193,30 @@ impl Plugin for HeroPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_hero);
         app.add_systems(
             Update,
-            (hero_ui_system, hero_button_system, ui_button_system)
+            (hero_ui_system, hero_button_system, hero_revive_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
+    }
+}
+
+/// #1216：英雄阵亡复活按钮（C# HeroPanel 复活按钮）：hero_hp<=0 显示，点击发 ReviveHeroWire
+fn hero_revive_system(
+    mut state: ResMut<HeroState>,
+    net: Res<NetConnection>,
+    mut q: Query<(&UiButton, &mut Visibility), With<HeroReviveBtn>>,
+) {
+    for (btn, mut vis) in &mut q {
+        *vis = if state.hero_hp <= 0 {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if btn.clicked {
+            net.send_packet(&crate::network::ReviveHeroWire);
+            state.message = "已请求复活英雄…".to_string();
+            tracing::info!("🦸 请求复活英雄");
+        }
     }
 }
 
@@ -347,6 +371,18 @@ fn spawn_hero(
         },
         DialogRoot(DialogKind::Hero),
         HeroWidget,
+    ));
+    // #1216：英雄阵亡复活按钮（默认隐藏，hero_hp<=0 时由按钮系统显示）
+    let revive_btn = spawn_ui_text(&mut commands, &font, "英雄已阵亡·点击复活", 300.0, 252.0, 12.0, Color::srgb(1.0, 0.4, 0.4), 8.4);
+    commands.entity(revive_btn).insert((
+        HeroReviveBtn,
+        UiButton {
+            rect: (300.0, 252.0, 160.0, 20.0),
+            clicked: false,
+        },
+        DialogRoot(DialogKind::Hero),
+        HeroWidget,
+        Visibility::Hidden,
     ));
     // 英雄技能按钮（#218：打开 HeroSkillDialog）
     let skill_btn = spawn_ui_text(&mut commands, &font, "英雄技能", 300.0, 360.0, 12.0, Color::srgb(0.8, 0.9, 1.0), 8.3);

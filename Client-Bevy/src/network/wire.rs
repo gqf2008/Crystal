@@ -122,6 +122,27 @@ impl Packet for ChangeHeroWire {
     }
 }
 
+/// 英雄一键复活（#1216：空 body，客户端英雄面板阵亡按钮）
+#[derive(Debug, Clone, Copy)]
+pub struct ReviveHeroWire;
+
+impl Packet for ReviveHeroWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::ReviveHero as i16;
+
+    fn read_body<R: std::io::Read>(
+        _reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        Ok(Self)
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        _writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        Ok(())
+    }
+}
+
 /// 英雄→主背包取回（#203：C# [from i32][to i32]，英雄格 → 主背包格）
 #[derive(Debug, Clone, Copy)]
 pub struct TakeBackHeroItemWire {

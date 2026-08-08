@@ -867,6 +867,9 @@ impl Message<ClientData> for GateActor {
             x if x == ClientPacketIds::TransferHeroItem as i16 => {
                 handle_transfer_hero_item(&self.world_ref, msg.session_id, payload);
             }
+            x if x == ClientPacketIds::ReviveHero as i16 => {
+                handle_revive_hero(&self.world_ref, msg.session_id, payload);
+            }
             // 宠物
             x if x == ClientPacketIds::UpdateIntelligentCreature as i16 => {
                 handle_update_intelligent_creature(&self.world_ref, msg.session_id, payload);
@@ -2196,6 +2199,16 @@ fn handle_change_hero(world_ref: &Option<ActorRef<crate::actors::world::WorldAct
     debug!("ChangeHero: session={} index={}", session_id, hero_index);
     let world_ref = match world_ref { Some(w) => w, None => return };
     let _ = world_ref.tell(crate::actors::world::ChangeHeroRequest { session_id, hero_index }).try_send();
+}
+
+/// ReviveHero：英雄一键复活（#1216，空 body）
+fn handle_revive_hero(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+    let _ = payload;
+    debug!("ReviveHero: session={}", session_id);
+    let world_ref = match world_ref { Some(w) => w, None => return };
+    let _ = world_ref
+        .tell(crate::actors::world::ReviveHeroRequest { session_id })
+        .try_send();
 }
 
 /// TakeBackHeroItem: C# [from i32][to i32]（英雄格 → 主背包格，#203）
