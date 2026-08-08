@@ -148,17 +148,9 @@ fn parse_bool(v: &str) -> Option<bool> {
     }
 }
 
-/// 从 config.ini 读取 [Settings] 段（工作目录优先，其次 crate 根）
-pub fn load_persisted_settings() -> PersistedSettings {
+/// 解析旧版 config.ini [Settings] 段（迁移用；新格式统一 Mir2Config.ini）
+pub fn parse_legacy_settings(content: &str) -> PersistedSettings {
     let mut s = PersistedSettings::default();
-    let mut content = std::fs::read_to_string("config.ini").ok();
-    if content.is_none() {
-        content = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config.ini"),
-        )
-        .ok();
-    }
-    let Some(content) = content else { return s };
     let mut section = String::new();
     for raw in content.lines() {
         let line = raw.trim();
@@ -205,7 +197,21 @@ pub fn load_persisted_settings() -> PersistedSettings {
     s
 }
 
-/// 写回 config.ini：保留 [Network]/[Login] 等段，替换/追加 [Settings] 段
+/// 从 config.ini 读取 [Settings] 段（旧格式；仅迁移用）
+#[allow(dead_code)]
+pub fn load_persisted_settings() -> PersistedSettings {
+    let mut content = std::fs::read_to_string("config.ini").ok();
+    if content.is_none() {
+        content = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config.ini"),
+        )
+        .ok();
+    }
+    parse_legacy_settings(&content.unwrap_or_default())
+}
+
+/// 写回 config.ini [Settings]（旧格式；新格式统一 Mir2Config.ini，仅供测试）
+#[allow(dead_code)]
 pub fn save_persisted_settings(settings: &PersistedSettings) {
     let path = config_path();
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
@@ -270,10 +276,20 @@ fn apply_settings_on_start(
     mut chat: ResMut<ChatFilter>,
     mut state: ResMut<SettingsSaveState>,
 ) {
-    let loaded = load_persisted_settings();
-    loaded.apply(&mut opt, &mut chat);
-    state.snapshot = loaded;
-    tracing::info!("⚙️ 已加载 config.ini [Settings]");
+    // 统一持久化到 Mir2Config.ini（C# Settings.cs）；旧 config.ini [Settings] 仅一次性迁移
+    let mir2_exists =
+        std::path::Path::new(crate::game::dialogs::settings_file::SETTINGS_PATH).exists();
+    if !mir2_exists {
+        let legacy = load_persisted_settings();
+        if legacy != PersistedSettings::default() {
+            legacy.apply(&mut opt, &mut chat);
+            opt.save();
+            chat.save();
+            tracing::info!("⚙️ 已从 config.ini [Settings] 迁移到 Mir2Config.ini");
+        }
+    }
+    state.snapshot = PersistedSettings::from((&*opt, &*chat));
+    tracing::info!("⚙️ 设置已从 Mir2Config.ini 加载");
 }
 
 /// 变更检测 + 防抖 1s 保存
@@ -291,8 +307,9 @@ fn persist_settings_system(
     if let Some(t) = state.dirty_since {
         if time.elapsed_secs_f64() - t >= 1.0 {
             state.dirty_since = None;
-            save_persisted_settings(&cur);
-            tracing::debug!("💾 设置已保存到 config.ini");
+            opt.save();
+            chat.save();
+            tracing::debug!("💾 设置已保存到 Mir2Config.ini");
         }
     }
 }
@@ -315,6 +332,17 @@ mod tests {
     use super::*;
 
     #[test]
+    #[test]
+    fn legacy_settings_parse() {
+        let content = "[Settings]\nSkillBar=false\nEffect=true\nSoundVolume=0.50\nFilterGuild=true\nTransparentChat=true\n";
+        let s = parse_legacy_settings(content);
+        assert!(!s.skill_bar);
+        assert!(s.effect);
+        assert!((s.sound_volume - 0.5).abs() < 1e-6);
+        assert!(s.filter_guild);
+        assert!(s.transparent_chat);
+    }
+
     fn settings_ini_roundtrip() {
         let mut s = PersistedSettings::default();
         s.skill_mode_ctrl = false;
@@ -374,3 +402,5 @@ mod tests {
         assert!(chat.whisper);
     }
 }
+
+
