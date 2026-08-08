@@ -202,7 +202,8 @@ fn help_ui_system(
     prev: Query<&UiButton, With<HelpPrev>>,
     next: Query<&UiButton, With<HelpNext>>,
     mut widgets: Query<&mut Visibility, With<HelpWidget>>,
-    mut lines: Query<(&mut Text2d, &HelpLine)>,
+    // #1319：Bevy B0001——lines 与 titles/page_labels 的 &mut Text2d 需 Without 隔离（#1320 合并后启动 panic）
+    mut lines: Query<(&mut Text2d, &HelpLine), (Without<HelpTitleText>, Without<HelpPageLabelText>)>,
     mut titles: Query<&mut Text2d, (With<HelpTitleText>, Without<HelpPageLabelText>)>,
     mut page_labels: Query<&mut Text2d, (With<HelpPageLabelText>, Without<HelpTitleText>)>,
 ) {
