@@ -94,6 +94,46 @@ impl Packet for CreatureRequestWire {
     }
 }
 
+/// 移除插槽物品（#1313 钓具卸下；gate 解析 [grid u8][grid_to u8][uid u64][to i32][from_uid u64]）
+#[derive(Debug, Clone, Copy)]
+pub struct RemoveSlotItemWire {
+    pub grid: u8,
+    pub grid_to: u8,
+    pub unique_id: u64,
+    pub to: i32,
+    pub from_unique_id: u64,
+}
+
+impl Packet for RemoveSlotItemWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::RemoveSlotItem as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            grid: reader.read_u8()?,
+            grid_to: reader.read_u8()?,
+            unique_id: reader.read_u64::<byteorder::LittleEndian>()?,
+            to: reader.read_i32::<byteorder::LittleEndian>()?,
+            from_unique_id: reader.read_u64::<byteorder::LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u8(self.grid)?;
+        writer.write_u8(self.grid_to)?;
+        writer.write_u64::<byteorder::LittleEndian>(self.unique_id)?;
+        writer.write_i32::<byteorder::LittleEndian>(self.to)?;
+        writer.write_u64::<byteorder::LittleEndian>(self.from_unique_id)?;
+        Ok(())
+    }
+}
+
 /// 英雄切换（M48：gate 解析 [hero_index u8]）
 #[derive(Debug, Clone, Copy)]
 pub struct ChangeHeroWire {
