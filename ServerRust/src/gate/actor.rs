@@ -2965,14 +2965,27 @@ fn handle_equip_slot_item(world_ref: &Option<ActorRef<crate::actors::world::Worl
     let _ = world_ref.tell(crate::actors::world::EquipSlotItemRequest { session_id, grid, unique_id, to_slot, grid_to }).try_send();
 }
 
-/// ConsignItem: [item_index: u32][price: u32][duration: u32] — 寄售
-fn forward_consign_item(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 12 { return; }
-    let unique_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    let price = u32::from_le_bytes(payload[4..8].try_into().unwrap_or([0; 4]));
-    debug!("ConsignItem: session={} uid={} price={}", session_id, unique_id, price);
+/// ConsignItem: [unique_id u64][price u32][panel_type u8]（对齐 SharedRust ConsignItem/C#）
+fn forward_consign_item(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.len() < 13 { return; }
+    let unique_id = u64::from_le_bytes(payload[0..8].try_into().unwrap_or([0; 8]));
+    let price = u32::from_le_bytes(payload[8..12].try_into().unwrap_or([0; 4]));
+    let panel_type = payload[12];
+    let market_type = if panel_type == mir2_shared::enums::MarketPanelType::Auction as u8 { 1 } else { 0 };
+    debug!("ConsignItem: session={} uid={} price={} type={}", session_id, unique_id, price, market_type);
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::ConsignItemRequest { session_id, unique_id: unique_id as u64, price: price as u64 }).try_send();
+    let _ = world_ref
+        .tell(crate::actors::world::ConsignItemRequest {
+            session_id,
+            unique_id,
+            price: price as u64,
+            market_type,
+        })
+        .try_send();
 }
 
 /// MarketSearch: [keyword: DotNetString]
@@ -2999,13 +3012,25 @@ fn forward_market_page(world_ref: &Option<ActorRef<crate::actors::world::WorldAc
     let _ = world_ref.tell(crate::actors::world::MarketPageRequest { session_id, page }).try_send();
 }
 
-/// MarketBuy: [listing_id: u32]
-fn forward_market_buy(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 4 { return; }
-    let listing_id = u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4]));
-    debug!("MarketBuy: session={} listing={}", session_id, listing_id);
+/// MarketBuy: [auction_id u64][bid_price u32]（对齐 SharedRust MarketBuy/C#）
+fn forward_market_buy(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.len() < 12 { return; }
+    let listing_id = u64::from_le_bytes(payload[0..8].try_into().unwrap_or([0; 8]));
+    let bid_price = u32::from_le_bytes(payload[8..12].try_into().unwrap_or([0; 4]));
+    debug!("MarketBuy: session={} listing={} bid={}", session_id, listing_id, bid_price);
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::MarketBuyRequest { session_id, listing_id: listing_id as u64, count: 1 }).try_send();
+    let _ = world_ref
+        .tell(crate::actors::world::MarketBuyRequest {
+            session_id,
+            listing_id,
+            count: 1,
+            bid_price,
+        })
+        .try_send();
 }
 
 /// MarketGetBack: [listing_id: u32]

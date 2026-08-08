@@ -1162,7 +1162,13 @@ pub struct AuctionListing {
     pub consignment_date: i64,
     pub sold: bool,
     pub buyer_name: Option<String>,
-    pub item_type: u8, // MarketItemType
+    pub item_type: u8, // MarketItemType：0=Consign 1=Auction
+    /// 当前最高出价（拍卖；初始=起始价）
+    pub current_bid: u64,
+    /// 当前最高出价者
+    pub current_buyer: Option<String>,
+    /// 到期未售出
+    pub expired: bool,
 }
 
     /// C# ItemObject.Drop(distance)：掉落物在 range 内散落（简化：随机偏移可行走格，回退原点）
@@ -4027,6 +4033,7 @@ impl Actor for WorldActor {
                         if aid >= next_auction_id {
                             next_auction_id = aid + 1;
                         }
+                        let starting_bid = if item_type == 1 { (price as u64).max(0) } else { 0 };
                         auctions.push(AuctionListing {
                             auction_id: aid,
                             seller_name: seller,
@@ -4036,6 +4043,9 @@ impl Actor for WorldActor {
                             sold: sold != 0,
                             buyer_name,
                             item_type: item_type as u8,
+                            current_bid: starting_bid,
+                            current_buyer: None,
+                            expired: false,
                         });
                     }
                 }

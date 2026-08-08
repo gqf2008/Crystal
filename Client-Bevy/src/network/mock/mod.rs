@@ -1023,10 +1023,9 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                 }
                                 x if x == ClientPacketIds::ConsignItem as i16 => {
                                     use byteorder::{LittleEndian, ReadBytesExt};
-                                    let uid32 = cur.read_u32::<LittleEndian>().unwrap_or(0);
+                                    let uid = cur.read_u64::<LittleEndian>().unwrap_or(0);
                                     let price = cur.read_u32::<LittleEndian>().unwrap_or(0);
-                                    let _duration = cur.read_u32::<LittleEndian>().unwrap_or(0);
-                                    let uid = uid32 as u64;
+                                    let _panel_type = cur.read_u8().unwrap_or(0);
                                     let idx = player_inventory
                                         .iter()
                                         .position(|s| s.as_ref().map(|i| i.unique_id) == Some(uid));
@@ -1159,7 +1158,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                 // #769：市场购买（--market-buy，wire [listing_id u32]）
                                 x if x == ClientPacketIds::MarketBuy as i16 => {
                                     use byteorder::{LittleEndian, ReadBytesExt};
-                                    let listing_id = cur.read_u32::<LittleEndian>().unwrap_or(0) as u64;
+                                    let listing_id = cur.read_u64::<LittleEndian>().unwrap_or(0);
+                                    let _bid_price = cur.read_u32::<LittleEndian>().unwrap_or(0);
                                     let pos = mock_market_listings
                                         .iter()
                                         .position(|(aid, _, _, _)| *aid == listing_id);
