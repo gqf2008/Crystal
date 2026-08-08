@@ -12,6 +12,9 @@
 
 use bevy::prelude::*;
 
+use std::fs;
+
+use crate::game::dialogs::settings_file;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
@@ -61,6 +64,90 @@ pub fn key_name(key: KeyCode) -> String {
         KeyCode::KeyO => "O".to_string(),
         _ => format!("{:?}", key).trim_start_matches("Key").to_string(),
     }
+}
+
+/// KeyBinds.ini 路径（对齐 C# KeyBindSettings：.\KeyBinds.ini）
+const KEYBINDS_PATH: &str = "./KeyBinds.ini";
+
+/// KeyCode Debug 名 → KeyCode（覆盖默认键位 + 常用键；未知返回 None）
+fn key_code_from_name(name: &str) -> Option<KeyCode> {
+    use KeyCode::*;
+    Some(match name {
+        "Space" => Space,
+        "Enter" => Enter,
+        "Escape" => Escape,
+        "Tab" => Tab,
+        "Backspace" => Backspace,
+        "AltLeft" => AltLeft,
+        "AltRight" => AltRight,
+        "ControlLeft" => ControlLeft,
+        "ControlRight" => ControlRight,
+        "ShiftLeft" => ShiftLeft,
+        "ShiftRight" => ShiftRight,
+        "KeyW" => KeyW,
+        "KeyA" => KeyA,
+        "KeyS" => KeyS,
+        "KeyD" => KeyD,
+        "KeyQ" => KeyQ,
+        "KeyB" => KeyB,
+        "KeyC" => KeyC,
+        "KeyK" => KeyK,
+        "KeyG" => KeyG,
+        "KeyM" => KeyM,
+        "KeyH" => KeyH,
+        "KeyO" => KeyO,
+        "KeyI" => KeyI,
+        "KeyV" => KeyV,
+        "F1" => F1,
+        "F2" => F2,
+        "F3" => F3,
+        "F4" => F4,
+        "F5" => F5,
+        "F6" => F6,
+        "F7" => F7,
+        "F8" => F8,
+        "F9" => F9,
+        "F10" => F10,
+        "F11" => F11,
+        "F12" => F12,
+        "ArrowUp" => ArrowUp,
+        "ArrowDown" => ArrowDown,
+        "ArrowLeft" => ArrowLeft,
+        "ArrowRight" => ArrowRight,
+        _ => return None,
+    })
+}
+
+/// 序列化绑定 → KeyBinds.ini 内容（[Bindings] action=KeyCode Debug 名）
+fn bindings_to_ini(bindings: &[KeyBinding]) -> String {
+    let mut s = String::from("[Bindings]\n");
+    for b in bindings {
+        s.push_str(&format!("{}={}\n", b.action, format!("{:?}", b.key)));
+    }
+    s
+}
+
+/// 解析 KeyBinds.ini 内容 → 绑定列表（缺失/非法回退默认键）
+fn bindings_from_ini(content: &str, defaults: &[KeyBinding]) -> Vec<KeyBinding> {
+    defaults
+        .iter()
+        .map(|b| {
+            let key = settings_file::ini_str(content, "Bindings", b.action)
+                .and_then(key_code_from_name)
+                .unwrap_or(b.key);
+            KeyBinding::new(b.action, b.group, key)
+        })
+        .collect()
+}
+
+/// 从 KeyBinds.ini 加载（不存在返回默认）
+fn load_bindings(defaults: &[KeyBinding]) -> Vec<KeyBinding> {
+    bindings_from_ini(&fs::read_to_string(KEYBINDS_PATH).unwrap_or_default(), defaults)
+}
+
+/// 保存绑定到 KeyBinds.ini
+fn save_bindings(bindings: &[KeyBinding]) {
+    let _ = fs::write(KEYBINDS_PATH, bindings_to_ini(bindings));
 }
 
 /// 默认键位（对齐 C# KeyBindSettings.New()：背包 F9/I、角色 F10/C、技能 F11/S、
@@ -118,8 +205,10 @@ pub struct KeyboardState {
 impl Default for KeyboardState {
     fn default() -> Self {
         let defaults = default_bindings();
+        // #1301：启动从 KeyBinds.ini 加载（缺失/非法回退默认）
+        let bindings = load_bindings(&defaults);
         Self {
-            bindings: defaults.clone(),
+            bindings,
             defaults,
             top_line: 0,
             rebinding: None,
@@ -431,6 +520,7 @@ fn keyboard_layout_ui_system(
             state.bindings = state.defaults.clone();
             state.top_line = 0;
             state.rebinding = None;
+            save_bindings(&state.bindings);
             tracing::info!("🎹 键位已重置为默认");
         }
     }
@@ -466,6 +556,7 @@ fn keyboard_layout_ui_system(
 
     // 等待按键：任意键重绑（Esc 取消）
     if let Some(idx) = state.rebinding {
+        let mut changed = false;
         for key in keys.get_just_pressed() {
             let k = *key;
             if k == KeyCode::Escape {
@@ -475,8 +566,13 @@ fn keyboard_layout_ui_system(
                 tracing::info!("🎹 绑定 {} → {}", b.action, key_name(k));
                 b.key = k;
                 state.rebinding = None;
+                changed = true;
             }
             break;
+        }
+        // #1301：重绑后立即持久化
+        if changed {
+            save_bindings(&state.bindings);
         }
     }
 
@@ -533,5 +629,43 @@ fn dialog_hotkey_system(
         if keys.just_pressed(b.key) {
             mgr.toggle(kind);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_code_name_roundtrip() {
+        for k in [KeyCode::KeyW, KeyCode::F1, KeyCode::Tab, KeyCode::Space, KeyCode::Escape, KeyCode::ArrowUp] {
+            let name = format!("{:?}", k);
+            assert_eq!(key_code_from_name(&name), Some(k), "{}", name);
+        }
+        assert_eq!(key_code_from_name("NotAKey"), None);
+    }
+
+    #[test]
+    fn bindings_roundtrip_ini() {
+        let defaults = default_bindings();
+        // 改两个键位（背包→KeyB、技能栏1→KeyQ）
+        let mut bindings = defaults.clone();
+        bindings[7].key = KeyCode::KeyB;
+        bindings[18].key = KeyCode::KeyQ;
+        let ini = bindings_to_ini(&bindings);
+        let loaded = bindings_from_ini(&ini, &defaults);
+        assert_eq!(loaded.len(), defaults.len());
+        assert_eq!(loaded[7].key, KeyCode::KeyB);
+        assert_eq!(loaded[18].key, KeyCode::KeyQ);
+        // 未改动的回退默认
+        assert_eq!(loaded[0].key, KeyCode::KeyW);
+    }
+
+    #[test]
+    fn bindings_from_ini_invalid_falls_back() {
+        let defaults = default_bindings();
+        let ini = "[Bindings]\n背包=NotAKey\n";
+        let loaded = bindings_from_ini(ini, &defaults);
+        assert_eq!(loaded[7].key, defaults[7].key);
     }
 }
