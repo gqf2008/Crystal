@@ -60,23 +60,21 @@ impl Default for OptionState {
     }
 }
 
-/// 设置持久化文件（与 C# Settings.cs：`.\Mir2Config.ini` 同路径同语义）
-const SETTINGS_PATH: &str = "./Mir2Config.ini";
 
 impl OptionState {
     /// 从 INI 文本解析（C# InIReader；音量按 0-100 存储 ↔ 0.0-1.0）
     pub fn from_ini(content: &str) -> Self {
         let mut s = Self::default();
-        s.sound_volume = ini_percent(content, "Sound", "Volume", s.sound_volume);
-        s.music_volume = ini_percent(content, "Sound", "Music", s.music_volume);
-        s.skill_mode_ctrl = ini_bool(content, "Game", "SkillMode", s.skill_mode_ctrl);
-        s.skill_bar = ini_bool(content, "Game", "SkillBar", s.skill_bar);
-        s.effect = ini_bool(content, "Game", "Effect", s.effect);
-        s.drop_view = ini_bool(content, "Game", "DropView", s.drop_view);
-        s.name_view = ini_bool(content, "Game", "NameView", s.name_view);
-        s.hp_view = ini_bool(content, "Game", "HPMPView", s.hp_view);
-        s.allow_observe = ini_bool(content, "Game", "AllowObserve", s.allow_observe);
-        s.new_move = ini_bool(content, "Game", "NewMove", s.new_move);
+        s.sound_volume = crate::game::dialogs::settings_file::ini_percent(content, "Sound", "Volume", s.sound_volume);
+        s.music_volume = crate::game::dialogs::settings_file::ini_percent(content, "Sound", "Music", s.music_volume);
+        s.skill_mode_ctrl = crate::game::dialogs::settings_file::ini_bool(content, "Game", "SkillMode", s.skill_mode_ctrl);
+        s.skill_bar = crate::game::dialogs::settings_file::ini_bool(content, "Game", "SkillBar", s.skill_bar);
+        s.effect = crate::game::dialogs::settings_file::ini_bool(content, "Game", "Effect", s.effect);
+        s.drop_view = crate::game::dialogs::settings_file::ini_bool(content, "Game", "DropView", s.drop_view);
+        s.name_view = crate::game::dialogs::settings_file::ini_bool(content, "Game", "NameView", s.name_view);
+        s.hp_view = crate::game::dialogs::settings_file::ini_bool(content, "Game", "HPMPView", s.hp_view);
+        s.allow_observe = crate::game::dialogs::settings_file::ini_bool(content, "Game", "AllowObserve", s.allow_observe);
+        s.new_move = crate::game::dialogs::settings_file::ini_bool(content, "Game", "NewMove", s.new_move);
         s
     }
 
@@ -100,51 +98,39 @@ impl OptionState {
 
     /// 启动时加载（C# Settings.Load；文件不存在用默认值）
     pub fn load() -> Self {
-        let content = std::fs::read_to_string(SETTINGS_PATH).unwrap_or_default();
+        let content = crate::game::dialogs::settings_file::load_ini();
         Self::from_ini(&content)
     }
 
-    /// 保存（C# Settings.Save；CMain 退出/设置变更时调用）
+    /// 保存（C# Settings.Save；merge 写回，保留 [Chat]/[Filter] 等其他 section）
     pub fn save(&self) {
-        let _ = std::fs::write(SETTINGS_PATH, self.to_ini());
-        tracing::debug!("⚙️ 设置已保存到 {}", SETTINGS_PATH);
+        use crate::game::dialogs::settings_file::{set_ini_value, write_ini};
+        let mut content = crate::game::dialogs::settings_file::load_ini();
+        let pct = |v: f32| ((v * 100.0).round() as i32).clamp(0, 100).to_string();
+        for (k, v) in [
+            ("Volume", pct(self.sound_volume)),
+            ("Music", pct(self.music_volume)),
+        ] {
+            content = set_ini_value(&content, "Sound", k, &v);
+        }
+        for (k, v) in [
+            ("SkillMode", self.skill_mode_ctrl.to_string()),
+            ("SkillBar", self.skill_bar.to_string()),
+            ("Effect", self.effect.to_string()),
+            ("DropView", self.drop_view.to_string()),
+            ("NameView", self.name_view.to_string()),
+            ("HPMPView", self.hp_view.to_string()),
+            ("AllowObserve", self.allow_observe.to_string()),
+            ("NewMove", self.new_move.to_string()),
+        ] {
+            content = set_ini_value(&content, "Game", k, &v);
+        }
+        write_ini(&content);
+        tracing::debug!("⚙️ 设置已保存到 Mir2Config.ini");
     }
 }
 
-/// 读取 INI 布尔值（缺省/非法回退 default）
-fn ini_bool(content: &str, section: &str, key: &str, default: bool) -> bool {
-    ini_str(content, section, key)
-        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
-        .unwrap_or(default)
-}
 
-/// 读取 INI 百分比音量（0-100 → 0.0-1.0）
-fn ini_percent(content: &str, section: &str, key: &str, default: f32) -> f32 {
-    ini_str(content, section, key)
-        .and_then(|v| v.parse::<f32>().ok())
-        .map(|v| (v / 100.0).clamp(0.0, 1.0))
-        .unwrap_or(default)
-}
-
-/// 读取 INI 某段某 key 的原始值
-fn ini_str<'a>(content: &'a str, section: &str, key: &str) -> Option<&'a str> {
-    let mut cur = "";
-    for line in content.lines() {
-        let l = line.trim();
-        if l.starts_with('[') && l.ends_with(']') {
-            cur = &l[1..l.len() - 1];
-            continue;
-        }
-        if cur.eq_ignore_ascii_case(section) {
-            if let Some(eq) = l.find('=') {
-                if l[..eq].trim().eq_ignore_ascii_case(key) {
-                    return Some(l[eq + 1..].trim());
-                }
-            }
-        }
-    }
-    None
-}
 
 /// 设置行类型（与 C# 各按钮组一一对应）
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -579,9 +565,10 @@ mod tests {
     #[test]
     fn test_ini_helpers() {
         let content = "[Sound]\nVolume=50\nMusic=100\n";
-        assert_eq!(ini_bool(content, "Sound", "Missing", true), true);
-        assert_eq!(ini_percent(content, "Sound", "Volume", 0.0), 0.5);
-        assert_eq!(ini_percent(content, "Sound", "Music", 0.0), 1.0);
-        assert_eq!(ini_percent(content, "Sound", "Missing", 0.2), 0.2);
+        assert_eq!(crate::game::dialogs::settings_file::ini_bool(content, "Sound", "Missing", true), true);
+        assert_eq!(crate::game::dialogs::settings_file::ini_percent(content, "Sound", "Volume", 0.0), 0.5);
+        assert_eq!(crate::game::dialogs::settings_file::ini_percent(content, "Sound", "Music", 0.0), 1.0);
+        assert_eq!(crate::game::dialogs::settings_file::ini_percent(content, "Sound", "Missing", 0.2), 0.2);
     }
 }
+
