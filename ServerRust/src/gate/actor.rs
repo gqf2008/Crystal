@@ -2665,38 +2665,37 @@ fn handle_cancel_mentor(social_ref: &Option<ActorRef<crate::actors::social::Soci
 /// UpdateIntelligentCreature: [creature_type: u8][pickup_mode: u8][custom_name: DotNetString?]
 /// UpdateIntelligentCreature: [type u8][pet_mode u8][custom_name dotnet][summon u8][unsummon u8][release u8]
 /// UpdateIntelligentCreature: [type u8][pet_mode u8][custom_name dotnet][summon u8][unsummon u8][release u8]
+/// UpdateIntelligentCreature: [type u8][pet_mode u8][name dotnet][summon u8][unsummon u8][release u8][filter 9][grade u8][options_save u8]
 fn handle_update_intelligent_creature(
     world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
     session_id: SessionId,
     payload: &[u8],
 ) {
-    if payload.len() < 3 {
+    if payload.len() < 4 {
         debug!("UpdateIntelligentCreature: session={} payload too short", session_id);
         return;
     }
     let mut cur = std::io::Cursor::new(payload);
-    let creature_type = {
+    let mut next_u8 = |cur: &mut std::io::Cursor<&[u8]>| {
         let mut b = [0u8; 1];
-        let _ = std::io::Read::read_exact(&mut cur, &mut b);
-        b[0]
+        std::io::Read::read_exact(cur, &mut b).is_ok().then(|| b[0]).unwrap_or(0)
     };
-    let pet_mode = {
-        let mut b = [0u8; 1];
-        let _ = std::io::Read::read_exact(&mut cur, &mut b);
-        b[0]
-    };
+    let creature_type = next_u8(&mut cur);
+    let pet_mode = next_u8(&mut cur);
     use mir2_shared::binary::read_dotnet_string;
     let custom_name = read_dotnet_string(&mut cur).unwrap_or_default();
-    let mut flag = |cur: &mut std::io::Cursor<&[u8]>| {
-        let mut b = [0u8; 1];
-        std::io::Read::read_exact(cur, &mut b).is_ok() && b[0] != 0
-    };
-    let summon_me = flag(&mut cur);
-    let unsummon_me = flag(&mut cur);
-    let release_me = flag(&mut cur);
+    let summon_me = next_u8(&mut cur) != 0;
+    let unsummon_me = next_u8(&mut cur) != 0;
+    let release_me = next_u8(&mut cur) != 0;
+    let mut filter = [0u8; 9];
+    for b in filter.iter_mut() {
+        *b = next_u8(&mut cur);
+    }
+    let grade = next_u8(&mut cur);
+    let options_save = next_u8(&mut cur) != 0;
     debug!(
-        "UpdateIntelligentCreature: session={} type={} mode={} name={} summon={} unsummon={} release={}",
-        session_id, creature_type, pet_mode, custom_name, summon_me, unsummon_me, release_me
+        "UpdateIntelligentCreature: session={} type={} mode={} name={} summon={} unsummon={} release={} save={}",
+        session_id, creature_type, pet_mode, custom_name, summon_me, unsummon_me, release_me, options_save
     );
     let world_ref = match world_ref { Some(w) => w, None => return };
     let _ = world_ref
@@ -2708,6 +2707,9 @@ fn handle_update_intelligent_creature(
             summon_me,
             unsummon_me,
             release_me,
+            filter,
+            grade,
+            options_save,
         })
         .try_send();
 }

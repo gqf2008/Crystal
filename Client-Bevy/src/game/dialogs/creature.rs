@@ -28,6 +28,10 @@ pub struct CreatureEntry {
     pub name: String,
     /// 是否当前激活（召唤中）
     pub active: bool,
+    /// 物品过滤 9 项（全部/金币/武器/盔甲/头盔/靴子/腰带/饰品/其他）
+    pub filter: [u8; 9],
+    /// 品质
+    pub grade: u8,
 }
 
 /// 宠物状态
@@ -41,6 +45,12 @@ pub struct CreatureState {
     pub rename_open: bool,
     /// 释放验证输入框是否打开（C# ReleaseButton → MirInputBox）
     pub release_open: bool,
+    /// 选项面板是否打开（C# IntelligentCreatureOptionsDialog）
+    pub options_open: bool,
+    /// 选项面板中的过滤勾选（0=全部 ... 8=其他）
+    pub options: [bool; 9],
+    /// 品质（C# ItemGrade；本批仅保存，暂不做品质选择 UI）
+    pub grade: u8,
 }
 
 #[derive(Component)]
@@ -70,6 +80,21 @@ pub struct CreatureRefresh;
 /// 半自动模式按钮（C# SemiAutoModeButton）
 #[derive(Component)] struct CreatureSemiBtn;
 
+/// 选项按钮（C# OptionsMenuButton Title[573-575]）
+#[derive(Component)] struct CreatureOptionsBtn;
+
+/// 选项面板（C# IntelligentCreatureOptionsDialog：9 个过滤复选框 + 保存/取消）
+#[derive(Component)] struct CreatureOptionsWidget;
+
+/// 选项行（0=全部 ... 8=其他）
+#[derive(Component)] struct CreatureOptionsLine(usize);
+
+/// 选项保存
+#[derive(Component)] struct CreatureOptionsSave;
+
+/// 选项取消
+#[derive(Component)] struct CreatureOptionsCancel;
+
 /// 改名输入框（TextInput id 33）
 #[derive(Component)] struct CreatureRenameInput;
 
@@ -98,7 +123,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_creature);
         app.add_systems(OnExit(AppState::Game), cleanup_creature);
         app.add_systems(
             Update,
-            (creature_ui_system, creature_action_system, ui_button_system)
+            (creature_ui_system, creature_action_system, creature_options_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -207,6 +232,41 @@ fn spawn_creature(
         12.0, Color::WHITE, 8.0,
     );
     commands.entity(e).insert((CreatureSemiBtn, UiButton { rect: (360.0, 330.0, 44.0, 22.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget));
+    let e = spawn_ui_text(
+        &mut commands, &font, "选项",
+        420.0, 330.0,
+        12.0, Color::WHITE, 8.0,
+    );
+    commands.entity(e).insert((CreatureOptionsBtn, UiButton { rect: (420.0, 330.0, 44.0, 22.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget));
+
+    // 选项面板（C# IntelligentCreatureOptionsDialog：9 个过滤项 + 保存/取消）
+    for i in 0..9usize {
+        let e = spawn_ui_text(
+            &mut commands, &font, "",
+            300.0, 120.0 + i as f32 * 22.0,
+            12.0, Color::WHITE, 8.5,
+        );
+        commands.entity(e).insert((
+            CreatureOptionsWidget,
+            CreatureOptionsLine(i),
+            UiButton { rect: (300.0, 120.0 + i as f32 * 22.0, 200.0, 20.0), clicked: false },
+            DialogRoot(DialogKind::Creature),
+            CreatureWidget,
+            Visibility::Hidden,
+        ));
+    }
+    let e = spawn_ui_text(
+        &mut commands, &font, "保存",
+        300.0, 335.0,
+        12.0, Color::WHITE, 8.5,
+    );
+    commands.entity(e).insert((CreatureOptionsWidget, CreatureOptionsSave, UiButton { rect: (300.0, 335.0, 44.0, 22.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget, Visibility::Hidden));
+    let e = spawn_ui_text(
+        &mut commands, &font, "取消",
+        360.0, 335.0,
+        12.0, Color::WHITE, 8.5,
+    );
+    commands.entity(e).insert((CreatureOptionsWidget, CreatureOptionsCancel, UiButton { rect: (360.0, 335.0, 44.0, 22.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget, Visibility::Hidden));
 
     // 改名/释放输入框（TextInput id 33/34，C# MirInputBox 语义）
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
@@ -420,6 +480,9 @@ fn creature_action_system(
                 summon_me: false,
                 unsummon_me: true,
                 release_me: false,
+                filter: [0; 9],
+                grade: 0,
+                options_save: false,
             });
             state.message = "已解散宠物".to_string();
         } else if is_summon {
@@ -430,6 +493,9 @@ fn creature_action_system(
                 summon_me: true,
                 unsummon_me: false,
                 release_me: false,
+                filter: [0; 9],
+                grade: 0,
+                options_save: false,
             });
             state.message = format!("已召唤宠物 {}", sel_name);
         } else if is_release {
@@ -444,6 +510,9 @@ fn creature_action_system(
                 summon_me: false,
                 unsummon_me: false,
                 release_me: false,
+                filter: [0; 9],
+                grade: 0,
+                options_save: false,
             });
             state.message = "切换到自动模式".to_string();
         } else if is_semi {
@@ -454,6 +523,9 @@ fn creature_action_system(
                 summon_me: false,
                 unsummon_me: false,
                 release_me: false,
+                filter: [0; 9],
+                grade: 0,
+                options_save: false,
             });
             state.message = "切换到半自动模式".to_string();
         } else if is_rok {
@@ -480,6 +552,9 @@ fn creature_action_system(
                 summon_me: false,
                 unsummon_me: false,
                 release_me: false,
+                filter: [0; 9],
+                grade: 0,
+                options_save: false,
             });
             state.message = format!("已改名为 {}", name);
         }
@@ -498,6 +573,9 @@ fn creature_action_system(
                 summon_me: false,
                 unsummon_me: false,
                 release_me: true,
+                filter: [0; 9],
+                grade: 0,
+                options_save: false,
             });
             state.message = "宠物已释放".to_string();
         } else {
@@ -507,6 +585,122 @@ fn creature_action_system(
         if input.texts.len() > 34 { input.texts[34].clear(); }
     }
 }
+/// 选项标签（C# IntelligentCreatureOptionsDialog.OptionNames）
+const CREATURE_OPTION_LABELS: [&str; 9] = ["全部", "金币", "武器", "盔甲", "头盔", "靴子", "腰带", "饰品", "其他"];
+
+/// 过滤切换（对齐 C# IntelligentCreatureItemFilter.SetItemFilter）
+fn creature_filter_toggle(f: &mut [bool; 9], idx: usize) {
+    match idx {
+        0 => {
+            f[0] = true;
+            for i in 1..9 { f[i] = false; }
+        }
+        1..=8 => {
+            f[0] = false;
+            f[idx] = !f[idx];
+        }
+        _ => {}
+    }
+    if (1..9).all(|i| f[i]) {
+        f[0] = true;
+        for i in 1..9 { f[i] = false; }
+    } else if (1..9).all(|i| !f[i]) {
+        f[0] = true;
+    }
+}
+
+/// 选项面板（C# IntelligentCreatureOptionsDialog：9 个过滤项 + 保存/取消）
+#[allow(clippy::too_many_arguments)]
+fn creature_options_system(
+    mut state: ResMut<CreatureState>,
+    net: Res<NetConnection>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    opts_btn: Query<&UiButton, With<CreatureOptionsBtn>>,
+    save_btn: Query<&UiButton, With<CreatureOptionsSave>>,
+    cancel_btn: Query<&UiButton, With<CreatureOptionsCancel>>,
+    mut lines: Query<(&mut Text2d, &CreatureOptionsLine)>,
+    mut widgets: Query<&mut Visibility, (With<CreatureOptionsWidget>, Without<CreatureOptionsLine>)>,
+    mut line_vis: Query<&mut Visibility, (With<CreatureOptionsLine>, Without<CreatureOptionsSave>)>,
+    mut save_vis: Query<&mut Visibility, (With<CreatureOptionsSave>, Without<CreatureOptionsCancel>)>,
+    mut cancel_vis: Query<&mut Visibility, (With<CreatureOptionsCancel>, Without<CreatureOptionsSave>)>,
+) {
+    for btn in &opts_btn {
+        if btn.clicked {
+            if !state.options_open {
+                state.options_open = true;
+                if let Some(c) = state.creatures.get(state.selected) {
+                    let f = c.filter;
+                    let g = c.grade;
+                    for i in 0..9 { state.options[i] = f[i] != 0; }
+                    state.grade = g;
+                }
+            } else {
+                state.options_open = false;
+            }
+        }
+    }
+    if state.options_open && mouse.just_pressed(MouseButton::Left) {
+        if let Ok(window) = windows.single() {
+            if let Some(cursor) = window.cursor_position() {
+                for i in 0..9usize {
+                    let y = 120.0 + i as f32 * 22.0;
+                    if cursor.x >= 300.0 && cursor.x <= 500.0 && cursor.y >= y && cursor.y <= y + 20.0 {
+                        creature_filter_toggle(&mut state.options, i);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    for btn in &save_btn {
+        if btn.clicked && state.options_open {
+            let mut filter = [0u8; 9];
+            for i in 0..9 { filter[i] = if state.options[i] { 1 } else { 0 }; }
+            let selected = state.creatures.get(state.selected).cloned();
+            let creature_type = selected.as_ref().map(|c| c.creature_type).unwrap_or(0);
+            let pet_mode = selected.as_ref().map(|c| c.pickup_mode).unwrap_or(0);
+            net.send_packet(&mir2_shared::packets::client::misc::UpdateIntelligentCreature {
+                creature_type,
+                pet_mode,
+                custom_name: String::new(),
+                summon_me: false,
+                unsummon_me: false,
+                release_me: false,
+                filter,
+                grade: state.grade,
+                options_save: true,
+            });
+            state.message = "宠物拾取设置已保存".to_string();
+            state.options_open = false;
+        }
+    }
+    for btn in &cancel_btn {
+        if btn.clicked {
+            state.options_open = false;
+        }
+    }
+    for (mut text, line) in &mut lines {
+        text.0 = if state.options_open {
+            format!("{} {}", if state.options[line.0] { "■" } else { "□" }, CREATURE_OPTION_LABELS[line.0])
+        } else {
+            String::new()
+        };
+    }
+    for mut vis in widgets.iter_mut() {
+        *vis = if state.options_open { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for mut vis in line_vis.iter_mut() {
+        *vis = if state.options_open { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for mut vis in save_vis.iter_mut() {
+        *vis = if state.options_open { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for mut vis in cancel_vis.iter_mut() {
+        *vis = if state.options_open { Visibility::Visible } else { Visibility::Hidden };
+    }
+}
+
 /// 消费服务端宠物列表事件（网络层只广播 ServerEvent）
 fn creature_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
@@ -539,5 +733,37 @@ fn creature_server_events(
         if let ServerEvent::CreaturePickupToggled { enabled } = ev {
             creature.message = format!("宠物拾取模式: {}", if *enabled { "开启" } else { "关闭" });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filter_toggle_all() {
+        let mut f = [false; 9];
+        creature_filter_toggle(&mut f, 0);
+        assert!(f[0]);
+        for i in 1..9 { assert!(!f[i]); }
+    }
+
+    #[test]
+    fn filter_toggle_categories_and_auto_all() {
+        let mut f = [false; 9];
+        creature_filter_toggle(&mut f, 1);
+        assert!(!f[0] && f[1]);
+        for i in 2..9 { creature_filter_toggle(&mut f, i); }
+        // 8 类全开 → 自动回退为「全部」
+        assert!(f[0]);
+        for i in 1..9 { assert!(!f[i]); }
+    }
+
+    #[test]
+    fn filter_toggle_off_last_restores_all() {
+        let mut f = [false; 9];
+        creature_filter_toggle(&mut f, 1);
+        creature_filter_toggle(&mut f, 1);
+        assert!(f[0]);
     }
 }

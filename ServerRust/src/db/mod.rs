@@ -2087,6 +2087,7 @@ async fn load_creatures(pool: &DbPool, character_name: &str) -> anyhow::Result<C
                     hunger: r.get::<i32, _>("active_hunger") as u8,
                     enabled: active_enabled != 0,
                     level: r.try_get::<i32, _>("active_level").unwrap_or(1).max(1) as u8,
+                    filter: crate::actors::creature::CreatureFilter::default(),
                 })
             } else {
                 None

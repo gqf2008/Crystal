@@ -1572,6 +1572,9 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
                 summon_me: false,
                 unsummon_me: false,
                 release_me: false,
+                filter: [1, 0, 0, 0, 0, 0, 0, 0, 0],
+                grade: 0,
+                options_save: false,
             };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 UpdateIntelligentCreature");

@@ -231,6 +231,12 @@ pub struct UpdateIntelligentCreature {
     pub summon_me: bool,
     pub unsummon_me: bool,
     pub release_me: bool,
+    /// 物品过滤 9 项
+    pub filter: [u8; 9],
+    /// 品质
+    pub grade: u8,
+    /// 保存过滤
+    pub options_save: bool,
 }
 
 impl Message<UpdateIntelligentCreature> for WorldActor {
@@ -260,6 +266,31 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
                 .ask(SetCreature { creature_log: log })
                 .await;
             send_system_message(&self.gate_ref, msg.session_id, "宠物已释放");
+            return;
+        }
+        // 保存物品过滤（C# OptionsSaveButton → UpdateIntelligentCreature）
+        if msg.options_save {
+            let target = if log.active_creature.as_ref().map(|c| c.creature_type).unwrap_or(CreatureType::None) == creature_type {
+                log.active_creature.as_mut()
+            } else {
+                log.owned_creatures.iter_mut().find(|c| c.creature_type == creature_type)
+            };
+            if let Some(c) = target {
+                let f = &mut c.filter;
+                f.pickup_all = msg.filter[0] != 0;
+                f.gold = msg.filter[1] != 0;
+                f.weapons = msg.filter[2] != 0;
+                f.armours = msg.filter[3] != 0;
+                f.helmets = msg.filter[4] != 0;
+                f.boots = msg.filter[5] != 0;
+                f.belts = msg.filter[6] != 0;
+                f.accessories = msg.filter[7] != 0;
+                f.others = msg.filter[8] != 0;
+                f.grade = msg.grade;
+            }
+            send_creature_list_packet(&self.gate_ref, msg.session_id, &log);
+            let _ = record.actor_ref.ask(SetCreature { creature_log: log }).await;
+            send_system_message(&self.gate_ref, msg.session_id, "宠物拾取设置已保存");
             return;
         }
         // 解散（C# UnSummonMe）：清除激活但保留拥有
