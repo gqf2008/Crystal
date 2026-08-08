@@ -223,6 +223,8 @@ pub enum ClientPacketIds {
     ItemRentalLockFee = 144,
     ItemRentalLockItem = 145,
     ConfirmItemRental = 146,
+    /// #1216：英雄一键复活（C# HeroPanel 复活按钮）
+    ReviveHero = 147,
     GuildTerritoryPage,
     PurchaseGuildTerritory,
     DeleteItem,

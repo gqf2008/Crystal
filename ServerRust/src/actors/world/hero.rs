@@ -10,6 +10,19 @@ pub struct ChangeHeroRequest {
     pub hero_index: u8,
 }
 
+/// 英雄一键复活请求（#1216：客户端英雄面板复活按钮 → 复用 REVIVEHERO 逻辑）
+pub struct ReviveHeroRequest {
+    pub session_id: u64,
+}
+
+impl Message<ReviveHeroRequest> for WorldActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: ReviveHeroRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        self.npc_revive_hero(msg.session_id).await;
+    }
+}
+
 impl Message<ChangeHeroRequest> for WorldActor {
     type Reply = ();
 
