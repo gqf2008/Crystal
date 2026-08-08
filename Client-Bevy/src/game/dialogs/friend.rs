@@ -26,6 +26,8 @@ pub struct FriendEntry {
     pub object_id: u32,
     pub name: String,
     pub memo: String,
+    /// 是否黑名单（C# ClientFriend.Blocked）
+    pub blocked: bool,
     pub online: bool,
 }
 
@@ -44,6 +46,8 @@ pub struct FriendState {
     pub selected: Option<usize>,
     /// 待处理的内嵌输入动作
     pub pending: Option<FriendPending>,
+    /// 当前页签（false=好友 true=黑名单，C# _blockedTab）
+    pub blocked_tab: bool,
 }
 
 #[derive(Component)]
@@ -72,6 +76,14 @@ pub struct FriendEmail;
 /// 内嵌输入框（添加/备注）
 #[derive(Component)]
 pub struct FriendInputBox;
+
+/// 好友页签（C# FriendLabel）
+#[derive(Component)]
+pub struct FriendTabFriend;
+
+/// 黑名单页签（C# BlacklistLabel）
+#[derive(Component)]
+pub struct FriendTabBlock;
 
 #[derive(Component)]
 pub struct FriendLine(usize);
@@ -239,6 +251,20 @@ fn spawn_friend(
         ));
     });
 
+    // 页签（C# FriendLabel/BlacklistLabel：好友/黑名单）
+    let e = spawn_ui_text(
+        &mut commands, &font, "好友",
+        318.0, 118.0,
+        12.0, Color::WHITE, 8.0,
+    );
+    commands.entity(e).insert((FriendTabFriend, UiButton { rect: (318.0, 118.0, 44.0, 20.0), clicked: false }, DialogRoot(DialogKind::Friend), FriendWidget));
+    let e = spawn_ui_text(
+        &mut commands, &font, "黑名单",
+        370.0, 118.0,
+        12.0, Color::WHITE, 8.0,
+    );
+    commands.entity(e).insert((FriendTabBlock, UiButton { rect: (370.0, 118.0, 60.0, 20.0), clicked: false }, DialogRoot(DialogKind::Friend), FriendWidget));
+
     // 好友列表（10 行）
     for i in 0..10usize {
         let e = spawn_ui_text(
@@ -270,6 +296,8 @@ fn friend_ui_system(
         Has<FriendMemo>,
         Has<FriendEmail>,
         Has<FriendWhisper>,
+        Has<FriendTabFriend>,
+        Has<FriendTabBlock>,
     )>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
@@ -308,15 +336,17 @@ fn friend_ui_system(
             mgr.close(DialogKind::Friend);
         }
     }
+    // 当前页签的显示列表（好友/黑名单过滤，C# _blockedTab）
+    let list = filter_friends(&friend.friends, friend.blocked_tab);
     // 列表（在线标记，原版 C# 语义）；#89 支持滚轮滚动；#130 选中行高亮
     let mut sl = scroll.single_mut();
     if let Ok(sl) = sl.as_mut() {
-        sl.set_total(friend.friends.len());
+        sl.set_total(list.len());
         let off = sl.offset;
         for (mut text, mut color, line) in &mut lines {
             let idx = off + line.0;
             let selected = friend.selected == Some(idx);
-            text.0 = match friend.friends.get(idx) {
+            text.0 = match list.get(idx) {
                 Some(f) => {
                     let mark = if f.online { "（在线）" } else { "（离线）" };
                     let name = if f.memo.is_empty() {
@@ -357,8 +387,17 @@ fn friend_ui_system(
     }
 
     // 添加/删除/备注/邮件/私聊按钮（C# FriendDialog Add/Remove/Memo/Email/Whisper）
-    for (btn, is_add, is_remove, is_memo, is_email, is_whisper) in &btns {
+    for (btn, is_add, is_remove, is_memo, is_email, is_whisper, is_tab_friend, is_tab_block) in &btns {
         if !btn.clicked {
+            continue;
+        }
+        // 页签切换（C# FriendLabel/BlacklistLabel）
+        if is_tab_friend || is_tab_block {
+            let target = is_tab_block;
+            if friend.blocked_tab != target {
+                friend.blocked_tab = target;
+                friend.selected = None;
+            }
             continue;
         }
         if is_add {
@@ -368,7 +407,7 @@ fn friend_ui_system(
             tracing::info!("👥 添加好友：请输入名字");
         } else if is_remove {
             if let Some(idx) = friend.selected {
-                if let Some(f) = friend.friends.get(idx) {
+                if let Some(f) = list.get(idx) {
                     net.send_packet(&mir2_shared::packets::client::friend::RemoveFriend {
                         character_index: f.object_id as i32,
                     });
@@ -385,7 +424,7 @@ fn friend_ui_system(
             }
         } else if is_email {
             // 邮件：ComposeMail(选中好友)（C# FriendDialog EmailButton）
-            if let Some(f) = friend.selected.and_then(|i| friend.friends.get(i)).cloned() {
+            if let Some(f) = friend.selected.and_then(|i| list.get(i)).cloned() {
                 mgr.open.push(DialogKind::Mail);
                 mail.compose = true;
                 mail.detail = None;
@@ -400,7 +439,7 @@ fn friend_ui_system(
             }
         } else if is_whisper {
             // 私聊：在线预填 /w，离线系统提示（C# FriendDialog WhisperButton）
-            if let Some(f) = friend.selected.and_then(|i| friend.friends.get(i)).cloned() {
+            if let Some(f) = friend.selected.and_then(|i| list.get(i)).cloned() {
                 match friend_whisper_command(&f.name, f.online) {
                     Some(cmd) => {
                         chat.input_active = true;
@@ -431,12 +470,12 @@ fn friend_ui_system(
             Some(FriendPending::Add) => {
                 net.send_packet(&mir2_shared::packets::client::friend::AddFriend {
                     name: name.clone(),
-                    blocked: false,
+                    blocked: friend.blocked_tab,
                 });
                 tracing::info!("👥 添加好友: {}", name);
             }
             Some(FriendPending::Memo(idx)) => {
-                if let Some(f) = friend.friends.get(idx) {
+                if let Some(f) = list.get(idx) {
                     net.send_packet(&mir2_shared::packets::client::friend::AddMemo {
                         character_index: f.object_id as i32,
                         memo: name.clone(),
@@ -470,6 +509,15 @@ fn friend_server_events(
         }
     }
 }
+/// 按页签过滤好友列表（false=好友 true=黑名单，C# _blockedTab）
+pub fn filter_friends(friends: &[FriendEntry], blocked_tab: bool) -> Vec<FriendEntry> {
+    friends
+        .iter()
+        .filter(|f| f.blocked == blocked_tab)
+        .cloned()
+        .collect()
+}
+
 /// 好友私聊命令（C# WhisperButton：离线返回 None）
 pub fn friend_whisper_command(name: &str, online: bool) -> Option<String> {
     if !online {
@@ -487,5 +535,18 @@ mod tests {
         assert_eq!(friend_whisper_command("Alice", true), Some("/w Alice ".to_string()));
         assert_eq!(friend_whisper_command("Alice", false), None);
     }
-}
 
+    #[test]
+    fn filter_friends_by_tab() {
+        let friends = vec![
+            FriendEntry { object_id: 1, name: "a".into(), memo: String::new(), blocked: false, online: true },
+            FriendEntry { object_id: 2, name: "b".into(), memo: String::new(), blocked: true, online: false },
+        ];
+        let ok = filter_friends(&friends, false);
+        assert_eq!(ok.len(), 1);
+        assert_eq!(ok[0].object_id, 1);
+        let blk = filter_friends(&friends, true);
+        assert_eq!(blk.len(), 1);
+        assert_eq!(blk[0].object_id, 2);
+    }
+}

@@ -980,7 +980,7 @@ impl SocialActor {
             }
         }
 
-        send_friends_list_packet(&self.gate_ref, session_id, &state.friend_list.friends, &online_object_ids);
+        send_friends_list_packet(&self.gate_ref, session_id, &state.friend_list.friends, &state.friend_list.blocked, &online_object_ids);
     }
 
     /// 向所有在线行会成员广播完整行会信息
@@ -2686,6 +2686,8 @@ impl Message<AddFriendRequest> for SocialActor {
                     Ok(Some(s)) => s, _ => return,
                 };
                 state.friend_list.add_blocked(target_oid, target_name.clone());
+                let _ = record.ask(SetPlayerState { state }).await;
+                self.send_friends_list(msg.session_id).await;
                 send_system_message(&self.gate_ref, msg.session_id, &format!("已将 {} 加入黑名单", target_name));
                 return;
             }
@@ -2742,8 +2744,22 @@ impl Message<RemoveFriendRequest> for SocialActor {
             Ok(s) => s, _ => return,
         };
 
+        // #1303：好友/黑名单通用删除（先试好友，再试黑名单）
+        let success = if success {
+            true
+        } else {
+            let mut st = match record.ask(GetPlayerState).await {
+                Ok(Some(s)) => s, _ => return,
+            };
+            let ok = st.friend_list.remove_blocked(msg.friend_object_id);
+            if ok {
+                let _ = record.ask(SetPlayerState { state: st }).await;
+            }
+            ok
+        };
+
         if success {
-            send_system_message(&self.gate_ref, msg.session_id, "已移除好友");
+            send_system_message(&self.gate_ref, msg.session_id, "已移除");
             self.send_friends_list(msg.session_id).await;
         }
     }

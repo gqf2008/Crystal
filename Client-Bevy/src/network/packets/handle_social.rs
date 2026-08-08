@@ -249,9 +249,11 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
                             Ok(m) => m,
                             Err(_) => { ok = false; break; }
                         };
+                        let mut blocked_buf = [0u8; 1];
+                        if std::io::Read::read_exact(&mut cur, &mut blocked_buf).is_err() { ok = false; break; }
                         let mut online_buf = [0u8; 1];
                         if std::io::Read::read_exact(&mut cur, &mut online_buf).is_err() { ok = false; break; }
-                        entries.push(FriendEntry { object_id, name, memo, online: online_buf[0] != 0 });
+                        entries.push(FriendEntry { object_id, name, memo, blocked: blocked_buf[0] != 0, online: online_buf[0] != 0 });
                     }
                     if ok && count as usize == entries.len() {
                         parsed = Some(entries);
@@ -268,9 +270,11 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
                         mir2_shared::binary::read_dotnet_string(&mut cur),
                         mir2_shared::binary::read_dotnet_string(&mut cur),
                     ) {
+                        let mut blocked_buf = [0u8; 1];
+                        let blocked = std::io::Read::read_exact(&mut cur, &mut blocked_buf).is_ok() && blocked_buf[0] != 0;
                         let mut online_buf = [0u8; 1];
                         let online = std::io::Read::read_exact(&mut cur, &mut online_buf).is_ok() && online_buf[0] != 0;
-                        parsed = Some(vec![FriendEntry { object_id, name, memo, online }]);
+                        parsed = Some(vec![FriendEntry { object_id, name, memo, blocked, online }]);
                     }
                 }
             }
