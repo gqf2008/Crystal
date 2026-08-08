@@ -660,6 +660,10 @@ impl WorldActor {
             has_red: bool,
             /// #1196：目标是否已有减速毒（道士 Curse 条件）
             has_slow: bool,
+            /// #1212：目标是否亡灵（TurnUndead 条件）
+            undead: bool,
+            /// #1212：目标怪物等级（Repulsion/TurnUndead 条件）
+            level: i32,
         }
         let monster_snaps: Vec<MonsterSnap> = self.monsters.values()
             .filter(|m| m.hp > 0)
@@ -672,6 +676,8 @@ impl WorldActor {
                 has_green: m.poison_list.iter().any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::GREEN)),
                 has_red: m.poison_list.iter().any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::RED)),
                 has_slow: m.poison_list.iter().any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::SLOW)),
+                undead: m.undead,
+                level: self.monster_infos.get(&m.monster_index).map(|i| i.level).unwrap_or(0),
             })
             .collect();
 
@@ -698,6 +704,10 @@ impl WorldActor {
         let mut magic_anim_intents: Vec<(u64, u8, u32)> = Vec::new();
         // 净化意图：(hero_session_id) —— 阶段 2.4c 清除主人中毒（#1210）
         let mut purify_intents: Vec<u64> = Vec::new();
+        // 击退意图：(target_oid, direction, distance) —— 阶段 3h 应用（#1212 Repulsion）
+        let mut push_intents: Vec<(u32, u8, i32)> = Vec::new();
+        // 超度意图：(hero_session_id, target_oid) —— 阶段 3h 击杀亡灵（#1212 TurnUndead）
+        let mut turn_undead_intents: Vec<(u64, u32)> = Vec::new();
 
         for snap in &snapshots {
             // 确保该英雄有 AI 状态（首次出现则初始化）
@@ -1090,6 +1100,38 @@ impl WorldActor {
                         ai_local.next_attack_tick = self.tick_count + 5;
                     }
                     MirClass::Wizard => {
+                        // #1212：C# WizardHero：距离1 且目标等级<英雄等级 → Repulsion（击退）
+                        let rep_lv = hero_magic_level(&snap.hero_magics, Spell::Repulsion as u8);
+                        if target_dist == 1 && rep_lv > 0 && target.level < snap.hero_level as i32 {
+                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Repulsion as u8);
+                            if ai_local.mp >= cost {
+                                ai_local.mp -= cost;
+                                if hero_repulsion_succeeds(rep_lv, snap.hero_level as i32, target.level) {
+                                    let dist = hero_repulsion_distance(rep_lv);
+                                    let dir = direction_towards(ai_local.x, ai_local.y, target.x, target.y);
+                                    push_intents.push((target.oid, dir, dist));
+                                }
+                                magic_anim_intents.push((snap.session_id, Spell::Repulsion as u8, target.oid));
+                                ai_local.next_attack_tick = self.tick_count + 6;
+                                *ai = ai_local;
+                                continue;
+                            }
+                        }
+                        // #1212：C# WizardHero：目标亡灵且已学 → TurnUndead（超度）
+                        let turn_lv = hero_magic_level(&snap.hero_magics, Spell::TurnUndead as u8);
+                        if target.undead && turn_lv > 0 {
+                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::TurnUndead as u8);
+                            if ai_local.mp >= cost {
+                                ai_local.mp -= cost;
+                                if hero_turn_undead_kills(snap.hero_level as i32, target.level, turn_lv) {
+                                    turn_undead_intents.push((snap.session_id, target.oid));
+                                }
+                                magic_anim_intents.push((snap.session_id, Spell::TurnUndead as u8, target.oid));
+                                ai_local.next_attack_tick = self.tick_count + 8;
+                                *ai = ai_local;
+                                continue;
+                            }
+                        }
                         // #1204：C# WizardHero：自身被围（2 格内怪>1 且目标距离<3）→ FlameField/ThunderStorm（5x5 自身 AoE）
                         let monsters_xy: Vec<(u32, i32, i32)> =
                             monster_snaps.iter().map(|m| (m.oid, m.x, m.y)).collect();
@@ -1956,6 +1998,21 @@ impl WorldActor {
                 .unwrap_or((0, 0));
             broadcast_hero_magic(self, *session_id, *spell, *target_oid, hx, hy, level).await;
         }
+
+        // 3h. 法师英雄 Repulsion 击退 + TurnUndead 超度亡灵（#1212）
+        for (oid, dir, dist) in &push_intents {
+            let _ = self.push_monster(*oid, *dir, *dist).await;
+            debug!("Hero Repulsion pushed monster {} ({} tiles)", oid, dist);
+        }
+        for (session_id, oid) in &turn_undead_intents {
+            if let Some(monster) = self.monsters.get_mut(oid) {
+                // C# TurnUndead 成功：直接击杀亡灵（死亡处理由怪物 tick 按 hp<=0 + LastHitter 结算）
+                monster.hp = 0;
+                monster.last_hitter_session = Some(*session_id);
+                monster.provoked = true;
+                debug!("Hero TurnUndead killed undead monster {}", oid);
+            }
+        }
     }
 
     /// 英雄阵亡处理（#1134，对齐 C# HeroObject.Die 的最小实现）：
@@ -2316,6 +2373,54 @@ fn hero_taoist_needs_purify(owner_poisoned: bool, purification_level: u8) -> boo
 /// 道士净化成功率（#1210：C# Envir.Random.Next(4) <= Lv；Lv0=25%）
 fn hero_purification_roll(level: u8) -> bool {
     fastrand::i32(0..4) <= level as i32
+}
+
+/// Repulsion 成功判定（#1212：C# Random(20) < 6 + Lv*3 + Level - ob.Level）
+fn hero_repulsion_succeeds(spell_level: u8, hero_level: i32, target_level: i32) -> bool {
+    hero_repulsion_succeeds_with(fastrand::i32(0..20), spell_level, hero_level, target_level)
+}
+
+fn hero_repulsion_succeeds_with(roll: i32, spell_level: u8, hero_level: i32, target_level: i32) -> bool {
+    roll < 6 + spell_level as i32 * 3 + hero_level - target_level
+}
+
+/// Repulsion 击退距离（#1212：C# 1 + max(0, Lv-1) + Random(2)）
+fn hero_repulsion_distance(spell_level: u8) -> i32 {
+    hero_repulsion_distance_with(fastrand::i32(0..2), spell_level)
+}
+
+fn hero_repulsion_distance_with(roll: i32, spell_level: u8) -> i32 {
+    1 + (spell_level as i32 - 1).max(0) + roll
+}
+
+/// TurnUndead 是否成功击杀（#1212：C# 两道概率判定，失败只引仇恨不杀）
+fn hero_turn_undead_kills(hero_level: i32, target_level: i32, spell_level: u8) -> bool {
+    hero_turn_undead_kills_with(
+        fastrand::i32(0..2),
+        fastrand::i32(0..100),
+        hero_level,
+        target_level,
+        spell_level,
+    )
+}
+
+fn hero_turn_undead_kills_with(
+    roll_low: i32,
+    roll_high: i32,
+    hero_level: i32,
+    target_level: i32,
+    spell_level: u8,
+) -> bool {
+    // C#：Random(2) + Level - 1 <= 目标等级 → 只引仇恨
+    if roll_low + hero_level - 1 <= target_level {
+        return false;
+    }
+    // C#：Random(100) >= ((Lv+1)<<3) + dif → 只引仇恨
+    let dif = hero_level - target_level + 15;
+    if roll_high >= ((spell_level as i32 + 1) << 3) + dif {
+        return false;
+    }
+    true
 }
 
 /// 各职业 ProcessFriend 增益列表（#1190/#1192/#1210：C# 子类顺序；道士由常驻预置块使用）
@@ -3150,5 +3255,22 @@ mod tests {
         // 净化成功概率函数可调用且结果合理（Lv3 几乎必成功）
         let successes = (0..100).filter(|_| hero_purification_roll(3)).count();
         assert!(successes >= 90);
+    }
+
+    #[test]
+    fn hero_repulsion_and_turnundead_rolls() {
+        // Repulsion：roll < 6 + Lv*3 + Level - ob.Level（目标等级 < 英雄等级为前置条件）
+        assert!(hero_repulsion_succeeds_with(0, 1, 30, 20));
+        // 高 roll（≥ 阈值 19）→ 失败
+        assert!(!hero_repulsion_succeeds_with(19, 1, 30, 20));
+        // 击退距离：1 + max(0, Lv-1) + roll
+        assert_eq!(hero_repulsion_distance_with(0, 1), 1);
+        assert_eq!(hero_repulsion_distance_with(1, 3), 4); // 1 + 2 + 1
+        // TurnUndead：roll_low + Level - 1 <= 目标等级 → 不杀
+        assert!(!hero_turn_undead_kills_with(0, 0, 30, 35, 1));
+        // roll_high 过大 → 不杀
+        assert!(!hero_turn_undead_kills_with(1, 99, 30, 10, 1));
+        // 双判定都过 → 杀（英雄 30 级 vs 亡灵 5 级）
+        assert!(hero_turn_undead_kills_with(1, 0, 30, 5, 1));
     }
 }
