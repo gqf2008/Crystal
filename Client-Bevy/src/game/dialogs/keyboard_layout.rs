@@ -167,6 +167,18 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("角色2", "界面", KeyCode::KeyC),
         KeyBinding::new("技能", "界面", KeyCode::F11),
         KeyBinding::new("技能2", "界面", KeyCode::KeyS),
+        KeyBinding::new("好友", "界面", KeyCode::KeyF),
+        KeyBinding::new("宠物", "界面", KeyCode::KeyE),
+        KeyBinding::new("坐骑", "界面", KeyCode::KeyJ),
+        KeyBinding::new("钓鱼", "界面", KeyCode::KeyN),
+        KeyBinding::new("夫妻", "界面", KeyCode::KeyL),
+        KeyBinding::new("队伍", "界面", KeyCode::KeyP),
+        KeyBinding::new("商城", "界面", KeyCode::KeyY),
+        KeyBinding::new("大地图", "界面", KeyCode::KeyB),
+        KeyBinding::new("排行", "界面", KeyCode::KeyK),
+        KeyBinding::new("键位", "界面", KeyCode::KeyU),
+        KeyBinding::new("技能栏显隐", "界面", KeyCode::KeyR),
+        KeyBinding::new("腰带", "界面", KeyCode::KeyZ),
         KeyBinding::new("行会", "界面", KeyCode::KeyG),
         KeyBinding::new("小地图", "界面", KeyCode::KeyV),
         KeyBinding::new("任务", "界面", KeyCode::KeyQ),
@@ -603,21 +615,34 @@ fn keyboard_layout_ui_system(
 }
 
 
-/// 快捷键打开/关闭窗口（#148，C# KeybindOptions 对齐；随键位设置可重绑）
-/// 覆盖：背包/角色/技能/行会/小地图/任务/设置
+/// 快捷键打开/关闭窗口（#148/#1370，C# KeybindOptions 对齐；随键位设置可重绑）
+/// 覆盖：背包/角色/技能/好友/宠物/坐骑/钓鱼/夫妻/队伍/商城/大地图/排行/键位/帮助/行会/小地图/任务/设置
 fn dialog_hotkey_system(
     keys: Res<ButtonInput<KeyCode>>,
     kb: Res<KeyboardState>,
     mut mgr: ResMut<DialogManager>,
+    mut belt_visible: ResMut<crate::game::dialogs::belt::BeltVisible>,
+    mut potion_belt_visible: ResMut<crate::game::dialogs::potion_belt::PotionBeltVisible>,
 ) {
     // #795：主/次绑定（对齐 C# KeyBindSettings 主键 + 备用键）
-    let map: [(&str, DialogKind); 11] = [
+    let map: [(&str, DialogKind); 22] = [
         ("背包", DialogKind::Inventory),
         ("背包2", DialogKind::Inventory),
         ("角色", DialogKind::Character),
         ("角色2", DialogKind::Character),
         ("技能", DialogKind::Skills),
         ("技能2", DialogKind::Skills),
+        ("好友", DialogKind::Friend),
+        ("宠物", DialogKind::Creature),
+        ("坐骑", DialogKind::Mount),
+        ("钓鱼", DialogKind::Fishing),
+        ("夫妻", DialogKind::Relationship),
+        ("队伍", DialogKind::Group),
+        ("商城", DialogKind::GameShop),
+        ("大地图", DialogKind::BigMap),
+        ("排行", DialogKind::Ranking),
+        ("键位", DialogKind::KeyboardLayout),
+        ("帮助", DialogKind::Help),
         ("行会", DialogKind::Guild),
         ("小地图", DialogKind::Minimap),
         ("任务", DialogKind::QuestLog),
@@ -628,6 +653,17 @@ fn dialog_hotkey_system(
         let Some(b) = kb.bindings.iter().find(|b| b.action == action) else { continue };
         if keys.just_pressed(b.key) {
             mgr.toggle(kind);
+        }
+    }
+    // #1370：技能栏显隐（R）/ 腰带（Z）——非对话框，走显隐资源
+    if let Some(b) = kb.bindings.iter().find(|b| b.action == "技能栏显隐") {
+        if keys.just_pressed(b.key) {
+            belt_visible.0 = !belt_visible.0;
+        }
+    }
+    if let Some(b) = kb.bindings.iter().find(|b| b.action == "腰带") {
+        if keys.just_pressed(b.key) {
+            potion_belt_visible.0 = !potion_belt_visible.0;
         }
     }
 }
