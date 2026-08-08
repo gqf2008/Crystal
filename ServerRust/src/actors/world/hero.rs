@@ -660,6 +660,8 @@ impl WorldActor {
         let mut autopot_intents: Vec<(u64, i32, bool)> = Vec::new();
         // 毒意图：(hero_session_id, target_oid, poison_type, duration_s, value, tick_ms) —— 阶段 3e 应用（#1192/#1196）
         let mut poison_intents: Vec<(u64, u32, mir2_shared::enums::PoisonType, u32, i32, u64)> = Vec::new();
+        // 法师 AoE 意图：(hero_session_id, spell, target_oid, tx, ty, raw, level) —— 阶段 3f 应用（#1200）
+        let mut aoe_intents: Vec<(u64, u8, u32, i32, i32, i32, u8)> = Vec::new();
 
         for snap in &snapshots {
             // 确保该英雄有 AI 状态（首次出现则初始化）
@@ -949,59 +951,109 @@ impl WorldActor {
                         ai_local.next_attack_tick = self.tick_count + 5;
                     }
                     MirClass::Wizard => {
-                        // #1188：C# WizardHero 单体弹道优先级：FlameDisruptor → Vampirism → FrostCrunch → ThunderBolt → GreatFireBall → FireBall
-                        let learned = first_learned_spell(
-                            &snap.hero_magics,
-                            &[
-                                Spell::FlameDisruptor,
-                                Spell::Vampirism,
-                                Spell::FrostCrunch,
-                                Spell::ThunderBolt,
-                                Spell::GreatFireBall,
-                                Spell::FireBall,
-                            ],
+                        // #1200：C# WizardHero：目标 1 格内有其他怪（TargetSurroundedCount>1）且已学 AoE → IceStorm/FireBang
+                        let surrounded = hero_target_surrounded(
+                            &monster_snaps.iter().map(|m| (m.oid, m.x, m.y)).collect::<Vec<_>>(),
+                            target.oid,
+                            target.x,
+                            target.y,
                         );
-                        match learned {
-                            Some((spell, level)) => {
-                                // #1188：伤害 = C# GetDamage（英雄自身 MC + 魔法表 Power/Multiplier × 实际等级）
-                                let raw = hero_spell_damage(
-                                    &self.magic_infos,
-                                    &snap.hero_magics,
+                        let aoe = if surrounded {
+                            first_learned_spell(&snap.hero_magics, &[Spell::IceStorm, Spell::FireBang])
+                        } else {
+                            None
+                        };
+                        if let Some((spell, level)) = aoe {
+                            // #1200：3x3 MAC AoE（对齐 player MagicRequest FireBang/IceStorm 结算）
+                            let raw = hero_spell_damage(
+                                &self.magic_infos,
+                                &snap.hero_magics,
+                                spell as u8,
+                                &hero_stats,
+                                snap.class,
+                            );
+                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+                            if ai_local.mp >= cost {
+                                ai_local.mp -= cost;
+                                aoe_intents.push((
+                                    snap.session_id,
                                     spell as u8,
-                                    &hero_stats,
-                                    snap.class,
+                                    target.oid,
+                                    target.x,
+                                    target.y,
+                                    raw,
+                                    level,
+                                ));
+                                support_intents.push((
+                                    snap.session_id,
+                                    snap.session_id,
+                                    spell as u8,
+                                    false,
+                                ));
+                                ai_local.next_attack_tick = self.tick_count + 8;
+                            } else {
+                                // 蓝不足：1 格内近战兜底
+                                let _ = hero_melee_fallback(
+                                    snap.session_id, target.oid, target_dist,
+                                    &hero_combat, &mut attack_intents, &mut support_intents,
                                 );
-                                // #1186：耗蓝（C# CanUseMagic：MagicCost > MP → 无法施法）
-                                let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
-                                if ai_local.mp >= cost {
-                                    ai_local.mp -= cost;
-                                    spell_intents.push((
-                                        snap.session_id,
+                                ai_local.next_attack_tick = self.tick_count + 6;
+                            }
+                        } else {
+                            // #1188：C# WizardHero 单体弹道优先级：FlameDisruptor → Vampirism → FrostCrunch → ThunderBolt → GreatFireBall → FireBall
+                            let learned = first_learned_spell(
+                                &snap.hero_magics,
+                                &[
+                                    Spell::FlameDisruptor,
+                                    Spell::Vampirism,
+                                    Spell::FrostCrunch,
+                                    Spell::ThunderBolt,
+                                    Spell::GreatFireBall,
+                                    Spell::FireBall,
+                                ],
+                            );
+                            match learned {
+                                Some((spell, level)) => {
+                                    // #1188：伤害 = C# GetDamage（英雄自身 MC + 魔法表 Power/Multiplier × 实际等级）
+                                    let raw = hero_spell_damage(
+                                        &self.magic_infos,
+                                        &snap.hero_magics,
                                         spell as u8,
-                                        target.oid,
-                                        target.x,
-                                        target.y,
-                                        raw,
-                                        self.tick_count + 4, // 弹道延迟 ~400ms
-                                        level,
-                                    ));
-                                    ai_local.next_attack_tick = self.tick_count + 8;
-                                } else {
-                                    // 蓝不足：1 格内近战兜底（C# WizardHero 无蓝时 ProcessTarget 退避/近战）
+                                        &hero_stats,
+                                        snap.class,
+                                    );
+                                    // #1186：耗蓝（C# CanUseMagic：MagicCost > MP → 无法施法）
+                                    let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+                                    if ai_local.mp >= cost {
+                                        ai_local.mp -= cost;
+                                        spell_intents.push((
+                                            snap.session_id,
+                                            spell as u8,
+                                            target.oid,
+                                            target.x,
+                                            target.y,
+                                            raw,
+                                            self.tick_count + 4, // 弹道延迟 ~400ms
+                                            level,
+                                        ));
+                                        ai_local.next_attack_tick = self.tick_count + 8;
+                                    } else {
+                                        // 蓝不足：1 格内近战兜底（C# WizardHero 无蓝时 ProcessTarget 退避/近战）
+                                        let _ = hero_melee_fallback(
+                                            snap.session_id, target.oid, target_dist,
+                                            &hero_combat, &mut attack_intents, &mut support_intents,
+                                        );
+                                        ai_local.next_attack_tick = self.tick_count + 6;
+                                    }
+                                }
+                                None => {
+                                    // 未学任何弹道技能：近战兜底
                                     let _ = hero_melee_fallback(
                                         snap.session_id, target.oid, target_dist,
                                         &hero_combat, &mut attack_intents, &mut support_intents,
                                     );
                                     ai_local.next_attack_tick = self.tick_count + 6;
                                 }
-                            }
-                            None => {
-                                // 未学任何弹道技能：近战兜底
-                                let _ = hero_melee_fallback(
-                                    snap.session_id, target.oid, target_dist,
-                                    &hero_combat, &mut attack_intents, &mut support_intents,
-                                );
-                                ai_local.next_attack_tick = self.tick_count + 6;
                             }
                         }
                     }
@@ -1635,6 +1687,56 @@ impl WorldActor {
                 );
             }
         }
+
+        // 3f. 应用法师英雄 AoE（#1200：C# FireBang/IceStorm 3x3 MAC，对齐 player MagicRequest 结算）
+        for (session_id, spell, _target_oid, tx, ty, raw, _level) in &aoe_intents {
+            // 用 buff 后英雄属性结算（命中/暴击）
+            let hero_snap = snapshots.iter().find(|s| s.session_id == *session_id);
+            let attacker_stats = if let Some(s) = hero_snap {
+                let mut combat = s.hero_combat;
+                let mut stats = s.hero_stats;
+                if let Some(ai) = self.hero_ai_states.get(&s.session_id) {
+                    hero_apply_buffs(&ai.buffs, s.class, &mut combat, &mut stats);
+                }
+                combat
+            } else {
+                continue;
+            };
+            let level_offset = hero_snap.map(|s| s.hero_level.min(10) as u16).unwrap_or(0);
+            let hit_ids: Vec<u32> = self
+                .monsters
+                .iter()
+                .filter(|(_, m)| m.hp > 0 && (m.x - *tx).abs() <= 1 && (m.y - *ty).abs() <= 1)
+                .map(|(id, _)| *id)
+                .collect();
+            for mid in &hit_ids {
+                if let Some(monster) = self.monsters.get_mut(mid) {
+                    let ds = monster.to_combat_stats();
+                    let r = combat_attack::resolve_attack(
+                        &attacker_stats,
+                        &ds,
+                        *raw,
+                        mir2_shared::enums::DefenceType::Mac,
+                        level_offset,
+                    );
+                    if r.is_hit && r.damage > 0 {
+                        monster.hp = monster.hp.saturating_sub(r.damage);
+                        monster.last_hitter_session = Some(*session_id);
+                        monster.provoked = true;
+                        if monster.target_session.is_none() {
+                            monster.target_session = Some(*session_id);
+                        }
+                        for p in &r.applied_poisons {
+                            crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
+                        }
+                    }
+                }
+            }
+            debug!(
+                "Hero Wizard AoE spell={} at ({},{}) dmg={} hits={}",
+                spell, tx, ty, raw, hit_ids.len()
+            );
+        }
     }
 
     /// 英雄阵亡处理（#1134，对齐 C# HeroObject.Die 的最小实现）：
@@ -1895,6 +1997,13 @@ fn hero_behaviour_is_follow(behaviour: u8) -> bool {
 /// C# HeroBehaviour：1=CounterAttack（#1198：只反击攻击主人的怪）
 fn hero_behaviour_is_counterattack(behaviour: u8) -> bool {
     behaviour == 1
+}
+
+/// 目标 1 格内是否还有其他怪（#1200：C# WizardHero TargetSurroundedCount > 1）
+fn hero_target_surrounded(monsters: &[(u32, i32, i32)], target_oid: u32, target_x: i32, target_y: i32) -> bool {
+    monsters.iter().any(|(oid, x, y)| {
+        *oid != target_oid && (x - target_x).abs() <= 1 && (y - target_y).abs() <= 1
+    })
 }
 
 /// 各职业 ProcessFriend 增益列表（#1190/#1192：C# 子类顺序）
@@ -2581,5 +2690,16 @@ mod tests {
         assert!(hero_behaviour_is_counterattack(1));
         assert!(!hero_behaviour_is_counterattack(0));
         assert!(!hero_behaviour_is_counterattack(2));
+    }
+
+    #[test]
+    fn hero_target_surrounded_detects_neighbors() {
+        let mobs = vec![(1u32, 10i32, 10i32), (2, 11, 10), (3, 20, 20)];
+        // 目标 (10,10)：旁边有 (11,10) → 被围
+        assert!(hero_target_surrounded(&mobs, 1, 10, 10));
+        // 目标 (20,20)：旁边无其他怪 → 未围
+        assert!(!hero_target_surrounded(&mobs, 3, 20, 20));
+        // 只有自己 → 未围
+        assert!(!hero_target_surrounded(&[(5, 0, 0)], 5, 0, 0));
     }
 }
