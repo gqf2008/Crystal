@@ -430,8 +430,9 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
                 server_events.write(ServerEvent::ObjectSitDown {
                     object_id: p.object_id,
                     direction: p.direction,
+                    sitting: p.sitting,
                 });
-                tracing::debug!("🪑 对象坐下 id={}", p.object_id);
+                tracing::debug!("🪑 对象坐下 id={} sitting={}", p.object_id, p.sitting);
             }
         }
         x if x == ServerPacketIds::Pushed as i16 => {

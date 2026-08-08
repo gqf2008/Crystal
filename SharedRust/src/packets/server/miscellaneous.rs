@@ -187,11 +187,14 @@ impl Packet for FishingUpdate {
 }
 
 /// ObjectSitDown - 对象坐下 (158)
-#[derive(Debug, Clone)]
+/// #1354：对齐 C# S.ObjectSitDown（ServerPackets.cs:4358）：
+/// [ObjectID u32][Location.X i32][Location.Y i32][Direction u8][Sitting bool]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ObjectSitDown {
     pub object_id: u32,       // 对象ID
-    pub direction: u8,        // 方向
     pub location: (i32, i32), // 位置
+    pub direction: u8,        // 方向
+    pub sitting: bool,        // 坐下(true)/起身(false)
 }
 
 impl Packet for ObjectSitDown {
@@ -200,21 +203,24 @@ impl Packet for ObjectSitDown {
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
         use byteorder::WriteBytesExt;
         writer.write_u32::<LittleEndian>(self.object_id)?;
-        writer.write_u8(self.direction)?;
         writer.write_i32::<LittleEndian>(self.location.0)?;
         writer.write_i32::<LittleEndian>(self.location.1)?;
+        writer.write_u8(self.direction)?;
+        writer.write_u8(if self.sitting { 1 } else { 0 })?;
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let object_id = reader.read_u32::<LittleEndian>()?;
-        let direction = reader.read_u8()?;
         let location_x = reader.read_i32::<LittleEndian>()?;
         let location_y = reader.read_i32::<LittleEndian>()?;
+        let direction = reader.read_u8()?;
+        let sitting = reader.read_u8()? != 0;
         Ok(Self {
             object_id,
-            direction,
             location: (location_x, location_y),
+            direction,
+            sitting,
         })
     }
 }
@@ -873,5 +879,42 @@ mod tests {
         let read = SetAutoPotItem::read_body(&mut cur).unwrap();
         assert_eq!(read.grid, 5);
         assert_eq!(read.item_index, 12345);
+    }
+
+    #[test]
+    fn object_sit_down_roundtrip_sitting() {
+        // #1354：C# wire [ObjectID u32][X i32][Y i32][Direction u8][Sitting bool] = 14 字节
+        let pkt = ObjectSitDown {
+            object_id: 1001,
+            location: (170, 667),
+            direction: 6,
+            sitting: true,
+        };
+        let mut buf = Vec::new();
+        pkt.write_body(&mut buf).unwrap();
+        assert_eq!(buf.len(), 14, "C# S.ObjectSitDown 应为 4+4+4+1+1=14 字节");
+        assert_eq!(&buf[0..4], &1001u32.to_le_bytes());
+        assert_eq!(&buf[4..8], &170i32.to_le_bytes());
+        assert_eq!(&buf[8..12], &667i32.to_le_bytes());
+        assert_eq!(buf[12], 6);
+        assert_eq!(buf[13], 1);
+        let mut cur = Cursor::new(&buf);
+        let read = ObjectSitDown::read_body(&mut cur).unwrap();
+        assert_eq!(read, pkt);
+    }
+
+    #[test]
+    fn object_sit_down_roundtrip_stand() {
+        let pkt = ObjectSitDown {
+            object_id: 2002,
+            location: (0, 0),
+            direction: 2,
+            sitting: false,
+        };
+        let mut buf = Vec::new();
+        pkt.write_body(&mut buf).unwrap();
+        let mut cur = Cursor::new(&buf);
+        let read = ObjectSitDown::read_body(&mut cur).unwrap();
+        assert_eq!(read, pkt);
     }
 }

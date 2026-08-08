@@ -100,12 +100,14 @@ fn apply_object_state_events(
             ServerEvent::ObjectSitDown {
                 object_id,
                 direction,
+                sitting,
             } => {
                 let found = anim.iter().any(|(_, id, _)| id.0 == object_id);
                 tracing::debug!(
-                    "[OBJSTATE] 坐下 id={} dir={} found={}",
+                    "[OBJSTATE] 坐下 id={} dir={} sitting={} found={}",
                     object_id,
                     direction,
+                    sitting,
                     found
                 );
                 // 有 SitDown 帧表才切动作，否则只更新朝向（避免动画冻结）
@@ -116,12 +118,17 @@ fn apply_object_state_events(
                 for (e, id, mut a) in &mut anim {
                     if id.0 == object_id {
                         a.direction = direction;
-                        if has_sit {
+                        if sitting && has_sit {
                             a.action = mir2_shared::enums::MirAction::SitDown;
                             a.frame_index = 0;
+                            // #573：坐下标记——演示驱动不再转向（C# 坐姿对象不自动转身）
+                            commands.entity(e).insert(Sitting);
+                        } else if !sitting {
+                            // #1354：起身——恢复站立动作并移除坐下标记
+                            commands.entity(e).remove::<Sitting>();
+                            a.action = mir2_shared::enums::MirAction::Standing;
+                            a.frame_index = 0;
                         }
-                        // #573：坐下标记——演示驱动不再转向（C# 坐姿对象不自动转身）
-                        commands.entity(e).insert(Sitting);
                         break;
                     }
                 }

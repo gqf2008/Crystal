@@ -383,8 +383,12 @@ pub enum ServerEvent {
     ObjectHidden { object_id: u32 },
     /// #226 ObjectShow：对象显形
     ObjectShown { object_id: u32 },
-    /// #226 ObjectSitDown：对象坐下
-    ObjectSitDown { object_id: u32, direction: u8 },
+    /// #226/#1354 ObjectSitDown：对象坐下/起身（sitting=true 坐下，false 起身）
+    ObjectSitDown {
+        object_id: u32,
+        direction: u8,
+        sitting: bool,
+    },
     /// #226 ObjectPushed：对象被击退（位置 + 朝向）
     ObjectPushed {
         object_id: u32,

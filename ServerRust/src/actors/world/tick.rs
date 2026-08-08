@@ -814,6 +814,32 @@ impl WorldActor {
     }
 
 
+    /// #1354：向同地图玩家广播坐下/起身（C# FrostTiger.Sitting → CurrentMap.Broadcast(S.ObjectSitDown)）
+    async fn broadcast_object_sit_down(&self, object_id: u32, x: i32, y: i32, direction: u8, sitting: bool) {
+        let packet = mir2_shared::packets::server::miscellaneous::ObjectSitDown {
+            object_id,
+            location: (x, y),
+            direction,
+            sitting,
+        };
+        let mut body = Vec::new();
+        if packet.write_body(&mut std::io::Cursor::new(&mut body)).is_err() {
+            return;
+        }
+        let data = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectSitDown as i16, &body);
+        let map_index = self.monsters.get(&object_id).map(|m| m.map_index).unwrap_or(0);
+        for (sid, rec) in &self.players {
+            if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                if s.map_index == map_index {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: *sid,
+                        data: data.clone(),
+                    }).await;
+                }
+            }
+        }
+    }
+
     /// 广播对象显示/隐藏（C# S.ObjectShow / S.ObjectHide：Shinsu 形态切换等）
     async fn broadcast_object_show_hide(&self, object_id: u32, visible: bool) {
         let mut body = Vec::new();
@@ -855,6 +881,7 @@ impl WorldActor {
         let mut die_monster_teleports: Vec<(u32, i32, i32)> = Vec::new();
         let mut die_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
         let mut die_show_hide: Vec<(u32, bool)> = Vec::new();
+        let mut die_sit_down: Vec<(u32, i32, i32, u8, bool)> = Vec::new();
         let mut die_player_heals: Vec<(u64, i32)> = Vec::new();
         {
             // 死亡回调也提供玩家快照（C# Die 可 FindAllTargets；ToxicGhoul 死亡 AOE 毒等用）
@@ -885,6 +912,7 @@ impl WorldActor {
                 out_monster_teleports: &mut die_monster_teleports,
                 out_player_buffs: &mut die_player_buffs,
                 out_show_hide: &mut die_show_hide,
+                out_sit_down: &mut die_sit_down,
                 out_player_heals: &mut die_player_heals,
                 pet_level: self.pet_levels.get(&monster.object_id).copied().unwrap_or(0),
                 master_pet_mode: None,
@@ -988,6 +1016,9 @@ impl WorldActor {
                         spawn_spread: 0,
                         next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
                         ai_profile, ai_state: MonsterAiState::Idle,
+ sitting: false,
+ hidden: false,
+ sit_down_tick: 0,
                         target_session: None,
                         last_hitter_session: None, provoked: false,
                         is_elite: false, is_boss: false,
@@ -1339,6 +1370,9 @@ impl WorldActor {
                 next_summon_tick: 0,
                 ai_profile,
                 ai_state: MonsterAiState::Idle,
+                sitting: false,
+                hidden: false,
+                sit_down_tick: 0,
                 target_session: None,
                 last_hitter_session: None,
                 provoked: false,
@@ -2184,6 +2218,9 @@ impl WorldActor {
             next_summon_tick: 0,
             ai_profile: MonsterAiProfile::from_info(&monster_info),
             ai_state: MonsterAiState::Idle,
+            sitting: false,
+            hidden: false,
+            sit_down_tick: 0,
             target_session: None,
             last_hitter_session: None,
             provoked: true,
@@ -3408,6 +3445,7 @@ impl Message<Tick> for WorldActor {
             let mut boss_monster_teleports: Vec<(u32, i32, i32)> = Vec::new();
             let mut boss_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
             let mut boss_show_hide: Vec<(u32, bool)> = Vec::new();
+            let mut boss_sit_down: Vec<(u32, i32, i32, u8, bool)> = Vec::new();
             let mut boss_player_heals: Vec<(u64, i32)> = Vec::new();
             // 召唤物过期队列（到期 tick 已过 → 移除，不掉落）
             let mut expired_monsters: Vec<u32> = Vec::new();
@@ -3471,6 +3509,7 @@ impl Message<Tick> for WorldActor {
                         out_monster_teleports: &mut boss_monster_teleports,
                         out_player_buffs: &mut boss_player_buffs,
                         out_show_hide: &mut boss_show_hide,
+                        out_sit_down: &mut boss_sit_down,
                         out_player_heals: &mut boss_player_heals,
                         pet_level: self.pet_levels.get(&monster_oid).copied().unwrap_or(0),
                         master_pet_mode,
@@ -4178,6 +4217,9 @@ impl Message<Tick> for WorldActor {
                     next_summon_tick: 0,
                     ai_profile,
                     ai_state: MonsterAiState::Idle,
+                    sitting: false,
+                    hidden: false,
+                    sit_down_tick: 0,
                     target_session: None,
                     last_hitter_session: None,
                     provoked: false,
@@ -4216,6 +4258,10 @@ impl Message<Tick> for WorldActor {
             // Boss 显示/隐藏广播（C# ObjectShow/ObjectHide，如 Shinsu 形态切换）
             for (oid, visible) in boss_show_hide.drain(..) {
                 self.broadcast_object_show_hide(oid, visible).await;
+            }
+            // #1354：Boss 坐下/起身广播（C# ObjectSitDown，如 FrostTiger 坐姿）
+            for (oid, sx, sy, sdir, sitting) in boss_sit_down.drain(..) {
+                self.broadcast_object_sit_down(oid, sx, sy, sdir, sitting).await;
             }
             // Boss 对玩家回血（C# MasterVampire 吸血主人 / Healer 治疗玩家）
             for (sid, amount) in boss_player_heals.drain(..) {
@@ -4400,6 +4446,9 @@ impl Message<Tick> for WorldActor {
                             spawn_spread: 0,
                             next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
                             ai_profile, ai_state: MonsterAiState::Idle,
+ sitting: false,
+ hidden: false,
+ sit_down_tick: 0,
                             target_session: None,
                             last_hitter_session: None, provoked: false,
                             is_elite: false, is_boss: false,
