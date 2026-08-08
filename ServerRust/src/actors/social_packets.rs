@@ -51,6 +51,14 @@ pub fn send_group_members_map(gate_ref: &ActorRef<GateActor>, session_id: u64, m
     }).try_send();
 }
 
+/// Send DeleteGroup (组队已解散/被移除) to a client.
+pub fn send_delete_group_packet(gate_ref: &ActorRef<GateActor>, session_id: u64) {
+    let _ = gate_ref.tell(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DeleteGroup as i16, &[]),
+    }).try_send();
+}
+
 /// Send group invite to a client.
 pub fn send_group_invite_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, inviter_name: &str, inviter_id: u64) {
     let mut body = Vec::new();
