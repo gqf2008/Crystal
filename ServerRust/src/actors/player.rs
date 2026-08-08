@@ -349,6 +349,8 @@ pub struct PlayerState {
     pub mount_loyalty_decrease_time: i64,
     /// 坐骑忠诚度自动恢复时间（毫秒；C# IncreaseLoyaltyTime，每 LoyaltyDelay*60）
     pub mount_loyalty_increase_time: i64,
+    /// 火把耐久消耗时间（毫秒；C# HumanObject.TorchTime，每 10s -5 耐久，归零卸下）
+    pub torch_burn_time: i64,
 }
 
 impl PlayerState {
@@ -701,6 +703,7 @@ allow_group: false,
             brown_until_ms: 0,
             mount_loyalty_decrease_time: 0,
             mount_loyalty_increase_time: 0,
+            torch_burn_time: 0,
             },
             gate_ref,
             world_ref,
@@ -2139,6 +2142,23 @@ impl Message<DamageEquipment> for PlayerActor {
         }
 
         broke
+    }
+}
+
+/// 设置火把耐久消耗计时（毫秒；C# HumanObject.TorchTime）
+pub struct SetTorchBurnTime {
+    pub burn_time: i64,
+}
+
+impl Message<SetTorchBurnTime> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetTorchBurnTime,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.torch_burn_time = msg.burn_time;
     }
 }
 
@@ -4101,6 +4121,8 @@ pub struct GainSpellExp {
     pub spell: u8,
     pub amount: u16,
     pub cast_time: i64,
+    /// #1230：DB magic_infos（等级门控/阈值/延迟用；None 时回退旧公式）
+    pub info: Option<crate::db::MagicInfo>,
 }
 
 impl Message<GainSpellExp> for PlayerActor {
@@ -4115,7 +4137,25 @@ impl Message<GainSpellExp> for PlayerActor {
                 break;
             }
         }
-        if let Some((spell, level, experience)) = self.state.gain_spell_exp(msg.spell, msg.amount) {
+        if let Some((spell, level, experience)) = self.state.gain_spell_exp(msg.spell, msg.amount, msg.info.as_ref()) {
+            // #1230：C# LevelMagic——升级时补发 S.MagicDelay（新等级延迟 DelayBase - level*DelayReduction）
+            if let Some(info) = msg.info.as_ref() {
+                let delay = crate::combat::magic::magic_delay(info, level) as i64;
+                let md = mir2_shared::packets::server::magic_combat::MagicDelay {
+                    object_id: self.state.object_id,
+                    spell,
+                    delay,
+                };
+                let mut md_body = Vec::new();
+                if md.write_body(&mut md_body).is_ok() {
+                    let _ = self.gate_ref.tell(crate::gate::actor::SendToClient {
+                        session_id: self.state.session_id,
+                        data: crate::util::wire::build_packet_bytes(
+                            mir2_shared::enums::ServerPacketIds::MagicDelay as i16, &md_body,
+                        ),
+                    }).await;
+                }
+            }
             // Send MagicLeveled packet (C# S.MagicLeveled: ObjectID u32 + Spell byte + Level byte + Experience u16)
             let packet = mir2_shared::packets::server::magic::MagicLeveled {
                 object_id: self.state.object_id,
@@ -4508,15 +4548,29 @@ impl PlayerState {
 impl PlayerState {
     /// 施法获得技能经验（入参为 SharedRust +3 spell，内部转 C# 编号匹配）
     /// 返回 (SharedRust Spell, 新等级, 经验)——仅升级时返回 Some
+    /// #1230：对齐 C# LevelMagic——玩家等级门控（Lv0 需 Info.Level1，Lv1 需 Level2，Lv2 需 Level3）
+    /// 与阈值 DB magic_infos.need1/need2/need3（info=None 时回退旧公式 (level+1)*1000）
     pub fn gain_spell_exp(
         &mut self,
         spell_shared: u8,
         amount: u16,
+        info: Option<&crate::db::MagicInfo>,
     ) -> Option<(mir2_shared::enums::Spell, u8, u16)> {
         let spell_cs = spell_shared.saturating_sub(3) as i32;
         let magic = self.magics.iter_mut().find(|m| m.spell == spell_cs)?;
         if magic.level >= 3 {
             return None;
+        }
+        if let Some(i) = info {
+            let gate = match magic.level {
+                0 => i.level1,
+                1 => i.level2,
+                2 => i.level3,
+                _ => return None,
+            };
+            if gate > 0 && (self.level as i32) < gate {
+                return None;
+            }
         }
         // #942：C# SpecialItemMode.Skill——技能经验 ×3（Stats[SkillGainMultiplier]=3）
         let mut amount = amount;
@@ -4526,10 +4580,23 @@ impl PlayerState {
             amount = amount.saturating_mul(3);
         }
         magic.experience = magic.experience.saturating_add(amount);
-        let xp_needed = (magic.level as u16 + 1) * 1000;
+        let xp_needed = match info {
+            Some(i) => match magic.level {
+                0 => i.need1.max(1) as u16,
+                1 => i.need2.max(1) as u16,
+                2 => i.need3.max(1) as u16,
+                _ => return None,
+            },
+            None => (magic.level as u16 + 1) * 1000,
+        };
         if magic.experience >= xp_needed && magic.level < 3 {
             magic.level += 1;
-            magic.experience = 0;
+            // C# LevelMagic：case 2 满级清零；case 0/1 余数结转（Experience -= NeedX）
+            if magic.level >= 3 {
+                magic.experience = 0;
+            } else {
+                magic.experience = magic.experience.saturating_sub(xp_needed);
+            }
             let spell = mir2_shared::enums::Spell::try_from(spell_shared)
                 .unwrap_or(mir2_shared::enums::Spell::None);
             return Some((spell, magic.level, magic.experience));
@@ -4559,21 +4626,54 @@ impl PlayerState {
 
     /// 英雄施法获得技能经验（#220）：入参为 SharedRust +3 spell，内部转 C# 编号匹配
     /// 返回 (SharedRust Spell, 新等级, 经验)——仅升级时返回 Some
+    /// #1230：对齐 C# LevelMagic（英雄继承 HumanObject）——等级门控 + DB need 阈值 + Skill ×3
     pub fn gain_hero_spell_exp(
         &mut self,
         spell_shared: u8,
         amount: u16,
+        info: Option<&crate::db::MagicInfo>,
     ) -> Option<(mir2_shared::enums::Spell, u8, u16)> {
         let spell_cs = spell_shared.saturating_sub(3) as i32;
         let magic = self.hero_magics.iter_mut().find(|m| m.spell == spell_cs)?;
         if magic.level >= 3 {
             return None;
         }
+        if let Some(i) = info {
+            let gate = match magic.level {
+                0 => i.level1,
+                1 => i.level2,
+                2 => i.level3,
+                _ => return None,
+            };
+            if gate > 0 && (self.level as i32) < gate {
+                return None;
+            }
+        }
+        // #942：C# SpecialItemMode.Skill——技能经验 ×3（英雄装备同样生效）
+        let mut amount = amount;
+        if self.hero_inventory.equipment.iter().flatten()
+            .any(|it| it.info.as_ref().map(|i| i.unique.contains(mir2_shared::enums::SpecialItemMode::SKILL)).unwrap_or(false))
+        {
+            amount = amount.saturating_mul(3);
+        }
         magic.experience = magic.experience.saturating_add(amount);
-        let xp_needed = (magic.level as u16 + 1) * 1000;
+        let xp_needed = match info {
+            Some(i) => match magic.level {
+                0 => i.need1.max(1) as u16,
+                1 => i.need2.max(1) as u16,
+                2 => i.need3.max(1) as u16,
+                _ => return None,
+            },
+            None => (magic.level as u16 + 1) * 1000,
+        };
         if magic.experience >= xp_needed && magic.level < 3 {
             magic.level += 1;
-            magic.experience = 0;
+            // C# LevelMagic：case 2 满级清零；case 0/1 余数结转（Experience -= NeedX）
+            if magic.level >= 3 {
+                magic.experience = 0;
+            } else {
+                magic.experience = magic.experience.saturating_sub(xp_needed);
+            }
             let spell = mir2_shared::enums::Spell::try_from(spell_shared)
                 .unwrap_or(mir2_shared::enums::Spell::None);
             return Some((spell, magic.level, magic.experience));
@@ -4586,6 +4686,8 @@ impl PlayerState {
 pub struct GainHeroSpellExp {
     pub spell_shared: u8,
     pub amount: u16,
+    /// #1230：DB magic_infos（等级门控/阈值用；None 时回退旧公式）
+    pub info: Option<crate::db::MagicInfo>,
 }
 
 impl Message<GainHeroSpellExp> for PlayerActor {
@@ -4596,7 +4698,7 @@ impl Message<GainHeroSpellExp> for PlayerActor {
         msg: GainHeroSpellExp,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        self.state.gain_hero_spell_exp(msg.spell_shared, msg.amount)
+        self.state.gain_hero_spell_exp(msg.spell_shared, msg.amount, msg.info.as_ref())
     }
 }
 
@@ -5211,6 +5313,7 @@ allow_group: false,
             brown_until_ms: 0,
             mount_loyalty_decrease_time: 0,
             mount_loyalty_increase_time: 0,
+            torch_burn_time: 0,
         }
     }
 
@@ -5394,51 +5497,51 @@ allow_group: false,
     fn test_gain_hero_spell_exp_levels_up() {
         let mut s = make_state();
         assert!(s.hero_learn_magic(31)); // FireBall C#
-        let r = s.gain_hero_spell_exp(34, 1000);
+        let r = s.gain_hero_spell_exp(34, 1000, None);
         assert!(r.is_some());
         let (spell, level, exp) = r.unwrap();
         assert_eq!(spell, mir2_shared::enums::Spell::FireBall);
         assert_eq!(level, 1);
         assert_eq!(exp, 0);
         // 3 级封顶后不再给经验
-        let _ = s.gain_hero_spell_exp(34, 3000);
-        let _ = s.gain_hero_spell_exp(34, 10000);
-        assert!(s.gain_hero_spell_exp(34, 10000).is_none());
+        let _ = s.gain_hero_spell_exp(34, 3000, None);
+        let _ = s.gain_hero_spell_exp(34, 10000, None);
+        assert!(s.gain_hero_spell_exp(34, 10000, None).is_none());
         assert_eq!(s.hero_magics[0].level, 3);
     }
 
     #[test]
     fn test_gain_hero_spell_exp_unlearned_ignored() {
         let mut s = make_state();
-        assert!(s.gain_hero_spell_exp(34, 1000).is_none());
+        assert!(s.gain_hero_spell_exp(34, 1000, None).is_none());
     }
     // ---- #214 技能升级 ----
     #[test]
     fn test_gain_spell_exp_levels_up() {
         let mut s = make_state();
         assert!(s.learn_magic(31)); // FireBall C#
-        let r = s.gain_spell_exp(34, 1000);
+        let r = s.gain_spell_exp(34, 1000, None);
         assert!(r.is_some());
         let (spell, level, exp) = r.unwrap();
         assert_eq!(spell, mir2_shared::enums::Spell::FireBall);
         assert_eq!(level, 1);
         assert_eq!(exp, 0);
         // 再升 2 级需 2000
-        let r2 = s.gain_spell_exp(34, 2000);
+        let r2 = s.gain_spell_exp(34, 2000, None);
         assert!(r2.is_some());
         assert_eq!(r2.unwrap().1, 2);
         // 3 级封顶后不再给经验
-        let r3 = s.gain_spell_exp(34, 10000);
+        let r3 = s.gain_spell_exp(34, 10000, None);
         assert!(r3.is_some());
         assert_eq!(r3.unwrap().1, 3);
-        assert!(s.gain_spell_exp(34, 10000).is_none());
+        assert!(s.gain_spell_exp(34, 10000, None).is_none());
     }
 
     #[test]
     fn test_gain_spell_exp_unlearned_ignored() {
         let mut s = make_state();
-        assert!(s.gain_spell_exp(34, 1000).is_none());
-        assert!(s.gain_spell_exp(0, 1000).is_none()); // 基础攻击（未学）忽略
+        assert!(s.gain_spell_exp(34, 1000, None).is_none());
+        assert!(s.gain_spell_exp(0, 1000, None).is_none()); // 基础攻击（未学）忽略
     }
     // ---- #212 技能书学习 ----
     #[test]
@@ -5480,7 +5583,7 @@ allow_group: false,
         // 学习火球（C# 编号 31；gain_spell_exp 入参为 SharedRust +3 = 34）
         assert!(s.learn_magic(31));
         // 无 Skill 特殊：经验 100
-        let _ = s.gain_spell_exp(34, 100);
+        let _ = s.gain_spell_exp(34, 100, None);
         assert_eq!(s.magics.iter().find(|m| m.spell == 31).unwrap().experience, 100);
         // 装备 Skill 特殊装备：经验 ×3
         let mut info = mir2_shared::data::item::ItemInfo::default();
@@ -5489,8 +5592,55 @@ allow_group: false,
             info: Some(info),
             ..Default::default()
         });
-        let _ = s.gain_spell_exp(34, 100);
+        let _ = s.gain_spell_exp(34, 100, None);
         assert_eq!(s.magics.iter().find(|m| m.spell == 31).unwrap().experience, 400); // 100 + 300
+    }
+
+    // ---- #1230 技能经验对齐 C# LevelMagic：DB 阈值（need1/2/3）+ 玩家等级门控（Level1/2/3） ----
+    #[test]
+    fn test_gain_spell_exp_db_threshold_and_gate() {
+        let mut s = make_state();
+        assert!(s.learn_magic(31)); // FireBall C# 编号 31（SharedRust 34）
+        let info = crate::db::MagicInfo {
+            name: "FireBall".into(),
+            spell: 31,
+            base_cost: 2,
+            level_cost: 1,
+            icon: 0,
+            level1: 7,
+            level2: 12,
+            level3: 17,
+            need1: 100,
+            need2: 300,
+            need3: 600,
+            delay_base: 1800,
+            delay_reduction: 100,
+            power_base: 5,
+            power_bonus: 1,
+            mpower_base: 5,
+            mpower_bonus: 1,
+            range: 9,
+            multiplier_base: 1.0,
+            multiplier_bonus: 0.0,
+        };
+        // 等级 1 < Level1(7)：等级门控拦截，不加经验
+        assert!(s.gain_spell_exp(34, 500, Some(&info)).is_none());
+        assert_eq!(s.magics.iter().find(|m| m.spell == 31).unwrap().experience, 0);
+        // 升到 7 级后：need1=100，500 经验升级并结转 400（C# case 0）
+        s.level = 7;
+        let r = s.gain_spell_exp(34, 500, Some(&info)).unwrap();
+        assert_eq!(r.1, 1);
+        assert_eq!(s.magics.iter().find(|m| m.spell == 31).unwrap().experience, 400);
+        // 1 级阈值 need2=300 且门控 Level2=12：当前等级 7 < 12 被拦
+        assert!(s.gain_spell_exp(34, 200, Some(&info)).is_none());
+        assert_eq!(s.magics.iter().find(|m| m.spell == 31).unwrap().level, 1);
+        s.level = 12;
+        // 已有结转 400 >= need2(300)，+200 → 升 2 级并结转 600-300=300（C# case 1）
+        let r2 = s.gain_spell_exp(34, 200, Some(&info)).unwrap();
+        assert_eq!(r2.1, 2);
+        assert_eq!(s.magics.iter().find(|m| m.spell == 31).unwrap().experience, 300);
+        // 2 级门控 Level3=17：当前等级 12 < 17 被拦（C# case 2 需 Level >= Level3）
+        assert!(s.gain_spell_exp(34, 1000, Some(&info)).is_none());
     }
 
     /// #973：召唤护身符消耗（C# GetAmulet + ConsumeItem）

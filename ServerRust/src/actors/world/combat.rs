@@ -4255,10 +4255,13 @@ impl Message<MagicRequest> for WorldActor {
 
         // Spell XP gain and cast_time update
         if !basic_spells.contains(&msg.spell) {
+            // #1230：C# LevelMagic exp = Random.Next(3)+1；DB 信息用于等级门控/阈值/升级延迟
+            let info = self.magic_infos.get(&(spell_cs as u32)).cloned();
             let _ = record.actor_ref.ask(crate::actors::player::GainSpellExp {
                 spell: msg.spell,
-                amount: 1,
+                amount: (1 + fastrand::i32(0..3)) as u16,
                 cast_time: now_ms,
+                info,
             }).await;
         }
     }

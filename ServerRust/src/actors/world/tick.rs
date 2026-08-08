@@ -300,9 +300,33 @@ impl WorldActor {
             let mut to_revive = Vec::new();
             let mut to_remove = Vec::new();
             let mut to_despawn_pets = Vec::new();
+            let mut torch_broke: Vec<u64> = Vec::new();
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
             for (session_id, record) in &self.players {
                 let _ = record.actor_ref.ask(crate::actors::player::TickBuff).await;
                 if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                    // C# HumanObject.Process TorchTime：每 10s 火把耐久 -5，归零自动卸下+重算属性
+                    if now_ms >= state.torch_burn_time {
+                        let next = now_ms + 10_000;
+                        let _ = record.actor_ref.ask(crate::actors::player::SetTorchBurnTime { burn_time: next }).await;
+                        let has_torch = state.inventory.equipment
+                            .get(crate::actors::inventory::EquipmentSlot::Torch as usize)
+                            .map(|s| s.is_some())
+                            .unwrap_or(false);
+                        if has_torch {
+                            let broke = record.actor_ref.ask(crate::actors::player::DamageEquipment {
+                                slot: crate::actors::inventory::EquipmentSlot::Torch,
+                                amount: 5,
+                            }).await.unwrap_or(false);
+                            if broke {
+                                debug!("Player session={} torch burned out!", session_id);
+                                torch_broke.push(*session_id);
+                            }
+                        }
+                    }
                     if state.is_dead {
                         match self.player_death_queue.get(session_id) {
                             None => {
@@ -323,6 +347,12 @@ impl WorldActor {
             }
             for session_id in to_remove {
                 self.player_death_queue.remove(&session_id);
+            }
+            // 火把损坏：重算属性 + 广播外观（C# RefreshStats + EquipmentChanged）
+            for session_id in torch_broke {
+                if let Some(st) = self.recalculate_and_set_stat_bonuses(session_id).await {
+                    self.broadcast_equipment_visuals(session_id, &st).await;
+                }
             }
             if !to_revive.is_empty() {
                 // 自动复活由独立消息 ProcessRevives 处理（避免 Tick handler 巨型状态机
@@ -3803,8 +3833,9 @@ impl Message<Tick> for WorldActor {
                                     dismount_sessions.push(target_session);
                                 }
 
-                                // 装备耐久损耗（C# HumanObject.DamageDura：受击时所有非武器槽位 -1）
-                                if !died {
+                                // 装备耐久损耗（C# HumanObject.DamageDura：受击时所有非武器槽位 -1；
+                                // #1230 致死也扣——C# DamageDura 在 ChangeHP 前调用）
+                                {
                                     let armor_slots = [
                                         EquipmentSlot::Armour,
                                         EquipmentSlot::Helmet,

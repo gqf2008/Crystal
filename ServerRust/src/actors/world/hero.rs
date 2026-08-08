@@ -1856,12 +1856,32 @@ impl WorldActor {
                     .actor_ref
                     .ask(crate::actors::player::GainHeroSpellExp {
                         spell_shared: *spell,
-                        amount: 1,
+                        // #1230：C# LevelMagic exp = Random.Next(3)+1（英雄继承 HumanObject）
+                        amount: (1 + fastrand::i32(0..3)) as u16,
+                        info: self.magic_infos.get(&((*spell).saturating_sub(3) as u32)).cloned(),
                     })
                     .await
                     .unwrap_or(None)
                 {
                     let hero_oid = record.object_id.wrapping_add(HERO_OID_OFFSET);
+                    // #1230：升级补发 S.MagicDelay（C# LevelMagic oldLevel != magic.Level）
+                    if let Some(info) = self.magic_infos.get(&((*spell).saturating_sub(3) as u32)) {
+                        let delay = crate::combat::magic::magic_delay(info, level) as i64;
+                        let md = mir2_shared::packets::server::magic_combat::MagicDelay {
+                            object_id: hero_oid,
+                            spell: spell_enum,
+                            delay,
+                        };
+                        let mut md_body = Vec::new();
+                        if md.write_body(&mut md_body).is_ok() {
+                            let _ = self.gate_ref.tell(SendToClient {
+                                session_id: *session_id,
+                                data: build_packet_bytes(
+                                    mir2_shared::enums::ServerPacketIds::MagicDelay as i16, &md_body,
+                                ),
+                            }).await;
+                        }
+                    }
                     let leveled = mir2_shared::packets::server::magic::MagicLeveled {
                         object_id: hero_oid,
                         spell: spell_enum,
