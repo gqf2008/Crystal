@@ -2923,6 +2923,8 @@ impl WorldActor {
             state.mount_type,
             state.is_mounted,
             0, // 英雄无等级特效
+            state.guild_name.as_deref().unwrap_or(""),
+            crate::actors::world::guild_rank_name(state.guild_rank),
         );
         for sid in self.players.keys() {
             let _ = self.gate_ref.tell(SendToClient {

@@ -99,6 +99,8 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
                 net_objects.write(NetObject::Player {
                     object_id: p.object_id,
                     name: p.name,
+                    guild_name: p.guild_name,
+                    guild_rank_name: p.guild_rank_name,
                     class: p.class,
                     gender: p.gender,
                     location_x: p.location_x,

@@ -235,8 +235,9 @@ fn potion_belt_icon_system(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
-    mut icons: Query<(&mut Sprite, &mut Visibility, &PotionBeltIcon)>,
-    mut counts: Query<(&mut Text2d, &mut Visibility, &PotionBeltCount)>,
+    // #1374：B0001 修复（#1362 药水腰带合入后启动 panic）——icons 与 counts 的 &mut Visibility 需 Without 隔离
+    mut icons: Query<(&mut Sprite, &mut Visibility, &PotionBeltIcon), Without<PotionBeltCount>>,
+    mut counts: Query<(&mut Text2d, &mut Visibility, &PotionBeltCount), Without<PotionBeltIcon>>,
 ) {
     let find = |i: usize| -> Option<&InvItem> {
         let uid = belt.slots.get(i).and_then(|u| u.as_ref())?;

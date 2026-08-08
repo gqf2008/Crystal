@@ -698,6 +698,12 @@ impl Message<NpcAddToGuild> for SocialActor {
             send_guild_info_packet(&self.gate_ref, msg.session_id, guild);
         }
         send_system_message(&self.gate_ref, msg.session_id, &format!("你已加入行会 \"{}\"", guild_name));
+        // #1374：C# BroadcastInfo——加入行会后重发外观（同图玩家看到行会名/职位）
+        if let Some(record) = self.players.get(&msg.session_id) {
+            if let Ok(Some(fresh)) = record.ask(GetPlayerState).await {
+                self.broadcast_ride_appearance(msg.session_id, &fresh).await;
+            }
+        }
         debug!("NPC AddToGuild: {} -> {}", state.name, guild_name);
     }
 }
@@ -729,6 +735,12 @@ impl Message<NpcRemoveFromGuild> for SocialActor {
             }
             send_guild_status_packet(&self.gate_ref, msg.session_id, false);
             send_system_message(&self.gate_ref, msg.session_id, &format!("你已离开行会 \"{}\"", guild_name));
+            // #1374：C# BroadcastInfo——退出行会后重发外观（行会名清除）
+            if let Some(record) = self.players.get(&msg.session_id) {
+                if let Ok(Some(fresh)) = record.ask(GetPlayerState).await {
+                    self.broadcast_ride_appearance(msg.session_id, &fresh).await;
+                }
+            }
             debug!("NPC RemoveFromGuild: {} <- {}", state.name, guild_name);
         }
     }
@@ -3355,6 +3367,10 @@ impl Message<LeaveGuildRequest> for SocialActor {
         }
 
         send_system_message(&self.gate_ref, msg.session_id, &format!("已离开行会 \"{}\"", guild_name));
+        // #1374：C# BroadcastInfo——退出行会后重发外观（行会名清除）
+        if let Ok(Some(fresh)) = record.ask(GetPlayerState).await {
+            self.broadcast_ride_appearance(msg.session_id, &fresh).await;
+        }
     }
 }
 
@@ -4053,6 +4069,8 @@ impl SocialActor {
             state.mount_type,
             state.is_mounted,
             state.level_effects,
+            state.guild_name.as_deref().unwrap_or(""),
+            crate::actors::world::guild_rank_name(state.guild_rank),
         );
         let _ = self
             .gate_ref

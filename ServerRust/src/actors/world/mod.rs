@@ -1383,6 +1383,8 @@ impl WorldActor {
             weapon, weapon_effect, armor,
             state.mount_type, state.is_mounted,
             state.level_effects,
+            state.guild_name.as_deref().unwrap_or(""),
+            guild_rank_name(state.guild_rank),
         );
         for (sid, record) in &self.players {
             if *sid == session_id { continue; }
@@ -1833,6 +1835,8 @@ impl WorldActor {
             weapon, weapon_effect, armor,
             state.mount_type, state.is_mounted,
             state.level_effects,
+            state.guild_name.as_deref().unwrap_or(""),
+            guild_rank_name(state.guild_rank),
         );
         let player_map_index = state.map_index;
         for (sid, other_record) in &self.players {
@@ -5969,6 +5973,15 @@ pub(crate) fn is_brown(brown_until_ms: i64) -> bool {
     brown_until_ms > now
 }
 
+/// #1374：行会职位显示名（C# GuildRank.Name 默认值；Rust 固定三档）
+pub(crate) fn guild_rank_name(rank: crate::actors::guild::GuildRank) -> &'static str {
+    match rank {
+        crate::actors::guild::GuildRank::Leader => "Leader",
+        crate::actors::guild::GuildRank::Officer => "Officer",
+        crate::actors::guild::GuildRank::Member => "Member",
+    }
+}
+
 /// 根据 PK 值与灰名计算名字颜色（ARGB，对齐 C# GetNameColour：
 /// 白=0（客户端默认）、红=0xFFFF0000、黄=0xFFFFFF00、褐(灰名)=0xFFA52A2A）
 pub(crate) fn name_colour_for_pk(pk_points: i32, brown_active: bool) -> i32 {
@@ -6433,14 +6446,17 @@ pub(crate) fn build_object_player_packet(
     weapon: i16, weapon_effect: i16, armor: i16,
     mount_type: i16, is_mounted: bool,
     level_effects: u16,
+    // #1374：行会名/职位名（C# ObjectPlayer GuildName/GuildRankName）
+    guild_name: &str,
+    guild_rank_name: &str,
 ) -> Vec<u8> {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
 
     body.extend_from_slice(&object_id.to_le_bytes());   // object_id
     write_dotnet_string(&mut body, name);               // name
-    write_dotnet_string(&mut body, "");                 // guild_name
-    write_dotnet_string(&mut body, "");                 // guild_rank_name
+    write_dotnet_string(&mut body, guild_name);         // guild_name（#1374）
+    write_dotnet_string(&mut body, guild_rank_name);    // guild_rank_name（#1374）
     body.extend_from_slice(&name_colour.to_le_bytes()); // name_colour
     body.push(class as u8);                             // class
     body.push(gender as u8);                            // gender

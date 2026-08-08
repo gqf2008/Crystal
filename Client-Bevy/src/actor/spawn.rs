@@ -148,6 +148,8 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
         NetObject::Player {
             object_id,
             name,
+            guild_name,
+            guild_rank_name: _,
             class,
             gender,
             location_x,
@@ -198,6 +200,10 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
                 )
             };
             commands.entity(e).insert(PlayerName(name.clone()));
+            // #1374：行会名标签（非空才插）
+            if !guild_name.is_empty() {
+                commands.entity(e).insert(PlayerGuildName(guild_name.clone()));
+            }
         }
         NetObject::GroundGold { .. } => {}
         NetObject::Monster {

@@ -439,6 +439,8 @@ impl Message<StartGameRequest> for WorldActor {
             self_weapon, self_weapon_effect, self_armor,
             loaded_state.mount_type, loaded_state.is_mounted,
             loaded_state.level_effects,
+            loaded_state.guild_name.as_deref().unwrap_or(""),
+            crate::actors::world::guild_rank_name(loaded_state.guild_rank),
         );
         let _ = self.gate_ref.tell(SendToClient {
             session_id: msg.session_id,
@@ -495,6 +497,8 @@ impl Message<StartGameRequest> for WorldActor {
                     ep_weapon, ep_weapon_effect, ep_armor,
                     ep_state.mount_type, ep_state.is_mounted,
                     ep_state.level_effects,
+                    ep_state.guild_name.as_deref().unwrap_or(""),
+                    crate::actors::world::guild_rank_name(ep_state.guild_rank),
                 );
                 let _ = self.gate_ref.tell(SendToClient {
                     session_id: msg.session_id,
@@ -552,6 +556,8 @@ impl Message<StartGameRequest> for WorldActor {
                     new_weapon, new_weapon_effect, new_armor,
                     loaded_state.mount_type, loaded_state.is_mounted,
                     loaded_state.level_effects,
+                    loaded_state.guild_name.as_deref().unwrap_or(""),
+                    crate::actors::world::guild_rank_name(loaded_state.guild_rank),
                 );
                 let _ = self.gate_ref.tell(SendToClient {
                     session_id: existing.session_id,

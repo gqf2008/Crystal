@@ -280,6 +280,10 @@ pub enum NetObject {
     Player {
         object_id: u32,
         name: String,
+        /// #1374：行会名（ObjectPlayer GuildName）
+        guild_name: String,
+        /// #1374：行会职位名（ObjectPlayer GuildRankName）
+        guild_rank_name: String,
         class: mir2_shared::MirClass,
         gender: mir2_shared::MirGender,
         location_x: i32,

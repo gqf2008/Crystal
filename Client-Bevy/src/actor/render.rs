@@ -111,6 +111,7 @@ pub fn actor_name_label_system(
             Option<&PlayerName>,
             Option<&MonsterName>,
             Option<&NpcName>,
+            Option<&PlayerGuildName>,
         ),
         (
             Without<ActorNamed>,
@@ -125,7 +126,7 @@ pub fn actor_name_label_system(
         ui_font.0 = load_ui_font(&mut fonts);
     }
     let font = ui_font.0.clone();
-    for (e, p, m, n) in &actors {
+    for (e, p, m, n, g) in &actors {
         let (text, color) = if let Some(n) = n {
             (n.0.clone(), Color::srgb(0.4, 1.0, 0.4))
         } else if let Some(m) = m {
@@ -136,7 +137,23 @@ pub fn actor_name_label_system(
             continue;
         };
         commands.entity(e).insert(ActorNamed);
+        let guild = g.filter(|g| !g.0.is_empty()).map(|g| g.0.clone());
         commands.entity(e).with_children(|p| {
+            // #1374：行会名标签（名字上方，小字青色，C# 风格）
+            if let Some(guild) = &guild {
+                p.spawn((
+                    ActorNameLabel,
+                    Text2d::new(guild.clone()),
+                    bevy::sprite::Anchor::TOP_CENTER,
+                    TextFont {
+                        font: FontSource::Handle(font.clone()),
+                        font_size: FontSize::Px(9.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.3, 0.9, 1.0)),
+                    Transform::from_xyz(0.0, 42.0, 0.0),
+                ));
+            }
             p.spawn((
                 ActorNameLabel,
                 Text2d::new(text),
