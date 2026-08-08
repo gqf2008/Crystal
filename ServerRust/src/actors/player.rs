@@ -770,6 +770,21 @@ allow_group: false,
         self.state.buffs.iter().any(|b| std::mem::discriminant(&b.buff_type) == tag)
     }
 
+    /// #1319：死亡清理（对齐 C# Die()）——清 Buff 并逐 buff 下发 S.RemoveBuff、毒清空、灰名重置
+    fn clear_death_state(&mut self) {
+        let tags: Vec<u8> = self.state.buffs.iter().map(|b| buff_tag(&b.buff_type)).collect();
+        self.state.buffs.clear();
+        self.state.poison_list.clear();
+        self.state.brown_until_ms = 0;
+        for tag in tags {
+            let mut body = Vec::new();
+            body.push(tag);
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: self.state.session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RemoveBuff as i16, &body),
+            }).try_send();
+        }
+    }
 
     /// 发送 UserLocation 给玩家
     fn send_user_location(&self) {
@@ -1356,10 +1371,8 @@ impl Message<TakeDamage> for PlayerActor {
                 }
             }
             self.state.is_dead = true;
-            // C# Die()：RemoveBuff(MagicShield/ElementalBarrier) + BrownTime = Envir.Time
-            // 简化：清除所有 buff（覆盖护盾移除）；灰名重置为 0
-            self.state.buffs.clear();
-            self.state.brown_until_ms = 0;
+            // #1319：C# Die()——清 Buff（逐 buff 下发 S.RemoveBuff）+ 毒清空 + 灰名重置
+            self.clear_death_state();
             debug!("Player {} died (attacker={})", self.state.name, msg.attacker_id);
 
             // 发送 S.Death 包给死亡玩家（C# Shared/ServerPackets.cs Death: [Location Point][Direction u8]）
@@ -2002,6 +2015,8 @@ impl Message<TickBuff> for PlayerActor {
                 // 中毒致死
                 if self.state.hp == 0 && !self.state.is_dead {
                     self.state.is_dead = true;
+                    // #1319：C# Die()——中毒致死同样清 Buff + PoisonList + 灰名，并逐 buff 下发 S.RemoveBuff
+                    self.clear_death_state();
                 }
             }
         }
