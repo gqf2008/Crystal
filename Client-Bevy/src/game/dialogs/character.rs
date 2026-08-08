@@ -189,6 +189,49 @@ pub struct CharSkillNext;
 #[derive(Component)]
 pub struct CharSkillBack;
 
+/// 装备格屏幕矩形（server_slot 0..13 → 绝对屏幕坐标；C# MirItemCell 36x36）
+fn equip_slot_screen_rect(server_slot: usize) -> Option<(f32, f32, f32, f32)> {
+    let pos_idx = *SERVER_SLOT_TO_POS.get(server_slot)?;
+    let (ox, oy) = EQUIP_SLOTS.get(pos_idx)?;
+    Some((
+        DIALOG_X + PAGE_X + ox,
+        DIALOG_Y + PAGE_Y + oy,
+        SLOT_SIZE,
+        SLOT_SIZE,
+    ))
+}
+
+/// 已装备格子悬停 tooltip（C# CharacterDialog MirItemCell；复用 #1244 item_tooltip_lines）
+fn char_equip_tooltip_system(
+    mgr: Res<DialogManager>,
+    page: Res<CharPage>,
+    inv: Res<HudState>,
+    mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
+    windows: Query<&Window>,
+) {
+    if !mgr.is_open(DialogKind::Character) || page.0 != 0 {
+        tooltip.update(5, false, String::new(), Vec::new(), 0.0, 0.0);
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    let mut hit: Option<crate::game::dialogs::inventory::InvItem> = None;
+    for server_slot in 0..14usize {
+        if let Some((sx, sy, w, h)) = equip_slot_screen_rect(server_slot) {
+            if cursor.x >= sx && cursor.x <= sx + w && cursor.y >= sy && cursor.y <= sy + h {
+                hit = inv.equipment.get(server_slot).and_then(|s| s.as_ref()).cloned();
+                break;
+            }
+        }
+    }
+    let Some(item) = hit else {
+        tooltip.update(5, false, String::new(), Vec::new(), cursor.x, cursor.y);
+        return;
+    };
+    let lines = crate::game::dialogs::inventory::item_tooltip_lines(&item);
+    tooltip.update(5, true, item.name.clone(), lines, cursor.x, cursor.y);
+}
+
 pub struct CharacterDialogPlugin;
 
 /// ServerRust equipment 槽位(0..13) → C# EQUIP_SLOTS 位置索引
@@ -205,7 +248,7 @@ impl Plugin for CharacterDialogPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_character_dialog);
         app.add_systems(
             Update,
-            (character_ui_system, char_equip_system, char_skill_system, ui_button_system)
+            (character_ui_system, char_equip_system, char_skill_system, char_equip_tooltip_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -808,5 +851,26 @@ fn exp_label(m: &mir2_shared::data::client_data::ClientMagic) -> String {
         1 => format!("{}/{}", m.experience, m.need2),
         2 => format!("{}/{}", m.experience, m.need3),
         _ => "-".to_string(),
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn equip_slot_screen_rect_weapon() {
+        // 武器 server_slot=0 → EQUIP_SLOTS[0]=(123,7) + PAGE(8,90) + DIALOG(760,0)
+        let r = equip_slot_screen_rect(0).unwrap();
+        assert_eq!(
+            r,
+            (1024.0 - 264.0 + 8.0 + 123.0, 0.0 + 90.0 + 7.0, 36.0, 36.0)
+        );
+        assert_eq!(equip_slot_screen_rect(14), None);
+    }
+
+    #[test]
+    fn server_slot_mapping_covers_all() {
+        assert_eq!(SERVER_SLOT_TO_POS.len(), 14);
+        assert_eq!(EQUIP_SLOTS.len(), 14);
     }
 }
