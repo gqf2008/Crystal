@@ -5646,17 +5646,28 @@ pub(crate) fn send_manage_heroes_packet(
 // 宠物系统网络辅助函数
 // ============================================================
 
-fn send_creature_list_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, creature: Option<&IntelligentCreature>) {
+/// 发送宠物列表（owned + active 标记；wire：[count i32][per: type u8][pet_mode u8][enabled u8][hunger u8][name dotnet][active u8]）
+fn send_creature_list_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, log: &crate::actors::creature::CreatureLog) {
+    let mut entries: Vec<&IntelligentCreature> = log.owned_creatures.iter().collect();
+    if let Some(active) = &log.active_creature {
+        if !entries.iter().any(|c| c.creature_type == active.creature_type) {
+            entries.push(active);
+        }
+    }
     let mut body = Vec::new();
-    if let Some(c) = creature {
-        body.extend_from_slice(&1i32.to_le_bytes());
+    body.extend_from_slice(&(entries.len() as i32).to_le_bytes());
+    for c in entries {
         body.push(c.creature_type as u8);
         body.push(c.pickup_mode as u8);
         body.push(if c.enabled { 1u8 } else { 0u8 });
         body.push(c.hunger);
         write_dotnet_string(&mut body, c.custom_name.as_deref().unwrap_or(""));
-    } else {
-        body.extend_from_slice(&0i32.to_le_bytes());
+        let is_active = log
+            .active_creature
+            .as_ref()
+            .map(|a| a.creature_type == c.creature_type)
+            .unwrap_or(false);
+        body.push(if is_active { 1u8 } else { 0u8 });
     }
     let _ = gate_ref.tell(SendToClient {
         session_id,

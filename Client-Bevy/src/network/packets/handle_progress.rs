@@ -460,7 +460,8 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
                 let enabled = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } } != 0;
                 let hunger = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } };
                 let name = match mir2_shared::binary::read_dotnet_string(&mut cur) { Ok(v) => v, Err(_) => { ok = false; break; } };
-                creatures.push(CreatureEntry { creature_type, pickup_mode, enabled, hunger, name });
+                let active = match cur.read_u8() { Ok(v) => v, Err(_) => { ok = false; break; } } != 0;
+                creatures.push(CreatureEntry { creature_type, pickup_mode, enabled, hunger, name, active });
             }
             if ok {
                 let count = creatures.len();
