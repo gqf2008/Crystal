@@ -418,6 +418,14 @@ struct HeroBuff {
     hero_level: u16,
 }
 
+/// 主人护盾类型（#1202：C# TaoistHero 给主人上 SoulShield/BlessedArmour/UltimateEnhancer）
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OwnerShieldKind {
+    SoulShield,
+    BlessedArmour,
+    UltimateEnhancer,
+}
+
 /// 英雄 AI 运行时状态（每个出战英雄一个实例）
 #[derive(Clone)]
 pub struct HeroCombatAI {
@@ -545,6 +553,8 @@ impl WorldActor {
             hero_poison_shape: i32,
             /// 是否装备普通护符（#1192：C# GetAmulet：Amulet shape 0）
             hero_amulet: bool,
+            /// 主人是否已有对应护盾 buff（SoulShield/BlessedArmour/UltimateEnhancer，#1202）
+            owner_has_shields: [bool; 3],
         }
 
         let mut snapshots: Vec<HeroSnapshot> = Vec::new();
@@ -610,6 +620,23 @@ impl WorldActor {
                         &state.hero_inventory.equipment,
                         &self.item_infos,
                     ),
+                    // #1202：主人已有对应护盾 buff（UltimateEnhancer 用 DC/MC/SC Boost 近似）
+                    owner_has_shields: [
+                        state.buffs.iter().any(|b| {
+                            matches!(b.buff_type, crate::combat::buff::BuffType::MacDefenseBoost { .. })
+                        }),
+                        state.buffs.iter().any(|b| {
+                            matches!(b.buff_type, crate::combat::buff::BuffType::AcDefenseBoost { .. })
+                        }),
+                        state.buffs.iter().any(|b| {
+                            matches!(
+                                b.buff_type,
+                                crate::combat::buff::BuffType::AttackBoost { .. }
+                                    | crate::combat::buff::BuffType::McBoost { .. }
+                                    | crate::combat::buff::BuffType::ScBoost { .. }
+                            )
+                        }),
+                    ],
                 });
             }
         }
@@ -662,6 +689,8 @@ impl WorldActor {
         let mut poison_intents: Vec<(u64, u32, mir2_shared::enums::PoisonType, u32, i32, u64)> = Vec::new();
         // 法师 AoE 意图：(hero_session_id, spell, target_oid, tx, ty, raw, level) —— 阶段 3f 应用（#1200）
         let mut aoe_intents: Vec<(u64, u8, u32, i32, i32, i32, u8)> = Vec::new();
+        // 主人护盾意图：(hero_session_id, kind) —— 阶段 2.4b 应用（#1202）
+        let mut owner_shield_intents: Vec<(u64, OwnerShieldKind)> = Vec::new();
 
         for snap in &snapshots {
             // 确保该英雄有 AI 状态（首次出现则初始化）
@@ -858,6 +887,31 @@ impl WorldActor {
                     ai_local.next_attack_tick = self.tick_count + 4;
                     *ai = ai_local;
                     continue;
+                }
+            } else if snap.class == MirClass::Taoist && snap.hero_amulet {
+                // #1202：C# TaoistHero ProcessFriend：给自己上完护盾后给主人上（SoulShield → BlessedArmour → UltimateEnhancer）
+                let owner_kind = [
+                    (OwnerShieldKind::SoulShield, 0usize),
+                    (OwnerShieldKind::BlessedArmour, 1usize),
+                    (OwnerShieldKind::UltimateEnhancer, 2usize),
+                ]
+                .iter()
+                .find(|(kind, idx)| {
+                    !snap.owner_has_shields[*idx]
+                        && hero_magic_level(&snap.hero_magics, hero_owner_shield_spell(*kind) as u8) > 0
+                })
+                .map(|(kind, _)| *kind);
+                if let Some(kind) = owner_kind {
+                    let spell = hero_owner_shield_spell(kind);
+                    let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+                    if ai_local.mp >= cost {
+                        ai_local.mp -= cost;
+                        owner_shield_intents.push((snap.session_id, kind));
+                        support_intents.push((snap.session_id, snap.session_id, spell as u8, false));
+                        ai_local.next_attack_tick = self.tick_count + 4;
+                        *ai = ai_local;
+                        continue;
+                    }
                 }
             }
 
@@ -1076,17 +1130,32 @@ impl WorldActor {
                         // #1196：Curse 可用 = 已学 + 普通护符 + 目标无减速毒（C# TaoistHero 无 Curse buff 近似）
                         let curse_lv = hero_magic_level(&snap.hero_magics, Spell::Curse as u8);
                         let can_curse = curse_lv > 0 && snap.hero_amulet && !target.has_slow;
-                        if healing_lv > 0 && owner_hp_pct < 90 {
+                        let hero_hp_pct = if ai_local.max_hp > 0 {
+                            ai_local.hp * 100 / ai_local.max_hp
+                        } else { 100 };
+                        if healing_lv > 0 && (hero_hp_pct < 90 || owner_hp_pct < 90) {
                             // #1186：治疗也耗蓝（C# CanUseMagic）
                             let heal_cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Healing as u8);
                             if ai_local.mp >= heal_cost {
                                 ai_local.mp -= heal_cost;
-                                support_intents.push((
-                                    snap.session_id,
-                                    snap.session_id,
-                                    Spell::Healing as u8,
-                                    true,
-                                ));
+                                // #1202：C# TaoistHero TargetList=[this, Owner]，先治自己再治主人
+                                if hero_hp_pct < 90 {
+                                    let amount = hero_heal_amount(&hero_stats, snap.hero_level);
+                                    ai_local.hp = (ai_local.hp + amount).min(ai_local.max_hp);
+                                    support_intents.push((
+                                        snap.session_id,
+                                        snap.session_id,
+                                        Spell::Healing as u8,
+                                        false,
+                                    ));
+                                } else {
+                                    support_intents.push((
+                                        snap.session_id,
+                                        snap.session_id,
+                                        Spell::Healing as u8,
+                                        true,
+                                    ));
+                                }
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             } else {
                                 let _ = hero_melee_fallback(
@@ -1407,6 +1476,30 @@ impl WorldActor {
             debug!(
                 "Hero auto-pot: session={} item_index={} uid={} is_mp={} shape={} hp_pool={} mp_pool={}",
                 session_id, item_index, potion.unique_id, is_mp, db.shape, hp_pool, mp_pool
+            );
+        }
+
+        // ===== 阶段 2.4b：道士英雄给主人上护盾（#1202：C# TaoistHero ProcessFriend 目标含 Owner） =====
+        for (session_id, kind) in &owner_shield_intents {
+            let Some(record) = self.players.get(session_id).map(|r| r.clone()) else {
+                continue;
+            };
+            let Some(snap) = snapshots.iter().find(|s| s.session_id == *session_id) else {
+                continue;
+            };
+            let spell = hero_owner_shield_spell(*kind);
+            let buff_lv = hero_magic_level(&snap.hero_magics, spell as u8);
+            let (buff_type, ticks) =
+                hero_owner_shield_buff(*kind, snap.class, snap.owner_level, buff_lv, &snap.hero_stats);
+            let _ = record
+                .actor_ref
+                .ask(crate::actors::player::ApplyBuff {
+                    buff: crate::combat::buff::BuffInstance::new(buff_type, ticks, 1),
+                })
+                .await;
+            debug!(
+                "Hero Taoist cast {:?} on owner {} ({} ticks)",
+                kind, session_id, ticks
             );
         }
 
@@ -2004,6 +2097,60 @@ fn hero_target_surrounded(monsters: &[(u32, i32, i32)], target_oid: u32, target_
     monsters.iter().any(|(oid, x, y)| {
         *oid != target_oid && (x - target_x).abs() <= 1 && (y - target_y).abs() <= 1
     })
+}
+
+/// 主人护盾对应 Spell（#1202）
+fn hero_owner_shield_spell(kind: OwnerShieldKind) -> mir2_shared::enums::Spell {
+    use mir2_shared::enums::Spell;
+    match kind {
+        OwnerShieldKind::SoulShield => Spell::SoulShield,
+        OwnerShieldKind::BlessedArmour => Spell::BlessedArmour,
+        OwnerShieldKind::UltimateEnhancer => Spell::UltimateEnhancer,
+    }
+}
+
+/// 主人护盾 buff 规格（#1202：C# 值 = 目标等级/7+4；UltimateEnhancer 按目标职业 +DC/MC/SC，时长 = SC*4+(Lv+1)*50 秒）
+fn hero_owner_shield_buff(
+    kind: OwnerShieldKind,
+    owner_class: mir2_shared::enums::MirClass,
+    owner_level: u16,
+    buff_lv: u8,
+    stats: &super::hero_stats::HeroStats,
+) -> (crate::combat::buff::BuffType, u32) {
+    use crate::combat::buff::BuffType;
+    use mir2_shared::enums::MirClass;
+    let hero_kind = match kind {
+        OwnerShieldKind::SoulShield => HeroBuffKind::SoulShield,
+        OwnerShieldKind::BlessedArmour => HeroBuffKind::BlessedArmour,
+        OwnerShieldKind::UltimateEnhancer => HeroBuffKind::UltimateEnhancer,
+    };
+    let ticks = (hero_buff_duration(hero_kind, buff_lv, stats) * 10) as u32;
+    let buff = match kind {
+        OwnerShieldKind::SoulShield => {
+            BuffType::MacDefenseBoost {
+                bonus: owner_level as i32 / 7 + 4,
+            }
+        }
+        OwnerShieldKind::BlessedArmour => {
+            BuffType::AcDefenseBoost {
+                bonus: owner_level as i32 / 7 + 4,
+            }
+        }
+        OwnerShieldKind::UltimateEnhancer => {
+            let value = if stats.max_sc >= 5 {
+                (stats.max_sc / 5).min(8)
+            } else {
+                1
+            };
+            match owner_class {
+                MirClass::Warrior | MirClass::Assassin => BuffType::AttackBoost { bonus: value },
+                MirClass::Wizard | MirClass::Archer => BuffType::McBoost { bonus: value },
+                MirClass::Taoist => BuffType::ScBoost { bonus: value },
+                _ => BuffType::AttackBoost { bonus: value },
+            }
+        }
+    };
+    (buff, ticks)
 }
 
 /// 各职业 ProcessFriend 增益列表（#1190/#1192：C# 子类顺序）
@@ -2701,5 +2848,54 @@ mod tests {
         assert!(!hero_target_surrounded(&mobs, 3, 20, 20));
         // 只有自己 → 未围
         assert!(!hero_target_surrounded(&[(5, 0, 0)], 5, 0, 0));
+    }
+
+    #[test]
+    fn hero_owner_shield_specs() {
+        use crate::combat::buff::BuffType;
+        use mir2_shared::enums::MirClass;
+        let stats = super::hero_stats::hero_base_stats(MirClass::Taoist, 30);
+        // SoulShield：主人等级 30 → MacDefenseBoost 30/7+4 = 8；时长 = SC*4+(Lv+1)*50 秒 → ticks ×10
+        let (bt, ticks) = hero_owner_shield_buff(
+            OwnerShieldKind::SoulShield,
+            MirClass::Taoist,
+            30,
+            1,
+            &stats,
+        );
+        assert_eq!(bt, BuffType::MacDefenseBoost { bonus: 8 });
+        assert_eq!(ticks, (hero_buff_duration(HeroBuffKind::SoulShield, 1, &stats) * 10) as u32);
+        // BlessedArmour → AcDefenseBoost
+        let (bt2, _) = hero_owner_shield_buff(
+            OwnerShieldKind::BlessedArmour,
+            MirClass::Taoist,
+            30,
+            1,
+            &stats,
+        );
+        assert_eq!(bt2, BuffType::AcDefenseBoost { bonus: 8 });
+        // UltimateEnhancer：道士主人 → ScBoost（MaxSC=4 → value=1）
+        let (bt3, _) = hero_owner_shield_buff(
+            OwnerShieldKind::UltimateEnhancer,
+            MirClass::Taoist,
+            30,
+            1,
+            &stats,
+        );
+        assert_eq!(bt3, BuffType::ScBoost { bonus: 1 });
+        // 战士主人 → AttackBoost
+        let (bt4, _) = hero_owner_shield_buff(
+            OwnerShieldKind::UltimateEnhancer,
+            MirClass::Warrior,
+            30,
+            1,
+            &stats,
+        );
+        assert_eq!(bt4, BuffType::AttackBoost { bonus: 1 });
+        // spell 映射
+        assert_eq!(
+            hero_owner_shield_spell(OwnerShieldKind::SoulShield),
+            mir2_shared::enums::Spell::SoulShield
+        );
     }
 }
