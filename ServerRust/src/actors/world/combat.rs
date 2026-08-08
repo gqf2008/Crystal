@@ -130,6 +130,18 @@ fn attack_disabled_by_poison(poison_list: &[crate::combat::poison::Poison]) -> b
     })
 }
 
+/// #1287：C# CanCast——眩晕/迷惑/麻痹/冰冻中禁止施法（与 CanAttack 差异：
+/// 施法查 Stun 不查 LRParalysis；攻击查 LRParalysis 不查 Stun）
+fn cast_disabled_by_poison(poison_list: &[crate::combat::poison::Poison]) -> bool {
+    use mir2_shared::enums::PoisonType;
+    poison_list.iter().any(|p| {
+        p.p_type.intersects(PoisonType::STUN)
+            || p.p_type.intersects(PoisonType::DAZED)
+            || p.p_type.intersects(PoisonType::PARALYSIS)
+            || p.p_type.intersects(PoisonType::FROZEN)
+    })
+}
+
 /// 采集请求（从 GateActor 转发）
 pub struct HarvestRequest {
     pub session_id: u64,
@@ -1672,6 +1684,18 @@ impl Message<MagicRequest> for WorldActor {
             _ => { return; }
         };
         if state.is_dead { return; }
+        // #1287：C# CanCast——眩晕/迷惑/麻痹/冰冻中禁止施法
+        if cast_disabled_by_poison(&state.poison_list) {
+            return;
+        }
+        // #1287：沉默禁施法（与 AttackRequest 的 Silence 检查一致）
+        if state
+            .buffs
+            .iter()
+            .any(|b| matches!(b.buff_type, crate::combat::buff::BuffType::Silence))
+        {
+            return;
+        }
 
         // 记录玩家当前施法目标（C# HumanObject.TargetID；宠物 FocusMasterTarget 用）
         if msg.target_id != 0 {
@@ -4643,8 +4667,9 @@ mod spell_geometry_tests {
 #[cfg(test)]
 mod tests {
     use super::{
-        attack_disabled_by_poison, find_attack_skill, player_attack_speed_ms, ATTACK_SKILL_SPELLS,
-        DAMAGE_DURA_ARMOR_SLOTS, SPELL_CROSS_HALFMOON, SPELL_HALFMOON, SPELL_SLAYING,
+        attack_disabled_by_poison, cast_disabled_by_poison, find_attack_skill,
+        player_attack_speed_ms, ATTACK_SKILL_SPELLS, DAMAGE_DURA_ARMOR_SLOTS, SPELL_CROSS_HALFMOON,
+        SPELL_HALFMOON, SPELL_SLAYING,
     };
     use crate::actors::inventory::EquipmentSlot;
     use crate::actors::player::PlayerMagic;
@@ -4674,6 +4699,22 @@ mod tests {
         assert!(ATTACK_SKILL_SPELLS.contains(&SPELL_CROSS_HALFMOON));
         assert!(!ATTACK_SKILL_SPELLS.contains(&super::SPELL_MPEATER));
         assert!(!ATTACK_SKILL_SPELLS.contains(&super::SPELL_HEMORRHAGE));
+    }
+
+    #[test]
+    fn test_cast_disabled_by_poison() {
+        use crate::combat::poison::Poison;
+        use mir2_shared::enums::PoisonType;
+        // #1287：C# CanCast——Stun/Dazed/Paralysis/Frozen 禁施法
+        assert!(!cast_disabled_by_poison(&[]));
+        assert!(cast_disabled_by_poison(&[Poison::new(PoisonType::STUN, 5, 0, 1000)]));
+        assert!(cast_disabled_by_poison(&[Poison::new(PoisonType::DAZED, 5, 0, 1000)]));
+        assert!(cast_disabled_by_poison(&[Poison::new(PoisonType::PARALYSIS, 5, 0, 1000)]));
+        assert!(cast_disabled_by_poison(&[Poison::new(PoisonType::FROZEN, 5, 0, 1000)]));
+        // C# CanCast 不查 LRParalysis（CanAttack 才查）；绿/红毒不禁施法
+        assert!(!cast_disabled_by_poison(&[Poison::new(PoisonType::LR_PARALYSIS, 5, 0, 1000)]));
+        assert!(!cast_disabled_by_poison(&[Poison::new(PoisonType::RED, 5, 3, 1000)]));
+        assert!(!cast_disabled_by_poison(&[Poison::new(PoisonType::GREEN, 5, 3, 1000)]));
     }
 
     #[test]
