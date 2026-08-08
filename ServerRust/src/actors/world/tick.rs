@@ -2281,6 +2281,8 @@ impl WorldActor {
                     }
                 }
             }
+            // #1340：C# EndWar → UpdatePlayersColours：停战即时刷新双方成员名字颜色
+            self.refresh_guild_war_colours(&a, &b).await;
             debug!("Guild war expired: {} vs {}", a, b);
         }
     }
