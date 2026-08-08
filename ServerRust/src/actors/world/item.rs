@@ -447,6 +447,39 @@ impl Message<UseItemRequest> for WorldActor {
                     } else {
                         send_system_message(&self.gate_ref, msg.session_id, "这本技能书无法使用");
                     }
+                } else if db.item_type == 13 {
+                    // #1220：英雄背包药水手动使用（C# UseItem Grid=HeroInventory）
+                    let consumed = record
+                        .actor_ref
+                        .ask(crate::actors::player::ConsumeHeroItem {
+                            unique_id: msg.unique_id,
+                        })
+                        .await
+                        .unwrap_or(false);
+                    if !consumed {
+                        return;
+                    }
+                    let hp_stat = db
+                        .stats
+                        .get(&(mir2_shared::enums::Stat::HP as u8))
+                        .copied()
+                        .unwrap_or(0)
+                        .max(0) as u32;
+                    let mp_stat = db
+                        .stats
+                        .get(&(mir2_shared::enums::Stat::MP as u8))
+                        .copied()
+                        .unwrap_or(0)
+                        .max(0) as u32;
+                    if let Some(ai) = self.hero_ai_states.get_mut(&msg.session_id) {
+                        super::hero::hero_apply_potion(ai, db.shape, hp_stat, mp_stat);
+                    }
+                    self.send_hero_information_packet(msg.session_id).await;
+                    send_system_message(&self.gate_ref, msg.session_id, "英雄使用了药水");
+                    tracing::info!(
+                        "🦸 {} 英雄使用药水 uid={} shape={}",
+                        player_state.name, msg.unique_id, db.shape
+                    );
                 }
             }
             return;
