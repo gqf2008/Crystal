@@ -11,13 +11,17 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
+use crate::game::dialogs::text_input::{
+    TextInputDisplay, TextInputField, TextInputRect, TextInputState,
+};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont,
+    UiImageCache,
 };
 
 /// 商城商品（GameShopInfo 写入）
@@ -39,6 +43,8 @@ pub struct GameShopState {
     pub gold: u32,
     pub message: String,
     pub item_names: HashMap<i32, String>,
+    /// 搜索关键词（C# GameshopDialog Search，本地按名称过滤）
+    pub search: String,
 }
 
 #[derive(Component)]
@@ -52,6 +58,20 @@ pub struct GameShopBuy;
 
 #[derive(Component)]
 pub struct GameShopLine(usize);
+
+/// 按名称过滤商城商品（C# GameshopDialog Search：FriendlyName.Contains(keyword)，返回 items 下标）
+fn filter_shop_items(items: &[ShopItem], search: &str) -> Vec<usize> {
+    let kw = search.trim().to_lowercase();
+    if kw.is_empty() {
+        return (0..items.len()).collect();
+    }
+    items
+        .iter()
+        .enumerate()
+        .filter(|(_, it)| it.name.to_lowercase().contains(&kw))
+        .map(|(i, _)| i)
+        .collect()
+}
 
 pub struct GameShopPlugin;
 
@@ -151,6 +171,50 @@ fn spawn_game_shop(
             GameShopWidget,
         ));
     }
+
+    // 搜索框（C# GameshopDialog Search：本地按名称过滤，TextInput id 31）
+    let white = images.add(crate::map_renderer::make_image(
+        vec![255, 255, 255, 255],
+        1,
+        1,
+    ));
+    let label = spawn_ui_text(
+        &mut commands, &font, "搜索",
+        390.0, 106.0, 12.0, Color::WHITE, 8.1,
+    );
+    commands.entity(label).insert((DialogRoot(DialogKind::GameShop), GameShopWidget));
+    let box_e = commands
+        .spawn((
+            UiEntity,
+            DialogRoot(DialogKind::GameShop),
+            GameShopWidget,
+            TextInputField(31),
+            TextInputRect(425.0, 105.0, 115.0, 18.0),
+            Sprite {
+                image: white.clone(),
+                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
+                custom_size: Some(Vec2::new(115.0, 18.0)),
+                ..default()
+            },
+            bevy::sprite::Anchor::TOP_LEFT,
+            Transform::from_xyz(425.0, -105.0, 8.1),
+            Visibility::Hidden,
+        ))
+        .id();
+    commands.entity(box_e).with_children(|p| {
+        p.spawn((
+            TextInputDisplay(31),
+            Text2d::new(String::new()),
+            bevy::sprite::Anchor::TOP_LEFT,
+            TextFont {
+                font: FontSource::Handle(font.clone()),
+                font_size: FontSize::Px(12.0),
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 1.0, 1.0)),
+            Transform::from_xyz(4.0, -1.0, 8.2),
+        ));
+    });
 }
 
 /// 显隐 + 渲染 + 关闭/购买 + 打开时请求目录
@@ -158,6 +222,7 @@ fn spawn_game_shop(
 fn game_shop_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut shop: ResMut<GameShopState>,
+    mut input: ResMut<TextInputState>,
     net: Res<NetConnection>,
     close: Query<&UiButton, With<GameShopClose>>,
     buy_btn: Query<&UiButton, With<GameShopBuy>>,
@@ -173,6 +238,10 @@ fn game_shop_ui_system(
     }
     if !open {
         *requested = false;
+        shop.search.clear();
+        if input.texts.len() > 31 {
+            input.texts[31].clear();
+        }
         return;
     }
     // 打开瞬间请求商城目录（C# GameshopDialog.Show → C.GameshopBuy{g_index=0}）
@@ -184,15 +253,20 @@ fn game_shop_ui_system(
         });
         tracing::info!("🛒 请求商城目录");
     }
+    // 搜索同步（C# KeyUp 本地过滤；texts 由 text_input_system 每帧回填）
+    if let Some(t) = input.texts.get(31) {
+        shop.search = t.clone();
+    }
+    let filtered = filter_shop_items(&shop.items, &shop.search);
     for btn in &close {
         if btn.clicked {
             mgr.close(DialogKind::GameShop);
         }
     }
-    // 渲染
+    // 渲染（按过滤后的下标，C# Search 语义）
     for (mut text, line) in &mut lines {
         text.0 = match line.0 {
-            i if i < 10 => match shop.items.get(i) {
+            i if i < 10 => match filtered.get(i).and_then(|&idx| shop.items.get(idx)) {
                 Some(it) => format!(
                     "{}: {}  {}金币",
                     it.item_index,
@@ -217,9 +291,9 @@ fn game_shop_ui_system(
                 for i in 0..10usize {
                     let y = 130.0 + i as f32 * 20.0;
                     if cursor.x >= 208.0 && cursor.x <= 540.0 && cursor.y >= y && cursor.y <= y + 18.0 {
-                        if i < shop.items.len() {
-                            shop.selected = Some(i);
-                            let it = &shop.items[i];
+                        if let Some(&idx) = filtered.get(i) {
+                            shop.selected = Some(idx);
+                            let it = &shop.items[idx];
                             tracing::info!(
                                 "🛒 选中商品: #{} {} {}金币",
                                 it.item_index,
@@ -290,5 +364,44 @@ fn shop_server_events(
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(name: &str) -> ShopItem {
+        ShopItem {
+            item_index: 0,
+            name: name.to_string(),
+            gold_price: 1,
+            credit_price: 0,
+            category: String::new(),
+            stock: 1,
+        }
+    }
+
+    #[test]
+    fn shop_search_filters_by_name() {
+        let items = vec![item("金创药"), item("太阳水"), item("回城卷")];
+        assert_eq!(filter_shop_items(&items, "").len(), 3);
+        assert_eq!(filter_shop_items(&items, "药").len(), 1);
+        assert_eq!(filter_shop_items(&items, "水").len(), 1);
+        assert_eq!(filter_shop_items(&items, "不存在").len(), 0);
+        assert_eq!(filter_shop_items(&items, "  药  ").len(), 1);
+        assert_eq!(filter_shop_items(&items, "JINCHUANG").len(), 0);
+    }
+
+    #[test]
+    fn shop_search_returns_original_indices() {
+        let items = vec![
+            item("金创药"),
+            item("太阳水"),
+            item("回城卷"),
+            item("金创药·大"),
+        ];
+        let idx = filter_shop_items(&items, "金创药");
+        assert_eq!(idx, vec![0, 3]);
     }
 }
