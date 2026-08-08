@@ -43,6 +43,7 @@ pub mod npc_awake;
 pub mod npc_drop;
 pub mod npc_goods;
 pub mod option;
+pub mod potion_belt;
 pub mod quest_log;
 pub mod quest_tracking;
 pub mod settings_file;
@@ -252,6 +253,7 @@ impl Plugin for DialogsPlugin {
                 menu::MenuDialogPlugin,
                 minimap::MiniMapPlugin,
                 belt::BeltPlugin,
+                potion_belt::PotionBeltPlugin,
                 compass::CompassPlugin,
                 npc::NpcDialogPlugin,
                 quest_log::QuestLogPlugin,
