@@ -44,6 +44,7 @@ pub mod npc_drop;
 pub mod npc_goods;
 pub mod option;
 pub mod quest_log;
+pub mod quest_tracking;
 pub mod ranking;
 pub mod refine;
 pub mod relationship;

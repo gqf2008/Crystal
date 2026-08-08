@@ -49,6 +49,10 @@ pub struct QuestLogAbandon;
 #[derive(Component)]
 pub struct QuestLogLine(usize);
 
+/// 每行“追踪/取消追踪”按钮（C# QuestRow Track 按钮）
+#[derive(Component)]
+pub struct QuestLogTrack(usize);
+
 pub struct QuestLogPlugin;
 
 impl Plugin for QuestLogPlugin {
@@ -121,6 +125,23 @@ fn spawn_quest_log(
             QuestLogWidget,
         ));
     }
+    // 每行追踪按钮（对齐 C# QuestRow Track）
+    for i in 0..8usize {
+        let e = spawn_ui_text(
+            &mut commands, &font, "追踪",
+            612.0, 120.0 + i as f32 * 20.0,
+            11.0, Color::srgb(0.6, 0.9, 1.0), 8.1,
+        );
+        commands.entity(e).insert((
+            QuestLogTrack(i),
+            UiButton {
+                rect: (612.0, 120.0 + i as f32 * 20.0, 40.0, 18.0),
+                clicked: false,
+            },
+            DialogRoot(DialogKind::QuestLog),
+            QuestLogWidget,
+        ));
+    }
     // 放弃按钮
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands, &mut libs, &mut images, &mut cache,
@@ -140,6 +161,7 @@ fn spawn_quest_log(
 fn quest_log_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<QuestLogState>,
+    mut tracking: ResMut<crate::game::dialogs::quest_tracking::QuestTrackingState>,
     net: Res<NetConnection>,
     close: Query<&UiButton, With<QuestLogClose>>,
     abandon_btn: Query<&UiButton, With<QuestLogAbandon>>,
@@ -147,6 +169,7 @@ fn quest_log_ui_system(
     windows: Query<&Window>,
     mut widgets: Query<&mut Visibility, With<QuestLogWidget>>,
     mut lines: Query<(&mut Text2d, &QuestLogLine)>,
+    mut track_btns: Query<(&mut Text2d, &UiButton, &QuestLogTrack)>,
 ) {
     let open = mgr.is_open(DialogKind::QuestLog);
     for mut vis in widgets.iter_mut() {
@@ -204,6 +227,28 @@ fn quest_log_ui_system(
                         break;
                     }
                 }
+            }
+        }
+    }
+    // 追踪按钮：标签（追踪/取消）+ 点击切换（C# QuestRow Track，上限 5）
+    for (mut text, btn, track) in &mut track_btns {
+        let quest = state.quests.get(track.0).cloned();
+        let tracked = quest.as_ref().map(|q| tracking.is_tracked(q.id)).unwrap_or(false);
+        text.0 = match &quest {
+            Some(_) if tracked => "取消".to_string(),
+            Some(_) => "追踪".to_string(),
+            None => String::new(),
+        };
+        if btn.clicked {
+            if let Some(q) = quest {
+                let now_tracked = tracking.toggle(q.id);
+                tracking.save();
+                state.message = if now_tracked {
+                    format!("已追踪任务 {}", q.name)
+                } else {
+                    format!("取消追踪任务 {}", q.name)
+                };
+                tracing::info!("📌 任务追踪 {}: {}", if now_tracked { "开启" } else { "关闭" }, q.name);
             }
         }
     }
