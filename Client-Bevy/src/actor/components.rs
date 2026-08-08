@@ -79,6 +79,10 @@ pub struct MonsterName(pub String);
 #[derive(Component)]
 pub struct PlayerName(pub String);
 
+/// #1374：玩家行会名（ObjectPlayer GuildName；头顶标签显示）
+#[derive(Component)]
+pub struct PlayerGuildName(pub String);
+
 /// 动画状态（动作/朝向/当前帧）
 #[derive(Component)]
 pub struct ActorAnim {
