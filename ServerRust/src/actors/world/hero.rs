@@ -555,6 +555,8 @@ impl WorldActor {
             hero_amulet: bool,
             /// 主人是否已有对应护盾 buff（SoulShield/BlessedArmour/UltimateEnhancer，#1202）
             owner_has_shields: [bool; 3],
+            /// 主人是否中毒（#1210：道士 Purification 条件）
+            owner_poisoned: bool,
         }
 
         let mut snapshots: Vec<HeroSnapshot> = Vec::new();
@@ -637,6 +639,7 @@ impl WorldActor {
                             )
                         }),
                     ],
+                    owner_poisoned: !state.poison_list.is_empty(),
                 });
             }
         }
@@ -693,6 +696,8 @@ impl WorldActor {
         let mut owner_shield_intents: Vec<(u64, OwnerShieldKind)> = Vec::new();
         // 支持类法术动画意图：(hero_session_id, spell, target_oid) —— 阶段 3g 广播 ObjectMagic（#1208）
         let mut magic_anim_intents: Vec<(u64, u8, u32)> = Vec::new();
+        // 净化意图：(hero_session_id) —— 阶段 2.4c 清除主人中毒（#1210）
+        let mut purify_intents: Vec<u64> = Vec::new();
 
         for snap in &snapshots {
             // 确保该英雄有 AI 状态（首次出现则初始化）
@@ -871,10 +876,10 @@ impl WorldActor {
             let friend = hero_friend_buffs(snap.class)
                 .iter()
                 .find(|(spell, kind)| {
-                    hero_magic_level(&snap.hero_magics, *spell as u8) > 0
+                    // #1210：道士 ProcessFriend 常驻预置块处理（跟随/待机也生效），此处跳过
+                    snap.class != MirClass::Taoist
+                        && hero_magic_level(&snap.hero_magics, *spell as u8) > 0
                         && !ai_local.buffs.iter().any(|b| b.kind == *kind)
-                        // #1192：道士护盾类增益需要普通护符
-                        && (snap.class != MirClass::Taoist || snap.hero_amulet)
                 })
                 .copied();
             if let Some((spell, kind)) = friend {
@@ -895,31 +900,102 @@ impl WorldActor {
                     *ai = ai_local;
                     continue;
                 }
-            } else if snap.class == MirClass::Taoist && snap.hero_amulet {
-                // #1202：C# TaoistHero ProcessFriend：给自己上完护盾后给主人上（SoulShield → BlessedArmour → UltimateEnhancer）
-                let owner_kind = [
-                    (OwnerShieldKind::SoulShield, 0usize),
-                    (OwnerShieldKind::BlessedArmour, 1usize),
-                    (OwnerShieldKind::UltimateEnhancer, 2usize),
-                ]
-                .iter()
-                .find(|(kind, idx)| {
-                    !snap.owner_has_shields[*idx]
-                        && hero_magic_level(&snap.hero_magics, hero_owner_shield_spell(*kind) as u8) > 0
-                })
-                .map(|(kind, _)| *kind);
-                if let Some(kind) = owner_kind {
-                    let spell = hero_owner_shield_spell(kind);
-                    let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+            }
+
+            // #1210：C# TaoistHero.ProcessFriend 常驻（TargetList=[this,Owner]，跟随/待机也生效）
+            // 顺序：净化 → 治疗（先自己后主人）→ 护盾（先自己后主人）；每 tick 只施放一个
+            if snap.class == MirClass::Taoist && ai_local.hp > 0 && !snap.owner_dead {
+                let hero_hp_pct = if ai_local.max_hp > 0 {
+                    ai_local.hp * 100 / ai_local.max_hp
+                } else { 100 };
+                let owner_hp_pct = if snap.owner_max_hp > 0 {
+                    snap.owner_hp * 100 / snap.owner_max_hp
+                } else { 100 };
+                let healing_lv = hero_magic_level(&snap.hero_magics, Spell::Healing as u8);
+                // 1) 净化：主人中毒且已学（C# Random(4)<=Lv 成功）
+                let pur_lv = hero_magic_level(&snap.hero_magics, Spell::Purification as u8);
+                if hero_taoist_needs_purify(snap.owner_poisoned, pur_lv) {
+                    let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Purification as u8);
                     if ai_local.mp >= cost {
                         ai_local.mp -= cost;
-                        owner_shield_intents.push((snap.session_id, kind));
-                        support_intents.push((snap.session_id, snap.session_id, spell as u8, false));
-                        // #1208：主人护盾广播 ObjectMagic（目标 = 主人）
-                        magic_anim_intents.push((snap.session_id, spell as u8, owner_oid));
+                        if hero_purification_roll(pur_lv) {
+                            purify_intents.push(snap.session_id);
+                        }
+                        magic_anim_intents.push((snap.session_id, Spell::Purification as u8, owner_oid));
                         ai_local.next_attack_tick = self.tick_count + 4;
                         *ai = ai_local;
                         continue;
+                    }
+                }
+                // 2) 治疗：先自己后主人（HP<90）
+                if healing_lv > 0 && (hero_hp_pct < 90 || owner_hp_pct < 90) {
+                    let heal_cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Healing as u8);
+                    if ai_local.mp >= heal_cost {
+                        ai_local.mp -= heal_cost;
+                        if hero_hp_pct < 90 {
+                            let amount = hero_heal_amount(&hero_stats, snap.hero_level);
+                            ai_local.hp = (ai_local.hp + amount).min(ai_local.max_hp);
+                            magic_anim_intents.push((snap.session_id, Spell::Healing as u8, hero_oid));
+                        } else {
+                            support_intents.push((snap.session_id, snap.session_id, Spell::Healing as u8, true));
+                            magic_anim_intents.push((snap.session_id, Spell::Healing as u8, owner_oid));
+                        }
+                        ai_local.next_attack_tick = self.tick_count + 4;
+                        *ai = ai_local;
+                        continue;
+                    }
+                }
+                // 3) 护盾：先自己后主人（SoulShield → BlessedArmour → UltimateEnhancer，护符门控）
+                if snap.hero_amulet {
+                    let self_shield = hero_friend_buffs(snap.class)
+                        .iter()
+                        .find(|(spell, kind)| {
+                            hero_magic_level(&snap.hero_magics, *spell as u8) > 0
+                                && !ai_local.buffs.iter().any(|b| b.kind == *kind)
+                        })
+                        .copied();
+                    if let Some((spell, kind)) = self_shield {
+                        let buff_lv = hero_magic_level(&snap.hero_magics, spell as u8);
+                        let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+                        if ai_local.mp >= cost {
+                            ai_local.mp -= cost;
+                            ai_local.buffs.push(HeroBuff {
+                                kind,
+                                expire_tick: self.tick_count
+                                    + hero_buff_duration(kind, buff_lv, &snap.hero_stats) * 10,
+                                level: buff_lv,
+                                hero_level: snap.hero_level,
+                            });
+                            magic_anim_intents.push((snap.session_id, spell as u8, hero_oid));
+                            ai_local.next_attack_tick = self.tick_count + 4;
+                            *ai = ai_local;
+                            continue;
+                        }
+                    } else {
+                        // 主人护盾（目标 = 主人）
+                        let owner_kind = [
+                            (OwnerShieldKind::SoulShield, 0usize),
+                            (OwnerShieldKind::BlessedArmour, 1usize),
+                            (OwnerShieldKind::UltimateEnhancer, 2usize),
+                        ]
+                        .iter()
+                        .find(|(kind, idx)| {
+                            !snap.owner_has_shields[*idx]
+                                && hero_magic_level(&snap.hero_magics, hero_owner_shield_spell(*kind) as u8) > 0
+                        })
+                        .map(|(kind, _)| *kind);
+                        if let Some(kind) = owner_kind {
+                            let spell = hero_owner_shield_spell(kind);
+                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
+                            if ai_local.mp >= cost {
+                                ai_local.mp -= cost;
+                                owner_shield_intents.push((snap.session_id, kind));
+                                magic_anim_intents.push((snap.session_id, spell as u8, owner_oid));
+                                ai_local.next_attack_tick = self.tick_count + 4;
+                                *ai = ai_local;
+                                continue;
+                            }
+                        }
                     }
                 }
             }
@@ -1159,11 +1235,7 @@ impl WorldActor {
                         }
                     }
                     MirClass::Taoist => {
-                        // 道士：治疗（已学 + 主人 HP<90%，C# TaoistHero ProcessFriend）优先，否则 SoulFireBall（已学），否则近战兜底
-                        let owner_hp_pct = if snap.owner_max_hp > 0 {
-                            snap.owner_hp * 100 / snap.owner_max_hp
-                        } else { 100 };
-                        let healing_lv = hero_magic_level(&snap.hero_magics, Spell::Healing as u8);
+                        // #1210：净化/治疗/护盾已由常驻 ProcessFriend 预置块处理；攻击顺序 Poisoning→Curse→SoulFireBall→近战
                         let soulfire_lv = hero_magic_level(&snap.hero_magics, Spell::SoulFireBall as u8);
                         // #1192：Poisoning 可用 = 已学 + 装备毒护符 + 目标无对应毒（C# TaoistHero）
                         let poisoning_lv = hero_magic_level(&snap.hero_magics, Spell::Poisoning as u8);
@@ -1177,45 +1249,8 @@ impl WorldActor {
                         // #1196：Curse 可用 = 已学 + 普通护符 + 目标无减速毒（C# TaoistHero 无 Curse buff 近似）
                         let curse_lv = hero_magic_level(&snap.hero_magics, Spell::Curse as u8);
                         let can_curse = curse_lv > 0 && snap.hero_amulet && !target.has_slow;
-                        let hero_hp_pct = if ai_local.max_hp > 0 {
-                            ai_local.hp * 100 / ai_local.max_hp
-                        } else { 100 };
-                        if healing_lv > 0 && (hero_hp_pct < 90 || owner_hp_pct < 90) {
-                            // #1186：治疗也耗蓝（C# CanUseMagic）
-                            let heal_cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Healing as u8);
-                            if ai_local.mp >= heal_cost {
-                                ai_local.mp -= heal_cost;
-                                // #1202：C# TaoistHero TargetList=[this, Owner]，先治自己再治主人
-                                if hero_hp_pct < 90 {
-                                    let amount = hero_heal_amount(&hero_stats, snap.hero_level);
-                                    ai_local.hp = (ai_local.hp + amount).min(ai_local.max_hp);
-                                    support_intents.push((
-                                        snap.session_id,
-                                        snap.session_id,
-                                        Spell::Healing as u8,
-                                        false,
-                                    ));
-                                    // #1208：自疗广播 ObjectMagic（目标 = 英雄自身）
-                                    magic_anim_intents.push((snap.session_id, Spell::Healing as u8, hero_oid));
-                                } else {
-                                    support_intents.push((
-                                        snap.session_id,
-                                        snap.session_id,
-                                        Spell::Healing as u8,
-                                        true,
-                                    ));
-                                    // #1208：主人治疗广播 ObjectMagic（目标 = 主人）
-                                    magic_anim_intents.push((snap.session_id, Spell::Healing as u8, owner_oid));
-                                }
-                                ai_local.next_attack_tick = self.tick_count + 10;
-                            } else {
-                                let _ = hero_melee_fallback(
-                                    snap.session_id, target.oid, target_dist,
-                                    &hero_combat, &mut attack_intents, &mut support_intents,
-                                );
-                                ai_local.next_attack_tick = self.tick_count + 10;
-                            }
-                        } else if can_poison {
+                        if can_poison {
+
                             // #1192：C# Poisoning：value = GetDamage(SC)；Duration=value*2+(Lv+1)*7、TickSpeed 2000
                             // 绿毒 Value = value/15 + Lv + 1（+Random PoisonAttack 近似省略）；红毒无伤害值（状态毒）
                             let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Poisoning as u8);
@@ -1556,6 +1591,14 @@ impl WorldActor {
                 "Hero Taoist cast {:?} on owner {} ({} ticks)",
                 kind, session_id, ticks
             );
+        }
+
+        // ===== 阶段 2.4c：道士英雄净化主人（#1210：C# Purification → PurifyPoisons） =====
+        for session_id in &purify_intents {
+            if let Some(record) = self.players.get(session_id).map(|r| r.clone()) {
+                let _ = record.actor_ref.ask(crate::actors::player::PurifyPoisons).await;
+                debug!("Hero Taoist purified owner {}", session_id);
+            }
         }
 
         // ===== 阶段 2.5：英雄 HP/MP 实时同步 + 阵亡处理（#1134/#1186） =====
@@ -2265,7 +2308,17 @@ fn hero_support_spell_is_magic(spell: u8) -> bool {
     )
 }
 
-/// 各职业 ProcessFriend 增益列表（#1190/#1192：C# 子类顺序）
+/// 道士净化条件（#1210：主人中毒且已学 Purification）
+fn hero_taoist_needs_purify(owner_poisoned: bool, purification_level: u8) -> bool {
+    owner_poisoned && purification_level > 0
+}
+
+/// 道士净化成功率（#1210：C# Envir.Random.Next(4) <= Lv；Lv0=25%）
+fn hero_purification_roll(level: u8) -> bool {
+    fastrand::i32(0..4) <= level as i32
+}
+
+/// 各职业 ProcessFriend 增益列表（#1190/#1192/#1210：C# 子类顺序；道士由常驻预置块使用）
 fn hero_friend_buffs(
     class: mir2_shared::enums::MirClass,
 ) -> &'static [(mir2_shared::enums::Spell, HeroBuffKind)] {
@@ -3084,5 +3137,18 @@ mod tests {
         assert!(!hero_support_spell_is_magic(Spell::Slaying as u8));
         assert!(!hero_support_spell_is_magic(Spell::HalfMoon as u8));
         assert!(!hero_support_spell_is_magic(Spell::None as u8));
+    }
+    #[test]
+    fn hero_taoist_needs_purify_gate() {
+        // 主人中毒且已学 → 需要净化
+        assert!(hero_taoist_needs_purify(true, 1));
+        assert!(hero_taoist_needs_purify(true, 3));
+        // 未中毒或未学 → 不需要
+        assert!(!hero_taoist_needs_purify(false, 1));
+        assert!(!hero_taoist_needs_purify(true, 0));
+        assert!(!hero_taoist_needs_purify(false, 0));
+        // 净化成功概率函数可调用且结果合理（Lv3 几乎必成功）
+        let successes = (0..100).filter(|_| hero_purification_roll(3)).count();
+        assert!(successes >= 90);
     }
 }
