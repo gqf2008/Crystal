@@ -63,6 +63,10 @@ impl HeroStats {
 
 /// C# BaseStat.Calculate 的四种公式（level i32，Gain/GainRate f32；结果截断取整）
 fn calc_health(class: MirClass, base: i32, gain: f32, gain_rate: f32, level: i32) -> i32 {
+    // C# BaseStat.Calculate：Gain == 0 直接返回 Base（避免除零）
+    if gain <= 0.0 {
+        return base;
+    }
     let v = match class {
         MirClass::Warrior => base as f32 + (level as f32 / gain + gain_rate + level as f32 / 20.0) * level as f32,
         _ => base as f32 + (level as f32 / gain + gain_rate) * level as f32,
@@ -71,6 +75,10 @@ fn calc_health(class: MirClass, base: i32, gain: f32, gain_rate: f32, level: i32
 }
 
 fn calc_mana(class: MirClass, base: i32, gain: f32, gain_rate: f32, level: i32) -> i32 {
+    // C# BaseStat.Calculate：Gain == 0 直接返回 Base（避免除零）
+    if gain <= 0.0 {
+        return base;
+    }
     let v = match class {
         MirClass::Wizard => base as f32 + ((level as f32 / gain + 2.0) * 2.2 * level as f32) + (level as f32 * gain_rate),
         MirClass::Taoist => (base as f32 + level as f32 / gain * 2.2 * level as f32) + (level as f32 * gain_rate),
@@ -80,10 +88,17 @@ fn calc_mana(class: MirClass, base: i32, gain: f32, gain_rate: f32, level: i32) 
 }
 
 fn calc_weight(base: i32, gain: f32, level: i32) -> i32 {
+    if gain <= 0.0 {
+        return base;
+    }
     (base as f32 + (level as f32 / gain) * level as f32) as i32
 }
 
 fn calc_stat(base: i32, gain: f32, level: i32) -> i32 {
+    // C# BaseStat.Calculate：Gain == 0 直接返回 Base（避免除零产生 i32::MAX）
+    if gain <= 0.0 {
+        return base;
+    }
     (base as f32 + level as f32 / gain) as i32
 }
 

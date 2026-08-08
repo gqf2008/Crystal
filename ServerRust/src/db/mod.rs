@@ -2426,7 +2426,7 @@ pub struct MapInfo {
 }
 
 /// Item info (flat from DB, stats parsed from JSON)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ItemInfo {
     pub index: i32,
     pub name: String,
