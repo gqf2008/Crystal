@@ -86,6 +86,16 @@ fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
         current_dura: item.current_dura,
         max_dura: item.max_dura,
         slots: item.slots.iter().map(|s| s.as_ref().map(to_inv_item)).collect(),
+        stats: item
+            .info
+            .as_ref()
+            .map(|i| i.stats.iter().map(|(s, v)| (s as u8, v)).collect())
+            .unwrap_or_default(),
+        required_type: item.info.as_ref().map(|i| i.required_type as u8).unwrap_or(0),
+        required_amount: item.info.as_ref().map(|i| i.required_amount).unwrap_or(0),
+        required_class: item.info.as_ref().map(|i| i.required_class.bits()).unwrap_or(0),
+        weight: item.info.as_ref().map(|i| i.weight as u16).unwrap_or(0),
+        price: item.info.as_ref().map(|i| i.price).unwrap_or(0),
     }
 }
 
@@ -172,6 +182,8 @@ fn parse_receive_mail(payload: &[u8]) -> Option<(MailEntry, Option<MailDetail>)>
 
     parse_content(payload).or_else(|| parse_entry(payload))
 }
+
+
 
 
 

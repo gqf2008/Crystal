@@ -44,6 +44,18 @@ pub struct InvItem {
     pub max_dura: u16,
     /// 镶嵌宝石槽（M56 SocketDialog 用；长度=孔数，元素=宝石）
     pub slots: Vec<Option<InvItem>>,
+    /// 属性（Stat 枚举值 → 数值；C# ItemInfo.Stats，tooltip 用）
+    pub stats: Vec<(u8, i32)>,
+    /// 需求类型（C# RequiredType 枚举值：Level=3 等）
+    pub required_type: u8,
+    /// 需求数值（等级/属性值）
+    pub required_amount: u8,
+    /// 需求职业位掩码（C# RequiredClass：战士1/法师2/道士4/刺客8/弓16）
+    pub required_class: u8,
+    /// 重量（C# ItemInfo.Weight）
+    pub weight: u16,
+    /// 价格（C# ItemInfo.Price）
+    pub price: u32,
 }
 
 impl InvItem {
@@ -554,15 +566,103 @@ fn inv_tooltip_system(
         tooltip.update(2, false, String::new(), Vec::new(), cursor.x, cursor.y);
         return;
     };
+    let lines = item_tooltip_lines(&item);
+    tooltip.update(2, true, item.name.clone(), lines, cursor.x, cursor.y);
+}
+
+/// 物品 tooltip 行（对齐 C# MirItemCell：成对属性合并 + 单项 + 需求 + 重量/价格）
+pub fn item_tooltip_lines(item: &InvItem) -> Vec<String> {
+    use mir2_shared::enums::Stat;
     let mut lines = Vec::new();
     if item.count > 1 {
         lines.push(format!("数量: {}", item.count));
     }
-    lines.push(format!("类型: {}", crate::game::dialogs::inventory::item_type_name(item.item_type)));
+    lines.push(format!("类型: {}", item_type_name(item.item_type)));
     if item.is_equipment() {
         lines.push(format!("耐久: {}/{}", item.current_dura, item.max_dura));
     }
-    tooltip.update(2, true, item.name.clone(), lines, cursor.x, cursor.y);
+    let get = |s: Stat| {
+        item.stats
+            .iter()
+            .find(|(k, _)| *k == s as u8)
+            .map(|(_, v)| *v)
+            .unwrap_or(0)
+    };
+    // 成对属性：最小-最大（C# 显示 防御 0-5 等）
+    for (min, max, label) in [
+        (Stat::MinAC, Stat::MaxAC, "防御"),
+        (Stat::MinMAC, Stat::MaxMAC, "魔御"),
+        (Stat::MinDC, Stat::MaxDC, "攻击"),
+        (Stat::MinMC, Stat::MaxMC, "魔法"),
+        (Stat::MinSC, Stat::MaxSC, "道术"),
+    ] {
+        let mn = get(min);
+        let mx = get(max);
+        if mn != 0 || mx != 0 {
+            lines.push(format!("{}: {}-{}", label, mn, mx));
+        }
+    }
+    // 单项属性
+    for (stat, label, suffix) in [
+        (Stat::Accuracy, "准确", ""),
+        (Stat::Agility, "敏捷", ""),
+        (Stat::Luck, "幸运", ""),
+        (Stat::HP, "生命", ""),
+        (Stat::MP, "魔法值", ""),
+        (Stat::AttackSpeed, "攻速", ""),
+        (Stat::Reflect, "反伤", ""),
+        (Stat::Strong, "强度", ""),
+        (Stat::Holy, "神圣", ""),
+        (Stat::Freezing, "冰冻", ""),
+        (Stat::PoisonAttack, "中毒攻击", ""),
+        (Stat::MagicResist, "魔法抗性", ""),
+        (Stat::PoisonResist, "中毒抗性", ""),
+        (Stat::HealthRecovery, "生命恢复", ""),
+        (Stat::SpellRecovery, "魔法恢复", ""),
+        (Stat::PoisonRecovery, "中毒恢复", ""),
+        (Stat::CriticalRate, "暴击率", "%"),
+        (Stat::CriticalDamage, "暴击伤害", ""),
+    ] {
+        let v = get(stat);
+        if v != 0 {
+            lines.push(format!("{}: +{}{}", label, v, suffix));
+        }
+    }
+    // 需求（C# RequiredType：Level=3 或属性值；RequiredClass 位掩码）
+    if item.required_type == 3 && item.required_amount > 0 {
+        lines.push(format!("需要等级: {}", item.required_amount));
+    } else if item.required_amount > 0 {
+        for (k, label) in [
+            (Stat::MaxAC as u8, "防御"),
+            (Stat::MaxMAC as u8, "魔御"),
+            (Stat::MaxDC as u8, "攻击"),
+            (Stat::MaxMC as u8, "魔法"),
+            (Stat::MaxSC as u8, "道术"),
+        ] {
+            if item.required_type == k {
+                lines.push(format!("需要{}: {}", label, item.required_amount));
+                break;
+            }
+        }
+    }
+    if item.required_class != 0 {
+        let mut names = Vec::new();
+        for (bit, n) in [(1u8, "战士"), (2, "法师"), (4, "道士"), (8, "刺客"), (16, "弓箭手")] {
+            if item.required_class & bit != 0 {
+                names.push(n);
+            }
+        }
+        if !names.is_empty() {
+            lines.push(format!("需要职业: {}", names.join("/")));
+        }
+    }
+    if item.weight > 0 {
+        lines.push(format!("重量: {}", item.weight));
+    }
+    if item.price > 0 {
+        lines.push(format!("价格: {} 金", item.price));
+    }
+    lines
 }
 
 /// ItemType 枚举 → 中文名（对齐 C# ItemInfo.Type 常见分类）
@@ -1081,7 +1181,43 @@ mod tests {
             current_dura: 100,
             max_dura: 100,
             slots: Vec::new(),
+            stats: Vec::new(),
+            required_type: 0,
+            required_amount: 0,
+            required_class: 0,
+            weight: 0,
+            price: 0,
         }
+    }
+
+    #[test]
+    fn tooltip_lines_pairs_and_singles() {
+        let mut it = item_with_type(ItemType::Weapon);
+        it.stats = vec![
+            (mir2_shared::enums::Stat::MinDC as u8, 3),
+            (mir2_shared::enums::Stat::MaxDC as u8, 8),
+            (mir2_shared::enums::Stat::Accuracy as u8, 2),
+            (mir2_shared::enums::Stat::Luck as u8, 1),
+        ];
+        it.weight = 5;
+        it.price = 120;
+        it.required_type = 3; // Level
+        it.required_amount = 30;
+        let lines = item_tooltip_lines(&it);
+        assert!(lines.iter().any(|l| l.contains("攻击: 3-8")));
+        assert!(lines.iter().any(|l| l.contains("准确: +2")));
+        assert!(lines.iter().any(|l| l.contains("幸运: +1")));
+        assert!(lines.iter().any(|l| l.contains("需要等级: 30")));
+        assert!(lines.iter().any(|l| l.contains("重量: 5")));
+        assert!(lines.iter().any(|l| l.contains("价格: 120 金")));
+    }
+
+    #[test]
+    fn tooltip_lines_requirements_class() {
+        let mut it = item_with_type(ItemType::Armour);
+        it.required_class = 1 | 2; // 战士/法师
+        let lines = item_tooltip_lines(&it);
+        assert!(lines.iter().any(|l| l.contains("需要职业: 战士/法师")));
     }
 
     #[test]
@@ -1111,3 +1247,5 @@ mod tests {
         assert_eq!(item_with_type(ItemType::Weapon).equip_slot(), Some(0));
     }
 }
+
+
