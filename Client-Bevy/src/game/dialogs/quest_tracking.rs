@@ -7,7 +7,6 @@
 // ============================================================================
 
 use std::fs;
-use std::path::PathBuf;
 
 use bevy::prelude::*;
 
@@ -18,6 +17,9 @@ use crate::ui::sprite_ui::{spawn_ui_text, UiEntity, UiFont};
 
 /// 最多同时追踪 5 个任务（C# QuestTrackingDialog：Count >= 5 return）
 pub const MAX_TRACKED: usize = 5;
+
+/// C# Settings.cs：QuestTrackingReader = InIReader(Data/UserData/QuestTracking.ini)
+const TRACKING_PATH: &str = "./Data/UserData/QuestTracking.ini";
 
 /// 追踪状态（C# TrackedQuestsIds）
 #[derive(Resource, Default)]
@@ -61,39 +63,45 @@ impl QuestTrackingState {
         self.tracked.contains(&id)
     }
 
-    fn file_path(char_name: &str) -> Option<PathBuf> {
-        if char_name.is_empty() {
-            return None;
-        }
-        Some(PathBuf::from(format!("quest_tracking_{}.txt", char_name)))
-    }
-
-    /// 按角色加载（C# Settings.LoadTrackedQuests(name)）
+    /// 按角色加载（C# Settings.LoadTrackedQuests(name)：[name] 段 Quest-0..4，空槽 -1）
     pub fn load(&mut self, char_name: &str) {
         self.char_name = char_name.to_string();
-        self.tracked.clear();
-        let Some(path) = Self::file_path(char_name) else { return };
-        let Ok(content) = fs::read_to_string(&path) else { return };
-        for line in content.lines() {
-            if let Ok(id) = line.trim().parse::<i32>() {
-                if self.tracked.len() < MAX_TRACKED && !self.tracked.contains(&id) {
-                    self.tracked.push(id);
+        let content = fs::read_to_string(TRACKING_PATH).unwrap_or_default();
+        self.tracked = parse_tracked(&content, char_name);
+    }
+
+    /// 按角色保存（C# Settings.SaveTrackedQuests(name)：merge 写回，保留其他角色段）
+    pub fn save(&self) {
+        use crate::game::dialogs::settings_file::set_ini_value;
+        if self.char_name.is_empty() {
+            return;
+        }
+        if let Some(parent) = std::path::Path::new(TRACKING_PATH).parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let mut content = fs::read_to_string(TRACKING_PATH).unwrap_or_default();
+        for i in 0..MAX_TRACKED as usize {
+            let v = self.tracked.get(i).copied().unwrap_or(-1);
+            content = set_ini_value(&content, &self.char_name, &format!("Quest-{}", i), &v.to_string());
+        }
+        let _ = fs::write(TRACKING_PATH, content);
+    }
+}
+
+/// 解析 C# QuestTracking.ini 的 [角色名] 段（Quest-0..4，-1 空槽跳过）
+pub fn parse_tracked(content: &str, char_name: &str) -> Vec<i32> {
+    use crate::game::dialogs::settings_file::ini_str;
+    let mut out = Vec::new();
+    for i in 0..MAX_TRACKED as usize {
+        if let Some(v) = ini_str(content, char_name, &format!("Quest-{}", i)) {
+            if let Ok(id) = v.trim().parse::<i32>() {
+                if id >= 0 && !out.contains(&id) {
+                    out.push(id);
                 }
             }
         }
     }
-
-    /// 按角色保存（C# Settings.SaveTrackedQuests(name)）
-    pub fn save(&self) {
-        let Some(path) = Self::file_path(&self.char_name) else { return };
-        let content = self
-            .tracked
-            .iter()
-            .map(|id| id.to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
-        let _ = fs::write(path, content);
-    }
+    out
 }
 
 #[derive(Component)]
@@ -270,23 +278,28 @@ mod tests {
     }
 
     #[test]
-    fn test_persistence_roundtrip() {
-        let name = format!("__qt_test_{}", std::process::id());
-        let path = QuestTrackingState::file_path(&name).unwrap();
-        let _ = std::fs::remove_file(&path);
+    fn parse_csharp_quest_tracking_ini() {
+        // C# QuestTracking.ini：[Alice] 段 Quest-0..4（空槽 -1）
+        let content = "[Alice]\nQuest-0=7\nQuest-1=8\nQuest-2=-1\nQuest-3=-1\nQuest-4=-1\n";
+        assert_eq!(parse_tracked(content, "Alice"), vec![7, 8]);
+        assert!(parse_tracked(content, "Bob").is_empty());
+    }
 
-        let mut s = QuestTrackingState::default();
-        s.load(&name); // 文件不存在 → 空
-        assert!(s.tracked.is_empty());
-        assert!(s.add(7));
-        assert!(s.add(8));
-        s.save();
-
-        let mut s2 = QuestTrackingState::default();
-        s2.load(&name);
-        assert_eq!(s2.tracked, vec![7, 8]);
-        assert_eq!(s2.char_name, name);
-
-        let _ = std::fs::remove_file(&path);
+    #[test]
+    fn tracking_ini_merge_keeps_other_characters() {
+        use crate::game::dialogs::settings_file::set_ini_value;
+        let mut content = String::new();
+        for i in 0..5usize {
+            let v = if i < 2 { [7, 8][i] } else { -1 };
+            content = set_ini_value(&content, "Alice", &format!("Quest-{}", i), &v.to_string());
+        }
+        for i in 0..5usize {
+            let v = if i == 0 { 9 } else { -1 };
+            content = set_ini_value(&content, "Bob", &format!("Quest-{}", i), &v.to_string());
+        }
+        assert_eq!(parse_tracked(&content, "Alice"), vec![7, 8]);
+        assert_eq!(parse_tracked(&content, "Bob"), vec![9]);
     }
 }
+
+
