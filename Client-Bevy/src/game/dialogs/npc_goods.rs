@@ -59,6 +59,8 @@ pub struct NpcGoodsState {
     pub is_buyback: bool,
     /// 数量框待确认购买（C# amountBox.OKButton）
     pub pending_buy: Option<NpcBuyPending>,
+    /// #珍珠商店：是否珍珠购买模式（C# NPCGoodsDialog.UsePearls；显示珍珠价，购买包不变）
+    pub use_pearls: bool,
 }
 
 /// 购买数量上限（C# BuyItem：max = min(StackSize, 库存)；非堆叠 = 1）
@@ -269,7 +271,11 @@ fn npc_goods_ui_system(
     let off = scroll.single().map(|s| s.offset).unwrap_or(0);
     for (mut text, line) in &mut lines {
         if let Some(g) = state.goods.get(off + line.0) {
-            text.0 = format!("{} x{}  {} 金", g.name, g.count, g.price);
+            text.0 = if state.use_pearls {
+                format!("{} x{}  {} 珍珠", g.name, g.count, g.price)
+            } else {
+                format!("{} x{}  {} 金", g.name, g.count, g.price)
+            };
         } else {
             text.0 = String::new();
         }
@@ -309,7 +315,11 @@ fn npc_goods_ui_system(
         }
     }
     if let Some(g) = hovered {
-        let mut lines = vec![format!("价格: {} 金", g.price)];
+        let mut lines = vec![if state.use_pearls {
+            format!("价格: {} 珍珠", g.price)
+        } else {
+            format!("价格: {} 金", g.price)
+        }];
         lines.push(format!("类型: {}", crate::game::dialogs::inventory::item_type_name(g.item_type)));
         if let Some(t) = &g.tool_tip {
             if !t.is_empty() {
@@ -405,6 +415,14 @@ fn npc_goods_server_events(
             npc_goods.goods = goods.clone();
             npc_goods.selected = None;
             npc_goods.visible = true;
+            npc_goods.use_pearls = false;
+        }
+        if let ServerEvent::PearlShop { goods, .. } = ev {
+            // #珍珠商店：C# NPCPearlGoods → UsePearls=true
+            npc_goods.goods = goods.clone();
+            npc_goods.selected = None;
+            npc_goods.visible = true;
+            npc_goods.use_pearls = true;
         }
     }
 }

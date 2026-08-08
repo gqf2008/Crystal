@@ -1497,6 +1497,10 @@ async fn exec_action(
         "RESET" => {
             world.send_awakening_panel(session_id, 3).await;
         }
+        // #珍珠商店：打开珍珠购买面板（对齐 C# PearlBuyKey → S.NPCPearlGoods）
+        "PEARLBUY" => {
+            world.send_pearl_goods(session_id, npc).await;
+        }
         // REVIVEHERO —— 复活当前英雄（对齐 C# ActionType.ReviveHero）
         "REVIVEHERO" => {
             world.npc_revive_hero(session_id).await;

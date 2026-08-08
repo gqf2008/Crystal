@@ -112,6 +112,8 @@ impl Message<NPCCallRequest> for WorldActor {
 
         // 记录会话当前 NPC（BuyItem 等包不含 npc_id，按会话解析）
         self.session_npc.insert(msg.session_id, npc.object_id);
+        // 新对话页 → 退出珍珠购买模式（C# NPCPage.Key 变化语义）
+        self.session_pearl_shop.remove(&msg.session_id);
 
         // [@BuyBack] 是引擎级按键（C# NPCScript.BuyBackKey）：直接发回购商品列表，
         // 不走脚本页（脚本页只有提示文本，C# 引擎同样只发商品）
@@ -132,6 +134,11 @@ impl Message<NPCCallRequest> for WorldActor {
         };
         if let Some(service) = panel_service {
             self.send_awakening_panel(msg.session_id, service).await;
+            return;
+        }
+        // #珍珠商店：[@PEARLBUY] 引擎级按键（C# NPCScript.PearlBuyKey → S.NPCPearlGoods）
+        if msg.key.eq_ignore_ascii_case("[@PEARLBUY]") {
+            self.send_pearl_goods(msg.session_id, &npc).await;
             return;
         }
 
@@ -943,6 +950,37 @@ impl Message<NewHeroRequest> for WorldActor {
     }
 }
 impl WorldActor {
+    /// #珍珠商店：下发 S.NPCPearlGoods（商品=该 NPC 商店商品，珍珠价 = 金币价 × rate；对齐 C# PearlBuyKey）
+    pub(crate) async fn send_pearl_goods(&mut self, session_id: u64, npc: &NpcState) {
+        use mir2_shared::packets::server::special_systems::NPCPearlGoods;
+        let goods = self.npc_goods.get(&npc.db_index).cloned().unwrap_or_default();
+        let mut items = Vec::new();
+        for good in &goods {
+            let mut item = mir2_shared::data::item::UserItem {
+                item_index: good.item_index,
+                count: good.count as u16,
+                ..Default::default()
+            };
+            enrich_item_info(&mut item, &self.item_infos);
+            items.push(item);
+        }
+        let rate = if npc.db_index > 0 {
+            self.npc_infos.get(&npc.db_index).map(|n| n.rate as f32 / 100.0).unwrap_or(1.0)
+        } else {
+            1.0
+        };
+        let pkt = NPCPearlGoods { list: items, rate, panel_type: mir2_shared::enums::PanelType::Buy };
+        let mut body = Vec::new();
+        if pkt.write_body(&mut body).is_ok() {
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id,
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::NPCPearlGoods as i16, &body),
+            }).await;
+        }
+        self.session_pearl_shop.insert(session_id);
+        debug!("珍珠商店: session={} goods={} rate={}", session_id, goods.len(), rate);
+    }
+
     /// #1356：下发觉醒面板打开包（0=觉醒 1=分解 2=降级 3=重置；C# S.NPCAwakening/S.NPCDisassemble/
     /// S.NPCDowngrade/S.NPCReset）
     pub(crate) async fn send_awakening_panel(&self, session_id: u64, service: u8) {

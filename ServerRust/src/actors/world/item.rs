@@ -1954,14 +1954,22 @@ impl Message<BuyItemRequest> for WorldActor {
         let price_per_unit = ((base_price * npc_rate) / 100).max(1);
         let total_price = price_per_unit * msg.count as u64;
 
-        // 检查金币
-        if state.inventory.gold < total_price {
-            send_system_message(&self.gate_ref, msg.session_id, "金币不足");
-            return;
+        // #珍珠商店：[@PEARLBUY] 页面购买扣珍珠，否则扣金币（C# PearlBuyKey 页面语义）
+        let is_pearl = self.session_pearl_shop.contains(&msg.session_id);
+        if is_pearl {
+            if state.pearl_count < total_price as i32 {
+                send_system_message(&self.gate_ref, msg.session_id, "珍珠不足");
+                return;
+            }
+            let _ = record.actor_ref.ask(crate::actors::player::LosePearls { amount: total_price as u32 }).await;
+        } else {
+            if state.inventory.gold < total_price {
+                send_system_message(&self.gate_ref, msg.session_id, "金币不足");
+                return;
+            }
+            // 扣除金币
+            let _ = record.actor_ref.ask(DeductGold { amount: total_price }).await;
         }
-
-        // 扣除金币
-        let _ = record.actor_ref.ask(DeductGold { amount: total_price }).await;
 
         // 扣减库存
         if !goods_list[good_idx].infinite_stock {
@@ -1990,10 +1998,14 @@ impl Message<BuyItemRequest> for WorldActor {
         }
         if added < msg.count as u16 {
             send_system_message(&self.gate_ref, msg.session_id, "背包空间不足，部分物品未购买");
-            // 退款未购买部分
+            // 退款未购买部分（珍珠页退珍珠）
             let refund = (msg.count as u16 - added) as u64 * price_per_unit;
             if refund > 0 {
-                let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount: refund }).await;
+                if is_pearl {
+                    let _ = record.actor_ref.ask(crate::actors::player::GainPearls { amount: refund as u32 }).await;
+                } else {
+                    let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount: refund }).await;
+                }
             }
         }
         // 完整 UserInformation 刷新（背包 + 金币）
@@ -2008,7 +2020,7 @@ impl Message<BuyItemRequest> for WorldActor {
         if !updates.is_empty() {
             send_system_message(&self.gate_ref, msg.session_id, "任务进度更新：获得物品");
         }
-        send_system_message(&self.gate_ref, msg.session_id, &format!("购买成功 (花费 {} 金币)", total_price));
+        send_system_message(&self.gate_ref, msg.session_id, &format!("购买成功 (花费 {} {})", total_price, if is_pearl { "珍珠" } else { "金币" }));
         let npc_name = self.npcs.get(&npc_oid).map(|n| n.name.as_str()).unwrap_or("?");
         debug!("BuyItem: {} bought item={} ({}) x{} for {} gold from NPC '{}' (stock={})", state.name, item_db.name, msg.item_index, msg.count, total_price, npc_name,
             if goods_list[good_idx].infinite_stock { "∞".to_string() } else { goods_list[good_idx].stock.to_string() });

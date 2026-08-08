@@ -426,6 +426,8 @@ pub enum ServerEvent {
     CraftResult { recipe_id: u32, count: u16, success: bool },
     /// NPCGoods：商品对话框（Buy/Craft 等）
     NpcGoods { goods: Vec<GoodsEntry>, rate: f32 },
+    /// #珍珠商店：NPC 珍珠商品（S.NPCPearlGoods → 商品对话框珍珠模式）
+    PearlShop { goods: Vec<GoodsEntry>, rate: f32 },
     /// NPCGoods（Sell/Repair/SpecialRepair）：出售/修理面板
     NpcSellPanel { panel_type: mir2_shared::enums::PanelType },
     /// UserInformation：进图初始化同步（HUD/技能/背包/装备/物品名缓存）
