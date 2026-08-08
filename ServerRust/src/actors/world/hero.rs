@@ -937,12 +937,26 @@ impl WorldActor {
                         continue;
                     }
                 }
-                // 2) 治疗：先自己后主人（HP<90）
-                if healing_lv > 0 && (hero_hp_pct < 90 || owner_hp_pct < 90) {
-                    let heal_cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Healing as u8);
+                // 2) 治疗：已学 MassHealing → 群疗（自+主一次，C# GetDamage(SC)）；否则单疗（先自己后主人）
+                let mass_lv = hero_magic_level(&snap.hero_magics, Spell::MassHealing as u8);
+                if (mass_lv > 0 || healing_lv > 0) && (hero_hp_pct < 90 || owner_hp_pct < 90) {
+                    let spell = if mass_lv > 0 {
+                        Spell::MassHealing
+                    } else {
+                        Spell::Healing
+                    };
+                    let heal_cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, spell as u8);
                     if ai_local.mp >= heal_cost {
                         ai_local.mp -= heal_cost;
-                        if hero_hp_pct < 90 {
+                        if mass_lv > 0 {
+                            // #1214：C# MassHealing 3x3 友方群疗（自 + 主一次）
+                            let amount = hero_mass_heal_amount(&self.magic_infos, &snap.hero_magics, &hero_stats, snap.class);
+                            if hero_hp_pct < 90 {
+                                ai_local.hp = (ai_local.hp + amount).min(ai_local.max_hp);
+                            }
+                            support_intents.push((snap.session_id, snap.session_id, Spell::MassHealing as u8, true));
+                            magic_anim_intents.push((snap.session_id, Spell::MassHealing as u8, hero_oid));
+                        } else if hero_hp_pct < 90 {
                             let amount = hero_heal_amount(&hero_stats, snap.hero_level);
                             ai_local.hp = (ai_local.hp + amount).min(ai_local.max_hp);
                             magic_anim_intents.push((snap.session_id, Spell::Healing as u8, hero_oid));
@@ -1866,7 +1880,14 @@ impl WorldActor {
                 if let Some(record) = self.players.get(heal_target_session) {
                     let amount = snapshots.iter()
                         .find(|s| s.session_id == *session_id)
-                        .map(|s| hero_heal_amount(&s.hero_stats, s.hero_level))
+                        .map(|s| {
+                            // #1214：MassHealing 用群疗量（C# GetDamage(SC)），单疗用原公式
+                            if *spell_id == mir2_shared::enums::Spell::MassHealing as u8 {
+                                hero_mass_heal_amount(&self.magic_infos, &s.hero_magics, &s.hero_stats, s.class)
+                            } else {
+                                hero_heal_amount(&s.hero_stats, s.hero_level)
+                            }
+                        })
                         .unwrap_or(5);
                     let _ = record.actor_ref.ask(crate::actors::player::Heal { amount }).await;
                     debug!("Hero healed owner {} for {} HP", heal_target_session, amount);
@@ -2421,6 +2442,23 @@ fn hero_turn_undead_kills_with(
         return false;
     }
     true
+}
+
+/// 道士群疗量（#1214：C# MassHealing value = magic.GetDamage(GetAttackPower(MinSC,MaxSC))）
+fn hero_mass_heal_amount(
+    magic_infos: &std::collections::HashMap<u32, crate::db::MagicInfo>,
+    hero_magics: &[(i32, u8)],
+    stats: &super::hero_stats::HeroStats,
+    class: mir2_shared::enums::MirClass,
+) -> i32 {
+    hero_spell_damage(
+        magic_infos,
+        hero_magics,
+        mir2_shared::enums::Spell::MassHealing as u8,
+        stats,
+        class,
+    )
+    .max(1)
 }
 
 /// 各职业 ProcessFriend 增益列表（#1190/#1192/#1210：C# 子类顺序；道士由常驻预置块使用）
@@ -3272,5 +3310,20 @@ mod tests {
         assert!(!hero_turn_undead_kills_with(1, 99, 30, 10, 1));
         // 双判定都过 → 杀（英雄 30 级 vs 亡灵 5 级）
         assert!(hero_turn_undead_kills_with(1, 0, 30, 5, 1));
+    }
+
+    #[test]
+    fn hero_mass_heal_amount_uses_sc() {
+        use mir2_shared::enums::{MirClass, Spell};
+        let shared = Spell::MassHealing as u8;
+        let cs = shared.saturating_sub(3) as u32;
+        let mut map = std::collections::HashMap::new();
+        map.insert(cs, magic_info_damage(40, 0, 5, 0, 1.0, 0.1));
+        let stats = super::hero_stats::hero_base_stats(MirClass::Taoist, 30);
+        let amount = hero_mass_heal_amount(&map, &[(cs as i32, 1)], &stats, MirClass::Taoist);
+        // C#：value = GetDamage(GetAttackPower(SC))；Taoist Lv30 SC 中值 = 4
+        let sc = (stats.min_sc + stats.max_sc) / 2;
+        assert_eq!(amount, crate::combat::magic::calc_magic_damage(map.get(&cs).unwrap(), 1, sc));
+        assert!(amount >= 1);
     }
 }
