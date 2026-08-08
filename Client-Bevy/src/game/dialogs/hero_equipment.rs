@@ -3,7 +3,7 @@
 // 参考：C# HeroDialog = CharacterDialog(MirGridType.HeroEquipment, Hero)
 //   - 背景 Title[504]，位置 (ScreenWidth-264, 0)；角色页 Prguse[340] at (8,90)
 //   - 14 个装备槽（C# EquipmentSlot 顺序，EQUIP_SLOTS 布局）
-//   - 服务端 12 槽按 SERVER_SLOT_TO_POS 映射到显示位
+//   - 服务端 14 槽按 SERVER_SLOT_TO_POS 映射到显示位
 // 交互：
 //   - 点击装备格 → C.RemoveItem{Grid=HeroEquipment}（卸下回英雄背包）
 //   - 英雄背包双击 → C.EquipItem{Grid=HeroInventory}（hero_inventory.rs）

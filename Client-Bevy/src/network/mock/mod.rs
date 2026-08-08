@@ -81,7 +81,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             mock_hero_inventory[0] = Some(potion_item(2)); // 金创药(中)
             mock_hero_inventory[1] = Some(potion_item(10)); // 布衣
             mock_hero_inventory[2] = Some(book_item(37)); // 英雄技能书：GreatFireBall（#218，SharedRust=37，uid 与玩家书区分）
-            // 英雄装备（12 槽，服务端 EquipmentSlot::COUNT；#206）
+            // 英雄装备（14 槽，服务端 EquipmentSlot::COUNT；#206/#1136）
             let mut mock_hero_equipment: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 12];
             let mut mock_hero_active = false;
             // #212：技能书学习的技能（UserInformation 已带初始技能，这里追加）

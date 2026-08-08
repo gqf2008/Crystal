@@ -351,7 +351,7 @@ fn spawn_character_dialog(
         CharDialogWidget,
     ));
 
-    // 装备槽（14 个，深色底；服务端 12 槽按 SERVER_SLOT_TO_POS 映射）
+    // 装备槽（14 个，深色底；服务端 14 槽按 SERVER_SLOT_TO_POS 映射）
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     for (pos, (ox, oy)) in EQUIP_SLOTS.iter().enumerate() {
         let slot_entity = commands

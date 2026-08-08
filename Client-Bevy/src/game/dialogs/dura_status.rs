@@ -26,7 +26,7 @@ const PANEL_Y: f32 = 200.0;
 const BTN_X: f32 = 984.0;
 const BTN_Y: f32 = 124.0;
 
-/// 装备部位（对应 ServerRust EquipmentSlot 0..10）
+/// 装备部位（对应 ServerRust EquipmentSlot 0..13，#1136 补 Torch/Belt/Stone）
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DuraPieceKind {
     Weapon,
@@ -40,6 +40,9 @@ pub enum DuraPieceKind {
     Boots,
     Amulet,
     Mount,
+    Torch,
+    Belt,
+    Stone,
 }
 
 /// 部位定义：服务端槽位 + 面板内相对坐标 + Prguse 三态索引 [正常, 警告, 危险]
@@ -50,7 +53,7 @@ struct PieceDef {
     idx: [usize; 3],
 }
 
-const PIECES: [PieceDef; 11] = [
+const PIECES: [PieceDef; 14] = [
     PieceDef { kind: DuraPieceKind::Weapon, server_slot: 0, rel: (4.0, 5.0), idx: [2125, 2126, 2127] },
     PieceDef { kind: DuraPieceKind::Armour, server_slot: 1, rel: (16.0, 11.0), idx: [2149, 2150, 2151] },
     PieceDef { kind: DuraPieceKind::Helmet, server_slot: 2, rel: (24.0, 3.0), idx: [2155, 2156, 2157] },
@@ -62,6 +65,10 @@ const PIECES: [PieceDef; 11] = [
     PieceDef { kind: DuraPieceKind::Boots, server_slot: 8, rel: (17.0, 43.0), idx: [2152, 2153, 2154] },
     PieceDef { kind: DuraPieceKind::Amulet, server_slot: 9, rel: (16.0, 54.0), idx: [2134, 2135, 2136] },
     PieceDef { kind: DuraPieceKind::Mount, server_slot: 10, rel: (43.0, 68.0), idx: [2140, 2141, 2142] },
+    // #1136：C# CharacterDuraPanel Torch/Belt/Stone（C# 位置：Torch(44,5) Belt(23,23) Stone(30,54)）
+    PieceDef { kind: DuraPieceKind::Torch, server_slot: 11, rel: (44.0, 5.0), idx: [2146, 2147, 2148] },
+    PieceDef { kind: DuraPieceKind::Belt, server_slot: 12, rel: (23.0, 23.0), idx: [2158, 2159, 2160] },
+    PieceDef { kind: DuraPieceKind::Stone, server_slot: 13, rel: (30.0, 54.0), idx: [2137, 2137, 2137] },
 ];
 
 #[derive(Component)]
@@ -170,6 +177,10 @@ fn dura_index(item: &InvItem, kind: DuraPieceKind) -> i32 {
         DuraPieceKind::Boots => (2152, 2153, 2154),
         DuraPieceKind::Amulet => (2134, 2135, 2136),
         DuraPieceKind::Mount => (2140, 2141, 2142),
+        DuraPieceKind::Torch => (2146, 2147, 2148),
+        DuraPieceKind::Belt => (2158, 2159, 2160),
+        // C# Stone 仅在耐久为 0 时显示 2137（破损帧），健康时隐藏
+        DuraPieceKind::Stone => return if cur == 0 { 2137 } else { -1 },
     };
     if cur == 0 {
         return -1;
@@ -253,5 +264,38 @@ fn dura_status_ui_system(
             }
         }
         *vis = if open && show { Visibility::Visible } else { Visibility::Hidden };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(cur: u16, max: u16) -> InvItem {
+        InvItem { current_dura: cur, max_dura: max, ..Default::default() }
+    }
+
+    #[test]
+    fn torch_dura_frames() {
+        // 正常 > max/2、警告 <= max/2、危险 <= max/5（C# ItemType.Torch：2146/2147/2148）
+        assert_eq!(dura_index(&item(80, 100), DuraPieceKind::Torch), 2146);
+        assert_eq!(dura_index(&item(50, 100), DuraPieceKind::Torch), 2147);
+        assert_eq!(dura_index(&item(20, 100), DuraPieceKind::Torch), 2148);
+        assert_eq!(dura_index(&item(0, 100), DuraPieceKind::Torch), -1);
+    }
+
+    #[test]
+    fn belt_dura_frames() {
+        assert_eq!(dura_index(&item(80, 100), DuraPieceKind::Belt), 2158);
+        assert_eq!(dura_index(&item(50, 100), DuraPieceKind::Belt), 2159);
+        assert_eq!(dura_index(&item(20, 100), DuraPieceKind::Belt), 2160);
+        assert_eq!(dura_index(&item(0, 100), DuraPieceKind::Belt), -1);
+    }
+
+    #[test]
+    fn stone_shows_broken_frame_only() {
+        // C#：Stone 仅在耐久为 0 时显示 2137（破损帧），健康时隐藏
+        assert_eq!(dura_index(&item(0, 100), DuraPieceKind::Stone), 2137);
+        assert_eq!(dura_index(&item(50, 100), DuraPieceKind::Stone), -1);
     }
 }
