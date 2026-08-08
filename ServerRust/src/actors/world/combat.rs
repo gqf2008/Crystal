@@ -38,6 +38,74 @@ impl WorldActor {
     }
 }
 
+/// 近战攻击技能（SharedRust 枚举值，C# CompleteAttack 会 LevelMagic 的技能）
+const ATTACK_SKILL_SPELLS: [u8; 7] = [
+    SPELL_SLAYING,
+    SPELL_THRUSTING,
+    SPELL_HALFMOON,
+    SPELL_CROSS_HALFMOON,
+    SPELL_TWIN_DRAKE_BLADE,
+    SPELL_DOUBLE_SLASH,
+    SPELL_FLAMING_SWORD,
+];
+
+/// #1256：攻击技能查找——magics/hero_magics 存 C# 编号，入参为 SharedRust(+3)，
+/// 需 -3 转换（此前 Slaying/HalfMoon/CrossHalfMoon 直接比较 SharedRust 值导致永不匹配）
+fn find_attack_skill<'a>(
+    magics: &'a [crate::actors::player::PlayerMagic],
+    spell_shared: u8,
+) -> Option<&'a crate::actors::player::PlayerMagic> {
+    let cs = (spell_shared as i32).saturating_sub(3);
+    magics.iter().find(|m| m.spell == cs)
+}
+
+impl WorldActor {
+    /// #1256：C# CompleteAttack——近战命中给攻击技能经验（Random.Next(3)+1，与 MagicRequest 一致）
+    async fn grant_attack_skill_exp(&self, session_id: u64, spell_shared: u8) {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let info = self
+            .magic_infos
+            .get(&((spell_shared as u32).saturating_sub(3)))
+            .cloned();
+        if let Some(record) = self.players.get(&session_id) {
+            let _ = record
+                .actor_ref
+                .ask(crate::actors::player::GainSpellExp {
+                    spell: spell_shared,
+                    amount: (1 + fastrand::i32(0..3)) as u16,
+                    cast_time: now_ms,
+                    info,
+                })
+                .await;
+        }
+    }
+
+    /// #1256：ElectricShock 技能经验（C# ElectricShock：成功必给/失败 50%/无目标不给）
+    async fn grant_electric_shock_exp(
+        &self,
+        session_id: u64,
+        spell_shared: u8,
+        now_ms: i64,
+        spell_cs: u8,
+    ) {
+        let info = self.magic_infos.get(&(spell_cs as u32)).cloned();
+        if let Some(record) = self.players.get(&session_id) {
+            let _ = record
+                .actor_ref
+                .ask(crate::actors::player::GainSpellExp {
+                    spell: spell_shared,
+                    amount: (1 + fastrand::i32(0..3)) as u16,
+                    cast_time: now_ms,
+                    info,
+                })
+                .await;
+        }
+    }
+}
+
 /// 攻击请求（从 GateActor 转发）
 pub struct WorldAttackRequest {
     pub session_id: u64,
@@ -139,6 +207,10 @@ impl Message<WorldAttackRequest> for WorldActor {
             // C# 弧/十字几何命中的格子（围绕玩家）
             let mut halfmoon_cells: Vec<(i32, i32)> = Vec::new();
             let mut primary_target_oid: u32 = 0; // 主目标 oid（溅射排除用）
+            // #1256：近战命中给攻击技能经验（C# CompleteAttack LevelMagic）的触发标记
+            let mut halfmoon_skill: Option<u8> = None;
+            let mut mp_eater_triggered = false;
+            let mut hemorrhage_triggered = false;
             for (oid, monster) in &mut self.monsters {
                 let dist = (monster.x - target_x).abs() + (monster.y - target_y).abs();
                 // #471：主人近战不攻击自己的召唤宠物（宠物是友方）
@@ -186,7 +258,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                     // ===== 战士近战技能触发 =====
                     // Slaying（攻杀）：C# Envir.cs 无倍率配置 → GetDamage = base×1.0（无额外伤害，仅技能经验）
                     let mut slaying_bonus = 0i32;
-                    if let Some(lv) = state.magics.iter().find(|m| m.spell == SPELL_SLAYING as i32).map(|m| m.level) {
+                    if let Some(lv) = find_attack_skill(&state.magics, SPELL_SLAYING).map(|m| m.level as i32) {
                         // 概率：level/5（C# 攻杀触发率与等级相关）
                         if fastrand::i32(0..5) < lv as i32 {
                             debug!("Player {} Slaying triggered (level {})", result.object_id, lv);
@@ -255,6 +327,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                         *count += add;
                         debug!("Player {} MPEater count={} (add={})", result.object_id, *count, add);
                         if *count >= 100 {
+                            mp_eater_triggered = true;
                             let add_mp = mp_eater_restore(lv, acc);
                             let _ = record.actor_ref.ask(crate::actors::player::AddMP { amount: add_mp }).await;
                             *count = 0;
@@ -269,6 +342,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                         *count += add;
                         debug!("Player {} Hemorrhage count={} (add={})", result.object_id, *count, add);
                         if hemorrhage_armed {
+                            hemorrhage_triggered = true;
                             // C#：武装命中 → 施放流血毒 + 复位
                             let duration = hemorrhage_duration(lv, state.luck).max(1) as u32;
                             let value = hemorrhage_value(state.effective_max_attack());
@@ -288,30 +362,44 @@ impl Message<WorldAttackRequest> for WorldActor {
                     }
                     // HalfMoon / CrossHalfMoon：C# 需 toggle 开启（HumanObject.cs:2929/3001）
                     // 倍率：HalfMoon 0.3+0.1Lv / CrossHalfMoon 0.4+0.1Lv（Envir.cs UpdateMagicInfo）
-                    let halfmoon = state.magics.iter()
-                        .find(|m| (m.spell == SPELL_HALFMOON as i32 || m.spell == SPELL_CROSS_HALFMOON as i32) && m.toggled)
-                        .map(|m| (m.spell, m.level));
-                    if let Some((spell_id, lv)) = halfmoon {
-                        let mult = if spell_id == SPELL_HALFMOON as i32 {
+                    // #1256：magics 存 C# 编号，需 find_attack_skill 转换（此前直接比较 SharedRust 值永不匹配）
+                    let halfmoon = find_attack_skill(&state.magics, SPELL_HALFMOON)
+                        .filter(|m| m.toggled)
+                        .map(|m| (SPELL_HALFMOON, m.level))
+                        .or_else(|| {
+                            find_attack_skill(&state.magics, SPELL_CROSS_HALFMOON)
+                                .filter(|m| m.toggled)
+                                .map(|m| (SPELL_CROSS_HALFMOON, m.level))
+                        });
+                    if let Some((skill_shared, lv)) = halfmoon {
+                        let is_halfmoon = skill_shared == SPELL_HALFMOON;
+                        let mult = if is_halfmoon {
                             0.3 + 0.1 * lv as f32
                         } else {
                             0.4 + 0.1 * lv as f32
                         };
                         let splash_dmg = ((damage as f32) * mult).max(1.0) as i32;
-                        halfmoon_splash.push((0, splash_dmg)); // 标记触发
-                        // C# 几何：HalfMoon 从正前方逆时针起 4 格弧；CrossHalfMoon 周围 8 格（都跳过正前方）
+                        halfmoon_skill = Some(skill_shared);
+                        // 标记触发；C# 几何：HalfMoon 从正前方逆时针起 4 格弧；CrossHalfMoon 周围 8 格（都跳过正前方）
+                        halfmoon_splash.push((0, splash_dmg));
                         if halfmoon_cells.is_empty() {
                             let front = atk_dir;
-                            if spell_id == SPELL_HALFMOON as i32 {
+                            if is_halfmoon {
                                 for k in 0..4usize {
                                     let d = (front + 7 + k) % 8;
-                                    if d == front { continue; }
-                                    halfmoon_cells.push((state.x + MON_DIR_DX[d], state.y + MON_DIR_DY[d]));
+                                    if d == front {
+                                        continue;
+                                    }
+                                    halfmoon_cells
+                                        .push((state.x + MON_DIR_DX[d], state.y + MON_DIR_DY[d]));
                                 }
                             } else {
                                 for d in 0..8usize {
-                                    if d == front { continue; }
-                                    halfmoon_cells.push((state.x + MON_DIR_DX[d], state.y + MON_DIR_DY[d]));
+                                    if d == front {
+                                        continue;
+                                    }
+                                    halfmoon_cells
+                                        .push((state.x + MON_DIR_DX[d], state.y + MON_DIR_DY[d]));
                                 }
                             }
                         }
@@ -412,7 +500,24 @@ impl Message<WorldAttackRequest> for WorldActor {
                 }
             }
 
+            // #1256：C# CompleteAttack——近战命中给攻击技能经验（Random.Next(3)+1）
+            if hit_monster {
+                if ATTACK_SKILL_SPELLS.contains(&msg.spell) {
+                    self.grant_attack_skill_exp(msg.session_id, msg.spell).await;
+                } else if let Some(skill) = halfmoon_skill {
+                    self.grant_attack_skill_exp(msg.session_id, skill).await;
+                }
+                if mp_eater_triggered {
+                    self.grant_attack_skill_exp(msg.session_id, SPELL_MPEATER).await;
+                }
+                if hemorrhage_triggered {
+                    self.grant_attack_skill_exp(msg.session_id, SPELL_HEMORRHAGE).await;
+                }
+            }
+
             // --- 玩家间伤害（仅在未命中怪物时） ---
+            let mut pvp_halfmoon_skill: Option<u8> = None; // #1256：PvP 半月/十字触发技能
+            let mut pvp_hit_skill: Option<u8> = None;      // #1256：PvP 本次命中技能（经验）
             if !hit_monster {
                 for (other_actor, other_session) in others {
                     // 获取其他玩家位置做距离检测
@@ -536,11 +641,17 @@ impl Message<WorldAttackRequest> for WorldActor {
                         debug!("Player {} FatalSword armed", result.object_id);
                     }
                     // HalfMoon/CrossHalfMoon PvP 溅射（C# 对玩家同样生效；toggle + 倍率 + 弧/十字几何）
-                    if let Some((spell_id, lv)) = state.magics.iter()
-                        .find(|m| (m.spell == SPELL_HALFMOON as i32 || m.spell == SPELL_CROSS_HALFMOON as i32) && m.toggled)
-                        .map(|m| (m.spell, m.level))
-                    {
-                        let mult = if spell_id == SPELL_HALFMOON as i32 {
+                    // #1256：magics 存 C# 编号，需 find_attack_skill 转换
+                    let halfmoon_pvp = find_attack_skill(&state.magics, SPELL_HALFMOON)
+                        .filter(|m| m.toggled)
+                        .map(|m| (SPELL_HALFMOON, m.level))
+                        .or_else(|| find_attack_skill(&state.magics, SPELL_CROSS_HALFMOON)
+                            .filter(|m| m.toggled)
+                            .map(|m| (SPELL_CROSS_HALFMOON, m.level)));
+                    if let Some((skill_shared, lv)) = halfmoon_pvp {
+                        let is_halfmoon = skill_shared == SPELL_HALFMOON;
+                        pvp_halfmoon_skill = Some(skill_shared);
+                        let mult = if is_halfmoon {
                             0.3 + 0.1 * lv as f32
                         } else {
                             0.4 + 0.1 * lv as f32
@@ -548,7 +659,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                         let splash_dmg = ((damage as f32) * mult).max(1.0) as i32;
                         let front = atk_dir;
                         let mut cells: Vec<(i32, i32)> = Vec::new();
-                        if spell_id == SPELL_HALFMOON as i32 {
+                        if is_halfmoon {
                             for k in 0..4usize {
                                 let d = (front + 7 + k) % 8;
                                 if d == front { continue; }
@@ -581,7 +692,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                             }
                         }
                         debug!("Player {} {} PvP splash dmg={} on {} players",
-                               result.object_id, if spell_id == SPELL_HALFMOON as i32 { "HalfMoon" } else { "CrossHalfMoon" },
+                               result.object_id, if skill_shared == SPELL_HALFMOON { "HalfMoon" } else { "CrossHalfMoon" },
                                splash_dmg, splash_hits.len());
                     }
                     // CounterAttack：受击方 7s 窗口激活时反击攻击者（C# HumanObject.cs 7212/7302）
@@ -616,6 +727,14 @@ impl Message<WorldAttackRequest> for WorldActor {
                             }).await.unwrap_or(false);
                     // #895：PvP 受击装备耐久损耗（C# Struck → DamageDura，命中即扣，含致死）
                     self.damage_armor_on_pvp_hit(other_session).await;
+                    // #1256：记录 PvP 命中技能（每次攻击最多一次；C# CompleteAttack LevelMagic）
+                    if pvp_hit_skill.is_none() {
+                        pvp_hit_skill = if ATTACK_SKILL_SPELLS.contains(&msg.spell) {
+                            Some(msg.spell)
+                        } else {
+                            pvp_halfmoon_skill
+                        };
+                    }
                     if pvp_died {
                                 let died_packet = Self::build_object_died_packet(
                                     other_state.object_id, other_state.x, other_state.y, other_state.direction);
@@ -651,6 +770,10 @@ impl Message<WorldAttackRequest> for WorldActor {
                                    result.object_id, other_state.name, damage, dist, attack_result.is_critical);
                         }
                     }
+                }
+                // #1256：C# CompleteAttack——PvP 命中给攻击技能经验（每次攻击最多一次）
+                if let Some(skill) = pvp_hit_skill {
+                    self.grant_attack_skill_exp(msg.session_id, skill).await;
                 }
             } else {
                 // 命中怪物时也要广播 ObjectAttack 给所有玩家
@@ -1530,6 +1653,8 @@ impl Message<MagicRequest> for WorldActor {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64;
+        // #1256：ElectricShock 分支内显式给技能经验（C#：成功必给/失败 50%/无目标不给）
+        let mut electric_shock_exp_handled = false;
 
         // Cooldown check
         if let Some(spell_info) = spell_db {
@@ -4004,6 +4129,9 @@ impl Message<MagicRequest> for WorldActor {
                             monster.target_session = None;
                             debug!("Magic: {} ElectricShock stunned own pet {}", state.name, mid);
                         }
+                        // #1256：C# ElectricShock——能走到这里说明驯服判定已成功，必给经验
+                        self.grant_electric_shock_exp(msg.session_id, msg.spell, now_ms, spell_cs).await;
+                        electric_shock_exp_handled = true;
                         return;
                     }
                     let can_tame = self.monsters.get(&mid)
@@ -4021,7 +4149,15 @@ impl Message<MagicRequest> for WorldActor {
                                 debug!("Magic: {} casts ElectricShock (tamed monster {})", state.name, mid);
                                 send_system_message(&self.gate_ref, msg.session_id, "驯服成功！");
                             }
+                            // #1256：C# 驯服成功必给经验
+                            self.grant_electric_shock_exp(msg.session_id, msg.spell, now_ms, spell_cs).await;
+                            electric_shock_exp_handled = true;
                         } else {
+                            // #1256：C# 失败 50% 概率给经验（Random(2)==0）
+                            if fastrand::i32(0..2) == 0 {
+                                self.grant_electric_shock_exp(msg.session_id, msg.spell, now_ms, spell_cs).await;
+                            }
+                            electric_shock_exp_handled = true;
                             // 失败时激怒怪物
                             if let Some(monster) = self.monsters.get_mut(&mid) {
                                 monster.provoked = true;
@@ -4030,8 +4166,13 @@ impl Message<MagicRequest> for WorldActor {
                             debug!("Magic: {} ElectricShock failed on monster {}", state.name, mid);
                         }
                     } else {
+                        // #1256：C# 不可驯服不给经验
+                        electric_shock_exp_handled = true;
                         debug!("Magic: {} ElectricShock: monster {} not tamable", state.name, mid);
                     }
+                } else {
+                    // #1256：C# 无目标（target == null）不给经验
+                    electric_shock_exp_handled = true;
                 }
             }
             // MagicBooster：MC 提升（C# HumanObject.cs:4345 + CompleteMagic 6228：MinMC/MaxMC += 6+Lv*6，60s）
@@ -4254,7 +4395,7 @@ impl Message<MagicRequest> for WorldActor {
         }
 
         // Spell XP gain and cast_time update
-        if !basic_spells.contains(&msg.spell) {
+        if !basic_spells.contains(&msg.spell) && !electric_shock_exp_handled {
             // #1230：C# LevelMagic exp = Random.Next(3)+1；DB 信息用于等级门控/阈值/升级延迟
             let info = self.magic_infos.get(&(spell_cs as u32)).cloned();
             let _ = record.actor_ref.ask(crate::actors::player::GainSpellExp {
@@ -4413,8 +4554,39 @@ mod spell_geometry_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::DAMAGE_DURA_ARMOR_SLOTS;
+    use super::{
+        find_attack_skill, ATTACK_SKILL_SPELLS, DAMAGE_DURA_ARMOR_SLOTS, SPELL_CROSS_HALFMOON,
+        SPELL_HALFMOON, SPELL_SLAYING,
+    };
     use crate::actors::inventory::EquipmentSlot;
+    use crate::actors::player::PlayerMagic;
+
+    #[test]
+    fn test_find_attack_skill_converts_shared_to_cs() {
+        // #1256：magics 存 C# 编号，入参 SharedRust(+3)；Slaying C#=2 / SharedRust=5
+        let mut magics = vec![PlayerMagic::new(2)]; // Slaying C#=2 / SharedRust=5
+        assert!(find_attack_skill(&magics, SPELL_SLAYING).is_some());
+        assert!(find_attack_skill(&magics, 4).is_none()); // Fencing 不是 Slaying
+        let mut magics2 = vec![PlayerMagic::new(4)]; // HalfMoon C#=4 / SharedRust=7
+        assert!(find_attack_skill(&magics2, SPELL_HALFMOON).is_some());
+        assert!(find_attack_skill(&magics2, SPELL_CROSS_HALFMOON).is_none());
+        // CrossHalfMoon C#=10 / SharedRust=13
+        let mut magics3 = vec![PlayerMagic::new(10)];
+        assert!(find_attack_skill(&magics3, SPELL_CROSS_HALFMOON).is_some());
+        // 未学 → None
+        let empty: Vec<PlayerMagic> = Vec::new();
+        assert!(find_attack_skill(&empty, SPELL_SLAYING).is_none());
+    }
+
+    #[test]
+    fn test_attack_skill_spells_list() {
+        // #1256：C# CompleteAttack 会 LevelMagic 的近战技能（MPEater/Hemorrhage 被动单独触发）
+        assert!(ATTACK_SKILL_SPELLS.contains(&SPELL_SLAYING));
+        assert!(ATTACK_SKILL_SPELLS.contains(&SPELL_HALFMOON));
+        assert!(ATTACK_SKILL_SPELLS.contains(&SPELL_CROSS_HALFMOON));
+        assert!(!ATTACK_SKILL_SPELLS.contains(&super::SPELL_MPEATER));
+        assert!(!ATTACK_SKILL_SPELLS.contains(&super::SPELL_HEMORRHAGE));
+    }
 
     #[test]
     fn test_damage_dura_armor_slots_excludes_weapon() {
