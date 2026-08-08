@@ -27,6 +27,34 @@ pub struct BuffEntry {
 pub struct BuffState {
     pub buffs: Vec<BuffEntry>,
     pub message: String,
+    /// 展开/收起（C# BuffDialog ExpandedBuffWindow，[Game] 段持久化）
+    pub expanded: bool,
+}
+
+impl BuffState {
+    /// 从 Mir2Config.ini 解析展开状态（C# Settings.ExpandedBuffWindow；缺失默认展开）
+    pub fn from_ini(content: &str) -> Self {
+        use crate::game::dialogs::settings_file::ini_bool;
+        Self {
+            buffs: Vec::new(),
+            message: String::new(),
+            expanded: ini_bool(content, "Game", "ExpandedBuffWindow", true),
+        }
+    }
+
+    /// 启动时加载（C# Settings.Load）
+    pub fn load() -> Self {
+        Self::from_ini(&crate::game::dialogs::settings_file::load_ini())
+    }
+
+    /// 保存展开状态（C# Settings.Save；merge 写回）
+    pub fn save_expanded(&self) {
+        use crate::game::dialogs::settings_file::{set_ini_value, write_ini};
+        let content = crate::game::dialogs::settings_file::load_ini();
+        let content = set_ini_value(&content, "Game", "ExpandedBuffWindow", &self.expanded.to_string());
+        write_ini(&content);
+        tracing::debug!("⚙️ Buff 窗口展开状态已保存: {}", self.expanded);
+    }
 }
 
 /// tag → 显示名（与服务端 buff_tag 对应）
@@ -60,6 +88,18 @@ pub fn buff_name(tag: u8) -> &'static str {
 #[derive(Component)]
 pub struct BuffWidget;
 
+/// 面板本体（收起时缩小为 44x34 小窗，C# Size(44,34)）
+#[derive(Component)]
+pub struct BuffPanel;
+
+/// 展开/收起按钮（C# _expandCollapseButton，Prguse2 7/8/9，16x15）
+#[derive(Component)]
+pub struct BuffExpand;
+
+/// 收起时显示的状态数量标签（C# _buffCountLabel）
+#[derive(Component)]
+pub struct BuffCount;
+
 #[derive(Component)]
 pub struct BuffClose;
 
@@ -70,7 +110,7 @@ pub struct BuffPlugin;
 
 impl Plugin for BuffPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<BuffState>();
+        app.insert_resource(BuffState::load());
                 app.add_systems(
             Update,
             buff_server_events.run_if(in_state(AppState::Game)),
@@ -111,9 +151,33 @@ fn spawn_buff(
         commands.entity(e).insert((
             DialogRoot(DialogKind::Buff),
             BuffWidget,
+            BuffPanel,
             Visibility::Hidden,
         ));
     }
+    // 展开/收起按钮（C# _expandCollapseButton：Prguse2 7/8/9，16x15）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Prguse2, 7, 8, 9,
+        280.0 + 300.0 - 20.0, 83.0, 7.0, 16.0, 15.0,
+    ) {
+        commands.entity(e).insert((
+            BuffExpand,
+            DialogRoot(DialogKind::Buff),
+            BuffWidget,
+        ));
+    }
+    // 收起时的数量标签（C# _buffCountLabel：黄色粗体）
+    let e = spawn_ui_text(
+        &mut commands, &font, "",
+        280.0 + 22.0, 97.0,
+        12.0, Color::srgb(1.0, 1.0, 0.0), 8.0,
+    );
+    commands.entity(e).insert((
+        BuffCount,
+        DialogRoot(DialogKind::Buff),
+        BuffWidget,
+    ));
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands, &mut libs, &mut images, &mut cache,
         LibraryName::Prguse2, 360, 361, 362,
@@ -140,27 +204,58 @@ fn spawn_buff(
     }
 }
 
-/// 显隐 + 渲染 + 关闭
+/// 显隐 + 渲染 + 展开/收起 + 关闭
 fn buff_ui_system(
     mut mgr: ResMut<DialogManager>,
-    state: Res<BuffState>,
-    close: Query<&UiButton, With<BuffClose>>,
-    mut widgets: Query<&mut Visibility, With<BuffWidget>>,
-    mut lines: Query<(&mut Text2d, &BuffLine)>,
+    mut state: ResMut<BuffState>,
+    mut expand: Query<(&UiButton, &mut Transform), With<BuffExpand>>,
+    mut close: Query<(&UiButton, &mut Visibility), With<BuffClose>>,
+    mut panel: Query<&mut Sprite, (With<BuffPanel>, Without<BuffExpand>, Without<BuffClose>, Without<BuffCount>)>,
+    mut count_text: Query<(&mut Text2d, &mut Transform, &mut Visibility), (With<BuffCount>, Without<BuffLine>)>,
+    mut widgets: Query<&mut Visibility, (With<BuffWidget>, Without<BuffLine>)>,
+    mut lines: Query<(&mut Text2d, &mut Visibility, &BuffLine)>,
 ) {
     let open = mgr.is_open(DialogKind::Buff);
-    for mut vis in widgets.iter_mut() {
+    // 面板尺寸：展开 300x200，收起 44x34（C# Size(44,34)）
+    let (pw, ph) = if state.expanded { (300.0f32, 200.0f32) } else { (44.0, 34.0) };
+    for mut sp in &mut panel {
+        sp.custom_size = Some(Vec2::new(pw, ph));
+    }
+    // 展开按钮：收起时移到小窗右上角
+    for (btn, mut tf) in &mut expand {
+        tf.translation.x = 280.0 + pw - 18.0;
+        tf.translation.y = -83.0;
+        if btn.clicked {
+            state.expanded = !state.expanded;
+            state.save_expanded();
+            tracing::info!("🩹 Buff 窗口{}", if state.expanded { "展开" } else { "收起" });
+        }
+    }
+    // 数量标签（收起时显示）
+    for (mut text, mut tf, mut vis) in &mut count_text {
+        *vis = if open && !state.expanded {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        text.0 = format!("{}", state.buffs.len());
+        tf.translation.x = 280.0 + pw / 2.0;
+        tf.translation.y = -(80.0 + ph / 2.0);
+    }
+    // 面板/按钮显隐
+    for mut vis in &mut widgets {
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
     if !open {
         return;
     }
-    for btn in &close {
-        if btn.clicked {
-            mgr.close(DialogKind::Buff);
-        }
+    // 关闭按钮仅展开时显示
+    for (_, mut vis) in &mut close {
+        *vis = if state.expanded { Visibility::Visible } else { Visibility::Hidden };
     }
-    for (mut text, line) in &mut lines {
+    // 列表行仅展开时显示 + 渲染
+    for (mut text, mut vis, line) in &mut lines {
+        *vis = if state.expanded { Visibility::Visible } else { Visibility::Hidden };
         text.0 = match line.0 {
             i if i < 8 => match state.buffs.get(i) {
                 Some(b) => format!(
@@ -216,3 +311,23 @@ fn buff_server_events(
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn buff_state_expanded_parse() {
+        let s = BuffState::from_ini("[Game]\nExpandedBuffWindow=false\n");
+        assert!(!s.expanded);
+        let s2 = BuffState::from_ini("[Game]\nExpandedBuffWindow=true\n");
+        assert!(s2.expanded);
+    }
+
+    #[test]
+    fn buff_state_expanded_default_true() {
+        // 缺失配置 → 默认展开（保持既有列表可见行为）
+        let s = BuffState::from_ini("");
+        assert!(s.expanded);
+    }
+}
+
