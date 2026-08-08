@@ -321,6 +321,8 @@ pub(crate) fn auto_inspect_test(
                     }
                     net.send_packet(&mir2_shared::packets::client::chat::Inspect {
                         object_id: oid,
+                        ranking: false,
+                        name: String::new(),
                     });
                     tracing::info!("[INSPECTTEST] 查看玩家 bevy2char (oid={})", oid);
                     *stage = 1;

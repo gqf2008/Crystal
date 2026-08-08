@@ -1912,10 +1912,11 @@ impl Message<GetRankingRequest> for WorldActor {
         debug!("GetRanking: session={} type={}", msg.session_id, msg.rank_type);
 
         // Collect online players
-        let mut entries: Vec<(String, u8, i32, i64)> = Vec::new();
+        let mut entries: Vec<(u32, String, u8, i32, i64)> = Vec::new();
         for (_, record) in &self.players {
             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                 entries.push((
+                    state.object_id,
                     state.name.clone(),
                     state.class as u8,
                     state.level as i32,
@@ -1939,8 +1940,8 @@ impl Message<GetRankingRequest> for WorldActor {
                         .unwrap_or(mir2_shared::enums::MirClass::Warrior) as u8;
                     let level: i32 = row.get("level");
                     let experience: i64 = row.get("experience");
-                    if !entries.iter().any(|(n, _, _, _)| n == &name) {
-                        entries.push((name, class, level, experience));
+                    if !entries.iter().any(|(_, n, _, _, _)| n == &name) {
+                        entries.push((0, name, class, level, experience));
                     }
                 }
             }
@@ -1948,7 +1949,7 @@ impl Message<GetRankingRequest> for WorldActor {
 
         // 按等级降序、经验降序排序
         entries.sort_by(|a, b| {
-            b.2.cmp(&a.2).then_with(|| b.3.cmp(&a.3))
+            b.3.cmp(&a.3).then_with(|| b.4.cmp(&a.4))
         });
 
         // 取前 20 名
@@ -1956,9 +1957,10 @@ impl Message<GetRankingRequest> for WorldActor {
             .into_iter()
             .take(20)
             .enumerate()
-            .map(|(idx, (name, class, level, experience))| {
+            .map(|(idx, (player_id, name, class, level, experience))| {
                 mir2_shared::packets::server::special_systems::RankInfo {
                     rank: (idx + 1) as i32,
+                    player_id,
                     player_name: name,
                     class,
                     level,

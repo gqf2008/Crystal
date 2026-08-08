@@ -360,6 +360,7 @@ pub struct Rankings {
 #[derive(Debug, Clone)]
 pub struct RankInfo {
     pub rank: i32,           // 排名
+    pub player_id: u32,      // 玩家 object_id（离线角色为 0）
     pub player_name: String, // 玩家名称
     pub class: u8,           // 职业
     pub level: i32,          // 等级
@@ -382,6 +383,7 @@ impl Packet for Rankings {
 
         for rank in &self.rankings {
             writer.write_i32::<LittleEndian>(rank.rank)?;
+            writer.write_u32::<LittleEndian>(rank.player_id)?;
             write_dotnet_string(writer, &rank.player_name)?;
             writer.write_u8(rank.class)?;
             writer.write_i32::<LittleEndian>(rank.level)?;
@@ -404,6 +406,7 @@ impl Packet for Rankings {
 
         for _ in 0..count {
             let rank = reader.read_i32::<LittleEndian>()?;
+            let player_id = reader.read_u32::<LittleEndian>()?;
 
             let player_name = read_dotnet_string(reader)?;
 
@@ -413,6 +416,7 @@ impl Packet for Rankings {
 
             rankings.push(RankInfo {
                 rank,
+                player_id,
                 player_name,
                 class,
                 level,

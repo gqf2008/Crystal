@@ -1064,6 +1064,10 @@ impl Message<HarvestRequest> for WorldActor {
 pub struct InspectPlayerRequest {
     pub session_id: u64,
     pub target_id: u32,
+    /// 排行榜查看（C# Inspect.Ranking）
+    pub ranking: bool,
+    /// 排行榜查看时离线玩家回查（Rust 无持久化角色 id，用名字查 DB）
+    pub name: String,
 }
 
 impl Message<InspectPlayerRequest> for WorldActor {
@@ -1081,6 +1085,36 @@ impl Message<InspectPlayerRequest> for WorldActor {
         }
 
         let Some(target) = target_state else {
+            // 排行榜查看：在线找不到 → 按名字查 DB 返回基础信息（C# 离线同样可看）
+            if msg.ranking && !msg.name.is_empty() {
+                match sqlx::query(
+                    "SELECT name, class, gender, level, guild_name FROM characters WHERE name = ?",
+                )
+                .bind(&msg.name)
+                .fetch_optional(&self.db_pool)
+                .await
+                {
+                    Ok(Some(row)) => {
+                        use sqlx::Row;
+                        let name: String = row.get("name");
+                        let class: i32 = row.get("class");
+                        let gender: i32 = row.get("gender");
+                        let level: i32 = row.get("level");
+                        let guild: Option<String> = row.get("guild_name");
+                        send_basic_inspect_packet(
+                            &self.gate_ref,
+                            msg.session_id,
+                            &name,
+                            guild.as_deref().unwrap_or(""),
+                            level as u16,
+                            class as u8,
+                            gender as u8,
+                        );
+                        return;
+                    }
+                    _ => {}
+                }
+            }
             send_system_message(&self.gate_ref, msg.session_id, "找不到目标玩家");
             return;
         };
@@ -1089,7 +1123,6 @@ impl Message<InspectPlayerRequest> for WorldActor {
         send_inspect_packet(&self.gate_ref, msg.session_id, &target);
     }
 }
-
 /// 观察玩家
 pub struct ObservePlayerRequest {
     pub session_id: u64,

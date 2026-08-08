@@ -904,7 +904,11 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         }
 
         NetworkEvent::InspectRequest { object_id } => {
-            let packet = client::Inspect { object_id };
+            let packet = client::Inspect {
+                object_id,
+                ranking: false,
+                name: String::new(),
+            };
             serialize_packet(stream, &packet)?;
         }
 
