@@ -242,6 +242,11 @@ fn option_view_system(
         ),
     >,
 ) {
+    // C# Settings.Volume：同步全局音量（此后播放的音效立即生效）
+    crate::game::sound::SOUND_VOLUME.store(
+        (opt.sound_volume * 100.0).round() as u32,
+        std::sync::atomic::Ordering::Relaxed,
+    );
     let target = |show: bool| if show { Visibility::Visible } else { Visibility::Hidden };
     let sb = target(view_should_show(OptionViewKind::SkillBar, &opt));
     for mut vis in &mut skill_slots {
@@ -681,5 +686,6 @@ mod view_tests {
         assert!(!view_should_show(OptionViewKind::HpView, &opt));
     }
 }
+
 
 

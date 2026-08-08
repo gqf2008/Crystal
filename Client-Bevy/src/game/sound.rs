@@ -55,6 +55,19 @@ impl SoundBank {
     }
 }
 
+/// 全局音效音量（0-100 百分比，C# Settings.Volume；option_view_system 同步）
+pub static SOUND_VOLUME: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(80);
+
+/// 百分比 → 线性音量（0.0-1.0）
+pub fn volume_from_percent(percent: u32) -> f32 {
+    (percent as f32 / 100.0).clamp(0.0, 1.0)
+}
+
+fn volume_settings() -> PlaybackSettings {
+    let v = SOUND_VOLUME.load(std::sync::atomic::Ordering::Relaxed);
+    PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(volume_from_percent(v)))
+}
+
 /// 播放音效（读取 wav → AudioSource → 一次性播放）
 pub fn play_sound(
     commands: &mut Commands,
@@ -74,7 +87,7 @@ pub fn play_sound(
     let handle = assets.add(source);
     commands.spawn((
         AudioPlayer(handle),
-        PlaybackSettings::DESPAWN,
+        volume_settings(),
     ));
 }
 
@@ -110,7 +123,7 @@ pub fn play_sound_cached(
     };
     commands.spawn((
         AudioPlayer(handle),
-        PlaybackSettings::DESPAWN,
+        volume_settings(),
     ));
 }
 
@@ -148,5 +161,17 @@ fn play_server_sounds(
             play_sound_cached(&mut commands, &mut assets, &bank, &mut cache, *sound_id);
             tracing::debug!("🔊 [SOUND] 播放服务端音效 #{}", sound_id);
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn volume_from_percent_clamps() {
+        assert_eq!(volume_from_percent(0), 0.0);
+        assert_eq!(volume_from_percent(80), 0.8);
+        assert_eq!(volume_from_percent(100), 1.0);
+        assert_eq!(volume_from_percent(200), 1.0);
     }
 }
