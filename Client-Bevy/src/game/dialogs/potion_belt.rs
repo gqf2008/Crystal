@@ -33,6 +33,16 @@ pub struct PotionBeltState {
     pub slots: [Option<u64>; BELT_SLOTS],
 }
 
+/// #1370：药水腰带显隐（C# BeltDialog 默认可见；Z 快捷键切换）
+#[derive(Resource)]
+pub struct PotionBeltVisible(pub bool);
+
+impl Default for PotionBeltVisible {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
 #[derive(Component)]
 pub struct PotionBeltWidget;
 
@@ -50,6 +60,7 @@ pub struct PotionBeltPlugin;
 impl Plugin for PotionBeltPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PotionBeltState>();
+        app.init_resource::<PotionBeltVisible>();
         app.add_systems(OnEnter(AppState::Game), spawn_potion_belt);
         app.add_systems(OnExit(AppState::Game), cleanup_potion_belt);
         app.add_systems(
@@ -161,13 +172,22 @@ fn spawn_potion_belt(
 #[allow(clippy::too_many_arguments)]
 fn potion_belt_ui_system(
     mut belt: ResMut<PotionBeltState>,
+    visible: Res<PotionBeltVisible>,
     hud: Res<HudState>,
     net: Res<NetConnection>,
     mut click: ResMut<InvClickState>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
+    mut widgets: Query<&mut Visibility, With<PotionBeltWidget>>,
     slots: Query<&PotionBeltSlot>,
 ) {
+    // #1370：腰带显隐（Z 快捷键）
+    for mut vis in &mut widgets {
+        *vis = if visible.0 { Visibility::Visible } else { Visibility::Hidden };
+    }
+    if !visible.0 {
+        return;
+    }
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
 
