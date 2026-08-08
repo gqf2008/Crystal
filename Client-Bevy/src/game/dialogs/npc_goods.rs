@@ -8,6 +8,7 @@
 
 use bevy::prelude::*;
 
+use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
 use crate::game::dialogs::DialogRoot;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
@@ -35,6 +36,16 @@ pub struct GoodsEntry {
     pub item_type: u8,
     /// 服务端物品描述（ItemInfo.tool_tip）
     pub tool_tip: Option<String>,
+    /// 单组堆叠上限（ItemInfo.stack_size；C# BuyItem 用 StackSize>1 决定弹数量框）
+    pub stack_size: u16,
+}
+
+/// 待确认的购买（数量框 OK 后发送，C# BuyItem amountBox.Amount）
+#[derive(Debug, Clone, Copy)]
+pub struct NpcBuyPending {
+    pub item_index: u32,
+    pub unique_id: u64,
+    pub is_buyback: bool,
 }
 
 /// NPC 商店状态
@@ -46,6 +57,17 @@ pub struct NpcGoodsState {
     pub selected: Option<usize>,
     /// 当前面板是否为回购列表（客户端按菜单项设置；购买按钮据此发 BuyItemBack）
     pub is_buyback: bool,
+    /// 数量框待确认购买（C# amountBox.OKButton）
+    pub pending_buy: Option<NpcBuyPending>,
+}
+
+/// 购买数量上限（C# BuyItem：max = min(StackSize, 库存)；非堆叠 = 1）
+fn buy_max_quantity(stack_size: u16, stock: u16) -> u32 {
+    if stack_size > 1 {
+        (stock as u32).min(stack_size as u32).max(1)
+    } else {
+        1
+    }
 }
 
 #[derive(Component)]
@@ -188,6 +210,8 @@ fn spawn_npc_goods(
 /// 显示/隐藏 + 商品列表渲染 + 选中/购买/关闭
 fn npc_goods_ui_system(
     mut state: ResMut<NpcGoodsState>,
+    mut amount: ResMut<AmountBoxState>,
+    mut result: MessageReader<AmountBoxResult>,
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
@@ -211,6 +235,28 @@ fn npc_goods_ui_system(
     }
     if !state.visible {
         return;
+    }
+    // 数量框结果：OK → 按数量发送购买/回购（C# BuyItem Count=amountBox.Amount）
+    for r in result.read() {
+        let Some(pending) = state.pending_buy.take() else { continue };
+        let Some(n) = r.0 else { continue };
+        if n == 0 {
+            continue;
+        }
+        if pending.is_buyback && pending.unique_id != 0 {
+            net.send_packet(&mir2_shared::packets::client::npc::BuyItemBack {
+                unique_id: pending.unique_id,
+                count: n as u16,
+            });
+            tracing::info!("🔄 回购 uid={} x{}", pending.unique_id, n);
+        } else {
+            net.send_packet(&mir2_shared::packets::client::npc::BuyItem {
+                item_index: pending.item_index as u64,
+                count: n as u16,
+                panel_type: mir2_shared::enums::PanelType::Buy,
+            });
+            tracing::info!("🏪 购买 item={} x{}", pending.item_index, n);
+        }
     }
 
     // 商品行（名称 + 价格，#124 支持滚轮滚动）
@@ -302,14 +348,37 @@ fn npc_goods_ui_system(
     // 购买/回购（原版 C# NPCGoodsDialog 购买按钮 → C.BuyItem；回购面板 → C.BuyItemBack）
     for btn in &buy {
         if btn.clicked {
+            if amount.visible {
+                // 数量框打开期间忽略（C# Modal）
+                continue;
+            }
             if let Some(idx) = state.selected {
-                if let Some(g) = state.goods.get(idx) {
+                if let Some(g) = state.goods.get(idx).cloned() {
                     if state.is_buyback && g.unique_id != 0 {
-                        net.send_packet(&mir2_shared::packets::client::npc::BuyItemBack {
+                        // 回购：可堆叠也弹数量框（C# 语义一致）
+                        if g.stack_size > 1 {
+                            state.pending_buy = Some(NpcBuyPending {
+                                item_index: g.item_index as u32,
+                                unique_id: g.unique_id,
+                                is_buyback: true,
+                            });
+                            amount.ask(format!("回购 {} 数量", g.name), buy_max_quantity(g.stack_size, g.count));
+                        } else {
+                            net.send_packet(&mir2_shared::packets::client::npc::BuyItemBack {
+                                unique_id: g.unique_id,
+                                count: 1,
+                            });
+                            tracing::info!("🔄 回购 {} (uid={})", g.name, g.unique_id);
+                        }
+                    } else if g.stack_size > 1 {
+                        // 堆叠商品 → 数量框（C# BuyItem：StackSize>1 弹 MirAmountBox）
+                        state.pending_buy = Some(NpcBuyPending {
+                            item_index: g.item_index as u32,
                             unique_id: g.unique_id,
-                            count: 1,
+                            is_buyback: false,
                         });
-                        tracing::info!("🔄 回购 {} (uid={})", g.name, g.unique_id);
+                        amount.ask(format!("购买 {} 数量", g.name), buy_max_quantity(g.stack_size, g.count));
+                        tracing::info!("🏪 购买 {}: 弹数量框 max={}", g.name, buy_max_quantity(g.stack_size, g.count));
                     } else {
                         net.send_packet(&mir2_shared::packets::client::npc::BuyItem {
                             item_index: g.item_index as u64,
@@ -339,3 +408,20 @@ fn npc_goods_server_events(
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn buy_max_quantity_non_stackable_is_one() {
+        assert_eq!(buy_max_quantity(1, 99), 1);
+        assert_eq!(buy_max_quantity(0, 5), 1);
+    }
+
+    #[test]
+    fn buy_max_quantity_stackable_caps_by_stock_and_stack() {
+        assert_eq!(buy_max_quantity(10, 5), 5); // 库存 5 < 堆叠 10
+        assert_eq!(buy_max_quantity(10, 99), 10); // 堆叠上限 10
+    }
+}
+

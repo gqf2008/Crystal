@@ -318,6 +318,7 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
                                         .map(|i| i.item_type as u8)
                                         .unwrap_or(0),
                                     tool_tip: item.info.as_ref().and_then(|i| i.tool_tip.clone()),
+                                    stack_size: item.info.as_ref().map(|i| i.stack_size).unwrap_or(1),
                                 })
                                 .collect();
                             let rate = p.rate;
@@ -395,3 +396,4 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
     }
     handled
 }
+
