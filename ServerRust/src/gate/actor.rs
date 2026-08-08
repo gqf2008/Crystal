@@ -2520,11 +2520,13 @@ fn handle_edit_guild_member(social_ref: &Option<ActorRef<crate::actors::social::
     if payload.len() < 2 { return; }
     let change_type = payload[0];
     // C#/SharedRust：[change_type u8][rank_index u8][name DotNet][rank_name DotNet]
+    let rank_index = payload[1];
     let mut cur = std::io::Cursor::new(&payload[2..]);
     let Ok(member_name) = mir2_shared::binary::read_dotnet_string(&mut cur) else { return };
-    debug!("EditGuildMember: session={} type={} name={}", session_id, change_type, member_name);
+    let rank_name = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
+    debug!("EditGuildMember: session={} type={} name={} rank_index={} rank_name={}", session_id, change_type, member_name, rank_index, rank_name);
     let social_ref = match social_ref { Some(s) => s, None => return };
-    let _ = social_ref.tell(crate::actors::social::EditGuildMemberRequest { session_id, change_type, member_name }).try_send();
+    let _ = social_ref.tell(crate::actors::social::EditGuildMemberRequest { session_id, change_type, member_name, rank_index, rank_name }).try_send();
 }
 
 /// EditGuildNotice: [count: i32][line1: DotNetString][line2: DotNetString]...

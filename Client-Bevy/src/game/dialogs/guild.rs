@@ -17,6 +17,7 @@ use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
 };
+use crate::ui::controls::{spawn_dropdown, DropDown};
 use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
 
 /// 行会成员
@@ -61,6 +62,8 @@ pub struct GuildState {
     pub selected_member: Option<usize>,
     /// #1348：是否显示离线成员（C# MembersShowOfflinesetting，默认 true）
     pub show_offline: bool,
+    /// #1362：职务名（3 个，C# 自定义职务名简化；服务端 GuildStatus 下发）
+    pub rank_names: [String; 3],
 }
 
 impl GuildState {
@@ -102,6 +105,16 @@ pub struct GuildInviteField;
 
 #[derive(Component)]
 pub struct GuildInviteBtn;
+
+/// #1362：职务改名下拉（C# RanksSelectBox）
+#[derive(Component)]
+pub struct GuildRankDrop;
+/// #1362：职务改名输入框（TextInput id 4）
+#[derive(Component)]
+pub struct GuildRankRenameField;
+/// #1362：职务改名保存按钮（C# RanksSaveName）
+#[derive(Component)]
+pub struct GuildRankSaveBtn;
 
 /// #1348：显示离线成员切换（C# MembersShowOfflineButton）
 #[derive(Component)]
@@ -174,6 +187,7 @@ impl Plugin for GuildPlugin {
                 guild_storage_system,
                 guild_invite_system,
                 guild_show_offline_system,
+                guild_rank_rename_system,
                 ui_button_system,
             )
                 .chain()
@@ -285,6 +299,60 @@ fn spawn_guild(
             rect: (545.0, 390.0, 70.0, 20.0),
             clicked: false,
         },
+        DialogRoot(DialogKind::Guild),
+        GuildWidget,
+    ));
+
+    // #1362：职务改名（C# RanksSelectBox + RanksName + RanksSaveName @(298,420)）
+    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let rank_dd = spawn_dropdown(
+        &mut commands, &mut images, &font,
+        vec!["会长".to_string(), "副会长".to_string(), "成员".to_string()],
+        Some(0),
+        298.0, 420.0, 64.0, 18.0,
+        3, 8.0,
+    );
+    commands.entity(rank_dd).insert((GuildRankDrop, DialogRoot(DialogKind::Guild), GuildWidget));
+    let rank_input = commands
+        .spawn((
+            crate::ui::sprite_ui::UiEntity,
+            DialogRoot(DialogKind::Guild),
+            GuildWidget,
+            GuildRankRenameField,
+            crate::game::dialogs::text_input::TextInputField(4),
+            crate::game::dialogs::text_input::TextInputRect(370.0, 420.0, 120.0, 20.0),
+            Sprite {
+                image: white.clone(),
+                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
+                custom_size: Some(Vec2::new(120.0, 20.0)),
+                ..default()
+            },
+            bevy::sprite::Anchor::TOP_LEFT,
+            Transform::from_xyz(370.0, -420.0, 8.1),
+            Visibility::Hidden,
+        ))
+        .id();
+    commands.entity(rank_input).with_children(|p| {
+        p.spawn((
+            crate::game::dialogs::text_input::TextInputDisplay(4),
+            Text2d::new(String::new()),
+            bevy::sprite::Anchor::TOP_LEFT,
+            TextFont {
+                font: FontSource::Handle(font.clone()),
+                font_size: FontSize::Px(12.0),
+                ..default()
+            },
+            TextColor(Color::WHITE),
+            Transform::from_xyz(4.0, -2.0, 8.2),
+        ));
+    });
+    let rank_save = spawn_ui_text(
+        &mut commands, &font, "改名",
+        500.0, 420.0, 12.0, Color::WHITE, 8.0,
+    );
+    commands.entity(rank_save).insert((
+        GuildRankSaveBtn,
+        UiButton { rect: (500.0, 420.0, 40.0, 20.0), clicked: false },
         DialogRoot(DialogKind::Guild),
         GuildWidget,
     ));
@@ -680,11 +748,12 @@ fn guild_ui_system(
                 // #1348：按 show_offline 过滤后的可见成员映射
                 match visible.get(idx).and_then(|&mi| guild.members.get(mi)) {
                 Some(m) => {
-                    let rank = match m.rank {
-                        0 => "会长",
-                        1 => "副会长",
-                        _ => "成员",
-                    };
+                    // #1362：显示服务端职务名（C# 自定义职务名简化）
+                    let rank = guild
+                        .rank_names
+                        .get(m.rank as usize)
+                        .cloned()
+                        .unwrap_or_else(|| "成员".to_string());
                     format!(
                         "{}{} ({})",
                         m.name,
@@ -847,6 +916,39 @@ fn guild_ui_system(
                         break;
                     }
                 }
+            }
+        }
+    }
+}
+
+/// #1362：职务改名（C# RanksSelectBox + RanksName + RanksSaveName → EditGuildMember ChangeType=6）
+fn guild_rank_rename_system(
+    guild: Res<GuildState>,
+    net: Res<NetConnection>,
+    mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
+    rank_dd: Query<(&DropDown, &GuildRankDrop)>,
+    save_btn: Query<&UiButton, With<GuildRankSaveBtn>>,
+) {
+    let idx = rank_dd
+        .single()
+        .map(|(dd, _)| dd.selected.unwrap_or(0))
+        .unwrap_or(0);
+    for btn in &save_btn {
+        if btn.clicked && guild.in_guild {
+            let name = input.texts.get(4).cloned().unwrap_or_default();
+            let name = name.trim().to_string();
+            if !name.is_empty() {
+                net.send_packet(&mir2_shared::packets::client::guild::EditGuildMember {
+                    change_type: 6,
+                    rank_index: idx as u8,
+                    name: String::new(),
+                    rank_name: name.clone(),
+                });
+                tracing::info!("🏰 职务改名: {} -> {}", idx, name);
+                if input.texts.len() > 4 {
+                    input.texts[4].clear();
+                }
+                input.active = None;
             }
         }
     }
@@ -1026,10 +1128,11 @@ fn guild_server_events(
                     guild.storage_received = false;
                 }
             }
-            ServerEvent::GuildData { name, leader, notice, members, gold } => {
+            ServerEvent::GuildData { name, leader, rank_names, notice, members, gold } => {
                 guild.in_guild = true;
                 guild.name = name.clone();
                 guild.leader = leader.clone();
+                guild.rank_names = rank_names.clone();
                 guild.notice = notice.clone();
                 guild.members = members.clone();
                 guild.gold = *gold;

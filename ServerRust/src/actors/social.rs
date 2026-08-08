@@ -157,6 +157,10 @@ pub struct EditGuildMemberRequest {
     pub session_id: u64,
     pub change_type: u8,
     pub member_name: String,
+    /// 职务索引（改名用，C# RankIndex）
+    pub rank_index: u8,
+    /// 新职务名（改名用，C# RankName）
+    pub rank_name: String,
 }
 
 pub struct EditGuildNoticeRequest {
@@ -3261,6 +3265,23 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                 if guild.set_rank(&msg.member_name, GuildRank::Member) {
                     send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已降职为成员", msg.member_name));
                 }
+            }
+            6 => { // #1362：职务改名（C# EditGuildMember ChangeType=3 rename；Rust 用 6 避免与降职冲突）
+                if my_rank != GuildRank::Leader {
+                    send_system_message(&self.gate_ref, msg.session_id, "只有会长可以修改职务名");
+                    return;
+                }
+                let idx = msg.rank_index as usize;
+                if idx >= guild.rank_names.len() || msg.rank_name.trim().is_empty() {
+                    send_system_message(&self.gate_ref, msg.session_id, "职务名无效");
+                    return;
+                }
+                guild.rank_names[idx] = msg.rank_name.trim().to_string();
+                // 广播全量行会信息（职务名变化 → 成员列表刷新）
+                for sid in guild.online_sessions(0) {
+                    send_guild_info_packet(&self.gate_ref, sid, guild);
+                }
+                send_system_message(&self.gate_ref, msg.session_id, "职务名已更新");
             }
             _ => {}
         }

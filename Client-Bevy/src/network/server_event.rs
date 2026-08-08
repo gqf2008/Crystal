@@ -222,10 +222,12 @@ pub enum ServerEvent {
     StorageOpened { items: Vec<Option<InvItem>>, visible: bool },
     /// GuildStatus（1 字节格式）：是否在行会；false 时消费端清空行会数据
     GuildInGuild { in_guild: bool },
-    /// GuildStatus（完整格式）：行会全量信息
+    /// #1362：行会职务名（3 个，C# 自定义职务名简化）
     GuildData {
         name: String,
         leader: String,
+        /// #1362：职务名（3 个）
+        rank_names: [String; 3],
         notice: Vec<String>,
         members: Vec<GuildMember>,
         gold: u32,

@@ -798,6 +798,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             &MockGuildStatus {
                                                 name: p.name,
                                                 leader: "刀客".to_string(),
+                                                rank_names: ["会长".to_string(), "副会长".to_string(), "成员".to_string()],
                                                 notice: mock_guild_notice.clone(),
                                                 members: mock_guild_members
                                                     .iter()
@@ -979,6 +980,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 &MockGuildStatus {
                                                     name: "TestGuild".to_string(),
                                                     leader: "刀客".to_string(),
+                                                    rank_names: ["会长".to_string(), "副会长".to_string(), "成员".to_string()],
                                                     notice: vec![],
                                                     members: vec![("刀客".to_string(), 1u8, true)],
                                                     gold: 0,

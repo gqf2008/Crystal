@@ -308,6 +308,10 @@ pub fn send_guild_info_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, g
     let mut body = Vec::new();
     write_dotnet_string(&mut body, &guild.name);
     write_dotnet_string(&mut body, guild.leader_name());
+    // 职务名（3 个，C# 自定义职务名简化）
+    for name in &guild.rank_names {
+        write_dotnet_string(&mut body, name);
+    }
     // Notice (5 lines)
     body.push(guild.notice.len() as u8);
     for line in &guild.notice {
