@@ -9,6 +9,8 @@
 // ============================================================================
 
 use bevy::prelude::*;
+use crate::actor::{LocalPlayer, PlayerName};
+use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect, TextInputState, TextInputSubmit};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
@@ -36,6 +38,8 @@ pub struct GroupState {
     pub invite: Option<GroupInviteInfo>,
     /// 是否允许组队（原版 C# GroupDialog.AllowGroup）
     pub allow_group: bool,
+    /// 移除成员输入框是否打开（C# DelButton → MirInputBox）
+    pub del_open: bool,
 }
 
 const DIALOG_X: f32 = 250.0;
@@ -52,6 +56,18 @@ pub struct GroupSwitch;
 
 #[derive(Component)]
 pub struct GroupMemberLine(usize);
+
+/// 移除成员按钮（C# GroupDialog DelButton Title[136-138] (140,219)）
+#[derive(Component)]
+pub struct GroupDelBtn;
+
+/// 移除成员输入框（TextInput id 32）
+#[derive(Component)]
+pub struct GroupDelInput;
+
+/// 移除确认按钮
+#[derive(Component)]
+pub struct GroupDelOk;
 
 // 邀请提示组件
 #[derive(Component)]
@@ -84,6 +100,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_group);
                 group_invite_system,
                 group_switch_system,
                 group_invite_player_system,
+                group_del_system,
                 ui_button_system,
             )
                 .chain()
@@ -169,6 +186,71 @@ fn spawn_group(
         ));
     }
 
+    // 移除成员（C# GroupDialog DelButton Title[136-138] (140,219) → MirInputBox → C.DellMember{Name}）
+    let del_btn = spawn_ui_text(
+        &mut commands, &font, "移除",
+        DIALOG_X + 140.0, DIALOG_Y + 219.0,
+        12.0, Color::WHITE, 8.0,
+    );
+    commands.entity(del_btn).insert((
+        GroupDelBtn,
+        UiButton {
+            rect: (DIALOG_X + 140.0, DIALOG_Y + 219.0, 44.0, 22.0),
+            clicked: false,
+        },
+        DialogRoot(DialogKind::Group),
+        GroupWidget,
+    ));
+    // 移除输入框（TextInput id 32）+ 确认按钮（C# MirInputBox 语义）
+    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let input_e = commands
+        .spawn((
+            crate::ui::sprite_ui::UiEntity,
+            DialogRoot(DialogKind::Group),
+            GroupWidget,
+            GroupDelInput,
+            TextInputField(32),
+            TextInputRect(DIALOG_X + 25.0, DIALOG_Y + 180.0, 120.0, 20.0),
+            Sprite {
+                image: white.clone(),
+                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
+                custom_size: Some(Vec2::new(120.0, 20.0)),
+                ..default()
+            },
+            bevy::sprite::Anchor::TOP_LEFT,
+            Transform::from_xyz(DIALOG_X + 25.0, -(DIALOG_Y + 180.0), 8.1),
+            Visibility::Hidden,
+        ))
+        .id();
+    commands.entity(input_e).with_children(|p| {
+        p.spawn((
+            TextInputDisplay(32),
+            Text2d::new(String::new()),
+            bevy::sprite::Anchor::TOP_LEFT,
+            TextFont {
+                font: FontSource::Handle(font.clone()),
+                font_size: FontSize::Px(12.0),
+                ..default()
+            },
+            TextColor(Color::WHITE),
+            Transform::from_xyz(4.0, -2.0, 8.2),
+        ));
+    });
+    let ok_btn = spawn_ui_text(
+        &mut commands, &font, "确认",
+        DIALOG_X + 150.0, DIALOG_Y + 180.0,
+        12.0, Color::WHITE, 8.0,
+    );
+    commands.entity(ok_btn).insert((
+        GroupDelOk,
+        UiButton {
+            rect: (DIALOG_X + 150.0, DIALOG_Y + 180.0, 40.0, 20.0),
+            clicked: false,
+        },
+        DialogRoot(DialogKind::Group),
+        GroupWidget,
+        Visibility::Hidden,
+    ));
     // 邀请提示（MirMessageBox：Prguse[360] 居中，Yes Title[206-208] / No Title[210-212]）
     let (bx, by) = (284.0, 289.0);
     if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 360) {
@@ -346,6 +428,81 @@ fn group_invite_player_system(
     }
 }
 
+
+/// 移除成员（C# DelButton → MirInputBox → C.DellMember{Name}；仅队长可见可用）
+#[allow(clippy::too_many_arguments)]
+fn group_del_system(
+    mut mgr: ResMut<DialogManager>,
+    mut group: ResMut<GroupState>,
+    net: Res<NetConnection>,
+    mut input: ResMut<TextInputState>,
+    mut submit: MessageReader<TextInputSubmit>,
+    del_btn: Query<&UiButton, With<GroupDelBtn>>,
+    ok_btn: Query<&UiButton, With<GroupDelOk>>,
+    local_player: Query<&PlayerName, With<LocalPlayer>>,
+    mut del_btn_vis: Query<&mut Visibility, With<GroupDelBtn>>,
+    mut input_vis: Query<&mut Visibility, With<GroupDelInput>>,
+    mut ok_vis: Query<&mut Visibility, With<GroupDelOk>>,
+) {
+    let open = mgr.is_open(DialogKind::Group);
+    if !open {
+        group.del_open = false;
+        if input.texts.len() > 32 {
+            input.texts[32].clear();
+        }
+        return;
+    }
+    let self_name = local_player.single().map(|n| n.0.clone()).unwrap_or_default();
+    let is_leader = group
+        .members
+        .first()
+        .map(|m| m.name == self_name)
+        .unwrap_or(false);
+    // 非队长隐藏移除按钮（C# GroupPanel_BeforeDraw：非队长 Add/Del 不可见）
+    for mut vis in del_btn_vis.iter_mut() {
+        *vis = if is_leader { Visibility::Visible } else { Visibility::Hidden };
+    }
+    if !is_leader {
+        group.del_open = false;
+    }
+    for mut vis in input_vis.iter_mut() {
+        *vis = if group.del_open { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for mut vis in ok_vis.iter_mut() {
+        *vis = if group.del_open { Visibility::Visible } else { Visibility::Hidden };
+    }
+    // 点击移除 → 打开输入框
+    for btn in &del_btn {
+        if btn.clicked && is_leader {
+            group.del_open = true;
+            input.active = Some(32);
+        }
+    }
+    // 确认 / Enter → 发送 DellMember{Name}
+    let mut confirmed = false;
+    for btn in &ok_btn {
+        if btn.clicked {
+            confirmed = true;
+        }
+    }
+    for s in submit.read() {
+        if s.0 == 32 {
+            confirmed = true;
+        }
+    }
+    if confirmed && group.del_open {
+        let name = input.texts.get(32).cloned().unwrap_or_default();
+        let name = name.trim().to_string();
+        if !name.is_empty() {
+            net.send_packet(&mir2_shared::packets::client::group::DellMember { name: name.clone() });
+            tracing::info!("👥 移除成员: {}", name);
+        }
+        group.del_open = false;
+        if input.texts.len() > 32 {
+            input.texts[32].clear();
+        }
+    }
+}
 
 /// 消费服务端组队事件（网络层只广播 ServerEvent）
 fn group_server_events(

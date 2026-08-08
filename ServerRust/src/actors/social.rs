@@ -2172,22 +2172,31 @@ impl Message<DellMemberRequest> for SocialActor {
             return;
         };
 
-        // 踢出成员
+        // 踢出成员（C# DelMember：先给被踢者 S.DeleteGroup，再 LeaveGroup）
         if let Some(group) = self.groups.get_mut(&group_id) {
             if group.remove_member(member_session).is_some() {
                 // 更新被踢出玩家的 group_id
                 if let Some(target_record) = self.players.get(&member_session) {
                     let _ = target_record.ask(SetGroupId { group_id: None }).await;
                 }
+                // 被踢玩家清除组队 UI（C# S.DeleteGroup）
+                send_delete_group_packet(&self.gate_ref, member_session);
+                send_system_message(&self.gate_ref, member_session, "你已被移出队伍");
 
                 debug!("Kicked {} from group #{}", msg.member_name, group_id);
                 send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已被踢出队伍", msg.member_name));
 
-                // 如果组队空了，删除
+                // 组队空了 → 删除；只剩 1 人 → 解散（C# LeaveGroup 语义）
                 if group.member_count() == 0 {
                     self.groups.remove(&group_id);
+                } else if group.member_count() == 1 {
+                    let last = group.members[0].session_id;
+                    send_delete_group_packet(&self.gate_ref, last);
+                    if let Some(record) = self.players.get(&last) {
+                        let _ = record.ask(SetGroupId { group_id: None }).await;
+                    }
+                    self.groups.remove(&group_id);
                 } else {
-                    // 广播更新
                     self.broadcast_group_update(group_id);
                 }
             }
