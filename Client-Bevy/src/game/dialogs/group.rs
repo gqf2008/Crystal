@@ -440,9 +440,10 @@ fn group_del_system(
     del_btn: Query<&UiButton, With<GroupDelBtn>>,
     ok_btn: Query<&UiButton, With<GroupDelOk>>,
     local_player: Query<&PlayerName, With<LocalPlayer>>,
-    mut del_btn_vis: Query<&mut Visibility, With<GroupDelBtn>>,
-    mut input_vis: Query<&mut Visibility, With<GroupDelInput>>,
-    mut ok_vis: Query<&mut Visibility, With<GroupDelOk>>,
+    // #1290：Bevy B0001——三个 &mut Visibility Query 需 Without 隔离（#1288 组队踢人合并后启动 panic）
+    mut del_btn_vis: Query<&mut Visibility, (With<GroupDelBtn>, Without<GroupDelInput>, Without<GroupDelOk>)>,
+    mut input_vis: Query<&mut Visibility, (With<GroupDelInput>, Without<GroupDelBtn>, Without<GroupDelOk>)>,
+    mut ok_vis: Query<&mut Visibility, (With<GroupDelOk>, Without<GroupDelBtn>, Without<GroupDelInput>)>,
 ) {
     let open = mgr.is_open(DialogKind::Group);
     if !open {

@@ -211,9 +211,16 @@ fn buff_ui_system(
     mut expand: Query<(&UiButton, &mut Transform), With<BuffExpand>>,
     mut close: Query<(&UiButton, &mut Visibility), With<BuffClose>>,
     mut panel: Query<&mut Sprite, (With<BuffPanel>, Without<BuffExpand>, Without<BuffClose>, Without<BuffCount>)>,
-    mut count_text: Query<(&mut Text2d, &mut Transform, &mut Visibility), (With<BuffCount>, Without<BuffLine>)>,
-    mut widgets: Query<&mut Visibility, (With<BuffWidget>, Without<BuffLine>)>,
-    mut lines: Query<(&mut Text2d, &mut Visibility, &BuffLine)>,
+    // #1290：Bevy B0001——多个 &mut Query 需完整 Without 隔离（#1237 合并后启动 panic）
+    mut count_text: Query<
+        (&mut Text2d, &mut Transform, &mut Visibility),
+        (With<BuffCount>, Without<BuffLine>, Without<BuffExpand>, Without<BuffClose>, Without<BuffWidget>),
+    >,
+    mut widgets: Query<&mut Visibility, (With<BuffWidget>, Without<BuffLine>, Without<BuffCount>, Without<BuffClose>)>,
+    mut lines: Query<
+        (&mut Text2d, &mut Visibility, &BuffLine),
+        (Without<BuffCount>, Without<BuffClose>, Without<BuffWidget>),
+    >,
 ) {
     let open = mgr.is_open(DialogKind::Buff);
     // 面板尺寸：展开 300x200，收起 44x34（C# Size(44,34)）
