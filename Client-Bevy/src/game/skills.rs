@@ -128,11 +128,63 @@ pub struct SkillBarIcon(pub usize);
 #[derive(Component)]
 pub struct SkillBarKey(pub usize);
 
+/// 技能栏位置状态（C# MagicBar SkillbarLocation：可拖动 + 持久化）
+#[derive(Resource)]
+pub struct SkillBarState {
+    /// 第 0 格左上角屏幕坐标（C# SkillbarLocation[0]）
+    pub pos: (f32, f32),
+    /// 拖动中：按下点与 pos 的偏移
+    pub drag_offset: Option<(f32, f32)>,
+}
+
+impl Default for SkillBarState {
+    fn default() -> Self {
+        Self {
+            pos: (
+                1024.0 / 2.0 - 4.0 * (SKILL_SLOT_W + 4.0),
+                SKILL_BAR_Y,
+            ),
+            drag_offset: None,
+        }
+    }
+}
+
+impl SkillBarState {
+    /// 从 Mir2Config.ini 解析（C# [Game] Skillbar0X/Skillbar0Y）
+    pub fn from_ini(content: &str) -> Self {
+        use crate::game::dialogs::settings_file::ini_str;
+        let mut s = Self::default();
+        if let Some(v) = ini_str(content, "Game", "Skillbar0X").and_then(|v| v.parse::<f32>().ok()) {
+            s.pos.0 = v;
+        }
+        if let Some(v) = ini_str(content, "Game", "Skillbar0Y").and_then(|v| v.parse::<f32>().ok()) {
+            s.pos.1 = v;
+        }
+        s
+    }
+
+    /// 启动时加载（C# Settings.Load）
+    pub fn load() -> Self {
+        Self::from_ini(&crate::game::dialogs::settings_file::load_ini())
+    }
+
+    /// 保存（C# Settings.Save：SkillbarLocation → [Game] Skillbar0X/Y，merge 写回）
+    pub fn save(&self) {
+        use crate::game::dialogs::settings_file::{set_ini_value, write_ini};
+        let mut content = crate::game::dialogs::settings_file::load_ini();
+        content = set_ini_value(&content, "Game", "Skillbar0X", &self.pos.0.round().to_string());
+        content = set_ini_value(&content, "Game", "Skillbar0Y", &self.pos.1.round().to_string());
+        write_ini(&content);
+        tracing::debug!("⚙️ 技能栏位置已保存到 Mir2Config.ini");
+    }
+}
+
 pub struct SkillsPlugin;
 
 impl Plugin for SkillsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MagicsState>();
+        app.insert_resource(SkillBarState::load());
         app.add_systems(OnEnter(AppState::Game), spawn_skills_window);
         app.add_systems(OnEnter(AppState::Game), spawn_skill_bar);
         app.add_systems(OnExit(AppState::Game), cleanup_skills_window);
@@ -147,6 +199,10 @@ impl Plugin for SkillsPlugin {
             skills_server_events.run_if(in_state(crate::scenes::AppState::Game)),
         );
 app.add_systems(Update, skill_bar_system.run_if(in_state(AppState::Game)));
+        app.add_systems(
+            Update,
+            skill_bar_drag_system.run_if(in_state(AppState::Game)),
+        );
     }
 }
 
@@ -247,6 +303,22 @@ fn skill_bar_system(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skill_bar_state_parse() {
+        let content = "[Game]\nSkillbar0X=123\nSkillbar0Y=456\n";
+        let s = SkillBarState::from_ini(content);
+        assert_eq!(s.pos, (123.0, 456.0));
+    }
+
+    #[test]
+    fn skill_bar_state_defaults_when_missing() {
+        let s = SkillBarState::from_ini("");
+        let d = SkillBarState::default();
+        assert_eq!(s.pos, d.pos);
+        assert_eq!(d.pos.0, 1024.0 / 2.0 - 4.0 * (SKILL_SLOT_W + 4.0));
+        assert_eq!(d.pos.1, SKILL_BAR_Y);
+    }
 
     fn magic(spell: Spell, key: u8) -> ClientMagic {
         ClientMagic {
@@ -520,6 +592,7 @@ fn spawn_skill_bar(
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
+    bar: Res<SkillBarState>,
 ) {
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
@@ -527,7 +600,7 @@ fn spawn_skill_bar(
     let font = ui_font.0.clone();
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     for i in 0..8usize {
-        let x = 1024.0 / 2.0 - 4.0 * (SKILL_SLOT_W + 4.0) + i as f32 * (SKILL_SLOT_W + 4.0);
+        let x = bar.pos.0 + i as f32 * (SKILL_SLOT_W + 4.0);
         let slot = commands
             .spawn((
                 UiEntity,
@@ -539,7 +612,7 @@ fn spawn_skill_bar(
                     ..default()
                 },
                 bevy::sprite::Anchor::TOP_LEFT,
-                Transform::from_xyz(x, -SKILL_BAR_Y, 2.5),
+                Transform::from_xyz(x, -bar.pos.1, 2.5),
                 Visibility::Visible,
             ))
             .id();
@@ -570,6 +643,40 @@ fn spawn_skill_bar(
                 Transform::from_xyz(1.0, -1.0, 2.7),
             ));
         });
+    }
+}
+
+/// 技能栏拖动（C# MagicBar Movable）：按住栏体移动，松开保存 [Game] Skillbar0X/Y
+fn skill_bar_drag_system(
+    mut bar: ResMut<SkillBarState>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    mut slots: Query<(&mut Transform, &SkillBarSlot)>,
+) {
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    let bar_w = 8.0 * (SKILL_SLOT_W + 4.0) - 4.0;
+    let in_bar = cursor.x >= bar.pos.0
+        && cursor.x <= bar.pos.0 + bar_w
+        && cursor.y >= bar.pos.1
+        && cursor.y <= bar.pos.1 + SKILL_SLOT_H;
+    if mouse.just_pressed(MouseButton::Left) && in_bar {
+        bar.drag_offset = Some((cursor.x - bar.pos.0, cursor.y - bar.pos.1));
+        tracing::debug!("⚙️ 技能栏开始拖动");
+    }
+    if let Some(off) = bar.drag_offset {
+        if mouse.pressed(MouseButton::Left) {
+            bar.pos = (cursor.x - off.0, cursor.y - off.1);
+        } else {
+            bar.drag_offset = None;
+            bar.save();
+            tracing::info!("⚙️ 技能栏位置 -> ({:.0},{:.0}) 已保存", bar.pos.0, bar.pos.1);
+        }
+    }
+    // 实时应用位置到各槽位（含拖动中）
+    for (mut tf, slot) in &mut slots {
+        tf.translation.x = bar.pos.0 + slot.0 as f32 * (SKILL_SLOT_W + 4.0);
+        tf.translation.y = -bar.pos.1;
     }
 }
 
@@ -606,3 +713,6 @@ fn skill_bar_icon_system(
         }
     }
 }
+
+
+
