@@ -60,6 +60,8 @@ impl MonsterBehavior for CannibalPlantBehavior {
         if !self.spawned {
             self.next_visibility_tick = ctx.tick_count + VISIBILITY_CHECK_TICKS;
             self.spawned = true;
+            // #1381：出生即隐身（C# Visible=false；进图默认站姿由客户端显示，随后按隐身广播消失）
+            monster.hidden = true;
         }
 
         // ---- 可见性切换（C# ProcessAI 每 2s 检测）----
@@ -68,8 +70,14 @@ impl MonsterBehavior for CannibalPlantBehavior {
             let has_near = ctx.nearest_target(monster.x, monster.y, APPEAR_RANGE, monster.map_index).is_some();
             if !self.visible && has_near {
                 self.visible = true;
+                monster.hidden = false;
+                // #1381：C# Broadcast(GetInfo) + ObjectShow
+                ctx.out_show_hide.push((monster.object_id, true));
             } else if self.visible && !has_near {
                 self.visible = false;
+                monster.hidden = true;
+                // #1381：C# ObjectHide + SetHP(MaxHP)
+                ctx.out_show_hide.push((monster.object_id, false));
                 monster.hp = monster.max_hp; // C# SetHP(Stats[HP])
             }
         }

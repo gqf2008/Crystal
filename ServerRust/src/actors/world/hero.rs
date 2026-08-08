@@ -1811,11 +1811,20 @@ impl WorldActor {
                         mir2_shared::enums::ServerPacketIds::ObjectHealth as i16,
                         &ohealth_body,
                     );
-                    for sid in self.players.keys() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *sid,
-                            data: data.clone(),
-                        }).await;
+                    // #1381：英雄血条只广播主人所在地图（C# CurrentMap.Broadcast）
+                    let owner_map = match record.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(s)) => s.map_index,
+                        _ => 0,
+                    };
+                    for (sid, other) in &self.players {
+                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                            if os.map_index == owner_map {
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: *sid,
+                                    data: data.clone(),
+                                }).await;
+                            }
+                        }
                     }
                 }
             }
@@ -1841,12 +1850,23 @@ impl WorldActor {
                 mir2_shared::enums::ServerPacketIds::ObjectWalk as i16,
                 &walk_body,
             );
-            // 简化：广播给所有在线玩家（单地图运行环境下足够）
-            for sid in self.players.keys() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: *sid,
-                    data: walk_packet.clone(),
-                }).await;
+            // #1381：英雄移动只广播主人所在地图（C# CurrentMap.Broadcast）
+            let owner_map = match self.players.get(session_id) {
+                Some(rec) => match rec.actor_ref.ask(GetPlayerState).await {
+                    Ok(Some(s)) => s.map_index,
+                    _ => continue,
+                },
+                None => continue,
+            };
+            for (sid, other) in &self.players {
+                if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                    if os.map_index == owner_map {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *sid,
+                            data: walk_packet.clone(),
+                        }).await;
+                    }
+                }
             }
         }
 
@@ -2926,25 +2946,58 @@ impl WorldActor {
             state.guild_name.as_deref().unwrap_or(""),
             crate::actors::world::guild_rank_name(state.guild_rank),
         );
-        for sid in self.players.keys() {
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: *sid,
-                data: packet.clone(),
-            }).await;
+        // #1381：英雄生成只广播主人所在地图（C# CurrentMap.Broadcast）
+        let owner_map = state.map_index;
+        for (sid, other) in &self.players {
+            if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                if os.map_index == owner_map {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: *sid,
+                        data: packet.clone(),
+                    }).await;
+                }
+            }
         }
     }
 
     /// #198：广播英雄对象移除（ObjectRemove）
     pub(crate) async fn broadcast_hero_remove(&self, owner_oid: u32) {
+        // #1381：按主人所在地图过滤（C# CurrentMap.Broadcast）；主人离线时回退全广播
+        let owner_map = {
+            let mut found = None;
+            for rec in self.players.values() {
+                if rec.object_id == owner_oid {
+                    if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                        found = Some(s.map_index);
+                    }
+                    break;
+                }
+            }
+            found
+        };
         let hero_oid = owner_oid.wrapping_add(HERO_OID_OFFSET);
         let mut body = Vec::new();
         body.extend_from_slice(&hero_oid.to_le_bytes());
         let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectRemove as i16, &body);
-        for sid in self.players.keys() {
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: *sid,
-                data: packet.clone(),
-            }).await;
+        for (sid, other) in &self.players {
+            match owner_map {
+                Some(map) => {
+                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                        if os.map_index == map {
+                            let _ = self.gate_ref.tell(SendToClient {
+                                session_id: *sid,
+                                data: packet.clone(),
+                            }).await;
+                        }
+                    }
+                }
+                None => {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: *sid,
+                        data: packet.clone(),
+                    }).await;
+                }
+            }
         }
     }
 }
