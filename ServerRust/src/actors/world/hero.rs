@@ -1690,8 +1690,8 @@ impl WorldActor {
         // 3c. 应用弹道法术（法师/道士/弓箭手）：直接 push 到 pending_spell_completions
         //     由 tick_spell_completions 在后续 tick 结算（复用现有弹道管线）
         for (session_id, spell, target_oid, tx, ty, damage, fire_at_tick, level) in &spell_intents {
-            // 广播 ObjectAttack 作为弹道发射动画
-            broadcast_hero_attack(self, *session_id, *spell).await;
+            // #1206：广播 S.ObjectMagic（C# Magic → 客户端渲染弹道特效）
+            broadcast_hero_magic(self, *session_id, *spell, *target_oid, *tx, *ty, *level).await;
             // #1184/#1196：英雄弹道用英雄自身（含增益）属性结算（LightBody 命中/MagicBooster MC 等生效）
             let hero_snap = snapshots.iter().find(|s| s.session_id == *session_id);
             let (buffed_combat, buffed_stats) = if let Some(s) = hero_snap {
@@ -1832,7 +1832,9 @@ impl WorldActor {
         }
 
         // 3f. 应用法师英雄 AoE（#1200/#1204：C# FireBang/IceStorm 3x3、FlameField/ThunderStorm 5x5，MAC）
-        for (session_id, spell, _target_oid, tx, ty, raw, _level, radius) in &aoe_intents {
+        for (session_id, spell, target_oid, tx, ty, raw, level, radius) in &aoe_intents {
+            // #1206：广播 S.ObjectMagic（AoE 施放动画，目标位置）
+            broadcast_hero_magic(self, *session_id, *spell, *target_oid, *tx, *ty, *level).await;
             // 用 buff 后英雄属性结算（命中/暴击）
             let hero_snap = snapshots.iter().find(|s| s.session_id == *session_id);
             let attacker_stats = if let Some(s) = hero_snap {
@@ -2470,6 +2472,57 @@ async fn broadcast_hero_attack(
         let _ = world.gate_ref.tell(SendToClient {
             session_id: *sid,
             data: attack_packet.clone(),
+        }).await;
+    }
+}
+
+/// 广播英雄施法动画（#1206：C# Magic → S.ObjectMagic，客户端据此渲染弹道/AoE 特效）
+async fn broadcast_hero_magic(
+    world: &WorldActor,
+    session_id: u64,
+    spell: u8,
+    target_id: u32,
+    target_x: i32,
+    target_y: i32,
+    level: u8,
+) {
+    let ai = match world.hero_ai_states.get(&session_id) {
+        Some(a) => a.clone(),
+        None => return,
+    };
+    let owner_oid = match world.players.get(&session_id).map(|r| r.object_id) {
+        Some(oid) => oid,
+        None => return,
+    };
+    let hero_oid = owner_oid.wrapping_add(HERO_OID_OFFSET);
+    let object_magic = mir2_shared::packets::server::magic_combat::ObjectMagic {
+        object_id: hero_oid,
+        location_x: ai.x,
+        location_y: ai.y,
+        direction: mir2_shared::enums::MirDirection::try_from(ai.direction)
+            .unwrap_or(mir2_shared::enums::MirDirection::Up),
+        spell: mir2_shared::enums::Spell::try_from(spell)
+            .unwrap_or(mir2_shared::enums::Spell::None),
+        target_id,
+        target_x,
+        target_y,
+        cast: true,
+        level,
+        self_broadcast: false,
+        secondary_target_ids: Vec::new(),
+    };
+    let mut body = Vec::new();
+    if object_magic.write_body(&mut body).is_err() {
+        return;
+    }
+    let packet = build_packet_bytes(
+        mir2_shared::enums::ServerPacketIds::ObjectMagic as i16,
+        &body,
+    );
+    for sid in world.players.keys() {
+        let _ = world.gate_ref.tell(SendToClient {
+            session_id: *sid,
+            data: packet.clone(),
         }).await;
     }
 }
