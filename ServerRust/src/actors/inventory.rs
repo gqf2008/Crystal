@@ -232,6 +232,71 @@ pub fn equip_fishing_gear(
     Ok(())
 }
 
+/// 钓具耐久结果（#1313 子批3）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FishingGearDamageResult {
+    /// 无鱼竿或无该槽钓具
+    NoGear,
+    /// 耐久归零损坏并移除
+    Broken,
+    /// 正常扣耐久
+    Ok,
+}
+
+impl PlayerInventory {
+    /// 当前鱼竿（Weapon 装备槽）
+    pub fn fishing_rod(&self) -> Option<&UserItem> {
+        self.equipment.get(EquipmentSlot::Weapon as usize).and_then(|e| e.as_ref())
+    }
+
+    /// 鱼竿 Bait 槽鱼饵数量（C# GetBait）
+    pub fn fishing_bait_count(&self) -> u16 {
+        self.fishing_rod()
+            .and_then(|r| r.slots.get(2).and_then(|s| s.as_ref()))
+            .map(|b| b.count)
+            .unwrap_or(0)
+    }
+
+    /// 消耗鱼竿 Bait 槽鱼饵（C# ConsumeItem；数量归零移除）
+    pub fn fishing_consume_bait(&mut self, amount: u16) -> bool {
+        let Some(rod) = self.equipment.get_mut(EquipmentSlot::Weapon as usize).and_then(|e| e.as_mut()) else { return false };
+        if rod.slots.len() < 5 { rod.slots.resize(5, None); }
+        let Some(slot) = rod.slots.get_mut(2).and_then(|s| s.as_mut()) else { return false };
+        if slot.count < amount { return false; }
+        slot.count -= amount;
+        if slot.count == 0 { rod.slots[2] = None; }
+        true
+    }
+
+    /// 钓具耐久 -amount（C# DamagedFishingItem；归零损坏并移除）
+    pub fn fishing_gear_damage(&mut self, slot: usize, amount: u16) -> FishingGearDamageResult {
+        let Some(rod) = self.equipment.get_mut(EquipmentSlot::Weapon as usize).and_then(|e| e.as_mut()) else { return FishingGearDamageResult::NoGear };
+        if rod.slots.len() < 5 { rod.slots.resize(5, None); }
+        let dura = {
+            let s = rod.slots.get_mut(slot).and_then(|s| s.as_mut());
+            match s {
+                Some(s) => {
+                    if s.current_dura <= amount { 0 } else { s.current_dura -= amount; s.current_dura }
+                }
+                None => return FishingGearDamageResult::NoGear,
+            }
+        };
+        if dura == 0 {
+            rod.slots[slot] = None;
+            FishingGearDamageResult::Broken
+        } else {
+            FishingGearDamageResult::Ok
+        }
+    }
+
+    /// 鱼竿耐久 -amount（C# DamageItem(rod,1)）
+    pub fn fishing_rod_durability_loss(&mut self, amount: u16) {
+        if let Some(rod) = self.equipment.get_mut(EquipmentSlot::Weapon as usize).and_then(|e| e.as_mut()) {
+            rod.current_dura = rod.current_dura.saturating_sub(amount);
+        }
+    }
+}
+
 /// 钓具槽类型校验（C# FishingSlot：Hook=0 Float=1 Bait=2 Finder=3 Reel=4；SharedRust ItemType：Hook=31..Reel=35）
 /// gear_item_type=None（信息缺失）时不拦截；slot 非法返回 false
 pub fn fishing_slot_type_ok(slot: usize, gear_item_type: Option<mir2_shared::enums::ItemType>) -> bool {
@@ -1244,6 +1309,69 @@ mod tests {
         assert_eq!(equip_fishing_gear(&mut inv, 7001, 0, uid), Err("不是钓鱼竿"));
         inv.equipment[EquipmentSlot::Weapon as usize] = Some(rod_item(49));
         assert_eq!(equip_fishing_gear(&mut inv, 7001, 5, uid), Err("无效钓具槽"));
+    }
+
+    fn rod_with_gear(rod_dura: u16, slots: Vec<Option<UserItem>>) -> UserItem {
+        let mut r = make_item(9101, 1);
+        r.unique_id = 7001;
+        r.current_dura = rod_dura;
+        r.info = Some(mir2_shared::data::item::ItemInfo {
+            item_type: mir2_shared::enums::ItemType::Weapon,
+            shape: 49,
+            ..Default::default()
+        });
+        r.slots = slots;
+        r
+    }
+
+    fn gear_item(uid: u64, count: u16, dura: u16) -> UserItem {
+        let mut g = make_item(9102, count);
+        g.unique_id = uid;
+        g.current_dura = dura;
+        g.max_dura = dura;
+        g.info = Some(mir2_shared::data::item::ItemInfo {
+            item_type: mir2_shared::enums::ItemType::Hook,
+            ..Default::default()
+        });
+        g
+    }
+
+    #[test]
+    fn fishing_bait_consume() {
+        let mut inv = PlayerInventory::default();
+        inv.equipment[EquipmentSlot::Weapon as usize] = Some(rod_with_gear(
+            100,
+            vec![None, None, Some(gear_item(9001, 2, 10)), None, None],
+        ));
+        assert_eq!(inv.fishing_bait_count(), 2);
+        assert!(inv.fishing_consume_bait(1));
+        assert_eq!(inv.fishing_bait_count(), 1);
+        assert!(inv.fishing_consume_bait(1));
+        assert_eq!(inv.fishing_bait_count(), 0);
+        assert!(!inv.fishing_consume_bait(1));
+    }
+
+    #[test]
+    fn fishing_gear_durability() {
+        let mut inv = PlayerInventory::default();
+        inv.equipment[EquipmentSlot::Weapon as usize] = Some(rod_with_gear(
+            100,
+            vec![Some(gear_item(9001, 1, 5)), None, None, None, None],
+        ));
+        assert_eq!(inv.fishing_gear_damage(0, 1), FishingGearDamageResult::Ok);
+        assert_eq!(inv.fishing_gear_damage(0, 4), FishingGearDamageResult::Broken);
+        assert_eq!(inv.fishing_gear_damage(0, 1), FishingGearDamageResult::NoGear);
+        assert_eq!(inv.fishing_gear_damage(2, 1), FishingGearDamageResult::NoGear);
+    }
+
+    #[test]
+    fn fishing_rod_durability_loss() {
+        let mut inv = PlayerInventory::default();
+        inv.equipment[EquipmentSlot::Weapon as usize] = Some(rod_with_gear(2, vec![None, None, None, None, None]));
+        inv.fishing_rod_durability_loss(1);
+        assert_eq!(inv.fishing_rod().unwrap().current_dura, 1);
+        inv.fishing_rod_durability_loss(5);
+        assert_eq!(inv.fishing_rod().unwrap().current_dura, 0);
     }
 
 }

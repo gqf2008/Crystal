@@ -4407,6 +4407,62 @@ impl Message<EquipFishingGear> for PlayerActor {
     }
 }
 
+
+/// #1313：抛竿消耗鱼饵（C# ConsumeItem Bait）
+pub struct FishingConsumeBait {
+    pub amount: u16,
+}
+
+impl Message<FishingConsumeBait> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: FishingConsumeBait, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let ok = self.state.inventory.fishing_consume_bait(msg.amount);
+        if ok {
+            self.send_equipment_changed();
+        }
+        ok
+    }
+}
+
+/// #1313：钓具耐久 -amount（C# DamagedFishingItem）
+pub struct FishingGearDamageMsg {
+    pub slot: usize,
+    pub amount: u16,
+}
+
+impl Message<FishingGearDamageMsg> for PlayerActor {
+    type Reply = u8; // 0=无钓具 1=正常 2=损坏移除
+
+    async fn handle(&mut self, msg: FishingGearDamageMsg, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        use crate::actors::inventory::FishingGearDamageResult;{
+            let r = self.state.inventory.fishing_gear_damage(msg.slot, msg.amount);
+            if r != FishingGearDamageResult::NoGear {
+                self.send_equipment_changed();
+            }
+            match r {
+                FishingGearDamageResult::NoGear => 0,
+                FishingGearDamageResult::Ok => 1,
+                FishingGearDamageResult::Broken => 2,
+            }
+        }
+    }
+}
+
+/// #1313：鱼竿耐久 -amount（C# DamageItem(rod,1)）
+pub struct FishingRodDurability {
+    pub amount: u16,
+}
+
+impl Message<FishingRodDurability> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: FishingRodDurability, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.inventory.fishing_rod_durability_loss(msg.amount);
+        self.send_equipment_changed();
+    }
+}
+
 const GRID_STORAGE: u8 = 4;
 
 impl Message<RemoveSlotItemMsg> for PlayerActor {

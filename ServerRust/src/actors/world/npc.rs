@@ -1535,6 +1535,18 @@ impl Message<FishingCastRequest> for WorldActor {
             + (success_counter as i32) * self.fishing_cfg.success_multiplier)
             .clamp(0, 100);
 
+        // #1313：抛竿消耗鱼竿 Bait 槽 1 个鱼饵（C# GetBait/ConsumeItem；无饵不能抛竿）
+        if !record.actor_ref.ask(crate::actors::player::FishingConsumeBait { amount: 1 }).await.unwrap_or(false) {
+            send_system_message(&self.gate_ref, msg.session_id, "你需要鱼饵（放在鱼竿鱼饵槽）");
+            return;
+        }
+        // C#：抛竿鱼竿耐久 -1、鱼钩耐久 -1；有失败计数时探鱼器耐久 -1
+        let _ = record.actor_ref.ask(crate::actors::player::FishingRodDurability { amount: 1 }).await;
+        let _ = record.actor_ref.ask(crate::actors::player::FishingGearDamageMsg { slot: 0, amount: 1 }).await;
+        if success_counter != 0 {
+            let _ = record.actor_ref.ask(crate::actors::player::FishingGearDamageMsg { slot: 3, amount: 1 }).await;
+        }
+
         self.fishing_sessions.insert(
             msg.session_id,
             FishingSession {
