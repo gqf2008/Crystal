@@ -254,7 +254,7 @@ pub enum ServerEvent {
     /// FriendUpdate：好友列表增量（列表或单个）
     FriendUpdated { entries: Vec<FriendEntry> },
     /// Rankings：排行榜
-    Rankings { entries: Vec<RankEntry> },
+    Rankings { entries: Vec<RankEntry>, my_rank: i32 },
     /// GuildNoticeChange：行会公告更新
     GuildNotice { notice: Vec<String> },
     /// ChangeQuest：任务进度更新（C# 语义：仅更新，移除由 CompleteQuest 负责）

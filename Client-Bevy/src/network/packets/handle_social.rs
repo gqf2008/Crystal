@@ -171,7 +171,12 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
             let mut cur = std::io::Cursor::new(body);
             let _rank_type = cur.read_u8().unwrap_or(0);
             let mut my_rank_buf = [0u8; 4];
-            if std::io::Read::read_exact(&mut cur, &mut my_rank_buf).is_err() {
+            let my_rank = if std::io::Read::read_exact(&mut cur, &mut my_rank_buf).is_ok() {
+                i32::from_le_bytes(my_rank_buf)
+            } else {
+                -1
+            };
+            if my_rank < 0 {
                 server_events.write(ServerEvent::RankingsCleared);
                 tracing::warn!("⚠️ Rankings 解析失败: (len={})", payload.len());
             } else {
@@ -205,7 +210,7 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
                 }
                 if ok {
                     let count = entries.len();
-                    server_events.write(ServerEvent::Rankings { entries });
+                    server_events.write(ServerEvent::Rankings { entries, my_rank });
                     tracing::info!("🏅 排行榜: {} 条", count);
                 } else {
                     tracing::warn!("⚠️ Rankings 解析失败: (len={})", payload.len());
