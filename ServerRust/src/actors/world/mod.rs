@@ -1913,6 +1913,16 @@ impl WorldActor {
         }
         // 补 ItemInfo（ObjectItem 携带 info 供客户端渲染名称/图标，与 M16 玩家丢弃路径一致）
         enrich_item_info(&mut item, &self.item_infos);
+        // #1274：C# MonsterObject.DropItem——GlobalDropNotify 稀有掉落全服公告（System2）
+        if item.info.as_ref().map(|i| i.global_drop_notify).unwrap_or(false) {
+            let item_name = item.info.as_ref().map(|i| i.name.clone()).unwrap_or_default();
+            broadcast_chat(
+                &self.gate_ref,
+                &self.players,
+                &format!("{} 掉落了 {}", monster.name, item_name),
+                mir2_shared::enums::ChatType::System2,
+            );
+        }
         // C#：掉落散落（Settings.DropRange）
         let (dx, dy) = scatter_drop_position(self.maps.get(&monster.map_index), monster.x, monster.y, 4);
         let object_item = mir2_shared::packets::server::ObjectItem {
@@ -5042,22 +5052,43 @@ fn send_item_via_mail(
 }
 
 /// 向所有在线玩家广播系统消息
-fn broadcast_system_message(gate_ref: &ActorRef<GateActor>, players: &HashMap<u64, PlayerRecord>, message: &str) {
+/// #1274：向全部在线玩家广播指定类型聊天（C# ChatType：System=5 / System2=14）
+fn broadcast_chat(
+    gate_ref: &ActorRef<GateActor>,
+    players: &HashMap<u64, PlayerRecord>,
+    message: &str,
+    chat_type: mir2_shared::enums::ChatType,
+) {
     use mir2_shared::enums::ServerPacketIds;
     let mut body = Vec::new();
     crate::util::wire::write_dotnet_string(&mut body, message);
-    body.push(mir2_shared::enums::ChatType::System as u8);
+    body.push(chat_type as u8);
     let packet = build_packet_bytes(ServerPacketIds::Chat as i16, &body);
     let gate_ref = gate_ref.clone();
     let session_ids: Vec<u64> = players.keys().copied().collect();
     tokio::spawn(async move {
         for session_id in session_ids {
-            let _ = gate_ref.tell(SendToClient {
-                session_id,
-                data: packet.clone(),
-            }).await;
+            let _ = gate_ref
+                .tell(SendToClient {
+                    session_id,
+                    data: packet.clone(),
+                })
+                .await;
         }
     });
+}
+
+fn broadcast_system_message(
+    gate_ref: &ActorRef<GateActor>,
+    players: &HashMap<u64, PlayerRecord>,
+    message: &str,
+) {
+    broadcast_chat(
+        gate_ref,
+        players,
+        message,
+        mir2_shared::enums::ChatType::System,
+    );
 }
 
 /// 从 DB 任务配置创建任务实例
