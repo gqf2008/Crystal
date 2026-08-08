@@ -1387,6 +1387,18 @@ mod tests {
     }
 
     #[test]
+    fn roundtrip_update_intelligent_creature() -> SharedResult<()> {
+        roundtrip(&client::UpdateIntelligentCreature {
+            creature_type: 2,
+            pet_mode: 1,
+            custom_name: "小粉猪".to_string(),
+            summon_me: true,
+            unsummon_me: false,
+            release_me: false,
+        })
+    }
+
+    #[test]
     fn roundtrip_observe() -> SharedResult<()> {
         roundtrip(&client::Observe {
             name: "Observer".to_string(),

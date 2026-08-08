@@ -561,10 +561,14 @@ impl Packet for RequestIntelligentCreatureUpdates {
     }
 }
 
-/// Update intelligent creature (note: Contains complex nested type)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Update intelligent creature（简化 wire：[type u8][pet_mode u8][custom_name dotnet][summon u8][unsummon u8][release u8]）
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateIntelligentCreature {
-    // Simplified - full implementation would need ClientIntelligentCreature struct
+    pub creature_type: u8,
+    /// 拾取模式（C# IntelligentCreaturePickupMode：0=自动 1=半自动）
+    pub pet_mode: u8,
+    /// 自定义名称（改名时携带）
+    pub custom_name: String,
     pub summon_me: bool,
     pub unsummon_me: bool,
     pub release_me: bool,
@@ -574,11 +578,16 @@ impl Packet for UpdateIntelligentCreature {
     const OPCODE: i16 = ClientPacketIds::UpdateIntelligentCreature as i16;
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        // Skip creature data for now (would need full ClientIntelligentCreature impl)
+        let creature_type = reader.read_u8()?;
+        let pet_mode = reader.read_u8()?;
+        let custom_name = read_dotnet_string(reader)?;
         let summon_me = reader.read_u8()? != 0;
         let unsummon_me = reader.read_u8()? != 0;
         let release_me = reader.read_u8()? != 0;
         Ok(Self {
+            creature_type,
+            pet_mode,
+            custom_name,
             summon_me,
             unsummon_me,
             release_me,
@@ -586,7 +595,9 @@ impl Packet for UpdateIntelligentCreature {
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
-        // Skip creature data
+        writer.write_u8(self.creature_type)?;
+        writer.write_u8(self.pet_mode)?;
+        write_dotnet_string(writer, &self.custom_name)?;
         writer.write_u8(if self.summon_me { 1 } else { 0 })?;
         writer.write_u8(if self.unsummon_me { 1 } else { 0 })?;
         writer.write_u8(if self.release_me { 1 } else { 0 })?;

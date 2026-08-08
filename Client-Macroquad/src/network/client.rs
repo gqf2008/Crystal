@@ -1566,6 +1566,9 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         // ===== 智能宠物 =====
         NetworkEvent::UpdateIntelligentCreatureRequest => {
             let packet = client::UpdateIntelligentCreature {
+                creature_type: 0,
+                pet_mode: 0,
+                custom_name: String::new(),
                 summon_me: false,
                 unsummon_me: false,
                 release_me: false,
