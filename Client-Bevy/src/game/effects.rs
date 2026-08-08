@@ -109,6 +109,7 @@ fn spawn_pending_effects(
     mut commands: Commands,
     mut state: ResMut<EffectsState>,
     mut effects: MessageReader<PendingEffect>,
+    opt: Res<crate::game::dialogs::option::OptionState>,
     mut images: ResMut<Assets<Image>>,
     actors: Query<(&NetObjectId, &Transform)>,
     players: Query<&Transform, (With<LocalPlayer>, With<NetObjectId>)>,
@@ -123,6 +124,10 @@ fn spawn_pending_effects(
         .map(|tf| Vec2::new(tf.translation.x, tf.translation.y))
         .unwrap_or_default();
     for e in pending {
+        // C# OptionDialog Effect 开关：关闭时不生成特效
+        if !opt.effect {
+            continue;
+        }
         state.spawned += 1;
         match e {
             PendingEffect::Projectile { target_id, color } => {
@@ -254,3 +259,4 @@ fn advance_bursts(
         }
     }
 }
+
