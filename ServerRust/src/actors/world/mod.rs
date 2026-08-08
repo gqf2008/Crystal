@@ -1881,7 +1881,8 @@ impl WorldActor {
                 x: monster.x,
                 y: monster.y,
                 map_index: monster.map_index,
-                dropper_session: None,
+                // #1262：C# MonsterObject.DropItem——金币掉落绑定击杀者（Owner=EXPOwner，60s）
+                dropper_session: monster.last_hitter_session,
                 drop_tick: self.tick_count,
                 death_drop: false,
             });
@@ -1934,7 +1935,8 @@ impl WorldActor {
             x: dx,
             y: dy,
             map_index: monster.map_index,
-            dropper_session: None,
+            // #1262：C# MonsterObject.DropItem——物品掉落绑定击杀者（Owner=EXPOwner，60s）
+            dropper_session: monster.last_hitter_session,
             drop_tick: self.tick_count,
             death_drop: false,
         });
@@ -2360,7 +2362,17 @@ impl WorldActor {
             for sid in self.players.keys() {
                 let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: buf.clone() }).await;
             }
-            self.ground_items.push(GroundItem { object_id: drop_oid, item, x: drop_x, y: drop_y, map_index, dropper_session: Some(session_id), drop_tick: self.tick_count, death_drop: true });
+            // #1262：C# DeathDrop -> DropItem(item, deathDrop:true) 不设 Owner（仅延长 ExpireTime）→ 自由拾取
+            self.ground_items.push(GroundItem {
+                object_id: drop_oid,
+                item,
+                x: drop_x,
+                y: drop_y,
+                map_index,
+                dropper_session: None,
+                drop_tick: self.tick_count,
+                death_drop: true,
+            });
         }
     }
 

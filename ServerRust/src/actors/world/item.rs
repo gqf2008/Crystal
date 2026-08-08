@@ -213,6 +213,27 @@ pub struct DisassembleItemRequest {
     pub unique_id: u64,
 }
 
+/// #1262：C# Settings.Minute = 60*1000ms；Rust tick=100ms → 60s = 600 ticks
+const DROP_OWNERSHIP_TICKS: u64 = 600;
+
+/// #1262：C# PickUp 掉落归属保护——
+/// 无主（dropper=None）任意拾取；保护期内仅掉落者/同组队员可拾取；过期后任意拾取
+fn can_pick_drop(
+    now_tick: u64,
+    drop_tick: u64,
+    ownership_ticks: u64,
+    dropper: Option<u64>,
+    picker: u64,
+    dropper_group: Option<u64>,
+    picker_group: Option<u64>,
+) -> bool {
+    let Some(dropper) = dropper else { return true };
+    if now_tick >= drop_tick + ownership_ticks || dropper == picker {
+        return true;
+    }
+    dropper_group.is_some() && dropper_group == picker_group
+}
+
 impl Message<PickUpRequest> for WorldActor {
     type Reply = ();
 
@@ -230,7 +251,6 @@ impl Message<PickUpRequest> for WorldActor {
         let player_pos = (state.x, state.y);
 
         // 查找附近可拾取的物品（1 格内，同地图）
-        const OWNERSHIP_TICKS: u64 = 300; // ~30 秒保护期
         // 预取在线玩家组号（C# IsGroupMember：保护期内同组队员可拾取掉落者的物品）
         let mut player_groups: std::collections::HashMap<u64, Option<u64>> = std::collections::HashMap::new();
         for (sid, rec) in &self.players {
@@ -243,18 +263,18 @@ impl Message<PickUpRequest> for WorldActor {
             if gi.map_index != state.map_index { return false; }
             if (gi.x - player_pos.0).abs() > 1 { return false; }
             if (gi.y - player_pos.1).abs() > 1 { return false; }
-            // 所有权保护：保护期内只有掉落者可拾取（C# PickUp：同组队员也可拾取）
-            if let Some(dropper) = gi.dropper_session {
-                if self.tick_count < gi.drop_tick + OWNERSHIP_TICKS && dropper != msg.session_id {
-                    // C# IsGroupMember(owner)：掉落者为同组队员时允许拾取
-                    let group_ok = match (player_groups.get(&dropper).copied().flatten(), picker_group) {
-                        (Some(dg), Some(pg)) => dg == pg,
-                        _ => false,
-                    };
-                    if !group_ok {
-                        return false;
-                    }
-                }
+            // #1262：C# PickUp 所有权保护（Owner=EXPOwner 60s / 同组可拾取 / 过期任意）
+            if !can_pick_drop(
+                self.tick_count,
+                gi.drop_tick,
+                DROP_OWNERSHIP_TICKS,
+                gi.dropper_session,
+                msg.session_id,
+                gi.dropper_session
+                    .and_then(|d| player_groups.get(&d).copied().flatten()),
+                picker_group,
+            ) {
+                return false;
             }
             true
         });
@@ -1673,13 +1693,14 @@ impl Message<DropItemRequest> for WorldActor {
             }
 
             // 添加到地面物品
+            // #1262：C# DropItem 不设 Owner → 自由拾取（对齐）
             self.ground_items.push(GroundItem {
                 object_id: drop_oid,
                 item: item.clone(),
                 x: player_pos.0,
                 y: player_pos.1,
                 map_index: state.map_index,
-                dropper_session: Some(msg.session_id),
+                dropper_session: None,
                 drop_tick: self.tick_count,
                 death_drop: false,
             });
@@ -1806,13 +1827,14 @@ impl Message<DropGoldRequest> for WorldActor {
                 count: amount as u16,
                 ..Default::default()
             };
+            // #1262：C# DropItem 不设 Owner → 自由拾取（对齐）
             self.ground_items.push(GroundItem {
                 object_id: drop_oid,
                 item: gold_item,
                 x: player_pos.0,
                 y: player_pos.1,
                 map_index: state.map_index,
-                dropper_session: Some(msg.session_id),
+                dropper_session: None,
                 drop_tick: self.tick_count,
                 death_drop: false,
             });
@@ -2740,6 +2762,7 @@ impl Message<DisassembleItemRequest> for WorldActor {
                 for sid in self.players.keys() {
                     let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: buf.clone() }).await;
                 }
+                // #1262：C# DropItem 不设 Owner → 自由拾取（对齐）
                 self.ground_items.push(GroundItem {
                     object_id: drop_oid,
                     item: mir2_shared::data::item::UserItem {
@@ -2750,7 +2773,7 @@ impl Message<DisassembleItemRequest> for WorldActor {
                     x: state.x,
                     y: state.y,
                     map_index: state.map_index,
-                    dropper_session: Some(msg.session_id),
+                    dropper_session: None,
                     drop_tick: self.tick_count,
                     death_drop: false,
                 });
@@ -2764,7 +2787,89 @@ impl Message<DisassembleItemRequest> for WorldActor {
 
 #[cfg(test)]
 mod tests {
-    use super::{can_equip_by_weight, npc_in_range, NpcState};
+    use super::{can_equip_by_weight, can_pick_drop, npc_in_range, NpcState, DROP_OWNERSHIP_TICKS};
+
+    #[test]
+    fn test_can_pick_drop_ownership() {
+        // #1262：C# PickUp 归属保护——无主任意拾取 / 保护期仅击杀者+同组 / 过期任意
+        // 无主：任意可拾取
+        assert!(can_pick_drop(
+            100,
+            0,
+            DROP_OWNERSHIP_TICKS,
+            None,
+            5,
+            None,
+            None
+        ));
+        // 保护期内：仅掉落者可拾取
+        assert!(can_pick_drop(
+            100,
+            0,
+            DROP_OWNERSHIP_TICKS,
+            Some(1),
+            1,
+            None,
+            None
+        ));
+        assert!(!can_pick_drop(
+            100,
+            0,
+            DROP_OWNERSHIP_TICKS,
+            Some(1),
+            2,
+            None,
+            None
+        ));
+        // 同组队员可拾取
+        assert!(can_pick_drop(
+            100,
+            0,
+            DROP_OWNERSHIP_TICKS,
+            Some(1),
+            2,
+            Some(7),
+            Some(7)
+        ));
+        assert!(!can_pick_drop(
+            100,
+            0,
+            DROP_OWNERSHIP_TICKS,
+            Some(1),
+            2,
+            Some(7),
+            Some(8)
+        ));
+        // 掉落者无组、拾取者有组：不可拾取（C# IsGroupMember(owner)）
+        assert!(!can_pick_drop(
+            100,
+            0,
+            DROP_OWNERSHIP_TICKS,
+            Some(1),
+            2,
+            None,
+            Some(7)
+        ));
+        // 过期后（>= drop_tick + 60s）任意拾取
+        assert!(can_pick_drop(
+            600,
+            0,
+            DROP_OWNERSHIP_TICKS,
+            Some(1),
+            2,
+            None,
+            None
+        ));
+        assert!(can_pick_drop(
+            601,
+            0,
+            DROP_OWNERSHIP_TICKS,
+            Some(1),
+            2,
+            None,
+            None
+        ));
+    }
     use crate::actors::inventory::{EquipmentSlot, PlayerInventory};
     use mir2_shared::enums::MirClass;
 
