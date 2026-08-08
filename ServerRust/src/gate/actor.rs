@@ -2990,10 +2990,11 @@ fn forward_consign_item(
 
 /// MarketSearch: [keyword: DotNetString]
 fn forward_market_search(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    let item_index = if payload.len() >= 4 { u32::from_le_bytes(payload[0..4].try_into().unwrap_or([0; 4])) } else { 0 };
-    debug!("MarketSearch: session={} item={}", session_id, item_index);
+    use mir2_shared::binary::read_dotnet_string;
+    let keyword = read_dotnet_string(&mut std::io::Cursor::new(payload)).unwrap_or_default();
+    debug!("MarketSearch: session={} kw={}", session_id, keyword);
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::MarketSearchRequest { session_id, item_index }).try_send();
+    let _ = world_ref.tell(crate::actors::world::MarketSearchRequest { session_id, keyword }).try_send();
 }
 
 /// MarketRefresh: []

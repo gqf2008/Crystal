@@ -435,12 +435,12 @@ fn market_ui_system(
             tracing::info!("🏪 刷新市场");
         }
     }
-    // 搜索（item_index）
+    // 搜索（C# TrustMerchantDialog FindButton → MarketSearch{Match}，名称子串；纯数字兼容编号）
     for btn in &search_btn {
         if btn.clicked {
-            let idx = input.texts.get(5).cloned().unwrap_or_default().trim().parse::<u32>().unwrap_or(0);
-            net.send_packet(&crate::network::MarketSearchWire { item_index: idx });
-            tracing::info!("🏪 搜索物品 #{}", idx);
+            let kw = input.texts.get(5).cloned().unwrap_or_default().trim().to_string();
+            net.send_packet(&crate::network::MarketSearchWire { keyword: kw.clone() });
+            tracing::info!("🏪 搜索市场: {}", kw);
             input.texts[5].clear();
             input.active = None;
         }
