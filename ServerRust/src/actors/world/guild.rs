@@ -240,6 +240,14 @@ impl Message<GuildWarReturnRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "目标行会不存在");
             return;
         }
+        // C# GuildObject.GoToWar / PlayerObject.GuildWarReturn：不能向新手行会宣战（Settings.NewbieGuild）
+        let (newbie_guild, _, _) = self.social_ref
+            .ask(crate::actors::social::NpcGetNewbieGuildConfig).await
+            .unwrap_or(("NewbieGuild".to_string(), true, 5i32));
+        if msg.guild_name.eq_ignore_ascii_case(&newbie_guild) {
+            send_system_message(&self.gate_ref, msg.session_id, "不能向新手行会宣战");
+            return;
+        }
         // C#：已在战争中不可重复宣战
         if self.guild_wars.get(sender_guild)
             .map(|s| s.contains(&msg.guild_name))
@@ -261,6 +269,9 @@ impl Message<GuildWarReturnRequest> for WorldActor {
                 &format!("行会金币不足，宣战需要 {} 金币", war_cost));
             return;
         }
+
+        // C#：扣费成功后 MyGuild.SendServerPacket(GuildStorageGoldChange{Type=2, Name=宣战者, Amount=费用})
+        self.send_guild_storage_gold_change_to_guild(sender_guild, &state.name, war_cost, 2).await;
 
         // Record the war declaration
         self.guild_wars.entry(sender_guild.clone()).or_default().insert(msg.guild_name.clone());
@@ -292,6 +303,9 @@ impl Message<GuildWarReturnRequest> for WorldActor {
                 }
             }
         }
+
+        // C# GoToWar：双方 UpdatePlayersColours（在线成员即时刷新名字颜色）
+        self.refresh_guild_war_colours(sender_guild, &msg.guild_name).await;
 
         // Send GuildRequestWar packet back to the declarer
         use mir2_shared::packets::server::miscellaneous::GuildRequestWar;
@@ -368,6 +382,44 @@ impl Message<GuildBuffUpdateRequest> for WorldActor {
 }
 
 impl WorldActor {
+    /// #1340：向行会全体在线成员广播行会仓库金币变更（C# GuildObject.SendServerPacket；
+    /// wire 对齐 C# S.GuildStorageGoldChange：[Amount u32][Type u8][Name dotnet]）
+    pub(crate) async fn send_guild_storage_gold_change_to_guild(
+        &self,
+        guild_name: &str,
+        actor_name: &str,
+        amount: u32,
+        change_type: u8,
+    ) {
+        let data = build_packet_bytes(
+            mir2_shared::enums::ServerPacketIds::GuildStorageGoldChange as i16,
+            &guild_storage_gold_change_body(amount, change_type, actor_name),
+        );
+        for (sid, rec) in &self.players {
+            if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                if s.guild_name.as_deref() == Some(guild_name) {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: *sid,
+                        data: data.clone(),
+                    }).await;
+                }
+            }
+        }
+    }
+
+    /// #1340：宣战/停战时对双方在线成员即时刷新名字颜色（C# UpdatePlayersColours：
+    /// 给双方成员 Enqueue ColourChanged + BroadcastInfo）
+    pub(crate) async fn refresh_guild_war_colours(&mut self, guild_a: &str, guild_b: &str) {
+        let members: Vec<u64> = self.players.keys().copied().collect();
+        for sid in members {
+            let Some(rec) = self.players.get(&sid).cloned() else { continue };
+            let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await else { continue };
+            if s.guild_name.as_deref() == Some(guild_a) || s.guild_name.as_deref() == Some(guild_b) {
+                self.broadcast_viewer_colours(sid).await;
+            }
+        }
+    }
+
     /// 读取行会激活的 Buff 列表
     async fn guild_buffs(&self, guild_name: &str) -> Vec<u32> {
         self.social_ref.ask(crate::actors::social::NpcGetGuildBuffs { guild_name: guild_name.to_string() }).await.unwrap_or_default()
@@ -472,6 +524,16 @@ impl Message<PurchaseGuildTerritoryRequest> for WorldActor {
     }
 }
 
+/// #1340：构建 GuildStorageGoldChange body（wire 对齐 C# ServerPackets.cs:4628：
+/// [Amount u32][Type u8][Name dotnet string]）
+fn guild_storage_gold_change_body(amount: u32, change_type: u8, name: &str) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(&amount.to_le_bytes());
+    body.push(change_type);
+    crate::util::wire::write_dotnet_string(&mut body, name);
+    body
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -481,5 +543,22 @@ mod tests {
         assert_eq!(war_key("A", "B"), ("A".to_string(), "B".to_string()));
         assert_eq!(war_key("B", "A"), ("A".to_string(), "B".to_string()));
         assert_eq!(war_key("A", "A"), ("A".to_string(), "A".to_string()));
+    }
+
+    #[test]
+    fn guild_storage_gold_change_body_matches_csharp_wire() {
+        // #1340：3000 = 0x00000BB8 LE；Type=2；dotnet string "Boss" = 4 + UTF8
+        let body = guild_storage_gold_change_body(3000, 2, "Boss");
+        assert_eq!(&body[0..4], &[0xB8, 0x0B, 0x00, 0x00]);
+        assert_eq!(body[4], 2);
+        assert_eq!(body[5], 4); // dotnet string length
+        assert_eq!(&body[6..], b"Boss");
+    }
+
+    #[test]
+    fn guild_storage_gold_change_body_empty_name() {
+        let body = guild_storage_gold_change_body(0, 1, "");
+        assert_eq!(body[4], 1);
+        assert_eq!(body[5], 0);
     }
 }
