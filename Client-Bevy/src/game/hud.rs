@@ -816,7 +816,7 @@ fn hud_server_events(
             | ServerEvent::CreatureList { .. }
             | ServerEvent::HeroChanged { .. }
             | ServerEvent::MarriageInvite { .. }
-            | ServerEvent::MarriageStatus { .. }
+            | ServerEvent::LoverUpdate { .. }
             | ServerEvent::DivorceRequest
             | ServerEvent::RentalRequestReceived
             | ServerEvent::RentalItemUpdate { .. }

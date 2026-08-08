@@ -4,7 +4,7 @@
 // 网络：
 //   C: MarriageRequest[target dotnet] / MarriageReply[bool] / ChangeMarriage(空)
 //      DivorceRequest[partner dotnet] / DivorceReply[bool]
-//   S: MarriageRequest[lover dotnet] / LoverUpdate[married u8] / DivorceRequest[lover dotnet]
+//   S: MarriageRequest[lover dotnet] / LoverUpdate[Name dotnet][Date i64][MapName dotnet][MarriedDays i16] / DivorceRequest[lover dotnet]
 // ============================================================================
 
 use bevy::prelude::*;
@@ -22,6 +22,14 @@ use crate::ui::sprite_ui::{
 #[derive(Resource, Default)]
 pub struct RelationshipState {
     pub married: bool,
+    /// 配偶名（#1329：LoverUpdate 全量）
+    pub lover_name: String,
+    /// 结婚日期（unix 秒）
+    pub date: i64,
+    /// 配偶当前地图标题
+    pub map_name: String,
+    /// 结婚天数
+    pub married_days: i16,
     /// 收到结婚邀请（对方名字）
     pub invite: Option<String>,
     pub message: String,
@@ -247,9 +255,21 @@ fn relationship_ui_system(
     for (mut text, line) in &mut lines {
         text.0 = match line.0 {
             0 => "关系（婚姻）".to_string(),
-            1 => format!("婚姻状态: {}", if state.married { "已婚" } else { "未婚" }),
+            1 => {
+                if state.married {
+                    format!("婚姻状态: 已婚（{}，{} 天）", state.lover_name, state.married_days)
+                } else {
+                    "婚姻状态: 未婚".to_string()
+                }
+            }
             2 => state.message.clone(),
-            3 => "输入目标名 → 求婚；已婚可离婚".to_string(),
+            3 => {
+                if state.married {
+                    format!("配偶位置: {}", if state.map_name.is_empty() { "未知" } else { state.map_name.as_str() })
+                } else {
+                    "输入目标名 → 求婚；已婚可离婚".to_string()
+                }
+            }
             _ => String::new(),
         };
     }
@@ -339,10 +359,14 @@ fn relationship_server_events(
                 relationship.invite = Some(name.clone());
                 relationship.message = format!("收到 {} 的求婚", name);
             }
-            ServerEvent::MarriageStatus { married } => {
-                relationship.married = *married;
-                relationship.message = if *married {
-                    "婚姻关系已建立！".to_string()
+            ServerEvent::LoverUpdate { lover_name, date, map_name, married_days } => {
+                relationship.lover_name = lover_name.clone();
+                relationship.date = *date;
+                relationship.map_name = map_name.clone();
+                relationship.married_days = *married_days;
+                relationship.married = !lover_name.is_empty();
+                relationship.message = if relationship.married {
+                    format!("婚姻关系已建立：{}（结婚 {} 天）", lover_name, married_days)
                 } else {
                     "婚姻关系已解除".to_string()
                 };

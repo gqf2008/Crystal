@@ -57,6 +57,7 @@ $CaseRequired = @{
     "mail"          = @{ A = @(); B = @('\[MAILREAD\] ✅ 已读取邮件') }
     "trade"         = @{ A = @('\[TRADETEST\] ✅ 交易窗口已打开'); B = @('\[TRADEACCEPT\] ✅ 接受邀请') }
     "friend"        = @{ A = @('\[FRIENDTEST\] ✅ 好友列表包含'); B = @() }
+    "marriage"      = @{ A = @('\[MARRY\] ✅ 离婚成功'); B = @('\[MARRYACC\] ✅ 离婚完成') }
 }
 
 function Test-Marks {
@@ -166,6 +167,7 @@ Invoke-PairCase "whisper" "--whisper-send" "--whisper-check"
 Invoke-PairCase "mail"    "--mail-test"    "--mail-read"
 Invoke-PairCase "trade"   "--trade-test"   "--trade-accept"
 Invoke-PairCase "friend"  "--friend-test"  ""
+Invoke-PairCase "marriage" "--marriage-test" "--marriage-accept"
 
 # 4) 服务端存活检查
 $alive = Get-Process -Id $srv.Id -ErrorAction SilentlyContinue
