@@ -693,6 +693,7 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
                 );
                 server_events.write(ServerEvent::MemberLocation {
                     name: p.member_name,
+                    map_index: p.map_index,
                     x: p.location.x,
                     y: p.location.y,
                 });

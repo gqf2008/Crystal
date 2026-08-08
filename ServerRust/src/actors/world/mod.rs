@@ -5686,6 +5686,62 @@ fn send_creature_list_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, lo
     }).try_send();
 }
 
+/// 下发队友位置（C# S.SendMemberLocation：[name dotnet][map_index u16][x i32][y i32]，#1309）
+fn send_member_location_packet(
+    gate_ref: &ActorRef<GateActor>,
+    session_id: u64,
+    name: &str,
+    map_index: u16,
+    x: i32,
+    y: i32,
+) {
+    let mut body = Vec::new();
+    write_dotnet_string(&mut body, name);
+    body.extend_from_slice(&map_index.to_le_bytes());
+    body.extend_from_slice(&x.to_le_bytes());
+    body.extend_from_slice(&y.to_le_bytes());
+    let _ = gate_ref.tell(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::SendMemberLocation as i16, &body),
+    }).try_send();
+}
+
+/// 组队位置周期广播（C# Group.SendLocations：每 5s 向队员下发其他成员位置+地图，#1309）
+async fn broadcast_group_locations(world: &mut WorldActor) {
+    // 收集 (session, name, group_id, map_index, x, y)
+    let mut members: Vec<(u64, String, Option<u64>, u16, i32, i32)> = Vec::new();
+    for (session_id, record) in &world.players {
+        if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+            if state.group_id.is_some() && !state.is_dead {
+                members.push((
+                    *session_id,
+                    state.name.clone(),
+                    state.group_id,
+                    state.map_index,
+                    state.x,
+                    state.y,
+                ));
+            }
+        }
+    }
+    for target in &members {
+        let Some(gid) = target.2 else { continue };
+        for other in &members {
+            if other.0 == target.0 || other.2 != Some(gid) {
+                continue;
+            }
+            send_member_location_packet(
+                &world.gate_ref,
+                target.0,
+                &other.1,
+                other.3,
+                other.4,
+                other.5,
+            );
+        }
+    }
+}
+
 // ============================================================
 // 游戏进入序列
 // ============================================================

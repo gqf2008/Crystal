@@ -1909,7 +1909,7 @@ pub(crate) fn auto_member_test(
                 let ok = members
                     .members
                     .iter()
-                    .any(|(n, x, y)| n == "队友A" && *x == 356 && *y == 350);
+                    .any(|(n, _m, x, y)| n == "队友A" && *x == 356 && *y == 350);
                 tracing::info!("[MEMBER] 成员点位={}", ok);
                 if ok {
                     tracing::info!("[MEMBER] ✅ 小队成员点位通过");

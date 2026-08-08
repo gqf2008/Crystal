@@ -1628,6 +1628,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             &to_client,
                                             &server::group::SendMemberLocation {
                                                 member_name: "队友A".to_string(),
+                                                map_index: 0,
                                                 location: mir2_shared::Point { x: 356, y: 350 },
                                             },
                                         );

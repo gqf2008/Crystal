@@ -84,6 +84,8 @@ impl Packet for GroupMembersMap {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SendMemberLocation {
     pub member_name: String,
+    /// 成员所在地图（#1309：客户端按图过滤队友点；C# 由 GroupMembersMap 提供）
+    pub map_index: u16,
     pub location: Point,
 }
 
@@ -92,18 +94,21 @@ impl Packet for SendMemberLocation {
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let member_name = read_dotnet_string(reader)?;
+        let map_index = reader.read_u16::<LittleEndian>()?;
         let x = reader.read_i32::<LittleEndian>()?;
         let y = reader.read_i32::<LittleEndian>()?;
         let location = Point { x, y };
 
         Ok(Self {
             member_name,
+            map_index,
             location,
         })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         write_dotnet_string(writer, &self.member_name)?;
+        writer.write_u16::<LittleEndian>(self.map_index)?;
         writer.write_i32::<LittleEndian>(self.location.x)?;
         writer.write_i32::<LittleEndian>(self.location.y)?;
         Ok(())
