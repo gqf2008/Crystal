@@ -682,6 +682,8 @@ impl Packet for ReportIssue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GetRanking {
     pub rank_index: u8,
+    /// 仅在线（C# RankingDialog OnlineOnly）
+    pub online_only: bool,
 }
 
 impl Packet for GetRanking {
@@ -689,11 +691,16 @@ impl Packet for GetRanking {
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         let rank_index = reader.read_u8()?;
-        Ok(Self { rank_index })
+        let online_only = reader.read_u8()? != 0;
+        Ok(Self {
+            rank_index,
+            online_only,
+        })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_u8(self.rank_index)?;
+        writer.write_u8(self.online_only as u8)?;
         Ok(())
     }
 }

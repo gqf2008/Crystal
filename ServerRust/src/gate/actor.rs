@@ -3246,12 +3246,33 @@ fn forward_report_issue(world_ref: &Option<ActorRef<crate::actors::world::WorldA
     let _ = world_ref.tell(crate::actors::world::ReportIssueRequest { session_id, issue_type, description }).try_send();
 }
 
-/// GetRanking: [type: u32][page: u32]
-fn forward_get_ranking(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
+/// GetRanking: [type: u8][online_only: u8]
+fn forward_get_ranking(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
     let rank_type = if !payload.is_empty() { payload[0] } else { 0 };
-    debug!("GetRanking: session={} type={}", session_id, rank_type);
-    let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::GetRankingRequest { session_id, rank_type }).try_send();
+    let online_only = if payload.len() > 1 {
+        payload[1] != 0
+    } else {
+        false
+    };
+    debug!(
+        "GetRanking: session={} type={} online_only={}",
+        session_id, rank_type, online_only
+    );
+    let world_ref = match world_ref {
+        Some(w) => w,
+        None => return,
+    };
+    let _ = world_ref
+        .tell(crate::actors::world::GetRankingRequest {
+            session_id,
+            rank_type,
+            online_only,
+        })
+        .try_send();
 }
 
 /// Opendoor: [door_index: u8]
@@ -3340,5 +3361,3 @@ mod tests {
         assert_eq!(result, "");
     }
 }
-
-

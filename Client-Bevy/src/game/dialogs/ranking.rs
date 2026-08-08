@@ -8,10 +8,13 @@
 use bevy::prelude::*;
 
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
+use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::{spawn_ui_text, UiButton, UiEntity, UiFont};
+use crate::ui::controls::{spawn_checkbox, CheckBox};
 use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
+use crate::ui::sprite_ui::{spawn_ui_text, UiButton, UiEntity, UiFont, UiImageCache};
 
 /// 排名条目（服务端 Rankings 包）
 #[derive(Debug, Clone, Default)]
@@ -29,6 +32,8 @@ pub struct RankingState {
     pub entries: Vec<RankEntry>,
     /// 当前页签（0=All 1..5=职业，C# RankingDialog SelectRank）
     pub tab: u8,
+    /// 仅在线（C# RankingDialog OnlineOnly）
+    pub online_only: bool,
 }
 
 #[derive(Component)]
@@ -51,6 +56,10 @@ pub struct RankingPrev;
 /// 下一页（C# NextButton）
 #[derive(Component)]
 pub struct RankingNext;
+
+/// 仅在线（C# OnlineOnlyButton）
+#[derive(Component)]
+pub struct RankingOnlineOnly;
 
 /// 职业名（C# 排行榜职业页签）
 pub fn rank_class_name(class: u8) -> &'static str {
@@ -105,6 +114,9 @@ fn spawn_ranking(
     mut images: ResMut<Assets<Image>>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
+    mut libs: ResMut<GameLibraries>,
+    mut cache: ResMut<UiImageCache>,
+    ranking: Res<RankingState>,
 ) {
     if !ui_font.0.is_strong() {
         ui_font.0 = crate::ui::sprite_ui::load_ui_font(&mut fonts);
@@ -208,6 +220,31 @@ fn spawn_ranking(
         RankingWidget,
     ));
 
+    // 仅在线（C# OnlineOnlyButton：Prguse 2086 未勾 / 2087 勾选）
+    if let Some(e) = spawn_checkbox(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Prguse,
+        [2086, 2086, 2086],
+        [2087, 2087, 2087],
+        390.0, 502.0, 8.2, 16.0, 14.0,
+        ranking.online_only,
+    ) {
+        commands.entity(e).insert((
+            RankingOnlineOnly,
+            DialogRoot(DialogKind::Ranking),
+            RankingWidget,
+        ));
+    }
+    let e = spawn_ui_text(
+        &mut commands, &font, "仅在线",
+        410.0, 502.0,
+        12.0, Color::srgb(0.8, 0.9, 1.0), 8.2,
+    );
+    commands.entity(e).insert((
+        DialogRoot(DialogKind::Ranking),
+        RankingWidget,
+    ));
+
     // 10 行
     for i in 0..10usize {
         let e = spawn_ui_text(
@@ -232,6 +269,7 @@ fn ranking_ui_system(
     tabs: Query<(&UiButton, &RankingTab)>,
     prev: Query<&UiButton, (With<RankingPrev>, Without<RankingTab>)>,
     next: Query<&UiButton, (With<RankingNext>, Without<RankingTab>, Without<RankingPrev>)>,
+    online_boxes: Query<&CheckBox, With<RankingOnlineOnly>>,
     mut widgets: Query<&mut Visibility, With<RankingWidget>>,
     mut lines: Query<(&mut Text2d, &RankingLine)>,
     mut scroll: Query<&mut ScrollList, With<RankingWidget>>,
@@ -248,7 +286,10 @@ fn ranking_ui_system(
     // 打开瞬间请求排行榜（原版 C# RankingDialog.Show → GetRanking）
     if !*requested {
         *requested = true;
-        net.send_packet(&mir2_shared::packets::client::misc::GetRanking { rank_index: ranking.tab });
+        net.send_packet(&mir2_shared::packets::client::misc::GetRanking {
+            rank_index: ranking.tab,
+            online_only: ranking.online_only,
+        });
         tracing::info!("🏅 请求排行榜");
     }
     let filtered = filter_rank_tab(&ranking.entries, ranking.tab);
@@ -260,8 +301,25 @@ fn ranking_ui_system(
             if let Ok(mut sl) = scroll.single_mut() {
                 sl.offset = 0;
             }
-            net.send_packet(&mir2_shared::packets::client::misc::GetRanking { rank_index: t.0 });
+            net.send_packet(&mir2_shared::packets::client::misc::GetRanking {
+                rank_index: t.0,
+                online_only: ranking.online_only,
+            });
             tracing::info!("🏅 排行榜页签 {}", if t.0 == 0 { "全部" } else { rank_class_name(t.0 - 1) });
+        }
+    }
+    // 仅在线（C# OnlineOnlyButton → 重置 + 重新请求）
+    if let Ok(cb) = online_boxes.single() {
+        if cb.checked != ranking.online_only {
+            ranking.online_only = cb.checked;
+            if let Ok(mut sl) = scroll.single_mut() {
+                sl.offset = 0;
+            }
+            net.send_packet(&mir2_shared::packets::client::misc::GetRanking {
+                rank_index: ranking.tab,
+                online_only: ranking.online_only,
+            });
+            tracing::info!("🏅 排行榜仅在线 {}", ranking.online_only);
         }
     }
     // 翻页（C# PrevButton/NextButton）
@@ -361,4 +419,3 @@ mod tests {
         assert_eq!(rank_class_name(99), "未知");
     }
 }
-

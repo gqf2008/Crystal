@@ -1765,6 +1765,7 @@ fn handle_outbound_event<S: Write>(stream: &mut S, event: NetworkEvent) -> Resul
         NetworkEvent::GetRankingRequest { ranking_type } => {
             let packet = client::GetRanking {
                 rank_index: ranking_type,
+                online_only: false,
             };
             serialize_packet(stream, &packet)?;
             tracing::debug!("📤 GetRanking: ranking_type={}", ranking_type);

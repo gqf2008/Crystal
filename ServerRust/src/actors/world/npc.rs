@@ -1902,6 +1902,7 @@ impl Message<ReportIssueRequest> for WorldActor {
 pub struct GetRankingRequest {
     pub session_id: u64,
     pub rank_type: u8,
+    pub online_only: bool,
 }
 
 impl Message<GetRankingRequest> for WorldActor {
@@ -1922,21 +1923,24 @@ impl Message<GetRankingRequest> for WorldActor {
             }
         }
         // Supplement with DB-backed top players for more complete rankings
-        if let Ok(db_rows) = sqlx::query(
-            "SELECT name, class, level, experience FROM characters ORDER BY level DESC, experience DESC LIMIT 50"
-        )
-        .fetch_all(&self.db_pool)
-        .await
-        {
-            for row in db_rows {
-                let name: String = row.get("name");
-                let class_val: i32 = row.get("class");
-                let class = mir2_shared::enums::MirClass::try_from(class_val as u8)
-                    .unwrap_or(mir2_shared::enums::MirClass::Warrior) as u8;
-                let level: i32 = row.get("level");
-                let experience: i64 = row.get("experience");
-                if !entries.iter().any(|(n, _, _, _)| n == &name) {
-                    entries.push((name, class, level, experience));
+        // 仅在线：跳过 DB 补全（C# OnlineOnly 只显示当前在线玩家）
+        if !msg.online_only {
+            if let Ok(db_rows) = sqlx::query(
+                "SELECT name, class, level, experience FROM characters ORDER BY level DESC, experience DESC LIMIT 50"
+            )
+            .fetch_all(&self.db_pool)
+            .await
+            {
+                for row in db_rows {
+                    let name: String = row.get("name");
+                    let class_val: i32 = row.get("class");
+                    let class = mir2_shared::enums::MirClass::try_from(class_val as u8)
+                        .unwrap_or(mir2_shared::enums::MirClass::Warrior) as u8;
+                    let level: i32 = row.get("level");
+                    let experience: i64 = row.get("experience");
+                    if !entries.iter().any(|(n, _, _, _)| n == &name) {
+                        entries.push((name, class, level, experience));
+                    }
                 }
             }
         }
