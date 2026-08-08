@@ -291,9 +291,10 @@ fn ranking_ui_system(
     next: Query<&UiButton, (With<RankingNext>, Without<RankingTab>, Without<RankingPrev>)>,
     online_boxes: Query<&CheckBox, With<RankingOnlineOnly>>,
     local_player: Query<&PlayerName, With<LocalPlayer>>,
-    mut my_rank_text: Query<&mut Text2d, With<RankingMyRank>>,
+    // #1329：B0001 修复（#1323 合入后启动 panic）——my_rank 与 lines 的 &mut Text2d 需 Without 隔离
+    mut my_rank_text: Query<&mut Text2d, (With<RankingMyRank>, Without<RankingLine>)>,
     mut widgets: Query<&mut Visibility, With<RankingWidget>>,
-    mut lines: Query<(&mut Text2d, &RankingLine)>,
+    mut lines: Query<(&mut Text2d, &RankingLine), Without<RankingMyRank>>,
     mut scroll: Query<&mut ScrollList, With<RankingWidget>>,
     mut requested: Local<bool>,
 ) {
