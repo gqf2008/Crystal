@@ -10,6 +10,7 @@
 
 use bevy::prelude::*;
 
+use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect, TextInputState, TextInputSubmit};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::movement::world_to_tile;
 use crate::map_renderer::{GameData, GameLibraries};
@@ -18,7 +19,7 @@ use crate::resources::libraries::LibraryName;
 use crate::resources::map_reader::{resolve_map_path, MapReader};
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{
-    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiFont, UiImageCache,
+    spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiButton, UiEntity, UiFont, UiImageCache,
 };
 
 /// 面板尺寸（Title[820] 实测 760x500）
@@ -343,6 +344,33 @@ fn spawn_big_map(
             BigMapWidget,
         ));
     }
+    // 搜索输入框（C# SearchTextBox；TextInputField id=10 供大地图专用）
+    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let label = spawn_ui_text(&mut commands, &font, "搜索:", px + 23.0, py + ph - 70.0, 11.0, Color::WHITE, 8.1);
+    commands.entity(label).insert((DialogRoot(DialogKind::BigMap), BigMapWidget));
+    commands
+        .spawn((
+            UiEntity,
+            DialogRoot(DialogKind::BigMap),
+            BigMapWidget,
+            TextInputField(10),
+            TextInputRect(px + 60.0, py + ph - 70.0, 150.0, 20.0),
+            Sprite {
+                image: white,
+                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
+                custom_size: Some(Vec2::new(150.0, 20.0)),
+                ..default()
+            },
+            bevy::sprite::Anchor::TOP_LEFT,
+            Transform::from_xyz(px + 60.0, -(py + ph - 70.0), 8.1),
+            Visibility::Visible,
+        ));
+    let disp = spawn_ui_text(&mut commands, &font, "", px + 63.0, py + ph - 67.0, 11.0, Color::WHITE, 8.2);
+    commands.entity(disp).insert((
+        TextInputDisplay(10),
+        DialogRoot(DialogKind::BigMap),
+        BigMapWidget,
+    ));
 
     // 世界地图覆盖层（C# WorldMapImage：Prguse2[1360] 底 + 1365 云 + 1366 边框，Location=(10,0)）
     let wm_x = px + 10.0;
@@ -421,6 +449,8 @@ fn big_map_ui_system(
     myloc_btn: Query<&UiButton, With<BigMapMyLocation>>,
     teleport_btn: Query<&UiButton, With<BigMapTeleport>>,
     search_btn: Query<&UiButton, With<BigMapSearch>>,
+    mut input: ResMut<TextInputState>,
+    mut submits: MessageReader<TextInputSubmit>,
     mut widgets: Query<(
         &mut Visibility,
         Option<&BigMapDot>,
@@ -433,6 +463,9 @@ fn big_map_ui_system(
 ) {
     let open = mgr.is_open(DialogKind::BigMap);
     let npc_count = state.npcs.len();
+    if open && input.texts.len() < 11 {
+        input.texts.resize(11, String::new());
+    }
     for (mut vis, dot, pdot) in &mut widgets {
         let show = if pdot.is_some() {
             open
@@ -474,10 +507,28 @@ fn big_map_ui_system(
             tracing::info!("🗺️ 回到我的位置 map={}", state.map_index);
         }
     }
+    // 搜索：按钮点击或输入框回车 → C.SearchMap（服务端按地图/NPC 名搜索并以系统消息返回）
+    let mut do_search = false;
     for btn in &search_btn {
         if btn.clicked {
-            tracing::info!("🗺️ 搜索（SearchMap 待接入）");
+            do_search = true;
         }
+    }
+    for s in submits.read() {
+        if s.0 == 10 {
+            do_search = true;
+        }
+    }
+    if do_search {
+        let keyword = input.texts.get(10).cloned().unwrap_or_default();
+        let keyword = keyword.trim().to_string();
+        if keyword.is_empty() {
+            tracing::warn!("🗺️ 搜索关键词为空");
+        } else {
+            net.send_packet(&crate::network::SearchMapWire { keyword: keyword.clone() });
+            tracing::info!("🗺️ 搜索: {}", keyword);
+        }
+        input.active = None;
     }
     for btn in &teleport_btn {
         if btn.clicked {
@@ -882,3 +933,6 @@ fn big_map_server_events(
         }
     }
 }
+
+
+
