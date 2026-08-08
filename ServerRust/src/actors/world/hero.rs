@@ -691,6 +691,8 @@ impl WorldActor {
         let mut aoe_intents: Vec<(u64, u8, u32, i32, i32, i32, u8, i32)> = Vec::new();
         // 主人护盾意图：(hero_session_id, kind) —— 阶段 2.4b 应用（#1202）
         let mut owner_shield_intents: Vec<(u64, OwnerShieldKind)> = Vec::new();
+        // 支持类法术动画意图：(hero_session_id, spell, target_oid) —— 阶段 3g 广播 ObjectMagic（#1208）
+        let mut magic_anim_intents: Vec<(u64, u8, u32)> = Vec::new();
 
         for snap in &snapshots {
             // 确保该英雄有 AI 状态（首次出现则初始化）
@@ -707,6 +709,9 @@ impl WorldActor {
                 });
             // 暴露可变副本用于本 tick 决策（循环内不写回 self）
             let mut ai_local = ai.clone();
+            // #1208：支持类法术 ObjectMagic 广播的目标 oid
+            let owner_oid = self.players.get(&snap.session_id).map(|r| r.object_id).unwrap_or(0);
+            let hero_oid = owner_oid.wrapping_add(HERO_OID_OFFSET);
             // #1190：清理过期增益
             ai_local.buffs.retain(|b| b.expire_tick > self.tick_count);
             // #1190：buff 对战斗属性/回蓝/冷却的影响（C# RefreshStats 对应项；hero_combat/hero_stats 为局部加 buff 副本）
@@ -884,6 +889,8 @@ impl WorldActor {
                         hero_level: snap.hero_level,
                     });
                     support_intents.push((snap.session_id, snap.session_id, spell as u8, false));
+                    // #1208：自增益广播 ObjectMagic（目标 = 英雄自身）
+                    magic_anim_intents.push((snap.session_id, spell as u8, hero_oid));
                     ai_local.next_attack_tick = self.tick_count + 4;
                     *ai = ai_local;
                     continue;
@@ -908,6 +915,8 @@ impl WorldActor {
                         ai_local.mp -= cost;
                         owner_shield_intents.push((snap.session_id, kind));
                         support_intents.push((snap.session_id, snap.session_id, spell as u8, false));
+                        // #1208：主人护盾广播 ObjectMagic（目标 = 主人）
+                        magic_anim_intents.push((snap.session_id, spell as u8, owner_oid));
                         ai_local.next_attack_tick = self.tick_count + 4;
                         *ai = ai_local;
                         continue;
@@ -1037,12 +1046,6 @@ impl WorldActor {
                                     level,
                                     2,
                                 ));
-                                support_intents.push((
-                                    snap.session_id,
-                                    snap.session_id,
-                                    spell as u8,
-                                    false,
-                                ));
                                 ai_local.next_attack_tick = self.tick_count + 8;
                             } else {
                                 // 蓝不足：1 格内近战兜底
@@ -1086,12 +1089,6 @@ impl WorldActor {
                                         raw,
                                         level,
                                         1,
-                                    ));
-                                    support_intents.push((
-                                        snap.session_id,
-                                        snap.session_id,
-                                        spell as u8,
-                                        false,
                                     ));
                                     ai_local.next_attack_tick = self.tick_count + 8;
                                 } else {
@@ -1198,6 +1195,8 @@ impl WorldActor {
                                         Spell::Healing as u8,
                                         false,
                                     ));
+                                    // #1208：自疗广播 ObjectMagic（目标 = 英雄自身）
+                                    magic_anim_intents.push((snap.session_id, Spell::Healing as u8, hero_oid));
                                 } else {
                                     support_intents.push((
                                         snap.session_id,
@@ -1205,6 +1204,8 @@ impl WorldActor {
                                         Spell::Healing as u8,
                                         true,
                                     ));
+                                    // #1208：主人治疗广播 ObjectMagic（目标 = 主人）
+                                    magic_anim_intents.push((snap.session_id, Spell::Healing as u8, owner_oid));
                                 }
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             } else {
@@ -1239,6 +1240,8 @@ impl WorldActor {
                                     Spell::Poisoning as u8,
                                     false,
                                 ));
+                                // #1208：施毒广播 ObjectMagic（目标 = 怪物）
+                                magic_anim_intents.push((snap.session_id, Spell::Poisoning as u8, target.oid));
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             } else {
                                 let _ = hero_melee_fallback(
@@ -1258,6 +1261,8 @@ impl WorldActor {
                                     Spell::Curse as u8,
                                     false,
                                 ));
+                                // #1208：诅咒广播 ObjectMagic（目标 = 怪物）
+                                magic_anim_intents.push((snap.session_id, Spell::Curse as u8, target.oid));
                                 // C# Map.cs：40% 概率附加 Slow 毒（Duration=1+(Lv+1)*2、TickSpeed 1000、Value=GetDamage(SC)）
                                 if fastrand::i32(0..10) < 4 {
                                     let value = hero_spell_damage(
@@ -1782,7 +1787,10 @@ impl WorldActor {
                     debug!("Hero healed owner {} for {} HP", heal_target_session, amount);
                 }
             }
-            // 广播 ObjectAttack（近战/施法动画）
+            // #1208：支持类法术改由 3g 广播 ObjectMagic；此处仅广播物理技能（Attack → S.ObjectAttack）
+            if hero_support_spell_is_magic(*spell_id) {
+                continue;
+            }
             let ai = match self.hero_ai_states.get(session_id) {
                 Some(a) => a.clone(),
                 None => continue,
@@ -1889,6 +1897,21 @@ impl WorldActor {
                 "Hero Wizard AoE spell={} at ({},{}) dmg={} hits={}",
                 spell, tx, ty, raw, hit_ids.len()
             );
+        }
+
+        // 3g. 支持类法术（增益/治疗/毒/诅咒）广播 S.ObjectMagic（#1208：C# Magic → S.ObjectMagic）
+        for (session_id, spell, target_oid) in &magic_anim_intents {
+            let level = snapshots
+                .iter()
+                .find(|s| s.session_id == *session_id)
+                .map(|s| hero_magic_level(&s.hero_magics, *spell))
+                .unwrap_or(1);
+            let (hx, hy) = self
+                .hero_ai_states
+                .get(session_id)
+                .map(|a| (a.x, a.y))
+                .unwrap_or((0, 0));
+            broadcast_hero_magic(self, *session_id, *spell, *target_oid, hx, hy, level).await;
         }
     }
 
@@ -2219,6 +2242,27 @@ fn hero_owner_shield_buff(
         }
     };
     (buff, ticks)
+}
+
+/// 支持类法术是否魔法（#1208：C# Magic → S.ObjectMagic；物理技能走 Attack → S.ObjectAttack）
+fn hero_support_spell_is_magic(spell: u8) -> bool {
+    use mir2_shared::enums::Spell;
+    matches!(
+        Spell::try_from(spell).unwrap_or(Spell::None),
+        Spell::Healing
+            | Spell::Poisoning
+            | Spell::Curse
+            | Spell::Rage
+            | Spell::ProtectionField
+            | Spell::Haste
+            | Spell::LightBody
+            | Spell::MagicShield
+            | Spell::MagicBooster
+            | Spell::Concentration
+            | Spell::SoulShield
+            | Spell::BlessedArmour
+            | Spell::UltimateEnhancer
+    )
 }
 
 /// 各职业 ProcessFriend 增益列表（#1190/#1192：C# 子类顺序）
@@ -3026,5 +3070,19 @@ mod tests {
         assert_eq!(hero_surrounded_count(&mobs, 10, 10, 1), 2);
         // (20,20) 2 格内 = 1
         assert_eq!(hero_surrounded_count(&mobs, 20, 20, 2), 1);
+    }
+    #[test]
+    fn hero_support_spell_magic_classification() {
+        use mir2_shared::enums::Spell;
+        // 魔法类：治疗/增益/毒/诅咒
+        assert!(hero_support_spell_is_magic(Spell::Healing as u8));
+        assert!(hero_support_spell_is_magic(Spell::Rage as u8));
+        assert!(hero_support_spell_is_magic(Spell::Poisoning as u8));
+        assert!(hero_support_spell_is_magic(Spell::Curse as u8));
+        assert!(hero_support_spell_is_magic(Spell::SoulShield as u8));
+        // 物理类：Slaying/HalfMoon/None
+        assert!(!hero_support_spell_is_magic(Spell::Slaying as u8));
+        assert!(!hero_support_spell_is_magic(Spell::HalfMoon as u8));
+        assert!(!hero_support_spell_is_magic(Spell::None as u8));
     }
 }
