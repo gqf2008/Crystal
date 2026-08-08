@@ -1154,7 +1154,10 @@ impl WorldActor {
                         && (self.fishing_cfg.monster_spawn_chance >= 100
                             || fastrand::i32(0..(100 - self.fishing_cfg.monster_spawn_chance as i32)) == 0);
 
-                    events.push((*session_id, item_index, spawn, state.x, state.y, state.map_index, state.fishing_autocast));
+                    // #1313：收获后卷线器耐久 -1（C# DamagedFishingItem(Reel,1)）；损坏且自动钓鱼 → 停止自动钓鱼
+                    let reel_result = record.actor_ref.ask(crate::actors::player::FishingGearDamageMsg { slot: 4, amount: 1 }).await.unwrap_or(0);
+                    let autocast = state.fishing_autocast && reel_result != 2;
+                    events.push((*session_id, item_index, spawn, state.x, state.y, state.map_index, autocast));
                 } else {
                     send_system_message(&self.gate_ref, *session_id, "鱼跑了...");
                     stopped.push(*session_id);
