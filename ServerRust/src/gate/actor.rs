@@ -2663,13 +2663,53 @@ fn handle_cancel_mentor(social_ref: &Option<ActorRef<crate::actors::social::Soci
 // ============================================================================
 
 /// UpdateIntelligentCreature: [creature_type: u8][pickup_mode: u8][custom_name: DotNetString?]
-fn handle_update_intelligent_creature(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 2 { return; }
-    let creature_type = payload[0];
-    let pickup_mode = payload[1];
-    debug!("UpdateIntelligentCreature: session={} type={} mode={}", session_id, creature_type, pickup_mode);
+/// UpdateIntelligentCreature: [type u8][pet_mode u8][custom_name dotnet][summon u8][unsummon u8][release u8]
+/// UpdateIntelligentCreature: [type u8][pet_mode u8][custom_name dotnet][summon u8][unsummon u8][release u8]
+fn handle_update_intelligent_creature(
+    world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>,
+    session_id: SessionId,
+    payload: &[u8],
+) {
+    if payload.len() < 3 {
+        debug!("UpdateIntelligentCreature: session={} payload too short", session_id);
+        return;
+    }
+    let mut cur = std::io::Cursor::new(payload);
+    let creature_type = {
+        let mut b = [0u8; 1];
+        let _ = std::io::Read::read_exact(&mut cur, &mut b);
+        b[0]
+    };
+    let pet_mode = {
+        let mut b = [0u8; 1];
+        let _ = std::io::Read::read_exact(&mut cur, &mut b);
+        b[0]
+    };
+    use mir2_shared::binary::read_dotnet_string;
+    let custom_name = read_dotnet_string(&mut cur).unwrap_or_default();
+    let mut flag = |cur: &mut std::io::Cursor<&[u8]>| {
+        let mut b = [0u8; 1];
+        std::io::Read::read_exact(cur, &mut b).is_ok() && b[0] != 0
+    };
+    let summon_me = flag(&mut cur);
+    let unsummon_me = flag(&mut cur);
+    let release_me = flag(&mut cur);
+    debug!(
+        "UpdateIntelligentCreature: session={} type={} mode={} name={} summon={} unsummon={} release={}",
+        session_id, creature_type, pet_mode, custom_name, summon_me, unsummon_me, release_me
+    );
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::UpdateIntelligentCreature { session_id, creature_type, pickup_mode }).try_send();
+    let _ = world_ref
+        .tell(crate::actors::world::UpdateIntelligentCreature {
+            session_id,
+            creature_type,
+            pet_mode,
+            custom_name,
+            summon_me,
+            unsummon_me,
+            release_me,
+        })
+        .try_send();
 }
 
 /// IntelligentCreaturePickup: [x: i32][y: i32]

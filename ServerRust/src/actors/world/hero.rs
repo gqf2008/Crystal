@@ -220,10 +220,17 @@ impl WorldActor {
 // ============================================================
 
 /// 更新/设置宠物
+/// 更新/设置宠物（C# UpdateIntelligentCreature：改名/召唤/解散/释放/模式）
 pub struct UpdateIntelligentCreature {
     pub session_id: u64,
     pub creature_type: u8,
-    pub pickup_mode: u8,
+    /// 拾取模式（C# petMode：0=自动 1=半自动）
+    pub pet_mode: u8,
+    /// 自定义名称（改名时携带）
+    pub custom_name: String,
+    pub summon_me: bool,
+    pub unsummon_me: bool,
+    pub release_me: bool,
 }
 
 impl Message<UpdateIntelligentCreature> for WorldActor {
@@ -240,37 +247,84 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
         };
 
         let creature_type = CreatureType::from(msg.creature_type);
-        let pickup = PickupMode::from(msg.pickup_mode);
+        let mut log = state.creature_log;
 
-        if creature_type == CreatureType::None {
-            // 关闭宠物
-            let mut log = state.creature_log;
+        // 释放（C# ReleaseMe）：从拥有列表与激活中移除
+        if msg.release_me {
             log.active_creature = None;
-            let _ = record.actor_ref.ask(SetCreature { creature_log: log }).await;
-            send_system_message(&self.gate_ref, msg.session_id, "宠物已关闭");
+            log.owned_creatures
+                .retain(|c| c.creature_type != creature_type);
+            let _ = record
+                .actor_ref
+                .ask(SetCreature { creature_log: log })
+                .await;
+            send_creature_list_packet(&self.gate_ref, msg.session_id, None);
+            send_system_message(&self.gate_ref, msg.session_id, "宠物已释放");
             return;
         }
-
-        // 设置或更新宠物
-        let mut log = state.creature_log;
+        // 解散（C# UnSummonMe）：清除激活但保留拥有
+        if msg.unsummon_me {
+            if let Some(active) = log.active_creature.take() {
+                if !log
+                    .owned_creatures
+                    .iter()
+                    .any(|c| c.creature_type == active.creature_type)
+                {
+                    log.owned_creatures.push(active);
+                }
+            }
+            let _ = record
+                .actor_ref
+                .ask(SetCreature { creature_log: log })
+                .await;
+            send_creature_list_packet(&self.gate_ref, msg.session_id, None);
+            send_system_message(&self.gate_ref, msg.session_id, "宠物已解散");
+            return;
+        }
+        // 改名（C# CustomName）
+        if !msg.custom_name.is_empty() {
+            if let Some(c) = &mut log.active_creature {
+                c.custom_name = Some(msg.custom_name.clone());
+            } else if creature_type != CreatureType::None {
+                let mut c = IntelligentCreature::new(creature_type);
+                c.custom_name = Some(msg.custom_name.clone());
+                c.enabled = true;
+                log.active_creature = Some(c);
+            }
+            let creature_ref = log.active_creature.clone();
+            let _ = record.actor_ref.ask(SetCreature { creature_log: log }).await;
+            send_creature_list_packet(&self.gate_ref, msg.session_id, creature_ref.as_ref());
+            send_system_message(&self.gate_ref, msg.session_id, "宠物已改名");
+            return;
+        }
+        // 召唤/模式更新（C# SummonMe / petMode）
+        let pet_mode = PickupMode::from(msg.pet_mode);
         if let Some(ref mut c) = log.active_creature {
-            // 更新已有宠物
-            c.pickup_mode = pickup;
-        } else {
-            // 创建新宠物
-            let mut creature = IntelligentCreature::new(creature_type);
-            creature.pickup_mode = pickup;
+            c.pickup_mode = pet_mode;
+        } else if msg.summon_me || creature_type != CreatureType::None {
+            // 优先从拥有列表召回，否则新建
+            let mut creature = log
+                .owned_creatures
+                .iter()
+                .find(|c| c.creature_type == creature_type)
+                .cloned()
+                .unwrap_or_else(|| IntelligentCreature::new(creature_type));
+            creature.pickup_mode = pet_mode;
             creature.enabled = true;
             log.active_creature = Some(creature);
+        } else {
+            // 原语义：关闭宠物（type=None 且无动作）
+            log.active_creature = None;
         }
         let creature_ref = log.active_creature.clone();
         let _ = record.actor_ref.ask(SetCreature { creature_log: log }).await;
-
         send_creature_list_packet(&self.gate_ref, msg.session_id, creature_ref.as_ref());
-        debug!("UpdateIntelligentCreature: {} type={:?} mode={:?}", state.name, creature_type, pickup);
+        debug!(
+            "UpdateIntelligentCreature: {} type={:?} mode={:?}",
+            state.name, creature_type, pet_mode
+        );
     }
 }
-
 /// 宠物拾取地面物品
 pub struct IntelligentCreaturePickup {
     pub session_id: u64,
