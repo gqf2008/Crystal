@@ -21,6 +21,35 @@ use crate::ui::sprite_ui::{
 };
 use crate::ui::controls::{spawn_dropdown, DropDown};
 
+/// #1356：觉醒面板服务模式（C# PanelType：Awakening/Disassemble/Downgrade/Reset）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NpcAwakeService {
+    #[default]
+    Awaken,
+    Disassemble,
+    Downgrade,
+    Reset,
+}
+
+impl NpcAwakeService {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Awaken => "觉醒",
+            Self::Disassemble => "分解",
+            Self::Downgrade => "降级",
+            Self::Reset => "重置",
+        }
+    }
+    pub fn from_u8(v: u8) -> Self {
+        match v {
+            1 => Self::Disassemble,
+            2 => Self::Downgrade,
+            3 => Self::Reset,
+            _ => Self::Awaken,
+        }
+    }
+}
+
 /// 材料需求行
 #[derive(Clone, Default)]
 pub struct MaterialRow {
@@ -42,6 +71,8 @@ pub struct NpcAwakeState {
     /// 最近觉醒结果（1=成功 0=销毁 -1=失败 -2=满级 -3=金币不足 -4=材料不足）
     pub result: i32,
     pub result_text: String,
+    /// #1356：当前服务模式（觉醒/分解/降级/重置）
+    pub service: NpcAwakeService,
 }
 
 #[derive(Component)]
@@ -52,6 +83,14 @@ pub struct NpcAwakeClose;
 
 #[derive(Component)]
 pub struct NpcAwakeUpgrade;
+
+/// #1356：服务模式按钮（C# PanelType）
+#[derive(Component)]
+pub struct NpcAwakeServiceBtn(u8);
+
+/// #1356：操作按钮文字（觉醒/分解/降级/重置）
+#[derive(Component)]
+pub struct NpcAwakeActionLabel;
 
 #[derive(Component)]
 pub struct NpcAwakeTypeDrop;
@@ -169,6 +208,34 @@ fn spawn_npc_awake(
         NpcAwakeWidget,
     ));
 
+    // #1356：服务模式按钮（C# PanelType：觉醒/分解/降级/重置）
+    for (i, label) in ["觉醒", "分解", "降级", "重置"].iter().enumerate() {
+        let e = spawn_ui_text(
+            &mut commands, &font, label,
+            px + 30.0 + i as f32 * 72.0, py + 26.0,
+            12.0, Color::WHITE, 8.0,
+        );
+        commands.entity(e).insert((
+            NpcAwakeServiceBtn(i as u8),
+            UiButton {
+                rect: (px + 30.0 + i as f32 * 72.0, py + 26.0, 64.0, 20.0),
+                clicked: false,
+            },
+            DialogRoot(DialogKind::NpcAwake),
+            NpcAwakeWidget,
+        ));
+    }
+    // #1356：操作按钮文字
+    let action = spawn_ui_text(
+        &mut commands, &font, "觉醒",
+        px + 118.0, py + 396.0, 12.0, Color::WHITE, 8.0,
+    );
+    commands.entity(action).insert((
+        NpcAwakeActionLabel,
+        DialogRoot(DialogKind::NpcAwake),
+        NpcAwakeWidget,
+    ));
+
     // 主物品格 (202,91)：图标 + 名字
     let empty = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     let icon = spawn_ui_sprite(&mut commands, empty.clone(), px + 202.0, py + 91.0, 7.0, 1.0);
@@ -228,7 +295,11 @@ fn npc_awake_ui_system(
     close: Query<&UiButton, With<NpcAwakeClose>>,
     upgrade: Query<&UiButton, With<NpcAwakeUpgrade>>,
     mut type_dd: Query<(&mut DropDown, &NpcAwakeTypeDrop)>,
-    mut widgets: Query<&mut Visibility, With<NpcAwakeWidget>>,
+    mut widgets: Query<&mut Visibility, (With<NpcAwakeWidget>, Without<NpcAwakeTypeDrop>, Without<NpcAwakeMaterialText>, Without<NpcAwakeActionLabel>)>,
+    service_btns: Query<(&UiButton, &NpcAwakeServiceBtn)>,
+    mut action: Query<(&mut Text2d, &mut Visibility), With<NpcAwakeActionLabel>>,
+    mut type_vis: Query<&mut Visibility, (With<NpcAwakeTypeDrop>, Without<NpcAwakeMaterialText>, Without<NpcAwakeActionLabel>)>,
+    mut mat_vis: Query<&mut Visibility, (With<NpcAwakeMaterialText>, Without<NpcAwakeTypeDrop>, Without<NpcAwakeActionLabel>)>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut last_uid: Local<Option<u64>>,
@@ -241,6 +312,31 @@ fn npc_awake_ui_system(
     }
     if !open {
         return;
+    }
+    // #1356：操作按钮文字 + 类型/材料显隐（非觉醒模式隐藏）
+    for (mut text, mut vis) in &mut action {
+        text.0 = state.service.label().to_string();
+        *vis = Visibility::Visible;
+    }
+    for mut vis in &mut type_vis {
+        *vis = if state.service == NpcAwakeService::Awaken { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for mut vis in &mut mat_vis {
+        *vis = if state.service == NpcAwakeService::Awaken { Visibility::Visible } else { Visibility::Hidden };
+    }
+    // #1356：服务模式切换（C# PanelType）
+    for (btn, svc) in &service_btns {
+        if btn.clicked {
+            let new_svc = NpcAwakeService::from_u8(svc.0);
+            if new_svc != state.service {
+                state.service = new_svc;
+                state.selected_uid = None;
+                state.selected_item = None;
+                state.awake_type = None;
+                state.materials.clear();
+                state.result_text = String::new();
+            }
+        }
     }
 
     for btn in &close {
@@ -287,21 +383,19 @@ fn npc_awake_ui_system(
                 && cursor.y >= 91.0
                 && cursor.y <= 119.0
             {
-                let weapons: Vec<InvItem> = hud
-                    .inventory
-                    .items
-                    .iter()
-                    .flatten()
-                    .filter(|it| it.item_type == 1)
-                    .cloned()
-                    .collect();
-                if !weapons.is_empty() {
+                // #1356：觉醒模式循环武器；分解/降级/重置循环全部物品
+                let pool: Vec<InvItem> = if state.service == NpcAwakeService::Awaken {
+                    hud.inventory.items.iter().flatten().filter(|it| it.item_type == 1).cloned().collect()
+                } else {
+                    hud.inventory.items.iter().flatten().cloned().collect()
+                };
+                if !pool.is_empty() {
                     let cur = state
                         .selected_uid
-                        .and_then(|u| weapons.iter().position(|w| w.unique_id == u))
+                        .and_then(|u| pool.iter().position(|w| w.unique_id == u))
                         .map(|i| i + 1)
                         .unwrap_or(0);
-                    let item = weapons[cur % weapons.len()].clone();
+                    let item = pool[cur % pool.len()].clone();
                     state.selected_uid = Some(item.unique_id);
                     state.selected_item = Some(item.clone());
                     state.awake_type = None;
@@ -313,16 +407,38 @@ fn npc_awake_ui_system(
         }
     }
 
-    // 升级按钮
+    // 操作按钮：按服务发包（C# PanelType 语义）
     for btn in &upgrade {
         if btn.clicked {
-            if let (Some(uid), Some(at)) = (state.selected_uid, state.awake_type) {
-                net.send_packet(&Awakening {
-                    unique_id: uid,
-                    awake_type: at,
-                    position_idx: 0,
-                });
-                tracing::info!("⚒️ 执行觉醒 uid={} type={:?}", uid, at);
+            match state.service {
+                NpcAwakeService::Awaken => {
+                    if let (Some(uid), Some(at)) = (state.selected_uid, state.awake_type) {
+                        net.send_packet(&Awakening {
+                            unique_id: uid,
+                            awake_type: at,
+                            position_idx: 0,
+                        });
+                        tracing::info!("⚒️ 执行觉醒 uid={} type={:?}", uid, at);
+                    }
+                }
+                NpcAwakeService::Disassemble => {
+                    if let Some(uid) = state.selected_uid {
+                        net.send_packet(&mir2_shared::packets::client::misc::DisassembleItem { unique_id: uid });
+                        tracing::info!("🔧 分解物品 uid={}", uid);
+                    }
+                }
+                NpcAwakeService::Downgrade => {
+                    if let Some(uid) = state.selected_uid {
+                        net.send_packet(&mir2_shared::packets::client::misc::DowngradeAwakening { unique_id: uid });
+                        tracing::info!("⬇️ 觉醒降级 uid={}", uid);
+                    }
+                }
+                NpcAwakeService::Reset => {
+                    if let Some(uid) = state.selected_uid {
+                        net.send_packet(&mir2_shared::packets::client::misc::ResetAddedItem { unique_id: uid });
+                        tracing::info!("🔄 重置附加属性 uid={}", uid);
+                    }
+                }
             }
         }
     }
@@ -383,6 +499,7 @@ fn npc_awake_render_system(
 fn awake_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut awake: ResMut<NpcAwakeState>,
+    mut mgr: ResMut<DialogManager>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
@@ -399,6 +516,16 @@ fn awake_server_events(
             ServerEvent::AwakeningResult { result, result_text } => {
                 awake.result = *result;
                 awake.result_text = result_text.clone();
+            }
+            ServerEvent::NpcAwakePanel { service } => {
+                // #1356：C# S.NPCAwakening/S.NPCDisassemble/S.NPCDowngrade/S.NPCReset → 打开面板
+                awake.service = NpcAwakeService::from_u8(*service);
+                awake.selected_uid = None;
+                awake.selected_item = None;
+                awake.awake_type = None;
+                awake.materials.clear();
+                awake.result_text = String::new();
+                mgr.open(DialogKind::NpcAwake);
             }
             _ => {}
         }

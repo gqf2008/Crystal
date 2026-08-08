@@ -120,6 +120,21 @@ impl Message<NPCCallRequest> for WorldActor {
             return;
         }
 
+        // #1356：觉醒/分解/降级/重置 是引擎级按键（C# NPCScript AwakeningKey/DisassembleKey/
+        // DowngradeKey/ResetKey → S.NPCAwakening/S.NPCDisassemble/S.NPCDowngrade/S.NPCReset）
+        let panel_key = msg.key.to_uppercase();
+        let panel_service = match panel_key.as_str() {
+            "[@AWAKENING]" => Some(0u8),
+            "[@DISASSEMBLE]" => Some(1u8),
+            "[@DOWNGRADE]" => Some(2u8),
+            "[@RESET]" => Some(3u8),
+            _ => None,
+        };
+        if let Some(service) = panel_service {
+            self.send_awakening_panel(msg.session_id, service).await;
+            return;
+        }
+
         // 优先使用 DB 脚本（支持 GOTO 跳转）
         let mut dialog_lines = Vec::new();
         let mut current_key = msg.key.clone();
@@ -928,6 +943,31 @@ impl Message<NewHeroRequest> for WorldActor {
     }
 }
 impl WorldActor {
+    /// #1356：下发觉醒面板打开包（0=觉醒 1=分解 2=降级 3=重置；C# S.NPCAwakening/S.NPCDisassemble/
+    /// S.NPCDowngrade/S.NPCReset）
+    pub(crate) async fn send_awakening_panel(&self, session_id: u64, service: u8) {
+        use mir2_shared::packets::server::awakening_system::{NPCAwakening, NPCDisassemble, NPCDowngrade, NPCReset};
+        let (opcode, body) = match service {
+            1 => {
+                let p = NPCDisassemble {}; let mut b = Vec::new(); let _ = p.write_body(&mut b);
+                (mir2_shared::enums::ServerPacketIds::NPCDisassemble as i16, b)
+            }
+            2 => {
+                let p = NPCDowngrade {}; let mut b = Vec::new(); let _ = p.write_body(&mut b);
+                (mir2_shared::enums::ServerPacketIds::NPCDowngrade as i16, b)
+            }
+            3 => {
+                let p = NPCReset {}; let mut b = Vec::new(); let _ = p.write_body(&mut b);
+                (mir2_shared::enums::ServerPacketIds::NPCReset as i16, b)
+            }
+            _ => {
+                let p = NPCAwakening {}; let mut b = Vec::new(); let _ = p.write_body(&mut b);
+                (mir2_shared::enums::ServerPacketIds::NPCAwakening as i16, b)
+            }
+        };
+        let _ = self.gate_ref.tell(SendToClient { session_id, data: build_packet_bytes(opcode, &body) }).await;
+    }
+
     /// NPC 脚本 REVIVEHERO：复活当前英雄（对齐 C# ActionType.ReviveHero，简化：清 dead 标记）
     pub(crate) async fn npc_revive_hero(&mut self, session_id: u64) {
         let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
