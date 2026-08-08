@@ -180,6 +180,95 @@ pub struct OptionVolumeFill(pub bool);
 #[derive(Component)]
 pub struct OptionVolumeKnob(pub bool);
 
+/// 设置项实际生效的种类（C# OptionDialog 开关）
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum OptionViewKind {
+    SkillBar,
+    DropView,
+    NameView,
+    HpView,
+}
+
+/// 开关 → 是否显示（C# Settings：SkillBar / DropView / NameView / HPMPView）
+pub fn view_should_show(kind: OptionViewKind, opt: &OptionState) -> bool {
+    match kind {
+        OptionViewKind::SkillBar => opt.skill_bar,
+        OptionViewKind::DropView => opt.drop_view,
+        OptionViewKind::NameView => opt.name_view,
+        OptionViewKind::HpView => opt.hp_view,
+    }
+}
+
+/// 设置项实际生效：技能栏/掉落物/名字/血条 显隐跟随开关（C# OptionDialog 立即生效）
+fn option_view_system(
+    opt: Res<OptionState>,
+    mut skill_slots: Query<
+        &mut Visibility,
+        (
+            With<crate::game::skills::SkillBarSlot>,
+            Without<crate::actor::GroundItem>,
+            Without<crate::actor::ActorNameLabel>,
+            Without<crate::game::combat::HpBarBg>,
+            Without<crate::game::combat::HpBarFill>,
+        ),
+    >,
+    mut ground_items: Query<
+        &mut Visibility,
+        (
+            With<crate::actor::GroundItem>,
+            Without<crate::game::skills::SkillBarSlot>,
+            Without<crate::actor::ActorNameLabel>,
+            Without<crate::game::combat::HpBarBg>,
+            Without<crate::game::combat::HpBarFill>,
+        ),
+    >,
+    mut name_labels: Query<
+        &mut Visibility,
+        (
+            With<crate::actor::ActorNameLabel>,
+            Without<crate::game::skills::SkillBarSlot>,
+            Without<crate::actor::GroundItem>,
+            Without<crate::game::combat::HpBarBg>,
+            Without<crate::game::combat::HpBarFill>,
+        ),
+    >,
+    mut hp_bars: Query<
+        &mut Visibility,
+        (
+            Or<(With<crate::game::combat::HpBarBg>, With<crate::game::combat::HpBarFill>)>,
+            Without<crate::game::skills::SkillBarSlot>,
+            Without<crate::actor::GroundItem>,
+            Without<crate::actor::ActorNameLabel>,
+        ),
+    >,
+) {
+    let target = |show: bool| if show { Visibility::Visible } else { Visibility::Hidden };
+    let sb = target(view_should_show(OptionViewKind::SkillBar, &opt));
+    for mut vis in &mut skill_slots {
+        if *vis != sb {
+            *vis = sb;
+        }
+    }
+    let dv = target(view_should_show(OptionViewKind::DropView, &opt));
+    for mut vis in &mut ground_items {
+        if *vis != dv {
+            *vis = dv;
+        }
+    }
+    let nv = target(view_should_show(OptionViewKind::NameView, &opt));
+    for mut vis in &mut name_labels {
+        if *vis != nv {
+            *vis = nv;
+        }
+    }
+    let hv = target(view_should_show(OptionViewKind::HpView, &opt));
+    for mut vis in &mut hp_bars {
+        if *vis != hv {
+            *vis = hv;
+        }
+    }
+}
+
 pub struct OptionPlugin;
 
 impl Plugin for OptionPlugin {
@@ -189,7 +278,7 @@ impl Plugin for OptionPlugin {
         app.add_systems(OnExit(AppState::Game), cleanup_option);
         app.add_systems(
             Update,
-            (option_ui_system, ui_button_system)
+            (option_ui_system, ui_button_system, option_view_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -571,4 +660,26 @@ mod tests {
         assert_eq!(crate::game::dialogs::settings_file::ini_percent(content, "Sound", "Missing", 0.2), 0.2);
     }
 }
+#[cfg(test)]
+mod view_tests {
+    use super::*;
+
+    #[test]
+    fn view_should_show_follows_option() {
+        let mut opt = OptionState::default();
+        assert!(view_should_show(OptionViewKind::SkillBar, &opt));
+        assert!(view_should_show(OptionViewKind::DropView, &opt));
+        assert!(view_should_show(OptionViewKind::NameView, &opt));
+        assert!(view_should_show(OptionViewKind::HpView, &opt));
+        opt.skill_bar = false;
+        opt.drop_view = false;
+        opt.name_view = false;
+        opt.hp_view = false;
+        assert!(!view_should_show(OptionViewKind::SkillBar, &opt));
+        assert!(!view_should_show(OptionViewKind::DropView, &opt));
+        assert!(!view_should_show(OptionViewKind::NameView, &opt));
+        assert!(!view_should_show(OptionViewKind::HpView, &opt));
+    }
+}
+
 
