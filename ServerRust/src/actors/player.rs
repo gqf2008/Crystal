@@ -3631,7 +3631,12 @@ impl Message<CompleteQuest> for PlayerActor {
     type Reply = Option<crate::actors::quest::QuestInstance>;
 
     async fn handle(&mut self, msg: CompleteQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        self.state.quest_log.complete_quest(msg.quest_index)
+        let done = self.state.quest_log.complete_quest(msg.quest_index);
+        if done.is_some() {
+            // C# FinishQuest → RecalculateQuestBag：移除不再需要的任务物品
+            self.recalculate_quest_bag();
+        }
+        done
     }
 }
 
@@ -3644,7 +3649,12 @@ impl Message<AbandonQuest> for PlayerActor {
     type Reply = bool;
 
     async fn handle(&mut self, msg: AbandonQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
-        self.state.quest_log.abandon_quest(msg.quest_index)
+        let done = self.state.quest_log.abandon_quest(msg.quest_index);
+        if done {
+            // C# AbandonQuest → RecalculateQuestBag
+            self.recalculate_quest_bag();
+        }
+        done
     }
 }
 
@@ -3758,13 +3768,23 @@ impl Message<TryQuestItemPickup> for PlayerActor {
         if !needed {
             return false;
         }
-        let ok = self.state.inventory.add_item(msg.item).is_some();
-        if ok {
-            self.send_inventory_changed();
-            // 更新物品任务进度（C# ProcessItem：按背包数量对齐进度）
+        // #1342：任务物品入独立任务格（C# QuestInventory），不再占用普通背包
+        if let Some(uid) = self.state.inventory.add_quest_item(msg.item.clone()) {
+            // C# GainQuestItem：Enqueue(S.GainedQuestItem{Item})
+            let mut item = msg.item;
+            item.unique_id = uid;
+            let pkt = mir2_shared::packets::server::miscellaneous::GainedQuestItem { item };
+            let mut body = Vec::new();
+            if pkt.write_body(&mut body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainedQuestItem as i16, &body),
+                }).await;
+            }
+            // 更新物品任务进度（C# ProcessItem：按任务格数量对齐进度）
             for quest in &mut self.state.quest_log.quests {
                 for p in &mut quest.progress {
-                    let count = self.state.inventory.count_item_by_index(p.progress_id) as i32;
+                    let count = self.state.inventory.count_quest_item_by_index(p.progress_id) as i32;
                     if count > p.current && count <= p.target {
                         p.current = count;
                     } else if count >= p.target && p.current < p.target {
@@ -3772,8 +3792,9 @@ impl Message<TryQuestItemPickup> for PlayerActor {
                     }
                 }
             }
+            return true;
         }
-        ok
+        false
     }
 }
 
@@ -3787,7 +3808,7 @@ impl Message<CheckQuestItemProgress> for PlayerActor {
         for quest in &mut self.state.quest_log.quests {
             let mut any_changed = false;
             for p in &mut quest.progress {
-                let count = self.state.inventory.count_item_by_index(p.progress_id);
+                let count = self.state.inventory.count_quest_item_by_index(p.progress_id);
                 let count_i32 = count as i32;
                 if count_i32 > p.current && count_i32 <= p.target {
                     p.current = count_i32;
@@ -5265,6 +5286,56 @@ impl PlayerActor {
     fn send_inventory_changed(&self) {
         // 发送 UserInformation 刷新（不含背包数据，客户端需主动查询）
         self.send_user_information_refresh();
+    }
+
+    /// C# RecalculateQuestBag：清除任务格中不再被任何活跃任务需要的任务物品，并逐个发 S.DeleteQuestItem
+    fn recalculate_quest_bag(&mut self) {
+        // 统计所有活跃任务仍需的任务物品数量（target - current，未完成项）
+        let needed: Vec<(i32, u16)> = {
+            let mut map: Vec<(i32, u32)> = Vec::new();
+            for quest in &self.state.quest_log.quests {
+                for p in &quest.progress {
+                    if p.current >= p.target { continue; }
+                    if let Some(e) = map.iter_mut().find(|(idx, _)| *idx == p.progress_id) {
+                        e.1 += (p.target - p.current) as u32;
+                    } else {
+                        map.push((p.progress_id, (p.target - p.current) as u32));
+                    }
+                }
+            }
+            map.into_iter().map(|(idx, need)| (idx, need.min(u16::MAX as u32) as u16)).collect()
+        };
+        // 每个任务物品保留 needed 数量，移除超出部分（复用 remove_quest_item_by_index）
+        let mut deletions: Vec<(u64, u16)> = Vec::new();
+        let present: Vec<(i32, u16)> = {
+            let mut m: Vec<(i32, u16)> = Vec::new();
+            for item in self.state.inventory.quest_inventory.iter().flatten() {
+                if let Some(e) = m.iter_mut().find(|(idx, _)| *idx == item.item_index) {
+                    e.1 = e.1.saturating_add(item.count);
+                } else {
+                    m.push((item.item_index, item.count));
+                }
+            }
+            m
+        };
+        for (idx, current) in present {
+            let need = needed.iter().find(|(nidx, _)| *nidx == idx).map(|(_, n)| *n).unwrap_or(0);
+            let keep = need.min(current);
+            let excess = current - keep;
+            if excess > 0 {
+                deletions.extend(self.state.inventory.remove_quest_item_by_index(idx, excess));
+            }
+        }
+        for (unique_id, count) in deletions {
+            let pkt = mir2_shared::packets::server::miscellaneous::DeleteQuestItem { unique_id, count };
+            let mut body = Vec::new();
+            if pkt.write_body(&mut body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::DeleteQuestItem as i16, &body),
+                }).try_send();
+            }
+        }
     }
 
     fn send_equipment_changed(&self) {
