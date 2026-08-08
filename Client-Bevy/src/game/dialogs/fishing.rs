@@ -9,7 +9,9 @@
 
 use bevy::prelude::*;
 
+use crate::game::dialogs::inventory::{InvClickState, InvItem};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
 use crate::resources::libraries::LibraryName;
@@ -43,6 +45,9 @@ pub struct FishingAutocast;
 #[derive(Component)]
 pub struct FishingLine(usize);
 
+/// 钓具槽（0=Hook 1=Float 2=Bait 3=Finder 4=Reel，C# FishingSlot）
+#[derive(Component)] struct FishingGearSlot(usize);
+
 pub struct FishingPlugin;
 
 impl Plugin for FishingPlugin {
@@ -56,7 +61,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_fishing);
         app.add_systems(OnExit(AppState::Game), cleanup_fishing);
         app.add_systems(
             Update,
-            (fishing_ui_system, ui_button_system)
+            (fishing_ui_system, fishing_gear_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -67,6 +72,14 @@ fn cleanup_fishing(mut commands: Commands, roots: Query<Entity, With<DialogRoot>
     for e in roots.iter() {
         commands.entity(e).despawn();
     }
+}
+
+/// 钓具槽位置（C# FishingDialog Grid：Hook@(17,203) Float@(17,241) Bait@(57,241) Finder@(97,241) Reel@(137,241)，34x30）
+const GEAR_POS: [(f32, f32); 5] = [(17.0, 203.0), (17.0, 241.0), (57.0, 241.0), (97.0, 241.0), (137.0, 241.0)];
+
+/// 找背包第一个空格（钓具卸下目标；无空格返回 None）
+fn free_inventory_index(items: &[Option<InvItem>]) -> Option<usize> {
+    items.iter().position(|s| s.is_none())
 }
 
 fn spawn_fishing(
@@ -155,6 +168,29 @@ fn spawn_fishing(
             FishingWidget,
         ));
     }
+    // 钓具槽（C# FishingDialog Grid：Hook/Float/Bait/Finder/Reel，34x30）
+    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    for (i, (rx, ry)) in GEAR_POS.iter().enumerate() {
+        let e = spawn_ui_sprite(
+            &mut commands, white.clone(), 280.0 + rx, 80.0 + ry, 8.1, 1.0,
+        );
+        commands.entity(e).insert((
+            Sprite {
+                image: white.clone(),
+                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
+                custom_size: Some(Vec2::new(34.0, 30.0)),
+                ..default()
+            },
+            DialogRoot(DialogKind::Fishing),
+            FishingWidget,
+        ));
+        let t = spawn_ui_text(
+            &mut commands, &font, "—",
+            280.0 + rx + 4.0, 80.0 + ry + 8.0,
+            10.0, Color::WHITE, 8.2,
+        );
+        commands.entity(t).insert((FishingGearSlot(i), DialogRoot(DialogKind::Fishing), FishingWidget));
+    }
 }
 
 /// 显隐 + 渲染 + 抛竿/自动钓鱼
@@ -223,6 +259,74 @@ fn fishing_ui_system(
 }
 
 
+/// #1313：钓具槽显示 + 点击穿戴/卸下（C# FishingDialog Grid + EquipSlotItem/RemoveSlotItem）
+#[allow(clippy::too_many_arguments)]
+fn fishing_gear_system(
+    mgr: Res<DialogManager>,
+    hud: Res<HudState>,
+    mut inv_click: ResMut<InvClickState>,
+    net: Res<NetConnection>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    mut slots: Query<(&mut Text2d, &FishingGearSlot)>
+) {
+    let open = mgr.is_open(DialogKind::Fishing);
+    let rod = hud.equipment.get(0).and_then(|e| e.as_ref());
+    for (mut text, slot) in &mut slots {
+        let name = rod
+            .and_then(|r| r.slots.get(slot.0))
+            .and_then(|s| s.as_ref())
+            .map(|g| g.name.clone())
+            .unwrap_or_else(|| "—".to_string());
+        if text.0 != name {
+            text.0 = name;
+        }
+    }
+    if !open || !mouse.just_pressed(MouseButton::Left) {
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    for (slot, (rx, ry)) in GEAR_POS.iter().enumerate() {
+        let x = 280.0 + rx;
+        let y = 80.0 + ry;
+        if cursor.x < x || cursor.x > x + 34.0 || cursor.y < y || cursor.y > y + 30.0 {
+            continue;
+        }
+        let Some(rod) = rod else { return };
+        // 已占用 → 卸下回背包（C# RemoveSlotItem Grid=Fishing）
+        if let Some(gear) = rod.slots.get(slot).and_then(|s| s.as_ref()) {
+            let Some(to) = free_inventory_index(&hud.inventory.items) else {
+                tracing::warn!("🎣 背包已满，无法卸下钓具");
+                return;
+            };
+            net.send_packet(&crate::network::RemoveSlotItemWire {
+                grid: mir2_shared::enums::MirGridType::Fishing as u8,
+                grid_to: mir2_shared::enums::MirGridType::Inventory as u8,
+                unique_id: gear.unique_id,
+                to: to as i32,
+                from_unique_id: rod.unique_id,
+            });
+            tracing::info!("🎣 卸下钓具 {} -> 背包{}", gear.name, to);
+            return;
+        }
+        // 空槽 + 背包已选中物品 → 穿戴（C# EquipSlotItem GridTo=Fishing）
+        if let Some(sel) = inv_click.selected {
+            if let Some(item) = hud.inventory.items.get(sel).and_then(|s| s.as_ref()) {
+                net.send_packet(&mir2_shared::packets::client::misc::EquipSlotItem {
+                    grid: mir2_shared::enums::MirGridType::Inventory,
+                    unique_id: item.unique_id,
+                    to_slot: slot as i32,
+                    grid_to: mir2_shared::enums::MirGridType::Fishing,
+                });
+                tracing::info!("🎣 穿戴钓具 {} -> 槽{}", item.name, slot);
+                inv_click.selected = None;
+            }
+        }
+        return;
+    }
+}
+
 /// 消费服务端钓鱼事件（网络层只广播 ServerEvent；文案在此构造）
 fn fishing_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
@@ -245,5 +349,20 @@ fn fishing_server_events(
                 _ => "钓鱼中".to_string(),
             };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn free_inventory_index_finds_first_empty() {
+        let items = vec![Some(InvItem::default()), None, Some(InvItem::default()), None];
+        assert_eq!(free_inventory_index(&items), Some(1));
+        let full = vec![Some(InvItem::default()); 3];
+        assert_eq!(free_inventory_index(&full), None);
+        let empty: Vec<Option<InvItem>> = vec![];
+        assert_eq!(free_inventory_index(&empty), None);
     }
 }
