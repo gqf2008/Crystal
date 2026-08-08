@@ -77,6 +77,8 @@ pub enum ChatFilterKind {
 /// 聊天过滤设置（C# Settings.Filter*Chat）
 #[derive(Resource)]
 pub struct ChatFilter {
+    /// 当前页签（持久化 [Chat] Tab；C# 无对应，属客户端增强）
+    pub tab: ChatChannel,
     pub normal: bool,
     pub whisper: bool,
     pub shout: bool,
@@ -94,6 +96,7 @@ pub struct ChatFilter {
 impl Default for ChatFilter {
     fn default() -> Self {
         Self {
+            tab: ChatChannel::All,
             normal: false,
             whisper: false,
             shout: false,
@@ -109,6 +112,53 @@ impl Default for ChatFilter {
 }
 
 impl ChatFilter {
+    /// 从 Mir2Config.ini 解析（C# [Filter] Filter*Chat + [Game] TransparentChat + [Chat] Tab）
+    pub fn from_ini(content: &str) -> Self {
+        use crate::game::dialogs::settings_file::{ini_bool, ini_str};
+        let mut f = Self::default();
+        f.normal = ini_bool(content, "Filter", "FilterNormalChat", f.normal);
+        f.whisper = ini_bool(content, "Filter", "FilterWhisperChat", f.whisper);
+        f.shout = ini_bool(content, "Filter", "FilterShoutChat", f.shout);
+        f.system = ini_bool(content, "Filter", "FilterSystemChat", f.system);
+        f.lover = ini_bool(content, "Filter", "FilterLoverChat", f.lover);
+        f.mentor = ini_bool(content, "Filter", "FilterMentorChat", f.mentor);
+        f.group = ini_bool(content, "Filter", "FilterGroupChat", f.group);
+        f.guild = ini_bool(content, "Filter", "FilterGuildChat", f.guild);
+        f.transparent = ini_bool(content, "Game", "TransparentChat", f.transparent);
+        if let Some(tab) = ini_str(content, "Chat", "Tab") {
+            f.tab = chat_tab_from_key(tab);
+        }
+        f
+    }
+
+    /// 启动时加载（C# Settings.Load）
+    pub fn load() -> Self {
+        let content = crate::game::dialogs::settings_file::load_ini();
+        Self::from_ini(&content)
+    }
+
+    /// 保存（merge 写回 Mir2Config.ini，保留 [Sound]/[Game] 等其他 section）
+    pub fn save(&self) {
+        use crate::game::dialogs::settings_file::{set_ini_value, write_ini};
+        let mut content = crate::game::dialogs::settings_file::load_ini();
+        for (k, v) in [
+            ("FilterNormalChat", self.normal),
+            ("FilterWhisperChat", self.whisper),
+            ("FilterShoutChat", self.shout),
+            ("FilterSystemChat", self.system),
+            ("FilterLoverChat", self.lover),
+            ("FilterMentorChat", self.mentor),
+            ("FilterGroupChat", self.group),
+            ("FilterGuildChat", self.guild),
+        ] {
+            content = set_ini_value(&content, "Filter", k, &v.to_string());
+        }
+        content = set_ini_value(&content, "Game", "TransparentChat", &self.transparent.to_string());
+        content = set_ini_value(&content, "Chat", "Tab", chat_tab_key(self.tab));
+        write_ini(&content);
+        tracing::debug!("💬 聊天设置已保存到 Mir2Config.ini");
+    }
+
     pub fn get(&self, k: ChatFilterKind) -> bool {
         match k {
             ChatFilterKind::All => true,
@@ -165,6 +215,29 @@ pub fn chat_tab_name(tab: ChatChannel) -> &'static str {
         ChatChannel::Guild => "行会",
         ChatChannel::Group => "队伍",
         ChatChannel::Whisper => "私聊",
+    }
+}
+
+/// 页签持久化 key（英文小写，写入 [Chat] Tab）
+fn chat_tab_key(tab: ChatChannel) -> &'static str {
+    match tab {
+        ChatChannel::All => "all",
+        ChatChannel::System => "system",
+        ChatChannel::Nearby => "nearby",
+        ChatChannel::Guild => "guild",
+        ChatChannel::Group => "group",
+        ChatChannel::Whisper => "whisper",
+    }
+}
+
+fn chat_tab_from_key(s: &str) -> ChatChannel {
+    match s.to_lowercase().as_str() {
+        "system" => ChatChannel::System,
+        "nearby" => ChatChannel::Nearby,
+        "guild" => ChatChannel::Guild,
+        "group" => ChatChannel::Group,
+        "whisper" => ChatChannel::Whisper,
+        _ => ChatChannel::All,
     }
 }
 
@@ -282,9 +355,10 @@ pub struct ChatPlugin;
 
 impl Plugin for ChatPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ChatFilter>();
+        app.insert_resource(ChatFilter::load());
         app.init_resource::<ChatItemCache>();
         app.add_systems(OnEnter(AppState::Game), spawn_chat);
+        app.add_systems(OnEnter(AppState::Game), chat_apply_persisted_tab);
         app.add_systems(OnEnter(AppState::Game), spawn_chat_option_panel);
         app.add_systems(OnExit(AppState::Game), cleanup_chat);
         app.add_systems(
@@ -570,6 +644,8 @@ fn chat_option_system(
     mut widgets: Query<&mut Visibility, With<ChatOptionWidget>>,
     mut panel_bg: Query<&mut Sprite, (With<ChatPanelBg>, Without<ChatOptionWidget>)>,
 ) {
+    // 过滤/透明变更后统一保存（C# Settings.Save）
+    let mut changed = false;
     // 设置按钮开/关
     for btn in &settings {
         if btn.clicked {
@@ -605,12 +681,14 @@ fn chat_option_system(
                 filter.set(kind.0, turn_on);
             }
         }
+        changed = true;
         any_on = turn_on;
     } else {
         // 单项勾选框状态 → 过滤状态（checkbox_system 已切换勾选）
         for (_, cb, _, _, kind) in &boxes {
             if kind.0 != ChatFilterKind::All && filter.get(kind.0) != cb.checked {
                 filter.set(kind.0, cb.checked);
+                changed = true;
                 if cb.checked {
                     any_on = true;
                 }
@@ -633,8 +711,12 @@ fn chat_option_system(
     for (btn, t) in &transp {
         if btn.clicked && filter.transparent != t.0 {
             filter.transparent = t.0;
+            changed = true;
             tracing::info!("💬 聊天面板透明: {}", t.0);
         }
+    }
+    if changed {
+        filter.save();
     }
     // 面板底色透明度
     for mut sp in &mut panel_bg {
@@ -895,9 +977,19 @@ fn chat_display_system(
     }
 }
 
-/// 页签点击切换 + 发送频道快捷按钮
+/// 进入游戏时恢复持久化页签（C# Settings 无此字段，客户端增强）
+fn chat_apply_persisted_tab(mut chat: ResMut<ChatState>, filter: Res<ChatFilter>) {
+    if chat.tab != filter.tab {
+        chat.tab = filter.tab;
+        chat.scroll_up = 0;
+        tracing::info!("💬 恢复聊天页签 {:?}", filter.tab);
+    }
+}
+
+/// 页签点击切换 + 发送频道快捷按钮（切换即持久化 [Chat] Tab）
 fn chat_tab_system(
     mut chat: ResMut<ChatState>,
+    mut filter: ResMut<ChatFilter>,
     tabs: Query<(&UiButton, &ChatTabBtn)>,
     bar: Query<(&UiButton, &ChatBarBtn)>,
 ) {
@@ -905,6 +997,8 @@ fn chat_tab_system(
         if btn.clicked && chat.tab != tab.0 {
             chat.tab = tab.0;
             chat.scroll_up = 0;
+            filter.tab = tab.0;
+            filter.save();
             tracing::info!("💬 聊天页签 -> {:?}", tab.0);
         }
     }
@@ -1012,6 +1106,18 @@ mod tests {
         assert_eq!(chat_channel(ChatType::Group), ChatChannel::Group);
         assert_eq!(chat_channel(ChatType::WhisperIn), ChatChannel::Whisper);
         assert_eq!(chat_channel(ChatType::WhisperOut), ChatChannel::Whisper);
+    }
+
+    #[test]
+    fn chat_filter_from_ini() {
+        let content = "[Filter]\nFilterNormalChat=true\nFilterWhisperChat=true\nFilterShoutChat=false\nFilterSystemChat=false\nFilterLoverChat=false\nFilterMentorChat=false\nFilterGroupChat=false\nFilterGuildChat=false\n\n[Game]\nTransparentChat=true\n\n[Chat]\nTab=guild\n";
+        let f = ChatFilter::from_ini(content);
+        assert!(f.normal);
+        assert!(f.whisper);
+        assert!(!f.shout);
+        assert!(!f.guild);
+        assert!(f.transparent);
+        assert_eq!(f.tab, ChatChannel::Guild);
     }
 
     #[test]
@@ -1199,3 +1305,6 @@ mod whisper_partner_tests {
         assert_eq!(whisper_partner("没有分隔符", ChatType::WhisperIn), None);
     }
 }
+
+
+

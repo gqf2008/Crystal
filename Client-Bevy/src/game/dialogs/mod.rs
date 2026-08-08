@@ -45,6 +45,7 @@ pub mod npc_goods;
 pub mod option;
 pub mod quest_log;
 pub mod quest_tracking;
+pub mod settings_file;
 pub mod ranking;
 pub mod refine;
 pub mod relationship;
@@ -331,3 +332,4 @@ fn logout_server_events(
         }
     }
 }
+
