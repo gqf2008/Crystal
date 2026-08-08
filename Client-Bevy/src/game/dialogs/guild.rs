@@ -59,9 +59,21 @@ pub struct GuildState {
     pub invite: Option<String>,
     /// 选中的成员行（踢出用）
     pub selected_member: Option<usize>,
+    /// #1348：是否显示离线成员（C# MembersShowOfflinesetting，默认 true）
+    pub show_offline: bool,
 }
 
 impl GuildState {
+    /// #1348：可见成员下标（show_offline=false 时过滤离线；C# MembersShowOfflineSwitch）
+    pub fn visible_member_indices(&self) -> Vec<usize> {
+        self.members
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| self.show_offline || m.online)
+            .map(|(i, _)| i)
+            .collect()
+    }
+
     /// 物品显示名：优先缓存名，回退 #index
     pub fn item_name(&self, index: i32) -> String {
         self.item_names
@@ -90,6 +102,10 @@ pub struct GuildInviteField;
 
 #[derive(Component)]
 pub struct GuildInviteBtn;
+
+/// #1348：显示离线成员切换（C# MembersShowOfflineButton）
+#[derive(Component)]
+pub struct GuildShowOfflineBtn;
 
 /// 踢出选中成员
 #[derive(Component)]
@@ -157,6 +173,7 @@ impl Plugin for GuildPlugin {
                 guild_ui_system,
                 guild_storage_system,
                 guild_invite_system,
+                guild_show_offline_system,
                 ui_button_system,
             )
                 .chain()
@@ -257,6 +274,21 @@ fn spawn_guild(
             GuildWidget,
         ));
     }
+    // #1348：显示离线成员切换（C# MembersShowOfflineButton/Status @(230,310)，纯本地过滤）
+    let show_offline_btn = spawn_ui_text(
+        &mut commands, &font, "显示离线",
+        545.0, 390.0, 12.0, Color::WHITE, 8.0,
+    );
+    commands.entity(show_offline_btn).insert((
+        GuildShowOfflineBtn,
+        UiButton {
+            rect: (545.0, 390.0, 70.0, 20.0),
+            clicked: false,
+        },
+        DialogRoot(DialogKind::Guild),
+        GuildWidget,
+    ));
+
     // 创建行会：输入框 + 按钮（原版 C# GuildDialog 创建流程）
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     let name_box = commands
@@ -591,7 +623,7 @@ fn guild_ui_system(
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
         if let Some(mut sl) = sl {
             // #89 成员列表行数（滚动夹紧）
-            sl.set_total(if guild.in_guild { guild.members.len() } else { 0 });
+            sl.set_total(if guild.in_guild { guild.visible_member_indices().len() } else { 0 });
         }
     }
     if !open {
@@ -616,6 +648,8 @@ fn guild_ui_system(
         .iter()
         .find_map(|(_, _, _, sl)| sl.map(|s| s.offset))
         .unwrap_or(0);
+    // #1348：可见成员下标（过滤离线）
+    let visible = guild.visible_member_indices();
     for (mut text, mut color, line) in &mut lines {
         text.0 = match line.0 {
             0 => {
@@ -643,7 +677,8 @@ fn guild_ui_system(
             }
             i if (1..=10).contains(&i) => {
                 let idx = scroll_offset + i - 1;
-                match guild.members.get(idx) {
+                // #1348：按 show_offline 过滤后的可见成员映射
+                match visible.get(idx).and_then(|&mi| guild.members.get(mi)) {
                 Some(m) => {
                     let rank = match m.rank {
                         0 => "会长",
@@ -724,15 +759,18 @@ fn guild_ui_system(
     for btn in &kick_btn {
         if btn.clicked {
             if let Some(idx) = guild.selected_member {
-                if let Some(m) = guild.members.get(idx) {
-                    net.send_packet(&mir2_shared::packets::client::guild::EditGuildMember {
-                        change_type: 1,
-                        rank_index: 0,
-                        name: m.name.clone(),
-                        rank_name: String::new(),
-                    });
-                    tracing::info!("🏰 踢出行会成员: {}", m.name);
-                    guild.selected_member = None;
+                let visible = guild.visible_member_indices();
+                if let Some(&mi) = visible.get(idx) {
+                    if let Some(m) = guild.members.get(mi) {
+                        net.send_packet(&mir2_shared::packets::client::guild::EditGuildMember {
+                            change_type: 1,
+                            rank_index: 0,
+                            name: m.name.clone(),
+                            rank_name: String::new(),
+                        });
+                        tracing::info!("🏰 踢出行会成员: {}", m.name);
+                        guild.selected_member = None;
+                    }
                 }
             }
         }
@@ -785,15 +823,14 @@ fn guild_ui_system(
     if mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
+                let visible = guild.visible_member_indices();
                 for i in 1..=10usize {
                     let y = 140.0 + (i - 1) as f32 * 20.0;
                     if cursor.x >= 298.0 && cursor.x <= 600.0 && cursor.y >= y && cursor.y <= y + 18.0 {
-                        if guild.members.get(i - 1).is_some() {
-                            guild.selected_member = Some(i - 1);
-                            tracing::info!(
-                                "🏰 选中行会成员: {}",
-                                guild.members[i - 1].name
-                            );
+                        let idx = scroll_offset + i - 1;
+                        if let Some(&mi) = visible.get(idx) {
+                            guild.selected_member = Some(idx);
+                            tracing::info!("🏰 选中行会成员: {}", guild.members[mi].name);
                         }
                         break;
                     }
@@ -810,6 +847,22 @@ fn guild_ui_system(
                         break;
                     }
                 }
+            }
+        }
+    }
+}
+
+/// #1348：显示离线成员切换（C# MembersShowOfflineButton/Status，纯本地过滤）
+fn guild_show_offline_system(
+    mut guild: ResMut<GuildState>,
+    mut btn: Query<(&UiButton, &mut Text2d), With<GuildShowOfflineBtn>>,
+) {
+    for (b, mut text) in btn.iter_mut() {
+        text.0 = if guild.show_offline { "✓显示离线".to_string() } else { "显示离线".to_string() };
+        if b.clicked {
+            guild.show_offline = !guild.show_offline;
+            if !guild.show_offline {
+                guild.selected_member = None;
             }
         }
     }
