@@ -2077,6 +2077,40 @@ pub struct DamageEquipment {
     pub amount: u16,
 }
 
+/// 扣除单件装备耐久（C# HumanObject.DamageItem：NoDuraLoss 免疫 / Strong 减免 / 归零破损）。
+/// 返回 (是否发生变化, 是否破损归零)。
+fn apply_dura_damage(item: &mut mir2_shared::data::item::UserItem, amount: u16) -> (bool, bool) {
+    // C# SpecialItemMode.NoDuraLoss = 0x400：装备不掉耐久
+    let no_dura_loss = item
+        .info
+        .as_ref()
+        .map(|i| {
+            i.unique
+                .contains(mir2_shared::enums::SpecialItemMode::NO_DURA_LOSS)
+        })
+        .unwrap_or(false);
+    if no_dura_loss {
+        return (false, false);
+    }
+    // C# DamageItem：Strong 属性减少耐久损耗（最少 1）
+    let strong = item
+        .info
+        .as_ref()
+        .map(|i| i.stats.get(mir2_shared::enums::Stat::Strong))
+        .unwrap_or(0)
+        .max(0) as u16;
+    let amount = amount.saturating_sub(strong).max(1);
+    if item.current_dura > amount {
+        item.current_dura -= amount;
+        item.dura_changed = true;
+        (true, false)
+    } else {
+        item.current_dura = 0;
+        item.dura_changed = true;
+        (true, true)
+    }
+}
+
 impl Message<DamageEquipment> for PlayerActor {
     type Reply = bool; // true = item broke
 
@@ -2085,38 +2119,21 @@ impl Message<DamageEquipment> for PlayerActor {
         msg: DamageEquipment,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
-        let mut changed = false;
-        let broke = if let Some(ref mut item) = self.state.inventory.equipment[msg.slot as usize] {
-            // C# SpecialItemMode.NoDuraLoss = 0x400：装备不掉耐久
-            let no_dura_loss = item
-                .info
-                .as_ref()
-                .map(|i| i.unique.contains(mir2_shared::enums::SpecialItemMode::NO_DURA_LOSS))
-                .unwrap_or(false);
-            if no_dura_loss {
-                false
-            } else {
-                // C# DamageItem：Strong 属性减少耐久损耗（最少 1）
-                let strong = item.info.as_ref()
-                    .map(|i| i.stats.get(mir2_shared::enums::Stat::Strong))
-                    .unwrap_or(0)
-                    .max(0) as u16;
-                let amount = msg.amount.saturating_sub(strong).max(1);
-                if item.current_dura > amount {
-                    item.current_dura -= amount;
-                    item.dura_changed = true;
-                    changed = true;
-                    false
+        let (changed, broke) =
+            if let Some(item) = self.state.inventory.equipment[msg.slot as usize].as_mut() {
+                // #1246：C# DamageItem——CurrentDura == 0 已破损直接返回（不再扣/不再发 DuraChanged）。
+                // 但 Torch 仍需返回 broke 供 tick 路径卸下删除（C# Process 对 0 耐久火把同样移除）。
+                if item.current_dura == 0 {
+                    (
+                        false,
+                        msg.slot == crate::actors::inventory::EquipmentSlot::Torch,
+                    )
                 } else {
-                    item.current_dura = 0;
-                    item.dura_changed = true;
-                    changed = true;
-                    true
+                    apply_dura_damage(item, msg.amount)
                 }
-            }
-        } else {
-            false
-        };
+            } else {
+                (false, false)
+            };
 
         // C#：装备耐久变化 → S.DuraChanged（HumanObject Process 每 tick 冲刷 DuraChanged 标志）
         if changed {
@@ -2136,9 +2153,13 @@ impl Message<DamageEquipment> for PlayerActor {
         }
 
         if broke {
-            self.state.inventory.equipment[msg.slot as usize] = None;
-            self.send_equipment_changed();
-            self.send_inventory_changed();
+            // #1246：C# DamageItem——非 Torch 装备耐久归零仍保留在装备栏（属性失效由
+            // RefreshStats 跳过，玩家可手动卸下后修理）；仅 Torch 归零卸下 + 删除（C# Process）
+            if msg.slot == crate::actors::inventory::EquipmentSlot::Torch {
+                self.state.inventory.equipment[msg.slot as usize] = None;
+                self.send_equipment_changed();
+                self.send_inventory_changed();
+            }
         }
 
         broke
@@ -4573,10 +4594,21 @@ impl PlayerState {
             }
         }
         // #942：C# SpecialItemMode.Skill——技能经验 ×3（Stats[SkillGainMultiplier]=3）
+        // #1246：破损装备特殊模式失效（C# RefreshStats continue）
         let mut amount = amount;
-        if self.inventory.equipment.iter().flatten()
-            .any(|it| it.info.as_ref().map(|i| i.unique.contains(mir2_shared::enums::SpecialItemMode::SKILL)).unwrap_or(false))
-        {
+        if self.inventory.equipment.iter().flatten().any(|it| {
+            let broken =
+                it.current_dura == 0 && it.info.as_ref().map(|i| i.durability > 0).unwrap_or(false);
+            !broken
+                && it
+                    .info
+                    .as_ref()
+                    .map(|i| {
+                        i.unique
+                            .contains(mir2_shared::enums::SpecialItemMode::SKILL)
+                    })
+                    .unwrap_or(false)
+        }) {
             amount = amount.saturating_mul(3);
         }
         magic.experience = magic.experience.saturating_add(amount);
@@ -4650,10 +4682,21 @@ impl PlayerState {
             }
         }
         // #942：C# SpecialItemMode.Skill——技能经验 ×3（英雄装备同样生效）
+        // #1246：破损装备特殊模式失效（C# RefreshStats continue）
         let mut amount = amount;
-        if self.hero_inventory.equipment.iter().flatten()
-            .any(|it| it.info.as_ref().map(|i| i.unique.contains(mir2_shared::enums::SpecialItemMode::SKILL)).unwrap_or(false))
-        {
+        if self.hero_inventory.equipment.iter().flatten().any(|it| {
+            let broken =
+                it.current_dura == 0 && it.info.as_ref().map(|i| i.durability > 0).unwrap_or(false);
+            !broken
+                && it
+                    .info
+                    .as_ref()
+                    .map(|i| {
+                        i.unique
+                            .contains(mir2_shared::enums::SpecialItemMode::SKILL)
+                    })
+                    .unwrap_or(false)
+        }) {
             amount = amount.saturating_mul(3);
         }
         magic.experience = magic.experience.saturating_add(amount);
@@ -5641,6 +5684,39 @@ allow_group: false,
         assert_eq!(s.magics.iter().find(|m| m.spell == 31).unwrap().experience, 300);
         // 2 级门控 Level3=17：当前等级 12 < 17 被拦（C# case 2 需 Level >= Level3）
         assert!(s.gain_spell_exp(34, 1000, Some(&info)).is_none());
+    }
+
+    // ---- #1246 破损装备特殊模式失效：Skill ×3 不生效 ----
+    #[test]
+    fn test_skill_special_exp_broken_item_no_multiplier() {
+        let mut s = make_state();
+        use crate::actors::inventory::EquipmentSlot;
+        use mir2_shared::data::item::UserItem;
+        assert!(s.learn_magic(31)); // FireBall C# 编号 31（SharedRust 34）
+        let mut info = mir2_shared::data::item::ItemInfo::default();
+        info.unique = mir2_shared::enums::SpecialItemMode::SKILL;
+        info.durability = 1000;
+        s.inventory.equipment[EquipmentSlot::Armour as usize] = Some(UserItem {
+            info: Some(info),
+            current_dura: 500,
+            max_dura: 1000,
+            ..Default::default()
+        });
+        let _ = s.gain_spell_exp(34, 100, None);
+        assert_eq!(
+            s.magics.iter().find(|m| m.spell == 31).unwrap().experience,
+            300
+        );
+        // 破损：×3 失效（+100 → 400）
+        s.inventory.equipment[EquipmentSlot::Armour as usize]
+            .as_mut()
+            .unwrap()
+            .current_dura = 0;
+        let _ = s.gain_spell_exp(34, 100, None);
+        assert_eq!(
+            s.magics.iter().find(|m| m.spell == 31).unwrap().experience,
+            400
+        );
     }
 
     /// #973：召唤护身符消耗（C# GetAmulet + ConsumeItem）
