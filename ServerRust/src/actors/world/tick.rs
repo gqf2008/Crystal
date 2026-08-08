@@ -294,6 +294,32 @@ impl WorldActor {
         }
     }
 
+    /// #1290：C# ProcessRegen PotTime——药水池每 200ms 处理（PerTickRegen = 5 + Level/10）
+    pub(crate) async fn tick_potion_pools(&mut self) {
+        if self.tick_count % 2 != 0 {
+            return;
+        }
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        for record in self.players.values() {
+            if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+                if state.is_dead
+                    || state.pot_time_ms > now_ms
+                    || (state.pot_hp_amount == 0 && state.pot_mp_amount == 0)
+                {
+                    continue;
+                }
+                let per_tick = (5 + state.level / 10).max(1) as u32;
+                let _ = record
+                    .actor_ref
+                    .ask(crate::actors::player::TickPotionPool { per_tick, now_ms })
+                    .await;
+            }
+        }
+    }
+
     /// 玩家 Buff tick + 死亡复活（每 5 ticks）
     pub(crate) async fn tick_buffs_and_revive(&mut self) {
         if self.tick_count % 5 == 0 {
@@ -4758,6 +4784,8 @@ impl Message<Tick> for WorldActor {
         }
 
         self.tick_buffs_and_revive().await;
+
+        self.tick_potion_pools().await;
 
         self.tick_environment_damage().await;
 

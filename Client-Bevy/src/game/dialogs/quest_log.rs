@@ -168,8 +168,9 @@ fn quest_log_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut widgets: Query<&mut Visibility, With<QuestLogWidget>>,
-    mut lines: Query<(&mut Text2d, &QuestLogLine)>,
-    mut track_btns: Query<(&mut Text2d, &UiButton, &QuestLogTrack)>,
+    // #1290：Bevy B0001——两个 &mut Text2d Query 需用 Without 隔离（#1226 任务追踪合并后启动 panic）
+    mut lines: Query<(&mut Text2d, &QuestLogLine), Without<QuestLogTrack>>,
+    mut track_btns: Query<(&mut Text2d, &UiButton, &QuestLogTrack), Without<QuestLogLine>>,
 ) {
     let open = mgr.is_open(DialogKind::QuestLog);
     for mut vis in widgets.iter_mut() {
