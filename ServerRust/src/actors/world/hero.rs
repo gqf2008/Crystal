@@ -509,7 +509,7 @@ impl WorldActor {
             owner_y: i32,
             owner_map: u16,
             class: MirClass,
-            /// hero_behaviour: 0=Attack, 1=Follow
+            /// hero_behaviour: C# 0=Attack, 1=CounterAttack, 2=Follow, 3=Custom（#1198）
             behaviour: u8,
             /// 主人是否死亡
             owner_dead: bool,
@@ -556,8 +556,8 @@ impl WorldActor {
                 if state.hero_index == 0 || state.is_dead || state.hero_despawned || hero_dead {
                     continue;
                 }
-                // hero_behaviour == 1 (Follow) 时英雄纯跟随，不参战
-                // 但仍需移动跟随主人，所以保留快照（AI 内部判断 behaviour）
+                // #1198：hero_behaviour == 2 (Follow) 时英雄纯跟随，不参战
+                // 但仍需移动跟随主人，所以保留快照（AI 内部判断 behaviour；C# 1=CounterAttack）
                 // #1184：英雄自身属性只算一次（基础 + 装备加成）
                 let hero = self.player_heroes.get(session_id)
                     .and_then(|hs| hs.iter().find(|h| h.index as u8 == state.hero_index))
@@ -758,7 +758,8 @@ impl WorldActor {
                 }
             }
 
-            let behaviour_follow = snap.behaviour == 1; // Follow 模式：纯跟随
+            // #1198：C# HeroBehaviour：2=Follow（原误把 1 当 Follow，实为 CounterAttack）
+            let behaviour_follow = hero_behaviour_is_follow(snap.behaviour);
 
             // ===== 距主人过远：强制召回（C# OwnerRecall） =====
             let dist_to_owner = (ai_local.x - snap.owner_x).abs() + (ai_local.y - snap.owner_y).abs();
@@ -793,6 +794,16 @@ impl WorldActor {
             // 在主人视野内找最近的活怪
             let target = monster_snaps.iter()
                 .filter(|m| m.map_index == snap.owner_map)
+                // #1198：CounterAttack 只锁定正在攻击主人的怪（C# FindTarget：ob.Target != this/Owner 跳过）
+                .filter(|m| {
+                    if !hero_behaviour_is_counterattack(snap.behaviour) {
+                        return true;
+                    }
+                    self.monsters
+                        .get(&m.oid)
+                        .map(|mo| mo.target_session == Some(snap.session_id))
+                        .unwrap_or(false)
+                })
                 .map(|m| (m, (m.x - snap.owner_x).abs() + (m.y - snap.owner_y).abs()))
                 .filter(|(_, d)| *d <= HERO_VIEW_RANGE)
                 .min_by_key(|(_, d)| *d)
@@ -1876,6 +1887,16 @@ fn hero_curse_slow(level: u8, value: i32) -> (u32, i32) {
     (duration, value.max(1))
 }
 
+/// C# HeroBehaviour：0=Attack, 1=CounterAttack, 2=Follow, 3=Custom（#1198）
+fn hero_behaviour_is_follow(behaviour: u8) -> bool {
+    behaviour == 2
+}
+
+/// C# HeroBehaviour：1=CounterAttack（#1198：只反击攻击主人的怪）
+fn hero_behaviour_is_counterattack(behaviour: u8) -> bool {
+    behaviour == 1
+}
+
 /// 各职业 ProcessFriend 增益列表（#1190/#1192：C# 子类顺序）
 fn hero_friend_buffs(
     class: mir2_shared::enums::MirClass,
@@ -2548,5 +2569,17 @@ mod tests {
         assert_eq!(hero_curse_slow(0, 30), (3, 30));
         assert_eq!(hero_curse_slow(2, 30), (7, 30));
         assert_eq!(hero_curse_slow(1, 0), (5, 1));
+    }
+
+    #[test]
+    fn hero_behaviour_csharp_semantics() {
+        // C#：0=Attack, 1=CounterAttack, 2=Follow, 3=Custom
+        assert!(hero_behaviour_is_follow(2));
+        assert!(!hero_behaviour_is_follow(0));
+        assert!(!hero_behaviour_is_follow(1));
+        assert!(!hero_behaviour_is_follow(3));
+        assert!(hero_behaviour_is_counterattack(1));
+        assert!(!hero_behaviour_is_counterattack(0));
+        assert!(!hero_behaviour_is_counterattack(2));
     }
 }
