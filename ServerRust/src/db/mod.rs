@@ -73,6 +73,7 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             guild_name TEXT,
             guild_rank INTEGER DEFAULT 2,
             spouse_name TEXT,
+            married_date INTEGER NOT NULL DEFAULT 0,
             allow_mentor INTEGER NOT NULL DEFAULT 0,
             mentor_name TEXT,
             hero_index INTEGER NOT NULL DEFAULT 0,
@@ -649,6 +650,9 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN allow_lover_recall INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
+    // #1329: 结婚日期（unix 秒，C# CharacterInfo.MarriedDate，safe to re-run）
+    let _ = sqlx::query("ALTER TABLE characters ADD COLUMN married_date INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN allow_trade INTEGER NOT NULL DEFAULT 0")
         .execute(&pool).await;
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN allow_observe INTEGER NOT NULL DEFAULT 0")
@@ -875,7 +879,7 @@ pub async fn save_account(pool: &DbPool, account: &AccountInfo) -> anyhow::Resul
            (username, password_hash, is_online, storage_password_hash, storage_password_last_set,
             wrong_password_count, banned_until, require_password_change,
             has_expanded_storage, expanded_storage_expiry_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, \?, ?, ?)"#
     )
     .bind(&account.username)
     .bind(&account.password_hash)
@@ -1118,7 +1122,7 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
             min_mc, max_mc, min_sc, max_sc,
             freezing, poison_attack, poison_recovery, holy, accuracy, agility,
             gold, group_id, guild_name, guild_rank,
-            spouse_name, allow_mentor, mentor_name, hero_index, hero_behaviour,
+            spouse_name, married_date, allow_mentor, mentor_name, hero_index, hero_behaviour,
             auto_pot_hp, auto_pot_mp, auto_pot_hp_item, auto_pot_mp_item,
             is_fishing, fishing_autocast, is_dead, allow_trade, allow_observe, allow_group, pk_points, pk_kill_count, can_gain_exp, pearl_count,
             last_access, bind_map_index, bind_x, bind_y, is_mentor, backpack_size
@@ -1161,6 +1165,7 @@ pub async fn save_character(pool: &DbPool, state: &PlayerState, account_username
     .bind(&state.guild_name)
     .bind(state.guild_rank as i32)
     .bind(&state.spouse_name)
+    .bind(state.married_date)
     .bind(if state.allow_mentor { 1 } else { 0 })
     .bind(&state.mentor_name)
     .bind(state.hero_index as i32)
@@ -1341,6 +1346,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         guild_rank,
         quest_log,
         spouse_name: row.get::<Option<String>, _>("spouse_name"),
+        married_date: row.try_get::<i64, _>("married_date").unwrap_or(0),
         allow_mentor: row.get::<i32, _>("allow_mentor") != 0,
         mentor_name: row.get::<Option<String>, _>("mentor_name"),
         creature_log,

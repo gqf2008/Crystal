@@ -3292,6 +3292,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         guild_rank: GuildRank::Member,
         quest_log: QuestLog::new(),
         spouse_name: None,
+        married_date: 0,
         allow_mentor: false,
         mentor_name: None,
         creature_log: CreatureLog::new(),

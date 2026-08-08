@@ -368,10 +368,21 @@ pub fn send_guild_member_update_packet(gate_ref: &ActorRef<GateActor>, session_i
 // 婚姻/师徒系统
 // ============================================================
 
-/// Send marriage status to a client.
-pub fn send_marriage_status_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, married: bool) {
+/// #1329：下发全量 LoverUpdate（对齐 C# S.LoverUpdate：[Name dotnet][Date i64][MapName dotnet][MarriedDays i16]）
+pub fn send_lover_update_packet(
+    gate_ref: &ActorRef<GateActor>,
+    session_id: u64,
+    lover_name: &str,
+    date: i64,
+    map_name: &str,
+    married_days: i16,
+) {
+    use byteorder::{LittleEndian, WriteBytesExt};
     let mut body = Vec::new();
-    body.push(if married { 1u8 } else { 0u8 });
+    write_dotnet_string(&mut body, lover_name);
+    body.extend_from_slice(&date.to_le_bytes());
+    write_dotnet_string(&mut body, map_name);
+    let _ = body.write_i16::<LittleEndian>(married_days);
     let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LoverUpdate as i16, &body),

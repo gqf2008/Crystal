@@ -3878,6 +3878,11 @@ impl Actor for WorldActor {
     ) -> Result<Self, Self::Error> {
         info!("WorldActor started (tick interval: {}ms)", args.tick_interval_ms);
 
+        // #1329：注入自身引用给 SocialActor（配偶 LoverUpdate 地图标题查询）
+        let _ = args.social_ref.tell(crate::actors::social::SetWorldRef {
+            world_ref: actor_ref.clone(),
+        });
+
         // 启动主循环
         let tick_ref = actor_ref.clone();
         tokio::spawn(async move {
@@ -7400,6 +7405,19 @@ impl Message<IsNoExperienceMap> for WorldActor {
         self.map_infos.get(&(msg.map_index as i32))
             .map(|m| m.no_experience)
             .unwrap_or(false)
+    }
+}
+
+/// #1329：查询地图标题（C# MapInfo.Title；配偶 LoverUpdate MapName 用）
+pub struct GetMapTitle {
+    pub map_index: u16,
+}
+
+impl Message<GetMapTitle> for WorldActor {
+    type Reply = Option<String>;
+
+    async fn handle(&mut self, msg: GetMapTitle, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.map_infos.get(&(msg.map_index as i32)).map(|m| m.title.clone())
     }
 }
 
