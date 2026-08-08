@@ -40,6 +40,8 @@ pub struct GroupState {
     pub allow_group: bool,
     /// 移除成员输入框是否打开（C# DelButton → MirInputBox）
     pub del_open: bool,
+    /// #1349：按名邀请输入框是否打开（C# AddButton → MirInputBox → C.AddMember）
+    pub add_open: bool,
 }
 
 const DIALOG_X: f32 = 250.0;
@@ -56,6 +58,18 @@ pub struct GroupSwitch;
 
 #[derive(Component)]
 pub struct GroupMemberLine(usize);
+
+/// #1349：按名邀请按钮（C# GroupDialog AddButton Title[133-135] (70,219)）
+#[derive(Component)]
+pub struct GroupAddBtn;
+
+/// #1349：按名邀请输入框
+#[derive(Component)]
+pub struct GroupAddInput;
+
+/// #1349：按名邀请确认按钮
+#[derive(Component)]
+pub struct GroupAddOk;
 
 /// 移除成员按钮（C# GroupDialog DelButton Title[136-138] (140,219)）
 #[derive(Component)]
@@ -101,6 +115,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_group);
                 group_switch_system,
                 group_invite_player_system,
                 group_del_system,
+                group_add_system,
                 ui_button_system,
             )
                 .chain()
@@ -166,6 +181,14 @@ fn spawn_group(
             DialogRoot(DialogKind::Group),
             GroupWidget,
         ));
+    }
+    // #1349：按名邀请按钮（C# GroupDialog AddButton Title[133-135] (70,219)）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 133, 134, 135,
+        DIALOG_X + 70.0, DIALOG_Y + 219.0, 7.0, 60.0, 23.0,
+    ) {
+        commands.entity(e).insert((GroupAddBtn, DialogRoot(DialogKind::Group), GroupWidget));
     }
     // 成员列表（C# GroupMembers 2 列布局）
     for i in 0..8usize {
@@ -243,6 +266,53 @@ fn spawn_group(
     );
     commands.entity(ok_btn).insert((
         GroupDelOk,
+        UiButton {
+            rect: (DIALOG_X + 150.0, DIALOG_Y + 180.0, 40.0, 20.0),
+            clicked: false,
+        },
+        DialogRoot(DialogKind::Group),
+    ));
+    // #1349：按名邀请输入框（TextInput id 33）+ 确认按钮
+    let add_input = commands
+        .spawn((
+            crate::ui::sprite_ui::UiEntity,
+            DialogRoot(DialogKind::Group),
+            GroupWidget,
+            GroupAddInput,
+            TextInputField(33),
+            TextInputRect(DIALOG_X + 25.0, DIALOG_Y + 180.0, 120.0, 20.0),
+            Sprite {
+                image: white.clone(),
+                color: Color::srgba(0.2, 0.2, 0.25, 0.9),
+                custom_size: Some(Vec2::new(120.0, 20.0)),
+                ..default()
+            },
+            bevy::sprite::Anchor::TOP_LEFT,
+            Transform::from_xyz(DIALOG_X + 25.0, -(DIALOG_Y + 180.0), 8.1),
+            Visibility::Hidden,
+        ))
+        .id();
+    commands.entity(add_input).with_children(|p| {
+        p.spawn((
+            TextInputDisplay(33),
+            Text2d::new(String::new()),
+            bevy::sprite::Anchor::TOP_LEFT,
+            TextFont {
+                font: FontSource::Handle(font.clone()),
+                font_size: FontSize::Px(12.0),
+                ..default()
+            },
+            TextColor(Color::WHITE),
+            Transform::from_xyz(4.0, -2.0, 8.2),
+        ));
+    });
+    let add_ok = spawn_ui_text(
+        &mut commands, &font, "确认",
+        DIALOG_X + 150.0, DIALOG_Y + 180.0,
+        12.0, Color::WHITE, 8.0,
+    );
+    commands.entity(add_ok).insert((
+        GroupAddOk,
         UiButton {
             rect: (DIALOG_X + 150.0, DIALOG_Y + 180.0, 40.0, 20.0),
             clicked: false,
@@ -501,6 +571,82 @@ fn group_del_system(
         group.del_open = false;
         if input.texts.len() > 32 {
             input.texts[32].clear();
+        }
+    }
+}
+
+/// #1349：按名邀请（C# AddButton → MirInputBox → C.AddMember{Name}；仅队长可见可用）
+#[allow(clippy::too_many_arguments)]
+fn group_add_system(
+    mut mgr: ResMut<DialogManager>,
+    mut group: ResMut<GroupState>,
+    net: Res<NetConnection>,
+    mut input: ResMut<TextInputState>,
+    mut submit: MessageReader<TextInputSubmit>,
+    add_btn: Query<&UiButton, With<GroupAddBtn>>,
+    ok_btn: Query<&UiButton, With<GroupAddOk>>,
+    local_player: Query<&PlayerName, With<LocalPlayer>>,
+    // #1290：Bevy B0001——三个 &mut Visibility Query 需 Without 隔离
+    mut add_btn_vis: Query<&mut Visibility, (With<GroupAddBtn>, Without<GroupAddInput>, Without<GroupAddOk>)>,
+    mut input_vis: Query<&mut Visibility, (With<GroupAddInput>, Without<GroupAddBtn>, Without<GroupAddOk>)>,
+    mut ok_vis: Query<&mut Visibility, (With<GroupAddOk>, Without<GroupAddBtn>, Without<GroupAddInput>)>,
+) {
+    let open = mgr.is_open(DialogKind::Group);
+    if !open {
+        group.add_open = false;
+        if input.texts.len() > 33 {
+            input.texts[33].clear();
+        }
+        return;
+    }
+    let self_name = local_player.single().map(|n| n.0.clone()).unwrap_or_default();
+    let is_leader = group
+        .members
+        .first()
+        .map(|m| m.name == self_name)
+        .unwrap_or(false);
+    // 非队长隐藏邀请按钮（C# GroupPanel_BeforeDraw：非队长 Add/Del 不可见）
+    for mut vis in add_btn_vis.iter_mut() {
+        *vis = if is_leader { Visibility::Visible } else { Visibility::Hidden };
+    }
+    if !is_leader {
+        group.add_open = false;
+    }
+    for mut vis in input_vis.iter_mut() {
+        *vis = if group.add_open { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for mut vis in ok_vis.iter_mut() {
+        *vis = if group.add_open { Visibility::Visible } else { Visibility::Hidden };
+    }
+    // 点击邀请 → 打开输入框
+    for btn in &add_btn {
+        if btn.clicked && is_leader {
+            group.add_open = true;
+            input.active = Some(33);
+        }
+    }
+    // 确认 / Enter → 发送 AddMember{Name}
+    let mut confirmed = false;
+    for btn in &ok_btn {
+        if btn.clicked {
+            confirmed = true;
+        }
+    }
+    for s in submit.read() {
+        if s.0 == 33 {
+            confirmed = true;
+        }
+    }
+    if confirmed && group.add_open {
+        let name = input.texts.get(33).cloned().unwrap_or_default();
+        let name = name.trim().to_string();
+        if !name.is_empty() {
+            net.send_packet(&mir2_shared::packets::client::group::AddMember { name: name.clone() });
+            tracing::info!("👥 按名邀请组队: {}", name);
+        }
+        group.add_open = false;
+        if input.texts.len() > 33 {
+            input.texts[33].clear();
         }
     }
 }
