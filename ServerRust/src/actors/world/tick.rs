@@ -4618,6 +4618,32 @@ impl Message<Tick> for WorldActor {
 
             // 处理死亡怪物
             for oid in &dead_monsters {
+                // #1369：DemonGuard 死亡待复活——保留尸体（不移除、不结算掉落/经验），首次发 ObjectDied
+                let keep_for_revive = self.monsters.get_mut(oid)
+                    .and_then(|m| m.behavior.as_any_mut()
+                        .and_then(|a| a.downcast_mut::<crate::actors::world::ai::bosses::demon_guard::DemonGuardBehavior>())
+                        .map(|b| b.has_pending_revive()))
+                    .unwrap_or(false);
+                if keep_for_revive {
+                    if let Some(monster) = self.monsters.get_mut(oid) {
+                        let first_died = monster.behavior.as_any_mut()
+                            .and_then(|a| a.downcast_mut::<crate::actors::world::ai::bosses::demon_guard::DemonGuardBehavior>())
+                            .map(|b| b.mark_death_announced())
+                            .unwrap_or(false);
+                        if first_died {
+                            let died_packet = Self::build_object_died_packet(
+                                *oid, monster.x, monster.y, monster.direction);
+                            for session_id in self.players.keys() {
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: *session_id,
+                                    data: died_packet.clone(),
+                                }).await;
+                            }
+                            debug!("DemonGuard #{} died, corpse kept for revive", oid);
+                        }
+                    }
+                    continue;
+                }
                 if let Some(monster) = self.monsters.remove(oid) {
                     debug!("Monster '{}' (#{}) died", monster.name, oid);
 
