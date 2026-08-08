@@ -351,6 +351,8 @@ pub struct PlayerState {
     pub mount_loyalty_increase_time: i64,
     /// 火把耐久消耗时间（毫秒；C# HumanObject.TorchTime，每 10s -5 耐久，归零卸下）
     pub torch_burn_time: i64,
+    /// 上次受击时间（毫秒；C# Attacked 重置 RegenTime，受击后 RegenDelay=10s 内不自然回血）
+    pub last_damage_ms: i64,
 }
 
 impl PlayerState {
@@ -704,6 +706,7 @@ allow_group: false,
             mount_loyalty_decrease_time: 0,
             mount_loyalty_increase_time: 0,
             torch_burn_time: 0,
+            last_damage_ms: 0,
             },
             gate_ref,
             world_ref,
@@ -1244,6 +1247,14 @@ impl Message<TakeDamage> for PlayerActor {
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
         let damage = msg.damage.max(0);
+        // #1283：C# Attacked——受击重置自然回血计时（RegenTime = now + RegenDelay(10s)）
+        if damage > 0 {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            self.state.last_damage_ms = now_ms;
+        }
         // #942：C# SpecialItemMode.Protection——装备含 Protection 且 MP>0 时伤害全部由 MP 吸收
         // （HumanObject.ChangeHP → ChangeMP(amount)，不致死；Struck 动画照常）
         if damage > 0
@@ -5357,6 +5368,7 @@ allow_group: false,
             mount_loyalty_decrease_time: 0,
             mount_loyalty_increase_time: 0,
             torch_burn_time: 0,
+            last_damage_ms: 0,
         }
     }
 
