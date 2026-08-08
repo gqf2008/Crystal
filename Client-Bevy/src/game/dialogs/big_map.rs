@@ -11,6 +11,7 @@
 use bevy::prelude::*;
 
 use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect, TextInputState, TextInputSubmit};
+use crate::game::dialogs::minimap::MemberLocations;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::movement::world_to_tile;
 use crate::map_renderer::{GameData, GameLibraries};
@@ -32,6 +33,8 @@ const VIEW_W: f32 = 568.0;
 const VIEW_H: f32 = 380.0;
 /// NPC 点池大小（超过部分不绘制）
 const DOT_POOL: usize = 64;
+/// 队友点池大小（C# Globals.MaxGroup）
+const MEMBER_DOT_POOL: usize = 8;
 /// 世界地图图标池大小
 const WORLD_ICON_POOL: usize = 32;
 /// NPC 行数（C# MaximumRows=18）
@@ -106,6 +109,10 @@ pub struct BigMapPlayerDot;
 #[derive(Component)]
 pub struct BigMapDot(pub usize);
 
+/// 队友点（index 对应 MemberLocations.members 下标，C# BigMapDialog Players）
+#[derive(Component)]
+pub struct BigMapMemberDot(pub usize);
+
 #[derive(Component)]
 pub struct BigMapRow(pub usize);
 
@@ -138,7 +145,7 @@ app.add_systems(OnEnter(AppState::Game), spawn_big_map);
         app.add_systems(OnExit(AppState::Game), cleanup_big_map);
         app.add_systems(
             Update,
-            (big_map_ui_system, big_map_world_system, big_map_viewport_system, ui_button_system)
+            (big_map_ui_system, big_map_world_system, big_map_viewport_system, big_map_member_system, ui_button_system)
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
@@ -258,6 +265,22 @@ fn spawn_big_map(
                 ..default()
             },
             BigMapDot(i),
+            DialogRoot(DialogKind::BigMap),
+            BigMapWidget,
+        ));
+    }
+
+    // 队友点池（黄色小方块，C# BigMapDialog Players[MaxGroup]）
+    for i in 0..MEMBER_DOT_POOL {
+        let e = spawn_ui_sprite(&mut commands, dot_white.clone(), px + VIEW_X, py + VIEW_Y, 6.35, 1.0);
+        commands.entity(e).insert((
+            Sprite {
+                image: dot_white.clone(),
+                color: Color::srgb(1.0, 0.9, 0.2),
+                custom_size: Some(Vec2::new(3.0, 3.0)),
+                ..default()
+            },
+            BigMapMemberDot(i),
             DialogRoot(DialogKind::BigMap),
             BigMapWidget,
         ));
@@ -718,6 +741,42 @@ fn big_map_world_system(
         }
     }
 }
+/// 队友点定位（与玩家光点同公式：vx+(x/mw)*tw, vy+(y/mh)*th；x/y 为服务端瓦片坐标）
+fn big_map_member_pos(x: i32, y: i32, mw: f32, mh: f32, tw: f32, th: f32, vx: f32, vy: f32) -> (f32, f32) {
+    (vx + (x as f32 / mw) * tw, vy + (y as f32 / mh) * th)
+}
+
+/// 大地图队友光点（C# BigMapDialog Players[MaxGroup]；#1307）
+fn big_map_member_system(
+    mgr: Res<DialogManager>,
+    state: Res<BigMapState>,
+    locs: Res<MemberLocations>,
+    mut dots: Query<(&mut Transform, &mut Visibility, &BigMapMemberDot)>
+) {
+    let open = mgr.is_open(DialogKind::BigMap);
+    let (tw, th) = state.tex_size;
+    let (mw, mh) = state.map_size;
+    if tw <= 0.0 || mw <= 0.0 {
+        for (_, mut vis, _) in &mut dots { *vis = Visibility::Hidden; }
+        return;
+    }
+    let px = (1024.0 - PANEL_W) / 2.0;
+    let py = (768.0 - PANEL_H) / 2.0;
+    let vx = px + VIEW_X + (VIEW_W - tw) / 2.0;
+    let vy = py + VIEW_Y + (VIEW_H - th) / 2.0;
+    for (mut tf, mut vis, dot) in &mut dots {
+        if open && dot.0 < locs.members.len() {
+            let (_, mx, my) = &locs.members[dot.0];
+            let (sx, sy) = big_map_member_pos(*mx, *my, mw, mh, tw, th, vx, vy);
+            tf.translation.x = sx - 1.5;
+            tf.translation.y = -(sy - 1.5);
+            *vis = Visibility::Visible;
+        } else {
+            *vis = Visibility::Hidden;
+        }
+    }
+}
+
 fn big_map_viewport_system(
     mgr: Res<DialogManager>,
     mut state: ResMut<BigMapState>,
@@ -934,5 +993,21 @@ fn big_map_server_events(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    #[test]
+    fn member_pos_maps_tiles() {
+        // x=50/200*400=100；y=100/400*800=200（与玩家光点同公式）
+        let (x, y) = big_map_member_pos(50, 100, 200.0, 400.0, 400.0, 800.0, 10.0, 20.0);
+        assert_eq!(x, 110.0);
+        assert_eq!(y, 220.0);
+    }
 
+    #[test]
+    fn member_pos_origin_and_edge() {
+        assert_eq!(big_map_member_pos(0, 0, 200.0, 400.0, 400.0, 800.0, 0.0, 0.0), (0.0, 0.0));
+        assert_eq!(big_map_member_pos(200, 400, 200.0, 400.0, 400.0, 800.0, 0.0, 0.0), (400.0, 800.0));
+    }
+}
