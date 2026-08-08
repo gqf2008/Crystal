@@ -32,6 +32,7 @@ impl Plugin for GamePlugin {
         app.init_resource::<player_control::ControlState>();
         // 网络系统直接引用的对话框状态（与插件解耦，避免资源未注册）
         app.init_resource::<dialogs::npc::NpcDialogState>();
+        app.init_resource::<dialogs::quest_tracking::QuestTrackingState>();
         app.init_resource::<dialogs::npc_goods::NpcGoodsState>();
         // 游戏场景 UI 相机（#71：回归多相机方案——UI 走独立相机 order=1 + RenderLayers layer 1，
         // 地图相机只画 layer 0，UI 实体画 layer 1，删除原先 UiRoot 反平移 workaround）
@@ -42,6 +43,7 @@ impl Plugin for GamePlugin {
             hud::HudPlugin,
             chat::ChatPlugin,
             dialogs::DialogsPlugin,
+            dialogs::quest_tracking::QuestTrackingPlugin,
             movement::MovementPlugin,
             object_state::ObjectStatePlugin,
             player_menu::PlayerMenuPlugin,
