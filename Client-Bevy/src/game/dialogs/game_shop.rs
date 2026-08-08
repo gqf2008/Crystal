@@ -274,8 +274,9 @@ fn game_shop_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut widgets: Query<&mut Visibility, With<GameShopWidget>>,
-    mut lines: Query<(&mut Text2d, &GameShopLine)>,
-    mut cats: Query<(&mut Text2d, &GameShopCat)>,
+    // #1354：B0001 修复（#1334 商城分类合入后启动 panic）——lines 与 cats 的 &mut Text2d 需 Without 隔离
+    mut lines: Query<(&mut Text2d, &GameShopLine), Without<GameShopCat>>,
+    mut cats: Query<(&mut Text2d, &GameShopCat), Without<GameShopLine>>,
     cat_up: Query<&UiButton, With<GameShopCatUp>>,
     cat_down: Query<&UiButton, With<GameShopCatDown>>,
     mut requested: Local<bool>,

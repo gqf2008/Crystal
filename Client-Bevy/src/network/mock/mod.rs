@@ -2816,6 +2816,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             object_id: 101,
                                             direction: 2,
                                             location: (353, 352),
+                                            sitting: true,
                                         },
                                     );
                                     // #234：对象冲刺/后跳动作

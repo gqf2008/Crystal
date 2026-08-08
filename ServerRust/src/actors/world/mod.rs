@@ -500,6 +500,12 @@ pub struct MonsterState {
     pub ai_profile: MonsterAiProfile,
     /// 当前 AI 状态
     pub ai_state: MonsterAiState,
+    /// #1354：是否坐下（C# FrostTiger Sitting；坐下时禁攻禁移）
+    pub sitting: bool,
+    /// #1354：是否隐藏（C# Hidden；坐下时隐藏）
+    pub hidden: bool,
+    /// #1354：坐下计时 tick（C# FrostTiger SitDownTime；0=初始随机已生成）
+    pub sit_down_tick: u64,
     /// 当前目标玩家 session（None = 无目标）
     pub target_session: Option<u64>,
     /// 最后造成伤害的玩家/施法者 session（C# MapObject.LastHitter；死亡经验/掉落归属用）
@@ -3311,6 +3317,9 @@ impl WorldActor {
                                     next_summon_tick: 0,
                                     ai_profile: MonsterAiProfile::from_info(&monster_info),
                                     ai_state: MonsterAiState::Idle,
+                                    sitting: false,
+                                    hidden: false,
+                                    sit_down_tick: 0,
                                     target_session: None,
                                     last_hitter_session: None,
                                     provoked: true, // Boss is always aggressive
@@ -3607,6 +3616,9 @@ impl WorldActor {
                                         next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
                                         ai_profile: MonsterAiProfile::from_info(&info),
                                         ai_state: MonsterAiState::Idle,
+                                        sitting: false,
+                                        hidden: false,
+                                        sit_down_tick: 0,
                                         target_session: None,
                                         last_hitter_session: None, provoked: false,
                                         is_elite: false, is_boss: false,
@@ -4402,6 +4414,9 @@ impl WorldActor {
                 next_summon_tick: 0,
                 ai_profile: MonsterAiProfile::from_info(&info),
                 ai_state: MonsterAiState::Idle,
+                sitting: false,
+                hidden: false,
+                sit_down_tick: 0,
                 target_session: None,
                 last_hitter_session: None,
                 provoked: false,
@@ -6675,6 +6690,9 @@ async fn spawn_npcs_and_monsters(
             next_summon_tick: 0,
             ai_profile,
             ai_state: MonsterAiState::Idle,
+            sitting: false,
+            hidden: false,
+            sit_down_tick: 0,
             target_session: None,
             last_hitter_session: None,
             provoked: false,
@@ -6760,6 +6778,9 @@ async fn spawn_npcs_and_monsters(
                         next_summon_tick: 0,
                         ai_profile,
                         ai_state: MonsterAiState::Idle,
+                        sitting: false,
+                        hidden: false,
+                        sit_down_tick: 0,
                         target_session: None,
                         last_hitter_session: None,
                         provoked: false,
@@ -6880,6 +6901,9 @@ mod tests {
                 flee_threshold: 0.0,
             },
             ai_state: MonsterAiState::Idle,
+            sitting: false,
+            hidden: false,
+            sit_down_tick: 0,
             target_session: None,
             last_hitter_session: None,
             provoked: false,
