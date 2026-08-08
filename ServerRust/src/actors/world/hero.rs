@@ -456,7 +456,7 @@ pub struct HeroCombatAI {
     pub next_cast_tick: u64,
     /// 当前锁定的怪物 object_id（对应 C# HeroObject.Target）
     pub target_oid: Option<u32>,
-    /// 当前 HP（由主人的 hero 缓存模拟，简化：使用主人 max_hp 的 60% 作为英雄 max_hp）
+    /// 当前 HP（#1180：英雄自身 Stats[HP]）
     pub hp: i32,
     /// 最大 HP
     pub max_hp: i32,
@@ -702,7 +702,7 @@ impl WorldActor {
         // 弹道法术意图（法师/道士/弓箭手远程技能）：直接 push 到 pending_spell_completions
         // (session_id, spell, target_oid, target_x, target_y, damage, fire_at_tick, level)
         let mut spell_intents: Vec<(u64, u8, u32, i32, i32, i32, u64, u8)> = Vec::new();
-        // 辅助意图（道士治疗主人 / 战士 buff）：暂时简化为发送 ObjectAttack 广播但不造伤害
+        // 辅助意图：物理技能（Slaying/HalfMoon 等）经 3d 广播 ObjectAttack；魔法类（增益/治疗/毒/诅咒）由 3g 广播 ObjectMagic（#1208）
         // (hero_session_id, target_session_or_zero, spell_id, is_heal)
         let mut support_intents: Vec<(u64, u64, u8, bool)> = Vec::new();
         // 自动喝药意图：(hero_session_id, item_index, is_mp) —— 阶段 2.4 统一消耗（C# ProcessAutoPot/TryAutoPot）
@@ -2708,41 +2708,6 @@ fn hero_spell_cost(
         .get(&(spell_cs as u32))
         .map(|info| crate::combat::magic::magic_cost(info, level))
         .unwrap_or(5)
-}
-
-/// 广播英雄弹道/施法的 ObjectAttack 包
-async fn broadcast_hero_attack(
-    world: &WorldActor,
-    session_id: u64,
-    spell: u8,
-) {
-    let ai = match world.hero_ai_states.get(&session_id) {
-        Some(a) => a.clone(),
-        None => return,
-    };
-    let owner_oid = match world.players.get(&session_id).map(|r| r.object_id) {
-        Some(oid) => oid,
-        None => return,
-    };
-    let hero_oid = owner_oid.wrapping_add(HERO_OID_OFFSET);
-    let mut attack_body = Vec::new();
-    attack_body.extend_from_slice(&hero_oid.to_le_bytes());
-    attack_body.extend_from_slice(&(ai.x as u32).to_le_bytes());
-    attack_body.extend_from_slice(&(ai.y as u32).to_le_bytes());
-    attack_body.push(ai.direction);
-    attack_body.push(spell);
-    attack_body.extend_from_slice(&0u16.to_le_bytes());
-    attack_body.push(0u8);
-    let attack_packet = build_packet_bytes(
-        mir2_shared::enums::ServerPacketIds::ObjectAttack as i16,
-        &attack_body,
-    );
-    for sid in world.players.keys() {
-        let _ = world.gate_ref.tell(SendToClient {
-            session_id: *sid,
-            data: attack_packet.clone(),
-        }).await;
-    }
 }
 
 /// 广播英雄施法动画（#1206：C# Magic → S.ObjectMagic，客户端据此渲染弹道/AoE 特效）
