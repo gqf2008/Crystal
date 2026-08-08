@@ -26,6 +26,8 @@ pub struct CreatureEntry {
     pub enabled: bool,
     pub hunger: u8,
     pub name: String,
+    /// 是否当前激活（召唤中）
+    pub active: bool,
 }
 
 /// 宠物状态
@@ -33,6 +35,8 @@ pub struct CreatureEntry {
 pub struct CreatureState {
     pub creatures: Vec<CreatureEntry>,
     pub message: String,
+    /// 当前选中的宠物行（C# BeforeAfterDraw 选中语义）
+    pub selected: usize,
     /// 改名输入框是否打开（C# CreatureRenameButton → MirInputBox）
     pub rename_open: bool,
     /// 释放验证输入框是否打开（C# ReleaseButton → MirInputBox）
@@ -53,6 +57,9 @@ pub struct CreatureRefresh;
 
 /// 解散按钮（C# DismissButton Title[580-582]）
 #[derive(Component)] struct CreatureDismissBtn;
+
+/// 召唤按钮（C# SummonButton Title[576-578]，选中未激活宠物时显示）
+#[derive(Component)] struct CreatureSummonBtn;
 
 /// 释放按钮（C# ReleaseButton Title[583-585]）
 #[derive(Component)] struct CreatureReleaseBtn;
@@ -177,6 +184,12 @@ fn spawn_creature(
     );
     commands.entity(e).insert((CreatureDismissBtn, UiButton { rect: (360.0, 305.0, 44.0, 22.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget));
     let e = spawn_ui_text(
+        &mut commands, &font, "召唤",
+        360.0, 305.0,
+        12.0, Color::WHITE, 8.0,
+    );
+    commands.entity(e).insert((CreatureSummonBtn, UiButton { rect: (360.0, 305.0, 44.0, 22.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget, Visibility::Hidden));
+    let e = spawn_ui_text(
         &mut commands, &font, "释放",
         420.0, 305.0,
         12.0, Color::WHITE, 8.0,
@@ -260,6 +273,8 @@ fn creature_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut state: ResMut<CreatureState>,
     net: Res<NetConnection>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
     close: Query<&UiButton, With<CreatureClose>>,
     refresh_btn: Query<&UiButton, With<CreatureRefresh>>,
     mut widgets: Query<&mut Visibility, With<CreatureWidget>>,
@@ -285,16 +300,33 @@ fn creature_ui_system(
             mgr.close(DialogKind::Creature);
         }
     }
+    // 行点击选中（C# BeforeAfterDraw 选中语义）
+    if mouse.just_pressed(MouseButton::Left) {
+        if let Ok(window) = windows.single() {
+            if let Some(cursor) = window.cursor_position() {
+                for i in 0..8usize {
+                    let y = 120.0 + i as f32 * 22.0;
+                    if cursor.x >= 298.0 && cursor.x <= 540.0 && cursor.y >= y && cursor.y <= y + 20.0 {
+                        if i < state.creatures.len() {
+                            state.selected = i;
+                            state.message = format!("选中宠物 {}", state.creatures[i].name);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
     for (mut text, line) in &mut lines {
         text.0 = match line.0 {
             i if i < 8 => match state.creatures.get(i) {
                 Some(c) => format!(
-                    "{}（类型 {}）拾取:{} 饥饿:{} {}",
+                    "{} {}（类型 {}）模式:{} 饥饿:{}",
+                    if state.selected == i { ">" } else { " " },
                     if c.name.is_empty() { format!("#{}", c.creature_type) } else { c.name.clone() },
                     c.creature_type,
                     if c.pickup_mode == 0 { "自动" } else { "半自动" },
-                    c.hunger,
-                    if c.enabled { "启用" } else { "" }
+                    c.hunger
                 ),
                 None => String::new(),
             },
@@ -313,65 +345,74 @@ fn creature_ui_system(
 }
 
 
-/// 宠物操作（C# IntelligentCreatureDialog ButtonClick：改名/解散/释放/自动/半自动）
+/// 宠物操作（C# IntelligentCreatureDialog ButtonClick：改名/召唤/解散/释放/自动/半自动）
 #[allow(clippy::too_many_arguments)]
 fn creature_action_system(
     mut state: ResMut<CreatureState>,
     net: Res<NetConnection>,
     mut input: ResMut<TextInputState>,
     mut submit: MessageReader<TextInputSubmit>,
-    rename_btn: Query<&UiButton, With<CreatureRenameBtn>>,
-    dismiss_btn: Query<&UiButton, With<CreatureDismissBtn>>,
-    release_btn: Query<&UiButton, With<CreatureReleaseBtn>>,
-    auto_btn: Query<&UiButton, With<CreatureAutoBtn>>,
-    semi_btn: Query<&UiButton, With<CreatureSemiBtn>>,
-    rename_ok: Query<&UiButton, With<CreatureRenameOk>>,
-    release_ok: Query<&UiButton, With<CreatureReleaseOk>>,
-    mut rename_vis: Query<&mut Visibility, With<CreatureRenameInput>>,
-    mut release_vis: Query<&mut Visibility, With<CreatureReleaseInput>>,
-    mut rename_ok_vis: Query<&mut Visibility, With<CreatureRenameOk>>,
-    mut release_ok_vis: Query<&mut Visibility, With<CreatureReleaseOk>>,
-    mut dismiss_vis: Query<&mut Visibility, With<CreatureDismissBtn>>,
+    buttons: Query<(
+        &UiButton,
+        Has<CreatureRenameBtn>,
+        Has<CreatureDismissBtn>,
+        Has<CreatureSummonBtn>,
+        Has<CreatureReleaseBtn>,
+        Has<CreatureAutoBtn>,
+        Has<CreatureSemiBtn>,
+        Has<CreatureRenameOk>,
+        Has<CreatureReleaseOk>,
+    )>,
+    mut btn_vis: Query<(&mut Visibility, Has<CreatureDismissBtn>, Has<CreatureSummonBtn>)>,
+    mut input_vis: Query<(
+        &mut Visibility,
+        Has<CreatureRenameInput>,
+        Has<CreatureReleaseInput>,
+        Has<CreatureRenameOk>,
+        Has<CreatureReleaseOk>,
+    )>,
 ) {
-    let active = state.creatures.first().cloned();
-    let creature_type = active.as_ref().map(|c| c.creature_type).unwrap_or(0);
-    let pet_mode = active.as_ref().map(|c| c.pickup_mode).unwrap_or(0);
+    let selected = state.creatures.get(state.selected).cloned();
+    let creature_type = selected.as_ref().map(|c| c.creature_type).unwrap_or(0);
+    let pet_mode = selected.as_ref().map(|c| c.pickup_mode).unwrap_or(0);
+    let is_active = selected.as_ref().map(|c| c.active).unwrap_or(false);
+    let sel_name = selected.as_ref().map(|c| c.name.clone()).unwrap_or_default();
 
-    // 解散按钮仅在有激活宠物时显示
-    for mut vis in dismiss_vis.iter_mut() {
-        *vis = if active.is_some() { Visibility::Visible } else { Visibility::Hidden };
+    // 解散仅对激活宠物显示；召唤对未激活的选中宠物显示（C# Summon/Dismiss 同位置切换）
+    for (mut vis, is_dismiss, is_summon) in &mut btn_vis {
+        if is_dismiss {
+            *vis = if is_active { Visibility::Visible } else { Visibility::Hidden };
+        } else if is_summon {
+            *vis = if selected.is_some() && !is_active { Visibility::Visible } else { Visibility::Hidden };
+        }
     }
-    for mut vis in rename_vis.iter_mut() {
-        *vis = if state.rename_open { Visibility::Visible } else { Visibility::Hidden };
-    }
-    for mut vis in rename_ok_vis.iter_mut() {
-        *vis = if state.rename_open { Visibility::Visible } else { Visibility::Hidden };
-    }
-    for mut vis in release_vis.iter_mut() {
-        *vis = if state.release_open { Visibility::Visible } else { Visibility::Hidden };
-    }
-    for mut vis in release_ok_vis.iter_mut() {
-        *vis = if state.release_open { Visibility::Visible } else { Visibility::Hidden };
+    for (mut vis, is_ri, is_reli, is_rok, is_relok) in &mut input_vis {
+        if is_ri {
+            *vis = if state.rename_open { Visibility::Visible } else { Visibility::Hidden };
+        }
+        if is_reli {
+            *vis = if state.release_open { Visibility::Visible } else { Visibility::Hidden };
+        }
+        if is_rok {
+            *vis = if state.rename_open { Visibility::Visible } else { Visibility::Hidden };
+        }
+        if is_relok {
+            *vis = if state.release_open { Visibility::Visible } else { Visibility::Hidden };
+        }
     }
 
     let submits: Vec<usize> = submit.read().map(|s| s.0).collect();
-
-    for btn in &rename_btn {
-        if btn.clicked {
+    let mut rename_confirm = false;
+    let mut release_confirm = false;
+    for (btn, is_rename, is_dismiss, is_summon, is_release, is_auto, is_semi, is_rok, is_relok) in &buttons {
+        if !btn.clicked {
+            continue;
+        }
+        if is_rename {
             state.rename_open = true;
             state.release_open = false;
             input.active = Some(33);
-        }
-    }
-    for btn in &release_btn {
-        if btn.clicked {
-            state.release_open = true;
-            state.rename_open = false;
-            input.active = Some(34);
-        }
-    }
-    for btn in &dismiss_btn {
-        if btn.clicked {
+        } else if is_dismiss {
             net.send_packet(&mir2_shared::packets::client::misc::UpdateIntelligentCreature {
                 creature_type,
                 pet_mode,
@@ -381,10 +422,21 @@ fn creature_action_system(
                 release_me: false,
             });
             state.message = "已解散宠物".to_string();
-        }
-    }
-    for btn in &auto_btn {
-        if btn.clicked {
+        } else if is_summon {
+            net.send_packet(&mir2_shared::packets::client::misc::UpdateIntelligentCreature {
+                creature_type,
+                pet_mode,
+                custom_name: String::new(),
+                summon_me: true,
+                unsummon_me: false,
+                release_me: false,
+            });
+            state.message = format!("已召唤宠物 {}", sel_name);
+        } else if is_release {
+            state.release_open = true;
+            state.rename_open = false;
+            input.active = Some(34);
+        } else if is_auto {
             net.send_packet(&mir2_shared::packets::client::misc::UpdateIntelligentCreature {
                 creature_type,
                 pet_mode: 0,
@@ -394,10 +446,7 @@ fn creature_action_system(
                 release_me: false,
             });
             state.message = "切换到自动模式".to_string();
-        }
-    }
-    for btn in &semi_btn {
-        if btn.clicked {
+        } else if is_semi {
             net.send_packet(&mir2_shared::packets::client::misc::UpdateIntelligentCreature {
                 creature_type,
                 pet_mode: 1,
@@ -407,10 +456,19 @@ fn creature_action_system(
                 release_me: false,
             });
             state.message = "切换到半自动模式".to_string();
+        } else if is_rok {
+            rename_confirm = true;
+        } else if is_relok {
+            release_confirm = true;
         }
     }
+    if submits.contains(&33) {
+        rename_confirm = true;
+    }
+    if submits.contains(&34) {
+        release_confirm = true;
+    }
     // 改名确认（C# CreatureRenameButton → MirInputBox → UpdateIntelligentCreature.CustomName）
-    let rename_confirm = rename_ok.iter().any(|b| b.clicked) || submits.contains(&33);
     if rename_confirm && state.rename_open {
         let name = input.texts.get(33).cloned().unwrap_or_default();
         let name = name.trim().to_string();
@@ -429,12 +487,10 @@ fn creature_action_system(
         if input.texts.len() > 33 { input.texts[33].clear(); }
     }
     // 释放确认（C# ReleaseButton → 输入宠物名验证 → ReleaseMe）
-    let release_confirm = release_ok.iter().any(|b| b.clicked) || submits.contains(&34);
     if release_confirm && state.release_open {
         let name = input.texts.get(34).cloned().unwrap_or_default();
         let name = name.trim().to_string();
-        let active_name = active.as_ref().map(|c| c.name.clone()).unwrap_or_default();
-        if name.eq_ignore_ascii_case(&active_name) {
+        if name.eq_ignore_ascii_case(&sel_name) {
             net.send_packet(&mir2_shared::packets::client::misc::UpdateIntelligentCreature {
                 creature_type,
                 pet_mode,
@@ -451,7 +507,6 @@ fn creature_action_system(
         if input.texts.len() > 34 { input.texts[34].clear(); }
     }
 }
-
 /// 消费服务端宠物列表事件（网络层只广播 ServerEvent）
 fn creature_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,

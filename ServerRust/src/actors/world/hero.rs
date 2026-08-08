@@ -254,11 +254,11 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
             log.active_creature = None;
             log.owned_creatures
                 .retain(|c| c.creature_type != creature_type);
+            send_creature_list_packet(&self.gate_ref, msg.session_id, &log);
             let _ = record
                 .actor_ref
                 .ask(SetCreature { creature_log: log })
                 .await;
-            send_creature_list_packet(&self.gate_ref, msg.session_id, None);
             send_system_message(&self.gate_ref, msg.session_id, "宠物已释放");
             return;
         }
@@ -273,11 +273,11 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
                     log.owned_creatures.push(active);
                 }
             }
+            send_creature_list_packet(&self.gate_ref, msg.session_id, &log);
             let _ = record
                 .actor_ref
                 .ask(SetCreature { creature_log: log })
                 .await;
-            send_creature_list_packet(&self.gate_ref, msg.session_id, None);
             send_system_message(&self.gate_ref, msg.session_id, "宠物已解散");
             return;
         }
@@ -291,9 +291,8 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
                 c.enabled = true;
                 log.active_creature = Some(c);
             }
-            let creature_ref = log.active_creature.clone();
+            send_creature_list_packet(&self.gate_ref, msg.session_id, &log);
             let _ = record.actor_ref.ask(SetCreature { creature_log: log }).await;
-            send_creature_list_packet(&self.gate_ref, msg.session_id, creature_ref.as_ref());
             send_system_message(&self.gate_ref, msg.session_id, "宠物已改名");
             return;
         }
@@ -316,9 +315,8 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
             // 原语义：关闭宠物（type=None 且无动作）
             log.active_creature = None;
         }
-        let creature_ref = log.active_creature.clone();
+        send_creature_list_packet(&self.gate_ref, msg.session_id, &log);
         let _ = record.actor_ref.ask(SetCreature { creature_log: log }).await;
-        send_creature_list_packet(&self.gate_ref, msg.session_id, creature_ref.as_ref());
         debug!(
             "UpdateIntelligentCreature: {} type={:?} mode={:?}",
             state.name, creature_type, pet_mode
@@ -422,9 +420,8 @@ impl Message<RequestIntelligentCreatureUpdates> for WorldActor {
             _ => return,
         };
 
-        // 发送当前宠物列表
-        let creature_ref = state.creature_log.active_creature.clone();
-        send_creature_list_packet(&self.gate_ref, msg.session_id, creature_ref.as_ref());
+        // 发送当前宠物列表（owned + active）
+        send_creature_list_packet(&self.gate_ref, msg.session_id, &state.creature_log);
     }
 }
 
