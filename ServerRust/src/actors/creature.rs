@@ -61,6 +61,39 @@ impl From<PickupMode> for u8 {
     }
 }
 
+/// 物品过滤（C# IntelligentCreatureItemFilter：全部/金币/武器/盔甲/头盔/靴子/腰带/饰品/其他 + 品质）
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CreatureFilter {
+    pub pickup_all: bool,
+    pub gold: bool,
+    pub weapons: bool,
+    pub armours: bool,
+    pub helmets: bool,
+    pub boots: bool,
+    pub belts: bool,
+    pub accessories: bool,
+    pub others: bool,
+    /// 品质（C# ItemGrade；0=None）
+    pub grade: u8,
+}
+
+impl Default for CreatureFilter {
+    fn default() -> Self {
+        Self {
+            pickup_all: true,
+            gold: false,
+            weapons: false,
+            armours: false,
+            helmets: false,
+            boots: false,
+            belts: false,
+            accessories: false,
+            others: false,
+            grade: 0,
+        }
+    }
+}
+
 /// 宠物实例
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IntelligentCreature {
@@ -77,6 +110,9 @@ pub struct IntelligentCreature {
     /// 宠物等级（NPC 脚本 PETLEVEL，对齐 C# PetLevel；默认 1，serde 兼容旧存档）
     #[serde(default = "default_creature_level")]
     pub level: u8,
+    /// 物品过滤（serde 兼容旧存档）
+    #[serde(default)]
+    pub filter: CreatureFilter,
 }
 
 fn default_creature_level() -> u8 {
@@ -92,6 +128,7 @@ impl IntelligentCreature {
             hunger: 100,
             enabled: false,
             level: 1,
+            filter: CreatureFilter::default(),
         }
     }
 

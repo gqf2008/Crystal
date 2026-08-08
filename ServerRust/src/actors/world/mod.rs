@@ -5668,6 +5668,17 @@ fn send_creature_list_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, lo
             .map(|a| a.creature_type == c.creature_type)
             .unwrap_or(false);
         body.push(if is_active { 1u8 } else { 0u8 });
+        // 物品过滤 9 项 + 品质
+        body.push(if c.filter.pickup_all { 1u8 } else { 0u8 });
+        body.push(if c.filter.gold { 1u8 } else { 0u8 });
+        body.push(if c.filter.weapons { 1u8 } else { 0u8 });
+        body.push(if c.filter.armours { 1u8 } else { 0u8 });
+        body.push(if c.filter.helmets { 1u8 } else { 0u8 });
+        body.push(if c.filter.boots { 1u8 } else { 0u8 });
+        body.push(if c.filter.belts { 1u8 } else { 0u8 });
+        body.push(if c.filter.accessories { 1u8 } else { 0u8 });
+        body.push(if c.filter.others { 1u8 } else { 0u8 });
+        body.push(c.filter.grade);
     }
     let _ = gate_ref.tell(SendToClient {
         session_id,

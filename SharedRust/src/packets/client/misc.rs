@@ -572,6 +572,12 @@ pub struct UpdateIntelligentCreature {
     pub summon_me: bool,
     pub unsummon_me: bool,
     pub release_me: bool,
+    /// 物品过滤 9 项（全部/金币/武器/盔甲/头盔/靴子/腰带/饰品/其他）
+    pub filter: [u8; 9],
+    /// 品质（C# ItemGrade）
+    pub grade: u8,
+    /// 是否保存过滤（C# OptionsSaveButton → UpdateIntelligentCreature）
+    pub options_save: bool,
 }
 
 impl Packet for UpdateIntelligentCreature {
@@ -584,6 +590,10 @@ impl Packet for UpdateIntelligentCreature {
         let summon_me = reader.read_u8()? != 0;
         let unsummon_me = reader.read_u8()? != 0;
         let release_me = reader.read_u8()? != 0;
+        let mut filter = [0u8; 9];
+        for b in filter.iter_mut() { *b = reader.read_u8()?; }
+        let grade = reader.read_u8()?;
+        let options_save = reader.read_u8()? != 0;
         Ok(Self {
             creature_type,
             pet_mode,
@@ -591,6 +601,9 @@ impl Packet for UpdateIntelligentCreature {
             summon_me,
             unsummon_me,
             release_me,
+            filter,
+            grade,
+            options_save,
         })
     }
 
@@ -601,6 +614,9 @@ impl Packet for UpdateIntelligentCreature {
         writer.write_u8(if self.summon_me { 1 } else { 0 })?;
         writer.write_u8(if self.unsummon_me { 1 } else { 0 })?;
         writer.write_u8(if self.release_me { 1 } else { 0 })?;
+        for b in &self.filter { writer.write_u8(*b)?; }
+        writer.write_u8(self.grade)?;
+        writer.write_u8(if self.options_save { 1 } else { 0 })?;
         Ok(())
     }
 }

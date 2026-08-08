@@ -1395,6 +1395,9 @@ mod tests {
             summon_me: true,
             unsummon_me: false,
             release_me: false,
+            filter: [1, 0, 1, 0, 0, 0, 0, 0, 0],
+            grade: 0,
+            options_save: true,
         })
     }
 

@@ -83,6 +83,8 @@ impl Packet for MockCreatureList {
         writer.write_u8(0)?; // hunger
         mir2_shared::binary::write_dotnet_string(writer, "小猪")?;
         writer.write_u8(1)?; // active
+        for _ in 0..9 { writer.write_u8(0)?; } // filter（默认全部关闭）
+        writer.write_u8(0)?; // grade
         Ok(())
     }
 }
