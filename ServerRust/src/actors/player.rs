@@ -353,6 +353,12 @@ pub struct PlayerState {
     pub torch_burn_time: i64,
     /// 上次受击时间（毫秒；C# Attacked 重置 RegenTime，受击后 RegenDelay=10s 内不自然回血）
     pub last_damage_ms: i64,
+    /// 药水累计待回复 HP（C# PotHealthAmount，NormalPotion 累加）
+    pub pot_hp_amount: u32,
+    /// 药水累计待回复 MP（C# PotManaAmount，NormalPotion 累加）
+    pub pot_mp_amount: u32,
+    /// 药水池下次处理时间（毫秒；C# PotTime = now + PotDelay=200ms）
+    pub pot_time_ms: i64,
 }
 
 impl PlayerState {
@@ -707,6 +713,9 @@ allow_group: false,
             mount_loyalty_increase_time: 0,
             torch_burn_time: 0,
             last_damage_ms: 0,
+            pot_hp_amount: 0,
+            pot_mp_amount: 0,
+            pot_time_ms: 0,
             },
             gate_ref,
             world_ref,
@@ -1589,6 +1598,77 @@ impl Message<Heal> for PlayerActor {
 
         debug!("Player {} healed for {} HP ({} -> {})", self.state.name, healed, before, self.state.hp);
         healed
+    }
+}
+
+/// #1290：使用 NormalPotion 累计药水池（C# PotHealthAmount/PotManaAmount 累加）
+pub struct AddPotionPool {
+    pub hp: u32,
+    pub mp: u32,
+}
+
+impl Message<AddPotionPool> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: AddPotionPool,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.pot_hp_amount = self.state.pot_hp_amount.saturating_add(msg.hp);
+        self.state.pot_mp_amount = self.state.pot_mp_amount.saturating_add(msg.mp);
+    }
+}
+
+/// #1290：C# ProcessRegen PotTime——每次从药水池扣 min(池, PerTickRegen)，返回 (回复量, 剩余池)
+fn potion_tick_regen(pool: u32, per_tick: u32) -> (u32, u32) {
+    let heal = pool.min(per_tick);
+    (heal, pool - heal)
+}
+
+/// #1290：药水池处理（每 PotDelay=200ms 由 WorldActor tick_potion_pools 调用）
+pub struct TickPotionPool {
+    pub per_tick: u32,
+    pub now_ms: i64,
+}
+
+impl Message<TickPotionPool> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(
+        &mut self,
+        msg: TickPotionPool,
+        _ctx: &mut Context<Self, Self::Reply>,
+    ) -> Self::Reply {
+        self.state.pot_time_ms = msg.now_ms + 200; // C# PotDelay
+        let mut changed = false;
+        if self.state.pot_hp_amount > 0 {
+            let (heal, rem) = potion_tick_regen(self.state.pot_hp_amount, msg.per_tick);
+            self.state.pot_hp_amount = rem;
+            self.state.hp = (self.state.hp + heal as i32).min(self.state.max_hp);
+            changed = true;
+        }
+        if self.state.pot_mp_amount > 0 {
+            let (add, rem) = potion_tick_regen(self.state.pot_mp_amount, msg.per_tick);
+            self.state.pot_mp_amount = rem;
+            self.state.mp = (self.state.mp + add as i32).min(self.state.max_mp);
+            changed = true;
+        }
+        if changed {
+            let mut body = Vec::new();
+            body.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
+            body.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
+            let _ = self
+                .gate_ref
+                .tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::HealthChanged as i16,
+                        &body,
+                    ),
+                })
+                .await;
+        }
     }
 }
 
@@ -5369,6 +5449,9 @@ allow_group: false,
             mount_loyalty_increase_time: 0,
             torch_burn_time: 0,
             last_damage_ms: 0,
+            pot_hp_amount: 0,
+            pot_mp_amount: 0,
+            pot_time_ms: 0,
         }
     }
 
@@ -5729,6 +5812,19 @@ allow_group: false,
             s.magics.iter().find(|m| m.spell == 31).unwrap().experience,
             400
         );
+    }
+
+    // ---- #1290 药水池 tick 计算（C# ProcessRegen：min(池, PerTickRegen)） ----
+    #[test]
+    fn test_potion_tick_regen() {
+        // 池 > per_tick：扣满 per_tick
+        assert_eq!(potion_tick_regen(100, 8), (8, 92));
+        // 池 < per_tick：取余清零
+        assert_eq!(potion_tick_regen(5, 8), (5, 0));
+        // 池 == per_tick
+        assert_eq!(potion_tick_regen(8, 8), (8, 0));
+        // 池 0
+        assert_eq!(potion_tick_regen(0, 8), (0, 0));
     }
 
     /// #973：召唤护身符消耗（C# GetAmulet + ConsumeItem）

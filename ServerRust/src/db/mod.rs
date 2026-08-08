@@ -1435,6 +1435,9 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
             mount_loyalty_increase_time: 0,
             torch_burn_time: 0,
             last_damage_ms: 0,
+            pot_hp_amount: 0,
+            pot_mp_amount: 0,
+            pot_time_ms: 0,
     };
 
     Ok(Some(state))

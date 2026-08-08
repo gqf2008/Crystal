@@ -596,24 +596,23 @@ impl Message<UseItemRequest> for WorldActor {
                     let shape = db.shape;
                     let get = |stat: Stat| db.stats.get(&(stat as u8)).copied().unwrap_or(0);
                     match shape {
-                        // 0 NormalPotion（C#：累计 PotHealthAmount/PotManaAmount，每 tick 回复 PerTickRegen = 5 + Level/10）
+                        // 0 NormalPotion（C#：累计 PotHealthAmount/PotManaAmount，每 PotDelay=200ms 回 PerTickRegen=5+Level/10）
                         0 => {
-                            let per_tick = (5 + player_state.level / 10).max(1) as u32;
                             let hp_pool = get(Stat::HP) as u32;
                             let mp_pool = get(Stat::MP) as u32;
-                            if hp_pool > 0 {
-                                let ticks = hp_pool.div_ceil(per_tick).max(1);
-                                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff {
-                                    buff: BuffInstance::new(BuffType::HpRegen { amount_per_tick: per_tick as i32 }, ticks, 1),
-                                }).await;
+                            if hp_pool > 0 || mp_pool > 0 {
+                                let _ = record
+                                    .actor_ref
+                                    .ask(crate::actors::player::AddPotionPool {
+                                        hp: hp_pool,
+                                        mp: mp_pool,
+                                    })
+                                    .await;
                             }
-                            if mp_pool > 0 {
-                                let ticks = mp_pool.div_ceil(per_tick).max(1);
-                                let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff {
-                                    buff: BuffInstance::new(BuffType::MpRegen { amount_per_tick: per_tick as i32 }, ticks, 1),
-                                }).await;
-                            }
-                            debug!("Potion: {} shape=0 normal potion hp_pool={} mp_pool={}", player_state.name, hp_pool, mp_pool);
+                            debug!(
+                                "Potion: {} shape=0 normal potion hp_pool={} mp_pool={}",
+                                player_state.name, hp_pool, mp_pool
+                            );
                         }
                         // 1 SunPotion（C#：立即回血回蓝）
                         1 => {
