@@ -456,7 +456,9 @@ pub(crate) fn handle_social(    net: &mut NetConnection,
             }
         }
         x if x == ServerPacketIds::MagicDelay as i16 => {
+            // #1376：C# S.MagicDelay → User.GetMagic(spell).Delay
             if let Ok(p) = MagicDelay::read_body(&mut cur) {
+                server_events.write(ServerEvent::MagicCooldown { spell: p.spell, delay_ms: p.delay });
                 tracing::debug!("⏳ 技能冷却: object={} spell={:?} delay={}ms", p.object_id, p.spell, p.delay);
             }
         }

@@ -33,6 +33,39 @@ pub fn is_toggle_spell(spell: Spell) -> bool {
     TOGGLE_SPELLS.contains(&spell)
 }
 
+/// #1376：技能冷却（S.MagicDelay → spell → (剩余秒, 总秒)）
+#[derive(Resource, Default)]
+pub struct MagicCooldowns {
+    pub map: Vec<(Spell, f32, f32)>,
+}
+
+impl MagicCooldowns {
+    pub fn set(&mut self, spell: Spell, delay_ms: i64) {
+        let total = delay_ms.max(0) as f32 / 1000.0;
+        if let Some(e) = self.map.iter_mut().find(|(s, _, _)| *s == spell) {
+            *e = (spell, total, total);
+        } else {
+            self.map.push((spell, total, total));
+        }
+    }
+    /// 剩余比例 0..1（无冷却=0）
+    pub fn fraction(&self, spell: Spell) -> f32 {
+        self.map
+            .iter()
+            .find(|(s, _, _)| *s == spell)
+            .map(|(_, r, t)| if *t > 0.0 { (*r / *t).clamp(0.0, 1.0) } else { 0.0 })
+            .unwrap_or(0.0)
+    }
+}
+
+/// #1376：冷却递减（Time 驱动）
+fn magic_cooldown_system(time: Res<Time>, mut cd: ResMut<MagicCooldowns>) {
+    cd.map.retain_mut(|(_, r, _)| {
+        *r -= time.delta_secs();
+        *r > 0.0
+    });
+}
+
 /// 已学技能列表（NewMagic 包写入）
 #[derive(Resource, Default)]
 pub struct MagicsState {
@@ -184,6 +217,7 @@ pub struct SkillsPlugin;
 impl Plugin for SkillsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MagicsState>();
+        app.init_resource::<MagicCooldowns>();
         app.insert_resource(SkillBarState::load());
         app.add_systems(OnEnter(AppState::Game), spawn_skills_window);
         app.add_systems(OnEnter(AppState::Game), spawn_skill_bar);
@@ -199,6 +233,7 @@ impl Plugin for SkillsPlugin {
             skills_server_events.run_if(in_state(crate::scenes::AppState::Game)),
         );
 app.add_systems(Update, skill_bar_system.run_if(in_state(AppState::Game)));
+app.add_systems(Update, magic_cooldown_system.run_if(in_state(AppState::Game)));
         app.add_systems(
             Update,
             skill_bar_drag_system.run_if(in_state(AppState::Game)),

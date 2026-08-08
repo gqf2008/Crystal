@@ -412,6 +412,9 @@ pub enum ServerEvent {
     GainHeroExperience { amount: u32 },
     /// HeroLevelChanged：英雄升级（#1135，C# S.HeroLevelChanged）
     HeroLevelChanged { level: u16, exp: i64, max_exp: i64 },
+    /// #1376：技能冷却（S.MagicDelay）
+    MagicCooldown { spell: mir2_shared::enums::Spell, delay_ms: i64 },
+
     /// MagicLeveled：技能升级（C# S.MagicLeveled）
     MagicLeveled {
         object_id: u32,
