@@ -7,6 +7,9 @@ use bevy::prelude::*;
 
 use crate::actor::{LocalPlayer, NetObjectId, PlayerName};
 use crate::game::chat::ChatState;
+use crate::game::dialogs::{DialogKind, DialogManager};
+use crate::game::dialogs::mail::MailState;
+use crate::game::dialogs::text_input::TextInputState;
 use crate::network::NetConnection;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::{spawn_ui_text, ui_button_system, UiButton, UiEntity, UiFont};
@@ -20,6 +23,7 @@ pub enum PlayerMenuAction {
     Inspect,
     AddFriend,
     Observe,
+    Mail,
 }
 
 /// 右键菜单状态
@@ -77,20 +81,21 @@ fn spawn_player_menu(
         Sprite {
             image: white.clone(),
             color: Color::srgba(0.1, 0.1, 0.14, 0.96),
-            custom_size: Some(Vec2::new(90.0, 120.0)),
+            custom_size: Some(Vec2::new(90.0, 140.0)),
             ..default()
         },
         bevy::sprite::Anchor::TOP_LEFT,
         Transform::from_xyz(-999.0, -999.0, 20.0),
         Visibility::Hidden,
     ));
-    let items: [(&str, PlayerMenuAction); 6] = [
+    let items: [(&str, PlayerMenuAction); 7] = [
         ("交易", PlayerMenuAction::Trade),
         ("组队", PlayerMenuAction::Group),
         ("私聊", PlayerMenuAction::Whisper),
         ("查看", PlayerMenuAction::Inspect),
         ("加好友", PlayerMenuAction::AddFriend),
         ("观察", PlayerMenuAction::Observe),
+        ("邮件", PlayerMenuAction::Mail),
     ];
     for (i, (label, action)) in items.iter().enumerate() {
         let t = spawn_ui_text(
@@ -147,6 +152,9 @@ fn player_menu_open_system(
 /// 菜单显隐 + 定位 + 选项点击
 fn player_menu_ui_system(
     mut state: ResMut<PlayerMenuState>,
+    mut mgr: ResMut<DialogManager>,
+    mut mail: ResMut<MailState>,
+    mut input: ResMut<TextInputState>,
     net: Res<NetConnection>,
     mut chat: ResMut<ChatState>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -163,7 +171,7 @@ fn player_menu_ui_system(
     if state.visible && mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = windows.single() {
             if let Some(cursor) = window.cursor_position() {
-                if cursor.x < state.x || cursor.x > state.x + 90.0 || cursor.y < state.y || cursor.y > state.y + 120.0 {
+                if cursor.x < state.x || cursor.x > state.x + 90.0 || cursor.y < state.y || cursor.y > state.y + 140.0 {
                     state.visible = false;
                 }
             }
@@ -222,6 +230,20 @@ fn player_menu_ui_system(
                 });
                 tracing::info!("👁️ 观察玩家 {}", state.name);
             }
+            PlayerMenuAction::Mail => {
+                // C# PlayerDialog.MailButton → MailComposeLetterDialog.ComposeMail(Name)
+                mgr.open.push(DialogKind::Mail);
+                mail.compose = true;
+                mail.detail = None;
+                mail.attach = vec![None; 5];
+                mail.compose_gold = 0;
+                if input.texts.len() < 4 {
+                    input.texts.resize(4, String::new());
+                }
+                input.texts[0] = state.name.clone();
+                input.active = None;
+                tracing::info!("✉️ 给 {} 写邮件", state.name);
+            }
             PlayerMenuAction::AddFriend => {
                 net.send_packet(&mir2_shared::packets::client::friend::AddFriend {
                     name: state.name.clone(),
@@ -233,4 +255,5 @@ fn player_menu_ui_system(
         state.visible = false;
     }
 }
+
 
