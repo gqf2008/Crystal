@@ -1483,6 +1483,20 @@ async fn exec_action(
                 debug!("NPC TAKEPEARLS: -{}", amount);
             }
         }
+        // #1356：打开觉醒/分解/降级/重置面板（对齐 C# NPCScript AwakeningKey/DisassembleKey/DowngradeKey/ResetKey
+        // → S.NPCAwakening/S.NPCDisassemble/S.NPCDowngrade/S.NPCReset）
+        "AWAKENING" => {
+            world.send_awakening_panel(session_id, 0).await;
+        }
+        "DISASSEMBLE" => {
+            world.send_awakening_panel(session_id, 1).await;
+        }
+        "DOWNGRADE" => {
+            world.send_awakening_panel(session_id, 2).await;
+        }
+        "RESET" => {
+            world.send_awakening_panel(session_id, 3).await;
+        }
         // REVIVEHERO —— 复活当前英雄（对齐 C# ActionType.ReviveHero）
         "REVIVEHERO" => {
             world.npc_revive_hero(session_id).await;
