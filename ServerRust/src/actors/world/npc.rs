@@ -696,6 +696,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             brown_until_ms: 0,
             mount_loyalty_decrease_time: 0,
             mount_loyalty_increase_time: 0,
+            torch_burn_time: 0,
         };
         debug!("NewCharacter: saving '{}' ...", msg.name);
         match db::save_character(&self.db_pool, &default_state, &msg.account_username).await {

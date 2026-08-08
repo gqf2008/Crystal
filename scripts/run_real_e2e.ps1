@@ -110,6 +110,12 @@ function Invoke-PairCase {
     $aArgs = @("--real-net","--auto-enter",$FlagA,"--e2e-user",$TestUser,"--e2e-pass",$TestPass)
     $bArgs = @("--real-net","--auto-enter","--e2e-user",$SecondUser,"--e2e-pass",$SecondPass)
     if ($FlagB) { $bArgs = @("--real-net","--auto-enter",$FlagB) + $bArgs }
+    # 配对用例前置重置（#1230）：前置用例会改变角色朝向/位置并被自动保存，
+    # 交易要求目标在正前方一格且面对面，必须每次配对前恢复摆位（否则 trade 偶发失败）。
+    $pyCmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($pyCmd) {
+        & python (Join-Path $PSScriptRoot "e2e_setup_db.py") (Join-Path $ServerWorkDir "data\crystal.db") | Out-Null
+    }
     $a = Start-Process -FilePath $ClientExe -ArgumentList $aArgs -RedirectStandardError $aErr -RedirectStandardOutput $aOut -PassThru -WindowStyle Hidden
     $b = Start-Process -FilePath $ClientExe -ArgumentList $bArgs -RedirectStandardError $bErr -RedirectStandardOutput $bOut -PassThru -WindowStyle Hidden
     $done = $a.WaitForExit($TimeoutSec * 1000)

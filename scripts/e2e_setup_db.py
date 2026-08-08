@@ -39,11 +39,15 @@ def main() -> int:
         "UPDATE characters SET x=?, y=?, gold=1000000 WHERE name IN ('bevychar','bevy2char')",
         (SAFE_X, SAFE_Y),
     )
-    # 2) 配对摆位（#1166）：交易邀请要求目标在正前方一格且面对面（C# 语义）。
-    #    bevychar（发起方）(170,667) 朝左(6) → 正前方 (169,667)；bevy2char（接受方）(169,667) 朝右(2)。
+    # 2) 配对摆位（#1166 + #1230 修正）：交易邀请要求目标在正前方一格且面对面（C# 语义）。
+    #    注意 (169,667) 是不可走水格（障碍）：bevy2char 若摆到那里，服务端登录会因
+    #    “原位置不可走”回退到城镇安全区出生点 (288,616)，被野生怪物围杀导致交易用例失败。
+    #    修正：bevychar（发起方/钓鱼方）(171,667) 朝左(6) → 正前方 (170,667)；
+    #         bevy2char（接受方）(170,667) 朝右(2)。两格均可走且面对面；
+    #         bevychar 前方 3 格 (170,667)/(169,667)/(168,667) 均为水（fishing-test 仍满足）。
     #    其余配对用例（组队/私聊/邮件/好友）按名称/在线表，不受相邻影响。
-    cur.execute("UPDATE characters SET direction=6 WHERE name='bevychar'")
-    cur.execute("UPDATE characters SET x=169, y=667, direction=2 WHERE name='bevy2char'")
+    cur.execute("UPDATE characters SET x=171, direction=6 WHERE name='bevychar'")
+    cur.execute("UPDATE characters SET x=170, direction=2 WHERE name='bevy2char'")
     # 2) bevychar 装备恢复（fishing/mount 用例依赖）：
     #    Weapon 槽 = BlueFishingRod(793)、Mount 槽 = BengalTiger(764)
     cur.execute("SELECT COUNT(*) FROM inventory_equipment WHERE character_name='bevychar' AND slot IN (0,10)")
