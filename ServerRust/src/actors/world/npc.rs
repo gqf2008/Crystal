@@ -620,6 +620,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             guild_rank: GuildRank::Member,
             quest_log: QuestLog::new(),
             spouse_name: None,
+            married_date: 0,
             allow_mentor: false,
             mentor_name: None,
             creature_log: CreatureLog::new(),

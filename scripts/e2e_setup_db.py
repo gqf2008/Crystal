@@ -48,6 +48,12 @@ def main() -> int:
     #    其余配对用例（组队/私聊/邮件/好友）按名称/在线表，不受相邻影响。
     cur.execute("UPDATE characters SET x=171, direction=6 WHERE name='bevychar'")
     cur.execute("UPDATE characters SET x=170, direction=2 WHERE name='bevy2char'")
+    # #1329：婚姻配对用例幂等——清空测试角色婚姻状态（spouse_name/结婚日期）
+    try:
+        cur.execute("UPDATE characters SET spouse_name=NULL, married_date=0 WHERE name IN ('bevychar','bevy2char')")
+    except sqlite3.Error:
+        # 旧库无 married_date 列（服务端启动后迁移补列）：只清 spouse_name
+        cur.execute("UPDATE characters SET spouse_name=NULL WHERE name IN ('bevychar','bevy2char')")
     # 2) bevychar 装备恢复（fishing/mount 用例依赖）：
     #    Weapon 槽 = BlueFishingRod(793)、Mount 槽 = BengalTiger(764)
     cur.execute("SELECT COUNT(*) FROM inventory_equipment WHERE character_name='bevychar' AND slot IN (0,10)")

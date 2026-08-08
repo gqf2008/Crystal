@@ -98,13 +98,14 @@ impl Packet for FriendUpdate {
     }
 }
 
-/// LoverUpdate - 恋人更新 (244)
-#[derive(Debug, Clone)]
+/// LoverUpdate - 恋人更新 (246)
+/// #1329：对齐 C# `S.LoverUpdate`（ServerPackets.cs）：[Name dotnet][Date i64 ToBinary][MapName dotnet][MarriedDays i16]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LoverUpdate {
-    pub lover_name: String,   // 恋人名称
-    pub date: i64,            // 结婚日期
-    pub map_name: String,     // 地图名称
-    pub location: (i32, i32), // 位置
+    pub lover_name: String, // 恋人名称（未结婚/离婚后为空串）
+    pub date: i64,          // 结婚日期（C# DateTime.ToBinary；Rust 存 unix 秒，客户端仅用于计算天数）
+    pub map_name: String,   // 配偶当前地图标题（离线为空串）
+    pub married_days: i16,  // 结婚天数
 }
 
 impl Packet for LoverUpdate {
@@ -117,8 +118,7 @@ impl Packet for LoverUpdate {
         write_dotnet_string(writer, &self.lover_name)?;
         writer.write_i64::<LittleEndian>(self.date)?;
         write_dotnet_string(writer, &self.map_name)?;
-        writer.write_i32::<LittleEndian>(self.location.0)?;
-        writer.write_i32::<LittleEndian>(self.location.1)?;
+        writer.write_i16::<LittleEndian>(self.married_days)?;
 
         Ok(())
     }
@@ -131,14 +131,13 @@ impl Packet for LoverUpdate {
 
         let map_name = read_dotnet_string(reader)?;
 
-        let location_x = reader.read_i32::<LittleEndian>()?;
-        let location_y = reader.read_i32::<LittleEndian>()?;
+        let married_days = reader.read_i16::<LittleEndian>()?;
 
         Ok(Self {
             lover_name,
             date,
             map_name,
-            location: (location_x, location_y),
+            married_days,
         })
     }
 }
@@ -249,5 +248,42 @@ impl Packet for MentorRequest {
         use crate::binary::read_dotnet_string;
         let mentor_name = read_dotnet_string(reader)?;
         Ok(Self { mentor_name })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::packets::base::{deserialize_packet, serialize_packet};
+    use std::io::Cursor;
+
+    #[test]
+    fn lover_update_roundtrip() {
+        let pkt = LoverUpdate {
+            lover_name: "bevy2char".to_string(),
+            date: 1_700_000_000,
+            map_name: "盟重省".to_string(),
+            married_days: 3,
+        };
+        let mut buf = Vec::new();
+        serialize_packet(&mut buf, &pkt).unwrap();
+        let mut cur = Cursor::new(&buf);
+        let got = deserialize_packet::<_, LoverUpdate>(&mut cur).unwrap();
+        assert_eq!(got, pkt);
+    }
+
+    #[test]
+    fn lover_update_empty_roundtrip() {
+        let pkt = LoverUpdate {
+            lover_name: String::new(),
+            date: 0,
+            map_name: String::new(),
+            married_days: 0,
+        };
+        let mut buf = Vec::new();
+        serialize_packet(&mut buf, &pkt).unwrap();
+        let mut cur = Cursor::new(&buf);
+        let got = deserialize_packet::<_, LoverUpdate>(&mut cur).unwrap();
+        assert_eq!(got, pkt);
     }
 }

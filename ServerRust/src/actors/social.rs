@@ -26,6 +26,19 @@ use mir2_shared::enums::ServerPacketIds;
 // Message types (moved from WorldActor)
 // ============================================================
 
+/// #1329：WorldActor 启动后注入自身引用（SocialActor 查询地图标题 LoverUpdate.MapName 用）
+pub struct SetWorldRef {
+    pub world_ref: ActorRef<crate::actors::world::WorldActor>,
+}
+
+impl Message<SetWorldRef> for SocialActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetWorldRef, _ctx: &mut Context<Self, Self::Reply>) {
+        self.world_ref = Some(msg.world_ref);
+    }
+}
+
 // --- Group ---
 
 pub struct SwitchGroupRequest {
@@ -576,7 +589,7 @@ impl Message<NpcForceDivorce> for SocialActor {
         };
         // 清除自己婚姻状态
         if let Some(record) = self.players.get(&msg.session_id) {
-            let _ = record.ask(SetSpouse { spouse_name: None }).await;
+            let _ = record.ask(SetSpouse { spouse_name: None, married_date: 0 }).await;
         }
         // 配偶在线则同步清除
         let online: Vec<u64> = self.players.keys().copied().collect();
@@ -585,14 +598,16 @@ impl Message<NpcForceDivorce> for SocialActor {
             if let Some(record) = self.players.get(&sid) {
                 if let Ok(Some(os)) = record.ask(GetPlayerState).await {
                     if os.name.eq_ignore_ascii_case(&spouse_name) {
-                        let _ = record.ask(SetSpouse { spouse_name: None }).await;
+                        let _ = record.ask(SetSpouse { spouse_name: None, married_date: 0 }).await;
                         send_system_message(&self.gate_ref, sid, &format!("你已与 {} 强制离婚", state.name));
+                        send_lover_update_packet(&self.gate_ref, sid, "", 0, "", 0);
                         break;
                     }
                 }
             }
         }
         send_system_message(&self.gate_ref, msg.session_id, &format!("你已与 {} 强制离婚", spouse_name));
+        send_lover_update_packet(&self.gate_ref, msg.session_id, "", 0, "", 0);
         debug!("NPC ForceDivorce: {} <- {}", state.name, spouse_name);
     }
 }
@@ -863,6 +878,7 @@ impl Actor for SocialActor {
             pending_marriage_invites: HashMap::new(),
             pending_mentor_invites: HashMap::new(),
             gate_ref: args.gate_ref,
+            world_ref: None,
             db_pool: args.db_pool,
             config: args.config,
         })
@@ -898,6 +914,8 @@ pub struct SocialActor {
 
     // === 依赖 ===
     gate_ref: ActorRef<GateActor>,
+    /// #1329：WorldActor 引用（LoverUpdate 地图标题查询；WorldActor on_start 注入）
+    world_ref: Option<ActorRef<crate::actors::world::WorldActor>>,
     db_pool: DbPool,
     config: SocialActorConfig,
 }
@@ -945,6 +963,28 @@ impl SocialActor {
             }
         }
         None
+    }
+
+    /// #1329：查询地图标题（LoverUpdate MapName；WorldActor GetMapTitle）
+    async fn map_title(&self, map_index: u16) -> String {
+        if let Some(world) = &self.world_ref {
+            if let Ok(Some(title)) = world.ask(crate::actors::world::GetMapTitle { map_index }).await {
+                return title;
+            }
+        }
+        String::new()
+    }
+
+    /// #1329：结婚天数（unix 秒 → 整天；C# MarriedDays）
+    fn married_days(&self, date_secs: i64) -> i16 {
+        if date_secs <= 0 {
+            return 0;
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        ((now - date_secs).max(0) / 86400).min(i16::MAX as i64) as i16
     }
 
     /// 查找交易（不可变）
@@ -1846,6 +1886,46 @@ impl Message<SocialPlayerJoined> for SocialActor {
                 );
             }
         }
+        // 配偶状态同步（C# GetRelationship 语义：上线时通知双方，双方各发 LoverUpdate）
+        if let Some(spouse_name) = state.spouse_name.clone() {
+            if let Some(spouse_sid) = self.find_player_by_name(&spouse_name, msg.session_id).await {
+                if let Some(spouse_record) = self.players.get(&spouse_sid) {
+                    if let Ok(Some(spouse_state)) = spouse_record.ask(GetPlayerState).await {
+                        // 上线者视角：对方（配偶）名字/日期/地图/天数
+                        let spouse_map = self.map_title(spouse_state.map_index).await;
+                        send_lover_update_packet(
+                            &self.gate_ref,
+                            msg.session_id,
+                            &spouse_name,
+                            state.married_date,
+                            &spouse_map,
+                            self.married_days(state.married_date),
+                        );
+                        // 对方视角：上线者信息 + 系统提示（C# player.ReceiveChat(PlayerHasComeOnline)）
+                        let self_map = self.map_title(state.map_index).await;
+                        send_lover_update_packet(
+                            &self.gate_ref,
+                            spouse_sid,
+                            &state.name,
+                            spouse_state.married_date,
+                            &self_map,
+                            self.married_days(spouse_state.married_date),
+                        );
+                        send_system_message(&self.gate_ref, spouse_sid, &format!("你的配偶 {} 上线了", state.name));
+                    }
+                }
+            } else {
+                // 对方离线：名字 + 日期，地图空（C# GetRelationship 离线分支）
+                send_lover_update_packet(
+                    &self.gate_ref,
+                    msg.session_id,
+                    &spouse_name,
+                    state.married_date,
+                    "",
+                    self.married_days(state.married_date),
+                );
+            }
+        }
         debug!("SocialActor: player {} joined", msg.name);
     }
 }
@@ -1858,10 +1938,19 @@ impl Message<SocialPlayerLeft> for SocialActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: SocialPlayerLeft, _ctx: &mut Context<Self, Self::Reply>) {
-        // 提前取师徒信息（随后从 players 移除）
+        // 提前取师徒/配偶信息（随后从 players 移除）
         let leaving_mentor = if let Some(rec) = self.players.get(&msg.session_id) {
             match rec.ask(GetPlayerState).await {
                 Ok(Some(s)) => Some((s.name.clone(), s.level, s.mentor_name.clone())),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        // #1329：配偶下线通知（C# LogoutRelationship）
+        let leaving_spouse = if let Some(rec) = self.players.get(&msg.session_id) {
+            match rec.ask(GetPlayerState).await {
+                Ok(Some(s)) => s.spouse_name.clone().map(|n| (s.name.clone(), n, s.married_date)),
                 _ => None,
             }
         } else {
@@ -1882,6 +1971,20 @@ impl Message<SocialPlayerLeft> for SocialActor {
                     0,
                 );
                 send_system_message(&self.gate_ref, partner_sid, &format!("{} 下线了", name));
+            }
+        }
+
+        // 配偶下线通知：配偶在线 → LoverUpdate MapName=""（离线刷新）
+        if let Some((name, spouse_name, married_date)) = leaving_spouse {
+            if let Some(spouse_sid) = self.find_player_by_name(&spouse_name, msg.session_id).await {
+                send_lover_update_packet(
+                    &self.gate_ref,
+                    spouse_sid,
+                    &name,
+                    married_date,
+                    "",
+                    self.married_days(married_date),
+                );
             }
         }
 
@@ -3489,13 +3592,21 @@ impl Message<MarriageReply> for SocialActor {
             _ => return,
         };
 
-        let _ = replier_record.ask(SetSpouse { spouse_name: Some(requester_state.name.clone()) }).await;
-        let _ = requester_record.ask(SetSpouse { spouse_name: Some(replier_state.name.clone()) }).await;
+        // #1329：结婚写入同一时刻（C# Info.MarriedDate = Envir.Now，unix 秒）
+        let married_date = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let _ = replier_record.ask(SetSpouse { spouse_name: Some(requester_state.name.clone()), married_date }).await;
+        let _ = requester_record.ask(SetSpouse { spouse_name: Some(replier_state.name.clone()), married_date }).await;
 
         send_system_message(&self.gate_ref, replier_session, &format!("结婚成功，你的配偶是: {}", requester_state.name));
         send_system_message(&self.gate_ref, requester_session, &format!("结婚成功，你的配偶是: {}", replier_state.name));
-        send_marriage_status_packet(&self.gate_ref, replier_session, true);
-        send_marriage_status_packet(&self.gate_ref, requester_session, true);
+        // #1329：全量 LoverUpdate（双方视角：对方名字/结婚日期/当前地图/结婚天数）
+        let requester_map = self.map_title(requester_state.map_index).await;
+        let replier_map = self.map_title(replier_state.map_index).await;
+        send_lover_update_packet(&self.gate_ref, replier_session, &requester_state.name, married_date, &requester_map, 0);
+        send_lover_update_packet(&self.gate_ref, requester_session, &replier_state.name, married_date, &replier_map, 0);
         debug!("Marriage: {} <-> {} married", requester_state.name, replier_state.name);
     }
 }
@@ -3572,22 +3683,22 @@ impl Message<SocialDivorceReply> for SocialActor {
 
         // 双方解除婚姻关系
         let spouse_name = replier_state.spouse_name.clone();
-        let _ = replier_record.ask(SetSpouse { spouse_name: None }).await;
+        let _ = replier_record.ask(SetSpouse { spouse_name: None, married_date: 0 }).await;
 
         // 通知前配偶
         if let Some(ref name) = spouse_name {
             if let Some(target_session) = self.find_player_by_name(name, msg.session_id).await {
                 if let Some(target_record) = self.players.get(&target_session) {
-                    let _ = target_record.ask(SetSpouse { spouse_name: None }).await;
+                    let _ = target_record.ask(SetSpouse { spouse_name: None, married_date: 0 }).await;
                     send_system_message(&self.gate_ref, target_session, "你已离婚");
                     // M49：前配偶状态同步（原实现只更新确认方）
-                    send_marriage_status_packet(&self.gate_ref, target_session, false);
+                    send_lover_update_packet(&self.gate_ref, target_session, "", 0, "", 0);
                 }
             }
         }
 
         send_system_message(&self.gate_ref, msg.session_id, "离婚成功");
-        send_marriage_status_packet(&self.gate_ref, msg.session_id, false);
+        send_lover_update_packet(&self.gate_ref, msg.session_id, "", 0, "", 0);
         debug!("DivorceReply: {} divorced", replier_state.name);
     }
 }
@@ -3606,7 +3717,32 @@ impl Message<SocialChangeMarriage> for SocialActor {
         };
 
         let in_marriage = state.spouse_name.is_some();
-        send_marriage_status_packet(&self.gate_ref, msg.session_id, in_marriage);
+        if in_marriage {
+            let spouse_name = state.spouse_name.clone().unwrap_or_default();
+            let spouse_map = if let Some(spouse_sid) = self.find_player_by_name(&spouse_name, msg.session_id).await {
+                if let Some(spouse_record) = self.players.get(&spouse_sid) {
+                    if let Ok(Some(spouse_state)) = spouse_record.ask(GetPlayerState).await {
+                        self.map_title(spouse_state.map_index).await
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            };
+            send_lover_update_packet(
+                &self.gate_ref,
+                msg.session_id,
+                &spouse_name,
+                state.married_date,
+                &spouse_map,
+                self.married_days(state.married_date),
+            );
+        } else {
+            send_lover_update_packet(&self.gate_ref, msg.session_id, "", 0, "", 0);
+        }
     }
 }
 

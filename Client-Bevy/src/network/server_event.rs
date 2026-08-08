@@ -280,8 +280,13 @@ pub enum ServerEvent {
     HeroChanged { index: u8 },
     /// MarriageRequest：求婚邀请
     MarriageInvite { name: String },
-    /// LoverUpdate：婚姻状态
-    MarriageStatus { married: bool },
+    /// LoverUpdate：婚姻状态（#1329 全量：配偶名/结婚日期/地图/结婚天数）
+    LoverUpdate {
+        lover_name: String,
+        date: i64,
+        map_name: String,
+        married_days: i16,
+    },
     /// DivorceRequest：离婚请求
     DivorceRequest,
     /// ItemRentalRequest：收到租赁请求（物主）

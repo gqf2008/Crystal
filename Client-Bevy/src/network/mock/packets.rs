@@ -277,7 +277,7 @@ impl Packet for MockFriendList {
     }
 }
 
-/// #702：婚姻状态（客户端格式 [married u8]）
+/// #702/#1329：婚姻状态（全量 [Name dotnet][Date i64][MapName dotnet][MarriedDays i16]，对齐 C# S.LoverUpdate）
 pub(crate) struct MockLoverUpdate {
     pub(crate) married: bool,
 }
@@ -290,8 +290,17 @@ impl Packet for MockLoverUpdate {
     }
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
-        use byteorder::WriteBytesExt;
-        writer.write_u8(if self.married { 1 } else { 0 })?;
+        use byteorder::{LittleEndian, WriteBytesExt};
+        mir2_shared::binary::write_dotnet_string(
+            writer,
+            if self.married { "bevy2char" } else { "" },
+        )?;
+        writer.write_i64::<LittleEndian>(if self.married { 1_700_000_000 } else { 0 })?;
+        mir2_shared::binary::write_dotnet_string(
+            writer,
+            if self.married { "盟重省" } else { "" },
+        )?;
+        writer.write_i16::<LittleEndian>(if self.married { 3 } else { 0 })?;
         Ok(())
     }
 }

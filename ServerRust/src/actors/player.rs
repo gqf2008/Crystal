@@ -197,6 +197,8 @@ pub struct PlayerState {
     pub quest_log: QuestLog,
     /// 配偶名称
     pub spouse_name: Option<String>,
+    /// 结婚日期（unix 秒；0 = 无，C# CharacterInfo.MarriedDate）
+    pub married_date: i64,
     /// 是否允许拜师
     pub allow_mentor: bool,
     /// 导师名称
@@ -634,6 +636,7 @@ impl PlayerActor {
                 guild_rank: GuildRank::Member,
                 quest_log: QuestLog::new(),
                 spouse_name: None,
+                married_date: 0,
                 allow_mentor: false,
                 mentor_name: None,
                 creature_log: CreatureLog::new(),
@@ -3810,16 +3813,19 @@ impl Message<CheckQuestItemProgress> for PlayerActor {
 // 婚姻/师徒系统 Handler
 // ============================================================
 
-/// 设置配偶名称
+/// 设置配偶名称（#1329：结婚时同时写入 married_date；离婚传 None 并清零日期）
 pub struct SetSpouse {
     pub spouse_name: Option<String>,
+    pub married_date: i64,
 }
 
 impl Message<SetSpouse> for PlayerActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: SetSpouse, _ctx: &mut Context<Self, Self::Reply>) {
+        let married = msg.spouse_name.is_some();
         self.state.spouse_name = msg.spouse_name;
+        self.state.married_date = if married { msg.married_date } else { 0 };
     }
 }
 
@@ -5479,6 +5485,7 @@ mod tests {
             guild_rank: GuildRank::Member,
             quest_log: QuestLog::new(),
             spouse_name: None,
+            married_date: 0,
             allow_mentor: false,
             mentor_name: None,
             creature_log: CreatureLog::new(),

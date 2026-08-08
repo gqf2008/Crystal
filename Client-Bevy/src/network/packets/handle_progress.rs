@@ -498,11 +498,19 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
             }
         }
         x if x == ServerPacketIds::LoverUpdate as i16 => {
-            // [married u8]
-            let body = &payload[PacketHeader::HEADER_SIZE..];
-            let married = body.first().copied().unwrap_or(0) != 0;
-            server_events.write(ServerEvent::MarriageStatus { married });
-            tracing::info!("💍 LoverUpdate: married={}", married);
+            // #1329：全量 [Name dotnet][Date i64][MapName dotnet][MarriedDays i16]（C# S.LoverUpdate）
+            match social_system::LoverUpdate::read_body(&mut cur) {
+                Ok(p) => {
+                    tracing::info!("💍 LoverUpdate: lover_name={}", p.lover_name);
+                    server_events.write(ServerEvent::LoverUpdate {
+                        lover_name: p.lover_name,
+                        date: p.date,
+                        map_name: p.map_name,
+                        married_days: p.married_days,
+                    });
+                }
+                Err(_) => tracing::warn!("⚠️ LoverUpdate 解析失败"),
+            }
         }
         x if x == ServerPacketIds::DivorceRequest as i16 => {
             server_events.write(ServerEvent::DivorceRequest);
