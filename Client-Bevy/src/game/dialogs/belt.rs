@@ -185,6 +185,7 @@ fn belt_icon_system(
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<UiImageCache>,
+    cd: Res<crate::game::skills::MagicCooldowns>,
     mut icons: Query<(&mut Sprite, &mut Visibility, &BeltIcon), Without<BeltWidget>>,
 ) {
     for (mut sprite, mut vis, icon) in &mut icons {
@@ -206,6 +207,14 @@ fn belt_icon_system(
                 }
                 if sprite.image.is_strong() {
                     *vis = Visibility::Visible;
+                }
+                // #1376：冷却暗化（对齐 C# CoolDowns 覆盖层；按剩余比例变暗）
+                let frac = cd.fraction(m.spell);
+                if frac > 0.0 {
+                    let k = 1.0 - 0.7 * frac;
+                    sprite.color = Color::srgba(k, k, k, 1.0);
+                } else {
+                    sprite.color = Color::WHITE;
                 }
             }
             None => *vis = Visibility::Hidden,
