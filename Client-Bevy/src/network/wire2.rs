@@ -367,3 +367,46 @@ impl Packet for RefineCheckWire {
     }
 
 }
+/// 观察玩家（gate 解析 [target_id u32]，对齐 C# PlayerInfoDialog ObserveButton → C.Observe）
+#[derive(Debug, Clone, Copy)]
+pub struct ObserveWire {
+    pub target_id: u32,
+}
+
+impl Packet for ObserveWire {
+    const OPCODE: i16 = mir2_shared::enums::ClientPacketIds::Observe as i16;
+
+    fn read_body<R: std::io::Read>(
+        reader: &mut R,
+    ) -> mir2_shared::data::stats::SharedResult<Self> {
+        use byteorder::ReadBytesExt;
+        Ok(Self {
+            target_id: reader.read_u32::<byteorder::LittleEndian>()?,
+        })
+    }
+
+    fn write_body<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> mir2_shared::data::stats::SharedResult<()> {
+        use byteorder::WriteBytesExt;
+        writer.write_u32::<byteorder::LittleEndian>(self.target_id)?;
+        Ok(())
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn observe_wire_roundtrip() {
+        let w = ObserveWire { target_id: 0x12345678 };
+        let mut buf = Vec::new();
+        w.write_body(&mut buf).unwrap();
+        // gate 解析 [target_id u32 LE]
+        assert_eq!(buf, vec![0x78, 0x56, 0x34, 0x12]);
+        let mut cur = std::io::Cursor::new(buf);
+        let r = ObserveWire::read_body(&mut cur).unwrap();
+        assert_eq!(r.target_id, 0x12345678);
+    }
+}
