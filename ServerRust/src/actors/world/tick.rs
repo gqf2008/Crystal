@@ -2926,6 +2926,27 @@ impl WorldActor {
         }
     }
 
+    /// #1312：C# CompleteMagic——弹道命中造成伤害才给技能经验（Random.Next(3)+1）
+    async fn grant_spell_hit_exp(&self, session_id: u64, spell_shared: u8) {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let spell_cs = spell_shared.saturating_sub(3);
+        let info = self.magic_infos.get(&(spell_cs as u32)).cloned();
+        if let Some(record) = self.players.get(&session_id) {
+            let _ = record
+                .actor_ref
+                .ask(crate::actors::player::GainSpellExp {
+                    spell: spell_shared,
+                    amount: (1 + fastrand::i32(0..3)) as u16,
+                    cast_time: now_ms,
+                    info,
+                })
+                .await;
+        }
+    }
+
     /// 弹道法术结算（单目标伤害 + 各法术附加效果）
     ///
     /// 防御类型：法师弹道（FireBall/ThunderBolt/...）用 MAC；弓箭手弹道
@@ -3031,6 +3052,9 @@ impl WorldActor {
             );
 
             if result.is_hit && result.damage > 0 {
+                // #1312：C# CompleteMagic `Attacked()>0 → LevelMagic`——命中造成伤害才给经验
+                self.grant_spell_hit_exp(pending.session_id, pending.spell)
+                    .await;
                 if let Some(monster) = self.monsters.get_mut(&target_id) {
                     monster.take_damage(result.damage);
                     monster.last_hitter_session = Some(pending.session_id);
@@ -3207,6 +3231,9 @@ impl WorldActor {
                     defence, level_offset,
                 );
                 if result.is_hit && result.damage > 0 {
+                    // #1312：C# CompleteMagic——弹道命中玩家造成伤害才给经验
+                    self.grant_spell_hit_exp(pending.session_id, pending.spell)
+                        .await;
                     let actor_ref = other_record.actor_ref.clone();
                     let damage = result.damage;
                     let _ = actor_ref.ask(TakeDamage {

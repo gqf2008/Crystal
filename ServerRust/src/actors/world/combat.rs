@@ -142,9 +142,9 @@ fn cast_disabled_by_poison(poison_list: &[crate::combat::poison::Poison]) -> boo
     })
 }
 
-/// #1299：目标类弹道法术（C# Fireball/Poisoning 等 `if (!xxx(target)) cast=false`；
-/// 位置类 MeteorShower 不在此列——无需目标即可施放）
-const TARGET_PROJECTILE_SPELLS: [u8; 17] = [
+/// #1312：延迟弹道法术（C# CompleteMagic 结算时 `Attacked()>0 → LevelMagic`；
+/// 命中才给经验，miss/0 伤害不给；FireBounce 每跳命中都给）
+const DELAYED_HIT_EXP_SPELLS: [u8; 18] = [
     SPELL_FIREBALL,
     SPELL_GREAT_FIREBALL,
     SPELL_THUNDERBOLT,
@@ -152,6 +152,7 @@ const TARGET_PROJECTILE_SPELLS: [u8; 17] = [
     SPELL_VAMPIRISM,
     SPELL_FLAME_DISRUPTOR,
     SPELL_SOUL_FIREBALL,
+    SPELL_METEOR_SHOWER,
     SPELL_FIRE_BOUNCE,
     SPELL_STRAIGHT_SHOT,
     SPELL_DOUBLE_SHOT,
@@ -164,12 +165,10 @@ const TARGET_PROJECTILE_SPELLS: [u8; 17] = [
     SPELL_CAT_TONGUE,
 ];
 
-/// #1299：C# Magic()——目标类弹道法术无目标（target_id==0）时 cast=false，不加技能经验
-fn should_grant_cast_exp(spell: u8, target_id: u32, basic: bool, electric_handled: bool) -> bool {
-    if basic || electric_handled {
-        return false;
-    }
-    if TARGET_PROJECTILE_SPELLS.contains(&spell) && target_id == 0 {
+/// #1312：C# CompleteMagic——延迟弹道法术不在施法时给经验（移到命中结算）；
+/// 基础攻击/ElectricShock 已处理也不加
+fn should_grant_cast_exp(spell: u8, basic: bool, electric_handled: bool) -> bool {
+    if basic || electric_handled || DELAYED_HIT_EXP_SPELLS.contains(&spell) {
         return false;
     }
     true
@@ -4542,7 +4541,6 @@ impl Message<MagicRequest> for WorldActor {
         // Spell XP gain and cast_time update
         if should_grant_cast_exp(
             msg.spell,
-            msg.target_id,
             basic_spells.contains(&msg.spell),
             electric_shock_exp_handled,
         ) {
@@ -4758,19 +4756,16 @@ mod tests {
 
     #[test]
     fn test_should_grant_cast_exp() {
-        // #1299：C# Magic()——目标类弹道法术无目标（target_id==0）cast=false 不加经验
-        // FireBall 无目标：不加
-        assert!(!should_grant_cast_exp(SPELL_FIREBALL, 0, false, false));
-        // FireBall 有目标：加
-        assert!(should_grant_cast_exp(SPELL_FIREBALL, 100, false, false));
-        // MeteorShower 位置类：无目标也可加（C# 位置施放）
-        assert!(should_grant_cast_exp(SPELL_METEOR_SHOWER, 0, false, false));
+        // #1312：C# CompleteMagic——延迟弹道法术一律不在施法时给经验（移到命中结算）
+        // FireBall / MeteorShower：施法时不加
+        assert!(!should_grant_cast_exp(SPELL_FIREBALL, false, false));
+        assert!(!should_grant_cast_exp(SPELL_METEOR_SHOWER, false, false));
         // 基础攻击：不加
-        assert!(!should_grant_cast_exp(SPELL_FIREBALL, 100, true, false));
+        assert!(!should_grant_cast_exp(SPELL_FIREBALL, true, false));
         // ElectricShock 已处理：不加（避免重复）
-        assert!(!should_grant_cast_exp(SPELL_FIREBALL, 100, false, true));
-        // 非目标类法术（如 Hiding 隐身的 SharedRust 值）无目标也加
-        assert!(should_grant_cast_exp(SPELL_HALFMOON, 0, false, false));
+        assert!(!should_grant_cast_exp(SPELL_FIREBALL, false, true));
+        // 非弹道法术（HalfMoon 近战技能）施法时加
+        assert!(should_grant_cast_exp(SPELL_HALFMOON, false, false));
     }
 
     #[test]
