@@ -4687,7 +4687,7 @@ impl PlayerState {
         // #942：C# SpecialItemMode.Skill——技能经验 ×3（Stats[SkillGainMultiplier]=3）
         // #1246：破损装备特殊模式失效（C# RefreshStats continue）
         let mut amount = amount;
-        if self.inventory.equipment.iter().flatten().any(|it| {
+        let skill_multiplier = self.inventory.equipment.iter().flatten().any(|it| {
             let broken =
                 it.current_dura == 0 && it.info.as_ref().map(|i| i.durability > 0).unwrap_or(false);
             !broken
@@ -4699,8 +4699,13 @@ impl PlayerState {
                             .contains(mir2_shared::enums::SpecialItemMode::SKILL)
                     })
                     .unwrap_or(false)
-        }) {
+        });
+        if skill_multiplier {
             amount = amount.saturating_mul(3);
+        } else if self.is_mentor && self.mentor_damage_bonus {
+            // #1305：C# LevelMagic MentorSkillBoost——导师且徒弟同组近身时技能经验 ×2
+            //（C#：仅当 Stats[SkillGainMultiplier]==1 时 ×2，随后再 ×SkillGainMultiplier）
+            amount = amount.saturating_mul(2);
         }
         magic.experience = magic.experience.saturating_add(amount);
         let xp_needed = match info {
@@ -4775,7 +4780,7 @@ impl PlayerState {
         // #942：C# SpecialItemMode.Skill——技能经验 ×3（英雄装备同样生效）
         // #1246：破损装备特殊模式失效（C# RefreshStats continue）
         let mut amount = amount;
-        if self.hero_inventory.equipment.iter().flatten().any(|it| {
+        let skill_multiplier = self.hero_inventory.equipment.iter().flatten().any(|it| {
             let broken =
                 it.current_dura == 0 && it.info.as_ref().map(|i| i.durability > 0).unwrap_or(false);
             !broken
@@ -4787,8 +4792,12 @@ impl PlayerState {
                             .contains(mir2_shared::enums::SpecialItemMode::SKILL)
                     })
                     .unwrap_or(false)
-        }) {
+        });
+        if skill_multiplier {
             amount = amount.saturating_mul(3);
+        } else if self.is_mentor && self.mentor_damage_bonus {
+            // #1305：C# LevelMagic MentorSkillBoost——导师且徒弟同组近身时技能经验 ×2
+            amount = amount.saturating_mul(2);
         }
         magic.experience = magic.experience.saturating_add(amount);
         let xp_needed = match info {
@@ -5811,6 +5820,51 @@ allow_group: false,
         assert_eq!(
             s.magics.iter().find(|m| m.spell == 31).unwrap().experience,
             400
+        );
+    }
+
+    // ---- #1305 导师技能经验双倍（C# LevelMagic MentorSkillBoost） ----
+    #[test]
+    fn test_mentor_skill_boost() {
+        let mut s = make_state();
+        assert!(s.learn_magic(31)); // FireBall C# 编号 31（SharedRust 34）
+        let _ = s.gain_spell_exp(34, 100, None); // 非导师：无加成
+        assert_eq!(
+            s.magics.iter().find(|m| m.spell == 31).unwrap().experience,
+            100
+        );
+        // 导师且徒弟同组近身（mentor_damage_bonus）：×2（+200 → 300）
+        s.is_mentor = true;
+        s.mentor_damage_bonus = true;
+        let _ = s.gain_spell_exp(34, 100, None);
+        assert_eq!(
+            s.magics.iter().find(|m| m.spell == 31).unwrap().experience,
+            300
+        );
+        // 徒弟不在近身（bonus=false）：无 ×2（+100 → 400）
+        s.mentor_damage_bonus = false;
+        let _ = s.gain_spell_exp(34, 100, None);
+        assert_eq!(
+            s.magics.iter().find(|m| m.spell == 31).unwrap().experience,
+            400
+        );
+        // 有 Skill ×3 装备时：×3 优先，不叠加 ×2（+300 → 700）
+        use crate::actors::inventory::EquipmentSlot;
+        use mir2_shared::data::item::UserItem;
+        let mut info = mir2_shared::data::item::ItemInfo::default();
+        info.unique = mir2_shared::enums::SpecialItemMode::SKILL;
+        info.durability = 1000;
+        s.inventory.equipment[EquipmentSlot::Armour as usize] = Some(UserItem {
+            info: Some(info),
+            current_dura: 500,
+            max_dura: 1000,
+            ..Default::default()
+        });
+        s.mentor_damage_bonus = true;
+        let _ = s.gain_spell_exp(34, 100, None);
+        assert_eq!(
+            s.magics.iter().find(|m| m.spell == 31).unwrap().experience,
+            700
         );
     }
 
