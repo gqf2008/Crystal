@@ -60,6 +60,92 @@ impl Default for OptionState {
     }
 }
 
+/// 设置持久化文件（与 C# Settings.cs：`.\Mir2Config.ini` 同路径同语义）
+const SETTINGS_PATH: &str = "./Mir2Config.ini";
+
+impl OptionState {
+    /// 从 INI 文本解析（C# InIReader；音量按 0-100 存储 ↔ 0.0-1.0）
+    pub fn from_ini(content: &str) -> Self {
+        let mut s = Self::default();
+        s.sound_volume = ini_percent(content, "Sound", "Volume", s.sound_volume);
+        s.music_volume = ini_percent(content, "Sound", "Music", s.music_volume);
+        s.skill_mode_ctrl = ini_bool(content, "Game", "SkillMode", s.skill_mode_ctrl);
+        s.skill_bar = ini_bool(content, "Game", "SkillBar", s.skill_bar);
+        s.effect = ini_bool(content, "Game", "Effect", s.effect);
+        s.drop_view = ini_bool(content, "Game", "DropView", s.drop_view);
+        s.name_view = ini_bool(content, "Game", "NameView", s.name_view);
+        s.hp_view = ini_bool(content, "Game", "HPMPView", s.hp_view);
+        s.allow_observe = ini_bool(content, "Game", "AllowObserve", s.allow_observe);
+        s.new_move = ini_bool(content, "Game", "NewMove", s.new_move);
+        s
+    }
+
+    /// 序列化为 INI 文本（对齐 C# Settings.Save 的 [Sound]/[Game] 段）
+    pub fn to_ini(&self) -> String {
+        let pct = |v: f32| ((v * 100.0).round() as i32).clamp(0, 100);
+        format!(
+            "[Sound]\nVolume={}\nMusic={}\n\n[Game]\nSkillMode={}\nSkillBar={}\nEffect={}\nDropView={}\nNameView={}\nHPMPView={}\nAllowObserve={}\nNewMove={}\n",
+            pct(self.sound_volume),
+            pct(self.music_volume),
+            self.skill_mode_ctrl,
+            self.skill_bar,
+            self.effect,
+            self.drop_view,
+            self.name_view,
+            self.hp_view,
+            self.allow_observe,
+            self.new_move,
+        )
+    }
+
+    /// 启动时加载（C# Settings.Load；文件不存在用默认值）
+    pub fn load() -> Self {
+        let content = std::fs::read_to_string(SETTINGS_PATH).unwrap_or_default();
+        Self::from_ini(&content)
+    }
+
+    /// 保存（C# Settings.Save；CMain 退出/设置变更时调用）
+    pub fn save(&self) {
+        let _ = std::fs::write(SETTINGS_PATH, self.to_ini());
+        tracing::debug!("⚙️ 设置已保存到 {}", SETTINGS_PATH);
+    }
+}
+
+/// 读取 INI 布尔值（缺省/非法回退 default）
+fn ini_bool(content: &str, section: &str, key: &str, default: bool) -> bool {
+    ini_str(content, section, key)
+        .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+        .unwrap_or(default)
+}
+
+/// 读取 INI 百分比音量（0-100 → 0.0-1.0）
+fn ini_percent(content: &str, section: &str, key: &str, default: f32) -> f32 {
+    ini_str(content, section, key)
+        .and_then(|v| v.parse::<f32>().ok())
+        .map(|v| (v / 100.0).clamp(0.0, 1.0))
+        .unwrap_or(default)
+}
+
+/// 读取 INI 某段某 key 的原始值
+fn ini_str<'a>(content: &'a str, section: &str, key: &str) -> Option<&'a str> {
+    let mut cur = "";
+    for line in content.lines() {
+        let l = line.trim();
+        if l.starts_with('[') && l.ends_with(']') {
+            cur = &l[1..l.len() - 1];
+            continue;
+        }
+        if cur.eq_ignore_ascii_case(section) {
+            if let Some(eq) = l.find('=') {
+                if l[..eq].trim().eq_ignore_ascii_case(key) {
+                    return Some(l[eq + 1..].trim());
+                }
+            }
+        }
+    }
+    None
+}
+
 /// 设置行类型（与 C# 各按钮组一一对应）
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum OptionToggleKind {
@@ -112,7 +198,7 @@ pub struct OptionPlugin;
 
 impl Plugin for OptionPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<OptionState>();
+        app.insert_resource(OptionState::load());
         app.add_systems(OnEnter(AppState::Game), spawn_option);
         app.add_systems(OnExit(AppState::Game), cleanup_option);
         app.add_systems(
@@ -354,6 +440,7 @@ fn option_ui_system(
     }
 
     // 开关点击 + 状态帧刷新（等效 C# BeforeDraw 按状态换 Index）
+    let mut changed = false;
     for (btn, tg, mut frames) in &mut toggles {
         if btn.clicked {
             match tg.kind {
@@ -371,6 +458,7 @@ fn option_ui_system(
                 tg.kind,
                 state_value(&state, tg.kind)
             );
+            changed = true;
         }
         let sel = state_value(&state, tg.kind);
         let f = if sel { &tg.frames_on } else { &tg.frames_off };
@@ -405,7 +493,12 @@ fn option_ui_system(
                 if bar.is_music { "音乐" } else { "音效" },
                 vol * 100.0
             );
+            changed = true;
         }
+    }
+    // 设置变更即保存（C# Settings.Save）
+    if changed {
+        state.save();
     }
 
     // 填充条 + 滑块位置（C#：fill=(Width-2)*percent，knob at (159+fill, 218/244)）
@@ -436,5 +529,59 @@ fn option_ui_system(
         let (bx, _, bw, _) = bar.rect;
         let fill = (bw - 2.0) * vol;
         tf.translation.x = bx + fill;
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_ini_empty_uses_defaults() {
+        let s = OptionState::from_ini("");
+        assert!(s.skill_mode_ctrl);
+        assert!(s.skill_bar);
+        assert_eq!(s.sound_volume, 0.8);
+        assert_eq!(s.music_volume, 0.6);
+        assert!(!s.allow_observe);
+    }
+
+    #[test]
+    fn test_from_ini_values() {
+        let content = "[Sound]\nVolume=30\nMusic=70\n\n[Game]\nSkillMode=false\nSkillBar=false\nEffect=true\nDropView=false\nNameView=false\nHPMPView=false\nAllowObserve=true\nNewMove=false\n";
+        let s = OptionState::from_ini(content);
+        assert_eq!(s.sound_volume, 0.3);
+        assert_eq!(s.music_volume, 0.7);
+        assert!(!s.skill_mode_ctrl);
+        assert!(!s.skill_bar);
+        assert!(s.effect);
+        assert!(!s.drop_view);
+        assert!(!s.name_view);
+        assert!(!s.hp_view);
+        assert!(s.allow_observe);
+        assert!(!s.new_move);
+    }
+
+    #[test]
+    fn test_to_ini_roundtrip() {
+        let mut s = OptionState::default();
+        s.skill_mode_ctrl = false;
+        s.effect = false;
+        s.sound_volume = 0.45;
+        s.music_volume = 1.0;
+        let parsed = OptionState::from_ini(&s.to_ini());
+        assert_eq!(parsed.skill_mode_ctrl, false);
+        assert_eq!(parsed.effect, false);
+        assert_eq!(parsed.sound_volume, 0.45); // 45 存整数往返
+        assert_eq!(parsed.music_volume, 1.0);
+        assert_eq!(parsed.name_view, true);
+    }
+
+    #[test]
+    fn test_ini_helpers() {
+        let content = "[Sound]\nVolume=50\nMusic=100\n";
+        assert_eq!(ini_bool(content, "Sound", "Missing", true), true);
+        assert_eq!(ini_percent(content, "Sound", "Volume", 0.0), 0.5);
+        assert_eq!(ini_percent(content, "Sound", "Music", 0.0), 1.0);
+        assert_eq!(ini_percent(content, "Sound", "Missing", 0.2), 0.2);
     }
 }
