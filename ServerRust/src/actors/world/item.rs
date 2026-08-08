@@ -2223,6 +2223,33 @@ impl Message<EquipSlotItemRequest> for WorldActor {
             None => return,
         };
 
+        // #1313：钓具穿戴（C# EquipSlotItem GridTo=Fishing：背包钓具 → 鱼竿 slots[FishingSlot]）
+        if msg.grid_to == mir2_shared::enums::MirGridType::Fishing as u8 {
+            let state = match record.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(s)) => s,
+                _ => return,
+            };
+            let rod_uid = state
+                .inventory
+                .equipment
+                .get(crate::actors::inventory::EquipmentSlot::Weapon as usize)
+                .and_then(|e| e.as_ref())
+                .map(|i| i.unique_id)
+                .unwrap_or(0);
+            let ok = record
+                .actor_ref
+                .ask(crate::actors::player::EquipFishingGear {
+                    rod_uid,
+                    slot: msg.to_slot.max(0) as usize,
+                    gear_uid: msg.unique_id,
+                })
+                .await
+                .unwrap_or(false);
+            if !ok {
+                send_system_message(&self.gate_ref, msg.session_id, "钓具穿戴失败");
+            }
+            return;
+        }
         let equip_slot = match crate::actors::inventory::EquipmentSlot::from_i32(msg.to_slot) {
             Some(s) => s,
             None => {

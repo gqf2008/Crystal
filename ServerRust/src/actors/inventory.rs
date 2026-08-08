@@ -158,7 +158,100 @@ impl PlayerInventory {
         });
         true
     }
+}
 
+/// 钓具穿戴（C# EquipSlotItem GridTo=Fishing：背包钓具放入鱼竿 slots[slot]）
+/// 成功时旧钓具（若有）放回背包；失败返回原因
+pub fn equip_fishing_gear(
+    inventory: &mut PlayerInventory,
+    rod_uid: u64,
+    slot: usize,
+    gear_uid: u64,
+) -> Result<(), &'static str> {
+    if !fishing_slot_type_ok(slot, None) {
+        return Err("无效钓具槽");
+    }
+    // 鱼竿：Weapon 装备槽且为钓鱼竿（shape 49/50）
+    let rod = match inventory.equipment.get_mut(EquipmentSlot::Weapon as usize) {
+        Some(Some(r)) => r,
+        _ => return Err("未装备鱼竿"),
+    };
+    if rod.unique_id != rod_uid {
+        return Err("鱼竿不匹配");
+    }
+    let shape = rod.info.as_ref().map(|i| i.shape as i32).unwrap_or(0);
+    if !crate::actors::world::is_fishing_rod_shape(shape) {
+        return Err("不是钓鱼竿");
+    }
+    if rod.slots.len() < 5 {
+        rod.slots.resize(5, None);
+    }
+    // 背包中找钓具
+    let gear = inventory
+        .backpack
+        .iter()
+        .find(|s| s.as_ref().map_or(false, |sl| sl.item.unique_id == gear_uid))
+        .and_then(|s| s.as_ref().map(|sl| sl.item.clone()));
+    let Some(gear) = gear else { return Err("背包中找不到钓具") };
+    // 类型校验
+    let gear_type = gear.info.as_ref().map(|i| i.item_type);
+    if !fishing_slot_type_ok(slot, gear_type) {
+        return Err("钓具类型与槽位不符");
+    }
+    // 从背包移除
+    let mut taken = None;
+    for s in inventory.backpack.iter_mut() {
+        if s.as_ref().map_or(false, |sl| sl.item.unique_id == gear_uid) {
+            taken = s.take();
+            break;
+        }
+    }
+    let Some(taken) = taken else { return Err("背包中找不到钓具") };
+    // 旧钓具回背包（优先原槽，其次空格；无空格则撤销并还原钓具）
+    if let Some(old) = rod.slots[slot].take() {
+        let old_grid = taken.grid as usize;
+        if old_grid < inventory.backpack.len() && inventory.backpack[old_grid].is_none() {
+            inventory.backpack[old_grid] = Some(InventorySlot { grid: old_grid as u8, item: old });
+        } else {
+            let mut placed = false;
+            for (i, s) in inventory.backpack.iter_mut().enumerate() {
+                if s.is_none() {
+                    *s = Some(InventorySlot { grid: i as u8, item: old });
+                    placed = true;
+                    break;
+                }
+            }
+            if !placed {
+                let tg = taken.grid as usize;
+                inventory.backpack[tg] = Some(taken);
+                return Err("背包已满");
+            }
+        }
+    }
+    rod.slots[slot] = Some(taken.item);
+    Ok(())
+}
+
+/// 钓具槽类型校验（C# FishingSlot：Hook=0 Float=1 Bait=2 Finder=3 Reel=4；SharedRust ItemType：Hook=31..Reel=35）
+/// gear_item_type=None（信息缺失）时不拦截；slot 非法返回 false
+pub fn fishing_slot_type_ok(slot: usize, gear_item_type: Option<mir2_shared::enums::ItemType>) -> bool {
+    use mir2_shared::enums::ItemType;
+    let expected = match slot {
+        0 => Some(ItemType::Hook),
+        1 => Some(ItemType::Float),
+        2 => Some(ItemType::Bait),
+        3 => Some(ItemType::Finder),
+        4 => Some(ItemType::Reel),
+        _ => None,
+    };
+    match (expected, gear_item_type) {
+        (Some(e), Some(t)) => e == t,
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
+impl PlayerInventory {
     /// 根据 unique_id 移除物品
     /// 返回移除的物品或 None
     pub fn remove_item_by_uid(&mut self, uid: u64) -> Option<UserItem> {
@@ -1097,4 +1190,60 @@ mod tests {
         assert_eq!(it2.max_dura, 1000);
         assert_eq!(it2.current_dura, 1000);
     }
+    #[test]
+    fn fishing_slot_type_ok_matches() {
+        use mir2_shared::enums::ItemType;
+        assert!(fishing_slot_type_ok(0, Some(ItemType::Hook)));
+        assert!(fishing_slot_type_ok(1, Some(ItemType::Float)));
+        assert!(fishing_slot_type_ok(2, Some(ItemType::Bait)));
+        assert!(fishing_slot_type_ok(3, Some(ItemType::Finder)));
+        assert!(fishing_slot_type_ok(4, Some(ItemType::Reel)));
+        assert!(!fishing_slot_type_ok(0, Some(ItemType::Float)));
+        assert!(!fishing_slot_type_ok(5, None));
+        assert!(fishing_slot_type_ok(0, None));
+    }
+
+    fn rod_item(shape: i16) -> UserItem {
+        let mut r = make_item(9101, 1);
+        r.unique_id = 7001;
+        r.info = Some(mir2_shared::data::item::ItemInfo {
+            item_type: mir2_shared::enums::ItemType::Weapon,
+            shape,
+            ..Default::default()
+        });
+        r
+    }
+
+    #[test]
+    fn equip_fishing_gear_ok_and_replace() {
+        let mut inv = PlayerInventory::default();
+        inv.equipment[EquipmentSlot::Weapon as usize] = Some(rod_item(49));
+        let mut hook = make_item(9102, 1);
+        hook.unique_id = 8001;
+        let (_, uid) = inv.add_item(hook.clone()).expect("add hook");
+        assert!(equip_fishing_gear(&mut inv, 7001, 0, uid).is_ok());
+        let rod = inv.equipment[EquipmentSlot::Weapon as usize].as_ref().unwrap();
+        assert_eq!(rod.slots[0].as_ref().unwrap().unique_id, uid);
+        assert!(!inv.backpack.iter().any(|s| s.as_ref().map_or(false, |sl| sl.item.unique_id == uid)));
+        let mut hook2 = make_item(9103, 1);
+        hook2.unique_id = 8002;
+        let (_, uid2) = inv.add_item(hook2.clone()).expect("add hook2");
+        assert!(equip_fishing_gear(&mut inv, 7001, 0, uid2).is_ok());
+        let rod = inv.equipment[EquipmentSlot::Weapon as usize].as_ref().unwrap();
+        assert_eq!(rod.slots[0].as_ref().unwrap().unique_id, uid2);
+        assert!(inv.backpack.iter().any(|s| s.as_ref().map_or(false, |sl| sl.item.unique_id == uid)));
+    }
+
+    #[test]
+    fn equip_fishing_gear_rejects_non_rod_and_bad_slot() {
+        let mut inv = PlayerInventory::default();
+        inv.equipment[EquipmentSlot::Weapon as usize] = Some(rod_item(0));
+        let mut g = make_item(9102, 1);
+        g.unique_id = 8001;
+        let (_, uid) = inv.add_item(g).expect("add");
+        assert_eq!(equip_fishing_gear(&mut inv, 7001, 0, uid), Err("不是钓鱼竿"));
+        inv.equipment[EquipmentSlot::Weapon as usize] = Some(rod_item(49));
+        assert_eq!(equip_fishing_gear(&mut inv, 7001, 5, uid), Err("无效钓具槽"));
+    }
+
 }
