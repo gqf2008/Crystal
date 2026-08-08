@@ -113,6 +113,23 @@ pub struct WorldAttackRequest {
     pub spell: u8,
 }
 
+/// #1269：C# HumanObject.RefreshStats——AttackSpeed = 1400 - (Stat*60 + min(370, Level*14))，下限 550ms
+fn player_attack_speed_ms(attack_speed_stat: i32, level: u16) -> i64 {
+    let speed = 1400 - (attack_speed_stat * 60 + (level as i32 * 14).min(370));
+    speed.max(550) as i64
+}
+
+/// #1269：C# CanAttack——麻痹/冰冻/眩晕中禁止攻击（Paralysis/LRParalysis/Frozen/Dazed）
+fn attack_disabled_by_poison(poison_list: &[crate::combat::poison::Poison]) -> bool {
+    use mir2_shared::enums::PoisonType;
+    poison_list.iter().any(|p| {
+        p.p_type.intersects(PoisonType::PARALYSIS)
+            || p.p_type.intersects(PoisonType::LR_PARALYSIS)
+            || p.p_type.intersects(PoisonType::FROZEN)
+            || p.p_type.intersects(PoisonType::DAZED)
+    })
+}
+
 /// 采集请求（从 GateActor 转发）
 pub struct HarvestRequest {
     pub session_id: u64,
@@ -139,6 +156,25 @@ impl Message<WorldAttackRequest> for WorldActor {
         let attacker_state = record.actor_ref.ask(GetPlayerState).await.ok().flatten();
         if let Some(ref state) = attacker_state {
             if state.is_dead { return; }
+            // #1269：C# CanAttack——麻痹/冰冻/眩晕中禁止攻击
+            if attack_disabled_by_poison(&state.poison_list) {
+                return;
+            }
+            // #1269：C# AttackTime = Envir.Time + AttackSpeed——攻击冷却服务端校验
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            let interval = player_attack_speed_ms(state.attack_speed, state.level);
+            let last = self
+                .player_last_attack_ms
+                .get(&msg.session_id)
+                .copied()
+                .unwrap_or(0);
+            if last > 0 && now_ms - last < interval {
+                return;
+            }
+            self.player_last_attack_ms.insert(msg.session_id, now_ms);
         }
 
         // 攻击时自动下坐骑
@@ -1188,6 +1224,25 @@ impl Message<RangeAttackRequest> for WorldActor {
             _ => return,
         };
         if state.is_dead { return; }
+        // #1269：C# CanAttack——麻痹/冰冻/眩晕中禁止远程攻击
+        if attack_disabled_by_poison(&state.poison_list) {
+            return;
+        }
+        // #1269：C# RangeAttack 同样受 AttackTime 冷却约束（与近战共享）
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let interval = player_attack_speed_ms(state.attack_speed, state.level);
+        let last = self
+            .player_last_attack_ms
+            .get(&msg.session_id)
+            .copied()
+            .unwrap_or(0);
+        if last > 0 && now_ms - last < interval {
+            return;
+        }
+        self.player_last_attack_ms.insert(msg.session_id, now_ms);
 
         // 记录玩家当前攻击目标（C# HumanObject.TargetID；宠物 FocusMasterTarget 用）
         if msg.target_id != 0 {
@@ -4555,8 +4610,8 @@ mod spell_geometry_tests {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_attack_skill, ATTACK_SKILL_SPELLS, DAMAGE_DURA_ARMOR_SLOTS, SPELL_CROSS_HALFMOON,
-        SPELL_HALFMOON, SPELL_SLAYING,
+        attack_disabled_by_poison, find_attack_skill, player_attack_speed_ms, ATTACK_SKILL_SPELLS,
+        DAMAGE_DURA_ARMOR_SLOTS, SPELL_CROSS_HALFMOON, SPELL_HALFMOON, SPELL_SLAYING,
     };
     use crate::actors::inventory::EquipmentSlot;
     use crate::actors::player::PlayerMagic;
@@ -4586,6 +4641,37 @@ mod tests {
         assert!(ATTACK_SKILL_SPELLS.contains(&SPELL_CROSS_HALFMOON));
         assert!(!ATTACK_SKILL_SPELLS.contains(&super::SPELL_MPEATER));
         assert!(!ATTACK_SKILL_SPELLS.contains(&super::SPELL_HEMORRHAGE));
+    }
+
+    #[test]
+    fn test_player_attack_speed_ms_formula() {
+        // #1269：C# AttackSpeed = 1400 - (Stat*60 + min(370, Level*14))，下限 550ms
+        // 0 攻速、1 级：1400 - (0 + 14) = 1386
+        assert_eq!(player_attack_speed_ms(0, 1), 1386);
+        // 高等级封顶 min(370, L*14)：30 级 420→370
+        assert_eq!(player_attack_speed_ms(0, 30), 1400 - 370);
+        // 攻速 10、30 级：1400 - (600+370) = 430 → 下限 550
+        assert_eq!(player_attack_speed_ms(10, 30), 550);
+        // 攻速 5、20 级：1400 - (300+280) = 820
+        assert_eq!(player_attack_speed_ms(5, 20), 820);
+        // 极端高攻速：仍为 550 下限
+        assert_eq!(player_attack_speed_ms(100, 1), 550);
+    }
+
+    #[test]
+    fn test_attack_disabled_by_poison() {
+        use crate::combat::poison::Poison;
+        use mir2_shared::enums::PoisonType;
+        // 无中毒：可攻击
+        assert!(!attack_disabled_by_poison(&[]));
+        // 麻痹/冰冻/眩晕：禁攻
+        assert!(attack_disabled_by_poison(&[Poison::new(PoisonType::PARALYSIS, 5, 0, 1000)]));
+        assert!(attack_disabled_by_poison(&[Poison::new(PoisonType::LR_PARALYSIS, 5, 0, 1000)]));
+        assert!(attack_disabled_by_poison(&[Poison::new(PoisonType::FROZEN, 5, 0, 1000)]));
+        assert!(attack_disabled_by_poison(&[Poison::new(PoisonType::DAZED, 5, 0, 1000)]));
+        // 红/绿毒不禁止攻击
+        assert!(!attack_disabled_by_poison(&[Poison::new(PoisonType::RED, 5, 3, 1000)]));
+        assert!(!attack_disabled_by_poison(&[Poison::new(PoisonType::GREEN, 5, 3, 1000)]));
     }
 
     #[test]
