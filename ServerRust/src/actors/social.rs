@@ -356,23 +356,58 @@ impl Message<GuildGainExp> for SocialActor {
     type Reply = ();
 
     async fn handle(&mut self, msg: GuildGainExp, _ctx: &mut Context<Self, Self::Reply>) {
-        let Some(guild) = self.guilds.get_mut(&msg.guild_name) else { return };
-        // C# GuildObject.GainExp（644-690）
-        let leveled = guild.apply_gain_exp(
-            msg.amount,
-            self.config.guild_exp_rate,
-            self.config.guild_point_per_level,
-            &self.config.guild_experience_list,
-            &self.config.guild_membercap_list,
-        );
+        // C# GuildObject.GainExp（644-690）：expAmount = amount * Guild_ExpRate；0 则忽略
+        let exp_amount = (msg.amount as f64 * self.config.guild_exp_rate).floor() as u32;
+        if exp_amount == 0 {
+            return;
+        }
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let (leveled, broadcast_gain, guild_level, guild_exp, guild_cap) = {
+            let Some(guild) = self.guilds.get_mut(&msg.guild_name) else { return };
+            let leveled = guild.apply_gain_exp(
+                msg.amount,
+                self.config.guild_exp_rate,
+                self.config.guild_point_per_level,
+                &self.config.guild_experience_list,
+                &self.config.guild_membercap_list,
+            );
+            // C#：升级/广播后 NextExpUpdate = now + 10000（节流 GuildExpGain）
+            let broadcast_gain = if leveled {
+                false
+            } else if now_ms >= guild.next_exp_update {
+                guild.next_exp_update = now_ms + 10_000;
+                true
+            } else {
+                false
+            };
+            (leveled, broadcast_gain, guild.level, guild.experience, guild.member_cap)
+        };
+        let sessions: Vec<u64> = {
+            let Some(guild) = self.guilds.get(&msg.guild_name) else { return };
+            guild.members.iter().filter_map(|m| m.session_id).collect()
+        };
         if leveled {
-            debug!("Guild '{}' leveled to {} (exp={} cap={})", guild.name, guild.level, guild.experience, guild.member_cap);
-            // C# NextExpUpdate=now+10s 后广播 GuildStatus 给在线成员
-            let sessions: Vec<u64> = guild.members.iter().filter_map(|m| m.session_id).collect();
-            for sid in sessions {
-                send_guild_status_packet(&self.gate_ref, sid, true);
+            debug!("Guild '{}' leveled to {} (exp={} cap={})", msg.guild_name, guild_level, guild_exp, guild_cap);
+            // C# 升级：广播 GuildStatus 给在线成员
+            for sid in &sessions {
+                send_guild_status_packet(&self.gate_ref, *sid, true);
             }
             self.save_guild_to_db(&msg.guild_name).await;
+        } else if broadcast_gain {
+            // #1344：C# 非升级 → 每 10s 广播 S.GuildExpGain{Amount=expAmount} 给在线成员
+            let mut body = Vec::new();
+            body.extend_from_slice(&exp_amount.to_le_bytes());
+            let data = build_packet_bytes(ServerPacketIds::GuildExpGain as i16, &body);
+            for sid in sessions {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: sid,
+                    data: data.clone(),
+                }).try_send();
+            }
+            debug!("Guild '{}' gained {} exp (GuildExpGain broadcast)", msg.guild_name, exp_amount);
         }
     }
 }
