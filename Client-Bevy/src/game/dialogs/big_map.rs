@@ -11,7 +11,7 @@
 use bevy::prelude::*;
 
 use crate::game::dialogs::text_input::{TextInputDisplay, TextInputField, TextInputRect, TextInputState, TextInputSubmit};
-use crate::game::dialogs::minimap::MemberLocations;
+use crate::game::dialogs::minimap::{CurrentMapIndex, MemberLocations};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::movement::world_to_tile;
 use crate::map_renderer::{GameData, GameLibraries};
@@ -751,6 +751,7 @@ fn big_map_member_system(
     mgr: Res<DialogManager>,
     state: Res<BigMapState>,
     locs: Res<MemberLocations>,
+    current: Res<CurrentMapIndex>,
     mut dots: Query<(&mut Transform, &mut Visibility, &BigMapMemberDot)>
 ) {
     let open = mgr.is_open(DialogKind::BigMap);
@@ -766,7 +767,12 @@ fn big_map_member_system(
     let vy = py + VIEW_Y + (VIEW_H - th) / 2.0;
     for (mut tf, mut vis, dot) in &mut dots {
         if open && dot.0 < locs.members.len() {
-            let (_, mx, my) = &locs.members[dot.0];
+            let (_, map_idx, mx, my) = &locs.members[dot.0];
+            // #1309：只显示同图队友
+            if *map_idx as i32 != current.0 {
+                *vis = Visibility::Hidden;
+                continue;
+            }
             let (sx, sy) = big_map_member_pos(*mx, *my, mw, mh, tw, th, vx, vy);
             tf.translation.x = sx - 1.5;
             tf.translation.y = -(sy - 1.5);

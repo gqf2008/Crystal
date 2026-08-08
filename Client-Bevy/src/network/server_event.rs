@@ -169,7 +169,7 @@ pub enum ServerEvent {
     /// #250 SetCompass：罗盘目标方向
     CompassTarget { x: i32, y: i32 },
     /// #254 SendMemberLocation：小队成员位置
-    MemberLocation { name: String, x: i32, y: i32 },
+    MemberLocation { name: String, map_index: u16, x: i32, y: i32 },
     /// #256 UpdateNotice：服务器公告（C# Notice: Title + Message）
     NoticeUpdated { title: String, message: String },
     /// #258 ItemUpgraded：物品升级（替换背包物品）

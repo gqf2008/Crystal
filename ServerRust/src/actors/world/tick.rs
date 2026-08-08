@@ -3297,6 +3297,11 @@ impl Message<Tick> for WorldActor {
         // NPC 脚本计时器到期清理（SETTIMER/EXPIRETIMER/CHECKTIMER，对齐 C# Envir.Timers）
         self.tick_npc_timers();
 
+        // 组队位置广播（C# Group 周期 SendLocations；每 50 tick ≈ 5s，#1309）
+        if self.tick_count % 50 == 0 {
+            crate::actors::world::broadcast_group_locations(self).await;
+        }
+
 
 
 

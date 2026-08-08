@@ -101,18 +101,23 @@ pub struct MiniMapMemberDot(pub usize);
 /// #254 成员位置状态（S.SendMemberLocation 按名字 upsert）
 #[derive(Resource, Default)]
 pub struct MemberLocations {
-    pub members: Vec<(String, i32, i32)>,
+    /// (名字, 地图 index, x, y)；#1309 增地图用于跨图过滤
+    pub members: Vec<(String, u16, i32, i32)>,
 }
 
 impl MemberLocations {
-    pub fn upsert(&mut self, name: String, x: i32, y: i32) {
-        if let Some(entry) = self.members.iter_mut().find(|(n, _, _)| *n == name) {
-            *entry = (name, x, y);
+    pub fn upsert(&mut self, name: String, map_index: u16, x: i32, y: i32) {
+        if let Some(entry) = self.members.iter_mut().find(|(n, _, _, _)| *n == name) {
+            *entry = (name, map_index, x, y);
         } else {
-            self.members.push((name, x, y));
+            self.members.push((name, map_index, x, y));
         }
     }
 }
+
+/// 当前地图 index（#1309：由 ServerEvent::MapInfo 更新，供队友点跨图过滤）
+#[derive(Resource, Default)]
+pub struct CurrentMapIndex(pub i32);
 
 #[derive(Component)]
 pub struct MiniMapPosText;
@@ -123,6 +128,7 @@ impl Plugin for MiniMapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MiniMapMode>();
         app.init_resource::<MemberLocations>();
+        app.init_resource::<CurrentMapIndex>();
         app.add_systems(OnEnter(AppState::Game), spawn_minimap);
         app.add_systems(OnExit(AppState::Game), cleanup_minimap);
         app.add_systems(
@@ -132,6 +138,7 @@ impl Plugin for MiniMapPlugin {
                 minimap_toggle_system,
                 minimap_ui_system,
                 minimap_member_events,
+                current_map_index_events,
                 minimap_member_dots_system,
                 ui_button_system,
             )
@@ -637,14 +644,26 @@ mod tests {
 
 
 
+/// #1309：ServerEvent::MapInfo → CurrentMapIndex（当前地图，供队友点跨图过滤）
+fn current_map_index_events(
+    mut current: ResMut<CurrentMapIndex>,
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+) {
+    for ev in events.read() {
+        if let crate::network::server_event::ServerEvent::MapInfo { map_index, .. } = ev {
+            current.0 = *map_index;
+        }
+    }
+}
+
 /// #254：S.SendMemberLocation → MemberLocations（按名字 upsert）
 fn minimap_member_events(
     mut locs: ResMut<MemberLocations>,
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
 ) {
     for ev in events.read() {
-        if let crate::network::server_event::ServerEvent::MemberLocation { name, x, y } = ev {
-            locs.upsert(name.clone(), *x, *y);
+        if let crate::network::server_event::ServerEvent::MemberLocation { name, map_index, x, y } = ev {
+            locs.upsert(name.clone(), *map_index, *x, *y);
         }
     }
 }
@@ -655,6 +674,7 @@ fn minimap_member_dots_system(
     mode: Res<MiniMapMode>,
     game_data: Res<GameData>,
     locs: Res<MemberLocations>,
+    current: Res<CurrentMapIndex>,
     mut dots: Query<
         (&mut Transform, &mut Visibility, &MiniMapMemberDot),
         (
@@ -671,10 +691,15 @@ fn minimap_member_dots_system(
         None => (1.0, 1.0),
     };
     for (mut tf, mut vis, idx) in &mut dots {
-        let Some((_, tx, ty)) = locs.members.get(idx.0) else {
+        let Some((_, map_idx, tx, ty)) = locs.members.get(idx.0) else {
             *vis = Visibility::Hidden;
             continue;
         };
+        // #1309：只显示同图队友（C# GroupMembersMap 按图过滤）
+        if *map_idx as i32 != current.0 {
+            *vis = Visibility::Hidden;
+            continue;
+        }
         if !open || !big {
             *vis = Visibility::Hidden;
             continue;
