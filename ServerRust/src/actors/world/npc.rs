@@ -690,6 +690,8 @@ impl Message<NewCharacterRequest> for WorldActor {
             exp_bonus_lover_percent: 0,
             exp_bonus_mentee_percent: 0,
             exp_bonus_newbie_percent: 0,
+            guild_buff_exp_percent: 0,
+            guild_buff_fish_rate_percent: 0,
             no_experience_map: false,
             brown_until_ms: 0,
             mount_loyalty_decrease_time: 0,
@@ -1484,18 +1486,58 @@ impl Message<FishingCastRequest> for WorldActor {
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
         if state.is_dead { return; }
 
-        // Check for fishing rod in weapon slot
-        let has_rod = state.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::Weapon)
-            .and_then(|item| self.item_infos.get(&item.item_index))
-            .map(|info| {
-                let n = info.name.to_lowercase();
-                n.contains("rod") || n.contains("fishing") || n.contains("竿") || n.contains("鱼")
-            })
-            .unwrap_or(false);
-        if !has_rod {
+        // C# FishingCast：鱼竿校验（IsFishingRod = shape 49/50 + CurrentDura != 0）
+        let rod_item = match state.inventory.get_equipment(crate::actors::inventory::EquipmentSlot::Weapon) {
+            Some(r) => r.clone(),
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "你需要装备鱼竿才能钓鱼");
+                return;
+            }
+        };
+        let rod_info = self.item_infos.get(&rod_item.item_index).cloned();
+        let is_rod = rod_info.as_ref().map(|i| is_fishing_rod_shape(i.shape)).unwrap_or(false);
+        if !is_rod || rod_item.current_dura == 0 {
             send_system_message(&self.gate_ref, msg.session_id, "你需要装备鱼竿才能钓鱼");
             return;
         }
+
+        // C# FishingCast：前方 3 格 + 水格（Cell.FishingAttribute >= 0）
+        let (fx, fy) = point_move(state.x, state.y, state.direction, 3);
+        let Some(map_data) = self.maps.get(&state.map_index).cloned() else { return };
+        if !map_data.is_valid(fx, fy) || map_data.fishing_attribute(fx, fy) < 0 {
+            send_system_message(&self.gate_ref, msg.session_id, "这里不是水域，无法钓鱼");
+            return;
+        }
+        let cell_attribute = map_data.fishing_attribute(fx, fy);
+
+        // C# FishingCast：successStat = rod.Info.Stats[Stat.MaxAC]；flexibilityStat = CriticalRate
+        // （鱼钩/鱼漂/鱼饵/卷线器/探鱼器插槽后续批次接入；行会 BuffFishRate 已由 tick 缓存）
+        let success_stat = rod_info
+            .as_ref()
+            .and_then(|i| i.stats.get(&(mir2_shared::enums::Stat::MaxAC as u8)).copied())
+            .unwrap_or(0);
+        let flexibility = rod_info
+            .as_ref()
+            .and_then(|i| i.stats.get(&(mir2_shared::enums::Stat::CriticalRate as u8)).copied())
+            .unwrap_or(0);
+        let fish_rate = state.guild_buff_fish_rate_percent;
+        // C#：FishingChance = SuccessStart + successStat + FishRatePercent + Counter*SuccessMultiplier
+        //（FishingChanceCounter 跨抛竿保留：每次满进度 +1，成功收获清零）
+        let success_counter = self.fishing_success_counters.get(&msg.session_id).copied().unwrap_or(0);
+        let chance = (self.fishing_cfg.success_start
+            + success_stat
+            + fish_rate
+            + (success_counter as i32) * self.fishing_cfg.success_multiplier)
+            .clamp(0, 100);
+
+        self.fishing_sessions.insert(
+            msg.session_id,
+            FishingSession {
+                cell_attribute,
+                chance,
+                flexibility,
+            },
+        );
 
         let _ = record.actor_ref.ask(SetFishing { is_fishing: true, autocast: false }).await;
 
@@ -1510,7 +1552,7 @@ impl Message<FishingCastRequest> for WorldActor {
             }).await;
         }
 
-        debug!("FishingCast: {} type={}", state.name, msg.fishing_type);
+        debug!("FishingCast: {} type={} at ({},{}) attr={} chance={}", state.name, msg.fishing_type, fx, fy, cell_attribute, chance);
     }
 }
 

@@ -4,7 +4,8 @@
 背景：#990 怪物 AI 对齐 C# 后，测试地图 BichonProvince 城镇出生点 (288,616)
 会被大群怪物围杀（野生怪物对安全区玩家可攻击，C# 语义），导致配对/精炼用例失败。
 本脚本：
-1. 把测试角色 bevychar/bevy2char 移到远离刷怪点的安全区 (650,629)
+1. 把测试角色 bevychar/bevy2char 移到远离刷怪点的河边钓鱼点（fishing-test 需要
+   前方 3 格为水格 FishingAttribute>=0，C# FishingCast 语义；#1217 数据驱动钓鱼）
 2. bevychar 背包为空时恢复 2 件物品（精炼/交易用例需要）
 """
 import json
@@ -14,10 +15,10 @@ import sys
 
 DB = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "ServerRust", "data", "crystal.db"))
-# map '0'（BichonProvince）运行时安全区为硬编码北部城镇 (260,245)-(295,285)
-# （mod.rs apply_hardcoded_safe_zones；南部 start_point (288,616) 不在运行时安全区，
-#   会被 ArcherGuard 等怪攻击）。选 (267,256)（可走 + 安全区中心，已实测）。
-SAFE_X, SAFE_Y = 267, 256  # map 1 (BichonProvince) 北部城镇安全区
+# map 1（file 0，BichonProvince 700x700）西北角河流边 (170,667)：可走、距最近刷怪点
+# 100 格（全图水域扫描实测最安全档），且 bevychar 面向左(6) 时前方 3 格 (167,667)
+# 是水格（FishingAttribute>=0，fishing-test 需要；#1217）。其余用例不依赖位置。
+SAFE_X, SAFE_Y = 170, 667  # map 1 (BichonProvince) 西北河流钓鱼点
 
 
 def make_item(template, uid: int, item_index: int) -> str:
@@ -39,10 +40,10 @@ def main() -> int:
         (SAFE_X, SAFE_Y),
     )
     # 2) 配对摆位（#1166）：交易邀请要求目标在正前方一格且面对面（C# 语义）。
-    #    bevychar（发起方）(267,256) 朝下 → 正前方 (267,257)；bevy2char（接受方）(267,257) 朝上。
+    #    bevychar（发起方）(170,667) 朝左(6) → 正前方 (169,667)；bevy2char（接受方）(169,667) 朝右(2)。
     #    其余配对用例（组队/私聊/邮件/好友）按名称/在线表，不受相邻影响。
-    cur.execute("UPDATE characters SET direction=4 WHERE name='bevychar'")
-    cur.execute("UPDATE characters SET x=267, y=257, direction=0 WHERE name='bevy2char'")
+    cur.execute("UPDATE characters SET direction=6 WHERE name='bevychar'")
+    cur.execute("UPDATE characters SET x=169, y=667, direction=2 WHERE name='bevy2char'")
     # 2) bevychar 装备恢复（fishing/mount 用例依赖）：
     #    Weapon 槽 = BlueFishingRod(793)、Mount 槽 = BengalTiger(764)
     cur.execute("SELECT COUNT(*) FROM inventory_equipment WHERE character_name='bevychar' AND slot IN (0,10)")
@@ -95,3 +96,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

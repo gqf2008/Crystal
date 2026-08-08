@@ -1044,10 +1044,12 @@ impl WorldActor {
         }
     }
 
-    /// 钓鱼收获判定（每 tick）
+    /// 钓鱼收获判定（每 tick；对齐 C# PlayerObject.UpdateFish + FishingCast(false) 收获）
     pub(crate) async fn tick_fishing(&mut self) {
         let mut caught = Vec::new(); // session_id
         let mut stopped = Vec::new(); // session_id
+        // (session, item_index, 是否刷怪, x, y, map, autocast)
+        let mut events: Vec<(u64, Option<i32>, bool, i32, i32, u16, bool)> = Vec::new();
         for (session_id, record) in &self.players {
             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
                 if !state.is_fishing { continue; }
@@ -1055,41 +1057,63 @@ impl WorldActor {
                 let counter = self.fishing_tick_counters.entry(*session_id).or_insert(0);
                 *counter += 1;
 
-                // 钓鱼需要 30~70 ticks（约 3~7 秒）才有收获
-                let required = 30 + ((*session_id as u32 + *counter).wrapping_mul(1103515245).wrapping_add(12345) % 41);
-                if *counter >= required {
-                    // 收获判定
-                    let roll = ((*session_id + self.tick_count) % 100) as u8;
-                    if roll < 60 {
-                        // 金币 10~50
-                        let gold = 10 + ((*session_id + self.tick_count) % 41) as u64;
-                        let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount: gold }).await;
-                        send_system_message(&self.gate_ref, *session_id, &format!("钓到了宝箱！获得 {} 金币", gold));
-                    } else if roll < 80 {
-                        // 随机物品：从已加载的物品中挑一个低阶物品
-                        let item_index = Self::random_fishing_item_index(&self.item_infos, *session_id, self.tick_count);
-                        let item = crate::actors::inventory::make_item(item_index, 1);
+                // C# FishingProgressMax = Settings.FishingAttempts（30 ticks ≈ 3 秒）
+                let attempts = self.fishing_cfg.attempts.max(1);
+                if *counter < attempts {
+                    continue;
+                }
+
+                let Some(session) = self.fishing_sessions.get(session_id).cloned() else {
+                    stopped.push(*session_id);
+                    continue;
+                };
+
+                // C# FishingCast(false)：FishingProgress > 99 → FishingChanceCounter++（跨抛竿保留）
+                let counter = self.fishing_success_counters.entry(*session_id).or_insert(0);
+                *counter = counter.saturating_add(1);
+
+                // C# FishingCast(false)：getChance = FishingChance + Random(10,24) + (进度>50 ? flexibility/2 : 0)
+                let get_chance = (session.chance + fastrand::i32(10..=24) + session.flexibility / 2).clamp(0, 100);
+
+                if fastrand::i32(0..=100) <= get_chance {
+                    // C# 成功收获 → FishingChanceCounter = 0
+                    self.fishing_success_counters.insert(*session_id, 0);
+                    // C#：Envir.FishingDrops.Where(Type == FishingAttribute) → AttemptDrop
+                    let item_index = self.attempt_fishing_drop(session.cell_attribute, 0);
+                    if let Some(idx) = item_index {
+                        let item = crate::actors::inventory::make_item(idx, 1);
                         let added = record.actor_ref.ask(crate::actors::player::AddItemToInventory { item }).await.unwrap_or(false);
                         if added {
-                            send_system_message(&self.gate_ref, *session_id, "钓到了一件物品！");
+                            send_system_message(&self.gate_ref, *session_id, "钓到了物品！");
                         } else {
                             send_system_message(&self.gate_ref, *session_id, "钓到了物品，但背包已满！");
                         }
-                    } else if roll < 95 {
-                        // 经验 10~30
-                        let xp = 10 + ((*session_id + self.tick_count) % 21) as i32;
-                        let _ = record.actor_ref.ask(crate::actors::player::AddExperience { amount: self.apply_global_exp_multiplier(xp) , experience_list: self.experience_list.clone()}).await;
-                        send_system_message(&self.gate_ref, *session_id, &format!("钓到了经验珠！获得 {} 经验", xp));
                     } else {
                         send_system_message(&self.gate_ref, *session_id, "鱼跑了...");
                     }
 
-                    if state.fishing_autocast {
-                        caught.push(*session_id);
-                    } else {
-                        stopped.push(*session_id);
-                    }
+                    // C#：收获时按 MonsterSpawnChance 刷 FishingMonster（Next(100-chance)==0；100% 恒刷）
+                    let spawn = self.fishing_cfg.monster_spawn_chance > 0
+                        && !self.fishing_cfg.monster.is_empty()
+                        && (self.fishing_cfg.monster_spawn_chance >= 100
+                            || fastrand::i32(0..(100 - self.fishing_cfg.monster_spawn_chance as i32)) == 0);
+
+                    events.push((*session_id, item_index, spawn, state.x, state.y, state.map_index, state.fishing_autocast));
+                } else {
+                    send_system_message(&self.gate_ref, *session_id, "鱼跑了...");
+                    stopped.push(*session_id);
                 }
+            }
+        }
+        for (session_id, _item_index, spawn, x, y, map_index, autocast) in events {
+            if spawn {
+                let monster = self.fishing_cfg.monster.clone();
+                let _ = self.spawn_monster_named(&monster, x, y, 1, map_index).await;
+            }
+            if autocast {
+                caught.push(session_id);
+            } else {
+                stopped.push(session_id);
             }
         }
         for session_id in caught {
@@ -1115,6 +1139,7 @@ impl WorldActor {
         }
         for session_id in stopped {
             self.fishing_tick_counters.remove(&session_id);
+            self.fishing_sessions.remove(&session_id);
             if let Some(record) = self.players.get(&session_id) {
                 let _ = record.actor_ref.ask(crate::actors::player::SetFishing { is_fishing: false, autocast: false }).await;
             }
@@ -4841,4 +4866,3 @@ mod tests {
         assert_eq!(pet_exp_gain("Vampire", 100), 100);
     }
 }
-

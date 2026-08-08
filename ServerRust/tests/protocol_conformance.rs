@@ -145,6 +145,8 @@ async fn start_server_with_world() -> u16 {
         goods_hide_added_stats: false,
         safe_zone_healing: false,
         experience_list: Vec::new(),
+        fishing_cfg: Default::default(),
+        guild_buff_infos: Vec::new(),
     });
     let _ = gate_ref.ask(SetWorldRef { world_ref }).await;
 

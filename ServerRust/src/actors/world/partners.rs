@@ -285,4 +285,51 @@ pub(crate) async fn tick_partner_bonuses(world: &mut WorldActor) {
             }
         }
     }
+
+    // ===== 行会 Buff 经验/钓鱼加成缓存（C# GuildBuffInfo.BuffExpRate / BuffFishRate）=====
+    // 与上面相同思路：AddExperience / 钓鱼 tick 只读缓存，避免 WorldActor tick 内反向 ask 死锁。
+    // WorldActor 持有 guild_buff_infos（启动时从 GuildSettings.ini [Buff-*] 加载），
+    // 激活列表按行会从 SocialActor 查询，按行会聚合后只 ask 一次。
+    let mut guild_active: HashMap<String, Vec<u32>> = HashMap::new();
+    for (_, record) in &world.players {
+        if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+            if let Some(g) = &st.guild_name {
+                if !guild_active.contains_key(g) {
+                    let active = world
+                        .social_ref
+                        .ask(crate::actors::social::NpcGetGuildBuffs { guild_name: g.clone() })
+                        .await
+                        .unwrap_or_default();
+                    guild_active.insert(g.clone(), active);
+                }
+            }
+        }
+    }
+    let mut buff_updates: Vec<(u64, i32, i32)> = Vec::new();
+    for (sid, record) in &world.players {
+        if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
+            let Some(guild_name) = &state.guild_name else { continue };
+            let active = guild_active.get(guild_name).cloned().unwrap_or_default();
+            let mut exp = 0i32;
+            let mut fish = 0i32;
+            for buff in world.guild_buff_infos.values() {
+                if active.contains(&buff.id) {
+                    exp += buff.buff_exp_rate;
+                    fish += buff.buff_fish_rate;
+                }
+            }
+            if exp != state.guild_buff_exp_percent || fish != state.guild_buff_fish_rate_percent {
+                buff_updates.push((*sid, exp, fish));
+            }
+        }
+    }
+    for (sid, exp, fish) in buff_updates {
+        if let Some(record) = world.players.get(&sid) {
+            if let Ok(Some(mut st)) = record.actor_ref.ask(GetPlayerState).await {
+                st.guild_buff_exp_percent = exp;
+                st.guild_buff_fish_rate_percent = fish;
+                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerState { state: st }).await;
+            }
+        }
+    }
 }

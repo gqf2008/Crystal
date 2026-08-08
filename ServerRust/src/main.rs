@@ -69,6 +69,16 @@ async fn async_main() -> anyhow::Result<()> {
     let map_dir = PathBuf::from(&cfg.server.map_data_dir);
     let spawn_dir = PathBuf::from("Data/spawn");
 
+    // 数据驱动配置（C# Settings 从 Configs/*.ini 读取；Daneo1989 数据源）
+    let configs_dir = map_dir.join("Configs");
+    let fishing_cfg = crystal_server::util::ini::load_fishing_config(&configs_dir);
+    let guild_buff_infos = crystal_server::util::ini::load_guild_buff_infos(&configs_dir);
+    info!(
+        "Loaded data configs: fishing attempts={} buffs={}",
+        fishing_cfg.attempts,
+        guild_buff_infos.len()
+    );
+
     // 初始化 SQLite 数据库（使用配置 database.path，支持绝对路径；#77 worktree 联调发现原硬编码忽略配置）
     let db_path = PathBuf::from(&cfg.database.path);
     if let Some(parent) = db_path.parent() {
@@ -115,6 +125,7 @@ async fn async_main() -> anyhow::Result<()> {
         guild_point_per_level: cfg.social.guild_point_per_level,
         guild_experience_list: cfg.social.guild_experience_list.clone(),
         guild_membercap_list: cfg.social.guild_membercap_list.clone(),
+        guild_buff_infos: guild_buff_infos.clone(),
         allow_new_character: cfg.social.allow_new_character,
         allow_delete_character: cfg.social.allow_delete_character,
         allow_create_assassin: cfg.social.allow_create_assassin,
@@ -154,6 +165,8 @@ async fn async_main() -> anyhow::Result<()> {
         drop_rate: cfg.server.drop_rate,
         exp_rate: 1.0, // C# Settings.ExpRate 默认 1
         experience_list: cfg.server.experience_list.clone(),
+        fishing_cfg: fishing_cfg,
+        guild_buff_infos: guild_buff_infos.clone(),
         item_timeout_ticks: cfg.server.item_timeout_secs as u64 * 10,
         max_drop_gold: cfg.server.max_drop_gold,
         rarity_cfg: cfg.server.rarity.clone(),

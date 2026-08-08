@@ -12,6 +12,17 @@ use byteorder::{LittleEndian, ReadBytesExt};
 pub struct CellInfo {
     pub back_image: i32,
     pub walkable: bool,
+    /// 钓鱼属性（C# Cell.FishingAttribute）：光值 ∈ [100,119] 时 = light-100，否则 -1
+    pub fishing_attribute: i8,
+}
+
+/// 从地图光值解析钓鱼属性（C# Map.cs：light∈[100,119] → FishingAttribute=light-100）
+fn fishing_attr_from_light(light: u8) -> i8 {
+    if (100..=119).contains(&light) {
+        (light - 100) as i8
+    } else {
+        -1
+    }
 }
 
 /// 安全区矩形 (x1, y1, x2, y2)
@@ -43,6 +54,14 @@ impl MapData {
             return false;
         }
         self.cells[x as usize][y as usize].walkable
+    }
+
+    /// 指定格子的钓鱼属性（C# Cell.FishingAttribute；越界/无水返回 -1）
+    pub fn fishing_attribute(&self, x: i32, y: i32) -> i8 {
+        if !self.is_valid(x, y) {
+            return -1;
+        }
+        self.cells[x as usize][y as usize].fishing_attribute
     }
 
     /// 检查指定坐标是否在安全区内
@@ -141,6 +160,7 @@ fn load_type_100(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
             CellInfo {
                 back_image: 0,
                 walkable: true,
+                fishing_attribute: -1,
             };
             height as usize
         ];
@@ -164,9 +184,13 @@ fn load_type_100(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
 
             let walkable = (back_image & OBSTACLE_BIT) == 0;
 
+            // C# LoadMapCellsV100：每格 26 字节，light 在 cell[25]
+            let fishing_attribute = fishing_attr_from_light(cell_bytes[25]);
+
             cells[x][y] = CellInfo {
                 back_image,
                 walkable,
+                fishing_attribute,
             };
         }
     }
@@ -226,6 +250,7 @@ fn load_type_1(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
             CellInfo {
                 back_image: 0,
                 walkable: true,
+                fishing_attribute: -1,
             };
             height as usize
         ];
@@ -246,9 +271,12 @@ fn load_type_1(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
             ]);
             let back_image = back_raw ^ BACK_XOR;
             let walkable = (back_image & OBSTACLE_BIT) == 0;
+            // C# LoadMapCellsv1：每格 15 字节，light 在 cell[13]
+            let fishing_attribute = fishing_attr_from_light(bytes[o + 13]);
             cells[x][y] = CellInfo {
                 back_image,
                 walkable,
+                fishing_attribute,
             };
         }
     }
@@ -301,6 +329,7 @@ fn load_type_0(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
             CellInfo {
                 back_image: 0,
                 walkable: true,
+                fishing_attribute: -1,
             };
             height as usize
         ];
@@ -326,9 +355,13 @@ fn load_type_0(bytes: &[u8], file_name: &str) -> io::Result<MapData> {
 
             let walkable = (back_image & OBSTACLE_BIT) == 0;
 
+            // C# LoadMapCellsv0：每格 12 字节，light 在 cell[11]
+            let fishing_attribute = fishing_attr_from_light(cell_bytes[11]);
+
             cells[x][y] = CellInfo {
                 back_image,
                 walkable,
+                fishing_attribute,
             };
         }
     }
@@ -507,4 +540,61 @@ mod tests {
         let result = parse_map_bytes(&[0x01], "small.map");
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_fishing_attribute_type_100() {
+        // 5x1 map；cell 0 光值 105（FishingAttribute=5），cell 1 光值 0（非水）
+        let mut bytes = vec![0x01, 0x00, 0x43, 0x23, 0x02, 0x00, 0x01, 0x00];
+        let mut cell0 = vec![0u8; 26];
+        cell0[25] = 105;
+        bytes.extend_from_slice(&cell0);
+        let mut cell1 = vec![0u8; 26];
+        bytes.extend_from_slice(&cell1);
+        let map = parse_map_bytes(&bytes, "test.map").unwrap();
+        assert_eq!(map.fishing_attribute(0, 0), 5);
+        assert_eq!(map.fishing_attribute(1, 0), -1);
+        assert_eq!(map.fishing_attribute(5, 0), -1); // 越界
+    }
+
+    #[test]
+    fn test_fishing_attribute_type_1() {
+        // Type1：3x1 map，15B/cell，light 在 cell[13]
+        let mut bytes = vec![0x10, b'M', b'a', b'p', b' ', b'2', b'0', b'1', b'0', b' ', b'V', b'e', b'r', b' ', b'1', b'.', b'0'];
+        bytes.resize(21, 0u8);
+        let xor: i16 = 0x1234;
+        let w: i16 = 3 ^ xor;
+        let h: i16 = 1 ^ xor;
+        bytes.extend_from_slice(&w.to_le_bytes());
+        bytes.extend_from_slice(&xor.to_le_bytes());
+        bytes.extend_from_slice(&h.to_le_bytes());
+        bytes.resize(54, 0u8);
+        let mut cell0 = vec![0u8; 15];
+        cell0[13] = 119; // FishingAttribute = 19
+        bytes.extend_from_slice(&cell0);
+        for _ in 1..3 {
+            let mut cell = vec![0u8; 15];
+            cell[0..4].copy_from_slice(&(0xAA38_AA38u32 as i32).to_le_bytes());
+            bytes.extend_from_slice(&cell);
+        }
+        let map = parse_map_bytes(&bytes, "test.map").unwrap();
+        assert_eq!(map.fishing_attribute(0, 0), 19);
+        assert_eq!(map.fishing_attribute(1, 0), -1);
+    }
+
+    #[test]
+    fn test_fishing_attribute_type_0() {
+        // Type0：52B 头 + 12B/cell，light 在 cell[11]
+        let mut bytes = vec![0u8; 52];
+        bytes[0] = 0x02; bytes[1] = 0x00; // width=2
+        bytes[2] = 0x01; bytes[3] = 0x00; // height=1
+        let mut cell0 = vec![0u8; 12];
+        cell0[11] = 100; // FishingAttribute = 0
+        bytes.extend_from_slice(&cell0);
+        let mut cell1 = vec![0u8; 12];
+        bytes.extend_from_slice(&cell1);
+        let map = parse_map_bytes(&bytes, "test.map").unwrap();
+        assert_eq!(map.fishing_attribute(0, 0), 0);
+        assert_eq!(map.fishing_attribute(1, 0), -1);
+    }
+
 }

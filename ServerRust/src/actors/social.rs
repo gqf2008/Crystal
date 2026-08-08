@@ -756,6 +756,8 @@ pub struct SocialActorConfig {
     pub guild_experience_list: Vec<i64>,
     /// 行会各级成员上限（C# Settings.Guild_MembercapList，索引=等级）
     pub guild_membercap_list: Vec<i32>,
+    /// 行会 Buff 定义（C# GuildBuffInfo：Configs/GuildSettings.ini [Buff-*]，TotalBuffs=16）
+    pub guild_buff_infos: Vec<crate::util::ini::GuildBuffInfo>,
     /// 是否允许创建角色（C# Settings.AllowNewCharacter）
     pub allow_new_character: bool,
     /// 是否允许删除角色（C# Settings.AllowDeleteCharacter）
@@ -804,6 +806,7 @@ impl Default for SocialActorConfig {
             guild_point_per_level: 0,
             guild_experience_list: Vec::new(),
             guild_membercap_list: Vec::new(),
+            guild_buff_infos: Vec::new(),
             allow_new_character: true,
             allow_delete_character: true,
             allow_create_assassin: true,
@@ -3882,4 +3885,3 @@ mod tests {
         assert_eq!(front_tile(5, 5, 1), (6, 4)); // UpRight
     }
 }
-
