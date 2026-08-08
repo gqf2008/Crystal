@@ -45,6 +45,8 @@ pub struct FriendInfo {
     pub object_id: u32, // 好友ID
     pub name: String,   // 好友名称
     pub memo: String,   // 备注
+    /// 是否黑名单（C# ClientFriend.Blocked）
+    pub blocked: bool,
     pub online: bool,   // 是否在线
 }
 
@@ -61,6 +63,7 @@ impl Packet for FriendUpdate {
             writer.write_u32::<LittleEndian>(friend.object_id)?;
             write_dotnet_string(writer, &friend.name)?;
             write_dotnet_string(writer, &friend.memo)?;
+            writer.write_u8(if friend.blocked { 1 } else { 0 })?;
             writer.write_u8(if friend.online { 1 } else { 0 })?;
         }
 
@@ -78,6 +81,7 @@ impl Packet for FriendUpdate {
             let name = read_dotnet_string(reader)?;
 
             let memo = read_dotnet_string(reader)?;
+            let blocked = reader.read_u8()? != 0;
 
             let online = reader.read_u8()? != 0;
 
@@ -85,6 +89,7 @@ impl Packet for FriendUpdate {
                 object_id,
                 name,
                 memo,
+                blocked,
                 online,
             });
         }

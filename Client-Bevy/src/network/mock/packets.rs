@@ -271,6 +271,7 @@ impl Packet for MockFriendList {
         writer.write_u32::<LittleEndian>(120)?; // oid bevy2char
         mir2_shared::binary::write_dotnet_string(writer, "bevy2char")?;
         mir2_shared::binary::write_dotnet_string(writer, "")?;
+        writer.write_u8(0)?; // blocked=false
         writer.write_u8(1)?; // online
         Ok(())
     }

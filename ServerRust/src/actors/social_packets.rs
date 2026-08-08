@@ -8,7 +8,7 @@ use tracing::debug;
 
 use crate::actors::group::{Group, GroupMember};
 use crate::actors::trade::{TradeSession, TradeSide};
-use crate::actors::friend::FriendEntry;
+use crate::actors::friend::{BlockedEntry, FriendEntry};
 use crate::actors::guild::Guild;
 use crate::actors::mail::MailMessage;
 use crate::actors::player::{GetPlayerState, PlayerActor, SetGroupId};
@@ -193,7 +193,7 @@ pub fn find_trade_mut(active_trades: &mut HashMap<u64, TradeSession>, session_id
 // ============================================================
 
 /// Send friends list to a client.
-pub fn send_friends_list_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, friends: &[FriendEntry], online_object_ids: &[u32]) {
+pub fn send_friends_list_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, friends: &[FriendEntry], blocked: &[BlockedEntry], online_object_ids: &[u32]) {
     let mut body = Vec::new();
     // [count: i32 LE][friends...]
     body.extend_from_slice(&(friends.len() as i32).to_le_bytes());
@@ -201,7 +201,15 @@ pub fn send_friends_list_packet(gate_ref: &ActorRef<GateActor>, session_id: u64,
         body.extend_from_slice(&friend.object_id.to_le_bytes());
         write_dotnet_string(&mut body, &friend.name);
         write_dotnet_string(&mut body, &friend.memo);
+        body.push(0u8); // blocked=false
         body.push(if online_object_ids.contains(&friend.object_id) { 1u8 } else { 0u8 });
+    }
+    for b in blocked {
+        body.extend_from_slice(&b.object_id.to_le_bytes());
+        write_dotnet_string(&mut body, &b.name);
+        write_dotnet_string(&mut body, &b.name); // memo 用名字占位（C# 黑名单无 memo）
+        body.push(1u8); // blocked=true
+        body.push(if online_object_ids.contains(&b.object_id) { 1u8 } else { 0u8 });
     }
     let _ = gate_ref.tell(SendToClient {
         session_id,
@@ -210,11 +218,12 @@ pub fn send_friends_list_packet(gate_ref: &ActorRef<GateActor>, session_id: u64,
 }
 
 /// Send friend add result to a client.
-pub fn send_friend_add_result_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, friend: &FriendEntry, online: bool) {
+pub fn send_friend_add_result_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, friend: &FriendEntry, blocked: bool, online: bool) {
     let mut body = Vec::new();
     body.extend_from_slice(&friend.object_id.to_le_bytes());
     write_dotnet_string(&mut body, &friend.name);
     write_dotnet_string(&mut body, &friend.memo);
+    body.push(if blocked { 1u8 } else { 0u8 });
     body.push(if online { 1u8 } else { 0u8 });
     let _ = gate_ref.tell(SendToClient {
         session_id,
