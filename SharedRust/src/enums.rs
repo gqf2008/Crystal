@@ -1506,20 +1506,21 @@ pub enum MirGridType {
 )]
 #[repr(u8)]
 pub enum EquipmentSlot {
-    Weapon = 3,
-    Armour = 4,
-    Helmet = 5,
-    Torch = 6,
-    Necklace = 7,
-    BraceletL = 8,
-    BraceletR = 9,
-    RingL = 10,
-    RingR = 11,
-    Amulet = 12,
-    Belt = 13,
-    Boots = 14,
-    Stone = 15,
-    Mount = 16,
+    // 数值对齐 C# EquipmentSlot（Weapon=0..Mount=13，见 Shared/Enums.cs；#1296 清理 +3 偏移）
+    Weapon = 0,
+    Armour = 1,
+    Helmet = 2,
+    Torch = 3,
+    Necklace = 4,
+    BraceletL = 5,
+    BraceletR = 6,
+    RingL = 7,
+    RingR = 8,
+    Amulet = 9,
+    Belt = 10,
+    Boots = 11,
+    Stone = 12,
+    Mount = 13,
 }
 
 #[derive(
@@ -1535,11 +1536,12 @@ pub enum EquipmentSlot {
 )]
 #[repr(u8)]
 pub enum MountSlot {
-    Reins = 3,
-    Bells = 4,
-    Saddle = 5,
-    Ribbon = 6,
-    Mask = 7,
+    // 数值对齐 C# MountSlot（Reins=0..Mask=4；#1296）
+    Reins = 0,
+    Bells = 1,
+    Saddle = 2,
+    Ribbon = 3,
+    Mask = 4,
 }
 
 #[derive(
@@ -1555,11 +1557,12 @@ pub enum MountSlot {
 )]
 #[repr(u8)]
 pub enum FishingSlot {
-    Hook = 3,
-    Float = 4,
-    Bait = 5,
-    Finder = 6,
-    Reel = 7,
+    // 数值对齐 C# FishingSlot（Hook=0..Reel=4；#1296）
+    Hook = 0,
+    Float = 1,
+    Bait = 2,
+    Finder = 3,
+    Reel = 4,
 }
 
 #[derive(
