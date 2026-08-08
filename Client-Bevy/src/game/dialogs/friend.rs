@@ -8,6 +8,8 @@
 
 use bevy::prelude::*;
 
+use crate::game::chat::{ChatChannel, ChatState};
+use crate::game::dialogs::mail::MailState;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
@@ -58,6 +60,14 @@ pub struct FriendRemove;
 
 #[derive(Component)]
 pub struct FriendMemo;
+
+/// 私聊选中好友（C# FriendDialog WhisperButton）
+#[derive(Component)]
+pub struct FriendWhisper;
+
+/// 发邮件给选中好友（C# FriendDialog EmailButton）
+#[derive(Component)]
+pub struct FriendEmail;
 
 /// 内嵌输入框（添加/备注）
 #[derive(Component)]
@@ -177,6 +187,22 @@ fn spawn_friend(
     ) {
         commands.entity(e).insert((FriendMemo, DialogRoot(DialogKind::Friend), FriendWidget));
     }
+    // 邮件按钮（C# EmailButton Prguse 563-565 @(144,241)）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Prguse, 563, 564, 565,
+        300.0 + 144.0, 100.0 + 241.0, 7.2, 24.0, 22.0,
+    ) {
+        commands.entity(e).insert((FriendEmail, DialogRoot(DialogKind::Friend), FriendWidget));
+    }
+    // 私聊按钮（C# WhisperButton Prguse 566-568 @(172,241)）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Prguse, 566, 567, 568,
+        300.0 + 172.0, 100.0 + 241.0, 7.2, 24.0, 22.0,
+    ) {
+        commands.entity(e).insert((FriendWhisper, DialogRoot(DialogKind::Friend), FriendWidget));
+    }
     // 内嵌输入框（添加/备注，TextInput id 30，#130）
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     let box_e = commands
@@ -233,11 +259,18 @@ fn spawn_friend(
 fn friend_ui_system(
     mut mgr: ResMut<DialogManager>,
     mut friend: ResMut<FriendState>,
+    mut mail: ResMut<MailState>,
+    mut chat: ResMut<ChatState>,
     net: Res<NetConnection>,
     close: Query<&UiButton, With<FriendClose>>,
-    add_btn: Query<&UiButton, With<FriendAdd>>,
-    remove_btn: Query<&UiButton, With<FriendRemove>>,
-    memo_btn: Query<&UiButton, With<FriendMemo>>,
+    btns: Query<(
+        &UiButton,
+        Has<FriendAdd>,
+        Has<FriendRemove>,
+        Has<FriendMemo>,
+        Has<FriendEmail>,
+        Has<FriendWhisper>,
+    )>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
@@ -323,17 +356,17 @@ fn friend_ui_system(
         }
     }
 
-    // 添加/删除/备注按钮（#130）
-    for btn in &add_btn {
-        if btn.clicked {
+    // 添加/删除/备注/邮件/私聊按钮（C# FriendDialog Add/Remove/Memo/Email/Whisper）
+    for (btn, is_add, is_remove, is_memo, is_email, is_whisper) in &btns {
+        if !btn.clicked {
+            continue;
+        }
+        if is_add {
             friend.pending = Some(FriendPending::Add);
             input.texts[30].clear();
             input.active = Some(30);
             tracing::info!("👥 添加好友：请输入名字");
-        }
-    }
-    for btn in &remove_btn {
-        if btn.clicked {
+        } else if is_remove {
             if let Some(idx) = friend.selected {
                 if let Some(f) = friend.friends.get(idx) {
                     net.send_packet(&mir2_shared::packets::client::friend::RemoveFriend {
@@ -343,15 +376,42 @@ fn friend_ui_system(
                     friend.selected = None;
                 }
             }
-        }
-    }
-    for btn in &memo_btn {
-        if btn.clicked {
+        } else if is_memo {
             if let Some(idx) = friend.selected {
                 friend.pending = Some(FriendPending::Memo(idx));
                 input.texts[30].clear();
                 input.active = Some(30);
                 tracing::info!("👥 备注好友：请输入备注");
+            }
+        } else if is_email {
+            // 邮件：ComposeMail(选中好友)（C# FriendDialog EmailButton）
+            if let Some(f) = friend.selected.and_then(|i| friend.friends.get(i)).cloned() {
+                mgr.open.push(DialogKind::Mail);
+                mail.compose = true;
+                mail.detail = None;
+                mail.attach = vec![None; 5];
+                mail.compose_gold = 0;
+                if input.texts.len() < 4 {
+                    input.texts.resize(4, String::new());
+                }
+                input.texts[0] = f.name.clone();
+                input.active = None;
+                tracing::info!("✉️ 给好友 {} 写邮件", f.name);
+            }
+        } else if is_whisper {
+            // 私聊：在线预填 /w，离线系统提示（C# FriendDialog WhisperButton）
+            if let Some(f) = friend.selected.and_then(|i| friend.friends.get(i)).cloned() {
+                match friend_whisper_command(&f.name, f.online) {
+                    Some(cmd) => {
+                        chat.input_active = true;
+                        chat.input_text = cmd;
+                        tracing::info!("💬 私聊好友 {}", f.name);
+                    }
+                    None => {
+                        chat.add_line("该玩家不在线".to_string(), Color::srgb(1.0, 0.3, 0.3), ChatChannel::System);
+                        tracing::info!("💬 好友 {} 不在线", f.name);
+                    }
+                }
             }
         }
     }
@@ -410,3 +470,22 @@ fn friend_server_events(
         }
     }
 }
+/// 好友私聊命令（C# WhisperButton：离线返回 None）
+pub fn friend_whisper_command(name: &str, online: bool) -> Option<String> {
+    if !online {
+        return None;
+    }
+    Some(format!("/w {} ", name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn whisper_command_online_offline() {
+        assert_eq!(friend_whisper_command("Alice", true), Some("/w Alice ".to_string()));
+        assert_eq!(friend_whisper_command("Alice", false), None);
+    }
+}
+
