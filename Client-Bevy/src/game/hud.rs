@@ -99,6 +99,12 @@ pub struct HudButton(pub HudButtonKind);
 #[derive(Component)]
 pub struct HeroBtn;
 
+/// #1357：HUD 英雄状态小面板（C# HeroInfoPanel：名字/等级/HP/MP/经验）
+#[derive(Component)]
+pub struct HeroPanel;
+#[derive(Component)]
+pub struct HeroPanelText(usize);
+
 /// HUD 显示数据快照（#70 试点：挂 HUD 根实体；值变化时才写组件，
 /// hud_update_system 用 Changed<HudData> 门控，血条/文字只在数据变化帧更新）
 #[derive(Component, Default, PartialEq, Clone)]
@@ -112,6 +118,34 @@ pub struct HudData {
     pub level: u16,
     pub gold: u32,
     pub name: String,
+}
+
+/// #1357：HUD 英雄状态小面板（C# HeroInfoPanel：名字 Lv/HP/MP/经验，有英雄才显示）
+fn hero_panel_system(
+    hero: Res<crate::game::dialogs::hero::HeroState>,
+    mut texts: Query<(&mut Text2d, &HeroPanelText)>,
+    mut widgets: Query<&mut Visibility, (With<HeroPanel>, Without<HeroPanelText>)>,
+    mut text_vis: Query<&mut Visibility, (With<HeroPanelText>, Without<HeroPanel>)>,
+) {
+    let show = hero.current.is_some();
+    for mut v in &mut widgets {
+        *v = if show { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for mut v in &mut text_vis {
+        *v = if show { Visibility::Visible } else { Visibility::Hidden };
+    }
+    if !show {
+        return;
+    }
+    let cur = hero.current.as_ref().unwrap();
+    for (mut text, kind) in &mut texts {
+        text.0 = match kind.0 {
+            0 => format!("{} Lv.{}", cur.name, cur.level),
+            1 => format!("HP {}", hero.hero_hp),
+            2 => format!("MP {}", hero.hero_mp),
+            _ => format!("经验 {}/{}", hero.hero_exp, hero.hero_max_exp),
+        };
+    }
 }
 
 /// #1331：英雄按钮显隐（C# HeroMenuButton.Visible = 有英雄）
@@ -209,6 +243,7 @@ impl Plugin for HudPlugin {
                 death_overlay_system,
                 attack_mode_text_system,
                 hero_btn_system,
+                hero_panel_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -471,6 +506,26 @@ fn spawn_hud(
         commands
             .entity(e)
             .insert((HudButton(HudButtonKind::Hero), HeroBtn, Visibility::Hidden));
+    }
+
+    // #1357：英雄状态小面板（C# HeroInfoPanel Prguse[14] @(95,48)，有英雄才显示）
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 14) {
+        let e = spawn_ui_sprite(&mut commands, h, main_x + 95.0, main_y + 48.0, 3.0, 1.0);
+        commands.entity(e).insert((HeroPanel, Visibility::Hidden));
+    }
+    let panel_texts: [(&str, f32, f32); 4] = [
+        ("", 26.0, 8.0),
+        ("", 8.0, 28.0),
+        ("", 8.0, 44.0),
+        ("", 8.0, 60.0),
+    ];
+    for (i, (_, dx, dy)) in panel_texts.iter().enumerate() {
+        let e = spawn_ui_text(
+            &mut commands, &font, "",
+            main_x + 95.0 + dx, main_y + 48.0 + dy,
+            11.0, Color::WHITE, 3.2,
+        );
+        commands.entity(e).insert((HeroPanelText(i), Visibility::Hidden));
     }
 
     // 死亡遮罩（#46）：全屏半透明 + 提示 + 复活按钮，默认隐藏
