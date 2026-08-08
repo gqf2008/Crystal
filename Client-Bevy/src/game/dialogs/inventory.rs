@@ -192,7 +192,7 @@ pub struct InventoryPanel;
 pub struct DialogWidget;
 
 #[derive(Component)]
-pub struct InvTab(pub usize); // 0=道具 1=道具2 2=任务
+pub struct InvTab(pub usize); // 0=道具 1=道具2（2=任务页签按 #1333 方案B 暂不生成）
 
 #[derive(Component)]
 pub struct InvGoldText;
@@ -265,11 +265,12 @@ fn spawn_inventory_dialog(
         ));
     }
 
-    // 标签页按钮（Title 737/197 道具，738/168 道具2，739/198 任务）
-    let tabs: [(usize, usize, usize, f32); 3] = [
+    // 标签页按钮（Title 737/197 道具，738/168 道具2）
+    // #1333 方案B：任务页签暂不生成（服务端 has_quest_inventory=false，任务物品入普通背包；
+    // C# QuestGrid 独立任务物品格待后续大批对齐，差异已记入 #1225）
+    let tabs: [(usize, usize, usize, f32); 2] = [
         (0, 737, 197, 6.0),
         (1, 738, 168, 76.0),
-        (2, 739, 198, 146.0),
     ];
     for (idx, normal, hover, x) in tabs {
         if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
