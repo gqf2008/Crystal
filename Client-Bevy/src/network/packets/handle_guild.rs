@@ -185,7 +185,7 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
             tracing::info!("🏪 市场页数: {}", pages);
         }
         x if x == ServerPacketIds::NPCMarketPage as i16 => {
-            // [count i32][per listing: auction_id u64][UserItem][7-bit seller][price u32][date i64]
+            // [count i32][per listing: auction_id u64][UserItem][7-bit seller][price u32][type u8][current_bid u32][date i64]
             let body = &payload[PacketHeader::HEADER_SIZE..];
             let mut cur = std::io::Cursor::new(body);
             use byteorder::{LittleEndian, ReadBytesExt};
@@ -209,6 +209,14 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
                     Ok(v) => v,
                     Err(_) => { ok = false; break; }
                 };
+                let item_type = match cur.read_u8() {
+                    Ok(v) => v,
+                    Err(_) => { ok = false; break; }
+                };
+                let current_bid = match cur.read_u32::<LittleEndian>() {
+                    Ok(v) => v,
+                    Err(_) => { ok = false; break; }
+                };
                 let _date = match cur.read_i64::<LittleEndian>() {
                     Ok(v) => v,
                     Err(_) => { ok = false; break; }
@@ -226,6 +234,8 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
                     info_name,
                     seller,
                     price,
+                    item_type,
+                    current_bid,
                 ));
             }
             if ok {

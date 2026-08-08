@@ -34,6 +34,10 @@ pub struct MarketItem {
     pub count: u16,
     pub seller: String,
     pub price: u32,
+    /// 0=寄售 1=拍卖（C# MarketItemType）
+    pub item_type: u8,
+    /// 拍卖当前最高出价（寄售=0）
+    pub current_bid: u32,
 }
 
 /// 市场状态
@@ -375,14 +379,22 @@ fn market_ui_system(
             i if i < 10 => {
                 let idx = market.page * 10 + i;
                 match market.listings.get(idx) {
-                    Some(it) => format!(
-                        "{:03}: {} x{} {} {}金币",
-                        it.auction_id % 10000,
-                        it.name,
-                        it.count,
-                        it.seller,
-                        it.price
-                    ),
+                    Some(it) => {
+                        // C#：拍卖行显示当前最高出价（Price = CurrentBid）+ “出价”后缀
+                        let price_txt = if it.item_type == 1 {
+                            format!("{}出价", it.current_bid)
+                        } else {
+                            format!("{}金币", it.price)
+                        };
+                        format!(
+                            "{:03}: {} x{} {} {}",
+                            it.auction_id % 10000,
+                            it.name,
+                            it.count,
+                            it.seller,
+                            price_txt
+                        )
+                    }
                     None => String::new(),
                 }
             }
@@ -471,9 +483,24 @@ fn market_action_system(
     for btn in &buy_btn {
         if btn.clicked {
             if let Some(idx) = market.selected {
-                let id = market.listings[idx].auction_id;
-                net.send_packet(&mir2_shared::packets::client::market::MarketBuy { auction_id: id, bid_price: 0 });
-                tracing::info!("🏪 购买商品 {}", id);
+                let it = &market.listings[idx];
+                let id = it.auction_id;
+                // C#：寄售一口价 BidPrice=0；拍卖出价默认当前价+1（可复用价格输入框 id6 自定义）
+                let bid_price = if it.item_type == 1 {
+                    let typed = input
+                        .texts
+                        .get(6)
+                        .cloned()
+                        .unwrap_or_default()
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or(0);
+                    if typed > 0 { typed } else { it.current_bid.saturating_add(1) }
+                } else {
+                    0
+                };
+                net.send_packet(&mir2_shared::packets::client::market::MarketBuy { auction_id: id, bid_price });
+                tracing::info!("🏪 购买商品 {}（bid={}）", id, bid_price);
             } else {
                 market.message = "请先点击选中一个商品".to_string();
             }
@@ -564,7 +591,7 @@ fn market_server_events(
             ServerEvent::MarketListings { listings } => {
                 market.listings = listings
                     .iter()
-                    .map(|(auction_id, unique_id, item_index, count, info_name, seller, price)| {
+                    .map(|(auction_id, unique_id, item_index, count, info_name, seller, price, item_type, current_bid)| {
                         let name = if !info_name.is_empty() {
                             info_name.clone()
                         } else {
@@ -582,6 +609,8 @@ fn market_server_events(
                             count: *count,
                             seller: seller.clone(),
                             price: *price,
+                            item_type: *item_type,
+                            current_bid: *current_bid,
                         }
                     })
                     .collect();

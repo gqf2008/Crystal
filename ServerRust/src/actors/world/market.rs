@@ -59,6 +59,8 @@ impl Message<MarketSearchRequest> for WorldActor {
                     item: a.item.clone(),
                     seller_name: a.seller_name.clone(),
                     price: a.price,
+                    item_type: a.item_type,
+                    current_bid: a.current_bid as u32,
                     consignment_date: a.consignment_date,
                 })
                 .collect();
@@ -126,6 +128,8 @@ impl Message<MarketRefreshRequest> for WorldActor {
                     item: a.item.clone(),
                     seller_name: a.seller_name.clone(),
                     price: a.price,
+                    item_type: a.item_type,
+                    current_bid: a.current_bid as u32,
                     consignment_date: a.consignment_date,
                 })
                 .collect();
@@ -184,6 +188,8 @@ impl Message<MarketPageRequest> for WorldActor {
                 item: a.item.clone(),
                 seller_name: a.seller_name.clone(),
                 price: a.price,
+                item_type: a.item_type,
+                current_bid: a.current_bid as u32,
                 consignment_date: a.consignment_date,
             })
             .collect();

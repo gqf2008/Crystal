@@ -332,9 +332,9 @@ impl Packet for MockNPCMarket {
     }
 }
 
-/// #720：市场列表（客户端格式 [count i32][per: auction_id u64][UserItem][seller dotnet][price u32][date i64]）
+/// #720：市场列表（客户端格式 [count i32][per: auction_id u64][UserItem][seller dotnet][price u32][type u8][current_bid u32][date i64]）
 pub(crate) struct MockNPCMarketPage {
-    pub(crate) listings: Vec<(u64, mir2_shared::data::item::UserItem, String, u32)>,
+    pub(crate) listings: Vec<(u64, mir2_shared::data::item::UserItem, String, u32, u8, u32)>,
 }
 
 impl Packet for MockNPCMarketPage {
@@ -347,11 +347,13 @@ impl Packet for MockNPCMarketPage {
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> mir2_shared::data::stats::SharedResult<()> {
         use byteorder::{LittleEndian, WriteBytesExt};
         writer.write_i32::<LittleEndian>(self.listings.len() as i32)?;
-        for (auction_id, item, seller, price) in &self.listings {
+        for (auction_id, item, seller, price, item_type, current_bid) in &self.listings {
             writer.write_u64::<LittleEndian>(*auction_id)?;
             item.write_to(writer)?;
             mir2_shared::binary::write_dotnet_string(writer, seller)?;
             writer.write_u32::<LittleEndian>(*price)?;
+            writer.write_u8(*item_type)?;
+            writer.write_u32::<LittleEndian>(*current_bid)?;
             writer.write_i64::<LittleEndian>(0)?; // date
         }
         Ok(())

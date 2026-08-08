@@ -308,8 +308,8 @@ pub enum ServerEvent {
     RentalCancelled,
     /// NPCMarket：市场页数
     MarketPages { pages: usize },
-    /// NPCMarketPage：市场列表（auction_id, unique_id, item_index, count, info_name, seller, price）
-    MarketListings { listings: Vec<(u64, u64, i32, u16, String, String, u32)> },
+    /// NPCMarketPage：市场列表（auction_id, unique_id, item_index, count, info_name, seller, price, item_type, current_bid）
+    MarketListings { listings: Vec<(u64, u64, i32, u16, String, String, u32, u8, u32)> },
     /// ConsignItem：寄售结果
     MarketConsign { uid: u64, success: bool },
     /// MarketSuccess：市场成功消息
