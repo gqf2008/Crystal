@@ -4365,6 +4365,13 @@ impl Message<SetAutoPotItem> for PlayerActor {
 }
 
 /// 从装备插槽中移除物品（RemoveSlotItem）
+/// #1313：钓具穿戴（C# EquipSlotItem GridTo=Fishing → 鱼竿 slots[FishingSlot]）
+pub struct EquipFishingGear {
+    pub rod_uid: u64,
+    pub slot: usize,
+    pub gear_uid: u64,
+}
+
 pub struct RemoveSlotItemMsg {
     pub grid: u8,
     pub grid_to: u8,
@@ -4378,6 +4385,28 @@ const GRID_MOUNT: u8 = 11;
 const GRID_FISHING: u8 = 12;
 const GRID_SOCKET: u8 = 14;
 const GRID_INVENTORY: u8 = 1;
+
+impl Message<EquipFishingGear> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: EquipFishingGear, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        if crate::actors::inventory::equip_fishing_gear(
+            &mut self.state.inventory,
+            msg.rod_uid,
+            msg.slot,
+            msg.gear_uid,
+        )
+        .is_ok()
+        {
+            self.send_inventory_changed();
+            self.send_equipment_changed();
+            true
+        } else {
+            false
+        }
+    }
+}
+
 const GRID_STORAGE: u8 = 4;
 
 impl Message<RemoveSlotItemMsg> for PlayerActor {
