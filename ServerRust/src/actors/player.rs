@@ -337,6 +337,10 @@ pub struct PlayerState {
     pub exp_bonus_mentee_percent: i32,
     /// 新手行会经验加成百分比缓存（C# Settings.NewbieGuildExpBuff）
     pub exp_bonus_newbie_percent: i32,
+    /// 行会 Buff 经验加成百分比缓存（C# GuildBuffInfo.BuffExpRate；tick 刷新避免 AddExperience 反向 ask WorldActor 死锁）
+    pub guild_buff_exp_percent: i32,
+    /// 行会 Buff 钓鱼成功率加成百分比缓存（C# BuffFishRate）
+    pub guild_buff_fish_rate_percent: i32,
     /// 当前地图是否无经验（C# MapInfo.NoExperience，#932；set_map_data 时从地图数据缓存，避免 AddExperience 反向 ask WorldActor 死锁）
     pub no_experience_map: bool,
     /// 灰名截止时间（毫秒；C# HumanObject.BrownTime，攻击低 PK 玩家后 1 分钟）
@@ -691,6 +695,8 @@ allow_group: false,
             exp_bonus_lover_percent: 0,
             exp_bonus_mentee_percent: 0,
             exp_bonus_newbie_percent: 0,
+            guild_buff_exp_percent: 0,
+            guild_buff_fish_rate_percent: 0,
             no_experience_map: false,
             brown_until_ms: 0,
             mount_loyalty_decrease_time: 0,
@@ -1399,10 +1405,13 @@ impl Message<AddExperience> for PlayerActor {
         } else {
             0
         };
+        // 行会 Buff 经验加成（C# GuildBuffInfo.BuffExpRate → Stat.ExpRatePercent）
+        let guild_buff_bonus = self.state.guild_buff_exp_percent;
         let amount = (base as f64 * self.state.exp_multiplier * self.state.exp_rate * rested_mul
             * (1.0 + lover_bonus as f64 / 100.0)
             * (1.0 + mentee_bonus as f64 / 100.0)
-            * (1.0 + newbie_bonus as f64 / 100.0)).round() as i64;
+            * (1.0 + newbie_bonus as f64 / 100.0)
+            * (1.0 + guild_buff_bonus as f64 / 100.0)).round() as i64;
         self.state.experience += amount;
 
         // C# GainExp：徒弟经验积累 MenteeEXP += amount * Settings.MenteeExpBank(1) / 100
@@ -5196,6 +5205,8 @@ allow_group: false,
             exp_bonus_lover_percent: 0,
             exp_bonus_mentee_percent: 0,
             exp_bonus_newbie_percent: 0,
+            guild_buff_exp_percent: 0,
+            guild_buff_fish_rate_percent: 0,
             no_experience_map: false,
             brown_until_ms: 0,
             mount_loyalty_decrease_time: 0,

@@ -99,6 +99,10 @@ pub struct WorldActorArgs {
     pub exp_rate: f64,
     /// 玩家升级经验曲线（C# Settings.ExperienceList；空表回退 ×1.5）
     pub experience_list: Vec<i64>,
+    /// 钓鱼系统配置（C# Settings.Fishing*：Configs/FishingSystem.ini）
+    pub fishing_cfg: crate::util::ini::FishingConfig,
+    /// 行会 Buff 定义（C# GuildBuffInfo：Configs/GuildSettings.ini [Buff-*]）
+    pub guild_buff_infos: Vec<crate::util::ini::GuildBuffInfo>,
     /// 地面物品超时 ticks（= item_timeout_secs * 10，100ms/tick）
     pub item_timeout_ticks: u64,
     /// 金币掉落每堆上限（C# Settings.MaxDropGold = 2000）
@@ -839,6 +843,28 @@ pub struct BuybackItem {
     pub expires_at: i64,
 }
 
+/// 钓鱼掉落条目（C# DropInfo，Type = FishingAttribute；Chance 为分母，`1/4500` → 4500）
+#[derive(Debug, Clone)]
+pub(crate) struct FishingDropInfo {
+    /// 对应钓鱼属性（C# DropInfo.Type = 文件序号 0..18）
+    pub drop_type: u8,
+    /// 掉落的物品 index（C# DropInfo.Item）
+    pub item_index: i32,
+    /// 掉落概率分母（C# DropInfo.Chance）
+    pub chance: u32,
+}
+
+/// 钓鱼会话状态（C# PlayerObject 钓鱼字段：FishingChance / flexibilityStat / FishingChanceCounter）
+#[derive(Debug, Clone)]
+pub(crate) struct FishingSession {
+    /// 当前钓点钓鱼属性（C# fishingCell.FishingAttribute）
+    pub cell_attribute: i8,
+    /// 本轮成功率（C# FishingChance：SuccessStart + successStat + FishRatePercent）
+    pub chance: i32,
+    /// 灵活度（C# flexibilityStat：CriticalRate，进度>50 时半值加入）
+    pub flexibility: i32,
+}
+
 /// WorldActor 状态
 pub struct WorldActor {
     /// Tick 计数器
@@ -918,6 +944,16 @@ pub struct WorldActor {
     pub(crate) player_death_queue: HashMap<u64, u64>,
     /// 钓鱼进度计数器 (session_id → 已钓鱼 tick 数)
     pub(crate) fishing_tick_counters: HashMap<u64, u32>,
+    /// 钓鱼会话（session → 当前钓点/成功率；C# PlayerObject.FishingChance 等）
+    pub(crate) fishing_sessions: HashMap<u64, FishingSession>,
+    /// 连续成功次数（C# FishingChanceCounter：每次满进度 +1，成功收获清零；跨抛竿保留）
+    pub(crate) fishing_success_counters: HashMap<u64, u32>,
+    /// 钓鱼系统配置（C# Settings.Fishing*：Configs/FishingSystem.ini）
+    pub(crate) fishing_cfg: crate::util::ini::FishingConfig,
+    /// 钓鱼掉落表（C# Envir.FishingDrops：Drops/00Fishing.txt，Type=FishingAttribute）
+    pub(crate) fishing_drops: Vec<FishingDropInfo>,
+    /// 行会 Buff 定义（id → info，C# Envir.FindGuildBuffInfo）
+    pub(crate) guild_buff_infos: HashMap<u32, crate::util::ini::GuildBuffInfo>,
     /// 地面掉落物品
     pub(crate) ground_items: Vec<GroundItem>,
     /// 已打开的门 (map_index, door_index)
@@ -1184,6 +1220,11 @@ impl WorldActor {
             world_boss_queue: HashMap::new(),
             player_death_queue: HashMap::new(),
             fishing_tick_counters: HashMap::new(),
+            fishing_sessions: HashMap::new(),
+            fishing_success_counters: HashMap::new(),
+            fishing_cfg: crate::util::ini::FishingConfig::default(),
+            fishing_drops: Vec::new(),
+            guild_buff_infos: HashMap::new(),
             ground_items: Vec::new(),
             open_doors: std::collections::HashSet::new(),
             db_pool,
@@ -3870,6 +3911,11 @@ impl Actor for WorldActor {
             Err(e) => { warn!("Failed to load monster_drops from DB: {}", e); HashMap::new() }
         };
 
+        // 钓鱼掉落表（C# Envir.LoadDrops：00Fishing.txt 前缀替换 00..18，Type=FishingAttribute）
+        let fishing_drops = load_fishing_drops(&drop_dir, &item_name_index);
+        info!("Loaded {} fishing drop entries", fishing_drops.len());
+        info!("Loaded {} guild buff definitions", args.guild_buff_infos.len());
+
         let npc_infos_list = match db::load_npc_infos(&args.db_pool).await {
             Ok(m) => { info!("Loaded {} NPC configs from database", m.len()); m }
             Err(e) => { warn!("Failed to load npc_infos from DB: {}", e); Vec::new() }
@@ -4024,6 +4070,11 @@ impl Actor for WorldActor {
             world_boss_queue: HashMap::new(),
             player_death_queue: HashMap::new(),
             fishing_tick_counters: HashMap::new(),
+            fishing_sessions: HashMap::new(),
+            fishing_success_counters: HashMap::new(),
+            fishing_cfg: args.fishing_cfg,
+            fishing_drops,
+            guild_buff_infos: args.guild_buff_infos.into_iter().map(|b| (b.id, b)).collect(),
             ground_items: Vec::new(),
             open_doors: std::collections::HashSet::new(),
             db_pool: args.db_pool,
@@ -4106,10 +4157,91 @@ fn default_conquest_instances() -> Vec<conquest::ConquestInstance> {
         .collect()
 }
 
+/// 从 `Drops/00Fishing.txt` 加载钓鱼掉落表（C# Envir.cs：FishingDropFilename="00Fishing"，
+/// 前缀替换为 00..18 → Type=文件序号；行格式 `1/4500 MossyBox` → Chance=4500）
+fn load_fishing_drops(drop_dir: &Path, item_name_index: &HashMap<String, i32>) -> Vec<FishingDropInfo> {
+    let mut out = Vec::new();
+    for i in 0..19u8 {
+        let file_name = if i < 10 {
+            format!("0{}Fishing.txt", i)
+        } else {
+            format!("{}Fishing.txt", i)
+        };
+        let path = drop_dir.join(file_name);
+        let Ok(content) = std::fs::read_to_string(&path) else { continue };
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+                continue;
+            }
+            // C# DropInfo.FromLine：`1/4500 MossyBox` → parts[0].Substring(2) = Chance
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 2 {
+                continue;
+            }
+            let Some(slash) = parts[0].find('/') else { continue };
+            let Ok(chance) = parts[0][slash + 1..].parse::<u32>() else { continue };
+            let Some(&item_index) = item_name_index.get(&parts[1].to_lowercase()) else {
+                warn!("Fishing drop item '{}' not found in item infos", parts[1]);
+                continue;
+            };
+            out.push(FishingDropInfo {
+                drop_type: i,
+                item_index,
+                chance,
+            });
+        }
+    }
+    out
+}
+
 /// 市场搜索缓存
 #[derive(Debug, Clone)]
 pub(crate) struct MarketSearchCache {
     results: Vec<usize>, // indices into self.auctions
+}
+
+/// C# Functions.PointMove(location, direction, distance)：返回目标点（MirDirection 0..7）
+pub(crate) fn point_move(x: i32, y: i32, direction: u8, steps: i32) -> (i32, i32) {
+    // MirDirection: Up=0, UpRight=1, Right=2, DownRight=3, Down=4, DownLeft=5, Left=6, UpLeft=7
+    const DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
+    const DIR_DY: [i32; 8] = [-1, -1, 0, 1, 1, 1, 0, -1];
+    if direction >= 8 {
+        return (x, y);
+    }
+    (
+        x + DIR_DX[direction as usize] * steps,
+        y + DIR_DY[direction as usize] * steps,
+    )
+}
+
+/// C# ItemInfo.IsFishingRod：shape 49/50（与 SharedRust FISHING_ROD_SHAPES 一致）
+pub(crate) fn is_fishing_rod_shape(shape: i32) -> bool {
+    shape == 49 || shape == 50
+}
+
+impl WorldActor {
+    /// 钓鱼掉落判定（C# DropInfo.AttemptDrop + PlayerObject 收获循环）：
+    /// 遍历该钓鱼属性的所有掉落行，`1/Chance` 命中则产出物品；C# 外层 foreach 不 break，
+    /// 后命中者覆盖先命中者，此处同样保留最后一个命中结果。
+    fn attempt_fishing_drop(&self, attribute: i8, item_drop_rate_percent: i32) -> Option<i32> {
+        let mut picked: Option<i32> = None;
+        for drop in self.fishing_drops.iter().filter(|d| d.drop_type as i8 == attribute) {
+            // C#：rate = Chance / DropRate；ItemDropRatePercentOffset>0 时按百分比降低分母
+            let mut rate = (drop.chance as f64 / self.drop_rate.max(0.01)) as u32;
+            if item_drop_rate_percent > 0 {
+                rate = rate.saturating_sub((rate * item_drop_rate_percent as u32) / 100);
+            }
+            if rate < 1 {
+                rate = 1;
+            }
+            // C#：Envir.Random.Next(rate) == 0 命中
+            if fastrand::u32(0..rate) == 0 {
+                picked = Some(drop.item_index);
+            }
+        }
+        picked
+    }
 }
 
 impl WorldActor {
@@ -4812,21 +4944,6 @@ impl Message<PlayerLeveled> for WorldActor {
 // 辅助函数
 // ============================================================
 
-impl WorldActor {
-    /// 从已加载的物品配置中随机选择一个适合钓鱼收获的物品索引
-    fn random_fishing_item_index(
-        item_infos: &HashMap<i32, db::ItemInfo>,
-        session_id: u64,
-        tick_count: u64,
-    ) -> i32 {
-        if item_infos.is_empty() {
-            return 1;
-        }
-        let keys: Vec<i32> = item_infos.keys().copied().collect();
-        let idx = ((session_id + tick_count) as usize) % keys.len();
-        keys[idx]
-    }
-}
 
 /// 从 NPC 指令 inner 文本中提取第一段引号内容。
 /// 对齐 C# NPCSegment.cs 中 COMPOSEMAIL 用 regexQuote 匹配 "..." 的逻辑。
@@ -6670,6 +6787,61 @@ mod tests {
             let r = roll_rarity(&cfg);
             assert!(r <= 3);
         }
+    }
+
+    #[test]
+    fn test_point_move_directions() {
+        // MirDirection：0=上 1=右上 2=右 3=右下 4=下 5=左下 6=左 7=左上
+        assert_eq!(point_move(10, 10, 0, 3), (10, 7));
+        assert_eq!(point_move(10, 10, 2, 3), (13, 10));
+        assert_eq!(point_move(10, 10, 4, 3), (10, 13));
+        assert_eq!(point_move(10, 10, 6, 3), (7, 10));
+        assert_eq!(point_move(10, 10, 1, 1), (11, 9));
+        assert_eq!(point_move(10, 10, 8, 3), (10, 10)); // 非法方向原样返回
+    }
+
+    #[test]
+    fn test_is_fishing_rod_shape() {
+        assert!(is_fishing_rod_shape(49));
+        assert!(is_fishing_rod_shape(50));
+        assert!(!is_fishing_rod_shape(0));
+        assert!(!is_fishing_rod_shape(48));
+    }
+
+    #[test]
+    fn test_load_fishing_drops() {
+        let dir = std::env::temp_dir().join("crystal_fishing_drops_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("00Fishing.txt"),
+            ";Pots + Other\n1/4500 MossyBox\n\n;Fish Market\n1/500 Trout\n1/500 Walleye\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("01Fishing.txt"), ";empty\n").unwrap();
+        let item_name_index: HashMap<String, i32> = [("mossybox".to_string(), 1), ("trout".to_string(), 2), ("walleye".to_string(), 3)]
+            .into_iter()
+            .collect();
+        let drops = load_fishing_drops(&dir, &item_name_index);
+        assert_eq!(drops.len(), 3);
+        assert_eq!(drops[0].drop_type, 0);
+        assert_eq!(drops[0].item_index, 1);
+        assert_eq!(drops[0].chance, 4500);
+        assert_eq!(drops[1].item_index, 2);
+        assert_eq!(drops[1].chance, 500);
+        assert_eq!(drops[2].drop_type, 0);
+        assert_eq!(drops[2].item_index, 3);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_load_fishing_drops_skips_unknown_item() {
+        let dir = std::env::temp_dir().join("crystal_fishing_drops_test2");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("00Fishing.txt"), "1/100 MissingItem\n").unwrap();
+        let item_name_index: HashMap<String, i32> = HashMap::new();
+        let drops = load_fishing_drops(&dir, &item_name_index);
+        assert!(drops.is_empty());
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
 

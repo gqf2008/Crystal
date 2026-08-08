@@ -1427,6 +1427,8 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
             exp_bonus_lover_percent: 0,
             exp_bonus_mentee_percent: 0,
             exp_bonus_newbie_percent: 0,
+            guild_buff_exp_percent: 0,
+            guild_buff_fish_rate_percent: 0,
             no_experience_map: false,
             brown_until_ms: 0,
             mount_loyalty_decrease_time: 0,
