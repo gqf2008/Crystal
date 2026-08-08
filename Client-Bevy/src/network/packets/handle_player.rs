@@ -128,6 +128,17 @@ pub(crate) fn handle_player(    net: &mut NetConnection,
                         .as_ref()
                         .map(|eq| eq.iter().map(|slot| slot.as_ref().map(to_inv_item)).collect())
                         .unwrap_or_default();
+                    // #1342：任务物品格（C# QuestInventory 40 格）
+                    let quest_inventory: Vec<Option<InvItem>> = p
+                        .quest_inventory
+                        .as_ref()
+                        .map(|qi| {
+                            qi.iter()
+                                .take(40)
+                                .map(|slot| slot.as_ref().map(to_inv_item))
+                                .collect()
+                        })
+                        .unwrap_or_default();
                     let mut item_names: Vec<(i32, String)> = Vec::new();
                     for slot in p
                         .inventory
@@ -154,6 +165,7 @@ pub(crate) fn handle_player(    net: &mut NetConnection,
                         magics,
                         inventory,
                         equipment,
+                        quest_inventory,
                         item_names,
                         max_hp: p.max_hp,
                         max_mp: p.max_mp,

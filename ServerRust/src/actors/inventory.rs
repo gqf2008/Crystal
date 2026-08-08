@@ -51,6 +51,8 @@ impl EquipmentSlot {
 
 /// 背包格子（最多 40 格）
 pub const BACKPACK_SIZE: usize = 40;
+/// 任务物品格（C# QuestInventory 40 格；InventoryDialog QuestGrid 8x5）
+pub const QUEST_INVENTORY_SIZE: usize = 40;
 
 /// 背包中的物品格子
 #[derive(Debug, Clone)]
@@ -89,6 +91,8 @@ pub struct PlayerInventory {
     pub equipment: [Option<UserItem>; EquipmentSlot::COUNT],
     /// 仓库格子（80 格）
     pub storage: Vec<Option<InventorySlot>>,
+    /// 任务物品格（C# QuestInventory，40 格，独立于背包）
+    pub quest_inventory: Vec<Option<UserItem>>,
 }
 
 impl Default for PlayerInventory {
@@ -98,6 +102,7 @@ impl Default for PlayerInventory {
             backpack: vec![None; BACKPACK_SIZE],
             equipment: [const { None }; EquipmentSlot::COUNT],
             storage: vec![None; STORAGE_SIZE],
+            quest_inventory: vec![None; QUEST_INVENTORY_SIZE],
         }
     }
 }
@@ -935,6 +940,48 @@ pub fn generate_item_uid() -> u64 {
 impl PlayerInventory {
     fn next_unique_id(&self) -> u64 {
         generate_item_uid()
+    }
+
+    /// 添加任务物品到任务格（C# GainQuestItem：找空位，不合并），返回分配的唯一 ID
+    pub fn add_quest_item(&mut self, mut item: UserItem) -> Option<u64> {
+        for grid in 0..self.quest_inventory.len() {
+            if self.quest_inventory[grid].is_none() {
+                item.unique_id = self.next_unique_id();
+                let uid = item.unique_id;
+                self.quest_inventory[grid] = Some(item);
+                return Some(uid);
+            }
+        }
+        None
+    }
+
+    /// 按 item_index 统计任务格中该物品总数量
+    pub fn count_quest_item_by_index(&self, item_index: i32) -> u16 {
+        self.quest_inventory.iter().flatten()
+            .filter(|i| i.item_index == item_index)
+            .map(|i| i.count)
+            .sum()
+    }
+
+    /// 从任务格移除指定数量（C# RecalculateQuestBag 逐格删除），返回 (unique_id, removed) 列表供 S.DeleteQuestItem 下发
+    pub fn remove_quest_item_by_index(&mut self, item_index: i32, mut count: u16) -> Vec<(u64, u16)> {
+        let mut removed = Vec::new();
+        for slot in self.quest_inventory.iter_mut() {
+            if let Some(item) = slot {
+                if item.item_index != item_index { continue; }
+                if item.count > count {
+                    item.count -= count;
+                    removed.push((item.unique_id, count));
+                    break;
+                } else {
+                    count -= item.count;
+                    removed.push((item.unique_id, item.count));
+                    *slot = None;
+                    if count == 0 { break; }
+                }
+            }
+        }
+        removed
     }
 }
 

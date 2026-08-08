@@ -161,6 +161,8 @@ pub struct InventoryState {
     pub gold: u32,
     pub weight: u32,
     pub max_weight: u32,
+    /// 任务物品格（C# QuestInventory 40 格；UserInformation.quest_inventory 写入）
+    pub quest_inventory: Vec<Option<InvItem>>,
     /// 当前背包页（0=道具 1=道具2 2=任务；#276 双页扩容）
     pub page: usize,
 }
@@ -181,6 +183,7 @@ const DIALOG_X: f32 = 182.0;
 const DIALOG_Y: f32 = 217.0;
 const GRID_COLS: usize = 8;
 const GRID_ROWS: usize = 5;
+const QUEST_GRID_SIZE: usize = GRID_COLS * GRID_ROWS; // 任务格 8x5=40（C# QuestInventory）
 const CELL_W: f32 = 36.0;
 const CELL_H: f32 = 32.0;
 
@@ -192,7 +195,7 @@ pub struct InventoryPanel;
 pub struct DialogWidget;
 
 #[derive(Component)]
-pub struct InvTab(pub usize); // 0=道具 1=道具2（2=任务页签按 #1333 方案B 暂不生成）
+pub struct InvTab(pub usize); // 0=道具 1=道具2 2=任务（#1342 QuestGrid）
 
 #[derive(Component)]
 pub struct InvGoldText;
@@ -219,11 +222,47 @@ impl Plugin for InventoryDialogPlugin {
                 inv_tooltip_system,
                 inv_item_action_system,
                 inv_confirm_system,
+                quest_inventory_events,
                 ui_button_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
         );
+    }
+}
+
+/// #1342：GainedQuestItem/DeleteQuestItem 增量更新任务格（C# QuestInventory）
+fn quest_inventory_events(
+    mut events: MessageReader<crate::network::server_event::ServerEvent>,
+    mut hud: ResMut<HudState>,
+) {
+    use crate::network::server_event::ServerEvent;
+    for ev in events.read() {
+        match ev {
+            ServerEvent::QuestItemGained { item } => {
+                if let Some(slot) = hud.inventory.quest_inventory.iter_mut().find(|s| s.is_none()) {
+                    *slot = Some(item.clone());
+                } else {
+                    hud.inventory.quest_inventory.push(Some(item.clone()));
+                }
+                hud.inventory.quest_inventory.truncate(QUEST_GRID_SIZE);
+            }
+            ServerEvent::QuestItemDeleted { unique_id, count } => {
+                for slot in hud.inventory.quest_inventory.iter_mut() {
+                    if let Some(it) = slot {
+                        if it.unique_id == *unique_id {
+                            if it.count > *count {
+                                it.count -= *count;
+                            } else {
+                                *slot = None;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -265,12 +304,12 @@ fn spawn_inventory_dialog(
         ));
     }
 
-    // 标签页按钮（Title 737/197 道具，738/168 道具2）
-    // #1333 方案B：任务页签暂不生成（服务端 has_quest_inventory=false，任务物品入普通背包；
-    // C# QuestGrid 独立任务物品格待后续大批对齐，差异已记入 #1225）
-    let tabs: [(usize, usize, usize, f32); 2] = [
+    // 标签页按钮（Title 737/197 道具，738/168 道具2，739/198 任务）
+    // #1342：任务页签（QuestGrid 8x5，C# QuestInventory）
+    let tabs: [(usize, usize, usize, f32); 3] = [
         (0, 737, 197, 6.0),
         (1, 738, 168, 76.0),
+        (2, 739, 198, 146.0),
     ];
     for (idx, normal, hover, x) in tabs {
         if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
@@ -459,7 +498,7 @@ fn inventory_ui_system(
     let inv = &hud.inventory;
     let open = mgr.is_open(DialogKind::Inventory);
     let size = inv.items.len().min(MAX_INV_SLOTS);
-    // 格子弹页显隐（#276）：道具=0..min(40,size)，道具2=40..size-1，任务页隐藏
+    // 格子弹页显隐（#276）：道具=0..min(40,size)，道具2=40..size-1，任务页=0..40（QuestGrid）
     for (mut vis, slot) in &mut all_vis {
         let visible = if !open {
             false
@@ -468,6 +507,8 @@ fn inventory_ui_system(
                 Some(s) => match inv.page {
                     0 => s.0 < size.min(GRID_COLS * GRID_ROWS),
                     1 => s.0 >= GRID_COLS * GRID_ROWS && s.0 < size,
+                    // #1342：任务页签显示 QuestGrid 40 格（C# QuestInventory 8x5）
+                    2 => s.0 < QUEST_GRID_SIZE,
                     _ => false,
                 },
                 None => true, // 背景/标签/关闭按钮
@@ -485,7 +526,11 @@ fn inventory_ui_system(
 
     // 物品数据 → 通用 ItemCell（图标/数量/耐久条由 item_cell_system 渲染，#90 续）
     for (slot, mut data) in &mut cells_data {
-        let item = inv.items.get(slot.0).and_then(|s| s.as_ref());
+        let item = if inv.page == 2 {
+            inv.quest_inventory.get(slot.0).and_then(|s| s.as_ref())
+        } else {
+            inv.items.get(slot.0).and_then(|s| s.as_ref())
+        };
         match item {
             Some(item) => {
                 let handle = ui_image(
@@ -540,6 +585,7 @@ fn inv_tooltip_system(
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
+
     let page = inv.inventory.page;
     let size = inv.inventory.items.len().min(MAX_INV_SLOTS);
     let mut hit: Option<InvItem> = None;
@@ -549,6 +595,7 @@ fn inv_tooltip_system(
         let visible = match page {
             0 => i < size.min(GRID_COLS * GRID_ROWS),
             1 => i >= GRID_COLS * GRID_ROWS && i < size,
+            2 => i < QUEST_GRID_SIZE,
             _ => false,
         };
         if !visible {
@@ -559,7 +606,11 @@ fn inv_tooltip_system(
         let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
         let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
         if cursor.x >= sx && cursor.x <= sx + CELL_W && cursor.y >= sy && cursor.y <= sy + CELL_H {
-            hit = inv.inventory.items.get(i).and_then(|s| s.as_ref()).cloned();
+            hit = if page == 2 {
+                inv.inventory.quest_inventory.get(i).and_then(|s| s.as_ref()).cloned()
+            } else {
+                inv.inventory.items.get(i).and_then(|s| s.as_ref()).cloned()
+            };
             break;
         }
     }
@@ -930,6 +981,11 @@ fn inv_item_action_system(
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
+
+    // #1342：任务物品格只读（C# MirGridType.QuestInventory 不可移动/使用）
+    if hud.inventory.page == 2 {
+        return;
+    }
 
     // 数量框结果：拆分/丢弃
     for r in result.read() {

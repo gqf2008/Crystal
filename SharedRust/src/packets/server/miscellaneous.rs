@@ -48,45 +48,47 @@ impl Packet for ShareQuest {
     }
 }
 
-/// GainedQuestItem - 获得任务物品 (203)
+/// GainedQuestItem - 获得任务物品 (203)（C# S.GainedQuestItem：完整 UserItem）
 #[derive(Debug, Clone)]
 pub struct GainedQuestItem {
-    pub item_id: i32, // 物品ID
+    pub item: UserItem,
 }
 
 impl Packet for GainedQuestItem {
     const OPCODE: i16 = ServerPacketIds::GainedQuestItem as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
-        writer.write_i32::<LittleEndian>(self.item_id)?;
+        self.item.write_to(writer)?;
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let item_id = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { item_id })
+        let item = UserItem::read_from(reader, i32::MAX, i32::MAX)?;
+        Ok(Self { item })
     }
 }
 
-/// DeleteQuestItem - 删除任务物品 (204)
-#[derive(Debug, Clone)]
+/// DeleteQuestItem - 删除任务物品 (204)（C# S.DeleteQuestItem：UniqueID u64 + Count u16）
+#[derive(Debug, Clone, Copy)]
 pub struct DeleteQuestItem {
-    pub item_id: i32, // 物品ID
+    pub unique_id: u64,
+    pub count: u16,
 }
 
 impl Packet for DeleteQuestItem {
     const OPCODE: i16 = ServerPacketIds::DeleteQuestItem as i16;
 
     fn write_body<W: std::io::Write>(&self, writer: &mut W) -> SharedResult<()> {
-        use byteorder::WriteBytesExt;
-        writer.write_i32::<LittleEndian>(self.item_id)?;
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u64::<LittleEndian>(self.unique_id)?;
+        writer.write_u16::<LittleEndian>(self.count)?;
         Ok(())
     }
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
-        let item_id = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { item_id })
+        let unique_id = reader.read_u64::<LittleEndian>()?;
+        let count = reader.read_u16::<LittleEndian>()?;
+        Ok(Self { unique_id, count })
     }
 }
 

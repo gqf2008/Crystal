@@ -6316,7 +6316,21 @@ fn build_user_information_packet(
             body.push(0u8);
         }
     }
-    body.push(0u8);                                           // has_quest_inventory=false
+    // 任务物品格（C# QuestInventory 40 格，含 info；InventoryDialog QuestGrid 8x5）
+    body.push(1u8);                                           // has_quest_inventory=true
+    body.extend_from_slice(&(state.inventory.quest_inventory.len() as i32).to_le_bytes());
+    for slot in state.inventory.quest_inventory.iter() {
+        if let Some(item) = slot {
+            body.push(1u8);
+            let mut item = item.clone();
+            enrich_item_info(&mut item, item_infos);
+            if item.write_to_with_info(&mut body).is_err() {
+                body.push(0u8); // 回退：空格子
+            }
+        } else {
+            body.push(0u8);
+        }
+    }
     body.extend_from_slice(&(state.inventory.gold as u32).to_le_bytes()); // gold
     body.extend_from_slice(&0u32.to_le_bytes());              // credit
     // 仓库扩容/仓库密码（C# UserInformation：HasExpandedStorage/HasStoragePassword/

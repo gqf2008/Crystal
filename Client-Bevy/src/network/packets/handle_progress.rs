@@ -339,13 +339,17 @@ pub(crate) fn handle_progress(    server_events: &mut MessageWriter<ServerEvent>
             }
         }
         x if x == ServerPacketIds::GainedQuestItem as i16 => {
+            // #1342：C# S.GainedQuestItem 携带完整 UserItem
             if let Ok(p) = miscellaneous::GainedQuestItem::read_body(&mut cur) {
-                tracing::info!("🎁 任务物品获得 #{}", p.item_id);
+                server_events.write(ServerEvent::QuestItemGained { item: to_inv_item(&p.item) });
+                tracing::info!("🎁 任务物品获得 #{}", p.item.item_index);
             }
         }
         x if x == ServerPacketIds::DeleteQuestItem as i16 => {
+            // #1342：C# S.DeleteQuestItem UniqueID u64 + Count u16
             if let Ok(p) = miscellaneous::DeleteQuestItem::read_body(&mut cur) {
-                tracing::info!("🗑️ 任务物品删除 #{}", p.item_id);
+                server_events.write(ServerEvent::QuestItemDeleted { unique_id: p.unique_id, count: p.count });
+                tracing::info!("🗑️ 任务物品删除 uid={} x{}", p.unique_id, p.count);
             }
         }
 
