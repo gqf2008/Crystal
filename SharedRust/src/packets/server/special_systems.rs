@@ -76,6 +76,8 @@ impl Packet for UpdateIntelligentCreatureList {
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         use crate::binary::read_dotnet_string;
+        let _rank_type = reader.read_u8()?;
+        let my_rank = reader.read_i32::<LittleEndian>()?;
         let count = reader.read_i32::<LittleEndian>()?;
         let mut creatures = Vec::with_capacity(count as usize);
 
@@ -285,6 +287,8 @@ impl Packet for GameShopInfo {
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         use crate::binary::read_dotnet_string;
+        let _rank_type = reader.read_u8()?;
+        let my_rank = reader.read_i32::<LittleEndian>()?;
         let count = reader.read_i32::<LittleEndian>()?;
         let mut items = Vec::with_capacity(count as usize);
 
@@ -355,6 +359,8 @@ impl Packet for GameShopStock {
 #[derive(Debug, Clone)]
 pub struct Rankings {
     pub rankings: Vec<RankInfo>, // 排名列表
+    /// 请求者自己的排名（0=未上榜，C# MyRank）
+    pub my_rank: i32,
 }
 
 #[derive(Debug, Clone)]
@@ -377,7 +383,7 @@ impl Packet for Rankings {
         // Note: C# has RankType(u8) + MyRank(i32) + ListingDetails + Listings(Vec<i64>) + Count
         // Rust only has rankings(Vec<RankInfo>)
         writer.write_u8(0)?; // RankType = 0
-        writer.write_i32::<LittleEndian>(0)?; // MyRank = 0
+        writer.write_i32::<LittleEndian>(self.my_rank)?; // MyRank
 
         writer.write_i32::<LittleEndian>(self.rankings.len() as i32)?;
 
@@ -401,6 +407,8 @@ impl Packet for Rankings {
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         use crate::binary::read_dotnet_string;
+        let _rank_type = reader.read_u8()?;
+        let my_rank = reader.read_i32::<LittleEndian>()?;
         let count = reader.read_i32::<LittleEndian>()?;
         let mut rankings = Vec::with_capacity(count as usize);
 
@@ -424,7 +432,7 @@ impl Packet for Rankings {
             });
         }
 
-        Ok(Self { rankings })
+        Ok(Self { rankings, my_rank })
     }
 }
 
@@ -469,6 +477,8 @@ impl Packet for GuildTerritoryPage {
 
     fn read_body<R: Read>(reader: &mut R) -> SharedResult<Self> {
         use crate::binary::read_dotnet_string;
+        let _rank_type = reader.read_u8()?;
+        let my_rank = reader.read_i32::<LittleEndian>()?;
         let count = reader.read_i32::<LittleEndian>()?;
         let mut territories = Vec::with_capacity(count as usize);
 

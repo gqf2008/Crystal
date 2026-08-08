@@ -1926,6 +1926,15 @@ impl Message<GetRankingRequest> for WorldActor {
     async fn handle(&mut self, msg: GetRankingRequest, _ctx: &mut Context<Self, Self::Reply>) {
         debug!("GetRanking: session={} type={}", msg.session_id, msg.rank_type);
 
+        // #1323：请求者名字（计算 MyRank）
+        let requester_name = match self.players.get(&msg.session_id) {
+            Some(r) => match r.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(s)) => s.name.clone(),
+                _ => String::new(),
+            },
+            None => String::new(),
+        };
+
         // Collect online players
         let mut entries: Vec<(u32, String, u8, i32, i64)> = Vec::new();
         for (_, record) in &self.players {
@@ -1967,6 +1976,12 @@ impl Message<GetRankingRequest> for WorldActor {
             b.3.cmp(&a.3).then_with(|| b.4.cmp(&a.4))
         });
 
+        // #1323：请求者自己的排名（C# MyRank；未上榜=0）
+        let my_rank = entries
+            .iter()
+            .position(|(_, n, _, _, _)| n == &requester_name)
+            .map(|i| i as i32 + 1)
+            .unwrap_or(0);
         // 取前 20 名
         let rankings: Vec<mir2_shared::packets::server::special_systems::RankInfo> = entries
             .into_iter()
@@ -1984,7 +1999,7 @@ impl Message<GetRankingRequest> for WorldActor {
             })
             .collect();
 
-        let packet = mir2_shared::packets::server::special_systems::Rankings { rankings };
+        let packet = mir2_shared::packets::server::special_systems::Rankings { rankings, my_rank };
         let mut body = Vec::new();
         if packet.write_body(&mut body).is_ok() {
             let _ = self.gate_ref.tell(SendToClient {

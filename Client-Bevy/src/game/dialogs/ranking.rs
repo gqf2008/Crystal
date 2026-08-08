@@ -7,6 +7,7 @@
 
 use bevy::prelude::*;
 
+use crate::actor::{LocalPlayer, PlayerName};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
@@ -36,6 +37,8 @@ pub struct RankingState {
     pub tab: u8,
     /// 仅在线（C# RankingDialog OnlineOnly）
     pub online_only: bool,
+    /// 我的排名（C# MyRank；0=未上榜）
+    pub my_rank: i32,
 }
 
 #[derive(Component)]
@@ -62,6 +65,10 @@ pub struct RankingNext;
 /// 仅在线（C# OnlineOnlyButton）
 #[derive(Component)]
 pub struct RankingOnlineOnly;
+
+/// 我的排名标签（C# MyRank）
+#[derive(Component)]
+pub struct RankingMyRank;
 
 /// 职业名（C# 排行榜职业页签）
 pub fn rank_class_name(class: u8) -> &'static str {
@@ -260,6 +267,17 @@ fn spawn_ranking(
             RankingWidget,
         ));
     }
+    // 我的排名（C# MyRank；点击滚动到我的行）
+    let t = spawn_ui_text(
+        &mut commands, &font, "我的排名：--",
+        210.0, 462.0,
+        12.0, Color::srgb(1.0, 0.9, 0.3), 8.2,
+    );
+    commands.entity(t).insert((
+        RankingMyRank,
+        DialogRoot(DialogKind::Ranking),
+        RankingWidget,
+    ));
 }
 
 fn ranking_ui_system(
@@ -272,6 +290,8 @@ fn ranking_ui_system(
     prev: Query<&UiButton, (With<RankingPrev>, Without<RankingTab>)>,
     next: Query<&UiButton, (With<RankingNext>, Without<RankingTab>, Without<RankingPrev>)>,
     online_boxes: Query<&CheckBox, With<RankingOnlineOnly>>,
+    local_player: Query<&PlayerName, With<LocalPlayer>>,
+    mut my_rank_text: Query<&mut Text2d, With<RankingMyRank>>,
     mut widgets: Query<&mut Visibility, With<RankingWidget>>,
     mut lines: Query<(&mut Text2d, &RankingLine)>,
     mut scroll: Query<&mut ScrollList, With<RankingWidget>>,
@@ -358,6 +378,28 @@ fn ranking_ui_system(
             None => String::new(),
         };
     }
+    // 我的排名（C# MyRank：0=未上榜；点击滚动到自己的行）
+    let self_name = local_player.single().map(|n| n.0.clone()).unwrap_or_default();
+    for mut text in &mut my_rank_text {
+        text.0 = if ranking.my_rank > 0 {
+            format!("我的排名：第 {} 名", ranking.my_rank)
+        } else {
+            "我的排名：未上榜".to_string()
+        };
+    }
+    if mouse.just_pressed(MouseButton::Left) {
+        if let Ok(window) = windows.single() {
+            if let Some(cursor) = window.cursor_position() {
+                if cursor.x >= 210.0 && cursor.x <= 420.0 && cursor.y >= 462.0 && cursor.y <= 482.0 {
+                    if let Some(idx) = filtered.iter().position(|e| e.player_name == self_name) {
+                        if let Ok(mut sl) = scroll.single_mut() {
+                            sl.offset = idx.min(max_offset);
+                        }
+                    }
+                }
+            }
+        }
+    }
     // 行点击查看（C# RankingRow.Click → Inspect{Ranking=true}）
     if mouse.just_pressed(MouseButton::Left) {
         if let Ok(window) = windows.single() {
@@ -403,8 +445,9 @@ fn ranking_server_events(
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
         match ev {
-            ServerEvent::Rankings { entries } => {
+            ServerEvent::Rankings { entries, my_rank } => {
                 ranking.entries = entries.clone();
+                ranking.my_rank = *my_rank;
             }
             ServerEvent::RankingsCleared => {
                 ranking.entries.clear();
