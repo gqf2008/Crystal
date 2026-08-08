@@ -95,6 +95,15 @@ pub struct CreatureRefresh;
 /// 选项取消
 #[derive(Component)] struct CreatureOptionsCancel;
 
+/// 品质上一档（C# OptionsGradeDialog PrevButton）
+#[derive(Component)] struct CreatureGradePrev;
+
+/// 品质下一档（C# OptionsGradeDialog NextButton）
+#[derive(Component)] struct CreatureGradeNext;
+
+/// 品质显示（C# GradeLabel）
+#[derive(Component)] struct CreatureGradeText;
+
 /// 改名输入框（TextInput id 33）
 #[derive(Component)] struct CreatureRenameInput;
 
@@ -267,6 +276,25 @@ fn spawn_creature(
         12.0, Color::WHITE, 8.5,
     );
     commands.entity(e).insert((CreatureOptionsWidget, CreatureOptionsCancel, UiButton { rect: (360.0, 335.0, 44.0, 22.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget, Visibility::Hidden));
+    // 品质选择（C# OptionsGradeDialog：全部/普通/稀有/神话/传说/英雄，Prev/Next 循环）
+    let e = spawn_ui_text(
+        &mut commands, &font, "品质:全部",
+        300.0, 360.0,
+        12.0, Color::WHITE, 8.5,
+    );
+    commands.entity(e).insert((CreatureOptionsWidget, CreatureGradeText, DialogRoot(DialogKind::Creature), CreatureWidget, Visibility::Hidden));
+    let e = spawn_ui_text(
+        &mut commands, &font, "◀",
+        380.0, 360.0,
+        12.0, Color::WHITE, 8.5,
+    );
+    commands.entity(e).insert((CreatureOptionsWidget, CreatureGradePrev, UiButton { rect: (380.0, 360.0, 20.0, 20.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget, Visibility::Hidden));
+    let e = spawn_ui_text(
+        &mut commands, &font, "▶",
+        410.0, 360.0,
+        12.0, Color::WHITE, 8.5,
+    );
+    commands.entity(e).insert((CreatureOptionsWidget, CreatureGradeNext, UiButton { rect: (410.0, 360.0, 20.0, 20.0), clicked: false }, DialogRoot(DialogKind::Creature), CreatureWidget, Visibility::Hidden));
 
     // 改名/释放输入框（TextInput id 33/34，C# MirInputBox 语义）
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
@@ -587,6 +615,13 @@ fn creature_action_system(
 }
 /// 选项标签（C# IntelligentCreatureOptionsDialog.OptionNames）
 const CREATURE_OPTION_LABELS: [&str; 9] = ["全部", "金币", "武器", "盔甲", "头盔", "靴子", "腰带", "饰品", "其他"];
+/// 品质标签（C# OptionsGradeDialog GradeStrings：全部/普通/稀有/神话/传说/英雄）
+const CREATURE_GRADE_LABELS: [&str; 6] = ["全部", "普通", "稀有", "神话", "传说", "英雄"];
+
+/// 品质循环（dir>0 下一档，否则上一档；0..5，对齐 C# Prev/Next）
+fn creature_grade_cycle(grade: u8, dir: i8) -> u8 {
+    if dir > 0 { (grade + 1) % 6 } else { (grade + 5) % 6 }
+}
 
 /// 过滤切换（对齐 C# IntelligentCreatureItemFilter.SetItemFilter）
 fn creature_filter_toggle(f: &mut [bool; 9], idx: usize) {
@@ -619,7 +654,8 @@ fn creature_options_system(
     opts_btn: Query<&UiButton, With<CreatureOptionsBtn>>,
     save_btn: Query<&UiButton, With<CreatureOptionsSave>>,
     cancel_btn: Query<&UiButton, With<CreatureOptionsCancel>>,
-    mut lines: Query<(&mut Text2d, &CreatureOptionsLine)>,
+    grade_btns: Query<(&UiButton, Has<CreatureGradePrev>, Has<CreatureGradeNext>)>,
+    mut lines: Query<(&mut Text2d, Option<&CreatureOptionsLine>, Has<CreatureGradeText>)>,
     mut widgets: Query<&mut Visibility, (With<CreatureOptionsWidget>, Without<CreatureOptionsLine>)>,
     mut line_vis: Query<&mut Visibility, (With<CreatureOptionsLine>, Without<CreatureOptionsSave>)>,
     mut save_vis: Query<&mut Visibility, (With<CreatureOptionsSave>, Without<CreatureOptionsCancel>)>,
@@ -680,9 +716,23 @@ fn creature_options_system(
             state.options_open = false;
         }
     }
-    for (mut text, line) in &mut lines {
-        text.0 = if state.options_open {
-            format!("{} {}", if state.options[line.0] { "■" } else { "□" }, CREATURE_OPTION_LABELS[line.0])
+    // 品质切换（C# OptionsGradeDialog Prev/Next 循环）
+    for (btn, is_prev, is_next) in &grade_btns {
+        if btn.clicked && state.options_open {
+            if is_prev {
+                state.grade = creature_grade_cycle(state.grade, -1);
+            } else if is_next {
+                state.grade = creature_grade_cycle(state.grade, 1);
+            }
+        }
+    }
+    for (mut text, line, is_grade) in &mut lines {
+        text.0 = if !state.options_open {
+            String::new()
+        } else if let Some(l) = line {
+            format!("{} {}", if state.options[l.0] { "■" } else { "□" }, CREATURE_OPTION_LABELS[l.0])
+        } else if is_grade {
+            format!("品质:{}", CREATURE_GRADE_LABELS[(state.grade as usize).min(5)])
         } else {
             String::new()
         };
@@ -765,5 +815,17 @@ mod tests {
         creature_filter_toggle(&mut f, 1);
         creature_filter_toggle(&mut f, 1);
         assert!(f[0]);
+    }
+
+    #[test]
+    fn grade_cycle_next() {
+        assert_eq!(creature_grade_cycle(0, 1), 1);
+        assert_eq!(creature_grade_cycle(5, 1), 0);
+    }
+
+    #[test]
+    fn grade_cycle_prev() {
+        assert_eq!(creature_grade_cycle(0, -1), 5);
+        assert_eq!(creature_grade_cycle(3, -1), 2);
     }
 }
