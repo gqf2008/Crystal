@@ -164,6 +164,8 @@ pub struct AiCtx<'a> {
     pub out_show_hide: &'a mut Vec<(u32, bool)>,
     /// 输出：坐下/起身广播（#1354 C# ObjectSitDown；oid, x, y, dir, sitting）
     pub out_sit_down: &'a mut Vec<(u32, i32, i32, u8, bool)>,
+    /// 输出：对象特效广播（#1364 C# ObjectEffect；oid, SpellEffect——如 DeathCrawlerBreath）
+    pub out_effects: &'a mut Vec<(u32, mir2_shared::enums::SpellEffect)>,
     /// 输出：对玩家回血（session, amount；C# MasterVampire / Healer 治疗玩家）
     pub out_player_heals: &'a mut Vec<(u64, i32)>,
     /// 当前怪物的宠物等级（C# MonsterObject.PetLevel；非宠物=0）
