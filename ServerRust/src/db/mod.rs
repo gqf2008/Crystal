@@ -2070,6 +2070,7 @@ pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>
             max_experience,
             spare_points: spare_points.clamp(0, 255) as u8,
             member_cap,
+            next_exp_update: 0,
         });
     }
 

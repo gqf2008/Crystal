@@ -73,6 +73,8 @@ pub struct Guild {
     pub spare_points: u8,
     /// 成员上限（C# GuildInfo.MemberCap）
     pub member_cap: i32,
+    /// #1344：下次 GuildExpGain 广播时间（unix ms，运行时；C# NextExpUpdate=Envir.Time+10000）
+    pub next_exp_update: i64,
 }
 
 impl Guild {
@@ -99,6 +101,7 @@ impl Guild {
             max_experience: 0,
             spare_points: 0,
             member_cap: 50,
+            next_exp_update: 0,
         }
     }
 

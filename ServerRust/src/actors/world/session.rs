@@ -1465,7 +1465,7 @@ impl Message<ChatRequest> for WorldActor {
         use mir2_shared::globals::MAX_CHAT_LENGTH;
 
         let record = match self.players.get(&msg.session_id) {
-            Some(r) => r,
+            Some(r) => r.clone(),
             None => {
                 warn!("Chat from unknown session {}", msg.session_id);
                 return;
@@ -2967,25 +2967,31 @@ impl Message<ChatRequest> for WorldActor {
         // #285：聊天物品链接 → 向在线玩家推送 S.NewChatItem
         self.send_chat_item_links(msg.session_id, &message).await;
 
+        // #1344：普通聊天对齐 C#（PlayerObject.Chat → CurrentMap.Broadcast(S.ObjectChat)）：
+        // 只广播同地图玩家（此前全服串线），并改用 S.ObjectChat（带 object_id）
+        let (sender_object_id, sender_map) = match record.actor_ref.ask(GetPlayerState).await {
+            Ok(Some(state)) => (state.object_id, state.map_index),
+            _ => return,
+        };
         let formatted = format!("[{}]: {}", player_name, message);
         debug!("Chat from {}: {}", player_name, message);
-
-        // 广播给所有在线玩家（ChatType::Normal = 0）
-        // 客户端 read_body 期望: [message: DotNetString][chat_type: u8]
-        let mut body = Vec::new();
-        write_dotnet_string(&mut body, &formatted);
-        body.push(0u8); // ChatType::Normal
-        let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::Chat as i16, &body);
-
-        for session_id in self.players.keys() {
+        let packet = build_packet_bytes(
+            mir2_shared::enums::ServerPacketIds::ObjectChat as i16,
+            &object_chat_body(sender_object_id, &formatted, mir2_shared::enums::ChatType::Normal as u8),
+        );
+        for (sid, other) in &self.players {
             // 不给自己回发（本地已 add_message）
-            if *session_id == msg.session_id {
+            if *sid == msg.session_id {
                 continue;
             }
-            let _ = self.gate_ref.tell(SendToClient {
-                session_id: *session_id,
-                data: packet.clone(),
-            }).await;
+            if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                if os.map_index == sender_map {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: *sid,
+                        data: packet.clone(),
+                    }).await;
+                }
+            }
         }
     }
 }
@@ -3382,9 +3388,18 @@ fn format_roll_message(player_name: &str, dice: i32) -> String {
     format!("{} 掷出了 {} 点", player_name, dice)
 }
 
+/// #1344：构建 S.ObjectChat body（wire 对齐 C# ObjectChat：[ObjectID u32][Text dotnet][ChatType u8]）
+fn object_chat_body(object_id: u32, text: &str, chat_type: u8) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(&object_id.to_le_bytes());
+    write_dotnet_string(&mut body, text);
+    body.push(chat_type);
+    body
+}
+
 #[cfg(test)]
 mod tests {
-    use super::format_roll_message;
+    use super::{format_roll_message, object_chat_body};
 
     #[test]
     fn test_roll_message_format() {
@@ -3399,5 +3414,23 @@ mod tests {
             let d = fastrand::i32(1..=5);
             assert!((1..=5).contains(&d), "dice out of range: {}", d);
         }
+    }
+
+    #[test]
+    fn test_object_chat_body_wire() {
+        // #1344：object_id=0x01020304 LE；dotnet "hi" = 长度4 + 2字节；chat_type=Normal(0)
+        let body = object_chat_body(0x01020304, "hi", 0);
+        assert_eq!(&body[0..4], &[0x04, 0x03, 0x02, 0x01]);
+        assert_eq!(body[4], 2); // dotnet string length
+        assert_eq!(&body[5..7], b"hi");
+        assert_eq!(body[7], 0); // ChatType::Normal
+    }
+
+    #[test]
+    fn test_object_chat_body_empty_text() {
+        let body = object_chat_body(7, "", 5);
+        assert_eq!(&body[0..4], &[7, 0, 0, 0]);
+        assert_eq!(body[4], 0);
+        assert_eq!(body[5], 5); // ChatType
     }
 }
