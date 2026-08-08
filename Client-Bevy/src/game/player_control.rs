@@ -9,6 +9,7 @@
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::window::{CursorIcon, SystemCursorIcon};
 
 use crate::actor::{ActorAnim, GroundItem, LocalPlayer, Monster, NetObjectId, Npc, Player};
 use crate::game::hud::HudState;
@@ -67,7 +68,7 @@ impl Plugin for PlayerControlPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (advance_attack_timer_system, autorun_toggle_system, right_click_move_system, left_click_interact_system, key_pickup_system, hold_move_system, auto_attack_system, pickup_arrival_system)
+            (advance_attack_timer_system, autorun_toggle_system, right_click_move_system, left_click_interact_system, key_pickup_system, hold_move_system, auto_attack_system, pickup_arrival_system, context_cursor_system)
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -82,6 +83,36 @@ pub fn screen_to_world(screen: Vec2, cam_tf: &Transform, window: &Window) -> Vec
         screen.x - half_w + cam_tf.translation.x,
         cam_tf.translation.y - (screen.y - half_h),
     )
+}
+
+/// 上下文光标（#1321：对齐 C# SetMouseCursor——NPC→手型、怪物→准星、其他→默认）
+fn context_cursor_system(
+    windows: Query<(Entity, &Window)>,
+    camera: Query<&Transform, With<Camera2d>>,
+    actors: Query<(&Transform, Has<Npc>, Has<Monster>), Without<LocalPlayer>>,
+    mut commands: Commands,
+    mut last: Local<SystemCursorIcon>,
+) {
+    let Ok((w_entity, window)) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    let Ok(cam) = camera.single() else { return };
+    let world = screen_to_world(cursor, cam, window);
+    let mut icon = SystemCursorIcon::Default;
+    for (tf, is_npc, is_monster) in &actors {
+        if (tf.translation.x - world.x).abs() < 24.0 && (tf.translation.y - world.y).abs() < 24.0 {
+            if is_npc {
+                icon = SystemCursorIcon::Pointer;
+                break;
+            }
+            if is_monster && icon == SystemCursorIcon::Default {
+                icon = SystemCursorIcon::Crosshair;
+            }
+        }
+    }
+    if icon != *last {
+        *last = icon;
+        commands.entity(w_entity).insert(CursorIcon::System(icon));
+    }
 }
 
 /// 主对话框底部区域（点击不响应移动）
