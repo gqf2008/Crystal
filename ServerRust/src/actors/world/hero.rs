@@ -2474,6 +2474,22 @@ fn hero_mass_heal_amount(
     .max(1)
 }
 
+/// 英雄药水效果（#1220：C# UseItem Grid=HeroInventory Potion）
+/// shape 0 NormalPotion：累计 PotHealth/PotMana（持续回复）；shape 1 SunPotion：立即回血回蓝（clamp）
+pub(crate) fn hero_apply_potion(ai: &mut HeroCombatAI, shape: i32, hp_stat: u32, mp_stat: u32) {
+    if shape == 0 {
+        ai.pot_health = (ai.pot_health + hp_stat).min(u16::MAX as u32);
+        ai.pot_mana = (ai.pot_mana + mp_stat).min(u16::MAX as u32);
+    } else if shape == 1 {
+        if hp_stat > 0 && ai.hp > 0 {
+            ai.hp = (ai.hp + hp_stat as i32).min(ai.max_hp);
+        }
+        if mp_stat > 0 && ai.mp > 0 {
+            ai.mp = (ai.mp + mp_stat as i32).min(ai.max_mp);
+        }
+    }
+}
+
 /// 各职业 ProcessFriend 增益列表（#1190/#1192/#1210：C# 子类顺序；道士由常驻预置块使用）
 fn hero_friend_buffs(
     class: mir2_shared::enums::MirClass,
@@ -3338,5 +3354,25 @@ mod tests {
         let sc = (stats.min_sc + stats.max_sc) / 2;
         assert_eq!(amount, crate::combat::magic::calc_magic_damage(map.get(&cs).unwrap(), 1, sc));
         assert!(amount >= 1);
+    }
+
+    #[test]
+    fn hero_apply_potion_shapes() {
+        // shape 0：累计持续回复池
+        let mut ai = HeroCombatAI::new_for_owner(0, 0, 100, 100);
+        hero_apply_potion(&mut ai, 0, 30, 20);
+        assert_eq!(ai.pot_health, 30);
+        assert_eq!(ai.pot_mana, 20);
+        // shape 1：立即回血回蓝并 clamp 到上限
+        ai.hp = 10;
+        ai.mp = 10;
+        hero_apply_potion(&mut ai, 1, 500, 500);
+        assert_eq!(ai.hp, ai.max_hp);
+        assert_eq!(ai.mp, ai.max_mp);
+        // shape 0 后再喝 SunPotion：池子保持，HP 立即回满
+        ai.hp = 5;
+        hero_apply_potion(&mut ai, 1, 100, 0);
+        assert_eq!(ai.hp, ai.max_hp);
+        assert_eq!(ai.pot_health, 30);
     }
 }
