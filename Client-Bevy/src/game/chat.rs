@@ -323,6 +323,10 @@ struct ChatInputText;
 #[derive(Component)]
 struct ChatTabBtn(ChatChannel);
 
+/// 聊天面板滚动按钮（C# ChatDialog HomeButton/UpButton/DownButton/EndButton）
+#[derive(Component)]
+pub struct ChatScrollBtn(KeyScroll);
+
 /// 发送频道快捷按钮（C# ChatControlBar）
 #[derive(Component)]
 struct ChatBarBtn(&'static str, &'static str);
@@ -369,6 +373,7 @@ impl Plugin for ChatPlugin {
                 chat_size_system,
                 chat_wheel_system,
                 chat_key_scroll_system,
+                chat_scroll_buttons_system,
                 chat_input_system,
                 chat_display_system,
                 chat_server_events,
@@ -434,6 +439,27 @@ fn spawn_chat(
             ChatTabBtn(*tab),
             UiButton {
                 rect: (tx, panel_y + 2.0, tab_w - 2.0, 14.0),
+                clicked: false,
+            },
+        ));
+    }
+    // 滚动按钮（C# HomeButton/UpButton/DownButton/EndButton：右侧竖排，点击滚动历史）
+    let scroll_btns: [(KeyScroll, &str); 4] = [
+        (KeyScroll::Home, "顶部"),
+        (KeyScroll::Up, "上"),
+        (KeyScroll::Down, "下"),
+        (KeyScroll::End, "底部"),
+    ];
+    for (i, (kind, label)) in scroll_btns.iter().enumerate() {
+        let e = spawn_ui_text(
+            &mut commands, &font, label,
+            panel_x + 360.0 - 38.0, panel_y + 20.0 + i as f32 * 16.0,
+            11.0, Color::srgb(0.8, 0.9, 1.0), 2.2,
+        );
+        commands.entity(e).insert((
+            ChatScrollBtn(*kind),
+            UiButton {
+                rect: (panel_x + 360.0 - 38.0, panel_y + 20.0 + i as f32 * 16.0, 36.0, 14.0),
                 clicked: false,
             },
         ));
@@ -913,6 +939,23 @@ fn apply_key_scroll(scroll_up: usize, max_scroll: usize, page: usize, action: Ke
     }
 }
 
+/// 聊天面板滚动按钮（C# ChatDialog Home/Up/Down/End；与键盘滚动共用 apply_key_scroll）
+fn chat_scroll_buttons_system(
+    mut chat: ResMut<ChatState>,
+    btns: Query<(&UiButton, &ChatScrollBtn)>,
+) {
+    if chat.input_active {
+        return;
+    }
+    let max_scroll = chat.lines.len().saturating_sub(chat.visible_lines);
+    let page = chat.visible_lines.max(1);
+    for (btn, kind) in &btns {
+        if btn.clicked {
+            chat.scroll_up = apply_key_scroll(chat.scroll_up, max_scroll, page, kind.0);
+        }
+    }
+}
+
 /// 显示：按页签过滤聊天行 + 输入行（单查询避免 B0001）
 fn chat_display_system(
     chat: Res<ChatState>,
@@ -1106,6 +1149,15 @@ mod tests {
         assert_eq!(chat_channel(ChatType::Group), ChatChannel::Group);
         assert_eq!(chat_channel(ChatType::WhisperIn), ChatChannel::Whisper);
         assert_eq!(chat_channel(ChatType::WhisperOut), ChatChannel::Whisper);
+    }
+
+    #[test]
+    fn scroll_buttons_use_key_scroll_semantics() {
+        // 顶部=Home(最旧) 底部=End(最新) 上=Up 下=Down
+        assert_eq!(apply_key_scroll(0, 10, 8, KeyScroll::Home), 10);
+        assert_eq!(apply_key_scroll(10, 10, 8, KeyScroll::End), 0);
+        assert_eq!(apply_key_scroll(0, 10, 8, KeyScroll::Up), 1);
+        assert_eq!(apply_key_scroll(1, 10, 8, KeyScroll::Down), 0);
     }
 
     #[test]
@@ -1305,6 +1357,8 @@ mod whisper_partner_tests {
         assert_eq!(whisper_partner("没有分隔符", ChatType::WhisperIn), None);
     }
 }
+
+
 
 
 
