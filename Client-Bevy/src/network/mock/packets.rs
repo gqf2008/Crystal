@@ -122,6 +122,7 @@ impl Packet for MockPlayerInspect {
 pub(crate) struct MockGuildStatus {
     pub(crate) name: String,
     pub(crate) leader: String,
+    pub(crate) rank_names: [String; 3],
     pub(crate) notice: Vec<String>,
     pub(crate) members: Vec<(String, u8, bool)>,
     pub(crate) gold: u32,
@@ -138,6 +139,9 @@ impl Packet for MockGuildStatus {
         use byteorder::WriteBytesExt;
         mir2_shared::binary::write_dotnet_string(writer, &self.name)?;
         mir2_shared::binary::write_dotnet_string(writer, &self.leader)?;
+        for name in &self.rank_names {
+            mir2_shared::binary::write_dotnet_string(writer, name)?;
+        }
         writer.write_u8(self.notice.len() as u8)?;
         for line in &self.notice {
             mir2_shared::binary::write_dotnet_string(writer, line)?;

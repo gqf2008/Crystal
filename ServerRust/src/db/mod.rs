@@ -2062,6 +2062,11 @@ pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>
             name,
             notice,
             members,
+            rank_names: [
+                "会长".to_string(),
+                "副会长".to_string(),
+                "成员".to_string(),
+            ],
             gold: gold as u64,
             storage_items,
             buffs: Vec::new(),
