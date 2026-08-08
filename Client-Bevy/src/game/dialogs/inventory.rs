@@ -152,6 +152,8 @@ impl InvItem {
 
 /// 背包最大格数（C# Grid 8x10=80，扩容上限；超出部分不渲染）
 pub const MAX_INV_SLOTS: usize = 80;
+/// 背包扩容上限（C# CharacterInfo.ResizeInventory 上限 86，AddButton 满格隐藏）
+pub const MAX_INV_EXPAND: usize = 86;
 
 /// 背包数据（网络 UserInformation.inventory 写入）
 #[derive(Resource, Default)]
@@ -222,6 +224,7 @@ impl Plugin for InventoryDialogPlugin {
                 inv_tooltip_system,
                 inv_item_action_system,
                 inv_confirm_system,
+                inv_add_del_buttons_system,
                 quest_inventory_events,
                 ui_button_system,
             )
@@ -386,12 +389,36 @@ fn spawn_inventory_dialog(
         DialogWidget,
     ));
 
+    // 扩展背包格购买按钮（C# InventoryDialog AddButton：Title 483/484/485 @(235,5)）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Title, 483, 484, 485,
+        DIALOG_X + 235.0, DIALOG_Y + 5.0, 7.0, 23.0, 23.0,
+    ) {
+        commands.entity(e).insert((InvAddBtn, DialogRoot(DialogKind::Inventory), DialogWidget));
+    }
+    // 删除模式按钮（C# InventoryDialog DelItemButton：Prguse2 366/367/368 @(291,212)）
+    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+        &mut commands, &mut libs, &mut images, &mut cache,
+        LibraryName::Prguse2, 366, 367, 368,
+        DIALOG_X + 291.0, DIALOG_Y + 212.0, 7.0, 20.0, 20.0,
+    ) {
+        commands.entity(e).insert((InvDelBtn, DialogRoot(DialogKind::Inventory), DialogWidget));
+    }
+
     // 格子背景不在此预生成：#276 由 inv_grid_sync_system 按 InventoryState.items.len()
     // 动态生成/移除（进图 UserInformation 到达前 items 为空，避免先建后删抖动）
 }
 
 #[derive(Component)]
 struct InvCloseBtn;
+
+/// #1346：扩展背包格购买按钮（C# InventoryDialog AddButton）
+#[derive(Component)]
+struct InvAddBtn;
+/// #1346：删除模式按钮（C# InventoryDialog DelItemButton）
+#[derive(Component)]
+struct InvDelBtn;
 
 /// 光标坐标 → 背包格（按当前页与格数）；供仓库/交易/英雄对话框复用。
 /// 对齐 C# InventoryDialog：page 0=道具（0..min(40,size)），1=道具2（40..size-1），
@@ -426,6 +453,8 @@ pub struct InvClickState {
     pub selected: Option<usize>,
     /// 英雄背包选中格（#203：与主背包双向转移共用选择态）
     pub hero_selected: Option<usize>,
+    /// #1346：删除模式（C# DelItemButton ToggleDeleteMode）
+    pub delete_mode: bool,
 }
 
 /// 丢弃确认框（原版 C# MirMessageBox YesNo：DropTip）
@@ -435,6 +464,8 @@ pub struct InvDropConfirm {
     pub text: String,
     pub unique_id: u64,
     pub count: u16,
+    /// #1346：0=丢弃 1=删除 2=背包扩容
+    pub mode: u8,
 }
 
 /// 数量框待处理操作（拆分/丢弃，原版 C# MirAmountBox OK 回调）
@@ -442,6 +473,8 @@ pub struct InvDropConfirm {
 pub struct InvPendingAmount {
     pub split_uid: Option<u64>,
     pub drop_uid: Option<u64>,
+    /// #1346：删除数量框待确认物品
+    pub delete_uid: Option<u64>,
 }
 
 #[derive(Component)]
@@ -873,6 +906,53 @@ fn use_or_equip(item: &InvItem, net: &NetConnection, hud: &HudState) {
     }
 }
 
+/// #1346：扩展背包购买/删除模式按钮（C# InventoryDialog AddButton / DelItemButton）
+#[allow(clippy::too_many_arguments)]
+fn inv_add_del_buttons_system(
+    mut hud: ResMut<HudState>,
+    mut click: ResMut<InvClickState>,
+    mut confirm: ResMut<InvDropConfirm>,
+    add_btn: Query<&UiButton, With<InvAddBtn>>,
+    del_btn: Query<&UiButton, With<InvDelBtn>>,
+    mut add_vis: Query<&mut Visibility, With<InvAddBtn>>,
+    mut del_sprite: Query<&mut Sprite, With<InvDelBtn>>,
+    mut libs: ResMut<GameLibraries>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
+) {
+    let len = hud.inventory.items.len();
+    // C# AddButton.Visible = openLevel < 10（上限 86 格）
+    let can_expand = len < MAX_INV_EXPAND;
+    for mut vis in &mut add_vis {
+        *vis = if can_expand { Visibility::Visible } else { Visibility::Hidden };
+    }
+    // 删除模式图标（C# DelItemButton.Index 366 ↔ 368）
+    let del_idx = if click.delete_mode { 368 } else { 366 };
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse2, del_idx) {
+        for mut s in &mut del_sprite {
+            s.image = h.clone();
+        }
+    }
+    for btn in &add_btn {
+        if btn.clicked && can_expand {
+            // C# cost = 1M + openLevel*1M（openLevel = (len-46)/4；Rust 基线 40）
+            let level = len.saturating_sub(GRID_COLS * GRID_ROWS) / 4;
+            let cost = 1_000_000u64 + (level as u64) * 1_000_000u64;
+            confirm.text = format!("花费 {} 金币扩展背包格？", cost);
+            confirm.mode = 2;
+            confirm.visible = true;
+        }
+    }
+    for btn in &del_btn {
+        if btn.clicked {
+            click.delete_mode = !click.delete_mode;
+            if !click.delete_mode {
+                click.selected = None;
+            }
+        }
+    }
+}
+
 /// 生成丢弃确认框（原版 C# MirMessageBox：Prguse[360] 456x190，Yes/No Title[206-208]/[210-212]）
 fn spawn_inv_confirm(
     mut commands: Commands,
@@ -934,16 +1014,34 @@ fn inv_confirm_system(
     }
     for btn in &yes {
         if btn.clicked {
-            net.send_packet(&mir2_shared::packets::client::item::DropItem {
-                unique_id: confirm.unique_id,
-                count: confirm.count as u32,
-                hero_inventory: false,
-            });
-            tracing::info!(
-                "🗑️ 确认丢弃 uid={} count={}",
-                confirm.unique_id,
-                confirm.count
-            );
+            match confirm.mode {
+                1 => {
+                    // #1346：删除模式（C# PromptDelete → C.DeleteItem），删除后退出删除模式
+                    net.send_packet(&mir2_shared::packets::client::item::DeleteItem {
+                        unique_id: confirm.unique_id,
+                        count: confirm.count,
+                        hero_inventory: false,
+                    });
+                    click.delete_mode = false;
+                    tracing::info!("🗑️ 确认删除 uid={} count={}", confirm.unique_id, confirm.count);
+                }
+                2 => {
+                    // #1346：背包扩容（C# AddButton → C.Chat"@ADDINVENTORY"）
+                    net.send_packet(&mir2_shared::packets::client::chat::Chat {
+                        message: "@ADDINVENTORY".to_string(),
+                        linked_items: Vec::new(),
+                    });
+                    tracing::info!("📦 请求背包扩容");
+                }
+                _ => {
+                    net.send_packet(&mir2_shared::packets::client::item::DropItem {
+                        unique_id: confirm.unique_id,
+                        count: confirm.count as u32,
+                        hero_inventory: false,
+                    });
+                    tracing::info!("🗑️ 确认丢弃 uid={} count={}", confirm.unique_id, confirm.count);
+                }
+            }
             confirm.visible = false;
             click.selected = None;
         }
@@ -1011,6 +1109,15 @@ fn inv_item_action_system(
                 hero_inventory: false,
             });
             tracing::info!("🗑️ 丢弃物品 uid={} count={}", uid, n);
+        } else if let Some(uid) = pending.delete_uid.take() {
+            // #1346：删除模式数量框确认（C# PromptDelete DoDelete）
+            click.delete_mode = false;
+            net.send_packet(&mir2_shared::packets::client::item::DeleteItem {
+                unique_id: uid,
+                count: n as u16,
+                hero_inventory: false,
+            });
+            tracing::info!("🗑️ 删除物品 uid={} count={}", uid, n);
         }
     }
 
@@ -1041,6 +1148,25 @@ fn inv_item_action_system(
     *last_modal = modal_now;
     if modal_was || modal_now {
         return;
+    }
+
+    // #1346：删除模式左键点物品 → 数量框/确认 → C.DeleteItem（C# PromptDelete）
+    if click.delete_mode && mouse.just_pressed(MouseButton::Left) {
+        if let Some(i) = slot_at(cursor.x, cursor.y) {
+            if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
+                if item.count > 1 {
+                    pending.delete_uid = Some(item.unique_id);
+                    amount.ask(format!("删除 {} 数量", item.name), item.count as u32);
+                } else {
+                    confirm.text = format!("确定删除 {} 吗？", item.name);
+                    confirm.unique_id = item.unique_id;
+                    confirm.count = 1;
+                    confirm.mode = 1;
+                    confirm.visible = true;
+                }
+                return;
+            }
+        }
     }
 
     // 双击/单击检测（原版 C# MirItemCell.OnMouseDoubleClick / OnMouseClick）
@@ -1102,6 +1228,12 @@ fn inv_item_action_system(
         if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
             use_or_equip(item, &net, &hud);
         }
+    }
+
+    // #1346：删除模式下右键取消（C# OnMouseClick right-click cancels bin toggle）
+    if mouse.just_pressed(MouseButton::Right) && click.delete_mode {
+        click.delete_mode = false;
+        return;
     }
 
     // Ctrl+右键：打开镶嵌面板（C# MirItemCell.OpenItem）
