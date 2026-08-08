@@ -31,11 +31,39 @@ pub struct KeyBinding {
     pub action: &'static str,
     pub group: &'static str,
     pub key: KeyCode,
+    /// #1386：修饰键要求（C# Require*：0=禁止按住 1=必须按住 2=不限）
+    pub require_alt: u8,
+    pub require_shift: u8,
+    pub require_ctrl: u8,
+    pub require_tilde: u8,
 }
 
 impl KeyBinding {
     fn new(action: &'static str, group: &'static str, key: KeyCode) -> Self {
-        Self { action, group, key }
+        Self { action, group, key, require_alt: 2, require_shift: 2, require_ctrl: 2, require_tilde: 2 }
+    }
+    /// 带修饰键默认（C# KeyBindSettings：HeroInventory Ctrl+I 等）
+    fn new_mod(action: &'static str, group: &'static str, key: KeyCode, ctrl: u8, alt: u8, shift: u8) -> Self {
+        Self { action, group, key, require_alt: alt, require_shift: shift, require_ctrl: ctrl, require_tilde: 2 }
+    }
+    /// 当前按键+修饰键是否匹配（C# Require* 语义：2=不限）
+    fn matches(&self, keys: &ButtonInput<KeyCode>) -> bool {
+        if !keys.just_pressed(self.key) {
+            return false;
+        }
+        let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+        let alt = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+        let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+        mod_ok(self.require_ctrl, ctrl) && mod_ok(self.require_alt, alt) && mod_ok(self.require_shift, shift)
+    }
+}
+
+/// C# Require* 匹配：0=未按 1=按住 2=不限
+fn mod_ok(req: u8, pressed: bool) -> bool {
+    match req {
+        0 => !pressed,
+        1 => pressed,
+        _ => true,
     }
 }
 
@@ -119,16 +147,19 @@ fn key_code_from_name(name: &str) -> Option<KeyCode> {
     })
 }
 
-/// 序列化绑定 → KeyBinds.ini 内容（[Bindings] action=KeyCode Debug 名）
+/// 序列化绑定 → KeyBinds.ini 内容（[Bindings] action=Key + action.RequireCtrl= 等，对齐 C# Require*）
 fn bindings_to_ini(bindings: &[KeyBinding]) -> String {
     let mut s = String::from("[Bindings]\n");
     for b in bindings {
         s.push_str(&format!("{}={}\n", b.action, format!("{:?}", b.key)));
+        s.push_str(&format!("{}.RequireCtrl={}\n", b.action, b.require_ctrl));
+        s.push_str(&format!("{}.RequireAlt={}\n", b.action, b.require_alt));
+        s.push_str(&format!("{}.RequireShift={}\n", b.action, b.require_shift));
     }
     s
 }
 
-/// 解析 KeyBinds.ini 内容 → 绑定列表（缺失/非法回退默认键）
+/// 解析 KeyBinds.ini 内容 → 绑定列表（缺失/非法回退默认键/修饰键）
 fn bindings_from_ini(content: &str, defaults: &[KeyBinding]) -> Vec<KeyBinding> {
     defaults
         .iter()
@@ -136,7 +167,16 @@ fn bindings_from_ini(content: &str, defaults: &[KeyBinding]) -> Vec<KeyBinding> 
             let key = settings_file::ini_str(content, "Bindings", b.action)
                 .and_then(key_code_from_name)
                 .unwrap_or(b.key);
-            KeyBinding::new(b.action, b.group, key)
+            let req = |suffix: &str, d: u8| {
+                settings_file::ini_str(content, "Bindings", &format!("{}{}", b.action, suffix))
+                    .and_then(|v| v.trim().parse::<u8>().ok())
+                    .unwrap_or(d)
+            };
+            let mut nb = KeyBinding::new(b.action, b.group, key);
+            nb.require_ctrl = req(".RequireCtrl", b.require_ctrl);
+            nb.require_alt = req(".RequireAlt", b.require_alt);
+            nb.require_shift = req(".RequireShift", b.require_shift);
+            nb
         })
         .collect()
 }
@@ -168,6 +208,9 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("角色2", "界面", KeyCode::KeyC),
         KeyBinding::new("技能", "界面", KeyCode::F11),
         KeyBinding::new("技能2", "界面", KeyCode::KeyS),
+        KeyBinding::new_mod("英雄背包", "界面", KeyCode::KeyI, 1, 2, 2),
+        KeyBinding::new_mod("英雄装备", "界面", KeyCode::KeyC, 1, 2, 2),
+        KeyBinding::new_mod("英雄技能", "界面", KeyCode::KeyS, 1, 2, 2),
         KeyBinding::new("好友", "界面", KeyCode::KeyF),
         KeyBinding::new("宠物", "界面", KeyCode::KeyE),
         KeyBinding::new("坐骑", "界面", KeyCode::KeyJ),
@@ -180,6 +223,9 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("键位", "界面", KeyCode::KeyU),
         KeyBinding::new("技能栏显隐", "界面", KeyCode::KeyR),
         KeyBinding::new("腰带", "界面", KeyCode::KeyZ),
+        KeyBinding::new("坐骑切换", "界面", KeyCode::KeyM),
+        KeyBinding::new_mod("退出", "系统", KeyCode::KeyQ, 2, 1, 2),
+        KeyBinding::new_mod("下线", "系统", KeyCode::KeyX, 2, 1, 2),
         KeyBinding::new("行会", "界面", KeyCode::KeyG),
         KeyBinding::new("小地图", "界面", KeyCode::KeyV),
         KeyBinding::new("任务", "界面", KeyCode::KeyQ),
@@ -569,6 +615,7 @@ fn keyboard_layout_ui_system(
 
     // 等待按键：任意键重绑（Esc 取消）
     if let Some(idx) = state.rebinding {
+        let enforce = state.enforce;
         let mut changed = false;
         for key in keys.get_just_pressed() {
             let k = *key;
@@ -578,6 +625,13 @@ fn keyboard_layout_ui_system(
             } else if let Some(b) = state.bindings.get_mut(idx) {
                 tracing::info!("🎹 绑定 {} → {}", b.action, key_name(k));
                 b.key = k;
+                // #1386：修饰键按按住状态写入（C# KeyboardLayoutDialog：按住=1，Enforce=0，否则 2）
+                let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+                let alt = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
+                let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+                b.require_ctrl = if ctrl { 1 } else if enforce { 0 } else { 2 };
+                b.require_alt = if alt { 1 } else if enforce { 0 } else { 2 };
+                b.require_shift = if shift { 1 } else if enforce { 0 } else { 2 };
                 state.rebinding = None;
                 changed = true;
             }
@@ -626,13 +680,16 @@ fn dialog_hotkey_system(
     mut potion_belt_visible: ResMut<crate::game::dialogs::potion_belt::PotionBeltVisible>,
 ) {
     // #795：主/次绑定（对齐 C# KeyBindSettings 主键 + 备用键）
-    let map: [(&str, DialogKind); 22] = [
+    let map: [(&str, DialogKind); 25] = [
         ("背包", DialogKind::Inventory),
         ("背包2", DialogKind::Inventory),
         ("角色", DialogKind::Character),
         ("角色2", DialogKind::Character),
         ("技能", DialogKind::Skills),
         ("技能2", DialogKind::Skills),
+        ("英雄背包", DialogKind::HeroInventory),
+        ("英雄装备", DialogKind::HeroEquipment),
+        ("英雄技能", DialogKind::HeroSkill),
         ("好友", DialogKind::Friend),
         ("宠物", DialogKind::Creature),
         ("坐骑", DialogKind::Mount),
@@ -650,11 +707,34 @@ fn dialog_hotkey_system(
         ("设置", DialogKind::Settings),
         ("设置2", DialogKind::Settings),
     ];
+    // #1386：修饰键感知匹配；若本帧有“必须按住修饰键”的命中，仅触发这些（避免 Ctrl+I 同时开背包+英雄背包）
+    let mut hits: Vec<(&str, DialogKind)> = Vec::new();
     for (action, kind) in map {
-        let Some(b) = kb.bindings.iter().find(|b| b.action == action) else { continue };
-        if keys.just_pressed(b.key) {
-            mgr.toggle(kind);
+        if let Some(b) = kb.bindings.iter().find(|b| b.action == action) {
+            if b.matches(&keys) {
+                hits.push((action, kind));
+            }
         }
+    }
+    let has_mod = hits.iter().any(|(a, _)| {
+        kb.bindings
+            .iter()
+            .find(|b| b.action == *a)
+            .map(|b| b.require_ctrl == 1 || b.require_alt == 1 || b.require_shift == 1)
+            .unwrap_or(false)
+    });
+    for (action, kind) in hits {
+        if has_mod {
+            let mod_req = kb.bindings
+                .iter()
+                .find(|b| b.action == action)
+                .map(|b| b.require_ctrl == 1 || b.require_alt == 1 || b.require_shift == 1)
+                .unwrap_or(false);
+            if !mod_req {
+                continue;
+            }
+        }
+        mgr.toggle(kind);
     }
     // #1370：技能栏显隐（R）/ 腰带（Z）——非对话框，走显隐资源
     if let Some(b) = kb.bindings.iter().find(|b| b.action == "技能栏显隐") {
@@ -674,35 +754,32 @@ fn dialog_hotkey_system(
 /// 退出 Alt+Q / 下线 Alt+X / 腰带 1-8（使用药水，C# Belt1..8）
 fn secondary_hotkey_system(
     keys: Res<ButtonInput<KeyCode>>,
-    mut mgr: ResMut<DialogManager>,
+    kb: Res<KeyboardState>,
     net: Res<NetConnection>,
     belt: Res<crate::game::dialogs::potion_belt::PotionBeltState>,
 ) {
-    let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
-    let alt = keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight);
-    if ctrl && keys.just_pressed(KeyCode::KeyI) {
-        mgr.toggle(DialogKind::HeroInventory);
+    // #1386：坐骑切换（M，可重绑）→ @ride
+    if let Some(b) = kb.bindings.iter().find(|b| b.action == "坐骑切换") {
+        if b.matches(&keys) {
+            net.send_packet(&mir2_shared::packets::client::chat::Chat {
+                message: "@ride".to_string(),
+                linked_items: Vec::new(),
+            });
+            tracing::info!("🐴 请求骑乘/下马 (@ride)");
+        }
     }
-    if ctrl && keys.just_pressed(KeyCode::KeyC) {
-        mgr.toggle(DialogKind::HeroEquipment);
+    // #1386：退出（Alt+Q）/ 下线（Alt+X）走键位（修饰键可重绑）
+    if let Some(b) = kb.bindings.iter().find(|b| b.action == "退出") {
+        if b.matches(&keys) {
+            tracing::info!("🎮 退出游戏");
+            std::process::exit(0);
+        }
     }
-    if ctrl && keys.just_pressed(KeyCode::KeyS) {
-        mgr.toggle(DialogKind::HeroSkill);
-    }
-    if keys.just_pressed(KeyCode::KeyM) {
-        net.send_packet(&mir2_shared::packets::client::chat::Chat {
-            message: "@ride".to_string(),
-            linked_items: Vec::new(),
-        });
-        tracing::info!("🐴 M 请求骑乘/下马 (@ride)");
-    }
-    if alt && keys.just_pressed(KeyCode::KeyQ) {
-        tracing::info!("🎮 Alt+Q 退出游戏");
-        std::process::exit(0);
-    }
-    if alt && keys.just_pressed(KeyCode::KeyX) {
-        net.send_packet(&mir2_shared::packets::client::character::LogOut);
-        tracing::info!("🎮 Alt+X 下线");
+    if let Some(b) = kb.bindings.iter().find(|b| b.action == "下线") {
+        if b.matches(&keys) {
+            net.send_packet(&mir2_shared::packets::client::character::LogOut);
+            tracing::info!("🎮 下线");
+        }
     }
     // 腰带 1-8（C# Belt1..8：D1..D8 / NumPad1..8）
     let digits = [
@@ -740,17 +817,24 @@ mod tests {
     #[test]
     fn bindings_roundtrip_ini() {
         let defaults = default_bindings();
-        // 改两个键位（背包→KeyB、技能栏1→KeyQ）
+        // 改两个键位（背包→KeyB、英雄背包→KeyQ）并改修饰键
         let mut bindings = defaults.clone();
-        bindings[7].key = KeyCode::KeyB;
-        bindings[18].key = KeyCode::KeyQ;
+        let i_bag = bindings.iter().position(|b| b.action == "背包").unwrap();
+        bindings[i_bag].key = KeyCode::KeyB;
+        let i_hero = bindings.iter().position(|b| b.action == "英雄背包").unwrap();
+        bindings[i_hero].key = KeyCode::KeyQ;
+        bindings[i_hero].require_ctrl = 2;
         let ini = bindings_to_ini(&bindings);
         let loaded = bindings_from_ini(&ini, &defaults);
         assert_eq!(loaded.len(), defaults.len());
-        assert_eq!(loaded[7].key, KeyCode::KeyB);
-        assert_eq!(loaded[18].key, KeyCode::KeyQ);
+        assert_eq!(loaded[i_bag].key, KeyCode::KeyB);
+        assert_eq!(loaded[i_hero].key, KeyCode::KeyQ);
+        // #1386：修饰键持久化
+        assert_eq!(loaded[i_hero].require_ctrl, 2);
+        assert_eq!(loaded[i_hero].require_alt, 2);
         // 未改动的回退默认
         assert_eq!(loaded[0].key, KeyCode::KeyW);
+        assert_eq!(loaded[i_hero].require_ctrl, 2);
     }
 
     #[test]
