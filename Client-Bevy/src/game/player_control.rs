@@ -34,6 +34,9 @@ pub struct ControlState {
     /// 按住移动状态：目标格 + 模式（true=跑, false=走），用于持续追踪鼠标
     pub hold_target: Option<(i32, i32)>,
     pub hold_run: Option<bool>,
+    /// NPC 对话冷却（C# GameScene.NPCTime/NPCID：同 NPC 5 秒内忽略重复 CallNPC）
+    pub npc_id: Option<u32>,
+    pub last_npc_call: f32,
     /// 是否已进入“按住移动”模式（长按 0.2s 后才置位，区分单击寻路）
     pub hold_active: bool,
     /// 按下时刻（秒），用于区分单击/长按
@@ -52,6 +55,8 @@ impl Default for ControlState {
             hold_run: None,
             hold_active: false,
             hold_pressed_at: None,
+            npc_id: None,
+            last_npc_call: 0.0,
         }
     }
 }
@@ -88,6 +93,30 @@ fn over_main_dialog(screen: Vec2) -> bool {
 /// 聊天面板区域（左上）
 fn over_chat_panel(screen: Vec2) -> bool {
     screen.x <= 380.0 && screen.y >= 768.0 - 150.0 - 190.0
+}
+
+/// 打包 UI 锁定资源（数量框/确认框/选中物品），避免系统参数超 Bevy 16 上限
+#[derive(SystemParam)]
+struct UiLockState<'w> {
+    click: Res<'w, crate::game::dialogs::inventory::InvClickState>,
+    amount: Res<'w, crate::game::dialogs::amount_box::AmountBoxState>,
+    confirm: Res<'w, crate::game::dialogs::inventory::InvDropConfirm>,
+}
+
+impl UiLockState<'_> {
+    fn locked(&self) -> bool {
+        self.click.selected.is_some() || self.amount.visible || self.confirm.visible
+    }
+}
+
+/// 修饰键检测（C# CMain.Alt：采集）
+fn is_alt_down(keys: &ButtonInput<KeyCode>) -> bool {
+    keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight)
+}
+
+/// 修饰键检测（C# CMain.Shift：强制攻击/远程攻击）
+fn is_shift_down(keys: &ButtonInput<KeyCode>) -> bool {
+    keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight)
 }
 
 
@@ -129,6 +158,13 @@ fn right_click_move_system(
     windows: Query<&Window>,
     camera: Query<&Transform, (With<Camera2d>, Without<UiButton>, Without<crate::ui::sprite_ui::UiEntity>)>,
     players: Query<(Entity, &Transform, &mut ActorAnim), (With<LocalPlayer>, With<NetObjectId>)>,
+    objects: Query<
+        (&NetObjectId, &Transform),
+        (
+            Or<(With<Npc>, With<Monster>, With<crate::actor::PlayerName>)>,
+            Without<LocalPlayer>,
+        ),
+    >,
     buttons: Query<&UiButton>,
     hud: Res<HudState>,
 ) {
@@ -148,6 +184,19 @@ fn right_click_move_system(
     }
     let Some(map) = &game_data.map else { return };
     let world = screen_to_world(cursor, cam_tf, window);
+    // C# OnMouseClick Right：仅当 MouseObject == null（空地）才寻路移动；
+    // 点到怪物/NPC/玩家不移动（玩家右键由 player_menu 弹菜单）
+    let Some(cursor_logical) = window.cursor_position() else { return };
+    let world_logical = screen_to_world(cursor_logical, cam_tf, window);
+    let hit_object = objects.iter().any(|(_, tf)| {
+        let d1 = Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length();
+        let d2 = Vec2::new(tf.translation.x - world_logical.x, tf.translation.y - world_logical.y).length();
+        d1.min(d2) < 60.0
+    });
+    if hit_object {
+        tracing::debug!("🖱️ 右键对象 → 不移动（C# 仅空地右键寻路）");
+        return;
+    }
     let target_tile = world_to_tile(world.x, world.y);
     let Ok((pe, ptf, _)) = players.single() else { return };
     let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
@@ -179,15 +228,16 @@ fn left_click_interact_system(
     net: Res<NetConnection>,
     game_data: Res<GameData>,
     mouse: Res<ButtonInput<MouseButton>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
     windows: Query<&Window>,
     camera: Query<&Transform, (With<Camera2d>, Without<UiButton>, Without<crate::ui::sprite_ui::UiEntity>)>,
     players: Query<(Entity, &Transform, &mut ActorAnim), (With<LocalPlayer>, With<NetObjectId>)>,
-    actors: Query<(&NetObjectId, &Transform, Has<Npc>)>,
+    actors: Query<(&NetObjectId, &Transform, Has<Npc>), Without<LocalPlayer>>,
+    remote_players: Query<&NetObjectId, (With<crate::actor::Player>, Without<LocalPlayer>)>,
     items: Query<(&NetObjectId, &Transform), (With<GroundItem>, Without<LocalPlayer>)>,
     buttons: Query<&UiButton>,
-    click: Res<crate::game::dialogs::inventory::InvClickState>,
-    amount: Res<crate::game::dialogs::amount_box::AmountBoxState>,
-    confirm: Res<crate::game::dialogs::inventory::InvDropConfirm>,
+    ui: UiLockState,
     hud: Res<HudState>,
 ) {
     if hud.dead {
@@ -205,9 +255,7 @@ fn left_click_interact_system(
     let world_logical = screen_to_world(cursor_logical, cam_tf, window);
     // （选中物品/数量框/确认框打开时不处理世界点击——丢弃流程由背包系统接管）
     if !mouse.just_pressed(MouseButton::Left)
-        || click.selected.is_some()
-        || amount.visible
-        || confirm.visible
+        || ui.locked()
         || over_ui
         || over_main_dialog(cursor_logical)
         || over_chat_panel(cursor_logical)
@@ -215,6 +263,21 @@ fn left_click_interact_system(
         return;
     }
     tracing::debug!("🖱️ 左键点击 screen=({},{}) world=({:.0},{:.0})", cursor.x, cursor.y, world.x, world.y);
+    let Ok((pe, ptf, anim)) = players.single() else { return };
+    let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
+    // C# OnMouseDown：Alt+左键 → Harvest（采集/挖矿，方向 = 玩家→鼠标方向）
+    if is_alt_down(&keys) {
+        let target_tile = world_to_tile(world.x, world.y);
+        let dx = (target_tile.0 - from_tile.0).signum();
+        let dy = (target_tile.1 - from_tile.1).signum();
+        let direction = direction_from_delta(dx, dy).unwrap_or(
+            mir2_shared::enums::MirDirection::try_from(anim.direction)
+                .unwrap_or(mir2_shared::enums::MirDirection::Up),
+        );
+        net.send_packet(&mir2_shared::packets::client::combat::Harvest { direction });
+        tracing::info!("⛏️ Alt+左键采集 dir={:?} target=({},{})", direction, target_tile.0, target_tile.1);
+        return;
+    }
     let mut best: Option<(u32, f32)> = None;
     for (id, tf, app) in &actors {
         let d1 = Vec2::new(tf.translation.x - world.x, tf.translation.y - world.y).length();
@@ -238,7 +301,6 @@ fn left_click_interact_system(
     if let Some((item_id, item_d)) = best_item {
         let actor_d = best.map(|(_, d)| d);
         if actor_d.map(|d| item_d < d).unwrap_or(true) {
-            let Ok((pe, ptf, _)) = players.single() else { return };
             let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
             let item_tile = items
                 .iter()
@@ -281,12 +343,31 @@ fn left_click_interact_system(
             .find(|(id, _, _)| id.0 == object_id)
             .map(|(_, _, is_npc)| is_npc)
             .unwrap_or(false);
+        let is_player = remote_players.iter().any(|id| id.0 == object_id);
         if is_npc {
+            // C# OnMouseClick Left：CallNPC，同 NPC 5 秒冷却（GameScene.NPCTime/NPCID）
+            let now = time.elapsed_secs();
+            if !npc_call_allowed(control.npc_id, control.last_npc_call, now, object_id) {
+                tracing::debug!("🧙 CallNPC {} 冷却中", object_id);
+                return;
+            }
+            control.npc_id = Some(object_id);
+            control.last_npc_call = now;
             net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
                 object_id,
                 key: "[@Main]".to_string(),
             });
             tracing::info!("🧙 CallNPC {}", object_id);
+        } else if is_player {
+            // C# OnMouseDown Left：点击玩家 break（不攻击）；Shift+左键才攻击（PvP）
+            if is_shift_down(&keys) {
+                control.attack_target = Some(object_id);
+                control.last_attack = 0.0;
+                tracing::info!("⚔️ [Shift] 攻击玩家 {}", object_id);
+            } else {
+                tracing::debug!("🖱️ 点击玩家 {}（C# break，不攻击）", object_id);
+                control.attack_target = None;
+            }
         } else {
             control.attack_target = Some(object_id);
             control.last_attack = 0.0; // 立即攻击
@@ -577,3 +658,35 @@ fn key_pickup_system(
         }
     }
 }
+/// C# GameScene.NPCTime/NPCID：同 NPC 5 秒内忽略重复 CallNPC
+fn npc_call_allowed(prev_id: Option<u32>, last_call: f32, now: f32, object_id: u32) -> bool {
+    !(prev_id == Some(object_id) && now - last_call < 5.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_npc_call_cooldown() {
+        assert!(npc_call_allowed(None, 0.0, 10.0, 1));
+        assert!(npc_call_allowed(Some(1), 10.0, 15.0, 1)); // 正好 5 秒 → 允许
+        assert!(!npc_call_allowed(Some(1), 10.0, 14.9, 1)); // 5 秒内 → 忽略
+        assert!(npc_call_allowed(Some(1), 10.0, 11.0, 2)); // 不同 NPC → 允许
+    }
+
+    #[test]
+    fn test_modifier_helpers() {
+        let mut keys = ButtonInput::<KeyCode>::default();
+        assert!(!is_alt_down(&keys));
+        assert!(!is_shift_down(&keys));
+        keys.press(KeyCode::AltLeft);
+        assert!(is_alt_down(&keys));
+        assert!(!is_shift_down(&keys));
+        keys.press(KeyCode::ShiftRight);
+        assert!(is_shift_down(&keys));
+    }
+}
+
+
+
