@@ -3763,43 +3763,49 @@ impl WorldActor {
                         self.npc_delayed_actions.remove(&session_id);
                         debug!("NPC BREAKTIMERECALL: session={}", session_id);
                     }
-                    // GROUPTELEPORT：组队传送（简化：传送玩家 + 同图组员到目标点）
+                    // GROUPTELEPORT <地图名> <实例ID> <x> <y>：组队传送（C# ActionType.GroupTeleport ~3862；
+                    // 传送所有组员到目标地图，x/y=0 时随机落点）
                     "GROUPTELEPORT" => {
-                        let tx = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(npc.x);
-                        let ty = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(npc.y);
+                        let map_name = parts.next().unwrap_or("");
+                        let _instance_id = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(1);
+                        let tx = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let ty = parts.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                        let Some(mi) = self.map_infos.values()
+                            .find(|m| m.file_name.eq_ignore_ascii_case(map_name))
+                            .cloned()
+                        else {
+                            warn!("NPC GROUPTELEPORT: map '{}' not found", map_name);
+                            continue;
+                        };
+                        let map_index = mi.index as u16;
+                        // 收集所有组员（C# GroupMembers：含自己，不限同图）
+                        let mut group_sessions = vec![session_id];
                         if let Some(record) = self.players.get(&session_id) {
                             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
-                                let gid = state.group_id;
-                                let map_idx = state.map_index;
-                                // 传送自身
-                                let _ = record.actor_ref.ask(crate::actors::player::SetPlayerPosition {
-                                    x: tx, y: ty, direction: state.direction,
-                                    map_index: None, is_mounted: None,
-                                }).await;
-                                // 传送组员
-                                if let Some(gid) = gid {
-                                    // 收集同地图的组员
-                                    let mut group_sessions = Vec::new();
+                                if let Some(gid) = state.group_id {
                                     for (sid, r) in &self.players {
                                         if *sid == session_id { continue; }
                                         if let Ok(Some(st)) = r.actor_ref.ask(GetPlayerState).await {
-                                            if st.group_id == Some(gid) && st.map_index == map_idx {
-                                                group_sessions.push(*sid);
-                                            }
-                                        }
-                                    }
-                                    for sid in group_sessions {
-                                        if let Some(r) = self.players.get(&sid) {
-                                            let _ = r.actor_ref.ask(crate::actors::player::SetPlayerPosition {
-                                                x: tx, y: ty, direction: state.direction,
-                                                map_index: None, is_mounted: None,
-                                            }).await;
+                                            if st.group_id == Some(gid) { group_sessions.push(*sid); }
                                         }
                                     }
                                 }
                             }
                         }
-                        debug!("NPC GROUPTELEPORT to ({},{})", tx, ty);
+                        // x/y 任一为 0 → 随机落点（C# TeleportRandom(200,0,map)，按地图宽高）
+                        let (fx, fy) = if tx == 0 || ty == 0 {
+                            let (w, h) = match self.get_or_load_map(&mi.file_name, map_index) {
+                                Some(m) => (m.width as i32, m.height as i32),
+                                None => (200, 200),
+                            };
+                            (fastrand::i32(0..w.max(1)), fastrand::i32(0..h.max(1)))
+                        } else {
+                            (tx, ty)
+                        };
+                        for sid in &group_sessions {
+                            crate::actors::world::npc_script::teleport_player(self, *sid, map_index, fx, fy).await;
+                        }
+                        debug!("NPC GROUPTELEPORT: {} members to {} ({},{})", group_sessions.len(), map_name, fx, fy);
                     }
                     // ===== NPC 邮件指令（对齐 C# NPCSegment.cs ComposeMail/AddMailGold/AddMailItem/SendMail）=====
                     // 流程：COMPOSEMAIL 创建邮件 → ADDMAILGOLD/ADDMAILITEM 累积附件 → SENDMAIL 发送给收件人
