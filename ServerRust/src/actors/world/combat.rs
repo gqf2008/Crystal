@@ -119,6 +119,11 @@ fn player_attack_speed_ms(attack_speed_stat: i32, level: u16) -> i64 {
     speed.max(550) as i64
 }
 
+/// #1515：C# TurnUndead 秒杀 threshold = ((Lv+1)<<3) + (Level - target.Level + 15)，clamp 0..100
+fn turn_undead_threshold(player_level: u16, mon_level: i32, spell_level: u8) -> i32 {
+    ((spell_level as i32 + 1) * 8 + player_level as i32 - mon_level + 15).clamp(0, 100)
+}
+
 /// #1269：C# CanAttack——麻痹/冰冻/眩晕中禁止攻击（Paralysis/LRParalysis/Frozen/Dazed）
 fn attack_disabled_by_poison(poison_list: &[crate::combat::poison::Poison]) -> bool {
     use mir2_shared::enums::PoisonType;
@@ -343,11 +348,12 @@ impl Message<WorldAttackRequest> for WorldActor {
                     }
 
                     // ===== 战士近战技能触发 =====
-                    // Slaying（攻杀）：C# Envir.cs 无倍率配置 → GetDamage = base×1.0（无额外伤害，仅技能经验）
+                    // #1517：Slaying（攻杀）——C# 无倍率配置 → GetDamage = base×1.0（主动命中无额外伤害）；
+                    // 伤害来源是 RefreshSkills 被动 MaxDC +[5,6,7,8][Lv]（effective_max_attack 已计入）；
+                    // 触发：跑动时 Random(12) <= Lv 武装，下一次攻击消费（C# HumanObject.cs:2956/3148）
                     let mut slaying_bonus = 0i32;
                     if let Some(lv) = find_attack_skill(&state.magics, SPELL_SLAYING).map(|m| m.level as i32) {
-                        // 概率：level/5（C# 攻杀触发率与等级相关）
-                        if fastrand::i32(0..5) < lv as i32 {
+                        if fastrand::i32(0..12) <= lv {
                             debug!("Player {} Slaying triggered (level {})", result.object_id, lv);
                         }
                     }
@@ -3795,29 +3801,80 @@ impl Message<MagicRequest> for WorldActor {
             }
             // ===== 特殊/辅助类法术（任务：补齐剩余主动法术）=====
             // --- 战士系 ---
-            // LionRoar：嘲讽范围内怪物（吸引仇恨，对齐 C# WarriorObject.LionRoar）
-            // 范围 = Range（默认 5 格），命中怪物 provoked + target_session=施法者
-            SPELL_LION_ROAR | SPELL_BATTLE_CRY => {
-                let range = spell_range.max(3);
+            // LionRoar：5×5 区域怪物施加 LR 麻痹（C# Map.cs:1398，非嘲讽）
+            // 条件：IsAttackTarget && 施法者 Level+3 >= 怪物 Level；Duration = Lv+2 秒
+            SPELL_LION_ROAR => {
                 let hit_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(_, m)| {
-                        let dist = (m.x - state.x).abs() + (m.y - state.y).abs();
-                        dist <= range && m.hp > 0 && m.master_session.is_none()
+                        (m.x - target_x).abs() <= 2
+                            && (m.y - target_y).abs() <= 2
+                            && m.hp > 0
+                            && m.master_session.is_none()
                     })
                     .map(|(id, _)| *id)
                     .collect();
-                let count = hit_ids.len();
+                let mut paralyzed = 0u32;
                 for mid in hit_ids {
+                    let mon_level = self.monsters.get(&mid)
+                        .and_then(|m| self.monster_infos.get(&m.monster_index))
+                        .map(|i| i.level).unwrap_or(0);
+                    // C#：player.Level + 3 < target.Level 跳过
+                    if state.level as i32 + 3 < mon_level { continue; }
+                    if let Some(monster) = self.monsters.get_mut(&mid) {
+                        crate::combat::poison::apply_poison(
+                            &mut monster.poison_list,
+                            crate::combat::poison::Poison::new(
+                                mir2_shared::enums::PoisonType::LR_PARALYSIS,
+                                (spell_level as u32 + 2).max(1),
+                                0,
+                                1000,
+                            ),
+                        );
+                        monster.provoked = true;
+                        paralyzed += 1;
+                    }
+                }
+                debug!("Magic: {} casts LionRoar (LRParalysis {} monsters)", state.name, paralyzed);
+            }
+            // BattleCry：5×5 区域概率嘲讽怪物（C# Map.cs:2250，非麻痹）
+            // 共享一次 Random(100)，threshold 按 Lv：0→90 / 1→70 / 2→50 / 3→30（10/30/50/70% 成功）
+            // 跳过 CoolEye==100 怪物；命中设 target=施法者
+            SPELL_BATTLE_CRY => {
+                let threshold = match spell_level {
+                    0 => 90,
+                    1 => 70,
+                    2 => 50,
+                    3 => 30,
+                    _ => 100,
+                };
+                let random_value = fastrand::i32(0..100);
+                let hit_ids: Vec<u32> = self.monsters.iter()
+                    .filter(|(_, m)| {
+                        (m.x - target_x).abs() <= 2
+                            && (m.y - target_y).abs() <= 2
+                            && m.hp > 0
+                            && m.master_session.is_none()
+                    })
+                    .map(|(id, _)| *id)
+                    .collect();
+                let mut taunted = 0u32;
+                for mid in hit_ids {
+                    // C#：randomValue > threshold 跳过（共享同一次随机）
+                    if random_value > threshold { break; }
+                    // C#：CoolEye == 100 跳过（对真视怪物无效）
+                    let cool_eye = self.monsters.get(&mid)
+                        .and_then(|m| self.monster_infos.get(&m.monster_index))
+                        .map(|i| i.cool_eye == 100)
+                        .unwrap_or(false);
+                    if cool_eye { continue; }
                     if let Some(monster) = self.monsters.get_mut(&mid) {
                         monster.provoked = true;
                         monster.target_session = Some(msg.session_id);
-                        // 嘲讽 buff（简化：标记仇恨，无数值）
-                        let buff = crate::combat::buff::BuffInstance::new(
-                            crate::combat::buff::BuffType::Taunt, 300, 5);
-                        let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
+                        taunted += 1;
                     }
                 }
-                debug!("Magic: {} casts LionRoar (taunted {} monsters)", state.name, count);
+                debug!("Magic: {} casts BattleCry (taunted {} monsters, roll={} threshold={})",
+                       state.name, taunted, random_value, threshold);
             }
             // ProtectionField：防护领域（C# HumanObject.cs ProtectionField）——
             // 仅自身 AC 提升：MaxAC/MinAC += round(MaxAC*(0.2+0.03Lv))，时长 45+15Lv 秒
@@ -3843,8 +3900,8 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} arms CounterAttack (7s window)", state.name);
             }
             // --- 法师系 ---
-            // TurnUndead：秒杀低级亡灵（对齐 C# WizardObject.TurnUndead）
-            // 命中目标格子亡灵怪物，按等级差概率秒杀（hp=0）
+            // TurnUndead：秒杀低级亡灵（对齐 C# WizardObject.TurnUndead，HumanObject.cs:4216）
+            // 双段判定：先概率嘲讽，未嘲讽再按 threshold 秒杀
             SPELL_TURN_UNDEAD => {
                 // 目标格子的亡灵怪物
                 let hit_ids: Vec<u32> = self.monsters.iter()
@@ -3860,17 +3917,30 @@ impl Message<MagicRequest> for WorldActor {
                     let mon_level = self.monsters.get(&mid)
                         .and_then(|m| self.monster_infos.get(&m.monster_index))
                         .map(|i| i.level).unwrap_or(0);
-                    // 等级差：玩家等级越高，秒杀概率越大
-                    // C# 概率近似：基础 30% + 等级差*10%，封顶 90%
-                    let level_diff = (state.level as i32 - mon_level).max(0);
-                    let chance = (30 + level_diff * 10).min(90);
-                    if fastrand::i32(0..100) < chance {
+                    // #1515：C# 第一步——Random(2) + Level - 1 <= target.Level 则嘲讽（不击杀）
+                    if fastrand::i32(0..2) + state.level as i32 - 1 <= mon_level {
                         if let Some(monster) = self.monsters.get_mut(&mid) {
-                            monster.hp = 0;
                             monster.provoked = true;
                             monster.target_session = Some(msg.session_id);
-                            killed += 1;
                         }
+                        continue;
+                    }
+                    // C# 第二步——dif = Level - target.Level + 15；threshold = ((Lv+1)<<3) + dif
+                    let threshold = turn_undead_threshold(state.level, mon_level, spell_level);
+                    if fastrand::i32(0..100) >= threshold {
+                        // Random(100) >= threshold → 嘲讽目标（不击杀）
+                        if let Some(monster) = self.monsters.get_mut(&mid) {
+                            monster.provoked = true;
+                            monster.target_session = Some(msg.session_id);
+                        }
+                        continue;
+                    }
+                    // 否则秒杀
+                    if let Some(monster) = self.monsters.get_mut(&mid) {
+                        monster.hp = 0;
+                        monster.provoked = true;
+                        monster.target_session = Some(msg.session_id);
+                        killed += 1;
                     }
                 }
                 debug!("Magic: {} casts TurnUndead (killed {} undead)", state.name, killed);
@@ -4861,7 +4931,7 @@ mod spell_geometry_tests {
 mod tests {
     use super::{
         attack_disabled_by_poison, cast_disabled_by_poison, find_attack_skill,
-        player_attack_speed_ms, should_grant_cast_exp, ATTACK_SKILL_SPELLS,
+        player_attack_speed_ms, should_grant_cast_exp, turn_undead_threshold, ATTACK_SKILL_SPELLS,
         DAMAGE_DURA_ARMOR_SLOTS, SPELL_CROSS_HALFMOON, SPELL_FIREBALL, SPELL_HALFMOON,
         SPELL_METEOR_SHOWER, SPELL_SLAYING,
     };
@@ -4938,6 +5008,18 @@ mod tests {
         assert_eq!(player_attack_speed_ms(5, 20), 820);
         // 极端高攻速：仍为 550 下限
         assert_eq!(player_attack_speed_ms(100, 1), 550);
+    }
+
+    #[test]
+    fn test_turn_undead_threshold() {
+        // Lv0 施法者 vs 同级怪：8 + 15 = 23
+        assert_eq!(turn_undead_threshold(30, 30, 0), 23);
+        // 高等级玩家更容易秒杀：Lv3 32 + (50-30+15)=35 → 67
+        assert_eq!(turn_undead_threshold(50, 30, 3), 67);
+        // 远低于怪物等级 → clamp 0
+        assert_eq!(turn_undead_threshold(10, 100, 0), 0);
+        // 远超怪物等级 → clamp 100
+        assert_eq!(turn_undead_threshold(90, 1, 3), 100);
     }
 
     #[test]

@@ -377,18 +377,19 @@ impl PlayerState {
         (base + buff_bonus).max(0)
     }
 
-    /// 计算包含装备+Buff加成的最大攻击力（#1508：Curse 按 C# MaxDCRatePercent 降低输出）
+    /// 计算包含装备+Buff加成的最大攻击力（#1508：Curse 按 C# MaxDCRatePercent 降低输出；#1517：Slaying 被动 MaxDC）
     pub fn effective_max_attack(&self) -> i32 {
         let base = self.max_attack + self.bonus_max_attack;
         let buff_bonus = crate::combat::buff::get_stat_bonus(
             &self.buffs,
             &crate::combat::buff::BuffType::AttackBoost { bonus: 0 },
         );
+        let slaying_bonus = slaying_max_dc(&self.magics);
         let curse = crate::combat::buff::get_stat_bonus(
             &self.buffs,
             &crate::combat::buff::BuffType::Curse { percent: 0 },
         );
-        ((base + buff_bonus) * (100 - curse) / 100).max(self.effective_min_attack())
+        ((base + buff_bonus + slaying_bonus) * (100 - curse) / 100).max(self.effective_min_attack())
     }
 
     pub fn effective_min_mc(&self) -> i32 {
@@ -479,7 +480,7 @@ impl PlayerState {
             min_mac: self.effective_min_mac(),
             max_mac: self.effective_max_mac(),
             agility: self.agility + get_stat_bonus(&self.buffs, &BuffType::AgilityBoost { bonus: 0 }),
-            accuracy: self.accuracy + spirit_sword_accuracy(&self.magics) + fencing_accuracy(&self.magics),
+            accuracy: self.accuracy + spirit_sword_accuracy(&self.magics) + fencing_accuracy(&self.magics) + slaying_accuracy(&self.magics),
             luck: self.luck,
             critical_rate: self.critical_rate + get_stat_bonus(&self.buffs, &BuffType::CriticalRateBoost { bonus: 0 }),
             critical_damage: self.critical_damage,
@@ -520,6 +521,25 @@ pub fn spirit_sword_accuracy(magics: &[PlayerMagic]) -> i32 {
         .iter()
         .find(|m| m.spell == (mir2_shared::enums::Spell::SpiritSword as i32 - 3))
         .map(|m| LV_PLUS[(m.level as usize).min(3)])
+        .unwrap_or(0)
+}
+
+/// #1517：战士 Slaying 被动——MaxDC + [5,6,7,8][Lv]（C# HumanObject.cs:2297 slayingLvPlus）
+pub fn slaying_max_dc(magics: &[PlayerMagic]) -> i32 {
+    const LV_PLUS: [i32; 4] = [5, 6, 7, 8];
+    magics
+        .iter()
+        .find(|m| m.spell == (mir2_shared::enums::Spell::Slaying as i32 - 3))
+        .map(|m| LV_PLUS[(m.level as usize).min(3)])
+        .unwrap_or(0)
+}
+
+/// #1517：战士 Slaying 被动——Accuracy + Lv（C# HumanObject.cs:2297）
+pub fn slaying_accuracy(magics: &[PlayerMagic]) -> i32 {
+    magics
+        .iter()
+        .find(|m| m.spell == (mir2_shared::enums::Spell::Slaying as i32 - 3))
+        .map(|m| m.level as i32)
         .unwrap_or(0)
 }
 
