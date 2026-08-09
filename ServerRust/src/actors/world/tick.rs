@@ -3034,6 +3034,7 @@ impl WorldActor {
             match c.target {
                 RangeTarget::Monster(monster_id) => {
                     // 目标怪物已消失/已死 → 箭矢落空（C# CompleteAttack 目标为空则无结算）
+                    let mut struck_dir = 0u8;
                     let hit_damage = {
                         let Some(monster) = self.monsters.get_mut(&monster_id) else {
                             debug!("RangeAttack resolve: monster {} gone, arrow whiffs", monster_id);
@@ -3076,6 +3077,11 @@ impl WorldActor {
                         for p in &attack_result.applied_poisons {
                             crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
                         }
+                        // #1582：C# MonsterObject.Attacked——受击时转向攻击者（PointDirection）
+                        monster.direction = crate::actors::world::ai::direction_towards(
+                            monster.x, monster.y, c.attacker_x, c.attacker_y,
+                        );
+                        struck_dir = monster.direction;
                         debug!("RangeAttack resolve: {} -> monster {} for {} damage (crit={})",
                                c.attacker_object_id, monster_id, damage, attack_result.is_critical);
                         damage
@@ -3102,7 +3108,7 @@ impl WorldActor {
                     struck_body.extend_from_slice(&c.attacker_object_id.to_le_bytes());
                     struck_body.extend_from_slice(&(c.target_x as u32).to_le_bytes());
                     struck_body.extend_from_slice(&(c.target_y as u32).to_le_bytes());
-                    struck_body.push(c.direction);
+                    struck_body.push(struck_dir);
                     let struck_packet = build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
 
