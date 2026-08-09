@@ -4297,11 +4297,21 @@ impl Message<MagicRequest> for WorldActor {
                         // C# 成功率：Random(4-Lv) == 0（Lv0=25% → Lv3=100%）
                         let n = (4 - spell_level as i32).max(1);
                         if fastrand::i32(0..n) == 0 {
-                            if let Some(monster) = self.monsters.get_mut(&mid) {
-                                monster.master_session = Some(msg.session_id);
-                                monster.target_session = None;
-                                monster.provoked = false;
-                                monster.recall_at_tick = 0; // C# 驯服宠物不消失
+                            // #1410：捕获驯服后的怪物名（随后广播 ObjectName；避免借用冲突）
+                            let tamed_name = {
+                                if let Some(monster) = self.monsters.get_mut(&mid) {
+                                    monster.master_session = Some(msg.session_id);
+                                    monster.target_session = None;
+                                    monster.provoked = false;
+                                    monster.recall_at_tick = 0; // C# 驯服宠物不消失
+                                    Some(monster.name.clone())
+                                } else {
+                                    None
+                                }
+                            };
+                            if let Some(name) = tamed_name {
+                                // C# HumanObject.cs:4101：驯服成功 Broadcast(S.ObjectName) 刷新名字显示
+                                self.broadcast_object_name(mid, &name).await;
                                 debug!("Magic: {} casts ElectricShock (tamed monster {})", state.name, mid);
                                 send_system_message(&self.gate_ref, msg.session_id, "驯服成功！");
                             }
