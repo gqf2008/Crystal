@@ -2814,6 +2814,14 @@ impl Message<MagicRequest> for WorldActor {
             // 伤害基于 DC（物理攻击），用 magic_stat（弓箭手类 = effective_max_attack）
             SPELL_STRAIGHT_SHOT | SPELL_DOUBLE_SHOT | SPELL_BINDING_SHOT | SPELL_NAPALM_SHOT | SPELL_CAT_TONGUE
             | SPELL_VAMPIRE_SHOT | SPELL_POISON_SHOT | SPELL_CRIPPLE_SHOT | SPELL_ELEMENTAL_SHOT => {
+                // #1483：C# SpecialArrowShot——VampireShot/PoisonShot 未武装时 40% 概率武装
+                if (msg.spell == SPELL_VAMPIRE_SHOT || msg.spell == SPELL_POISON_SHOT) && state.special_shot_armed == 0 {
+                    if fastrand::i32(0..20) >= 8 {
+                        let armed = if msg.spell == SPELL_VAMPIRE_SHOT { 1 } else { 2 };
+                        let _ = record.actor_ref.ask(crate::actors::player::SetSpecialShotArmed { armed }).await;
+                        debug!("Player {} armed {} special shot (40%)", state.name, if armed == 1 { "Vampire" } else { "Poison" });
+                    }
+                }
                 // 弓箭手弹道伤害：DC × 法术倍率（power_base 近似），最少 1
                 let mut raw_damage = (magic_stat + (power as i32) / 2).max(1);
                 // ElementalShot（C# HumanObject.ElementalShot）：无元素时施法凝聚第一档并取消射击；

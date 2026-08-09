@@ -272,6 +272,8 @@ pub struct PlayerState {
     /// 是否为 GM（对应 C# IsGM / AccountInfo.AdminAccount）
     pub is_gm: bool,
     pub gm_never_die: bool,
+    /// #1483：弓手特殊箭武装（0=无 1=Vampire 2=Poison；C# VampireShot/PoisonShot buff）
+    pub special_shot_armed: u8,
     /// 是否已购买仓库扩容（C# AccountInfo.HasExpandedStorage；登录时从 accounts 表加载）
     pub has_expanded_storage: bool,
     /// 仓库扩容到期时间（unix 秒；0 = 无，C# AccountInfo.ExpandedStorageExpiryDate）
@@ -675,6 +677,7 @@ impl PlayerActor {
                 allow_lover_recall: false,
                 is_gm: false,
                 gm_never_die: false, // #1480：GM 无敌模式（C# GMNeverDie）
+                special_shot_armed: 0, // #1483：弓手特殊箭武装（0=无 1=Vampire 2=Poison）
                 has_expanded_storage: false,
                 expanded_storage_expiry_date: 0,
                 has_storage_password: false,
@@ -1763,6 +1766,19 @@ impl Message<SetElements> for PlayerActor {
     ) -> Self::Reply {
         self.state.elements_level = msg.level;
         self.state.has_elemental = msg.has_elemental;
+    }
+}
+
+/// #1483：设置弓手特殊箭武装（0=无 1=Vampire 2=Poison；C# VampireShot/PoisonShot buff）
+pub struct SetSpecialShotArmed {
+    pub armed: u8,
+}
+
+impl Message<SetSpecialShotArmed> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetSpecialShotArmed, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.special_shot_armed = msg.armed.min(2);
     }
 }
 
@@ -5668,6 +5684,7 @@ mod tests {
             allow_lover_recall: false,
             is_gm: false,
             gm_never_die: false, // #1480：GM 无敌模式（C# GMNeverDie）
+            special_shot_armed: 0, // #1483：弓手特殊箭武装（0=无 1=Vampire 2=Poison）
             has_expanded_storage: false,
             expanded_storage_expiry_date: 0,
             has_storage_password: false,
