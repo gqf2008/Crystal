@@ -138,6 +138,8 @@ pub struct AiCtx<'a> {
     pub players: &'a [PlayerSnap],
     /// 怪物快照（全图，供 Boss 互查）
     pub monsters: &'a [MonsterSnap],
+    /// #1396：怪物 index → 名称映射（FloatingRock 克隆目标解析用）
+    pub monster_name_by_index: &'a std::collections::HashMap<i32, String>,
     /// 输出：移动 (oid, x, y, dir)
     pub out_moves: &'a mut Vec<(u32, i32, i32, u8)>,
     /// 输出：攻击动作
