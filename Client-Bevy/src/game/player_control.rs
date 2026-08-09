@@ -183,7 +183,7 @@ fn autorun_toggle_system(
 /// 右键：寻路移动（原版 NewMove + PathFinder.FindPath）
 fn right_click_move_system(
     mut commands: Commands,
-    control: Res<ControlState>,
+    mut control: ResMut<ControlState>,
     game_data: Res<GameData>,
     mut libs: ResMut<GameLibraries>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -246,6 +246,9 @@ fn right_click_move_system(
                 step_origin: None,
                 turn_acc: 0.0,
             });
+            // #1590：C# 右键空地寻路取消当前目标（TargetObject = null）——停止自动攻击/拾取
+            control.attack_target = None;
+            control.pickup_target = None;
             tracing::info!("🚶 寻路 {} -> {}（{} 格）", from_tile.0, from_tile.1, len);
         }
     } else {
