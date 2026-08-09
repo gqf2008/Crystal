@@ -13,6 +13,8 @@ use bevy::prelude::*;
 use crate::game::dialogs::amount_box::{AmountBoxResult, AmountBoxState};
 use crate::game::dialogs::character;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
+use crate::game::chat::{ChatChannel, ChatState};
+use crate::game::sound::{play_sound_cached, SoundBank, SoundCache};
 use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
@@ -52,6 +54,10 @@ pub struct InvItem {
     pub required_amount: u8,
     /// 需求职业位掩码（C# RequiredClass：战士1/法师2/道士4/刺客8/弓16）
     pub required_class: u8,
+    /// 需求性别位掩码（C# RequiredGender：Male=1 Female=2，#1544）
+    pub required_gender: u8,
+    /// 灵魂绑定（C# UserItem.SoulBoundId：-1 未绑定；Rust 哨兵 1=已绑定本人，#1544）
+    pub soul_bound_id: i32,
     /// 重量（C# ItemInfo.Weight）
     pub weight: u16,
     /// 价格（C# ItemInfo.Price）
@@ -148,6 +154,7 @@ impl InvItem {
                 | Ok(ItemType::Fish)
         )
     }
+
 }
 
 /// 背包最大格数（C# Grid 8x10=80，扩容上限；超出部分不渲染）
@@ -172,12 +179,24 @@ pub struct InventoryState {
 impl InventoryState {
     /// 按服务端 ResizeInventory 调整格数（C# Array.Resize：截断/补空，上限 MAX_INV_SLOTS）
     pub fn resize(&mut self, size: usize) {
+
         let size = size.min(MAX_INV_SLOTS);
         if size < self.items.len() {
             self.items.truncate(size);
         } else {
             self.items.resize(size, None);
         }
+    }
+
+    /// #1544：RefreshStats 重量（C# User.RefreshStats 从物品重量重算；max_weight 由服务端 bag_weight 提供）
+    pub fn refresh_weight(&mut self) {
+        let w: u32 = self
+            .items
+            .iter()
+            .flatten()
+            .map(|it| it.weight as u32 * it.count as u32)
+            .sum();
+        self.weight = w;
     }
 }
 
@@ -212,6 +231,7 @@ impl Plugin for InventoryDialogPlugin {
         app.init_resource::<InvClickState>();
         app.init_resource::<InvDropConfirm>();
         app.init_resource::<InvPendingAmount>();
+        app.init_resource::<ItemUseFeedback>();
         app.add_systems(OnEnter(AppState::Game), spawn_inventory_dialog);
         app.add_systems(OnEnter(AppState::Game), spawn_inv_confirm);
         app.add_systems(OnExit(AppState::Game), cleanup_dialogs);
@@ -222,11 +242,13 @@ impl Plugin for InventoryDialogPlugin {
                 inventory_ui_system,
                 inv_selection_system,
                 inv_tooltip_system,
+                inv_socket_open_system,
                 inv_item_action_system,
                 inv_confirm_system,
                 inv_add_del_buttons_system,
                 quest_inventory_events,
                 ui_button_system,
+                inv_sound_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -880,11 +902,239 @@ fn inv_selection_system(
 
 
 
-fn use_or_equip(item: &InvItem, net: &NetConnection, hud: &HudState) {
+/// #1544：消费物品使用反馈队列（PlayItemSound 音效 + CanUseItem 拒绝提示）
+fn inv_sound_system(
+    mut commands: Commands,
+    mut assets: ResMut<Assets<AudioSource>>,
+    bank: Res<SoundBank>,
+    mut cache: ResMut<SoundCache>,
+    mut feedback: ResMut<ItemUseFeedback>,
+    mut chat: ResMut<ChatState>,
+) {
+    let sounds = std::mem::take(&mut feedback.sounds);
+    for id in sounds {
+        play_sound_cached(&mut commands, &mut assets, &bank, &mut cache, id);
+    }
+    for msg in std::mem::take(&mut feedback.messages) {
+        chat.add_line(msg, crate::game::chat::chat_color(mir2_shared::enums::ChatType::System), ChatChannel::System);
+    }
+}
+/// #1544：物品使用反馈队列（音效 + CanUseItem 拒绝提示，合并减少系统参数）
+#[derive(Resource, Default)]
+pub struct ItemUseFeedback {
+    pub sounds: Vec<u32>,
+    pub messages: Vec<String>,
+    /// #1544：物品使用节流（C# GameScene.UseItemTime = CMain.Time + 300）
+    pub last_use: f64,
+}
+/// #1544：腰带快捷使用（C# BeltDialog.Grid[i].UseItem → UseItem 守卫）：
+///   节流 + 钓鱼限制（骑乘允许药水，C# 仅禁非 Scroll/Potion/Torch）
+/// 返回 true = 已发包。
+pub(crate) fn try_use_belt_item(
+    uid: u64,
+    net: &NetConnection,
+    hud: &HudState,
+    now: f64,
+    feedback: &mut ItemUseFeedback,
+) -> bool {
+    if now < feedback.last_use {
+        return false;
+    }
+    if hud.fishing {
+        return false;
+    }
+    feedback.last_use = now + 0.3;
+    net.send_packet(&mir2_shared::packets::client::item::UseItem { unique_id: uid });
+    true
+}
+
+/// #1544：物品使用音效（C# MirItemCell.PlayItemSound → SoundList）
+fn item_use_sound_id(item: &InvItem) -> Option<u32> {
+    use mir2_shared::enums::ItemType;
+    let t = ItemType::try_from(item.item_type).ok()?;
+    Some(match t {
+        ItemType::Weapon => 10111,    // ClickWeapon
+        ItemType::Armour => 10112,    // ClickArmour
+        ItemType::Helmet => 10116,    // ClickHelmet
+        ItemType::Necklace => 10115,  // ClickNecklace
+        ItemType::Bracelet => 10114,  // ClickBracelet
+        ItemType::Ring => 10113,      // ClickRing
+        ItemType::Boots => 10117,     // ClickBoots
+        ItemType::Potion => 10108,    // ClickDrug
+        _ => 10118,                   // ClickItem
+    })
+}
+
+/// #1544：CanUseItem 客户端检查（C# MirItemCell.CanUseItem：性别/职业/等级）
+/// 返回 Err(提示语) 时不应发包；服务端仍会二次校验（#576）。
+fn can_use_item_check(item: &InvItem, gender: u8, class: u8, level: u16) -> Result<(), &'static str> {
+    // 性别：RequiredGender Male=1 Female=2；0/3(NONE=both) 视为不限制
+    let gbit = 1u8 << gender; // MirGender Male=0→1, Female=1→2
+    if item.required_gender != 0
+        && item.required_gender != 3
+        && (item.required_gender & gbit) == 0
+    {
+        return Err("性别不符");
+    }
+    // 职业：RequiredClass Warrior=1 Wizard=2 Taoist=4 Assassin=8 Archer=16
+    let cbit = 1u8 << class; // MirClass Warrior=0 Wizard=1 Taoist=2 Assassin=3 Archer=4
+    if item.required_class != 0
+        && item.required_class != 31
+        && (item.required_class & cbit) == 0
+    {
+        return Err("职业不符");
+    }
+    // 等级：RequiredType Level=3 / MaxLevel=9（SharedRust 枚举）
+    match item.required_type {
+        3 if (level as u8) < item.required_amount => return Err("等级不足"),
+        9 if (level as u8) > item.required_amount => return Err("超过最高等级"),
+        _ => {}
+    }
+    Ok(())
+}
+
+/// #1544：槽物品（坐骑/钓具）→ EquipSlotItem（C# MirItemCell.UseSlotItem）
+/// 返回 (to_slot, GridTo)：
+///   - Reins/Bells/Ribbon/Saddle/Mask → Mount 槽（0..4）
+///   - Hook/Float/Bait/Finder/Reel → Fishing 槽（0..4）
+fn slot_item_target(item: &InvItem) -> Option<(i32, MirGridType)> {
+    use mir2_shared::enums::ItemType;
+    let t = ItemType::try_from(item.item_type).ok()?;
+    let (slot, grid) = match t {
+        // C# MountSlot：Reins=0 Bells=1 Saddle=2 Ribbon=3 Mask=4
+        ItemType::Reins => (0, MirGridType::Mount),
+        ItemType::Bells => (1, MirGridType::Mount),
+        ItemType::Saddle => (2, MirGridType::Mount),
+        ItemType::Ribbon => (3, MirGridType::Mount),
+        ItemType::Mask => (4, MirGridType::Mount),
+        // C# FishingSlot：Hook=0 Float=1 Bait=2 Finder=3 Reel=4
+        ItemType::Hook => (0, MirGridType::Fishing),
+        ItemType::Float => (1, MirGridType::Fishing),
+        ItemType::Bait => (2, MirGridType::Fishing),
+        ItemType::Finder => (3, MirGridType::Fishing),
+        ItemType::Reel => (4, MirGridType::Fishing),
+        _ => return None,
+    };
+    Some((slot, grid))
+}
+
+/// #1544：槽物品前置检查（C# CanUseItem：坐骑配件需坐骑；钓具需鱼竿 shape 49/50）
+fn slot_item_ready(hud: &HudState, grid_to: MirGridType) -> bool {
+    match grid_to {
+        MirGridType::Mount => hud.equipment.get(10).and_then(|s| s.as_ref()).is_some(),
+        MirGridType::Fishing => matches!(
+            hud.equipment.get(0).and_then(|s| s.as_ref()).map(|w| w.shape),
+            Some(49) | Some(50),
+        ),
+        _ => false,
+    }
+}
+
+/// #1544：使用/装备结果（Sent=已发包；Confirm=已弹确认框；Blocked=守卫拦截/无动作）
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UseOutcome {
+    Sent,
+    Confirm,
+    Blocked,
+}
+
+/// 使用/装备物品（#1544 对齐 C# MirItemCell.UseItem 守卫）：
+///   1. UseItemTime 节流（300ms）
+///   2. 钓鱼限制（非英雄格 User.Fishing）
+///   3. 骑乘限制（RidingMount 仅 Scroll/Potion/Torch）
+///   4. SoulBoundId 绑定检查（-1 未绑定；1=Rust 哨兵=已绑定本人）
+///   5. CanUseItem（性别/职业/等级）→ 聊天提示
+///   6. 槽物品（坐骑/钓具）→ EquipSlotItem
+///   7. Potion Shape 4 → 确认框（mode=3）
+///   8. 装备/使用 → EquipItem / UseItem
+/// 返回 UseOutcome：Sent=已发包 / Confirm=已弹确认框 / Blocked=拦截或无动作。
+#[allow(clippy::too_many_arguments)]
+fn use_or_equip(
+    item: &InvItem,
+    net: &NetConnection,
+    hud: &HudState,
+    now: f64,
+    feedback: &mut ItemUseFeedback,
+    confirm: &mut InvDropConfirm,
+) -> UseOutcome {
+    // 1. 节流
+    if now < feedback.last_use {
+        return UseOutcome::Blocked;
+    }
+    // 2. 钓鱼
+    if hud.fishing {
+        feedback.messages.push("钓鱼中无法使用物品".to_string());
+        return UseOutcome::Blocked;
+    }
+    // 3. 骑乘（仅 Scroll/Potion/Torch 可用）
+    {
+        use mir2_shared::enums::ItemType;
+        let t = ItemType::try_from(item.item_type).ok();
+        if hud.riding
+            && !matches!(
+                t,
+                Some(ItemType::Scroll) | Some(ItemType::Potion) | Some(ItemType::Torch)
+            )
+        {
+            feedback.messages.push("骑乘中无法使用该物品".to_string());
+            return UseOutcome::Blocked;
+        }
+    }
+    // 4. 灵魂绑定（C# SoulBoundId != -1 && User.Id != SoulBoundId；Rust 哨兵 1=本人）
+    {
+        // Rust 哨兵：1 = 已绑定本人；-1/0 = 未绑定；>1 = C# 迁移数据绑定到具体角色
+        if item.soul_bound_id > 1 {
+            feedback.messages.push("物品已绑定其他角色".to_string());
+            return UseOutcome::Blocked;
+        }
+    }
+    // 5. CanUseItem
+    if let Err(reason) = can_use_item_check(item, hud.gender, hud.class, hud.level) {
+        feedback.messages.push(reason.to_string());
+        return UseOutcome::Blocked;
+    }
+    // 6. 槽物品（坐骑/钓具）→ EquipSlotItem（C# CanUseItem：需先装备坐骑/鱼竿）
+    if let Some((to_slot, grid_to)) = slot_item_target(item) {
+        // C# CanUseItem：坐骑配件需已装备坐骑（Equipment[10]）；钓具需武器为鱼竿（shape 49/50）
+        if !slot_item_ready(hud, grid_to) {
+            let msg = if grid_to == MirGridType::Mount {
+                "请先装备坐骑"
+            } else {
+                "请先装备鱼竿"
+            };
+            feedback.messages.push(msg.to_string());
+            return UseOutcome::Blocked;
+        }
+        net.send_packet(&mir2_shared::packets::client::misc::EquipSlotItem {
+            grid: MirGridType::Inventory,
+            unique_id: item.unique_id,
+            to_slot,
+            grid_to,
+        });
+        tracing::info!(
+            "🧩 槽物品使用 {} (uid={}) -> {:?}[{}]",
+            item.name,
+            item.unique_id,
+            grid_to,
+            to_slot
+        );
+        feedback.last_use = now + 0.3;
+        return UseOutcome::Sent;
+    }
+    // 7. Potion Shape 4 → 确认框（C# AreYouWantUsePotion → MirMessageBox YesNo）
+    if item.item_type == mir2_shared::enums::ItemType::Potion as u8 && item.shape == 4 {
+        confirm.text = "确定使用此药水吗？".to_string();
+        confirm.unique_id = item.unique_id;
+        confirm.count = 1;
+        confirm.mode = 3; // PotionShape4 确认
+        confirm.visible = true;
+        tracing::info!("🧪 药水 Shape4 需确认 uid={}", item.unique_id);
+        return UseOutcome::Confirm;
+    }
+    // 8. 装备/使用
     if item.is_equipment() {
         if let Some(to) = item.equip_slot_occupied(|s| hud.equipment.get(s).and_then(|x| x.as_ref()).is_some()) {
             net.send_packet(&mir2_shared::packets::client::item::EquipItem {
-                // 协议字段为 MirGridType；服务端按 unique_id 定位背包格
                 grid: MirGridType::Inventory,
                 unique_id: item.unique_id,
                 to,
@@ -895,17 +1145,22 @@ fn use_or_equip(item: &InvItem, net: &NetConnection, hud: &HudState) {
                 item.unique_id,
                 to
             );
+            feedback.last_use = now + 0.3;
+            return UseOutcome::Sent;
         }
-    } else if item.is_usable() {
+        return UseOutcome::Blocked;
+    }
+    if item.is_usable() {
         net.send_packet(&mir2_shared::packets::client::item::UseItem {
             unique_id: item.unique_id,
         });
         tracing::info!("💊 使用 {} (uid={})", item.name, item.unique_id);
-    } else {
-        tracing::debug!("背包物品 {} 不可用/不可装备", item.name);
+        feedback.last_use = now + 0.3;
+        return UseOutcome::Sent;
     }
+    tracing::debug!("背包物品 {} 不可用/不可装备", item.name);
+    UseOutcome::Blocked
 }
-
 /// #1346：扩展背包购买/删除模式按钮（C# InventoryDialog AddButton / DelItemButton）
 #[allow(clippy::too_many_arguments)]
 fn inv_add_del_buttons_system(
@@ -1025,6 +1280,13 @@ fn inv_confirm_system(
                     click.delete_mode = false;
                     tracing::info!("🗑️ 确认删除 uid={} count={}", confirm.unique_id, confirm.count);
                 }
+                3 => {
+                    // #1544：Potion Shape 4 确认后使用（C# AreYouWantUsePotion → UseItem）
+                    net.send_packet(&mir2_shared::packets::client::item::UseItem {
+                        unique_id: confirm.unique_id,
+                    });
+                    tracing::info!("🧪 确认使用 Shape4 药水 uid={}", confirm.unique_id);
+                }
                 2 => {
                     // #1346：背包扩容（C# AddButton → C.Chat"@ADDINVENTORY"）
                     net.send_packet(&mir2_shared::packets::client::chat::Chat {
@@ -1053,6 +1315,46 @@ fn inv_confirm_system(
     }
 }
 
+/// Ctrl+右键：打开镶嵌面板（C# MirItemCell.OpenItem）——独立系统避免主系统参数超限（Bevy 16 上限）
+#[allow(clippy::too_many_arguments)]
+fn inv_socket_open_system(
+    hud: Res<HudState>,
+    mut mgr: ResMut<DialogManager>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    windows: Query<&Window>,
+    mut socket: ResMut<crate::game::dialogs::socket::SocketState>,
+) {
+    if !mouse.just_pressed(MouseButton::Right) || !keys.pressed(KeyCode::ControlLeft) {
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    let page = hud.inventory.page;
+    let size = hud.inventory.items.len().min(MAX_INV_SLOTS);
+    let range: std::ops::Range<usize> = match page {
+        0 => 0..size.min(GRID_COLS * GRID_ROWS),
+        1 => (GRID_COLS * GRID_ROWS)..size,
+        _ => 0..0,
+    };
+    for i in range {
+        let x = i % GRID_COLS;
+        let y = (i / GRID_COLS) % GRID_ROWS;
+        let sx = DIALOG_X + 9.0 + x as f32 * (CELL_W + 1.0);
+        let sy = DIALOG_Y + 37.0 + y as f32 * (CELL_H + 1.0);
+        if cursor.x >= sx && cursor.x <= sx + CELL_W && cursor.y >= sy && cursor.y <= sy + CELL_H {
+            if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
+                if !item.slots.is_empty() {
+                    socket.item = Some(item.clone());
+                    mgr.open(DialogKind::Socket);
+                    tracing::info!("💎 打开镶嵌面板: {} ({} 孔)", item.name, item.slots.len());
+                }
+            }
+            return;
+        }
+    }
+}
+
 /// 物品高级交互：
 ///   - 右键 → 使用/装备（原版 C# MouseButtons.Right → UseItem）
 ///   - Shift+左键 → 拆分堆叠（MirAmountBox → SplitItem）
@@ -1068,9 +1370,9 @@ fn inv_item_action_system(
     windows: Query<&Window>,
     time: Res<Time>,
     mut amount: ResMut<AmountBoxState>,
+    mut feedback: ResMut<ItemUseFeedback>,
     mut confirm: ResMut<InvDropConfirm>,
     npc_goods: Res<crate::game::dialogs::npc_goods::NpcGoodsState>,
-    mut socket: ResMut<crate::game::dialogs::socket::SocketState>,
     mut pending: ResMut<InvPendingAmount>,
     mut result: MessageReader<AmountBoxResult>,
     all_buttons: Query<&UiButton>,
@@ -1226,39 +1528,32 @@ fn inv_item_action_system(
     // 双击：使用/装备
     if let Some(i) = dbl {
         if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
-            use_or_equip(item, &net, &hud);
+            if use_or_equip(item, &net, &hud, now, &mut feedback, &mut confirm) == UseOutcome::Sent {
+                if let Some(sid) = item_use_sound_id(item) {
+                    feedback.sounds.push(sid);
+                }
+            }
         }
     }
-
     // #1346：删除模式下右键取消（C# OnMouseClick right-click cancels bin toggle）
     if mouse.just_pressed(MouseButton::Right) && click.delete_mode {
         click.delete_mode = false;
         return;
     }
 
-    // Ctrl+右键：打开镶嵌面板（C# MirItemCell.OpenItem）
-    if mouse.just_pressed(MouseButton::Right) && keys.pressed(KeyCode::ControlLeft) {
-        if let Some(i) = slot_at(cursor.x, cursor.y) {
-            if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
-                if !item.slots.is_empty() {
-                    socket.item = Some(item.clone());
-                    mgr.open(DialogKind::Socket);
-                    tracing::info!("💎 打开镶嵌面板: {} ({} 孔)", item.name, item.slots.len());
-                }
-            }
-        }
-        return;
-    }
 
     // 右键：使用/装备
     if mouse.just_pressed(MouseButton::Right) {
         if let Some(i) = slot_at(cursor.x, cursor.y) {
             if let Some(item) = hud.inventory.items.get(i).and_then(|s| s.as_ref()) {
-                use_or_equip(item, &net, &hud);
+            if use_or_equip(item, &net, &hud, now, &mut feedback, &mut confirm) == UseOutcome::Sent {
+                    if let Some(sid) = item_use_sound_id(item) {
+                        feedback.sounds.push(sid);
+                    }
+                }
             }
         }
     }
-
     // Alt+左键：快速出售（原版 C# "Add support for ALT + click to sell quickly"）
     if mouse.just_pressed(MouseButton::Left) && keys.pressed(KeyCode::AltLeft) {
         if npc_goods.visible {
@@ -1374,6 +1669,8 @@ mod tests {
             required_type: 0,
             required_amount: 0,
             required_class: 0,
+            required_gender: 0,
+            soul_bound_id: -1,
             weight: 0,
             price: 0,
         }
@@ -1435,6 +1732,99 @@ mod tests {
         assert_eq!(item_with_type(ItemType::Stone).equip_slot(), Some(13));
         assert_eq!(item_with_type(ItemType::Weapon).equip_slot(), Some(0));
     }
+
+
+    #[test]
+    fn can_use_item_gender_class_level() {
+        let mut it = item_with_type(ItemType::Weapon);
+        // 性别：Male=1（MirGender Male=0 → bit1）
+        it.required_gender = 1;
+        assert!(can_use_item_check(&it, 0, 0, 30).is_ok());
+        assert!(can_use_item_check(&it, 1, 0, 30).is_err());
+        // 职业：Warrior=1（MirClass Warrior=0 → bit1）
+        it.required_gender = 0;
+        it.required_class = 1;
+        assert!(can_use_item_check(&it, 0, 0, 30).is_ok());
+        assert!(can_use_item_check(&it, 0, 1, 30).is_err());
+        // 等级：RequiredType Level=3（SharedRust）
+        it.required_class = 0;
+        it.required_type = 3;
+        it.required_amount = 30;
+        assert!(can_use_item_check(&it, 0, 0, 30).is_ok());
+        assert!(can_use_item_check(&it, 0, 0, 29).is_err());
+        // MaxLevel=9
+        it.required_type = 9;
+        it.required_amount = 40;
+        assert!(can_use_item_check(&it, 0, 0, 40).is_ok());
+        assert!(can_use_item_check(&it, 0, 0, 41).is_err());
+        // 无需求
+        it.required_type = 0;
+        it.required_amount = 0;
+        assert!(can_use_item_check(&it, 0, 0, 1).is_ok());
+    }
+
+    #[test]
+    fn slot_item_target_mount_and_fishing() {
+        let mut reins = item_with_type(ItemType::Reins);
+        assert_eq!(slot_item_target(&reins), Some((0, MirGridType::Mount)));
+        reins.item_type = ItemType::Mask as u8;
+        assert_eq!(slot_item_target(&reins), Some((4, MirGridType::Mount)));
+        let mut hook = item_with_type(ItemType::Hook);
+        assert_eq!(slot_item_target(&hook), Some((0, MirGridType::Fishing)));
+        hook.item_type = ItemType::Reel as u8;
+        assert_eq!(slot_item_target(&hook), Some((4, MirGridType::Fishing)));
+        let sword = item_with_type(ItemType::Weapon);
+        assert_eq!(slot_item_target(&sword), None);
+    }
+
+    #[test]
+    fn slot_item_ready_requires_mount_or_rod() {
+        let mut hud = HudState::default();
+        assert!(!slot_item_ready(&hud, MirGridType::Mount));
+        assert!(!slot_item_ready(&hud, MirGridType::Fishing));
+        let mut m = item_with_type(ItemType::Mount);
+        hud.equipment[10] = Some(m);
+        assert!(slot_item_ready(&hud, MirGridType::Mount));
+        let mut rod = item_with_type(ItemType::Weapon);
+        rod.shape = 49;
+        hud.equipment[0] = Some(rod);
+        assert!(slot_item_ready(&hud, MirGridType::Fishing));
+        let mut sword = item_with_type(ItemType::Weapon);
+        sword.shape = 0;
+        hud.equipment[0] = Some(sword);
+        assert!(!slot_item_ready(&hud, MirGridType::Fishing));
+    }
+    #[test]
+    fn item_use_sound_maps_types() {
+        assert_eq!(item_use_sound_id(&item_with_type(ItemType::Weapon)), Some(10111));
+        assert_eq!(item_use_sound_id(&item_with_type(ItemType::Potion)), Some(10108));
+        assert_eq!(item_use_sound_id(&item_with_type(ItemType::Food)), Some(10118));
+    }
+
+    #[test]
+    fn use_item_cooldown_gates() {
+        let mut fb = ItemUseFeedback::default();
+        let now = 100.0;
+        // 未节流 → 放行
+        assert!(!(now < fb.last_use));
+        fb.last_use = now + 0.3;
+        assert!(now < fb.last_use);
+    }
+
+    #[test]
+    fn refresh_weight_sums_items() {
+        let mut inv = InventoryState::default();
+        let mut a = item_with_type(ItemType::Potion);
+        a.weight = 1;
+        a.count = 2;
+        let mut b = item_with_type(ItemType::Scroll);
+        b.weight = 3;
+        b.count = 1;
+        inv.items = vec![Some(a), Some(b), None];
+        inv.refresh_weight();
+        assert_eq!(inv.weight, 5);
+    }
 }
+
 
 

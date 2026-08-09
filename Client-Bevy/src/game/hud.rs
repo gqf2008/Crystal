@@ -42,6 +42,12 @@ pub struct HudState {
     pub player_object_id: Option<u32>,
     /// 角色职业（显示用）
     pub class: u8,
+    /// 角色性别（UserInformation 提供；C# MirGender，CanUseItem 用，#1544）
+    pub gender: u8,
+    /// 是否骑乘中（MountUpdated 本地玩家，#1544：骑乘时仅 Scroll/Potion/Torch 可用）
+    pub riding: bool,
+    /// 是否钓鱼中（FishingUpdate 本地玩家，#1544：钓鱼时不可使用物品）
+    pub fishing: bool,
     /// 自动喝药开关（HP < 35% 自动使用背包药品）
     pub auto_pot_hp: bool,
     /// 玩家死亡（Death 包置位，Revived 清除；死亡时禁用输入/显示遮罩）
@@ -74,6 +80,9 @@ impl Default for HudState {
             name: String::new(),
             player_object_id: None,
             class: 0,
+            gender: 0,
+            riding: false,
+            fishing: false,
             auto_pot_hp: true,
             dead: false,
             reincarnation_offered: false,
@@ -968,6 +977,7 @@ fn death_overlay_system(
 fn hud_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut hud: ResMut<HudState>,
+    mut belt: ResMut<crate::game::dialogs::potion_belt::PotionBeltState>,
     mut char_state: ResMut<crate::game::dialogs::character::CharacterState>,
 ) {
     use crate::network::server_event::ServerEvent;
@@ -1020,6 +1030,20 @@ fn hud_server_events(
                 hud.max_exp = (*max_exp).max(1);
                 tracing::info!("⬆️ 升级 Lv.{} exp={}/{}", level, exp, max_exp);
             }
+            ServerEvent::FishingUpdate { progress, .. } => {
+                // #1544：钓鱼中不可使用物品（C# MirItemCell.UseItem 非英雄格 User.Fishing 检查）
+                hud.fishing = *progress != 0;
+            }
+            ServerEvent::MountUpdated {
+                object_id,
+                is_mounted,
+                ..
+            } => {
+                // #1544：本地玩家骑乘状态（C# User.RidingMount；骑乘时仅 Scroll/Potion/Torch 可用）
+                if Some(*object_id) == hud.player_object_id {
+                    hud.riding = *is_mounted;
+                }
+            }
             ServerEvent::Chat { .. }
             | ServerEvent::NpcDialog { .. }
             | ServerEvent::Roll { .. }
@@ -1071,7 +1095,6 @@ fn hud_server_events(
             | ServerEvent::TerritoryWar { .. }
             | ServerEvent::TradeGold { .. }
             | ServerEvent::TradeCancelled
-            | ServerEvent::FishingUpdate { .. }
             | ServerEvent::MailReceived { .. }
             | ServerEvent::ParcelCollected { .. }
             | ServerEvent::TradeRequested { .. }
@@ -1114,7 +1137,6 @@ fn hud_server_events(
             | ServerEvent::PlaySound { .. }
             | ServerEvent::TimerSet { .. }
             | ServerEvent::TimerExpired { .. }
-            | ServerEvent::MountUpdated { .. }
             | ServerEvent::ObjectPoisoned { .. }
             | ServerEvent::SpellToggled { .. }
             | ServerEvent::NpcImageUpdated { .. }
@@ -1204,6 +1226,7 @@ fn hud_server_events(
                 exp,
                 max_exp,
                 gold,
+                gender,
                 class,
                 object_id,
                 inventory,
@@ -1245,11 +1268,15 @@ fn hud_server_events(
                 hud.max_exp = (*max_exp).max(1);
                 hud.gold = *gold;
                 hud.class = *class;
+                hud.gender = *gender;
                 hud.player_object_id = Some(*object_id);
                 hud.inventory.items = inventory.clone();
                 hud.inventory.quest_inventory = quest_inventory.clone();
                 hud.inventory.gold = *gold;
                 hud.equipment = equipment.clone();
+                // #1544：RefreshStats 重量（C# User.RefreshStats；max_weight=服务端 bag_weight）
+                hud.inventory.max_weight = (*bag_weight).max(0) as u32;
+                hud.inventory.refresh_weight();
                 // #208：角色面板属性
                 char_state.name = name.clone();
                 char_state.level = *level;
@@ -1297,6 +1324,10 @@ fn hud_server_events(
                     .items
                     .iter()
                     .position(|s| s.as_ref().map(|it| it.unique_id) == Some(*unique_id));
+                // #1544：记录被消耗物品的 item_index（腰带补货用）
+                let used_item_index = idx
+                    .and_then(|i| hud.inventory.items.get(i).and_then(|s| s.as_ref()))
+                    .map(|it| it.item_index);
                 if let Some(idx) = idx {
                     let count = hud.inventory.items[idx].as_ref().map(|it| it.count).unwrap_or(0);
                     if count > 1 {
@@ -1307,6 +1338,24 @@ fn hud_server_events(
                         hud.inventory.items[idx] = None;
                     }
                     tracing::info!("💊 使用物品 uid={} 剩余 {}", unique_id, count.saturating_sub(1));
+                    hud.inventory.refresh_weight();
+                }
+                // #1544：腰带自动补货（C# MirItemCell.UseItem count==1 && ItemSlot < BeltIdx → 背包找同物品 MoveItem 到腰带）
+                // Bevy 腰带为 unique_id 虚拟槽：消耗后找同 item_index 补上
+                if let Some(used_index) = used_item_index {
+                    for slot in belt.slots.iter_mut() {
+                        if *slot == Some(*unique_id) {
+                            let next = hud.inventory.items.iter().flatten()
+                                .find(|it| it.unique_id != *unique_id && it.item_index == used_index)
+                                .map(|it| it.unique_id);
+                            if let Some(uid) = next {
+                                *slot = Some(uid);
+                                tracing::info!("🧪 腰带补货 uid={} -> {}", unique_id, uid);
+                            } else {
+                                *slot = None;
+                            }
+                        }
+                    }
                 }
             }
             ServerEvent::ItemDuraChanged {
@@ -1429,3 +1478,4 @@ fn hud_server_events(
         }
     }
 }
+

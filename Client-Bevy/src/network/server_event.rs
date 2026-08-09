@@ -443,6 +443,7 @@ pub enum ServerEvent {
         max_exp: i64,
         gold: u32,
         class: u8,
+        gender: u8,
         object_id: u32,
         magics: Vec<ClientMagic>,
         inventory: Vec<Option<InvItem>>,
