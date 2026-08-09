@@ -143,6 +143,11 @@ pub struct CreateGuildRequest {
     pub guild_name: String,
 }
 
+pub struct GmCreateGuildRequest {
+    pub session_id: u64,
+    pub guild_name: String,
+}
+
 pub struct GuildInviteReply {
     pub session_id: u64,
     pub accept: bool,
@@ -3027,6 +3032,55 @@ impl Message<CreateGuildRequest> for SocialActor {
             send_guild_status_packet(&self.gate_ref, msg.session_id, true);
         }
         debug!("Guild created: {} by {}", msg.guild_name, state.name);
+    }
+}
+
+impl Message<GmCreateGuildRequest> for SocialActor {
+    type Reply = ();
+    async fn handle(&mut self, msg: GmCreateGuildRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        let record = match self.players.get(&msg.session_id) {
+            Some(r) => r, None => return,
+        };
+        let state = match record.ask(GetPlayerState).await {
+            Ok(Some(s)) => s, _ => return,
+        };
+
+        // 已在行会则拒绝（C# CREATEGUILD：PlayerAlreadyInGuild）
+        if state.guild_name.is_some() {
+            send_system_message(&self.gate_ref, msg.session_id, "该玩家已经有行会了");
+            return;
+        }
+        // 名称长度限制（C#：gName.Length 3-20）
+        if msg.guild_name.trim().is_empty() || msg.guild_name.len() < 3 || msg.guild_name.len() > 20 {
+            send_system_message(&self.gate_ref, msg.session_id, "行会名称长度需为 3-20 个字符");
+            return;
+        }
+        // 名称唯一性检查
+        if self.guilds.contains_key(&msg.guild_name) {
+            send_system_message(&self.gate_ref, msg.session_id, "行会名称已存在");
+            return;
+        }
+
+        // GM 直接建会：跳过等级/金币/新手行会限制（C# CREATEGUILD：仅 GM/TestServer 可用）
+        let guild = Guild::new(msg.guild_name.clone(), state.name.clone(), msg.session_id);
+        self.guilds.insert(msg.guild_name.clone(), guild);
+        if let Some(guild) = self.guilds.get(&msg.guild_name) {
+            if let Err(e) = db::save_guild(&self.db_pool, guild).await {
+                warn!("Failed to save guild '{}' to DB: {}", msg.guild_name, e);
+            }
+        }
+        let _ = record.ask(SetGuildInfo {
+            guild_name: Some(msg.guild_name.clone()),
+            rank: GuildRank::Leader,
+        }).await;
+
+        send_system_message(&self.gate_ref, msg.session_id, &format!("行会 \"{}\" 已创建", msg.guild_name));
+        if let Some(guild) = self.guilds.get(&msg.guild_name) {
+            send_guild_info_packet(&self.gate_ref, msg.session_id, guild);
+        } else {
+            send_guild_status_packet(&self.gate_ref, msg.session_id, true);
+        }
+        debug!("Guild created (GM): {} by {}", msg.guild_name, state.name);
     }
 }
 
