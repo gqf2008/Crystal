@@ -117,6 +117,19 @@ pub struct GuildRankRenameField;
 /// #1362：职务改名保存按钮（C# RanksSaveName）
 #[derive(Component)]
 pub struct GuildRankSaveBtn;
+/// #1395 子批2：加职务输入框（TextInput id 7）/ 按钮（C# AddRank）
+#[derive(Component)]
+pub struct GuildAddRankField;
+#[derive(Component)]
+pub struct GuildAddRankBtn;
+/// #1395 子批2：职务权限位按钮（C# RanksOptionsButtons[8]，bit 0..7）
+#[derive(Component)]
+pub struct GuildRankPermBtn(u8);
+#[derive(Component)]
+pub struct GuildRankPermText;
+/// #1395 子批2：调职按钮（C# 升职 ChangeType=2，把选中成员调到下拉职务）
+#[derive(Component)]
+pub struct GuildPromoteBtn;
 
 /// #1348：显示离线成员切换（C# MembersShowOfflineButton）
 #[derive(Component)]
@@ -190,6 +203,7 @@ impl Plugin for GuildPlugin {
                 guild_invite_system,
                 guild_show_offline_system,
                 guild_rank_rename_system,
+                guild_rank_manage_system,
                 ui_button_system,
             )
                 .chain()
@@ -358,6 +372,47 @@ fn spawn_guild(
         DialogRoot(DialogKind::Guild),
         GuildWidget,
     ));
+
+    // #1395 子批2：加职务（TextInput id 7 @(340,448)）+ 按钮
+    let add_label = spawn_ui_text(&mut commands, &font, "加职务", 298.0, 448.0, 11.0, Color::WHITE, 8.0);
+    commands.entity(add_label).insert((DialogRoot(DialogKind::Guild), GuildWidget));
+    let add_input = commands
+        .spawn((
+            crate::ui::sprite_ui::UiEntity,
+            DialogRoot(DialogKind::Guild),
+            GuildWidget,
+            GuildAddRankField,
+            crate::game::dialogs::text_input::TextInputField(7),
+            crate::game::dialogs::text_input::TextInputRect(340.0, 448.0, 100.0, 20.0),
+            Sprite { image: white.clone(), color: Color::srgba(0.2, 0.2, 0.25, 0.9), custom_size: Some(Vec2::new(100.0, 20.0)), ..default() },
+            bevy::sprite::Anchor::TOP_LEFT,
+            Transform::from_xyz(340.0, -448.0, 8.1),
+            Visibility::Hidden,
+        ))
+        .id();
+    commands.entity(add_input).with_children(|p| {
+        p.spawn((
+            crate::game::dialogs::text_input::TextInputDisplay(7),
+            Text2d::new(String::new()),
+            bevy::sprite::Anchor::TOP_LEFT,
+            TextFont { font: FontSource::Handle(font.clone()), font_size: FontSize::Px(12.0), ..default() },
+            TextColor(Color::WHITE),
+            Transform::from_xyz(4.0, -2.0, 8.2),
+        ));
+    });
+    let add_btn = spawn_ui_text(&mut commands, &font, "添加", 450.0, 448.0, 11.0, Color::WHITE, 8.0);
+    commands.entity(add_btn).insert((GuildAddRankBtn, UiButton { rect: (450.0, 448.0, 36.0, 18.0), clicked: false }, DialogRoot(DialogKind::Guild), GuildWidget));
+    // #1395 子批2：权限位（C# RanksOptionsButtons[8]：改/招/踢/存/取/盟/告/益）
+    let perm_label = spawn_ui_text(&mut commands, &font, "权限", 298.0, 472.0, 11.0, Color::WHITE, 8.0);
+    commands.entity(perm_label).insert((DialogRoot(DialogKind::Guild), GuildWidget));
+    for (i, label) in ["改", "招", "踢", "存", "取", "盟", "告", "益"].iter().enumerate() {
+        let e = spawn_ui_text(&mut commands, &font, label, 330.0 + i as f32 * 30.0, 472.0, 11.0, Color::WHITE, 8.0);
+        commands.entity(e).insert((GuildRankPermBtn(i as u8), UiButton { rect: (330.0 + i as f32 * 30.0, 472.0, 24.0, 16.0), clicked: false }, DialogRoot(DialogKind::Guild), GuildWidget));
+    }
+    let perm_text = spawn_ui_text(&mut commands, &font, "权限:00000000", 298.0, 492.0, 10.0, Color::srgb(0.8, 0.9, 0.6), 8.0);
+    commands.entity(perm_text).insert((GuildRankPermText, DialogRoot(DialogKind::Guild), GuildWidget));
+    let promote_btn = spawn_ui_text(&mut commands, &font, "调职到下拉职务", 440.0, 492.0, 11.0, Color::WHITE, 8.0);
+    commands.entity(promote_btn).insert((GuildPromoteBtn, UiButton { rect: (440.0, 492.0, 100.0, 18.0), clicked: false }, DialogRoot(DialogKind::Guild), GuildWidget));
 
     // 创建行会：输入框 + 按钮（原版 C# GuildDialog 创建流程）
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
@@ -958,6 +1013,77 @@ fn guild_rank_rename_system(
                     input.texts[4].clear();
                 }
                 input.active = None;
+            }
+        }
+    }
+}
+
+/// #1395 子批2：加职务/权限勾选/调职（C# EditGuildMember 4/5/2）
+fn guild_rank_manage_system(
+    guild: Res<GuildState>,
+    net: Res<NetConnection>,
+    mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
+    mut rank_dd: Query<(&mut DropDown, &GuildRankDrop)>,
+    add_btn: Query<&UiButton, With<GuildAddRankBtn>>,
+    promote_btn: Query<&UiButton, With<GuildPromoteBtn>>,
+    perm_btns: Query<(&UiButton, &GuildRankPermBtn)>,
+    mut perm_text: Query<&mut Text2d, With<GuildRankPermText>>,
+) {
+    let idx = rank_dd.single_mut().map(|(dd, _)| dd.selected.unwrap_or(0)).unwrap_or(0);
+    let options = guild.rank_defs.get(idx).map(|(_, o)| *o).unwrap_or(0);
+    for mut t in &mut perm_text {
+        let s = format!("权限:{:08b}", options);
+        if t.0 != s {
+            t.0 = s;
+        }
+    }
+    if !guild.in_guild {
+        return;
+    }
+    for btn in &add_btn {
+        if btn.clicked {
+            let name = input.texts.get(7).cloned().unwrap_or_default();
+            let name = name.trim().to_string();
+            if !name.is_empty() {
+                net.send_packet(&mir2_shared::packets::client::guild::EditGuildMember {
+                    change_type: 4,
+                    rank_index: 0,
+                    name: String::new(),
+                    rank_name: name.clone(),
+                });
+                tracing::info!("🏰 添加职务: {}", name);
+                if input.texts.len() > 7 {
+                    input.texts[7].clear();
+                }
+                input.active = None;
+            }
+        }
+    }
+    for (btn, p) in &perm_btns {
+        if btn.clicked {
+            let bit = p.0;
+            let on = options & (1 << bit) == 0;
+            net.send_packet(&mir2_shared::packets::client::guild::EditGuildMember {
+                change_type: 5,
+                rank_index: idx as u8,
+                name: if on { "true".to_string() } else { "false".to_string() },
+                rank_name: bit.to_string(),
+            });
+            tracing::info!("🏰 职务 #{} 权限位 {} -> {}", idx, bit, on);
+        }
+    }
+    for btn in &promote_btn {
+        if btn.clicked {
+            if let Some(si) = guild.selected_member {
+                if let Some(m) = guild.members.get(si) {
+                    net.send_packet(&mir2_shared::packets::client::guild::EditGuildMember {
+                        change_type: 2,
+                        rank_index: idx as u8,
+                        name: m.name.clone(),
+                        rank_name: String::new(),
+                    });
+                    tracing::info!("🏰 调职 {} -> 职务 #{}", m.name, idx);
+                }
             }
         }
     }
