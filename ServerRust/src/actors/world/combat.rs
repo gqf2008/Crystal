@@ -614,7 +614,7 @@ impl Message<WorldAttackRequest> for WorldActor {
                         // 只有范围内的玩家才受到伤害
                         if dist <= MELEE_RANGE {
                             // 攻击模式检查
-                            if !can_attack_player(state, &other_state) {
+                            if !can_attack_player(state, &other_state, &self.guild_wars) {
                                 continue;
                             }
 
@@ -626,6 +626,12 @@ impl Message<WorldAttackRequest> for WorldActor {
                                 .map(|m| m.is_safe_zone(other_state.x, other_state.y))
                                 .unwrap_or(false);
                             if attacker_safe || target_safe {
+                                continue;
+                            }
+                            // #1459：C# IsAttackTarget——CurrentMap.Info.NoFight 禁战地图不可攻击
+                            if self.map_infos.get(&(state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
+                                || self.map_infos.get(&(other_state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
+                            {
                                 continue;
                             }
 
@@ -1411,7 +1417,7 @@ impl Message<RangeAttackRequest> for WorldActor {
                     let dist = (other_state.x - target_x).abs() + (other_state.y - target_y).abs();
                     if dist <= 1 {
                         // 攻击模式检查
-                        if !can_attack_player(&state, &other_state) {
+                        if !can_attack_player(&state, &other_state, &self.guild_wars) {
                             continue;
                         }
                         // 安全区保护
@@ -1422,6 +1428,12 @@ impl Message<RangeAttackRequest> for WorldActor {
                             .map(|m| m.is_safe_zone(other_state.x, other_state.y))
                             .unwrap_or(false);
                         if attacker_safe || target_safe {
+                            continue;
+                        }
+                        // #1459：C# IsAttackTarget——CurrentMap.Info.NoFight 禁战地图不可攻击
+                        if self.map_infos.get(&(state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
+                            || self.map_infos.get(&(other_state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
+                        {
                             continue;
                         }
 
