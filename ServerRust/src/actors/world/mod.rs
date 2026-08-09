@@ -1043,6 +1043,8 @@ pub struct WorldActor {
     pub(crate) global_event_name: Option<String>,
     /// 隐身中的玩家 session 集合（用于视野管理）
     pub(crate) invisible_sessions: std::collections::HashSet<u64>,
+    /// #1465：GM 保护模式（C# GMGameMaster；@GAMEMASTER 切换，PvP 不可攻击）
+    pub(crate) gm_protected: std::collections::HashSet<u64>,
     /// #940：@MOVE 传送冷却（C# LastTeleportTime=10s，session -> ms）
     pub(crate) last_teleport_time: std::collections::HashMap<u64, i64>,
     /// #940：@FIND 探测冷却（C# LastProbeTime=180s，session -> ms）
@@ -1302,6 +1304,7 @@ impl WorldActor {
             global_exp_event_end_tick: 0,
             global_event_name: None,
             invisible_sessions: HashSet::new(),
+            gm_protected: HashSet::new(),
             last_teleport_time: std::collections::HashMap::new(),
             last_probe_time: std::collections::HashMap::new(),
             last_move_time: std::collections::HashMap::new(),
@@ -4197,6 +4200,7 @@ impl Actor for WorldActor {
             global_exp_event_end_tick: 0,
             global_event_name: None,
             invisible_sessions: HashSet::new(),
+            gm_protected: HashSet::new(),
             last_teleport_time: std::collections::HashMap::new(),
             last_probe_time: std::collections::HashMap::new(),
             last_move_time: std::collections::HashMap::new(),
