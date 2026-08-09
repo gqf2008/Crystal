@@ -849,6 +849,8 @@ pub struct BuybackItem {
     pub sell_price: u64,
     /// 回购过期时间（Unix 毫秒；C# Settings.GoodsBuyBackTime = 60 分钟）
     pub expires_at: i64,
+    /// 卖出时的 NPC（#1542：C# NPCObject.BuyBack[Name] 按 NPC 隔离）
+    pub npc_object_id: u32,
 }
 
 /// 钓鱼掉落条目（C# DropInfo，Type = FishingAttribute；Chance 为分母，`1/4500` → 4500）
@@ -1724,7 +1726,8 @@ impl WorldActor {
         // C#：过期回购物品清理（GoodsBuyBackTime = 60 分钟）
         let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
         if let Some(list) = self.buyback_items.get_mut(&session_id) {
-            list.retain(|b| b.expires_at > now_ms);
+            // #1542：只保留当前 NPC 的未过期回购（C# NPCObject.BuyBack[Name]）
+            list.retain(|b| b.expires_at > now_ms && b.npc_object_id == npc.object_id);
         }
         let items: Vec<mir2_shared::data::item::UserItem> = self
             .buyback_items

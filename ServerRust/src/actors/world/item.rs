@@ -2109,6 +2109,8 @@ impl Message<SellItemRequest> for WorldActor {
                 item: removed.as_ref().cloned().unwrap_or_else(|| item_data.clone()),
                 sell_price: total_gold,
                 expires_at: now_ms + 60 * 60 * 1000,
+                // #1542：记录卖出 NPC（C# NPCObject.BuyBack[Name] 按 NPC 隔离）
+                npc_object_id: npc_oid,
             };
             let list = self.buyback_items.entry(msg.session_id).or_default();
             list.insert(0, buyback);
@@ -2608,7 +2610,15 @@ impl Message<BuyItemBackRequest> for WorldActor {
             _ => return,
         };
 
-        // 查找回购列表中的对应物品（按 unique_id，C# BuyItemBack 语义）
+        // #1542：回购只能在卖出时的 NPC（C# NPCObject.BuyBack[Name]）
+        let npc_oid = match self.session_npc.get(&msg.session_id) {
+            Some(o) => *o,
+            None => {
+                send_system_message(&self.gate_ref, msg.session_id, "请先与 NPC 对话");
+                return;
+            }
+        };
+        // 查找回购列表中的对应物品（按 unique_id，C# BuyItemBack 语义；仅当前 NPC 的条目）
         let list = match self.buyback_items.get_mut(&msg.session_id) {
             Some(l) => l,
             None => {
@@ -2616,6 +2626,11 @@ impl Message<BuyItemBackRequest> for WorldActor {
                 return;
             }
         };
+        list.retain(|b| b.npc_object_id == npc_oid);
+        if list.is_empty() {
+            send_system_message(&self.gate_ref, msg.session_id, "没有可回购的物品");
+            return;
+        }
         let idx = match list.iter().position(|b| b.item.unique_id == msg.unique_id) {
             Some(i) => i,
             None => {
