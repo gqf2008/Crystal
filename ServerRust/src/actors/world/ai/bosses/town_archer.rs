@@ -11,9 +11,10 @@
 //! Attack（C# :28-48）：ObjectRangeAttack + ProjectileAttack。
 //! ProcessTarget（C# :50-77）：dist>AttackRange → Target=null 复位。
 
-use crate::actors::world::MonsterState;
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
+use crate::actors::world::ai::helpers::*;
+use crate::actors::world::MonsterState;
 
 const ATTACK_RANGE: i32 = 10;
 
@@ -30,21 +31,25 @@ impl MonsterBehavior for TownArcherBehavior {
         if ctx.tick_count < monster.next_attack_tick {
             return;
         }
-        // 射程内任意玩家（红名判定由上层 PKPoints 过滤，此处快照无 PK 字段，简化为攻击范围内玩家）
-        let target = match ctx.nearest_target(monster.x, monster.y, ATTACK_RANGE, monster.map_index) {
-            Some(t) => *t,
-            None => return,
+        // #1391：只攻击红名玩家（C# FindTarget：PKPoints<200 跳过；快照现已带 pk_points）
+        let target = match ctx.nearest_target(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
+        {
+            Some(t) if is_red_name(t.pk_points) => *t,
+            _ => return,
         };
         monster.target_session = Some(target.session_id);
         monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
 
-        let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-            attacker_oid: monster.object_id,
-            target_session: target.session_id,
-            target_object_id: target.object_id,
-            damage,
-            spell_id: 0,
-        });
+        let damage =
+            crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck)
+                .max(1);
+        ctx.out_attacks
+            .push(crate::actors::world::ai::AttackAction::Range {
+                attacker_oid: monster.object_id,
+                target_session: target.session_id,
+                target_object_id: target.object_id,
+                damage,
+                spell_id: 0,
+            });
     }
 }

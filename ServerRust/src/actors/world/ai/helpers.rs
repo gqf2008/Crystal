@@ -1,5 +1,12 @@
 //! Boss 共用 helper 函数（对齐 C# FindAllTargets/PoisonTarget/Broadcast 等）
 
+/// #1391：C# 红名阈值（PlayerObject.cs:250：PKPoints >= 200）
+pub const RED_NAME_PK: i32 = 200;
+
+/// #1391：是否红名（C# PKPoints >= 200；守卫/城镇弓箭手目标判定用）
+pub fn is_red_name(pk_points: i32) -> bool {
+    pk_points >= RED_NAME_PK
+}
 
 /// 方向增量（8 方向，对齐 MirDirection）
 pub const DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
@@ -19,14 +26,14 @@ pub fn direction_towards(from_x: i32, from_y: i32, to_x: i32, to_y: i32) -> u8 {
     let normalized = ((angle + 360.0) % 360.0 + 22.5) as i32 % 360 / 45;
     // 映射：0=右(2), 45=下右(3), 90=下(4), 135=下左(5), 180=左(6), 225=上左(7), 270=上(0), 315=上右(1)
     match normalized {
-        0 => 2,  // 右
-        1 => 3,  // 下右
-        2 => 4,  // 下
-        3 => 5,  // 下左
-        4 => 6,  // 左
-        5 => 7,  // 上左
-        6 => 0,  // 上
-        7 => 1,  // 上右
+        0 => 2, // 右
+        1 => 3, // 下右
+        2 => 4, // 下
+        3 => 5, // 下左
+        4 => 6, // 左
+        5 => 7, // 上左
+        6 => 0, // 上
+        7 => 1, // 上右
         _ => 0,
     }
 }
@@ -53,7 +60,12 @@ pub fn step_toward(from_x: i32, from_y: i32, tx: i32, ty: i32) -> (i32, i32, u8)
 
 /// 远离目标走一步（逃跑用）
 pub fn step_away(from_x: i32, from_y: i32, tx: i32, ty: i32) -> (i32, i32, u8) {
-    step_toward(from_x, from_y, from_x + (from_x - tx), from_y + (from_y - ty))
+    step_toward(
+        from_x,
+        from_y,
+        from_x + (from_x - tx),
+        from_y + (from_y - ty),
+    )
 }
 
 /// 切比雪夫距离（对齐 C# MaxDistance）

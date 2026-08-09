@@ -883,6 +883,7 @@ impl WorldActor {
         let mut die_show_hide: Vec<(u32, bool)> = Vec::new();
         let mut die_sit_down: Vec<(u32, i32, i32, u8, bool)> = Vec::new();
         let mut die_effects: Vec<(u32, mir2_shared::enums::SpellEffect)> = Vec::new();
+        let mut die_player_purges: Vec<u64> = Vec::new();
         let mut die_player_heals: Vec<(u64, i32)> = Vec::new();
         {
             // 死亡回调也提供玩家快照（C# Die 可 FindAllTargets；ToxicGhoul 死亡 AOE 毒等用）
@@ -915,6 +916,7 @@ impl WorldActor {
                 out_show_hide: &mut die_show_hide,
                 out_sit_down: &mut die_sit_down,
                 out_effects: &mut die_effects,
+                out_player_purges: &mut die_player_purges,
                 out_player_heals: &mut die_player_heals,
                 pet_level: self.pet_levels.get(&monster.object_id).copied().unwrap_or(0),
                 master_pet_mode: None,
@@ -3449,6 +3451,7 @@ impl Message<Tick> for WorldActor {
             let mut boss_show_hide: Vec<(u32, bool)> = Vec::new();
             let mut boss_sit_down: Vec<(u32, i32, i32, u8, bool)> = Vec::new();
             let mut boss_effects: Vec<(u32, mir2_shared::enums::SpellEffect)> = Vec::new();
+            let mut boss_player_purges: Vec<u64> = Vec::new();
             let mut boss_player_heals: Vec<(u64, i32)> = Vec::new();
             // 召唤物过期队列（到期 tick 已过 → 移除，不掉落）
             let mut expired_monsters: Vec<u32> = Vec::new();
@@ -3514,6 +3517,7 @@ impl Message<Tick> for WorldActor {
                         out_show_hide: &mut boss_show_hide,
                         out_sit_down: &mut boss_sit_down,
                         out_effects: &mut boss_effects,
+                        out_player_purges: &mut boss_player_purges,
                         out_player_heals: &mut boss_player_heals,
                         pet_level: self.pet_levels.get(&monster_oid).copied().unwrap_or(0),
                         master_pet_mode,
@@ -4271,6 +4275,12 @@ impl Message<Tick> for WorldActor {
             for (oid, effect) in boss_effects.drain(..) {
                 let map_idx = self.monsters.get(&oid).map(|m| m.map_index).unwrap_or(0);
                 self.broadcast_object_effect(oid, effect, map_idx).await;
+            }
+            // #1391：净化玩家毒（C# PowerBead Effect==1 → PlayerActor.PurifyPoisons）
+            for sid in boss_player_purges.drain(..) {
+                if let Some(rec) = self.players.get(&sid) {
+                    let _ = rec.actor_ref.ask(crate::actors::player::PurifyPoisons).await;
+                }
             }
             // Boss 对玩家回血（C# MasterVampire 吸血主人 / Healer 治疗玩家）
             for (sid, amount) in boss_player_heals.drain(..) {
