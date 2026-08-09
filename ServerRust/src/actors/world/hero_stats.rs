@@ -32,6 +32,8 @@ pub struct HeroStats {
     pub bag_weight: i32,
     pub wear_weight: i32,
     pub hand_weight: i32,
+    /// 毒攻击（#1423/#1424：C# Stat.PoisonAttack，装备提供；绿毒 Value 随机项）
+    pub poison_attack: i32,
 }
 
 impl HeroStats {
@@ -121,6 +123,7 @@ pub fn hero_base_stats(class: MirClass, level: i32) -> HeroStats {
         bag_weight: calc_weight(50, bag_g, level),
         wear_weight: calc_weight(15, wear_g, level),
         hand_weight: calc_weight(12, hand_g, level),
+        poison_attack: 0,
         min_dc: calc_stat(0, min_dc_g, level),
         max_dc: calc_stat(0, max_dc_g, level),
         min_mc: calc_stat(0, min_mc_g, level),
@@ -162,6 +165,7 @@ pub fn compute_hero_stats(
     s.bag_weight += b.bag_weight;
     s.wear_weight += b.wear_weight;
     s.hand_weight += b.hand_weight;
+    s.poison_attack += b.poison_attack;
     s
 }
 
@@ -214,5 +218,59 @@ mod tests {
         let map = std::collections::HashMap::new();
         let base = compute_hero_stats(MirClass::Warrior, 30, &empty, &map);
         assert_eq!(base.max_hp, 419);
+    }
+
+    #[test]
+    fn equipment_poison_attack_adds_to_hero_stats() {
+        // #1423/#1424：C# Stat.PoisonAttack 来自装备 → HeroStats.poison_attack（绿毒随机项用）
+        use mir2_shared::data::item::UserItem;
+        let mut info = crate::db::ItemInfo {
+            index: 1,
+            name: String::new(),
+            item_type: 0,
+            grade: 0,
+            required_type: 0,
+            required_class: 0,
+            required_gender: 0,
+            set_type: 0,
+            shape: 0,
+            weight: 5,
+            light: 0,
+            required_amount: 0,
+            image: 0,
+            durability: 1000,
+            stack_size: 1,
+            price: 0,
+            start_item: false,
+            effect: 0,
+            bool_flags: 0,
+            bind_mode: 0,
+            special_mode: 0,
+            random_stats_id: 0,
+            can_fast_run: false,
+            can_awakening: false,
+            slots: 0,
+            stats_json: String::new(),
+            stats: std::collections::HashMap::new(),
+            has_tool_tip: false,
+            tool_tip: None,
+        };
+        info.stats.insert(mir2_shared::enums::Stat::PoisonAttack as u8, 6);
+        let mut infos = std::collections::HashMap::new();
+        infos.insert(1, info);
+
+        let mut eq: Vec<Option<UserItem>> =
+            vec![None; crate::actors::inventory::EquipmentSlot::COUNT as usize];
+        eq[crate::actors::inventory::EquipmentSlot::Armour as usize] = Some(UserItem {
+            item_index: 1,
+            current_dura: 500,
+            max_dura: 1000,
+            ..Default::default()
+        });
+
+        let base = hero_base_stats(MirClass::Taoist, 30);
+        assert_eq!(base.poison_attack, 0);
+        let with_eq = compute_hero_stats(MirClass::Taoist, 30, &eq, &infos);
+        assert_eq!(with_eq.poison_attack, 6);
     }
 }

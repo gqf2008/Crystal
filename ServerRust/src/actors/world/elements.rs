@@ -1,7 +1,7 @@
 // 元素系统（弓手 Concentration / ElementalShot / ElementalBarrier）
 //
 // 对齐 C# `Server/MirObjects/HumanObject.cs`（#region Elemental System）：
-// - Concentration：专注 buff（MP 回复），移动/被推时打断 3s；
+// - Concentration：专注 buff（#1422：不影响 MP 回复；仅冥想攒元素概率 + 移动/被推时打断 3s）；
 // - GatherElement：每次命中目标有概率攒元素（需冥想，专注未打断时概率提高）；
 // - ObtainElement：更新 ElementsLevel/HasElemental 并广播 SetElemental；
 // - 元素等级/上限：C# Settings.OrbsExpList（默认 [50,100,150,200]）。
