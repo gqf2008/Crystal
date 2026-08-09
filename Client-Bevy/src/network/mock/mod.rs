@@ -798,11 +798,11 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             &MockGuildStatus {
                                                 name: p.name,
                                                 leader: "刀客".to_string(),
-                                                rank_names: ["会长".to_string(), "副会长".to_string(), "成员".to_string()],
+                                                rank_defs: vec![("会长".to_string(), 255u8), ("副会长".to_string(), 30u8), ("成员".to_string(), 0u8)],
                                                 notice: mock_guild_notice.clone(),
                                                 members: mock_guild_members
                                                     .iter()
-                                                    .map(|n| (n.clone(), 1u8, true))
+                                                    .map(|n| (n.clone(), 1u8, 1u8, true))
                                                     .collect(),
                                                 gold: mock_guild_gold,
                                             },
@@ -980,9 +980,9 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 &MockGuildStatus {
                                                     name: "TestGuild".to_string(),
                                                     leader: "刀客".to_string(),
-                                                    rank_names: ["会长".to_string(), "副会长".to_string(), "成员".to_string()],
+                                                    rank_defs: vec![("会长".to_string(), 255u8), ("副会长".to_string(), 30u8), ("成员".to_string(), 0u8)],
                                                     notice: vec![],
-                                                    members: vec![("刀客".to_string(), 1u8, true)],
+                                                    members: vec![("刀客".to_string(), 1u8, 0u8, true)],
                                                     gold: 0,
                                                 },
                                             );

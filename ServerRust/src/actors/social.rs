@@ -3174,6 +3174,7 @@ impl Message<EditGuildMemberRequest> for SocialActor {
             return;
         }
 
+        let mut guild_changed = false;
         match msg.change_type {
             0 => { // 邀请加入（C# EditGuildMember ChangeType=0 add member）
                 // 查找目标玩家（在线）
@@ -3260,13 +3261,21 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                     send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已被踢出行会", msg.member_name));
                 }
             }
-            2 => { // 升职
+            2 => { // #1395：按职务索引移动成员（C# EditGuildMember ChangeType=2 带 RankIndex）
                 if my_rank != GuildRank::Leader {
                     send_system_message(&self.gate_ref, msg.session_id, "只有会长可以升职成员");
                     return;
                 }
-                if guild.set_rank(&msg.member_name, GuildRank::Officer) {
-                    send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已升职为副会长", msg.member_name));
+                let target = msg.rank_index;
+                if !guild.rank_defs.iter().any(|d| d.index == target) {
+                    send_system_message(&self.gate_ref, msg.session_id, "职务不存在");
+                    return;
+                }
+                if let Some(m) = guild.members.iter_mut().find(|m| m.name == msg.member_name) {
+                    m.rank_index = target;
+                    // 目标职务为 0/1 档时同步逻辑档（2+ 视为成员档）
+                    m.rank = match target { 0 => GuildRank::Leader, 1 => GuildRank::Officer, _ => GuildRank::Member };
+                    send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已调整职务", msg.member_name));
                 }
             }
             3 => { // 降职
@@ -3278,17 +3287,55 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                     send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已降职为成员", msg.member_name));
                 }
             }
+            4 => { // #1395：添加职务（C# EditGuildMember ChangeType=4 add rank）
+                if my_rank != GuildRank::Leader {
+                    send_system_message(&self.gate_ref, msg.session_id, "只有会长可以添加职务");
+                    return;
+                }
+                if msg.rank_name.trim().is_empty() {
+                    send_system_message(&self.gate_ref, msg.session_id, "职务名无效");
+                    return;
+                }
+                let new_idx = guild.add_rank(msg.rank_name.trim());
+                for sid in guild.online_sessions(0) {
+                    send_guild_info_packet(&self.gate_ref, sid, guild);
+                }
+                guild_changed = true;
+                send_system_message(&self.gate_ref, msg.session_id, &format!("已添加职务：{}（#{})", msg.rank_name.trim(), new_idx));
+            }
+            5 => { // #1395：切换职务权限位（C# EditGuildMember ChangeType=5；rank_name=选项位，name=true/false）
+                if my_rank != GuildRank::Leader {
+                    send_system_message(&self.gate_ref, msg.session_id, "只有会长可以修改职务权限");
+                    return;
+                }
+                let bit = msg.rank_name.trim().parse::<u8>().unwrap_or(0);
+                if bit >= 8 {
+                    return;
+                }
+                let on = msg.member_name.trim() == "true";
+                if let Some(d) = guild.rank_defs.iter_mut().find(|d| d.index == msg.rank_index) {
+                    if on { d.options |= 1 << bit; } else { d.options &= !(1 << bit); }
+                }
+                for sid in guild.online_sessions(0) {
+                    send_guild_info_packet(&self.gate_ref, sid, guild);
+                }
+                guild_changed = true;
+                send_system_message(&self.gate_ref, msg.session_id, "职务权限已更新");
+            }
             6 => { // #1362：职务改名（C# EditGuildMember ChangeType=3 rename；Rust 用 6 避免与降职冲突）
                 if my_rank != GuildRank::Leader {
                     send_system_message(&self.gate_ref, msg.session_id, "只有会长可以修改职务名");
                     return;
                 }
-                let idx = msg.rank_index as usize;
-                if idx >= guild.rank_names.len() || msg.rank_name.trim().is_empty() {
+                let idx = msg.rank_index;
+                if !guild.rank_defs.iter().any(|d| d.index == idx) || msg.rank_name.trim().is_empty() {
                     send_system_message(&self.gate_ref, msg.session_id, "职务名无效");
                     return;
                 }
-                guild.rank_names[idx] = msg.rank_name.trim().to_string();
+                if let Some(d) = guild.rank_defs.iter_mut().find(|d| d.index == idx) {
+                    d.name = msg.rank_name.trim().to_string();
+                }
+                guild_changed = true;
                 // 广播全量行会信息（职务名变化 → 成员列表刷新）
                 for sid in guild.online_sessions(0) {
                     send_guild_info_packet(&self.gate_ref, sid, guild);
@@ -3296,6 +3343,10 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                 send_system_message(&self.gate_ref, msg.session_id, "职务名已更新");
             }
             _ => {}
+        }
+        // #1395：职务/权限变更后持久化
+        if guild_changed {
+            self.save_guild_to_db(&guild_name).await;
         }
     }
 }

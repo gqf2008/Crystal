@@ -122,9 +122,9 @@ impl Packet for MockPlayerInspect {
 pub(crate) struct MockGuildStatus {
     pub(crate) name: String,
     pub(crate) leader: String,
-    pub(crate) rank_names: [String; 3],
+    pub(crate) rank_defs: Vec<(String, u8)>,
     pub(crate) notice: Vec<String>,
-    pub(crate) members: Vec<(String, u8, bool)>,
+    pub(crate) members: Vec<(String, u8, u8, bool)>,
     pub(crate) gold: u32,
 }
 
@@ -139,17 +139,21 @@ impl Packet for MockGuildStatus {
         use byteorder::WriteBytesExt;
         mir2_shared::binary::write_dotnet_string(writer, &self.name)?;
         mir2_shared::binary::write_dotnet_string(writer, &self.leader)?;
-        for name in &self.rank_names {
+        writer.write_u8(self.rank_defs.len() as u8)?;
+        for (idx, (name, options)) in self.rank_defs.iter().enumerate() {
+            writer.write_u8(idx as u8);
             mir2_shared::binary::write_dotnet_string(writer, name)?;
+            writer.write_u8(*options)?;
         }
         writer.write_u8(self.notice.len() as u8)?;
         for line in &self.notice {
             mir2_shared::binary::write_dotnet_string(writer, line)?;
         }
         writer.write_u8(self.members.len() as u8)?;
-        for (name, rank, online) in &self.members {
+        for (name, rank, rank_index, online) in &self.members {
             mir2_shared::binary::write_dotnet_string(writer, name)?;
             writer.write_u8(*rank)?;
+            writer.write_u8(*rank_index)?;
             writer.write_u8(if *online { 1 } else { 0 })?;
         }
         writer.write_u32::<byteorder::LittleEndian>(self.gold)?;

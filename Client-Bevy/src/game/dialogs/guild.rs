@@ -25,6 +25,8 @@ use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
 pub struct GuildMember {
     pub name: String,
     pub rank: u8,
+    /// #1395：职务定义索引（C# rank_index）
+    pub rank_index: u8,
     pub online: bool,
 }
 
@@ -62,8 +64,8 @@ pub struct GuildState {
     pub selected_member: Option<usize>,
     /// #1348：是否显示离线成员（C# MembersShowOfflinesetting，默认 true）
     pub show_offline: bool,
-    /// #1362：职务名（3 个，C# 自定义职务名简化；服务端 GuildStatus 下发）
-    pub rank_names: [String; 3],
+    /// #1395：职务定义（name, options；服务端 GuildStatus 下发，C# GuildObject.Ranks）
+    pub rank_defs: Vec<(String, u8)>,
 }
 
 impl GuildState {
@@ -748,11 +750,11 @@ fn guild_ui_system(
                 // #1348：按 show_offline 过滤后的可见成员映射
                 match visible.get(idx).and_then(|&mi| guild.members.get(mi)) {
                 Some(m) => {
-                    // #1362：显示服务端职务名（C# 自定义职务名简化）
+                    // #1395：按 rank_index 显示职务名（C# 按职务分组）
                     let rank = guild
-                        .rank_names
-                        .get(m.rank as usize)
-                        .cloned()
+                        .rank_defs
+                        .get(m.rank_index as usize)
+                        .map(|(n, _)| n.clone())
                         .unwrap_or_else(|| "成员".to_string());
                     format!(
                         "{}{} ({})",
@@ -926,13 +928,20 @@ fn guild_rank_rename_system(
     guild: Res<GuildState>,
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    rank_dd: Query<(&DropDown, &GuildRankDrop)>,
+    mut rank_dd: Query<(&mut DropDown, &GuildRankDrop)>,
     save_btn: Query<&UiButton, With<GuildRankSaveBtn>>,
 ) {
-    let idx = rank_dd
-        .single()
-        .map(|(dd, _)| dd.selected.unwrap_or(0))
-        .unwrap_or(0);
+    // #1395：下拉同步服务端职务定义（顺序即索引）
+    let defs = guild.rank_defs.clone();
+    let idx = if let Ok((mut dd, _)) = rank_dd.single_mut() {
+        if dd.items != defs.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>() {
+            dd.items = defs.iter().map(|(n, _)| n.clone()).collect();
+            dd.selected = dd.selected.filter(|&s| s < dd.items.len());
+        }
+        dd.selected.unwrap_or(0)
+    } else {
+        0
+    };
     for btn in &save_btn {
         if btn.clicked && guild.in_guild {
             let name = input.texts.get(4).cloned().unwrap_or_default();
@@ -1128,11 +1137,11 @@ fn guild_server_events(
                     guild.storage_received = false;
                 }
             }
-            ServerEvent::GuildData { name, leader, rank_names, notice, members, gold } => {
+            ServerEvent::GuildData { name, leader, rank_defs, notice, members, gold } => {
                 guild.in_guild = true;
                 guild.name = name.clone();
                 guild.leader = leader.clone();
-                guild.rank_names = rank_names.clone();
+                guild.rank_defs = rank_defs.clone();
                 guild.notice = notice.clone();
                 guild.members = members.clone();
                 guild.gold = *gold;
@@ -1242,11 +1251,13 @@ fn guild_server_events(
                         guild.members.push(GuildMember {
                             name: name.clone(),
                             rank: *rank,
+                            rank_index: *rank,
                             online: *online,
                         });
                     }
                 } else if let Some(m) = guild.members.iter_mut().find(|m| m.name == *name) {
                     m.rank = *rank;
+                    m.rank_index = *rank;
                     m.online = *online;
                 }
             }

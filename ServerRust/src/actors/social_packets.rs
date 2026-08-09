@@ -308,9 +308,12 @@ pub fn send_guild_info_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, g
     let mut body = Vec::new();
     write_dotnet_string(&mut body, &guild.name);
     write_dotnet_string(&mut body, guild.leader_name());
-    // 职务名（3 个，C# 自定义职务名简化）
-    for name in &guild.rank_names {
-        write_dotnet_string(&mut body, name);
+    // #1395：职务定义（count u8 + per [index u8][name dotnet][options u8]，C# GuildObject.Ranks）
+    body.push(guild.rank_defs.len().min(255) as u8);
+    for d in guild.rank_defs.iter().take(255) {
+        body.push(d.index);
+        write_dotnet_string(&mut body, &d.name);
+        body.push(d.options);
     }
     // Notice (5 lines)
     body.push(guild.notice.len() as u8);
@@ -322,6 +325,7 @@ pub fn send_guild_info_packet(gate_ref: &ActorRef<GateActor>, session_id: u64, g
     for member in &guild.members {
         write_dotnet_string(&mut body, &member.name);
         body.push(member.rank as u8);
+        body.push(member.rank_index);
         body.push(if member.session_id.is_some() { 1u8 } else { 0u8 });
     }
     // Guild gold
