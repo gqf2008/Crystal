@@ -69,7 +69,7 @@ impl Plugin for PlayerControlPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (advance_attack_timer_system, autorun_toggle_system, right_click_move_system, left_click_interact_system, key_pickup_system, pet_pickup_system, hold_move_system, auto_attack_system, pickup_arrival_system, context_cursor_system)
+            (advance_attack_timer_system, autorun_toggle_system, right_click_move_system, left_click_interact_system, key_pickup_system, pet_pickup_system, pet_mode_system, hold_move_system, auto_attack_system, pickup_arrival_system, context_cursor_system)
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -937,6 +937,55 @@ fn pet_pickup_system(
     }
 }
 
+/// #1562：宠物模式循环（C# GameScene.cs:906 ChangePetMode）：
+/// Both → MoveOnly → AttackOnly → None → FocusMasterTarget → Both
+pub fn next_pet_mode(current: mir2_shared::enums::PetMode) -> mir2_shared::enums::PetMode {
+    use mir2_shared::enums::PetMode;
+    match current {
+        PetMode::Both => PetMode::MoveOnly,
+        PetMode::MoveOnly => PetMode::AttackOnly,
+        PetMode::AttackOnly => PetMode::None,
+        PetMode::None => PetMode::FocusMasterTarget,
+        PetMode::FocusMasterTarget => PetMode::Both,
+    }
+}
+
+/// #1562：构造 C.ChangePMode（SharedRust packets/client/misc.rs）
+pub fn build_change_pmode(mode: mir2_shared::enums::PetMode) -> mir2_shared::packets::client::misc::ChangePMode {
+    mir2_shared::packets::client::misc::ChangePMode { mode }
+}
+
+/// 宠物模式切换（#1562，C# KeybindOptions.ChangePetmode → GameScene.ChangePetMode）：
+/// - 默认 Ctrl+T（C# 默认 Ctrl+A，但 Bevy 中 A 用于相机平移，避免冲突改 Ctrl+T）；
+/// - 500ms 冷却（C# ChangePModeTime = Time + 500）；
+/// - 发送后由服务端 S.ChangePMode 确认更新 HudState.pet_mode（不本地抢改）。
+fn pet_mode_system(
+    keys: Res<ButtonInput<KeyCode>>,
+    kb: Res<crate::game::dialogs::keyboard_layout::KeyboardState>,
+    net: Res<NetConnection>,
+    chat: Res<crate::game::chat::ChatState>,
+    time: Res<Time>,
+    hud: Res<crate::game::hud::HudState>,
+    mut last_toggle: Local<f32>,
+) {
+    if chat.input_active {
+        return;
+    }
+    let Some(b) = kb.bindings.iter().find(|b| b.action == "宠物模式切换") else {
+        return;
+    };
+    if !b.matches(&keys) {
+        return;
+    }
+    if time.elapsed_secs() - *last_toggle < 0.5 {
+        return;
+    }
+    *last_toggle = time.elapsed_secs();
+    let next = next_pet_mode(hud.pet_mode);
+    net.send_packet(&build_change_pmode(next));
+    tracing::info!("🐾 宠物模式切换 {:?} -> {:?}", hud.pet_mode, next);
+}
+
 /// C# GameScene.NPCTime/NPCID：同 NPC 5 秒内忽略重复 CallNPC
 fn npc_call_allowed(prev_id: Option<u32>, last_call: f32, now: f32, object_id: u32) -> bool {
     !(prev_id == Some(object_id) && now - last_call < 5.0)
@@ -1073,6 +1122,24 @@ mod tests {
         assert!(!pkt.mouse_mode);
         assert_eq!(pkt.location.x, 5);
         assert_eq!(pkt.location.y, 6);
+    }
+
+    #[test]
+    fn test_next_pet_mode_cycle() {
+        // #1562：C# GameScene.cs:906 循环顺序
+        use mir2_shared::enums::PetMode;
+        assert_eq!(next_pet_mode(PetMode::Both), PetMode::MoveOnly);
+        assert_eq!(next_pet_mode(PetMode::MoveOnly), PetMode::AttackOnly);
+        assert_eq!(next_pet_mode(PetMode::AttackOnly), PetMode::None);
+        assert_eq!(next_pet_mode(PetMode::None), PetMode::FocusMasterTarget);
+        assert_eq!(next_pet_mode(PetMode::FocusMasterTarget), PetMode::Both);
+    }
+
+    #[test]
+    fn test_build_change_pmode() {
+        // #1562：C.ChangePMode 字段
+        let pkt = build_change_pmode(mir2_shared::enums::PetMode::AttackOnly);
+        assert_eq!(pkt.mode, mir2_shared::enums::PetMode::AttackOnly);
     }
 
     #[test]
