@@ -1606,7 +1606,7 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -1647,11 +1647,15 @@ impl Message<ChatRequest> for WorldActor {
                             let _ = record.actor_ref.ask(crate::actors::player::AddGold { amount: g }).await;
                             send_system_message(&self.gate_ref, msg.session_id, &format!("已获得 {} 金币", g));
                         }
-                        // @make <物品名> [数量]
+                        // @make <物品名|索引> [数量]（#1471：C# MAKE 索引/名称双查）
                         "MAKE" => {
                             let name = parts.get(1).copied().unwrap_or("");
                             let count = parts.get(2).and_then(|s| s.parse::<u16>().ok()).unwrap_or(1).max(1);
-                            let item_idx = self.item_infos.iter().find(|(_, i)| i.name.eq_ignore_ascii_case(name)).map(|(k, _)| *k);
+                            let item_idx = if let Ok(idx) = name.parse::<i32>() {
+                                if self.item_infos.contains_key(&idx) { Some(idx) } else { None }
+                            } else {
+                                self.item_infos.iter().find(|(_, i)| i.name.eq_ignore_ascii_case(&name)).map(|(k, _)| *k)
+                            };
                             if let Some(idx) = item_idx {
                                 let mut item = crate::actors::inventory::make_item(idx, count);
                                 if let Some(info) = self.item_infos.get(&idx) {
@@ -1664,19 +1668,32 @@ impl Message<ChatRequest> for WorldActor {
                                 send_system_message(&self.gate_ref, msg.session_id, &format!("未找到物品：{}", name));
                             }
                         }
-                        // @monster <怪物名> [数量]
-                        "MONSTER" => {
-                            let name = parts.get(1).copied().unwrap_or("");
+                        // @monster|@mob <怪物名|索引> [数量]（#1472：C# MOB 索引/名称双查）
+                        "MONSTER" | "MOB" => {
+                            let key = parts.get(1).copied().unwrap_or("");
+                            let idx_opt = if let Ok(idx) = key.parse::<i32>() {
+                                if self.monster_infos.contains_key(&idx) { Some(idx) } else { None }
+                            } else {
+                                self.monster_name_index.get(&key.to_lowercase()).copied()
+                            };
                             let count = parts.get(2).and_then(|s| s.parse::<u32>().ok()).unwrap_or(1).max(1);
                             let state = match record.actor_ref.ask(GetPlayerState).await {
                                 Ok(Some(s)) => s,
                                 _ => return,
                             };
-                            let spawned = self.spawn_monster_named(name, state.x, state.y, count, state.map_index).await;
-                            let msg_text = if spawned > 0 {
-                                format!("已召唤 {} x{}", name, spawned)
+                            let spawned = if let Some(idx) = idx_opt {
+                                // 按索引取怪名后走 spawn_monster_named（#1472）
+                                match self.monster_infos.get(&idx).map(|i| i.name.clone()) {
+                                    Some(name) => self.spawn_monster_named(&name, state.x, state.y, count, state.map_index).await,
+                                    None => 0,
+                                }
                             } else {
-                                format!("未找到怪物：{}", name)
+                                0
+                            };
+                            let msg_text = if spawned > 0 {
+                                format!("已召唤 {} x{}", key, spawned)
+                            } else {
+                                format!("未找到怪物：{}", key)
                             };
                             send_system_message(&self.gate_ref, msg.session_id, &msg_text);
                         }
