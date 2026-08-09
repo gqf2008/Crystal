@@ -354,9 +354,11 @@ impl Message<UpdateIntelligentCreature> for WorldActor {
         );
     }
 }
-/// 宠物拾取地面物品
+/// 宠物拾取地面物品（C# PlayerObject.IntelligentCreaturePickup → pet.ManualPickup）
+/// mouse_mode=true：在目标位置附近拾取（X 键）；false：半自动（宠物/玩家位置附近，Ctrl+A）
 pub struct IntelligentCreaturePickup {
     pub session_id: u64,
+    pub mouse_mode: bool,
     pub x: i32,
     pub y: i32,
 }
@@ -389,12 +391,20 @@ impl Message<IntelligentCreaturePickup> for WorldActor {
             return;
         }
 
+        // #1558：C# IntelligentCreatureObject.ManualPickup——
+        //   mousemode=true 在 atLocation（鼠标位置）附近拾取；
+        //   mousemode=false 在宠物当前位置附近半自动拾取（服务端宠物跟随玩家，用玩家位置近似）
+        let (cx, cy) = if msg.mouse_mode {
+            (msg.x, msg.y)
+        } else {
+            (state.x, state.y)
+        };
         // 查找附近的地面物品（同地图）
         let distance = 3; // 宠物拾取范围
         let item_idx = self.ground_items.iter().position(|item| {
             item.map_index == state.map_index
-                && (item.x - msg.x).abs() <= distance
-                && (item.y - msg.y).abs() <= distance
+                && (item.x - cx).abs() <= distance
+                && (item.y - cy).abs() <= distance
         });
 
         if let Some(idx) = item_idx {
@@ -422,8 +432,8 @@ impl Message<IntelligentCreaturePickup> for WorldActor {
                         }
                     }
                 }
-                debug!("Creature pickup: {} picked up item at ({},{})",
-                       state.name, msg.x, msg.y);
+                debug!("Creature pickup: {} picked up item at ({},{}) mouse_mode={}",
+                       state.name, cx, cy, msg.mouse_mode);
             } else {
                 // 添加失败，放回去
                 self.ground_items.push(item);

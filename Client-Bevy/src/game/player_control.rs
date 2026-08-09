@@ -69,7 +69,7 @@ impl Plugin for PlayerControlPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (advance_attack_timer_system, autorun_toggle_system, right_click_move_system, left_click_interact_system, key_pickup_system, hold_move_system, auto_attack_system, pickup_arrival_system, context_cursor_system)
+            (advance_attack_timer_system, autorun_toggle_system, right_click_move_system, left_click_interact_system, key_pickup_system, pet_pickup_system, hold_move_system, auto_attack_system, pickup_arrival_system, context_cursor_system)
                 .run_if(in_state(AppState::Game)),
         );
     }
@@ -880,6 +880,63 @@ fn key_pickup_system(
         }
     }
 }
+/// #1558：构造 C.IntelligentCreaturePickup（SharedRust packets/client/misc.rs）
+/// `[mouse_mode: u8][x: i32][y: i32]`——mouse_mode=true 鼠标拾取、false 半自动（C# GameScene.cs:804/811）
+pub fn build_pet_pickup(
+    mouse_mode: bool,
+    tile: (i32, i32),
+) -> mir2_shared::packets::client::misc::IntelligentCreaturePickup {
+    mir2_shared::packets::client::misc::IntelligentCreaturePickup {
+        mouse_mode,
+        location: mir2_shared::map::Point { x: tile.0, y: tile.1 },
+    }
+}
+
+/// 宠物拾取指令（#1558，C# KeybindOptions.CreaturePickup/CreatureAutoPickup）：
+/// - X：宠物到鼠标位置拾取（MouseMode=true，GameScene.cs:811）
+/// - Ctrl+X：宠物半自动拾取（MouseMode=false，GameScene.cs:804，服务端在宠物/玩家位置附近拾取）
+fn pet_pickup_system(
+    keys: Res<ButtonInput<KeyCode>>,
+    kb: Res<crate::game::dialogs::keyboard_layout::KeyboardState>,
+    net: Res<NetConnection>,
+    chat: Res<crate::game::chat::ChatState>,
+    windows: Query<&Window>,
+    camera: Query<
+        &Transform,
+        (With<Camera2d>, Without<UiButton>, Without<crate::ui::sprite_ui::UiEntity>),
+    >,
+    players: Query<&Transform, (With<LocalPlayer>, With<NetObjectId>)>,
+    hud: Res<HudState>,
+) {
+    if hud.dead {
+        return;
+    }
+    // 聊天输入激活时不触发（X/Ctrl+X 是文本按键，避免输入字母时误发拾取指令）
+    if chat.input_active {
+        return;
+    }
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.physical_cursor_position() else { return };
+    let Ok(cam_tf) = camera.single() else { return };
+    let world = screen_to_world(cursor, cam_tf, window);
+    let mouse_tile = world_to_tile(world.x, world.y);
+    let player_tile = players
+        .single()
+        .map(|tf| world_to_tile(tf.translation.x, tf.translation.y))
+        .ok();
+
+    for b in &kb.bindings {
+        if b.action == "宠物拾取" && b.matches(&keys) {
+            net.send_packet(&build_pet_pickup(true, mouse_tile));
+            tracing::info!("🐾 宠物拾取（鼠标）@ ({},{})", mouse_tile.0, mouse_tile.1);
+        } else if b.action == "宠物半自动拾取" && b.matches(&keys) {
+            let tile = player_tile.unwrap_or(mouse_tile);
+            net.send_packet(&build_pet_pickup(false, tile));
+            tracing::info!("🐾 宠物半自动拾取 @ ({},{})", tile.0, tile.1);
+        }
+    }
+}
+
 /// C# GameScene.NPCTime/NPCID：同 NPC 5 秒内忽略重复 CallNPC
 fn npc_call_allowed(prev_id: Option<u32>, last_call: f32, now: f32, object_id: u32) -> bool {
     !(prev_id == Some(object_id) && now - last_call < 5.0)
@@ -1002,6 +1059,20 @@ mod tests {
         assert_eq!(pkt.target_id, 101);
         assert_eq!(pkt.target_location.x, 15);
         assert_eq!(pkt.target_location.y, 25);
+    }
+
+    #[test]
+    fn test_build_pet_pickup_fields() {
+        // #1558：C.IntelligentCreaturePickup = [mouse_mode u8][Point x i32][y i32]
+        let pkt = build_pet_pickup(true, (10, 20));
+        assert!(pkt.mouse_mode);
+        assert_eq!(pkt.location.x, 10);
+        assert_eq!(pkt.location.y, 20);
+
+        let pkt = build_pet_pickup(false, (5, 6));
+        assert!(!pkt.mouse_mode);
+        assert_eq!(pkt.location.x, 5);
+        assert_eq!(pkt.location.y, 6);
     }
 
     #[test]

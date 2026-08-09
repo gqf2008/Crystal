@@ -51,7 +51,7 @@ impl KeyBinding {
         Self { action, group, key, require_alt: alt, require_shift: shift, require_ctrl: ctrl, require_tilde: 2 }
     }
     /// 当前按键+修饰键是否匹配（C# Require* 语义：2=不限）
-    fn matches(&self, keys: &ButtonInput<KeyCode>) -> bool {
+    pub(crate) fn matches(&self, keys: &ButtonInput<KeyCode>) -> bool {
         if !keys.just_pressed(self.key) {
             return false;
         }
@@ -205,6 +205,9 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("向右移动", "移动", KeyCode::KeyD),
         KeyBinding::new("拾取", "交互", KeyCode::Tab),
         KeyBinding::new("拾取2", "交互", KeyCode::Space),
+        // #1558：宠物拾取（C# KeyBindSettings：CreaturePickup=X 鼠标拾取、CreatureAutoPickup=Ctrl+A 半自动）
+        KeyBinding::new_mod("宠物拾取", "交互", KeyCode::KeyX, 0, 2, 2),
+        KeyBinding::new_mod("宠物半自动拾取", "交互", KeyCode::KeyX, 1, 2, 2),
         KeyBinding::new("聊天", "交互", KeyCode::Enter),
         KeyBinding::new("背包", "界面", KeyCode::F9),
         KeyBinding::new("背包2", "界面", KeyCode::KeyI),

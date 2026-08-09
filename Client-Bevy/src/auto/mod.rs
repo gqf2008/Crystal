@@ -27,6 +27,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--auto-attack") {
         app.add_systems(Update, auto_attack_debug);
     }
+    // --auto-pet-pickup: 宠物拾取指令链路（#1558，C.IntelligentCreaturePickup → 拾取入包）
+    if std::env::args().any(|a| a == "--auto-pet-pickup") {
+        app.add_systems(Update, auto_pet_pickup_test);
+    }
     // --auto-ranged-attack: 弓手远程攻击链路（#1556，C.RangeAttack → 弹道 → 受击反馈）
     if std::env::args().any(|a| a == "--auto-ranged-attack") {
         app.add_systems(Update, auto_ranged_attack_test);
