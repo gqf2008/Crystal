@@ -2490,11 +2490,13 @@ impl Message<AddItemToInventory> for PlayerActor {
         // 金币（item_index=0）：直接加 gold，不占背包（C# 金币独立于背包）
         if msg.item.item_index == 0 {
             self.state.inventory.gold = self.state.inventory.gold.saturating_add(msg.item.count as u64);
+            // #1588：拾取金币应发 S.GainedGold（客户端 Gold += Gold）；
+            // 原先错发 LoseGold 会让客户端先扣余额再靠 UserInformation 回刷。
             let mut body = Vec::new();
             body.extend_from_slice(&(msg.item.count as u32).to_le_bytes());
             let _ = self.gate_ref.tell(SendToClient {
                 session_id: self.state.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::LoseGold as i16, &body),
+                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GainedGold as i16, &body),
             }).await;
             return true;
         }
