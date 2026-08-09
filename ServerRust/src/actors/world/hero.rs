@@ -834,7 +834,6 @@ impl WorldActor {
                 .find(|b| b.kind == HeroBuffKind::Haste)
                 .map(|b| (b.level as i32 * 2 + 2) as u64)
                 .unwrap_or(0);
-            let concentrating = ai_local.buffs.iter().any(|b| b.kind == HeroBuffKind::Concentration);
             // #1134：英雄 HP 不再每 tick 强制满血——改为脱战缓慢回血（C# Stats 回血近似）
             // 上一 tick 无锁定目标视为脱战（战斗中不回血，损耗可见）
             if !snap.owner_dead && ai_local.hp > 0 && ai_local.hp < ai_local.max_hp
@@ -853,16 +852,13 @@ impl WorldActor {
                 ai_local.pot_health -= regen;
             }
             // #1186：自然回蓝（C# ProcessRegen：CanRegen 时 (int)(Stats[MP]*0.03)+1）
+            // #1422：C# 专注 buff 不提供回蓝加成（仅冥想攒元素概率 + 移动打断）——移除原 ×2 近似
             if !snap.owner_dead
                 && ai_local.mp > 0
                 && ai_local.mp < ai_local.max_mp
                 && ai_local.target_oid.is_none()
             {
-                let mut regen = (ai_local.max_mp * 3 / 100 + 1).max(1);
-                // #1190：Concentration 专注回蓝增强（近似 ×2）
-                if concentrating {
-                    regen *= 2;
-                }
+                let regen = (ai_local.max_mp * 3 / 100 + 1).max(1);
                 ai_local.mp = (ai_local.mp + regen).min(ai_local.max_mp);
             }
             // #1186：药水持续回蓝（C# ProcessRegen：PerTickRegen 从 PotManaAmount 扣除）
@@ -1408,14 +1404,19 @@ impl WorldActor {
                         if can_poison {
 
                             // #1192：C# Poisoning：value = GetDamage(SC)；Duration=value*2+(Lv+1)*7、TickSpeed 2000
-                            // 绿毒 Value = value/15 + Lv + 1（+Random PoisonAttack 近似省略）；红毒无伤害值（状态毒）
+                            // 绿毒 Value = value/15 + Lv + 1 + Random(PoisonAttack)（#1423：C# HumanObject.cs:6043）
+                            // 红毒无伤害值（状态毒）
                             let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Poisoning as u8);
                             if ai_local.mp >= cost {
                                 ai_local.mp -= cost;
                                 let value = hero_attack_power_sc(&hero_stats).max(1);
                                 let duration = (value * 2 + (poisoning_lv as i32 + 1) * 7).max(1) as u32;
                                 let poison_value = if snap.hero_poison_shape == 1 {
-                                    (value / 15 + poisoning_lv as i32 + 1).max(1)
+                                    hero_poisoning_green_value(
+                                        value,
+                                        poisoning_lv as i32,
+                                        snap.hero_stats.poison_attack,
+                                    )
                                 } else {
                                     0 // C# Red 毒无 Value（状态毒）
                                 };
@@ -1591,7 +1592,11 @@ impl WorldActor {
                                 // #1194：PoisonShot buff 生效时本次射击附加绿毒（C# CompleteRangeAttack 取消 buff 并 ApplyPoison）
                                 if has_poison_buff {
                                     let duration = (raw * 2 + (straight_lv as i32 + 1) * 7).max(1) as u32;
-                                    let pv = (raw / 25 + straight_lv as i32 + 1).max(1);
+                                    let pv = hero_poison_shot_value(
+                                        raw,
+                                        straight_lv as i32,
+                                        snap.hero_stats.poison_attack,
+                                    );
                                     poison_intents.push((
                                         snap.session_id,
                                         target.oid,
@@ -2410,6 +2415,25 @@ fn hero_has_amulet(
         return false;
     };
     info.item_type == 8 && info.shape == 0 && item.count > 0
+}
+
+/// 英雄绿毒随机项（#1423/#1424：C# Envir.Random.Next(Stats[Stat.PoisonAttack])；Random.Next(0)=0）
+fn hero_random_poison_attack(poison_attack: i32) -> i32 {
+    if poison_attack > 0 {
+        fastrand::i32(0..poison_attack)
+    } else {
+        0
+    }
+}
+
+/// 道士 Poisoning 绿毒 Value（#1423：C# value/15 + Lv + 1 + Random(PoisonAttack)）
+fn hero_poisoning_green_value(value: i32, level: i32, poison_attack: i32) -> i32 {
+    (value / 15 + level + 1 + hero_random_poison_attack(poison_attack)).max(1)
+}
+
+/// 弓手 PoisonShot 附加绿毒 Value（#1424：C# value/25 + Lv + 1 + Random(PoisonAttack)）
+fn hero_poison_shot_value(value: i32, level: i32, poison_attack: i32) -> i32 {
+    (value / 25 + level + 1 + hero_random_poison_attack(poison_attack)).max(1)
 }
 
 /// #1414：道士英雄 SC 攻击力（C# GetAttackPower(MinSC, MaxSC)，无幸运；替代取中值近似）
@@ -3684,4 +3708,47 @@ mod tests {
         assert_eq!(hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::MagicShield, 0, &stats), 30);
     }
 
+    #[test]
+    fn hero_random_poison_attack_matches_csharp() {
+        // #1423/#1424：C# Envir.Random.Next(Stats[Stat.PoisonAttack])——Random.Next(0)=0，其余返回 [0, pa)
+        assert_eq!(hero_random_poison_attack(0), 0);
+        assert_eq!(hero_random_poison_attack(-1), 0);
+        for _ in 0..200 {
+            let r = hero_random_poison_attack(5);
+            assert!((0..5).contains(&r), "poison roll out of range: {}", r);
+        }
+    }
+
+    #[test]
+    fn hero_poisoning_green_value_matches_csharp() {
+        // #1423：C# Value = value/15 + Lv + 1 + Random(PoisonAttack)
+        // pa=0 → 随机项恒 0（C# Random.Next(0)=0）
+        assert_eq!(hero_poisoning_green_value(30, 2, 0), 30 / 15 + 2 + 1);
+        assert_eq!(hero_poisoning_green_value(15, 0, 0), 15 / 15 + 0 + 1);
+        // pa>0：随机项落在 [0, pa)
+        for _ in 0..200 {
+            let v = hero_poisoning_green_value(30, 2, 8);
+            let base = 30 / 15 + 2 + 1;
+            assert!(
+                (base..base + 8).contains(&v),
+                "poisoning value out of range: {}",
+                v
+            );
+        }
+    }
+
+    #[test]
+    fn hero_poison_shot_value_matches_csharp() {
+        // #1424：C# Value = value/25 + Lv + 1 + Random(PoisonAttack)
+        assert_eq!(hero_poison_shot_value(50, 3, 0), 50 / 25 + 3 + 1);
+        for _ in 0..200 {
+            let v = hero_poison_shot_value(50, 3, 6);
+            let base = 50 / 25 + 3 + 1;
+            assert!(
+                (base..base + 6).contains(&v),
+                "poison shot value out of range: {}",
+                v
+            );
+        }
+    }
 }
