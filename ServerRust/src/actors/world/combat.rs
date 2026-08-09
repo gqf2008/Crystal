@@ -1467,7 +1467,7 @@ impl Message<RangeAttackRequest> for WorldActor {
                 session_id: msg.session_id,
                 attacker_object_id: object_id,
                 direction: msg.direction,
-                monster_id: msg.target_id,
+                target: RangeTarget::Monster(msg.target_id),
                 target_x,
                 target_y,
                 attacker_stats,
@@ -1479,116 +1479,191 @@ impl Message<RangeAttackRequest> for WorldActor {
                 "RangeAttack scheduled: {} -> monster {} hit={} dmg={} fire_at_tick={} (delay {} ticks)",
                 state.name, msg.target_id, hit, raw_damage, fire_at_tick, range_flight_ticks(attack_dist)
             );
-        } else if !others.is_empty() {
+        } else {
+            // #1566：PvP 目标（玩家）——施法时解析 + 预约延迟结算（与怪物目标一致，C# DelayedAction）
+            // 优先按 target_id（客户端 C.RangeAttack.TargetID = 玩家 object_id），其次目标格 1 格内
+            let mut target_player: Option<(u64, u16)> = None;
             for other in &others {
                 if let Ok(Some(other_state)) = other.actor_ref.ask(GetPlayerState).await {
-                    // #1466：C# IsAttackTarget Dead——死亡玩家不可攻击
+                    let id_match = msg.target_id != 0 && other_state.object_id == msg.target_id;
+                    let cell_match = msg.target_id == 0
+                        && (other_state.x - target_x).abs() + (other_state.y - target_y).abs() <= 1;
+                    if !id_match && !cell_match {
+                        continue;
+                    }
+                    // 施法时基础校验（死亡/GM/安全区/禁战/攻击模式；飞行后重校验）
                     if other_state.is_dead { continue; }
-                    // #1465：C# GMGameMaster——GM 保护模式不可攻击
                     if self.gm_protected.contains(&other.session_id) { continue; }
-                    let dist = (other_state.x - target_x).abs() + (other_state.y - target_y).abs();
-                    if dist <= 1 {
-                        // 攻击模式检查
-                        if !can_attack_player(&state, &other_state, &self.guild_wars) {
-                            continue;
-                        }
-                        // 安全区保护
-                        let attacker_safe = self.maps.get(&state.map_index)
-                            .map(|m| m.is_safe_zone(state.x, state.y))
-                            .unwrap_or(false);
-                        let target_safe = self.maps.get(&other_state.map_index)
-                            .map(|m| m.is_safe_zone(other_state.x, other_state.y))
-                            .unwrap_or(false);
-                        if attacker_safe || target_safe {
-                            continue;
-                        }
-                        // #1459：C# IsAttackTarget——CurrentMap.Info.NoFight 禁战地图不可攻击
-                        if self.map_infos.get(&(state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
-                            || self.map_infos.get(&(other_state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
-                        {
-                            continue;
-                        }
-
-                        let attacker_stats = state.to_combat_stats();
-                        let defender_stats = other_state.to_combat_stats();
-                        // #1519：C# 距离命中率
-                        if fastrand::i32(0..100) >= ranged_chance {
-                            continue;
-                        }
-                        // C# GetRangeAttackPower：min 随距离缩小
-                        let eff_min = range_attack_min_reduction(attacker_stats.min_atk, attack_dist);
-                        let mut raw_damage = combat_attack::get_attack_power(
-                            eff_min, attacker_stats.max_atk, attacker_stats.luck,
-                        );
-                        // C# ApplyArcherState：MentalState 惩罚
-                        raw_damage = raw_damage * archer_penalty / 100;
-                        let level_offset = if other_state.level > state.level {
-                            0
-                        } else {
-                            (state.level - other_state.level).min(10) as u16
-                        };
-                        let attack_result = combat_attack::resolve_attack(
-                            &attacker_stats, &defender_stats, raw_damage,
-                            mir2_shared::enums::DefenceType::AcAgility, level_offset,
-                        );
-                        let damage = attack_result.damage;
-                        if !attack_result.applied_poisons.is_empty() {
-                            let _ = other.actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
-                                poisons: attack_result.applied_poisons,
-                            }).await;
-                        }
-                        // C#：PvP 命中广播 ObjectStruck + DamageIndicator 给同图其他玩家
-                if damage > 0 {
-                    self.broadcast_pvp_hit(
-                        other_state.object_id, object_id,
-                        other_state.x, other_state.y, other_state.direction, damage, other_state.map_index,
-                    ).await;
+                    if !can_attack_player(&state, &other_state, &self.guild_wars) { continue; }
+                    let attacker_safe = self.maps.get(&state.map_index)
+                        .map(|m| m.is_safe_zone(state.x, state.y))
+                        .unwrap_or(false);
+                    let target_safe = self.maps.get(&other_state.map_index)
+                        .map(|m| m.is_safe_zone(other_state.x, other_state.y))
+                        .unwrap_or(false);
+                    if attacker_safe || target_safe { continue; }
+                    if self.map_infos.get(&(state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
+                        || self.map_infos.get(&(other_state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
+                    { continue; }
+                    target_player = Some((other.session_id, other_state.level));
+                    break;
                 }
-                let pvp_died = other.actor_ref.ask(TakeDamage {
-                            attacker_id: object_id,
-                            attacker_session: msg.session_id,
-                            damage,
-                        }).await.unwrap_or(false);
-                // #895：PvP 受击装备耐久损耗（C# Struck → DamageDura，命中即扣，含致死）
-                self.damage_armor_on_pvp_hit(other.session_id).await;
-                if pvp_died {
-                            // 目标死亡处理
-                            let died_packet = Self::build_object_died_packet(
-                                other_state.object_id, other_state.x, other_state.y, other_state.direction);
-                            for (sid, _) in &self.players {
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *sid,
-                                    data: died_packet.clone(),
-                                }).await;
-                            }
-                            self.handle_player_death_drop(other.session_id, other_state.x, other_state.y, other_state.map_index, true).await;
+            }
 
-                            // 增加 PK 值
-                            let _ = record.actor_ref.ask(crate::actors::player::AddPkPoints { points: 100 }).await;
+            if let Some((defender_session, defender_level)) = target_player {
+                // 施法时掷命中 + 算伤害（防御在飞行后按目标当前状态结算）
+                let hit = fastrand::i32(0..100) < ranged_chance;
+                let raw_damage = if hit {
+                    let eff_min = range_attack_min_reduction(attacker_stats.min_atk, attack_dist);
+                    let mut raw = combat_attack::get_attack_power(
+                        eff_min, attacker_stats.max_atk, attacker_stats.luck,
+                    );
+                    raw = raw * archer_penalty / 100;
+                    raw
+                } else {
+                    0
+                };
+                let level_offset = if defender_level > state.level {
+                    0
+                } else {
+                    (state.level - defender_level).min(10) as u16
+                };
+                let fire_at_tick = self.tick_count + range_flight_ticks(attack_dist);
+                self.pending_range_completions.push(PendingRangeCompletion {
+                    fire_at_tick,
+                    session_id: msg.session_id,
+                    attacker_object_id: object_id,
+                    direction: msg.direction,
+                    target: RangeTarget::Player(defender_session),
+                    target_x,
+                    target_y,
+                    attacker_stats,
+                    raw_damage,
+                    level_offset,
+                    hit,
+                });
+                debug!(
+                    "RangeAttack scheduled (PvP): {} -> player {} hit={} dmg={} fire_at_tick={} (delay {} ticks)",
+                    state.name, defender_session, hit, raw_damage, fire_at_tick, range_flight_ticks(attack_dist)
+                );
+            }
+        }
+    }
+}
+
+impl WorldActor {
+    /// #1566：远程攻击 PvP 结算（箭矢飞行后调用；C# DelayedType.Damage → Attacked）
+    ///
+    /// 飞行后按双方当前状态重校验（死亡/GM/安全区/禁战/攻击模式），
+    /// 按目标当前防御结算伤害，处理 TakeDamage / 受击反馈 / 死亡（PK/武器诅咒/观众颜色/掉落）。
+    /// 返回是否真正命中（false = 目标失效/落空，调用方不发 Miss 飘字）。
+    pub(crate) async fn resolve_ranged_pvp_hit(
+        &mut self,
+        attacker_session: u64,
+        attacker_object_id: u32,
+        attacker_stats: crate::combat::attack::CombatStats,
+        defender_session: u64,
+        raw_damage: i32,
+        level_offset: u16,
+        direction: u8,
+        target_x: i32,
+        target_y: i32,
+    ) -> bool {
+        let (Some(attacker_record), Some(defender_record)) = (
+            self.players.get(&attacker_session).cloned(),
+            self.players.get(&defender_session).cloned(),
+        ) else {
+            return false;
+        };
+        let (Ok(Some(attacker_state)), Ok(Some(defender_state))) = (
+            attacker_record.actor_ref.ask(GetPlayerState).await,
+            defender_record.actor_ref.ask(GetPlayerState).await,
+        ) else {
+            return false;
+        };
+        if attacker_state.is_dead || defender_state.is_dead {
+            return false;
+        }
+        if self.gm_protected.contains(&defender_session) {
+            return false;
+        }
+        if !can_attack_player(&attacker_state, &defender_state, &self.guild_wars) {
+            return false;
+        }
+        let attacker_safe = self.maps.get(&attacker_state.map_index)
+            .map(|m| m.is_safe_zone(attacker_state.x, attacker_state.y))
+            .unwrap_or(false);
+        let target_safe = self.maps.get(&defender_state.map_index)
+            .map(|m| m.is_safe_zone(defender_state.x, defender_state.y))
+            .unwrap_or(false);
+        if attacker_safe || target_safe {
+            return false;
+        }
+        if self.map_infos.get(&(attacker_state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
+            || self.map_infos.get(&(defender_state.map_index as i32)).map(|mi| mi.no_fight).unwrap_or(false)
+        {
+            return false;
+        }
+
+        let defender_stats = defender_state.to_combat_stats();
+        let attack_result = combat_attack::resolve_attack(
+            &attacker_stats, &defender_stats, raw_damage,
+            mir2_shared::enums::DefenceType::AcAgility, level_offset,
+        );
+        let damage = attack_result.damage;
+        if !attack_result.applied_poisons.is_empty() {
+            let _ = defender_record.actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
+                poisons: attack_result.applied_poisons,
+            }).await;
+        }
+        // C#：PvP 命中广播 ObjectStruck + DamageIndicator 给同图其他玩家
+        if damage > 0 {
+            self.broadcast_pvp_hit(
+                defender_state.object_id, attacker_object_id,
+                defender_state.x, defender_state.y, defender_state.direction, damage, defender_state.map_index,
+            ).await;
+        }
+        let pvp_died = defender_record.actor_ref.ask(TakeDamage {
+                    attacker_id: attacker_object_id,
+                    attacker_session,
+                    damage,
+                }).await.unwrap_or(false);
+        // #895：PvP 受击装备耐久损耗（C# Struck → DamageDura，命中即扣，含致死）
+        self.damage_armor_on_pvp_hit(defender_session).await;
+        if pvp_died {
+                    // 目标死亡处理
+                    let died_packet = Self::build_object_died_packet(
+                        defender_state.object_id, defender_state.x, defender_state.y, defender_state.direction);
+                    for (sid, _) in &self.players {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *sid,
+                            data: died_packet.clone(),
+                        }).await;
+                    }
+                    self.handle_player_death_drop(defender_session, defender_state.x, defender_state.y, defender_state.map_index, true).await;
+
+                    // 增加 PK 值
+                    let _ = attacker_record.actor_ref.ask(crate::actors::player::AddPkPoints { points: 100 }).await;
         // C# Die：击杀玩家 1/4 概率诅咒武器（Luck -1，Luck > -MaxLuck 时）
-        if let Ok(Some(weapon)) = record.actor_ref.ask(crate::actors::player::GetEquipmentInfo {
+        if let Ok(Some(weapon)) = attacker_record.actor_ref.ask(crate::actors::player::GetEquipmentInfo {
             slot: crate::actors::inventory::EquipmentSlot::Weapon,
         }).await {
             if weapon.added_stats.get(mir2_shared::enums::Stat::Luck) > -10 && fastrand::i32(..4) == 0 { // C# Settings.MaxLuck = 10
-                let _ = record.actor_ref.ask(crate::actors::player::AddWeaponLuck { delta: -1 }).await;
-                send_system_message(&self.gate_ref, msg.session_id, "你的武器受到了诅咒！");
-                debug!("Weapon cursed on player kill: {} -> {}", record.name, weapon.item_index);
+                let _ = attacker_record.actor_ref.ask(crate::actors::player::AddWeaponLuck { delta: -1 }).await;
+                send_system_message(&self.gate_ref, attacker_session, "你的武器受到了诅咒！");
+                debug!("Weapon cursed on player kill: {} -> {}", attacker_record.name, weapon.item_index);
             }
         }
-                            // #921：逐观众广播名字颜色（C# BroadcastColourChange）
-                            self.broadcast_viewer_colours(msg.session_id).await;
-                            if let Some(r) = self.players.get_mut(&msg.session_id) {
-                                if let Ok(Some(attacker_state)) = record.actor_ref.ask(GetPlayerState).await {
-                                    r.last_pk_points = attacker_state.pk_points;
-                                }
-                            }
+                    // #921：逐观众广播名字颜色（C# BroadcastColourChange）
+                    self.broadcast_viewer_colours(attacker_session).await;
+                    if let Some(r) = self.players.get_mut(&attacker_session) {
+                        if let Ok(Some(attacker_state2)) = attacker_record.actor_ref.ask(GetPlayerState).await {
+                            r.last_pk_points = attacker_state2.pk_points;
                         }
-                        debug!("RangeAttack PvP: {} damaged {} for {}", state.name, other_state.name, damage);
-                        break; // 远程攻击只命中一个目标
                     }
                 }
-            }
-        }
+        debug!("RangeAttack PvP resolve: {} damaged {} for {}", attacker_state.name, defender_state.name, damage);
+        true
     }
 }
 
@@ -1622,7 +1697,14 @@ pub struct PendingSpellCompletion {
     pub bounce: i32,
 }
 
-/// 弓手远程攻击延迟结算项（#1560，对齐 C# HumanObject.RangeAttack 的
+/// 远程攻击目标（#1566）：怪物 object_id 或玩家 session
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RangeTarget {
+    Monster(u32),
+    Player(u64),
+}
+
+/// 弓手远程攻击延迟结算项（#1560/#1566，对齐 C# HumanObject.RangeAttack 的
 /// DelayedAction(DelayedType.Damage / DamageIndicator, Envir.Time + delay, ...)）：
 /// 施法时广播 ObjectRangeAttack + S.RangeAttack 弹道，伤害在箭矢飞行 delay 后落地。
 #[derive(Debug, Clone)]
@@ -1634,8 +1716,8 @@ pub struct PendingRangeCompletion {
     /// 攻击者 object_id（反馈包用）
     pub attacker_object_id: u32,
     pub direction: u8,
-    /// 目标怪物 object_id
-    pub monster_id: u32,
+    /// 目标（怪物 object_id / 玩家 session）
+    pub target: RangeTarget,
     /// 目标快照位置（反馈包用）
     pub target_x: i32,
     pub target_y: i32,

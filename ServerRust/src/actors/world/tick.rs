@@ -3031,110 +3031,146 @@ impl WorldActor {
         });
 
         for c in ready {
-            let monster_id = c.monster_id;
-            // 目标怪物已消失/已死 → 箭矢落空（C# CompleteAttack 目标为空则无结算）
-            let hit_damage = {
-                let Some(monster) = self.monsters.get_mut(&monster_id) else {
-                    debug!("RangeAttack resolve: monster {} gone, arrow whiffs", monster_id);
-                    continue;
-                };
-                if monster.hp <= 0 {
-                    debug!("RangeAttack resolve: monster {} already dead, arrow whiffs", monster_id);
-                    continue;
-                }
-                if !c.hit {
-                    // 未命中：Miss 飘字（C# BroadcastDamageIndicator(DamageType.Miss)）
+            match c.target {
+                RangeTarget::Monster(monster_id) => {
+                    // 目标怪物已消失/已死 → 箭矢落空（C# CompleteAttack 目标为空则无结算）
+                    let hit_damage = {
+                        let Some(monster) = self.monsters.get_mut(&monster_id) else {
+                            debug!("RangeAttack resolve: monster {} gone, arrow whiffs", monster_id);
+                            continue;
+                        };
+                        if monster.hp <= 0 {
+                            debug!("RangeAttack resolve: monster {} already dead, arrow whiffs", monster_id);
+                            continue;
+                        }
+                        if !c.hit {
+                            // 未命中：Miss 飘字（C# BroadcastDamageIndicator(DamageType.Miss)）
+                            let mut dmg_body = Vec::new();
+                            dmg_body.extend_from_slice(&0i32.to_le_bytes()); // damage = 0
+                            dmg_body.push(4u8); // damage_type = Miss
+                            dmg_body.extend_from_slice(&monster_id.to_le_bytes());
+                            let dmg_packet = build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
+                            for session_id in self.players.keys() {
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: *session_id,
+                                    data: dmg_packet.clone(),
+                                }).await;
+                            }
+                            debug!("RangeAttack resolve: {} -> monster {} MISS", c.attacker_object_id, monster_id);
+                            continue;
+                        }
+
+                        let defender_stats = monster.to_combat_stats();
+                        let attack_result = combat_attack::resolve_attack(
+                            &c.attacker_stats, &defender_stats, c.raw_damage,
+                            mir2_shared::enums::DefenceType::AcAgility, c.level_offset,
+                        );
+                        let damage = attack_result.damage;
+                        monster.take_damage(damage);
+                        monster.last_hitter_session = Some(c.session_id);
+                        monster.provoked = true;
+                        if monster.target_session.is_none() {
+                            monster.target_session = Some(c.session_id);
+                        }
+                        for p in &attack_result.applied_poisons {
+                            crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
+                        }
+                        debug!("RangeAttack resolve: {} -> monster {} for {} damage (crit={})",
+                               c.attacker_object_id, monster_id, damage, attack_result.is_critical);
+                        damage
+                    };
+                    self.pending_gather.push(c.session_id);
+
+                    // 武器耐久损耗（C# DamageWeapon：远程命中扣 Random(4)+1）
+                    if let Some(record) = self.players.get(&c.session_id) {
+                        let broke = record.actor_ref.ask(crate::actors::player::DamageEquipment {
+                            slot: EquipmentSlot::Weapon,
+                            amount: (1 + fastrand::i32(0..4)) as u16,
+                        }).await.unwrap_or(false);
+                        if broke {
+                            debug!("Player {} weapon broke (ranged)!", c.attacker_object_id);
+                            if let Some(state) = self.recalculate_and_set_stat_bonuses(c.session_id).await {
+                                self.broadcast_equipment_visuals(c.session_id, &state).await;
+                            }
+                        }
+                    }
+
+                    // 广播受击动画 + 伤害飘字 + 血条给所有玩家（对齐近战路径）
+                    let mut struck_body = Vec::new();
+                    struck_body.extend_from_slice(&monster_id.to_le_bytes());
+                    struck_body.extend_from_slice(&c.attacker_object_id.to_le_bytes());
+                    struck_body.extend_from_slice(&(c.target_x as u32).to_le_bytes());
+                    struck_body.extend_from_slice(&(c.target_y as u32).to_le_bytes());
+                    struck_body.push(c.direction);
+                    let struck_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
+
                     let mut dmg_body = Vec::new();
-                    dmg_body.extend_from_slice(&0i32.to_le_bytes()); // damage = 0
-                    dmg_body.push(4u8); // damage_type = Miss
+                    dmg_body.extend_from_slice(&hit_damage.to_le_bytes());
+                    dmg_body.push(0u8); // damage_type = normal (Hit)
                     dmg_body.extend_from_slice(&monster_id.to_le_bytes());
                     let dmg_packet = build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
+
+                    let percent = self.monsters.get(&monster_id)
+                        .map(|m| ((m.hp.max(0) as f32 / m.max_hp.max(1) as f32) * 100.0) as u8)
+                        .unwrap_or(0);
+                    let mut health_body = Vec::new();
+                    health_body.extend_from_slice(&monster_id.to_le_bytes());
+                    health_body.push(percent);
+                    health_body.extend_from_slice(&3u16.to_le_bytes()); // expire（秒）
+                    let health_packet = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &health_body);
+
                     for session_id in self.players.keys() {
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *session_id,
+                            data: struck_packet.clone(),
+                        }).await;
                         let _ = self.gate_ref.tell(SendToClient {
                             session_id: *session_id,
                             data: dmg_packet.clone(),
                         }).await;
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: *session_id,
+                            data: health_packet.clone(),
+                        }).await;
                     }
-                    debug!("RangeAttack resolve: {} -> monster {} MISS", c.attacker_object_id, monster_id);
-                    continue;
-                }
 
-                let defender_stats = monster.to_combat_stats();
-                let attack_result = combat_attack::resolve_attack(
-                    &c.attacker_stats, &defender_stats, c.raw_damage,
-                    mir2_shared::enums::DefenceType::AcAgility, c.level_offset,
-                );
-                let damage = attack_result.damage;
-                monster.take_damage(damage);
-                monster.last_hitter_session = Some(c.session_id);
-                monster.provoked = true;
-                if monster.target_session.is_none() {
-                    monster.target_session = Some(c.session_id);
                 }
-                for p in &attack_result.applied_poisons {
-                    crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
-                }
-                debug!("RangeAttack resolve: {} -> monster {} for {} damage (crit={})",
-                       c.attacker_object_id, monster_id, damage, attack_result.is_critical);
-                damage
-            };
-            self.pending_gather.push(c.session_id);
-
-            // 武器耐久损耗（C# DamageWeapon：远程命中扣 Random(4)+1）
-            if let Some(record) = self.players.get(&c.session_id) {
-                let broke = record.actor_ref.ask(crate::actors::player::DamageEquipment {
-                    slot: EquipmentSlot::Weapon,
-                    amount: (1 + fastrand::i32(0..4)) as u16,
-                }).await.unwrap_or(false);
-                if broke {
-                    debug!("Player {} weapon broke (ranged)!", c.attacker_object_id);
-                    if let Some(state) = self.recalculate_and_set_stat_bonuses(c.session_id).await {
-                        self.broadcast_equipment_visuals(c.session_id, &state).await;
+                RangeTarget::Player(defender_session) => {
+                    // #1566：PvP 目标——命中走完整结算；未命中对目标玩家广播 Miss
+                    if c.hit {
+                        self.resolve_ranged_pvp_hit(
+                            c.session_id,
+                            c.attacker_object_id,
+                            c.attacker_stats,
+                            defender_session,
+                            c.raw_damage,
+                            c.level_offset,
+                            c.direction,
+                            c.target_x,
+                            c.target_y,
+                        ).await;
+                    } else if let Some(record) = self.players.get(&defender_session) {
+                        if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                            let mut dmg_body = Vec::new();
+                            dmg_body.extend_from_slice(&0i32.to_le_bytes()); // damage = 0
+                            dmg_body.push(4u8); // damage_type = Miss
+                            dmg_body.extend_from_slice(&st.object_id.to_le_bytes());
+                            let dmg_packet = build_packet_bytes(
+                                mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
+                            for session_id in self.players.keys() {
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: *session_id,
+                                    data: dmg_packet.clone(),
+                                }).await;
+                            }
+                            debug!("RangeAttack resolve: {} -> player {} MISS", c.attacker_object_id, st.object_id);
+                        }
                     }
                 }
-            }
-
-            // 广播受击动画 + 伤害飘字 + 血条给所有玩家（对齐近战路径）
-            let mut struck_body = Vec::new();
-            struck_body.extend_from_slice(&monster_id.to_le_bytes());
-            struck_body.extend_from_slice(&c.attacker_object_id.to_le_bytes());
-            struck_body.extend_from_slice(&(c.target_x as u32).to_le_bytes());
-            struck_body.extend_from_slice(&(c.target_y as u32).to_le_bytes());
-            struck_body.push(c.direction);
-            let struck_packet = build_packet_bytes(
-                mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
-
-            let mut dmg_body = Vec::new();
-            dmg_body.extend_from_slice(&hit_damage.to_le_bytes());
-            dmg_body.push(0u8); // damage_type = normal (Hit)
-            dmg_body.extend_from_slice(&monster_id.to_le_bytes());
-            let dmg_packet = build_packet_bytes(
-                mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
-
-            let percent = self.monsters.get(&monster_id)
-                .map(|m| ((m.hp.max(0) as f32 / m.max_hp.max(1) as f32) * 100.0) as u8)
-                .unwrap_or(0);
-            let mut health_body = Vec::new();
-            health_body.extend_from_slice(&monster_id.to_le_bytes());
-            health_body.push(percent);
-            health_body.extend_from_slice(&3u16.to_le_bytes()); // expire（秒）
-            let health_packet = build_packet_bytes(
-                mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &health_body);
-
-            for session_id in self.players.keys() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: *session_id,
-                    data: struck_packet.clone(),
-                }).await;
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: *session_id,
-                    data: dmg_packet.clone(),
-                }).await;
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: *session_id,
-                    data: health_packet.clone(),
-                }).await;
             }
         }
     }
