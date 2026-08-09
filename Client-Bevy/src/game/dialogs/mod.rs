@@ -197,18 +197,19 @@ pub fn dialog_drag_system(
     let cursor = Vec2::new(world.x, -world.y);
 
     // 聚合每个可见对话框的包围盒（隐藏窗口不参与命中，避免拖错/拖到不可见窗口）
-    let mut boxes: std::collections::HashMap<DialogKind, (f32, f32, f32, f32)> =
+    let mut boxes: std::collections::HashMap<DialogKind, (f32, f32, f32, f32, f32)> =
         std::collections::HashMap::new();
     for (_, root, vis, tf) in dialogs.iter() {
         if *vis != Visibility::Visible {
             continue;
         }
         let (x, y) = (tf.translation.x, -tf.translation.y);
-        let b = boxes.entry(root.0).or_insert((x, y, x, y));
+        let b = boxes.entry(root.0).or_insert((x, y, x, y, tf.translation.z));
         b.0 = b.0.min(x);
         b.1 = b.1.min(y);
         b.2 = b.2.max(x);
         b.3 = b.3.max(y);
+        b.4 = b.4.max(tf.translation.z);
     }
 
     // 点击标题栏开始拖动（按钮命中区不触发拖动，避免点关闭/翻页等误拖）
@@ -218,36 +219,41 @@ pub fn dialog_drag_system(
             cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h
         });
         if !on_button {
-            for (kind, (minx, miny, maxx, maxy)) in &boxes {
-                // 按住窗口任意位置（非按钮）即可拖动，对齐 C# MirImageControl.Movable
+            // 取光标下 z 最高的可见对话框（重叠时拖动最顶层的那个，避免“拖上面动下面”）
+            let mut top: Option<(DialogKind, f32)> = None;
+            for (kind, (minx, miny, maxx, maxy, maxz)) in &boxes {
                 if cursor.x >= *minx && cursor.x <= *maxx && cursor.y >= *miny && cursor.y <= *maxy {
-                    let origins = dialogs
-                        .iter()
-                        .filter(|(_, r, v, _)| *v == Visibility::Visible && r.0 == *kind)
-                        .map(|(e, _, _, tf)| (e, tf.translation))
-                        .collect::<std::collections::HashMap<_, _>>();
-                    drag.dragging = Some(*kind);
-                    drag.start_cursor = cursor;
-                    drag.origins = origins;
-                    // 同步记录各交互控件的原始命中位置（拖动后保持可点击）
-                    drag.btn_origins = ui_buttons
-                        .iter()
-                        .filter(|(_, _, r)| r.map(|r| r.0) == Some(*kind))
-                        .map(|(e, btn, _)| (e, (btn.rect.0, btn.rect.1)))
-                        .collect();
-                    drag.text_origins = text_rects
-                        .iter()
-                        .filter(|(_, _, r)| r.map(|r| r.0) == Some(*kind))
-                        .map(|(e, tr, _)| (e, (tr.0, tr.1)))
-                        .collect();
-                    drag.dd_origins = drop_downs
-                        .iter()
-                        .filter(|(_, _, r)| r.map(|r| r.0) == Some(*kind))
-                        .map(|(e, dd, _)| (e, ((dd.box_rect.0, dd.box_rect.1), (dd.popup_pos.0, dd.popup_pos.1))))
-                        .collect();
-                    tracing::info!("🖱️ 拖动对话框 {:?}", kind);
-                    break;
+                    if top.map(|(_, z)| *maxz > z).unwrap_or(true) {
+                        top = Some((*kind, *maxz));
+                    }
                 }
+            }
+            if let Some((kind, _)) = top {
+                let origins = dialogs
+                    .iter()
+                    .filter(|(_, r, v, _)| *v == Visibility::Visible && r.0 == kind)
+                    .map(|(e, _, _, tf)| (e, tf.translation))
+                    .collect::<std::collections::HashMap<_, _>>();
+                drag.dragging = Some(kind);
+                drag.start_cursor = cursor;
+                drag.origins = origins;
+                // 同步记录各交互控件的原始命中位置（拖动后保持可点击）
+                drag.btn_origins = ui_buttons
+                    .iter()
+                    .filter(|(_, _, r)| r.map(|r| r.0) == Some(kind))
+                    .map(|(e, btn, _)| (e, (btn.rect.0, btn.rect.1)))
+                    .collect();
+                drag.text_origins = text_rects
+                    .iter()
+                    .filter(|(_, _, r)| r.map(|r| r.0) == Some(kind))
+                    .map(|(e, tr, _)| (e, (tr.0, tr.1)))
+                    .collect();
+                drag.dd_origins = drop_downs
+                    .iter()
+                    .filter(|(_, _, r)| r.map(|r| r.0) == Some(kind))
+                    .map(|(e, dd, _)| (e, ((dd.box_rect.0, dd.box_rect.1), (dd.popup_pos.0, dd.popup_pos.1))))
+                    .collect();
+                tracing::info!("🖱️ 拖动对话框 {:?}", kind);
             }
         }
     }
