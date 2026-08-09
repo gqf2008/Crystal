@@ -891,6 +891,8 @@ impl WorldActor {
                 .map(|(s, x, y, oid, pk, hp, map, lvl)| ai::PlayerSnap {
                     session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl, pk_points: *pk,
                 }).collect();
+            let die_monster_name_map: std::collections::HashMap<i32, String> =
+                self.monster_infos.iter().map(|(k, v)| (*k, v.name.clone())).collect();
             let mut ctx = AiCtx {
                 tick_count: self.tick_count,
                 monster_oid: monster.object_id,
@@ -901,6 +903,7 @@ impl WorldActor {
                 dragon_level: 0,
                 players: &die_player_snaps,
                 monsters: &[],
+                monster_name_by_index: &die_monster_name_map,
                 out_moves: &mut die_moves,
                 out_attacks: &mut die_attacks,
                 out_spell_fields: &mut die_spell_fields,
@@ -3487,6 +3490,8 @@ impl Message<Tick> for WorldActor {
                         .map(|(s, x, y, oid, pk, hp, map, lvl)| ai::PlayerSnap {
                                         session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl, pk_points: *pk,
                                     }).collect();
+                    let monster_name_map: std::collections::HashMap<i32, String> =
+                        self.monster_infos.iter().map(|(k, v)| (*k, v.name.clone())).collect();
                     // monster_snaps 从循环外预收集的 monster_snapshot 构建（避免 &mut self.monsters 借用冲突）
                     let monster_snaps: Vec<ai::MonsterSnap> = monster_snapshot.iter()
                         .map(|(oid, x, y, hp, max_hp, map, idx, _, _, _)| ai::MonsterSnap {
@@ -3502,6 +3507,7 @@ impl Message<Tick> for WorldActor {
                         dragon_level: self.dragon_state.as_ref().map(|d| d.level).unwrap_or(0),
                         players: &player_snaps,
                         monsters: &monster_snaps,
+                        monster_name_by_index: &monster_name_map,
                         out_moves: &mut boss_moves,
                         out_attacks: &mut boss_attacks,
                         out_spell_fields: &mut boss_spell_fields,
