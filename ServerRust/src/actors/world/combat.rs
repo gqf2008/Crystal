@@ -1361,7 +1361,8 @@ impl Message<RangeAttackRequest> for WorldActor {
                 let raw_damage = combat_attack::get_attack_power(
                     attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck,
                 );
-                let level_offset = state.level.min(10) as u16;
+                // #1455：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                let level_offset = crate::combat::attack::level_offset(state.level, monster.level.max(0) as u16);
                 let attack_result = combat_attack::resolve_attack(
                     &attacker_stats, &defender_stats, raw_damage,
                     // 远程物理攻击用 AC 防御（无 Agility 闪避，远程难躲）
@@ -2307,7 +2308,6 @@ impl Message<MagicRequest> for WorldActor {
             SPELL_THRUSTING => {
                 let dir = msg.direction as usize % 8;
                 let attacker_stats = state.to_combat_stats();
-                let level_offset = state.level.min(10) as u16;
                 let raw = crate::combat::attack::get_attack_power(
                     attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck,
                 );
@@ -2324,6 +2324,8 @@ impl Message<MagicRequest> for WorldActor {
                     if let Some(mid) = hit {
                         if let Some(m) = self.monsters.get_mut(&mid) {
                             let ds = m.to_combat_stats();
+                            // #1455：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                            let level_offset = crate::combat::attack::level_offset(state.level, m.level.max(0) as u16);
                             let r = combat_attack::resolve_attack(
                                 &attacker_stats, &ds, raw_damage,
                                 mir2_shared::enums::DefenceType::AcAgility, level_offset,
@@ -2526,7 +2528,6 @@ impl Message<MagicRequest> for WorldActor {
                     crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
                 } else { fastrand::i32(5..=15) }.max(1);
                 let attacker_stats = state.to_combat_stats();
-                let level_offset = state.level.min(10) as u16;
                 // 3×3：target 周围 ±1 格
                 let hit_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(_, m)| {
@@ -2539,6 +2540,8 @@ impl Message<MagicRequest> for WorldActor {
                 for mid in hit_ids {
                     if let Some(monster) = self.monsters.get_mut(&mid) {
                         let defender_stats = monster.to_combat_stats();
+                        // #1455：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                        let level_offset = crate::combat::attack::level_offset(state.level, monster.level.max(0) as u16);
                         let r = combat_attack::resolve_attack(
                             &attacker_stats, &defender_stats, raw_damage,
                             mir2_shared::enums::DefenceType::Mac, level_offset,
@@ -2566,7 +2569,6 @@ impl Message<MagicRequest> for WorldActor {
                     crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
                 } else { fastrand::i32(5..=15) }.max(1);
                 let attacker_stats = state.to_combat_stats();
-                let level_offset = state.level.min(10) as u16;
                 let dir = msg.direction as usize % 8;
                 let mut cx = state.x;
                 let mut cy = state.y;
@@ -2580,6 +2582,8 @@ impl Message<MagicRequest> for WorldActor {
                     if let Some(mid) = hit {
                         if let Some(monster) = self.monsters.get_mut(&mid) {
                             let defender_stats = monster.to_combat_stats();
+                            // #1455：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                            let level_offset = crate::combat::attack::level_offset(state.level, monster.level.max(0) as u16);
                             let r = combat_attack::resolve_attack(
                                 &attacker_stats, &defender_stats, raw_damage,
                                 mir2_shared::enums::DefenceType::Mac, level_offset,
@@ -2610,7 +2614,6 @@ impl Message<MagicRequest> for WorldActor {
                     crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
                 } else { fastrand::i32(5..=15) }.max(1);
                 let attacker_stats = state.to_combat_stats();
-                let level_offset = state.level.min(10) as u16;
                 let hit_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(_, m)| {
                         let dx = (m.x - state.x).abs();
@@ -2629,6 +2632,8 @@ impl Message<MagicRequest> for WorldActor {
                         } else {
                             raw_damage
                         };
+                        // #1455：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                        let level_offset = crate::combat::attack::level_offset(state.level, monster.level.max(0) as u16);
                         let r = combat_attack::resolve_attack(
                             &attacker_stats, &defender_stats, adjusted_dmg,
                             mir2_shared::enums::DefenceType::Mac, level_offset,
@@ -2656,7 +2661,6 @@ impl Message<MagicRequest> for WorldActor {
                     crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
                 } else { fastrand::i32(8..=20) }.max(1);
                 let attacker_stats = state.to_combat_stats();
-                let level_offset = state.level.min(10) as u16;
                 let cells = hellfire_cells(state.x, state.y, msg.direction, spell_level);
                 let hit_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y)))
@@ -2666,6 +2670,8 @@ impl Message<MagicRequest> for WorldActor {
                 for mid in hit_ids {
                     if let Some(monster) = self.monsters.get_mut(&mid) {
                         let defender_stats = monster.to_combat_stats();
+                        // #1455：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                        let level_offset = crate::combat::attack::level_offset(state.level, monster.level.max(0) as u16);
                         let r = combat_attack::resolve_attack(
                             &attacker_stats, &defender_stats, raw_damage,
                             mir2_shared::enums::DefenceType::Mac, level_offset,
@@ -2699,7 +2705,6 @@ impl Message<MagicRequest> for WorldActor {
                     raw_damage *= 2;
                 }
                 let attacker_stats = state.to_combat_stats();
-                let level_offset = state.level.min(10) as u16;
                 let cells = icethrust_cells(state.x, state.y, msg.direction);
                 let mut spell_hits: Vec<(u32, i32, i32, u8, i32)> = Vec::new();
                 for (i, (cx, cy)) in cells.iter().enumerate() {
@@ -2710,6 +2715,8 @@ impl Message<MagicRequest> for WorldActor {
                     if let Some(mid) = hit {
                         if let Some(monster) = self.monsters.get_mut(&mid) {
                             let defender_stats = monster.to_combat_stats();
+                            // #1455：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                            let level_offset = crate::combat::attack::level_offset(state.level, monster.level.max(0) as u16);
                             let r = combat_attack::resolve_attack(
                                 &attacker_stats, &defender_stats, dmg,
                                 mir2_shared::enums::DefenceType::Mac, level_offset,
@@ -3196,7 +3203,6 @@ impl Message<MagicRequest> for WorldActor {
             SPELL_HEAVENLY_SWORD => {
                 let dir = msg.direction as usize % 8;
                 let attacker_stats = state.to_combat_stats();
-                let level_offset = state.level.min(10) as u16;
                 let raw_damage = crate::combat::attack::get_attack_power(
                     attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck);
                 let mut cx = state.x;
@@ -3212,6 +3218,8 @@ impl Message<MagicRequest> for WorldActor {
                 for mid in hit_ids {
                     if let Some(m) = self.monsters.get_mut(&mid) {
                         let ds = m.to_combat_stats();
+                        // #1455：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                        let level_offset = crate::combat::attack::level_offset(state.level, m.level.max(0) as u16);
                         let r = combat_attack::resolve_attack(
                             &attacker_stats, &ds, raw_damage,
                             mir2_shared::enums::DefenceType::AcAgility, level_offset);
@@ -3247,7 +3255,6 @@ impl Message<MagicRequest> for WorldActor {
                 // C# Envir.cs BladeAvalanche：倍率 1+0.4Lv（幸运翻倍保留）
                 let raw = ((raw as f32) * (1.0 + 0.4 * spell_level as f32)).max(1.0) as i32;
                 let attacker_stats = state.to_combat_stats();
-                let level_offset = state.level.min(10) as u16;
                 let dir = msg.direction as usize % 8;
                 let prev = (dir + 7) % 8;
                 let next = (dir + 1) % 8;
@@ -3266,6 +3273,8 @@ impl Message<MagicRequest> for WorldActor {
                         for mid in hit_ids {
                             if let Some(monster) = self.monsters.get_mut(&mid) {
                                 let ds = monster.to_combat_stats();
+                                // #1455：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                                let level_offset = crate::combat::attack::level_offset(state.level, monster.level.max(0) as u16);
                                 let r = combat_attack::resolve_attack(
                                     &attacker_stats, &ds, cell_dmg,
                                     mir2_shared::enums::DefenceType::Mac, level_offset,
@@ -3291,7 +3300,6 @@ impl Message<MagicRequest> for WorldActor {
             SPELL_CRESCENT_SLASH => {
                 let dir = msg.direction as usize % 8;
                 let attacker_stats = state.to_combat_stats();
-                let level_offset = state.level.min(10) as u16;
                 let raw = crate::combat::attack::get_attack_power(
                     attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck);
                 // C# Envir.cs CrescentSlash：倍率 1+0.4Lv
@@ -3309,6 +3317,8 @@ impl Message<MagicRequest> for WorldActor {
                 for mid in hit_ids {
                     if let Some(m) = self.monsters.get_mut(&mid) {
                         let ds = m.to_combat_stats();
+                        // #1455：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                        let level_offset = crate::combat::attack::level_offset(state.level, m.level.max(0) as u16);
                         let r = combat_attack::resolve_attack(
                             &attacker_stats, &ds, raw_damage,
                             mir2_shared::enums::DefenceType::AcAgility, level_offset);
@@ -3820,7 +3830,7 @@ impl Message<MagicRequest> for WorldActor {
                             if step == 0 {
                                 let attacker_stats = state.to_combat_stats();
                                 let defender_stats = m.to_combat_stats();
-                                let level_offset = state.level.min(10) as u16;
+                                let level_offset = crate::combat::attack::level_offset(state.level, m.level.max(0) as u16);
                                 let r = combat_attack::resolve_attack(
                                     &attacker_stats, &defender_stats, raw_damage,
                                     mir2_shared::enums::DefenceType::Ac, level_offset,
@@ -3877,7 +3887,6 @@ impl Message<MagicRequest> for WorldActor {
                 } else { fastrand::i32(5..=12) }.max(1);
                 let damage = (magic_stat * 2).max(1);
                 let attacker_stats = state.to_combat_stats();
-                let level_offset = state.level.min(10) as u16;
                 let cells = plague_cells(target_x, target_y);
                 let hit_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y)))
@@ -3895,6 +3904,8 @@ impl Message<MagicRequest> for WorldActor {
                             );
                         }
                         let defender_stats = monster.to_combat_stats();
+                        // #1455：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                        let level_offset = crate::combat::attack::level_offset(state.level, monster.level.max(0) as u16);
                         let r = combat_attack::resolve_attack(
                             &attacker_stats, &defender_stats, damage,
                             mir2_shared::enums::DefenceType::Mac, level_offset,
@@ -3967,7 +3978,6 @@ impl Message<MagicRequest> for WorldActor {
             }
                 let raw_damage = (magic_stat + (power as i32) / 2).max(1);
                 let attacker_stats = state.to_combat_stats();
-                let level_offset = state.level.min(10) as u16;
                 // C# Map.cs:1347：location ±2 = 5×5
                 let cells = curse_cells_5x5(state.x, state.y);
                 let hit_ids: Vec<u32> = self.monsters.iter()
@@ -3978,6 +3988,8 @@ impl Message<MagicRequest> for WorldActor {
                 for mid in hit_ids {
                     if let Some(monster) = self.monsters.get_mut(&mid) {
                         let ds = monster.to_combat_stats();
+                        // #1455：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                        let level_offset = crate::combat::attack::level_offset(state.level, monster.level.max(0) as u16);
                         let r = combat_attack::resolve_attack(
                             &attacker_stats, &ds, raw_damage,
                             mir2_shared::enums::DefenceType::Ac, level_offset,
@@ -4052,7 +4064,6 @@ impl Message<MagicRequest> for WorldActor {
                     crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
                 } else { fastrand::i32(8..=20) }.max(1);
                 let attacker_stats = state.to_combat_stats();
-                let level_offset = state.level.min(10) as u16;
                 let cells = curse_cells_5x5(target_x, target_y);
                 let hit_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y)))
@@ -4062,6 +4073,8 @@ impl Message<MagicRequest> for WorldActor {
                 for mid in hit_ids {
                     if let Some(monster) = self.monsters.get_mut(&mid) {
                         let ds = monster.to_combat_stats();
+                        // #1455：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                        let level_offset = crate::combat::attack::level_offset(state.level, monster.level.max(0) as u16);
                         let r = combat_attack::resolve_attack(
                             &attacker_stats, &ds, raw_damage,
                             mir2_shared::enums::DefenceType::Mac, level_offset,
@@ -4546,7 +4559,6 @@ impl Message<MagicRequest> for WorldActor {
                     fastrand::i32(5..=15)
                 }.max(1);
                 let attacker_stats = state.to_combat_stats();
-                let level_offset = state.level.min(10) as u16;
                 let hit_monster_ids: Vec<u32> = self.monsters.iter()
                     .filter(|(_, m)| {
                         let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
@@ -4558,6 +4570,8 @@ impl Message<MagicRequest> for WorldActor {
                 for monster_id in hit_monster_ids {
                     if let Some(monster) = self.monsters.get_mut(&monster_id) {
                         let defender_stats = monster.to_combat_stats();
+                        // #1455：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                        let level_offset = crate::combat::attack::level_offset(state.level, monster.level.max(0) as u16);
                         let r = combat_attack::resolve_attack(
                             &attacker_stats, &defender_stats, raw_damage,
                             mir2_shared::enums::DefenceType::Mac, level_offset,
