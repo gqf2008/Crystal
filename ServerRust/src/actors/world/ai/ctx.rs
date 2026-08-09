@@ -97,6 +97,18 @@ pub struct BossSummon {
     pub summoner_oid: Option<u32>,
 }
 
+/// #1437：TrapRock 子岩生成（C# TrapRock.Show：目标四角生成 ChildRock，立即可见、同目标）
+#[derive(Debug, Clone)]
+pub struct ChildRockSpawn {
+    pub monster_name: String,
+    pub x: i32,
+    pub y: i32,
+    pub target_session: u64,
+    pub target_x: i32,
+    pub target_y: i32,
+    pub parent_oid: u32,
+}
+
 /// 对玩家的 poison 施加（C# PoisonTarget）
 #[derive(Debug, Clone)]
 pub struct PoisonPlayer {
@@ -150,6 +162,8 @@ pub struct AiCtx<'a> {
     pub out_spell_fields: &'a mut Vec<SpellFieldSpawn>,
     /// 输出：召唤物
     pub out_summons: &'a mut Vec<BossSummon>,
+    /// 输出：TrapRock 子岩（#1437）
+    pub out_child_rocks: &'a mut Vec<ChildRockSpawn>,
     /// 输出：怪物互疗 (target_oid, amount)
     pub out_heals: &'a mut Vec<(u32, i32)>,
     /// 输出：对玩家的 poison
