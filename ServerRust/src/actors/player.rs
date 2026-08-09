@@ -742,21 +742,22 @@ allow_group: false,
         let dx = DIR_DX[direction as usize];
         let dy = DIR_DY[direction as usize];
 
-        let new_x = self.state.x + dx * steps;
-        let new_y = self.state.y + dy * steps;
-
-        // 检查最终落点是否可行走
-        if let Some(ref map) = self.map_data {
-            if !map.is_walkable(new_x, new_y) {
-                debug!("Player {} blocked at ({}, {})", self.state.name, new_x, new_y);
-                return false;
+        // #1428：C# Walk/Run 对每一格做 ValidPoint 校验（for j=1..=steps）
+        for j in 1..=steps {
+            let cx = self.state.x + dx * j;
+            let cy = self.state.y + dy * j;
+            if let Some(ref map) = self.map_data {
+                if !map.is_walkable(cx, cy) {
+                    debug!("Player {} blocked at ({}, {})", self.state.name, cx, cy);
+                    return false;
+                }
             }
         }
 
         // 更新朝向
         self.state.direction = direction;
-        self.state.x = new_x;
-        self.state.y = new_y;
+        self.state.x = self.state.x + dx * steps;
+        self.state.y = self.state.y + dy * steps;
         true
     }
 
@@ -1100,7 +1101,12 @@ impl Message<MoveRequest> for PlayerActor {
         if self.has_buff(crate::combat::buff::BuffType::Stun) {
             return false;
         }
-        let steps = if msg.is_run { 2 } else { 1 };
+        // #1428：C# HumanObject.Run steps = RidingMount ? 3 : 2；Walk = 1
+        let steps = if msg.is_run {
+            if self.state.is_mounted { 3 } else { 2 }
+        } else {
+            1
+        };
         let success = self.try_move(msg.direction, steps);
 
         if success {

@@ -784,29 +784,20 @@ impl Message<WorldMoveRequest> for WorldActor {
                 return;
             }
         };
+        // #1426/#1428：run/steps 在 state 块内确定（块外也要用 move_type/扣忠诚度）
+        let (mut run, mut steps) = (false, 1);
         if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
             if state.is_dead { return; }
 
-            // #902：负重限制（C# HumanObject.CanMove/CanRun：CurrentBagWeight > Stats[BagWeight] 不能移动；
-            // Run 退化为 Walk，Walk 直接失败并回发 S.UserLocation 同步当前位置）
+            // #1426：负重超限——C# CanWalk 不含负重（超重可走）；CanRun 含负重 → Run 退化为 Walk（HumanObject.Run :2516）
             let (bag_weight, _, _) = super::compute_player_weights(&state.inventory, &self.item_infos);
             let limit = super::weight_limit(&state.inventory, state.class, state.level, mir2_shared::enums::Stat::BagWeight, &self.item_infos);
-            if bag_weight > limit {
-                let mut body = Vec::new();
-                body.push(state.direction);
-                body.extend_from_slice(&state.x.to_le_bytes());
-                body.extend_from_slice(&state.y.to_le_bytes());
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: msg.session_id,
-                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
-                }).await;
-                send_system_message(&self.gate_ref, msg.session_id, "负重过重，无法移动！");
-                return;
-            }
-
-            // #1408：C# Walk/Run 阻挡校验——NPC / 未摧毁城墙城门阻挡通行（run 同时校验中间格）
+            let overweight = bag_weight > limit;
+            // #1428：C# HumanObject.Run steps = RidingMount ? 3 : 2（SwiftFeet 未实现，只按骑乘）
+            run = effective_run(msg.is_run, overweight);
+            steps = move_steps(run, state.is_mounted);
+            // #1408/#1428：C# Walk/Run 对每一格做阻挡校验——NPC / 未摧毁城墙城门阻挡通行
             let dir = msg.direction as usize % 8;
-            let steps = if msg.is_run { 2 } else { 1 };
             let npc_tiles: Vec<(i32, i32)> = self.npcs.values()
                 .filter(|n| n.map_index == state.map_index)
                 .map(|n| (n.x, n.y))
@@ -816,21 +807,18 @@ impl Message<WorldMoveRequest> for WorldActor {
                 .filter(|s| self.conquest_instances.iter().any(|c| c.id == s.conquest_id && c.map_index == state.map_index as i32))
                 .map(|s| (s.x, s.y))
                 .collect();
-            let mut blocked = tile_blocked_by(
-                state.x + super::MON_DIR_DX[dir] * steps,
-                state.y + super::MON_DIR_DY[dir] * steps,
-                &npc_tiles,
-                &struct_tiles,
-            );
-            if steps == 2 {
+            let mut blocked = false;
+            for j in 1..=steps {
                 blocked |= tile_blocked_by(
-                    state.x + super::MON_DIR_DX[dir],
-                    state.y + super::MON_DIR_DY[dir],
+                    state.x + super::MON_DIR_DX[dir] * j,
+                    state.y + super::MON_DIR_DY[dir] * j,
                     &npc_tiles,
                     &struct_tiles,
                 );
             }
             if blocked {
+                // #1427：C# Walk/Run 失败 Enqueue S.UserLocation（用服务端坐标重同步）
+                send_user_location_sync(&self.gate_ref, msg.session_id, state.direction, state.x, state.y).await;
                 return;
             }
         }
@@ -851,15 +839,19 @@ impl Message<WorldMoveRequest> for WorldActor {
         }
         self.last_move_time.insert(msg.session_id, std::time::Instant::now());
 
-        let move_type = if msg.is_run { MoveType::Run } else { MoveType::Walk };
+        let move_type = if run { MoveType::Run } else { MoveType::Walk };
 
         // 发送移动请求到 PlayerActor
+        // #1427：C# Walk/Run 失败 Enqueue S.UserLocation（目标不可走/眩晕/非法方向等）
         if let Ok(success) = record.actor_ref.ask(MoveRequest {
             session_id: msg.session_id,
             direction: msg.direction,
-            is_run: msg.is_run,
+            is_run: run,
         }).await {
             if !success {
+                if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                    send_user_location_sync(&self.gate_ref, msg.session_id, st.direction, st.x, st.y).await;
+                }
                 return;
             }
         } else {
@@ -871,7 +863,7 @@ impl Message<WorldMoveRequest> for WorldActor {
 
         // C# HumanObject Walk/Run：骑乘移动扣坐骑忠诚度（Walk=1 / Run=2，LoyaltyDelay 限速）
         let _ = record.actor_ref.tell(crate::actors::player::DecreaseMountLoyalty {
-            amount: if msg.is_run { 2 } else { 1 },
+            amount: if run { 2 } else { 1 },
         }).try_send();
 
         // C# HumanObject Walk/Run：进入安全区时更新绑定点（SetBindSafeZone）
@@ -3438,9 +3430,44 @@ fn object_chat_body(object_id: u32, text: &str, chat_type: u8) -> Vec<u8> {
     body
 }
 
+/// #1426：C# HumanObject.Run——超重时 CanRun=false，Run 退化为 Walk（HumanObject.cs :2516）
+fn effective_run(is_run: bool, overweight: bool) -> bool {
+    is_run && !overweight
+}
+
+/// #1428：C# HumanObject.Run steps = RidingMount ? 3 : 2；Walk = 1（SwiftFeet 未实现）
+fn move_steps(run: bool, is_mounted: bool) -> i32 {
+    if !run {
+        1
+    } else if is_mounted {
+        3
+    } else {
+        2
+    }
+}
+
+/// #1427：回发 S.UserLocation 让客户端重同步（C# Walk/Run 失败 Enqueue UserLocation；
+/// wire 与 PlayerActor.send_user_location 一致：[direction u8][x i32][y i32]）
+async fn send_user_location_sync(
+    gate_ref: &ActorRef<GateActor>,
+    session_id: u64,
+    direction: u8,
+    x: i32,
+    y: i32,
+) {
+    let mut body = Vec::new();
+    body.push(direction);
+    body.extend_from_slice(&x.to_le_bytes());
+    body.extend_from_slice(&y.to_le_bytes());
+    let _ = gate_ref.tell(SendToClient {
+        session_id,
+        data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
+    }).await;
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{format_roll_message, object_chat_body, tile_blocked_by};
+    use super::{effective_run, format_roll_message, move_steps, object_chat_body, tile_blocked_by};
 
     #[test]
     fn test_roll_message_format() {
@@ -3473,6 +3500,19 @@ mod tests {
         assert_eq!(&body[0..4], &[7, 0, 0, 0]);
         assert_eq!(body[4], 0);
         assert_eq!(body[5], 5); // ChatType
+    }
+
+    #[test]
+    fn test_effective_run_and_move_steps() {
+        // #1426：超重 run 退化为 walk；walk 不受负重影响
+        assert!(effective_run(true, false));
+        assert!(!effective_run(true, true));
+        assert!(!effective_run(false, true));
+        // #1428：骑乘 run 3 格，普通 run 2 格，walk 1 格
+        assert_eq!(move_steps(false, false), 1);
+        assert_eq!(move_steps(false, true), 1);
+        assert_eq!(move_steps(true, false), 2);
+        assert_eq!(move_steps(true, true), 3);
     }
 
     #[test]
