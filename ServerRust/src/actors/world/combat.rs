@@ -1401,20 +1401,41 @@ impl Message<RangeAttackRequest> for WorldActor {
         );
         let ranged_chance = ranged_chance_to_hit(attack_dist, focus);
 
-        // 广播 ObjectAttack 给其他玩家
+        // C# HumanObject.RangeAttack（HumanObject.cs:2745）：
+        //   - Broadcast(S.ObjectRangeAttack{...}) 给其他玩家（拉弓动作，Broadcast 排除攻击者）
+        //   - Enqueue(S.RangeAttack{TargetID, Target, Spell}) 给攻击者（弹道表现）
         let others: Vec<_> = self.other_players(msg.session_id)
             .into_iter().cloned()
             .collect();
+        let mut range_body = Vec::new();
+        range_body.extend_from_slice(&object_id.to_le_bytes());
+        range_body.extend_from_slice(&(state.x as u32).to_le_bytes());
+        range_body.extend_from_slice(&(state.y as u32).to_le_bytes());
+        range_body.push(msg.direction);
+        range_body.extend_from_slice(&msg.target_id.to_le_bytes());
+        range_body.extend_from_slice(&(target_x as u32).to_le_bytes());
+        range_body.extend_from_slice(&(target_y as u32).to_le_bytes());
+        range_body.extend_from_slice(&0u16.to_le_bytes()); // spell
+        range_body.extend_from_slice(&0u16.to_le_bytes()); // spell_level
+        let range_packet = build_packet_bytes(
+            mir2_shared::enums::ServerPacketIds::ObjectRangeAttack as i16, &range_body);
         for other in &others {
-            let mut body = Vec::new();
-            body.extend_from_slice(&object_id.to_le_bytes());
-            body.push(msg.direction);
-            body.push(0u8); // spell = 0 (range attack)
             let _ = self.gate_ref.tell(SendToClient {
                 session_id: other.session_id,
-                data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &body),
+                data: range_packet.clone(),
             }).await;
         }
+        // S.RangeAttack 弹道（客户端 PendingEffect::Projectile：从玩家飞向目标）
+        let mut proj_body = Vec::new();
+        proj_body.extend_from_slice(&msg.target_id.to_le_bytes());
+        proj_body.extend_from_slice(&(target_x as u32).to_le_bytes());
+        proj_body.extend_from_slice(&(target_y as u32).to_le_bytes());
+        proj_body.extend_from_slice(&0u16.to_le_bytes()); // spell
+        proj_body.extend_from_slice(&0u16.to_le_bytes()); // spell_level
+        let _ = self.gate_ref.tell(SendToClient {
+            session_id: msg.session_id,
+            data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RangeAttack as i16, &proj_body),
+        }).await;
 
         // 检测范围内的怪物
         let hit_monster_ids: Vec<u32> = self.monsters.iter()
@@ -1426,6 +1447,8 @@ impl Message<RangeAttackRequest> for WorldActor {
             .collect();
 
         let mut hit_monster = false;
+        // #1556：命中反馈（C# DelayedAction Damage 结算后的 ObjectStruck/DamageIndicator/ObjectHealth）
+        let mut hit_feedback: Vec<(u32, i32, i32, i32)> = Vec::new();
         for monster_id in hit_monster_ids {
             if let Some(monster) = self.monsters.get_mut(&monster_id) {
                 let attacker_stats = state.to_combat_stats();
@@ -1449,6 +1472,7 @@ impl Message<RangeAttackRequest> for WorldActor {
                     mir2_shared::enums::DefenceType::AcAgility, level_offset,
                 );
                 let damage = attack_result.damage;
+                hit_feedback.push((monster_id, monster.x, monster.y, damage));
                 monster.take_damage(damage);
                 monster.last_hitter_session = Some(msg.session_id);
                 self.pending_gather.push(msg.session_id);
@@ -1480,6 +1504,52 @@ impl Message<RangeAttackRequest> for WorldActor {
                     if let Some(state) = self.recalculate_and_set_stat_bonuses(msg.session_id).await {
                         self.broadcast_equipment_visuals(msg.session_id, &state).await;
                     }
+                }
+            }
+        }
+
+        // #1556：命中怪物 → 广播受击动画 + 伤害飘字 + 血条给所有玩家（对齐近战路径 C# 结算表现）
+        if !hit_feedback.is_empty() {
+            for (monster_id, mx, my, dmg) in &hit_feedback {
+                let mut struck_body = Vec::new();
+                struck_body.extend_from_slice(&monster_id.to_le_bytes());
+                struck_body.extend_from_slice(&object_id.to_le_bytes());
+                struck_body.extend_from_slice(&(*mx as u32).to_le_bytes());
+                struck_body.extend_from_slice(&(*my as u32).to_le_bytes());
+                struck_body.push(msg.direction);
+                let struck_packet = build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
+
+                let mut dmg_body = Vec::new();
+                dmg_body.extend_from_slice(&dmg.to_le_bytes());
+                dmg_body.push(0u8); // damage_type = normal
+                dmg_body.extend_from_slice(&monster_id.to_le_bytes());
+                let dmg_packet = build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
+
+                let percent = self.monsters.get(monster_id)
+                    .map(|m| ((m.hp.max(0) as f32 / m.max_hp.max(1) as f32) * 100.0) as u8)
+                    .unwrap_or(0);
+                let mut health_body = Vec::new();
+                health_body.extend_from_slice(&monster_id.to_le_bytes());
+                health_body.push(percent);
+                health_body.extend_from_slice(&3u16.to_le_bytes()); // expire（秒）
+                let health_packet = build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &health_body);
+
+                for session_id in self.players.keys() {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: *session_id,
+                        data: struck_packet.clone(),
+                    }).await;
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: *session_id,
+                        data: dmg_packet.clone(),
+                    }).await;
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: *session_id,
+                        data: health_packet.clone(),
+                    }).await;
                 }
             }
         }

@@ -27,6 +27,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--auto-attack") {
         app.add_systems(Update, auto_attack_debug);
     }
+    // --auto-ranged-attack: 弓手远程攻击链路（#1556，C.RangeAttack → 弹道 → 受击反馈）
+    if std::env::args().any(|a| a == "--auto-ranged-attack") {
+        app.add_systems(Update, auto_ranged_attack_test);
+    }
     // --auto-inv / --auto-char: 进游戏 3 秒后自动打开背包/角色对话框（M9 调试）
     if std::env::args().any(|a| a == "--auto-inv") {
         app.add_systems(Update, auto_open_inventory);

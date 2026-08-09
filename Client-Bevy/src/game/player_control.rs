@@ -444,6 +444,38 @@ fn pickup_arrival_system(
     control.pickup_target = None;
 }
 
+/// #1556：攻击包类型选择——弓手且装备武器 → 远程（C# AttackRange1 → C.RangeAttack），
+/// 其余 → 近战（C# Attack1 → C.Attack）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlayerAttackKind {
+    Melee,
+    Ranged,
+}
+
+/// C# HumanObject.HasClassWeapon 简化：Class==Archer 且武器槽非空。
+pub(crate) fn player_attack_kind(class: u8, has_weapon: bool) -> PlayerAttackKind {
+    if class == mir2_shared::enums::MirClass::Archer as u8 && has_weapon {
+        PlayerAttackKind::Ranged
+    } else {
+        PlayerAttackKind::Melee
+    }
+}
+
+/// #1556：构造 C.RangeAttack 包（C# PlayerObject.cs:1574 字段映射）
+pub fn build_ranged_attack(
+    direction: MirDirection,
+    player_tile: (i32, i32),
+    target_id: u32,
+    target_tile: (i32, i32),
+) -> mir2_shared::packets::client::combat::RangeAttack {
+    mir2_shared::packets::client::combat::RangeAttack {
+        direction,
+        location: mir2_shared::map::Point { x: player_tile.0, y: player_tile.1 },
+        target_id,
+        target_location: mir2_shared::map::Point { x: target_tile.0, y: target_tile.1 },
+    }
+}
+
 /// 自动攻击（目标存在且存活时循环攻击）
 /// #1554：对齐 C# 攻击距离（GameScene.CheckInput）：
 ///   - 近战：InRange(目标, 玩家, 1) 才 Attack1（GameScene.cs:11502）
@@ -477,8 +509,11 @@ fn auto_attack_system(
     let Ok(player_tf) = players.single() else { return };
 
     // #1554：弓手（Archer 且装备武器）→ 远程范围 9；否则近战范围 1（C# InRange Chebyshev）
-    let is_archer = hud.class == mir2_shared::enums::MirClass::Archer as u8
-        && hud.equipment.get(0).and_then(|s| s.as_ref()).is_some();
+    let attack_kind = player_attack_kind(
+        hud.class,
+        hud.equipment.get(0).and_then(|s| s.as_ref()).is_some(),
+    );
+    let is_archer = attack_kind == PlayerAttackKind::Ranged;
     let max_range = if is_archer { 9 } else { 1 };
     let p_tile = world_to_tile(player_tf.translation.x, player_tf.translation.y);
     let t_tile = world_to_tile(target_tf.translation.x, target_tf.translation.y);
@@ -511,11 +546,20 @@ fn auto_attack_system(
     let dy = (target_tf.translation.y - player_tf.translation.y) as i32;
     let dir = direction_from_delta(dx.signum(), dy.signum()).unwrap_or(mir2_shared::enums::MirDirection::Up);
 
-    net.send_packet(&mir2_shared::packets::client::combat::Attack {
-        direction: dir,
-        spell: mir2_shared::enums::Spell::None,
-    });
-    crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, 10050);
+    if is_archer {
+        // #1556：弓手 → C.RangeAttack（C# PlayerObject.cs:1574 AttackRange1）：
+        //   Direction / Location=玩家格 / TargetID / TargetLocation=目标格；
+        //   远程弹道由服务端回 S.RangeAttack 渲染（PendingEffect::Projectile），
+        //   C# PlayAttackSound 弓手直接 return（不播近战挥击音）。
+        net.send_packet(&build_ranged_attack(dir, p_tile, target_id, t_tile));
+        tracing::debug!("🏹 RangeAttack target={} dir={:?} range={}", target_id, dir, max_range);
+    } else {
+        net.send_packet(&mir2_shared::packets::client::combat::Attack {
+            direction: dir,
+            spell: mir2_shared::enums::Spell::None,
+        });
+        crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, 10050);
+    }
     // 诊断（#57）：攻击时打印玩家/目标瓦片与方向（debug 级）
     tracing::debug!(
         "⚔️ Attack target={} dir={:?} range={} in_range={}",
@@ -920,6 +964,44 @@ mod tests {
         assert!(in_range((0,0), (9,0), 9));
         assert!(in_range((0,0), (5,5), 9));
         assert!(!in_range((0,0), (10,0), 9));
+    }
+
+    #[test]
+    fn test_player_attack_kind_archer_vs_melee() {
+        // #1556：弓手（Archer + 武器）→ Ranged；其余（战士/无武器弓手）→ Melee
+        assert_eq!(
+            player_attack_kind(mir2_shared::enums::MirClass::Archer as u8, true),
+            PlayerAttackKind::Ranged
+        );
+        assert_eq!(
+            player_attack_kind(mir2_shared::enums::MirClass::Archer as u8, false),
+            PlayerAttackKind::Melee
+        );
+        assert_eq!(
+            player_attack_kind(mir2_shared::enums::MirClass::Warrior as u8, true),
+            PlayerAttackKind::Melee
+        );
+        assert_eq!(
+            player_attack_kind(mir2_shared::enums::MirClass::Wizard as u8, true),
+            PlayerAttackKind::Melee
+        );
+    }
+
+    #[test]
+    fn test_build_ranged_attack_fields() {
+        // #1556：C# PlayerObject.cs:1574 C.RangeAttack 字段映射
+        let pkt = build_ranged_attack(
+            mir2_shared::enums::MirDirection::UpRight,
+            (10, 20),
+            101,
+            (15, 25),
+        );
+        assert_eq!(pkt.direction, mir2_shared::enums::MirDirection::UpRight);
+        assert_eq!(pkt.location.x, 10);
+        assert_eq!(pkt.location.y, 20);
+        assert_eq!(pkt.target_id, 101);
+        assert_eq!(pkt.target_location.x, 15);
+        assert_eq!(pkt.target_location.y, 25);
     }
 
     #[test]
