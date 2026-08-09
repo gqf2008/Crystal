@@ -566,7 +566,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             send_new_character_result(&self.gate_ref, msg.session_id, 3);
             return;
         }
-        let default_state = PlayerState {
+        let mut default_state = PlayerState {
             object_id: 0,
             name: msg.name.clone(),
             map_index: 0,
@@ -727,6 +727,35 @@ impl Message<NewCharacterRequest> for WorldActor {
             pot_mp_amount: 0,
             pot_time_ms: 0,
         };
+        // #1527：新建角色初始属性按 C# Settings.ClassBaseStats[Class].Calculate(1)（与升级重算同一映射）
+        {
+            let base_stats = mir2_shared::data::stats::BaseStats::new(class);
+            for bs in &base_stats.stats {
+                let val = bs.calculate(class, default_state.level as i32);
+                use mir2_shared::enums::Stat;
+                match bs.stat {
+                    Stat::HP => { default_state.max_hp = val; default_state.hp = val; }
+                    Stat::MP => { default_state.max_mp = val; default_state.mp = val; }
+                    Stat::MinDC => default_state.min_attack = val,
+                    Stat::MaxDC => default_state.max_attack = val,
+                    Stat::MinMC => default_state.min_mc = val,
+                    Stat::MaxMC => default_state.max_mc = val,
+                    Stat::MinSC => default_state.min_sc = val,
+                    Stat::MaxSC => default_state.max_sc = val,
+                    Stat::MinAC => default_state.min_ac = val,
+                    Stat::MaxAC => { default_state.max_ac = val; default_state.defence = val; }
+                    Stat::MinMAC => default_state.min_mac = val,
+                    Stat::MaxMAC => default_state.max_mac = val,
+                    Stat::Agility => default_state.agility = val,
+                    Stat::Accuracy => default_state.accuracy = val,
+                    _ => {}
+                }
+            }
+        }
+        // 经验曲线（C# RefreshMaxExperience：MaxExperience = ExperienceList[Level-1]）
+        if let Some(first) = self.experience_list.first() {
+            default_state.max_experience = *first;
+        }
         debug!("NewCharacter: saving '{}' ...", msg.name);
         match db::save_character(&self.db_pool, &default_state, &msg.account_username).await {
             Ok(_) => info!("NewCharacter: saved '{}' ok", msg.name),
