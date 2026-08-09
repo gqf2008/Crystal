@@ -994,7 +994,7 @@ impl WorldActor {
                     ai_local.mp -= cost;
                     ai_local.buffs.push(HeroBuff {
                         kind,
-                        expire_tick: self.tick_count + hero_buff_duration(kind, buff_lv, &snap.hero_stats) * 10,
+                        expire_tick: self.tick_count + hero_buff_duration(&self.magic_infos, kind, buff_lv, &snap.hero_stats) * 10,
                         level: buff_lv,
                         hero_level: snap.hero_level,
                     });
@@ -1086,7 +1086,7 @@ impl WorldActor {
                             ai_local.buffs.push(HeroBuff {
                                 kind,
                                 expire_tick: self.tick_count
-                                    + hero_buff_duration(kind, buff_lv, &snap.hero_stats) * 10,
+                                    + hero_buff_duration(&self.magic_infos, kind, buff_lv, &snap.hero_stats) * 10,
                                 level: buff_lv,
                                 hero_level: snap.hero_level,
                             });
@@ -1552,7 +1552,7 @@ impl WorldActor {
                                     ai_local.buffs.push(HeroBuff {
                                         kind: HeroBuffKind::PoisonShot,
                                         expire_tick: self.tick_count
-                                            + hero_buff_duration(HeroBuffKind::PoisonShot, poison_lv, &snap.hero_stats)
+                                            + hero_buff_duration(&self.magic_infos, HeroBuffKind::PoisonShot, poison_lv, &snap.hero_stats)
                                                 * 10,
                                         level: poison_lv,
                                         hero_level: snap.hero_level,
@@ -2473,7 +2473,7 @@ fn hero_owner_shield_buff(
         OwnerShieldKind::BlessedArmour => HeroBuffKind::BlessedArmour,
         OwnerShieldKind::UltimateEnhancer => HeroBuffKind::UltimateEnhancer,
     };
-    let ticks = (hero_buff_duration(hero_kind, buff_lv, stats) * 10) as u32;
+    let ticks = (hero_buff_duration(&std::collections::HashMap::new(), hero_kind, buff_lv, stats) * 10) as u32;
     let buff = match kind {
         OwnerShieldKind::SoulShield => {
             BuffType::MacDefenseBoost {
@@ -2652,15 +2652,29 @@ fn hero_friend_buffs(
 
 /// 增益时长（秒，#1190/#1192：C# HumanObject 各 Spell 实现）
 /// SoulShield/BlessedArmour/UltimateEnhancer 时长依赖道士 SC（C# SC*4 + (Lv+1)*50）
-fn hero_buff_duration(kind: HeroBuffKind, level: u8, stats: &super::hero_stats::HeroStats) -> u64 {
+fn hero_buff_duration(
+    magic_infos: &std::collections::HashMap<u32, crate::db::MagicInfo>,
+    kind: HeroBuffKind,
+    level: u8,
+    stats: &super::hero_stats::HeroStats,
+) -> u64 {
     let level = level as u64;
     match kind {
         HeroBuffKind::Rage => 18 + 6 * level,
         HeroBuffKind::ProtectionField => 45 + 15 * level,
         HeroBuffKind::Haste => 25 + 15 * level,
         HeroBuffKind::LightBody => (level + 1) * 30,
-        // C# MagicShield 时长按 power 计（magic.GetPower(MC+15)），此处稳定近似
-        HeroBuffKind::MagicShield => 30 + 10 * level,
+        // #1418：C# HumanObject.cs:6203——时长 = Settings.Second * magic.GetPower(GetAttackPower(MinMC,MaxMC)+15)
+        HeroBuffKind::MagicShield => {
+            let spell_cs = (mir2_shared::enums::Spell::MagicShield as u8 as i32).saturating_sub(3);
+            let mc = crate::combat::attack::get_attack_power(stats.min_mc, stats.max_mc, 0).max(1);
+            match magic_infos.get(&(spell_cs as u32)) {
+                Some(info) => {
+                    (crate::combat::magic::magic_power_with_base(info, level.min(255) as u8, mc + 15) as u64).max(1)
+                }
+                None => 30 + 10 * level, // 无 MagicInfo 兜底（保持原近似）
+            }
+        }
         HeroBuffKind::MagicBooster => 60,
         HeroBuffKind::Concentration => 45 + 15 * level,
         // #1194：C# SpecialArrowShot：PoisonShot buff = 5 + 5*Lv 秒
@@ -3194,15 +3208,16 @@ mod tests {
         use mir2_shared::enums::MirClass;
         let stats = super::hero_stats::hero_base_stats(MirClass::Taoist, 30);
         // Rage：18+6*Lv；Haste：25+15*Lv；LightBody：(Lv+1)*30；MagicBooster：60
-        assert_eq!(hero_buff_duration(HeroBuffKind::Rage, 2, &stats), 30);
-        assert_eq!(hero_buff_duration(HeroBuffKind::ProtectionField, 1, &stats), 60);
-        assert_eq!(hero_buff_duration(HeroBuffKind::Haste, 2, &stats), 55);
-        assert_eq!(hero_buff_duration(HeroBuffKind::LightBody, 1, &stats), 60);
-        assert_eq!(hero_buff_duration(HeroBuffKind::MagicBooster, 3, &stats), 60);
-        assert_eq!(hero_buff_duration(HeroBuffKind::Concentration, 1, &stats), 60);
+        assert_eq!(hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::Rage, 2, &stats), 30);
+        assert_eq!(hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::ProtectionField, 1, &stats), 60);
+        assert_eq!(hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::Haste, 2, &stats), 55);
+        assert_eq!(hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::LightBody, 1, &stats), 60);
+        assert_eq!(hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::MagicBooster, 3, &stats), 60);
+
+        assert_eq!(hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::Concentration, 1, &stats), 60);
         // #1192：道士护盾 Duration = SC*4 + (Lv+1)*50 秒（Taoist Lv30 SC 中值 = 4）
         assert_eq!(
-            hero_buff_duration(HeroBuffKind::SoulShield, 1, &stats),
+            hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::SoulShield, 1, &stats),
             4 * 4 + (1 + 1) * 50
         );
     }
@@ -3319,7 +3334,7 @@ mod tests {
         use mir2_shared::enums::MirClass;
         let stats = super::hero_stats::hero_base_stats(MirClass::Archer, 30);
         // C#：PoisonShot buff = 5 + 5*Lv 秒
-        assert_eq!(hero_buff_duration(HeroBuffKind::PoisonShot, 2, &stats), 15);
+        assert_eq!(hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::PoisonShot, 2, &stats), 15);
         // PoisonShot 无属性加成
         let mut combat = stats.to_combat_stats();
         let mut s = stats;
@@ -3391,7 +3406,7 @@ mod tests {
             &stats,
         );
         assert_eq!(bt, BuffType::MacDefenseBoost { bonus: 8 });
-        assert_eq!(ticks, (hero_buff_duration(HeroBuffKind::SoulShield, 1, &stats) * 10) as u32);
+        assert_eq!(ticks, (hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::SoulShield, 1, &stats) * 10) as u32);
         // BlessedArmour → AcDefenseBoost
         let (bt2, _) = hero_owner_shield_buff(
             OwnerShieldKind::BlessedArmour,
@@ -3625,6 +3640,48 @@ mod tests {
         for _ in 0..50 {
             assert_eq!(hero_attack_power_sc(&hs), 20);
         }
+    }
+
+
+    #[test]
+    fn hero_magicshield_duration_matches_csharp() {
+        // #1418：C# HumanObject.cs:6203——时长 = Settings.Second * magic.GetPower(GetAttackPower(MinMC,MaxMC)+15)
+        // mpower=0、power_base=0、power_bonus=0 → DefPower=0；mc=10 → power=25 → round(25/4*(lv+1))
+        let spell_cs = (mir2_shared::enums::Spell::MagicShield as u8 as i32).saturating_sub(3);
+        let info = crate::db::MagicInfo {
+            name: "MagicShield".to_string(),
+            spell: spell_cs,
+            base_cost: 0,
+            level_cost: 0,
+            icon: 0,
+            level1: 0,
+            level2: 0,
+            level3: 0,
+            need1: 0,
+            need2: 0,
+            need3: 0,
+            delay_base: 0,
+            delay_reduction: 0,
+            power_base: 0,
+            power_bonus: 0,
+            mpower_base: 0,
+            mpower_bonus: 0,
+            range: 0,
+            multiplier_base: 1.0,
+            multiplier_bonus: 0.0,
+        };
+        let mut infos = std::collections::HashMap::new();
+        infos.insert(spell_cs as u32, info);
+        let stats = super::hero_stats::HeroStats {
+            min_mc: 10,
+            max_mc: 10,
+            ..Default::default()
+        };
+        // lv=0：round(25/4*1)=6 秒；lv=1：round(25/4*2)=13 秒
+        assert_eq!(hero_buff_duration(&infos, HeroBuffKind::MagicShield, 0, &stats), 6);
+        assert_eq!(hero_buff_duration(&infos, HeroBuffKind::MagicShield, 1, &stats), 13);
+        // 无 MagicInfo 兜底：30 + 10*lv
+        assert_eq!(hero_buff_duration(&std::collections::HashMap::new(), HeroBuffKind::MagicShield, 0, &stats), 30);
     }
 
 }

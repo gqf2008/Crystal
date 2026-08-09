@@ -31,6 +31,12 @@ pub fn magic_power(info: &MagicInfo, level: u8) -> f64 {
     raw.round()
 }
 
+/// C# GetPower(int power) — MagicShield 时长等（round(power/4*(Lv+1) + DefPower())）
+pub fn magic_power_with_base(info: &MagicInfo, level: u8, power: i32) -> f64 {
+    let raw = (power as f64 / 4.0) * (level as f64 + 1.0) + magic_def_power(info);
+    raw.round()
+}
+
 /// C# GetMultiplier() — 法术倍率
 pub fn magic_multiplier(info: &MagicInfo, level: u8) -> f64 {
     info.multiplier_base + (level as f64) * info.multiplier_bonus
@@ -63,4 +69,42 @@ pub fn wizard_magic_bonus(mc: i32) -> f64 {
 /// 道士：SC 转额外伤害
 pub fn taoist_magic_bonus(sc: i32) -> f64 {
     sc as f64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn magic_power_with_base_matches_csharp() {
+        // C# GetPower(int power)：round(power/4*(Lv+1) + DefPower())
+        // mpower=0、power_base=0、power_bonus=0 → DefPower=0
+        let info = MagicInfo {
+            name: "MagicShield".to_string(),
+            spell: 43,
+            base_cost: 0,
+            level_cost: 0,
+            icon: 0,
+            level1: 0,
+            level2: 0,
+            level3: 0,
+            need1: 0,
+            need2: 0,
+            need3: 0,
+            delay_base: 0,
+            delay_reduction: 0,
+            power_base: 0,
+            power_bonus: 0,
+            mpower_base: 0,
+            mpower_bonus: 0,
+            range: 0,
+            multiplier_base: 1.0,
+            multiplier_bonus: 0.0,
+        };
+        // power=100, lv=0 → 100/4*1 = 25；lv=1 → 100/4*2 = 50
+        assert_eq!(magic_power_with_base(&info, 0, 100), 25.0);
+        assert_eq!(magic_power_with_base(&info, 1, 100), 50.0);
+        // power=25, lv=0 → 6.25 → round 6
+        assert_eq!(magic_power_with_base(&info, 0, 25), 6.0);
+    }
 }
