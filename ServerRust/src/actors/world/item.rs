@@ -368,7 +368,27 @@ impl Message<PickUpRequest> for WorldActor {
                 }
             }
         } else {
-            send_system_message(&self.gate_ref, msg.session_id, "附近没有可以拾取的物品。");
+            // #1574：C# CannotPickupNotOwner（PlayerObject.cs:7535）——格内有物品但归属保护中 → 明确提示
+            let blocked_owned = self.ground_items.iter().any(|gi| {
+                if gi.map_index != state.map_index { return false; }
+                if (gi.x - player_pos.0).abs() > 1 { return false; }
+                if (gi.y - player_pos.1).abs() > 1 { return false; }
+                !can_pick_drop(
+                    self.tick_count,
+                    gi.drop_tick,
+                    DROP_OWNERSHIP_TICKS,
+                    gi.dropper_session,
+                    msg.session_id,
+                    gi.dropper_session
+                        .and_then(|d| player_groups.get(&d).copied().flatten()),
+                    picker_group,
+                )
+            });
+            if blocked_owned {
+                send_system_message(&self.gate_ref, msg.session_id, "这个物品不是你的，无法拾取。");
+            } else {
+                send_system_message(&self.gate_ref, msg.session_id, "附近没有可以拾取的物品。");
+            }
         }
     }
 }
@@ -2933,6 +2953,25 @@ impl Message<DisassembleItemRequest> for WorldActor {
 #[cfg(test)]
 mod tests {
     use super::{can_equip_by_weight, can_pick_drop, npc_in_range, NpcState, DROP_OWNERSHIP_TICKS};
+
+    #[test]
+    fn test_pickup_feedback_ownership_blocked_detection() {
+        // #1574：拾取失败时区分"归属保护"与"附近无物品"（C# CannotPickupNotOwner）
+        // blocked = 同格存在 can_pick_drop 拒绝的物品（他人保护期内）
+        let blocked = |now: u64, drop_tick: u64, dropper: Option<u64>, picker: u64, dg: Option<u64>, pg: Option<u64>| {
+            !can_pick_drop(now, drop_tick, DROP_OWNERSHIP_TICKS, dropper, picker, dg, pg)
+        };
+        // 他人保护中 → blocked（应提示"不是你的"）
+        assert!(blocked(100, 0, Some(1), 2, None, None));
+        // 自己 → 可拾取（不提示）
+        assert!(!blocked(100, 0, Some(1), 1, None, None));
+        // 同组 → 可拾取
+        assert!(!blocked(100, 0, Some(1), 2, Some(7), Some(7)));
+        // 无主 → 可拾取
+        assert!(!blocked(100, 0, None, 2, None, None));
+        // 过期（60s=600 ticks）→ 可拾取
+        assert!(!blocked(600, 0, Some(1), 2, None, None));
+    }
 
     #[test]
     fn test_can_pick_drop_ownership() {
