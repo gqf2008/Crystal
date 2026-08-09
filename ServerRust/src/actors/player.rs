@@ -4552,9 +4552,10 @@ pub struct SetAutoPotItem {
     pub item_index: i32,
 }
 
-// C# MirGridType values: HeroHPItem=23, HeroMPItem=24
-const GRID_HERO_HP_ITEM: u8 = 23;
-const GRID_HERO_MP_ITEM: u8 = 24;
+// #1576：线协议 grid 用 SharedRust MirGridType 枚举值（客户端 S/C 包均 MirGridType::try_from(u8) 解析）：
+// HeroHpItem=26 / HeroMpItem=27。旧值 23/24 对应 Socket/HeroEquipment，导致自动药物品格永不匹配。
+const GRID_HERO_HP_ITEM: u8 = mir2_shared::enums::MirGridType::HeroHpItem as u8;
+const GRID_HERO_MP_ITEM: u8 = mir2_shared::enums::MirGridType::HeroMpItem as u8;
 
 impl Message<SetAutoPotItem> for PlayerActor {
     type Reply = ();
@@ -5677,6 +5678,22 @@ impl PlayerActor {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hero_auto_pot_grid_constants_match_protocol() {
+        // #1576：SetAutoPotItem 线协议 grid 值必须与 MirGridType 一致（HeroHpItem=26 / HeroMpItem=27）
+        assert_eq!(
+            GRID_HERO_HP_ITEM,
+            mir2_shared::enums::MirGridType::HeroHpItem as u8,
+            "英雄自动药 HP 格常量与协议错位"
+        );
+        assert_eq!(
+            GRID_HERO_MP_ITEM,
+            mir2_shared::enums::MirGridType::HeroMpItem as u8,
+            "英雄自动药 MP 格常量与协议错位"
+        );
+    }
+
+
     use super::*;
 
     fn make_state() -> PlayerState {
