@@ -102,6 +102,10 @@ pub struct ActorNameLabel;
 #[derive(Component)]
 pub struct ActorNamed;
 
+/// #1402：行会名子标签标记（更新/移除用）
+#[derive(Component)]
+pub struct ActorGuildLabel;
+
 /// 为新增角色生成头顶名字（世界空间 Text2d，跟随角色移动）
 pub fn actor_name_label_system(
     mut commands: Commands,
@@ -142,6 +146,7 @@ pub fn actor_name_label_system(
             // #1374：行会名标签（名字上方，小字青色，C# 风格）
             if let Some(guild) = &guild {
                 p.spawn((
+                    ActorGuildLabel,
                     ActorNameLabel,
                     Text2d::new(guild.clone()),
                     bevy::sprite::Anchor::TOP_CENTER,
@@ -167,6 +172,58 @@ pub fn actor_name_label_system(
                 Transform::from_xyz(0.0, 28.0, 0.0),
             ));
         });
+    }
+}
+
+/// #1402：行会名标签即时更新——按 PlayerGuildName 创建/更新/移除已存在玩家的 ActorGuildLabel
+pub fn actor_guild_label_system(
+    mut commands: Commands,
+    players: Query<(Entity, Option<&PlayerGuildName>), (With<ActorNamed>, Without<LocalPlayer>)>,
+    guild_labels: Query<(Entity, &ChildOf), With<ActorGuildLabel>>,
+    mut texts: Query<&mut Text2d, With<ActorGuildLabel>>,
+    mut fonts: ResMut<Assets<Font>>,
+    mut ui_font: ResMut<UiFont>,
+) {
+    if !ui_font.0.is_strong() {
+        ui_font.0 = load_ui_font(&mut fonts);
+    }
+    let font = ui_font.0.clone();
+    for (e, guild) in &players {
+        let desired = guild.map(|g| g.0.clone()).filter(|s| !s.is_empty());
+        let existing = guild_labels
+            .iter()
+            .find(|(_, ch)| ch.parent() == e)
+            .map(|(le, _)| le);
+        match (desired, existing) {
+            (Some(name), Some(le)) => {
+                if let Ok(mut t) = texts.get_mut(le) {
+                    if t.0 != name {
+                        t.0 = name;
+                    }
+                }
+            }
+            (Some(name), None) => {
+                commands.entity(e).with_children(|p| {
+                    p.spawn((
+                        ActorGuildLabel,
+                        ActorNameLabel,
+                        Text2d::new(name),
+                        bevy::sprite::Anchor::TOP_CENTER,
+                        TextFont {
+                            font: FontSource::Handle(font.clone()),
+                            font_size: FontSize::Px(9.0),
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.3, 0.9, 1.0)),
+                        Transform::from_xyz(0.0, 42.0, 0.0),
+                    ));
+                });
+            }
+            (None, Some(le)) => {
+                commands.entity(le).despawn();
+            }
+            (None, None) => {}
+        }
     }
 }
 

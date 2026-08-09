@@ -67,6 +67,11 @@ impl Plugin for ActorPlugin {
             Update,
             render::actor_name_label_system.run_if(in_state(crate::scenes::AppState::Game)),
         );
+        // #1402：行会名标签即时更新（加退会/职位变化重发 ObjectPlayer）
+        app.add_systems(
+            Update,
+            render::actor_guild_label_system.run_if(in_state(crate::scenes::AppState::Game)),
+        );
         // #178 PK 名字染色（ObjectColourChanged）
         app.add_systems(
             Update,
