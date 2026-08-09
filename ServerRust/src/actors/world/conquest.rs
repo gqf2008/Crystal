@@ -60,6 +60,10 @@ pub struct ConquestInstance {
     pub siege_structure_ids: Vec<u32>,
     /// 领地守卫/箭塔落点（C# ConquestInfo.ConquestGuards；CONQUESTGUARD 按 id 落点）
     pub guards: Vec<ConquestGuardInfo>,
+    /// 城门（C# ConquestInfo.ConquestGates；启动生成 SiegeStructure）
+    pub gates: Vec<ConquestGuardInfo>,
+    /// 城墙（C# ConquestInfo.ConquestWalls；启动生成 SiegeStructure）
+    pub walls: Vec<ConquestGuardInfo>,
     /// 攻城金库（C# GuildInfo.GoldStorage，TAKECONQUESTGOLD 取走）
     pub gold_storage: u64,
     /// NPC 税率（C# GuildInfo.NPCRate，SETCONQUESTRATE 设置）
@@ -120,6 +124,8 @@ impl ConquestInstance {
             max_points: MAX_KING_POINTS,
             siege_structure_ids: Vec::new(),
             guards: Vec::new(),
+            gates: Vec::new(),
+            walls: Vec::new(),
             gold_storage: 0,
             tax_rate: 0,
             for_sale: false,
@@ -253,6 +259,10 @@ pub struct SiegeStructure {
     pub y: i32,
     /// 所属征服区域 ID（多个城堡同时开战时区分）
     pub conquest_id: i32,
+    /// 结构索引（C# ConquestGateInfo/ConquestWallInfo.Index；OPENGATE 等脚本按此定位）
+    pub index: i32,
+    /// 修复费用（C# Info.RepairCost，GetRepairCost 公式消费）
+    pub repair_cost: u32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -276,6 +286,8 @@ impl SiegeStructure {
             x: 0,
             y: 0,
             conquest_id: 0,
+            index: 0,
+            repair_cost: 0,
         }
     }
 
@@ -291,6 +303,8 @@ impl SiegeStructure {
             x: 0,
             y: 0,
             conquest_id: 0,
+            index: 0,
+            repair_cost: 0,
         }
     }
 
@@ -307,6 +321,8 @@ impl SiegeStructure {
             x: 0,
             y: 0,
             conquest_id: 0,
+            index: 0,
+            repair_cost: 0,
         }
     }
 
@@ -323,7 +339,19 @@ impl SiegeStructure {
             x: 0,
             y: 0,
             conquest_id: 0,
+            index: 0,
+            repair_cost: 0,
         }
+    }
+
+    /// 启动时按数据放置城门/城墙（#1523：坐标/索引/修复费来自 ConquestInfo.Gates/Walls）
+    pub fn placed(mut self, index: i32, x: i32, y: i32, repair_cost: u32, conquest_id: i32) -> Self {
+        self.index = index;
+        self.x = x;
+        self.y = y;
+        self.repair_cost = repair_cost;
+        self.conquest_id = conquest_id;
+        self
     }
 
     /// 是否为阻挡类结构（#1431：C# CastleGate.Blocking => Closed && base.Blocking——
@@ -390,6 +418,27 @@ mod tests {
     use super::*;
 
     #[test]
+    #[test]
+    fn test_repair_cost_formula() {
+        // #1524：C# GetRepairCost——城门/城墙：RepairCost / (MaxHP / (MaxHP - HP))；箭塔：死亡全额
+        // 满血 0
+        let mut gate = SiegeStructure::gate(1);
+        assert_eq!(gate.repair_cost(), 0);
+        // 城门缺一半：100000 / (50000/25000=2) = 50000
+        let mut gate2 = SiegeStructure::gate(2).placed(0, 0, 0, 100000, 1);
+        gate2.hp = 25000;
+        assert_eq!(gate2.repair_cost(), 50000);
+        // 城墙缺 1/3：60000 / (30000/10000=3) = 20000
+        let mut wall = SiegeStructure::wall(3).placed(0, 0, 0, 60000, 1);
+        wall.hp = 20000;
+        assert_eq!(wall.repair_cost(), 20000);
+        // 箭塔：存活 0，死亡全额
+        let mut tower = SiegeStructure::archer_tower(4).placed(0, 0, 0, 8000, 1);
+        assert_eq!(tower.repair_cost(), 0);
+        tower.hp = 0;
+        assert_eq!(tower.repair_cost(), 8000);
+    }
+
     fn test_take_damage_and_destroy() {
         let mut wall = SiegeStructure::wall(1);
         // 100 dmg on 30000 hp → barely scratched, damage_level still 0
@@ -485,10 +534,17 @@ mod tests {
 }
 
 impl SiegeStructure {
-    /// 修复费用（简化：按缺失 HP 比例，对齐 C# GetRepairCost 概念；每 100 点缺失收 5 金币）
+    /// 修复费用（#1524：C# ConquestGuildInfo.GetRepairCost）
+    /// 城门/城墙：cost = RepairCost / (MaxHP / (MaxHP - HP))（整数除法，满血 0）
+    /// 箭塔：死亡 → 全额 RepairCost；存活 → 0
     pub fn repair_cost(&self) -> u64 {
+        if self.structure_type == SiegeStructureType::ArcherTower {
+            return if self.hp <= 0 { self.repair_cost as u64 } else { 0 };
+        }
         let missing = (self.max_hp - self.hp).max(0) as u64;
-        missing / 100 * 5
+        if missing == 0 { return 0; }
+        let divisor = (self.max_hp as u64 / missing).max(1);
+        self.repair_cost as u64 / divisor
     }
 
     /// 满修复（HP 回满 + 损伤等级清零；区分已有 repair(amount)）

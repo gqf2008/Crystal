@@ -4148,6 +4148,24 @@ impl Actor for WorldActor {
             }).collect()
         };
 
+        // #1523：启动生成城门/城墙（C# ConquestObject 从 ConquestInfo.ConquestGates/Walls 生成，带坐标/索引/修复费）
+        let mut siege_structures: std::collections::HashMap<u32, conquest::SiegeStructure> = std::collections::HashMap::new();
+        let mut next_oid = 1000u32;
+        for inst in &conquest_instances {
+            for g in &inst.gates {
+                let oid = next_oid;
+                next_oid += 1;
+                siege_structures.insert(oid, conquest::SiegeStructure::gate(oid)
+                    .placed(g.index, g.x, g.y, g.repair_cost, inst.id));
+            }
+            for w in &inst.walls {
+                let oid = next_oid;
+                next_oid += 1;
+                siege_structures.insert(oid, conquest::SiegeStructure::wall(oid)
+                    .placed(w.index, w.x, w.y, w.repair_cost, inst.id));
+            }
+        }
+
         Ok(Self {
             tick_count: 0,
             npc_timers: HashMap::new(),
@@ -4162,7 +4180,7 @@ impl Actor for WorldActor {
             map_dir: args.map_dir,
             spawn_dir: args.spawn_dir,
             script_dir: args.quest_dir.clone(),
-            next_object_id: 1000,
+            next_object_id: next_oid,
             monsters: HashMap::new(),
             cursed_monsters: HashMap::new(),
             flaming_sword: HashMap::new(),
@@ -4261,7 +4279,7 @@ impl Actor for WorldActor {
             robot_last_check_minute: 0,
             dragon_state: None,
             conquest_instances,
-            siege_structures: HashMap::new(),
+            siege_structures,
             guild_wars: HashMap::new(),
             guild_war_ends: HashMap::new(),
             hero_ai_states: HashMap::new(),

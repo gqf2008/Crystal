@@ -525,6 +525,26 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             repair_cost INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (conquest_idx, idx)
         );
+        CREATE TABLE IF NOT EXISTS conquest_gates (
+            conquest_idx INTEGER NOT NULL,
+            idx INTEGER NOT NULL,
+            x INTEGER NOT NULL,
+            y INTEGER NOT NULL,
+            mob_index INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            repair_cost INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (conquest_idx, idx)
+        );
+        CREATE TABLE IF NOT EXISTS conquest_walls (
+            conquest_idx INTEGER NOT NULL,
+            idx INTEGER NOT NULL,
+            x INTEGER NOT NULL,
+            y INTEGER NOT NULL,
+            mob_index INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            repair_cost INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (conquest_idx, idx)
+        );
         CREATE TABLE IF NOT EXISTS monster_drops (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             monster_index INTEGER NOT NULL,
@@ -2966,16 +2986,46 @@ pub struct ConquestInfoRow {
     pub king_size: i32,
     pub control_point_index: i32,
     pub guards: Vec<ConquestGuardRow>,
+    pub gates: Vec<ConquestGuardRow>,
+    pub walls: Vec<ConquestGuardRow>,
 }
 
 /// 加载全部征服领地配置（含守卫坐标；C# ConquestInfo.ConquestGuards）
 pub async fn load_conquest_infos(pool: &DbPool) -> anyhow::Result<Vec<ConquestInfoRow>> {
     let rows = sqlx::query("SELECT * FROM conquest_infos ORDER BY idx").fetch_all(pool).await?;
     let guard_rows = sqlx::query("SELECT * FROM conquest_guards ORDER BY conquest_idx, idx").fetch_all(pool).await?;
+    let gate_rows = sqlx::query("SELECT * FROM conquest_gates ORDER BY conquest_idx, idx").fetch_all(pool).await?;
+    let wall_rows = sqlx::query("SELECT * FROM conquest_walls ORDER BY conquest_idx, idx").fetch_all(pool).await?;
     let mut guards_by_conquest: HashMap<i32, Vec<ConquestGuardRow>> = HashMap::new();
     for r in guard_rows {
         let cidx: i32 = r.get("conquest_idx");
         guards_by_conquest.entry(cidx).or_default().push(ConquestGuardRow {
+            conquest_idx: cidx,
+            index: r.get("idx"),
+            x: r.get("x"),
+            y: r.get("y"),
+            mob_index: r.get("mob_index"),
+            name: r.get("name"),
+            repair_cost: r.get("repair_cost"),
+        });
+    }
+    let mut gates_by_conquest: HashMap<i32, Vec<ConquestGuardRow>> = HashMap::new();
+    for r in gate_rows {
+        let cidx: i32 = r.get("conquest_idx");
+        gates_by_conquest.entry(cidx).or_default().push(ConquestGuardRow {
+            conquest_idx: cidx,
+            index: r.get("idx"),
+            x: r.get("x"),
+            y: r.get("y"),
+            mob_index: r.get("mob_index"),
+            name: r.get("name"),
+            repair_cost: r.get("repair_cost"),
+        });
+    }
+    let mut walls_by_conquest: HashMap<i32, Vec<ConquestGuardRow>> = HashMap::new();
+    for r in wall_rows {
+        let cidx: i32 = r.get("conquest_idx");
+        walls_by_conquest.entry(cidx).or_default().push(ConquestGuardRow {
             conquest_idx: cidx,
             index: r.get("idx"),
             x: r.get("x"),
@@ -3021,6 +3071,8 @@ pub async fn load_conquest_infos(pool: &DbPool) -> anyhow::Result<Vec<ConquestIn
             king_size: r.get("king_size"),
             control_point_index: r.get("control_point_index"),
             guards: guards_by_conquest.remove(&index).unwrap_or_default(),
+            gates: gates_by_conquest.remove(&index).unwrap_or_default(),
+            walls: walls_by_conquest.remove(&index).unwrap_or_default(),
         });
     }
     Ok(out)

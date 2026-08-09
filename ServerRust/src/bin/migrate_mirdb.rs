@@ -307,6 +307,15 @@ struct ParsedConquestGuard {
     repair_cost: u32,
 }
 
+struct ParsedConquestGate {
+    index: i32,
+    x: i32,
+    y: i32,
+    mob_index: i32,
+    name: String,
+    repair_cost: i32,
+}
+
 struct ParsedConquestInfo {
     index: i32,
     full_map: bool,
@@ -332,6 +341,8 @@ struct ParsedConquestInfo {
     king_size: u16,
     control_point_index: i32,
     guards: Vec<ParsedConquestGuard>,
+    gates: Vec<ParsedConquestGate>,
+    walls: Vec<ParsedConquestGate>,
 }
 
 struct ParsedGTMap {
@@ -1050,6 +1061,12 @@ fn read_conquest_info<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> s
         guards: guards.into_iter().map(|g| ParsedConquestGuard {
             index: g.0, x: g.1, y: g.2, mob_index: g.3, name: g.4, repair_cost: g.5,
         }).collect(),
+        gates: gates.into_iter().map(|g| ParsedConquestGate {
+            index: g.0, x: g.1, y: g.2, mob_index: g.3, name: g.4, repair_cost: g.5,
+        }).collect(),
+        walls: walls.into_iter().map(|g| ParsedConquestGate {
+            index: g.0, x: g.1, y: g.2, mob_index: g.3, name: g.4, repair_cost: g.5,
+        }).collect(),
     })
 }
 
@@ -1327,6 +1344,26 @@ async fn create_tables(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
             control_point_index INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS conquest_guards (
+            conquest_idx INTEGER NOT NULL,
+            idx INTEGER NOT NULL,
+            x INTEGER NOT NULL,
+            y INTEGER NOT NULL,
+            mob_index INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            repair_cost INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (conquest_idx, idx)
+        );
+        CREATE TABLE IF NOT EXISTS conquest_gates (
+            conquest_idx INTEGER NOT NULL,
+            idx INTEGER NOT NULL,
+            x INTEGER NOT NULL,
+            y INTEGER NOT NULL,
+            mob_index INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            repair_cost INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (conquest_idx, idx)
+        );
+        CREATE TABLE IF NOT EXISTS conquest_walls (
             conquest_idx INTEGER NOT NULL,
             idx INTEGER NOT NULL,
             x INTEGER NOT NULL,
@@ -1663,6 +1700,20 @@ async fn insert_conquest_info(pool: &sqlx::SqlitePool, c: &ParsedConquestInfo) -
         .bind(c.index).bind(g.index).bind(g.x).bind(g.y).bind(g.mob_index)
         .bind(&g.name).bind(g.repair_cost as i64)
         .execute(pool).await?;
+    }
+    // 城门/城墙（C# ConquestInfo.ConquestGates/ConquestWalls）
+    for (table, list) in [("conquest_gates", &c.gates), ("conquest_walls", &c.walls)] {
+        sqlx::query(&format!("DELETE FROM {} WHERE conquest_idx = ?", table))
+            .bind(c.index)
+            .execute(pool).await?;
+        for g in list {
+            sqlx::query(&format!(
+                "INSERT OR REPLACE INTO {} (conquest_idx, idx, x, y, mob_index, name, repair_cost) VALUES (?,?,?,?,?,?,?)", table
+            ))
+            .bind(c.index).bind(g.index).bind(g.x).bind(g.y).bind(g.mob_index)
+            .bind(&g.name).bind(g.repair_cost as i64)
+            .execute(pool).await?;
+        }
     }
     Ok(())
 }
