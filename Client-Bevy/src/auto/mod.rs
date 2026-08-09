@@ -36,6 +36,10 @@ pub fn register(app: &mut App) {
     }
 
     // --storage-test: 自动仓库存取链路（自动化验证用）
+    // --storage-equip-test: 仓库双击装备链路（#1546，Storage EquipItem）
+    if std::env::args().any(|a| a == "--storage-equip-test") {
+        app.add_systems(Update, auto_storage_equip_test);
+    }
     if std::env::args().any(|a| a == "--storage-test") {
         app.add_systems(Update, auto_storage_test);
     }

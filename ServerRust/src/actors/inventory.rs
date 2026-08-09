@@ -699,6 +699,24 @@ impl PlayerInventory {
     }
 
     /// 卸下装备：从装备槽位放回背包
+
+    /// #1546：从仓库格装备（C# EquipItem Grid=Storage：从 Account.Storage 定位 → 装备；旧装备放回仓库原格）
+    /// 返回 (旧装备 Option<UserItem>, 新装备 unique_id) 或 None
+    pub fn equip_from_storage(&mut self, storage_idx: usize, slot: EquipmentSlot) -> Option<(Option<UserItem>, u64)> {
+        if storage_idx >= self.storage.len() {
+            return None;
+        }
+        let item = self.storage[storage_idx].take()?.item;
+        let old_equipment = self.equipment[slot as usize].replace(item.clone());
+        // C#：array[index] = toArray[to]（旧装备放回仓库原格）
+        if let Some(old) = old_equipment.clone() {
+            self.storage[storage_idx] = Some(InventorySlot {
+                grid: storage_idx as u8,
+                item: old,
+            });
+        }
+        Some((old_equipment, item.unique_id))
+    }
     /// 返回 (卸下物品, 放入的 grid) 或 None
     pub fn unequip_item(&mut self, slot: EquipmentSlot) -> Option<(UserItem, u8)> {
         let item = self.equipment[slot as usize].take()?;
@@ -1421,4 +1439,31 @@ mod tests {
         assert_eq!(inv.fishing_rod().unwrap().current_dura, 0);
     }
 
+
+
+    #[test]
+    fn test_equip_from_storage_puts_old_back_to_storage() {
+        // #1546：C# EquipItem Grid=Storage 语义——从仓库格装备，旧装备放回仓库原格
+        let mut inv = PlayerInventory::new();
+        let sword = make_item(5, 1); // 武器
+        inv.storage[3] = Some(InventorySlot { grid: 3, item: sword.clone() });
+        // 先通过背包装备一把旧武器到槽 0
+        let (grid, _) = inv.add_item(make_item(5, 2)).unwrap();
+        assert!(inv.equip_item(grid, EquipmentSlot::Weapon).is_some());
+        assert!(inv.equipment[EquipmentSlot::Weapon as usize].is_some());
+        // 仓库装备：旧武器回仓库格 3
+        let r = inv.equip_from_storage(3, EquipmentSlot::Weapon);
+        assert!(r.is_some());
+        let (old, new_uid) = r.unwrap();
+        assert!(old.is_some(), "旧装备应放回仓库");
+        assert_eq!(new_uid, sword.unique_id);
+        assert_eq!(inv.storage[3].as_ref().map(|s| s.item.unique_id), old.as_ref().map(|i| i.unique_id));
+        assert_eq!(inv.equipment[EquipmentSlot::Weapon as usize].as_ref().map(|i| i.unique_id), Some(sword.unique_id));
+    }
+
+    #[test]
+    fn test_equip_from_storage_empty_slot_returns_none() {
+        let mut inv = PlayerInventory::new();
+        assert!(inv.equip_from_storage(0, EquipmentSlot::Weapon).is_none());
+    }
 }

@@ -12,7 +12,10 @@
 
 use bevy::prelude::*;
 
-use crate::game::dialogs::inventory::{inv_slot_at, InvClickState, InvItem};
+use crate::game::dialogs::inventory::{
+    inv_slot_at, item_use_sound_id, use_item_core, InvClickState, InvDropConfirm,
+    InvItem, ItemUseFeedback, UseItemCtx, UseOutcome,
+};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
@@ -517,6 +520,10 @@ fn storage_action_system(
     net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
+    time: Res<Time>,
+    mut feedback: ResMut<ItemUseFeedback>,
+    mut confirm: ResMut<InvDropConfirm>,
+    mut last_storage_click: Local<Option<(usize, f64)>>,
 ) {
     if !state.visible || !mouse.just_pressed(MouseButton::Left) {
         return;
@@ -531,6 +538,43 @@ fn storage_action_system(
         hud.inventory.page,
         hud.inventory.items.len(),
     );
+
+    // #1546：仓库格双击 → 装备（C# MirItemCell.OnMouseDoubleClick → UseItem；消耗品要求 Grid==Inventory/HeroInventory 故仓库拦截）
+    let now = time.elapsed_secs_f64();
+    let mut dbl_storage = false;
+    if let Some(i) = storage_slot {
+        if let Some((last_i, last_t)) = *last_storage_click {
+            if last_i == i && now - last_t < 0.4 {
+                dbl_storage = true;
+                *last_storage_click = None;
+            } else {
+                *last_storage_click = Some((i, now));
+            }
+        } else {
+            *last_storage_click = Some((i, now));
+        }
+    }
+    if dbl_storage {
+        if let Some(item) = state.items.get(storage_slot.unwrap()).and_then(|s| s.as_ref()) {
+            let ctx = UseItemCtx {
+                grid: mir2_shared::enums::MirGridType::Storage,
+                equipment: &hud.equipment,
+                gender: hud.gender,
+                class: hud.class,
+                level: hud.level,
+                check_fishing: true,
+                allow_consumable: false,
+            };
+            if use_item_core(item, &net, &hud, ctx, now, &mut feedback, &mut confirm) == UseOutcome::Sent {
+                if let Some(sid) = item_use_sound_id(item) {
+                    feedback.sounds.push(sid);
+                }
+            }
+        }
+        state.selected = None;
+        return;
+    }
+
 
     // 1) 选中了背包物品 → 点仓库格：存入（原版 C# SelectedCell Inventory → Storage 拖放）
     if let Some(from) = inv_click.selected {

@@ -294,6 +294,125 @@ pub(crate) fn auto_storage_test(
     }
 }
 
+
+/// --storage-equip-test：仓库格双击装备链路（#1546：Storage EquipItem → mock 处理 → 客户端装备槽更新）
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn auto_storage_equip_test(
+    net: ResMut<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    storage: Res<client_bevy::game::dialogs::storage::StorageState>,
+    hud: Res<client_bevy::game::hud::HudState>,
+    npcs: Query<(
+        &client_bevy::actor::NetObjectId,
+        &client_bevy::actor::NpcName,
+        &Transform,
+    )>,
+    players: Query<
+        &Transform,
+        (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>),
+    >,
+    mut t: Local<f32>,
+    mut stage: Local<u8>,
+    mut npc_oid: Local<Option<u32>>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    *t += time.delta_secs();
+    match *stage {
+        0 => {
+            if *t < 6.0 {
+                return;
+            }
+            let oid = players.single().ok().and_then(|ptf| {
+                let (px, py) =
+                    client_bevy::game::movement::world_to_tile(ptf.translation.x, ptf.translation.y);
+                npcs.iter()
+                    .filter(|(_, n, _)| n.0.contains("Alchemist") || n.0.contains("Merchant"))
+                    .map(|(id, _, tf)| {
+                        let (nx, ny) =
+                            client_bevy::game::movement::world_to_tile(tf.translation.x, tf.translation.y);
+                        (id.0, (nx - px).abs() + (ny - py).abs())
+                    })
+                    .min_by_key(|(_, d)| *d)
+                    .map(|(id, _)| id)
+            });
+            if let Some(oid) = oid {
+                *npc_oid = Some(oid);
+                net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                    object_id: oid,
+                    key: "[@Main]".to_string(),
+                });
+                *stage = 1;
+                *t = 0.0;
+            }
+        }
+        1 => {
+            if *t < 2.0 {
+                return;
+            }
+            if let Some(oid) = *npc_oid {
+                net.send_packet(&mir2_shared::packets::client::npc::CallNPC {
+                    object_id: oid,
+                    key: "[@Storage]".to_string(),
+                });
+                *stage = 2;
+                *t = 0.0;
+            }
+        }
+        2 => {
+            if *t < 2.0 {
+                return;
+            }
+            if storage.unlock_panel {
+                net.send_packet(&mir2_shared::packets::client::storage::UnlockStorage {
+                    password: "123456".to_string(),
+                });
+                tracing::info!("[STORAGEEQUIP] 仓库解锁");
+                *t = 0.0;
+                return;
+            }
+            if storage.visible {
+                // 仓库格 4 = mock 木剑（#1546）；直接发 EquipItem Grid=Storage 模拟双击
+                if let Some(item) = storage.items.get(4).and_then(|s| s.as_ref()) {
+                    net.send_packet(&mir2_shared::packets::client::item::EquipItem {
+                        grid: mir2_shared::enums::MirGridType::Storage,
+                        unique_id: item.unique_id,
+                        to: 0, // Weapon
+                    });
+                    tracing::info!("[STORAGEEQUIP] 仓库格4装备 {} uid={}", item.name, item.unique_id);
+                    *stage = 3;
+                    *t = 0.0;
+                } else {
+                    tracing::warn!("[STORAGEEQUIP] 仓库格4无木剑");
+                }
+            }
+        }
+        3 => {
+            if *t < 2.0 {
+                return;
+            }
+            let equipped = hud
+                .equipment
+                .get(0)
+                .and_then(|s| s.as_ref())
+                .map(|i| i.name.clone())
+                .unwrap_or_default();
+            tracing::info!("[STORAGEEQUIP] 装备槽0 = {}", equipped);
+            if equipped.contains("木剑") {
+                tracing::info!("[STORAGEEQUIP] ✅ 仓库双击装备链路验证通过");
+            } else {
+                tracing::error!("[STORAGEEQUIP] ❌ 装备槽0未更新为木剑");
+            }
+            *stage = 4;
+        }
+        _ => {}
+    }
+}
+
+
 /// --refine-test：精炼全流程（存入 → 开始 60 秒 → 查看 → 取回）
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn auto_refine_test(
