@@ -1106,9 +1106,14 @@ impl Message<MoveRequest> for PlayerActor {
         if self.has_buff(crate::combat::buff::BuffType::Stun) {
             return false;
         }
-        // #1428：C# HumanObject.Run steps = RidingMount ? 3 : 2；Walk = 1
+        // #1428/#1502：C# HumanObject.Run steps = RidingMount || (ActiveSwiftFeet && !Sneaking) ? 3 : 2；Walk = 1
         let steps = if msg.is_run {
-            if self.state.is_mounted { 3 } else { 2 }
+            if self.state.is_mounted
+                || self.has_buff(crate::combat::buff::BuffType::MoveSpeedBoost { percent: 0 }) {
+                3
+            } else {
+                2
+            }
         } else {
             1
         };

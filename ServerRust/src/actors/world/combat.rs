@@ -3093,7 +3093,7 @@ impl Message<MagicRequest> for WorldActor {
             SPELL_SWIFT_FEET => {
                 let spd_pct = 30 + spell_level as i32 * 10;
                 let buff = crate::combat::buff::BuffInstance::new(
-                    crate::combat::buff::BuffType::MoveSpeedBoost { percent: spd_pct }, 300, 5);
+                    crate::combat::buff::BuffType::MoveSpeedBoost { percent: spd_pct }, 250 + spell_level as u32 * 50, 5);
                 let _ = record.actor_ref.ask(crate::actors::player::ApplyBuff { buff }).await;
                 debug!("Magic: {} casts SwiftFeet (move speed +{}%)", state.name, spd_pct);
             }

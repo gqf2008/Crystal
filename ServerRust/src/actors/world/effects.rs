@@ -31,7 +31,12 @@ impl WorldActor {
         };
         let mut effects = 0u16;
         for (flag, bit) in LEVEL_EFFECT_FLAGS {
-            if state.flags.get(&flag.to_string()).copied().unwrap_or(0) != 0 {
+            // #1503：兼容两种键格式——@setflag 写入 NPC_FLAG_<n>，旧数据/脚本可能用纯数字键
+            let plain = flag.to_string();
+            let prefixed = format!("NPC_FLAG_{}", flag);
+            let v = state.flags.get(&plain).copied().unwrap_or(0)
+                .max(state.flags.get(&prefixed).copied().unwrap_or(0));
+            if v != 0 {
                 effects |= bit;
             }
         }

@@ -2183,30 +2183,11 @@ async fn exec_action(
             }
             debug!("NPC EXPIRETIMER: key={}", key);
         }
-        // REFRESHEFFECTS —— 刷新等级特效（对齐 C# ActionType.RefreshEffects + S.ObjectLevelEffects）
+        // REFRESHEFFECTS —— 刷新等级特效（对齐 C# ActionType.RefreshEffects：SetLevelEffects + Broadcast）
         "REFRESHEFFECTS" => {
-            if let Some(st) = current_player_state(world, session_id).await {
-                let map_index = st.map_index;
-                let packet = mir2_shared::packets::server::movement::ObjectLevelEffects {
-                    object_id: st.object_id,
-                    level_effects: 0, // Rust 端暂无 LevelEffects 计算（C# SetLevelEffects），先发 0 占位
-                };
-                let mut body = Vec::new();
-                if mir2_shared::packets::base::serialize_packet(&mut std::io::Cursor::new(&mut body), &packet).is_ok() {
-                    // 广播给同图玩家（对齐 C# player.Broadcast）
-                    let mut targets = Vec::new();
-                    for (sid, r) in &world.players {
-                        if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
-                            if os.map_index == map_index {
-                                targets.push(*sid);
-                            }
-                        }
-                    }
-                    for sid in targets {
-                        let _ = world.gate_ref.tell(SendToClient { session_id: sid, data: body.clone() }).await;
-                    }
-                }
-            }
+            // #1503：复用 effects.rs 计算 flags 990-998 → LevelEffects 并广播同图玩家
+            world.refresh_level_effects(session_id).await;
+            world.broadcast_level_effects(session_id).await;
         }
         // GROUPGOTO <section> —— 组队跳转脚本段（对齐 C# ActionType.GroupGoto：DelayedAction 立即调度，所有组员到点执行）
         "GROUPGOTO" => {
