@@ -3691,6 +3691,41 @@ impl Message<AcceptQuest> for PlayerActor {
     }
 }
 
+/// #1489：GM 设置任务完成/取消（C# SETQUEST state 0=取消 1=完成）
+pub struct GmSetQuest {
+    pub quest_index: i32,
+    pub complete: bool,
+}
+
+impl Message<GmSetQuest> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: GmSetQuest, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let ql = &mut self.state.quest_log;
+        if let Some(idx) = ql.quests.iter().position(|q| q.quest_index == msg.quest_index) {
+            ql.quests.remove(idx);
+        }
+        if msg.complete {
+            if !ql.completed_indices.contains(&msg.quest_index) {
+                ql.completed_indices.push(msg.quest_index);
+            }
+        } else {
+            ql.completed_indices.retain(|i| *i != msg.quest_index);
+        }
+    }
+}
+
+/// #1490：GM 清空任务（C# CLEARQUESTS）
+pub struct GmClearQuests;
+
+impl Message<GmClearQuests> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, _msg: GmClearQuests, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.quest_log = crate::actors::quest::QuestLog::new();
+    }
+}
+
 /// 完成任务（在 PlayerActor 上执行，返回完成的奖励信息）
 pub struct CompleteQuest {
     pub quest_index: i32,
