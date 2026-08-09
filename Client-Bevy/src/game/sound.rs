@@ -68,6 +68,59 @@ fn volume_settings() -> PlaybackSettings {
     PlaybackSettings::DESPAWN.with_volume(bevy::audio::Volume::Linear(volume_from_percent(v)))
 }
 
+/// #1564：近战挥击音效（C# PlayerObject.PlayAttackSound，PlayerObject.cs:4889）：
+/// - 骑乘：mount_type<7 → TigerAttack1(10181)、<12 → WolfAttack1(10190)（C# Random 区间，取首值确定性返回）；
+/// - 刺客（持武器）→ SwingShort(10050)；
+/// - 弓手（持武器）→ 无挥击音（C# 直接 return）；
+/// - 其余按武器形状映射 SwingWood/Short/Sword/Sword2/Axe/Long/Club/Fist；
+/// - 无武器 → SwingFist(10056)（C# default 分支）。
+pub fn attack_swing_sound(
+    class: u8,
+    riding: bool,
+    mount_type: i16,
+    weapon_shape: i16,
+) -> Option<u32> {
+    use mir2_shared::enums::MirClass;
+    if riding {
+        // C#：MountType < 7 → 10181..10184（Tiger）；< 12 → 10190..10193（Wolf）
+        return Some(if mount_type < 7 { 10181 } else { 10190 });
+    }
+    if class == MirClass::Assassin as u8 {
+        return Some(10050); // SwingShort
+    }
+    if class == MirClass::Archer as u8 {
+        return None; // 弓手不播近战挥击音（C# return）
+    }
+    Some(match weapon_shape {
+        0 | 23 | 28 | 40 => 10051, // SwingWood
+        1 | 12 => 10050,           // SwingShort
+        2 | 8 | 11 | 15 | 18 | 20 | 25 | 31 | 33 | 34 | 37 | 41 => 10052, // SwingSword
+        3 | 5 | 7 | 9 | 13 | 19 | 24 | 26 | 29 | 32 | 35 => 10053,       // SwingSword2
+        4 | 14 | 16 | 38 => 10054,                                        // SwingAxe
+        6 | 10 | 17 | 22 | 27 | 30 | 36 | 39 => 10056,                    // SwingLong
+        21 => 10055,                                                       // SwingClub
+        _ => 10056,                                                        // SwingFist
+    })
+}
+
+/// #1564：玩家受击 flinch 音（C# PlayerObject.cs:749 FlinchSound：MaleFlinch 10138 / FemaleFlinch 10139）
+pub fn player_flinch_sound(gender: u8) -> u32 {
+    if gender == 0 {
+        10138 // MaleFlinch
+    } else {
+        10139 // FemaleFlinch
+    }
+}
+
+/// #1564：玩家死亡音（C# PlayerObject.cs:748 DieSound：MaleDie 10144 / FemaleDie 10145）
+pub fn player_die_sound(gender: u8) -> u32 {
+    if gender == 0 {
+        10144 // MaleDie
+    } else {
+        10145 // FemaleDie
+    }
+}
+
 /// 播放音效（读取 wav → AudioSource → 一次性播放）
 pub fn play_sound(
     commands: &mut Commands,
@@ -173,5 +226,59 @@ mod tests {
         assert_eq!(volume_from_percent(80), 0.8);
         assert_eq!(volume_from_percent(100), 1.0);
         assert_eq!(volume_from_percent(200), 1.0);
+    }
+
+    #[test]
+    fn attack_swing_sound_weapon_shapes_match_csharp() {
+        // #1564：C# PlayerObject.PlayAttackSound 武器形状分组
+        use mir2_shared::enums::MirClass;
+        let war = MirClass::Warrior as u8;
+        // 0/23/28/40 → SwingWood(10051)
+        for shape in [0i16, 23, 28, 40] {
+            assert_eq!(attack_swing_sound(war, false, 0, shape), Some(10051));
+        }
+        // 1/12 → SwingShort(10050)
+        for shape in [1i16, 12] {
+            assert_eq!(attack_swing_sound(war, false, 0, shape), Some(10050));
+        }
+        // 2 → SwingSword(10052)
+        assert_eq!(attack_swing_sound(war, false, 0, 2), Some(10052));
+        // 3 → SwingSword2(10053)
+        assert_eq!(attack_swing_sound(war, false, 0, 3), Some(10053));
+        // 4 → SwingAxe(10054)
+        assert_eq!(attack_swing_sound(war, false, 0, 4), Some(10054));
+        // 21 → SwingClub(10055)
+        assert_eq!(attack_swing_sound(war, false, 0, 21), Some(10055));
+        // 6 → SwingLong(10056)
+        assert_eq!(attack_swing_sound(war, false, 0, 6), Some(10056));
+        // 默认（无武器 -1）→ SwingFist(10056)
+        assert_eq!(attack_swing_sound(war, false, 0, -1), Some(10056));
+    }
+
+    #[test]
+    fn attack_swing_sound_class_and_riding() {
+        // #1564：刺客 SwingShort；弓手无挥击音；骑乘坐骑音
+        use mir2_shared::enums::MirClass;
+        assert_eq!(
+            attack_swing_sound(MirClass::Assassin as u8, false, 0, 5),
+            Some(10050)
+        );
+        assert_eq!(
+            attack_swing_sound(MirClass::Archer as u8, false, 0, 5),
+            None,
+            "弓手不播近战挥击音（C# return）"
+        );
+        // 骑乘：mount_type<7 → TigerAttack1(10181)；>=7 → WolfAttack1(10190)
+        assert_eq!(attack_swing_sound(MirClass::Warrior as u8, true, 0, 5), Some(10181));
+        assert_eq!(attack_swing_sound(MirClass::Warrior as u8, true, 7, 5), Some(10190));
+    }
+
+    #[test]
+    fn player_flinch_and_die_sound_by_gender() {
+        // #1564：C# FlinchSound/DieSound 按性别（0=Male）
+        assert_eq!(player_flinch_sound(0), 10138); // MaleFlinch
+        assert_eq!(player_flinch_sound(1), 10139); // FemaleFlinch
+        assert_eq!(player_die_sound(0), 10144); // MaleDie
+        assert_eq!(player_die_sound(1), 10145); // FemaleDie
     }
 }

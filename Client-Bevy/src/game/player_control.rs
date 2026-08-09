@@ -558,7 +558,15 @@ fn auto_attack_system(
             direction: dir,
             spell: mir2_shared::enums::Spell::None,
         });
-        crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, 10050);
+        // #1564：近战挥击音按武器/职业/骑乘选择（C# PlayAttackSound；弓手无挥击音）
+        if let Some(sound_id) = crate::game::sound::attack_swing_sound(
+            hud.class,
+            hud.riding,
+            hud.mount_type,
+            hud.equipment.get(0).and_then(|s| s.as_ref()).map(|i| i.shape).unwrap_or(-1),
+        ) {
+            crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
+        }
     }
     // 诊断（#57）：攻击时打印玩家/目标瓦片与方向（debug 级）
     tracing::debug!(
