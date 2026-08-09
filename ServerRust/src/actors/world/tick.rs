@@ -887,8 +887,8 @@ impl WorldActor {
         {
             // 死亡回调也提供玩家快照（C# Die 可 FindAllTargets；ToxicGhoul 死亡 AOE 毒等用）
             let die_player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
-                .map(|(s, x, y, oid, _, hp, map, lvl)| ai::PlayerSnap {
-                    session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl,
+                .map(|(s, x, y, oid, pk, hp, map, lvl)| ai::PlayerSnap {
+                    session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl, pk_points: *pk,
                 }).collect();
             let mut ctx = AiCtx {
                 tick_count: self.tick_count,
@@ -3473,16 +3473,16 @@ impl Message<Tick> for WorldActor {
                             let tgt = self.player_targets.get(&master).copied()
                                 .and_then(|oid| player_positions.iter()
                                     .find(|(_, _, _, o, _, _, _, _)| *o == oid)
-                                    .map(|(s, x, y, oid, _, hp, map, lvl)| ai::PlayerSnap {
-                                        session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl,
+                                    .map(|(s, x, y, oid, pk, hp, map, lvl)| ai::PlayerSnap {
+                                        session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl, pk_points: *pk,
                                     }));
                             (mode, tgt, self.pet_targets.contains_key(&monster.object_id))
                         } else {
                             (None, None, false)
                         };
                     let player_snaps: Vec<ai::PlayerSnap> = player_positions.iter()
-                        .map(|(s, x, y, oid, _, hp, map, lvl)| ai::PlayerSnap {
-                                        session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl,
+                        .map(|(s, x, y, oid, pk, hp, map, lvl)| ai::PlayerSnap {
+                                        session_id: *s, x: *x, y: *y, hp: *hp, map_index: *map, object_id: *oid, level: *lvl, pk_points: *pk,
                                     }).collect();
                     // monster_snaps 从循环外预收集的 monster_snapshot 构建（避免 &mut self.monsters 借用冲突）
                     let monster_snaps: Vec<ai::MonsterSnap> = monster_snapshot.iter()

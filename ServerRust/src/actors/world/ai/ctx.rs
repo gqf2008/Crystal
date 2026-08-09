@@ -16,6 +16,8 @@ pub struct PlayerSnap {
     pub map_index: u16,
     pub object_id: u32,
     pub level: u16,
+    /// #1385：PK 值（C# PKPoints；守卫红名目标判定用）
+    pub pk_points: i32,
 }
 
 /// 怪物快照（供 Boss 互查，如 Healer 治疗友军、Yimoogi 分身聚合）
