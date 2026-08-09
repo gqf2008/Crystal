@@ -1333,6 +1333,25 @@ impl Message<PlayerLogOut> for WorldActor {
         msg: PlayerLogOut,
         _ctx: &mut Context<Self, Self::Reply>,
     ) -> Self::Reply {
+        // #1578：C# MirConnection.LogOut——攻击/施法后 10s 内 LogOut 失败（S.LogOutFailed 空包）
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let block_until = self.player_logout_block_ms.get(&msg.session_id).copied();
+        if crate::actors::world::combat::logout_blocked(now_ms, block_until) {
+            debug!("Logout blocked: session={} until={} (C# LogTime)", msg.session_id, block_until.unwrap_or(0));
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::LogOutFailed as i16,
+                    &[],
+                ),
+            }).await;
+            return;
+        }
+        self.player_logout_block_ms.remove(&msg.session_id);
+
         let record = match self.players.remove(&msg.session_id) {
             Some(r) => r,
             None => {
