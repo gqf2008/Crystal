@@ -172,6 +172,7 @@ async fn async_main() -> anyhow::Result<()> {
         rarity_cfg: cfg.server.rarity.clone(),
         notice_path: cfg.server.notice_path.clone(),
         death_exp_penalty_percent: cfg.server.death_exp_penalty_percent,
+        movement_pacing_ms: cfg.server.movement_pacing_ms,
         health_regen_weight: cfg.server.health_regen_weight,
         mana_regen_weight: cfg.server.mana_regen_weight,
         goods_hide_added_stats: cfg.server.goods_hide_added_stats,

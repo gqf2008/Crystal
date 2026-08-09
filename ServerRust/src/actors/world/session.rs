@@ -825,16 +825,28 @@ impl Message<WorldMoveRequest> for WorldActor {
             }
         }
 
-        // Phase 1.4: 反作弊 — 速度 hack 检测
-        // 正常移动间隔: Walk ~200ms, Run ~150ms。
-        // 阈值 50ms 容忍网络抖动,但拒绝明显的瞬移/速度 hack。
+        // Phase 1.4: 反作弊/节流 — 速度 hack 检测 + 可配置移动节流（#1509/#1531）
+        // 正常移动间隔: Walk ~200ms, Run ~150ms。阈值 50ms 容忍网络抖动,但拒绝明显的瞬移/速度 hack。
+        // movement_pacing_ms > 0 时按 C# HumanObject MoveDelay=600ms/动作 节流（Slow 毒 ×2，GetDelayTime）
         const MIN_MOVE_INTERVAL_MS: u64 = 50;
+        let pacing_ms = self.movement_pacing_ms;
+        let interval_ms = if pacing_ms > 0 {
+            // C# GetDelayTime：持有 Slow 毒时翻倍
+            let slow = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                st.poison_list.iter().any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::SLOW))
+            } else {
+                false
+            };
+            pacing_ms * if slow { 2 } else { 1 }
+        } else {
+            MIN_MOVE_INTERVAL_MS
+        };
         if let Some(last) = self.last_move_time.get(&msg.session_id) {
             let elapsed = last.elapsed();
-            if elapsed < std::time::Duration::from_millis(MIN_MOVE_INTERVAL_MS) {
+            if elapsed < std::time::Duration::from_millis(interval_ms) {
                 warn!(
                     "Speed hack detected: session {} moved after {:?} (min={:?})",
-                    msg.session_id, elapsed, MIN_MOVE_INTERVAL_MS
+                    msg.session_id, elapsed, interval_ms
                 );
                 return; // 拒绝移动
             }

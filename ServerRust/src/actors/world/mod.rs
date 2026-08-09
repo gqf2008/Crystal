@@ -113,6 +113,8 @@ pub struct WorldActorArgs {
     pub notice_path: String,
     /// 死亡经验惩罚百分比（默认 0=关闭，对齐 C#）
     pub death_exp_penalty_percent: u32,
+    /// 服务端移动节流间隔毫秒（0=关闭；>0 按 C# MoveDelay=600ms/动作 节流，Slow 毒 ×2）
+    pub movement_pacing_ms: u64,
     /// 回血权重（C# Settings.HealthRegenWeight）
     pub health_regen_weight: u32,
     /// 回蓝权重（C# Settings.ManaRegenWeight）
@@ -1023,6 +1025,8 @@ pub struct WorldActor {
     pub(crate) notice_path: String,
     /// 死亡经验惩罚百分比（默认 0=关闭，对齐 C#）
     pub(crate) death_exp_penalty_percent: u32,
+    /// 服务端移动节流间隔毫秒（0=关闭；>0 按 C# MoveDelay=600ms/动作 节流，Slow 毒 ×2）
+    pub(crate) movement_pacing_ms: u64,
     /// 回血权重（C# Settings.HealthRegenWeight）
     pub(crate) health_regen_weight: u32,
     /// 回蓝权重（C# Settings.ManaRegenWeight）
@@ -1294,6 +1298,7 @@ impl WorldActor {
             rarity_cfg: crate::util::config::RarityConfig::default(),
             notice_path: "Notice.txt".to_string(),
             death_exp_penalty_percent: 0,
+            movement_pacing_ms: 0,
             health_regen_weight: 10,
             mana_regen_weight: 10,
             goods_hide_added_stats: true,
@@ -4242,6 +4247,7 @@ impl Actor for WorldActor {
             rarity_cfg: args.rarity_cfg,
             notice_path: args.notice_path.clone(),
             death_exp_penalty_percent: args.death_exp_penalty_percent,
+            movement_pacing_ms: args.movement_pacing_ms,
             health_regen_weight: args.health_regen_weight,
             mana_regen_weight: args.mana_regen_weight,
             goods_hide_added_stats: args.goods_hide_added_stats,

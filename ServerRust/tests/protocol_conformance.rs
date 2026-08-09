@@ -140,6 +140,7 @@ async fn start_server_with_world() -> u16 {
         rarity_cfg: Default::default(),
         notice_path: String::new(),
         death_exp_penalty_percent: 0,
+        movement_pacing_ms: 0,
         health_regen_weight: 1,
         mana_regen_weight: 1,
         goods_hide_added_stats: false,
