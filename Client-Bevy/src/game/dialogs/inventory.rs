@@ -1724,6 +1724,21 @@ fn inv_item_action_system(
 }
 
 
+/// #1592：自动喝 HP 药选药——优先 shape==0（C# ItemInfo Potion：0=HP 红药、1=MP 蓝药），
+/// 无 HP 药时退化为任意药水（保持旧行为）。
+pub fn pick_auto_hp_potion<'a>(items: impl Iterator<Item = &'a InvItem>) -> Option<&'a InvItem> {
+    let mut fallback: Option<&InvItem> = None;
+    for it in items {
+        if mir2_shared::enums::ItemType::try_from(it.item_type) == Ok(mir2_shared::enums::ItemType::Potion) {
+            if it.shape == 0 {
+                return Some(it);
+            }
+            fallback.get_or_insert(it);
+        }
+    }
+    fallback
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1870,6 +1885,34 @@ mod tests {
         hud.equipment[0] = Some(sword);
         assert!(!slot_item_ready(&hud, MirGridType::Fishing));
     }
+    #[test]
+    fn pick_auto_hp_potion_prefers_hp_shape() {
+        // #1592：HP 药（shape 0）优先；只有 MP 药（shape 1）时退化；无药水 None
+        let mut hp = InvItem::default();
+        hp.item_type = mir2_shared::enums::ItemType::Potion as u8;
+        hp.shape = 0;
+        let mut mp = InvItem::default();
+        mp.item_type = mir2_shared::enums::ItemType::Potion as u8;
+        mp.shape = 1;
+        let mut sword = InvItem::default();
+        sword.item_type = mir2_shared::enums::ItemType::Weapon as u8;
+        sword.shape = 0;
+
+        // 背包：武器 → 蓝药 → 红药 → 选红药
+        let items = [Some(sword.clone()), Some(mp.clone()), Some(hp.clone())];
+        let picked = pick_auto_hp_potion(items.iter().flatten()).expect("应选到药水");
+        assert_eq!(picked.shape, 0, "应优先 HP 药");
+
+        // 只有蓝药 → 退化选蓝药
+        let items = [Some(sword.clone()), Some(mp.clone())];
+        let picked = pick_auto_hp_potion(items.iter().flatten()).expect("应退化到蓝药");
+        assert_eq!(picked.shape, 1);
+
+        // 无药水 → None
+        let items = [Some(sword.clone())];
+        assert!(pick_auto_hp_potion(items.iter().flatten()).is_none());
+    }
+
     #[test]
     fn item_use_sound_maps_types() {
         assert_eq!(item_use_sound_id(&item_with_type(ItemType::Weapon)), Some(10111));

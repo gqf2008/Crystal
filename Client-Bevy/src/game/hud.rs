@@ -758,11 +758,10 @@ fn auto_potion_system(
     }
     let pct = hud.hp as f32 / hud.max_hp.max(1) as f32;
     if pct < 0.35 {
-        // 数据驱动：从背包找第一个药品（ItemType::Potion）
-        let potion = hud.inventory.items.iter().flatten().find(|it| {
-            mir2_shared::enums::ItemType::try_from(it.item_type)
-                == Ok(mir2_shared::enums::ItemType::Potion)
-        });
+        // #1592：优先 HP 药（shape==0），无则退化为任意药水（避免喝蓝药不回复 HP）
+        let potion = crate::game::dialogs::inventory::pick_auto_hp_potion(
+            hud.inventory.items.iter().flatten(),
+        );
         if let Some(potion) = potion {
             net.send_packet(&mir2_shared::packets::client::item::UseItem {
                 unique_id: potion.unique_id,
