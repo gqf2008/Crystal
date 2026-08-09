@@ -922,6 +922,7 @@ impl WorldActor {
                 players: &die_player_snaps,
                 monsters: &[],
                 monster_name_by_index: &die_monster_name_map,
+                slave_count: 0,
                 out_moves: &mut die_moves,
                 out_attacks: &mut die_attacks,
                 out_spell_fields: &mut die_spell_fields,
@@ -3476,6 +3477,16 @@ impl Message<Tick> for WorldActor {
             let mut boss_effects: Vec<(u32, mir2_shared::enums::SpellEffect)> = Vec::new();
             let mut boss_player_purges: Vec<u64> = Vec::new();
             let mut boss_player_heals: Vec<(u64, i32)> = Vec::new();
+            // #1441：每个 master 当前存活 slave 数（C# SlaveList.Count；slave_master 预统计）
+            let slave_counts: std::collections::HashMap<u32, usize> = {
+                let mut m = std::collections::HashMap::new();
+                for (soid, master) in &self.slave_master {
+                    if self.monsters.contains_key(soid) {
+                        *m.entry(*master).or_insert(0) += 1;
+                    }
+                }
+                m
+            };
             // 召唤物过期队列（到期 tick 已过 → 移除，不掉落）
             let mut expired_monsters: Vec<u32> = Vec::new();
 
@@ -3528,6 +3539,7 @@ impl Message<Tick> for WorldActor {
                         players: &player_snaps,
                         monsters: &monster_snaps,
                         monster_name_by_index: &monster_name_map,
+                        slave_count: slave_counts.get(&monster_oid).copied().unwrap_or(0),
                         out_moves: &mut boss_moves,
                         out_attacks: &mut boss_attacks,
                         out_spell_fields: &mut boss_spell_fields,

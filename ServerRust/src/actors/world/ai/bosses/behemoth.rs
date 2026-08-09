@@ -111,7 +111,8 @@ impl MonsterBehavior for BehemothBehavior {
                 } else if fastrand::i32(0..2) == 0 {
                     // SpawnSlaves：投掷 huggers（数量 = min(8, targets*5)）
                     let targets_count = ctx.find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index).len();
-                    let count = (targets_count * 5).min(8);
+                    // #1443：C# count = min(8, targets*5 - SlaveList.Count)
+                    let count = (targets_count * 5).saturating_sub(ctx.slave_count).min(8);
                     for i in 0..count {
                         let dir = (i as usize) % 8;
                         let name = SLAVE_NAMES[fastrand::usize(0..SLAVE_NAMES.len())];

@@ -42,15 +42,10 @@ impl MonsterBehavior for BugBagMaggotBehavior {
         };
         monster.target_session = Some(target.session_id);
 
-        // 统计当前地图本怪召唤物数量（用 monster_name 近似，简化：不精确计数上限）
-        let existing = ctx.monsters.iter()
-            .filter(|m| m.map_index == monster.map_index && m.monster_index >= 0)
-            .count();
-        if existing >= 50 {
+        // #1442：C# SlaveList.Count >= 20 跳过召唤（#1434 slave_master 精确计数）
+        if ctx.slave_count >= SLAVE_CAP {
             return;
         }
-        let _ = SLAVE_CAP; // 上限由全局怪物数限制近似
-
         monster.next_summon_tick = ctx.tick_count + SUMMON_COOLDOWN;
         // 召唤 BugBat 在自身附近（C# Spawn 在 CurrentLocation）
         let dir = monster.direction as usize % 8;

@@ -96,7 +96,8 @@ impl MonsterBehavior for BoneLordBehavior {
 
 impl BoneLordBehavior {
     fn spawn_slaves(&self, monster: &mut MonsterState, ctx: &mut AiCtx) {
-        let count = 8u8;
+        // #1441：C# count = min(8, 40 - SlaveList.Count)
+        let count = slave_spawn_count(8, ctx.slave_count, 40) as u8;
         let names = ["BoneMonster1", "BoneMonster2", "BoneMonster3", "BoneMonster4"];
         for i in 0..count {
             let dir = (i % 8) as usize;

@@ -77,3 +77,26 @@ pub fn max_distance(x1: i32, y1: i32, x2: i32, y2: i32) -> i32 {
 pub fn manhattan(x1: i32, y1: i32, x2: i32, y2: i32) -> i32 {
     (x1 - x2).abs() + (y1 - y2).abs()
 }
+
+/// #1441：C# SpawnSlaves 数量 = min(requested, max(0, cap_total - SlaveList.Count))
+pub fn slave_spawn_count(requested: usize, slave_count: usize, cap_total: i32) -> usize {
+    requested.min((cap_total - slave_count as i32).max(0) as usize)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::slave_spawn_count;
+
+    #[test]
+    fn slave_spawn_count_caps_at_slave_list_room() {
+        // #1441：C# min(n, cap - SlaveList.Count)，负数钳 0
+        assert_eq!(slave_spawn_count(8, 0, 40), 8);
+        assert_eq!(slave_spawn_count(8, 38, 40), 2);
+        assert_eq!(slave_spawn_count(8, 40, 40), 0);
+        assert_eq!(slave_spawn_count(8, 45, 40), 0); // 已超上限不再召
+        assert_eq!(slave_spawn_count(3, 4, 6), 2); // MeowMeow 6-4=2
+        assert_eq!(slave_spawn_count(1, 3, 4), 1); // HoodedSummoner 4-3=1
+        assert_eq!(slave_spawn_count(6, 35, 40), 5); // AncientBringer 40-35=5
+        assert_eq!(slave_spawn_count(8, 25, 30), 5); // TurtleKing 30-25=5
+    }
+}

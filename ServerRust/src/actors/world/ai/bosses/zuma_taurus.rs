@@ -104,7 +104,8 @@ impl MonsterBehavior for ZumaTaurusBehavior {
 impl ZumaTaurusBehavior {
     /// 召唤 Zuma 小怪（对齐 C# SpawnSlaves：count = min(8, 40-SlaveList.Count)，随机 Zuma1..7）
     fn spawn_slaves(&self, monster: &mut MonsterState, ctx: &mut AiCtx) {
-        for i in 0..SLAVES_PER_STAGE {
+        // #1441：C# count = min(8, 40 - SlaveList.Count)
+        for i in 0..slave_spawn_count(SLAVES_PER_STAGE as usize, ctx.slave_count, 40) {
             // C# switch(Random(7))：从 Zuma1..7 中随机
             let name = SLAVE_NAMES[fastrand::usize(0..SLAVE_NAMES.len())];
             // 散布在自身周围（C# Front 失败回退 CurrentLocation）

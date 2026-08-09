@@ -41,8 +41,8 @@ impl MonsterBehavior for SnakeTotemBehavior {
                 return;
             }
         }
-        // C# ProcessAI：保持 Minions（10s 冷却近似）
-        if ctx.tick_count >= self.next_summon_tick {
+        // #1442：C# ProcessAI：SlaveList.Count < MaxMinions 才召唤（MaxMinions=PetLevel+1，Rust 近似 2）
+        if ctx.tick_count >= self.next_summon_tick && ctx.slave_count < 2 {
             self.next_summon_tick = ctx.tick_count + SUMMON_COOLDOWN;
             ctx.out_summons.push(crate::actors::world::ai::BossSummon {
                 monster_name: "CharmedSnake".to_string(),
