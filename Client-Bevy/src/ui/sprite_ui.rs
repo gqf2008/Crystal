@@ -185,6 +185,7 @@ pub fn ui_button_system(
     mut buttons: Query<(&mut UiButton, Option<&mut ButtonFrames>, &mut Sprite)>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
+    ui_cameras: Query<(&Camera, &GlobalTransform), With<UiEntity>>,
 ) {
     let Ok(window) = windows.single() else {
         return;
@@ -192,6 +193,14 @@ pub fn ui_button_system(
     let Some(cursor) = window.cursor_position() else {
         return;
     };
+    // UI 相机 Fixed 1024x768：窗口缩放/最大化时需换算成 UI 世界坐标（按钮命中保持准确）
+    let Ok((cam, gtf)) = ui_cameras.single() else {
+        return;
+    };
+    let Ok(world) = cam.viewport_to_world_2d(gtf, cursor) else {
+        return;
+    };
+    let cursor = Vec2::new(world.x, -world.y);
     let just = mouse.just_pressed(MouseButton::Left);
     let down = mouse.pressed(MouseButton::Left);
     for (mut btn, frames, mut sprite) in &mut buttons {
@@ -236,6 +245,7 @@ pub fn ui_button_sound_system(
     windows: Query<&Window>,
     buttons: Query<(Entity, &UiButton, Option<&ButtonSound>, Option<&ButtonHoverSound>)>,
     mut hovered_prev: Local<std::collections::HashSet<Entity>>,
+    ui_cameras: Query<(&Camera, &GlobalTransform), With<UiEntity>>,
 ) {
     let Ok(window) = windows.single() else {
         return;
@@ -243,6 +253,13 @@ pub fn ui_button_sound_system(
     let Some(cursor) = window.cursor_position() else {
         return;
     };
+    let Ok((cam, gtf)) = ui_cameras.single() else {
+        return;
+    };
+    let Ok(world) = cam.viewport_to_world_2d(gtf, cursor) else {
+        return;
+    };
+    let cursor = Vec2::new(world.x, -world.y);
 
     let mut hovered_now = std::collections::HashSet::new();
     for (e, btn, sound, hover_sound) in &buttons {
