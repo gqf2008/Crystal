@@ -17,6 +17,7 @@ use crate::ui::sprite_ui::{
 };
 use mir2_shared::enums::Spell;
 
+use crate::actor::ActorAnim;
 use crate::network::{NetConnection, SessionState};
 use crate::scenes::AppState;
 
@@ -244,6 +245,7 @@ app.add_systems(Update, magic_cooldown_system.run_if(in_state(AppState::Game)));
 /// M37：有选中攻击目标时朝目标施放（弹道类魔法 target_id + 目标位置），
 /// 无目标时朝当前朝向施放（fallback）。
 fn skill_bar_system(
+    mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     mut magics: ResMut<MagicsState>,
     net: Res<NetConnection>,
@@ -251,7 +253,7 @@ fn skill_bar_system(
     control: Res<crate::game::player_control::ControlState>,
     mut chat: ResMut<crate::game::chat::ChatState>,
     actors: Query<(&crate::actor::NetObjectId, &Transform), Without<crate::actor::LocalPlayer>>,
-    players: Query<&Transform, (With<crate::actor::LocalPlayer>, With<crate::actor::NetObjectId>)>,
+    mut players: Query<(Entity, &Transform, &mut ActorAnim), (With<crate::actor::LocalPlayer>, With<crate::actor::NetObjectId>)>,
 ) {
     const F_KEYS: [KeyCode; 8] = [
         KeyCode::F1,
@@ -291,12 +293,11 @@ fn skill_bar_system(
         return;
     }
     // 玩家当前瓦片位置（以本地玩家实体 Transform 为准，服务器坐标更稳）
-    let (px, py) = players
-        .single()
-        .ok()
-        .map(|tf| crate::game::movement::world_to_tile(tf.translation.x, tf.translation.y))
-        .or_else(|| session.self_position.map(|(x, y, _)| (x, y)))
-        .unwrap_or((0, 0));
+    // #1596：single_mut 拿到本地实体，施法时清除寻路路径（C# CanMove=false）
+    let Ok((pe, ptf, mut anim)) = players.single_mut() else {
+        return;
+    };
+    let (px, py) = crate::game::movement::world_to_tile(ptf.translation.x, ptf.translation.y);
     // 有选中目标 → 朝目标施放
     let mut target_id = 0u32;
     let mut tx = px;
@@ -318,6 +319,11 @@ fn skill_bar_system(
             .unwrap_or(cast_dir);
         }
     }
+    // #1596：C# 施法替代移动动作（CanMove=false）——清除寻路路径并回站立
+    commands.entity(pe).remove::<crate::game::movement::LocalMove>();
+    anim.action = mir2_shared::enums::MirAction::Standing;
+    anim.frame_index = 0;
+
     net.send_packet(&mir2_shared::packets::client::combat::Magic {
         spell: magic.spell,
         direction: cast_dir,
