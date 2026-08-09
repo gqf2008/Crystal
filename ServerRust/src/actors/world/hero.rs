@@ -759,6 +759,10 @@ impl WorldActor {
             undead: bool,
             /// #1212：目标怪物等级（Repulsion/TurnUndead 条件）
             level: i32,
+            /// #1533：目标是否已在显血窗口内（Revelation RevTime 未过）
+            rev_active: bool,
+            /// #1533：目标是否 AutoRev（C# TaoistHero Revelation 条件：仅非 AutoRev 目标）
+            auto_rev: bool,
         }
         let monster_snaps: Vec<MonsterSnap> = self.monsters.values()
             .filter(|m| m.hp > 0)
@@ -773,6 +777,10 @@ impl WorldActor {
                 has_slow: m.poison_list.iter().any(|p| p.p_type.intersects(mir2_shared::enums::PoisonType::SLOW)),
                 undead: m.undead,
                 level: self.monster_infos.get(&m.monster_index).map(|i| i.level).unwrap_or(0),
+                rev_active: self.revealed_hp.get(&m.object_id)
+                    .map(|u| *u > self.tick_count).unwrap_or(false),
+                auto_rev: self.monster_infos.get(&m.monster_index)
+                    .map(|i| i.auto_rev).unwrap_or(false),
             })
             .collect();
 
@@ -795,6 +803,8 @@ impl WorldActor {
         let mut aoe_intents: Vec<(u64, u8, u32, i32, i32, i32, u8, i32)> = Vec::new();
         // 主人护盾意图：(hero_session_id, kind) —— 阶段 2.4b 应用（#1202）
         let mut owner_shield_intents: Vec<(u64, OwnerShieldKind)> = Vec::new();
+        // 启示显血意图：(hero_session_id, target_oid, until_tick) —— #1533 阶段 3h 应用（C# SendHealth）
+        let mut revelation_intents: Vec<(u64, u32, u64)> = Vec::new();
         // 支持类法术动画意图：(hero_session_id, spell, target_oid) —— 阶段 3g 广播 ObjectMagic（#1208）
         let mut magic_anim_intents: Vec<(u64, u8, u32)> = Vec::new();
         // 净化意图：(hero_session_id) —— 阶段 2.4c 清除主人中毒（#1210）
@@ -1401,6 +1411,10 @@ impl WorldActor {
                         // #1196：Curse 可用 = 已学 + 普通护符 + 目标无减速毒（C# TaoistHero 无 Curse buff 近似）
                         let curse_lv = hero_magic_level(&snap.hero_magics, Spell::Curse as u8);
                         let can_curse = curse_lv > 0 && snap.hero_amulet && !target.has_slow;
+                        // #1533：Revelation 可用 = 已学 + 普通护符 + 目标非 AutoRev + RevTime 已过（C# TaoistHero）
+                        let revelation_lv = hero_magic_level(&snap.hero_magics, Spell::Revelation as u8);
+                        let can_reveal = revelation_lv > 0 && snap.hero_amulet
+                            && !target.auto_rev && !target.rev_active;
                         if can_poison {
 
                             // #1192：C# Poisoning：value = GetDamage(SC)；Duration=value*2+(Lv+1)*7、TickSpeed 2000
@@ -1475,6 +1489,31 @@ impl WorldActor {
                                         1000,
                                     ));
                                 }
+                                ai_local.next_attack_tick = self.tick_count + 10;
+                            } else {
+                                let _ = hero_melee_fallback(
+                                    snap.session_id, target.oid, target_dist,
+                                    &hero_combat, &mut attack_intents, &mut support_intents,
+                                );
+                                ai_local.next_attack_tick = self.tick_count + 10;
+                            }
+                        } else if can_reveal {
+                            // #1533：C# TaoistHero Revelation——显血（HumanObject.cs:6284：value 秒内显示目标 HP）
+                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::Revelation as u8);
+                            if ai_local.mp >= cost {
+                                ai_local.mp -= cost;
+                                // C# value = GetAttackPower(MinSC,MaxSC) + GetPower()
+                                let value = hero_spell_damage(
+                                    &self.magic_infos,
+                                    &snap.hero_magics,
+                                    Spell::Revelation as u8,
+                                    &hero_stats,
+                                    snap.class,
+                                ).max(1);
+                                let until = self.tick_count + (value as u64) * 10;
+                                revelation_intents.push((snap.session_id, target.oid, until));
+                                // #1208：施放广播 ObjectMagic（目标 = 怪物）
+                                magic_anim_intents.push((snap.session_id, Spell::Revelation as u8, target.oid));
                                 ai_local.next_attack_tick = self.tick_count + 10;
                             } else {
                                 let _ = hero_melee_fallback(
@@ -2095,6 +2134,31 @@ impl WorldActor {
                     target_oid, p_type, duration, value, tick_ms
                 );
             }
+        }
+
+        // 3e2. 应用启示显血（#1533：C# SendHealth——revealed_hp + 同图 ObjectHealth 广播，Expire=剩余秒）
+        for (session_id, target_oid, until) in &revelation_intents {
+            self.revealed_hp.insert(*target_oid, *until);
+            let (hp, max_hp, m_map) = match self.monsters.get(target_oid) {
+                Some(m) => (m.hp, m.max_hp, m.map_index),
+                None => continue,
+            };
+            let percent = ((hp.max(0) as f32 / max_hp.max(1) as f32) * 100.0) as u8;
+            let expire = (((*until).saturating_sub(self.tick_count)) / 10).max(5) as u16;
+            let mut body = Vec::new();
+            body.extend_from_slice(&target_oid.to_le_bytes());
+            body.push(percent);
+            body.extend_from_slice(&expire.to_le_bytes());
+            let pkt = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &body);
+            for (sid, r) in &self.players {
+                if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                    if os.map_index == m_map {
+                        let _ = self.gate_ref.tell(SendToClient { session_id: *sid, data: pkt.clone() }).await;
+                    }
+                }
+            }
+            debug!("Hero {} Revelation: reveal monster {} until tick {} ({}s)",
+                   session_id, target_oid, until, expire);
         }
 
         // 3f. 应用法师英雄 AoE（#1200/#1204：C# FireBang/IceStorm 3x3、FlameField/ThunderStorm 5x5，MAC）
