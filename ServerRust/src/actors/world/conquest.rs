@@ -58,6 +58,8 @@ pub struct ConquestInstance {
     pub max_points: i32,
     /// 属于本区域的攻城结构 object_id 列表（城墙/城门/攻城器）
     pub siege_structure_ids: Vec<u32>,
+    /// 领地守卫/箭塔落点（C# ConquestInfo.ConquestGuards；CONQUESTGUARD 按 id 落点）
+    pub guards: Vec<ConquestGuardInfo>,
     /// 攻城金库（C# GuildInfo.GoldStorage，TAKECONQUESTGOLD 取走）
     pub gold_storage: u64,
     /// NPC 税率（C# GuildInfo.NPCRate，SETCONQUESTRATE 设置）
@@ -68,6 +70,17 @@ pub struct ConquestInstance {
     pub sale_price: u64,
     /// 领地剩余租期（天，EXTENDGT 延长）
     pub rent_days: u32,
+}
+
+/// 领地守卫/箭塔落点（对应 C# ConquestArcherInfo / ConquestGuildArcherInfo）
+#[derive(Debug, Clone)]
+pub struct ConquestGuardInfo {
+    pub index: i32,
+    pub x: i32,
+    pub y: i32,
+    pub mob_index: i32,
+    pub name: String,
+    pub repair_cost: u32,
 }
 
 /// 控制点占领状态（对应 C# ControlPoints dict 的 entry）
@@ -106,12 +119,19 @@ impl ConquestInstance {
             control_point_owners: Vec::new(),
             max_points: MAX_KING_POINTS,
             siege_structure_ids: Vec::new(),
+            guards: Vec::new(),
             gold_storage: 0,
             tax_rate: 0,
             for_sale: false,
             sale_price: 0,
             rent_days: 30,
         }
+    }
+
+    /// 附加守卫落点（DB 加载后设置；C# ConquestInfo.ConquestGuards）
+    pub fn with_guards(mut self, guards: Vec<ConquestGuardInfo>) -> Self {
+        self.guards = guards;
+        self
     }
 
     /// 检查是否到开战时间

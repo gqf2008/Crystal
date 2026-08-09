@@ -298,6 +298,15 @@ struct ParsedGameShopItem {
     can_buy_gold: bool,
 }
 
+struct ParsedConquestGuard {
+    index: i32,
+    x: i32,
+    y: i32,
+    mob_index: i32,
+    name: String,
+    repair_cost: u32,
+}
+
 struct ParsedConquestInfo {
     index: i32,
     full_map: bool,
@@ -322,6 +331,7 @@ struct ParsedConquestInfo {
     king_y: i32,
     king_size: u16,
     control_point_index: i32,
+    guards: Vec<ParsedConquestGuard>,
 }
 
 struct ParsedGTMap {
@@ -1037,6 +1047,9 @@ fn read_conquest_info<R: Read>(reader: &mut BinaryReader<R>, _version: i32) -> s
         flag_index, extra_maps_json,
         start_hour, war_length, conquest_type, conquest_game, days,
         king_x, king_y, king_size, control_point_index,
+        guards: guards.into_iter().map(|g| ParsedConquestGuard {
+            index: g.0, x: g.1, y: g.2, mob_index: g.3, name: g.4, repair_cost: g.5,
+        }).collect(),
     })
 }
 
@@ -1312,6 +1325,16 @@ async fn create_tables(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
             king_y INTEGER NOT NULL,
             king_size INTEGER NOT NULL DEFAULT 0,
             control_point_index INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS conquest_guards (
+            conquest_idx INTEGER NOT NULL,
+            idx INTEGER NOT NULL,
+            x INTEGER NOT NULL,
+            y INTEGER NOT NULL,
+            mob_index INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            repair_cost INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (conquest_idx, idx)
         );
         CREATE TABLE IF NOT EXISTS gt_maps (
             idx INTEGER PRIMARY KEY,
@@ -1628,6 +1651,19 @@ async fn insert_conquest_info(pool: &sqlx::SqlitePool, c: &ParsedConquestInfo) -
     .bind(c.king_x).bind(c.king_y).bind(c.king_size as i32)
     .bind(c.control_point_index)
     .execute(pool).await?;
+
+    // 守卫/箭塔落点（C# ConquestInfo.ConquestGuards）
+    sqlx::query("DELETE FROM conquest_guards WHERE conquest_idx = ?")
+        .bind(c.index)
+        .execute(pool).await?;
+    for g in &c.guards {
+        sqlx::query(
+            "INSERT OR REPLACE INTO conquest_guards (conquest_idx, idx, x, y, mob_index, name, repair_cost) VALUES (?,?,?,?,?,?,?)"
+        )
+        .bind(c.index).bind(g.index).bind(g.x).bind(g.y).bind(g.mob_index)
+        .bind(&g.name).bind(g.repair_cost as i64)
+        .execute(pool).await?;
+    }
     Ok(())
 }
 

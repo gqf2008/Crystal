@@ -1329,11 +1329,13 @@ impl WorldActor {
 
 impl WorldActor {
     /// NPC 脚本 CONQUESTSIEGE/CONQUESTGUARD：生成攻城器/守卫结构（对齐 C# ActionType；数据层，地图表现留待攻城专项）
+    /// guard_id：CONQUESTGUARD 的守卫索引（C# ConquestGuildArcherInfo 按 id 落点，Info.Location）
     pub(crate) async fn npc_spawn_siege_structure(
         &mut self,
         session_id: u64,
         conquest_index: i32,
         kind: crate::actors::world::conquest::SiegeStructureType,
+        guard_id: Option<i32>,
     ) {
         let Some(conquest) = self.conquest_instances.iter().find(|c| c.id == conquest_index).cloned() else { return };
         let oid = self.alloc_object_id();
@@ -1345,13 +1347,25 @@ impl WorldActor {
             _ => return,
         };
         structure.conquest_id = conquest_index;
-        structure.x = conquest.map_index;
+        // #1513：箭塔按守卫 id 落点（C# ArcherMonster.Spawn(ConquestMap, Info.Location)）；未配置回退 (0,0)
+        structure.x = 0;
+        structure.y = 0;
+        if kind == crate::actors::world::conquest::SiegeStructureType::ArcherTower {
+            if let Some(gid) = guard_id {
+                if let Some(g) = conquest.guards.iter().find(|g| g.index == gid) {
+                    structure.x = g.x;
+                    structure.y = g.y;
+                }
+            }
+        }
+        let (sx, sy) = (structure.x, structure.y);
         if let Some(c) = self.conquest_instances.iter_mut().find(|c| c.id == conquest_index) {
             c.siege_structure_ids.push(oid);
         }
         self.siege_structures.insert(oid, structure);
         send_system_message(&self.gate_ref, session_id, &format!("已生成攻城结构 #{}", oid));
-        debug!("NPC SpawnSiege: conquest={} kind={:?} oid={}", conquest_index, kind, oid);
+        debug!("NPC SpawnSiege: conquest={} kind={:?} oid={} guard={:?} at ({}, {})",
+               conquest_index, kind, oid, guard_id, sx, sy);
     }
 }
 

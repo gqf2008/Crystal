@@ -1541,14 +1541,15 @@ async fn exec_action(
         "CONQUESTSIEGE" => {
             let index = arg0().parse::<i32>().unwrap_or(-1);
             if index >= 0 {
-                world.npc_spawn_siege_structure(session_id, index, crate::actors::world::conquest::SiegeStructureType::Catapult).await;
+                world.npc_spawn_siege_structure(session_id, index, crate::actors::world::conquest::SiegeStructureType::Catapult, None).await;
             }
         }
-        // CONQUESTGUARD <index> <id> —— 生成守卫（对齐 C# ActionType.ConquestGuard；简化生成箭塔结构）
+        // CONQUESTGUARD <index> <id> —— 生成守卫（对齐 C# ActionType.ConquestGuard；按 id 落点生成箭塔结构）
         "CONQUESTGUARD" => {
             let index = arg0().parse::<i32>().unwrap_or(-1);
+            let id = arg1().parse::<i32>().ok();
             if index >= 0 {
-                world.npc_spawn_siege_structure(session_id, index, crate::actors::world::conquest::SiegeStructureType::ArcherTower).await;
+                world.npc_spawn_siege_structure(session_id, index, crate::actors::world::conquest::SiegeStructureType::ArcherTower, id).await;
             }
         }
         // CONQUESTGATE <index> <id> —— 修复城门（对齐 C# ActionType.ConquestGate）

@@ -515,6 +515,16 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             king_size INTEGER NOT NULL DEFAULT 0,
             control_point_index INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS conquest_guards (
+            conquest_idx INTEGER NOT NULL,
+            idx INTEGER NOT NULL,
+            x INTEGER NOT NULL,
+            y INTEGER NOT NULL,
+            mob_index INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            repair_cost INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (conquest_idx, idx)
+        );
         CREATE TABLE IF NOT EXISTS monster_drops (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             monster_index INTEGER NOT NULL,
@@ -2915,6 +2925,105 @@ pub async fn load_map_infos(pool: &DbPool) -> anyhow::Result<Vec<MapInfo>> {
     }
 
     Ok(maps)
+}
+
+/// 领地守卫（对应 C# ConquestArcherInfo：箭塔落点）
+#[derive(Debug, Clone)]
+pub struct ConquestGuardRow {
+    pub conquest_idx: i32,
+    pub index: i32,
+    pub x: i32,
+    pub y: i32,
+    pub mob_index: i32,
+    pub name: String,
+    pub repair_cost: i32,
+}
+
+/// 征服领地配置（对应 C# ConquestInfo，含守卫）
+#[derive(Debug, Clone)]
+pub struct ConquestInfoRow {
+    pub index: i32,
+    pub full_map: bool,
+    pub location_x: i32,
+    pub location_y: i32,
+    pub size: i32,
+    pub name: String,
+    pub map_index: i32,
+    pub palace_index: i32,
+    pub guard_index: i32,
+    pub gate_index: i32,
+    pub wall_index: i32,
+    pub siege_index: i32,
+    pub flag_index: i32,
+    pub extra_maps_json: String,
+    pub start_hour: i32,
+    pub war_length: i32,
+    pub conquest_type: i32,
+    pub conquest_game: i32,
+    pub days: [bool; 7],
+    pub king_x: i32,
+    pub king_y: i32,
+    pub king_size: i32,
+    pub control_point_index: i32,
+    pub guards: Vec<ConquestGuardRow>,
+}
+
+/// 加载全部征服领地配置（含守卫坐标；C# ConquestInfo.ConquestGuards）
+pub async fn load_conquest_infos(pool: &DbPool) -> anyhow::Result<Vec<ConquestInfoRow>> {
+    let rows = sqlx::query("SELECT * FROM conquest_infos ORDER BY idx").fetch_all(pool).await?;
+    let guard_rows = sqlx::query("SELECT * FROM conquest_guards ORDER BY conquest_idx, idx").fetch_all(pool).await?;
+    let mut guards_by_conquest: HashMap<i32, Vec<ConquestGuardRow>> = HashMap::new();
+    for r in guard_rows {
+        let cidx: i32 = r.get("conquest_idx");
+        guards_by_conquest.entry(cidx).or_default().push(ConquestGuardRow {
+            conquest_idx: cidx,
+            index: r.get("idx"),
+            x: r.get("x"),
+            y: r.get("y"),
+            mob_index: r.get("mob_index"),
+            name: r.get("name"),
+            repair_cost: r.get("repair_cost"),
+        });
+    }
+    let mut out = Vec::new();
+    for r in rows {
+        let index: i32 = r.get("idx");
+        out.push(ConquestInfoRow {
+            index,
+            full_map: r.get::<i32, _>("full_map") != 0,
+            location_x: r.get("location_x"),
+            location_y: r.get("location_y"),
+            size: r.get("size"),
+            name: r.get("name"),
+            map_index: r.get("map_index"),
+            palace_index: r.get("palace_index"),
+            guard_index: r.get("guard_index"),
+            gate_index: r.get("gate_index"),
+            wall_index: r.get("wall_index"),
+            siege_index: r.get("siege_index"),
+            flag_index: r.get("flag_index"),
+            extra_maps_json: r.get("extra_maps_json"),
+            start_hour: r.get("start_hour"),
+            war_length: r.get("war_length"),
+            conquest_type: r.get("conquest_type"),
+            conquest_game: r.get("conquest_game"),
+            days: [
+                r.get::<i32, _>("monday") != 0,
+                r.get::<i32, _>("tuesday") != 0,
+                r.get::<i32, _>("wednesday") != 0,
+                r.get::<i32, _>("thursday") != 0,
+                r.get::<i32, _>("friday") != 0,
+                r.get::<i32, _>("saturday") != 0,
+                r.get::<i32, _>("sunday") != 0,
+            ],
+            king_x: r.get("king_x"),
+            king_y: r.get("king_y"),
+            king_size: r.get("king_size"),
+            control_point_index: r.get("control_point_index"),
+            guards: guards_by_conquest.remove(&index).unwrap_or_default(),
+        });
+    }
+    Ok(out)
 }
 
 /// Load all item infos from DB
