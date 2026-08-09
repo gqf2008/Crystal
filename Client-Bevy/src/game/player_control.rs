@@ -264,7 +264,7 @@ fn left_click_interact_system(
     time: Res<Time>,
     windows: Query<&Window>,
     camera: Query<&Transform, (With<Camera2d>, Without<UiButton>, Without<crate::ui::sprite_ui::UiEntity>)>,
-    players: Query<(Entity, &Transform, &mut ActorAnim), (With<LocalPlayer>, With<NetObjectId>)>,
+    mut players: Query<(Entity, &Transform, &mut ActorAnim), (With<LocalPlayer>, With<NetObjectId>)>,
     actors: Query<(&NetObjectId, &Transform, Has<Npc>), Without<LocalPlayer>>,
     remote_players: Query<&NetObjectId, (With<crate::actor::Player>, Without<LocalPlayer>)>,
     items: Query<(&NetObjectId, &Transform), (With<GroundItem>, Without<LocalPlayer>)>,
@@ -295,7 +295,7 @@ fn left_click_interact_system(
         return;
     }
     tracing::debug!("🖱️ 左键点击 screen=({},{}) world=({:.0},{:.0})", cursor.x, cursor.y, world.x, world.y);
-    let Ok((pe, ptf, anim)) = players.single() else { return };
+    let Ok((pe, ptf, mut anim)) = players.single_mut() else { return };
     let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
     // C# OnMouseDown：Alt+左键 → Harvest（采集/挖矿，方向 = 玩家→鼠标方向）
     if is_alt_down(&keys) {
@@ -395,6 +395,10 @@ fn left_click_interact_system(
             if is_shift_down(&keys) {
                 control.attack_target = Some(object_id);
                 control.last_attack = 0.0;
+                // #1584：C# 点击攻击后停止移动（CanMove=false）——清除寻路路径并回站立
+                commands.entity(pe).remove::<LocalMove>();
+                anim.action = mir2_shared::enums::MirAction::Standing;
+                anim.frame_index = 0;
                 tracing::info!("⚔️ [Shift] 攻击玩家 {}", object_id);
             } else {
                 tracing::debug!("🖱️ 点击玩家 {}（C# break，不攻击）", object_id);
@@ -403,6 +407,10 @@ fn left_click_interact_system(
         } else {
             control.attack_target = Some(object_id);
             control.last_attack = 0.0; // 立即攻击
+            // #1584：C# 点击攻击后停止移动（CanMove=false）——清除寻路路径并回站立
+            commands.entity(pe).remove::<LocalMove>();
+            anim.action = mir2_shared::enums::MirAction::Standing;
+            anim.frame_index = 0;
             tracing::info!("⚔️ 攻击目标 {}", object_id);
         }
     } else {
