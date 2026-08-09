@@ -8,7 +8,7 @@
 
 use bevy::prelude::*;
 
-use crate::game::dialogs::inventory::{InvClickState, InvItem};
+use crate::game::dialogs::inventory::{try_use_belt_item, InvClickState, InvItem, ItemUseFeedback};
 use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
 use crate::network::NetConnection;
@@ -175,7 +175,9 @@ fn potion_belt_ui_system(
     visible: Res<PotionBeltVisible>,
     hud: Res<HudState>,
     net: Res<NetConnection>,
+    mut feedback: ResMut<ItemUseFeedback>,
     mut click: ResMut<InvClickState>,
+    time: Res<Time>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     mut widgets: Query<&mut Visibility, With<PotionBeltWidget>>,
@@ -188,6 +190,7 @@ fn potion_belt_ui_system(
     if !visible.0 {
         return;
     }
+    let now = time.elapsed_secs_f64();
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
 
@@ -216,8 +219,10 @@ fn potion_belt_ui_system(
     }
     if let Some(uid) = belt.slots[i] {
         // 有物品 → 使用（C# BeltGrid 点击使用药水）
-        net.send_packet(&mir2_shared::packets::client::item::UseItem { unique_id: uid });
-        tracing::info!("🧪 使用腰带物品 uid={}", uid);
+        // #1544：腰带使用走节流/钓鱼守卫（C# BeltDialog.Grid[i].UseItem）
+        if try_use_belt_item(uid, &net, &hud, now, &mut feedback) {
+            tracing::info!("🧪 使用腰带物品 uid={}", uid);
+        }
     } else if let Some(sel) = click.selected {
         // 无物品 + 背包有选中 → 指派（C# 拖入腰带格）
         if let Some(item) = hud.inventory.items.get(sel).and_then(|s| s.as_ref()) {
@@ -269,3 +274,4 @@ fn potion_belt_icon_system(
         }
     }
 }
+

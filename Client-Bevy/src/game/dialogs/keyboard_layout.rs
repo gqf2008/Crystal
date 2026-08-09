@@ -15,6 +15,9 @@ use bevy::prelude::*;
 use std::fs;
 
 use crate::game::dialogs::character::CharPage;
+use crate::game::dialogs::inventory::{try_use_belt_item, ItemUseFeedback};
+use crate::game::dialogs::potion_belt::PotionBeltState;
+use crate::game::hud::HudState;
 use crate::game::dialogs::settings_file;
 use crate::network::NetConnection;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
@@ -770,7 +773,10 @@ fn secondary_hotkey_system(
     keys: Res<ButtonInput<KeyCode>>,
     kb: Res<KeyboardState>,
     net: Res<NetConnection>,
-    belt: Res<crate::game::dialogs::potion_belt::PotionBeltState>,
+    hud: Res<HudState>,
+    time: Res<Time>,
+    mut feedback: ResMut<ItemUseFeedback>,
+    belt: Res<PotionBeltState>,
 ) {
     // #1386：坐骑切换（M，可重绑）→ @ride
     if let Some(b) = kb.bindings.iter().find(|b| b.action == "坐骑切换") {
@@ -808,8 +814,9 @@ fn secondary_hotkey_system(
         let pressed = keys.just_pressed(digits[i]) || keys.just_pressed(numpads[i]);
         if pressed {
             if let Some(uid) = belt.slots.get(i).and_then(|u| u.as_ref()).copied() {
-                net.send_packet(&mir2_shared::packets::client::item::UseItem { unique_id: uid });
-                tracing::info!("🧪 腰带 {} 使用 uid={}", i + 1, uid);
+                // #1544：腰带快捷使用走节流/钓鱼守卫（C# Belt1..8 → BeltDialog.Grid[i].UseItem）
+                let now = time.elapsed_secs_f64();
+                try_use_belt_item(uid, &net, &hud, now, &mut feedback);
             }
         }
     }
@@ -859,3 +866,4 @@ mod tests {
         assert_eq!(loaded[7].key, defaults[7].key);
     }
 }
+

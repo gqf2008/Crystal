@@ -94,6 +94,8 @@ fn to_inv_item(item: &mir2_shared::data::item::UserItem) -> InvItem {
         required_type: item.info.as_ref().map(|i| i.required_type as u8).unwrap_or(0),
         required_amount: item.info.as_ref().map(|i| i.required_amount).unwrap_or(0),
         required_class: item.info.as_ref().map(|i| i.required_class.bits()).unwrap_or(0),
+        required_gender: item.info.as_ref().map(|i| i.required_gender.bits()).unwrap_or(0),
+        soul_bound_id: item.soul_bound_id,
         weight: item.info.as_ref().map(|i| i.weight as u16).unwrap_or(0),
         price: item.info.as_ref().map(|i| i.price).unwrap_or(0),
     }
