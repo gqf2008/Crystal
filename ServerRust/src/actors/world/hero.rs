@@ -2361,13 +2361,9 @@ fn direction_towards(from_x: i32, from_y: i32, to_x: i32, to_y: i32) -> u8 {
     best_dir
 }
 
-/// 英雄物理攻击力（#1184：C# GetAttackPower(Stats[MinDC], Stats[MaxDC]) 的稳定近似，取中值）
+/// #1414：英雄物理攻击力（C# GetAttackPower(Stats[MinDC], Stats[MaxDC])，含幸运判定；替代取中值近似）
 fn hero_attack_power(stats: &crate::combat::attack::CombatStats) -> i32 {
-    if stats.max_atk > stats.min_atk {
-        (stats.min_atk + stats.max_atk) / 2
-    } else {
-        stats.max_atk.max(1)
-    }
+    crate::combat::attack::get_attack_power(stats.min_atk, stats.max_atk, stats.luck).max(1)
 }
 
 /// 英雄已学技能等级（#1188：C# = SharedRust - 3；0 = 未学）
@@ -2416,13 +2412,9 @@ fn hero_has_amulet(
     info.item_type == 8 && info.shape == 0 && item.count > 0
 }
 
-/// 道士英雄 SC 攻击力（#1192：C# GetAttackPower(MinSC, MaxSC) 的稳定近似）
+/// #1414：道士英雄 SC 攻击力（C# GetAttackPower(MinSC, MaxSC)，无幸运；替代取中值近似）
 fn hero_attack_power_sc(stats: &super::hero_stats::HeroStats) -> i32 {
-    if stats.max_sc > stats.min_sc {
-        (stats.min_sc + stats.max_sc) / 2
-    } else {
-        stats.max_sc.max(1)
-    }
+    crate::combat::attack::get_attack_power(stats.min_sc, stats.max_sc, 0).max(1)
 }
 
 /// 道士 Curse 的 Slow 毒参数（#1196：C# Duration=1+(Lv+1)*2、TickSpeed 1000、Value=GetDamage(SC)）
@@ -3175,7 +3167,7 @@ mod tests {
         assert_eq!(atk.len(), 1);
         assert_eq!(atk[0].0, 1);
         assert_eq!(atk[0].1, 100);
-        assert_eq!(atk[0].2, 7); // (5+9)/2
+        assert!((5..=9).contains(&atk[0].2), "damage out of range: {}", atk[0].2); // #1414：GetAttackPower 随机 5..9
         assert_eq!(atk[0].3, DefenceType::Ac);
         assert!(!atk[0].4);
         assert_eq!(sup.len(), 1);
@@ -3610,6 +3602,28 @@ mod tests {
                 mir2_shared::enums::MirClass::Taoist,
             );
             assert_eq!(dmg, 10);
+        }
+    }
+
+
+    #[test]
+    fn hero_attack_power_random_deterministic_when_min_eq_max() {
+        // #1414：GetAttackPower 在 min==max 时确定
+        let stats = crate::combat::attack::CombatStats {
+            min_atk: 30,
+            max_atk: 30,
+            ..Default::default()
+        };
+        for _ in 0..50 {
+            assert_eq!(hero_attack_power(&stats), 30);
+        }
+        let hs = super::hero_stats::HeroStats {
+            min_sc: 20,
+            max_sc: 20,
+            ..Default::default()
+        };
+        for _ in 0..50 {
+            assert_eq!(hero_attack_power_sc(&hs), 20);
         }
     }
 
