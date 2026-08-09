@@ -4085,8 +4085,6 @@ impl Message<MagicRequest> for WorldActor {
                     debug!("Magic: {} casts Hallucination (failed)", state.name);
                 }
             }
-            // #409：OneWithNature —— 5×5 AoE MAC 伤害 + 必中 Green 毒（C# Map.cs：持有 PoisonShot buff 时）
-            // 吸血（VampireShot buff）暂不模拟
             // #409/#1499：OneWithNature —— 5×5 AoE MAC 伤害 + 特殊箭武装（C# Map.cs：持有 PoisonShot buff 绿毒 / VampireShot buff 吸血）
             SPELL_ONE_WITH_NATURE => {
                 let raw_damage = if let Some(info) = spell_db {
