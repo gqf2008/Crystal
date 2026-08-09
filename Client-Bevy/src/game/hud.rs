@@ -17,6 +17,7 @@ use crate::game::dialogs::{DialogKind, DialogManager};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
+use crate::ui::sprite_ui::ui_image_opaque;
 use crate::ui::sprite_ui::UiButton;
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiEntity, UiFont, UiImageCache,
@@ -388,14 +389,14 @@ fn spawn_hud(
     commands.spawn((UiEntity, HudData::default()));
 
     // 背景
-    if let Some(h) = ui_image(
+    if let Some(h) = ui_image_opaque(
         &mut libs,
         &mut images,
         &mut cache,
         LibraryName::Prguse,
         resolution_index,
     ) {
-        // z=2.0：>=2 避开深度剔除（<2 的 UI 精灵被地图深度剔除不渲染）；或球/按钮 z>=2.0 在其上
+        // 用不透明加载（黑→透明 workaround 会毁掉黑底 HUD 底条）；恢复原 spawn
         spawn_ui_sprite(&mut commands, h, main_x, main_y, 2.0, 1.0);
     }
 

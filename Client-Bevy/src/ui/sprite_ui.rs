@@ -87,6 +87,38 @@ pub fn ui_image(
     Some(handle)
 }
 
+/// 强制不透明加载 UI 纹理：
+/// 全局 bgra_to_rgba 会把纯黑像素转透明（为修地图黑块的 workaround），
+/// 但这会毁掉黑底不透明 UI 纹理（如 HUD 底条 Prguse[1]、深色对话框背景）。
+pub fn ui_image_opaque(
+    libs: &mut GameLibraries,
+    images: &mut Assets<Image>,
+    cache: &mut UiImageCache,
+    name: LibraryName,
+    index: usize,
+) -> Option<Handle<Image>> {
+    use std::collections::hash_map::Entry;
+    let key = (name as u8, index);
+    match cache.map.entry(key) {
+        Entry::Occupied(e) => return Some(e.get().clone()),
+        Entry::Vacant(_) => {}
+    }
+    let info = libs.0.get_image(name, index)?;
+    let mut rgba = info.rgba.clone()?;
+    // 黑→透明 hack 后强制恢复全不透明（UI 面板背景是设计成不透明的）
+    for a in rgba.chunks_exact_mut(4) {
+        a[3] = 255;
+    }
+    let w = info.width.max(0) as u32;
+    let h = info.height.max(0) as u32;
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let handle = images.add(make_image(rgba, w, h));
+    cache.map.insert(key, handle.clone());
+    Some(handle)
+}
+
 /// 生成 UI 精灵（屏幕坐标 x,y 左上角，y 向下；scale 缩放）
 pub fn spawn_ui_sprite(
     commands: &mut Commands,
