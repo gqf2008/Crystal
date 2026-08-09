@@ -1886,15 +1886,17 @@ impl WorldActor {
                 Some(s) => s.hero_combat,
                 None => continue,
             };
-            let level_offset = snapshots.iter()
+            let hero_level = snapshots.iter()
                 .find(|s| s.session_id == *session_id)
-                .map(|s| s.hero_level.min(10) as u16)
+                .map(|s| s.hero_level)
                 .unwrap_or(0);
 
-            let defender_stats = match self.monsters.get(target_oid) {
-                Some(m) => m.to_combat_stats(),
+            let (defender_stats, monster_level) = match self.monsters.get(target_oid) {
+                Some(m) => (m.to_combat_stats(), m.level.max(0) as u16),
                 None => continue,
             };
+            // #1456：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+            let level_offset = combat_attack::level_offset(hero_level, monster_level);
             let result = combat_attack::resolve_attack(
                 &attacker_stats, &defender_stats, *raw_damage, *defence, level_offset,
             );
@@ -2111,7 +2113,7 @@ impl WorldActor {
             } else {
                 continue;
             };
-            let level_offset = hero_snap.map(|s| s.hero_level.min(10) as u16).unwrap_or(0);
+            let hero_level = hero_snap.map(|s| s.hero_level).unwrap_or(0);
             let hit_ids: Vec<u32> = self
                 .monsters
                 .iter()
@@ -2129,6 +2131,8 @@ impl WorldActor {
                         *raw
                     };
                     let ds = monster.to_combat_stats();
+                    // #1456：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                    let level_offset = combat_attack::level_offset(hero_level, monster.level.max(0) as u16);
                     let r = combat_attack::resolve_attack(
                         &attacker_stats,
                         &ds,
