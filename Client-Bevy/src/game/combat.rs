@@ -6,7 +6,7 @@
 
 use bevy::prelude::*;
 
-use crate::actor::{ActorAnim, NetObjectId};
+use crate::actor::{ActorAnim, MonsterAppearance, NetObjectId};
 use crate::game::hud::HudState;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiFont;
@@ -186,7 +186,13 @@ fn apply_combat_events(
     sound_bank: Res<crate::game::sound::SoundBank>,
     mut audio_assets: ResMut<Assets<AudioSource>>,
     mut events: MessageReader<CombatEvent>,
-    mut actors: Query<(Entity, &NetObjectId, &mut ActorAnim, Option<&crate::actor::Monster>)>,
+    mut actors: Query<(
+        Entity,
+        &NetObjectId,
+        &mut ActorAnim,
+        Option<&crate::actor::Monster>,
+        Option<&MonsterAppearance>,
+    )>,
 ) {
     for ev in events.read() {
         match ev {
@@ -202,12 +208,23 @@ fn apply_combat_events(
                 if let Some(sound_id) = struck_sound {
                     crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
                 }
-                for (e, id, mut anim, _mon) in &mut actors {
+                for (e, id, mut anim, mon, appr) in &mut actors {
                     if id.0 == *object_id {
                         anim.action = mir2_shared::enums::MirAction::Attack1;
                         anim.direction = *direction;
                         anim.frame_index = 0;
                         commands.entity(e).insert(StruckTimer(0.6));
+                        // #1570：怪物攻击音（C# PlayAttackSound → BaseSound+1；玩家/NPC 不播）
+                        if mon.is_some() {
+                            if let Some(appr) = appr {
+                                crate::game::sound::play_sound(
+                                    &mut commands,
+                                    &mut audio_assets,
+                                    &sound_bank,
+                                    crate::game::sound::monster_attack_sound(appr.monster_type),
+                                );
+                            }
+                        }
                         break;
                     }
                 }
@@ -220,7 +237,7 @@ fn apply_combat_events(
                     &sound_bank,
                     crate::game::sound::player_flinch_sound(hud.gender),
                 );
-                for (e, id, mut anim, _mon) in &mut actors {
+                for (e, id, mut anim, _mon, _appr) in &mut actors {
                     if hud.player_object_id == Some(id.0) {
                         anim.action = mir2_shared::enums::MirAction::Struck;
                         anim.frame_index = 0;
@@ -231,7 +248,7 @@ fn apply_combat_events(
             }
             CombatEvent::ObjectHealth { object_id, percent, expire } => {
                 // C# S.ObjectHealth：挂载血量（血条系统渲染/过期）
-                for (e, id, _, _) in &mut actors {
+                for (e, id, _, _, _) in &mut actors {
                     if id.0 == *object_id {
                         commands.entity(e).insert(ActorHp {
                             percent: *percent,
@@ -246,7 +263,7 @@ fn apply_combat_events(
                 direction,
             } => {
                 // #246：采集动作——玩家/NPC 用 Harvest 帧（344），默认怪物回退 Attack1
-                for (e, id, mut anim, mon) in &mut actors {
+                for (e, id, mut anim, mon, _appr) in &mut actors {
                     if id.0 == *object_id {
                         anim.action = if mon.is_some() {
                             mir2_shared::enums::MirAction::Attack1
@@ -262,7 +279,7 @@ fn apply_combat_events(
             }
             CombatEvent::ObjectMana { object_id, percent } => {
                 // #238：更新/插入对象蓝条（刷新式 15s 生命周期）
-                for (e, id, _, _) in &mut actors {
+                for (e, id, _, _, _) in &mut actors {
                     if id.0 == *object_id {
                         commands.entity(e).insert(ActorMp {
                             percent: *percent,
@@ -282,13 +299,24 @@ fn apply_combat_events(
                         crate::game::sound::player_die_sound(hud.gender),
                     );
                 }
-                for (e, id, mut anim, _mon) in &mut actors {
+                for (e, id, mut anim, mon, appr) in &mut actors {
                     if id.0 == *object_id {
                         anim.action = mir2_shared::enums::MirAction::Dead;
                         anim.frame_index = 0;
                         // 本地玩家死亡由 Death 包管理（复活时恢复），不自动 despawn
                         if hud.player_object_id != Some(*object_id) {
                             commands.entity(e).insert(DeathTimer(3.0));
+                            // #1570：怪物死亡音（C# PlayDieSound → BaseSound+3；本地玩家走性别死亡音）
+                            if mon.is_some() {
+                                if let Some(appr) = appr {
+                                    crate::game::sound::play_sound(
+                                        &mut commands,
+                                        &mut audio_assets,
+                                        &sound_bank,
+                                        crate::game::sound::monster_die_sound(appr.monster_type),
+                                    );
+                                }
+                            }
                         }
                         break;
                     }
@@ -297,7 +325,7 @@ fn apply_combat_events(
             CombatEvent::SpellCast { object_id } => {
                 // #224：施法动作——玩家用 Spell 帧（C# Action.Spell），
                 // 默认怪物无 Spell 帧表 → 回退 Attack1（避免动画冻结）
-                for (e, id, mut anim, mon) in &mut actors {
+                for (e, id, mut anim, mon, _appr) in &mut actors {
                     if id.0 == *object_id {
                         anim.action = if mon.is_some() {
                             mir2_shared::enums::MirAction::Attack1
@@ -316,7 +344,7 @@ fn apply_combat_events(
             } => {
                 // #234：其他对象近战攻击 → Attack1 动作（玩家/怪物通用帧表）
                 tracing::debug!("⚔️ [ATTACK] 处理攻击 id={}", object_id);
-                for (e, id, mut anim, _mon) in &mut actors {
+                for (e, id, mut anim, _mon, _appr) in &mut actors {
                     if id.0 == *object_id {
                         anim.action = mir2_shared::enums::MirAction::Attack1;
                         anim.direction = *direction;
@@ -329,7 +357,7 @@ fn apply_combat_events(
             CombatEvent::RangeAttack { object_id } => {
                 // #224：远程攻击动作——玩家用 AttackRange1（C# Action.AttackRange1），
                 // 默认怪物无 AttackRange 帧表 → 回退 Attack1
-                for (e, id, mut anim, mon) in &mut actors {
+                for (e, id, mut anim, mon, _appr) in &mut actors {
                     if id.0 == *object_id {
                         anim.action = if mon.is_some() {
                             mir2_shared::enums::MirAction::Attack1
@@ -344,7 +372,7 @@ fn apply_combat_events(
             }
             CombatEvent::Revived { object_id } => {
                 // 复活：恢复站立 + 清除死亡计时（本地玩家由 Revived 包驱动）
-                for (e, id, mut anim, _mon) in &mut actors {
+                for (e, id, mut anim, _mon, _appr) in &mut actors {
                     if id.0 == *object_id {
                         anim.action = mir2_shared::enums::MirAction::Standing;
                         anim.frame_index = 0;
@@ -364,8 +392,8 @@ fn apply_combat_events(
                 }
                 let Some(target) = actors
                     .iter()
-                    .find(|(_, id, _, _)| id.0 == *object_id)
-                    .map(|(e, _, _, _)| e)
+                    .find(|(_, id, _, _, _)| id.0 == *object_id)
+                    .map(|(e, _, _, _, _)| e)
                 else {
                     continue;
                 };

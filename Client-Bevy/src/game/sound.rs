@@ -103,6 +103,21 @@ pub fn attack_swing_sound(
     })
 }
 
+/// #1570：怪物基础音（C# MonsterObject.cs:217 BaseSound = (ushort)BaseImage * 10）
+pub fn monster_base_sound(monster_type: u16) -> u32 {
+    monster_type as u32 * 10
+}
+
+/// #1570：怪物攻击音（C# PlayAttackSound → BaseSound + 1）
+pub fn monster_attack_sound(monster_type: u16) -> u32 {
+    monster_base_sound(monster_type) + 1
+}
+
+/// #1570：怪物死亡音（C# PlayDieSound → BaseSound + 3）
+pub fn monster_die_sound(monster_type: u16) -> u32 {
+    monster_base_sound(monster_type) + 3
+}
+
 /// #1568：怪物受击音（C# MonsterObject.PlayStruckSound，MonsterObject.cs:3966）按攻击者武器形状：
 /// StruckWooden(10061)/StruckShort(10060)/StruckSword(10062)/StruckSword2(10063)/StruckAxe(10064)/StruckClub(10065)；
 /// 未匹配（如无武器）C# 无 default → 不发音（返回 None）。
@@ -287,6 +302,17 @@ mod tests {
         // 骑乘：mount_type<7 → TigerAttack1(10181)；>=7 → WolfAttack1(10190)
         assert_eq!(attack_swing_sound(MirClass::Warrior as u8, true, 0, 5), Some(10181));
         assert_eq!(attack_swing_sound(MirClass::Warrior as u8, true, 7, 5), Some(10190));
+    }
+
+    #[test]
+    fn monster_base_sound_matches_csharp() {
+        // #1570：C# BaseSound = BaseImage * 10；攻击 +1 / 死亡 +3
+        assert_eq!(monster_base_sound(0), 0);
+        assert_eq!(monster_base_sound(1), 10);
+        assert_eq!(monster_base_sound(42), 420);
+        assert_eq!(monster_attack_sound(1), 11); // BaseSound+1
+        assert_eq!(monster_die_sound(1), 13); // BaseSound+3
+        assert_eq!(monster_die_sound(42), 423);
     }
 
     #[test]
