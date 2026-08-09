@@ -119,6 +119,28 @@ fn player_attack_speed_ms(attack_speed_stat: i32, level: u16) -> i64 {
     speed.max(550) as i64
 }
 
+/// #1519：C# GetRangeAttackPower——min 随距离缩小（Globals.MaxAttackRange=9，整数 floor）
+fn range_attack_min_reduction(min: i32, range: i32) -> i32 {
+    const MAX_RANGE: i32 = 9;
+    let x = min * (MAX_RANGE - range) / MAX_RANGE;
+    (min - x).max(0)
+}
+
+/// #1519：C# ApplyArcherState——MentalState 0/1/2 → 100 / 55+5*Lv / 80（返回伤害百分比）
+fn archer_state_penalty(mental_state: u8, mental_lvl: u8) -> i32 {
+    match mental_state {
+        1 => 55 + mental_lvl as i32 * 5,
+        2 => 80,
+        _ => 100,
+    }
+}
+
+/// #1519：C# chanceToHit = (100 + RangeAccuracyBonus(0) - (100/MaxAttackRange)*distance) * (focus?2:1)，<0 clamp 0
+fn ranged_chance_to_hit(distance: i32, focus: bool) -> i32 {
+    let base = 100 - (100 / 9) * distance; // RangeAccuracyBonus=0（Settings 默认）
+    (base * if focus { 2 } else { 1 }).max(0)
+}
+
 /// #1515：C# TurnUndead 秒杀 threshold = ((Lv+1)<<3) + (Level - target.Level + 15)，clamp 0..100
 fn turn_undead_threshold(player_level: u16, mon_level: i32, spell_level: u8) -> i32 {
     ((spell_level as i32 + 1) * 8 + player_level as i32 - mon_level + 15).clamp(0, 100)
@@ -1361,6 +1383,23 @@ impl Message<RangeAttackRequest> for WorldActor {
         let object_id = state.object_id;
         let target_x = msg.target_x;
         let target_y = msg.target_y;
+        // #1519：C# MaxDistance（Chebyshev）——Focus/距离缩放/命中率共用
+        let attack_dist = (target_x - state.x).abs().max((target_y - state.y).abs());
+        // C# Focus：Random(5) <= Lv → 命中率×2（HumanObject.cs:2804）
+        let focus = state.magics.iter()
+            .find(|m| m.spell == (mir2_shared::enums::Spell::Focus as i32 - 3))
+            .map(|m| fastrand::i32(0..5) <= m.level as i32)
+            .unwrap_or(false);
+        // C# ApplyArcherState：MentalState 0/1/2 → 100 / 55+5*Lv / 80
+        let mental_lvl = state.magics.iter()
+            .find(|m| m.spell == (mir2_shared::enums::Spell::MentalState as i32 - 3))
+            .map(|m| m.level)
+            .unwrap_or(0);
+        let archer_penalty = archer_state_penalty(
+            self.mental_state.get(&msg.session_id).copied().unwrap_or(0),
+            mental_lvl,
+        );
+        let ranged_chance = ranged_chance_to_hit(attack_dist, focus);
 
         // 广播 ObjectAttack 给其他玩家
         let others: Vec<_> = self.other_players(msg.session_id)
@@ -1391,15 +1430,23 @@ impl Message<RangeAttackRequest> for WorldActor {
             if let Some(monster) = self.monsters.get_mut(&monster_id) {
                 let attacker_stats = state.to_combat_stats();
                 let defender_stats = monster.to_combat_stats();
-                let raw_damage = combat_attack::get_attack_power(
-                    attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck,
+                // #1519：C# 距离命中率——Random(100) < chanceToHit 才命中（否则整箭落空）
+                if fastrand::i32(0..100) >= ranged_chance {
+                    continue;
+                }
+                // C# GetRangeAttackPower：min 随距离缩小（MaxAttackRange=9）
+                let eff_min = range_attack_min_reduction(attacker_stats.min_atk, attack_dist);
+                let mut raw_damage = combat_attack::get_attack_power(
+                    eff_min, attacker_stats.max_atk, attacker_stats.luck,
                 );
+                // C# ApplyArcherState：MentalState 惩罚（trickshot/group attack）
+                raw_damage = raw_damage * archer_penalty / 100;
                 // #1455：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
                 let level_offset = crate::combat::attack::level_offset(state.level, monster.level.max(0) as u16);
                 let attack_result = combat_attack::resolve_attack(
                     &attacker_stats, &defender_stats, raw_damage,
-                    // 远程物理攻击用 AC 防御（无 Agility 闪避，远程难躲）
-                    mir2_shared::enums::DefenceType::Ac, level_offset,
+                    // C#：远程攻击防御 = ACAgility（可被敏捷闪避）
+                    mir2_shared::enums::DefenceType::AcAgility, level_offset,
                 );
                 let damage = attack_result.damage;
                 monster.take_damage(damage);
@@ -1470,9 +1517,17 @@ impl Message<RangeAttackRequest> for WorldActor {
 
                         let attacker_stats = state.to_combat_stats();
                         let defender_stats = other_state.to_combat_stats();
-                        let raw_damage = combat_attack::get_attack_power(
-                            attacker_stats.min_atk, attacker_stats.max_atk, attacker_stats.luck,
+                        // #1519：C# 距离命中率
+                        if fastrand::i32(0..100) >= ranged_chance {
+                            continue;
+                        }
+                        // C# GetRangeAttackPower：min 随距离缩小
+                        let eff_min = range_attack_min_reduction(attacker_stats.min_atk, attack_dist);
+                        let mut raw_damage = combat_attack::get_attack_power(
+                            eff_min, attacker_stats.max_atk, attacker_stats.luck,
                         );
+                        // C# ApplyArcherState：MentalState 惩罚
+                        raw_damage = raw_damage * archer_penalty / 100;
                         let level_offset = if other_state.level > state.level {
                             0
                         } else {
@@ -1480,7 +1535,7 @@ impl Message<RangeAttackRequest> for WorldActor {
                         };
                         let attack_result = combat_attack::resolve_attack(
                             &attacker_stats, &defender_stats, raw_damage,
-                            mir2_shared::enums::DefenceType::Ac, level_offset,
+                            mir2_shared::enums::DefenceType::AcAgility, level_offset,
                         );
                         let damage = attack_result.damage;
                         if !attack_result.applied_poisons.is_empty() {
@@ -2885,8 +2940,13 @@ impl Message<MagicRequest> for WorldActor {
                         debug!("Player {} armed {} special shot (40%)", state.name, if armed == 1 { "Vampire" } else { "Poison" });
                     }
                 }
-                // 弓箭手弹道伤害：DC × 法术倍率（power_base 近似），最少 1
-                let mut raw_damage = (magic_stat + (power as i32) / 2).max(1);
+                // #1519/#1520：C# GetRangeAttackPower——min 随距离缩小（MaxAttackRange=9）；
+                // 保持 DC 基值（C# 技能用 MC，Rust 新建角色 MC=0，DC/MC 差异待专项确认）
+                let archer_dist = (target_x - state.x).abs().max((target_y - state.y).abs());
+                let eff_min = range_attack_min_reduction(state.effective_min_attack(), archer_dist);
+                let mut raw_damage = (crate::combat::attack::get_attack_power(
+                    eff_min, magic_stat, state.luck,
+                ) + (power as i32) / 2).max(1);
                 // ElementalShot（C# HumanObject.ElementalShot）：无元素时施法凝聚第一档并取消射击；
                 // 有元素时伤害 = GetAttackPower(MinMC, MaxMC) + 元素球攻击加成（OrbsDmgList）
                 if msg.spell == SPELL_ELEMENTAL_SHOT {
@@ -2907,8 +2967,19 @@ impl Message<MagicRequest> for WorldActor {
                            state.name, orb_power, state.elements_level);
                 }
 
-                // 弹道延迟：距离×50ms + 500ms
-                let target_dist = ((state.x - target_x).abs() + (state.y - target_y).abs()) as u64;
+                // #1519/#1520：C# ApplyArcherState——MentalState 惩罚（trickshot/group attack）
+                let mental_lvl = state.magics.iter()
+                    .find(|m| m.spell == (mir2_shared::enums::Spell::MentalState as i32 - 3))
+                    .map(|m| m.level)
+                    .unwrap_or(0);
+                let archer_penalty = archer_state_penalty(
+                    self.mental_state.get(&msg.session_id).copied().unwrap_or(0),
+                    mental_lvl,
+                );
+                raw_damage = raw_damage * archer_penalty / 100;
+
+                // 弹道延迟：距离×50ms + 500ms（C# MaxDistance=Chebyshev）
+                let target_dist = archer_dist as u64;
                 let base_delay_ms = target_dist * 50 + 500;
                 // tick_count 每 100ms +1，按 100ms 取整（最少 1 tick）
                 let fire_at_tick = self.tick_count + (base_delay_ms / 100).max(1);
@@ -4930,8 +5001,9 @@ mod spell_geometry_tests {
 #[cfg(test)]
 mod tests {
     use super::{
-        attack_disabled_by_poison, cast_disabled_by_poison, find_attack_skill,
-        player_attack_speed_ms, should_grant_cast_exp, turn_undead_threshold, ATTACK_SKILL_SPELLS,
+        archer_state_penalty, attack_disabled_by_poison, cast_disabled_by_poison, find_attack_skill,
+        player_attack_speed_ms, range_attack_min_reduction, ranged_chance_to_hit, should_grant_cast_exp,
+        turn_undead_threshold, ATTACK_SKILL_SPELLS,
         DAMAGE_DURA_ARMOR_SLOTS, SPELL_CROSS_HALFMOON, SPELL_FIREBALL, SPELL_HALFMOON,
         SPELL_METEOR_SHOWER, SPELL_SLAYING,
     };
@@ -5020,6 +5092,23 @@ mod tests {
         assert_eq!(turn_undead_threshold(10, 100, 0), 0);
         // 远超怪物等级 → clamp 100
         assert_eq!(turn_undead_threshold(90, 1, 3), 100);
+    }
+
+    #[test]
+    fn test_archer_helpers() {
+        // #1519：GetRangeAttackPower min 缩小——距离 0 全缩，距离 9 不变，中间取 floor
+        assert_eq!(range_attack_min_reduction(10, 0), 0);
+        assert_eq!(range_attack_min_reduction(10, 9), 10);
+        assert_eq!(range_attack_min_reduction(10, 4), 5); // floor(10*5/9)=5
+        // ApplyArcherState：MentalState 0/1/2 → 100 / 55+5*Lv / 80
+        assert_eq!(archer_state_penalty(0, 0), 100);
+        assert_eq!(archer_state_penalty(1, 2), 65);
+        assert_eq!(archer_state_penalty(2, 0), 80);
+        // chanceToHit：近距恒命中（>=100），远距按 100 - 11*dist，Focus ×2，<0 clamp 0
+        assert_eq!(ranged_chance_to_hit(0, false), 100);
+        assert_eq!(ranged_chance_to_hit(9, false), 1);
+        assert_eq!(ranged_chance_to_hit(9, true), 2);
+        assert_eq!(ranged_chance_to_hit(10, false), 0);
     }
 
     #[test]
