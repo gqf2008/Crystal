@@ -20,6 +20,10 @@ pub(crate) use world::*;
 /// 按 CLI flag（--auto-* / --real-verify / --auto-walk 等）注册自动化验证系统
 pub fn register(app: &mut App) {
     // --auto-attack: 进游戏后每 1.5s 自动攻击（M10 战斗链路调试）
+    // --attack-range-test: 攻击距离校验（#1554，近战1格/弓手9格/范围外提示）
+    if std::env::args().any(|a| a == "--attack-range-test") {
+        app.add_systems(Update, auto_attack_range_test);
+    }
     if std::env::args().any(|a| a == "--auto-attack") {
         app.add_systems(Update, auto_attack_debug);
     }

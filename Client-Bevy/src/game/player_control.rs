@@ -445,6 +445,10 @@ fn pickup_arrival_system(
 }
 
 /// 自动攻击（目标存在且存活时循环攻击）
+/// #1554：对齐 C# 攻击距离（GameScene.CheckInput）：
+///   - 近战：InRange(目标, 玩家, 1) 才 Attack1（GameScene.cs:11502）
+///   - 弓手（Class==Archer 且装备武器）：InRange(..., MaxAttackRange=9) 才远程攻击（11480）
+///   - 范围外：每 1s 提示"目标太远"（OutputDelay=1000，TargetTooFar，11491-11495）
 fn auto_attack_system(
     mut commands: Commands,
     time: Res<Time>,
@@ -455,6 +459,9 @@ fn auto_attack_system(
     players: Query<&Transform, (With<LocalPlayer>, With<NetObjectId>)>,
     actors: Query<(&NetObjectId, &Transform)>,
     hud: Res<HudState>,
+    mut chat: ResMut<crate::game::chat::ChatState>,
+    // C# OutputDelay=1000ms：范围外提示节流
+    mut too_far_timer: Local<f32>,
 ) {
     if hud.dead {
         return;
@@ -468,6 +475,31 @@ fn auto_attack_system(
         return;
     };
     let Ok(player_tf) = players.single() else { return };
+
+    // #1554：弓手（Archer 且装备武器）→ 远程范围 9；否则近战范围 1（C# InRange Chebyshev）
+    let is_archer = hud.class == mir2_shared::enums::MirClass::Archer as u8
+        && hud.equipment.get(0).and_then(|s| s.as_ref()).is_some();
+    let max_range = if is_archer { 9 } else { 1 };
+    let p_tile = world_to_tile(player_tf.translation.x, player_tf.translation.y);
+    let t_tile = world_to_tile(target_tf.translation.x, target_tf.translation.y);
+    let in_range = (t_tile.0 - p_tile.0).abs() <= max_range
+        && (t_tile.1 - p_tile.1).abs() <= max_range;
+
+    if !in_range {
+        // 保留目标（玩家需走近），每 1s 提示一次（C# OutputDelay）
+        *too_far_timer += time.delta_secs();
+        if *too_far_timer >= 1.0 {
+            *too_far_timer = 0.0;
+            chat.add_line(
+                "目标太远".to_string(),
+                crate::game::chat::chat_color(mir2_shared::enums::ChatType::System),
+                crate::game::chat::ChatChannel::System,
+            );
+            tracing::debug!("🚫 目标太远: target={} range={} 需 <= {}", target_id, max_range, max_range);
+        }
+        return;
+    }
+    *too_far_timer = 0.0;
 
     if control.last_attack < control.attack_interval {
         return;
@@ -486,8 +518,8 @@ fn auto_attack_system(
     crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, 10050);
     // 诊断（#57）：攻击时打印玩家/目标瓦片与方向（debug 级）
     tracing::debug!(
-        "⚔️ Attack target={} dir={:?}",
-        target_id, dir
+        "⚔️ Attack target={} dir={:?} range={} in_range={}",
+        target_id, dir, max_range, in_range
     );
 }
 
@@ -871,6 +903,48 @@ mod tests {
         let threshold = TILE_WIDTH * 2.0;
         assert!(96.0f32 <= threshold);
         assert!(!(240.0f32 <= threshold));
+    }
+
+    #[test]
+    fn test_attack_range_chebyshev() {
+        // #1554：C# Functions.InRange = Chebyshev（max(|dx|,|dy|) <= i）
+        let in_range = |p: (i32,i32), t: (i32,i32), r: i32| {
+            (t.0 - p.0).abs() <= r && (t.1 - p.1).abs() <= r
+        };
+        // 近战范围 1：对角也算 1（C# InRange 1）
+        assert!(in_range((0,0), (1,1), 1));
+        assert!(in_range((0,0), (1,0), 1));
+        assert!(!in_range((0,0), (2,0), 1));
+        assert!(!in_range((0,0), (2,2), 1));
+        // 弓手范围 9：C# MaxAttackRange=9
+        assert!(in_range((0,0), (9,0), 9));
+        assert!(in_range((0,0), (5,5), 9));
+        assert!(!in_range((0,0), (10,0), 9));
+    }
+
+    #[test]
+    fn test_archer_detection() {
+        // #1554：弓手 = Class==Archer 且装备武器（C# HasClassWeapon 简化）
+        let mut hud = crate::game::hud::HudState::default();
+        hud.class = mir2_shared::enums::MirClass::Archer as u8;
+        // 无武器 → 非弓手
+        let is_archer = hud.class == mir2_shared::enums::MirClass::Archer as u8
+            && hud.equipment.get(0).and_then(|s| s.as_ref()).is_some();
+        assert!(!is_archer);
+        // 装备武器 → 弓手（远程范围 9）
+        let mut bow = crate::game::dialogs::inventory::InvItem::default();
+        bow.item_type = mir2_shared::enums::ItemType::Weapon as u8;
+        hud.equipment[0] = Some(bow);
+        let is_archer = hud.class == mir2_shared::enums::MirClass::Archer as u8
+            && hud.equipment.get(0).and_then(|s| s.as_ref()).is_some();
+        assert!(is_archer);
+        // 战士 → 近战
+        let mut warrior = crate::game::hud::HudState::default();
+        warrior.class = mir2_shared::enums::MirClass::Warrior as u8;
+        warrior.equipment[0] = Some(crate::game::dialogs::inventory::InvItem::default());
+        let is_archer = warrior.class == mir2_shared::enums::MirClass::Archer as u8
+            && warrior.equipment.get(0).and_then(|s| s.as_ref()).is_some();
+        assert!(!is_archer);
     }
 }
 
