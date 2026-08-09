@@ -2831,8 +2831,9 @@ fn parse_buff_type(s: &str) -> Option<crate::combat::buff::BuffType> {
         "PROTECTIONFIELD" => Some(BuffType::DamageReduction { percent: 0 }),
         "IMMORTALSKIN" => Some(BuffType::AcDefenseBoost { bonus: 0 }),
         "ULTIMATEENHANCER" => Some(BuffType::McBoost { bonus: 0 }),
-        // C# Curse 降低目标输出，Rust 端用 Slow 近似负面效果
-        "SLOW" | "CURSE" => Some(BuffType::Slow { percent: 0 }),
+        // #1508：C# Curse 降低目标输出（MaxDC/MC/SC RatePercent）；脚本 GIVEBUFF CURSE 用独立 Curse debuff
+        "SLOW" => Some(BuffType::Slow { percent: 0 }),
+        "CURSE" => Some(BuffType::Curse { percent: 0 }),
         "FROZEN" => Some(BuffType::Frozen),
         _ => None,
     }
@@ -3438,6 +3439,7 @@ You don't have enough Gold!
         assert!(matches!(parse_buff_type("POISON"), Some(BuffType::Poison { .. })));
         assert!(matches!(parse_buff_type("SoulShield"), Some(BuffType::MacDefenseBoost { .. })));
         assert!(matches!(parse_buff_type("SwiftFeet"), Some(BuffType::MoveSpeedBoost { .. })));
+        assert!(matches!(parse_buff_type("CURSE"), Some(BuffType::Curse { .. })));
         assert!(parse_buff_type("NotABuff").is_none());
     }
 
