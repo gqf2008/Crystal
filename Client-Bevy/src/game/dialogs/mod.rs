@@ -175,7 +175,7 @@ pub struct DialogZ {
 }
 
 /// 通用弹窗拖动系统：
-/// - 按 DialogKind 聚合实体，用实体位置估算窗口包围盒，标题栏（顶部 28px）可拖
+/// - 按 DialogKind 聚合实体，用实体位置估算窗口包围盒，按住任意位置（非按钮）可拖
 /// - 拖动时对所有该对话框实体整体平移（保持相对布局）
 pub fn dialog_drag_system(
     mut drag: ResMut<DialogDrag>,
@@ -219,8 +219,8 @@ pub fn dialog_drag_system(
         });
         if !on_button {
             for (kind, (minx, miny, maxx, maxy)) in &boxes {
-                // 标题栏：窗口顶部 28px
-                if cursor.x >= *minx && cursor.x <= *maxx && cursor.y >= *miny && cursor.y <= *miny + 28.0 {
+                // 按住窗口任意位置（非按钮）即可拖动，对齐 C# MirImageControl.Movable
+                if cursor.x >= *minx && cursor.x <= *maxx && cursor.y >= *miny && cursor.y <= *maxy {
                     let origins = dialogs
                         .iter()
                         .filter(|(_, r, v, _)| *v == Visibility::Visible && r.0 == *kind)
