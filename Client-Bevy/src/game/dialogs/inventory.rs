@@ -1018,6 +1018,18 @@ fn slot_item_target(item: &InvItem) -> Option<(i32, MirGridType)> {
     Some((slot, grid))
 }
 
+/// #1544：槽物品前置检查（C# CanUseItem：坐骑配件需坐骑；钓具需鱼竿 shape 49/50）
+fn slot_item_ready(hud: &HudState, grid_to: MirGridType) -> bool {
+    match grid_to {
+        MirGridType::Mount => hud.equipment.get(10).and_then(|s| s.as_ref()).is_some(),
+        MirGridType::Fishing => matches!(
+            hud.equipment.get(0).and_then(|s| s.as_ref()).map(|w| w.shape),
+            Some(49) | Some(50),
+        ),
+        _ => false,
+    }
+}
+
 /// #1544：使用/装备结果（Sent=已发包；Confirm=已弹确认框；Blocked=守卫拦截/无动作）
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum UseOutcome {
@@ -1081,8 +1093,18 @@ fn use_or_equip(
         feedback.messages.push(reason.to_string());
         return UseOutcome::Blocked;
     }
-    // 6. 槽物品（坐骑/钓具）→ EquipSlotItem
+    // 6. 槽物品（坐骑/钓具）→ EquipSlotItem（C# CanUseItem：需先装备坐骑/鱼竿）
     if let Some((to_slot, grid_to)) = slot_item_target(item) {
+        // C# CanUseItem：坐骑配件需已装备坐骑（Equipment[10]）；钓具需武器为鱼竿（shape 49/50）
+        if !slot_item_ready(hud, grid_to) {
+            let msg = if grid_to == MirGridType::Mount {
+                "请先装备坐骑"
+            } else {
+                "请先装备鱼竿"
+            };
+            feedback.messages.push(msg.to_string());
+            return UseOutcome::Blocked;
+        }
         net.send_packet(&mir2_shared::packets::client::misc::EquipSlotItem {
             grid: MirGridType::Inventory,
             unique_id: item.unique_id,
@@ -1755,6 +1777,23 @@ mod tests {
         assert_eq!(slot_item_target(&sword), None);
     }
 
+    #[test]
+    fn slot_item_ready_requires_mount_or_rod() {
+        let mut hud = HudState::default();
+        assert!(!slot_item_ready(&hud, MirGridType::Mount));
+        assert!(!slot_item_ready(&hud, MirGridType::Fishing));
+        let mut m = item_with_type(ItemType::Mount);
+        hud.equipment[10] = Some(m);
+        assert!(slot_item_ready(&hud, MirGridType::Mount));
+        let mut rod = item_with_type(ItemType::Weapon);
+        rod.shape = 49;
+        hud.equipment[0] = Some(rod);
+        assert!(slot_item_ready(&hud, MirGridType::Fishing));
+        let mut sword = item_with_type(ItemType::Weapon);
+        sword.shape = 0;
+        hud.equipment[0] = Some(sword);
+        assert!(!slot_item_ready(&hud, MirGridType::Fishing));
+    }
     #[test]
     fn item_use_sound_maps_types() {
         assert_eq!(item_use_sound_id(&item_with_type(ItemType::Weapon)), Some(10111));
