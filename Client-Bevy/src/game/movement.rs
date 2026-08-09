@@ -107,6 +107,77 @@ fn lookahead_direction(last: (i32, i32), path: &VecDeque<(i32, i32)>) -> Option<
 }
 
 /// 逐步转向（对齐 macroquad MovementSystem::step_towards_direction）：
+
+/// #1548：C# Functions.NextDir（顺时针下一方向）
+pub fn next_direction(d: MirDirection) -> MirDirection {
+    match d {
+        MirDirection::Up => MirDirection::UpRight,
+        MirDirection::UpRight => MirDirection::Right,
+        MirDirection::Right => MirDirection::DownRight,
+        MirDirection::DownRight => MirDirection::Down,
+        MirDirection::Down => MirDirection::DownLeft,
+        MirDirection::DownLeft => MirDirection::Left,
+        MirDirection::Left => MirDirection::UpLeft,
+        MirDirection::UpLeft => MirDirection::Up,
+    }
+}
+
+/// #1548：C# Functions.PreviousDir（逆时针上一方向）
+pub fn previous_direction(d: MirDirection) -> MirDirection {
+    match d {
+        MirDirection::Up => MirDirection::UpLeft,
+        MirDirection::UpLeft => MirDirection::Left,
+        MirDirection::Left => MirDirection::DownLeft,
+        MirDirection::DownLeft => MirDirection::Down,
+        MirDirection::Down => MirDirection::DownRight,
+        MirDirection::DownRight => MirDirection::Right,
+        MirDirection::Right => MirDirection::UpRight,
+        MirDirection::UpRight => MirDirection::Up,
+    }
+}
+
+/// #1548：C# Functions.PointMove（从 (x,y) 沿 dir 走 dist 格）
+pub fn point_move(x: i32, y: i32, dir: MirDirection, dist: i32) -> (i32, i32) {
+    let (dx, dy) = match dir {
+        MirDirection::Up => (0, -1),
+        MirDirection::UpRight => (1, -1),
+        MirDirection::Right => (1, 0),
+        MirDirection::DownRight => (1, 1),
+        MirDirection::Down => (0, 1),
+        MirDirection::DownLeft => (-1, 1),
+        MirDirection::Left => (-1, 0),
+        MirDirection::UpLeft => (-1, -1),
+        _ => (0, 0),
+    };
+    (x + dx * dist, y + dy * dist)
+}
+
+/// #1548：鼠标相对玩家 → 8 方向扇区（对齐 C# GameScene.MouseDirection(45F)）
+/// 用角度扇区（45° 容差）而非瓦片差：鼠标在扇区内移动方向稳定，不抖动
+pub fn mouse_direction(player_world: Vec2, mouse_world: Vec2) -> MirDirection {
+    let dx = mouse_world.x - player_world.x;
+    let dy = mouse_world.y - player_world.y;
+    // 玩家脚下极小范围：不转向（C# InRange(p, 2) 归零防抖）
+    if dx.abs() < 8.0 && dy.abs() < 8.0 {
+        return MirDirection::Up;
+    }
+    let angle = dy.atan2(dx).to_degrees(); // [-180, 180]，0°=正右、逆时针正
+    // C# MouseDirection：0°=正上（Up）、顺时针 45°/扇区；数学角转 C# 角 = 90° - angle
+    let mut deg = 90.0 - angle + 22.5;
+    if deg < 0.0 { deg += 360.0; }
+    let sector = ((deg / 45.0) as i32).rem_euclid(8);
+    match sector {
+        0 => MirDirection::Up,
+        1 => MirDirection::UpRight,
+        2 => MirDirection::Right,
+        3 => MirDirection::DownRight,
+        4 => MirDirection::Down,
+        5 => MirDirection::DownLeft,
+        6 => MirDirection::Left,
+        _ => MirDirection::UpLeft,
+    }
+}
+
 /// 每帧最多转 max_steps 步，选择最短旋转方向（顺时针/逆时针）
 fn step_towards_direction(current: u8, desired: u8, max_steps: i32) -> u8 {
     let cur = current % 8;
@@ -557,4 +628,69 @@ mod tests {
                 || a == (0, 1) && b == (1, 0) && c == (0, 1);
             assert!(!zigzag, "锯齿路径: {:?}", deltas);
         }
+    
+    }
+    #[test]
+    fn test_mouse_direction_sectors_stable() {
+        let player = Vec2::new(0.0, 0.0);
+        assert_eq!(mouse_direction(player, Vec2::new(100.0, 0.0)), MirDirection::Right);
+        assert_eq!(mouse_direction(player, Vec2::new(100.0, 100.0)), MirDirection::UpRight);
+        assert_eq!(mouse_direction(player, Vec2::new(0.0, 100.0)), MirDirection::Up);
+        assert_eq!(mouse_direction(player, Vec2::new(0.0, -100.0)), MirDirection::Down);
+        assert_eq!(mouse_direction(player, Vec2::new(-100.0, -100.0)), MirDirection::DownLeft);
+        // 玩家脚下 → 防抖 Up
+        assert_eq!(mouse_direction(player, Vec2::new(3.0, -3.0)), MirDirection::Up);
+        // 扇区内稳定：角度 20° 与 10° 都应是 Right（0°~22.5° 边界容差内）
+        assert_eq!(mouse_direction(player, Vec2::new(100.0, 18.0)), MirDirection::Right);
+        assert_eq!(mouse_direction(player, Vec2::new(100.0, 10.0)), MirDirection::Right);
+    }
+
+    #[test]
+    fn test_next_previous_direction_roundtrip() {
+        for d in [
+            MirDirection::Up,
+            MirDirection::UpRight,
+            MirDirection::Right,
+            MirDirection::DownRight,
+            MirDirection::Down,
+            MirDirection::DownLeft,
+            MirDirection::Left,
+            MirDirection::UpLeft,
+        ] {
+            let n = next_direction(d);
+            assert_eq!(previous_direction(n), d, "next+previous 应还原 {}", d as u8);
+        }
+        assert_eq!(next_direction(MirDirection::UpLeft), MirDirection::Up);
+        assert_eq!(previous_direction(MirDirection::Up), MirDirection::UpLeft);
+    }
+
+    #[test]
+    fn test_point_move_distances() {
+        assert_eq!(point_move(5, 5, MirDirection::Up, 1), (5, 4));
+        assert_eq!(point_move(5, 5, MirDirection::Right, 2), (7, 5));
+        assert_eq!(point_move(5, 5, MirDirection::DownLeft, 1), (4, 6));
+    }
+
+    #[test]
+    fn test_walk_fallback_tries_next_then_previous() {
+        // #1548：C# CanWalk(dir, out dir)：原方向不可走 → NextDir → PreviousDir
+        let mut walkable = vec![vec![true; 3]; 3];
+        walkable[1][0] = false; // 北墙
+        let map = crate::map_renderer::LoadedMap {
+            name: String::new(),
+            width: 3,
+            height: 3,
+            walkable,
+        };
+        let from = (1, 1);
+        let dir = MirDirection::Up;
+        let mut chosen = None;
+        for d in [dir, next_direction(dir), previous_direction(dir)] {
+            let pp = point_move(from.0, from.1, d, 1);
+            if map.is_walkable(pp.0, pp.1) {
+                chosen = Some(d);
+                break;
+            }
+        }
+        assert_eq!(chosen, Some(MirDirection::UpRight), "北墙时应回退北东");
     }

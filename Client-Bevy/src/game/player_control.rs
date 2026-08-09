@@ -13,7 +13,8 @@ use bevy::window::{CursorIcon, SystemCursorIcon};
 
 use crate::actor::{ActorAnim, GroundItem, LocalPlayer, Monster, NetObjectId, Npc, Player};
 use crate::game::hud::HudState;
-use crate::game::movement::{direction_from_delta, world_to_tile, LocalMove};
+use crate::game::movement::{direction_from_delta, mouse_direction, next_direction, point_move, previous_direction, world_to_tile, LocalMove};
+use mir2_shared::enums::MirDirection;
 use crate::game::pathfinding;
 use crate::map_renderer::{GameData, GameLibraries};
 use crate::network::NetConnection;
@@ -529,7 +530,6 @@ fn hold_move_system(
     let Some(cursor) = window.physical_cursor_position() else { return };
     let Ok(cam_tf) = camera.single() else { return };
     let world = screen_to_world(cursor, cam_tf, window);
-    let target_tile = world_to_tile(world.x, world.y);
 
     let run = if mouse.pressed(MouseButton::Right) {
         Some(true)
@@ -565,43 +565,95 @@ fn hold_move_system(
 
     if control.hold_active {
         if let Some(run) = run {
+            // #1548：方向驱动按住移动（对齐 C# GameScene.CheckInput MapButtons 分支）
+            //   右键按住：CanRun（2 格）→ Run；否则 CanWalk 退避 → Walk 1 格；不可走原地转向
+            //   左键按住：CanWalk 退避 → Walk 1 格；不可走原地转向
+            // 方向由鼠标相对玩家 8 方向扇区（45° 容差）决定，鼠标轻微移动不换方向 → 消除 45° 抖动
             let Ok((pe, ptf, mut lm, mut anim)) = players.single_mut() else { return };
             let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
-            let need_repath = control.hold_target != Some(target_tile)
-                || control.hold_run != Some(run)
-                || lm.path.is_empty();
-            if need_repath {
-                control.hold_target = Some(target_tile);
-                control.hold_run = Some(run);
-                if from_tile == target_tile {
-                    return;
-                }
-                if let Some(p) = pathfinding::find_path(map, from_tile, target_tile) {
-                    if p.is_empty() {
-                        tracing::debug!("[HOLD] 目标不可达 {:?}", target_tile);
+            let dir = mouse_direction(Vec2::new(ptf.translation.x, ptf.translation.y), world);
+            let new_dir = dir as u8;
+            let direction_changed = control.hold_target != Some((new_dir as i32, 0))
+                || control.hold_run != Some(run);
+
+            // 尝试方向：原方向 → NextDir → PreviousDir（C# CanWalk(dir, out dir)）
+            let mut chosen: Option<(MirDirection, i32)> = None; // (方向, 步数)
+            let mut can_walk = |d: MirDirection| -> bool {
+                let p = point_move(from_tile.0, from_tile.1, d, 1);
+                map.is_walkable(p.0, p.1)
+            };
+            if run {
+                // C# CanRun：CanWalk(dir) && EmptyCell(2 格)；骑乘/冲刺 3 格（客户端简化：2 格）
+                for d in [dir, next_direction(dir), previous_direction(dir)] {
+                    let p1 = point_move(from_tile.0, from_tile.1, d, 1);
+                    let p2 = point_move(from_tile.0, from_tile.1, d, 2);
+                    if map.is_walkable(p1.0, p1.1) && map.is_walkable(p2.0, p2.1) {
+                        chosen = Some((d, 2));
+                        break;
                     }
-                    if !p.is_empty() {
-                        let first = p[0];
-                        if let Some(d) =
-                            direction_from_delta(first.0 - from_tile.0, first.1 - from_tile.1)
-                        {
-                            anim.direction = d as u8;
+                }
+                if chosen.is_none() {
+                    // 跑不可达 → 退走 1 格（C# 右键按住先 CanRun 后 CanWalk）
+                    for d in [dir, next_direction(dir), previous_direction(dir)] {
+                        if can_walk(d) {
+                            chosen = Some((d, 1));
+                            break;
                         }
-                        anim.action = if run {
-                            mir2_shared::enums::MirAction::Running
-                        } else {
-                            mir2_shared::enums::MirAction::Walking
-                        };
+                    }
+                }
+            } else {
+                for d in [dir, next_direction(dir), previous_direction(dir)] {
+                    if can_walk(d) {
+                        chosen = Some((d, 1));
+                        break;
+                    }
+                }
+            }
+
+            let need_step = chosen.is_some()
+                && (direction_changed || lm.path.is_empty());
+            if let Some((d, steps)) = chosen {
+                if need_step {
+                    // 立即转向（C# Standing direction 语义：即使不可走也先转方向）
+                    anim.direction = d as u8;
+                    control.hold_target = Some((d as u8 as i32, 0));
+                    control.hold_run = Some(run);
+                    if steps == 2 {
+                        let p2 = point_move(from_tile.0, from_tile.1, d, 2);
+                        anim.action = mir2_shared::enums::MirAction::Running;
                         commands.entity(pe).insert(LocalMove {
-                            path: p.into(),
+                            path: vec![point_move(from_tile.0, from_tile.1, d, 1), p2].into(),
                             step_timer_ms: 0.0,
-                            run,
+                            run: true,
+                            last: None,
+                            step_origin: None,
+                            turn_acc: 0.0,
+                        });
+                    } else {
+                        let p1 = point_move(from_tile.0, from_tile.1, d, 1);
+                        anim.action = mir2_shared::enums::MirAction::Walking;
+                        commands.entity(pe).insert(LocalMove {
+                            path: vec![p1].into(),
+                            step_timer_ms: 0.0,
+                            run: false,
                             last: None,
                             step_origin: None,
                             turn_acc: 0.0,
                         });
                     }
                 }
+            } else {
+                // 三方向都不可走 → 原地转向（C# CanWalk 失败 → Standing direction）
+                if direction_changed {
+                    anim.direction = new_dir;
+                    anim.action = mir2_shared::enums::MirAction::Standing;
+                    anim.frame_index = 0;
+                    control.hold_target = Some((new_dir as i32, 0));
+                    control.hold_run = Some(run);
+                }
+                // 清空旧路径避免卡住
+                lm.path.clear();
+                lm.last = None;
             }
         } else {
             // 按住移动中松开 → 立即停下
@@ -624,7 +676,6 @@ fn hold_move_system(
         control.hold_pressed_at = None;
     }
 }
-
 
 /// 按键拾取最近物品（#158 C# KeybindOptions.Pickup：默认 Tab；保留 Space 为次键）
 fn key_pickup_system(
@@ -718,6 +769,8 @@ mod tests {
         assert!(is_shift_down(&keys));
     }
 }
+
+
 
 
 

@@ -443,6 +443,11 @@ pub fn register(app: &mut App) {
         app.add_systems(Update, auto_spell_verify);
     }
     // --auto-walk-diag: 对角线移动方向稳定性验证（#1145）——真实寻路 + LocalMove + 记录方向序列
+    // --hold-move-test: 按住移动方向驱动稳定性（#1548，45° 扇区容差）
+    if std::env::args().any(|a| a == "--hold-move-test") {
+        app.init_resource::<HoldMoveTest>();
+        app.add_systems(Update, hold_move_test_system);
+    }
     if std::env::args().any(|a| a == "--auto-walk-diag") {
         app.init_resource::<AutoWalkDiag>();
         app.add_systems(Update, auto_walk_diag_system);
@@ -667,5 +672,74 @@ fn is_passive_prey(name: &str) -> bool {
     ]
     .iter()
     .any(|k| n.contains(k))
+}
+
+
+/// --hold-move-test：按住移动方向驱动稳定性（#1548）
+/// 进图后模拟鼠标固定在玩家 45° 方向连续 40 帧：
+///   - mouse_direction 输出必须稳定（扇区容差）
+///   - 方向驱动选择（原/Next/Previous 退避）在真实地图上应有可达方向
+///   - 记录方向序列，断言无来回抖动（相邻帧方向差 <= 1 或退避后稳定）
+#[derive(Resource, Default)]
+struct HoldMoveTest {
+    started: bool,
+    frame: u32,
+    dirs: Vec<u8>,
+}
+
+fn hold_move_test_system(
+    mut t: Local<f32>,
+    mut st: ResMut<HoldMoveTest>,
+    time: Res<Time>,
+    game_data: Res<client_bevy::map_renderer::GameData>,
+    players: Query<&Transform, (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>)>,
+) {
+    use client_bevy::game::movement::{mouse_direction, next_direction, point_move, previous_direction};
+    use mir2_shared::enums::MirDirection;
+    if !st.started {
+        *t += time.delta_secs();
+        if *t < 8.0 {
+            return;
+        }
+        let Ok(ptf) = players.single() else { return };
+        let Some(map) = &game_data.map else { return };
+        tracing::info!("[HOLDMOVE] 开始：玩家=({},{}) map={}", ptf.translation.x, ptf.translation.y, map.name);
+        st.started = true;
+        return;
+    }
+    st.frame += 1;
+    if st.frame > 40 {
+        // 输出并结束
+        let dirs = std::mem::take(&mut st.dirs);
+        let jitter = dirs.windows(2).filter(|w| {
+            let d = (w[1] as i32 - w[0] as i32).rem_euclid(8);
+            d == 4 // 反向抖动
+        }).count();
+        let stable = dirs.windows(2).all(|w| {
+            let d = (w[1] as i32 - w[0] as i32).rem_euclid(8);
+            d <= 2 || d >= 6
+        });
+        let verdict = if jitter == 0 && stable { "✅ 方向稳定无抖动" } else { "❌ 方向抖动" };
+        tracing::info!("[HOLDMOVE] {} 方向序列 {:?}", verdict, dirs);
+        st.started = false;
+        st.frame = 0;
+        return;
+    }
+    let Ok(ptf) = players.single() else { return };
+    let Some(map) = &game_data.map else { return };
+    // 模拟鼠标在玩家 45° 右上方固定位置（世界坐标 = 玩家 + (400, 400)）
+    let player_world = Vec2::new(ptf.translation.x, ptf.translation.y);
+    let mouse_world = player_world + Vec2::new(400.0, 400.0);
+    let dir = mouse_direction(player_world, mouse_world);
+    // 记录当前选择的方向（原方向；若不可走则退避）
+    let from = client_bevy::game::movement::world_to_tile(player_world.x, player_world.y);
+    let chosen = [dir, next_direction(dir), previous_direction(dir)].iter().copied().find(|d| {
+        let p = point_move(from.0, from.1, *d, 1);
+        map.is_walkable(p.0, p.1)
+    });
+    let d = chosen.unwrap_or(dir);
+    if st.dirs.last() != Some(&(d as u8)) {
+        st.dirs.push(d as u8);
+    }
 }
 
