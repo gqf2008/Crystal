@@ -1613,11 +1613,33 @@ impl Message<ChatRequest> for WorldActor {
                         return;
                     }
                     match cmd.as_str() {
-                        // @level <n>
+                        // @level [玩家] <等级>（#1468：C# GM LEVEL parts>=3 改目标玩家）
                         "LEVEL" => {
-                            let lv = parts.get(1).and_then(|s| s.parse::<u16>().ok()).unwrap_or(1).min(200);
-                            let _ = record.actor_ref.ask(crate::actors::player::ChangeLevel { level: lv }).await;
-                            send_system_message(&self.gate_ref, msg.session_id, &format!("等级已设置为 {}", lv));
+                            let lv = parts.last().and_then(|s| s.parse::<u16>().ok()).unwrap_or(1).min(200);
+                            if parts.len() >= 3 {
+                                // C#：@level <玩家> <等级>——改目标在线玩家
+                                let name = parts.get(1).copied().unwrap_or("");
+                                let mut found = None;
+                                for (_sid, other) in &self.players {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if os.name.eq_ignore_ascii_case(name) {
+                                            found = Some(*_sid);
+                                            break;
+                                        }
+                                    }
+                                }
+                                let Some(target_sid) = found else {
+                                    send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                    return;
+                                };
+                                if let Some(r) = self.players.get(&target_sid) {
+                                    let _ = r.actor_ref.ask(crate::actors::player::ChangeLevel { level: lv }).await;
+                                }
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("已设置 {} 的等级为 {}", name, lv));
+                            } else {
+                                let _ = record.actor_ref.ask(crate::actors::player::ChangeLevel { level: lv }).await;
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("等级已设置为 {}", lv));
+                            }
                         }
                         // @gold <n>
                         "GOLD" => {
@@ -1820,7 +1842,22 @@ impl Message<ChatRequest> for WorldActor {
                                 Ok(Some(s)) => s,
                                 _ => return,
                             };
-                            let map_index = state.map_index;
+                            // #1469：C# CLEARMOB parts.Length>1 按地图名清指定图
+                            let map_index = if parts.len() > 1 {
+                                let name = parts.get(1).copied().unwrap_or("");
+                                match self.map_infos.values()
+                                    .find(|m| m.file_name.eq_ignore_ascii_case(name))
+                                    .map(|m| m.index as u16)
+                                {
+                                    Some(idx) => idx,
+                                    None => {
+                                        send_system_message(&self.gate_ref, msg.session_id, &format!("未找到地图：{}", name));
+                                        return;
+                                    }
+                                }
+                            } else {
+                                state.map_index
+                            };
                             let ids: Vec<u32> = self.monsters.iter()
                                 .filter(|(_, m)| m.map_index == map_index)
                                 .map(|(oid, _)| *oid)
