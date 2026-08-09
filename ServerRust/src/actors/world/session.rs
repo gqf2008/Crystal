@@ -1605,7 +1605,7 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS" | "GIVEPEARLS" | "GIVECREDIT" | "MAPMOVE" | "LISTFLAGS" | "STARTWAR" | "CREATEGUILD") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -2522,6 +2522,133 @@ impl Message<ChatRequest> for WorldActor {
                             } else {
                                 send_system_message(&self.gate_ref, msg.session_id, "英雄已学会该技能");
                             }
+                        }
+                        // @givepearls [玩家] <数量>（C# case "GIVEPEARLS" ~3103：GainPearls，上限 int.MaxValue）
+                        "GIVEPEARLS" => {
+                            let amount = parts.last().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+                            if amount == 0 { return; }
+                            match parts.get(1).copied() {
+                                Some(n) if parts.len() >= 3 => {
+                                    let mut found = false;
+                                    for (_sid, other) in &self.players {
+                                        if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                            if os.name.eq_ignore_ascii_case(n) {
+                                                let _ = other.actor_ref.ask(crate::actors::player::GainPearls { amount }).await;
+                                                send_system_message(&self.gate_ref, msg.session_id, &format!("已给 {} {} 珍珠", os.name, amount));
+                                                found = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if !found {
+                                        send_system_message(&self.gate_ref, msg.session_id, &format!("未找到在线玩家：{}", n));
+                                    }
+                                }
+                                _ => {
+                                    let _ = record.actor_ref.ask(crate::actors::player::GainPearls { amount }).await;
+                                    send_system_message(&self.gate_ref, msg.session_id, &format!("已获得 {} 珍珠", amount));
+                                }
+                            }
+                        }
+                        // @givecredit [玩家] <数量>（C# case "GIVECREDIT" ~3135：账户积分，上限 uint.MaxValue）
+                        "GIVECREDIT" => {
+                            let amount = parts.last().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                            if amount == 0 { return; }
+                            let target_sid = if parts.len() >= 3 {
+                                let name = parts.get(1).copied().unwrap_or("");
+                                let mut found = None;
+                                for (_sid, other) in &self.players {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if os.name.eq_ignore_ascii_case(name) {
+                                            found = Some(*_sid);
+                                            break;
+                                        }
+                                    }
+                                }
+                                found
+                            } else {
+                                Some(msg.session_id)
+                            };
+                            let Some(target_sid) = target_sid else {
+                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                return;
+                            };
+                            self.npc_change_credit(target_sid, amount as i64).await;
+                        }
+                        // @mapmove <地图名> [x] [y]（C# case "MAPMOVE" ~2872：按地图名传送，无坐标随机落点）
+                        "MAPMOVE" => {
+                            let Some(map_name) = parts.get(1).copied() else {
+                                send_system_message(&self.gate_ref, msg.session_id, "用法：@mapmove <地图名> [x] [y]");
+                                return;
+                            };
+                            let Some(mi) = self.map_infos.values().find(|m| m.file_name.eq_ignore_ascii_case(map_name)).cloned() else {
+                                send_system_message(&self.gate_ref, msg.session_id, &format!("未找到地图：{}", map_name));
+                                return;
+                            };
+                            let map_index = mi.index as u16;
+                            let (x, y) = if let (Some(x), Some(y)) = (
+                                parts.get(2).and_then(|s| s.parse::<i32>().ok()),
+                                parts.get(3).and_then(|s| s.parse::<i32>().ok()),
+                            ) {
+                                (x, y)
+                            } else {
+                                // C# TeleportRandom(200, 0, map)：无坐标时随机落点
+                                let (w, h) = match self.get_or_load_map(&mi.file_name, map_index) {
+                                    Some(m) => (m.width as i32, m.height as i32),
+                                    None => (200, 200),
+                                };
+                                (fastrand::i32(0..w.max(1)), fastrand::i32(0..h.max(1)))
+                            };
+                            crate::actors::world::npc_script::teleport_player(self, msg.session_id, map_index, x, y).await;
+                            send_system_message(&self.gate_ref, msg.session_id, &format!("已传送至 {} ({}, {})", mi.title, x, y));
+                        }
+                        // @listflags（C# case "LISTFLAGS" ~3372：列出玩家 flags）
+                        "LISTFLAGS" => {
+                            let state = match record.actor_ref.ask(GetPlayerState).await {
+                                Ok(Some(s)) => s,
+                                _ => return,
+                            };
+                            if state.flags.is_empty() {
+                                send_system_message(&self.gate_ref, msg.session_id, "当前没有 flag");
+                            } else {
+                                for (k, v) in &state.flags {
+                                    send_system_message(&self.gate_ref, msg.session_id, &format!("flag {} = {}", k, v));
+                                }
+                            }
+                        }
+                        // @startwar <行会名>（C# case "STARTWAR" ~3597：GM + 会长宣战，复用 GuildWarReturn 宣战流程）
+                        "STARTWAR" => {
+                            let Some(enemy) = parts.get(1).copied() else {
+                                send_system_message(&self.gate_ref, msg.session_id, "用法：@startwar <行会名>");
+                                return;
+                            };
+                            self.declare_guild_war(msg.session_id, enemy.to_string()).await;
+                        }
+                        // @createguild [玩家] <行会名>（C# case "CREATEGUILD" ~3264：GM 直接建会，跳过等级/金币）
+                        "CREATEGUILD" => {
+                            let (target_sid, guild_name) = if parts.len() >= 3 {
+                                let name = parts.get(1).copied().unwrap_or("");
+                                let mut found = None;
+                                for (_sid, other) in &self.players {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if os.name.eq_ignore_ascii_case(name) {
+                                            found = Some(*_sid);
+                                            break;
+                                        }
+                                    }
+                                }
+                                (found, parts.get(2).copied().unwrap_or(""))
+                            } else {
+                                (Some(msg.session_id), parts.get(1).copied().unwrap_or(""))
+                            };
+                            let Some(target_sid) = target_sid else {
+                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                return;
+                            };
+                            let _ = self.social_ref.ask(crate::actors::social::GmCreateGuildRequest {
+                                session_id: target_sid,
+                                guild_name: guild_name.to_string(),
+                            }).await;
                         }
                         _ => {}
                     }

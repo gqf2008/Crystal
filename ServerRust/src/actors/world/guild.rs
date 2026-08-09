@@ -203,57 +203,64 @@ pub struct GuildWarReturnRequest {
 impl Message<GuildWarReturnRequest> for WorldActor {
     type Reply = ();
     async fn handle(&mut self, msg: GuildWarReturnRequest, _ctx: &mut Context<Self, Self::Reply>) {
+        self.declare_guild_war(msg.session_id, msg.guild_name.clone()).await;
+    }
+}
+
+impl WorldActor {
+    /// 行会宣战（C# PlayerObject STARTWAR / GuildWarReturn：会长校验、费用、新手行会禁止；@startwar 复用）
+    pub(crate) async fn declare_guild_war(&mut self, session_id: u64, guild_name: String) {
         // GuildWarReturn: query if a guild exists and return its war status
-        let record = match self.players.get(&msg.session_id) { Some(r) => r.clone(), None => return };
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
         let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
 
-        debug!("GuildWarReturn: {} querying guild={}", state.name, msg.guild_name);
+        debug!("GuildWarReturn: {} querying guild={}", state.name, guild_name);
 
         if state.guild_name.is_none() {
-            send_system_message(&self.gate_ref, msg.session_id, "你还没有加入行会");
+            send_system_message(&self.gate_ref, session_id, "你还没有加入行会");
             return;
         }
 
         let sender_guild = state.guild_name.as_ref().unwrap();
-        if msg.guild_name == *sender_guild {
-            send_system_message(&self.gate_ref, msg.session_id, "不能向自己的行会宣战");
+        if guild_name == *sender_guild {
+            send_system_message(&self.gate_ref, session_id, "不能向自己的行会宣战");
             return;
         }
 
         // 行会信息由 SocialActor 管理，此处仅做简单校验
-        if msg.guild_name.is_empty() {
-            send_system_message(&self.gate_ref, msg.session_id, "行会名称无效");
+        if guild_name.is_empty() {
+            send_system_message(&self.gate_ref, session_id, "行会名称无效");
             return;
         }
 
         // C# requires guild leader (rank 0) to declare war
         if state.guild_rank != GuildRank::Leader {
-            send_system_message(&self.gate_ref, msg.session_id, "只有行会会长才能宣战");
+            send_system_message(&self.gate_ref, session_id, "只有行会会长才能宣战");
             return;
         }
 
         // C# GoToWar：目标行会必须存在
         let exists = self.social_ref.ask(crate::actors::social::NpcGuildExists {
-            guild_name: msg.guild_name.clone(),
+            guild_name: guild_name.clone(),
         }).await.unwrap_or(false);
         if !exists {
-            send_system_message(&self.gate_ref, msg.session_id, "目标行会不存在");
+            send_system_message(&self.gate_ref, session_id, "目标行会不存在");
             return;
         }
         // C# GuildObject.GoToWar / PlayerObject.GuildWarReturn：不能向新手行会宣战（Settings.NewbieGuild）
         let (newbie_guild, _, _) = self.social_ref
             .ask(crate::actors::social::NpcGetNewbieGuildConfig).await
             .unwrap_or(("NewbieGuild".to_string(), true, 5i32));
-        if msg.guild_name.eq_ignore_ascii_case(&newbie_guild) {
-            send_system_message(&self.gate_ref, msg.session_id, "不能向新手行会宣战");
+        if guild_name.eq_ignore_ascii_case(&newbie_guild) {
+            send_system_message(&self.gate_ref, session_id, "不能向新手行会宣战");
             return;
         }
         // C#：已在战争中不可重复宣战
         if self.guild_wars.get(sender_guild)
-            .map(|s| s.contains(&msg.guild_name))
+            .map(|s| s.contains(&guild_name))
             .unwrap_or(false)
         {
-            send_system_message(&self.gate_ref, msg.session_id, "你们已与该行会开战");
+            send_system_message(&self.gate_ref, session_id, "你们已与该行会开战");
             return;
         }
         // C# 宣战费用（Settings.Guild_WarCost=3000）：行会金币不足拒绝
@@ -265,7 +272,7 @@ impl Message<GuildWarReturnRequest> for WorldActor {
             amount: war_cost as u64,
         }).await.unwrap_or(false);
         if !deducted {
-            send_system_message(&self.gate_ref, msg.session_id,
+            send_system_message(&self.gate_ref, session_id,
                 &format!("行会金币不足，宣战需要 {} 金币", war_cost));
             return;
         }
@@ -274,19 +281,19 @@ impl Message<GuildWarReturnRequest> for WorldActor {
         self.send_guild_storage_gold_change_to_guild(sender_guild, &state.name, war_cost, 2).await;
 
         // Record the war declaration
-        self.guild_wars.entry(sender_guild.clone()).or_default().insert(msg.guild_name.clone());
-        self.guild_wars.entry(msg.guild_name.clone()).or_default().insert(sender_guild.clone());
+        self.guild_wars.entry(sender_guild.clone()).or_default().insert(guild_name.clone());
+        self.guild_wars.entry(guild_name.clone()).or_default().insert(sender_guild.clone());
         // C# GuildAtWar.TimeRemaining = Settings.Minute * Guild_WarTime（单位分钟）
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
-        self.guild_war_ends.insert(war_key(sender_guild, &msg.guild_name), now + war_time * 60);
+        self.guild_war_ends.insert(war_key(sender_guild, &guild_name), now + war_time * 60);
 
         // Notify all online members of the declaring guild
-        let war_msg = format!("行会 {} 已向 {} 宣战！", sender_guild, msg.guild_name);
+        let war_msg = format!("行会 {} 已向 {} 宣战！", sender_guild, guild_name);
         for (sid, rec) in &self.players {
-            if *sid == msg.session_id { continue; }
+            if *sid == session_id { continue; }
             if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
                 if s.guild_name.as_deref() == Some(sender_guild.as_str()) {
                     send_system_message(&self.gate_ref, *sid, &war_msg);
@@ -298,27 +305,27 @@ impl Message<GuildWarReturnRequest> for WorldActor {
         let target_msg = format!("行会 {} 已向你们宣战！", sender_guild);
         for (sid, rec) in &self.players {
             if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
-                if s.guild_name.as_deref() == Some(msg.guild_name.as_str()) {
+                if s.guild_name.as_deref() == Some(guild_name.as_str()) {
                     send_system_message(&self.gate_ref, *sid, &target_msg);
                 }
             }
         }
 
         // C# GoToWar：双方 UpdatePlayersColours（在线成员即时刷新名字颜色）
-        self.refresh_guild_war_colours(sender_guild, &msg.guild_name).await;
+        self.refresh_guild_war_colours(sender_guild, &guild_name).await;
 
         // Send GuildRequestWar packet back to the declarer
         use mir2_shared::packets::server::miscellaneous::GuildRequestWar;
-        let war_packet = GuildRequestWar { guild_name: msg.guild_name.clone() };
+        let war_packet = GuildRequestWar { guild_name: guild_name.clone() };
         let mut war_body = Vec::new();
         if let Ok(()) = mir2_shared::packets::Packet::write_body(&war_packet, &mut war_body) {
             let _ = self.gate_ref.tell(SendToClient {
-                session_id: msg.session_id,
+                session_id,
                 data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::GuildRequestWar as i16, &war_body),
             }).await;
         }
 
-        send_system_message(&self.gate_ref, msg.session_id, &format!("已向 {} 行会宣战", msg.guild_name));
+        send_system_message(&self.gate_ref, session_id, &format!("已向 {} 行会宣战", guild_name));
     }
 }
 
