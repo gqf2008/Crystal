@@ -123,6 +123,27 @@ pub struct HudData {
     pub name: String,
 }
 
+/// #1392：HUD 负重/空格标签（C# WeightLabel=剩余负重，SpaceLabel=背包空格数）
+fn hud_space_weight_system(
+    hud: Res<HudState>,
+    mut wt: Query<&mut Text2d, (With<HudWeightText>, Without<HudSpaceText>)>,
+    mut sp: Query<&mut Text2d, (With<HudSpaceText>, Without<HudWeightText>)>,
+) {
+    let rem = hud.inventory.max_weight.saturating_sub(hud.inventory.weight);
+    let w = format!("{}/{}", rem, hud.inventory.max_weight);
+    for mut t in &mut wt {
+        if t.0 != w {
+            t.0 = w.clone();
+        }
+    }
+    let space = hud.inventory.items.iter().filter(|s| s.is_none()).count().to_string();
+    for mut t in &mut sp {
+        if t.0 != space {
+            t.0 = space.clone();
+        }
+    }
+}
+
 /// #1357：HUD 英雄状态小面板（C# HeroInfoPanel：名字 Lv/HP/MP/经验，有英雄才显示）
 fn hero_panel_system(
     hero: Res<crate::game::dialogs::hero::HeroState>,
@@ -230,6 +251,12 @@ pub struct PModeText;
 /// #1388：技能模式指示（C# SModeLabel）
 #[derive(Component)]
 pub struct SModeText;
+/// #1392：HUD 负重标签（C# WeightLabel）
+#[derive(Component)]
+pub struct HudWeightText;
+/// #1392：HUD 空格标签（C# SpaceLabel）
+#[derive(Component)]
+pub struct HudSpaceText;
 
 pub struct HudPlugin;
 
@@ -253,6 +280,7 @@ impl Plugin for HudPlugin {
                 attack_mode_text_system,
                 hero_btn_system,
                 hero_panel_system,
+                hud_space_weight_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
@@ -607,6 +635,11 @@ fn spawn_hud(
     commands.entity(pm).insert(PModeText);
     let sm = spawn_ui_text(&mut commands, &font, "技能:Ctrl", 1024.0 - 110.0, 768.0 - 56.0, 12.0, Color::srgb(0.6, 0.8, 1.0), 4.0);
     commands.entity(sm).insert(SModeText);
+    // #1392：负重/空格（C# WeightLabel/SpaceLabel @(Width-105/Width-30, 101)）
+    let wt = spawn_ui_text(&mut commands, &font, "0/0", main_x + bg_w - 105.0, main_y + 101.0, 11.0, Color::WHITE, 4.0);
+    commands.entity(wt).insert(HudWeightText);
+    let sp = spawn_ui_text(&mut commands, &font, "0", main_x + bg_w - 30.0, main_y + 101.0, 11.0, Color::WHITE, 4.0);
+    commands.entity(sp).insert(HudSpaceText);
 }
 
 #[allow(clippy::too_many_arguments)]
