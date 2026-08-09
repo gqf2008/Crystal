@@ -1504,6 +1504,13 @@ impl WorldActor {
 
     /// 宠物自动拾取（每 tick）
     pub(crate) async fn tick_pet_pickup(&mut self) {
+        // #1586：归属校验（与玩家拾取 #1262 一致）——组号映射一次构建
+        let mut player_groups: std::collections::HashMap<u64, Option<u64>> = std::collections::HashMap::new();
+        for (sid, rec) in &self.players {
+            if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                player_groups.insert(*sid, s.group_id);
+            }
+        }
         let mut pet_pickups: Vec<(usize, u64)> = Vec::new(); // (ground_item_index, session_id)
         for (session_id, record) in &self.players {
             if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await {
@@ -1520,8 +1527,19 @@ impl WorldActor {
                     let dist = (state.x - gi.x).abs() + (state.y - gi.y).abs();
                     if dist > 3 { continue; }
                     if gi.map_index != state.map_index { continue; }
-                    // 绑定物品（dropper_session 不为空）不能拾取
-                    if gi.dropper_session.is_some() && gi.dropper_session != Some(*session_id) { continue; }
+                    // #1586：归属校验（C# Owner=EXPOwner 60s / 同组可拾取 / 过期任意）
+                    if !crate::actors::world::item::can_pick_drop(
+                        self.tick_count,
+                        gi.drop_tick,
+                        crate::actors::world::item::DROP_OWNERSHIP_TICKS,
+                        gi.dropper_session,
+                        *session_id,
+                        gi.dropper_session
+                            .and_then(|d| player_groups.get(&d).copied().flatten()),
+                        state.group_id,
+                    ) {
+                        continue;
+                    }
 
                     let is_gold = gi.item.item_index == 0;
                     let should_pickup = match pickup_mode {

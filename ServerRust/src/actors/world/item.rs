@@ -214,11 +214,11 @@ pub struct DisassembleItemRequest {
 }
 
 /// #1262：C# Settings.Minute = 60*1000ms；Rust tick=100ms → 60s = 600 ticks
-const DROP_OWNERSHIP_TICKS: u64 = 600;
+pub(crate) const DROP_OWNERSHIP_TICKS: u64 = 600;
 
 /// #1262：C# PickUp 掉落归属保护——
 /// 无主（dropper=None）任意拾取；保护期内仅掉落者/同组队员可拾取；过期后任意拾取
-fn can_pick_drop(
+pub(crate) fn can_pick_drop(
     now_tick: u64,
     drop_tick: u64,
     ownership_ticks: u64,
