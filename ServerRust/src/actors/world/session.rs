@@ -1606,7 +1606,7 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -2044,6 +2044,17 @@ impl Message<ChatRequest> for WorldActor {
                                 }
                             }
                         }
+                        // @gamemaster（C# case "GAMEMASTER" ~2448：切换 GM 保护模式，PvP 不可攻击）
+                        "GAMEMASTER" => {
+                            if self.gm_protected.contains(&msg.session_id) {
+                                self.gm_protected.remove(&msg.session_id);
+                                send_system_message(&self.gate_ref, msg.session_id, "已关闭 GM 保护模式（可被攻击）");
+                            } else {
+                                self.gm_protected.insert(msg.session_id);
+                                send_system_message(&self.gate_ref, msg.session_id, "已开启 GM 保护模式（不可被攻击）");
+                            }
+                        }
+
                         // @setflag <index> [玩家]（C# case "SETFLAG" ~3351：切换 flag）
                         "SETFLAG" => {
                             let Some(flag) = parts.get(1).and_then(|s| s.parse::<i32>().ok()) else {

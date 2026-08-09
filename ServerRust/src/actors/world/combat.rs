@@ -601,6 +601,10 @@ impl Message<WorldAttackRequest> for WorldActor {
                 for (other_actor, other_session) in others {
                     // 获取其他玩家位置做距离检测
                     if let Ok(Some(other_state)) = other_actor.ask(GetPlayerState).await {
+                        // #1466：C# IsAttackTarget Dead——死亡玩家不可攻击
+                        if other_state.is_dead { continue; }
+                        // #1465：C# GMGameMaster——GM 保护模式不可攻击
+                        if self.gm_protected.contains(&other_session) { continue; }
                         // 计算曼哈顿距离（Mir2 使用 8 方向近战范围约 1-2 格）
                         let dist = (other_state.x - result.x).abs() + (other_state.y - result.y).abs();
                         const MELEE_RANGE: i32 = 2; // 近战有效范围
@@ -1414,6 +1418,10 @@ impl Message<RangeAttackRequest> for WorldActor {
         if !hit_monster {
             for other in &others {
                 if let Ok(Some(other_state)) = other.actor_ref.ask(GetPlayerState).await {
+                    // #1466：C# IsAttackTarget Dead——死亡玩家不可攻击
+                    if other_state.is_dead { continue; }
+                    // #1465：C# GMGameMaster——GM 保护模式不可攻击
+                    if self.gm_protected.contains(&other.session_id) { continue; }
                     let dist = (other_state.x - target_x).abs() + (other_state.y - target_y).abs();
                     if dist <= 1 {
                         // 攻击模式检查
