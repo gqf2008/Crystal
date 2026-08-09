@@ -50,6 +50,10 @@ pub struct HudState {
     pub fishing: bool,
     /// #1550：陷阱岩石（C# User.InTrapRock：陷阱中不可走/跑）
     pub in_trap_rock: bool,
+    /// #1552：冲刺（C# User.Sprint，SwiftFeet Buff）——CanRun 3 格
+    pub sprint: bool,
+    /// #1552：潜行（C# User.Sneaking，MoonLight/DarkBody Buff）——不可跑 + 半透明
+    pub sneaking: bool,
     /// 自动喝药开关（HP < 35% 自动使用背包药品）
     pub auto_pot_hp: bool,
     /// 玩家死亡（Death 包置位，Revived 清除；死亡时禁用输入/显示遮罩）
@@ -86,6 +90,8 @@ impl Default for HudState {
             riding: false,
             fishing: false,
             in_trap_rock: false,
+            sprint: false,
+            sneaking: false,
             auto_pot_hp: true,
             dead: false,
             reincarnation_offered: false,

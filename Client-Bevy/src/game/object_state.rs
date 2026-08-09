@@ -51,6 +51,7 @@ impl Plugin for ObjectStatePlugin {
 fn apply_object_state_events(
     mut commands: Commands,
     mut events: MessageReader<ServerEvent>,
+    hud: Res<crate::game::hud::HudState>,
     mut vis: Query<(&NetObjectId, &mut Visibility)>,
     mut anim: Query<(Entity, &NetObjectId, &mut ActorAnim)>,
     mut transforms: Query<(&NetObjectId, &mut Transform)>,
@@ -80,19 +81,34 @@ fn apply_object_state_events(
     for ev in pending {
         match ev {
             ServerEvent::ObjectHidden { object_id } => {
-                let found = vis.iter().any(|(id, _)| id.0 == object_id);
-                tracing::debug!("[OBJSTATE] 隐藏 id={} found={}", object_id, found);
+                // #1552：本地玩家潜行/隐身 → 半透明（C# ApplyDrawColour 半隐身），
+                // 远程对象 → 完全隐藏（B0001：query 冲突用本地 id 判断）
+                let is_local = hud.player_object_id == Some(object_id);
                 for (id, mut v) in &mut vis {
                     if id.0 == object_id {
-                        *v = Visibility::Hidden;
+                        if is_local {
+                            *v = Visibility::Visible;
+                            for mut layer in &mut layers {
+                                layer.alpha = 0.35;
+                            }
+                        } else {
+                            *v = Visibility::Hidden;
+                        }
                         break;
                     }
                 }
+                tracing::debug!("[OBJSTATE] 隐藏 id={} local={} found={}", object_id, is_local, vis.iter().any(|(id, _)| id.0 == object_id));
             }
             ServerEvent::ObjectShown { object_id } => {
                 for (id, mut v) in &mut vis {
                     if id.0 == object_id {
                         *v = Visibility::Visible;
+                        // #1552：本地玩家恢复不透明
+                        if hud.player_object_id == Some(object_id) {
+                            for mut layer in &mut layers {
+                                layer.alpha = 1.0;
+                            }
+                        }
                         break;
                     }
                 }
