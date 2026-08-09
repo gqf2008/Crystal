@@ -1180,18 +1180,37 @@ pub struct AuctionListing {
     pub expired: bool,
 }
 
-    /// C# ItemObject.Drop(distance)：掉落物在 range 内散落（简化：随机偏移可行走格，回退原点）
+    /// #1438：C# ItemObject.Drop(distance)——按 d=0..range 方形环逐格找可行走格（近格优先），
+    /// 无则回退原点（替代原随机 12 次尝试）
 pub(crate) fn scatter_drop_position(map: Option<&MapData>, x: i32, y: i32, range: i32) -> (i32, i32) {
     if let Some(m) = map {
-        for _ in 0..12 {
-            let nx = x + fastrand::i32(-range..=range);
-            let ny = y + fastrand::i32(-range..=range);
-            if m.is_walkable(nx, ny) {
-                return (nx, ny);
+        for d in 0..=range {
+            for dy in -d..=d {
+                for dx in -d..=d {
+                    // C# d 环 = 方形边界（max(|dx|,|dy|)==d；内圈已在更小 d 覆盖）
+                    if dx.abs().max(dy.abs()) != d {
+                        continue;
+                    }
+                    let nx = x + dx;
+                    let ny = y + dy;
+                    if m.is_walkable(nx, ny) {
+                        return (nx, ny);
+                    }
+                }
             }
         }
     }
     (x, y)
+}
+
+/// #1436：C# DeathDrop——封印未到期（ExpiryDate > now）才阻止掉落；到期/无封印可掉
+pub(crate) fn sealed_blocks_drop(
+    sealed: Option<&mir2_shared::data::item::SealedInfo>,
+    now_ticks: i64,
+) -> bool {
+    sealed
+        .map(|s| !crate::actors::world::tick::item_expired(s.expiry_date_binary, now_ticks))
+        .unwrap_or(false)
 }
 
 
@@ -2274,8 +2293,8 @@ impl WorldActor {
             if item.wedding_ring != -1 {
                 continue;
             }
-            // 封印物品未到期不掉（Rust 简化：任何封印状态都不掉）
-            if item.sealed_info.is_some() {
+            // #1436：C# DeathDrop——封印仅未到期（ExpiryDate > now）不掉；到期封印正常掉落
+            if sealed_blocks_drop(item.sealed_info.as_ref(), crate::actors::world::tick::dotnet_now_ticks()) {
                 continue;
             }
             // 租赁物品：C# 返还主人；Rust 简化不参与死亡掉落
@@ -2334,7 +2353,7 @@ impl WorldActor {
             if item.wedding_ring != -1 {
                 continue;
             }
-            if item.sealed_info.is_some() {
+            if sealed_blocks_drop(item.sealed_info.as_ref(), crate::actors::world::tick::dotnet_now_ticks()) {
                 continue;
             }
             if item.rental_information.is_some() {
@@ -7127,8 +7146,50 @@ mod tests {
         assert_eq!(body[4], 9); // dotnet string length
         assert_eq!(&body[5..], b"TamedWolf");
     }
-}
+    #[test]
+    fn sealed_blocks_drop_only_when_unexpired() {
+        // #1436：C# DeathDrop——封印未到期才阻止掉落；到期/无封印可掉
+        use mir2_shared::data::item::SealedInfo;
+        let now = 1_700_000_000_000_000_000i64; // 任意基准 ticks
+        let unexpired = SealedInfo { expiry_date_binary: now + 10_000_000, next_seal_date_binary: 0 };
+        let expired = SealedInfo { expiry_date_binary: now - 10_000_000, next_seal_date_binary: 0 };
+        assert!(sealed_blocks_drop(Some(&unexpired), now));
+        assert!(!sealed_blocks_drop(Some(&expired), now));
+        assert!(!sealed_blocks_drop(None, now));
+    }
 
+    #[test]
+    fn scatter_drop_position_ring_scan_prefers_near_cells() {
+        // #1438：C# ItemObject.Drop 环扫——近格优先；原点不可走时找最近可行走格；全不可走回退原点
+        let mut cells = vec![vec![crate::maps::loader::CellInfo { back_image: 0, walkable: false, fishing_attribute: -1 }; 9]; 9];
+        // 中心 (4,4) 不可走，距离 1 的 (4,5) 可走
+        cells[4][5] = crate::maps::loader::CellInfo { back_image: 0, walkable: true, fishing_attribute: -1 };
+        let map = MapData {
+            file_name: String::new(),
+            title: String::new(),
+            width: 9,
+            height: 9,
+            cells,
+            safe_zone_rects: Vec::new(),
+            no_experience: false,
+        };
+        assert_eq!(scatter_drop_position(Some(&map), 4, 4, 2), (4, 5));
+        // 全不可走 → 回退原点
+        let map2 = MapData {
+            file_name: String::new(),
+            title: String::new(),
+            width: 9,
+            height: 9,
+            cells: vec![vec![crate::maps::loader::CellInfo { back_image: 0, walkable: false, fishing_attribute: -1 }; 9]; 9],
+            safe_zone_rects: Vec::new(),
+            no_experience: false,
+        };
+        assert_eq!(scatter_drop_position(Some(&map2), 4, 4, 2), (4, 4));
+        // 无地图 → 原点
+        assert_eq!(scatter_drop_position(None, 3, 7, 3), (3, 7));
+    }
+
+}
 #[cfg(test)]
 mod e2e;
 

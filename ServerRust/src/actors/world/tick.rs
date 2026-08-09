@@ -46,7 +46,7 @@ impl Message<ProcessDelayedActions> for WorldActor {
 const DOTNET_BINARY_TICKS_MASK: i64 = 0x3FFF_FFFF_FFFF_FFFF;
 
 /// 当前时间对应的 .NET Ticks（本地墙钟，C# Envir.Now.Ticks 语义）
-fn dotnet_now_ticks() -> i64 {
+pub(crate) fn dotnet_now_ticks() -> i64 {
     let now = chrono::Local::now().naive_local();
     let as_utc = now.and_utc();
     as_utc.timestamp() * 10_000_000
@@ -55,7 +55,7 @@ fn dotnet_now_ticks() -> i64 {
 }
 
 /// #916：物品/租赁是否已到期（C# ExpireInfo.ExpiryDate <= Envir.Now）
-fn item_expired(expiry_date_binary: i64, now_ticks: i64) -> bool {
+pub(crate) fn item_expired(expiry_date_binary: i64, now_ticks: i64) -> bool {
     (expiry_date_binary & DOTNET_BINARY_TICKS_MASK) <= now_ticks
 }
 
@@ -889,6 +889,7 @@ impl WorldActor {
         let mut die_attacks: Vec<ai::AttackAction> = Vec::new();
         let mut die_spell_fields: Vec<ai::SpellFieldSpawn> = Vec::new();
         let mut die_summons: Vec<ai::BossSummon> = Vec::new();
+        let mut die_child_rocks: Vec<ai::ChildRockSpawn> = Vec::new();
         let mut die_heals: Vec<(u32, i32)> = Vec::new();
         let mut die_poisons: Vec<ai::PoisonPlayer> = Vec::new();
         let mut die_pushes: Vec<ai::PushPlayer> = Vec::new();
@@ -925,6 +926,7 @@ impl WorldActor {
                 out_attacks: &mut die_attacks,
                 out_spell_fields: &mut die_spell_fields,
                 out_summons: &mut die_summons,
+                out_child_rocks: &mut die_child_rocks,
                 out_heals: &mut die_heals,
                 out_poisons: &mut die_poisons,
                 out_pushes: &mut die_pushes,
@@ -3460,6 +3462,7 @@ impl Message<Tick> for WorldActor {
             let mut boss_attacks: Vec<ai::AttackAction> = Vec::new();
             let mut boss_spell_fields: Vec<ai::SpellFieldSpawn> = Vec::new();
             let mut boss_summons: Vec<ai::BossSummon> = Vec::new();
+            let mut boss_child_rocks: Vec<ai::ChildRockSpawn> = Vec::new();
             let mut boss_heals: Vec<(u32, i32)> = Vec::new();
             let mut boss_poisons: Vec<ai::PoisonPlayer> = Vec::new();
             let mut boss_pushes: Vec<ai::PushPlayer> = Vec::new();
@@ -3529,6 +3532,7 @@ impl Message<Tick> for WorldActor {
                         out_attacks: &mut boss_attacks,
                         out_spell_fields: &mut boss_spell_fields,
                         out_summons: &mut boss_summons,
+                        out_child_rocks: &mut boss_child_rocks,
                         out_heals: &mut boss_heals,
                         out_poisons: &mut boss_poisons,
                         out_pushes: &mut boss_pushes,
@@ -4525,6 +4529,83 @@ impl Message<Tick> for WorldActor {
                     }
                 } else {
                     debug!("Boss summon '{}' not in monster_name_index (DB may lack this mob)", bs.monster_name);
+                }
+            }
+            // #1437：TrapRock 子岩生成（C# TrapRock.Show：目标四角 ChildRock，立即可见、同目标、slave 级联）
+            for cr in &boss_child_rocks {
+                let mon_index = self.monster_name_index.get(&cr.monster_name.to_lowercase()).copied();
+                if let Some(idx) = mon_index {
+                    if let Some(info) = self.monster_infos.get(&idx).cloned() {
+                        let new_oid = self.alloc_object_id();
+                        let hp = info.stats.get(&(mir2_shared::enums::Stat::HP as u8)).copied().unwrap_or(50);
+                        let min_dmg = info.stats.get(&(mir2_shared::enums::Stat::MinDC as u8)).copied().unwrap_or(5);
+                        let max_dmg = info.stats.get(&(mir2_shared::enums::Stat::MaxDC as u8)).copied().unwrap_or(10);
+                        let map_index = self.monsters.get(&cr.parent_oid).map(|m| m.map_index)
+                            .or_else(|| self.monsters.values().next().map(|m| m.map_index))
+                            .unwrap_or(0);
+                        let spawn = MonsterSpawn {
+                            name: info.name.clone(),
+                            image: info.image as u16,
+                            monster_index: idx,
+                            x: cr.x,
+                            y: cr.y,
+                            direction: 0,
+                            hp,
+                            min_dmg,
+                            max_dmg,
+                            xp: info.experience,
+                            map_index,
+                            count: 1,
+                            spread: 0,
+                        };
+                        let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
+                        for session_id in self.players.keys() {
+                            let _ = self.gate_ref.tell(SendToClient {
+                                session_id: *session_id,
+                                data: packet.clone(),
+                            }).await;
+                        }
+                        let ai_profile = MonsterAiProfile::from_info(&info);
+                        // 子岩预设：shown=true、child=true、目标格锁定（C# ChildRock.Show）
+                        let behavior = crate::actors::world::ai::bosses::trap_rock::TrapRockBehavior::child(
+                            true,
+                            (cr.target_x, cr.target_y),
+                            cr.parent_oid,
+                        );
+                        self.monsters.insert(new_oid, MonsterState {
+                            object_id: new_oid,
+                            name: spawn.name.clone(),
+                            image: spawn.image,
+                            monster_index: idx,
+                            x: cr.x, y: cr.y, direction: 0,
+                            hp, max_hp: hp, min_dmg, max_dmg, xp: spawn.xp,
+                            spawn_x: cr.x, spawn_y: cr.y, map_index,
+                            spawn_spread: 0,
+                            next_attack_tick: 0, next_move_tick: 0, next_summon_tick: 0,
+                            ai_profile, ai_state: MonsterAiState::Idle,
+                            sitting: false, hidden: false, sit_down_tick: 0,
+                            target_session: Some(cr.target_session),
+                            last_hitter_session: None, provoked: false,
+                            is_elite: false, is_boss: false,
+                            min_ac: 0, max_ac: 0, min_mac: 0, max_mac: 0,
+                            agility: 0, accuracy: 0,
+                            armour_rate: 1.0, damage_rate: 1.0,
+                            magic_resist: 0, critical_rate: 0, critical_damage: 0,
+                            luck: 0, reflect: 0, damage_reduction_percent: 0, level: info.level, effect: info.effect,
+                            poison_list: Vec::new(),
+                            last_hit_damage: 0, undead: false,
+                            master_session: None, rarity: 0, pet_experience: 0, max_pet_level: 0,
+                            recall_at_tick: 0,
+                            behavior: Box::new(behavior),
+                        });
+                        // 登记 slave 归属（父岩死亡 → 子岩级联清理，C# SlaveList）
+                        self.slave_master.insert(new_oid, cr.parent_oid);
+                        debug!("TrapRock child '{}' #{} spawned at ({},{}) parent={}", spawn.name, new_oid, cr.x, cr.y, cr.parent_oid);
+                    } else {
+                        debug!("TrapRock child '{}' found index {} but no MonsterInfo", cr.monster_name, idx);
+                    }
+                } else {
+                    debug!("TrapRock child '{}' not in monster_name_index", cr.monster_name);
                 }
             }
             // Boss 对玩家的 poison
