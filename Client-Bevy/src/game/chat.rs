@@ -9,6 +9,7 @@ use std::collections::VecDeque;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
+use bevy::sprite::Anchor;
 
 use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
@@ -318,6 +319,16 @@ struct ChatLine(usize);
 /// 输入行文本
 #[derive(Component)]
 struct ChatInputText;
+/// 输入框背景（激活时显示，提供可见的文本交互框）
+#[derive(Component)]
+struct ChatInputBg;
+/// 输入光标（激活时闪烁，随文本推进）
+#[derive(Component)]
+struct ChatInputCursor;
+
+/// 聊天输入框位置（spawn_chat：panel_x+4=10, panel_y+150=578）
+const CHAT_INPUT_X: f32 = 10.0;
+const CHAT_INPUT_Y: f32 = 578.0;
 
 /// 频道页签按钮
 #[derive(Component)]
@@ -375,6 +386,7 @@ impl Plugin for ChatPlugin {
                 chat_key_scroll_system,
                 chat_scroll_buttons_system,
                 chat_input_system,
+                chat_input_ui_system,
                 chat_display_system,
                 chat_server_events,
                 chat_item_cache_events,
@@ -387,7 +399,15 @@ impl Plugin for ChatPlugin {
 
 fn cleanup_chat(
     mut commands: Commands,
-    roots: Query<Entity, Or<(With<ChatPanel>, With<ChatOptionWidget>)>>,
+    roots: Query<
+        Entity,
+        Or<(
+            With<ChatPanel>,
+            With<ChatOptionWidget>,
+            With<ChatInputBg>,
+            With<ChatInputCursor>,
+        )>,
+    >,
 ) {
     for e in roots.iter() {
         commands.entity(e).despawn();
@@ -480,6 +500,35 @@ fn spawn_chat(
         12.0, Color::srgb(0.9, 0.9, 0.4), 2.0,
     );
     commands.entity(e).insert(ChatInputText);
+    // 输入框背景 + 闪烁光标（C# ChatTextBox：激活时可见的输入 UI）
+    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    commands.spawn((
+        UiEntity,
+        ChatInputBg,
+        Sprite {
+            image: white.clone(),
+            custom_size: Some(Vec2::new(350.0, 16.0)),
+            color: Color::srgba(0.0, 0.0, 0.0, 0.55),
+            ..default()
+        },
+        Anchor::TOP_LEFT,
+        Transform::from_xyz(CHAT_INPUT_X + 0.0, -(CHAT_INPUT_Y + 1.0), 1.9),
+        Visibility::Hidden,
+    ));
+    commands.spawn((
+        UiEntity,
+        ChatInputCursor,
+        Text2d::new("|"),
+        Anchor::TOP_LEFT,
+        TextFont {
+            font: FontSource::Handle(font.clone()),
+            font_size: FontSize::Px(12.0),
+            ..default()
+        },
+        TextColor(Color::srgb(1.0, 1.0, 0.4)),
+        Transform::from_xyz(CHAT_INPUT_X + 16.0, -CHAT_INPUT_Y, 2.1),
+        Visibility::Hidden,
+    ));
     // 发送频道快捷按钮（C# ChatControlBar：附近/喊话/行会/队伍/私聊）
     // 点击把指令前缀填入输入框（服务端按前缀路由频道）
     let bar: [(&str, &str); 5] = [
@@ -1000,10 +1049,18 @@ fn chat_display_system(
             let new = if chat.input_active {
                 format!("> {}", chat.input_text)
             } else {
-                String::new()
+                "回车开始聊天".to_string()
             };
             if text.0 != new {
                 text.0 = new;
+            }
+            let c = if chat.input_active {
+                Color::srgb(0.9, 0.9, 0.4)
+            } else {
+                Color::srgb(0.6, 0.6, 0.6)
+            };
+            if color.0 != c {
+                color.0 = c;
             }
         } else if let Some(tab_btn) = tab_btn {
             // 选中页签高亮
@@ -1016,6 +1073,34 @@ fn chat_display_system(
             if color.0 != c {
                 color.0 = c;
             }
+        }
+    }
+}
+
+/// 输入框 UI：激活时显示背景 + 闪烁光标（光标随文本推进）
+fn chat_input_ui_system(
+    chat: Res<ChatState>,
+    time: Res<Time>,
+    mut bg: Query<&mut Visibility, (With<ChatInputBg>, Without<ChatInputCursor>)>,
+    mut cursors: Query<
+        (&mut Visibility, &mut Transform),
+        (With<ChatInputCursor>, Without<ChatInputBg>),
+    >,
+) {
+    let active = chat.input_active;
+    for mut v in &mut bg {
+        *v = if active { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for (mut v, mut tf) in &mut cursors {
+        // 光标闪烁（约 2Hz）
+        *v = if active && (time.elapsed_secs() * 2.0) as i64 % 2 == 0 {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if active {
+            // 光标跟随文本末尾（粗估：每字符 12px，前缀 “> ” 约 16px）
+            tf.translation.x = CHAT_INPUT_X + 16.0 + chat.input_text.chars().count() as f32 * 12.0;
         }
     }
 }

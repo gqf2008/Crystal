@@ -62,7 +62,9 @@ pub mod trust_merchant;
 
 use bevy::prelude::*;
 
+use crate::game::dialogs::text_input::TextInputRect;
 use crate::scenes::AppState;
+use crate::ui::controls::DropDown;
 use crate::ui::sprite_ui::{UiButton, UiEntity};
 
 /// 对话框类型
@@ -158,6 +160,18 @@ pub struct DialogDrag {
     pub start_cursor: Vec2,
     /// 拖动开始时各实体的原始 Transform（用于增量位移）
     pub origins: std::collections::HashMap<Entity, Vec3>,
+    /// 拖动开始时按钮命中矩形的原始位置（拖动后同步，否则按钮/关闭点击失效）
+    pub btn_origins: std::collections::HashMap<Entity, (f32, f32)>,
+    /// 拖动开始时文本输入框命中矩形的原始位置
+    pub text_origins: std::collections::HashMap<Entity, (f32, f32)>,
+    /// 拖动开始时下拉框命中矩形的原始位置（box_rect + popup_pos）
+    pub dd_origins: std::collections::HashMap<Entity, ((f32, f32), (f32, f32))>,
+}
+
+/// 对话框置顶层级（front 系统维护单调递增的 z 顶值）
+#[derive(Resource, Default)]
+pub struct DialogZ {
+    pub top: f32,
 }
 
 /// 通用弹窗拖动系统：
@@ -170,6 +184,9 @@ pub fn dialog_drag_system(
     ui_cameras: Query<(&Camera, &GlobalTransform), With<UiEntity>>,
     buttons: Query<&UiButton>,
     mut dialogs: Query<(Entity, &DialogRoot, &Visibility, &mut Transform)>,
+    mut ui_buttons: Query<(Entity, &mut UiButton, Option<&DialogRoot>)>,
+    mut text_rects: Query<(Entity, &mut TextInputRect, Option<&DialogRoot>)>,
+    mut drop_downs: Query<(Entity, &mut DropDown, Option<&DialogRoot>)>,
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
@@ -213,6 +230,22 @@ pub fn dialog_drag_system(
                     drag.dragging = Some(*kind);
                     drag.start_cursor = cursor;
                     drag.origins = origins;
+                    // 同步记录各交互控件的原始命中位置（拖动后保持可点击）
+                    drag.btn_origins = ui_buttons
+                        .iter()
+                        .filter(|(_, _, r)| r.map(|r| r.0) == Some(*kind))
+                        .map(|(e, btn, _)| (e, (btn.rect.0, btn.rect.1)))
+                        .collect();
+                    drag.text_origins = text_rects
+                        .iter()
+                        .filter(|(_, _, r)| r.map(|r| r.0) == Some(*kind))
+                        .map(|(e, tr, _)| (e, (tr.0, tr.1)))
+                        .collect();
+                    drag.dd_origins = drop_downs
+                        .iter()
+                        .filter(|(_, _, r)| r.map(|r| r.0) == Some(*kind))
+                        .map(|(e, dd, _)| (e, ((dd.box_rect.0, dd.box_rect.1), (dd.popup_pos.0, dd.popup_pos.1))))
+                        .collect();
                     tracing::info!("🖱️ 拖动对话框 {:?}", kind);
                     break;
                 }
@@ -220,7 +253,7 @@ pub fn dialog_drag_system(
         }
     }
 
-    // 拖动中：整体平移
+    // 拖动中：整体平移 + 同步命中矩形
     if let Some(kind) = drag.dragging {
         if mouse.pressed(MouseButton::Left) {
             let delta = cursor - drag.start_cursor;
@@ -231,12 +264,121 @@ pub fn dialog_drag_system(
                     }
                 }
             }
+            for (e, mut btn, _) in ui_buttons.iter_mut() {
+                if let Some(o) = drag.btn_origins.get(&e) {
+                    btn.rect.0 = o.0 + delta.x;
+                    btn.rect.1 = o.1 + delta.y;
+                }
+            }
+            for (e, mut tr, _) in text_rects.iter_mut() {
+                if let Some(o) = drag.text_origins.get(&e) {
+                    tr.0 = o.0 + delta.x;
+                    tr.1 = o.1 + delta.y;
+                }
+            }
+            for (e, mut dd, _) in drop_downs.iter_mut() {
+                if let Some(o) = drag.dd_origins.get(&e) {
+                    dd.box_rect.0 = o.0.0 + delta.x;
+                    dd.box_rect.1 = o.0.1 + delta.y;
+                    dd.popup_pos.0 = o.1.0 + delta.x;
+                    dd.popup_pos.1 = o.1.1 + delta.y;
+                }
+            }
         } else {
             // 松开结束
             drag.dragging = None;
             drag.origins.clear();
+            drag.btn_origins.clear();
+            drag.text_origins.clear();
+            drag.dd_origins.clear();
         }
     }
+}
+
+/// 置顶系统：
+/// - 新打开的对话框 → 置顶（对齐 C# Show → BringToFront）
+/// - 点击可见对话框 → 置顶（对齐 C# 点击窗口置前）
+pub fn dialog_front_system(
+    mut z: ResMut<DialogZ>,
+    mgr: Res<DialogManager>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    ui_cameras: Query<(&Camera, &GlobalTransform), With<UiEntity>>,
+    mut dialogs: Query<(Entity, &DialogRoot, &Visibility, &mut Transform)>,
+    mut prev_open: Local<Vec<DialogKind>>,
+) {
+    if z.top < 30.0 {
+        z.top = 30.0;
+    }
+
+    // 1) 新打开的对话框 → 置顶
+    if let Some(kind) = mgr.open.last().copied().filter(|k| !prev_open.contains(k)) {
+        bump_dialog_z(kind, &mut z, &mut dialogs);
+    }
+    *prev_open = mgr.open.clone();
+
+    // 2) 点击可见对话框 → 置顶
+    if mouse.just_pressed(MouseButton::Left) {
+        let Ok(window) = windows.single() else { return };
+        let Some(cursor) = window.cursor_position() else { return };
+        let Ok((cam, gtf)) = ui_cameras.single() else { return };
+        let Ok(world) = cam.viewport_to_world_2d(gtf, cursor) else { return };
+        let cursor = Vec2::new(world.x, -world.y);
+
+        let mut boxes: std::collections::HashMap<DialogKind, (f32, f32, f32, f32, f32)> =
+            std::collections::HashMap::new();
+        for (_, root, vis, tf) in dialogs.iter() {
+            if *vis != Visibility::Visible {
+                continue;
+            }
+            let (x, y) = (tf.translation.x, -tf.translation.y);
+            let b = boxes.entry(root.0).or_insert((x, y, x, y, tf.translation.z));
+            b.0 = b.0.min(x);
+            b.1 = b.1.min(y);
+            b.2 = b.2.max(x);
+            b.3 = b.3.max(y);
+            b.4 = b.4.max(tf.translation.z);
+        }
+        // 取光标下 z 最高的可见对话框（即当前实际在最前的那一个）
+        let mut best: Option<(DialogKind, f32)> = None;
+        for (kind, (minx, miny, maxx, maxy, maxz)) in &boxes {
+            if cursor.x >= *minx && cursor.x <= *maxx && cursor.y >= *miny && cursor.y <= *maxy {
+                if best.map(|(_, bz)| *maxz > bz).unwrap_or(true) {
+                    best = Some((*kind, *maxz));
+                }
+            }
+        }
+        if let Some((kind, _)) = best {
+            bump_dialog_z(kind, &mut z, &mut dialogs);
+        }
+    }
+}
+
+/// 把指定对话框整体平移到置顶 z（保留内部相对层级，隐藏子页也一起平移）
+fn bump_dialog_z(
+    kind: DialogKind,
+    z: &mut DialogZ,
+    dialogs: &mut Query<(Entity, &DialogRoot, &Visibility, &mut Transform)>,
+) {
+    let mut min_z = f32::MAX;
+    let mut any = false;
+    for (_, r, _, tf) in dialogs.iter() {
+        if r.0 == kind {
+            min_z = min_z.min(tf.translation.z);
+            any = true;
+        }
+    }
+    if !any {
+        return;
+    }
+    let top = z.top;
+    z.top += 10.0;
+    for (_, r, _, mut tf) in dialogs.iter_mut() {
+        if r.0 == kind {
+            tf.translation.z = tf.translation.z - min_z + top;
+        }
+    }
+    tracing::info!("📌 置顶对话框 {:?}（z={}）", kind, top);
 }
 
 
@@ -246,9 +388,10 @@ impl Plugin for DialogsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DialogManager>();
         app.init_resource::<DialogDrag>();
+        app.init_resource::<DialogZ>();
         app.add_plugins(hero_equipment::HeroEquipmentPlugin);
         app.add_plugins(hero_skills::HeroSkillPlugin);
-                app.add_systems(Update, dialog_drag_system.run_if(in_state(AppState::Game)));
+        app.add_systems(Update, (dialog_drag_system, dialog_front_system).run_if(in_state(AppState::Game)));
         // #182 登出：清理对话框与会话状态
         app.add_systems(Update, logout_server_events.run_if(in_state(AppState::Game)));
         app.add_systems(Update, crate::ui::scroll_list::scroll_list_system.run_if(in_state(AppState::Game)));
