@@ -1550,6 +1550,8 @@ impl Message<EquipItemRequest> for WorldActor {
 
                 // #937：装备临时技能同步（Flame/Healing/Blink）
                 self.sync_temp_skills(msg.session_id).await;
+                // #1540：ClearRing 特殊模式隐身同步（头盔宝石）
+                self.sync_clear_ring_visibility(msg.session_id).await;
 
                 // 重新计算装备加成 + 广播视觉变化
                 if let Some(state) = self.recalculate_and_set_stat_bonuses(msg.session_id).await {
@@ -1640,6 +1642,8 @@ impl Message<RemoveItemRequest> for WorldActor {
                 if let Some(state) = self.recalculate_and_set_stat_bonuses(msg.session_id).await {
                     self.broadcast_equipment_visuals(msg.session_id, &state).await;
                 }
+                // #1540：ClearRing 特殊模式隐身同步（卸下解除）
+                self.sync_clear_ring_visibility(msg.session_id).await;
             }
             _ => {
                 send_system_message(&self.gate_ref, msg.session_id, "背包已满，无法卸下装备");

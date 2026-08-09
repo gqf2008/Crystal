@@ -4870,6 +4870,29 @@ impl WorldActor {
         }
     }
 
+    /// #1540：ClearRing 特殊模式（C# SpecialItemMode.ClearRing 0x0004，头盔宝石）——常驻隐身
+    /// 装备含 ClearRing → invisible_sessions + ObjectHidden(true)；卸下且无 Hiding/MoonLight/DarkBody 隐身 buff → 解除
+    pub(crate) async fn sync_clear_ring_visibility(&mut self, session_id: u64) {
+        let record = match self.players.get(&session_id) { Some(r) => r.clone(), None => return };
+        let state = match record.actor_ref.ask(GetPlayerState).await { Ok(Some(s)) => s, _ => return };
+        let has_clear_ring = state.inventory.equipment.iter().flatten()
+            .any(|it| self.item_infos.get(&it.item_index)
+                .map(|i| (i.special_mode as u16 & 0x0004) != 0)
+                .unwrap_or(false));
+        let buff_hidden = state.buffs.iter().any(|b| matches!(
+            b.buff_type, crate::combat::buff::BuffType::Invisibility));
+        let currently_invisible = self.invisible_sessions.contains(&session_id);
+        if has_clear_ring && !currently_invisible {
+            self.invisible_sessions.insert(session_id);
+            self.broadcast_object_hidden(state.object_id, true, state.map_index).await;
+            debug!("ClearRing: {} hidden by helmet gem", state.name);
+        } else if !has_clear_ring && currently_invisible && !buff_hidden {
+            self.invisible_sessions.remove(&session_id);
+            self.broadcast_object_hidden(state.object_id, false, state.map_index).await;
+            debug!("ClearRing: {} revealed (gem removed)", state.name);
+        }
+    }
+
     /// 重新计算装备属性加成并设置到 PlayerActor
     /// 返回最新的 PlayerState（如果成功）
     pub(crate) async fn recalculate_and_set_stat_bonuses(&self, session_id: u64) -> Option<PlayerState> {

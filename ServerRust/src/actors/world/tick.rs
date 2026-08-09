@@ -1826,6 +1826,7 @@ impl WorldActor {
             return;
         }
         let now_ticks = dotnet_now_ticks();
+        let mut clear_ring_sync: Vec<u64> = Vec::new();
         for (session_id, record) in &self.players {
             if let Ok(Some(mut state)) = record.actor_ref.ask(GetPlayerState).await {
                 let mut expired_backpack: Vec<usize> = Vec::new();
@@ -1933,8 +1934,15 @@ impl WorldActor {
                     if let Some(st) = self.recalculate_and_set_stat_bonuses(*session_id).await {
                         self.broadcast_equipment_visuals(*session_id, &st).await;
                     }
+                    // #1540：ClearRing 特殊模式隐身同步（过期移除后解除）
+                    clear_ring_sync.push(*session_id);
                 }
             }
+        }
+
+        // #1540：ClearRing 特殊模式隐身同步（装备过期移除后解除）
+        for sid in clear_ring_sync {
+            self.sync_clear_ring_visibility(sid).await;
         }
     }
 
