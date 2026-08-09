@@ -14,6 +14,7 @@ use bevy::prelude::*;
 
 use std::fs;
 
+use crate::game::dialogs::character::CharPage;
 use crate::game::dialogs::settings_file;
 use crate::network::NetConnection;
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
@@ -676,17 +677,16 @@ fn dialog_hotkey_system(
     keys: Res<ButtonInput<KeyCode>>,
     kb: Res<KeyboardState>,
     mut mgr: ResMut<DialogManager>,
+    mut page: ResMut<CharPage>,
     mut belt_visible: ResMut<crate::game::dialogs::belt::BeltVisible>,
     mut potion_belt_visible: ResMut<crate::game::dialogs::potion_belt::PotionBeltVisible>,
 ) {
     // #795：主/次绑定（对齐 C# KeyBindSettings 主键 + 备用键）
-    let map: [(&str, DialogKind); 25] = [
+    let map: [(&str, DialogKind); 23] = [
         ("背包", DialogKind::Inventory),
         ("背包2", DialogKind::Inventory),
         ("角色", DialogKind::Character),
         ("角色2", DialogKind::Character),
-        ("技能", DialogKind::Skills),
-        ("技能2", DialogKind::Skills),
         ("英雄背包", DialogKind::HeroInventory),
         ("英雄装备", DialogKind::HeroEquipment),
         ("英雄技能", DialogKind::HeroSkill),
@@ -735,6 +735,20 @@ fn dialog_hotkey_system(
             }
         }
         mgr.toggle(kind);
+    }
+    // 技能（C# KeybindOptions.Skills/Skills2）：无独立技能窗口，打开角色对话框技能页
+    for action in ["技能", "技能2"] {
+        if let Some(b) = kb.bindings.iter().find(|b| b.action == action) {
+            if b.matches(&keys) {
+                if mgr.is_open(DialogKind::Character) && page.0 == 3 {
+                    mgr.close(DialogKind::Character);
+                } else {
+                    mgr.open(DialogKind::Character);
+                    page.0 = 3;
+                }
+                tracing::info!("🎯 技能快捷键（{}）→ 角色技能页", action);
+            }
+        }
     }
     // #1370：技能栏显隐（R）/ 腰带（Z）——非对话框，走显隐资源
     if let Some(b) = kb.bindings.iter().find(|b| b.action == "技能栏显隐") {
