@@ -299,6 +299,11 @@ impl Message<WorldAttackRequest> for WorldActor {
             attack_body.extend_from_slice(&0u16.to_le_bytes()); // spell_level
             attack_body.push(0u8); // attack_type
             let packet = build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
+            // #1580：本地玩家自己的攻击动画（C# 客户端本地 ActionFeed；Bevy 依赖服务端回显）
+            let _ = self.gate_ref.tell(SendToClient {
+                session_id: msg.session_id,
+                data: packet.clone(),
+            }).await;
 
             // --- 检测是否命中怪物 ---
             // 计算攻击方向的前方位置
@@ -1437,6 +1442,11 @@ impl Message<RangeAttackRequest> for WorldActor {
                 data: range_packet.clone(),
             }).await;
         }
+        // #1580：本地玩家自己的拉弓动画（C# 本地 ActionFeed；Bevy 依赖 ObjectRangeAttack 回显）
+        let _ = self.gate_ref.tell(SendToClient {
+            session_id: msg.session_id,
+            data: range_packet.clone(),
+        }).await;
         // S.RangeAttack 弹道（客户端 PendingEffect::Projectile：从玩家飞向目标）
         let mut proj_body = Vec::new();
         proj_body.extend_from_slice(&msg.target_id.to_le_bytes());
@@ -2132,6 +2142,16 @@ impl Message<MagicRequest> for WorldActor {
                 let _ = self.gate_ref.tell(SendToClient {
                     session_id: other.session_id,
                     data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectMagic as i16, &om_body),
+                }).await;
+            }
+            // #1580：本地玩家自己的施法动画（self_broadcast=true；C# 本地 ActionFeed，Bevy 依赖回显）
+            let mut self_om = object_magic.clone();
+            self_om.self_broadcast = true;
+            let mut self_body = Vec::new();
+            if self_om.write_body(&mut self_body).is_ok() {
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: msg.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::ObjectMagic as i16, &self_body),
                 }).await;
             }
         }
