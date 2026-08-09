@@ -1224,12 +1224,10 @@ impl WorldActor {
         kind: crate::actors::world::conquest::SiegeStructureType,
         id: i32,
     ) -> Option<u32> {
-        let mut matches: Vec<u32> = self.siege_structures.iter()
-            .filter(|(_, s)| s.conquest_id == conquest_id && s.structure_type == kind)
+        // #1523：按数据索引精确匹配（C# GateList.Index / WallList.Index）
+        self.siege_structures.iter()
+            .find(|(_, s)| s.conquest_id == conquest_id && s.structure_type == kind && s.index == id)
             .map(|(oid, _)| *oid)
-            .collect();
-        matches.sort();
-        matches.get((id - 1).max(0) as usize).copied()
     }
 
     /// NPC 脚本 CONQUESTGATE/CONQUESTWALL：修复攻城结构（对齐 C#：GM 免费，非 GM 扣行会金币）
@@ -1352,9 +1350,11 @@ impl WorldActor {
         structure.y = 0;
         if kind == crate::actors::world::conquest::SiegeStructureType::ArcherTower {
             if let Some(gid) = guard_id {
+                structure.index = gid; // #1523：AFFORDGUARD/CONQUESTGUARD 按守卫索引定位
                 if let Some(g) = conquest.guards.iter().find(|g| g.index == gid) {
                     structure.x = g.x;
                     structure.y = g.y;
+                    structure.repair_cost = g.repair_cost;
                 }
             }
         }
