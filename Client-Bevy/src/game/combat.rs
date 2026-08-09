@@ -329,7 +329,7 @@ fn apply_combat_events(
                 }
             }
             // 伤害飘字（挂到目标实体上自动跟随）
-            CombatEvent::Damage { object_id, damage, .. } => {
+            CombatEvent::Damage { object_id, damage, dmg_type } => {
                 // 命中探测：非本地玩家的伤害事件 = 玩家攻击命中目标（#57）
                 if hud.player_object_id != Some(*object_id) {
                     probe.hits += 1;
@@ -344,11 +344,21 @@ fn apply_combat_events(
                 else {
                     continue;
                 };
+                // #1560：C# DamageType.Miss=4 → 渲染 "Miss"（灰色），其余渲染 "-damage"
+                let is_miss = *dmg_type == 4;
                 commands.entity(target).with_children(|p| {
                     p.spawn((
-                        Text2d::new(format!("-{}", damage)),
+                        Text2d::new(if is_miss {
+                            "Miss".to_string()
+                        } else {
+                            format!("-{}", damage)
+                        }),
                         Anchor::TOP_LEFT,
-                        TextColor(Color::srgb(1.0, 0.9, 0.3)),
+                        TextColor(if is_miss {
+                            Color::srgb(0.7, 0.7, 0.7)
+                        } else {
+                            Color::srgb(1.0, 0.9, 0.3)
+                        }),
                         TextFont {
                             font: FontSource::Handle(ui_font.0.clone()),
                             font_size: FontSize::Px(16.0),

@@ -1075,6 +1075,8 @@ pub struct WorldActor {
     pub(crate) spell_objects: HashMap<u32, spell::SpellObject>,
     /// 弹道法术的延迟结算队列（对齐 C# DelayedAction）
     pub(crate) pending_spell_completions: Vec<PendingSpellCompletion>,
+    /// 弓手远程攻击延迟结算队列（#1560，C# DelayedType.Damage/DamageIndicator）
+    pub(crate) pending_range_completions: Vec<PendingRangeCompletion>,
     /// tick_spell_completions 期间的吸血回血暂存（session_id, amount）
     pub(crate) vamp_heals: Vec<(u64, i32)>,
     /// 玩家造成伤害后待攒元素的 session 队列（C# GatherElement 每次命中触发）
@@ -1324,6 +1326,7 @@ impl WorldActor {
             player_rentals: HashMap::new(),
             spell_objects: HashMap::new(),
             pending_spell_completions: Vec::new(),
+            pending_range_completions: Vec::new(),
             vamp_heals: Vec::new(),
             pending_gather: Vec::new(),
             concentration_visible: HashMap::new(),
@@ -4274,6 +4277,7 @@ impl Actor for WorldActor {
             player_rentals: HashMap::new(),
             spell_objects: HashMap::new(),
             pending_spell_completions: Vec::new(),
+            pending_range_completions: Vec::new(),
             vamp_heals: Vec::new(),
             pending_gather: Vec::new(),
             concentration_visible: HashMap::new(),
