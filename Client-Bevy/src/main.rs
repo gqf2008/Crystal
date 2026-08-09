@@ -8,6 +8,7 @@
 //   cargo run --bin client_bevy -- --map n0
 //   cargo run --bin client_bevy -- --map 11yearvilliage
 //   cargo run --bin client_bevy -- --no-actors      # 只渲染地图（截图验证用）
+//   cargo run --bin client_bevy -- --window-title 修复版   # 自定义窗口标题（多实例并行时区分）
 
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
@@ -31,6 +32,16 @@ mod auto;
 use client_bevy::ui::sprite_ui::mark_ui_render_layers;
 
 fn main() {
+    // --window-title <标题>：自定义窗口标题（多实例并行时便于区分，如“修复版”）
+    let default_title = "Mir2 (Bevy) — 传奇2 客户端移植".to_string();
+    let window_title = {
+        let args: Vec<String> = std::env::args().collect();
+        args.iter()
+            .position(|a| a == "--window-title")
+            .and_then(|i| args.get(i + 1))
+            .cloned()
+            .unwrap_or(default_title)
+    };
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
@@ -55,7 +66,7 @@ fn main() {
             })
             .set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: "Mir2 (Bevy) — 传奇2 客户端移植".to_string(),
+                    title: window_title,
                     resolution: (1024u32, 768u32).into(),
                     // 禁用系统 IME：用游戏内置拼音输入法（src/ui/pinyin_ime.rs）。
                     // winit 用 IACE_CHILDREN 解关联 IME 上下文，字母键作为原始
