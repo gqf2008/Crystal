@@ -229,8 +229,8 @@ pub enum ServerEvent {
     GuildData {
         name: String,
         leader: String,
-        /// #1362：职务名（3 个）
-        rank_names: [String; 3],
+        /// #1395：职务定义（name, options，C# GuildObject.Ranks）
+        rank_defs: Vec<(String, u8)>,
         notice: Vec<String>,
         members: Vec<GuildMember>,
         gold: u32,

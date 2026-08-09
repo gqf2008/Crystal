@@ -37,6 +37,24 @@ impl GuildRank {
     }
 }
 
+/// 行会职务定义（C# GuildObject.Ranks；任意数量，name + options 权限位）
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GuildRankDef {
+    pub index: u8,
+    pub name: String,
+    /// C# GuildRankOptions 位标志
+    pub options: u8,
+}
+
+/// 默认 3 档职务（0=会长 1=副会长 2=成员，权限取自 GuildRank::default_options）
+pub fn default_rank_defs() -> Vec<GuildRankDef> {
+    vec![
+        GuildRankDef { index: 0, name: "会长".to_string(), options: GuildRank::Leader.default_options() },
+        GuildRankDef { index: 1, name: "副会长".to_string(), options: GuildRank::Officer.default_options() },
+        GuildRankDef { index: 2, name: "成员".to_string(), options: GuildRank::Member.default_options() },
+    ]
+}
+
 /// 行会成员
 #[derive(Debug, Clone)]
 pub struct GuildMember {
@@ -44,8 +62,10 @@ pub struct GuildMember {
     pub name: String,
     /// Session ID（None = 离线）
     pub session_id: Option<u64>,
-    /// 成员 rank
+    /// 成员 rank（逻辑档：Leader/Officer/Member，权限判定用）
     pub rank: GuildRank,
+    /// 职务索引（rank_defs 下标，显示/改名/分组用；默认与档位一致）
+    pub rank_index: u8,
 }
 
 /// 行会
@@ -57,8 +77,8 @@ pub struct Guild {
     pub notice: Vec<String>,
     /// 成员列表
     pub members: Vec<GuildMember>,
-    /// 职务名（3 固定职务，C# 自定义职务名的简化；可改名）
-    pub rank_names: [String; 3],
+    /// 职务定义列表（C# GuildObject.Ranks：任意数量，name + options）
+    pub rank_defs: Vec<GuildRankDef>,
     /// 行会金币（仓库）
     pub gold: u64,
     /// 行会仓库物品（最多 100 格）
@@ -90,15 +110,12 @@ impl Guild {
                 "".to_string(),
                 "".to_string(),
             ],
-            rank_names: [
-                "会长".to_string(),
-                "副会长".to_string(),
-                "成员".to_string(),
-            ],
+            rank_defs: default_rank_defs(),
             members: vec![GuildMember {
                 name: leader_name,
                 session_id: Some(leader_session),
                 rank: GuildRank::Leader,
+                rank_index: 0,
             }],
             gold: 0,
             storage_items: vec![None; 100],
@@ -168,6 +185,7 @@ impl Guild {
                 name,
                 session_id,
                 rank: GuildRank::Member,
+                rank_index: 2,
             });
         }
     }
@@ -190,6 +208,42 @@ impl Guild {
     pub fn set_rank(&mut self, name: &str, rank: GuildRank) -> bool {
         if let Some(m) = self.members.iter_mut().find(|m| m.name == name) {
             m.rank = rank;
+            m.rank_index = rank as u8;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// #1395：职务显示名（rank_defs 下标，越界回退档位默认名）
+    pub fn rank_name(&self, rank_index: u8) -> String {
+        self.rank_defs
+            .iter()
+            .find(|d| d.index == rank_index)
+            .map(|d| d.name.clone())
+            .unwrap_or_else(|| "成员".to_string())
+    }
+
+    /// #1395：职务权限（rank_defs.options；越界回退档位默认）
+    pub fn rank_options(&self, rank_index: u8) -> u8 {
+        self.rank_defs
+            .iter()
+            .find(|d| d.index == rank_index)
+            .map(|d| d.options)
+            .unwrap_or(0)
+    }
+
+    /// #1395：添加职务（C# EditGuildMember ChangeType=4），返回新 index
+    pub fn add_rank(&mut self, name: &str) -> u8 {
+        let next = self.rank_defs.iter().map(|d| d.index).max().unwrap_or(0).saturating_add(1);
+        self.rank_defs.push(GuildRankDef { index: next, name: name.to_string(), options: 0 });
+        next
+    }
+
+    /// #1395：设置职务权限（C# EditGuildMember ChangeType=5 切位）
+    pub fn set_rank_options(&mut self, rank_index: u8, options: u8) -> bool {
+        if let Some(d) = self.rank_defs.iter_mut().find(|d| d.index == rank_index) {
+            d.options = options;
             true
         } else {
             false
