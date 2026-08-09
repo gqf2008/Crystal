@@ -3128,6 +3128,14 @@ impl WorldActor {
                 // #1312：C# CompleteMagic `Attacked()>0 → LevelMagic`——命中造成伤害才给经验
                 self.grant_spell_hit_exp(pending.session_id, pending.spell)
                     .await;
+                // #1483：读取弓手特殊箭武装（施放时 40% 设置，命中时消耗）
+                let special_armed = match self.players.get(&pending.session_id) {
+                    Some(r) => match r.actor_ref.ask(GetPlayerState).await {
+                        Ok(Some(s)) => s.special_shot_armed,
+                        _ => 0,
+                    },
+                    None => 0,
+                };
                 if let Some(monster) = self.monsters.get_mut(&target_id) {
                     monster.take_damage(result.damage);
                     monster.last_hitter_session = Some(pending.session_id);
@@ -3158,12 +3166,17 @@ impl WorldActor {
                             poison::Poison::new(PoisonType::PARALYSIS, 3, 0, 1000));
                     }
 
-                    // #377：弓手三连箭状态（C# SpecialArrowShot，buffTime=5+5*Lv）
-                    if spell == Spell::PoisonShot {
-                        let dur = super::special_shot_buff_time(pending.spell_level).max(1) as u32;
+                    // #1484：C# SpecialArrowShot——仅 PoisonShot buff 武装时命中施绿毒（C# 公式）
+                    if spell == Spell::PoisonShot && special_armed == 2 {
+                        let lv = pending.spell_level as i32;
+                        let dur = (result.damage * 2 + (lv + 1) * 7).max(1) as u32;
+                        let val = (result.damage / 25 + lv + 1
+                            + fastrand::i32(0..caster_state.poison_attack.max(1))).max(1);
                         poison::apply_poison(&mut monster.poison_list,
-                            poison::Poison::new(PoisonType::GREEN, dur, (pending.damage / 10).max(1), 1000));
-                        debug!("PoisonShot poisoned monster {} ({}s)", target_id, dur);
+                            poison::Poison::new(PoisonType::GREEN, dur, val, 2000));
+                        let _ = self.players.get(&pending.session_id)
+                            .map(|r| r.actor_ref.tell(crate::actors::player::SetSpecialShotArmed { armed: 0 }).try_send());
+                        debug!("PoisonShot buff consumed -> green poison {} ({}s)", val, dur / 10);
                     }
                     if spell == Spell::CrippleShot {
                         let dur = super::special_shot_buff_time(pending.spell_level).max(1) as u32;
@@ -3177,12 +3190,15 @@ impl WorldActor {
                             poison::Poison::new(PoisonType::FROZEN, (pending.spell_level as u32 + 1) * 3, 0, 1000));
                         debug!("CatTongue froze monster {} ({}s)", target_id, (pending.spell_level as u32 + 1) * 3);
                     }
-                    if spell == Spell::VampireShot {
-                        let vamp = (result.damage as f32 * 0.25) as i32;
+                    if spell == Spell::VampireShot && special_armed == 1 {
+                        // #1484：C# VampAmount = value*(Lv+1)*0.25（命中消耗 buff）
+                        let vamp = (result.damage as f32 * (pending.spell_level as f32 + 1.0) * 0.25) as i32;
                         if vamp > 0 {
                             self.vamp_heals.push((pending.session_id, vamp));
                         }
-                        debug!("VampireShot leeched {} HP on monster {}", vamp, target_id);
+                        let _ = self.players.get(&pending.session_id)
+                            .map(|r| r.actor_ref.tell(crate::actors::player::SetSpecialShotArmed { armed: 0 }).try_send());
+                        debug!("VampireShot buff consumed -> leeched {} HP", vamp);
                     }
 
                     // Vampirism：吸血 = 实伤 × (level+1) × 0.25（C# HumanObject.cs:6011）

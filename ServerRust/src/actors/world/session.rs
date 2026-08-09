@@ -3546,6 +3546,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         allow_lover_recall: false,
         is_gm: false,
         gm_never_die: false, // #1480：GM 无敌模式（C# GMNeverDie）
+        special_shot_armed: 0, // #1483：弓手特殊箭武装（0=无 1=Vampire 2=Poison）
         has_expanded_storage: false,
         expanded_storage_expiry_date: 0,
         has_storage_password: false,
