@@ -314,9 +314,8 @@ impl Message<WorldAttackRequest> for WorldActor {
                             raw_damage = ((raw_damage as f32) * (0.2 + 0.05 * lv as f32)).max(1.0) as i32;
                         }
                     }
-                    // LevelOffset: 防御方等级高于攻击方时为 0，否则取等级差上限 10
-                    // 怪物暂无 level 字段（按 0 处理），玩家攻击怪物时 level_offset = min(10, player_level)
-                    let level_offset = state.level.min(10) as u16;
+                    // #1451：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                    let level_offset = crate::combat::attack::level_offset(state.level, monster.level.max(0) as u16);
                     let attack_result = combat_attack::resolve_attack(
                         &attacker_stats, &defender_stats, raw_damage,
                         mir2_shared::enums::DefenceType::AcAgility, level_offset,
@@ -1607,19 +1606,6 @@ fn plague_cells(tx: i32, ty: i32) -> Vec<(i32, i32)> {
         }
     }
     cells
-}
-
-/// #328 Plague：C# 随机毒表（Random.Next(15)：0-2 Slow、3-4 Frozen、5-9 Green、10-14 None）
-fn plague_poison(roll: i32) -> mir2_shared::enums::PoisonType {
-    if roll < 3 {
-        mir2_shared::enums::PoisonType::SLOW
-    } else if roll < 5 {
-        mir2_shared::enums::PoisonType::FROZEN
-    } else if roll < 10 {
-        mir2_shared::enums::PoisonType::GREEN
-    } else {
-        mir2_shared::enums::PoisonType::NONE
-    }
 }
 
 /// #328 Plague：毒强度（C# Red → value/15+Lv+1；其余 value+(Lv+1)*2）
@@ -3874,6 +3860,18 @@ impl Message<MagicRequest> for WorldActor {
                     debug!("Magic: {} casts Plague but has no amulet", state.name);
                     return;
                 }
+                // #1453：C# Plague——毒型由装备毒护符决定（GetPoison(1,1)=绿 / (1,2)=红）并消耗 1；无毒护符只伤害
+                let poison_shape = state.equipped_poison_shape();
+                let mut ptype = match poison_shape {
+                    1 => mir2_shared::enums::PoisonType::GREEN,
+                    2 => mir2_shared::enums::PoisonType::RED,
+                    _ => mir2_shared::enums::PoisonType::NONE,
+                };
+                if poison_shape != 0 {
+                    if !record.actor_ref.ask(crate::actors::player::ConsumePoisonAmuletForPlague { shape: poison_shape as u16 }).await.unwrap_or(false) {
+                        ptype = mir2_shared::enums::PoisonType::NONE;
+                    }
+                }
                 let value = if let Some(info) = spell_db {
                     crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
                 } else { fastrand::i32(5..=12) }.max(1);
@@ -3887,8 +3885,6 @@ impl Message<MagicRequest> for WorldActor {
                     .collect();
                 let mut spell_hits: Vec<(u32, i32, i32, u8, i32)> = Vec::new();
                 for mid in hit_ids {
-                    // 随机毒（C# Map.cs 概率表）
-                    let ptype = plague_poison(fastrand::i32(0..15));
                     if let Some(monster) = self.monsters.get_mut(&mid) {
                         let temp_value = plague_temp_value(value, spell_level, ptype);
                         if ptype != mir2_shared::enums::PoisonType::NONE {
@@ -4676,18 +4672,6 @@ mod spell_geometry_tests {
     }
 
     #[test]
-    fn plague_poison_table() {
-        use mir2_shared::enums::PoisonType;
-        assert_eq!(plague_poison(0), PoisonType::SLOW);
-        assert_eq!(plague_poison(2), PoisonType::SLOW);
-        assert_eq!(plague_poison(3), PoisonType::FROZEN);
-        assert_eq!(plague_poison(4), PoisonType::FROZEN);
-        assert_eq!(plague_poison(5), PoisonType::GREEN);
-        assert_eq!(plague_poison(9), PoisonType::GREEN);
-        assert_eq!(plague_poison(10), PoisonType::NONE);
-        assert_eq!(plague_poison(14), PoisonType::NONE);
-    }
-
     #[test]
     fn plague_values() {
         use mir2_shared::enums::PoisonType;
