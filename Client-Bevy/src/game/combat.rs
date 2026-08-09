@@ -202,8 +202,13 @@ fn apply_combat_events(
                 }
             }
             CombatEvent::PlayerStruck => {
-                // C# S.Struck：本地玩家受击动画 + 音效
-                crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, 10060);
+                // C# S.Struck：本地玩家受击动画 + 音效（#1564：性别 flinch，C# PlayFlinchSound）
+                crate::game::sound::play_sound(
+                    &mut commands,
+                    &mut audio_assets,
+                    &sound_bank,
+                    crate::game::sound::player_flinch_sound(hud.gender),
+                );
                 for (e, id, mut anim, _mon) in &mut actors {
                     if hud.player_object_id == Some(id.0) {
                         anim.action = mir2_shared::enums::MirAction::Struck;
@@ -257,6 +262,15 @@ fn apply_combat_events(
                 }
             }
             CombatEvent::Died { object_id, .. } => {
+                // #1564：本地玩家死亡音（C# PlayDieSound 按性别）
+                if hud.player_object_id == Some(*object_id) {
+                    crate::game::sound::play_sound(
+                        &mut commands,
+                        &mut audio_assets,
+                        &sound_bank,
+                        crate::game::sound::player_die_sound(hud.gender),
+                    );
+                }
                 for (e, id, mut anim, _mon) in &mut actors {
                     if id.0 == *object_id {
                         anim.action = mir2_shared::enums::MirAction::Dead;

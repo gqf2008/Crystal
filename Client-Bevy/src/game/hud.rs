@@ -46,6 +46,8 @@ pub struct HudState {
     pub gender: u8,
     /// 是否骑乘中（MountUpdated 本地玩家，#1544：骑乘时仅 Scroll/Potion/Torch 可用）
     pub riding: bool,
+    /// 坐骑类型（MountUpdated 本地玩家，#1564：骑乘音效区分 Tiger/Wolf）
+    pub mount_type: i16,
     /// 是否钓鱼中（FishingUpdate 本地玩家，#1544：钓鱼时不可使用物品）
     pub fishing: bool,
     /// #1550：陷阱岩石（C# User.InTrapRock：陷阱中不可走/跑）
@@ -88,6 +90,7 @@ impl Default for HudState {
             class: 0,
             gender: 0,
             riding: false,
+            mount_type: 0,
             fishing: false,
             in_trap_rock: false,
             sprint: false,
@@ -1049,12 +1052,14 @@ fn hud_server_events(
             }
             ServerEvent::MountUpdated {
                 object_id,
+                mount_type,
                 is_mounted,
-                ..
             } => {
                 // #1544：本地玩家骑乘状态（C# User.RidingMount；骑乘时仅 Scroll/Potion/Torch 可用）
                 if Some(*object_id) == hud.player_object_id {
                     hud.riding = *is_mounted;
+                    // #1564：记录坐骑类型（骑乘音效 Tiger/Wolf 区分）
+                    hud.mount_type = *mount_type;
                 }
             }
             ServerEvent::Chat { .. }
