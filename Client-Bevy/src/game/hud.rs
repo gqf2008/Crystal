@@ -17,7 +17,6 @@ use crate::game::dialogs::{DialogKind, DialogManager};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
-use crate::ui::sprite_ui::ui_image_opaque;
 use crate::ui::sprite_ui::UiButton;
 use crate::ui::sprite_ui::{
     spawn_ui_sprite, spawn_ui_text, ui_button_system, ui_image, UiEntity, UiFont, UiImageCache,
@@ -389,14 +388,16 @@ fn spawn_hud(
     commands.spawn((UiEntity, HudData::default()));
 
     // 背景
-    if let Some(h) = ui_image_opaque(
+    // HUD 底条 Prguse[1] 数据本身 41% 不透明（黑底透明+装饰）：用原始 alpha（黑→透明 workaround
+    // 对数据已是透明的黑像素无影响），恢复 C# 半透明装饰效果，而不是实心黑带。
+    if let Some(h) = ui_image(
         &mut libs,
         &mut images,
         &mut cache,
         LibraryName::Prguse,
         resolution_index,
     ) {
-        // 用不透明加载（黑→透明 workaround 会毁掉黑底 HUD 底条）；恢复原 spawn
+        // z=2.0：>=2 避开深度剔除（<2 的 UI 精灵不渲染）
         spawn_ui_sprite(&mut commands, h, main_x, main_y, 2.0, 1.0);
     }
 

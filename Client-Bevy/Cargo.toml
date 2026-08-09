@@ -52,3 +52,6 @@ strip = true
 # 让原生候选窗正常弹出。见 ../vendor/winit-0.30.13 内 [CRYSTAL PATCH] 注释。
 [patch.crates-io]
 winit = { path = "../vendor/winit-0.30.13" }
+# parley CJK 修复：new_for_non_complex_scripts -> new_auto（中文文字渲染）
+parley = { path = "vendor/parley" }
+
