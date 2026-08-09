@@ -538,6 +538,11 @@ impl Message<WorldAttackRequest> for WorldActor {
                     debug!("Player {} hit monster '{}' (#{}) for {} dmg (crit={}, slaying={}) (hp={}/{})",
                            result.object_id, monster.name, *oid, total_dmg, attack_result.is_critical, slaying_bonus, monster.hp, monster.max_hp);
 
+                    // #1582：C# MonsterObject.Attacked——受击时转向攻击者（PointDirection）
+                    monster.direction = crate::actors::world::ai::direction_towards(
+                        monster.x, monster.y, result.x, result.y,
+                    );
+
                     // 发送 ObjectStruck（受击动画）
                     let mut struck_body = Vec::new();
                     struck_body.extend_from_slice(&monster.object_id.to_le_bytes());
@@ -1488,6 +1493,8 @@ impl Message<RangeAttackRequest> for WorldActor {
                 fire_at_tick,
                 session_id: msg.session_id,
                 attacker_object_id: object_id,
+                attacker_x: state.x,
+                attacker_y: state.y,
                 direction: msg.direction,
                 target: RangeTarget::Monster(msg.target_id),
                 target_x,
@@ -1555,6 +1562,8 @@ impl Message<RangeAttackRequest> for WorldActor {
                     fire_at_tick,
                     session_id: msg.session_id,
                     attacker_object_id: object_id,
+                    attacker_x: state.x,
+                    attacker_y: state.y,
                     direction: msg.direction,
                     target: RangeTarget::Player(defender_session),
                     target_x,
@@ -1737,6 +1746,9 @@ pub struct PendingRangeCompletion {
     pub session_id: u64,
     /// 攻击者 object_id（反馈包用）
     pub attacker_object_id: u32,
+    /// 攻击者位置快照（#1582：受击时怪物转向攻击者）
+    pub attacker_x: i32,
+    pub attacker_y: i32,
     pub direction: u8,
     /// 目标（怪物 object_id / 玩家 session）
     pub target: RangeTarget,
