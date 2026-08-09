@@ -228,14 +228,19 @@ pub(crate) fn setup_world(
         tracing::warn!("[DIAG] 相机定位失败！Camera2d 数量={}", camera.iter().count());
     }
 
-    // 构建可行走网格（M8 寻路）
+    // 构建可行走网格（M8 寻路）+ 门索引网格（#1550）
     let mut walkable = Vec::with_capacity(map.width as usize);
+    let mut doors = Vec::with_capacity(map.width as usize);
     for x in 0..map.width {
         let mut col = Vec::with_capacity(map.height as usize);
+        let mut dcol = Vec::with_capacity(map.height as usize);
         for y in 0..map.height {
-            col.push(map.map_cells[x as usize][y as usize].is_walkable());
+            let cell = &map.map_cells[x as usize][y as usize];
+            col.push(cell.is_walkable());
+            dcol.push(cell.door_index);
         }
         walkable.push(col);
+        doors.push(dcol);
     }
     // 诊断：可走格统计（#57 排查 0.map 寻路失败）
     {
@@ -258,6 +263,7 @@ pub struct GameData {
         width: map.width,
         height: map.height,
         walkable,
+        doors,
     });
     game_data.map_reader = Some(std::sync::Arc::new(map));
 
@@ -400,3 +406,5 @@ pub fn make_image(rgba: Vec<u8>, width: u32, height: u32) -> Image {
         RenderAssetUsages::default(),
     )
 }
+
+

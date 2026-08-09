@@ -48,6 +48,8 @@ pub struct HudState {
     pub riding: bool,
     /// 是否钓鱼中（FishingUpdate 本地玩家，#1544：钓鱼时不可使用物品）
     pub fishing: bool,
+    /// #1550：陷阱岩石（C# User.InTrapRock：陷阱中不可走/跑）
+    pub in_trap_rock: bool,
     /// 自动喝药开关（HP < 35% 自动使用背包药品）
     pub auto_pot_hp: bool,
     /// 玩家死亡（Death 包置位，Revived 清除；死亡时禁用输入/显示遮罩）
@@ -83,6 +85,7 @@ impl Default for HudState {
             gender: 0,
             riding: false,
             fishing: false,
+            in_trap_rock: false,
             auto_pot_hp: true,
             dead: false,
             reincarnation_offered: false,
@@ -1033,6 +1036,10 @@ fn hud_server_events(
             ServerEvent::FishingUpdate { progress, .. } => {
                 // #1544：钓鱼中不可使用物品（C# MirItemCell.UseItem 非英雄格 User.Fishing 检查）
                 hud.fishing = *progress != 0;
+            }
+            ServerEvent::TrapRockChanged { in_trap } => {
+                // #1550：C# User.InTrapRock——陷阱中不可走/跑
+                hud.in_trap_rock = *in_trap;
             }
             ServerEvent::MountUpdated {
                 object_id,
