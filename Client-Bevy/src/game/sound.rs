@@ -103,6 +103,22 @@ pub fn attack_swing_sound(
     })
 }
 
+/// #1568：怪物受击音（C# MonsterObject.PlayStruckSound，MonsterObject.cs:3966）按攻击者武器形状：
+/// StruckWooden(10061)/StruckShort(10060)/StruckSword(10062)/StruckSword2(10063)/StruckAxe(10064)/StruckClub(10065)；
+/// 未匹配（如无武器）C# 无 default → 不发音（返回 None）。
+pub fn monster_struck_sound(weapon_shape: i16) -> Option<u32> {
+    Some(match weapon_shape {
+        0 | 23 | 28 | 40 => 10061, // StruckWooden
+        1 | 12 => 10060,           // StruckShort
+        2 | 8 | 11 | 15 | 18 | 20 | 25 | 31 | 33 | 34 | 37 | 41 => 10062, // StruckSword
+        3 | 5 | 7 | 9 | 13 | 19 | 24 | 26 | 29 | 32 | 35 => 10063,       // StruckSword2
+        4 | 14 | 16 | 38 => 10064,                                        // StruckAxe
+        6 | 10 | 17 | 22 | 27 | 30 | 36 | 39 => 10060,                    // StruckShort
+        21 => 10065,                                                       // StruckClub
+        _ => return None,
+    })
+}
+
 /// #1564：玩家受击 flinch 音（C# PlayerObject.cs:749 FlinchSound：MaleFlinch 10138 / FemaleFlinch 10139）
 pub fn player_flinch_sound(gender: u8) -> u32 {
     if gender == 0 {
@@ -271,6 +287,23 @@ mod tests {
         // 骑乘：mount_type<7 → TigerAttack1(10181)；>=7 → WolfAttack1(10190)
         assert_eq!(attack_swing_sound(MirClass::Warrior as u8, true, 0, 5), Some(10181));
         assert_eq!(attack_swing_sound(MirClass::Warrior as u8, true, 7, 5), Some(10190));
+    }
+
+    #[test]
+    fn monster_struck_sound_weapon_shapes_match_csharp() {
+        // #1568：C# MonsterObject.PlayStruckSound 形状分组
+        for shape in [0i16, 23, 28, 40] {
+            assert_eq!(monster_struck_sound(shape), Some(10061)); // StruckWooden
+        }
+        for shape in [1i16, 12, 6, 10, 17, 22, 27, 30, 36, 39] {
+            assert_eq!(monster_struck_sound(shape), Some(10060)); // StruckShort
+        }
+        assert_eq!(monster_struck_sound(2), Some(10062)); // StruckSword
+        assert_eq!(monster_struck_sound(3), Some(10063)); // StruckSword2
+        assert_eq!(monster_struck_sound(4), Some(10064)); // StruckAxe
+        assert_eq!(monster_struck_sound(21), Some(10065)); // StruckClub
+        // 无武器（C# 无 default）→ 不发音
+        assert_eq!(monster_struck_sound(-1), None);
     }
 
     #[test]

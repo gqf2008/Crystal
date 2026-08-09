@@ -15,7 +15,8 @@ use bevy::sprite::Anchor;
 /// 服务器战斗事件（网络 handler 发送，战斗系统消费）
 #[derive(Message, Debug, Clone, Copy)]
 pub enum CombatEvent {
-    Struck { object_id: u32, direction: u8 },
+    /// 对象受击（S.ObjectStruck：怪物/NPC 受击动画；#1568 带攻击者用于受击音）
+    Struck { object_id: u32, attacker_id: u32, direction: u8 },
     /// S.Struck：本地玩家被击中（C# User.Struck 受击动画）
     PlayerStruck,
     /// S.ObjectHealth：对象血量百分比（C# 头顶血条）
@@ -189,8 +190,18 @@ fn apply_combat_events(
 ) {
     for ev in events.read() {
         match ev {
-            CombatEvent::Struck { object_id, direction } => {
-                crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, 10060);
+            CombatEvent::Struck { object_id, attacker_id, direction } => {
+                // #1568：C# MonsterObject.PlayStruckSound——本地玩家攻击时按自己武器播受击音
+                let struck_sound = if hud.player_object_id == Some(*attacker_id) {
+                    crate::game::sound::monster_struck_sound(
+                        hud.equipment.get(0).and_then(|s| s.as_ref()).map(|i| i.shape).unwrap_or(-1),
+                    )
+                } else {
+                    Some(10060) // 默认 StruckShort（非本地玩家攻击者武器未知）
+                };
+                if let Some(sound_id) = struck_sound {
+                    crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
+                }
                 for (e, id, mut anim, _mon) in &mut actors {
                     if id.0 == *object_id {
                         anim.action = mir2_shared::enums::MirAction::Attack1;
