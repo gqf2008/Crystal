@@ -46,7 +46,7 @@ pub(crate) fn handle_npc_items(    net: &mut NetConnection,
         // ---- M10: 战斗反馈 ----
         x if x == ServerPacketIds::ObjectStruck as i16 => {
             if let Ok(p) = combat::ObjectStruck::read_body(&mut cur) {
-                combat_evt.write(CombatEvent::Struck { object_id: p.object_id, direction: p.direction });
+                combat_evt.write(CombatEvent::Struck { object_id: p.object_id, attacker_id: p.attacker_id, direction: p.direction });
                 // M38：选中的目标受击 → 命中爆炸特效
                 if control.attack_target == Some(p.object_id) {
                     effects.write(PendingEffect::Burst {
