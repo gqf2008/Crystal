@@ -1052,7 +1052,12 @@ impl WorldActor {
                             support_intents.push((snap.session_id, snap.session_id, Spell::MassHealing as u8, true));
                             magic_anim_intents.push((snap.session_id, Spell::MassHealing as u8, hero_oid));
                         } else if hero_hp_pct < 90 {
-                            let amount = hero_heal_amount(&self.magic_infos, &snap.hero_magics, &hero_stats, snap.hero_level);
+                            let amount = hero_heal_amount(
+                                &self.magic_infos,
+                                &snap.hero_magics,
+                                &hero_stats,
+                                snap.hero_level,
+                            );
                             ai_local.hp = (ai_local.hp + amount).min(ai_local.max_hp);
                             magic_anim_intents.push((snap.session_id, Spell::Healing as u8, hero_oid));
                         } else {
@@ -2020,7 +2025,12 @@ impl WorldActor {
                             if *spell_id == mir2_shared::enums::Spell::MassHealing as u8 {
                                 hero_mass_heal_amount(&self.magic_infos, &s.hero_magics, &s.hero_stats, s.class)
                             } else {
-                                hero_heal_amount(&self.magic_infos, &s.hero_magics, &s.hero_stats, s.hero_level)
+                                hero_heal_amount(
+                                    &self.magic_infos,
+                                    &s.hero_magics,
+                                    &s.hero_stats,
+                                    s.hero_level,
+                                )
                             }
                         })
                         .unwrap_or(5);
@@ -3551,7 +3561,10 @@ mod tests {
         // 未学技能（magics 空）：hero_magic_level=0 → .max(1)=1，公式仍按 1 级
         assert_eq!(healing_from_sc(&infos, &[], 10, 5), 25);
         // 无魔法信息兜底：sc*2 + level
-        assert_eq!(healing_from_sc(&std::collections::HashMap::new(), &magics, 10, 5), 25);
+        assert_eq!(
+            healing_from_sc(&std::collections::HashMap::new(), &magics, 10, 5),
+            25
+        );
     }
 
 }
