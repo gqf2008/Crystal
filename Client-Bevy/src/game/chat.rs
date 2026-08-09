@@ -439,7 +439,7 @@ fn spawn_chat(
         Sprite {
             image: white,
             custom_size: Some(Vec2::new(360.0, 172.0)),
-            color: Color::srgba(0.0, 0.0, 0.0, 0.55),
+            color: Color::srgba(0.0, 0.0, 0.0, 0.72),
             ..default()
         },
         Transform::from_xyz(panel_x + 180.0, -(panel_y + 75.0), 1.5),
@@ -513,7 +513,7 @@ fn spawn_chat(
         },
         Anchor::TOP_LEFT,
         Transform::from_xyz(CHAT_INPUT_X + 0.0, -(CHAT_INPUT_Y + 1.0), 1.9),
-        Visibility::Hidden,
+        Visibility::Visible,
     ));
     commands.spawn((
         UiEntity,
@@ -1081,16 +1081,9 @@ fn chat_display_system(
 fn chat_input_ui_system(
     chat: Res<ChatState>,
     time: Res<Time>,
-    mut bg: Query<&mut Visibility, (With<ChatInputBg>, Without<ChatInputCursor>)>,
-    mut cursors: Query<
-        (&mut Visibility, &mut Transform),
-        (With<ChatInputCursor>, Without<ChatInputBg>),
-    >,
+    mut cursors: Query<(&mut Visibility, &mut Transform), With<ChatInputCursor>>,
 ) {
     let active = chat.input_active;
-    for mut v in &mut bg {
-        *v = if active { Visibility::Visible } else { Visibility::Hidden };
-    }
     for (mut v, mut tf) in &mut cursors {
         // 光标闪烁（约 2Hz）
         *v = if active && (time.elapsed_secs() * 2.0) as i64 % 2 == 0 {

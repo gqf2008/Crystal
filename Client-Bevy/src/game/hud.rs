@@ -12,6 +12,7 @@ use bevy::sprite::Anchor;
 
 use crate::game::dialogs::character::CharPage;
 use crate::game::dialogs::inventory::InvItem;
+use crate::game::dialogs::keyboard_layout::{key_name, KeyboardState};
 use crate::game::dialogs::{DialogKind, DialogManager};
 use crate::map_renderer::GameLibraries;
 use crate::resources::libraries::LibraryName;
@@ -181,6 +182,60 @@ fn hero_btn_system(hero: Res<crate::game::dialogs::hero::HeroState>, mut btns: Q
     }
 }
 
+/// HUD 按钮悬停提示（C# MirButton Hint：名称 + 快捷键；source=11 与对话框 tooltip 隔离）
+fn hud_tooltip_system(
+    kb: Res<KeyboardState>,
+    mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
+    windows: Query<&Window>,
+    ui_cameras: Query<(&Camera, &GlobalTransform), With<UiEntity>>,
+    buttons: Query<(&UiButton, &HudButton)>,
+) {
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    let Ok((cam, gtf)) = ui_cameras.single() else { return };
+    let Ok(world) = cam.viewport_to_world_2d(gtf, cursor) else { return };
+    let cursor = Vec2::new(world.x, -world.y);
+
+    let mut hit: Option<(String, String)> = None;
+    for (btn, kind) in &buttons {
+        let (x, y, w, h) = btn.rect;
+        if cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h {
+            hit = hud_button_hint(kind.0, &kb);
+            break;
+        }
+    }
+    match hit {
+        Some((name, key)) => {
+            let line = if key.is_empty() {
+                name.clone()
+            } else {
+                format!("{}（{}）", name, key)
+            };
+            tooltip.update(11, true, name, vec![line], cursor.x, cursor.y);
+        }
+        None => tooltip.update(11, false, String::new(), Vec::new(), 0.0, 0.0),
+    }
+}
+
+/// HUD 按钮名称 + 绑定快捷键（无键位绑定的按钮只显示名称）
+fn hud_button_hint(kind: HudButtonKind, kb: &KeyboardState) -> Option<(String, String)> {
+    let (name, action): (&str, Option<&str>) = match kind {
+        HudButtonKind::Character => ("角色", Some("角色")),
+        HudButtonKind::Inventory => ("背包", Some("背包")),
+        HudButtonKind::Skills => ("技能", Some("技能")),
+        HudButtonKind::QuestLog => ("任务", Some("任务")),
+        HudButtonKind::Option => ("设置", Some("设置")),
+        HudButtonKind::Menu => ("菜单", None),
+        HudButtonKind::GameShop => ("商城", Some("商城")),
+        HudButtonKind::Hero => ("英雄", None),
+    };
+    let key = action
+        .and_then(|a| kb.bindings.iter().find(|b| b.action == a))
+        .map(|b| key_name(b.key))
+        .unwrap_or_default();
+    Some((name.to_string(), key))
+}
+
 /// HUD 按钮 → 对话框开关（M9：接入 DialogManager）
 fn hud_button_system(mut mgr: ResMut<DialogManager>, mut page: ResMut<CharPage>, buttons: Query<(&UiButton, &HudButton)>) {
     for (btn, kind) in &buttons {
@@ -290,6 +345,7 @@ impl Plugin for HudPlugin {
                 hero_btn_system,
                 hero_panel_system,
                 hud_space_weight_system,
+                hud_tooltip_system,
             )
                 .chain()
                 .run_if(in_state(AppState::Game)),
