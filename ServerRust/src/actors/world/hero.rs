@@ -2782,11 +2782,8 @@ fn hero_spell_damage(
         mir2_shared::enums::MirClass::Archer => (stats.min_mc, stats.max_mc),
         _ => (stats.min_dc, stats.max_dc),
     };
-    let base = if max_v > min_v {
-        (min_v + max_v) / 2
-    } else {
-        max_v.max(1)
-    };
+    // #1406：C# 法术伤害 = magic.GetDamage(GetAttackPower(Min/Max 主属性))——随机攻击力（含幸运判定），非均值
+    let base = crate::combat::attack::get_attack_power(min_v, max_v, 0).max(1);
     match magic_infos.get(&(spell_cs as u32)) {
         Some(info) => crate::combat::magic::calc_magic_damage(info, level, base),
         None => base,
@@ -3565,6 +3562,55 @@ mod tests {
             healing_from_sc(&std::collections::HashMap::new(), &magics, 10, 5),
             25
         );
+    }
+
+
+    #[test]
+    fn hero_spell_damage_random_power_deterministic_when_min_eq_max() {
+        // #1406：GetAttackPower(Min,Max) 在 min==max 时确定（C# 同样）
+        // 构造简单 MagicInfo（multiplier=1、power=0）→ calc = base
+        let spell_cs = (mir2_shared::enums::Spell::MassHealing as u8 as i32).saturating_sub(3);
+        let info = crate::db::MagicInfo {
+            name: "MassHealing".to_string(),
+            spell: spell_cs,
+            base_cost: 4,
+            level_cost: 1,
+            icon: 0,
+            level1: 0,
+            level2: 0,
+            level3: 0,
+            need1: 0,
+            need2: 0,
+            need3: 0,
+            delay_base: 1000,
+            delay_reduction: 20,
+            power_base: 0,
+            power_bonus: 0,
+            mpower_base: 0,
+            mpower_bonus: 0,
+            range: 7,
+            multiplier_base: 1.0,
+            multiplier_bonus: 0.0,
+        };
+        let mut infos = std::collections::HashMap::new();
+        infos.insert(spell_cs as u32, info);
+        let magics = vec![(spell_cs, 1u8)];
+        // min==max==10 → base=10 → calc_magic_damage(10)=10
+        let stats = super::hero_stats::HeroStats {
+            min_sc: 10,
+            max_sc: 10,
+            ..Default::default()
+        };
+        for _ in 0..50 {
+            let dmg = hero_spell_damage(
+                &infos,
+                &magics,
+                mir2_shared::enums::Spell::MassHealing as u8,
+                &stats,
+                mir2_shared::enums::MirClass::Taoist,
+            );
+            assert_eq!(dmg, 10);
+        }
     }
 
 }
