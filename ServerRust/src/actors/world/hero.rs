@@ -558,6 +558,8 @@ pub struct HeroCombatAI {
     pub last_sent_mp: i32,
     /// 自身增益列表（#1190：C# Buffs）
     pub buffs: Vec<HeroBuff>,
+    /// 元素球等级（#1537：C# ElementsLevel；ArcherHero ElementalShot 聚球用）
+    pub elements_level: i32,
 }
 
 impl HeroCombatAI {
@@ -584,6 +586,7 @@ impl HeroCombatAI {
             max_mp,
             last_sent_mp: max_mp,
             buffs: Vec::new(),
+            elements_level: 0,
         }
     }
 }
@@ -1567,6 +1570,11 @@ impl WorldActor {
                         let poison_lv = hero_magic_level(&snap.hero_magics, Spell::PoisonShot as u8);
                         let straight_lv = hero_magic_level(&snap.hero_magics, Spell::StraightShot as u8);
                         let has_poison_buff = ai_local.buffs.iter().any(|b| b.kind == HeroBuffKind::PoisonShot);
+                        // #1537：C# ArcherHero ElementalShot 聚球条件（GetElementalOrbCount<1；需 Meditation）
+                        let elemental_lv = hero_magic_level(&snap.hero_magics, Spell::ElementalShot as u8);
+                        let meditation_lv = hero_magic_level(&snap.hero_magics, Spell::Meditation as u8);
+                        let orb_count = crate::actors::world::elements::elemental_orb_count(ai_local.elements_level);
+                        let can_elemental = elemental_lv > 0 && meditation_lv > 0 && orb_count < 1;
                         if poison_lv > 0 && !target.has_green && !has_poison_buff {
                             // #1194：C# SpecialArrowShot：PoisonShot 魔法箭（MC 伤害/MAC 防御）
                             let raw = hero_spell_damage(
@@ -1607,6 +1615,25 @@ impl WorldActor {
                                     &hero_combat, &mut attack_intents, &mut support_intents,
                                 );
                                 ai_local.next_attack_tick = self.tick_count + 6;
+                            }
+                        } else if can_elemental {
+                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::ElementalShot as u8);
+                            if ai_local.mp >= cost {
+                                ai_local.mp -= cost;
+                                // C# ObtainElement(true)：ElementsLevel = OrbsExpList[0]；Meditation Lv3 → [1]（GatherOrbsPerLevel）
+                                ai_local.elements_level = if meditation_lv >= 3 {
+                                    crate::actors::world::elements::ORBS_EXP_LIST[1]
+                                } else {
+                                    crate::actors::world::elements::ORBS_EXP_LIST[0]
+                                };
+                                magic_anim_intents.push((snap.session_id, Spell::ElementalShot as u8, target.oid));
+                                ai_local.next_attack_tick = self.tick_count + 10;
+                            } else {
+                                let _ = hero_melee_fallback(
+                                    snap.session_id, target.oid, target_dist,
+                                    &hero_combat, &mut attack_intents, &mut support_intents,
+                                );
+                                ai_local.next_attack_tick = self.tick_count + 10;
                             }
                         } else if straight_lv > 0 {
                             // #1194：C# StraightShot 用 MC 伤害（原 DC 为误对齐）
