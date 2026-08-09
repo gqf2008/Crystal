@@ -1284,6 +1284,19 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                     }
                                     if let Ok(p) = client::Attack::read_body(&mut cur) {
                                         tracing::info!("[MOCK] 攻击 dir={:?}", p.direction);
+                                        // #1580：本地玩家自己的挥击动画（对齐真实服务器回显）
+                                        send(
+                                            &to_client,
+                                            &server::combat::ObjectAttack {
+                                                object_id: 100,
+                                                location_x: 354,
+                                                location_y: 352,
+                                                direction: p.direction as u8,
+                                                spell: 0,
+                                                level: 0,
+                                                attack_type: 0,
+                                            },
+                                        );
                                         let target = 101u32; // 第一个怪物
                                         let hp = monster_hp.entry(target).or_insert(monster_def(target).hp_max);
                                         let damage = player_attack_damage(&player_equipment);
