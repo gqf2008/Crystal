@@ -2940,12 +2940,13 @@ impl Message<MagicRequest> for WorldActor {
                         debug!("Player {} armed {} special shot (40%)", state.name, if armed == 1 { "Vampire" } else { "Poison" });
                     }
                 }
-                // #1519/#1520：C# GetRangeAttackPower——min 随距离缩小（MaxAttackRange=9）；
-                // 保持 DC 基值（C# 技能用 MC，Rust 新建角色 MC=0，DC/MC 差异待专项确认）
+                // #1528：C# GetRangeAttackPower(MinMC, MaxMC, distance)——弓手技能用 MC（魔法箭），与英雄弓手一致
                 let archer_dist = (target_x - state.x).abs().max((target_y - state.y).abs());
-                let eff_min = range_attack_min_reduction(state.effective_min_attack(), archer_dist);
+                let mc_min = state.effective_min_mc();
+                let mc_max = state.effective_max_mc();
+                let eff_min = range_attack_min_reduction(mc_min, archer_dist);
                 let mut raw_damage = (crate::combat::attack::get_attack_power(
-                    eff_min, magic_stat, state.luck,
+                    eff_min, mc_max, state.luck,
                 ) + (power as i32) / 2).max(1);
                 // ElementalShot（C# HumanObject.ElementalShot）：无元素时施法凝聚第一档并取消射击；
                 // 有元素时伤害 = GetAttackPower(MinMC, MaxMC) + 元素球攻击加成（OrbsDmgList）
@@ -2992,7 +2993,7 @@ impl Message<MagicRequest> for WorldActor {
                     target_x,
                     target_y,
                     damage: raw_damage,
-                    magic_stat,
+                    magic_stat: mc_max,
                     hero_stats: None,
                     hero_level: None,
                     spell_level,
@@ -3009,7 +3010,7 @@ impl Message<MagicRequest> for WorldActor {
                         target_x,
                         target_y,
                         damage: raw_damage,
-                        magic_stat,
+                        magic_stat: mc_max,
                         hero_stats: None,
                         hero_level: None,
                         spell_level,
