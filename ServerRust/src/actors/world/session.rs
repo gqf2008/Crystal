@@ -803,6 +803,36 @@ impl Message<WorldMoveRequest> for WorldActor {
                 send_system_message(&self.gate_ref, msg.session_id, "负重过重，无法移动！");
                 return;
             }
+
+            // #1408：C# Walk/Run 阻挡校验——NPC / 未摧毁城墙城门阻挡通行（run 同时校验中间格）
+            let dir = msg.direction as usize % 8;
+            let steps = if msg.is_run { 2 } else { 1 };
+            let npc_tiles: Vec<(i32, i32)> = self.npcs.values()
+                .filter(|n| n.map_index == state.map_index)
+                .map(|n| (n.x, n.y))
+                .collect();
+            let struct_tiles: Vec<(i32, i32)> = self.siege_structures.values()
+                .filter(|s| s.is_blocking() && !s.is_destroyed())
+                .filter(|s| self.conquest_instances.iter().any(|c| c.id == s.conquest_id && c.map_index == state.map_index as i32))
+                .map(|s| (s.x, s.y))
+                .collect();
+            let mut blocked = tile_blocked_by(
+                state.x + super::MON_DIR_DX[dir] * steps,
+                state.y + super::MON_DIR_DY[dir] * steps,
+                &npc_tiles,
+                &struct_tiles,
+            );
+            if steps == 2 {
+                blocked |= tile_blocked_by(
+                    state.x + super::MON_DIR_DX[dir],
+                    state.y + super::MON_DIR_DY[dir],
+                    &npc_tiles,
+                    &struct_tiles,
+                );
+            }
+            if blocked {
+                return;
+            }
         }
 
         // Phase 1.4: 反作弊 — 速度 hack 检测
@@ -3394,6 +3424,11 @@ fn format_roll_message(player_name: &str, dice: i32) -> String {
     format!("{} 掷出了 {} 点", player_name, dice)
 }
 
+/// #1408：目标格是否被阻挡（NPC 或攻城结构占用，C# 移动阻挡语义）
+fn tile_blocked_by(tx: i32, ty: i32, npc_tiles: &[(i32, i32)], struct_tiles: &[(i32, i32)]) -> bool {
+    npc_tiles.contains(&(tx, ty)) || struct_tiles.contains(&(tx, ty))
+}
+
 /// #1344：构建 S.ObjectChat body（wire 对齐 C# ObjectChat：[ObjectID u32][Text dotnet][ChatType u8]）
 fn object_chat_body(object_id: u32, text: &str, chat_type: u8) -> Vec<u8> {
     let mut body = Vec::new();
@@ -3405,7 +3440,7 @@ fn object_chat_body(object_id: u32, text: &str, chat_type: u8) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_roll_message, object_chat_body};
+    use super::{format_roll_message, object_chat_body, tile_blocked_by};
 
     #[test]
     fn test_roll_message_format() {
@@ -3438,5 +3473,16 @@ mod tests {
         assert_eq!(&body[0..4], &[7, 0, 0, 0]);
         assert_eq!(body[4], 0);
         assert_eq!(body[5], 5); // ChatType
+    }
+
+    #[test]
+    fn test_tile_blocked_by() {
+        // #1408：NPC 或攻城结构占用目标格 → 阻挡
+        let npcs = vec![(170i32, 667i32), (200, 300)];
+        let walls = vec![(350i32, 350i32)];
+        assert!(tile_blocked_by(170, 667, &npcs, &walls));
+        assert!(tile_blocked_by(350, 350, &npcs, &walls));
+        assert!(!tile_blocked_by(171, 667, &npcs, &walls));
+        assert!(!tile_blocked_by(100, 100, &[], &[]));
     }
 }
