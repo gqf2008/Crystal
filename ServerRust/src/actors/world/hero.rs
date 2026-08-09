@@ -1237,21 +1237,6 @@ impl WorldActor {
                                 continue;
                             }
                         }
-                        // #1212：C# WizardHero：目标亡灵且已学 → TurnUndead（超度）
-                        let turn_lv = hero_magic_level(&snap.hero_magics, Spell::TurnUndead as u8);
-                        if target.undead && turn_lv > 0 {
-                            let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::TurnUndead as u8);
-                            if ai_local.mp >= cost {
-                                ai_local.mp -= cost;
-                                if hero_turn_undead_kills(snap.hero_level as i32, target.level, turn_lv) {
-                                    turn_undead_intents.push((snap.session_id, target.oid));
-                                }
-                                magic_anim_intents.push((snap.session_id, Spell::TurnUndead as u8, target.oid));
-                                ai_local.next_attack_tick = self.tick_count + 8;
-                                *ai = ai_local;
-                                continue;
-                            }
-                        }
                         // #1204：C# WizardHero：自身被围（2 格内怪>1 且目标距离<3）→ FlameField/ThunderStorm（5x5 自身 AoE）
                         let monsters_xy: Vec<(u32, i32, i32)> =
                             monster_snaps.iter().map(|m| (m.oid, m.x, m.y)).collect();
@@ -1338,6 +1323,23 @@ impl WorldActor {
                                     ai_local.next_attack_tick = self.tick_count + 6;
                                 }
                             } else {
+                                // #1535：C# WizardHero 顺序——TurnUndead 在 AoE 之后、单体弹道之前；条件 Target.Level < Level
+                                let turn_lv = hero_magic_level(&snap.hero_magics, Spell::TurnUndead as u8);
+                                if target.undead && turn_lv > 0
+                                    && target.level < snap.hero_level as i32
+                                {
+                                    let cost = hero_spell_cost(&self.magic_infos, &snap.hero_magics, Spell::TurnUndead as u8);
+                                    if ai_local.mp >= cost {
+                                        ai_local.mp -= cost;
+                                        if hero_turn_undead_kills(snap.hero_level as i32, target.level, turn_lv) {
+                                            turn_undead_intents.push((snap.session_id, target.oid));
+                                        }
+                                        magic_anim_intents.push((snap.session_id, Spell::TurnUndead as u8, target.oid));
+                                        ai_local.next_attack_tick = self.tick_count + 8;
+                                        *ai = ai_local;
+                                        continue;
+                                    }
+                                }
                                 // #1188：C# WizardHero 单体弹道优先级：FlameDisruptor → Vampirism → FrostCrunch → ThunderBolt → GreatFireBall → FireBall
                                 let learned = first_learned_spell(
                                     &snap.hero_magics,
