@@ -270,7 +270,7 @@ impl Default for ChatState {
             tab: ChatChannel::All,
             input_active: false,
             input_text: String::new(),
-            visible_lines: 8,
+            visible_lines: 4,
             scroll_up: 0,
             size: 1,
             last_pm: None,
@@ -326,9 +326,9 @@ struct ChatInputBg;
 #[derive(Component)]
 struct ChatInputCursor;
 
-/// 聊天输入框位置（spawn_chat：panel_x+4=10, panel_y+150=578）
-const CHAT_INPUT_X: f32 = 10.0;
-const CHAT_INPUT_Y: f32 = 578.0;
+/// 聊天输入框位置（C# ChatTextBox @ (1,54) → 绝对坐标 (231,725)，宽 627）
+const CHAT_INPUT_X: f32 = 231.0;
+const CHAT_INPUT_Y: f32 = 725.0;
 
 /// 频道页签按钮
 #[derive(Component)]
@@ -345,10 +345,6 @@ struct ChatBarBtn(&'static str, &'static str);
 /// 聊天设置按钮（打开 ChatOptionDialog）
 #[derive(Component)]
 struct ChatSettingsBtn;
-
-/// 窗口尺寸切换按钮（C# ChatPanel SizeButton）
-#[derive(Component)]
-struct ChatSizeBtn;
 
 /// 聊天设置面板背景（透明开关改 alpha）
 #[derive(Component)]
@@ -374,6 +370,7 @@ impl Plugin for ChatPlugin {
         app.init_resource::<ChatItemCache>();
         app.add_systems(OnEnter(AppState::Game), spawn_chat);
         app.add_systems(OnEnter(AppState::Game), chat_apply_persisted_tab);
+        app.add_systems(OnEnter(AppState::Game), chat_welcome);
         app.add_systems(OnEnter(AppState::Game), spawn_chat_option_panel);
         app.add_systems(OnExit(AppState::Game), cleanup_chat);
         app.add_systems(
@@ -381,7 +378,6 @@ impl Plugin for ChatPlugin {
             (
                 chat_tab_system,
                 chat_option_system.after(crate::ui::controls::checkbox_system),
-                chat_size_system,
                 chat_wheel_system,
                 chat_key_scroll_system,
                 chat_scroll_buttons_system,
@@ -428,99 +424,74 @@ fn spawn_chat(
     }
     let font = ui_font.0.clone();
 
-    let panel_x = 6.0;
-    let panel_y = 768.0 - 150.0 - 190.0; // 主对话框上方
+    // C# ChatDialog：Prguse[2221] 632x68 @ (MainDialog.X+230, ScreenHeight-97) = (230,671)
+    let panel_x = 230.0;
+    let panel_y = 671.0;
 
-    // 面板背景：C# ChatDialog 用真实纹理 Prguse[2221]（1024 分辨率 632x68）。
-    // 用 spawn_ui_sprite（TOP_LEFT + 自然尺寸）——实验确认 custom_size+Center 精灵是否不渲染。
+    // 面板背景：C# 白色纹理 Prguse[2221]（632x68 自然尺寸，不拉伸）
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     let chat_bg = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2221)
-        .unwrap_or(white);
-    // 面板加高到 172 包住现有聊天内容（页签/消息行/输入框/滚动按钮），界面整洁
-    let bg_e = commands.spawn((
+        .unwrap_or_else(|| white.clone());
+    commands.spawn((
         UiEntity,
         ChatPanel,
         ChatPanelBg,
         Sprite {
             image: chat_bg,
-            custom_size: Some(Vec2::new(632.0, 172.0)),
-            color: Color::WHITE,
+            // 半透明：进入 alpha 混合通道，不写深度；Bevy 高 z 靠前，
+            // 面板 z=2.05 低于所有内容（2.2+），内容才显示在面板上
+            color: Color::srgba(1.0, 1.0, 1.0, 0.85),
             ..default()
         },
         bevy::sprite::Anchor::TOP_LEFT,
-        // z=2.05：高于深度剔除阈值（约 2.0），低于内容（z=2.1-2.4），保证消息/输入显示在面板上
         Transform::from_xyz(panel_x, -panel_y, 2.05),
         Visibility::Visible,
-    )).id();
-    let _ = bg_e;
+    ));
 
-    // 频道页签（主话框：全部/系统/附近/行会/队伍/私聊）
-    let tab_w = 60.0;
-    for (i, tab) in CHAT_TABS.iter().enumerate() {
-        let tx = panel_x + 2.0 + i as f32 * tab_w;
-        let e = spawn_ui_text(
-            &mut commands, &font, chat_tab_name(*tab),
-            tx, panel_y + 2.0,
-            11.0, Color::srgb(0.8, 0.8, 0.8), 2.4,
-        );
-        commands.entity(e).insert((
-            ChatTabBtn(*tab),
-            UiButton {
-                rect: (tx, panel_y + 2.0, tab_w - 2.0, 14.0),
-                clicked: false,
-            },
-        ));
-    }
-    // 滚动按钮（C# HomeButton/UpButton/DownButton/EndButton：右侧竖排，点击滚动历史）
-    let scroll_btns: [(KeyScroll, &str); 4] = [
-        (KeyScroll::Home, "顶部"),
-        (KeyScroll::Up, "上"),
-        (KeyScroll::Down, "下"),
-        (KeyScroll::End, "底部"),
-    ];
-    for (i, (kind, label)) in scroll_btns.iter().enumerate() {
-        let e = spawn_ui_text(
-            &mut commands, &font, label,
-            panel_x + 360.0 - 38.0, panel_y + 20.0 + i as f32 * 16.0,
-            11.0, Color::srgb(0.8, 0.9, 1.0), 2.4,
-        );
-        commands.entity(e).insert((
-            ChatScrollBtn(*kind),
-            UiButton {
-                rect: (panel_x + 360.0 - 38.0, panel_y + 20.0 + i as f32 * 16.0, 36.0, 14.0),
-                clicked: false,
-            },
-        ));
-    }
-    // 消息行（8 行）
-    for i in 0..8usize {
+    // 消息行（C# ChatPanel：4 行，起点 (1,1)，行距 13）
+    for i in 0..4usize {
         let e = spawn_ui_text(
             &mut commands, &font, "",
-            panel_x + 4.0, panel_y + 20.0 + i as f32 * 16.0,
-            12.0, Color::srgb(0.1, 0.1, 0.15), 2.2,
+            panel_x + 1.0, panel_y + 1.0 + i as f32 * 13.0,
+            12.0, Color::srgb(0.1, 0.1, 0.15), 4.0,
         );
         commands.entity(e).insert(ChatLine(i));
     }
-    // 输入行
+    // 滚动按钮（C# ChatDialog Home/Up/Down/End 图片按钮：x=618，y=1/9/39/45）
+    let scroll_btns: [(KeyScroll, usize, usize, usize, f32); 4] = [
+        (KeyScroll::Home, 2018, 2019, 2020, 1.0),
+        (KeyScroll::Up, 2021, 2022, 2023, 9.0),
+        (KeyScroll::Down, 2024, 2025, 2026, 39.0),
+        (KeyScroll::End, 2027, 2028, 2029, 45.0),
+    ];
+    for (kind, normal, hover, pressed, by) in scroll_btns {
+        if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
+            &mut commands, &mut libs, &mut images, &mut cache,
+            LibraryName::Prguse, normal, hover, pressed,
+            panel_x + 618.0, panel_y + by, 2.3, 12.0, 8.0,
+        ) {
+            commands.entity(e).insert(ChatScrollBtn(kind));
+        }
+    }
+    // 输入行（C# ChatTextBox @ (1,54) 627x13，ForeColour Black）
     let e = spawn_ui_text(
         &mut commands, &font, "",
-        panel_x + 4.0, panel_y + 150.0,
-        12.0, Color::srgb(0.9, 0.9, 0.4), 2.2,
+        CHAT_INPUT_X, CHAT_INPUT_Y,
+        12.0, Color::srgb(0.1, 0.1, 0.1), 2.25,
     );
     commands.entity(e).insert(ChatInputText);
-    // 输入框背景 + 闪烁光标（C# ChatTextBox：激活时可见的输入 UI）
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    // 输入框背景（C# BackColour=DarkGray）+ 闪烁光标
     commands.spawn((
         UiEntity,
         ChatInputBg,
         Sprite {
             image: white.clone(),
-            custom_size: Some(Vec2::new(350.0, 16.0)),
-            color: Color::srgba(0.0, 0.0, 0.0, 0.55),
+            custom_size: Some(Vec2::new(627.0, 13.0)),
+            color: Color::srgba(0.45, 0.45, 0.45, 0.85),
             ..default()
         },
         Anchor::TOP_LEFT,
-        Transform::from_xyz(CHAT_INPUT_X + 0.0, -(CHAT_INPUT_Y + 1.0), 2.1),
+        Transform::from_xyz(231.0, -(CHAT_INPUT_Y + 1.0), 2.1),
         Visibility::Visible,
     ));
     commands.spawn((
@@ -533,91 +504,12 @@ fn spawn_chat(
             font_size: FontSize::Px(12.0),
             ..default()
         },
-        TextColor(Color::srgb(1.0, 1.0, 0.4)),
-        Transform::from_xyz(CHAT_INPUT_X + 16.0, -CHAT_INPUT_Y, 2.3),
+        TextColor(Color::srgb(0.0, 0.0, 0.0)),
+        Transform::from_xyz(CHAT_INPUT_X + 16.0, -CHAT_INPUT_Y, 2.25),
         Visibility::Hidden,
-    ));
-    // 发送频道快捷按钮（C# ChatControlBar：附近/喊话/行会/队伍/私聊）
-    // 点击把指令前缀填入输入框（服务端按前缀路由频道）
-    let bar: [(&str, &str); 5] = [
-        ("附近", ""),
-        ("喊话", "/s "),
-        ("行会", "/guild "),
-        ("队伍", "/g "),
-        ("私聊", "/w "),
-    ];
-    for (i, (label, prefix)) in bar.iter().enumerate() {
-        // 频道快捷栏放在面板上方（C# ChatControlBar 为独立条）
-        let bx = panel_x + 4.0 + i as f32 * 72.0;
-        let by = panel_y - 16.0;
-        let t = spawn_ui_text(
-            &mut commands, &font, label,
-            bx, by,
-            11.0, Color::srgb(0.7, 0.9, 1.0), 2.4,
-        );
-        commands.entity(t).insert((
-            ChatBarBtn(label, prefix),
-            UiButton {
-                rect: (bx, by, 70.0, 14.0),
-                clicked: false,
-            },
-        ));
-    }
-    // 聊天设置按钮（打开 C# ChatOptionDialog）
-    let settings = spawn_ui_text(
-        &mut commands, &font, "设置",
-        panel_x + 360.0 - 34.0, panel_y + 2.0,
-        11.0, Color::srgb(0.8, 0.9, 1.0), 2.2,
-    );
-    commands.entity(settings).insert((
-        ChatSettingsBtn,
-        UiButton {
-            rect: (panel_x + 360.0 - 34.0, panel_y + 2.0, 32.0, 14.0),
-            clicked: false,
-        },
-    ));
-    // 窗口尺寸切换（C# ChatPanel SizeButton）
-    let size_btn = spawn_ui_text(
-        &mut commands, &font, "尺寸",
-        panel_x + 360.0 - 66.0, panel_y + 2.0,
-        11.0, Color::srgb(0.8, 0.9, 1.0), 2.2,
-    );
-    commands.entity(size_btn).insert((
-        ChatSizeBtn,
-        UiButton {
-            rect: (panel_x + 360.0 - 66.0, panel_y + 2.0, 30.0, 14.0),
-            clicked: false,
-        },
     ));
 }
 
-/// 窗口尺寸切换（#160 C# ChatPanel ChangeSize：4/8/11 行三档）
-fn chat_size_system(
-    mut chat: ResMut<ChatState>,
-    size_btn: Query<&UiButton, With<ChatSizeBtn>>,
-    mut bg: Query<&mut Sprite, (With<ChatPanelBg>, Without<ChatOptionWidget>)>,
-    mut input: Query<&mut Transform, (With<ChatInputText>, Without<ChatLine>)>,
-) {
-    const PANEL_Y: f32 = 428.0;
-    for btn in &size_btn {
-        if btn.clicked {
-            chat.size = (chat.size + 1) % 3;
-            let lines = [4usize, 8, 11][chat.size];
-            chat.visible_lines = lines;
-            let panel_h = 20.0 + lines as f32 * 16.0 + 24.0;
-            for mut sp in &mut bg {
-                if let Some(cs) = sp.custom_size.as_mut() {
-                    *cs = Vec2::new(360.0, panel_h);
-                }
-            }
-            let input_y = 20.0 + lines as f32 * 16.0 + 6.0;
-            for mut tf in &mut input {
-                tf.translation.y = -(PANEL_Y + input_y);
-            }
-            tracing::info!("💬 聊天窗口尺寸 -> {} 行", lines);
-        }
-    }
-}
 
 /// 聊天设置面板（过滤 + 透明，C# ChatOptionDialog）
 fn spawn_chat_option_panel(
@@ -833,7 +725,7 @@ fn chat_input_system(
     // 输入行位置见 spawn_chat：panel_x+4=10, panel_y+140=568
     // 只写 Some（None 由 clear_ime_focus 每帧统一重置，避免与 Game 态其他输入框互相覆盖）
     if chat.input_active {
-        focus.rect = Some((10.0, 568.0, 350.0, 16.0));
+        focus.rect = Some((231.0, 725.0, 627.0, 13.0));
     }
 
     // Enter：激活/发送（组合中被 IME 接管 → 跳过，不发送）
@@ -912,7 +804,7 @@ fn chat_wheel_system(
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
-    const PANEL: (f32, f32, f32, f32) = (6.0, 428.0, 360.0, 172.0);
+    const PANEL: (f32, f32, f32, f32) = (230.0, 671.0, 632.0, 68.0); // C# ChatDialog 区域
     if cursor.x < PANEL.0
         || cursor.x > PANEL.0 + PANEL.2
         || cursor.y < PANEL.1
@@ -949,7 +841,7 @@ fn chat_key_scroll_system(
     }
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
-    const PANEL: (f32, f32, f32, f32) = (6.0, 428.0, 360.0, 172.0);
+    const PANEL: (f32, f32, f32, f32) = (230.0, 671.0, 632.0, 68.0); // C# ChatDialog 区域
     if cursor.x < PANEL.0
         || cursor.x > PANEL.0 + PANEL.2
         || cursor.y < PANEL.1
@@ -1073,7 +965,7 @@ fn chat_display_system(
             let c = if chat.input_active {
                 Color::srgb(0.1, 0.1, 0.1)
             } else {
-                Color::srgb(0.35, 0.35, 0.35)
+                Color::srgb(0.15, 0.15, 0.15)
             };
             if color.0 != c {
                 color.0 = c;
@@ -1112,6 +1004,16 @@ fn chat_input_ui_system(
             tf.translation.x = CHAT_INPUT_X + 16.0 + chat.input_text.chars().count() as f32 * 12.0;
         }
     }
+}
+
+/// 进入游戏时显示欢迎消息（mock/服务器通常不主动发欢迎语，让聊天框有可见内容）
+fn chat_welcome(mut chat: ResMut<ChatState>) {
+    tracing::info!("💬 欢迎消息系统运行");
+    chat.add_line(
+        "欢迎来到传奇 2！按 Enter 开始聊天，/s 喊话、/guild 行会、/g 队伍、/w 私聊。",
+        Color::srgb(0.1, 0.1, 0.15),
+        ChatChannel::System,
+    );
 }
 
 /// 进入游戏时恢复持久化页签（C# Settings 无此字段，客户端增强）

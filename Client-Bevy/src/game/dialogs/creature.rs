@@ -662,7 +662,10 @@ fn creature_options_system(
     save_btn: Query<&UiButton, With<CreatureOptionsSave>>,
     cancel_btn: Query<&UiButton, With<CreatureOptionsCancel>>,
     grade_btns: Query<(&UiButton, Has<CreatureGradePrev>, Has<CreatureGradeNext>)>,
-    mut lines: Query<(&mut Text2d, Option<&CreatureOptionsLine>, Has<CreatureGradeText>)>,
+    mut lines: Query<
+        (&mut Text2d, Option<&CreatureOptionsLine>, Has<CreatureGradeText>),
+        Or<(With<CreatureOptionsLine>, With<CreatureGradeText>)>,
+    >,
     // #1299：Bevy B0001——四个 &mut Visibility Query 需互相 Without（#1298 合并后启动 panic）
     mut widgets: Query<
         &mut Visibility,
