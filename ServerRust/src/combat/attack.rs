@@ -248,6 +248,16 @@ pub struct AttackResult {
     pub applied_poisons: Vec<Poison>,
 }
 
+/// #1451：C# LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+/// （防御方等级高于攻击方为 0，否则等级差上限 10；影响负面效果触发）
+pub fn level_offset(attacker_level: u16, defender_level: u16) -> u16 {
+    if defender_level >= attacker_level {
+        0
+    } else {
+        (attacker_level - defender_level).min(10)
+    }
+}
+
 /// 完整攻击结算，对齐 C# HumanObject.Attacked 的 13 步流程。
 ///
 /// 参数：
@@ -610,5 +620,14 @@ mod tests {
             }
         }
         assert!(slow_count > 5, "high freezing with level_offset=5 should slow ~20%, got {}/100", slow_count);
+    }
+    #[test]
+    fn level_offset_matches_csharp_formula() {
+        // #1451：C# Level = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+        assert_eq!(level_offset(30, 30), 0);   // 同级 0
+        assert_eq!(level_offset(30, 35), 0);   // 防御方更高 0
+        assert_eq!(level_offset(30, 20), 10);  // 差 10 封顶
+        assert_eq!(level_offset(30, 28), 2);   // 差 2
+        assert_eq!(level_offset(30, 18), 10);  // 差 12 → 10
     }
 }

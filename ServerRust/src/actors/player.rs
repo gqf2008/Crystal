@@ -3102,6 +3102,24 @@ impl Message<ConsumeAmuletForSummon> for PlayerActor {
     }
 }
 
+/// #1453：消耗 1 个指定 shape 的毒护符（C# Plague GetPoison + ConsumeItem；shape 1=绿/2=红）
+pub struct ConsumePoisonAmuletForPlague {
+    pub shape: u16,
+}
+
+impl Message<ConsumePoisonAmuletForPlague> for PlayerActor {
+    type Reply = bool;
+
+    async fn handle(&mut self, msg: ConsumePoisonAmuletForPlague, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let removed = self.state.consume_poison_amulet(msg.shape);
+        if removed {
+            self.send_equipment_changed();
+        } else if let Some(item) = self.state.inventory.equipment[EquipmentSlot::Pendant as usize].as_ref() {
+            self.send_refresh_item(item);
+        }
+        removed
+    }
+}
 /// 丢弃金币
 pub struct DropGold {
     pub amount: u64,
@@ -4714,6 +4732,44 @@ impl PlayerState {
         }
         true
     }
+
+    /// 装备毒护符 shape（#1453：C# GetPoison(1,1)=绿 / (1,2)=红；Pendant 槽 Amulet shape 1/2；0=无）
+    pub fn equipped_poison_shape(&self) -> i32 {
+        use crate::actors::inventory::EquipmentSlot;
+        let Some(Some(item)) = self.inventory.equipment.get(EquipmentSlot::Pendant as usize) else {
+            return 0;
+        };
+        let Some(info) = item.info.as_ref() else {
+            return 0;
+        };
+        if info.item_type != mir2_shared::enums::ItemType::Amulet {
+            return 0;
+        }
+        if info.shape == 1i16 || info.shape == 2i16 { info.shape as i32 } else { 0 }
+    }
+
+    /// C# HumanObject.GetPoison + ConsumeItem：消耗 1 个指定 shape 的毒护符（shape 1=绿/2=红）
+    pub fn consume_poison_amulet(&mut self, shape: u16) -> bool {
+        use crate::actors::inventory::EquipmentSlot;
+        let slot = EquipmentSlot::Pendant as usize;
+        let Some(item) = self.inventory.equipment.get_mut(slot) else {
+            return false;
+        };
+        let Some(item) = item.as_mut() else {
+            return false;
+        };
+        let Some(info) = item.info.as_ref() else {
+            return false;
+        };
+        if info.item_type != mir2_shared::enums::ItemType::Amulet || info.shape != shape as i16 || item.count < 1 {
+            return false;
+        }
+        item.count -= 1;
+        if item.count == 0 {
+            self.inventory.equipment[slot] = None;
+        }
+        true
+    }
 }
 
 /// 英雄↔主背包物品转移（纯逻辑，#203）
@@ -6112,5 +6168,41 @@ allow_group: false,
         // 未装备 → 失败
         let mut s = make_state();
         assert!(!s.consume_amulet_for_summon(1));
+    }
+    #[test]
+    fn test_poison_amulet_detect_and_consume() {
+        // #1453：C# GetPoison(1,1)=绿(shape1) / (1,2)=红(shape2)，Plague 消耗 1
+        use crate::actors::inventory::EquipmentSlot;
+        use mir2_shared::data::item::UserItem;
+
+        let poison_amulet = |shape: i16, count: u16| {
+            let mut info = mir2_shared::data::item::ItemInfo::default();
+            info.item_type = mir2_shared::enums::ItemType::Amulet;
+            info.shape = shape;
+            Some(UserItem { info: Some(info), count, ..Default::default() })
+        };
+
+        // 绿毒护符：detect=1，消耗 1 后 count-1
+        let mut s = make_state();
+        s.inventory.equipment[EquipmentSlot::Pendant as usize] = poison_amulet(1, 3);
+        assert_eq!(s.equipped_poison_shape(), 1);
+        assert!(s.consume_poison_amulet(1));
+        assert_eq!(s.inventory.equipment[EquipmentSlot::Pendant as usize].as_ref().unwrap().count, 2);
+
+        // 红毒护符：detect=2；错误 shape 消耗失败
+        let mut s = make_state();
+        s.inventory.equipment[EquipmentSlot::Pendant as usize] = poison_amulet(2, 1);
+        assert_eq!(s.equipped_poison_shape(), 2);
+        assert!(!s.consume_poison_amulet(1));
+
+        // 普通护符 shape0：detect=0；消耗 1 失败（GetPoison 要 shape 1/2）
+        let mut s = make_state();
+        s.inventory.equipment[EquipmentSlot::Pendant as usize] = poison_amulet(0, 5);
+        assert_eq!(s.equipped_poison_shape(), 0);
+        assert!(!s.consume_poison_amulet(1));
+
+        // 未装备：detect=0
+        let s = make_state();
+        assert_eq!(s.equipped_poison_shape(), 0);
     }
 }

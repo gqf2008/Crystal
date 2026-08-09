@@ -490,9 +490,9 @@ impl WorldActor {
             }
             // DelayedExplosion 阶段 2：目标当前位置 3×3 AoE MAC 伤害（C# Map.cs case DelayedExplosion）
             for (caster_session, map_index, x, y, value) in pending_explosions {
-                let attacker_stats = match self.players.get(&caster_session) {
+                let (attacker_stats, caster_level) = match self.players.get(&caster_session) {
                     Some(r) => match r.actor_ref.ask(GetPlayerState).await {
-                        Ok(Some(s)) if !s.is_dead => s.to_combat_stats(),
+                        Ok(Some(s)) if !s.is_dead => (s.to_combat_stats(), s.level),
                         _ => continue,
                     },
                     None => continue,
@@ -507,9 +507,11 @@ impl WorldActor {
                 for mid in hit_ids {
                     if let Some(monster) = self.monsters.get_mut(&mid) {
                         let defender_stats = monster.to_combat_stats();
+                        // #1452：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                        let level_offset = crate::combat::attack::level_offset(caster_level, monster.level.max(0) as u16);
                         let r = crate::combat::attack::resolve_attack(
                             &attacker_stats, &defender_stats, value.max(1),
-                            mir2_shared::enums::DefenceType::Mac, 5,
+                            mir2_shared::enums::DefenceType::Mac, level_offset,
                         );
                         if r.is_hit && r.damage > 0 {
                             monster.take_damage(r.damage);
@@ -2796,29 +2798,29 @@ impl WorldActor {
 
         // 第二阶段：对每个命中的怪物走战斗公式（MAC 防御 + 暴击 + 附加状态）
         // 按施法者分组缓存 CombatStats，减少 GetPlayerState 调用
-        let mut caster_cache: std::collections::HashMap<u64, crate::combat::attack::CombatStats> = std::collections::HashMap::new();
+        // #1452：缓存 (CombatStats, 等级) 用于 LevelOffset 等级差
+        let mut caster_cache: std::collections::HashMap<u64, (crate::combat::attack::CombatStats, u16)> = std::collections::HashMap::new();
         for (caster_session, spell, _sx, _sy, tick_value, hit_ids) in spell_hits {
             // 获取施法者 CombatStats
-            let attacker_stats = if let Some(cs) = caster_cache.get(&caster_session) {
-                *cs
+            let (attacker_stats, caster_level) = if let Some((cs, lv)) = caster_cache.get(&caster_session) {
+                (*cs, *lv)
             } else {
-                let stats = match self.players.get(&caster_session) {
+                let (stats, level) = match self.players.get(&caster_session) {
                     Some(r) => match r.actor_ref.ask(GetPlayerState).await {
-                        Ok(Some(s)) if !s.is_dead => s.to_combat_stats(),
+                        Ok(Some(s)) if !s.is_dead => (s.to_combat_stats(), s.level),
                         _ => continue, // 施法者离线/死亡，跳过本次 tick
                     },
                     None => continue,
                 };
-                caster_cache.insert(caster_session, stats);
-                stats
+                caster_cache.insert(caster_session, (stats, level));
+                (stats, level)
             };
 
             for mid in hit_ids {
                 if let Some(monster) = self.monsters.get_mut(&mid) {
                     let defender_stats = monster.to_combat_stats();
-                    // level_offset：施法者等级与怪物等级差，上限 10。
-                    // 简化：用 5（多数情况玩家等级 > 怪物，差值 3-8 合理）
-                    let level_offset = 5u16;
+                    // #1452：C# LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                    let level_offset = crate::combat::attack::level_offset(caster_level, monster.level.max(0) as u16);
                     let raw_damage = tick_value.max(1);
                     let r = attack::resolve_attack(
                         &attacker_stats, &defender_stats, raw_damage,
@@ -2947,18 +2949,17 @@ impl WorldActor {
                 continue;
             }
             // #1184：英雄弹道用英雄自身 CombatStats/等级结算（命中/暴击/等级差）
-            let (attacker_stats, level_offset) = if let Some(hs) = pending.hero_stats {
+            let (attacker_stats, caster_level) = if let Some(hs) = pending.hero_stats {
                 (
                     hs,
                     pending
                         .hero_level
-                        .map(|l| l.min(10) as u16)
-                        .unwrap_or_else(|| caster_state.level.min(10) as u16),
+                        .unwrap_or(caster_state.level),
                 )
             } else {
                 (
                     caster_state.to_combat_stats(),
-                    caster_state.level.min(10) as u16,
+                    caster_state.level,
                 )
             };
             let spell_enum = Spell::try_from(pending.spell).unwrap_or(Spell::None);
@@ -2977,7 +2978,7 @@ impl WorldActor {
                 | Spell::VampireShot | Spell::PoisonShot | Spell::CrippleShot | Spell::ElementalShot
                 | Spell::CatTongue => {
                     Self::complete_projectile_spell(
-                        self, pending, &caster_state, &attacker_stats, level_offset, spell_enum,
+                        self, pending, &caster_state, &attacker_stats, caster_level, spell_enum,
                     ).await;
                 }
                 _ => {
@@ -3025,7 +3026,7 @@ impl WorldActor {
         pending: PendingSpellCompletion,
         caster_state: &crate::actors::player::PlayerState,
         attacker_stats: &crate::combat::attack::CombatStats,
-        level_offset: u16,
+        caster_level: u16,
         spell: mir2_shared::enums::Spell,
     ) {
         use mir2_shared::enums::{DefenceType, Spell, PoisonType};
@@ -3115,6 +3116,9 @@ impl WorldActor {
                 _ => raw_damage,
             };
 
+            // #1452：C# LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+            let mlevel = self.monsters.get(&target_id).map(|m| m.level).unwrap_or(0);
+            let level_offset = crate::combat::attack::level_offset(caster_level, mlevel.max(0) as u16);
             let result = attack::resolve_attack(
                 &attacker_stats_owned, &defender_stats, final_damage,
                 defence, level_offset,
@@ -3295,6 +3299,8 @@ impl WorldActor {
                     continue;
                 }
                 let defender_stats = other_state.to_combat_stats();
+                // #1452：PvP LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
+                let level_offset = crate::combat::attack::level_offset(caster_level, other_state.level);
                 let result = attack::resolve_attack(
                     &attacker_stats_owned, &defender_stats, raw_damage,
                     defence, level_offset,
