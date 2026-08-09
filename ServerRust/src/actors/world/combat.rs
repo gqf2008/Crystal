@@ -113,6 +113,14 @@ pub struct WorldAttackRequest {
     pub spell: u8,
 }
 
+/// #1578：C# Globals.LogDelay——攻击/施法后下线阻止时长（10s）
+pub(crate) const LOGOUT_DELAY_MS: i64 = 10_000;
+
+/// #1578：下线是否被阻止（C# MirConnection.LogOut：Envir.Time < Player.LogTime）
+pub(crate) fn logout_blocked(now_ms: i64, block_until_ms: Option<i64>) -> bool {
+    block_until_ms.is_some_and(|until| now_ms < until)
+}
+
 /// #1269：C# HumanObject.RefreshStats——AttackSpeed = 1400 - (Stat*60 + min(370, Level*14))，下限 550ms
 fn player_attack_speed_ms(attack_speed_stat: i32, level: u16) -> i64 {
     let speed = 1400 - (attack_speed_stat * 60 + (level as i32 * 14).min(370));
@@ -254,6 +262,8 @@ impl Message<WorldAttackRequest> for WorldActor {
                 return;
             }
             self.player_last_attack_ms.insert(msg.session_id, now_ms);
+            // #1578：C# HumanObject.Attack LogTime——攻击后 10s 内不可下线
+            self.player_logout_block_ms.insert(msg.session_id, now_ms + LOGOUT_DELAY_MS);
         }
 
         // 攻击时自动下坐骑
@@ -1374,6 +1384,8 @@ impl Message<RangeAttackRequest> for WorldActor {
             return;
         }
         self.player_last_attack_ms.insert(msg.session_id, now_ms);
+        // #1578：C# HumanObject.RangeAttack LogTime——远程攻击后 10s 内不可下线
+        self.player_logout_block_ms.insert(msg.session_id, now_ms + LOGOUT_DELAY_MS);
 
         // 记录玩家当前攻击目标（C# HumanObject.TargetID；宠物 FocusMasterTarget 用）
         if msg.target_id != 0 {
@@ -2041,6 +2053,8 @@ impl Message<MagicRequest> for WorldActor {
             send_system_message(&self.gate_ref, msg.session_id, "魔法值不足");
             return;
         }
+        // #1578：C# HumanObject 魔法 LogTime——成功施法后 10s 内不可下线
+        self.player_logout_block_ms.insert(msg.session_id, now_ms + LOGOUT_DELAY_MS);
         // #312：冥想被动——施法后有概率返还 MP（C# HumanObject.cs:3827，概率≈(Lv+集中)/8）
         let meditation_lv = state.magics.iter()
             .find(|m| m.spell == (SPELL_MEDITATION as i32 - 3))
@@ -5113,8 +5127,9 @@ mod spell_geometry_tests {
 mod tests {
     use super::{
         archer_state_penalty, attack_disabled_by_poison, cast_disabled_by_poison, find_attack_skill,
-        player_attack_speed_ms, range_attack_min_reduction, range_flight_ticks, ranged_chance_to_hit,
-        should_grant_cast_exp, turn_undead_threshold, ATTACK_SKILL_SPELLS,
+        logout_blocked, player_attack_speed_ms, range_attack_min_reduction, range_flight_ticks,
+        ranged_chance_to_hit, should_grant_cast_exp, turn_undead_threshold, ATTACK_SKILL_SPELLS,
+        LOGOUT_DELAY_MS,
         DAMAGE_DURA_ARMOR_SLOTS, SPELL_CROSS_HALFMOON, SPELL_FIREBALL, SPELL_HALFMOON,
         SPELL_METEOR_SHOWER, SPELL_SLAYING,
     };
@@ -5156,6 +5171,20 @@ mod tests {
         assert_eq!(range_flight_ticks(3), 7);  // 700ms → 7
         assert_eq!(range_flight_ticks(9), 10); // 1000ms → 10
         assert_eq!(range_flight_ticks(-5), 6); // 负距离按 0 处理
+    }
+
+    #[test]
+    fn test_logout_blocked_matches_csharp_logtime() {
+        // #1578：C# MirConnection.LogOut——Envir.Time < Player.LogTime（攻击后 10s）→ LogOutFailed
+        assert_eq!(LOGOUT_DELAY_MS, 10_000, "C# Globals.LogDelay=10s");
+        // 有阻止且未到期 → blocked
+        assert!(logout_blocked(1000, Some(11000)));
+        // 刚好到期 → 允许
+        assert!(!logout_blocked(11000, Some(11000)));
+        // 过期 → 允许
+        assert!(!logout_blocked(12000, Some(11000)));
+        // 无阻止记录 → 允许
+        assert!(!logout_blocked(1000, None));
     }
 
     #[test]
