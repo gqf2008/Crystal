@@ -2,25 +2,21 @@
 // auto：自动化验证/调试系统（--auto-* / --real-verify / F12 截图等）
 // ============================================================================
 // 从 auto.rs 拆分（#1146）：register() 按 CLI flag 分发；各域系统按领域模块化。
-
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 use client_bevy::scenes::AppState;
-
 mod combat;
 mod dialogs;
 mod inventory;
 mod navigation;
 mod social;
 mod world;
-
 pub(crate) use combat::*;
 pub(crate) use dialogs::*;
 pub(crate) use inventory::*;
 pub(crate) use navigation::*;
 pub(crate) use social::*;
 pub(crate) use world::*;
-
 /// 按 CLI flag（--auto-* / --real-verify / --auto-walk 等）注册自动化验证系统
 pub fn register(app: &mut App) {
     // --auto-attack: 进游戏后每 1.5s 自动攻击（M10 战斗链路调试）
@@ -34,7 +30,6 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--auto-char") {
         app.add_systems(Update, auto_open_character);
     }
-
     // --storage-test: 自动仓库存取链路（自动化验证用）
     // --storage-equip-test: 仓库双击装备链路（#1546，Storage EquipItem）
     if std::env::args().any(|a| a == "--storage-equip-test") {
@@ -465,7 +460,6 @@ pub fn register(app: &mut App) {
         }
     }
 }
-
 fn debug_screenshot(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
@@ -488,7 +482,6 @@ fn debug_screenshot(
         capture_shot(&mut commands, &mut counter);
     }
 }
-
 fn capture_shot(commands: &mut Commands, counter: &mut u32) {
     // #71：截图目录不存在时自动创建（tools/ 位于仓库根，随 CWD 变化）
     if let Ok(dir) = std::path::Path::new("../tools").canonicalize() {
@@ -502,10 +495,8 @@ fn capture_shot(commands: &mut Commands, counter: &mut u32) {
         .spawn(Screenshot::primary_window())
         .observe(save_to_disk(path));
 }
-
 #[derive(Resource)]
 struct AutoWalkDir(String);
-
 /// 调试：把本地玩家按方向持续平移（--auto-walk down），用于验证 chunk 流式加载
 fn auto_walk_system(
     mut timer: Local<f32>,
@@ -540,15 +531,12 @@ fn auto_walk_system(
         tf.translation += step;
     }
 }
-
-
 /// --auto-walk-diag 状态（#1145）：记录对角线移动过程中的方向序列
 #[derive(Resource, Default)]
 struct AutoWalkDiag {
     started: bool,
     seq: Vec<u8>,
 }
-
 /// 对角线移动方向稳定性验证（#1145）：
 /// 进图 8s 后从玩家位置向 +20/+15 对角寻路，插入真实 LocalMove；
 /// 记录每步 anim.direction 变化，结束时打印序列（应稳定无来回跳）。
@@ -633,7 +621,6 @@ fn auto_walk_diag_system(
         state.seq.push(anim.direction);
     }
 }
-
 /// --real-verify 状态机（合并 Local 参数，避免超 Bevy 16 参数上限）
 #[derive(Default)]
 struct RealVerifyState {
@@ -662,7 +649,6 @@ struct RealVerifyState {
     /// #304：连续死亡次数（超过 3 次判定冒烟失败）
     revive_count: u8,
 }
-
 /// #304：被动弱怪名单（优先猎杀，避免守卫/高血量目标导致冒烟卡死）
 fn is_passive_prey(name: &str) -> bool {
     let n = name.to_lowercase();
@@ -673,8 +659,6 @@ fn is_passive_prey(name: &str) -> bool {
     .iter()
     .any(|k| n.contains(k))
 }
-
-
 /// --hold-move-test：按住移动方向驱动稳定性（#1548）
 /// 进图后模拟鼠标固定在玩家 45° 方向连续 40 帧：
 ///   - mouse_direction 输出必须稳定（扇区容差）
@@ -684,12 +668,10 @@ fn is_passive_prey(name: &str) -> bool {
 struct HoldMoveTest {
     started: bool,
     frame: u32,
+    /// 0=稳定 1=陷阱 2=冲刺
+    phase: u8,
     dirs: Vec<u8>,
-    /// #1550：陷阱阶段（InTrapRock=true 后方向应停走）
-    trap_done: bool,
-    trap_dirs: Vec<u8>,
 }
-
 fn hold_move_test_system(
     mut t: Local<f32>,
     mut st: ResMut<HoldMoveTest>,
@@ -712,47 +694,64 @@ fn hold_move_test_system(
         return;
     }
     st.frame += 1;
-    if st.frame > 40 && !st.trap_done {
-        // 阶段1结束：方向序列输出 + 进入陷阱阶段
-        let dirs = std::mem::take(&mut st.dirs);
-        let jitter = dirs.windows(2).filter(|w| {
-            let d = (w[1] as i32 - w[0] as i32).rem_euclid(8);
-            d == 4
-        }).count();
-        let stable = dirs.windows(2).all(|w| {
-            let d = (w[1] as i32 - w[0] as i32).rem_euclid(8);
-            d <= 2 || d >= 6
-        });
-        let verdict = if jitter == 0 && stable { "✅ 方向稳定无抖动" } else { "❌ 方向抖动" };
-        tracing::info!("[HOLDMOVE] {} 方向序列 {:?}", verdict, dirs);
-        // 陷阱阶段：InTrapRock=true → C# CanWalk/CanRun 禁止移动 → 应原地转向不再前进
-        hud.in_trap_rock = true;
-        st.frame = 0;
-        st.trap_done = true;
-        return;
-    }
-    if st.trap_done && st.frame > 40 {
-        // 陷阱阶段结束：验证方向不再前进（序列为空或只有 1 个转向）
-        let trap_dirs = std::mem::take(&mut st.trap_dirs);
-        let verdict = if trap_dirs.len() <= 1 {
-            "✅ 陷阱禁止移动（原地转向）"
-        } else {
-            "❌ 陷阱中仍在移动"
-        };
-        tracing::info!("[HOLDMOVE] {} 陷阱阶段方向 {:?}", verdict, trap_dirs);
-        hud.in_trap_rock = false;
-        st.started = false;
-        st.frame = 0;
-        st.trap_done = false;
-        return;
+    st.frame += 1;
+    // 阶段结束判定
+    if st.frame > 40 {
+        match st.phase {
+            0 => {
+                // 阶段0（稳定）结束：输出方向序列
+                let dirs = std::mem::take(&mut st.dirs);
+                let jitter = dirs.windows(2).filter(|w| {
+                    let d = (w[1] as i32 - w[0] as i32).rem_euclid(8);
+                    d == 4
+                }).count();
+                let stable = dirs.windows(2).all(|w| {
+                    let d = (w[1] as i32 - w[0] as i32).rem_euclid(8);
+                    d <= 2 || d >= 6
+                });
+                let verdict = if jitter == 0 && stable { "✅ 方向稳定无抖动" } else { "❌ 方向抖动" };
+                tracing::info!("[HOLDMOVE] {} 方向序列 {:?}", verdict, dirs);
+                // 进入陷阱阶段
+                hud.in_trap_rock = true;
+                st.frame = 0;
+                st.phase = 1;
+                return;
+            }
+            1 => {
+                // 阶段1（陷阱）结束：验证方向不再前进
+                let dirs = std::mem::take(&mut st.dirs);
+                let verdict = if dirs.len() <= 1 {
+                    "✅ 陷阱禁止移动（原地转向）"
+                } else {
+                    "❌ 陷阱中仍在移动"
+                };
+                tracing::info!("[HOLDMOVE] {} 陷阱阶段方向 {:?}", verdict, dirs);
+                // 进入冲刺阶段
+                hud.in_trap_rock = false;
+                hud.sprint = true;
+                st.frame = 0;
+                st.phase = 2;
+                return;
+            }
+            _ => {
+                // 阶段2（冲刺）结束：验证可移动（3 格跑）
+                let dirs = std::mem::take(&mut st.dirs);
+                let moving = !dirs.is_empty();
+                let verdict = if moving { "✅ 冲刺可移动（3 格跑）" } else { "❌ 冲刺未移动" };
+                tracing::info!("[HOLDMOVE] {} 冲刺阶段方向 {:?}", verdict, dirs);
+                hud.sprint = false;
+                st.started = false;
+                st.frame = 0;
+                st.phase = 0;
+                return;
+            }
+        }
     }
     let Ok(ptf) = players.single() else { return };
     let Some(map) = &game_data.map else { return };
-    // 模拟鼠标在玩家 45° 右上方固定位置（世界坐标 = 玩家 + (400, 400)）
     let player_world = Vec2::new(ptf.translation.x, ptf.translation.y);
     let mouse_world = player_world + Vec2::new(400.0, 400.0);
     let dir = mouse_direction(player_world, mouse_world);
-    // 陷阱中：方向仍计算（原地转向），但不应产生可移动方向
     let from = client_bevy::game::movement::world_to_tile(player_world.x, player_world.y);
     let chosen = if hud.in_trap_rock {
         None // 陷阱禁止移动（C# CanWalk 12094 直接 false）
@@ -763,13 +762,7 @@ fn hold_move_test_system(
         })
     };
     let d = chosen.unwrap_or(dir);
-    if st.trap_done {
-        // 陷阱阶段只记录方向变化（期望 <=1 个）
-        if st.trap_dirs.last() != Some(&(d as u8)) && st.trap_dirs.len() < 2 {
-            st.trap_dirs.push(d as u8);
-        }
-    } else if st.dirs.last() != Some(&(d as u8)) {
+    if st.dirs.last() != Some(&(d as u8)) {
         st.dirs.push(d as u8);
     }
 }
-

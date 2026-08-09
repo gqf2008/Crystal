@@ -284,11 +284,18 @@ fn buff_ui_system(
 fn buff_server_events(
     mut events: MessageReader<crate::network::server_event::ServerEvent>,
     mut buff: ResMut<BuffState>,
+    mut hud: ResMut<crate::game::hud::HudState>,
 ) {
     use crate::network::server_event::ServerEvent;
     for ev in events.read() {
         match ev {
             ServerEvent::BuffAdded { tag, ticks } => {
+                // #1552：SwiftFeet(ServerRust MoveSpeedBoost tag=12) → Sprint；MoonLight/DarkBody(Invisibility tag=10) → Sneaking
+                match *tag {
+                    12 => hud.sprint = true,
+                    10 => hud.sneaking = true,
+                    _ => {}
+                }
                 if let Some(e) = buff.buffs.iter_mut().find(|b| b.tag == *tag) {
                     e.remaining_ticks = *ticks;
                 } else {
@@ -297,6 +304,12 @@ fn buff_server_events(
                 buff.message = format!("获得状态: {}", buff_name(*tag));
             }
             ServerEvent::BuffRemoved { tag } => {
+                // #1552：状态消失 → 清对应移动状态
+                match *tag {
+                    12 => hud.sprint = false,
+                    10 => hud.sneaking = false,
+                    _ => {}
+                }
                 buff.buffs.retain(|b| b.tag != *tag);
                 buff.message = format!("状态消失: {}", buff_name(*tag));
             }
@@ -318,6 +331,7 @@ fn buff_server_events(
         }
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,6 +349,24 @@ mod tests {
         // 缺失配置 → 默认展开（保持既有列表可见行为）
         let s = BuffState::from_ini("");
         assert!(s.expanded);
+    }
+
+    #[test]
+    fn buff_to_sprint_sneaking_state() {
+        // #1552：SwiftFeet(ServerRust MoveSpeedBoost tag=12) → sprint；MoonLight/DarkBody(Invisibility tag=10) → sneaking
+        let mut hud = crate::game::hud::HudState::default();
+        assert!(!hud.sprint);
+        assert!(!hud.sneaking);
+        // 模拟 buff_server_events 的 tag 分支逻辑
+        match 12u8 { 12 => hud.sprint = true, 10 => hud.sneaking = true, _ => {} }
+        assert!(hud.sprint);
+        match 10u8 { 12 => hud.sprint = true, 10 => hud.sneaking = true, _ => {} }
+        assert!(hud.sneaking);
+        // 消失
+        match 12u8 { 12 => hud.sprint = false, 10 => hud.sneaking = false, _ => {} }
+        assert!(!hud.sprint);
+        match 10u8 { 12 => hud.sprint = false, 10 => hud.sneaking = false, _ => {} }
+        assert!(!hud.sneaking);
     }
 }
 

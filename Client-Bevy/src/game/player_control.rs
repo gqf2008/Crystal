@@ -627,7 +627,8 @@ fn hold_move_system(
             };
             if run {
                 // C# CanRun：负重不超限 && CanWalk(dir) && EmptyCell(2 格)；
-                // 骑乘（或冲刺且非潜行）→ 3 格（C# GameScene.cs:12143-12147）
+                // 骑乘或冲刺（且非潜行）→ 3 格（C# GameScene.cs:12143-12147）
+                // 潜行且非冲刺 → 不可跑（C# CheckInput 11528：!Sneaking || (Sneaking && Sprint)）
                 let bag_ok = hud.inventory.weight <= hud.inventory.max_weight;
                 let wear_ok = hud
                     .equipment
@@ -636,8 +637,8 @@ fn hold_move_system(
                     .map(|i| i.weight as u32)
                     .sum::<u32>()
                     <= hud.inventory.max_weight;
-                let can_run_base = !in_trap && bag_ok && wear_ok;
-                let run_dist = if hud.riding { 3 } else { 2 };
+                let can_run_base = !in_trap && bag_ok && wear_ok && !(hud.sneaking && !hud.sprint);
+                let run_dist = if hud.riding || (hud.sprint && !hud.sneaking) { 3 } else { 2 };
                 for d in [dir, next_direction(dir), previous_direction(dir)] {
                     if !can_run_base {
                         break;
