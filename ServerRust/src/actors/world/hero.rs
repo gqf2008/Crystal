@@ -399,12 +399,29 @@ impl Message<IntelligentCreaturePickup> for WorldActor {
         } else {
             (state.x, state.y)
         };
+        // #1586：归属校验（C# IntelligentCreatureObject.FillTargetList 检查 Owner）——
+        // 与玩家拾取（#1262 can_pick_drop）一致：掉落者/同组可拾取、过期（60s）后任意
+        let mut player_groups: std::collections::HashMap<u64, Option<u64>> = std::collections::HashMap::new();
+        for (sid, rec) in &self.players {
+            if let Ok(Some(s)) = rec.actor_ref.ask(GetPlayerState).await {
+                player_groups.insert(*sid, s.group_id);
+            }
+        }
         // 查找附近的地面物品（同地图）
         let distance = 3; // 宠物拾取范围
         let item_idx = self.ground_items.iter().position(|item| {
-            item.map_index == state.map_index
-                && (item.x - cx).abs() <= distance
-                && (item.y - cy).abs() <= distance
+            if item.map_index != state.map_index { return false; }
+            if (item.x - cx).abs() > distance || (item.y - cy).abs() > distance { return false; }
+            crate::actors::world::item::can_pick_drop(
+                self.tick_count,
+                item.drop_tick,
+                crate::actors::world::item::DROP_OWNERSHIP_TICKS,
+                item.dropper_session,
+                msg.session_id,
+                item.dropper_session
+                    .and_then(|d| player_groups.get(&d).copied().flatten()),
+                state.group_id,
+            )
         });
 
         if let Some(idx) = item_idx {
