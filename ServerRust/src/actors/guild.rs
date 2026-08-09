@@ -10,6 +10,17 @@ pub enum GuildRank {
 }
 
 impl GuildRank {
+    /// C# GuildRankOptions 位标志（GuildInfo.cs）：CanChangeRank=1/CanRecruit=2/CanKick=4/CanStoreItem=8/
+    /// CanRetrieveItem=16/CanAlterAlliance=32/CanChangeNotice=64/CanActivateBuff=128
+    pub const CAN_CHANGE_RANK: u8 = 1;
+    pub const CAN_RECRUIT: u8 = 2;
+    pub const CAN_KICK: u8 = 4;
+    pub const CAN_STORE_ITEM: u8 = 8;
+    pub const CAN_RETRIEVE_ITEM: u8 = 16;
+    pub const CAN_ALTER_ALLIANCE: u8 = 32;
+    pub const CAN_CHANGE_NOTICE: u8 = 64;
+    pub const CAN_ACTIVATE_BUFF: u8 = 128;
+
     pub fn from_u8(val: u8) -> Self {
         match val {
             0 => Self::Leader,
@@ -18,20 +29,12 @@ impl GuildRank {
         }
     }
 
-    /// 默认行会权限（C# GuildRankOptions 位标志；简化：Leader 全权限，Officer 部分，Member 无）
+    /// 默认行会权限（C# GuildRankOptions：Leader 全权限，Officer 部分，Member 无）
     pub fn default_options(&self) -> u8 {
-        const CAN_CHANGE_RANK: u8 = 1;
-        const CAN_RECRUIT: u8 = 2;
-        const CAN_KICK: u8 = 4;
-        const CAN_STORE_ITEM: u8 = 8;
-        const CAN_RETRIEVE_ITEM: u8 = 16;
-        const CAN_ALTER_ALLIANCE: u8 = 32;
-        const CAN_CHANGE_NOTICE: u8 = 64;
-        const CAN_ACTIVATE_BUFF: u8 = 128;
         match self {
-            Self::Leader => CAN_CHANGE_RANK | CAN_RECRUIT | CAN_KICK | CAN_STORE_ITEM
-                | CAN_RETRIEVE_ITEM | CAN_ALTER_ALLIANCE | CAN_CHANGE_NOTICE | CAN_ACTIVATE_BUFF,
-            Self::Officer => CAN_RECRUIT | CAN_KICK | CAN_STORE_ITEM | CAN_RETRIEVE_ITEM | CAN_CHANGE_NOTICE,
+            Self::Leader => Self::CAN_CHANGE_RANK | Self::CAN_RECRUIT | Self::CAN_KICK | Self::CAN_STORE_ITEM
+                | Self::CAN_RETRIEVE_ITEM | Self::CAN_ALTER_ALLIANCE | Self::CAN_CHANGE_NOTICE | Self::CAN_ACTIVATE_BUFF,
+            Self::Officer => Self::CAN_RECRUIT | Self::CAN_KICK | Self::CAN_STORE_ITEM | Self::CAN_RETRIEVE_ITEM | Self::CAN_CHANGE_NOTICE,
             Self::Member => 0,
         }
     }
@@ -233,6 +236,15 @@ impl Guild {
             .unwrap_or(0)
     }
 
+    /// #1461：成员权限位（按成员 rank_index 查 rank_defs.options；C# MyGuildRank.Options）
+    pub fn member_options(&self, name: &str) -> u8 {
+        self.members
+            .iter()
+            .find(|m| m.name == name)
+            .map(|m| self.rank_options(m.rank_index))
+            .unwrap_or(0)
+    }
+
     /// #1395：添加职务（C# EditGuildMember ChangeType=4），返回新 index
     pub fn add_rank(&mut self, name: &str) -> u8 {
         let next = self.rank_defs.iter().map(|d| d.index).max().unwrap_or(0).saturating_add(1);
@@ -413,5 +425,21 @@ mod tests {
         assert!(!g.apply_gain_exp(10000, 0.0, 0, &[], &[]));
         assert_eq!(g.experience, 0);
     }
-}
 
+    #[test]
+    fn member_options_use_rank_defs_bits() {
+        // #1461：C# MyGuildRank.Options——按 rank_index 查 rank_defs.options
+        let mut g = Guild::new("G".into(), "L".into(), 1);
+        g.add_member("A".into(), None);
+        // 成员（index=2）默认无权限
+        assert_eq!(g.member_options("A"), 0);
+        // 授予 CanRecruit 后（模拟自定义职务/权限调整）
+        if let Some(m) = g.members.iter_mut().find(|m| m.name == "A") {
+            m.rank_index = 2;
+        }
+        g.set_rank_options(2, crate::actors::guild::GuildRank::CAN_RECRUIT);
+        assert_eq!(g.member_options("A"), crate::actors::guild::GuildRank::CAN_RECRUIT);
+        // 未找到成员 → 0
+        assert_eq!(g.member_options("Nobody"), 0);
+    }
+}

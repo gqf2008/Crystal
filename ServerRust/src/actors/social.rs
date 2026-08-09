@@ -3168,8 +3168,14 @@ impl Message<EditGuildMemberRequest> for SocialActor {
             Some(g) => g, None => return,
         };
 
-        // 只有会长和副会长可以管理成员
-        if my_rank != GuildRank::Leader && my_rank != GuildRank::Officer {
+        // #1463：C# 权限位——邀请 CanRecruit / 踢出 CanKick / 职务操作 CanChangeRank
+        let my_options = guild.member_options(&state.name);
+        let required = match msg.change_type {
+            0 => crate::actors::guild::GuildRank::CAN_RECRUIT,
+            1 => crate::actors::guild::GuildRank::CAN_KICK,
+            _ => crate::actors::guild::GuildRank::CAN_CHANGE_RANK,
+        };
+        if my_options & required == 0 {
             send_system_message(&self.gate_ref, msg.session_id, "权限不足");
             return;
         }
@@ -3262,10 +3268,6 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                 }
             }
             2 => { // #1395：按职务索引移动成员（C# EditGuildMember ChangeType=2 带 RankIndex）
-                if my_rank != GuildRank::Leader {
-                    send_system_message(&self.gate_ref, msg.session_id, "只有会长可以升职成员");
-                    return;
-                }
                 let target = msg.rank_index;
                 if !guild.rank_defs.iter().any(|d| d.index == target) {
                     send_system_message(&self.gate_ref, msg.session_id, "职务不存在");
@@ -3279,19 +3281,11 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                 }
             }
             3 => { // 降职
-                if my_rank != GuildRank::Leader {
-                    send_system_message(&self.gate_ref, msg.session_id, "只有会长可以降职成员");
-                    return;
-                }
                 if guild.set_rank(&msg.member_name, GuildRank::Member) {
                     send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已降职为成员", msg.member_name));
                 }
             }
             4 => { // #1395：添加职务（C# EditGuildMember ChangeType=4 add rank）
-                if my_rank != GuildRank::Leader {
-                    send_system_message(&self.gate_ref, msg.session_id, "只有会长可以添加职务");
-                    return;
-                }
                 if msg.rank_name.trim().is_empty() {
                     send_system_message(&self.gate_ref, msg.session_id, "职务名无效");
                     return;
@@ -3304,10 +3298,6 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                 send_system_message(&self.gate_ref, msg.session_id, &format!("已添加职务：{}（#{})", msg.rank_name.trim(), new_idx));
             }
             5 => { // #1395：切换职务权限位（C# EditGuildMember ChangeType=5；rank_name=选项位，name=true/false）
-                if my_rank != GuildRank::Leader {
-                    send_system_message(&self.gate_ref, msg.session_id, "只有会长可以修改职务权限");
-                    return;
-                }
                 let bit = msg.rank_name.trim().parse::<u8>().unwrap_or(0);
                 if bit >= 8 {
                     return;
@@ -3323,10 +3313,6 @@ impl Message<EditGuildMemberRequest> for SocialActor {
                 send_system_message(&self.gate_ref, msg.session_id, "职务权限已更新");
             }
             6 => { // #1362：职务改名（C# EditGuildMember ChangeType=3 rename；Rust 用 6 避免与降职冲突）
-                if my_rank != GuildRank::Leader {
-                    send_system_message(&self.gate_ref, msg.session_id, "只有会长可以修改职务名");
-                    return;
-                }
                 let idx = msg.rank_index;
                 if !guild.rank_defs.iter().any(|d| d.index == idx) || msg.rank_name.trim().is_empty() {
                     send_system_message(&self.gate_ref, msg.session_id, "职务名无效");
@@ -3370,6 +3356,11 @@ impl Message<EditGuildNoticeRequest> for SocialActor {
             Some(g) => g, None => return,
         };
 
+        // #1461：C# CanChangeNotice
+        if guild.member_options(&state.name) & crate::actors::guild::GuildRank::CAN_CHANGE_NOTICE == 0 {
+            send_system_message(&self.gate_ref, msg.session_id, "权限不足");
+            return;
+        }
         guild.notice = msg.notice.clone();
 
         // 通知所有在线行会成员
@@ -3446,6 +3437,11 @@ impl Message<GuildStorageGoldChangeRequest> for SocialActor {
 
         match msg.change_type {
             0 => { // 存入
+                // #1462：C# CanStoreItem
+                if guild.member_options(&state.name) & crate::actors::guild::GuildRank::CAN_STORE_ITEM == 0 {
+                    send_system_message(&self.gate_ref, msg.session_id, "权限不足");
+                    return;
+                }
                 let has_gold = { state.inventory.gold >= msg.amount as u64 };
                 if !has_gold {
                     send_system_message(&self.gate_ref, msg.session_id, "金币不足");
@@ -3460,7 +3456,8 @@ impl Message<GuildStorageGoldChangeRequest> for SocialActor {
             }
             1 => { // 取出
                 // 只有会长和副会长可以取出
-                if state.guild_rank != GuildRank::Leader && state.guild_rank != GuildRank::Officer {
+                // #1462：C# CanRetrieveItem
+                if guild.member_options(&state.name) & crate::actors::guild::GuildRank::CAN_RETRIEVE_ITEM == 0 {
                     send_system_message(&self.gate_ref, msg.session_id, "权限不足");
                     return;
                 }
@@ -3504,6 +3501,11 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
 
         match msg.change_type {
             0 => { // 存入物品
+                // #1462：C# CanStoreItem
+                if guild.member_options(&state.name) & crate::actors::guild::GuildRank::CAN_STORE_ITEM == 0 {
+                    send_system_message(&self.gate_ref, msg.session_id, "权限不足");
+                    return;
+                }
                 if !guild.storage_has_space() {
                     send_system_message(&self.gate_ref, msg.session_id, "行会仓库已满");
                     return;
@@ -3555,7 +3557,8 @@ impl Message<GuildStorageItemChangeRequest> for SocialActor {
                 }
             }
             1 => { // 取出物品
-                if state.guild_rank != GuildRank::Leader && state.guild_rank != GuildRank::Officer {
+                // #1462：C# CanRetrieveItem
+                if guild.member_options(&state.name) & crate::actors::guild::GuildRank::CAN_RETRIEVE_ITEM == 0 {
                     send_system_message(&self.gate_ref, msg.session_id, "权限不足");
                     return;
                 }
