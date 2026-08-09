@@ -261,6 +261,8 @@ pub(crate) fn handle_player(    net: &mut NetConnection,
                     text: format!("宠物模式：{}", name),
                     chat_type: mir2_shared::enums::ChatType::System,
                 });
+                // #1388：HUD 宠物模式标签
+                server_events.write(ServerEvent::PetModeChanged { mode: p.mode });
                 tracing::info!("🐾 宠物模式确认: {:?}", p.mode);
             }
         }

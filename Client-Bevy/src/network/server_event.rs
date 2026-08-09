@@ -13,6 +13,9 @@ use mir2_shared::packets::server::{chat, combat, drops, experience, item_operati
 /// Bevy 0.19：Message（替代旧 EventReader/EventWriter）
 #[derive(Message, Debug, Clone)]
 pub enum ServerEvent {
+    /// #1388：宠物模式变更（S.ChangePMode）
+    PetModeChanged { mode: mir2_shared::enums::PetMode },
+
     /// HealthChanged：HP/MP 当前值
     HealthChanged { hp: i32, mp: i32 },
     /// GainedGold：增量（击杀掉落等），消费方负责累加余额

@@ -52,6 +52,8 @@ pub struct HudState {
     pub inventory: crate::game::dialogs::inventory::InventoryState,
     /// 装备（12 槽）
     pub equipment: Vec<Option<InvItem>>,
+    /// #1388：宠物模式（C# PModeLabel；S.ChangePMode 更新）
+    pub pet_mode: mir2_shared::enums::PetMode,
 }
 
 impl Default for HudState {
@@ -76,6 +78,7 @@ impl Default for HudState {
             pot_cooldown: 0.0,
             inventory: Default::default(),
             equipment: vec![None; 14], // #1136：服务端补 Torch/Belt/Stone 共 14 槽
+            pet_mode: mir2_shared::enums::PetMode::Both,
         }
     }
 }
@@ -221,6 +224,12 @@ const BUTTON_TOP: f32 = 76.0;
 /// 攻击模式指示（右下角）
 #[derive(Component)]
 pub struct AttackModeText;
+/// #1388：宠物模式指示（C# PModeLabel）
+#[derive(Component)]
+pub struct PModeText;
+/// #1388：技能模式指示（C# SModeLabel）
+#[derive(Component)]
+pub struct SModeText;
 
 pub struct HudPlugin;
 
@@ -593,6 +602,11 @@ fn spawn_hud(
     // 攻击模式指示（#156，右下角）
     let am = spawn_ui_text(&mut commands, &font, "模式:和平", 1024.0 - 110.0, 768.0 - 24.0, 12.0, Color::srgb(1.0, 0.9, 0.3), 4.0);
     commands.entity(am).insert(AttackModeText);
+    // #1388：宠物/技能模式指示（C# PModeLabel/SModeLabel，右下堆叠）
+    let pm = spawn_ui_text(&mut commands, &font, "宠物:跟随", 1024.0 - 110.0, 768.0 - 40.0, 12.0, Color::srgb(0.6, 0.9, 0.6), 4.0);
+    commands.entity(pm).insert(PModeText);
+    let sm = spawn_ui_text(&mut commands, &font, "技能:Ctrl", 1024.0 - 110.0, 768.0 - 56.0, 12.0, Color::srgb(0.6, 0.8, 1.0), 4.0);
+    commands.entity(sm).insert(SModeText);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -644,17 +658,36 @@ fn auto_potion_system(
 }
 
 /// 每帧按 HudState 更新血/蓝/经验条与文本（单查询避免 Bevy B0001 冲突）
-/// #70：HudState（Resource）→ HudData（组件）快照同步，仅在实际值变化时写组件
-/// 攻击模式指示更新（#156）
+/// 模式指示更新（#156 攻击 / #1388 宠物+技能）：值变化即写，无变化跳过
 fn attack_mode_text_system(
     mode: Res<crate::game::combat::AttackModeState>,
-    mut texts: Query<&mut Text2d, With<AttackModeText>>,
+    hud: Res<HudState>,
+    opt: Res<crate::game::dialogs::option::OptionState>,
+    mut am: Query<&mut Text2d, (With<AttackModeText>, Without<PModeText>, Without<SModeText>)>,
+    mut pm: Query<&mut Text2d, (With<PModeText>, Without<AttackModeText>, Without<SModeText>)>,
+    mut sm: Query<&mut Text2d, (With<SModeText>, Without<AttackModeText>, Without<PModeText>)>,
 ) {
-    if !mode.is_changed() {
-        return;
+    let a = format!("模式:{}", crate::game::combat::attack_mode_name(mode.mode));
+    for mut t in &mut am {
+        if t.0 != a {
+            t.0 = a.clone();
+        }
     }
-    let s = format!("模式:{}", crate::game::combat::attack_mode_name(mode.mode));
-    for mut t in &mut texts {
+    let p = match hud.pet_mode {
+        mir2_shared::enums::PetMode::Both => "宠物:攻击和跟随".to_string(),
+        mir2_shared::enums::PetMode::MoveOnly => "宠物:仅跟随".to_string(),
+        mir2_shared::enums::PetMode::AttackOnly => "宠物:仅攻击".to_string(),
+        mir2_shared::enums::PetMode::None => "宠物:不行动".to_string(),
+        mir2_shared::enums::PetMode::FocusMasterTarget => "宠物:跟随目标".to_string(),
+        _ => "宠物:未知".to_string(),
+    };
+    for mut t in &mut pm {
+        if t.0 != p {
+            t.0 = p.clone();
+        }
+    }
+    let s = if opt.skill_mode_ctrl { "技能:Ctrl".to_string() } else { "技能:~".to_string() };
+    for mut t in &mut sm {
         if t.0 != s {
             t.0 = s.clone();
         }
@@ -841,6 +874,10 @@ fn hud_server_events(
         match ev {
             // #1342：任务物品格增量更新由 inventory.rs quest_inventory_events 处理
             ServerEvent::QuestItemGained { .. } | ServerEvent::QuestItemDeleted { .. } | ServerEvent::NpcAwakePanel { .. } | ServerEvent::MagicCooldown { .. } | ServerEvent::PearlShop { .. } => {}
+            ServerEvent::PetModeChanged { mode } => {
+                // #1388：HUD 宠物模式标签
+                hud.pet_mode = *mode;
+            }
             ServerEvent::HealthChanged { hp, mp } => {
                 hud.hp = *hp;
                 hud.mp = *mp;
