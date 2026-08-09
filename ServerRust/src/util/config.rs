@@ -343,6 +343,9 @@ pub struct ServerWorldConfig {
     /// 死亡经验惩罚百分比（0=关闭，对齐 C# 无通用死亡惩罚；>0 时按当前等级经验百分比扣除）
     #[serde(default = "default_death_exp_penalty_percent")]
     pub death_exp_penalty_percent: u32,
+    /// 服务端移动节流间隔毫秒（0=关闭，默认关以兼容 Bevy 客户端节奏；>0 时按 C# HumanObject MoveDelay=600ms/动作 节流，Slow 毒 ×2）
+    #[serde(default = "default_movement_pacing_ms")]
+    pub movement_pacing_ms: u64,
     /// 回血权重（C# Settings.HealthRegenWeight = 10：healthRegen += regen * HealthRecovery / weight）
     #[serde(default = "default_health_regen_weight")]
     pub health_regen_weight: u32,
@@ -380,6 +383,10 @@ fn default_max_drop_gold() -> u32 {
 
 fn default_notice_path() -> String {
     "Notice.txt".to_string()
+}
+
+fn default_movement_pacing_ms() -> u64 {
+    0
 }
 
 fn default_death_exp_penalty_percent() -> u32 {
@@ -562,6 +569,7 @@ impl Default for ServerConfig {
                 rarity: RarityConfig::default(),
                 notice_path: default_notice_path(),
                 death_exp_penalty_percent: default_death_exp_penalty_percent(),
+                movement_pacing_ms: default_movement_pacing_ms(),
             },
             social: SocialConfig::default(),
             conquest: ConquestConfig::default(),
