@@ -1605,7 +1605,7 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS" | "SETQUEST" | "CLEARQUESTS") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -2285,6 +2285,69 @@ impl Message<ChatRequest> for WorldActor {
                                         self.refresh_player_appearance(sid).await;
                                         send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已转职为 {:?}", st.name, class));
                                     }
+                                }
+                            }
+                        }
+
+                        // @setquest <id> <0|1> [玩家]（C# case "SETQUEST"：0=取消 1=完成）
+                        "SETQUEST" => {
+                            let quest_id = parts.get(1).and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                            let state = parts.get(2).and_then(|s| s.parse::<i32>().ok()).unwrap_or(-1);
+                            if quest_id < 1 || !matches!(state, 0 | 1) {
+                                send_system_message(&self.gate_ref, msg.session_id, "用法：@setquest <任务ID> <0=取消|1=完成> [玩家]");
+                                return;
+                            }
+                            let target_sid = if parts.len() >= 4 {
+                                let name = parts.get(3).copied().unwrap_or("");
+                                let mut found = None;
+                                for (_sid, other) in &self.players {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if os.name.eq_ignore_ascii_case(name) {
+                                            found = Some(*_sid);
+                                            break;
+                                        }
+                                    }
+                                }
+                                let Some(sid) = found else {
+                                    send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                    return;
+                                };
+                                Some(sid)
+                            } else {
+                                Some(msg.session_id)
+                            };
+                            if let Some(sid) = target_sid {
+                                if let Some(r) = self.players.get(&sid) {
+                                    let _ = r.actor_ref.ask(crate::actors::player::GmSetQuest { quest_index: quest_id, complete: state == 1 }).await;
+                                    send_system_message(&self.gate_ref, msg.session_id, &format!("任务 {} 已{}", quest_id, if state == 1 { "完成" } else { "取消" }));
+                                }
+                            }
+                        }
+
+                        // @clearquests [玩家]（C# case "CLEARQUESTS"：清空任务）
+                        "CLEARQUESTS" => {
+                            let target_sid = if let Some(n) = parts.get(1).copied() {
+                                let mut found = None;
+                                for (_sid, other) in &self.players {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if os.name.eq_ignore_ascii_case(n) {
+                                            found = Some(*_sid);
+                                            break;
+                                        }
+                                    }
+                                }
+                                let Some(sid) = found else {
+                                    send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                    return;
+                                };
+                                Some(sid)
+                            } else {
+                                Some(msg.session_id)
+                            };
+                            if let Some(sid) = target_sid {
+                                if let Some(r) = self.players.get(&sid) {
+                                    let _ = r.actor_ref.ask(crate::actors::player::GmClearQuests).await;
+                                    send_system_message(&self.gate_ref, msg.session_id, "任务已清空");
                                 }
                             }
                         }
