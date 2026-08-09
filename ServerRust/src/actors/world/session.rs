@@ -1606,7 +1606,7 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -2106,6 +2106,60 @@ impl Message<ChatRequest> for WorldActor {
                             } else {
                                 self.gm_protected.insert(msg.session_id);
                                 send_system_message(&self.gate_ref, msg.session_id, "已开启 GM 保护模式（不可被攻击）");
+                            }
+                        }
+
+                        // @kill [玩家]（C# case "KILL"：GM 击杀目标玩家）
+                        "KILL" => {
+                            let name = parts.get(1).copied().unwrap_or("");
+                            let mut found = None;
+                            for (_sid, other) in &self.players {
+                                if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                    if os.name.eq_ignore_ascii_case(name) {
+                                        found = Some(*_sid);
+                                        break;
+                                    }
+                                }
+                            }
+                            let Some(target_sid) = found else {
+                                send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                return;
+                            };
+                            let Some(target) = self.players.get(&target_sid).cloned() else { return; };
+                            if let Ok(Some(st)) = target.actor_ref.ask(GetPlayerState).await {
+                                let died = target.actor_ref.ask(crate::actors::player::TakeDamage {
+                                    attacker_id: 0, attacker_session: 0, damage: i32::MAX,
+                                }).await.unwrap_or(false);
+                                if died {
+                                    let died_packet = Self::build_object_died_packet(st.object_id, st.x, st.y, st.direction);
+                                    for (sid, _) in &self.players {
+                                        let _ = self.gate_ref.tell(SendToClient {
+                                            session_id: *sid,
+                                            data: died_packet.clone(),
+                                        }).await;
+                                    }
+                                    self.handle_player_death_drop(target_sid, st.x, st.y, st.map_index, false).await;
+                                    send_system_message(&self.gate_ref, msg.session_id, &format!("已击杀 {}", st.name));
+                                }
+                            }
+                        }
+
+                        // @die（C# case "DIE"：自杀）
+                        "DIE" => {
+                            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                                let died = record.actor_ref.ask(crate::actors::player::TakeDamage {
+                                    attacker_id: 0, attacker_session: 0, damage: i32::MAX,
+                                }).await.unwrap_or(false);
+                                if died {
+                                    let died_packet = Self::build_object_died_packet(st.object_id, st.x, st.y, st.direction);
+                                    for (sid, _) in &self.players {
+                                        let _ = self.gate_ref.tell(SendToClient {
+                                            session_id: *sid,
+                                            data: died_packet.clone(),
+                                        }).await;
+                                    }
+                                    self.handle_player_death_drop(msg.session_id, st.x, st.y, st.map_index, false).await;
+                                }
                             }
                         }
 
