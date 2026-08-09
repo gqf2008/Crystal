@@ -1052,7 +1052,7 @@ impl WorldActor {
                             support_intents.push((snap.session_id, snap.session_id, Spell::MassHealing as u8, true));
                             magic_anim_intents.push((snap.session_id, Spell::MassHealing as u8, hero_oid));
                         } else if hero_hp_pct < 90 {
-                            let amount = hero_heal_amount(&hero_stats, snap.hero_level);
+                            let amount = hero_heal_amount(&self.magic_infos, &snap.hero_magics, &hero_stats, snap.hero_level);
                             ai_local.hp = (ai_local.hp + amount).min(ai_local.max_hp);
                             magic_anim_intents.push((snap.session_id, Spell::Healing as u8, hero_oid));
                         } else {
@@ -2020,7 +2020,7 @@ impl WorldActor {
                             if *spell_id == mir2_shared::enums::Spell::MassHealing as u8 {
                                 hero_mass_heal_amount(&self.magic_infos, &s.hero_magics, &s.hero_stats, s.class)
                             } else {
-                                hero_heal_amount(&s.hero_stats, s.hero_level)
+                                hero_heal_amount(&self.magic_infos, &s.hero_magics, &s.hero_stats, s.hero_level)
                             }
                         })
                         .unwrap_or(5);
@@ -2802,14 +2802,32 @@ fn hero_melee_fallback(
     }
 }
 
-/// 道士英雄治疗量（#1184：C# Healing = magic.GetDamage(GetAttackPower(MinSC,MaxSC)*2) + Level 的简化稳定近似）
-fn hero_heal_amount(stats: &super::hero_stats::HeroStats, level: u16) -> i32 {
-    let sc = if stats.max_sc > stats.min_sc {
-        (stats.min_sc + stats.max_sc) / 2
-    } else {
-        stats.max_sc.max(1)
+/// #1404：道士英雄单疗量（C# HumanObject.cs:4359：magic.GetDamage(GetAttackPower(MinSC,MaxSC)*2) + Level）
+fn hero_heal_amount(
+    magic_infos: &std::collections::HashMap<u32, crate::db::MagicInfo>,
+    hero_magics: &[(i32, u8)],
+    stats: &super::hero_stats::HeroStats,
+    level: u16,
+) -> i32 {
+    // C# GetAttackPower(MinSC,MaxSC)（无幸运）→ ×2 → magic.GetDamage → +Level
+    let sc = crate::combat::attack::get_attack_power(stats.min_sc, stats.max_sc, 0).max(1);
+    healing_from_sc(magic_infos, hero_magics, sc, level)
+}
+
+/// #1404：纯函数（便于测试）——C# Healing = magic.GetDamage(sc*2) + Level
+fn healing_from_sc(
+    magic_infos: &std::collections::HashMap<u32, crate::db::MagicInfo>,
+    hero_magics: &[(i32, u8)],
+    sc: i32,
+    level: u16,
+) -> i32 {
+    let spell_cs = (mir2_shared::enums::Spell::Healing as u8 as i32).saturating_sub(3);
+    let lv = hero_magic_level(hero_magics, mir2_shared::enums::Spell::Healing as u8).max(1);
+    let base = match magic_infos.get(&(spell_cs as u32)) {
+        Some(info) => crate::combat::magic::calc_magic_damage(info, lv, sc * 2),
+        None => sc * 2,
     };
-    (sc * 2).max(1) + level as i32
+    base + level as i32
 }
 
 /// 英雄法术 MP 费用（#1186：C# MagicCost = base_cost + level*level_cost；技能等级用英雄已学等级）
@@ -3497,4 +3515,43 @@ mod tests {
         assert_eq!(ai.hp, ai.max_hp);
         assert_eq!(ai.pot_health, 30);
     }
+
+    #[test]
+    fn hero_healing_matches_csharp_getdamage() {
+        // #1404：C# Healing = magic.GetDamage(GetAttackPower(MinSC,MaxSC)*2) + Level
+        // multiplier=1.0 + lv*0，power=0 → GetDamage(20)=20；+ Level 5 = 25
+        let spell_cs = (mir2_shared::enums::Spell::Healing as u8 as i32).saturating_sub(3);
+        let info = crate::db::MagicInfo {
+            name: "Healing".to_string(),
+            spell: spell_cs,
+            base_cost: 3,
+            level_cost: 1,
+            icon: 0,
+            level1: 0,
+            level2: 0,
+            level3: 0,
+            need1: 0,
+            need2: 0,
+            need3: 0,
+            delay_base: 1000,
+            delay_reduction: 20,
+            power_base: 0,
+            power_bonus: 0,
+            mpower_base: 0,
+            mpower_bonus: 0,
+            range: 7,
+            multiplier_base: 1.0,
+            multiplier_bonus: 0.0,
+        };
+        let mut infos = std::collections::HashMap::new();
+        infos.insert(spell_cs as u32, info);
+        let magics = vec![(spell_cs, 1u8)];
+        // sc=10（min==max 确定）→ GetDamage(20)=20 → +5=25
+        assert_eq!(healing_from_sc(&infos, &magics, 10, 5), 25);
+        // 未学技能（magics 空）：hero_magic_level=0 → .max(1)=1，公式仍按 1 级
+        assert_eq!(healing_from_sc(&infos, &[], 10, 5), 25);
+        // 无魔法信息兜底：sc*2 + level
+        assert_eq!(healing_from_sc(&std::collections::HashMap::new(), &magics, 10, 5), 25);
+    }
+
 }
