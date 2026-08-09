@@ -24,6 +24,42 @@ pub(crate) fn auto_attack_debug(
     }
 }
 
+/// --auto-pmode：进图后循环发送宠物模式切换（#1562，C.ChangePMode → S.ChangePMode 确认链路）
+pub(crate) fn auto_pmode_test(
+    net: Res<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut sent: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    if time.elapsed_secs() < 6.0 {
+        return;
+    }
+    match *sent {
+        0 => {
+            *sent = 1;
+            net.send_packet(&client_bevy::game::player_control::build_change_pmode(
+                mir2_shared::enums::PetMode::MoveOnly,
+            ));
+            tracing::info!("🐾 [PMODETEST] 发送宠物模式 MoveOnly");
+        }
+        1 => {
+            if time.elapsed_secs() < 7.0 {
+                return;
+            }
+            *sent = 2;
+            net.send_packet(&client_bevy::game::player_control::build_change_pmode(
+                mir2_shared::enums::PetMode::AttackOnly,
+            ));
+            tracing::info!("🐾 [PMODETEST] 发送宠物模式 AttackOnly");
+        }
+        _ => {}
+    }
+}
+
 /// --auto-pet-pickup：进图后发送宠物拾取指令（#1558，C.IntelligentCreaturePickup：
 /// 鼠标拾取 mouse_mode=true + 半自动 mouse_mode=false，验证 发送→mock 解析→拾取入包 链路）
 pub(crate) fn auto_pet_pickup_test(

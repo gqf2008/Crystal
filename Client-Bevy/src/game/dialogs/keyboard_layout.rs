@@ -208,6 +208,8 @@ pub fn default_bindings() -> Vec<KeyBinding> {
         // #1558：宠物拾取（C# KeyBindSettings：CreaturePickup=X 鼠标拾取、CreatureAutoPickup=Ctrl+A 半自动）
         KeyBinding::new_mod("宠物拾取", "交互", KeyCode::KeyX, 0, 2, 2),
         KeyBinding::new_mod("宠物半自动拾取", "交互", KeyCode::KeyX, 1, 2, 2),
+        // #1562：宠物模式切换（C# ChangePetmode=Ctrl+A；Bevy 中 A 用于相机平移 → 改 Ctrl+T 避免冲突）
+        KeyBinding::new_mod("宠物模式切换", "交互", KeyCode::KeyT, 1, 2, 2),
         KeyBinding::new("聊天", "交互", KeyCode::Enter),
         KeyBinding::new("背包", "界面", KeyCode::F9),
         KeyBinding::new("背包2", "界面", KeyCode::KeyI),

@@ -27,6 +27,10 @@ pub fn register(app: &mut App) {
     if std::env::args().any(|a| a == "--auto-attack") {
         app.add_systems(Update, auto_attack_debug);
     }
+    // --auto-pmode: 宠物模式切换链路（#1562，C.ChangePMode → S.ChangePMode 确认）
+    if std::env::args().any(|a| a == "--auto-pmode") {
+        app.add_systems(Update, auto_pmode_test);
+    }
     // --auto-pet-pickup: 宠物拾取指令链路（#1558，C.IntelligentCreaturePickup → 拾取入包）
     if std::env::args().any(|a| a == "--auto-pet-pickup") {
         app.add_systems(Update, auto_pet_pickup_test);

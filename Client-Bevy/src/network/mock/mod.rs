@@ -2252,6 +2252,13 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         }
                                     }
                                 }
+                                x if x == ClientPacketIds::ChangePMode as i16 => {
+                                    // #1562：宠物模式切换（C# GameScene.ChangePetMode）→ 回 S.ChangePMode 确认
+                                    if let Ok(p) = client::ChangePMode::read_body(&mut cur) {
+                                        send(&to_client, &server::player::ChangePMode { mode: p.mode });
+                                        tracing::info!("[MOCK] 宠物模式切换 -> {:?}", p.mode);
+                                    }
+                                }
                                 x if x == ClientPacketIds::IntelligentCreaturePickup as i16 => {
                                     // #1558：宠物拾取指令（C# GameScene.cs:804/811）
                                     //   [mouse_mode u8][x i32][y i32]；mouse_mode=true 鼠标位置、false 玩家位置附近
