@@ -12,16 +12,10 @@
 
 use crate::actors::world::ai::behavior::MonsterBehavior;
 use crate::actors::world::ai::ctx::AiCtx;
+use crate::actors::world::ai::helpers::*;
 use crate::actors::world::MonsterState;
 
 const VIEW_RANGE: i32 = 15;
-/// #1385：C# 红名阈值（PlayerObject.cs:250：PKPoints >= 200）
-const RED_NAME_PK: i32 = 200;
-
-/// #1385：是否红名（C# PKPoints >= 200）
-fn is_red_name(pk_points: i32) -> bool {
-    pk_points >= RED_NAME_PK
-}
 
 pub struct GuardBehavior;
 
