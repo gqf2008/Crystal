@@ -448,8 +448,8 @@ fn spawn_chat(
             ..default()
         },
         bevy::sprite::Anchor::TOP_LEFT,
-        // z=6.0：实测此值下文字（z=2.0-2.4）能渲染在面板上；z=2.0 反而盖住文字
-        Transform::from_xyz(panel_x, -panel_y, 6.0),
+        // z=2.05：高于深度剔除阈值（约 2.0），低于内容（z=2.1-2.4），保证消息/输入显示在面板上
+        Transform::from_xyz(panel_x, -panel_y, 2.05),
         Visibility::Visible,
     )).id();
     let _ = bg_e;
