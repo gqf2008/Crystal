@@ -4221,6 +4221,38 @@ impl Message<Tick> for WorldActor {
                                     damage,
                                 }).await.unwrap_or(false);
 
+                                // #1598：C# HumanObject.Attacked（:7215/:7307）——向同图其他玩家
+                                // 广播 ObjectStruck + DamageIndicator（Broadcast 排除受害者；受害者收 S.Struck）
+                                if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
+                                    let mut struck_body = Vec::new();
+                                    struck_body.extend_from_slice(&victim.object_id.to_le_bytes());
+                                    struck_body.extend_from_slice(&monster.object_id.to_le_bytes());
+                                    struck_body.extend_from_slice(&(victim.x as u32).to_le_bytes());
+                                    struck_body.extend_from_slice(&(victim.y as u32).to_le_bytes());
+                                    struck_body.push(victim.direction);
+                                    let struck_packet = build_packet_bytes(
+                                        mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
+                                    let mut dmg_body = Vec::new();
+                                    dmg_body.extend_from_slice(&damage.to_le_bytes());
+                                    dmg_body.push(0u8); // damage_type = normal
+                                    dmg_body.extend_from_slice(&victim.object_id.to_le_bytes());
+                                    let dmg_packet = build_packet_bytes(
+                                        mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
+                                    for (sid, _) in &self.players {
+                                        if *sid == target_session {
+                                            continue;
+                                        }
+                                        let _ = self.gate_ref.tell(SendToClient {
+                                            session_id: *sid,
+                                            data: struck_packet.clone(),
+                                        }).await;
+                                        let _ = self.gate_ref.tell(SendToClient {
+                                            session_id: *sid,
+                                            data: dmg_packet.clone(),
+                                        }).await;
+                                    }
+                                }
+
                                 // 被攻击时自动下坐骑
                                 if !died {
                                     dismount_sessions.push(target_session);
