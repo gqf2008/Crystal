@@ -1636,6 +1636,11 @@ fn plague_duration(level: u8, value: i32) -> i32 {
     2 * (level as i32 + 1) + value / 10
 }
 
+/// #1447：C# UltimateEnhancer expiretime = GetAttackPower(SC)*4 + (Lv+1)*50（秒）
+fn ultimate_enhancer_duration_ticks(sc_power: i32, level: u8) -> u32 {
+    ((sc_power.max(1) * 4 + (level as i32 + 1) * 50) as u32) * 10
+}
+
 /// #345 MPEater：恢复 MP = 5*(Lv + Acc/4)（C# HumanObject.cs:3086）
 fn mp_eater_restore(level: i32, accuracy: i32) -> i32 {
     5 * (level + accuracy / 4)
@@ -2742,6 +2747,11 @@ impl Message<MagicRequest> for WorldActor {
             }
             // #306：Curse —— 7×7 区域 40% 概率 Slow 毒 + 减伤（C# Map.cs:1837，value2=1+(Lv+1)*2）
             SPELL_CURSE => {
+                // #1445：C# Curse 需普通护符并消耗 1（失败也消耗；HumanObject.cs:4860）
+                if !record.actor_ref.ask(crate::actors::player::ConsumeAmuletForSummon { amount: 1 }).await.unwrap_or(false) {
+                    debug!("Magic: {} casts Curse but has no amulet", state.name);
+                    return;
+                }
                 let value2 = 1 + (spell_level as i32 + 1) * 2;
                 // C# Curse：Random(10-(Lv+1)*2) > 2 失败（Lv0≈37.5% → Lv3=100%）
                 let chance_n = (10 - (spell_level as i32 + 1) * 2).max(1);
@@ -3859,6 +3869,11 @@ impl Message<MagicRequest> for WorldActor {
             }
             // #328：Plague —— 3×3 区域随机毒 + MaxSC×2 MAC 伤害（C# Map.cs:1972）
             SPELL_PLAGUE => {
+                // #1446：C# Plague 需普通护符并消耗 1（HumanObject.cs:4827）
+                if !record.actor_ref.ask(crate::actors::player::ConsumeAmuletForSummon { amount: 1 }).await.unwrap_or(false) {
+                    debug!("Magic: {} casts Plague but has no amulet", state.name);
+                    return;
+                }
                 let value = if let Some(info) = spell_db {
                     crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
                 } else { fastrand::i32(5..=12) }.max(1);
@@ -4094,11 +4109,22 @@ impl Message<MagicRequest> for WorldActor {
                 debug!("Magic: {} casts MentalState -> {}", state.name, label);
             }
             // #427：UltimateEnhancer —— 友方目标 DC/MC/SC 提升（C# HumanObject.cs:4784）
-            // 按目标职业加成：战士/刺客→DC，法师/弓手→MC，道士→SC；C# 需 amulet（Rust 暂不实现门槛）
+            // 按目标职业加成：战士/刺客→DC，法师/弓手→MC，道士→SC
             SPELL_ULTIMATE_ENHANCER => {
+                // #1447：C# UltimateEnhancer 需普通护符并消耗 1（HumanObject.cs:4784）
+                if !record.actor_ref.ask(crate::actors::player::ConsumeAmuletForSummon { amount: 1 }).await.unwrap_or(false) {
+                    debug!("Magic: {} casts UltimateEnhancer but has no amulet", state.name);
+                    return;
+                }
                 let sc = state.effective_max_sc();
                 let value = if sc >= 5 { (sc / 5).min(8) } else { 1 };
-                let duration_ticks = ((sc * 4 + (spell_level as i32 + 1) * 50) as u32) * 10;
+                // #1447：C# expiretime = GetAttackPower(MinSC,MaxSC)*4 + (Lv+1)*50
+                let sc_power = crate::combat::attack::get_attack_power(
+                    state.min_sc + state.bonus_min_sc,
+                    state.max_sc + state.bonus_max_sc,
+                    0,
+                ).max(1);
+                let duration_ticks = ultimate_enhancer_duration_ticks(sc_power, spell_level);
                 // 目标选择：msg.target_id 指向自己或同组玩家 → 对其施放；否则自己
                 let mut target_session = msg.session_id;
                 let mut target_class = state.class;
@@ -4720,6 +4746,15 @@ mod spell_geometry_tests {
         }
         assert!(ok);
     }
+    #[test]
+    fn ultimate_enhancer_duration_matches_csharp() {
+        // #1447：C# expiretime = GetAttackPower(SC)*4 + (Lv+1)*50 秒（×10 ticks）
+        assert_eq!(ultimate_enhancer_duration_ticks(10, 1), (10 * 4 + (1 + 1) * 50) * 10);
+        assert_eq!(ultimate_enhancer_duration_ticks(10, 0), (10 * 4 + 50) * 10);
+        // sc_power<=0 钳 1（get_attack_power max(1)）
+        assert_eq!(ultimate_enhancer_duration_ticks(0, 1), (1 * 4 + (1 + 1) * 50) * 10);
+    }
+
 }
 
 #[cfg(test)]
