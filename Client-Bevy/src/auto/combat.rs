@@ -24,6 +24,34 @@ pub(crate) fn auto_attack_debug(
     }
 }
 
+/// --auto-ranged-attack：进图后发送一次 C.RangeAttack（#1556，
+/// 验证 远程攻击 → mock 回 ObjectRangeAttack/S.RangeAttack → 弹道+受击 链路）
+pub(crate) fn auto_ranged_attack_test(
+    net: Res<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut sent: Local<bool>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    if *sent {
+        return;
+    }
+    if time.elapsed_secs() < 6.0 {
+        return;
+    }
+    *sent = true;
+    net.send_packet(&client_bevy::game::player_control::build_ranged_attack(
+        mir2_shared::enums::MirDirection::Right,
+        (354, 352),
+        101,
+        (353, 352),
+    ));
+    tracing::info!("🏹 [RANGETEST] 发送 RangeAttack → 目标 101");
+}
+
 /// --drop-pick-test：怪物掉落 → 地面物品 → 拾取 → 背包
 /// 前提：DB 配置 bevychar 在 Deer(340,325) 左侧、攻击力秒杀、Deer 掉落 chance=1.0
 #[allow(clippy::too_many_arguments)]

@@ -1401,6 +1401,158 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         }
                                     }
                                 }
+                                x if x == ClientPacketIds::RangeAttack as i16 => {
+                                    // #1556：弓手远程攻击反馈——ObjectRangeAttack（射手拉弓）+ S.RangeAttack（弹道）
+                                    // + ObjectStruck/DamageIndicator/ObjectHealth（对齐 ServerRust RangeAttackRequest）
+                                    if player_dead {
+                                        tracing::debug!("[MOCK] 死亡中忽略远程攻击");
+                                        continue;
+                                    }
+                                    if let Ok(p) = client::RangeAttack::read_body(&mut cur) {
+                                        tracing::info!("[MOCK] 远程攻击 dir={:?} target={} target_loc=({},{})",
+                                            p.direction, p.target_id, p.target_location.x, p.target_location.y);
+                                        let target = if p.target_id != 0 { p.target_id } else { 101u32 };
+                                        // 射手拉弓动作（C# S.ObjectRangeAttack；仅其他玩家可见，这里直接回给射手验证动画）
+                                        let (mx, my) = monster_pos.get(&target).copied().unwrap_or((353, 352));
+                                        send(
+                                            &to_client,
+                                            &server::combat::ObjectRangeAttack {
+                                                object_id: 100,
+                                                location_x: 354,
+                                                location_y: 352,
+                                                direction: p.direction as u8,
+                                                target_id: target,
+                                                target_x: mx as u32,
+                                                target_y: my as u32,
+                                                spell: 0,
+                                                spell_level: 0,
+                                            },
+                                        );
+                                        // 弹道（S.RangeAttack，客户端 PendingEffect::Projectile 渲染）
+                                        send(
+                                            &to_client,
+                                            &server::combat::RangeAttack {
+                                                target_id: target,
+                                                target_x: mx as u32,
+                                                target_y: my as u32,
+                                                spell: 0,
+                                                spell_level: 0,
+                                            },
+                                        );
+                                        // 命中结算（同近战 Attack 分支）
+                                        let hp = monster_hp.entry(target).or_insert(monster_def(target).hp_max);
+                                        let damage = player_attack_damage(&player_equipment);
+                                        *hp -= damage as i32;
+                                        monster_last_hit.insert(target, std::time::Instant::now());
+                                        send(
+                                            &to_client,
+                                            &server::combat::ObjectStruck {
+                                                object_id: target,
+                                                attacker_id: 100,
+                                                location_x: mx as u32,
+                                                location_y: my as u32,
+                                                direction: p.direction as u8,
+                                            },
+                                        );
+                                        send(
+                                            &to_client,
+                                            &server::combat::DamageIndicator {
+                                                damage: damage as i32,
+                                                damage_type: 0,
+                                                object_id: target,
+                                            },
+                                        );
+                                        if *hp <= 0 && !respawn.contains_key(&target) {
+                                            let (ix, iy) = monster_pos.get(&target).copied().unwrap_or((353, 352));
+                                            send(
+                                                &to_client,
+                                                &server::combat::ObjectDied {
+                                                    object_id: target,
+                                                    location_x: ix as u32,
+                                                    location_y: iy as u32,
+                                                    direction: 0,
+                                                    death_type: 0,
+                                                },
+                                            );
+                                            if !mock_leveled_up {
+                                                mock_leveled_up = true;
+                                                player_stats.level += 1;
+                                                let max_exp = MockPlayerStats::max_exp_for(player_stats.level);
+                                                send(
+                                                    &to_client,
+                                                    &server::experience::LevelChanged {
+                                                        level: player_stats.level,
+                                                        experience: player_stats.exp,
+                                                        max_experience: max_exp,
+                                                    },
+                                                );
+                                                send(
+                                                    &to_client,
+                                                    &server::experience::ObjectLeveled {
+                                                        object_id: 100,
+                                                        level: player_stats.level,
+                                                    },
+                                                );
+                                                tracing::info!("⬆️ [MOCK] 玩家升级到 Lv.{}", player_stats.level);
+                                            }
+                                            let roll = (std::time::SystemTime::now()
+                                                .duration_since(std::time::UNIX_EPOCH)
+                                                .map(|d| d.subsec_micros())
+                                                .unwrap_or(0)
+                                                + next_item_id)
+                                                % 10;
+                                            next_item_id += 1;
+                                            if roll < 4 {
+                                                let g = 20 + (next_item_id % 5) * 20;
+                                                player_gold += g;
+                                                send(&to_client, &server::drops::GainedGold { gold: g });
+                                                send(
+                                                    &to_client,
+                                                    &server::chat::Chat {
+                                                        message: format!("获得 {} 金币", g),
+                                                        chat_type: ChatType::System,
+                                                    },
+                                                );
+                                                tracing::info!("💰 [MOCK] 怪物 {} 掉落金币 +{}（余额 {}）", target, g, player_gold);
+                                            } else if roll < 7 {
+                                                let item_id = next_item_id;
+                                                next_item_id += 1;
+                                                ground_items.push((item_id, ix, iy, potion_item(1)));
+                                                send(
+                                                    &to_client,
+                                                    &server::drops::ObjectItem {
+                                                        object_id: item_id,
+                                                        item: potion_item(1),
+                                                        location_x: ix,
+                                                        location_y: iy,
+                                                    },
+                                                );
+                                                tracing::info!("💊 [MOCK] 怪物 {} 掉落药水 #{}", target, item_id);
+                                            } else if roll < 9 {
+                                                let item_id = next_item_id;
+                                                next_item_id += 1;
+                                                let equip = if next_item_id % 2 == 0 { 5 } else { 10 };
+                                                ground_items.push((item_id, ix, iy, potion_item(equip)));
+                                                send(
+                                                    &to_client,
+                                                    &server::drops::ObjectItem {
+                                                        object_id: item_id,
+                                                        item: potion_item(equip),
+                                                        location_x: ix,
+                                                        location_y: iy,
+                                                    },
+                                                );
+                                                tracing::info!("⚔️ [MOCK] 怪物 {} 掉落装备 #{} (index {})", target, item_id, equip);
+                                            } else {
+                                                tracing::info!("🍃 [MOCK] 怪物 {} 无掉落", target);
+                                            }
+                                            send(&to_client, &server::objects::ObjectRemove { object_id: target });
+                                            respawn.insert(target, std::time::Instant::now());
+                                            on_kill_reward(&to_client, target, &mut player_stats, &mut quest);
+                                            tracing::info!("💀 怪物 {} 死亡", target);
+                                        }
+                                    }
+                                }
                                 x if x == ClientPacketIds::Magic as i16 => {
                                     // 技能施放：回显魔法 + 对目标造成伤害
                                     if player_dead {
