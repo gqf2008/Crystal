@@ -87,9 +87,11 @@ pub(crate) fn spawn_net_objects_when_ready(
                 object_id,
                 mount_type,
                 is_mounted,
+                guild_name,
                 ..
             } => {
                 // M60：已存在的玩家（骑乘/下马重发 ObjectPlayer）→ 只更新坐骑层，不重复生成
+                // #1402：加退会/职位变化重发 ObjectPlayer → 即时更新行会名标签（#1374 续）
                 let existing = actors
                     .iter()
                     .find(|(_, id, _)| id.0 == *object_id)
@@ -127,6 +129,14 @@ pub(crate) fn spawn_net_objects_when_ready(
                             }
                         }
                         tracing::info!("🐴 玩家 {} 下马", object_id);
+                    }
+                    // #1402：重发 ObjectPlayer 时同步行会名标签
+                    if guild_name.is_empty() {
+                        commands.entity(ent).remove::<PlayerGuildName>();
+                    } else {
+                        commands
+                            .entity(ent)
+                            .insert(PlayerGuildName(guild_name.clone()));
                     }
                     continue;
                 }
@@ -202,7 +212,9 @@ fn spawn_net_object_entity(commands: &mut Commands, obj: &NetObject, is_local_pl
             commands.entity(e).insert(PlayerName(name.clone()));
             // #1374：行会名标签（非空才插）
             if !guild_name.is_empty() {
-                commands.entity(e).insert(PlayerGuildName(guild_name.clone()));
+                commands
+                    .entity(e)
+                    .insert(PlayerGuildName(guild_name.clone()));
             }
         }
         NetObject::GroundGold { .. } => {}
