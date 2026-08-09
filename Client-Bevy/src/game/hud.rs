@@ -10,6 +10,7 @@
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use crate::game::dialogs::character::CharPage;
 use crate::game::dialogs::inventory::InvItem;
 use crate::game::dialogs::{DialogKind, DialogManager};
 use crate::map_renderer::GameLibraries;
@@ -181,14 +182,22 @@ fn hero_btn_system(hero: Res<crate::game::dialogs::hero::HeroState>, mut btns: Q
 }
 
 /// HUD 按钮 → 对话框开关（M9：接入 DialogManager）
-fn hud_button_system(mut mgr: ResMut<DialogManager>, buttons: Query<(&UiButton, &HudButton)>) {
+fn hud_button_system(mut mgr: ResMut<DialogManager>, mut page: ResMut<CharPage>, buttons: Query<(&UiButton, &HudButton)>) {
     for (btn, kind) in &buttons {
         if btn.clicked {
             tracing::info!("🎛️ HUD 按钮点击: {:?}", kind.0);
             match kind.0 {
                 HudButtonKind::Inventory => mgr.toggle(DialogKind::Inventory),
                 HudButtonKind::Character => mgr.toggle(DialogKind::Character),
-                HudButtonKind::Skills => mgr.toggle(DialogKind::Skills),
+                HudButtonKind::Skills => {
+                    // C# MainDialogs.SkillButton → CharacterDialog.ShowSkillPage()
+                    if mgr.is_open(DialogKind::Character) && page.0 == 3 {
+                        mgr.close(DialogKind::Character);
+                    } else {
+                        mgr.open(DialogKind::Character);
+                        page.0 = 3;
+                    }
+                }
                 HudButtonKind::QuestLog => mgr.toggle(DialogKind::QuestLog),
                 HudButtonKind::Option => mgr.toggle(DialogKind::Settings),
                 HudButtonKind::Menu => mgr.toggle(DialogKind::Menu),

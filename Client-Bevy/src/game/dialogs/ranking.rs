@@ -1,7 +1,7 @@
 // ============================================================================
 // 排名对话框（M9 第 3 批）
 // 布局参考：macroquad ranking_dialog.rs
-//   - 320x380 面板，(200,150)，10 行 28px
+//   - 背景 Title[728]（324x441），(200,150)，10 行 28px
 // 网络：Ranking 请求 → 服务器回排名 → 显示
 // ============================================================================
 
@@ -15,7 +15,7 @@ use crate::resources::libraries::LibraryName;
 use crate::scenes::AppState;
 use crate::ui::controls::{spawn_checkbox, CheckBox};
 use crate::ui::scroll_list::{spawn_scroll_bar, ScrollList};
-use crate::ui::sprite_ui::{spawn_ui_text, UiButton, UiEntity, UiFont, UiImageCache};
+use crate::ui::sprite_ui::{spawn_ui_text, ui_image, UiButton, UiEntity, UiFont, UiImageCache};
 
 /// 排名条目（服务端 Rankings 包）
 #[derive(Debug, Clone, Default)]
@@ -132,24 +132,39 @@ fn spawn_ranking(
     }
     let font = ui_font.0.clone();
 
-    // 面板
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    let panel = commands
-        .spawn((
-            UiEntity,
-            DialogRoot(DialogKind::Ranking),
-            RankingWidget,
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.12, 0.12, 0.16, 0.95),
-                custom_size: Some(Vec2::new(320.0, 380.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(200.0, -150.0, 8.0),
-            Visibility::Hidden,
-        ))
-        .id();
+    // 面板背景 Title[728]（C# RankingDialog：Index=728, Library=Title；324x441）
+    let panel = if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 728) {
+        commands
+            .spawn((
+                UiEntity,
+                DialogRoot(DialogKind::Ranking),
+                RankingWidget,
+                Sprite::from_image(h),
+                bevy::sprite::Anchor::TOP_LEFT,
+                Transform::from_xyz(200.0, -150.0, 8.0),
+                Visibility::Hidden,
+            ))
+            .id()
+    } else {
+        // 兜底：纹理缺失时退回半透明深色面板
+        let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+        commands
+            .spawn((
+                UiEntity,
+                DialogRoot(DialogKind::Ranking),
+                RankingWidget,
+                Sprite {
+                    image: white.clone(),
+                    color: Color::srgba(0.12, 0.12, 0.16, 0.95),
+                    custom_size: Some(Vec2::new(320.0, 380.0)),
+                    ..default()
+                },
+                bevy::sprite::Anchor::TOP_LEFT,
+                Transform::from_xyz(200.0, -150.0, 8.0),
+                Visibility::Hidden,
+            ))
+            .id()
+    };
     // #89 可滚动排行列表：10 行 × 28px
     let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (490.0, 190.0, 4.0, 280.0), 8.3);
     commands.entity(track).insert((DialogRoot(DialogKind::Ranking), RankingWidget, Visibility::Visible));

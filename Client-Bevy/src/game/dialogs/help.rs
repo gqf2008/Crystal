@@ -130,7 +130,8 @@ fn spawn_help(
     }
     let font = ui_font.0.clone();
 
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 170) {
+    // 背景 Prguse[920]（C# HelpDialog：Index=920, Library=Prguse, Location=Center；536x509）
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 920) {
         let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
         commands.entity(e).insert((
             DialogRoot(DialogKind::Help),

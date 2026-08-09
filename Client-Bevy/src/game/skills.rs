@@ -495,24 +495,39 @@ fn spawn_skills_window(
     }
     let font = ui_font.0.clone();
 
-    // 面板（半透明深色）
-    let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
-    let panel = commands
-        .spawn((
-            UiEntity,
-            DialogRoot(DialogKind::Skills),
-            SkillsWidget,
-            Sprite {
-                image: white.clone(),
-                color: Color::srgba(0.12, 0.12, 0.16, 0.95),
-                custom_size: Some(Vec2::new(300.0, 360.0)),
-                ..default()
-            },
-            bevy::sprite::Anchor::TOP_LEFT,
-            Transform::from_xyz(SKILLS_DX, -SKILLS_DY, 6.0),
-            Visibility::Hidden,
-        ))
-        .id();
+    // 面板背景 Title[508]（C# CharacterDialog 技能页背景；248x284）
+    let panel = if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Title, 508) {
+        commands
+            .spawn((
+                UiEntity,
+                DialogRoot(DialogKind::Skills),
+                SkillsWidget,
+                Sprite::from_image(h),
+                bevy::sprite::Anchor::TOP_LEFT,
+                Transform::from_xyz(SKILLS_DX, -SKILLS_DY, 6.0),
+                Visibility::Hidden,
+            ))
+            .id()
+    } else {
+        // 兜底：纹理缺失时退回半透明深色面板
+        let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+        commands
+            .spawn((
+                UiEntity,
+                DialogRoot(DialogKind::Skills),
+                SkillsWidget,
+                Sprite {
+                    image: white.clone(),
+                    color: Color::srgba(0.12, 0.12, 0.16, 0.95),
+                    custom_size: Some(Vec2::new(300.0, 360.0)),
+                    ..default()
+                },
+                bevy::sprite::Anchor::TOP_LEFT,
+                Transform::from_xyz(SKILLS_DX, -SKILLS_DY, 6.0),
+                Visibility::Hidden,
+            ))
+            .id()
+    };
     // 标题
     let t = spawn_ui_text(&mut commands, &font, "技能", SKILLS_DX + 12.0, SKILLS_DY + 8.0, 15.0, Color::srgb(1.0, 0.9, 0.3), 6.2);
     commands.entity(t).insert((DialogRoot(DialogKind::Skills), SkillsWidget));
