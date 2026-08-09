@@ -209,7 +209,11 @@ impl Message<WorldAttackRequest> for WorldActor {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as i64)
                 .unwrap_or(0);
-            let interval = player_attack_speed_ms(state.attack_speed, state.level);
+            // #1506：C# AttackTime = 1400 - ((AttackSpeed*60) + min(370, Lv*14))——AttackSpeed 含 Haste/Fury buff 加成
+            let atk_spd_bonus = crate::combat::buff::get_stat_bonus(
+                &state.buffs, &crate::combat::buff::BuffType::AttackSpeedBoost { percent: 0 },
+            );
+            let interval = player_attack_speed_ms(state.attack_speed + atk_spd_bonus, state.level);
             let last = self
                 .player_last_attack_ms
                 .get(&msg.session_id)
@@ -888,12 +892,12 @@ pub(crate) struct MineSpotState {
     pub last_regen_tick: u64,
 }
 
-/// 矿脉最大储量（C# Mine.MaxStones 数据缺失，取近似 5）
-const MINE_MAX_STONES: u8 = 5;
-/// 矿脉再生间隔（C# Mine.SpotRegenRate 分钟，近似 2 分钟 = 1200 ticks）
-const MINE_REGEN_TICKS: u64 = 1200;
-/// 挖矿命中率（C# Mine.HitRate + 镐 Accuracy*10，近似 70%）
-const MINE_HIT_RATE: i32 = 70;
+/// 矿脉最大储量（C# MineInfo.MaxStones 默认 80，Settings.cs Mine{i} 可配置）
+const MINE_MAX_STONES: u8 = 80;
+/// 矿脉再生间隔（C# MineInfo.SpotRegenRate 默认 5 分钟 = 3000 ticks @100ms）
+const MINE_REGEN_TICKS: u64 = 3000;
+/// 挖矿基础命中率（C# MineInfo.HitRate 默认 25，另加镐 Accuracy*10）
+const MINE_HIT_RATE_BASE: i32 = 25;
 /// Rubble 废墟持续时间（C# 5 分钟）
 const RUBBLE_DURATION_MS: u64 = 300_000;
 
@@ -982,12 +986,12 @@ impl Message<HarvestRequest> for WorldActor {
         let spot_key = (state.map_index, target_x, target_y);
         {
             let spot = self.mine_spot_state.entry(spot_key).or_insert(MineSpotState {
-                stones_left: fastrand::i32(1..=MINE_MAX_STONES as i32) as u8,
+                stones_left: fastrand::i32(0..MINE_MAX_STONES as i32) as u8,
                 last_regen_tick: 0,
             });
             if spot.stones_left == 0 {
                 if self.tick_count >= spot.last_regen_tick + MINE_REGEN_TICKS {
-                    spot.stones_left = fastrand::i32(1..=MINE_MAX_STONES as i32) as u8;
+                    spot.stones_left = fastrand::i32(0..MINE_MAX_STONES as i32) as u8;
                     spot.last_regen_tick = self.tick_count;
                 } else {
                     send_system_message(&self.gate_ref, msg.session_id, "这里的矿脉已枯竭，稍后再来");
@@ -998,7 +1002,8 @@ impl Message<HarvestRequest> for WorldActor {
         }
 
         // 命中判定（C# Random(100) < HitRate + Accuracy*10；命中才出废墟/掉落/耗耐久）
-        let hit = fastrand::i32(0..100) < MINE_HIT_RATE;
+        // C# Random(100) < (HitRate + Weapon.GetTotal(Accuracy)*10)；accuracy 含装备/技能加成
+        let hit = fastrand::i32(0..100) < MINE_HIT_RATE_BASE + state.accuracy * 10;
         let mut result_msg = "没有挖到东西".to_string();
         if hit {
             // Rubble 废墟：玩家脚下创建/刷新（C# CurrentLocation 格，5 分钟）
@@ -1319,7 +1324,11 @@ impl Message<RangeAttackRequest> for WorldActor {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
-        let interval = player_attack_speed_ms(state.attack_speed, state.level);
+        // #1506：C# AttackTime = 1400 - ((AttackSpeed*60) + min(370, Lv*14))——AttackSpeed 含 Haste/Fury buff 加成
+        let atk_spd_bonus = crate::combat::buff::get_stat_bonus(
+            &state.buffs, &crate::combat::buff::BuffType::AttackSpeedBoost { percent: 0 },
+        );
+        let interval = player_attack_speed_ms(state.attack_speed + atk_spd_bonus, state.level);
         let last = self
             .player_last_attack_ms
             .get(&msg.session_id)
@@ -3043,8 +3052,8 @@ impl Message<MagicRequest> for WorldActor {
             // ===== 刺客法术（Assassin，buff 系 + 位移系 + 物理攻击系）=====
             // Haste：攻击速度提升（C# CompleteMagic 6149：AttackSpeed stat += Lv*2+2，时长 25+15Lv 秒）
             SPELL_HASTE => {
-                // stat 2..8 ≈ 20..80% 冷却缩减（近似）
-                let pct = (2 + spell_level as i32 * 2) * 10;
+                // #1506：C# Stats[AttackSpeed] = Lv*2+2（2..8），AttackTime 公式直接消费 stat
+                let pct = 2 + spell_level as i32 * 2;
                 let buff = crate::combat::buff::BuffInstance::new(
                     crate::combat::buff::BuffType::AttackSpeedBoost { percent: pct },
                     (25 + spell_level as u32 * 15) * 10,
