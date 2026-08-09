@@ -32,18 +32,6 @@ impl DemonGuardBehavior {
             death_announced: false,
         }
     }
-
-    /// #1369：是否处于"死亡待复活"（尸体保留）状态
-    pub(crate) fn has_pending_revive(&self) -> bool {
-        self.pending_revive_tick > 0
-    }
-
-    /// #1369：标记死亡已广播；返回是否为首次（tick.rs 死亡处理首次发 ObjectDied）
-    pub(crate) fn mark_death_announced(&mut self) -> bool {
-        let first = !self.death_announced;
-        self.death_announced = true;
-        first
-    }
 }
 
 /// #1369：C# DemonGuard 复活 HP = MaxHP * (100 - 25*RevivalCount) / 100（最小 1）
@@ -59,6 +47,18 @@ fn revived_xp(base_xp: i32, revival_count: u32) -> i32 {
 }
 
 impl MonsterBehavior for DemonGuardBehavior {
+    /// #1369/#1399：死亡待复活（尸体保留）
+    fn keep_corpse_for_revive(&self) -> bool {
+        self.pending_revive_tick > 0
+    }
+
+    /// #1369/#1399：标记死亡已广播；返回是否首次（首次发 ObjectDied）
+    fn mark_death_announced(&mut self) -> bool {
+        let first = !self.death_announced;
+        self.death_announced = true;
+        first
+    }
+
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         // #1369：C# ProcessAI——死亡且 RevivalTime 到且次数未满 → Revive（延迟复活）
         if monster.hp <= 0 {

@@ -3,9 +3,9 @@
 //! 每个 Boss / 特殊怪物实现此 trait，与 C# 类继承 1:1 对齐。
 //! 普通怪物用 DefaultBehavior（保留原 9 种 MonsterAiType，由 tick_monsters 处理）。
 
-use crate::combat::poison::Poison;
-use crate::actors::world::MonsterState;
 use super::ctx::AiCtx;
+use crate::actors::world::MonsterState;
+use crate::combat::poison::Poison;
 
 /// 怪物行为接口（对齐 C# MonsterObject 的 virtual 方法）
 /// 需要 Send + Sync：WorldActor 跨 await 点持有 monsters HashMap，要求 Box<dyn> 是 Send + Sync
@@ -43,6 +43,16 @@ pub trait MonsterBehavior: Send + Sync + 'static {
 
     /// 死亡回调（对齐 C# Die；HornedCommander 清理 Slave/RockSpike）
     fn on_die(&mut self, _monster: &mut MonsterState, _ctx: &mut AiCtx) {}
+
+    /// #1399：死亡后是否保留尸体等待复活/苏醒（DemonGuard 延迟复活、DragonStatue 睡眠）
+    fn keep_corpse_for_revive(&self) -> bool {
+        false
+    }
+
+    /// #1399：标记死亡已广播；返回是否首次（tick.rs 死亡处理首次发 ObjectDied，避免每 tick 重复）
+    fn mark_death_announced(&mut self) -> bool {
+        false
+    }
 
     /// 出生初始化（对齐 C# Spawned；TreeQueen 设定时器）
     fn on_spawned(&mut self, _monster: &mut MonsterState) {}
