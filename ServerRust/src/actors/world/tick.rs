@@ -4198,10 +4198,14 @@ impl Message<Tick> for WorldActor {
                                 }).await;
                             }
                         } else {
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: target_session,
-                                data: attack_packet,
-                            }).await;
+                            // #1594：C# MonsterObject.Attack Broadcast——近战攻击动画广播给同图所有玩家
+                            // （受害者包含在内；远程/Boss 分支已广播）
+                            for sid in self.players.keys() {
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: *sid,
+                                    data: attack_packet.clone(),
+                                }).await;
+                            }
                         }
                         // 安全区保护：目标在安全区内则不受怪物伤害
                         let target_in_safe = self.maps.get(&monster.map_index)
