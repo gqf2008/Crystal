@@ -172,11 +172,10 @@ pub struct SkillBarState {
 
 impl Default for SkillBarState {
     fn default() -> Self {
+        // C# Settings.SkillbarLocation[0] = {0, 0}（左上角）。
+        // 之前默认放底部中央 (360,726) 会与左下聊天面板 (230,671)-(862,739) 重叠 → 界面“乱”。
         Self {
-            pos: (
-                1024.0 / 2.0 - 4.0 * (SKILL_SLOT_W + 4.0),
-                SKILL_BAR_Y,
-            ),
+            pos: (0.0, 0.0),
             drag_offset: None,
         }
     }
@@ -351,8 +350,8 @@ mod tests {
         let s = SkillBarState::from_ini("");
         let d = SkillBarState::default();
         assert_eq!(s.pos, d.pos);
-        assert_eq!(d.pos.0, 1024.0 / 2.0 - 4.0 * (SKILL_SLOT_W + 4.0));
-        assert_eq!(d.pos.1, SKILL_BAR_Y);
+        assert_eq!(d.pos.0, 0.0);
+        assert_eq!(d.pos.1, 0.0);
     }
 
     fn magic(spell: Spell, key: u8) -> ClientMagic {
