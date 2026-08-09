@@ -985,6 +985,8 @@ pub struct WorldActor {
     pub(crate) npc_goods: HashMap<i32, Vec<db::NpcGoodsInfo>>,
     /// 会话当前对话的 NPC（BuyItem 用，客户端协议不含 npc_id）
     pub(crate) session_npc: HashMap<u64, u32>,
+    /// #珍珠商店：会话当前处于珍珠购买页（[@PEARLBUY] 置位，下次 CallNPC 清除）
+    pub(crate) session_pearl_shop: std::collections::HashSet<u64>,
     /// 游戏配置：NPC 脚本 ((npc_index, page_name) -> lines)
     pub(crate) npc_scripts: HashMap<(i32, String), Vec<String>>,
     /// 游戏配置：任务信息
@@ -1251,6 +1253,7 @@ impl WorldActor {
             npc_infos: HashMap::new(),
             npc_goods: HashMap::new(),
             session_npc: HashMap::new(),
+            session_pearl_shop: std::collections::HashSet::new(),
             npc_scripts: HashMap::new(),
             quest_infos: HashMap::new(),
             magic_infos: HashMap::new(),
@@ -4143,6 +4146,7 @@ impl Actor for WorldActor {
             npc_infos,
             npc_goods,
             session_npc: HashMap::new(),
+            session_pearl_shop: std::collections::HashSet::new(),
             npc_scripts,
             quest_infos,
             magic_infos,
