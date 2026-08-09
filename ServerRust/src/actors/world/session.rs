@@ -1605,7 +1605,7 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN" | "OBSERVER" | "CHANGECLASS") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -2226,6 +2226,67 @@ impl Message<ChatRequest> for WorldActor {
                             let _ = record.actor_ref.ask(crate::actors::player::SetGmNeverDie { enabled }).await;
                             send_system_message(&self.gate_ref, msg.session_id,
                                 if enabled { "已开启无敌模式（不会死亡）" } else { "已关闭无敌模式" });
+                        }
+
+                        // @observer（C# case "OBSERVER"：GM 观战隐身）
+                        "OBSERVER" => {
+                            if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await {
+                                let hidden = !self.invisible_sessions.contains(&msg.session_id);
+                                if hidden {
+                                    self.invisible_sessions.insert(msg.session_id);
+                                    self.hide_player_from_others(msg.session_id, &st).await;
+                                    send_system_message(&self.gate_ref, msg.session_id, "已进入观战模式（对他人隐身）");
+                                } else {
+                                    self.invisible_sessions.remove(&msg.session_id);
+                                    self.reveal_player_to_others(msg.session_id, &st).await;
+                                    send_system_message(&self.gate_ref, msg.session_id, "已退出观战模式");
+                                }
+                            }
+                        }
+
+                        // @changeclass [玩家] <职业>（C# case "CHANGECLASS"：GM 转职）
+                        "CHANGECLASS" => {
+                            let class_str = parts.last().copied().unwrap_or("");
+                            let class_opt = match class_str.to_uppercase().as_str() {
+                                "WARRIOR" => Some(mir2_shared::enums::MirClass::Warrior),
+                                "WIZARD" => Some(mir2_shared::enums::MirClass::Wizard),
+                                "TAOIST" => Some(mir2_shared::enums::MirClass::Taoist),
+                                "ASSASSIN" => Some(mir2_shared::enums::MirClass::Assassin),
+                                "ARCHER" => Some(mir2_shared::enums::MirClass::Archer),
+                                _ => None,
+                            };
+                            let Some(class) = class_opt else {
+                                send_system_message(&self.gate_ref, msg.session_id, "用法：@changeclass [玩家] <Warrior|Wizard|Taoist|Assassin|Archer>");
+                                return;
+                            };
+                            let target_sid = if parts.len() >= 3 {
+                                let name = parts.get(1).copied().unwrap_or("");
+                                let mut found = None;
+                                for (_sid, other) in &self.players {
+                                    if let Ok(Some(os)) = other.actor_ref.ask(GetPlayerState).await {
+                                        if os.name.eq_ignore_ascii_case(name) {
+                                            found = Some(*_sid);
+                                            break;
+                                        }
+                                    }
+                                }
+                                let Some(sid) = found else {
+                                    send_system_message(&self.gate_ref, msg.session_id, "未找到在线玩家");
+                                    return;
+                                };
+                                Some(sid)
+                            } else {
+                                Some(msg.session_id)
+                            };
+                            if let Some(sid) = target_sid {
+                                if let Some(r) = self.players.get(&sid) {
+                                    let _ = r.actor_ref.ask(crate::actors::player::ChangeClass { class }).await;
+                                    if let Ok(Some(st)) = r.actor_ref.ask(GetPlayerState).await {
+                                        self.refresh_player_appearance(sid).await;
+                                        send_system_message(&self.gate_ref, msg.session_id, &format!("{} 已转职为 {:?}", st.name, class));
+                                    }
+                                }
+                            }
                         }
 
                         // @setflag <index> [玩家]（C# case "SETFLAG" ~3351：切换 flag）
