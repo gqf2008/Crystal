@@ -74,6 +74,7 @@ impl MonsterBehavior for HoodedSummonerBehavior {
                             x: target.x + fastrand::i32(-2..=2),
                             y: target.y + fastrand::i32(-2..=2),
                             is_slave: true,
+                            summoner_oid: Some(monster.object_id),
                         });
                     } else {
                         // 冷却中：退化为远程弹道

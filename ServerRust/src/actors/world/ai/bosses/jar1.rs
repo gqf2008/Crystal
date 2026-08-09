@@ -45,6 +45,7 @@ impl MonsterBehavior for Jar1Behavior {
                     x: monster.x,
                     y: monster.y,
                     is_slave: false,
+                    summoner_oid: Some(monster.object_id),
                 });
                 // 防止重复召唤
                 self.die_tick = u64::MAX;

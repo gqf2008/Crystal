@@ -962,7 +962,8 @@ pub struct WorldActor {
     pub(crate) guild_buff_infos: HashMap<u32, crate::util::ini::GuildBuffInfo>,
     /// 地面掉落物品
     pub(crate) ground_items: Vec<GroundItem>,
-    /// 已打开的门 (map_index, door_index)
+    /// #1434：召唤物 slave 归属索引（slave oid → master oid；C# MonsterObject.SlaveList）
+    pub(crate) slave_master: std::collections::HashMap<u32, u32>,
     pub(crate) open_doors: std::collections::HashSet<(u16, u8)>,
     /// SQLite 数据库连接池
     pub(crate) db_pool: DbPool,
@@ -1243,6 +1244,7 @@ impl WorldActor {
             guild_buff_infos: HashMap::new(),
             ground_items: Vec::new(),
             open_doors: std::collections::HashSet::new(),
+            slave_master: std::collections::HashMap::new(),
             db_pool,
             map_infos: HashMap::new(),
             item_infos: HashMap::new(),
@@ -4136,6 +4138,7 @@ impl Actor for WorldActor {
             guild_buff_infos: args.guild_buff_infos.into_iter().map(|b| (b.id, b)).collect(),
             ground_items: Vec::new(),
             open_doors: std::collections::HashSet::new(),
+            slave_master: std::collections::HashMap::new(),
             db_pool: args.db_pool,
             map_infos,
             item_infos,

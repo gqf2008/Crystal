@@ -77,6 +77,7 @@ impl MonsterBehavior for HornedCommanderBehavior {
                     x: monster.x + DIR_DX[dir] * dist,
                     y: monster.y + DIR_DY[dir] * dist,
                     is_slave: true,
+                    summoner_oid: Some(monster.object_id),
                 });
             }
             self.called_boulders = true;
@@ -96,6 +97,7 @@ impl MonsterBehavior for HornedCommanderBehavior {
                 x: monster.x + DIR_DX[monster.direction as usize % 8],
                 y: monster.y + DIR_DY[monster.direction as usize % 8],
                 is_slave: true,
+                summoner_oid: Some(monster.object_id),
             });
             return;
         }

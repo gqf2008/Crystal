@@ -306,9 +306,14 @@ impl SiegeStructure {
         }
     }
 
-    /// 是否为阻挡类结构（城墙/城门，HP 归零后通过）
+    /// 是否为阻挡类结构（#1431：C# CastleGate.Blocking => Closed && base.Blocking——
+    /// 开门（is_open）的城门不阻挡；城墙始终阻挡，HP 归零后由调用方过滤）
     pub fn is_blocking(&self) -> bool {
-        matches!(self.structure_type, SiegeStructureType::Wall | SiegeStructureType::CastleGate)
+        match self.structure_type {
+            SiegeStructureType::Wall => true,
+            SiegeStructureType::CastleGate => !self.is_open,
+            _ => false,
+        }
     }
 
     /// 是否已被摧毁（HP 归零，破损）
@@ -426,6 +431,36 @@ mod tests {
         inst.start_war("新攻击方");
         assert_eq!(inst.state, WarState::InProgress);
         assert_eq!(inst.attacker_guild.as_deref(), Some("新攻击方"));
+    }
+    #[test]
+    fn test_gate_is_blocking_follows_is_open() {
+        // #1431：C# CastleGate.Blocking => Closed && base.Blocking——开门不阻挡
+        let mut gate = SiegeStructure::gate(1);
+        assert!(gate.is_blocking(), "关门默认阻挡");
+        gate.is_open = true;
+        assert!(!gate.is_blocking(), "开门不阻挡");
+        gate.is_open = false;
+        gate.hp = 0;
+        assert!(gate.is_blocking(), "is_blocking 只看开关门；已摧毁由调用方过滤 is_destroyed");
+        // 城墙始终阻挡（无开关门）
+        let wall = SiegeStructure::wall(2);
+        assert!(wall.is_blocking());
+    }
+
+    #[test]
+    fn test_find_nearest_target_skips_open_gate() {
+        // #1431：攻城器目标选择跳过已开门城门（is_blocking=false）
+        let mut map = std::collections::HashMap::new();
+        let mut w1 = SiegeStructure::wall(10);
+        w1.conquest_id = 1; w1.x = 5; w1.y = 5;
+        let mut g2 = SiegeStructure::gate(11);
+        g2.conquest_id = 1; g2.x = 20; g2.y = 20; g2.is_open = true;
+        map.insert(10, w1); map.insert(11, g2);
+        let ids = vec![10u32, 11u32];
+        assert_eq!(find_nearest_target(0, 0, 1, &map, &ids), Some(10));
+        // 若只有开门城门 → 无目标
+        map.remove(&10);
+        assert_eq!(find_nearest_target(0, 0, 1, &map, &ids), None);
     }
 }
 

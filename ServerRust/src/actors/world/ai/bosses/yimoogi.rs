@@ -61,6 +61,7 @@ impl MonsterBehavior for YimoogiBehavior {
                     x: monster.x + fastrand::i32(-1..=1),
                     y: monster.y + fastrand::i32(-1..=1),
                     is_slave: true,
+                    summoner_oid: Some(monster.object_id),
                 });
             }
             self.final_teleport = true;
@@ -77,6 +78,7 @@ impl MonsterBehavior for YimoogiBehavior {
                 x: monster.x + DIR_DX[monster.direction as usize % 8],
                 y: monster.y + DIR_DY[monster.direction as usize % 8],
                 is_slave: true,
+                summoner_oid: Some(monster.object_id),
             });
             self.child_spawned = true;
             self.no_attack = false;

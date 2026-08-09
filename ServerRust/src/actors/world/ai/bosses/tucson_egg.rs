@@ -91,6 +91,7 @@ impl MonsterBehavior for TucsonEggBehavior {
                 x: monster.x,
                 y: monster.y,
                 is_slave: false,
+                summoner_oid: Some(monster.object_id),
             });
         }
     }

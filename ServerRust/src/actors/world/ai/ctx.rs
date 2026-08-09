@@ -93,6 +93,8 @@ pub struct BossSummon {
     pub x: i32,
     pub y: i32,
     pub is_slave: bool, // true=加入 slave_list（死亡时清理）
+    /// #1434：召唤者（master）object_id；is_slave=true 时用于登记 SlaveList（master 死亡级联清理）
+    pub summoner_oid: Option<u32>,
 }
 
 /// 对玩家的 poison 施加（C# PoisonTarget）

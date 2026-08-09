@@ -109,6 +109,7 @@ impl MonsterBehavior for AncientBringerBehavior {
                             x: target.x + fastrand::i32(-3..=3),
                             y: target.y + fastrand::i32(-3..=3),
                             is_slave: true,
+                            summoner_oid: Some(monster.object_id),
                         });
                     }
                 }

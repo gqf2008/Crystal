@@ -46,6 +46,7 @@ impl MonsterBehavior for RootSpiderBehavior {
             x: monster.x + DIR_DX[dir],
             y: monster.y + DIR_DY[dir],
             is_slave: true,
+            summoner_oid: Some(monster.object_id),
         });
     }
 }

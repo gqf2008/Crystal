@@ -60,6 +60,7 @@ impl MonsterBehavior for OmaKingBehavior {
                     x: monster.x + DIR_DX[dir] * 2,
                     y: monster.y + DIR_DY[dir] * 2,
                     is_slave: true,
+                    summoner_oid: Some(monster.object_id),
                 });
             }
         }

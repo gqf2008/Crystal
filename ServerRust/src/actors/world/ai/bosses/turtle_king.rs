@@ -185,6 +185,7 @@ impl TurtleKingBehavior {
                 x: monster.x + DIR_DX[dir] * ((i / 8) as i32 + 1),
                 y: monster.y + DIR_DY[dir] * ((i / 8) as i32 + 1),
                 is_slave: true,
+                summoner_oid: Some(monster.object_id),
             });
         }
     }
