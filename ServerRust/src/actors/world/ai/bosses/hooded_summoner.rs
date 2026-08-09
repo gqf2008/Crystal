@@ -64,7 +64,8 @@ impl MonsterBehavior for HoodedSummonerBehavior {
                     });
                 }
                 4 | 5 => {
-                    if ctx.tick_count >= self.slave_spawn_tick {
+                    // #1441：C# count = min(1, 4 - SlaveList.Count)——满员不召
+                    if ctx.tick_count >= self.slave_spawn_tick && slave_spawn_count(1, ctx.slave_count, 4) > 0 {
                         // 召唤 Slave（C# SpawnSlaves，1 只）
                         self.slave_spawn_tick = ctx.tick_count + SLAVE_COOLDOWN_TICKS;
                         let mobs = if roll == 4 { &SCROLL_MOBS_A } else { &SCROLL_MOBS_B };

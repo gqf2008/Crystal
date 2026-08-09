@@ -77,9 +77,8 @@ impl MonsterBehavior for GeneralMeowMeowBehavior {
         // ---- 定时器：召唤 Slave（C# ProcessAI：Envir.Time > SlaveSpawnTime）----
         if ctx.tick_count >= self.next_slave_tick {
             self.next_slave_tick = ctx.tick_count + SLAVE_SPAWN_INTERVAL_TICKS;
-            // C# count = min(3, 6 - SlaveList.Count)
-            // 简化：直接召唤 3 只（SlaveList.Count 运行时不可知，靠 is_slave 统一管理）
-            for i in 0..3 {
+            // #1441：C# count = min(3, 6 - SlaveList.Count)
+            for i in 0..slave_spawn_count(3, ctx.slave_count, 6) {
                 let dir = (i as usize) % 8;
                 let name = SLAVE_NAMES[fastrand::usize(0..SLAVE_NAMES.len())];
                 ctx.out_summons.push(crate::actors::world::ai::BossSummon {

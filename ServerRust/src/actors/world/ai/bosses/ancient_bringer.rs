@@ -103,7 +103,8 @@ impl MonsterBehavior for AncientBringerBehavior {
                 });
                 // 1/10 召唤 AncientBat（C# SpawnSlaves）
                 if rare {
-                    for _ in 0..MAX_BATS {
+                    // #1441：C# SpawnSlaves count = min(6, 40 - SlaveList.Count)
+                    for _ in 0..slave_spawn_count(MAX_BATS, ctx.slave_count, 40) {
                         ctx.out_summons.push(crate::actors::world::ai::BossSummon {
                             monster_name: BAT_NAME.to_string(),
                             x: target.x + fastrand::i32(-3..=3),

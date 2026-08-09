@@ -177,7 +177,8 @@ impl MonsterBehavior for TurtleKingBehavior {
 
 impl TurtleKingBehavior {
     fn spawn_slaves(&self, monster: &mut MonsterState, ctx: &mut AiCtx) {
-        for i in 0..SLAVES_PER_STAGE {
+        // #1441：C# count = min(8, 30 - SlaveList.Count)
+        for i in 0..slave_spawn_count(SLAVES_PER_STAGE as usize, ctx.slave_count, 30) {
             let dir = (i as usize) % 8;
             let name = SLAVE_NAMES[fastrand::usize(0..SLAVE_NAMES.len())];
             ctx.out_summons.push(crate::actors::world::ai::BossSummon {

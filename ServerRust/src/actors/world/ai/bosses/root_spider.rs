@@ -38,6 +38,10 @@ impl MonsterBehavior for RootSpiderBehavior {
         };
         monster.target_session = Some(target.session_id);
         monster.next_summon_tick = ctx.tick_count + SUMMON_COOLDOWN;
+        // #1442：C# SlaveList.Count >= 20 跳过召唤
+        if ctx.slave_count >= 20 {
+            return;
+        }
 
         // 召唤 BombSpider 在偏移位置（C# 按 Direction 选 Back/DownRight/DownLeft）
         let dir = monster.direction as usize % 8;

@@ -154,6 +154,8 @@ pub struct AiCtx<'a> {
     pub monsters: &'a [MonsterSnap],
     /// #1396：怪物 index → 名称映射（FloatingRock 克隆目标解析用）
     pub monster_name_by_index: &'a std::collections::HashMap<i32, String>,
+    /// #1441：当前怪物存活的 slave 数（C# SlaveList.Count；tick 预计算）
+    pub slave_count: usize,
     /// 输出：移动 (oid, x, y, dir)
     pub out_moves: &'a mut Vec<(u32, i32, i32, u8)>,
     /// 输出：攻击动作
