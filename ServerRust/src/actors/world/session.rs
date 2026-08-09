@@ -1606,7 +1606,7 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -2161,6 +2161,63 @@ impl Message<ChatRequest> for WorldActor {
                                     self.handle_player_death_drop(msg.session_id, st.x, st.y, st.map_index, false).await;
                                 }
                             }
+                        }
+
+                        // @reloaddrops（C# case "RELOADDROPS"：重载掉落表）
+                        "RELOADDROPS" => {
+                            let item_name_index: std::collections::HashMap<String, i32> = self.item_infos.iter()
+                                .map(|(idx, i)| (i.name.to_lowercase(), *idx))
+                                .collect();
+                            let drop_dir = self.map_dir.join("Envir").join("Drops");
+                            if drop_dir.exists() {
+                                if let Err(e) = db::import_drops_from_dir(&drop_dir, &self.monster_infos, &item_name_index, &self.db_pool).await {
+                                    send_system_message(&self.gate_ref, msg.session_id, &format!("掉落重载失败：{}", e));
+                                    return;
+                                }
+                            }
+                            match db::load_monster_drops(&self.db_pool).await {
+                                Ok(d) => { self.monster_drops = d; }
+                                Err(e) => {
+                                    send_system_message(&self.gate_ref, msg.session_id, &format!("掉落重载失败：{}", e));
+                                    return;
+                                }
+                            }
+                            self.fishing_drops = load_fishing_drops(&drop_dir, &item_name_index);
+                            send_system_message(&self.gate_ref, msg.session_id, "掉落表已重载");
+                        }
+
+                        // @reloadnpcs（C# case "RELOADNPCS"：重载 NPC 配置/脚本）
+                        "RELOADNPCS" => {
+                            let npc_dir = self.map_dir.join("Envir").join("NPCs");
+                            if npc_dir.exists() {
+                                let npc_infos_vec: Vec<db::NPCInfo> = self.npc_infos.values().cloned().collect();
+                                if let Err(e) = db::import_npc_scripts_from_dir(&npc_dir, &npc_infos_vec, &self.db_pool).await {
+                                    send_system_message(&self.gate_ref, msg.session_id, &format!("NPC 重载失败：{}", e));
+                                    return;
+                                }
+                            }
+                            match db::load_npc_infos(&self.db_pool).await {
+                                Ok(m) => { self.npc_infos = m.into_iter().map(|n| (n.index, n)).collect(); }
+                                Err(e) => {
+                                    send_system_message(&self.gate_ref, msg.session_id, &format!("NPC 重载失败：{}", e));
+                                    return;
+                                }
+                            }
+                            match db::load_npc_scripts(&self.db_pool).await {
+                                Ok(s) => { self.npc_scripts = s; }
+                                Err(e) => {
+                                    send_system_message(&self.gate_ref, msg.session_id, &format!("NPC 重载失败：{}", e));
+                                    return;
+                                }
+                            }
+                            match db::load_npc_goods(&self.db_pool).await {
+                                Ok(g) => { self.npc_goods = g; }
+                                Err(e) => {
+                                    send_system_message(&self.gate_ref, msg.session_id, &format!("NPC 重载失败：{}", e));
+                                    return;
+                                }
+                            }
+                            send_system_message(&self.gate_ref, msg.session_id, "NPC 配置已重载");
                         }
 
                         // @setflag <index> [玩家]（C# case "SETFLAG" ~3351：切换 flag）
