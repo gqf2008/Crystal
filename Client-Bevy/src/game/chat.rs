@@ -18,7 +18,7 @@ use crate::scenes::AppState;
 use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
 use crate::resources::libraries::LibraryName;
 use crate::ui::controls::spawn_checkbox;
-use crate::ui::sprite_ui::{spawn_ui_text, ui_image, UiButton, UiEntity, UiFont, UiImageCache};
+use crate::ui::sprite_ui::{spawn_ui_sprite, spawn_ui_text, ui_image, UiButton, UiEntity, UiFont, UiImageCache};
 
 /// 聊天频道（主话框页签，对齐 C# MainDialogs ChatPanel）
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -432,22 +432,27 @@ fn spawn_chat(
     let panel_y = 768.0 - 150.0 - 190.0; // 主对话框上方
 
     // 面板背景：C# ChatDialog 用真实纹理 Prguse[2221]（1024 分辨率 632x68）。
-    // 不用纯色 1x1 白图着色——部分机器上纯色精灵不渲染导致聊天框/输入框消失。
+    // 用 spawn_ui_sprite（TOP_LEFT + 自然尺寸）——实验确认 custom_size+Center 精灵是否不渲染。
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     let chat_bg = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2221)
         .unwrap_or(white);
-    commands.spawn((
+    // 面板加高到 172 包住现有聊天内容（页签/消息行/输入框/滚动按钮），界面整洁
+    let bg_e = commands.spawn((
         UiEntity,
         ChatPanel,
         ChatPanelBg,
         Sprite {
             image: chat_bg,
-            custom_size: Some(Vec2::new(360.0, 172.0)),
+            custom_size: Some(Vec2::new(632.0, 172.0)),
+            color: Color::WHITE,
             ..default()
         },
-        Transform::from_xyz(panel_x + 180.0, -(panel_y + 75.0), 1.5),
-        Visibility::default(),
-    ));
+        bevy::sprite::Anchor::TOP_LEFT,
+        // z=6.0：实测此值下文字（z=2.0-2.4）能渲染在面板上；z=2.0 反而盖住文字
+        Transform::from_xyz(panel_x, -panel_y, 6.0),
+        Visibility::Visible,
+    )).id();
+    let _ = bg_e;
 
     // 频道页签（主话框：全部/系统/附近/行会/队伍/私聊）
     let tab_w = 60.0;
@@ -456,7 +461,7 @@ fn spawn_chat(
         let e = spawn_ui_text(
             &mut commands, &font, chat_tab_name(*tab),
             tx, panel_y + 2.0,
-            11.0, Color::srgb(0.8, 0.8, 0.8), 2.2,
+            11.0, Color::srgb(0.8, 0.8, 0.8), 2.4,
         );
         commands.entity(e).insert((
             ChatTabBtn(*tab),
@@ -477,7 +482,7 @@ fn spawn_chat(
         let e = spawn_ui_text(
             &mut commands, &font, label,
             panel_x + 360.0 - 38.0, panel_y + 20.0 + i as f32 * 16.0,
-            11.0, Color::srgb(0.8, 0.9, 1.0), 2.2,
+            11.0, Color::srgb(0.8, 0.9, 1.0), 2.4,
         );
         commands.entity(e).insert((
             ChatScrollBtn(*kind),
@@ -492,7 +497,7 @@ fn spawn_chat(
         let e = spawn_ui_text(
             &mut commands, &font, "",
             panel_x + 4.0, panel_y + 20.0 + i as f32 * 16.0,
-            12.0, Color::WHITE, 2.0,
+            12.0, Color::srgb(0.1, 0.1, 0.15), 2.2,
         );
         commands.entity(e).insert(ChatLine(i));
     }
@@ -500,7 +505,7 @@ fn spawn_chat(
     let e = spawn_ui_text(
         &mut commands, &font, "",
         panel_x + 4.0, panel_y + 150.0,
-        12.0, Color::srgb(0.9, 0.9, 0.4), 2.0,
+        12.0, Color::srgb(0.9, 0.9, 0.4), 2.2,
     );
     commands.entity(e).insert(ChatInputText);
     // 输入框背景 + 闪烁光标（C# ChatTextBox：激活时可见的输入 UI）
@@ -515,7 +520,7 @@ fn spawn_chat(
             ..default()
         },
         Anchor::TOP_LEFT,
-        Transform::from_xyz(CHAT_INPUT_X + 0.0, -(CHAT_INPUT_Y + 1.0), 1.9),
+        Transform::from_xyz(CHAT_INPUT_X + 0.0, -(CHAT_INPUT_Y + 1.0), 2.1),
         Visibility::Visible,
     ));
     commands.spawn((
@@ -529,7 +534,7 @@ fn spawn_chat(
             ..default()
         },
         TextColor(Color::srgb(1.0, 1.0, 0.4)),
-        Transform::from_xyz(CHAT_INPUT_X + 16.0, -CHAT_INPUT_Y, 2.1),
+        Transform::from_xyz(CHAT_INPUT_X + 16.0, -CHAT_INPUT_Y, 2.3),
         Visibility::Hidden,
     ));
     // 发送频道快捷按钮（C# ChatControlBar：附近/喊话/行会/队伍/私聊）
@@ -548,7 +553,7 @@ fn spawn_chat(
         let t = spawn_ui_text(
             &mut commands, &font, label,
             bx, by,
-            11.0, Color::srgb(0.7, 0.9, 1.0), 2.2,
+            11.0, Color::srgb(0.7, 0.9, 1.0), 2.4,
         );
         commands.entity(t).insert((
             ChatBarBtn(label, prefix),
@@ -798,10 +803,12 @@ fn chat_option_system(
     }
     // 面板底色透明度
     for mut sp in &mut panel_bg {
+        // 面板用真实纹理 Prguse[2221]（白色），不能再染黑（旧纯色黑面板方案）：
+        // 否则白色面板被 0.55 黑 tint 染成近黑 → 聊天框看不见。
         let target = if filter.transparent {
-            Color::srgba(0.0, 0.0, 0.0, 0.15)
+            Color::srgba(1.0, 1.0, 1.0, 0.6)
         } else {
-            Color::srgba(0.0, 0.0, 0.0, 0.55)
+            Color::WHITE
         };
         if sp.color != target {
             sp.color = target;
@@ -1040,7 +1047,13 @@ fn chat_display_system(
         if let Some(line) = line {
             let (msg, c) = match visible.get(start + line.0) {
                 Some((m, c)) => (m.clone(), *c),
-                None => (String::new(), Color::WHITE),
+                None => (String::new(), Color::srgb(0.1, 0.1, 0.15)),
+            };
+            // 白底面板：白色消息字映射为深色，否则看不见
+            let c = if c == Color::WHITE {
+                Color::srgb(0.1, 0.1, 0.15)
+            } else {
+                c
             };
             if text.0 != msg {
                 text.0 = msg;
@@ -1058,9 +1071,9 @@ fn chat_display_system(
                 text.0 = new;
             }
             let c = if chat.input_active {
-                Color::srgb(0.9, 0.9, 0.4)
+                Color::srgb(0.1, 0.1, 0.1)
             } else {
-                Color::srgb(0.6, 0.6, 0.6)
+                Color::srgb(0.35, 0.35, 0.35)
             };
             if color.0 != c {
                 color.0 = c;

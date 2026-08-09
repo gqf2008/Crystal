@@ -395,7 +395,8 @@ fn spawn_hud(
         LibraryName::Prguse,
         resolution_index,
     ) {
-        spawn_ui_sprite(&mut commands, h, main_x, main_y, 1.0, 1.0);
+        // z=2.0：>=2 避开深度剔除（<2 的 UI 精灵被地图深度剔除不渲染）；或球/按钮 z>=2.0 在其上
+        spawn_ui_sprite(&mut commands, h, main_x, main_y, 2.0, 1.0);
     }
 
     // 血/蓝球填充（Prguse[4]：左半红 HP、右半蓝 MP）
