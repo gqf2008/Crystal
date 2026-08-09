@@ -4120,6 +4120,34 @@ impl Actor for WorldActor {
             idx
         };
 
+        // #1512：加载征服领地配置（含守卫坐标）；DB 为空时回退默认种子
+        let conquest_infos = match db::load_conquest_infos(&args.db_pool).await {
+            Ok(list) => { info!("Loaded {} conquest infos from database", list.len()); list }
+            Err(e) => { warn!("Failed to load conquest_infos from DB: {}", e); Vec::new() }
+        };
+        let conquest_instances = if conquest_infos.is_empty() {
+            default_conquest_instances()
+        } else {
+            conquest_infos.into_iter().map(|c| {
+                let game = match c.conquest_game {
+                    0 => conquest::ConquestGame::CapturePalace,
+                    1 => conquest::ConquestGame::KingOfHill,
+                    2 => conquest::ConquestGame::Classic,
+                    _ => conquest::ConquestGame::ControlPoints,
+                };
+                let mut inst = conquest::ConquestInstance::new(c.index, c.map_index, c.palace_index, game);
+                inst.guards = c.guards.into_iter().map(|g| conquest::ConquestGuardInfo {
+                    index: g.index,
+                    x: g.x,
+                    y: g.y,
+                    mob_index: g.mob_index,
+                    name: g.name,
+                    repair_cost: g.repair_cost.max(0) as u32,
+                }).collect();
+                inst
+            }).collect()
+        };
+
         Ok(Self {
             tick_count: 0,
             npc_timers: HashMap::new(),
@@ -4232,7 +4260,7 @@ impl Actor for WorldActor {
             robot_tasks: Vec::new(),
             robot_last_check_minute: 0,
             dragon_state: None,
-            conquest_instances: default_conquest_instances(),
+            conquest_instances,
             siege_structures: HashMap::new(),
             guild_wars: HashMap::new(),
             guild_war_ends: HashMap::new(),

@@ -77,6 +77,8 @@ const PARTY_EXP_RATE: [f64; 11] = [1.0, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 
 
 /// #954：攻城箭塔单次伤害（C# ConquestArcher 攻击力简化常量）
 const ARCHER_DAMAGE: i32 = 30;
+/// #1513：箭塔攻击范围（C# ConquestArcher FindTarget 用 Info.ViewRange，取 10）
+const ARCHER_RANGE: i32 = 10;
 
 /// C# WinExp 组队单成员分配：expPoint * rate * memberLevel / sumLevel
 fn party_exp_share(exp_after_reduce: i32, rate: f64, member_level: u16, sum_level: i32) -> i32 {
@@ -2514,10 +2516,13 @@ impl WorldActor {
                     {
                         continue;
                     }
-                    // 简化：箭塔坐标当前为占位（未接入地图坐标），按全地图覆盖近似；
-                    // 后续接入坐标后改为 s.x/s.y + ARCHER_RANGE 过滤
-                    for (sid, map, _x, _y, guild) in &player_snaps {
+                    // #1513：有守卫坐标（s.x/s.y 非 0）时按 ARCHER_RANGE 过滤；未配置回退全地图
+                    let has_coords = s.x != 0 || s.y != 0;
+                    for (sid, map, px, py, guild) in &player_snaps {
                         if *map != conquest_map { continue; }
+                        if has_coords && ((*px - s.x).abs() > ARCHER_RANGE || (*py - s.y).abs() > ARCHER_RANGE) {
+                            continue;
+                        }
                         // C# FindTarget：跳过守方（owner 行会）玩家
                         if let (Some(owner), Some(g)) = (&owner, guild) {
                             if g == owner { continue; }
