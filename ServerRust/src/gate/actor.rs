@@ -2716,14 +2716,25 @@ fn handle_update_intelligent_creature(
         .try_send();
 }
 
-/// IntelligentCreaturePickup: [x: i32][y: i32]
+/// 解析 C.IntelligentCreaturePickup（SharedRust packets/client/misc.rs）：
+/// `[mouse_mode: u8][x: i32][y: i32]`（9 字节）。
+/// C# GameScene.cs:804/811：MouseMode=false 半自动、true 鼠标拾取。
+fn parse_pet_pickup(payload: &[u8]) -> Option<(bool, i32, i32)> {
+    if payload.len() < 9 {
+        return None;
+    }
+    let mouse_mode = payload[0] != 0;
+    let x = i32::from_le_bytes(payload[1..5].try_into().ok()?);
+    let y = i32::from_le_bytes(payload[5..9].try_into().ok()?);
+    Some((mouse_mode, x, y))
+}
+
+/// IntelligentCreaturePickup: [mouse_mode: u8][x: i32][y: i32]
 fn handle_intelligent_creature_pickup(world_ref: &Option<ActorRef<crate::actors::world::WorldActor>>, session_id: SessionId, payload: &[u8]) {
-    if payload.len() < 8 { return; }
-    let x = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0;4]));
-    let y = i32::from_le_bytes(payload[4..8].try_into().unwrap_or([0;4]));
-    debug!("IntelligentCreaturePickup: session={} x={} y={}", session_id, x, y);
+    let Some((mouse_mode, x, y)) = parse_pet_pickup(payload) else { return; };
+    debug!("IntelligentCreaturePickup: session={} mouse_mode={} x={} y={}", session_id, mouse_mode, x, y);
     let world_ref = match world_ref { Some(w) => w, None => return };
-    let _ = world_ref.tell(crate::actors::world::IntelligentCreaturePickup { session_id, x, y }).try_send();
+    let _ = world_ref.tell(crate::actors::world::IntelligentCreaturePickup { session_id, mouse_mode, x, y }).try_send();
 }
 
 /// RequestIntelligentCreatureUpdates: [request_updates: bool]
@@ -3454,5 +3465,36 @@ mod tests {
         let data = [10, 0x61, 0x62, 0x63];
         let result = parse_dotnet_string(&data);
         assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_parse_pet_pickup_wire_format() {
+        // #1558：C.IntelligentCreaturePickup = [mouse_mode u8][x i32][y i32]（9 字节）
+        // 旧实现按 8 字节 [x][y] 解析导致偏移 1 字节
+        let mut payload = Vec::new();
+        payload.push(1u8); // mouse_mode = true（鼠标拾取）
+        payload.extend_from_slice(&100i32.to_le_bytes());
+        payload.extend_from_slice(&200i32.to_le_bytes());
+        let (mouse_mode, x, y) = parse_pet_pickup(&payload).expect("9 字节包应解析成功");
+        assert!(mouse_mode);
+        assert_eq!(x, 100);
+        assert_eq!(y, 200);
+
+        // mouse_mode = false（半自动）
+        payload[0] = 0;
+        let (mouse_mode, x, y) = parse_pet_pickup(&payload).expect("半自动包应解析成功");
+        assert!(!mouse_mode);
+        assert_eq!(x, 100);
+        assert_eq!(y, 200);
+    }
+
+    #[test]
+    fn test_parse_pet_pickup_rejects_short_payload() {
+        // 8 字节旧格式（缺 mouse_mode）必须拒绝，避免 x/y 偏移
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&100i32.to_le_bytes());
+        payload.extend_from_slice(&200i32.to_le_bytes());
+        assert_eq!(parse_pet_pickup(&payload), None);
+        assert_eq!(parse_pet_pickup(&[]), None);
     }
 }

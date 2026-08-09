@@ -2252,6 +2252,55 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         }
                                     }
                                 }
+                                x if x == ClientPacketIds::IntelligentCreaturePickup as i16 => {
+                                    // #1558：宠物拾取指令（C# GameScene.cs:804/811）
+                                    //   [mouse_mode u8][x i32][y i32]；mouse_mode=true 鼠标位置、false 玩家位置附近
+                                    if let Ok(p) = client::IntelligentCreaturePickup::read_body(&mut cur) {
+                                        let (cx, cy) = if p.mouse_mode {
+                                            (p.location.x, p.location.y)
+                                        } else {
+                                            (354, 352) // 玩家位置（宠物跟随）
+                                        };
+                                        tracing::info!("[MOCK] 宠物拾取 mouse_mode={} @ ({},{})", p.mouse_mode, cx, cy);
+                                        let target = ground_items.iter().position(|(_, ix, iy, _)| {
+                                            (*ix - cx).abs() <= 3 && (*iy - cy).abs() <= 3
+                                        });
+                                        if let Some(idx) = target {
+                                            let (id, _, _, item) = ground_items.remove(idx);
+                                            send(&to_client, &server::objects::ObjectRemove { object_id: id });
+                                            if let Some(empty) = player_inventory.iter_mut().find(|s| s.is_none()) {
+                                                *empty = Some(item.clone());
+                                            }
+                                            send(&to_client, &server::drops::GainedItem { item });
+                                            send_user_information(
+                                                &to_client,
+                                                active_char_index,
+                                                &player_inventory,
+                                                &player_equipment,
+                                                player_gold,
+                                                player_stats,
+                                            );
+                                            tracing::info!("🐾 宠物拾取地面物品 #{} 入包", id);
+                                        } else {
+                                            // 无战斗掉落时回退初始物品 300（与 PickUp 分支一致，保证 E2E 可验证）
+                                            send(&to_client, &server::objects::ObjectRemove { object_id: 300 });
+                                            let item = potion_item(1);
+                                            if let Some(empty) = player_inventory.iter_mut().find(|s| s.is_none()) {
+                                                *empty = Some(item.clone());
+                                            }
+                                            send(&to_client, &server::drops::GainedItem { item });
+                                            send_user_information(
+                                                &to_client,
+                                                active_char_index,
+                                                &player_inventory,
+                                                &player_equipment,
+                                                player_gold,
+                                                player_stats,
+                                            );
+                                            tracing::info!("🐾 [MOCK] 宠物拾取：附近无物品，回退拾取初始物品 #300 入包");
+                                        }
+                                    }
+                                }
                                 x if x == ClientPacketIds::EquipItem as i16 => {
                                     // #206：英雄装备（英雄背包 → 英雄装备槽）
                                     if let Ok(p) = client::item::EquipItem::read_body(&mut cur) {

@@ -24,6 +24,39 @@ pub(crate) fn auto_attack_debug(
     }
 }
 
+/// --auto-pet-pickup：进图后发送宠物拾取指令（#1558，C.IntelligentCreaturePickup：
+/// 鼠标拾取 mouse_mode=true + 半自动 mouse_mode=false，验证 发送→mock 解析→拾取入包 链路）
+pub(crate) fn auto_pet_pickup_test(
+    net: Res<client_bevy::network::NetConnection>,
+    state: Res<State<client_bevy::scenes::AppState>>,
+    time: Res<Time>,
+    mut sent: Local<u8>,
+) {
+    use client_bevy::scenes::AppState;
+    if *state != AppState::Game {
+        return;
+    }
+    if time.elapsed_secs() < 6.0 {
+        return;
+    }
+    match *sent {
+        0 => {
+            *sent = 1;
+            net.send_packet(&client_bevy::game::player_control::build_pet_pickup(true, (353, 352)));
+            tracing::info!("🐾 [PETTEST] 发送宠物拾取（鼠标）@ (353,352)");
+        }
+        1 => {
+            if time.elapsed_secs() < 7.0 {
+                return;
+            }
+            *sent = 2;
+            net.send_packet(&client_bevy::game::player_control::build_pet_pickup(false, (353, 352)));
+            tracing::info!("🐾 [PETTEST] 发送宠物半自动拾取 @ (353,352)");
+        }
+        _ => {}
+    }
+}
+
 /// --auto-ranged-attack：进图后发送一次 C.RangeAttack（#1556，
 /// 验证 远程攻击 → mock 回 ObjectRangeAttack/S.RangeAttack → 弹道+受击 链路）
 pub(crate) fn auto_ranged_attack_test(
