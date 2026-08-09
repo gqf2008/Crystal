@@ -182,7 +182,6 @@ pub fn dialog_drag_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     ui_cameras: Query<(&Camera, &GlobalTransform), With<UiEntity>>,
-    buttons: Query<&UiButton>,
     mut dialogs: Query<(Entity, &DialogRoot, &Visibility, &mut Transform)>,
     mut ui_buttons: Query<(Entity, &mut UiButton, Option<&DialogRoot>)>,
     mut text_rects: Query<(Entity, &mut TextInputRect, Option<&DialogRoot>)>,
@@ -214,7 +213,7 @@ pub fn dialog_drag_system(
 
     // 点击标题栏开始拖动（按钮命中区不触发拖动，避免点关闭/翻页等误拖）
     if mouse.just_pressed(MouseButton::Left) && drag.dragging.is_none() {
-        let on_button = buttons.iter().any(|b| {
+        let on_button = ui_buttons.iter().any(|(_, b, _)| {
             let (x, y, w, h) = b.rect;
             cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h
         });
