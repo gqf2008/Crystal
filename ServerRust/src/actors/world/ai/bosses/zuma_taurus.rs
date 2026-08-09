@@ -114,6 +114,7 @@ impl ZumaTaurusBehavior {
                 x: monster.x + DIR_DX[dir] * ((i / 8) as i32 + 1),
                 y: monster.y + DIR_DY[dir] * ((i / 8) as i32 + 1),
                 is_slave: true, // 加入 slave_list，Boss 死亡时清理
+                summoner_oid: Some(monster.object_id),
             });
         }
     }

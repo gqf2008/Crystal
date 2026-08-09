@@ -7,6 +7,23 @@ const ROAM_DELAY_TICKS: u64 = 10;
 /// 怪物索敌间隔（C# MonsterObject.SearchDelay = 3000ms = 30 ticks）
 const SEARCH_DELAY_TICKS: u64 = 30;
 
+/// #1434：收集 master 的所有后代 slave oid（含多级；C# MonsterObject.SlaveList 死亡级联；不含 master 自身）
+fn collect_slave_cascade(master: u32, slave_master: &std::collections::HashMap<u32, u32>) -> Vec<u32> {
+    let mut out = Vec::new();
+    let mut queue = vec![master];
+    while let Some(cur) = queue.pop() {
+        let children: Vec<u32> = slave_master.iter()
+            .filter(|(_, m)| **m == cur)
+            .map(|(s, _)| *s)
+            .collect();
+        for c in children {
+            out.push(c);
+            queue.push(c);
+        }
+    }
+    out
+}
+
 /// 游戏主循环 Tick
 pub struct Tick;
 
@@ -4496,6 +4513,12 @@ impl Message<Tick> for WorldActor {
                         if let Some(m) = self.monsters.get_mut(&new_oid) {
                             m.fill_combat_stats(&info);
                         }
+                        // #1434：登记 slave 归属（C# SlaveList；master 死亡时级联清理）
+                        if bs.is_slave {
+                            if let Some(master) = bs.summoner_oid {
+                                self.slave_master.insert(new_oid, master);
+                            }
+                        }
                         debug!("Boss summoned '{}' as #{} at ({},{}) slave={}", spawn.name, new_oid, bs.x, bs.y, bs.is_slave);
                     } else {
                         debug!("Boss summon '{}' found index {} but no MonsterInfo", bs.monster_name, idx);
@@ -4656,6 +4679,26 @@ impl Message<Tick> for WorldActor {
                     continue;
                 }
                 if let Some(monster) = self.monsters.remove(oid) {
+                    // #1434：C# MonsterObject.SlaveList——master 死亡，其召唤物（含多级）一起清理
+                    let slave_oids = collect_slave_cascade(*oid, &self.slave_master);
+                    for soid in slave_oids {
+                        self.slave_master.remove(&soid);
+                        if let Some(slave) = self.monsters.remove(&soid) {
+                            let slave_died = Self::build_object_died_packet(soid, slave.x, slave.y, slave.direction);
+                            let slave_removed = Self::build_object_remove_packet(soid);
+                            for session_id in self.players.keys() {
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: *session_id,
+                                    data: slave_died.clone(),
+                                }).await;
+                                let _ = self.gate_ref.tell(SendToClient {
+                                    session_id: *session_id,
+                                    data: slave_removed.clone(),
+                                }).await;
+                            }
+                            debug!("Slave #{} died with master #{}", soid, oid);
+                        }
+                    }
                     debug!("Monster '{}' (#{}) died", monster.name, oid);
 
                     // ===== on_die 集成 =====
@@ -4982,7 +5025,7 @@ impl Message<Tick> for WorldActor {
 mod tests {
     use super::{
         dotnet_now_ticks, in_range, item_expired, party_exp_share, pet_exp_gain, reduce_exp,
-        safe_zone_heal_hp, PARTY_EXP_RATE,
+        collect_slave_cascade, safe_zone_heal_hp, PARTY_EXP_RATE,
     };
 
     #[test]
@@ -5096,5 +5139,23 @@ mod tests {
         assert_eq!(pet_exp_gain("Angel", 100), 300);
         assert_eq!(pet_exp_gain("HolyDeva", 100), 100);
         assert_eq!(pet_exp_gain("Vampire", 100), 100);
+    }
+    /// #1434：C# MonsterObject.SlaveList——master 死亡级联清理（含多级）
+    #[test]
+    fn test_collect_slave_cascade_multilevel() {
+        let mut sm = std::collections::HashMap::new();
+        // master 1 → slaves 10, 20；20 → slave 30（多级）
+        sm.insert(10, 1);
+        sm.insert(20, 1);
+        sm.insert(30, 20);
+        // 无关怪物不参与
+        sm.insert(99, 7);
+        let mut got = collect_slave_cascade(1, &sm);
+        got.sort();
+        assert_eq!(got, vec![10, 20, 30]);
+        // 单级：master 7 → slave 99
+        assert_eq!(collect_slave_cascade(7, &sm), vec![99]);
+        // 无 slave 的 master → 空
+        assert!(collect_slave_cascade(42, &sm).is_empty());
     }
 }

@@ -88,6 +88,7 @@ impl MonsterBehavior for HellLordBehavior {
                         x: monster.x + fastrand::i32(-10..=10),
                         y: monster.y + fastrand::i32(-10..=10),
                         is_slave: true,
+                        summoner_oid: Some(monster.object_id),
                     });
                 }
             }
@@ -103,6 +104,7 @@ impl MonsterBehavior for HellLordBehavior {
                     x: p.x + fastrand::i32(-5..=15),
                     y: p.y + fastrand::i32(-5..=15),
                     is_slave: false, // Bomb 不加 SlaveList（散落不管）
+                    summoner_oid: Some(monster.object_id),
                 });
             }
         }

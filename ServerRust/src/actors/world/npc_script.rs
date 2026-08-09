@@ -65,8 +65,10 @@ pub struct Section {
 /// 一个执行片段：一组 check + 命中/未命中两套行为
 #[derive(Debug, Clone, Default)]
 pub struct Segment {
-    /// 条件指令列表（AND 逻辑；空表示无条件恒真）
+    /// 条件指令列表（首组 AND 逻辑；空表示无条件恒真）
     pub checks: Vec<Check>,
+    /// #1433：#OR 后续分支组（每组内 AND；任一分支全过即通过；空表示无 OR）
+    pub or_groups: Vec<Vec<Check>>,
     /// 条件成立时执行的动作
     pub actions: Vec<Action>,
     /// 条件成立时显示的文本（保留原始按钮标记 `<text/@target>`）
@@ -190,7 +192,10 @@ impl ParsedScript {
                         mode = ParseMode::If;
                     }
                     "OR" => {
-                        // OR 行当作额外 check 加入当前 segment（简化为 AND；真正 OR 罕见，TODO）
+                        // #1433：C# 脚本 #OR 开启新分支——把当前 AND 组冲入 or_groups，后续 check 进新组
+                        if !seg.checks.is_empty() {
+                            seg.or_groups.push(std::mem::take(&mut seg.checks));
+                        }
                         mode = ParseMode::If;
                     }
                     "ACT" => mode = ParseMode::Act,
@@ -290,7 +295,7 @@ impl ParsedScript {
                 Some(s) => s,
                 None => return result, // 玩家已离线，停止
             };
-            let passed = eval_checks(world, session_id, &player_state, &seg.checks).await;
+            let passed = eval_checks(world, session_id, &player_state, &seg.checks, &seg.or_groups).await;
             let (actions, say_src) = if passed {
                 (seg.actions.clone(), seg.say.clone())
             } else {
@@ -653,24 +658,47 @@ pub fn parse_class(name: &str) -> Option<MirClass> {
 // Check 求值
 // =============================================================================
 
-/// 求值一组 check（AND 逻辑；空集 = 恒真）
+/// 求值一组 check（#1433：首组 AND + OR 分支——任一分支全过即通过；全空 = 恒真）
 async fn eval_checks(
     world: &mut WorldActor,
     session_id: u64,
     player: &PlayerState,
     checks: &[Check],
+    or_groups: &[Vec<Check>],
 ) -> bool {
-    if checks.is_empty() {
+    // #1433：无任何条件 → 恒真；否则首组/任一 OR 组全过即通过
+    let mut group_results: Vec<bool> = Vec::new();
+    if !checks.is_empty() {
+        group_results.push(eval_check_group(world, session_id, player, checks).await);
+    }
+    for group in or_groups {
+        group_results.push(eval_check_group(world, session_id, player, group).await);
+    }
+    or_groups_pass(&group_results)
+}
+
+/// #1433：OR 分组判定（每组结果已由调用方算好；任一真即真；全空恒真）
+fn or_groups_pass(group_results: &[bool]) -> bool {
+    if group_results.is_empty() {
         return true;
     }
-    for c in checks {
+    group_results.iter().any(|g| *g)
+}
+
+/// 求值单个 AND 组（组内全过为真）
+async fn eval_check_group(
+    world: &mut WorldActor,
+    session_id: u64,
+    player: &PlayerState,
+    group: &[Check],
+) -> bool {
+    for c in group {
         if !eval_one_check(world, session_id, player, c).await {
             return false;
         }
     }
     true
 }
-
 async fn eval_one_check(
     world: &mut WorldActor,
     session_id: u64,
@@ -3595,5 +3623,44 @@ You don't have enough Gold!
         assert!(!drops[1].group.as_ref().unwrap().random);
         assert!(drops[1].group.as_ref().unwrap().first);
     }
-}
 
+    #[test]
+    fn parses_or_groups_and_plain_if() {
+        // #1433：C# #IF/#OR——OR 把当前 AND 组冲入 or_groups，后续 check 进 checks
+        let script = ParsedScript::parse(OR_SAMPLE);
+        let seg = &script.find("main").unwrap().segments[0];
+        // 首组（#OR 前）冲入 or_groups[0]
+        assert_eq!(seg.or_groups.len(), 1);
+        assert_eq!(seg.or_groups[0].len(), 1);
+        assert_eq!(seg.or_groups[0][0].check_type, "CHECKGOLD");
+        assert_eq!(seg.or_groups[0][0].args, vec![">", "1000"]);
+        // #OR 后的一组进 checks
+        assert_eq!(seg.checks.len(), 1);
+        assert_eq!(seg.checks[0].check_type, "CHECKLEVEL");
+        assert_eq!(seg.checks[0].args, vec![">", "10"]);
+        // 无 OR 的普通 IF：or_groups 为空
+        let plain = ParsedScript::parse(SAMPLE);
+        let m = &plain.find("main").unwrap().segments[0];
+        assert!(m.or_groups.is_empty());
+    }
+
+    #[test]
+    fn or_groups_pass_any_semantics() {
+        // #1433：任一分支通过即真；全空恒真；全假为假
+        assert!(or_groups_pass(&[]));
+        assert!(or_groups_pass(&[true]));
+        assert!(or_groups_pass(&[false, true]));
+        assert!(or_groups_pass(&[true, false, false]));
+        assert!(!or_groups_pass(&[false]));
+        assert!(!or_groups_pass(&[false, false]));
+    }
+
+    const OR_SAMPLE: &str = r#"[@MAIN]
+#IF
+CHECKGOLD > 1000
+#OR
+CHECKLEVEL > 10
+#ACT
+GOTO @OK
+"#;
+}

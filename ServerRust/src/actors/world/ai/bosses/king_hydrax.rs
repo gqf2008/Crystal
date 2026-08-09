@@ -112,6 +112,7 @@ impl MonsterBehavior for KingHydraxBehavior {
                 x: ox,
                 y: oy,
                 is_slave: true,
+                summoner_oid: Some(monster.object_id),
             });
         }
     }

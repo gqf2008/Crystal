@@ -81,6 +81,7 @@ impl MonsterBehavior for FloatingRockBehavior {
             x: cx,
             y: cy,
             is_slave: true, // C# SlaveList：死亡时清理
+            summoner_oid: Some(monster.object_id),
         });
     }
 

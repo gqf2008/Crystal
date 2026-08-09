@@ -87,6 +87,7 @@ impl MonsterBehavior for GeneralMeowMeowBehavior {
                     x: monster.x + DIR_DX[dir] * (i + 1) as i32,
                     y: monster.y + DIR_DY[dir] * (i + 1) as i32,
                     is_slave: true,
+                    summoner_oid: Some(monster.object_id),
                 });
             }
         }

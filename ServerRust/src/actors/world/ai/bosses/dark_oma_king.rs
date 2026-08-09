@@ -97,6 +97,7 @@ impl MonsterBehavior for DarkOmaKingBehavior {
                         x: sx,
                         y: sy,
                         is_slave: true, // 加入 slave_list，Boss 死亡时清理
+                        summoner_oid: Some(monster.object_id),
                     });
                     break;
                 }

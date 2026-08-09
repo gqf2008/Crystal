@@ -49,6 +49,7 @@ impl MonsterBehavior for SnakeTotemBehavior {
                 x: monster.x,
                 y: monster.y,
                 is_slave: true,
+                summoner_oid: Some(monster.object_id),
             });
         }
     }
