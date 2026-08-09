@@ -118,6 +118,103 @@ pub fn monster_die_sound(monster_type: u16) -> u32 {
     monster_base_sound(monster_type) + 3
 }
 
+/// #1572：玩家步声（C# PlayerObject.PlayStepSound，PlayerObject.cs:3695）：
+/// - 门控：Front/Middle/BackIndex > 199 → 非 mir2 地图不播（None）；
+/// - 骑乘 → MountWalkL(10176)；
+/// - shanda(100-198)/mir3(200-298) 分区表庞大，本实现简化为 WalkGroundL（已注明）；
+/// - 其余按 wemade 分区（BackImage & 0x1FFFF 索引区间 + Middle/Front 覆盖）；
+/// - running → +2（Run*）、frame_index==4 → +1（*R）。
+pub fn step_sound_for_cell(
+    cell: &crate::resources::map_reader::CellInfo,
+    running: bool,
+    riding: bool,
+    frame_index: u8,
+) -> Option<u32> {
+    if cell.front_index > 199 || cell.middle_index > 199 || cell.back_index > 199 {
+        return None;
+    }
+    let mut s = if riding {
+        10176 // MountWalkL
+    } else if (100..299).contains(&cell.back_index) {
+        10001 // shanda/mir3 简化：WalkGroundL
+    } else {
+        wemade_step_sound(cell)
+    };
+    if running {
+        s += 2;
+    }
+    if frame_index == 4 {
+        s += 1;
+    }
+    Some(s)
+}
+
+/// #1572：wemade 分区（C# PlayWemadeStepSound，PlayerObject.cs:3749）
+fn wemade_step_sound(cell: &crate::resources::map_reader::CellInfo) -> u32 {
+    let index = (cell.back_image & 0x1FFFF) - 1;
+    let mut sound = 10001; // WalkGroundL
+    if (0..=10000).contains(&index) {
+        if ((330..=349).contains(&index) || (450..=454).contains(&index) || (550..=554).contains(&index)
+            || (750..=754).contains(&index) || (950..=954).contains(&index) || (1250..=1254).contains(&index)
+            || (1400..=1424).contains(&index) || (1455..=1474).contains(&index) || (1500..=1524).contains(&index)
+            || (1550..=1574).contains(&index))
+        {
+            sound = 10009; // WalkLawnL
+        } else if ((250..=254).contains(&index) || (1005..=1009).contains(&index) || (1050..=1054).contains(&index)
+            || (1060..=1064).contains(&index) || (1450..=1454).contains(&index) || (1650..=1654).contains(&index))
+        {
+            sound = 10013; // WalkRoughL
+        } else if ((605..=609).contains(&index) || (650..=654).contains(&index) || (660..=664).contains(&index)
+            || (2000..=2049).contains(&index) || (3025..=3049).contains(&index) || (2400..=2424).contains(&index)
+            || (4625..=4649).contains(&index) || (4675..=4678).contains(&index))
+        {
+            sound = 10005; // WalkStoneL
+        } else if ((1825..=1924).contains(&index) || (2150..=2174).contains(&index) || (3075..=3099).contains(&index)
+            || (3325..=3349).contains(&index) || (3375..=3399).contains(&index))
+        {
+            sound = 10021; // WalkCaveL
+        } else if index == 3230 || index == 3231 || index == 3246 || index == 3277 || (3780..=3799).contains(&index) {
+            sound = 10017; // WalkWoodL
+        } else if (3825..=4434).contains(&index) {
+            sound = if index % 25 == 0 { 10017 } else { 10001 };
+        } else if (2075..=2099).contains(&index) || (2125..=2149).contains(&index) {
+            sound = 10025; // WalkRoomL
+        } else if (1800..=1824).contains(&index) {
+            sound = 10029; // WalkWaterL
+        }
+        // 覆盖规则
+        if (825..=1349).contains(&index) && (index - 825) / 25 % 2 == 0 {
+            sound = 10005;
+        }
+        if (1375..=1799).contains(&index) && (index - 1375) / 25 % 2 == 0 {
+            sound = 10021;
+        }
+        if matches!(index, 1385 | 1386 | 1391 | 1392) {
+            sound = 10017;
+        }
+        // Middle 覆盖
+        let m_index = (cell.middle_image & 0x7FFF) - 1;
+        if (0..=115).contains(&m_index) {
+            sound = 10001;
+        } else if (120..=124).contains(&m_index) {
+            sound = 10009;
+        }
+        // Front 覆盖
+        let f_index = (cell.front_image & 0x7FFF) - 1;
+        if (221..=289).contains(&f_index) || (583..=658).contains(&f_index) || (1183..=1206).contains(&f_index)
+            || (7163..=7295).contains(&f_index) || (7404..=7414).contains(&f_index)
+        {
+            sound = 10005;
+        } else if (3125..=3267).contains(&f_index) || (3757..=3948).contains(&f_index) || (6030..=6999).contains(&f_index) {
+            sound = 10017;
+        }
+        if (3316..=3589).contains(&f_index) {
+            sound = 10025;
+        }
+    }
+    sound
+}
+
 /// #1568：怪物受击音（C# MonsterObject.PlayStruckSound，MonsterObject.cs:3966）按攻击者武器形状：
 /// StruckWooden(10061)/StruckShort(10060)/StruckSword(10062)/StruckSword2(10063)/StruckAxe(10064)/StruckClub(10065)；
 /// 未匹配（如无武器）C# 无 default → 不发音（返回 None）。
@@ -302,6 +399,49 @@ mod tests {
         // 骑乘：mount_type<7 → TigerAttack1(10181)；>=7 → WolfAttack1(10190)
         assert_eq!(attack_swing_sound(MirClass::Warrior as u8, true, 0, 5), Some(10181));
         assert_eq!(attack_swing_sound(MirClass::Warrior as u8, true, 7, 5), Some(10190));
+    }
+
+    #[test]
+    fn step_sound_wemade_back_ranges_match_csharp() {
+        // #1572：C# PlayWemadeStepSound 主干区间
+        use crate::resources::map_reader::CellInfo;
+        let mut cell = CellInfo::new();
+        // 330-349 → WalkLawnL(10009)
+        cell.back_image = 332;
+        assert_eq!(wemade_step_sound(&cell), 10009);
+        // 605-609 → WalkStoneL(10005)
+        cell.back_image = 606;
+        assert_eq!(wemade_step_sound(&cell), 10005);
+        // 1825-1924 → WalkCaveL(10021)
+        cell.back_image = 1900;
+        assert_eq!(wemade_step_sound(&cell), 10021);
+        // 默认 → WalkGroundL(10001)
+        cell.back_image = 5000;
+        assert_eq!(wemade_step_sound(&cell), 10001);
+        // back_image=0 → index=-1 → WalkGroundL
+        cell.back_image = 0;
+        assert_eq!(wemade_step_sound(&cell), 10001);
+    }
+
+    #[test]
+    fn step_sound_gate_riding_running_frame() {
+        // #1572：C# PlayStepSound 门控与偏移
+        use crate::resources::map_reader::CellInfo;
+        // 非 mir2 地图（Index>199）→ 不播
+        let mut cell = CellInfo::new();
+        cell.front_index = 200;
+        assert_eq!(step_sound_for_cell(&cell, false, false, 0), None);
+        cell.front_index = 0;
+        cell.back_index = 200;
+        assert_eq!(step_sound_for_cell(&cell, false, false, 0), None);
+        // 正常格（wemade）
+        cell.back_index = 0;
+        assert_eq!(step_sound_for_cell(&cell, false, false, 0), Some(10001));
+        // 跑步 +2 / 第4帧 +1
+        assert_eq!(step_sound_for_cell(&cell, true, false, 0), Some(10003)); // RunGroundL
+        assert_eq!(step_sound_for_cell(&cell, false, false, 4), Some(10002)); // WalkGroundR
+        // 骑乘 → MountWalkL(10176)
+        assert_eq!(step_sound_for_cell(&cell, false, true, 0), Some(10176));
     }
 
     #[test]

@@ -11,7 +11,9 @@ use bevy::prelude::*;
 use mir2_shared::enums::MirDirection;
 
 use crate::actor::{depth_z, ActorAnim, LocalPlayer, NetObjectId, Sitting};
-use crate::map_renderer::{TILE_HEIGHT, TILE_WIDTH};
+use crate::game::hud::HudState;
+use crate::game::sound::SoundBank;
+use crate::map_renderer::{GameData, TILE_HEIGHT, TILE_WIDTH};
 use crate::network::{NetConnection, SessionState};
 use crate::scenes::AppState;
 
@@ -345,6 +347,10 @@ fn advance_local_move(
     mut commands: Commands,
     time: Res<Time>,
     net: Res<NetConnection>,
+    game_data: Res<GameData>,
+    hud: Res<HudState>,
+    sound_bank: Res<SoundBank>,
+    mut audio_assets: ResMut<Assets<AudioSource>>,
     mut players: Query<(Entity, &mut LocalMove, &mut Transform, &mut ActorAnim), With<LocalPlayer>>,
 ) {
     // 与动画帧率同步（C#：走 1 格/6 帧/100ms，跑 2 格/6 帧/100ms）
@@ -430,6 +436,25 @@ fn advance_local_move(
             lm.path.pop_front();
         }
         lm.last = Some(target);
+        // #1572：到达目标格播步声（C# PlayStepSound 按地面类型/跑/骑乘/帧）
+        if let Some(map_reader) = &game_data.map_reader {
+            if target.0 >= 0 && target.1 >= 0 {
+                let cells = &map_reader.map_cells;
+                if let Some(row) = cells.get(target.0 as usize) {
+                    if let Some(cell) = row.get(target.1 as usize) {
+                        if let Some(sound_id) = crate::game::sound::step_sound_for_cell(
+                            cell,
+                            use_run,
+                            hud.riding,
+                            anim.frame_index.clamp(0, 255) as u8,
+                        ) {
+                            crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
+                            tracing::debug!("👣 步声 #{} @ ({},{}) run={}", sound_id, target.0, target.1, use_run);
+                        }
+                    }
+                }
+            }
+        }
         if let Some(d) = seg_dir {
             tracing::debug!("🚶 到达发包: from=({},{}) target=({},{}) dir={:?} run={}", from.0, from.1, target.0, target.1, d, use_run);
             if use_run {
@@ -550,6 +575,16 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.insert_resource(crate::network::NetConnection::default());
+        // #1572：advance_local_move 新增步声依赖
+        app.insert_resource(crate::map_renderer::GameData {
+            map: None,
+            map_reader: None,
+            desired_map: None,
+            player_spawn: None,
+        });
+        app.insert_resource(crate::game::hud::HudState::default());
+        app.insert_resource(crate::game::sound::SoundBank::default());
+        app.insert_resource(bevy::asset::Assets::<bevy::audio::AudioSource>::default());
         app.add_systems(Update, advance_local_move);
 
         // 对角路径（3 对角 + 2 直线）
