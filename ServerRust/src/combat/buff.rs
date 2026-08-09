@@ -55,6 +55,8 @@ pub enum BuffType {
     Transform { shape: i16 },
     /// 传送后魔法惩罚（C# BuffType.TemporalFlux：Teleport/Blink/StormEscape 后 30s，施法耗蓝 +30%）
     TeleportManaPenalty { percent: i32 },
+    /// 诅咒（C# BuffType.Curse：MaxDC/MC/SC RatePercent 降低输出，玩家另 AttackSpeedRatePercent 降低攻速）
+    Curse { percent: i32 },
 }
 
 /// Buff 实例
@@ -172,6 +174,7 @@ pub fn get_stat_bonus(buffs: &[BuffInstance], stat_type: &BuffType) -> i32 {
             (BuffType::ScBoost { bonus }, BuffType::ScBoost { .. }) => *bonus,
             (BuffType::AttackSpeedBoost { percent }, BuffType::AttackSpeedBoost { .. }) => *percent,
             (BuffType::MoveSpeedBoost { percent }, BuffType::MoveSpeedBoost { .. }) => *percent,
+            (BuffType::Curse { percent }, BuffType::Curse { .. }) => *percent,
             (BuffType::Reflect { percent }, BuffType::Reflect { .. }) => *percent,
             _ => 0,
         })

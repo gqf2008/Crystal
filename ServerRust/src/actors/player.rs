@@ -377,14 +377,18 @@ impl PlayerState {
         (base + buff_bonus).max(0)
     }
 
-    /// 计算包含装备+Buff加成的最大攻击力
+    /// 计算包含装备+Buff加成的最大攻击力（#1508：Curse 按 C# MaxDCRatePercent 降低输出）
     pub fn effective_max_attack(&self) -> i32 {
         let base = self.max_attack + self.bonus_max_attack;
         let buff_bonus = crate::combat::buff::get_stat_bonus(
             &self.buffs,
             &crate::combat::buff::BuffType::AttackBoost { bonus: 0 },
         );
-        (base + buff_bonus).max(self.effective_min_attack())
+        let curse = crate::combat::buff::get_stat_bonus(
+            &self.buffs,
+            &crate::combat::buff::BuffType::Curse { percent: 0 },
+        );
+        ((base + buff_bonus) * (100 - curse) / 100).max(self.effective_min_attack())
     }
 
     pub fn effective_min_mc(&self) -> i32 {
@@ -392,13 +396,18 @@ impl PlayerState {
         (base).max(0)
     }
 
+    /// #1508：Curse 按 C# MaxMCRatePercent 降低魔法攻击
     pub fn effective_max_mc(&self) -> i32 {
         let base = self.max_mc + self.bonus_max_mc;
         let buff_bonus = crate::combat::buff::get_stat_bonus(
             &self.buffs,
             &crate::combat::buff::BuffType::McBoost { bonus: 0 },
         );
-        (base + buff_bonus).max(self.effective_min_mc())
+        let curse = crate::combat::buff::get_stat_bonus(
+            &self.buffs,
+            &crate::combat::buff::BuffType::Curse { percent: 0 },
+        );
+        ((base + buff_bonus) * (100 - curse) / 100).max(self.effective_min_mc())
     }
 
     pub fn effective_min_sc(&self) -> i32 {
@@ -406,13 +415,18 @@ impl PlayerState {
         (base).max(0)
     }
 
+    /// #1508：Curse 按 C# MaxSCRatePercent 降低道术
     pub fn effective_max_sc(&self) -> i32 {
         let base = self.max_sc + self.bonus_max_sc;
         let buff_bonus = crate::combat::buff::get_stat_bonus(
             &self.buffs,
             &crate::combat::buff::BuffType::ScBoost { bonus: 0 },
         );
-        (base + buff_bonus).max(self.effective_min_sc())
+        let curse = crate::combat::buff::get_stat_bonus(
+            &self.buffs,
+            &crate::combat::buff::BuffType::Curse { percent: 0 },
+        );
+        ((base + buff_bonus) * (100 - curse) / 100).max(self.effective_min_sc())
     }
 
     /// 计算包含装备+Buff加成的防御力
@@ -550,6 +564,7 @@ fn buff_tag(t: &crate::combat::buff::BuffType) -> u8 {
         BuffType::ScBoost { .. } => 22,
         BuffType::Transform { .. } => 23,
         BuffType::TeleportManaPenalty { .. } => 24,
+        BuffType::Curse { .. } => 25,
     }
 }
 

@@ -209,11 +209,15 @@ impl Message<WorldAttackRequest> for WorldActor {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as i64)
                 .unwrap_or(0);
-            // #1506：C# AttackTime = 1400 - ((AttackSpeed*60) + min(370, Lv*14))——AttackSpeed 含 Haste/Fury buff 加成
+            // #1506/#1508：AttackTime = 1400 - ((AttackSpeed*60) + min(370, Lv*14))；AttackSpeed 含 Haste/Fury buff 加成，Curse 再降 pct%
             let atk_spd_bonus = crate::combat::buff::get_stat_bonus(
                 &state.buffs, &crate::combat::buff::BuffType::AttackSpeedBoost { percent: 0 },
             );
-            let interval = player_attack_speed_ms(state.attack_speed + atk_spd_bonus, state.level);
+            let curse_pct = crate::combat::buff::get_stat_bonus(
+                &state.buffs, &crate::combat::buff::BuffType::Curse { percent: 0 },
+            );
+            let total_atk_spd = (state.attack_speed + atk_spd_bonus) * (100 - curse_pct) / 100;
+            let interval = player_attack_speed_ms(total_atk_spd, state.level);
             let last = self
                 .player_last_attack_ms
                 .get(&msg.session_id)
@@ -1324,11 +1328,15 @@ impl Message<RangeAttackRequest> for WorldActor {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
-        // #1506：C# AttackTime = 1400 - ((AttackSpeed*60) + min(370, Lv*14))——AttackSpeed 含 Haste/Fury buff 加成
+        // #1506/#1508：AttackTime = 1400 - ((AttackSpeed*60) + min(370, Lv*14))；AttackSpeed 含 Haste/Fury buff 加成，Curse 再降 pct%
         let atk_spd_bonus = crate::combat::buff::get_stat_bonus(
             &state.buffs, &crate::combat::buff::BuffType::AttackSpeedBoost { percent: 0 },
         );
-        let interval = player_attack_speed_ms(state.attack_speed + atk_spd_bonus, state.level);
+        let curse_pct = crate::combat::buff::get_stat_bonus(
+            &state.buffs, &crate::combat::buff::BuffType::Curse { percent: 0 },
+        );
+        let total_atk_spd = (state.attack_speed + atk_spd_bonus) * (100 - curse_pct) / 100;
+        let interval = player_attack_speed_ms(total_atk_spd, state.level);
         let last = self
             .player_last_attack_ms
             .get(&msg.session_id)
@@ -2767,7 +2775,7 @@ impl Message<MagicRequest> for WorldActor {
                 self.broadcast_spell_hit(&spell_hits, object_id).await;
                 debug!("Magic: {} casts IceThrust dmg={} hits={}", state.name, raw_damage, spell_hits.len());
             }
-            // #306：Curse —— 7×7 区域 40% 概率 Slow 毒 + 减伤（C# Map.cs:1837，value2=1+(Lv+1)*2）
+            // #306/#1508：Curse —— 7×7 区域每目标 40% 概率 Slow 毒 + 减伤（C# Map.cs:1837，value2=1+(Lv+1)*2）
             SPELL_CURSE => {
                 // #1445：C# Curse 需普通护符并消耗 1（失败也消耗；HumanObject.cs:4860）
                 if !record.actor_ref.ask(crate::actors::player::ConsumeAmuletForSummon { amount: 1 }).await.unwrap_or(false) {
@@ -2789,19 +2797,23 @@ impl Message<MagicRequest> for WorldActor {
                 );
                 let damage = (sc_power + 5 * (spell_level as i32 + 1)).max(1);
                 let cells = curse_cells(target_x, target_y);
+                let duration = damage as u32;
+                // —— 怪物目标（C# IsAttackTarget：跳过自己的宠物；每目标 Random.Next(10)>=4 跳过）——
                 let hit_ids: Vec<u32> = self.monsters.iter()
-                    .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y)))
+                    .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y))
+                        && m.master_session != Some(msg.session_id))
                     .map(|(id, _)| *id)
                     .collect();
-                let candidate_count = hit_ids.len();
+                let monster_candidates = hit_ids.len();
                 for mid in hit_ids {
+                    if fastrand::i32(0..10) >= 4 { continue; }
                     if let Some(monster) = self.monsters.get_mut(&mid) {
                         // Slow 毒（C# Duration=damage 秒，Value=value2）
                         crate::combat::poison::apply_poison(
                             &mut monster.poison_list,
                             crate::combat::poison::Poison::new(
                                 mir2_shared::enums::PoisonType::SLOW,
-                                damage.max(1) as u32,
+                                duration,
                                 value2,
                                 1000,
                             ),
@@ -2809,11 +2821,47 @@ impl Message<MagicRequest> for WorldActor {
                         monster.provoked = true;
                         monster.target_session = Some(msg.session_id);
                         // 减伤：value2%（C# 降低 MaxDC/MaxMC/MaxSC 输出百分比），持续 damage 秒
-                        let until = self.tick_count + (damage.max(1) as u64) * 10;
+                        let until = self.tick_count + duration as u64 * 10;
                         self.cursed_monsters.insert(mid, (value2, until));
                     }
                 }
-                debug!("Magic: {} casts Curse (7x7, {} candidates, rate={}%)", state.name, candidate_count, value2);
+                // —— 玩家目标（#1508：C# 7x7 含 Player；MaxDC/MC/SC + AttackSpeed RatePercent=-value2）——
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                let mut player_targets: Vec<(u64, crate::actors::player::PlayerState)> = Vec::new();
+                for (sid, r) in &self.players {
+                    if *sid == msg.session_id { continue; }
+                    if let Ok(Some(os)) = r.actor_ref.ask(GetPlayerState).await {
+                        if !os.is_dead && os.map_index == state.map_index
+                            && cells.contains(&(os.x, os.y))
+                        {
+                            player_targets.push((*sid, os));
+                        }
+                    }
+                }
+                let player_candidates = player_targets.len();
+                for (sid, os) in player_targets {
+                    // C# IsAttackTarget(player)：按当前攻击模式判定
+                    if !can_attack_player(&state, &os, &self.guild_wars) { continue; }
+                    // 每目标 Random.Next(10)>=4 跳过（40% 命中）
+                    if fastrand::i32(0..10) >= 4 { continue; }
+                    if let Some(record2) = self.players.get(&sid) {
+                        let mut ns = os.clone();
+                        ns.poison_list.push(crate::combat::poison::Poison::new(
+                            mir2_shared::enums::PoisonType::SLOW, duration, value2, 1000,
+                        ));
+                        crate::combat::buff::apply_buff(&mut ns.buffs, crate::combat::buff::BuffInstance::new(
+                            crate::combat::buff::BuffType::Curse { percent: value2 },
+                            duration * 10,
+                            1,
+                        ));
+                        let _ = record2.actor_ref.ask(crate::actors::player::SetPlayerState { state: ns }).await;
+                    }
+                }
+                debug!("Magic: {} casts Curse (7x7, monsters={} players={}, rate={}%)",
+                       state.name, monster_candidates, player_candidates, value2);
             }
             // ===== 弓箭手（Archer）弹道物理系法术 =====
             // StraightShot：单目标弹道，延迟 = 距离×50ms + 500ms，AC 防御（弓箭手物理）
