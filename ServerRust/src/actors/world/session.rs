@@ -792,9 +792,12 @@ impl Message<WorldMoveRequest> for WorldActor {
             let (bag_weight, _, _) = super::compute_player_weights(&state.inventory, &self.item_infos);
             let limit = super::weight_limit(&state.inventory, state.class, state.level, mir2_shared::enums::Stat::BagWeight, &self.item_infos);
             let overweight = bag_weight > limit;
-            // #1428：C# HumanObject.Run steps = RidingMount ? 3 : 2（SwiftFeet 未实现，只按骑乘）
+            // #1428/#1502：C# HumanObject.Run steps = RidingMount || (ActiveSwiftFeet && !Sneaking) ? 3 : 2
             run = effective_run(msg.is_run, overweight);
-            steps = move_steps(run, state.is_mounted);
+            let swift_feet = state.buffs.iter().any(|b| matches!(
+                b.buff_type, crate::combat::buff::BuffType::MoveSpeedBoost { .. }
+            ));
+            steps = move_steps(run, state.is_mounted, swift_feet);
             // #1408/#1428：C# Walk/Run 对每一格做阻挡校验——NPC / 未摧毁城墙城门阻挡通行
             let dir = msg.direction as usize % 8;
             let npc_tiles: Vec<(i32, i32)> = self.npcs.values()
@@ -3872,11 +3875,12 @@ fn effective_run(is_run: bool, overweight: bool) -> bool {
     is_run && !overweight
 }
 
-/// #1428：C# HumanObject.Run steps = RidingMount ? 3 : 2；Walk = 1（SwiftFeet 未实现）
-fn move_steps(run: bool, is_mounted: bool) -> i32 {
+/// #1428/#1502：C# HumanObject.Run steps = RidingMount || (ActiveSwiftFeet && !Sneaking) ? 3 : 2；Walk = 1
+/// SwiftFeet 用 MoveSpeedBoost buff 表示（Rust 仅 SwiftFeet 施放产生该 buff，无歧义）
+fn move_steps(run: bool, is_mounted: bool, swift_feet: bool) -> i32 {
     if !run {
         1
-    } else if is_mounted {
+    } else if is_mounted || swift_feet {
         3
     } else {
         2
@@ -3945,11 +3949,14 @@ mod tests {
         assert!(effective_run(true, false));
         assert!(!effective_run(true, true));
         assert!(!effective_run(false, true));
-        // #1428：骑乘 run 3 格，普通 run 2 格，walk 1 格
-        assert_eq!(move_steps(false, false), 1);
-        assert_eq!(move_steps(false, true), 1);
-        assert_eq!(move_steps(true, false), 2);
-        assert_eq!(move_steps(true, true), 3);
+        // #1428/#1502：骑乘或 SwiftFeet（MoveSpeedBoost）run 3 格，普通 run 2 格，walk 1 格
+        assert_eq!(move_steps(false, false, false), 1);
+        assert_eq!(move_steps(false, true, false), 1);
+        assert_eq!(move_steps(false, false, true), 1);
+        assert_eq!(move_steps(true, false, false), 2);
+        assert_eq!(move_steps(true, true, false), 3);
+        assert_eq!(move_steps(true, false, true), 3);
+        assert_eq!(move_steps(true, true, true), 3);
     }
 
     #[test]
