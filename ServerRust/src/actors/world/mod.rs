@@ -6139,8 +6139,24 @@ fn has_special_equipped(state: &PlayerState, flag: mir2_shared::enums::SpecialIt
         .any(|it| it.info.as_ref().map(|i| i.unique.contains(flag)).unwrap_or(false))
 }
 
+/// #1458：C# GuildObject.IsEnemy——宣战敌对行会才可攻击（IsAtWar && WarringGuilds 包含）
+fn guild_enemy_attackable(
+    my_guild: Option<&str>,
+    target_guild: Option<&str>,
+    guild_wars: &std::collections::HashMap<String, std::collections::HashSet<String>>,
+) -> bool {
+    match (my_guild, target_guild) {
+        (Some(m), Some(t)) => guild_wars.get(m).map(|s| s.contains(t)).unwrap_or(false),
+        _ => false,
+    }
+}
+
 /// 检查攻击者是否可以在当前攻击模式下攻击目标玩家
-fn can_attack_player(attacker: &PlayerState, target: &PlayerState) -> bool {
+fn can_attack_player(
+    attacker: &PlayerState,
+    target: &PlayerState,
+    guild_wars: &std::collections::HashMap<String, std::collections::HashSet<String>>,
+) -> bool {
     use mir2_shared::enums::AttackMode;
     match attacker.attack_mode {
         AttackMode::Peace => false,
@@ -6153,10 +6169,8 @@ fn can_attack_player(attacker: &PlayerState, target: &PlayerState) -> bool {
             attacker.guild_name.is_none() || attacker.guild_name != target.guild_name
         }
         AttackMode::EnemyGuild => {
-            // 简化：只能攻击不同行会的玩家（且双方都有行会）
-            attacker.guild_name.is_some()
-                && target.guild_name.is_some()
-                && attacker.guild_name != target.guild_name
+            // #1458：C# IsAttackTarget——MyGuild != null && MyGuild.IsEnemy(attacker.MyGuild)
+            guild_enemy_attackable(attacker.guild_name.as_deref(), target.guild_name.as_deref(), guild_wars)
         }
         AttackMode::RedBrown => {
             // 只能攻击红名/橙名玩家
@@ -7187,6 +7201,23 @@ mod tests {
         assert_eq!(scatter_drop_position(Some(&map2), 4, 4, 2), (4, 4));
         // 无地图 → 原点
         assert_eq!(scatter_drop_position(None, 3, 7, 3), (3, 7));
+    }
+
+    #[test]
+    fn guild_enemy_attackable_only_when_at_war() {
+        // #1458：C# IsEnemy——宣战表包含才可攻击
+        use std::collections::{HashMap, HashSet};
+        let mut wars: HashMap<String, HashSet<String>> = HashMap::new();
+        wars.insert("A".to_string(), HashSet::from(["B".to_string()]));
+        wars.insert("B".to_string(), HashSet::from(["A".to_string()]));
+        assert!(guild_enemy_attackable(Some("A"), Some("B"), &wars));
+        assert!(guild_enemy_attackable(Some("B"), Some("A"), &wars));
+        // 未宣战异会 → 不可攻击
+        assert!(!guild_enemy_attackable(Some("A"), Some("C"), &wars));
+        // 无行会/同会 → 不可攻击
+        assert!(!guild_enemy_attackable(None, Some("B"), &wars));
+        assert!(!guild_enemy_attackable(Some("A"), None, &wars));
+        assert!(!guild_enemy_attackable(Some("A"), Some("A"), &wars));
     }
 
 }
