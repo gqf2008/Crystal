@@ -18,7 +18,7 @@ use crate::scenes::AppState;
 use crate::ui::pinyin_ime::{ImeFocus, PinyinIme};
 use crate::resources::libraries::LibraryName;
 use crate::ui::controls::spawn_checkbox;
-use crate::ui::sprite_ui::{spawn_ui_text, UiButton, UiEntity, UiFont, UiImageCache};
+use crate::ui::sprite_ui::{spawn_ui_text, ui_image, UiButton, UiEntity, UiFont, UiImageCache};
 
 /// 聊天频道（主话框页签，对齐 C# MainDialogs ChatPanel）
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -418,6 +418,7 @@ fn spawn_chat(
     mut commands: Commands,
     mut libs: ResMut<GameLibraries>,
     mut images: ResMut<Assets<Image>>,
+    mut cache: ResMut<UiImageCache>,
     mut fonts: ResMut<Assets<Font>>,
     mut ui_font: ResMut<UiFont>,
 ) {
@@ -430,16 +431,18 @@ fn spawn_chat(
     let panel_x = 6.0;
     let panel_y = 768.0 - 150.0 - 190.0; // 主对话框上方
 
-    // 面板底色（半透明黑，1x1 白图着色）
+    // 面板背景：C# ChatDialog 用真实纹理 Prguse[2221]（1024 分辨率 632x68）。
+    // 不用纯色 1x1 白图着色——部分机器上纯色精灵不渲染导致聊天框/输入框消失。
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
+    let chat_bg = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2221)
+        .unwrap_or(white);
     commands.spawn((
         UiEntity,
         ChatPanel,
         ChatPanelBg,
         Sprite {
-            image: white,
+            image: chat_bg,
             custom_size: Some(Vec2::new(360.0, 172.0)),
-            color: Color::srgba(0.0, 0.0, 0.0, 0.72),
             ..default()
         },
         Transform::from_xyz(panel_x + 180.0, -(panel_y + 75.0), 1.5),
