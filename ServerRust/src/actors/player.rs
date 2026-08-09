@@ -271,6 +271,7 @@ pub struct PlayerState {
     pub allow_lover_recall: bool,
     /// 是否为 GM（对应 C# IsGM / AccountInfo.AdminAccount）
     pub is_gm: bool,
+    pub gm_never_die: bool,
     /// 是否已购买仓库扩容（C# AccountInfo.HasExpandedStorage；登录时从 accounts 表加载）
     pub has_expanded_storage: bool,
     /// 仓库扩容到期时间（unix 秒；0 = 无，C# AccountInfo.ExpandedStorageExpiryDate）
@@ -673,6 +674,7 @@ impl PlayerActor {
                 last_recall_time: 0,
                 allow_lover_recall: false,
                 is_gm: false,
+                gm_never_die: false, // #1480：GM 无敌模式（C# GMNeverDie）
                 has_expanded_storage: false,
                 expanded_storage_expiry_date: 0,
                 has_storage_password: false,
@@ -1337,6 +1339,20 @@ impl Message<TakeDamage> for PlayerActor {
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::Struck as i16, &struck_body),
         }).await;
 
+        // #1480：GM 无敌（C# GMNeverDie）——HP 钳到 ≥1，不进入死亡流程
+        if self.state.gm_never_die {
+            if self.state.hp <= 0 {
+                self.state.hp = 1;
+                let mut hb = Vec::new();
+                hb.extend_from_slice(&(self.state.hp as u32).to_le_bytes());
+                hb.extend_from_slice(&(self.state.mp as u32).to_le_bytes());
+                let _ = self.gate_ref.tell(SendToClient {
+                    session_id: self.state.session_id,
+                    data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::HealthChanged as i16, &hb),
+                }).await;
+            }
+            return false;
+        }
         // 死亡处理
         if self.state.hp <= 0 && !self.state.is_dead {
             // C# Die()：复活戒指（SpecialItemMode.Revival）——回满血、扣 1000 耐久、5 分钟冷却
@@ -1747,6 +1763,19 @@ impl Message<SetElements> for PlayerActor {
     ) -> Self::Reply {
         self.state.elements_level = msg.level;
         self.state.has_elemental = msg.has_elemental;
+    }
+}
+
+/// #1480：设置 GM 无敌模式（C# GMNeverDie，@superman 切换）
+pub struct SetGmNeverDie {
+    pub enabled: bool,
+}
+
+impl Message<SetGmNeverDie> for PlayerActor {
+    type Reply = ();
+
+    async fn handle(&mut self, msg: SetGmNeverDie, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        self.state.gm_never_die = msg.enabled;
     }
 }
 
@@ -5638,6 +5667,7 @@ mod tests {
             last_recall_time: 0,
             allow_lover_recall: false,
             is_gm: false,
+            gm_never_die: false, // #1480：GM 无敌模式（C# GMNeverDie）
             has_expanded_storage: false,
             expanded_storage_expiry_date: 0,
             has_storage_password: false,

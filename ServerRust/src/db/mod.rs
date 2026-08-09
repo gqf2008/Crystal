@@ -1408,6 +1408,7 @@ pub async fn load_character(pool: &DbPool, character_name: &str) -> anyhow::Resu
         last_recall_time: 0,
         allow_lover_recall: row.get::<Option<i32>, _>("allow_lover_recall").map(|v| v != 0).unwrap_or(false),
         is_gm: row.get::<i32, _>("admin_account") != 0,
+        gm_never_die: false, // #1480：GM 无敌模式（C# GMNeverDie）
         has_expanded_storage: false,
         expanded_storage_expiry_date: 0,
         has_storage_password: false,

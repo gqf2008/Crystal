@@ -281,7 +281,6 @@ impl Message<StartGameRequest> for WorldActor {
             }
         }
 
-
         // 初始化装备属性加成（从已装备物品计算）
         let b = calculate_equipment_bonuses(&loaded_state.inventory.equipment, &self.item_infos);
         loaded_state.bonus_min_attack = b.min_atk;
@@ -1606,7 +1605,7 @@ impl Message<ChatRequest> for WorldActor {
             let parts: Vec<&str> = cmd_rest.split_whitespace().collect();
             if !parts.is_empty() {
                 let cmd = parts[0].to_uppercase();
-                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS") {
+                if matches!(cmd.as_str(), "LEVEL" | "GOLD" | "MAKE" | "MONSTER" | "GOTO" | "RECALLMOB" | "CLEARBAG" | "REVIVE" | "GIVEGOLD" | "GIVESKILL" | "CLEARMOB" | "ADJUSTPKPOINT" | "CHANGEGENDER" | "HAIR" | "SETLIGHT" | "LEVELHERO" | "INFO" | "SETFLAG" | "CLEARFLAGS" | "DELETESKILL" | "GIVEHEROSKILL" | "GAMEMASTER" | "MOB" | "KILL" | "DIE" | "RELOADDROPS" | "RELOADNPCS" | "SUPERMAN") {
                     let is_gm = if let Ok(Some(state)) = record.actor_ref.ask(GetPlayerState).await { state.is_gm } else { false };
                     if !is_gm {
                         send_system_message(&self.gate_ref, msg.session_id, "你没有权限使用此命令");
@@ -2218,6 +2217,15 @@ impl Message<ChatRequest> for WorldActor {
                                 }
                             }
                             send_system_message(&self.gate_ref, msg.session_id, "NPC 配置已重载");
+                        }
+
+                        // @superman（C# case "SUPERMAN"：切换 GM 无敌模式 GMNeverDie）
+                        "SUPERMAN" => {
+                            let current = if let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await { st.gm_never_die } else { false };
+                            let enabled = !current;
+                            let _ = record.actor_ref.ask(crate::actors::player::SetGmNeverDie { enabled }).await;
+                            send_system_message(&self.gate_ref, msg.session_id,
+                                if enabled { "已开启无敌模式（不会死亡）" } else { "已关闭无敌模式" });
                         }
 
                         // @setflag <index> [玩家]（C# case "SETFLAG" ~3351：切换 flag）
@@ -3537,6 +3545,7 @@ fn create_default_player_state(session_id: u64, object_id: u32) -> crate::actors
         mount_type: 0,
         allow_lover_recall: false,
         is_gm: false,
+        gm_never_die: false, // #1480：GM 无敌模式（C# GMNeverDie）
         has_expanded_storage: false,
         expanded_storage_expiry_date: 0,
         has_storage_password: false,

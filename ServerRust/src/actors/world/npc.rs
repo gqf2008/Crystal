@@ -677,6 +677,7 @@ impl Message<NewCharacterRequest> for WorldActor {
             mount_type: 0,
             allow_lover_recall: false,
             is_gm: false,
+            gm_never_die: false, // #1480：GM 无敌模式（C# GMNeverDie）
             has_expanded_storage: false,
             expanded_storage_expiry_date: 0,
             has_storage_password: false,
