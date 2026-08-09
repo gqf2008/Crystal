@@ -438,9 +438,9 @@ fn spawn_chat(
         ChatPanelBg,
         Sprite {
             image: chat_bg,
-            // 半透明：进入 alpha 混合通道，不写深度；Bevy 高 z 靠前，
+            // C# Color.White（纹理自身 alpha）；Bevy 高 z 靠前：
             // 面板 z=2.05 低于所有内容（2.2+），内容才显示在面板上
-            color: Color::srgba(1.0, 1.0, 1.0, 0.85),
+            color: Color::WHITE,
             ..default()
         },
         bevy::sprite::Anchor::TOP_LEFT,
@@ -453,33 +453,40 @@ fn spawn_chat(
         let e = spawn_ui_text(
             &mut commands, &font, "",
             panel_x + 1.0, panel_y + 1.0 + i as f32 * 13.0,
-            12.0, Color::srgb(0.1, 0.1, 0.15), 4.0,
+            11.0, Color::srgb(0.1, 0.1, 0.15), 4.0,
         );
         commands.entity(e).insert(ChatLine(i));
     }
     // 滚动按钮（C# ChatDialog Home/Up/Down/End 图片按钮：x=618，y=1/9/39/45）
-    let scroll_btns: [(KeyScroll, usize, usize, usize, f32); 4] = [
-        (KeyScroll::Home, 2018, 2019, 2020, 1.0),
-        (KeyScroll::Up, 2021, 2022, 2023, 9.0),
-        (KeyScroll::Down, 2024, 2025, 2026, 39.0),
-        (KeyScroll::End, 2027, 2028, 2029, 45.0),
+    let scroll_btns: [(KeyScroll, usize, usize, usize, f32, f32, f32); 4] = [
+        (KeyScroll::Home, 2018, 2019, 2020, 1.0, 12.0, 8.0),
+        (KeyScroll::Up, 2021, 2022, 2023, 9.0, 12.0, 6.0),
+        (KeyScroll::Down, 2024, 2025, 2026, 39.0, 12.0, 6.0),
+        (KeyScroll::End, 2027, 2028, 2029, 45.0, 12.0, 8.0),
     ];
-    for (kind, normal, hover, pressed, by) in scroll_btns {
+    for (kind, normal, hover, pressed, by, bw, bh) in scroll_btns {
         if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
             &mut commands, &mut libs, &mut images, &mut cache,
             LibraryName::Prguse, normal, hover, pressed,
-            panel_x + 618.0, panel_y + by, 2.3, 12.0, 8.0,
+            panel_x + 618.0, panel_y + by, 2.3, bw, bh,
         ) {
             commands.entity(e).insert(ChatScrollBtn(kind));
         }
+    }
+    // 滚动条轨道（C# CountBar Prguse[2012] @(622,16)，4x21）+ 滑块（PositionBar 2015 @(619,16)，8x14）
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2012) {
+        spawn_ui_sprite(&mut commands, h, panel_x + 622.0, panel_y + 16.0, 2.3, 1.0);
+    }
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 2015) {
+        spawn_ui_sprite(&mut commands, h, panel_x + 619.0, panel_y + 16.0, 2.35, 1.0);
     }
     // 输入行（C# ChatTextBox @ (1,54) 627x13，ForeColour Black）
     let e = spawn_ui_text(
         &mut commands, &font, "",
         CHAT_INPUT_X, CHAT_INPUT_Y,
-        12.0, Color::srgb(0.1, 0.1, 0.1), 2.25,
+        11.0, Color::srgb(0.1, 0.1, 0.1), 2.25,
     );
-    commands.entity(e).insert(ChatInputText);
+    commands.entity(e).insert((ChatInputText, Visibility::Hidden));
     // 输入框背景（C# BackColour=DarkGray）+ 闪烁光标
     commands.spawn((
         UiEntity,
@@ -492,7 +499,8 @@ fn spawn_chat(
         },
         Anchor::TOP_LEFT,
         Transform::from_xyz(231.0, -(CHAT_INPUT_Y + 1.0), 2.1),
-        Visibility::Visible,
+        // C# ChatTextBox.Visible=false：按 Enter 激活后才显示
+        Visibility::Hidden,
     ));
     commands.spawn((
         UiEntity,
@@ -501,7 +509,7 @@ fn spawn_chat(
         Anchor::TOP_LEFT,
         TextFont {
             font: FontSource::Handle(font.clone()),
-            font_size: FontSize::Px(12.0),
+            font_size: FontSize::Px(11.0),
             ..default()
         },
         TextColor(Color::srgb(0.0, 0.0, 0.0)),
@@ -954,19 +962,16 @@ fn chat_display_system(
                 color.0 = c;
             }
         } else if input.is_some() {
+            // C# ChatTextBox：未激活时不显示；激活后显示 “> 输入内容”
             let new = if chat.input_active {
                 format!("> {}", chat.input_text)
             } else {
-                "回车开始聊天".to_string()
+                String::new()
             };
             if text.0 != new {
                 text.0 = new;
             }
-            let c = if chat.input_active {
-                Color::srgb(0.1, 0.1, 0.1)
-            } else {
-                Color::srgb(0.15, 0.15, 0.15)
-            };
+            let c = Color::srgb(0.1, 0.1, 0.1);
             if color.0 != c {
                 color.0 = c;
             }
@@ -985,13 +990,21 @@ fn chat_display_system(
     }
 }
 
-/// 输入框 UI：激活时显示背景 + 闪烁光标（光标随文本推进）
+/// 输入框 UI：激活时显示背景 + 输入文本 + 闪烁光标（C# ChatTextBox.Visible 随激活切换）
 fn chat_input_ui_system(
     chat: Res<ChatState>,
     time: Res<Time>,
     mut cursors: Query<(&mut Visibility, &mut Transform), With<ChatInputCursor>>,
+    mut bgs: Query<&mut Visibility, (With<ChatInputBg>, Without<ChatInputText>, Without<ChatInputCursor>)>,
+    mut texts: Query<&mut Visibility, (With<ChatInputText>, Without<ChatInputBg>, Without<ChatInputCursor>)>,
 ) {
     let active = chat.input_active;
+    for mut v in &mut bgs {
+        *v = if active { Visibility::Visible } else { Visibility::Hidden };
+    }
+    for mut v in &mut texts {
+        *v = if active { Visibility::Visible } else { Visibility::Hidden };
+    }
     for (mut v, mut tf) in &mut cursors {
         // 光标闪烁（约 2Hz）
         *v = if active && (time.elapsed_secs() * 2.0) as i64 % 2 == 0 {
@@ -1000,8 +1013,8 @@ fn chat_input_ui_system(
             Visibility::Hidden
         };
         if active {
-            // 光标跟随文本末尾（粗估：每字符 12px，前缀 “> ” 约 16px）
-            tf.translation.x = CHAT_INPUT_X + 16.0 + chat.input_text.chars().count() as f32 * 12.0;
+            // 光标跟随文本末尾（粗估：每字符 11px，前缀 “> ” 约 14px）
+            tf.translation.x = CHAT_INPUT_X + 14.0 + chat.input_text.chars().count() as f32 * 11.0;
         }
     }
 }
