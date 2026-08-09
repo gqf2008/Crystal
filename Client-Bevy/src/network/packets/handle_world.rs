@@ -272,6 +272,8 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
         }
         x if x == ServerPacketIds::InTrapRock as i16 => {
             if let Ok(p) = miscellaneous::InTrapRock::read_body(&mut cur) {
+                // #1550：写入 HudState（C# User.InTrapRock：陷阱中不可走/跑）
+                server_events.write(ServerEvent::TrapRockChanged { in_trap: p.in_trap });
                 tracing::debug!("🪤 陷阱状态 in_trap={}", p.in_trap);
             }
         }

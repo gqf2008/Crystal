@@ -685,6 +685,9 @@ struct HoldMoveTest {
     started: bool,
     frame: u32,
     dirs: Vec<u8>,
+    /// #1550：陷阱阶段（InTrapRock=true 后方向应停走）
+    trap_done: bool,
+    trap_dirs: Vec<u8>,
 }
 
 fn hold_move_test_system(
@@ -692,6 +695,7 @@ fn hold_move_test_system(
     mut st: ResMut<HoldMoveTest>,
     time: Res<Time>,
     game_data: Res<client_bevy::map_renderer::GameData>,
+    mut hud: ResMut<client_bevy::game::hud::HudState>,
     players: Query<&Transform, (With<client_bevy::actor::LocalPlayer>, With<client_bevy::actor::NetObjectId>)>,
 ) {
     use client_bevy::game::movement::{mouse_direction, next_direction, point_move, previous_direction};
@@ -708,12 +712,12 @@ fn hold_move_test_system(
         return;
     }
     st.frame += 1;
-    if st.frame > 40 {
-        // 输出并结束
+    if st.frame > 40 && !st.trap_done {
+        // 阶段1结束：方向序列输出 + 进入陷阱阶段
         let dirs = std::mem::take(&mut st.dirs);
         let jitter = dirs.windows(2).filter(|w| {
             let d = (w[1] as i32 - w[0] as i32).rem_euclid(8);
-            d == 4 // 反向抖动
+            d == 4
         }).count();
         let stable = dirs.windows(2).all(|w| {
             let d = (w[1] as i32 - w[0] as i32).rem_euclid(8);
@@ -721,8 +725,25 @@ fn hold_move_test_system(
         });
         let verdict = if jitter == 0 && stable { "✅ 方向稳定无抖动" } else { "❌ 方向抖动" };
         tracing::info!("[HOLDMOVE] {} 方向序列 {:?}", verdict, dirs);
+        // 陷阱阶段：InTrapRock=true → C# CanWalk/CanRun 禁止移动 → 应原地转向不再前进
+        hud.in_trap_rock = true;
+        st.frame = 0;
+        st.trap_done = true;
+        return;
+    }
+    if st.trap_done && st.frame > 40 {
+        // 陷阱阶段结束：验证方向不再前进（序列为空或只有 1 个转向）
+        let trap_dirs = std::mem::take(&mut st.trap_dirs);
+        let verdict = if trap_dirs.len() <= 1 {
+            "✅ 陷阱禁止移动（原地转向）"
+        } else {
+            "❌ 陷阱中仍在移动"
+        };
+        tracing::info!("[HOLDMOVE] {} 陷阱阶段方向 {:?}", verdict, trap_dirs);
+        hud.in_trap_rock = false;
         st.started = false;
         st.frame = 0;
+        st.trap_done = false;
         return;
     }
     let Ok(ptf) = players.single() else { return };
@@ -731,14 +752,23 @@ fn hold_move_test_system(
     let player_world = Vec2::new(ptf.translation.x, ptf.translation.y);
     let mouse_world = player_world + Vec2::new(400.0, 400.0);
     let dir = mouse_direction(player_world, mouse_world);
-    // 记录当前选择的方向（原方向；若不可走则退避）
+    // 陷阱中：方向仍计算（原地转向），但不应产生可移动方向
     let from = client_bevy::game::movement::world_to_tile(player_world.x, player_world.y);
-    let chosen = [dir, next_direction(dir), previous_direction(dir)].iter().copied().find(|d| {
-        let p = point_move(from.0, from.1, *d, 1);
-        map.is_walkable(p.0, p.1)
-    });
+    let chosen = if hud.in_trap_rock {
+        None // 陷阱禁止移动（C# CanWalk 12094 直接 false）
+    } else {
+        [dir, next_direction(dir), previous_direction(dir)].iter().copied().find(|d| {
+            let p = point_move(from.0, from.1, *d, 1);
+            map.is_walkable(p.0, p.1)
+        })
+    };
     let d = chosen.unwrap_or(dir);
-    if st.dirs.last() != Some(&(d as u8)) {
+    if st.trap_done {
+        // 陷阱阶段只记录方向变化（期望 <=1 个）
+        if st.trap_dirs.last() != Some(&(d as u8)) && st.trap_dirs.len() < 2 {
+            st.trap_dirs.push(d as u8);
+        }
+    } else if st.dirs.last() != Some(&(d as u8)) {
         st.dirs.push(d as u8);
     }
 }

@@ -9,7 +9,7 @@ fn main() {
         for y in 0..map_reader.height { col.push(map_reader.map_cells[x as usize][y as usize].is_walkable()); }
         walkable.push(col);
     }
-    let map = LoadedMap { name: "3".into(), width: map_reader.width, height: map_reader.height, walkable };
+    let map = LoadedMap { name: "3".into(), width: map_reader.width, height: map_reader.height, walkable, doors: vec![vec![0u8; map_reader.height as usize]; map_reader.width as usize] };
     let p = pathfinding::find_path(&map, (500,400), (540,440)).unwrap();
     let mut prev = (500,400);
     let mut seq = Vec::new();

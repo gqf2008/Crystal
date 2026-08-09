@@ -607,6 +607,7 @@ mod tests {
             width: 20,
             height: 20,
             walkable: vec![vec![true; 20]; 20],
+            doors: vec![vec![0u8; 20]; 20],
         };
         let path = crate::game::pathfinding::find_path(&map, (0, 0), (5, 3)).unwrap();
         let mut deltas = Vec::new();
@@ -681,6 +682,7 @@ mod tests {
             width: 3,
             height: 3,
             walkable,
+            doors: vec![vec![0u8; 3]; 3],
         };
         let from = (1, 1);
         let dir = MirDirection::Up;

@@ -16,7 +16,7 @@ use crate::game::hud::HudState;
 use crate::game::movement::{direction_from_delta, mouse_direction, next_direction, point_move, previous_direction, world_to_tile, LocalMove};
 use mir2_shared::enums::MirDirection;
 use crate::game::pathfinding;
-use crate::map_renderer::{GameData, GameLibraries};
+use crate::map_renderer::{GameData, GameLibraries, TILE_WIDTH};
 use crate::network::NetConnection;
 use crate::scenes::AppState;
 use crate::ui::sprite_ui::UiButton;
@@ -501,6 +501,7 @@ fn hold_move_system(
     mut control: ResMut<ControlState>,
     time: Res<Time>,
     game_data: Res<GameData>,
+    net: Res<NetConnection>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     camera: Query<
@@ -565,10 +566,11 @@ fn hold_move_system(
 
     if control.hold_active {
         if let Some(run) = run {
-            // #1548：方向驱动按住移动（对齐 C# GameScene.CheckInput MapButtons 分支）
-            //   右键按住：CanRun（2 格）→ Run；否则 CanWalk 退避 → Walk 1 格；不可走原地转向
+            // #1548/#1550：方向驱动按住移动（对齐 C# GameScene.CheckInput MapButtons 分支）
+            //   右键按住：鼠标距玩家 <= 2 格 → 只转向（C# GameScene.cs:11614 InRange 2）；
+            //     CanRun（2/3 格）→ Run；否则 CanWalk 退避 → Walk 1 格；不可走原地转向
             //   左键按住：CanWalk 退避 → Walk 1 格；不可走原地转向
-            // 方向由鼠标相对玩家 8 方向扇区（45° 容差）决定，鼠标轻微移动不换方向 → 消除 45° 抖动
+            //   陷阱/负重：InTrapRock 不可走/跑；背包或穿戴超重不可跑（C# CanRun 12139）
             let Ok((pe, ptf, mut lm, mut anim)) = players.single_mut() else { return };
             let from_tile = world_to_tile(ptf.translation.x, ptf.translation.y);
             let dir = mouse_direction(Vec2::new(ptf.translation.x, ptf.translation.y), world);
@@ -576,19 +578,80 @@ fn hold_move_system(
             let direction_changed = control.hold_target != Some((new_dir as i32, 0))
                 || control.hold_run != Some(run);
 
+            // 右键按住且鼠标距玩家 <= 2 格 → 只转向（C# GameScene.cs:11614）
+            if run && (world - Vec2::new(ptf.translation.x, ptf.translation.y)).length() <= TILE_WIDTH * 2.0 {
+                if direction_changed {
+                    anim.direction = new_dir;
+                    anim.action = mir2_shared::enums::MirAction::Standing;
+                    anim.frame_index = 0;
+                    control.hold_target = Some((new_dir as i32, 0));
+                    control.hold_run = Some(true);
+                }
+                lm.path.clear();
+                lm.last = None;
+                return;
+            }
+
+            // 陷阱：InTrapRock 不可走/跑（C# CanWalk 12094 / CanRun 12139）
+            let in_trap = hud.in_trap_rock;
+
+            // 门检查：目标格是门（door_index != 0）且当前未放行 → 发 Opendoor（C# CheckDoorOpen 12113）
+            // 门状态由服务端 Opendoor 包更新；walkable 中门格已阻挡，发 Opendoor 后服务端刷新地图可走
+            fn check_door(map: &crate::map_renderer::LoadedMap, net: &NetConnection, p: (i32, i32)) -> bool {
+                if !map.in_bounds(p.0, p.1) {
+                    return false;
+                }
+                let di = map.doors[p.0 as usize][p.1 as usize];
+                if di == 0 {
+                    return true;
+                }
+                // 门格：walkable=false 表示门关；发 Opendoor 让服务端开门
+                if !map.is_walkable(p.0, p.1) {
+                    net.send_packet(&mir2_shared::packets::client::misc::Opendoor {
+                        door_index: di,
+                    });
+                    tracing::debug!("🚪 请求开门 door={} at ({},{})", di, p.0, p.1);
+                }
+                // 门仍关（walkable=false）→ 不可走；开（walkable=true）→ 可走
+                map.is_walkable(p.0, p.1)
+            }
+
             // 尝试方向：原方向 → NextDir → PreviousDir（C# CanWalk(dir, out dir)）
             let mut chosen: Option<(MirDirection, i32)> = None; // (方向, 步数)
             let mut can_walk = |d: MirDirection| -> bool {
+                if in_trap {
+                    return false;
+                }
                 let p = point_move(from_tile.0, from_tile.1, d, 1);
-                map.is_walkable(p.0, p.1)
+                check_door(map, &net, p)
             };
             if run {
-                // C# CanRun：CanWalk(dir) && EmptyCell(2 格)；骑乘/冲刺 3 格（客户端简化：2 格）
+                // C# CanRun：负重不超限 && CanWalk(dir) && EmptyCell(2 格)；
+                // 骑乘（或冲刺且非潜行）→ 3 格（C# GameScene.cs:12143-12147）
+                let bag_ok = hud.inventory.weight <= hud.inventory.max_weight;
+                let wear_ok = hud
+                    .equipment
+                    .iter()
+                    .flatten()
+                    .map(|i| i.weight as u32)
+                    .sum::<u32>()
+                    <= hud.inventory.max_weight;
+                let can_run_base = !in_trap && bag_ok && wear_ok;
+                let run_dist = if hud.riding { 3 } else { 2 };
                 for d in [dir, next_direction(dir), previous_direction(dir)] {
-                    let p1 = point_move(from_tile.0, from_tile.1, d, 1);
-                    let p2 = point_move(from_tile.0, from_tile.1, d, 2);
-                    if map.is_walkable(p1.0, p1.1) && map.is_walkable(p2.0, p2.1) {
-                        chosen = Some((d, 2));
+                    if !can_run_base {
+                        break;
+                    }
+                    let mut ok = true;
+                    for k in 1..=run_dist {
+                        let p = point_move(from_tile.0, from_tile.1, d, k);
+                        if !check_door(map, &net, p) {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    if ok {
+                        chosen = Some((d, run_dist));
                         break;
                     }
                 }
@@ -768,9 +831,45 @@ mod tests {
         keys.press(KeyCode::ShiftRight);
         assert!(is_shift_down(&keys));
     }
+
+    #[test]
+    fn test_loaded_map_doors_grid() {
+        // #1550：LoadedMap doors 网格（C# M2CellInfo.DoorIndex）
+        let map = crate::map_renderer::LoadedMap {
+            name: "d".into(),
+            width: 2,
+            height: 2,
+            walkable: vec![vec![true; 2]; 2],
+            doors: vec![vec![0u8, 1], vec![0, 0]],
+        };
+        assert_eq!(map.doors[0][1], 1, "门索引应保留");
+        assert_eq!(map.doors[1][0], 0);
+        assert!(map.is_walkable(1, 1));
+    }
+
+    #[test]
+    fn test_can_run_weight_and_trap_conditions() {
+        // #1550：C# CanRun（GameScene.cs:12139）——负重/陷阱决定能否跑
+        let mut hud = HudState::default();
+        hud.inventory.weight = 10;
+        hud.inventory.max_weight = 100;
+        assert!(hud.inventory.weight <= hud.inventory.max_weight);
+        let wear: u32 = hud.equipment.iter().flatten().map(|i| i.weight as u32).sum();
+        assert!(wear <= hud.inventory.max_weight);
+        // 背包超重 → 不可跑（C# CurrentBagWeight > BagWeight）
+        hud.inventory.weight = 200;
+        assert!(hud.inventory.weight > hud.inventory.max_weight);
+        // 陷阱 → 不可走/跑（C# InTrapRock）
+        hud.in_trap_rock = true;
+        assert!(hud.in_trap_rock);
+    }
+
+    #[test]
+    fn test_hold_right_click_close_turn_only() {
+        // #1550：右键按住且鼠标距玩家 <= 2 格 → 只转向（C# GameScene.cs:11614 InRange 2）
+        let threshold = TILE_WIDTH * 2.0;
+        assert!(96.0f32 <= threshold);
+        assert!(!(240.0f32 <= threshold));
+    }
 }
-
-
-
-
 

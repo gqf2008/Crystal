@@ -193,6 +193,8 @@ pub struct LoadedMap {
     pub width: i32,
     pub height: i32,
     /// 可行走网格（M8 寻路用；back_image 障碍标志位）
+    /// #1550：门索引网格（C# M2CellInfo.DoorIndex；0=无门）
+    pub doors: Vec<Vec<u8>>,
     pub walkable: Vec<Vec<bool>>,
 }
 

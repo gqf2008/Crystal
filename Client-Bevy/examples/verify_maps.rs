@@ -31,6 +31,7 @@ fn main() {
             width: reader.width,
             height: reader.height,
             walkable,
+            doors: vec![vec![0u8; reader.height as usize]; reader.width as usize],
         };
         let spawn_walkable = map.is_walkable(sx, sy);
         let reachable = map.walkable.iter().flatten().filter(|w| **w).count();

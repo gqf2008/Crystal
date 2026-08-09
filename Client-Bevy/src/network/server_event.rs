@@ -149,6 +149,8 @@ pub enum ServerEvent {
         is_mounted: bool,
     },
     /// #236 Poisoned/ObjectPoisoned：中毒状态
+    /// #1550：InTrapRock：本地玩家陷阱岩石状态（C# User.InTrapRock：陷阱中不可走/跑）
+    TrapRockChanged { in_trap: bool },
     ObjectPoisoned { object_id: u32, poisoned: bool },
     /// #240 ItemRepaired：修理结果（耐久/最大耐久更新）
     ItemRepaired {

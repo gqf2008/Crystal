@@ -140,6 +140,7 @@ mod tests {
             width: w,
             height: h,
             walkable,
+            doors: vec![vec![0u8; h as usize]; w as usize],
         }
     }
 
@@ -178,6 +179,7 @@ mod tests {
             width: 5,
             height: 5,
             walkable: blocked,
+            doors: vec![vec![0u8; 5]; 5],
         };
         let _ = map;
         assert!(find_path(&map2, (0, 2), (4, 2)).is_none());
