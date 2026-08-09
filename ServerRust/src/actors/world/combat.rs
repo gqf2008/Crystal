@@ -4087,6 +4087,7 @@ impl Message<MagicRequest> for WorldActor {
             }
             // #409：OneWithNature —— 5×5 AoE MAC 伤害 + 必中 Green 毒（C# Map.cs：持有 PoisonShot buff 时）
             // 吸血（VampireShot buff）暂不模拟
+            // #409/#1499：OneWithNature —— 5×5 AoE MAC 伤害 + 特殊箭武装（C# Map.cs：持有 PoisonShot buff 绿毒 / VampireShot buff 吸血）
             SPELL_ONE_WITH_NATURE => {
                 let raw_damage = if let Some(info) = spell_db {
                     crate::combat::magic::calc_magic_damage(info, spell_level, magic_stat)
@@ -4097,7 +4098,11 @@ impl Message<MagicRequest> for WorldActor {
                     .filter(|(_, m)| m.hp > 0 && cells.contains(&(m.x, m.y)))
                     .map(|(id, _)| *id)
                     .collect();
+                // 特殊箭武装（#1483）：1=VampireShot 吸血 / 2=PoisonShot 绿毒
+                let has_vamp = state.special_shot_armed == 1;
+                let has_poison = state.special_shot_armed == 2;
                 let mut spell_hits: Vec<(u32, i32, i32, u8, i32)> = Vec::new();
+                let mut vamp_total = 0i32;
                 for mid in hit_ids {
                     if let Some(monster) = self.monsters.get_mut(&mid) {
                         let ds = monster.to_combat_stats();
@@ -4117,21 +4122,35 @@ impl Message<MagicRequest> for WorldActor {
                                 monster.target_session = Some(msg.session_id);
                             }
                             spell_hits.push((mid, monster.x, monster.y, monster.direction, r.damage));
+                            // C# Vampire Effect：VampAmount += value*(Lv+1)*0.25（命中时累加）
+                            if has_vamp {
+                                vamp_total += (raw_damage as f32 * (spell_level as f32 + 1.0) * 0.25) as i32;
+                            }
                         }
                         // C#：持有 PoisonShot buff 时必中绿毒（Duration = value*2 + (Lv+1)*7；
                         // Value = value/15 + Lv + 1 + Random(PoisonAttack)）
-                        let dur = (raw_damage * 2 + (spell_level as i32 + 1) * 7).max(1) as u32;
-                        let val = (raw_damage / 15 + spell_level as i32 + 1
-                            + fastrand::i32(0..state.poison_attack.max(1))).max(1);
-                        crate::combat::poison::apply_poison(&mut monster.poison_list,
-                            crate::combat::poison::Poison::new(
-                                mir2_shared::enums::PoisonType::GREEN, dur, val, 2000,
-                            ));
+                        if has_poison {
+                            let dur = (raw_damage * 2 + (spell_level as i32 + 1) * 7).max(1) as u32;
+                            let val = (raw_damage / 15 + spell_level as i32 + 1
+                                + fastrand::i32(0..state.poison_attack.max(1))).max(1);
+                            crate::combat::poison::apply_poison(&mut monster.poison_list,
+                                crate::combat::poison::Poison::new(
+                                    mir2_shared::enums::PoisonType::GREEN, dur, val, 2000,
+                                ));
+                        }
                     }
                 }
+                // 吸血统一入队（tick 统一结算，与弹道 VampireShot 一致）
+                if vamp_total > 0 {
+                    self.vamp_heals.push((msg.session_id, vamp_total));
+                }
+                // C#：施放后消耗特殊箭 buff（AddBuff 1s 过期 → 武装归零）
+                if has_vamp || has_poison {
+                    let _ = record.actor_ref.ask(crate::actors::player::SetSpecialShotArmed { armed: 0 }).await;
+                }
                 self.broadcast_spell_hit(&spell_hits, object_id).await;
-                debug!("Magic: {} casts OneWithNature (5x5, {} hit, dmg={})",
-                       state.name, spell_hits.len(), raw_damage);
+                debug!("Magic: {} casts OneWithNature (5x5, {} hit, dmg={}, vamp={})",
+                       state.name, spell_hits.len(), raw_damage, vamp_total);
             }
             // #409：MentalState —— 模式 0/1/2 循环（C# HumanObject.cs:8571）
             SPELL_MENTAL_STATE => {
