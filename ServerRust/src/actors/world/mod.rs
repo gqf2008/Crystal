@@ -4725,6 +4725,25 @@ impl WorldActor {
         }
     }
 
+    /// #1410：广播对象名字更新（C# CurrentMap.Broadcast(S.ObjectName)——驯服成功刷新名字显示）
+    pub(crate) async fn broadcast_object_name(&self, object_id: u32, name: &str) {
+        let data = build_packet_bytes(
+            mir2_shared::enums::ServerPacketIds::ObjectName as i16,
+            &object_name_body(object_id, name),
+        );
+        let map_index = self.monsters.get(&object_id).map(|m| m.map_index).unwrap_or(0);
+        for (sid, rec) in &self.players {
+            if let Ok(Some(os)) = rec.actor_ref.ask(GetPlayerState).await {
+                if os.map_index == map_index {
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: *sid,
+                        data: data.clone(),
+                    }).await;
+                }
+            }
+        }
+    }
+
     /// #921：向所有在线玩家广播目标的名字颜色（逐观众计算，C# HumanObject.BroadcastColourChange）
     async fn broadcast_viewer_colours(&mut self, target_session: u64) {
         let target = match self.players.get(&target_session).cloned() {
@@ -6441,6 +6460,14 @@ fn build_user_information_packet(
 }
 
 /// 构建 ObjectPlayer 数据包（其他玩家进入视野）
+/// #1410：构建 S.ObjectName body（[ObjectID u32][Name dotnet]，C# ServerPackets ObjectName）
+fn object_name_body(object_id: u32, name: &str) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(&object_id.to_le_bytes());
+    write_dotnet_string(&mut body, name);
+    body
+}
+
 pub(crate) fn build_object_player_packet(
     name: &str, object_id: u32, x: i32, y: i32, direction: u8, level: u16,
     name_colour: i32,
@@ -7087,6 +7114,15 @@ mod tests {
         let drops = load_fishing_drops(&dir, &item_name_index);
         assert!(drops.is_empty());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_object_name_body_wire() {
+        // #1410：C# S.ObjectName = [ObjectID u32][Name dotnet]
+        let body = object_name_body(1001, "TamedWolf");
+        assert_eq!(&body[0..4], &1001u32.to_le_bytes());
+        assert_eq!(body[4], 9); // dotnet string length
+        assert_eq!(&body[5..], b"TamedWolf");
     }
 }
 
