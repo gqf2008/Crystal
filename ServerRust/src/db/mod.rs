@@ -223,12 +223,14 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
             level INTEGER NOT NULL DEFAULT 1,
             max_experience INTEGER NOT NULL DEFAULT 0,
             spare_points INTEGER NOT NULL DEFAULT 0,
-            member_cap INTEGER NOT NULL DEFAULT 50
+            member_cap INTEGER NOT NULL DEFAULT 50,
+            rank_defs_json TEXT NOT NULL DEFAULT '[]'
         );
         CREATE TABLE IF NOT EXISTS guild_members (
             guild_name TEXT NOT NULL,
             member_name TEXT NOT NULL,
             rank INTEGER NOT NULL DEFAULT 2,
+            rank_index INTEGER NOT NULL DEFAULT 2,
             PRIMARY KEY (guild_name, member_name),
             FOREIGN KEY (guild_name) REFERENCES guilds(name)
         );
@@ -632,6 +634,11 @@ pub async fn init_db_pool(db_url: &str) -> anyhow::Result<DbPool> {
         .execute(&pool).await;
     // #899: 背包格数（C# CharacterInfo.Inventory.Length，扩容后重登不丢，safe to re-run）
     let _ = sqlx::query("ALTER TABLE characters ADD COLUMN backpack_size INTEGER NOT NULL DEFAULT 40")
+        .execute(&pool).await;
+    // #1395: 行会职务定义/职务索引（C# GuildObject.Ranks，safe to re-run）
+    let _ = sqlx::query("ALTER TABLE guilds ADD COLUMN rank_defs_json TEXT NOT NULL DEFAULT '[]'")
+        .execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE guild_members ADD COLUMN rank_index INTEGER NOT NULL DEFAULT 2")
         .execute(&pool).await;
     // #932: 无经验地图（C# MapInfo.NoExperience，safe to re-run）
     let _ = sqlx::query("ALTER TABLE map_infos ADD COLUMN no_experience INTEGER NOT NULL DEFAULT 0")
@@ -1998,7 +2005,8 @@ async fn load_quests(pool: &DbPool, character_name: &str) -> anyhow::Result<Ques
 pub async fn save_guild(pool: &DbPool, guild: &Guild) -> anyhow::Result<()> {
     let notice_json = serde_json::to_string(&guild.notice)?;
     let storage_items_json = serde_json::to_string(&guild.storage_items)?;
-    sqlx::query("INSERT OR REPLACE INTO guilds (name, notice_json, gold, storage_items_json, experience, level, max_experience, spare_points, member_cap) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    let rank_defs_json = serde_json::to_string(&guild.rank_defs)?;
+    sqlx::query("INSERT OR REPLACE INTO guilds (name, notice_json, gold, storage_items_json, experience, level, max_experience, spare_points, member_cap, rank_defs_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
         .bind(&guild.name)
         .bind(&notice_json)
         .bind(guild.gold as i64)
@@ -2008,6 +2016,7 @@ pub async fn save_guild(pool: &DbPool, guild: &Guild) -> anyhow::Result<()> {
         .bind(guild.max_experience)
         .bind(guild.spare_points as i32)
         .bind(guild.member_cap)
+        .bind(&rank_defs_json)
         .execute(pool)
         .await?;
 
@@ -2016,10 +2025,11 @@ pub async fn save_guild(pool: &DbPool, guild: &Guild) -> anyhow::Result<()> {
         .bind(&guild.name).execute(pool).await?;
 
     for m in &guild.members {
-        sqlx::query("INSERT INTO guild_members (guild_name, member_name, rank) VALUES (?, ?, ?)")
+        sqlx::query("INSERT INTO guild_members (guild_name, member_name, rank, rank_index) VALUES (?, ?, ?, ?)")
             .bind(&guild.name)
             .bind(&m.name)
             .bind(m.rank as i32)
+            .bind(m.rank_index as i32)
             .execute(pool).await?;
     }
 
@@ -2029,7 +2039,7 @@ pub async fn save_guild(pool: &DbPool, guild: &Guild) -> anyhow::Result<()> {
 pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>> {
     let mut guilds = HashMap::new();
 
-    let guild_rows = sqlx::query("SELECT name, notice_json, gold, storage_items_json, experience, level, max_experience, spare_points, member_cap FROM guilds")
+    let guild_rows = sqlx::query("SELECT name, notice_json, gold, storage_items_json, experience, level, max_experience, spare_points, member_cap, rank_defs_json FROM guilds")
         .fetch_all(pool)
         .await?;
 
@@ -2044,9 +2054,10 @@ pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>
         let max_experience: i64 = row.get("max_experience");
         let spare_points: i32 = row.get("spare_points");
         let member_cap: i32 = row.get("member_cap");
+        let rank_defs: Vec<crate::actors::guild::GuildRankDef> = serde_json::from_str(&row.get::<String, _>("rank_defs_json")).unwrap_or_else(|_| crate::actors::guild::default_rank_defs());
 
         let member_rows = sqlx::query(
-            "SELECT member_name, rank FROM guild_members WHERE guild_name = ?"
+            "SELECT member_name, rank, rank_index FROM guild_members WHERE guild_name = ?"
         )
         .bind(&name)
         .fetch_all(pool)
@@ -2056,17 +2067,14 @@ pub async fn load_guilds(pool: &DbPool) -> anyhow::Result<HashMap<String, Guild>
             name: r.get("member_name"),
             session_id: None, // Loaded as offline
             rank: GuildRank::from_u8(r.get::<i32, _>("rank") as u8),
+            rank_index: r.get::<i32, _>("rank_index").clamp(0, 255) as u8,
         }).collect();
 
         guilds.insert(name.clone(), Guild {
             name,
             notice,
             members,
-            rank_names: [
-                "会长".to_string(),
-                "副会长".to_string(),
-                "成员".to_string(),
-            ],
+            rank_defs,
             gold: gold as u64,
             storage_items,
             buffs: Vec::new(),

@@ -100,14 +100,14 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
                 let mut cur = std::io::Cursor::new(body);
                 let name = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
                 let leader = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
-                // #1362：职务名（3 个，C# 自定义职务名简化）
-                let mut rank_names = [
-                    "会长".to_string(),
-                    "副会长".to_string(),
-                    "成员".to_string(),
-                ];
-                for slot in rank_names.iter_mut() {
-                    *slot = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
+                // #1395：职务定义（count u8 + per [index u8][name dotnet][options u8]）
+                let rank_count = cur.read_u8().unwrap_or(0) as usize;
+                let mut rank_defs: Vec<(String, u8)> = Vec::new();
+                for _ in 0..rank_count.min(255) {
+                    let _idx = cur.read_u8().unwrap_or(0);
+                    let name = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
+                    let options = cur.read_u8().unwrap_or(0);
+                    rank_defs.push((name, options));
                 }
                 let notice_count = cur.read_u8().unwrap_or(0) as usize;
                 let mut notice = Vec::new();
@@ -122,8 +122,9 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
                 for _ in 0..member_count {
                     let mname = mir2_shared::binary::read_dotnet_string(&mut cur).unwrap_or_default();
                     let rank = cur.read_u8().unwrap_or(0);
+                    let rank_index = cur.read_u8().unwrap_or(0);
                     let online = cur.read_u8().unwrap_or(0) != 0;
-                    members.push(UiGuildMember { name: mname, rank, online });
+                    members.push(UiGuildMember { name: mname, rank, rank_index, online });
                 }
                 let mut gold_buf = [0u8; 4];
                 let gold = if std::io::Read::read_exact(&mut cur, &mut gold_buf).is_ok() {
@@ -135,7 +136,7 @@ pub(crate) fn handle_guild(    net: &mut NetConnection,
                 server_events.write(ServerEvent::GuildData {
                     name,
                     leader,
-                    rank_names,
+                    rank_defs,
                     notice,
                     members,
                     gold,
