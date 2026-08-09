@@ -2731,6 +2731,24 @@ impl Message<InventoryEquipItem> for PlayerActor {
     }
 }
 
+/// #1546：从仓库格装备（C# EquipItem Grid=Storage；旧装备放回仓库原格）
+pub struct StorageEquipItem {
+    pub storage_idx: usize,
+    pub slot: crate::actors::inventory::EquipmentSlot,
+}
+
+impl Message<StorageEquipItem> for PlayerActor {
+    type Reply = Option<(Option<mir2_shared::data::item::UserItem>, u64)>;
+
+    async fn handle(&mut self, msg: StorageEquipItem, _ctx: &mut Context<Self, Self::Reply>) -> Self::Reply {
+        let result = self.state.inventory.equip_from_storage(msg.storage_idx, msg.slot);
+        if result.is_some() {
+            self.send_inventory_changed();
+            self.send_equipment_changed();
+        }
+        result
+    }
+}
 /// 获取装备信息
 pub struct GetEquipmentInfo {
     pub slot: crate::actors::inventory::EquipmentSlot,

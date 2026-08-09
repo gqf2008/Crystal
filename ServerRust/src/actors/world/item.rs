@@ -1448,6 +1448,63 @@ impl Message<EquipItemRequest> for WorldActor {
         };
 
         // 按 unique_id 在背包中定位格子（客户端发来的 grid 是 MirGridType）
+
+        // #1546：仓库格双击装备（C# EquipItem Grid=Storage：从 Account.Storage 定位 → 装备，旧装备回仓库原格）
+        if msg.grid == mir2_shared::enums::MirGridType::Storage as u8 {
+            let state = match record.actor_ref.ask(GetPlayerState).await {
+                Ok(Some(s)) => s,
+                _ => return,
+            };
+            let Some(storage_idx) = state.inventory.storage.iter().position(|s| {
+                s.as_ref().map_or(false, |slot| slot.item.unique_id == msg.unique_id)
+            }) else {
+                send_system_message(&self.gate_ref, msg.session_id, "找不到该物品");
+                return;
+            };
+            // C# CanEquipItem 校验（槽位类型/性别/职业/RequiredType）
+            let equippable = self
+                .item_infos
+                .get(&state.inventory.storage[storage_idx].as_ref().unwrap().item.item_index)
+                .map(|info| can_equip_item(info, slot, &state))
+                .unwrap_or(false);
+            if !equippable {
+                send_system_message(&self.gate_ref, msg.session_id, "该物品无法装备到此位置");
+                send_equip_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, msg.slot, false);
+                return;
+            }
+            let result = record
+                .actor_ref
+                .ask(crate::actors::player::StorageEquipItem {
+                    storage_idx,
+                    slot,
+                })
+                .await
+                .unwrap_or(None);
+            match result {
+                Some(_) => {
+                    send_equip_item_response(&self.gate_ref, msg.session_id, msg.grid, msg.unique_id, msg.slot, true);
+                    // 重新计算装备加成 + 广播视觉变化 + 刷新仓库/背包
+                    if let Some(state) = self.recalculate_and_set_stat_bonuses(msg.session_id).await {
+                        self.broadcast_equipment_visuals(msg.session_id, &state).await;
+                    }
+                    if let Ok(Some(new_state)) = record.actor_ref.ask(GetPlayerState).await {
+                        // 客户端 ItemEquipped 从背包定位不到仓库物品，需 UserInformation 全量刷新装备槽
+                        let packet = super::build_user_information_packet(&new_state, &self.item_infos);
+                        let _ = self.gate_ref.tell(SendToClient {
+                            session_id: msg.session_id,
+                            data: packet,
+                        }).await;
+                        self.send_user_storage(msg.session_id, &new_state.inventory.storage);
+                    }
+                    tracing::info!("🏦 仓库装备 uid={} -> 槽 {}", msg.unique_id, msg.slot);
+                }
+                None => {
+                    send_system_message(&self.gate_ref, msg.session_id, "装备失败");
+                }
+            }
+            return;
+        }
+
         let state = match record.actor_ref.ask(GetPlayerState).await {
             Ok(Some(s)) => s,
             _ => return,

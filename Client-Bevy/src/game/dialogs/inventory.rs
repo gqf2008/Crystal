@@ -949,7 +949,7 @@ pub(crate) fn try_use_belt_item(
 }
 
 /// #1544：物品使用音效（C# MirItemCell.PlayItemSound → SoundList）
-fn item_use_sound_id(item: &InvItem) -> Option<u32> {
+pub(crate) fn item_use_sound_id(item: &InvItem) -> Option<u32> {
     use mir2_shared::enums::ItemType;
     let t = ItemType::try_from(item.item_type).ok()?;
     Some(match t {
@@ -1031,40 +1031,68 @@ fn slot_item_ready(hud: &HudState, grid_to: MirGridType) -> bool {
 }
 
 /// #1544：使用/装备结果（Sent=已发包；Confirm=已弹确认框；Blocked=守卫拦截/无动作）
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum UseOutcome {
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum UseOutcome {
     Sent,
     Confirm,
     Blocked,
 }
 
+
+/// #1546：UseItem 上下文（C# MirItemCell.UseItem 对 User/Hero/Storage 的差异）
+#[derive(Clone, Copy)]
+pub(crate) struct UseItemCtx<'a> {
+    /// 来源格（Inventory / HeroInventory / Storage）
+    pub grid: MirGridType,
+    /// 装备槽（User 或 Hero）
+    pub equipment: &'a [Option<InvItem>],
+    /// 角色/英雄性别
+    pub gender: u8,
+    /// 角色/英雄职业
+    pub class: u8,
+    /// 角色/英雄等级
+    pub level: u16,
+    /// 钓鱼限制（C# !HeroGridType && User.Fishing → 英雄格 false）
+    pub check_fishing: bool,
+    /// 允许消耗品（C# 消耗品要求 Grid==Inventory/HeroInventory → 仓库 false）
+    pub allow_consumable: bool,
+}
+
+impl<'a> UseItemCtx<'a> {
+    /// 主背包（hud）
+    pub fn player(hud: &'a HudState) -> Self {
+        Self {
+            grid: MirGridType::Inventory,
+            equipment: &hud.equipment,
+            gender: hud.gender,
+            class: hud.class,
+            level: hud.level,
+            check_fishing: true,
+            allow_consumable: true,
+        }
+    }
+}
+
 /// 使用/装备物品（#1544 对齐 C# MirItemCell.UseItem 守卫）：
-///   1. UseItemTime 节流（300ms）
-///   2. 钓鱼限制（非英雄格 User.Fishing）
-///   3. 骑乘限制（RidingMount 仅 Scroll/Potion/Torch）
-///   4. SoulBoundId 绑定检查（-1 未绑定；1=Rust 哨兵=已绑定本人）
-///   5. CanUseItem（性别/职业/等级）→ 聊天提示
-///   6. 槽物品（坐骑/钓具）→ EquipSlotItem
-///   7. Potion Shape 4 → 确认框（mode=3）
-///   8. 装备/使用 → EquipItem / UseItem
-/// 返回 UseOutcome：Sent=已发包 / Confirm=已弹确认框 / Blocked=拦截或无动作。
+
+/// #1546：守卫链纯逻辑（不发包，便于单测）
+/// 返回 Some(true)=可继续（已通过守卫）；Some(false)=槽物品无坐骑/鱼竿；None=被拦截
 #[allow(clippy::too_many_arguments)]
-fn use_or_equip(
+fn use_item_guard(
     item: &InvItem,
-    net: &NetConnection,
     hud: &HudState,
+    ctx: UseItemCtx,
     now: f64,
     feedback: &mut ItemUseFeedback,
-    confirm: &mut InvDropConfirm,
-) -> UseOutcome {
+) -> Option<bool> {
     // 1. 节流
     if now < feedback.last_use {
-        return UseOutcome::Blocked;
+        return None;
     }
-    // 2. 钓鱼
-    if hud.fishing {
+    // 2. 钓鱼（英雄格跳过：C# !HeroGridType && User.Fishing）
+    if ctx.check_fishing && hud.fishing {
         feedback.messages.push("钓鱼中无法使用物品".to_string());
-        return UseOutcome::Blocked;
+        return None;
     }
     // 3. 骑乘（仅 Scroll/Potion/Torch 可用）
     {
@@ -1077,27 +1105,53 @@ fn use_or_equip(
             )
         {
             feedback.messages.push("骑乘中无法使用该物品".to_string());
-            return UseOutcome::Blocked;
+            return None;
         }
     }
-    // 4. 灵魂绑定（C# SoulBoundId != -1 && User.Id != SoulBoundId；Rust 哨兵 1=本人）
-    {
-        // Rust 哨兵：1 = 已绑定本人；-1/0 = 未绑定；>1 = C# 迁移数据绑定到具体角色
-        if item.soul_bound_id > 1 {
-            feedback.messages.push("物品已绑定其他角色".to_string());
-            return UseOutcome::Blocked;
-        }
+    // 4. 灵魂绑定（Rust 哨兵：1=本人；-1/0=未绑定；>1=C# 迁移数据绑定他人）
+    if item.soul_bound_id > 1 {
+        feedback.messages.push("物品已绑定其他角色".to_string());
+        return None;
     }
     // 5. CanUseItem
-    if let Err(reason) = can_use_item_check(item, hud.gender, hud.class, hud.level) {
+    if let Err(reason) = can_use_item_check(item, ctx.gender, ctx.class, ctx.level) {
         feedback.messages.push(reason.to_string());
-        return UseOutcome::Blocked;
+        return None;
     }
-    // 6. 槽物品（坐骑/钓具）→ EquipSlotItem（C# CanUseItem：需先装备坐骑/鱼竿）
-    if let Some((to_slot, grid_to)) = slot_item_target(item) {
-        // C# CanUseItem：坐骑配件需已装备坐骑（Equipment[10]）；钓具需武器为鱼竿（shape 49/50）
-        if !slot_item_ready(hud, grid_to) {
-            let msg = if grid_to == MirGridType::Mount {
+    // 6. 槽物品前置（坐骑/鱼竿）
+    if let Some((_, grid_to)) = slot_item_target(item) {
+        return Some(slot_item_ready(hud, grid_to));
+    }
+    Some(true)
+}
+///   1. UseItemTime 节流（300ms）
+///   2. 钓鱼限制（C# !HeroGridType && User.Fishing）
+///   3. 骑乘限制（RidingMount 仅 Scroll/Potion/Torch）
+///   4. SoulBoundId 绑定检查（-1 未绑定；1=Rust 哨兵=已绑定本人）
+///   5. CanUseItem（性别/职业/等级）→ 聊天提示
+///   6. 槽物品（坐骑/钓具）→ EquipSlotItem
+///   7. Potion Shape 4 → 确认框（mode=3）
+///   8. 装备/使用 → EquipItem / UseItem（消耗品按 ctx.allow_consumable）
+/// 返回 UseOutcome：Sent=已发包 / Confirm=已弹确认框 / Blocked=拦截或无动作。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn use_item_core(
+    item: &InvItem,
+    net: &NetConnection,
+    hud: &HudState,
+    ctx: UseItemCtx,
+    now: f64,
+    feedback: &mut ItemUseFeedback,
+    confirm: &mut InvDropConfirm,
+) -> UseOutcome {
+    // 守卫链（节流/钓鱼/骑乘/SoulBound/CanUseItem/槽物品前置）
+    match use_item_guard(item, hud, ctx, now, feedback) {
+        None => return UseOutcome::Blocked,
+        Some(false) => {
+            // 按物品目标（坐骑/钓具）提示，而非来源格
+            let target_mount = slot_item_target(item)
+                .map(|(_, g)| g == MirGridType::Mount)
+                .unwrap_or(false);
+            let msg = if target_mount {
                 "请先装备坐骑"
             } else {
                 "请先装备鱼竿"
@@ -1105,8 +1159,12 @@ fn use_or_equip(
             feedback.messages.push(msg.to_string());
             return UseOutcome::Blocked;
         }
+        Some(true) => {}
+    }
+    // 6. 槽物品（坐骑/钓具）→ EquipSlotItem（前置已由 use_item_guard 校验）
+    if let Some((to_slot, grid_to)) = slot_item_target(item) {
         net.send_packet(&mir2_shared::packets::client::misc::EquipSlotItem {
-            grid: MirGridType::Inventory,
+            grid: ctx.grid,
             unique_id: item.unique_id,
             to_slot,
             grid_to,
@@ -1122,7 +1180,10 @@ fn use_or_equip(
         return UseOutcome::Sent;
     }
     // 7. Potion Shape 4 → 确认框（C# AreYouWantUsePotion → MirMessageBox YesNo）
-    if item.item_type == mir2_shared::enums::ItemType::Potion as u8 && item.shape == 4 {
+    if ctx.allow_consumable
+        && item.item_type == mir2_shared::enums::ItemType::Potion as u8
+        && item.shape == 4
+    {
         confirm.text = "确定使用此药水吗？".to_string();
         confirm.unique_id = item.unique_id;
         confirm.count = 1;
@@ -1133,24 +1194,26 @@ fn use_or_equip(
     }
     // 8. 装备/使用
     if item.is_equipment() {
-        if let Some(to) = item.equip_slot_occupied(|s| hud.equipment.get(s).and_then(|x| x.as_ref()).is_some()) {
+        if let Some(to) = item.equip_slot_occupied(|s| ctx.equipment.get(s).and_then(|x| x.as_ref()).is_some()) {
             net.send_packet(&mir2_shared::packets::client::item::EquipItem {
-                grid: MirGridType::Inventory,
+                grid: ctx.grid,
                 unique_id: item.unique_id,
                 to,
             });
             tracing::info!(
-                "⚔️ 使用/装备 {} (uid={}) -> 槽 {}",
+                "⚔️ 使用/装备 {} (uid={}) -> 槽 {} (grid={:?})",
                 item.name,
                 item.unique_id,
-                to
+                to,
+                ctx.grid
             );
             feedback.last_use = now + 0.3;
             return UseOutcome::Sent;
         }
         return UseOutcome::Blocked;
     }
-    if item.is_usable() {
+    // 消耗品：C# 要求 Grid==Inventory/HeroInventory（仓库不可用）
+    if ctx.allow_consumable && item.is_usable() {
         net.send_packet(&mir2_shared::packets::client::item::UseItem {
             unique_id: item.unique_id,
         });
@@ -1158,8 +1221,21 @@ fn use_or_equip(
         feedback.last_use = now + 0.3;
         return UseOutcome::Sent;
     }
-    tracing::debug!("背包物品 {} 不可用/不可装备", item.name);
+    tracing::debug!("背包物品 {} 不可用/不可装备 (grid={:?})", item.name, ctx.grid);
     UseOutcome::Blocked
+}
+
+/// 主背包快捷使用（#1544 包装，调用点保持兼容）
+#[allow(clippy::too_many_arguments)]
+fn use_or_equip(
+    item: &InvItem,
+    net: &NetConnection,
+    hud: &HudState,
+    now: f64,
+    feedback: &mut ItemUseFeedback,
+    confirm: &mut InvDropConfirm,
+) -> UseOutcome {
+    use_item_core(item, net, hud, UseItemCtx::player(hud), now, feedback, confirm)
 }
 /// #1346：扩展背包购买/删除模式按钮（C# InventoryDialog AddButton / DelItemButton）
 #[allow(clippy::too_many_arguments)]
@@ -1824,7 +1900,127 @@ mod tests {
         inv.refresh_weight();
         assert_eq!(inv.weight, 5);
     }
+
+
+    #[test]
+    fn guard_hero_skips_fishing() {
+        // #1546：英雄格 check_fishing=false → 钓鱼中也可使用（C# !HeroGridType && User.Fishing）
+        let mut hud = HudState::default();
+        hud.fishing = true;
+        let mut fb = ItemUseFeedback::default();
+        let potion = item_with_type(ItemType::Potion);
+        let ctx_hero = UseItemCtx {
+            grid: MirGridType::HeroInventory,
+            equipment: &hud.equipment,
+            gender: 0,
+            class: 0,
+            level: 1,
+            check_fishing: false,
+            allow_consumable: true,
+        };
+        assert!(use_item_guard(&potion, &hud, ctx_hero, 0.0, &mut fb).is_some());
+        // 主背包 check_fishing=true → 钓鱼拦截
+        let ctx_player = UseItemCtx::player(&hud);
+        assert!(use_item_guard(&potion, &hud, ctx_player, 0.0, &mut fb).is_none());
+    }
+
+    #[test]
+    fn guard_storage_blocks_consumable_but_allows_equip() {
+        // #1546：仓库格 allow_consumable=false → 消耗品拦截；装备放行
+        let mut hud = HudState::default();
+        let mut fb = ItemUseFeedback::default();
+        let ctx_storage = UseItemCtx {
+            grid: MirGridType::Storage,
+            equipment: &hud.equipment,
+            gender: 0,
+            class: 0,
+            level: 1,
+            check_fishing: true,
+            allow_consumable: false,
+        };
+        // 守卫本身通过（消耗品拦截在 use_item_core 第 8 步）
+        let potion = item_with_type(ItemType::Potion);
+        assert!(use_item_guard(&potion, &hud, ctx_storage, 0.0, &mut fb).is_some());
+        // 装备放行
+        let sword = item_with_type(ItemType::Weapon);
+        assert!(use_item_guard(&sword, &hud, ctx_storage, 0.0, &mut fb).is_some());
+    }
+
+    #[test]
+    fn use_item_core_storage_blocks_consumable() {
+        // 仓库双击药水 → Blocked（不发包）；仓库双击武器且槽空 → Sent
+        let net = NetConnection::default();
+        let mut hud = HudState::default();
+        // 仓库双击药水 → Blocked（不发包）；仓库双击武器且槽空 → Sent
+        let mut hud = HudState::default();
+        let mut fb = ItemUseFeedback::default();
+        let mut confirm = InvDropConfirm::default();
+        let ctx_storage = UseItemCtx {
+            grid: MirGridType::Storage,
+            equipment: &hud.equipment,
+            gender: 0,
+            class: 0,
+            level: 1,
+            check_fishing: true,
+            allow_consumable: false,
+        };
+        let potion = item_with_type(ItemType::Potion);
+        assert_eq!(
+            use_item_core(&potion, &net, &hud, ctx_storage, 0.0, &mut fb, &mut confirm),
+            UseOutcome::Blocked
+        );
+        let sword = item_with_type(ItemType::Weapon);
+        assert_eq!(
+            use_item_core(&sword, &net, &hud, ctx_storage, 0.0, &mut fb, &mut confirm),
+            UseOutcome::Sent
+        );
+    }
+
+    #[test]
+    fn use_item_core_hero_equips_with_hero_equipment() {
+        let net = NetConnection::default();
+        // #1546：英雄格装备用英雄装备槽判断（ctx.equipment）
+        let hud = HudState::default();
+        let mut fb = ItemUseFeedback::default();
+        let mut confirm = InvDropConfirm::default();
+        // Bracelet 智能槽：右(5)空 → Sent；右占回退左(4)；双占 → Blocked
+        let mut bracelet = item_with_type(ItemType::Bracelet);
+        bracelet.unique_id = 20;
+        let mut hero_eq_empty = vec![None; 14];
+        let ctx_empty = UseItemCtx {
+            grid: MirGridType::HeroInventory,
+            equipment: &hero_eq_empty,
+            gender: 0,
+            class: 0,
+            level: 1,
+            check_fishing: false,
+            allow_consumable: true,
+        };
+        assert_eq!(
+            use_item_core(&bracelet, &net, &hud, ctx_empty, 0.0, &mut fb, &mut confirm),
+            UseOutcome::Sent
+        );
+        // 左右手镯都占用 → 不装备（C# BraceletR/L 都占用 → 不装备）
+        let mut hero_eq_full = vec![None; 14];
+        let mut br = item_with_type(ItemType::Bracelet);
+        br.unique_id = 4;
+        hero_eq_full[4] = Some(br);
+        let mut br2 = item_with_type(ItemType::Bracelet);
+        br2.unique_id = 5;
+        hero_eq_full[5] = Some(br2);
+        let ctx_full = UseItemCtx {
+            grid: MirGridType::HeroInventory,
+            equipment: &hero_eq_full,
+            gender: 0,
+            class: 0,
+            level: 1,
+            check_fishing: false,
+            allow_consumable: true,
+        };
+        assert_eq!(
+            use_item_core(&bracelet, &net, &hud, ctx_full, 0.0, &mut fb, &mut confirm),
+            UseOutcome::Blocked
+        );
+    }
 }
-
-
 

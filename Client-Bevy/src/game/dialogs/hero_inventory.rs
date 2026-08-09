@@ -14,7 +14,10 @@
 use bevy::prelude::*;
 
 use crate::game::dialogs::hero::{next_autopot, HeroState, STAT_HP, STAT_MP};
-use crate::game::dialogs::inventory::{inv_slot_at, InvClickState};
+use crate::game::dialogs::inventory::{
+    inv_slot_at, item_use_sound_id, use_item_core, InvClickState, InvDropConfirm,
+    ItemUseFeedback, UseItemCtx, UseOutcome,
+};
 use crate::game::dialogs::{DialogKind, DialogManager, DialogRoot};
 use crate::game::hud::HudState;
 use crate::map_renderer::GameLibraries;
@@ -588,6 +591,8 @@ fn hero_inv_click_system(
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     time: Res<Time>,
+    mut feedback: ResMut<ItemUseFeedback>,
+    mut confirm: ResMut<InvDropConfirm>,
     mut last_hero_click: Local<Option<(usize, f64)>>,
 ) {
     if !mgr.is_open(DialogKind::HeroInventory) {
@@ -614,25 +619,32 @@ fn hero_inv_click_system(
     let Some(i) = hero_slot_at(cursor.x, cursor.y) else {
         return;
     };
-    // #206：双击英雄背包格 → C.EquipItem（C# MirItemCell OnMouseDoubleClick）
+    // #206：双击英雄背包格 → 使用/装备（C# MirItemCell OnMouseDoubleClick → UseItem；#1546 守卫链）
     let now = time.elapsed_secs_f64();
     if let Some((last_i, last_t)) = *last_hero_click {
         if last_i == i && now - last_t < 0.4 {
             *last_hero_click = None;
             if let Some(item) = hero.inventory.get(i).and_then(|s| s.as_ref()) {
-                if let Some(to) = item.equip_slot_occupied(|s| hero.equipment.get(s).and_then(|x| x.as_ref()).is_some()) {
-                    net.send_packet(&mir2_shared::packets::client::item::EquipItem {
-                        grid: mir2_shared::enums::MirGridType::HeroInventory,
-                        unique_id: item.unique_id,
-                        to,
-                    });
-                    tracing::info!("🦸 英雄装备 {} (uid={}) -> slot {}", item.name, item.unique_id, to);
-                } else if item.is_usable() {
-                    // #218：技能书/药品等 → C.UseItem（服务端识别英雄背包物品）
-                    net.send_packet(&mir2_shared::packets::client::item::UseItem {
-                        unique_id: item.unique_id,
-                    });
-                    tracing::info!("🦸 英雄使用 {} (uid={})", item.name, item.unique_id);
+                // C# UseItem HeroGridType：actor=Hero，CanUseItem 用英雄性别/职业/等级；
+                // 钓鱼限制英雄格跳过（!HeroGridType && User.Fishing）；槽物品/坐骑检查用 User 装备
+                let (gender, class, level) = hero
+                    .current
+                    .as_ref()
+                    .map(|c| (c.gender as u8, c.class as u8, c.level))
+                    .unwrap_or((0, 0, 1));
+                let ctx = UseItemCtx {
+                    grid: mir2_shared::enums::MirGridType::HeroInventory,
+                    equipment: &hero.equipment,
+                    gender,
+                    class,
+                    level,
+                    check_fishing: false,
+                    allow_consumable: true,
+                };
+                if use_item_core(item, &net, &hud, ctx, now, &mut feedback, &mut confirm) == UseOutcome::Sent {
+                    if let Some(sid) = item_use_sound_id(item) {
+                        feedback.sounds.push(sid);
+                    }
                 }
             }
             return;

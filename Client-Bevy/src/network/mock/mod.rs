@@ -93,6 +93,21 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
             let mut mock_storage_password: Option<String> = Some("123456".to_string());
             // #512：仓库物品（80 格，MOCK 本地维护，StoreItem/TakeBackItem 闭环）
             let mut mock_storage: Vec<Option<mir2_shared::data::item::UserItem>> = vec![None; 80];
+            // #1546：仓库格4预置木剑（仓库双击装备 E2E；Storage 格装备链路）
+            mock_storage[4] = Some(mir2_shared::data::item::UserItem {
+                unique_id: 9504,
+                item_index: 5,
+                count: 1,
+                info: Some(mir2_shared::data::item::ItemInfo {
+                    index: 5,
+                    name: "木剑".to_string(),
+                    price: 10,
+                    image: 5,
+                    item_type: mir2_shared::enums::ItemType::Weapon,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
             // #557：本地坐骑状态（@ride 切换）
             let mut mock_riding = false;
             // #573：钓鱼收获计时（FishingCast 后 5s 回发系统聊天）
@@ -384,6 +399,22 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                                         price: 10,
                                                                         image: 1,
                                                                         tool_tip: Some("仓库演示物品".to_string()),
+                                                                        ..Default::default()
+                                                                    }),
+                                                                    ..Default::default()
+                                                                })
+                                                            } else if i == 4 {
+                                                                // #1546：仓库演示装备（木剑），供仓库双击装备 E2E
+                                                                Some(mir2_shared::data::item::UserItem {
+                                                                    item_index: 5,
+                                                                    count: 1,
+                                                                    info: Some(mir2_shared::data::item::ItemInfo {
+                                                                        index: 5,
+                                                                        name: "木剑".to_string(),
+                                                                        price: 10,
+                                                                        image: 5,
+                                                                        item_type: mir2_shared::enums::ItemType::Weapon,
+                                                                        tool_tip: Some("仓库装备演示".to_string()),
                                                                         ..Default::default()
                                                                     }),
                                                                     ..Default::default()
@@ -2114,6 +2145,46 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                             continue;
                                         }
                                         // 玩家装备：背包 → 装备槽（服务端记录，供伤害/防御计算）
+                                        // #1546：仓库格双击装备（C# EquipItem Grid=Storage：从仓库定位 → 装备，旧装备回仓库原格）
+                                        if p.grid == mir2_shared::enums::MirGridType::Storage {
+                                            let to = p.to as usize;
+                                            let from = mock_storage
+                                                .iter()
+                                                .position(|s| s.as_ref().map(|i| i.unique_id) == Some(p.unique_id));
+                                            let ok = if let Some(from) = from {
+                                                if to < player_equipment.len() {
+                                                    let item = mock_storage[from].take();
+                                                    let old = player_equipment[to].take();
+                                                    // C#：array[index] = toArray[to]（旧装备回仓库原格）
+                                                    if let Some(old) = old {
+                                                        mock_storage[from] = Some(old);
+                                                    }
+                                                    player_equipment[to] = item;
+                                                    true
+                                                } else {
+                                                    false
+                                                }
+                                            } else {
+                                                false
+                                            };
+                                            send(
+                                                &to_client,
+                                                &server::item_operations::EquipItem {
+                                                    grid: p.grid,
+                                                    unique_id: p.unique_id,
+                                                    to: p.to,
+                                                    success: ok,
+                                                },
+                                            );
+                                            if ok {
+                                                send_user_information(&to_client, active_char_index, &player_inventory, &player_equipment, player_gold, player_stats);
+                                                send(&to_client, &server::player::UserStorage { storage: mock_storage.clone() });
+                                                tracing::info!("🏦 [MOCK] 仓库装备成功 uid={} -> 槽 {}", p.unique_id, p.to);
+                                            } else {
+                                                tracing::warn!("⚠️ [MOCK] 仓库装备失败 uid={} -> 槽 {}", p.unique_id, p.to);
+                                            }
+                                            continue;
+                                        }
                                         let to = p.to as usize;
                                         let from = player_inventory
                                             .iter()
