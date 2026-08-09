@@ -339,6 +339,8 @@ impl Message<StartGameRequest> for WorldActor {
 
         info!("Player {} entered world (object_id={}, session={})",
               player_name, object_id, msg.session_id);
+        // #1540：登录即同步 ClearRing 隐身（头盔宝石）
+        self.sync_clear_ring_visibility(msg.session_id).await;
 
         // C# PlayerObject.SetBind：确保绑定点有效（无绑定点/无效时随机出生安全区）
         self.ensure_bind(msg.session_id).await;
