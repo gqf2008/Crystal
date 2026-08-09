@@ -1437,125 +1437,49 @@ impl Message<RangeAttackRequest> for WorldActor {
             data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::RangeAttack as i16, &proj_body),
         }).await;
 
-        // 检测范围内的怪物
-        let hit_monster_ids: Vec<u32> = self.monsters.iter()
-            .filter(|(_, m)| {
-                let dist = (m.x - target_x).abs() + (m.y - target_y).abs();
-                dist <= 1
-            })
-            .map(|(id, _)| *id)
-            .collect();
+        // #1560：C# DelayedAction——命中/未命中都预约到箭矢飞行后结算（HumanObject.cs:2827-2836）
+        // 目标怪物解析（客户端 C.RangeAttack.TargetID = 怪物 object_id）
+        let attacker_stats = state.to_combat_stats();
+        let targeted_monster_level = if msg.target_id != 0 {
+            self.monsters.get(&msg.target_id).map(|m| m.level.max(0) as u16)
+        } else {
+            None
+        };
 
-        let mut hit_monster = false;
-        // #1556：命中反馈（C# DelayedAction Damage 结算后的 ObjectStruck/DamageIndicator/ObjectHealth）
-        let mut hit_feedback: Vec<(u32, i32, i32, i32)> = Vec::new();
-        for monster_id in hit_monster_ids {
-            if let Some(monster) = self.monsters.get_mut(&monster_id) {
-                let attacker_stats = state.to_combat_stats();
-                let defender_stats = monster.to_combat_stats();
-                // #1519：C# 距离命中率——Random(100) < chanceToHit 才命中（否则整箭落空）
-                if fastrand::i32(0..100) >= ranged_chance {
-                    continue;
-                }
-                // C# GetRangeAttackPower：min 随距离缩小（MaxAttackRange=9）
+        if let Some(monster_level) = targeted_monster_level {
+            // 施法时掷命中（C# Envir.Random.Next(100) < chanceToHit）
+            let hit = fastrand::i32(0..100) < ranged_chance;
+            // 施法时算伤害（C# GetRangeAttackPower + ApplyArcherState；防御在飞行后按目标结算）
+            let raw_damage = if hit {
                 let eff_min = range_attack_min_reduction(attacker_stats.min_atk, attack_dist);
-                let mut raw_damage = combat_attack::get_attack_power(
+                let mut raw = combat_attack::get_attack_power(
                     eff_min, attacker_stats.max_atk, attacker_stats.luck,
                 );
-                // C# ApplyArcherState：MentalState 惩罚（trickshot/group attack）
-                raw_damage = raw_damage * archer_penalty / 100;
-                // #1455：LevelOffset = Level > attacker.Level ? 0 : min(10, attacker.Level - Level)
-                let level_offset = crate::combat::attack::level_offset(state.level, monster.level.max(0) as u16);
-                let attack_result = combat_attack::resolve_attack(
-                    &attacker_stats, &defender_stats, raw_damage,
-                    // C#：远程攻击防御 = ACAgility（可被敏捷闪避）
-                    mir2_shared::enums::DefenceType::AcAgility, level_offset,
-                );
-                let damage = attack_result.damage;
-                hit_feedback.push((monster_id, monster.x, monster.y, damage));
-                monster.take_damage(damage);
-                monster.last_hitter_session = Some(msg.session_id);
-                self.pending_gather.push(msg.session_id);
-                monster.provoked = true;
-                // C# MonsterObject.Attacked：仅当无目标时锁定攻击者
-                if monster.target_session.is_none() {
-                    monster.target_session = Some(msg.session_id);
-                }
-                for p in &attack_result.applied_poisons {
-                    crate::combat::poison::apply_poison(&mut monster.poison_list, *p);
-                }
-                debug!("RangeAttack: {} -> monster {} for {} damage (crit={})", state.name, monster_id, damage, attack_result.is_critical);
-                hit_monster = true;
-                if monster.hp <= 0 {
-                    // 死亡由 Tick 循环处理（广播 ObjectDied + 重生）
-                }
-            }
-        }
-
-        // 武器耐久损耗（C# DamageWeapon：远程命中同样扣耐久 Random(4)+1）
-        if hit_monster {
-            if let Some(record) = self.players.get(&msg.session_id) {
-                let broke = record.actor_ref.ask(crate::actors::player::DamageEquipment {
-                    slot: EquipmentSlot::Weapon,
-                    amount: (1 + fastrand::i32(0..4)) as u16,
-                }).await.unwrap_or(false);
-                if broke {
-                    debug!("Player {} weapon broke (ranged)!", object_id);
-                    if let Some(state) = self.recalculate_and_set_stat_bonuses(msg.session_id).await {
-                        self.broadcast_equipment_visuals(msg.session_id, &state).await;
-                    }
-                }
-            }
-        }
-
-        // #1556：命中怪物 → 广播受击动画 + 伤害飘字 + 血条给所有玩家（对齐近战路径 C# 结算表现）
-        if !hit_feedback.is_empty() {
-            for (monster_id, mx, my, dmg) in &hit_feedback {
-                let mut struck_body = Vec::new();
-                struck_body.extend_from_slice(&monster_id.to_le_bytes());
-                struck_body.extend_from_slice(&object_id.to_le_bytes());
-                struck_body.extend_from_slice(&(*mx as u32).to_le_bytes());
-                struck_body.extend_from_slice(&(*my as u32).to_le_bytes());
-                struck_body.push(msg.direction);
-                let struck_packet = build_packet_bytes(
-                    mir2_shared::enums::ServerPacketIds::ObjectStruck as i16, &struck_body);
-
-                let mut dmg_body = Vec::new();
-                dmg_body.extend_from_slice(&dmg.to_le_bytes());
-                dmg_body.push(0u8); // damage_type = normal
-                dmg_body.extend_from_slice(&monster_id.to_le_bytes());
-                let dmg_packet = build_packet_bytes(
-                    mir2_shared::enums::ServerPacketIds::DamageIndicator as i16, &dmg_body);
-
-                let percent = self.monsters.get(monster_id)
-                    .map(|m| ((m.hp.max(0) as f32 / m.max_hp.max(1) as f32) * 100.0) as u8)
-                    .unwrap_or(0);
-                let mut health_body = Vec::new();
-                health_body.extend_from_slice(&monster_id.to_le_bytes());
-                health_body.push(percent);
-                health_body.extend_from_slice(&3u16.to_le_bytes()); // expire（秒）
-                let health_packet = build_packet_bytes(
-                    mir2_shared::enums::ServerPacketIds::ObjectHealth as i16, &health_body);
-
-                for session_id in self.players.keys() {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: *session_id,
-                        data: struck_packet.clone(),
-                    }).await;
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: *session_id,
-                        data: dmg_packet.clone(),
-                    }).await;
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: *session_id,
-                        data: health_packet.clone(),
-                    }).await;
-                }
-            }
-        }
-
-        // 未命中怪物时尝试命中玩家（PvP）
-        if !hit_monster {
+                raw = raw * archer_penalty / 100;
+                raw
+            } else {
+                0
+            };
+            let level_offset = crate::combat::attack::level_offset(state.level, monster_level);
+            let fire_at_tick = self.tick_count + range_flight_ticks(attack_dist);
+            self.pending_range_completions.push(PendingRangeCompletion {
+                fire_at_tick,
+                session_id: msg.session_id,
+                attacker_object_id: object_id,
+                direction: msg.direction,
+                monster_id: msg.target_id,
+                target_x,
+                target_y,
+                attacker_stats,
+                raw_damage,
+                level_offset,
+                hit,
+            });
+            debug!(
+                "RangeAttack scheduled: {} -> monster {} hit={} dmg={} fire_at_tick={} (delay {} ticks)",
+                state.name, msg.target_id, hit, raw_damage, fire_at_tick, range_flight_ticks(attack_dist)
+            );
+        } else if !others.is_empty() {
             for other in &others {
                 if let Ok(Some(other_state)) = other.actor_ref.ask(GetPlayerState).await {
                     // #1466：C# IsAttackTarget Dead——死亡玩家不可攻击
@@ -1696,6 +1620,40 @@ pub struct PendingSpellCompletion {
     pub spell_level: u8,
     /// FireBounce 剩余弹跳次数（0 = 非链式法术；C# bounce = magic.Level + 2）
     pub bounce: i32,
+}
+
+/// 弓手远程攻击延迟结算项（#1560，对齐 C# HumanObject.RangeAttack 的
+/// DelayedAction(DelayedType.Damage / DamageIndicator, Envir.Time + delay, ...)）：
+/// 施法时广播 ObjectRangeAttack + S.RangeAttack 弹道，伤害在箭矢飞行 delay 后落地。
+#[derive(Debug, Clone)]
+pub struct PendingRangeCompletion {
+    /// 到期 tick（WorldActor.tick_count，100ms/tick）
+    pub fire_at_tick: u64,
+    /// 攻击者 session
+    pub session_id: u64,
+    /// 攻击者 object_id（反馈包用）
+    pub attacker_object_id: u32,
+    pub direction: u8,
+    /// 目标怪物 object_id
+    pub monster_id: u32,
+    /// 目标快照位置（反馈包用）
+    pub target_x: i32,
+    pub target_y: i32,
+    /// 攻击者战斗属性快照（施法时；C# 施法时算伤害、飞行后按目标防御结算）
+    pub attacker_stats: crate::combat::attack::CombatStats,
+    /// 预计算的原始 DC 伤害（GetRangeAttackPower + ApplyArcherState 后）
+    pub raw_damage: i32,
+    /// LevelOffset（C# Level > attacker.Level ? 0 : min(10, diff)）
+    pub level_offset: u16,
+    /// 是否命中（false = 箭矢落空 → DamageIndicator Miss）
+    pub hit: bool,
+}
+
+/// #1560：箭矢飞行时间（C# HumanObject.cs:2827 delay = MaxDistance*50 + 550 ms；
+/// tick=100ms，向上取整避免提前结算）
+pub fn range_flight_ticks(attack_dist: i32) -> u64 {
+    let delay_ms = attack_dist.max(0) * 50 + 550;
+    (delay_ms as u64).div_ceil(100)
 }
 
 /// 技能释放请求
@@ -5073,8 +5031,8 @@ mod spell_geometry_tests {
 mod tests {
     use super::{
         archer_state_penalty, attack_disabled_by_poison, cast_disabled_by_poison, find_attack_skill,
-        player_attack_speed_ms, range_attack_min_reduction, ranged_chance_to_hit, should_grant_cast_exp,
-        turn_undead_threshold, ATTACK_SKILL_SPELLS,
+        player_attack_speed_ms, range_attack_min_reduction, range_flight_ticks, ranged_chance_to_hit,
+        should_grant_cast_exp, turn_undead_threshold, ATTACK_SKILL_SPELLS,
         DAMAGE_DURA_ARMOR_SLOTS, SPELL_CROSS_HALFMOON, SPELL_FIREBALL, SPELL_HALFMOON,
         SPELL_METEOR_SHOWER, SPELL_SLAYING,
     };
@@ -5106,6 +5064,16 @@ mod tests {
         assert!(ATTACK_SKILL_SPELLS.contains(&SPELL_CROSS_HALFMOON));
         assert!(!ATTACK_SKILL_SPELLS.contains(&super::SPELL_MPEATER));
         assert!(!ATTACK_SKILL_SPELLS.contains(&super::SPELL_HEMORRHAGE));
+    }
+
+    #[test]
+    fn test_range_flight_ticks_matches_csharp_delay() {
+        // #1560：C# HumanObject.cs:2827 delay = MaxDistance*50 + 550 ms；tick=100ms 向上取整
+        assert_eq!(range_flight_ticks(0), 6);  // 550ms → ceil(5.5)=6
+        assert_eq!(range_flight_ticks(1), 6);  // 600ms → 6
+        assert_eq!(range_flight_ticks(3), 7);  // 700ms → 7
+        assert_eq!(range_flight_ticks(9), 10); // 1000ms → 10
+        assert_eq!(range_flight_ticks(-5), 6); // 负距离按 0 处理
     }
 
     #[test]
