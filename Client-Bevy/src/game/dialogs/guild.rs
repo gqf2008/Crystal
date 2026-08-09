@@ -1,7 +1,7 @@
 // ============================================================================
 // 行会对话框（M27）
 // 布局参考：C# GuildDialog.cs / macroquad guild_dialog.rs
-//   - 背景 Prguse[956]，标题 Title[15]，位置 (280,80)
+//   - 背景 Prguse[180]，标题 Title[15]，位置 (280,80)
 //   - 行会名/会长/金币、成员列表（职务+在线）、公告、创建输入框
 // 网络：GuildStatus（1 字节 in_guild / 完整信息，同 opcode 双格式）、GuildNoticeChange、GuildMemberChange
 // ============================================================================
@@ -232,8 +232,8 @@ fn spawn_guild(
     }
     let font = ui_font.0.clone();
 
-    // 背景 Prguse[956]
-    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 956) {
+    // 背景 Prguse[180]（C# GuildDialog：Index=180, Library=Prguse, Location=Center；590x432）
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 180) {
         let e = spawn_ui_sprite(&mut commands, h, 280.0, 80.0, 6.0, 1.0);
         // #89 可滚动成员列表：10 行 × 20px
         let (track, thumb) = spawn_scroll_bar(&mut commands, &mut images, (498.0, 140.0, 4.0, 200.0), 6.3);

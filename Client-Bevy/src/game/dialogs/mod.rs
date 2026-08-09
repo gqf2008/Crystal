@@ -63,6 +63,7 @@ pub mod trust_merchant;
 use bevy::prelude::*;
 
 use crate::scenes::AppState;
+use crate::ui::sprite_ui::{UiButton, UiEntity};
 
 /// 对话框类型
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -163,19 +164,29 @@ pub struct DialogDrag {
 /// - 按 DialogKind 聚合实体，用实体位置估算窗口包围盒，标题栏（顶部 28px）可拖
 /// - 拖动时对所有该对话框实体整体平移（保持相对布局）
 pub fn dialog_drag_system(
-    mut commands: Commands,
     mut drag: ResMut<DialogDrag>,
     mouse: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    mut dialogs: Query<(Entity, &DialogRoot, &mut Transform)>,
+    ui_cameras: Query<(&Camera, &GlobalTransform), With<UiEntity>>,
+    buttons: Query<&UiButton>,
+    mut dialogs: Query<(Entity, &DialogRoot, &Visibility, &mut Transform)>,
 ) {
     let Ok(window) = windows.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
+    // UI 相机是 Fixed 1024x768：窗口被缩放/最大化时 cursor_position 与 UI 世界坐标不一致，
+    // 必须经相机换算（viewport_to_world_2d）得到 UI 世界坐标再参与命中。
+    let Ok((ui_camera, cam_tf)) = ui_cameras.single() else { return };
+    let Ok(world) = ui_camera.viewport_to_world_2d(cam_tf, cursor) else { return };
+    // UI 世界坐标 y 向下（实体 Transform 用 -y），转回屏幕正坐标便于包围盒计算
+    let cursor = Vec2::new(world.x, -world.y);
 
-    // 聚合每个对话框的包围盒
+    // 聚合每个可见对话框的包围盒（隐藏窗口不参与命中，避免拖错/拖到不可见窗口）
     let mut boxes: std::collections::HashMap<DialogKind, (f32, f32, f32, f32)> =
         std::collections::HashMap::new();
-    for (_, root, tf) in dialogs.iter() {
+    for (_, root, vis, tf) in dialogs.iter() {
+        if *vis != Visibility::Visible {
+            continue;
+        }
         let (x, y) = (tf.translation.x, -tf.translation.y);
         let b = boxes.entry(root.0).or_insert((x, y, x, y));
         b.0 = b.0.min(x);
@@ -184,21 +195,27 @@ pub fn dialog_drag_system(
         b.3 = b.3.max(y);
     }
 
-    // 点击标题栏开始拖动
+    // 点击标题栏开始拖动（按钮命中区不触发拖动，避免点关闭/翻页等误拖）
     if mouse.just_pressed(MouseButton::Left) && drag.dragging.is_none() {
-        for (kind, (minx, miny, maxx, maxy)) in &boxes {
-            // 标题栏：窗口顶部 28px（粗略；至少 24px 宽）
-            if cursor.x >= *minx && cursor.x <= *maxx && cursor.y >= *miny && cursor.y <= *miny + 28.0 {
-                let origins = dialogs
-                    .iter()
-                    .filter(|(_, r, _)| r.0 == *kind)
-                    .map(|(e, _, tf)| (e, tf.translation))
-                    .collect::<std::collections::HashMap<_, _>>();
-                drag.dragging = Some(*kind);
-                drag.start_cursor = cursor;
-                drag.origins = origins;
-                tracing::info!("🖱️ 拖动对话框 {:?}", kind);
-                break;
+        let on_button = buttons.iter().any(|b| {
+            let (x, y, w, h) = b.rect;
+            cursor.x >= x && cursor.x <= x + w && cursor.y >= y && cursor.y <= y + h
+        });
+        if !on_button {
+            for (kind, (minx, miny, maxx, maxy)) in &boxes {
+                // 标题栏：窗口顶部 28px
+                if cursor.x >= *minx && cursor.x <= *maxx && cursor.y >= *miny && cursor.y <= *miny + 28.0 {
+                    let origins = dialogs
+                        .iter()
+                        .filter(|(_, r, v, _)| *v == Visibility::Visible && r.0 == *kind)
+                        .map(|(e, _, _, tf)| (e, tf.translation))
+                        .collect::<std::collections::HashMap<_, _>>();
+                    drag.dragging = Some(*kind);
+                    drag.start_cursor = cursor;
+                    drag.origins = origins;
+                    tracing::info!("🖱️ 拖动对话框 {:?}", kind);
+                    break;
+                }
             }
         }
     }
@@ -207,9 +224,11 @@ pub fn dialog_drag_system(
     if let Some(kind) = drag.dragging {
         if mouse.pressed(MouseButton::Left) {
             let delta = cursor - drag.start_cursor;
-            for (e, _, mut tf) in dialogs.iter_mut() {
-                if let Some(orig) = drag.origins.get(&e) {
-                    tf.translation = *orig + Vec3::new(delta.x, -delta.y, 0.0);
+            for (e, _, vis, mut tf) in dialogs.iter_mut() {
+                if *vis == Visibility::Visible {
+                    if let Some(orig) = drag.origins.get(&e) {
+                        tf.translation = *orig + Vec3::new(delta.x, -delta.y, 0.0);
+                    }
                 }
             }
         } else {
