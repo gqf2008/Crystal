@@ -3,3 +3,6 @@
 
 # UI 布局核验截图（临时产物）
 layout_*.png
+
+# 运行时生成的客户端设置（C# Settings.cs 同款）
+/Mir2Config.ini
