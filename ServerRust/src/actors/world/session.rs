@@ -2991,10 +2991,7 @@ impl Message<ChatRequest> for WorldActor {
                                     map_index: Some(my_state.map_index),
                                     is_mounted: None,
                                 }).await;
-                                let mut body = Vec::new();
-                                body.push(os.direction);
-                                body.extend_from_slice(&fx.to_le_bytes());
-                                body.extend_from_slice(&fy.to_le_bytes());
+                                let body = user_location_body(fx, fy, os.direction);
                                 let _ = self.gate_ref.tell(SendToClient {
                                     session_id: *sid,
                                     data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
@@ -3949,8 +3946,19 @@ fn move_steps(run: bool, is_mounted: bool, swift_feet: bool) -> i32 {
     }
 }
 
+/// UserLocation 包体（wire 与 SharedRust `packets::server::user::UserLocation` 一致：
+/// [x i32][y i32][direction u8]）。统一入口避免再出现 [dir][x][y] 错序导致客户端把坐标
+/// 解析成 x*256+dir 的超大值（#1809）。
+pub(crate) fn user_location_body(x: i32, y: i32, direction: u8) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(&x.to_le_bytes());
+    body.extend_from_slice(&y.to_le_bytes());
+    body.push(direction);
+    body
+}
+
 /// #1427：回发 S.UserLocation 让客户端重同步（C# Walk/Run 失败 Enqueue UserLocation；
-/// wire 与 PlayerActor.send_user_location 一致：[direction u8][x i32][y i32]）
+/// wire 与 SharedRust UserLocation 一致：[x i32][y i32][direction u8]）
 async fn send_user_location_sync(
     gate_ref: &ActorRef<GateActor>,
     session_id: u64,
@@ -3958,10 +3966,7 @@ async fn send_user_location_sync(
     x: i32,
     y: i32,
 ) {
-    let mut body = Vec::new();
-    body.push(direction);
-    body.extend_from_slice(&x.to_le_bytes());
-    body.extend_from_slice(&y.to_le_bytes());
+    let body = user_location_body(x, y, direction);
     let _ = gate_ref.tell(SendToClient {
         session_id,
         data: build_packet_bytes(mir2_shared::enums::ServerPacketIds::UserLocation as i16, &body),
@@ -3970,12 +3975,38 @@ async fn send_user_location_sync(
 
 #[cfg(test)]
 mod tests {
-    use super::{effective_run, format_roll_message, move_steps, object_chat_body, tile_blocked_by};
+    use mir2_shared::packets::Packet;
+    use super::{
+        effective_run, format_roll_message, move_steps, object_chat_body, tile_blocked_by,
+        user_location_body,
+    };
 
     #[test]
     fn test_roll_message_format() {
         assert_eq!(format_roll_message("张三", 4), "张三 掷出了 4 点");
         assert_eq!(format_roll_message("Legacy", 1), "Legacy 掷出了 1 点");
+    }
+
+    #[test]
+    fn test_user_location_body_wire_layout() {
+        // #1809：UserLocation 包体必须为 [x i32][y i32][direction u8]，
+        // 与 SharedRust `packets::server::user::UserLocation::read_body` 一致；
+        // 错序 [dir][x][y] 会让客户端解析出 x*256+dir 的超大坐标。
+        let body = user_location_body(275, 296, 6);
+        assert_eq!(body.len(), 9);
+        let mut cur = std::io::Cursor::new(&body[..]);
+        let pkt = mir2_shared::packets::server::user::UserLocation::read_body(&mut cur).unwrap();
+        assert_eq!(pkt.location_x, 275);
+        assert_eq!(pkt.location_y, 296);
+        assert_eq!(pkt.direction as u8, 6);
+
+        // 边界：0 与负数坐标也保持顺序
+        let body = user_location_body(-5, 0, 0);
+        let mut cur = std::io::Cursor::new(&body[..]);
+        let pkt = mir2_shared::packets::server::user::UserLocation::read_body(&mut cur).unwrap();
+        assert_eq!(pkt.location_x, -5);
+        assert_eq!(pkt.location_y, 0);
+        assert_eq!(pkt.direction as u8, 0);
     }
 
     #[test]
