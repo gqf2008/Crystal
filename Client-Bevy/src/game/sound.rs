@@ -120,6 +120,49 @@ pub fn monster_die_sound(monster_type: u16) -> u32 {
     monster_base_sound(monster_type) + 3
 }
 
+/// #1624：怪物二段攻击音（C# PlaySecondAttackSound，MonsterObject.cs:4045 → BaseSound + 6）
+pub fn monster_second_attack_sound(monster_type: u16) -> u32 {
+    monster_base_sound(monster_type) + 6
+}
+
+/// #1624：怪物三段攻击音（C# PlayThirdAttackSound，MonsterObject.cs:4056）：
+/// DarkCaptain(334)/HornedSorceror(346)/HornedCommander(348) 不播；默认 BaseSound + 7
+pub fn monster_third_attack_sound(monster_type: u16) -> Option<u32> {
+    if matches!(monster_type, 334 | 346 | 348) {
+        return None;
+    }
+    Some(monster_base_sound(monster_type) + 7)
+}
+
+/// #1624：怪物四段攻击音（C# PlayFourthAttackSound，MonsterObject.cs:4070）：
+/// HornedCommander(348) 不播；SnowWolfKing(370) → BaseSound + 5；默认 BaseSound + 8
+pub fn monster_fourth_attack_sound(monster_type: u16) -> Option<u32> {
+    match monster_type {
+        348 => None,
+        370 => Some(monster_base_sound(monster_type) + 5),
+        _ => Some(monster_base_sound(monster_type) + 8),
+    }
+}
+
+/// #1624：怪物五段攻击音（C# PlayFithAttackSound，MonsterObject.cs:4085 → BaseSound + 9）
+pub fn monster_fifth_attack_sound(monster_type: u16) -> u32 {
+    monster_base_sound(monster_type) + 9
+}
+
+/// #1624：怪物挥击音（C# PlaySwingSound，MonsterObject.cs:4090）：
+/// DarkCaptain(334)/EvilMir(900)/DragonStatue(902) 不播；默认 BaseSound + 4
+pub fn monster_swing_sound(monster_type: u16) -> Option<u32> {
+    if matches!(monster_type, 334 | 900 | 902) {
+        return None;
+    }
+    Some(monster_base_sound(monster_type) + 4)
+}
+
+/// #1624：怪物畏缩音（C# PlayFlinchSound，MonsterObject.cs:3957 → BaseSound + 2）
+pub fn monster_flinch_sound(monster_type: u16) -> u32 {
+    monster_base_sound(monster_type) + 2
+}
+
 /// #1572：玩家步声（C# PlayerObject.PlayStepSound，PlayerObject.cs:3695）：
 /// - 门控：Front/Middle/BackIndex > 199 → 非 mir2 地图不播（None）；
 /// - 骑乘 → MountWalkL(10176)；
@@ -533,6 +576,32 @@ mod tests {
         assert_eq!(monster_attack_sound(1), 11); // BaseSound+1
         assert_eq!(monster_die_sound(1), 13); // BaseSound+3
         assert_eq!(monster_die_sound(42), 423);
+    }
+
+    #[test]
+    fn monster_segmented_attack_sounds_match_csharp() {
+        // #1624：C# MonsterObject PlaySecond/Third/Fourth/FithAttackSound + Swing/Flinch
+        // 二段 +6
+        assert_eq!(monster_second_attack_sound(1), 16);
+        assert_eq!(monster_second_attack_sound(42), 426);
+        // 三段：DarkCaptain(334)/HornedSorceror(346)/HornedCommander(348) 不播；默认 +7
+        assert_eq!(monster_third_attack_sound(334), None);
+        assert_eq!(monster_third_attack_sound(346), None);
+        assert_eq!(monster_third_attack_sound(348), None);
+        assert_eq!(monster_third_attack_sound(1), Some(17));
+        // 四段：HornedCommander(348) 不播；SnowWolfKing(370) +5；默认 +8
+        assert_eq!(monster_fourth_attack_sound(348), None);
+        assert_eq!(monster_fourth_attack_sound(370), Some(3705));
+        assert_eq!(monster_fourth_attack_sound(1), Some(18));
+        // 五段 +9
+        assert_eq!(monster_fifth_attack_sound(1), 19);
+        // 挥击：DarkCaptain(334)/EvilMir(900)/DragonStatue(902) 不播；默认 +4
+        assert_eq!(monster_swing_sound(334), None);
+        assert_eq!(monster_swing_sound(900), None);
+        assert_eq!(monster_swing_sound(902), None);
+        assert_eq!(monster_swing_sound(1), Some(14));
+        // 畏缩 +2
+        assert_eq!(monster_flinch_sound(1), 12);
     }
 
     #[test]

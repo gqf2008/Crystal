@@ -199,6 +199,7 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
                 combat_evt.write(CombatEvent::Attack {
                     object_id: pid,
                     direction: p.direction as u8,
+                    attack_type: 0,
                 });
                 server_events.write(ServerEvent::ObjectPushed {
                     object_id: pid,
@@ -213,6 +214,7 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
                 combat_evt.write(CombatEvent::Attack {
                     object_id: p.object_id,
                     direction: p.direction as u8,
+                    attack_type: 0,
                 });
                 server_events.write(ServerEvent::ObjectPushed {
                     object_id: p.object_id,
@@ -488,6 +490,7 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
                 combat_evt.write(CombatEvent::Attack {
                     object_id: p.object_id,
                     direction: p.direction,
+                    attack_type: p.attack_type,
                 });
                 tracing::debug!("⚔️ 对象攻击 id={} dir={}", p.object_id, p.direction);
             }
