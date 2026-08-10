@@ -2165,12 +2165,14 @@ impl WorldActor {
                 mir2_shared::enums::ServerPacketIds::ObjectAttack as i16,
                 &attack_body,
             );
-            for sid in self.players.keys() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: *sid,
-                    data: attack_packet.clone(),
-                }).await;
-            }
+            let hero_map = match self.players.get(session_id) {
+                Some(rec) => match rec.actor_ref.ask(crate::actors::player::GetPlayerState).await {
+                    Ok(Some(st)) => st.map_index,
+                    _ => 0,
+                },
+                None => 0,
+            };
+            broadcast_to_map(&self.gate_ref, &self.players, hero_map, &attack_packet).await;
         }
 
         // 3e. 应用毒意图（#1192/#1196：C# ApplyPoison；道士 Poisoning/弓箭手毒箭 TickSpeed 2000、道士 Curse 1000）

@@ -988,11 +988,8 @@ impl WorldActor {
             attack_body.push(0u8);
             let attack_packet = build_packet_bytes(
                 mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
-            for sid in self.players.keys() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: *sid, data: attack_packet.clone(),
-                }).await;
-            }
+            // #1649：怪物生成/动画广播只发同图玩家（C# CurrentMap.Broadcast）
+            broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &attack_packet).await;
             // 对范围内玩家造成伤害
             for (sid, px, py, _, _, _, pmap, _) in player_positions {
                 if *pmap != monster.map_index { continue; }
@@ -1030,11 +1027,8 @@ impl WorldActor {
                         spread: 0,
                     };
                     let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
-                    for session_id in self.players.keys() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *session_id, data: packet.clone(),
-                        }).await;
-                    }
+                    // #1649：怪物生成/动画广播只发同图玩家（C# CurrentMap.Broadcast）
+                    broadcast_to_map(&self.gate_ref, &self.players, spawn.map_index, &packet).await;
                     let ai_profile = MonsterAiProfile::from_info(&info);
                     self.monsters.insert(new_oid, MonsterState {
                         object_id: new_oid,
@@ -1120,12 +1114,8 @@ impl WorldActor {
                     walk_body.push(m.direction);
                     let walk_packet = build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::ObjectWalk as i16, &walk_body);
-                    for session_id in self.players.keys() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *session_id,
-                            data: walk_packet.clone(),
-                        }).await;
-                    }
+                    // #1649：动画广播只发同图玩家（C# CurrentMap.Broadcast）
+                    broadcast_to_map(&self.gate_ref, &self.players, m.map_index, &walk_packet).await;
                 }
             }
         }
@@ -1328,12 +1318,8 @@ impl WorldActor {
             respawn_pos.x = rx;
             respawn_pos.y = ry;
             let packet = build_object_monster_packet(&respawn_pos, new_oid, &spawn.name);
-            for session_id in self.players.keys() {
-                let _ = self.gate_ref.tell(SendToClient {
-                    session_id: *session_id,
-                    data: packet.clone(),
-                }).await;
-            }
+            // #1649：怪物生成/动画广播只发同图玩家（C# CurrentMap.Broadcast）
+            broadcast_to_map(&self.gate_ref, &self.players, respawn_pos.map_index, &packet).await;
             let monster_info_opt = self.monster_infos.get(&spawn.monster_index);
             let ai_profile = monster_info_opt
                 .map(MonsterAiProfile::from_info)
@@ -4128,12 +4114,8 @@ impl Message<Tick> for WorldActor {
                                 heal_body.push(0u8);
                                 let heal_packet = build_packet_bytes(
                                     mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &heal_body);
-                                for sid in self.players.keys() {
-                                    let _ = self.gate_ref.tell(SendToClient {
-                                        session_id: *sid,
-                                        data: heal_packet.clone(),
-                                    }).await;
-                                }
+                                // #1649：动画广播只发同图玩家（C# CurrentMap.Broadcast）
+                                broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &heal_packet).await;
                             }
                         }
                         // Summoner AI：低血量时召唤援军
@@ -4221,21 +4203,13 @@ impl Message<Tick> for WorldActor {
                             mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
                         if is_ranged {
                             // 远程/法术攻击广播给所有玩家（弹道动画）
-                            for sid in self.players.keys() {
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *sid,
-                                    data: attack_packet.clone(),
-                                }).await;
-                            }
+                            // #1649：动画广播只发同图玩家（C# CurrentMap.Broadcast）
+                            broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &attack_packet).await;
                         } else {
                             // #1594：C# MonsterObject.Attack Broadcast——近战攻击动画广播给同图所有玩家
                             // （受害者包含在内；远程/Boss 分支已广播）
-                            for sid in self.players.keys() {
-                                let _ = self.gate_ref.tell(SendToClient {
-                                    session_id: *sid,
-                                    data: attack_packet.clone(),
-                                }).await;
-                            }
+                            // #1649：动画广播只发同图玩家（C# CurrentMap.Broadcast）
+                            broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &attack_packet).await;
                         }
                         // 安全区保护：目标在安全区内则不受怪物伤害
                         let target_in_safe = self.maps.get(&monster.map_index)
@@ -4491,12 +4465,8 @@ impl Message<Tick> for WorldActor {
                     attack_body.push(0u8); // spell=0
                     let attack_packet = build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
-                    for sid in self.players.keys() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *sid,
-                            data: attack_packet.clone(),
-                        }).await;
-                    }
+                    // #1649：动画广播只发同图玩家（C# CurrentMap.Broadcast）
+                    broadcast_to_map(&self.gate_ref, &self.players, tm.map_index, &attack_packet).await;
                     debug!("Monster #{} hits '{}' (#{}) for {} dmg (monster-vs-monster)", aid, tm.name, tmid, damage);
                 }
             }
@@ -4505,12 +4475,8 @@ impl Message<Tick> for WorldActor {
             for spawn in &summon_spawns {
                 let new_oid = self.alloc_object_id();
                 let packet = build_object_monster_packet(spawn, new_oid, &spawn.name);
-                for session_id in self.players.keys() {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: *session_id,
-                        data: packet.clone(),
-                    }).await;
-                }
+                // #1649：怪物生成/动画广播只发同图玩家（C# CurrentMap.Broadcast）
+                broadcast_to_map(&self.gate_ref, &self.players, spawn.map_index, &packet).await;
                 let monster_info_opt = self.monster_infos.get(&spawn.monster_index);
                 let ai_profile = monster_info_opt
                     .map(MonsterAiProfile::from_info)
@@ -4702,12 +4668,8 @@ impl Message<Tick> for WorldActor {
                 attack_body.push(attack_type);
                 let attack_packet = build_packet_bytes(
                     mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
-                for sid in self.players.keys() {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: *sid,
-                        data: attack_packet.clone(),
-                    }).await;
-                }
+                // #1649：动画广播只发同图玩家（C# CurrentMap.Broadcast）
+                broadcast_to_map(&self.gate_ref, &self.players, boss_map, &attack_packet).await;
                 // 对命中玩家造成伤害
                 for sid in &targets {
                     if let Some(record) = self.players.get(sid) {
@@ -4780,12 +4742,8 @@ impl Message<Tick> for WorldActor {
                             spread: 0,
                         };
                         let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
-                        for session_id in self.players.keys() {
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: *session_id,
-                                data: packet.clone(),
-                            }).await;
-                        }
+                        // #1649：怪物生成/动画广播只发同图玩家（C# CurrentMap.Broadcast）
+                        broadcast_to_map(&self.gate_ref, &self.players, spawn.map_index, &packet).await;
                         let ai_profile = MonsterAiProfile::from_info(&info);
                         self.monsters.insert(new_oid, MonsterState {
                             object_id: new_oid,
@@ -4865,12 +4823,8 @@ impl Message<Tick> for WorldActor {
                             spread: 0,
                         };
                         let packet = build_object_monster_packet(&spawn, new_oid, &spawn.name);
-                        for session_id in self.players.keys() {
-                            let _ = self.gate_ref.tell(SendToClient {
-                                session_id: *session_id,
-                                data: packet.clone(),
-                            }).await;
-                        }
+                        // #1649：怪物生成/动画广播只发同图玩家（C# CurrentMap.Broadcast）
+                        broadcast_to_map(&self.gate_ref, &self.players, spawn.map_index, &packet).await;
                         let ai_profile = MonsterAiProfile::from_info(&info);
                         // 子岩预设：shown=true、child=true、目标格锁定（C# ChildRock.Show）
                         let behavior = crate::actors::world::ai::bosses::trap_rock::TrapRockBehavior::child(
@@ -4972,12 +4926,8 @@ impl Message<Tick> for WorldActor {
                     walk_body.push(m.direction);
                     let walk_packet = build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::ObjectWalk as i16, &walk_body);
-                    for session_id in self.players.keys() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *session_id,
-                            data: walk_packet.clone(),
-                        }).await;
-                    }
+                    // #1649：动画广播只发同图玩家（C# CurrentMap.Broadcast）
+                    broadcast_to_map(&self.gate_ref, &self.players, m.map_index, &walk_packet).await;
                 }
             }
 
@@ -4994,12 +4944,8 @@ impl Message<Tick> for WorldActor {
                     walk_body.push(m.direction);
                     let walk_packet = build_packet_bytes(
                         mir2_shared::enums::ServerPacketIds::ObjectWalk as i16, &walk_body);
-                    for session_id in self.players.keys() {
-                        let _ = self.gate_ref.tell(SendToClient {
-                            session_id: *session_id,
-                            data: walk_packet.clone(),
-                        }).await;
-                    }
+                    // #1649：动画广播只发同图玩家（C# CurrentMap.Broadcast）
+                    broadcast_to_map(&self.gate_ref, &self.players, m.map_index, &walk_packet).await;
                 }
             }
             // 广播 ObjectTurn（C# ProcessRoam 转身；ObjectID + Location(i32,i32) + Direction(u8)）
@@ -5011,12 +4957,8 @@ impl Message<Tick> for WorldActor {
                 turn_body.push(*dir);
                 let turn_packet = build_packet_bytes(
                     mir2_shared::enums::ServerPacketIds::ObjectTurn as i16, &turn_body);
-                for session_id in self.players.keys() {
-                    let _ = self.gate_ref.tell(SendToClient {
-                        session_id: *session_id,
-                        data: turn_packet.clone(),
-                    }).await;
-                }
+                // #1649：动画广播只发同图玩家（C# CurrentMap.Broadcast）
+                broadcast_to_map(&self.gate_ref, &self.players, self.monsters.get(oid).map(|mm| mm.map_index).unwrap_or(0), &turn_packet).await;
             }
 
             // 处理破损装备广播（避免在怪物循环内借用 self）
