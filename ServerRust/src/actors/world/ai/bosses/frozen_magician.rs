@@ -35,14 +35,15 @@ impl MonsterBehavior for FrozenMagicianBehavior {
             // C# 不在近战：1/2 概率远程 / 移动
             if ctx.tick_count >= monster.next_attack_tick && fastrand::i32(0..2) == 0 {
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 10;
-                let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+                // C# 远程用 MinMC/MaxMC（FrozenMagician.cs:107），Type=1
+                let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
                 let dmg = if fastrand::i32(0..3) == 0 { (damage as f32 * 1.5) as i32 } else { damage };
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,
                     target_object_id: target.object_id,
                     damage: dmg.max(1),
-                    spell_id: 0,
+                    spell_id: 1,
                 });
                 return;
             }
@@ -68,14 +69,16 @@ impl MonsterBehavior for FrozenMagicianBehavior {
                     attack_type: 0,
                 });
             } else {
+                // C# 近战内 1/3 远程（MC，Type=1）
                 monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown + 10;
-                let dmg = if fastrand::i32(0..3) == 0 { (damage as f32 * 1.5) as i32 } else { damage };
+                let mc_damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac, monster.luck).max(1);
+                let dmg = if fastrand::i32(0..3) == 0 { (mc_damage as f32 * 1.5) as i32 } else { mc_damage };
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
                     attacker_oid: monster.object_id,
                     target_session: target.session_id,
                     target_object_id: target.object_id,
                     damage: dmg.max(1),
-                    spell_id: 0,
+                    spell_id: 1,
                 });
             }
         }
