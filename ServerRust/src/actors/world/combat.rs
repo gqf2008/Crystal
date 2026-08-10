@@ -980,23 +980,36 @@ impl Message<WorldAttackRequest> for WorldActor {
                                 }
                                 self.handle_player_death_drop(other_session, other_state.x, other_state.y, other_state.map_index, true).await;
 
-                                // 击杀玩家：增加 PK 值并广播名字颜色变化
-                                let _ = record.actor_ref.ask(crate::actors::player::AddPkPoints { points: 100 }).await;
-                                // #1751：C# Die——击杀/被击杀消息（MurderPlayer / MurderedByPlayer）
-                                send_system_message(&self.gate_ref, msg.session_id,
-                                    &format!("你谋杀了 {}", other_state.name));
-                                send_system_message(&self.gate_ref, other_session,
-                                    &format!("你被 {} 击杀了", record.name));
-        // C# Die：击杀玩家 1/4 概率诅咒武器（Luck -1，Luck > -MaxLuck 时）
-        if let Ok(Some(weapon)) = record.actor_ref.ask(crate::actors::player::GetEquipmentInfo {
-            slot: crate::actors::inventory::EquipmentSlot::Weapon,
-        }).await {
-            if weapon.added_stats.get(mir2_shared::enums::Stat::Luck) > -10 && fastrand::i32(..4) == 0 { // C# Settings.MaxLuck = 10
-                let _ = record.actor_ref.ask(crate::actors::player::AddWeaponLuck { delta: -1 }).await;
-                send_system_message(&self.gate_ref, msg.session_id, "你的武器受到了诅咒！");
-                debug!("Weapon cursed on player kill: {} -> {}", record.name, weapon.item_index);
-            }
-        }
+                                // #1862：C# Die——仅非行会战/非攻城区/非保护期且受害者非红名时 PK+100 + 消息 + 武器诅咒
+                                let victim_brown = crate::actors::world::is_brown(other_state.brown_until_ms);
+                                let victim_war_zone = self.is_conquest_map(other_state.map_index);
+                                let victim_red = other_state.pk_points >= 200;
+                                let (_any_war, at_war) = guild_war_flags(
+                                    other_state.guild_name.as_deref(),
+                                    state.guild_name.as_deref(),
+                                    &self.guild_wars,
+                                );
+                                if at_war || victim_war_zone {
+                                    // C# ProtectedByLaw：行会战/攻城区不涨 PK
+                                    send_system_message(&self.gate_ref, msg.session_id, "受到法律保护");
+                                } else if !victim_brown && !victim_red {
+                                    let _ = record.actor_ref.ask(crate::actors::player::AddPkPoints { points: 100 }).await;
+                                    // #1751：C# Die——击杀/被击杀消息（MurderPlayer / MurderedByPlayer）
+                                    send_system_message(&self.gate_ref, msg.session_id,
+                                        &format!("你谋杀了 {}", other_state.name));
+                                    send_system_message(&self.gate_ref, other_session,
+                                        &format!("你被 {} 击杀了", record.name));
+                                    // C# Die：击杀玩家 1/4 概率诅咒武器（Luck -1，Luck > -MaxLuck 时）
+                                    if let Ok(Some(weapon)) = record.actor_ref.ask(crate::actors::player::GetEquipmentInfo {
+                                        slot: crate::actors::inventory::EquipmentSlot::Weapon,
+                                    }).await {
+                                        if weapon.added_stats.get(mir2_shared::enums::Stat::Luck) > -10 && fastrand::i32(..4) == 0 { // C# Settings.MaxLuck = 10
+                                            let _ = record.actor_ref.ask(crate::actors::player::AddWeaponLuck { delta: -1 }).await;
+                                            send_system_message(&self.gate_ref, msg.session_id, "你的武器受到了诅咒！");
+                                            debug!("Weapon cursed on player kill: {} -> {}", record.name, weapon.item_index);
+                                        }
+                                    }
+                                }
                                 // #921：逐观众广播名字颜色（C# BroadcastColourChange）
                                 self.broadcast_viewer_colours(msg.session_id).await;
                                 if let Some(r) = self.players.get_mut(&msg.session_id) {
@@ -1798,23 +1811,36 @@ impl WorldActor {
                     }
                     self.handle_player_death_drop(defender_session, defender_state.x, defender_state.y, defender_state.map_index, true).await;
 
-                    // 增加 PK 值
-                    let _ = attacker_record.actor_ref.ask(crate::actors::player::AddPkPoints { points: 100 }).await;
-                    // #1751：C# Die——击杀/被击杀消息（MurderPlayer / MurderedByPlayer）
-                    send_system_message(&self.gate_ref, attacker_session,
-                        &format!("你谋杀了 {}", defender_state.name));
-                    send_system_message(&self.gate_ref, defender_session,
-                        &format!("你被 {} 击杀了", attacker_record.name));
-        // C# Die：击杀玩家 1/4 概率诅咒武器（Luck -1，Luck > -MaxLuck 时）
-        if let Ok(Some(weapon)) = attacker_record.actor_ref.ask(crate::actors::player::GetEquipmentInfo {
-            slot: crate::actors::inventory::EquipmentSlot::Weapon,
-        }).await {
-            if weapon.added_stats.get(mir2_shared::enums::Stat::Luck) > -10 && fastrand::i32(..4) == 0 { // C# Settings.MaxLuck = 10
-                let _ = attacker_record.actor_ref.ask(crate::actors::player::AddWeaponLuck { delta: -1 }).await;
-                send_system_message(&self.gate_ref, attacker_session, "你的武器受到了诅咒！");
-                debug!("Weapon cursed on player kill: {} -> {}", attacker_record.name, weapon.item_index);
-            }
-        }
+                    // #1862：C# Die——仅非行会战/非攻城区/非保护期且受害者非红名时 PK+100 + 消息 + 武器诅咒
+                    let victim_brown = crate::actors::world::is_brown(defender_state.brown_until_ms);
+                    let victim_war_zone = self.is_conquest_map(defender_state.map_index);
+                    let victim_red = defender_state.pk_points >= 200;
+                    let (_any_war, at_war) = guild_war_flags(
+                        defender_state.guild_name.as_deref(),
+                        attacker_state.guild_name.as_deref(),
+                        &self.guild_wars,
+                    );
+                    if at_war || victim_war_zone {
+                        // C# ProtectedByLaw：行会战/攻城区不涨 PK
+                        send_system_message(&self.gate_ref, attacker_session, "受到法律保护");
+                    } else if !victim_brown && !victim_red {
+                        let _ = attacker_record.actor_ref.ask(crate::actors::player::AddPkPoints { points: 100 }).await;
+                        // #1751：C# Die——击杀/被击杀消息（MurderPlayer / MurderedByPlayer）
+                        send_system_message(&self.gate_ref, attacker_session,
+                            &format!("你谋杀了 {}", defender_state.name));
+                        send_system_message(&self.gate_ref, defender_session,
+                            &format!("你被 {} 击杀了", attacker_record.name));
+                        // C# Die：击杀玩家 1/4 概率诅咒武器（Luck -1，Luck > -MaxLuck 时）
+                        if let Ok(Some(weapon)) = attacker_record.actor_ref.ask(crate::actors::player::GetEquipmentInfo {
+                            slot: crate::actors::inventory::EquipmentSlot::Weapon,
+                        }).await {
+                            if weapon.added_stats.get(mir2_shared::enums::Stat::Luck) > -10 && fastrand::i32(..4) == 0 { // C# Settings.MaxLuck = 10
+                                let _ = attacker_record.actor_ref.ask(crate::actors::player::AddWeaponLuck { delta: -1 }).await;
+                                send_system_message(&self.gate_ref, attacker_session, "你的武器受到了诅咒！");
+                                debug!("Weapon cursed on player kill: {} -> {}", attacker_record.name, weapon.item_index);
+                            }
+                        }
+                    }
                     // #921：逐观众广播名字颜色（C# BroadcastColourChange）
                     self.broadcast_viewer_colours(attacker_session).await;
                     if let Some(r) = self.players.get_mut(&attacker_session) {
