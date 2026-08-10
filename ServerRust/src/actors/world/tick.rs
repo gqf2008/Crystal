@@ -1021,6 +1021,38 @@ impl WorldActor {
                     broadcast_to_map(&self.gate_ref, &self.players, map_index, &pkt).await;
                 }
             }
+            // #1799：玩家中毒同步（C# HumanObject.SendPoisoned：Poisoned 给自己 + ObjectPoisoned 同图广播）
+            let mut player_poison_updates: Vec<(u64, u32, u16, mir2_shared::enums::PoisonType)> = Vec::new();
+            for (sid, record) in &self.players {
+                let Ok(Some(st)) = record.actor_ref.ask(GetPlayerState).await else { continue };
+                let combined = combined_poison_flags(&st.poison_list);
+                let last = self.player_poison_flags.get(sid).copied().unwrap_or(mir2_shared::enums::PoisonType::NONE);
+                if combined != last {
+                    self.player_poison_flags.insert(*sid, combined);
+                    player_poison_updates.push((*sid, st.object_id, st.map_index, combined));
+                }
+            }
+            for (sid, oid, map_index, combined) in player_poison_updates {
+                // Poisoned 给本人（客户端毒图标 + #1616 麻痹/冰冻输入锁）
+                let p = mir2_shared::packets::server::buff::Poisoned { poison: combined };
+                let mut body = Vec::new();
+                if p.write_body(&mut body).is_ok() {
+                    let pkt = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::Poisoned as i16, &body);
+                    let _ = self.gate_ref.tell(SendToClient { session_id: sid, data: pkt }).await;
+                }
+                // ObjectPoisoned 同图广播（他人看染绿/解毒）
+                let op = mir2_shared::packets::server::buff::ObjectPoisoned {
+                    object_id: oid,
+                    poison: combined,
+                };
+                let mut obody = Vec::new();
+                if op.write_body(&mut obody).is_ok() {
+                    let pkt = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectPoisoned as i16, &obody);
+                    broadcast_to_map(&self.gate_ref, &self.players, map_index, &pkt).await;
+                }
+            }
             // 广播 DelayedExplosion 三级 ObjectEffect（同图玩家）
             for (oid, stage, map_index) in &delayed_effects {
                 let effect = mir2_shared::packets::server::magic_combat::ObjectEffect {

@@ -1011,6 +1011,8 @@ pub struct WorldActor {
     pub(crate) movement_index: HashMap<(i32, i32, i32), db::MapMovementInfo>,
     /// 各怪当前组合毒标记（#1797：C# CurrentPoison，变更时广播 ObjectPoisoned）
     pub(crate) monster_poison_flags: HashMap<u32, mir2_shared::enums::PoisonType>,
+    /// 各玩家当前组合毒标记（#1799：C# HumanObject.CurrentPoison，变更时 Poisoned + ObjectPoisoned）
+    pub(crate) player_poison_flags: HashMap<u64, mir2_shared::enums::PoisonType>,
     /// SocialActor 引用（用于转发社交命令）
     pub(crate) social_ref: ActorRef<SocialActor>,
     /// 攻城/GT 配置
@@ -1404,6 +1406,7 @@ impl WorldActor {
             game_shop_items: Vec::new(),
             movement_index: HashMap::new(),
             monster_poison_flags: HashMap::new(),
+            player_poison_flags: HashMap::new(),
             social_ref,
             conquest_cfg: crate::util::config::ConquestConfig::default(),
             rested_cfg: crate::util::config::RestedConfig::default(),
@@ -4414,6 +4417,7 @@ impl Actor for WorldActor {
             game_shop_items,
             movement_index,
             monster_poison_flags: HashMap::new(),
+            player_poison_flags: HashMap::new(),
             social_ref: args.social_ref,
             conquest_cfg: args.conquest_cfg,
             rested_cfg: args.rested_cfg,
