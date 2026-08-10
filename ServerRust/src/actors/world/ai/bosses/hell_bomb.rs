@@ -52,21 +52,20 @@ impl MonsterBehavior for HellBombBehavior {
             damage,
             spell_id: 0,
         });
-        // C# switch(Info.Image)：按名字近似（HellBomb1/2/3）
-        let ptype = if monster.name.to_lowercase().contains("hellbomb1") {
-            PoisonType::FROZEN
-        } else if monster.name.to_lowercase().contains("hellbomb2") {
-            PoisonType::DAZED
-        } else {
-            PoisonType::BLEEDING
+        // C# switch(Info.Image)：HellBomb1=903→Frozen / HellBomb2=904→Dazed / HellBomb3=905→Bleeding（Shared/Enums.cs:702-704）
+        let ptype = match monster.image {
+            903 => PoisonType::FROZEN,
+            904 => PoisonType::DAZED,
+            _ => PoisonType::BLEEDING,
         };
         let nearby: Vec<u64> = ctx.find_targets_in_range(monster.x, monster.y, EXPLODE_RADIUS, monster.map_index)
             .iter().map(|p| p.session_id).collect();
         for sid in nearby {
-            // PoisonTarget(1, 5, type, 2000)：100%
+            // PoisonTarget(1, 5, type, 2000)：100%、值=SC（C# PoisonTarget 固定 Value=SC）
+            let sc_value = crate::combat::attack::get_attack_power(monster.min_sc, monster.max_sc, 0).max(1);
             ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                 session_id: sid,
-                poison: Poison::new(ptype, 5, damage, 2000),
+                poison: Poison::new(ptype, 5, sc_value, 2000),
             });
         }
     }
