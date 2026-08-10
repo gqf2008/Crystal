@@ -85,6 +85,12 @@ fn spawn_belt(
     _fonts: ResMut<Assets<Font>>,
     _ui_font: ResMut<UiFont>,
 ) {
+    // 废弃：旧底部 8 格 F1-F8 快捷栏由 skills.rs（左上角，C# SkillBarDialog）替代，
+    // 且会与 C# 底部 6 格药水腰带（potion_belt.rs）混淆。默认不再生成；
+    // 需要时设 BEVY_LEGACY_BELT=1 恢复。
+    if std::env::var("BEVY_LEGACY_BELT").is_err() {
+        return;
+    }
     if !crate::ui::sprite_ui::ui_enabled("belt") {
         return;
     }

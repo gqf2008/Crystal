@@ -148,7 +148,7 @@ fn spawn_menu_dialog(
         LibraryName::Title, 206, 207, 208,
         410.0, 380.0, 9.3, 76.0, 25.0,
     ) {
-        commands.entity(e).insert((MenuExitYes, DialogRoot(DialogKind::Menu)));
+        commands.entity(e).insert((MenuExitYes, DialogRoot(DialogKind::Menu), MenuExitConfirm));
     }
     let t = spawn_ui_text(&mut commands, &font, "确定", 432.0, 384.0, 12.0, Color::WHITE, 9.4);
     commands.entity(t).insert((MenuExitConfirm, DialogRoot(DialogKind::Menu)));
@@ -157,7 +157,7 @@ fn spawn_menu_dialog(
         LibraryName::Title, 210, 211, 212,
         500.0, 380.0, 9.3, 76.0, 25.0,
     ) {
-        commands.entity(e).insert((MenuExitNo, DialogRoot(DialogKind::Menu)));
+        commands.entity(e).insert((MenuExitNo, DialogRoot(DialogKind::Menu), MenuExitConfirm));
     }
     let t = spawn_ui_text(&mut commands, &font, "取消", 530.0, 384.0, 12.0, Color::WHITE, 9.4);
     commands.entity(t).insert((MenuExitConfirm, DialogRoot(DialogKind::Menu)));
@@ -189,6 +189,10 @@ fn menu_ui_system(
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
     if !open {
+        // 退出确认框（MenuExitConfirm 标签+按钮）不在 widgets 里，关闭时必须隐藏
+        for mut vis in &mut confirm_widgets {
+            *vis = Visibility::Hidden;
+        }
         *confirm = false;
         return;
     }

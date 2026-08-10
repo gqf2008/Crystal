@@ -271,6 +271,7 @@ fn spawn_group(
             clicked: false,
         },
         DialogRoot(DialogKind::Group),
+        GroupWidget,
     ));
     // #1349：按名邀请输入框（TextInput id 33）+ 确认按钮
     let add_input = commands
@@ -327,25 +328,25 @@ fn spawn_group(
         let e = spawn_ui_sprite(&mut commands, h, bx, by, 9.5, 1.0);
         commands
             .entity(e)
-            .insert((GroupInviteWidget, Visibility::Hidden));
+            .insert((GroupInviteWidget, DialogRoot(DialogKind::Group), Visibility::Hidden));
     }
     let t = spawn_ui_text(
         &mut commands, &font, "", bx + 35.0, by + 40.0, 12.0, Color::WHITE, 9.6,
     );
-    commands.entity(t).insert((GroupInviteText, GroupInviteWidget));
+    commands.entity(t).insert((GroupInviteText, GroupInviteWidget, DialogRoot(DialogKind::Group)));
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands, &mut libs, &mut images, &mut cache,
         LibraryName::Title, 206, 207, 208,
         bx + 240.0, by + 150.0, 9.7, 76.0, 25.0,
     ) {
-        commands.entity(e).insert((GroupInviteYes, GroupInviteWidget));
+        commands.entity(e).insert((GroupInviteYes, GroupInviteWidget, DialogRoot(DialogKind::Group)));
     }
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands, &mut libs, &mut images, &mut cache,
         LibraryName::Title, 210, 211, 212,
         bx + 340.0, by + 150.0, 9.7, 76.0, 25.0,
     ) {
-        commands.entity(e).insert((GroupInviteNo, GroupInviteWidget));
+        commands.entity(e).insert((GroupInviteNo, GroupInviteWidget, DialogRoot(DialogKind::Group)));
     }
 }
 
@@ -375,6 +376,10 @@ fn group_ui_system(
         *vis = if open { Visibility::Visible } else { Visibility::Hidden };
     }
     if !open {
+        // 邀请框（GroupInviteWidget）只在 open 分支管理显隐，关闭时必须隐藏
+        for mut vis in &mut invite_widgets {
+            *vis = Visibility::Hidden;
+        }
         return;
     }
     for btn in &close {

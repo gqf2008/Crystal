@@ -64,6 +64,8 @@ pub struct HudState {
     pub dead: bool,
     /// 收到轮回术复活请求（#222）
     pub reincarnation_offered: bool,
+    /// 死亡弹窗已点击“否”关闭（C# ShowReviveMessage 只弹一次；死亡后重置）
+    pub death_popup_dismissed: bool,
     /// 自动喝药冷却（避免连发）
     pub pot_cooldown: f32,
     /// 背包（网络 UserInformation 写入）
@@ -101,6 +103,7 @@ impl Default for HudState {
             auto_pot_hp: true,
             dead: false,
             reincarnation_offered: false,
+            death_popup_dismissed: false,
             pot_cooldown: 0.0,
             inventory: Default::default(),
             equipment: vec![None; 14], // #1136：服务端补 Torch/Belt/Stone 共 14 槽
@@ -314,10 +317,6 @@ struct NameText;
 struct DeathOverlay;
 #[derive(Component)]
 struct DeathReviveBtn;
-
-/// 轮回术接受复活按钮（#222）
-#[derive(Component)]
-struct DeathReincAcceptBtn;
 
 /// 轮回术拒绝按钮（#222）
 #[derive(Component)]
@@ -661,7 +660,9 @@ if !crate::ui::sprite_ui::ui_enabled("hud") {
         commands.entity(e).insert((HeroPanelText(i), Visibility::Hidden));
     }
 
-    // 死亡遮罩（#46）：全屏半透明 + 提示 + 复活按钮，默认隐藏
+    // 死亡弹窗（对齐 C# GameScene.ShowReviveMessage → MirMessageBox(YesNo)）：
+    // Prguse[360] 居中 (284,289)，文案 DiedTip，是/否按钮 Title[206-208]/[210-212]
+    // （按钮纹理自带“是/否”文字，不再额外绘制文字）；轮回术请求时复用同一弹窗。
     let white = images.add(crate::map_renderer::make_image(vec![255, 255, 255, 255], 1, 1));
     commands.spawn((
         UiEntity,
@@ -669,56 +670,40 @@ if !crate::ui::sprite_ui::ui_enabled("hud") {
         Sprite {
             image: white,
             custom_size: Some(Vec2::new(1024.0, 768.0)),
-            color: Color::srgba(0.0, 0.0, 0.0, 0.65),
+            color: Color::srgba(0.0, 0.0, 0.0, 0.5),
             ..default()
         },
         Transform::from_xyz(512.0, -384.0, 10.0),
         Visibility::Hidden,
     ));
+    if let Some(h) = ui_image(&mut libs, &mut images, &mut cache, LibraryName::Prguse, 360) {
+        let e = spawn_ui_sprite(&mut commands, h, 284.0, 289.0, 10.5, 1.0);
+        commands.entity(e).insert((DeathOverlay, Visibility::Hidden));
+    }
     let death_txt = spawn_ui_text(
         &mut commands,
         &font,
-        "你已死亡，点击复活返回安全区",
-        262.0,
-        330.0,
-        20.0,
-        Color::srgb(1.0, 0.3, 0.3),
+        "你已经死亡，是否要在城镇复活？",
+        319.0,
+        324.0,
+        16.0,
+        Color::WHITE,
         11.0,
     );
-    commands.entity(death_txt).insert((DeathText, DeathOverlay));
-    if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
-        &mut commands,
-        &mut libs,
-        &mut images,
-        &mut cache,
-        LibraryName::Title,
-        206,
-        207,
-        208,
-        462.0,
-        380.0,
-        11.0,
-        100.0,
-        30.0,
-    ) {
-        commands.entity(e).insert((DeathReviveBtn, DeathOverlay));
-    }
-    // #222：轮回术接受/拒绝按钮（死亡且有请求时显示）
-    let acc_txt = spawn_ui_text(&mut commands, &font, "接受复活", 300.0, 385.0, 16.0, Color::srgb(0.4, 1.0, 0.4), 11.2);
-    commands.entity(acc_txt).insert((DeathReincAcceptBtn, DeathOverlay, Visibility::Hidden));
+    commands.entity(death_txt).insert((DeathText, DeathOverlay, Visibility::Hidden));
+    // 是（TownRevive / 轮回术接受）
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands, &mut libs, &mut images, &mut cache,
         LibraryName::Title, 206, 207, 208,
-        292.0, 380.0, 11.0, 96.0, 30.0,
+        544.0, 446.0, 11.0, 76.0, 25.0,
     ) {
-        commands.entity(e).insert((DeathReincAcceptBtn, DeathOverlay, Visibility::Hidden));
+        commands.entity(e).insert((DeathReviveBtn, DeathOverlay, Visibility::Hidden));
     }
-    let dec_txt = spawn_ui_text(&mut commands, &font, "拒绝", 634.0, 385.0, 16.0, Color::srgb(1.0, 0.5, 0.5), 11.2);
-    commands.entity(dec_txt).insert((DeathReincDeclineBtn, DeathOverlay, Visibility::Hidden));
+    // 否（关闭弹窗 / 轮回术拒绝）
     if let Some(e) = crate::ui::sprite_ui::spawn_ui_button(
         &mut commands, &mut libs, &mut images, &mut cache,
-        LibraryName::Title, 206, 207, 208,
-        624.0, 380.0, 11.0, 96.0, 30.0,
+        LibraryName::Title, 210, 211, 212,
+        644.0, 446.0, 11.0, 76.0, 25.0,
     ) {
         commands.entity(e).insert((DeathReincDeclineBtn, DeathOverlay, Visibility::Hidden));
     }
@@ -923,25 +908,14 @@ fn hud_update_system(
 fn death_overlay_system(
     mut hud: ResMut<HudState>,
     net: Res<crate::network::NetConnection>,
-    mut overlay: Query<
-        &mut Visibility,
-        (
-            With<DeathOverlay>,
-            Without<DeathReincAcceptBtn>,
-            Without<DeathReincDeclineBtn>,
-        ),
-    >,
-    revive_btns: Query<&UiButton, With<DeathReviveBtn>>,
-    mut acc_grp: Query<
-        (&mut Visibility, Option<&UiButton>),
-        (With<DeathReincAcceptBtn>, Without<DeathReincDeclineBtn>),
-    >,
-    mut dec_grp: Query<
-        (&mut Visibility, Option<&UiButton>),
-        (With<DeathReincDeclineBtn>, Without<DeathReincAcceptBtn>),
-    >,
+    // 背景/遮罩/文字/是/否按钮全部带 DeathOverlay，统一随死亡显隐
+    mut overlay: Query<&mut Visibility, With<DeathOverlay>>,
+    mut death_texts: Query<&mut Text2d, (With<DeathText>, Without<DeathReviveBtn>, Without<DeathReincDeclineBtn>)>,
+    yes_btns: Query<&UiButton, (With<DeathReviveBtn>, Without<DeathReincDeclineBtn>)>,
+    no_btns: Query<&UiButton, (With<DeathReincDeclineBtn>, Without<DeathReviveBtn>)>,
 ) {
-    let show = hud.dead;
+    // C# ShowReviveMessage：死亡后弹一次；点“否”关闭后不再弹（除非再次死亡）
+    let show = hud.dead && !hud.death_popup_dismissed;
     for mut vis in overlay.iter_mut() {
         *vis = if show {
             Visibility::Visible
@@ -949,47 +923,46 @@ fn death_overlay_system(
             Visibility::Hidden
         };
     }
-    // #222：轮回术确认按钮（仅死亡且有请求时；文本+按钮同标记）
-    let reinc_show = show && hud.reincarnation_offered;
-    for (mut vis, _) in &mut acc_grp {
-        *vis = if reinc_show { Visibility::Visible } else { Visibility::Hidden };
-    }
-    for (mut vis, _) in &mut dec_grp {
-        *vis = if reinc_show { Visibility::Visible } else { Visibility::Hidden };
+    for mut t in &mut death_texts {
+        let new = if hud.reincarnation_offered {
+            "你想要复活吗？"
+        } else {
+            "你已经死亡，是否要在城镇复活？"
+        };
+        if t.0 != new {
+            t.0 = new.to_string();
+        }
     }
     if !show {
         return;
     }
-    for btn in &revive_btns {
+    // 是：轮回术请求 → AcceptReincarnation；否则 TownRevive（C# YesButton 语义）
+    for btn in &yes_btns {
         if btn.clicked {
-            net.send_packet(&mir2_shared::packets::client::misc::TownRevive);
-            tracing::info!("⛪ 点击复活（TownRevive）");
-            // 乐观清除，服务端 Revived 会再次确认
-            hud.dead = false;
-            hud.reincarnation_offered = false;
-        }
-    }
-    for (_, ui) in &acc_grp {
-        if let Some(btn) = ui {
-            if btn.clicked && reinc_show {
+            if hud.reincarnation_offered {
                 net.send_packet(&mir2_shared::packets::client::misc::AcceptReincarnation);
                 tracing::info!("🌀 接受轮回术复活");
-                hud.dead = false;
-                hud.reincarnation_offered = false;
+            } else {
+                net.send_packet(&mir2_shared::packets::client::misc::TownRevive);
+                tracing::info!("⛪ 点击复活（TownRevive）");
             }
+            hud.dead = false;
+            hud.reincarnation_offered = false;
+            hud.death_popup_dismissed = false;
         }
     }
-    for (_, ui) in &dec_grp {
-        if let Some(btn) = ui {
-            if btn.clicked && reinc_show {
+    // 否：轮回术请求 → CancelReincarnation；关闭弹窗（玩家保持死亡，C# Dispose 语义）
+    for btn in &no_btns {
+        if btn.clicked {
+            if hud.reincarnation_offered {
                 net.send_packet(&mir2_shared::packets::client::misc::CancelReincarnation);
                 tracing::info!("🌀 拒绝轮回术复活");
-                hud.reincarnation_offered = false;
             }
+            hud.reincarnation_offered = false;
+            hud.death_popup_dismissed = true;
         }
     }
 }
-
 
 /// 消费服务端事件更新 HUD 状态（网络层只发 ServerEvent，不再直接改 HudState）
 fn hud_server_events(
@@ -1336,6 +1309,7 @@ fn hud_server_events(
             }
             ServerEvent::PlayerDied => {
                 hud.dead = true;
+                hud.death_popup_dismissed = false;
             }
             ServerEvent::ReincarnationRequested => {
                 if hud.dead {
@@ -1345,6 +1319,7 @@ fn hud_server_events(
             ServerEvent::PlayerRevived => {
                 hud.dead = false;
                 hud.reincarnation_offered = false;
+                hud.death_popup_dismissed = false;
             }
             ServerEvent::ItemUsed { unique_id } => {
                 let idx = hud

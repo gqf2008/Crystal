@@ -198,10 +198,9 @@ fn sell_panel_ui_system(
     >,
     mut info_texts: Query<(&mut Text2d, &SellPanelInfo)>,
 ) {
-    for (mut vis, info) in &mut widgets {
-        if info.is_some() {
-            continue;
-        }
+    for (mut vis, _info) in &mut widgets {
+        // 提示文本也随面板显隐（此前跳过 SellPanelInfo，导致“放入物品后点确认出售”
+        // 在面板关闭时仍渲染在屏幕上）
         *vis = if state.visible {
             Visibility::Visible
         } else {

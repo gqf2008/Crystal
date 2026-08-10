@@ -722,7 +722,7 @@ fn guild_ui_system(
     mut guild: ResMut<GuildState>,
     net: Res<NetConnection>,
     mut input: ResMut<crate::game::dialogs::text_input::TextInputState>,
-    create_btn: Query<&UiButton, With<GuildCreateBtn>>,
+    mut create_btns: Query<(&UiButton, &mut Visibility), With<GuildCreateBtn>>,
     invite_btn: Query<&UiButton, With<GuildInviteBtn>>,
     kick_btn: Query<&UiButton, With<GuildKickBtn>>,
     notice_btn: Query<&UiButton, With<GuildNoticeBtn>>,
@@ -750,6 +750,14 @@ fn guild_ui_system(
             // #89 成员列表行数（滚动夹紧）
             sl.set_total(if guild.in_guild { guild.visible_member_indices().len() } else { 0 });
         }
+    }
+    // 创建行会按钮：仅对话框打开且未入会时显示（此前完全没管理显隐，一直残留屏幕）
+    for (_, mut vis) in &mut create_btns {
+        *vis = if open && !guild.in_guild {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
     }
     if !open {
         *requested = false;
@@ -849,7 +857,7 @@ fn guild_ui_system(
         }
     }
     // 创建按钮 → GuildNameReturn（原版 C#：输入行会名 → 创建）
-    for btn in &create_btn {
+    for (btn, _) in &create_btns {
         if btn.clicked {
             let name = input.texts.get(0).cloned().unwrap_or_default();
             let name = name.trim().to_string();

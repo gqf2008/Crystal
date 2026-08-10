@@ -2565,6 +2565,10 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                 if item.info.as_ref().map(|i| i.item_type) == Some(ItemType::Book) {
                                                     let spell = item.info.as_ref().map(|i| i.shape).unwrap_or(0) as u8;
                                                     if !mock_learned_magics.iter().any(|m| m.spell as u8 == spell) {
+                                                        // 自动绑定到第一个空 F 键（1..=8），否则技能栏只有空框
+                                                        let next_key = (1u8..=8)
+                                                            .find(|k| !mock_learned_magics.iter().any(|m| m.key == *k))
+                                                            .unwrap_or(0);
                                                         let cm = ClientMagic {
                                                             name: format!("技能#{}", spell),
                                                             spell: mir2_shared::enums::Spell::try_from(spell).unwrap_or(Spell::None),
@@ -2578,7 +2582,7 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                                             need2: 0,
                                                             need3: 0,
                                                             level: 0,
-                                                            key: 0,
+                                                            key: next_key,
                                                             experience: 0,
                                                             delay: 0,
                                                             range: 1,
