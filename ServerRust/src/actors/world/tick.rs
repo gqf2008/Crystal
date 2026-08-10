@@ -546,6 +546,22 @@ fn monster_melee_defence_type(name: &str) -> mir2_shared::enums::DefenceType {
     }
 }
 
+/// #1850：死亡回调爆炸防御类型（C# CompleteDeath/ExplosionDie/Die 的 DefenceType）
+/// 未收录默认 ACAgility（C# 多数死亡爆炸：WoodBox/BombSpider/Hugger/HoodedSummonerScrolls）。
+fn death_explosion_defence_type(name: &str) -> mir2_shared::enums::DefenceType {
+    use mir2_shared::enums::DefenceType;
+    let n = name.to_ascii_lowercase();
+    if matches!(n.as_str(), "charmedsnake" | "vampirespider") {
+        DefenceType::MacAgility
+    } else if matches!(n.as_str(), "snowwolfking") {
+        DefenceType::Mac
+    } else if matches!(n.as_str(), "humanassassin") {
+        DefenceType::Ac
+    } else {
+        DefenceType::AcAgility
+    }
+}
+
 /// C# Functions.InRange：切比雪夫距离（Abs(dx)<=range && Abs(dy)<=range）
 fn in_range(ax: i32, ay: i32, bx: i32, by: i32, range: i32) -> bool {
     (ax - bx).abs().max((ay - by).abs()) <= range
@@ -1606,16 +1622,48 @@ impl WorldActor {
                 mir2_shared::enums::ServerPacketIds::ObjectAttack as i16, &attack_body);
             // #1649：怪物生成/动画广播只发同图玩家（C# CurrentMap.Broadcast）
             broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &attack_packet).await;
-            // 对范围内玩家造成伤害
+            // 对范围内玩家造成伤害（#1850：对齐 C# Attacked——命中/护甲/反伤/Miss 反馈）
+            let death_stats = monster.to_combat_stats();
+            let death_level = monster.level;
+            let death_def = death_explosion_defence_type(&monster.name);
             for (sid, px, py, _, _, _, pmap, _, _) in player_positions {
                 if *pmap != monster.map_index { continue; }
                 if !hit_cells.contains(&(*px, *py)) { continue; }
                 if let Some(record) = self.players.get(sid) {
+                    let mut is_critical = false;
+                    let actual = if let Ok(Some(defender)) = record.actor_ref.ask(GetPlayerState).await {
+                        let (actual, reflected, is_miss, crit) = resolve_monster_vs_player(
+                            &death_stats, death_level, &defender, damage, death_def,
+                        );
+                        is_critical = crit;
+                        if reflected > 0 {
+                            if let Some(m) = self.monsters.get_mut(&attacker_oid) {
+                                m.take_damage(reflected);
+                                m.provoked = true;
+                            }
+                        }
+                        if is_miss {
+                            broadcast_miss_feedback(
+                                &self.players, &self.gate_ref, monster.map_index, *sid, defender.object_id,
+                            ).await;
+                            0
+                        } else {
+                            actual
+                        }
+                    } else { damage };
                     let _ = record.actor_ref.ask(crate::actors::player::TakeDamage {
                         attacker_id: attacker_oid,
                         attacker_session: *sid,
-                        damage,
+                        damage: actual,
                     }).await;
+                    // 同图其他玩家看受击/飘字（C# Attacked → BroadcastDamageIndicator）
+                    if let Ok(Some(victim)) = record.actor_ref.ask(GetPlayerState).await {
+                        broadcast_hit_feedback(
+                            &self.players, &self.gate_ref, monster.map_index, *sid,
+                            victim.object_id, victim.x, victim.y, victim.direction,
+                            attacker_oid, actual, if is_critical { 5 } else { 0 },
+                        ).await;
+                    }
                 }
             }
         }
@@ -6659,6 +6707,20 @@ mod tests {
         assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::DAZED, 5, 0, 1000)], 0), (false, true));
         // SLOW 不阻塞
         assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::SLOW, 5, 0, 1000)], 0), (false, false));
+    }
+
+    /// #1850：死亡爆炸防御类型映射（C# CompleteDeath/ExplosionDie 的 DefenceType）
+    #[test]
+    fn test_death_explosion_defence_type_mapping() {
+        use mir2_shared::enums::DefenceType;
+        assert_eq!(super::death_explosion_defence_type("HumanAssassin"), DefenceType::Ac);
+        assert_eq!(super::death_explosion_defence_type("CharmedSnake"), DefenceType::MacAgility);
+        assert_eq!(super::death_explosion_defence_type("VampireSpider"), DefenceType::MacAgility);
+        assert_eq!(super::death_explosion_defence_type("SnowWolfKing"), DefenceType::Mac);
+        assert_eq!(super::death_explosion_defence_type("WoodBox"), DefenceType::AcAgility);
+        assert_eq!(super::death_explosion_defence_type("BombSpider"), DefenceType::AcAgility);
+        assert_eq!(super::death_explosion_defence_type("HoodedSummonerScrolls"), DefenceType::AcAgility);
+        assert_eq!(super::death_explosion_defence_type(""), DefenceType::AcAgility);
     }
 
     /// #1790：ObjectDied.Type 映射（C#：HumanAssassin=2 / Sep*·HumanWizard 有主=1 / 其余 0）
