@@ -1552,6 +1552,18 @@ impl Message<ChatRequest> for WorldActor {
             return;
         }
 
+        // #1659：普通聊天限流（防刷屏广播；喊话另有 10s 冷却）
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        if let Some(last) = self.last_chat_ms.get(&msg.session_id) {
+            if now_ms - *last < 200 {
+                return;
+            }
+        }
+        self.last_chat_ms.insert(msg.session_id, now_ms);
+
         // C#：! 前缀喊话（HasMapShout/HasServerShout 卷轴 + 8 级门槛 + 10 秒冷却）
         if let Some(shout_msg) = message.strip_prefix('!') {
             let shout_msg = shout_msg.trim();

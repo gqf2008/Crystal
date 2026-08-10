@@ -1061,6 +1061,8 @@ pub struct WorldActor {
     pub(crate) last_turn_ms: std::collections::HashMap<u64, i64>,
     /// #1657：每个玩家上次采集时间（ms，C# Mining ActionTime=550ms）
     pub(crate) last_harvest_ms: std::collections::HashMap<u64, i64>,
+    /// #1659：每个玩家上次聊天时间（ms，防刷屏广播）
+    pub(crate) last_chat_ms: std::collections::HashMap<u64, i64>,
     /// #1269：每个玩家上次攻击时间（ms；C# AttackTime = Envir.Time + AttackSpeed）
     pub(crate) player_last_attack_ms: std::collections::HashMap<u64, i64>,
     /// #1578：攻击/施法后的下线阻止截止（C# HumanObject.LogTime = Envir.Time + Globals.LogDelay）
@@ -1325,6 +1327,7 @@ impl WorldActor {
             last_move_time: std::collections::HashMap::new(),
         last_turn_ms: std::collections::HashMap::new(),
         last_harvest_ms: std::collections::HashMap::new(),
+        last_chat_ms: std::collections::HashMap::new(),
             player_last_attack_ms: std::collections::HashMap::new(),
             player_logout_block_ms: std::collections::HashMap::new(),
             current_light: Self::light_for_hour(chrono::Local::now().hour()),
@@ -4270,6 +4273,7 @@ impl Actor for WorldActor {
             last_move_time: std::collections::HashMap::new(),
         last_turn_ms: std::collections::HashMap::new(),
         last_harvest_ms: std::collections::HashMap::new(),
+        last_chat_ms: std::collections::HashMap::new(),
             player_last_attack_ms: std::collections::HashMap::new(),
             player_logout_block_ms: std::collections::HashMap::new(),
             current_light: Self::light_for_hour(chrono::Local::now().hour()),
