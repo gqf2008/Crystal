@@ -487,6 +487,14 @@ pub fn build_ranged_attack(
     }
 }
 
+/// #1602：C# AttackTime = User.AttackSpeed（ServerRust #1506 公式）——
+/// max(550, 1400 - (AttackSpeed*60 + min(370, Lv*14))) ms，返回秒。
+/// 弓手远程再加 200ms（C# PlayerObject.cs:1574 AttackRange1）。
+pub fn attack_interval_secs(attack_speed_stat: i32, level: u16) -> f32 {
+    let ms = 1400 - (attack_speed_stat * 60 + (level as i32 * 14).min(370));
+    ms.max(550) as f32 / 1000.0
+}
+
 /// 自动攻击（目标存在且存活时循环攻击）
 /// #1554：对齐 C# 攻击距离（GameScene.CheckInput）：
 ///   - 近战：InRange(目标, 玩家, 1) 才 Attack1（GameScene.cs:11502）
@@ -502,6 +510,7 @@ fn auto_attack_system(
     players: Query<&Transform, (With<LocalPlayer>, With<NetObjectId>)>,
     actors: Query<(&NetObjectId, &Transform)>,
     hud: Res<HudState>,
+    character_state: Res<crate::game::dialogs::character::CharacterState>,
     mut chat: ResMut<crate::game::chat::ChatState>,
     // C# OutputDelay=1000ms：范围外提示节流
     mut too_far_timer: Local<f32>,
@@ -526,6 +535,9 @@ fn auto_attack_system(
     );
     let is_archer = attack_kind == PlayerAttackKind::Ranged;
     let max_range = if is_archer { 9 } else { 1 };
+    // #1602：C# AttackTime = User.AttackSpeed（弓手远程 +200ms）——按攻速/等级动态计算
+    control.attack_interval = attack_interval_secs(character_state.attack_speed, character_state.level)
+        + if is_archer { 0.2 } else { 0.0 };
     let p_tile = world_to_tile(player_tf.translation.x, player_tf.translation.y);
     let t_tile = world_to_tile(target_tf.translation.x, target_tf.translation.y);
     let in_range = (t_tile.0 - p_tile.0).abs() <= max_range
@@ -1089,6 +1101,19 @@ mod tests {
         assert!(in_range((0,0), (9,0), 9));
         assert!(in_range((0,0), (5,5), 9));
         assert!(!in_range((0,0), (10,0), 9));
+    }
+
+    #[test]
+    fn test_attack_interval_secs_matches_server_formula() {
+        // #1602：ServerRust #1506 AttackTime = max(550, 1400 - (stat*60 + min(370, lv*14))) ms
+        // 攻速 0 等级 1 → 1400-14=1386ms
+        assert!((attack_interval_secs(0, 1) - 1.386).abs() < 0.001);
+        // 高攻速（stat=10, lv=40 → 600+370=970 → 430 → 钳到 550ms）
+        assert_eq!(attack_interval_secs(10, 40), 0.55);
+        // 攻速 5 等级 20 → 300+280=580 → 820ms
+        assert!((attack_interval_secs(5, 20) - 0.82).abs() < 0.001);
+        // 下限
+        assert_eq!(attack_interval_secs(100, 100), 0.55);
     }
 
     #[test]
