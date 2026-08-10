@@ -28,8 +28,8 @@ pub enum CombatEvent {
     SpellCast { object_id: u32 },
     /// #224 对象远程攻击（S.ObjectRangeAttack）：施法者播 AttackRange 动作
     RangeAttack { object_id: u32 },
-    /// #234 对象近战攻击（S.ObjectAttack）：施法者播 Attack1 动作
-    Attack { object_id: u32, direction: u8 },
+    /// #234/#1624 对象近战攻击（S.ObjectAttack）：施法者按 attack_type 播 Attack1-5 动作
+    Attack { object_id: u32, direction: u8, attack_type: u8 },
     /// #238 对象蓝量（S.ObjectMana）
     ObjectMana { object_id: u32, percent: u8 },
     /// #246 采集（S.ObjectHarvest/ObjectHarvested）：目标播 Harvest 动作
@@ -208,23 +208,13 @@ fn apply_combat_events(
                 if let Some(sound_id) = struck_sound {
                     crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
                 }
-                for (e, id, mut anim, mon, appr) in &mut actors {
+                for (e, id, mut anim, _mon, _appr) in &mut actors {
                     if id.0 == *object_id {
                         anim.action = mir2_shared::enums::MirAction::Attack1;
                         anim.direction = *direction;
                         anim.frame_index = 0;
                         commands.entity(e).insert(StruckTimer(0.6));
-                        // #1570：怪物攻击音（C# PlayAttackSound → BaseSound+1；玩家/NPC 不播）
-                        if mon.is_some() {
-                            if let Some(appr) = appr {
-                                crate::game::sound::play_sound(
-                                    &mut commands,
-                                    &mut audio_assets,
-                                    &sound_bank,
-                                    crate::game::sound::monster_attack_sound(appr.monster_type),
-                                );
-                            }
-                        }
+                        // 注：怪物攻击音由 Attack 事件（#1624）在动作起始播放，此处不播
                         break;
                     }
                 }
@@ -341,15 +331,51 @@ fn apply_combat_events(
             CombatEvent::Attack {
                 object_id,
                 direction,
+                attack_type,
             } => {
-                // #234：其他对象近战攻击 → Attack1 动作（玩家/怪物通用帧表）
-                tracing::debug!("⚔️ [ATTACK] 处理攻击 id={}", object_id);
-                for (e, id, mut anim, _mon, _appr) in &mut actors {
+                // #234：对象近战攻击（玩家固定 Attack1；怪物按 attack_type 0-4 → Attack1-5，C# GameScene.cs:3347）
+                tracing::debug!("⚔️ [ATTACK] 处理攻击 id={} type={}", object_id, attack_type);
+                let action = match attack_type {
+                    1 => mir2_shared::enums::MirAction::Attack2,
+                    2 => mir2_shared::enums::MirAction::Attack3,
+                    3 => mir2_shared::enums::MirAction::Attack4,
+                    4 => mir2_shared::enums::MirAction::Attack5,
+                    _ => mir2_shared::enums::MirAction::Attack1,
+                };
+                for (e, id, mut anim, mon, appr) in &mut actors {
                     if id.0 == *object_id {
-                        anim.action = mir2_shared::enums::MirAction::Attack1;
+                        anim.action = if mon.is_some() { action } else { mir2_shared::enums::MirAction::Attack1 };
                         anim.direction = *direction;
                         anim.frame_index = 0;
                         commands.entity(e).insert(StruckTimer(0.6));
+                        // #1624：怪物攻击动作起始音（C# SetAction → Play*AttackSound）
+                        if mon.is_some() {
+                            if let Some(appr) = appr {
+                                let sound_id = match action {
+                                    mir2_shared::enums::MirAction::Attack2 => {
+                                        Some(crate::game::sound::monster_second_attack_sound(appr.monster_type))
+                                    }
+                                    mir2_shared::enums::MirAction::Attack3 => {
+                                        crate::game::sound::monster_third_attack_sound(appr.monster_type)
+                                    }
+                                    mir2_shared::enums::MirAction::Attack4 => {
+                                        crate::game::sound::monster_fourth_attack_sound(appr.monster_type)
+                                    }
+                                    mir2_shared::enums::MirAction::Attack5 => {
+                                        Some(crate::game::sound::monster_fifth_attack_sound(appr.monster_type))
+                                    }
+                                    _ => Some(crate::game::sound::monster_attack_sound(appr.monster_type)),
+                                };
+                                if let Some(sound_id) = sound_id {
+                                    crate::game::sound::play_sound(
+                                        &mut commands,
+                                        &mut audio_assets,
+                                        &sound_bank,
+                                        sound_id,
+                                    );
+                                }
+                            }
+                        }
                         break;
                     }
                 }

@@ -14,6 +14,9 @@ use super::spawn::depth_z;
 
 pub(crate) fn advance_actor_animations(
     time: Res<Time>,
+    mut commands: Commands,
+    sound_bank: Res<crate::game::sound::SoundBank>,
+    mut audio_assets: ResMut<Assets<bevy::audio::AudioSource>>,
     mut actors: Query<(
         Option<&ActorAppearance>,
         Option<&MonsterAppearance>,
@@ -29,6 +32,8 @@ pub(crate) fn advance_actor_animations(
         let Some(frame) = actor_frame(player, monster, npc, &anim) else {
             continue;
         };
+        // #1624：挥击音边缘检测（C# MonsterObject.cs:2126 Attack2 第 3 帧 PlaySwingSound）
+        let prev_frame = anim.frame_index;
         let draw_frame = frame.start + (anim.direction as i32) * frame.offset() + anim.frame_index;
         let effect_frame =
             frame.effect_start + (anim.direction as i32) * frame.effect_offset() + anim.frame_index;
@@ -49,6 +54,15 @@ pub(crate) fn advance_actor_animations(
         while anim.elapsed_ms >= interval {
             anim.elapsed_ms -= interval;
             anim.frame_index = (anim.frame_index + 1) % count;
+        }
+
+        // #1624：怪物 Attack2 挥击音——进入第 3 帧时触发一次（C# if (FrameIndex == 3) PlaySwingSound()）
+        if anim.action == MirAction::Attack2 && anim.frame_index == 3 && prev_frame != 3 {
+            if let Some(monster) = monster {
+                if let Some(sound_id) = crate::game::sound::monster_swing_sound(monster.monster_type) {
+                    crate::game::sound::play_sound(&mut commands, &mut audio_assets, &sound_bank, sound_id);
+                }
+            }
         }
 
         for child in children.iter() {
