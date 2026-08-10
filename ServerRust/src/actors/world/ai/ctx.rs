@@ -20,6 +20,8 @@ pub struct PlayerSnap {
     pub pk_points: i32,
     /// #1828：最小攻击力（C# MinDC；DarkCaptain/SnowWolfKing 选更弱目标用）
     pub min_dc: i32,
+    /// #1894：当前毒状态合并位（C# Target.PoisonList；Sep 道士系毒轮换判定用）
+    pub poison_flags: mir2_shared::enums::PoisonType,
 }
 
 /// 怪物快照（供 Boss 互查，如 Healer 治疗友军、Yimoogi 分身聚合）
@@ -325,7 +327,7 @@ mod tests {
     fn snap(id: u64, x: i32, y: i32, hp: i32) -> PlayerSnap {
         PlayerSnap {
             session_id: id, x, y, hp, map_index: 1, object_id: id as u32,
-            level: 30, pk_points: 0, min_dc: 10,
+            level: 30, pk_points: 0, min_dc: 10, poison_flags: mir2_shared::enums::PoisonType::NONE,
         }
     }
 

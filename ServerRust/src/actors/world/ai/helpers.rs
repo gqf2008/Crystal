@@ -285,7 +285,7 @@ mod tests {
         use super::weakest_player_by_dc;
         use crate::actors::world::ai::ctx::PlayerSnap;
         let snap = |id: u64, dc: i32| PlayerSnap {
-            session_id: id, x: 0, y: 0, hp: 100, map_index: 1, object_id: id as u32, level: 30, pk_points: 0, min_dc: dc,
+            session_id: id, x: 0, y: 0, hp: 100, map_index: 1, object_id: id as u32, level: 30, pk_points: 0, min_dc: dc, poison_flags: mir2_shared::enums::PoisonType::NONE,
         };
         assert!(weakest_player_by_dc(&[]).is_none());
         let snaps = [snap(1, 50), snap(2, 20), snap(3, 80)];
