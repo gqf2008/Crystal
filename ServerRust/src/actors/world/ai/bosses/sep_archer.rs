@@ -9,6 +9,8 @@ use crate::actors::world::ai::ctx::AiCtx;
 use crate::actors::world::ai::helpers::*;
 
 const VIEW_RANGE: i32 = 12;
+/// C# AttackRange = 6
+const ATTACK_RANGE: i32 = 6;
 
 pub struct SepArcherBehavior;
 
@@ -27,7 +29,7 @@ impl MonsterBehavior for SepArcherBehavior {
         monster.target_session = Some(target.session_id);
         let dist = max_distance(monster.x, monster.y, target.x, target.y);
 
-        if dist <= VIEW_RANGE && ctx.tick_count >= monster.next_attack_tick {
+        if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
             // C# dist<=2 且 1/3：BackStep
@@ -36,17 +38,36 @@ impl MonsterBehavior for SepArcherBehavior {
                 ctx.out_moves.push((monster.object_id, nx, ny, dir));
                 return;
             }
-            ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
-                attacker_oid: monster.object_id,
-                target_session: target.session_id,
-                target_object_id: target.object_id,
-                damage,
-                spell_id: 0,
-            });
+            // C# 4/5 DoubleShot（两次投射）/ 1/5 StraightShot（一次投射）
+            if fastrand::i32(0..5) > 0 {
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    target_object_id: target.object_id,
+                    damage,
+                    spell_id: 0,
+                });
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    target_object_id: target.object_id,
+                    damage,
+                    spell_id: 1,
+                });
+            } else {
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Range {
+                    attacker_oid: monster.object_id,
+                    target_session: target.session_id,
+                    target_object_id: target.object_id,
+                    damage,
+                    spell_id: 0,
+                });
+            }
             return;
         }
 
-        if ctx.tick_count >= monster.next_move_tick {
+        // C# ProcessTarget：出攻击范围才 MoveTo（不风筝）
+        if dist > ATTACK_RANGE && ctx.tick_count >= monster.next_move_tick {
             let (nx, ny, dir) = step_toward(monster.x, monster.y, target.x, target.y);
             ctx.out_moves.push((monster.object_id, nx, ny, dir));
             monster.next_move_tick = ctx.tick_count + monster.ai_profile.move_interval;

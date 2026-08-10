@@ -48,6 +48,20 @@ impl MonsterBehavior for SepHighAssassinBehavior {
         if dist <= 1 && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
+            // C# ProcessTarget：近战 4/5 Attack / 1/5 RangeAttack（HeavenlySword）
+            if fastrand::i32(0..5) == 0 {
+                let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Line {
+                    attacker_oid: monster.object_id,
+                    origin_x: monster.x,
+                    origin_y: monster.y,
+                    direction: dir,
+                    range: ATTACK_RANGE,
+                    damage,
+                    spell_id: 0,
+                });
+                return;
+            }
             if fastrand::i32(0..5) == 0 {
                 // C# CrescentSlash：8 向新月斩（排除背向 3 方向），命中距离 1-2 全额伤害
                 let facing = direction_towards(monster.x, monster.y, target.x, target.y) as usize % 8;
@@ -83,7 +97,8 @@ impl MonsterBehavior for SepHighAssassinBehavior {
             return;
         }
 
-        if dist <= VIEW_RANGE && ctx.tick_count >= monster.next_attack_tick {
+        // C# ProcessTarget：追击中（出近战范围）1/5 RangeAttack（HeavenlySword）
+        if dist <= VIEW_RANGE && ctx.tick_count >= monster.next_attack_tick && fastrand::i32(0..5) == 0 {
             // C# RangeAttack：HeavenlySword 直线 LineAttack(3)
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
