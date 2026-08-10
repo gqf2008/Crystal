@@ -160,7 +160,7 @@ fn player_menu_ui_system(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,
-    mut options: Query<(&mut Transform, &mut UiButton, &PlayerMenuOption)>,
+    mut options: Query<(&mut Transform, &mut UiButton, &mut Visibility, &PlayerMenuOption)>,
     mut widgets: Query<(&mut Transform, &mut Visibility), (With<PlayerMenuWidget>, Without<PlayerMenuOption>)>,
 ) {
     // ESC 关闭（#146）
@@ -185,9 +185,19 @@ fn player_menu_ui_system(
             tf.translation.y = -state.y;
         }
     }
-    // 选项定位（跟随面板）
+    // 选项定位（跟随面板）；菜单未打开时必须隐藏并移出屏幕，
+    // 否则 7 个菜单文字会一直显示在左上角 (8,6..126)（用户看到的“交易/组队/私聊...”）
+    // 且按钮 rect 留在 (0,0) 附近可被误点击
     let mut idx = 0usize;
-    for (mut tf, mut btn, _) in &mut options {
+    for (mut tf, mut btn, mut vis, _) in &mut options {
+        if !state.visible {
+            *vis = Visibility::Hidden;
+            tf.translation.x = -999.0;
+            tf.translation.y = -999.0;
+            btn.rect = (-999.0, -999.0, 90.0, 18.0);
+            continue;
+        }
+        *vis = Visibility::Visible;
         let oy = state.y + 6.0 + idx as f32 * 20.0;
         tf.translation.x = state.x + 8.0;
         tf.translation.y = -oy;
@@ -198,7 +208,7 @@ fn player_menu_ui_system(
         return;
     }
     // 选项点击
-    for (_, btn, action) in &options {
+    for (_, btn, _vis, action) in &options {
         if !btn.clicked {
             continue;
         }
