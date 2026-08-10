@@ -2404,6 +2404,19 @@ impl WorldActor {
         map_index: u16,
         killed_by_player: bool,
     ) {
+        // #1755：C# Die（:624）UnSummonIntelligentCreature——玩家死亡解散其召唤物（同图广播 ObjectRemove）
+        let pet_ids: Vec<u32> = self.monsters.iter()
+            .filter(|(_, m)| m.master_session == Some(session_id))
+            .map(|(id, _)| *id)
+            .collect();
+        for pid in pet_ids {
+            if let Some(m) = self.monsters.remove(&pid) {
+                let remove_packet = Self::build_object_remove_packet(pid);
+                broadcast_to_map(&self.gate_ref, &self.players, m.map_index, &remove_packet).await;
+                debug!("Player {} died: pet #{} despawned", session_id, pid);
+            }
+        }
+
         // C# DeathDrop：NoDropPlayer 地图直接返回；安全区也不掉落（保留现有保护）
         if self.map_infos.get(&(map_index as i32)).map(|m| m.no_drop_player).unwrap_or(false) {
             return;
@@ -7988,6 +8001,7 @@ impl Message<GmGotoRequest> for WorldActor {
         send_system_message(&self.gate_ref, msg.session_id, &format!("已传送到 {} 身边", name));
     }
 }
+
 
 
 
