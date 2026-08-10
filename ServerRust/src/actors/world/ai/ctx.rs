@@ -148,6 +148,8 @@ pub struct AiCtx<'a> {
     pub monster_index: i32,
     /// 地图尺寸 (宽, 高)，用于全图随机传送等（缺省 200×200）
     pub map_size: (i32, i32),
+    /// #1834：地图可行走判定（越界返回 false，对应 C# ValidPoint/walkable）
+    pub is_walkable: &'a dyn Fn(i32, i32) -> bool,
     /// 龙系统当前等级（0=未激活；EvilMir DragonLink 攻击加成用）
     pub dragon_level: u8,
     /// 玩家快照（全图，behavior 自行按距离/map 过滤）

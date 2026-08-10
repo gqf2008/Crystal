@@ -1501,13 +1501,16 @@ impl WorldActor {
                 }).collect();
             let die_monster_name_map: std::collections::HashMap<i32, String> =
                 self.monster_infos.iter().map(|(k, v)| (*k, v.name.clone())).collect();
+            let map_ref = self.maps.get(&monster.map_index);
+            let is_walkable = move |x: i32, y: i32| map_ref.map(|m| m.is_walkable(x, y)).unwrap_or(false);
             let mut ctx = AiCtx {
                 tick_count: self.tick_count,
                 monster_oid: monster.object_id,
                 monster_index: monster.monster_index,
-                map_size: self.maps.get(&monster.map_index)
+                map_size: map_ref
                     .map(|m| (m.width as i32, m.height as i32))
                     .unwrap_or((200, 200)),
+                is_walkable: &is_walkable,
                 dragon_level: 0,
                 players: &die_player_snaps,
                 monsters: &[],
@@ -4357,12 +4360,15 @@ impl Message<Tick> for WorldActor {
                             object_id: *oid, x: *x, y: *y, hp: *hp, max_hp: *max_hp,
                             map_index: *map, monster_index: *idx,
                         }).collect();
+                    let map_ref = self.maps.get(&monster.map_index);
+                    let is_walkable = move |x: i32, y: i32| map_ref.map(|m| m.is_walkable(x, y)).unwrap_or(false);
                     let mut ctx = ai::AiCtx {
                         tick_count: self.tick_count,
                         monster_oid, monster_index,
-                        map_size: self.maps.get(&monster.map_index)
+                        map_size: map_ref
                             .map(|m| (m.width as i32, m.height as i32))
                             .unwrap_or((200, 200)),
+                        is_walkable: &is_walkable,
                         dragon_level: self.dragon_state.as_ref().map(|d| d.level).unwrap_or(0),
                         players: &player_snaps,
                         monsters: &monster_snaps,
