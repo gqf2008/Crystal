@@ -63,6 +63,8 @@ impl MonsterBehavior for VampireSpiderBehavior {
                 if let Some(master) = monster.master_session {
                     let heal = ((damage as f32 * (ctx.pet_level as f32 + 1.0) * 0.25) as i32).max(1);
                     ctx.out_player_heals.push((master, heal));
+                    // C# MasterVampire（VampireSpider.cs:184）：对被击目标广播 Bleeding
+                    ctx.out_effects.push((target.object_id, mir2_shared::enums::SpellEffect::Bleeding, 0, 0));
                 }
             }
             return;
@@ -93,9 +95,15 @@ impl MonsterBehavior for VampireSpiderBehavior {
         // C# MasterVampire：每个命中目标给主人回血 value*(PetLevel+1)*0.25
         if let Some(master) = monster.master_session {
             let per = ((damage as f32 * (ctx.pet_level as f32 + 1.0) * 0.25) as i32).max(1);
-            let hits = ctx.find_targets_in_range(monster.x, monster.y, EXPLOSION_RADIUS, monster.map_index).len() as i32;
-            if hits > 0 {
-                ctx.out_player_heals.push((master, per.saturating_mul(hits)));
+            let die_targets: Vec<crate::actors::world::ai::PlayerSnap> =
+                ctx.find_targets_in_range(monster.x, monster.y, EXPLOSION_RADIUS, monster.map_index)
+                    .into_iter().copied().collect();
+            if !die_targets.is_empty() {
+                ctx.out_player_heals.push((master, per.saturating_mul(die_targets.len() as i32)));
+                // C# Die → MasterVampire（VampireSpider.cs:184）：对每个命中目标广播 Bleeding
+                for dt in &die_targets {
+                    ctx.out_effects.push((dt.object_id, mir2_shared::enums::SpellEffect::Bleeding, 0, 0));
+                }
             }
         }
     }

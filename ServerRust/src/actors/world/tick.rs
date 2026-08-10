@@ -1552,7 +1552,7 @@ impl WorldActor {
         let mut die_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
         let mut die_show_hide: Vec<(u32, bool)> = Vec::new();
         let mut die_sit_down: Vec<(u32, i32, i32, u8, bool)> = Vec::new();
-        let mut die_effects: Vec<(u32, mir2_shared::enums::SpellEffect)> = Vec::new();
+        let mut die_effects: Vec<(u32, mir2_shared::enums::SpellEffect, u32, u32)> = Vec::new();
         let mut die_player_purges: Vec<u64> = Vec::new();
         let mut die_player_heals: Vec<(u64, i32)> = Vec::new();
         {
@@ -1610,6 +1610,27 @@ impl WorldActor {
             );
             behavior.on_die(monster, &mut ctx);
             monster.behavior = behavior;
+        }
+        // #1888：死亡回调对象特效广播（C# ObjectEffect，如 VampireSpider 爆炸吸血 Bleeding）
+        for (oid, effect, effect_type, time) in die_effects.drain(..) {
+            // 死亡怪已移出 self.monsters：先匹配当前死亡怪，再按玩家 object_id 反查地图
+            let map_idx = if oid == monster.object_id {
+                monster.map_index
+            } else if let Some(m) = self.monsters.get(&oid) {
+                m.map_index
+            } else {
+                let mut idx = 0u16;
+                for r in self.players.values() {
+                    if let Ok(Some(st)) = r.actor_ref.ask(GetPlayerState).await {
+                        if st.object_id == oid {
+                            idx = st.map_index;
+                            break;
+                        }
+                    }
+                }
+                idx
+            };
+            self.broadcast_object_effect(oid, effect, effect_type, time, map_idx).await;
         }
         // 应用死亡攻击（HumanAssassin 16 方向爆炸 → 半径 2 AOE）
         for atk in &die_attacks {
@@ -4580,7 +4601,7 @@ impl Message<Tick> for WorldActor {
             let mut boss_player_buffs: Vec<(u64, crate::combat::buff::BuffInstance)> = Vec::new();
             let mut boss_show_hide: Vec<(u32, bool)> = Vec::new();
             let mut boss_sit_down: Vec<(u32, i32, i32, u8, bool)> = Vec::new();
-            let mut boss_effects: Vec<(u32, mir2_shared::enums::SpellEffect)> = Vec::new();
+            let mut boss_effects: Vec<(u32, mir2_shared::enums::SpellEffect, u32, u32)> = Vec::new();
             let mut boss_player_purges: Vec<u64> = Vec::new();
             let mut boss_player_heals: Vec<(u64, i32)> = Vec::new();
             // #1441：每个 master 当前存活 slave 数（C# SlaveList.Count；slave_master 预统计）
@@ -5640,7 +5661,7 @@ impl Message<Tick> for WorldActor {
                 self.broadcast_object_sit_down(oid, sx, sy, sdir, sitting).await;
             }
             // #1364：Boss 对象特效广播（C# ObjectEffect，如 DeathCrawlerBreath 吐息毒）
-            for (oid, effect) in boss_effects.drain(..) {
+            for (oid, effect, effect_type, time) in boss_effects.drain(..) {
                 // #1886：目标可能是玩家（C# Target.Broadcast，ObjectID=Target）；怪物表查不到时按玩家 object_id 反查地图
                 let map_idx = if let Some(m) = self.monsters.get(&oid) {
                     m.map_index
@@ -5656,7 +5677,7 @@ impl Message<Tick> for WorldActor {
                     }
                     idx
                 };
-                self.broadcast_object_effect(oid, effect, map_idx).await;
+                self.broadcast_object_effect(oid, effect, effect_type, time, map_idx).await;
             }
             // #1391：净化玩家毒（C# PowerBead Effect==1 → PlayerActor.PurifyPoisons）
             for sid in boss_player_purges.drain(..) {

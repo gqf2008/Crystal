@@ -51,7 +51,7 @@ impl MonsterBehavior for RedMoonEvilBehavior {
             });
             // C# Attack（RedMoonEvil.cs:61）：对每个目标广播 RedMoonEvil 特效
             for t in targets.iter() {
-                ctx.out_effects.push((t.object_id, mir2_shared::enums::SpellEffect::RedMoonEvil));
+                ctx.out_effects.push((t.object_id, mir2_shared::enums::SpellEffect::RedMoonEvil, 0, 0));
             }
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
         }

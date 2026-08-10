@@ -83,23 +83,30 @@ impl MonsterBehavior for KingGuardBehavior {
                         });
                     }
                 } else {
-                    // 重击 MC*2 + AOE(AttackRange) Slow/Paralysis
+                    // 重击 MC*2 + AOE(AttackRange) Slow + KingGuard 特效
                     let damage = crate::combat::attack::get_attack_power(monster.min_mac, monster.max_mac * 2, 0).max(1);
+                    // C# CompleteRangeAttack FindAllTargets(AttackRange, CurrentLocation)：AOE 以怪物自身为中心
                     ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
                         attacker_oid: monster.object_id,
-                        center_x: target.x,
-                        center_y: target.y,
+                        center_x: monster.x,
+                        center_y: monster.y,
                         radius: ATTACK_RANGE,
                         damage,
                         spell_id: 0,
                     });
-                    // C# PoisonTarget Slow/Paralysis（分支恒真，用 Slow 近似）
-                    // C# PoisonTarget(5,10,Slow,1000)：1/5
-                    if fastrand::i32(0..5) == 0 {
-                        ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
-                            session_id: target.session_id,
-                            poison: Poison::new(PoisonType::SLOW, 10, 0, 1000),
-                        });
+                    // C# KingGuard.cs:135-144：Random(3)>=0 恒真 → EffectType=0 + Slow；EffectType=1 + Paralysis 为死代码
+                    let aoe_targets: Vec<crate::actors::world::ai::PlayerSnap> =
+                        ctx.find_targets_in_range(monster.x, monster.y, ATTACK_RANGE, monster.map_index)
+                            .into_iter().copied().collect();
+                    for gt in aoe_targets {
+                        ctx.out_effects.push((gt.object_id, mir2_shared::enums::SpellEffect::KingGuard, 0, 0));
+                        // C# PoisonTarget(5,10,Slow,1000)：1/5
+                        if fastrand::i32(0..5) == 0 {
+                            ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                                session_id: gt.session_id,
+                                poison: Poison::new(PoisonType::SLOW, 10, 0, 1000),
+                            });
+                        }
                     }
                 }
             }
