@@ -548,6 +548,11 @@ enum OwnerShieldKind {
     UltimateEnhancer,
 }
 
+/// #1794：C# HeroObject.PercentMana = MP / MaxMP * 100（上限 100）
+fn hero_mana_percent(mp: i32, max_mp: i32) -> u8 {
+    (mp.max(0) * 100 / max_mp.max(1)).min(100) as u8
+}
+
 /// 英雄 AI 运行时状态（每个出战英雄一个实例）
 #[derive(Clone)]
 pub struct HeroCombatAI {
@@ -1962,6 +1967,24 @@ impl WorldActor {
                             }
                         }
                     }
+                }
+                // #1794：英雄头顶蓝条（C# HeroObject.BroadcastManaChange → Owner.Enqueue(S.ObjectMana)）
+                let max_mp = self.hero_ai_states.get(&snap.session_id).map(|ai| ai.max_mp).unwrap_or(mp);
+                let omana = mir2_shared::packets::server::object::ObjectMana {
+                    object_id: hero_oid,
+                    percent: hero_mana_percent(mp, max_mp),
+                };
+                let mut omana_body = Vec::new();
+                if omana.write_body(&mut omana_body).is_ok() {
+                    let data = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectMana as i16,
+                        &omana_body,
+                    );
+                    // C# 只发主人（Owner.Enqueue）
+                    let _ = self.gate_ref.tell(SendToClient {
+                        session_id: snap.session_id,
+                        data,
+                    }).await;
                 }
             }
             debug!("Hero HP changed: session={} hp={}", snap.session_id, hp);
@@ -3983,6 +4006,16 @@ mod tests {
             );
         }
     }
+    /// #1794：英雄蓝条百分比 = MP/MaxMP*100（上限 100，C# PercentMana）
+    #[test]
+    fn test_hero_mana_percent() {
+        assert_eq!(hero_mana_percent(50, 100), 50);
+        assert_eq!(hero_mana_percent(0, 100), 0);
+        assert_eq!(hero_mana_percent(150, 100), 100); // 上限 100
+        assert_eq!(hero_mana_percent(-5, 100), 0);
+        assert_eq!(hero_mana_percent(10, 0), 100); // max 兜底 1
+    }
+
 }
 
 
