@@ -559,6 +559,20 @@ struct AutoWalkDiag {
 /// 对角线移动方向稳定性验证（#1145）：
 /// 进图 8s 后从玩家位置向 +20/+15 对角寻路，插入真实 LocalMove；
 /// 记录每步 anim.direction 变化，结束时打印序列（应稳定无来回跳）。
+/// #1821：方向序列判定——空序列必须显式报错（假绿防护），不允许“✅ 稳定 []”
+fn diagwalk_verdict(seq: &[u8]) -> &'static str {
+    if seq.is_empty() {
+        "❌ 未采集到方向（路径未走/被立即清空）"
+    } else if seq
+        .windows(2)
+        .any(|w| (w[1] as i32 - w[0] as i32).rem_euclid(8) == 4)
+    {
+        "❌ 抖动"
+    } else {
+        "✅ 稳定"
+    }
+}
+
 fn auto_walk_diag_system(
     mut t: Local<f32>,
     mut state: ResMut<AutoWalkDiag>,
@@ -583,15 +597,13 @@ fn auto_walk_diag_system(
         if *t < 8.0 {
             return;
         }
-        tracing::info!("[DIAGWALK] 开始（t={} map={}）", *t, game_data.map.is_some());
         let Ok((pe, ptf, mut anim, _)) = players.single_mut() else {
-            tracing::warn!("[DIAGWALK] ❌ 本地玩家查询失败");
-            return;
+            return; // 玩家未就绪时静默等待（#1821：不再每帧刷“查询失败”）
         };
         let Some(map) = &game_data.map else {
-            tracing::warn!("[DIAGWALK] ❌ 地图未就绪");
-            return;
+            return; // 地图未就绪时静默等待
         };
+        tracing::info!("[DIAGWALK] 开始（t={} map=true 玩家 @ {},{}）", *t, ptf.translation.x, ptf.translation.y);
         let from = world_to_tile(ptf.translation.x, ptf.translation.y);
         let to = (from.0 + 20, from.1 + 15); // 纯 45° 对角
         if let Some(p) = client_bevy::game::pathfinding::find_path(map, from, to) {
@@ -625,11 +637,11 @@ fn auto_walk_diag_system(
     if lm.path.is_empty() && anim.action == mir2_shared::enums::MirAction::Standing {
         // 结束：输出方向序列 + 抖动检查（相邻方向差 4 = 反向抖动）
         let seq = std::mem::take(&mut state.seq);
+        let verdict = diagwalk_verdict(&seq);
         let jitter = seq.windows(2).filter(|w| {
             let d = (w[1] as i32 - w[0] as i32).rem_euclid(8);
             d == 4
         }).count();
-        let verdict = if jitter == 0 { "✅ 稳定" } else { "❌ 抖动" };
         tracing::info!("[DIAGWALK] {} 方向序列 {:?}（反向抖动 {} 次）", verdict, seq, jitter);
         state.started = false;
         return;
@@ -852,3 +864,26 @@ fn ui_dump_system(
     tracing::info!("=== UI_DUMP end count={} ===", q.iter().count());
 }
 
+#[cfg(test)]
+mod tests {
+    use super::diagwalk_verdict;
+
+    #[test]
+    fn test_diagwalk_verdict_empty_seq_not_green() {
+        // #1821：空序列 = 未采集到方向，必须显式报错，不许假绿
+        assert!(diagwalk_verdict(&[]).contains("❌"));
+        assert!(diagwalk_verdict(&[]).contains("未采集"));
+    }
+
+    #[test]
+    fn test_diagwalk_verdict_stable_and_jitter() {
+        // 单一方向 → 稳定
+        assert_eq!(diagwalk_verdict(&[1]), "✅ 稳定");
+        assert_eq!(diagwalk_verdict(&[1, 1, 1]), "✅ 稳定");
+        // 相邻方向（差 1）→ 稳定（允许转向）
+        assert_eq!(diagwalk_verdict(&[1, 2]), "✅ 稳定");
+        // 反向抖动（差 4）→ 抖动
+        assert_eq!(diagwalk_verdict(&[1, 5]), "❌ 抖动");
+        assert_eq!(diagwalk_verdict(&[1, 2, 6]), "❌ 抖动");
+    }
+}
