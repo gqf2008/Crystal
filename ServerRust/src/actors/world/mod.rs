@@ -5277,6 +5277,23 @@ impl WorldActor {
         0
     }
 
+    /// #1792：C# ObjectTeleportOut/In.Type（effectnumber）——各怪传送特效编号
+    pub(crate) fn monster_teleport_type(name: &str) -> u8 {
+        match name.to_ascii_lowercase().as_str() {
+            "yimoogi" => 1,
+            "redfoxman" => 2,
+            "mutatedmanworm" => 4,
+            "witchdoctor" => 5,
+            "turtleking" => 6,
+            "mandrill" => 7,
+            "darkcaptain" => 8,
+            "doe" => 9,
+            "hornedcommander" => 10,
+            "snowwolfking" => 11,
+            _ => 0,
+        }
+    }
+
     /// 构建 ObjectDied 数据包（death_type 见 monster_death_type）
     pub(crate) fn build_object_died_packet(object_id: u32, x: i32, y: i32, direction: u8, death_type: u8) -> Vec<u8> {
         let mut body = Vec::with_capacity(14);

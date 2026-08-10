@@ -405,10 +405,10 @@ pub enum ServerEvent {
         y: i32,
         direction: u8,
     },
-    /// #226 ObjectTeleportOut：对象传送消失
-    ObjectTeleportOut { object_id: u32 },
-    /// #226 ObjectTeleportIn：对象传送出现
-    ObjectTeleportIn { object_id: u32 },
+    /// #226 ObjectTeleportOut：对象传送消失（Rust 扩展带旧位置）
+    ObjectTeleportOut { object_id: u32, location_x: u32, location_y: u32 },
+    /// #226 ObjectTeleportIn：对象传送出现（Rust 扩展带新位置）
+    ObjectTeleportIn { object_id: u32, location_x: u32, location_y: u32 },
     /// NewMagic：学会技能
     MagicLearned { magic: ClientMagic },
     /// NewMagic(hero=true)：英雄学会技能（#1128）

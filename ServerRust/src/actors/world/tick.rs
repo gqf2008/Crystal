@@ -5320,16 +5320,43 @@ impl Message<Tick> for WorldActor {
                     moved_monsters.push((oid, nx, ny, dir));
                 }
             }
-            // Boss 怪物自传送（C# TeleportRandom/Teleport：RedFoxman/WhiteFoxman 等）
+            // Boss 怪物自传送（C# MonsterObject.Teleport：ObjectTeleportOut → 更新位置 → ObjectTeleportIn）
             for (oid, tx, ty) in boss_monster_teleports.drain(..) {
-                let map_idx = self.monsters.get(&oid).map(|m| m.map_index).unwrap_or(0);
+                let (old_x, old_y, map_idx, dir) = self.monsters.get(&oid)
+                    .map(|m| (m.x, m.y, m.map_index, m.direction))
+                    .unwrap_or((0, 0, 0, 0));
                 let walkable = self.maps.get(&map_idx)
                     .map(|m| m.is_walkable(tx, ty))
                     .unwrap_or(false);
-                if walkable {
-                    let dir = self.monsters.get(&oid).map(|m| m.direction).unwrap_or(0);
-                    moved_monsters.push((oid, tx, ty, dir));
+                if !walkable {
+                    continue;
                 }
+                let name = self.monsters.get(&oid).map(|m| m.name.as_str()).unwrap_or("");
+                let ttype = Self::monster_teleport_type(name);
+                // ObjectTeleportOut（旧位置）
+                let mut out_body = Vec::new();
+                out_body.extend_from_slice(&oid.to_le_bytes());
+                out_body.push(ttype);
+                out_body.extend_from_slice(&(old_x as u32).to_le_bytes());
+                out_body.extend_from_slice(&(old_y as u32).to_le_bytes());
+                let out_packet = build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::ObjectTeleportOut as i16, &out_body);
+                broadcast_to_map(&self.gate_ref, &self.players, map_idx, &out_packet).await;
+                // 直接更新位置（不走 ObjectWalk 移动动画）
+                if let Some(m) = self.monsters.get_mut(&oid) {
+                    m.x = tx;
+                    m.y = ty;
+                    m.direction = dir;
+                }
+                // ObjectTeleportIn（新位置）
+                let mut in_body = Vec::new();
+                in_body.extend_from_slice(&oid.to_le_bytes());
+                in_body.push(ttype);
+                in_body.extend_from_slice(&(tx as u32).to_le_bytes());
+                in_body.extend_from_slice(&(ty as u32).to_le_bytes());
+                let in_packet = build_packet_bytes(
+                    mir2_shared::enums::ServerPacketIds::ObjectTeleportIn as i16, &in_body);
+                broadcast_to_map(&self.gate_ref, &self.players, map_idx, &in_packet).await;
             }
             // Boss 给玩家加 buff（C# AddBuff：YinDevilNode/PowerBead 等）
             for (sid, buff) in boss_player_buffs.drain(..) {
@@ -6486,6 +6513,25 @@ mod tests {
         assert_eq!(&body[12..16], &22u32.to_le_bytes());
         assert_eq!(body[16], 3); // direction
         assert_eq!(body[17], 2); // death_type
+    }
+
+    /// #1792：传送特效 Type 映射（C# effectnumber）
+    #[test]
+    fn test_monster_teleport_type_mapping() {
+        use super::WorldActor;
+        assert_eq!(WorldActor::monster_teleport_type("Yimoogi"), 1);
+        assert_eq!(WorldActor::monster_teleport_type("RedFoxman"), 2);
+        assert_eq!(WorldActor::monster_teleport_type("MutatedManworm"), 4);
+        assert_eq!(WorldActor::monster_teleport_type("WitchDoctor"), 5);
+        assert_eq!(WorldActor::monster_teleport_type("TurtleKing"), 6);
+        assert_eq!(WorldActor::monster_teleport_type("Mandrill"), 7);
+        assert_eq!(WorldActor::monster_teleport_type("DarkCaptain"), 8);
+        assert_eq!(WorldActor::monster_teleport_type("Doe"), 9);
+        assert_eq!(WorldActor::monster_teleport_type("HornedCommander"), 10);
+        assert_eq!(WorldActor::monster_teleport_type("SnowWolfKing"), 11);
+        // 未收录 → 0（默认特效）
+        assert_eq!(WorldActor::monster_teleport_type("WhiteFoxman"), 0);
+        assert_eq!(WorldActor::monster_teleport_type(""), 0);
     }
 }
 

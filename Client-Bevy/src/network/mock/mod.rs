@@ -3161,6 +3161,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         &server::map::ObjectTeleportOut {
                                             object_id: 103,
                                             teleport_type: 0,
+                                            location_x: 353,
+                                            location_y: 352,
                                         },
                                     );
                                     // #234：对象后跳（放 t+4s，避免与 #226 坐下同一对象同一时刻冲突）
@@ -3205,6 +3207,8 @@ pub fn spawn_mock(to_client: Sender<Vec<u8>>, from_client: Receiver<Vec<u8>>) {
                                         &server::map::ObjectTeleportIn {
                                             object_id: 103,
                                             teleport_type: 0,
+                                            location_x: 355,
+                                            location_y: 352,
                                         },
                                     );
                                     tracing::info!("🌀 [MOCK] 对象状态: 传送出现103");

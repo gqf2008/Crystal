@@ -69,12 +69,18 @@ pub struct ObjectShow {
 pub struct ObjectTeleportOut {
     pub object_id: u32,
     pub teleport_type: u8,
+    /// Rust 扩展：旧位置
+    pub location_x: u32,
+    pub location_y: u32,
 }
 
 #[derive(Debug, Clone)]
 pub struct ObjectTeleportIn {
     pub object_id: u32,
     pub teleport_type: u8,
+    /// Rust 扩展：新位置
+    pub location_x: u32,
+    pub location_y: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -264,12 +270,16 @@ impl Packet for ObjectTeleportOut {
         Ok(ObjectTeleportOut {
             object_id: reader.read_u32::<LittleEndian>()?,
             teleport_type: reader.read_u8()?,
+            location_x: reader.read_u32::<LittleEndian>()?,
+            location_y: reader.read_u32::<LittleEndian>()?,
         })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_u32::<LittleEndian>(self.object_id)?;
         writer.write_u8(self.teleport_type)?;
+        writer.write_u32::<LittleEndian>(self.location_x)?;
+        writer.write_u32::<LittleEndian>(self.location_y)?;
         Ok(())
     }
 }
@@ -281,12 +291,16 @@ impl Packet for ObjectTeleportIn {
         Ok(ObjectTeleportIn {
             object_id: reader.read_u32::<LittleEndian>()?,
             teleport_type: reader.read_u8()?,
+            location_x: reader.read_u32::<LittleEndian>()?,
+            location_y: reader.read_u32::<LittleEndian>()?,
         })
     }
 
     fn write_body<W: Write>(&self, writer: &mut W) -> SharedResult<()> {
         writer.write_u32::<LittleEndian>(self.object_id)?;
         writer.write_u8(self.teleport_type)?;
+        writer.write_u32::<LittleEndian>(self.location_x)?;
+        writer.write_u32::<LittleEndian>(self.location_y)?;
         Ok(())
     }
 }

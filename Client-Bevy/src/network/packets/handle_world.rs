@@ -473,6 +473,8 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
             if let Ok(p) = map::ObjectTeleportOut::read_body(&mut cur) {
                 server_events.write(ServerEvent::ObjectTeleportOut {
                     object_id: p.object_id,
+                    location_x: p.location_x,
+                    location_y: p.location_y,
                 });
                 tracing::debug!("🌀 对象传送消失 id={}", p.object_id);
             }
@@ -481,6 +483,8 @@ pub(crate) fn handle_world(    net: &mut NetConnection,
             if let Ok(p) = map::ObjectTeleportIn::read_body(&mut cur) {
                 server_events.write(ServerEvent::ObjectTeleportIn {
                     object_id: p.object_id,
+                    location_x: p.location_x,
+                    location_y: p.location_y,
                 });
                 tracing::debug!("🌀 对象传送出现 id={}", p.object_id);
             }
