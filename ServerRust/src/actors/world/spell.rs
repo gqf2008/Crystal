@@ -19,6 +19,8 @@ pub struct SpellObject {
     /// 施法位置（格子坐标）
     pub x: i32,
     pub y: i32,
+    /// 法术覆盖格集合（C# Map.cs 地面法术落点；空=单格）
+    pub cells: Vec<(i32, i32)>,
     /// 朝向
     pub direction: u8,
     /// 每跳间隔（毫秒），对应 C# TickSpeed
@@ -87,7 +89,13 @@ impl SpellObject {
             detonated: false,
             linked_trap_id: None,
             target_id: None,
+            cells: Vec::new(),
         }
+    }
+
+    /// 设置覆盖格（C# Map.cs：FireWall 十字 5 / PoisonCloud 3x3 / Blizzard·MeteorStrike 5x5）
+    pub fn set_cells(&mut self, cells: Vec<(i32, i32)>) {
+        self.cells = cells;
     }
 
     /// 是否需要过期
@@ -181,4 +189,72 @@ pub fn create_persistent_spell(
         cfg.duration_ms, cfg.tick_value, cfg.tick_interval_ms,
         level, stat,
     )
+}
+
+/// C# 地面法术落点（Server/MirEnvir/Map.cs）：FireWall 中心+4 正交（5）、PoisonCloud 3x3（9）、
+/// Blizzard/MeteorStrike 5x5（25）；其余单格。
+pub fn spell_cells_for(spell: mir2_shared::enums::Spell, x: i32, y: i32) -> Vec<(i32, i32)> {
+    use mir2_shared::enums::Spell;
+    let mut cells = Vec::new();
+    match spell {
+        Spell::FireWall => {
+            cells.push((x, y));
+            for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+                cells.push((x + dx, y + dy));
+            }
+        }
+        Spell::PoisonCloud => {
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    cells.push((x + dx, y + dy));
+                }
+            }
+        }
+        Spell::Blizzard | Spell::MeteorStrike => {
+            for dy in -2..=2 {
+                for dx in -2..=2 {
+                    cells.push((x + dx, y + dy));
+                }
+            }
+        }
+        _ => cells.push((x, y)),
+    }
+    cells
+}
+
+#[cfg(test)]
+mod tests {
+    use super::spell_cells_for;
+    use mir2_shared::enums::Spell;
+
+    #[test]
+    fn firewall_cells_cross() {
+        let cells = spell_cells_for(Spell::FireWall, 10, 10);
+        assert_eq!(cells.len(), 5);
+        for c in [(10, 10), (10, 9), (11, 10), (10, 11), (9, 10)] {
+            assert!(cells.contains(&c), "missing {c:?}");
+        }
+    }
+
+    #[test]
+    fn poison_cloud_3x3() {
+        let cells = spell_cells_for(Spell::PoisonCloud, 0, 0);
+        assert_eq!(cells.len(), 9);
+        let mut sorted = cells.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 9);
+    }
+
+    #[test]
+    fn blizzard_meteor_5x5() {
+        for sp in [Spell::Blizzard, Spell::MeteorStrike] {
+            let cells = spell_cells_for(sp, 5, 5);
+            assert_eq!(cells.len(), 25, "{sp:?}");
+            let mut sorted = cells.clone();
+            sorted.sort_unstable();
+            sorted.dedup();
+            assert_eq!(sorted.len(), 25, "{sp:?}");
+        }
+    }
 }

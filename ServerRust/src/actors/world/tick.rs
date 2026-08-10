@@ -3359,10 +3359,15 @@ impl WorldActor {
                     } else {
                         None
                     };
+                    // #1854：按 C# 落点几何命中（cells 为空时回退单格±1）
                     let hit_ids: Vec<u32> = self.monsters.iter()
                         .filter(|(_, m)| {
-                            let dist = (m.x - spell_obj.x).abs() + (m.y - spell_obj.y).abs();
-                            dist <= 1 && m.hp > 0 && m.map_index == spell_obj.map_index
+                            let in_area = if spell_obj.cells.is_empty() {
+                                (m.x - spell_obj.x).abs() + (m.y - spell_obj.y).abs() <= 1
+                            } else {
+                                spell_obj.cells.contains(&(m.x, m.y))
+                            };
+                            in_area && m.hp > 0 && m.map_index == spell_obj.map_index
                         })
                         .map(|(id, _)| *id)
                         .collect();
