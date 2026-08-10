@@ -2760,7 +2760,8 @@ impl WorldActor {
                             for (sid, other) in &self.players {
                                 if let Ok(Some(s)) = other.actor_ref.ask(GetPlayerState).await {
                                     let dist = (s.x - spell_obj.x).abs() + (s.y - spell_obj.y).abs();
-                                    if dist <= 2 && !heal_targets.contains(sid) {
+                                    // #1638：治疗圈只作用同图玩家（C# CurrentMap）
+                                    if dist <= 2 && s.map_index == spell_obj.map_index && !heal_targets.contains(sid) {
                                         heal_targets.push(*sid);
                                         heal_amounts.push(spell_obj.tick_value.max(25));
                                     }
@@ -4611,6 +4612,15 @@ impl Message<Tick> for WorldActor {
             }
             // Boss 攻击：广播 ObjectAttack + 对命中的玩家造成伤害
             for atk in &boss_attacks {
+                // #1638：Boss 攻击只命中同图玩家（C# CurrentMap；Aoe/Line 动作不带 map，从攻击者查）
+                let boss_map: u16 = match atk {
+                    ai::AttackAction::Melee { attacker_oid, .. }
+                    | ai::AttackAction::Range { attacker_oid, .. }
+                    | ai::AttackAction::Aoe { attacker_oid, .. }
+                    | ai::AttackAction::Line { attacker_oid, .. } => {
+                        self.monsters.get(attacker_oid).map(|m| m.map_index).unwrap_or(0)
+                    }
+                };
                 let (attacker_oid, targets, damage, spell_id, attack_type, atk_x, atk_y, atk_dir) = match atk {
                     ai::AttackAction::Melee { attacker_oid, target_session, damage, spell_id, attack_type } => {
                         (*attacker_oid, vec![*target_session], *damage, *spell_id, *attack_type, 0i32, 0i32, 0u8)
@@ -4620,10 +4630,10 @@ impl Message<Tick> for WorldActor {
                     }
                     ai::AttackAction::Aoe { attacker_oid, center_x, center_y, radius, damage, .. } => {
                         let tgts: Vec<u64> = player_positions.iter()
-                            .filter(|(_, px, py, _, _, _, _, _)| {
+                            .filter(|(_, px, py, _, _, _, pmap, _)| {
                                 let dx = (px - center_x).abs();
                                 let dy = (py - center_y).abs();
-                                dx.max(dy) <= *radius
+                                dx.max(dy) <= *radius && *pmap == boss_map
                             })
                             .map(|(s, _, _, _, _, _, _, _)| *s)
                             .collect();
@@ -4634,7 +4644,10 @@ impl Message<Tick> for WorldActor {
                         let dir = (*direction as usize) % 8;
                         let (ldx, ldy) = (MON_DIR_DX[dir], MON_DIR_DY[dir]);
                         let tgts: Vec<u64> = player_positions.iter()
-                            .filter(|(_, px, py, _, _, _, _, _)| {
+                            .filter(|(_, px, py, _, _, _, pmap, _)| {
+                                if *pmap != boss_map {
+                                    return false;
+                                }
                                 for k in 1..=*range {
                                     if *px == origin_x + ldx * k && *py == origin_y + ldy * k {
                                         return true;
