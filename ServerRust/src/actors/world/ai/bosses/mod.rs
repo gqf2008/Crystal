@@ -117,6 +117,7 @@ pub mod demon_guard;
 pub mod trap_rock;
 pub mod sep_high_warrior;
 pub mod sep_warrior;
+pub mod sep_high_archer;
 pub mod sep_archer;
 pub mod sep_taoist;
 pub mod sep_high_wizard;
