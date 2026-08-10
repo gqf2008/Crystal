@@ -49,6 +49,8 @@ pub(crate) struct RangedPendingHit {
     /// 攻击时目标位置（弹道落地时用于安全区/伤害广播定位）
     pub px: i32,
     pub py: i32,
+    /// #1730：Mage 怪（法术）→ MACAgility；Ranged/近战 → ACAgility（C# 法术吃魔防）
+    pub is_magic: bool,
     pub target_in_safe: bool,
 }
 
@@ -599,7 +601,8 @@ impl WorldActor {
                 &self.players, &self.gate_ref, self.death_exp_penalty_percent,
                 hit.attacker_oid, "怪物", &attacker_stats, attacker_level,
                 hit.target_session, hit.damage, hit.px, hit.py, hit.map_index,
-                hit.target_in_safe, mir2_shared::enums::DefenceType::AcAgility,
+                hit.target_in_safe,
+                if hit.is_magic { mir2_shared::enums::DefenceType::MacAgility } else { mir2_shared::enums::DefenceType::AcAgility },
                 &mut death_drops, &mut dismount_sessions, &mut broken_armor,
             ).await;
             if reflected > 0 {
@@ -4697,6 +4700,7 @@ impl Message<Tick> for WorldActor {
                                 map_index: monster.map_index,
                                 px,
                                 py,
+                                is_magic: matches!(profile.ai_type, MonsterAiType::Mage),
                                 target_in_safe,
                             });
                         } else {
@@ -6031,6 +6035,7 @@ mod tests {
         assert!(collect_slave_cascade(42, &sm).is_empty());
     }
 }
+
 
 
 
