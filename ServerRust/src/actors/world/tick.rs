@@ -241,6 +241,23 @@ fn slow_adjusted_ticks(base_ticks: u64, slowed: bool) -> u64 {
     if slowed { (base_ticks + 1).min(35) } else { base_ticks }
 }
 
+/// #1777：C# MonsterObject.CanMove/CanAttack（MonsterObject.cs:634-664）——控制毒禁移动/攻击：
+/// 移动禁 PARALYSIS/LR_PARALYSIS/FROZEN/STUN；攻击另禁 DAZED。
+/// （C# Stun 对 Light 10/5 光源怪的豁免 Rust 暂不细分；光源怪极少且多为静态）
+/// 返回 (禁移动, 禁攻击)。
+fn monster_control_blocked(poison_list: &[crate::combat::poison::Poison]) -> (bool, bool) {
+    use mir2_shared::enums::PoisonType;
+    let move_blocked = poison_list.iter().any(|p| {
+        p.p_type.intersects(PoisonType::PARALYSIS)
+            || p.p_type.intersects(PoisonType::LR_PARALYSIS)
+            || p.p_type.intersects(PoisonType::FROZEN)
+            || p.p_type.intersects(PoisonType::STUN)
+    });
+    let attack_blocked = move_blocked
+        || poison_list.iter().any(|p| p.p_type.intersects(PoisonType::DAZED));
+    (move_blocked, attack_blocked)
+}
+
 /// #1721：向同图其他玩家广播 DamageIndicator Miss（C# GetArmour/Attacked BroadcastDamageIndicator(Miss)）
 async fn broadcast_miss_feedback(
     players: &HashMap<u64, PlayerRecord>,
@@ -4334,6 +4351,8 @@ impl Message<Tick> for WorldActor {
                     // #471 宠物协战（自定义 AI 宠物）：攻击主人攻击的怪物，不主动攻击玩家
                     // C# CanAttack：MoveOnly/None 不允许攻击（PetMode）
                     if let Some(master) = monster.master_session {
+                        // #1777：宠物受控制毒同样禁移动/攻击
+                        let (pet_move_blocked, pet_attack_blocked) = monster_control_blocked(&monster.poison_list);
                         let pet_may_attack = self.player_pet_modes
                             .get(&master)
                             .map(|m| matches!(m, mir2_shared::enums::PetMode::Both
@@ -4363,7 +4382,7 @@ impl Message<Tick> for WorldActor {
                         }
                         if let Some((tmid, tx, ty)) = pet_target {
                             let dist = (tx - monster.x).abs() + (ty - monster.y).abs();
-                            if dist <= 1 && self.tick_count >= monster.next_attack_tick {
+                            if dist <= 1 && self.tick_count >= monster.next_attack_tick && !pet_attack_blocked {
                                 let dmg_range = (monster.max_dmg - monster.min_dmg).max(1);
                                 let damage = ((self.tick_count.wrapping_add(monster.object_id as u64)
                                     .wrapping_mul(13)) as i32 % dmg_range) + monster.min_dmg;
@@ -4377,7 +4396,7 @@ impl Message<Tick> for WorldActor {
                                     crate::combat::poison::is_slowed(&monster.poison_list),
                                 );
                                 monster.ai_state = MonsterAiState::Attack;
-                            } else if self.tick_count >= monster.next_move_tick {
+                            } else if self.tick_count >= monster.next_move_tick && !pet_move_blocked {
                                 let mut path = self.monster_paths.entry(monster.object_id).or_default();
                                 let recalc = path.is_empty()
                                     || self.monster_path_targets.get(&monster.object_id)
@@ -4431,6 +4450,8 @@ impl Message<Tick> for WorldActor {
                 let profile = &monster.ai_profile;
                 // C# Slow 毒：攻速/移速 +100ms（上限 3500ms）
                 let slowed = crate::combat::poison::is_slowed(&monster.poison_list);
+                // C# CanMove/CanAttack：控制毒禁移动/攻击
+                let (move_blocked, attack_blocked) = monster_control_blocked(&monster.poison_list);
 
                 // 找最近玩家（在视野范围内）
                 // Guard AI：优先攻击红名玩家（PK 值 > 0）
@@ -4514,9 +4535,9 @@ impl Message<Tick> for WorldActor {
                 let is_fleeing = profile.ai_type == MonsterAiType::Coward && hp_pct < profile.flee_threshold;
 
                 // 是否在攻击冷却中
-                let can_attack = self.tick_count >= monster.next_attack_tick;
+                let can_attack = self.tick_count >= monster.next_attack_tick && !attack_blocked;
                 // 是否可以移动（移动间隔）
-                let can_move = self.tick_count >= monster.next_move_tick;
+                let can_move = self.tick_count >= monster.next_move_tick && !move_blocked;
 
                 // Passive 怪物：未激怒时不主动攻击
                 let should_chase = match profile.ai_type {
@@ -5287,6 +5308,10 @@ impl Message<Tick> for WorldActor {
             }
             // Boss 移动（合并到 moved_monsters 复用广播逻辑），校验 walkable 避免穿墙
             for (oid, nx, ny, dir) in boss_moves.drain(..) {
+                // #1777：C# CanMove——Boss 受控制毒禁移动
+                if self.monsters.get(&oid).map(|m| monster_control_blocked(&m.poison_list).0).unwrap_or(false) {
+                    continue;
+                }
                 let map_idx = self.monsters.get(&oid).map(|m| m.map_index).unwrap_or(0);
                 let walkable = self.maps.get(&map_idx)
                     .map(|m| m.is_walkable(nx, ny))
@@ -5314,6 +5339,16 @@ impl Message<Tick> for WorldActor {
             }
             // Boss 攻击：广播 ObjectAttack + 对命中的玩家造成伤害
             for atk in &boss_attacks {
+                // #1777：C# CanAttack——Boss 受控制毒禁攻击（仅拦截发起；已排程弹道照常落地，C# DelayedAction 同理）
+                let atk_oid = match atk {
+                    ai::AttackAction::Melee { attacker_oid, .. }
+                    | ai::AttackAction::Range { attacker_oid, .. }
+                    | ai::AttackAction::Aoe { attacker_oid, .. }
+                    | ai::AttackAction::Line { attacker_oid, .. } => *attacker_oid,
+                };
+                if self.monsters.get(&atk_oid).map(|m| monster_control_blocked(&m.poison_list).1).unwrap_or(false) {
+                    continue;
+                }
                 // #1638：Boss 攻击只命中同图玩家（C# CurrentMap；Aoe/Line 动作不带 map，从攻击者查）
                 let boss_map: u16 = match atk {
                     ai::AttackAction::Melee { attacker_oid, .. }
@@ -6146,6 +6181,7 @@ mod tests {
         dotnet_now_ticks, in_range, item_expired, party_exp_share, pet_exp_gain, reduce_exp,
         collect_slave_cascade, safe_zone_heal_hp, boss_range_defence_type, monster_melee_defence_type,
         build_object_range_attack_body, resolve_monster_vs_monster, slow_adjusted_ticks,
+        monster_control_blocked,
         PARTY_EXP_RATE,
     };
 
@@ -6393,6 +6429,24 @@ mod tests {
         // 上限 35 tick（3500ms）
         assert_eq!(slow_adjusted_ticks(35, true), 35);
         assert_eq!(slow_adjusted_ticks(34, true), 35);
+    }
+
+    /// #1777：控制毒禁移动/攻击（C# CanMove/CanAttack）
+    #[test]
+    fn test_monster_control_blocked() {
+        use crate::combat::poison::Poison;
+        use mir2_shared::enums::PoisonType;
+        // 空/普通毒：不阻塞
+        assert_eq!(monster_control_blocked(&[]), (false, false));
+        assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::GREEN, 5, 10, 1000)]), (false, false));
+        // 移动+攻击均禁：PARALYSIS / LR_PARALYSIS / FROZEN / STUN
+        for t in [PoisonType::PARALYSIS, PoisonType::LR_PARALYSIS, PoisonType::FROZEN, PoisonType::STUN] {
+            assert_eq!(monster_control_blocked(&[Poison::new(t, 5, 0, 1000)]), (true, true));
+        }
+        // DAZED：只禁攻击不禁移动
+        assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::DAZED, 5, 0, 1000)]), (false, true));
+        // SLOW 不阻塞
+        assert_eq!(monster_control_blocked(&[Poison::new(PoisonType::SLOW, 5, 0, 1000)]), (false, false));
     }
 }
 
