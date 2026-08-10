@@ -511,6 +511,7 @@ fn auto_attack_system(
     actors: Query<(&NetObjectId, &Transform)>,
     hud: Res<HudState>,
     character_state: Res<crate::game::dialogs::character::CharacterState>,
+    magics: Res<crate::game::skills::MagicsState>,
     mut chat: ResMut<crate::game::chat::ChatState>,
     // C# OutputDelay=1000ms：范围外提示节流
     mut too_far_timer: Local<f32>,
@@ -577,9 +578,11 @@ fn auto_attack_system(
         net.send_packet(&build_ranged_attack(dir, p_tile, target_id, t_tile));
         tracing::debug!("🏹 RangeAttack target={} dir={:?} range={}", target_id, dir, max_range);
     } else {
+        // #1610：C# Attack1 动作——开关技能（半月/十字斩/双斩）随 C.Attack 发送
+        let attack_spell = crate::game::skills::toggled_attack_spell(&magics.spell_toggles);
         net.send_packet(&mir2_shared::packets::client::combat::Attack {
             direction: dir,
-            spell: mir2_shared::enums::Spell::None,
+            spell: attack_spell,
         });
         // #1564：近战挥击音按武器/职业/骑乘选择（C# PlayAttackSound；弓手无挥击音）
         if let Some(sound_id) = crate::game::sound::attack_swing_sound(
@@ -1101,6 +1104,30 @@ mod tests {
         assert!(in_range((0,0), (9,0), 9));
         assert!(in_range((0,0), (5,5), 9));
         assert!(!in_range((0,0), (10,0), 9));
+    }
+
+    #[test]
+    fn test_toggled_attack_spell_mapping() {
+        // #1610：C# Attack1 开关技能映射（HalfMoon > CrossHalfMoon > DoubleSlash > None）
+        use mir2_shared::enums::Spell;
+        use crate::game::skills::toggled_attack_spell;
+        // 未开启 → None
+        assert_eq!(toggled_attack_spell(&[(Spell::HalfMoon, false)]), Spell::None);
+        // 半月开启 → HalfMoon
+        assert_eq!(
+            toggled_attack_spell(&[(Spell::HalfMoon, true), (Spell::CrossHalfMoon, true)]),
+            Spell::HalfMoon
+        );
+        // 仅十字斩 → CrossHalfMoon
+        assert_eq!(
+            toggled_attack_spell(&[(Spell::HalfMoon, false), (Spell::CrossHalfMoon, true)]),
+            Spell::CrossHalfMoon
+        );
+        // 仅双斩 → DoubleSlash
+        assert_eq!(
+            toggled_attack_spell(&[(Spell::HalfMoon, false), (Spell::DoubleSlash, true)]),
+            Spell::DoubleSlash
+        );
     }
 
     #[test]

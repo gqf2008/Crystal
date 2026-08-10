@@ -29,6 +29,21 @@ pub const TOGGLE_SPELLS: [Spell; 4] = [
     Spell::DoubleSlash,
 ];
 
+/// #1610：C# PlayerObject.cs Attack1 动作——按开关状态选择随 C.Attack 发送的 Spell
+/// （HalfMoon → Spell.HalfMoon、CrossHalfMoon → Spell.CrossHalfMoon、DoubleSlash → Spell.DoubleSlash；否则 None）
+pub fn toggled_attack_spell(spell_toggles: &[(Spell, bool)]) -> Spell {
+    let on = |s: Spell| spell_toggles.iter().any(|(sp, v)| *sp == s && *v);
+    if on(Spell::HalfMoon) {
+        Spell::HalfMoon
+    } else if on(Spell::CrossHalfMoon) {
+        Spell::CrossHalfMoon
+    } else if on(Spell::DoubleSlash) {
+        Spell::DoubleSlash
+    } else {
+        Spell::None
+    }
+}
+
 /// 是否开关技能（#242）
 pub fn is_toggle_spell(spell: Spell) -> bool {
     TOGGLE_SPELLS.contains(&spell)
