@@ -34,7 +34,9 @@ impl MonsterBehavior for RedMoonEvilBehavior {
         // C# ProcessTarget：每 AttackSpeed 周期 AoE 攻击视野内所有目标（一次 ObjectAttack）
         if ctx.tick_count >= monster.next_attack_tick {
             let view_range = monster.ai_profile.aggro_range.max(1) as i32;
-            let targets = ctx.find_targets_in_range(monster.x, monster.y, view_range, monster.map_index);
+            let targets: Vec<crate::actors::world::ai::PlayerSnap> =
+                ctx.find_targets_in_range(monster.x, monster.y, view_range, monster.map_index)
+                    .into_iter().copied().collect();
             if targets.is_empty() {
                 return;
             }
@@ -47,6 +49,10 @@ impl MonsterBehavior for RedMoonEvilBehavior {
                 damage,
                 spell_id: 0,
             });
+            // C# Attack（RedMoonEvil.cs:61）：对每个目标广播 RedMoonEvil 特效
+            for t in targets.iter() {
+                ctx.out_effects.push((t.object_id, mir2_shared::enums::SpellEffect::RedMoonEvil));
+            }
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
         }
     }

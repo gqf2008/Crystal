@@ -55,6 +55,8 @@ impl MonsterBehavior for SepWarriorBehavior {
                         session_id: target.session_id,
                         poison: Poison::new(PoisonType::STUN, 5, 0, 1000),
                     });
+                    // C# Attack（SepWarrior.cs:81）：眩晕时对目标广播 TwinDrakeBlade 特效
+                    ctx.out_effects.push((target.object_id, mir2_shared::enums::SpellEffect::TwinDrakeBlade));
                 }
             } else {
                 ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {
