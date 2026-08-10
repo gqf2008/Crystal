@@ -17,7 +17,7 @@ impl WorldActor {
     /// #1858：即时法术命中玩家（C# Map.cs Attacked(player, value, MAC, false)）
     /// 门控：can_attack_player（攻击模式/行会战）+ GM 保护 + 安全区 + 禁战地图；
     /// ThunderStorm 对玩家（非亡灵）伤害 ×1/10（C# Map.cs:1332）。
-    async fn apply_spell_pvp_hits(
+    pub(crate) async fn apply_spell_pvp_hits(
         &self,
         caster_session: u64,
         attacker_stats: &crate::combat::attack::CombatStats,
@@ -69,6 +69,26 @@ impl WorldActor {
                     attacker_session: target_session,
                     damage,
                 }).await;
+                // C# SpellObject.ProcessSpell 附加状态（Blizzard 1/8 Slow、PoisonCloud 绿毒）
+                match spell {
+                    mir2_shared::enums::Spell::Blizzard => {
+                        if fastrand::i32(0..8) == 0 {
+                            let dur = (5 + fastrand::i32(0..attacker_stats.freezing.max(1))) as u32;
+                            let _ = other_actor.actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
+                                poisons: vec![crate::combat::poison::Poison::new(
+                                    mir2_shared::enums::PoisonType::SLOW, dur, 0, 2000)],
+                            }).await;
+                        }
+                    }
+                    mir2_shared::enums::Spell::PoisonCloud => {
+                        let poison_value = (raw_damage / 4).min(10);
+                        let _ = other_actor.actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
+                            poisons: vec![crate::combat::poison::Poison::new(
+                                mir2_shared::enums::PoisonType::GREEN, 12, poison_value, 1000)],
+                        }).await;
+                    }
+                    _ => {}
+                }
                 for p in &attack_result.applied_poisons {
                     let _ = other_actor.actor_ref.ask(crate::actors::player::ApplyCombatPoisons {
                         poisons: vec![*p],
@@ -3717,7 +3737,7 @@ impl Message<MagicRequest> for WorldActor {
                         let level_offset = crate::combat::attack::level_offset(state.level, m.level.max(0) as u16);
                         let r = combat_attack::resolve_attack(
                             &attacker_stats, &ds, raw_damage,
-                            mir2_shared::enums::DefenceType::AcAgility, level_offset);
+                            mir2_shared::enums::DefenceType::Mac, level_offset);
                         if r.is_hit && r.damage > 0 {
                             m.take_damage(r.damage);
                             m.last_hitter_session = Some(msg.session_id);
@@ -3732,6 +3752,30 @@ impl Message<MagicRequest> for WorldActor {
                             }
                         }
                     }
+                }
+                // #1860：C# Map.cs:1243 同时命中玩家（直线 3 格，每格首个玩家，MAC）
+                let mut player_hit_ids: Vec<u64> = Vec::new();
+                {
+                    let mut px = state.x;
+                    let mut py = state.y;
+                    for _ in 0..3 {
+                        px += MON_DIR_DX[dir];
+                        py += MON_DIR_DY[dir];
+                        let mut first = None;
+                        for (sid, r) in &self.players {
+                            if *sid == msg.session_id { continue; }
+                            if let Ok(Some(ps)) = r.actor_ref.ask(GetPlayerState).await {
+                                if ps.is_dead || ps.map_index != state.map_index { continue; }
+                                if ps.x == px && ps.y == py { first = Some(*sid); break; }
+                            }
+                        }
+                        if let Some(sid) = first {
+                            if !player_hit_ids.contains(&sid) { player_hit_ids.push(sid); }
+                        }
+                    }
+                }
+                if !player_hit_ids.is_empty() {
+                    self.apply_spell_pvp_hits(msg.session_id, &attacker_stats, state.level, spell_enum, raw_damage, &player_hit_ids).await;
                 }
                 debug!("Magic: {} casts HeavenlySword (line 3 AoE)", state.name);
             }
