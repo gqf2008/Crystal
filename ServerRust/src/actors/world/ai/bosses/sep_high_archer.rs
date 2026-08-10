@@ -58,6 +58,13 @@ impl MonsterBehavior for SepHighArcherBehavior {
             if poison_active && fastrand::i32(0..2) == 0 {
                 // C# CrippleShot：目标 + 3×3 区域受伤（MAC）+ 绿毒，消耗 PoisonShot buff
                 self.poison_shot_active_until = 0;
+                // C# PoisonTarget(Target, 5, 8, Green, 2000)：主目标额外 1/5、8s（值=SC，用 damage 近似）
+                if fastrand::i32(0..5) == 0 {
+                    ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
+                        session_id: target.session_id,
+                        poison: Poison::new(PoisonType::GREEN, 8, damage, 2000),
+                    });
+                }
                 for p in ctx.players.iter().filter(|p| p.map_index == monster.map_index && p.hp > 0
                     && max_distance(target.x, target.y, p.x, p.y) <= 1) {
                     ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Melee {

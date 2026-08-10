@@ -37,8 +37,8 @@ impl MonsterBehavior for CaveMaggotBehavior {
                 spell_id: 0,
                 attack_type: 0,
             });
-            // C# CompleteAttack：命中后 20% 施加麻痹（5s，tick 1000）
-            if fastrand::i32(0..100) < 20 {
+            // C# CompleteAttack：PoisonTarget(20, 5, Paralysis, 1000)：1/20（5%）
+            if fastrand::i32(0..20) == 0 {
                 ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                     session_id: target.session_id,
                     poison: crate::combat::poison::Poison::new(
