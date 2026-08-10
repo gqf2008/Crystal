@@ -5,7 +5,7 @@
 //!   - 近战（dist<=3，3/4 概率）：
 //!     - 毒云（20s 冷却）：伤害 + FindAllTargets(3) AOE + 1/2 绿毒（2-6s）
 //!     - 普通（2/3）：伤害 + 1/2 眩晕毒（2-6s）
-//!     - 前撞（1/3）：TriangleAttack(3)（用 AOE 3 近似）
+//!     - 前撞（1/3）：TriangleAttack(damage, 3, 2)（9 格锥）
 //!   - 远程（dist>3 或 1/4）：1/5 ProjectileAttack + 1/4 麻痹毒（5s，tick 1000）
 
 use crate::actors::world::MonsterState;
@@ -83,14 +83,19 @@ impl MonsterBehavior for PeacockSpiderBehavior {
                         });
                     }
                 } else {
-                    // 前撞：TriangleAttack(3)（用 AOE 3 近似）
-                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+                    // 前撞：TriangleAttack(damage, 3, 2, 500, ACAgility, false)（9 格锥）
+                    let dir = direction_towards(monster.x, monster.y, target.x, target.y);
+                    monster.direction = dir;
+                    ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Triangle {
                         attacker_oid: monster.object_id,
                         center_x: monster.x,
                         center_y: monster.y,
-                        radius: MELEE_RANGE,
+                        direction: dir,
+                        distance: 3,
+                        limit_width: 2,
                         damage,
                         spell_id: 0,
+                        attack_type: 0,
                     });
                 }
             } else if fastrand::i32(0..5) == 0 {
