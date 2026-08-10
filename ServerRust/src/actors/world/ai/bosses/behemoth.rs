@@ -90,7 +90,7 @@ impl MonsterBehavior for BehemothBehavior {
                     if fastrand::i32(0..3) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: target.session_id,
-                            poison: Poison::new(PoisonType::DAZED, 15, base, 1000),
+                            poison: Poison::new(PoisonType::DAZED, 15, poison_sc_value(monster), 1000),
                         });
                     }
                 }
@@ -98,7 +98,7 @@ impl MonsterBehavior for BehemothBehavior {
                 if fastrand::i32(0..15) == 0 {
                     ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                         session_id: target.session_id,
-                        poison: Poison::new(PoisonType::BLEEDING, 15, base, 1000),
+                        poison: Poison::new(PoisonType::BLEEDING, 15, poison_sc_value(monster), 1000),
                     });
                 }
             } else {
@@ -142,7 +142,7 @@ impl MonsterBehavior for BehemothBehavior {
                             if fastrand::i32(0..15) == 0 {
                             ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                                 session_id: sid,
-                                poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 1000),
+                                poison: Poison::new(PoisonType::PARALYSIS, 5, poison_sc_value(monster), 1000),
                             });
                             }
                     }

@@ -75,7 +75,7 @@ impl MonsterBehavior for SpittingSpiderBehavior {
                     if fastrand::i32(0..8) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: target.session_id,
-                            poison: Poison::new(PoisonType::GREEN, 5, damage, 2000),
+                            poison: Poison::new(PoisonType::GREEN, 5, poison_sc_value(monster), 2000),
                         });
                     }
                 }
@@ -90,7 +90,7 @@ impl MonsterBehavior for SpittingSpiderBehavior {
                     if fastrand::i32(0..8) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: h.session_id,
-                            poison: Poison::new(PoisonType::GREEN, 5, damage, 2000),
+                            poison: Poison::new(PoisonType::GREEN, 5, poison_sc_value(monster), 2000),
                         });
                     }
                 }

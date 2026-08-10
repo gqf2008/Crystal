@@ -63,7 +63,7 @@ impl MonsterBehavior for CannibalTentaclesBehavior {
                     for sid in nearby {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: sid,
-                            poison: Poison::new(PoisonType::GREEN, 5, damage, 1000),
+                            poison: Poison::new(PoisonType::GREEN, 5, poison_sc_value(monster), 1000),
                         });
                     }
                 }

@@ -114,7 +114,7 @@ impl MonsterBehavior for TurtleKingBehavior {
                         if fastrand::i32(0..8) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: target.session_id,
-                            poison: Poison::new(PoisonType::DAZED, 3, damage, 1000),
+                            poison: Poison::new(PoisonType::DAZED, 3, poison_sc_value(monster), 1000),
                         });
                         }
                 }
@@ -156,14 +156,14 @@ impl MonsterBehavior for TurtleKingBehavior {
                         if fastrand::i32(0..5) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: target.session_id,
-                            poison: Poison::new(PoisonType::SLOW, 15, damage, 1000),
+                            poison: Poison::new(PoisonType::SLOW, 15, poison_sc_value(monster), 1000),
                         });
                         }
                     // C# PoisonTarget 1/5
                         if fastrand::i32(0..5) == 0 {
                         ctx.out_poisons.push(crate::actors::world::ai::PoisonPlayer {
                             session_id: target.session_id,
-                            poison: Poison::new(PoisonType::PARALYSIS, 5, damage, 1000),
+                            poison: Poison::new(PoisonType::PARALYSIS, 5, poison_sc_value(monster), 1000),
                         });
                         }
                 }
