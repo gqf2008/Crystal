@@ -170,7 +170,7 @@ fn apply_object_state_events(
                     }
                 }
             }
-            ServerEvent::ObjectTeleportOut { object_id } => {
+            ServerEvent::ObjectTeleportOut { object_id, .. } => {
                 // 传送消失：白紫色爆点 + 隐藏
                 effects.write(crate::game::effects::PendingEffect::Burst {
                     target_id: object_id,
@@ -183,11 +183,20 @@ fn apply_object_state_events(
                     }
                 }
             }
-            ServerEvent::ObjectTeleportIn { object_id } => {
+            ServerEvent::ObjectTeleportIn { object_id, location_x, location_y } => {
+                // 传送出现：瞬移到新位置 + 白紫色爆点 + 显示（C# Teleport 特效+位置）
                 effects.write(crate::game::effects::PendingEffect::Burst {
                     target_id: object_id,
                     color: [0.8, 0.7, 1.0],
                 });
+                let to = tile_to_world(location_x as i32, location_y as i32);
+                for (id, mut t) in &mut transforms {
+                    if id.0 == object_id {
+                        t.translation.x = to.x;
+                        t.translation.y = to.y;
+                        break;
+                    }
+                }
                 for (id, mut v) in &mut vis {
                     if id.0 == object_id {
                         *v = Visibility::Visible;
