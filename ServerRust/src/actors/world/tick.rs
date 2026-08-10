@@ -258,6 +258,12 @@ fn monster_control_blocked(poison_list: &[crate::combat::poison::Poison]) -> (bo
     (move_blocked, attack_blocked)
 }
 
+/// #1797：C# MonsterObject.CurrentPoison = 全部活动毒 PType 的 OR
+fn combined_poison_flags(poison_list: &[crate::combat::poison::Poison]) -> mir2_shared::enums::PoisonType {
+    use mir2_shared::enums::PoisonType;
+    poison_list.iter().fold(PoisonType::NONE, |acc, p| acc | p.p_type)
+}
+
 /// #1721：向同图其他玩家广播 DamageIndicator Miss（C# GetArmour/Attacked BroadcastDamageIndicator(Miss)）
 async fn broadcast_miss_feedback(
     players: &HashMap<u64, PlayerRecord>,
@@ -991,6 +997,28 @@ impl WorldActor {
                     monster.take_damage(dmg);
                     // C# MonsterObject.Process：毒伤归属毒源（LastHitter = poison.Owner）
                     monster.last_hitter_session = monster.poison_list.iter().find(|p| p.owner_session != 0).map(|p| p.owner_session);
+                }
+            }
+            // #1797：怪物中毒视觉同步（C# CurrentPoison 变更 → ObjectPoisoned：客户端染绿/解毒）
+            let mut poison_updates: Vec<(u32, u16, mir2_shared::enums::PoisonType)> = Vec::new();
+            for (oid, monster) in &self.monsters {
+                let combined = combined_poison_flags(&monster.poison_list);
+                let last = self.monster_poison_flags.get(oid).copied().unwrap_or(mir2_shared::enums::PoisonType::NONE);
+                if combined != last {
+                    self.monster_poison_flags.insert(*oid, combined);
+                    poison_updates.push((*oid, monster.map_index, combined));
+                }
+            }
+            for (oid, map_index, combined) in poison_updates {
+                let packet = mir2_shared::packets::server::buff::ObjectPoisoned {
+                    object_id: oid,
+                    poison: combined,
+                };
+                let mut body = Vec::new();
+                if packet.write_body(&mut body).is_ok() {
+                    let pkt = build_packet_bytes(
+                        mir2_shared::enums::ServerPacketIds::ObjectPoisoned as i16, &body);
+                    broadcast_to_map(&self.gate_ref, &self.players, map_index, &pkt).await;
                 }
             }
             // 广播 DelayedExplosion 三级 ObjectEffect（同图玩家）
@@ -5846,6 +5874,7 @@ impl Message<Tick> for WorldActor {
             // 处理召唤物过期（无掉落，仅移除 + 广播 ObjectRemove）
             for oid in &expired_monsters {
                 if let Some(monster) = self.monsters.remove(oid) {
+                    self.monster_poison_flags.remove(oid);
                     let remove_packet = Self::build_object_remove_packet(*oid);
                     broadcast_to_map(&self.gate_ref, &self.players, monster.map_index, &remove_packet).await;
                     debug!("Summon '{}' (#{}) expired (recall_at_tick reached)", monster.name, oid);
@@ -5873,11 +5902,13 @@ impl Message<Tick> for WorldActor {
                     continue;
                 }
                 if let Some(monster) = self.monsters.remove(oid) {
+                    self.monster_poison_flags.remove(oid);
                     // #1434：C# MonsterObject.SlaveList——master 死亡，其召唤物（含多级）一起清理
                     let slave_oids = collect_slave_cascade(*oid, &self.slave_master);
                     for soid in slave_oids {
                         self.slave_master.remove(&soid);
                         if let Some(slave) = self.monsters.remove(&soid) {
+                            self.monster_poison_flags.remove(&soid);
                             let slave_died = Self::build_object_died_packet(
                                 soid, slave.x, slave.y, slave.direction,
                                 Self::monster_death_type(&slave.name, slave.master_session.is_some()),
@@ -6215,7 +6246,7 @@ mod tests {
         dotnet_now_ticks, in_range, item_expired, party_exp_share, pet_exp_gain, reduce_exp,
         collect_slave_cascade, safe_zone_heal_hp, boss_range_defence_type, monster_melee_defence_type,
         build_object_range_attack_body, resolve_monster_vs_monster, slow_adjusted_ticks,
-        monster_control_blocked,
+        monster_control_blocked, combined_poison_flags,
         PARTY_EXP_RATE,
     };
 
@@ -6532,6 +6563,23 @@ mod tests {
         // 未收录 → 0（默认特效）
         assert_eq!(WorldActor::monster_teleport_type("WhiteFoxman"), 0);
         assert_eq!(WorldActor::monster_teleport_type(""), 0);
+    }
+
+    /// #1797：组合毒标记 = 全部活动毒 PType 的 OR（C# CurrentPoison）
+    #[test]
+    fn test_combined_poison_flags() {
+        use crate::combat::poison::Poison;
+        use mir2_shared::enums::PoisonType;
+        assert_eq!(combined_poison_flags(&[]), PoisonType::NONE);
+        assert_eq!(
+            combined_poison_flags(&[Poison::new(PoisonType::GREEN, 5, 10, 2000)]),
+            PoisonType::GREEN
+        );
+        let both = combined_poison_flags(&[
+            Poison::new(PoisonType::GREEN, 5, 10, 2000),
+            Poison::new(PoisonType::RED, 5, 10, 2000),
+        ]);
+        assert!(both.intersects(PoisonType::GREEN) && both.intersects(PoisonType::RED));
     }
 }
 
