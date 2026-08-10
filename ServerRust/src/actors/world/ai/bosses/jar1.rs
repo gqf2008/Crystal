@@ -39,14 +39,19 @@ impl MonsterBehavior for Jar1Behavior {
             }
             // C# DelayedAction(Die, +1000) → 10 ticks 后召唤
             if ctx.tick_count >= self.die_tick + 10 {
-                // 召唤一只随机同级怪物（简化：用通用僵尸名，POC 无法查 MonsterInfoList 过滤）
-                ctx.out_summons.push(crate::actors::world::ai::BossSummon {
-                    monster_name: "Zombie".to_string(),
-                    x: monster.x,
-                    y: monster.y,
-                    is_slave: false,
-                    summoner_oid: Some(monster.object_id),
-                });
+                // C# SpawnSlave（Jar1.cs:45-71）：随机同级怪（Level∈[self-10, self]），非 Boss、排除攻城 AI
+                let candidates: Vec<&(String, i32)> = ctx.monster_spawn_candidates.iter()
+                    .filter(|(_, lv)| *lv <= monster.level && *lv >= monster.level - 10)
+                    .collect();
+                if let Some((name, _)) = candidates.get(fastrand::usize(0..candidates.len())).copied() {
+                    ctx.out_summons.push(crate::actors::world::ai::BossSummon {
+                        monster_name: name.clone(),
+                        x: monster.x,
+                        y: monster.y,
+                        is_slave: false,
+                        summoner_oid: Some(monster.object_id),
+                    });
+                }
                 // 防止重复召唤
                 self.die_tick = u64::MAX;
             }

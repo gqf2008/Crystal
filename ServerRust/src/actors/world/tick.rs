@@ -1604,6 +1604,7 @@ impl WorldActor {
                 current_target: monster.target_session,
                 monsters: &[],
                 monster_name_by_index: &die_monster_name_map,
+                monster_spawn_candidates: &[],
                 slave_count: 0,
                 out_moves: &mut die_moves,
                 out_attacks: &mut die_attacks,
@@ -4602,6 +4603,12 @@ impl Message<Tick> for WorldActor {
             let monster_snapshot: Vec<(u32, i32, i32, i32, i32, u16, i32, String, u16, u8)> = self.monsters.values()
                 .map(|m| (m.object_id, m.x, m.y, m.hp, m.max_hp, m.map_index, m.monster_index, m.name.clone(), m.image, m.direction))
                 .collect();
+            // #1932：Jar 系死亡召唤候选（非已注册 Boss、排除攻城 AI 72/73/80/81/82，对齐 C# Jar1.SpawnSlave）
+            let monster_spawn_candidates: Vec<(String, i32)> = self.monster_infos.values()
+                .filter(|i| !crate::actors::world::ai::is_registered_boss(&i.name)
+                    && !matches!(i.ai, 72 | 73 | 80 | 81 | 82))
+                .map(|i| (i.name.clone(), i.level))
+                .collect();
             // #986：怪物敌对关系预收集（oid → (master_session, target_session)），供宠物自主索敌
             let monster_hostility: std::collections::HashMap<u32, (Option<u64>, Option<u64>)> =
                 self.monsters.iter()
@@ -4701,6 +4708,7 @@ impl Message<Tick> for WorldActor {
                         current_target: monster.target_session,
                         monsters: &monster_snaps,
                         monster_name_by_index: &monster_name_map,
+                        monster_spawn_candidates: &monster_spawn_candidates,
                         slave_count: slave_counts.get(&monster_oid).copied().unwrap_or(0),
                         out_moves: &mut boss_moves,
                         out_attacks: &mut boss_attacks,

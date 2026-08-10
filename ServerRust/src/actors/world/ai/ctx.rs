@@ -196,6 +196,8 @@ pub struct AiCtx<'a> {
     pub monsters: &'a [MonsterSnap],
     /// #1396：怪物 index → 名称映射（FloatingRock 克隆目标解析用）
     pub monster_name_by_index: &'a std::collections::HashMap<i32, String>,
+    /// #1932：Jar 系死亡召唤候选（name, level）——非已注册 Boss、排除攻城 AI（72/73/80/81/82）
+    pub monster_spawn_candidates: &'a [(String, i32)],
     /// #1441：当前怪物存活的 slave 数（C# SlaveList.Count；tick 预计算）
     pub slave_count: usize,
     /// 输出：移动 (oid, x, y, dir)

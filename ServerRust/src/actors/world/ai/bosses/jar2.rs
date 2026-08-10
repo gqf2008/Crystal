@@ -14,11 +14,16 @@ use mir2_shared::enums::PoisonType;
 
 const ATTACK_RANGE: i32 = 6;
 
-pub struct Jar2Behavior;
+pub struct Jar2Behavior {
+    /// 是否已触发死亡召唤（C# Jar1.CompleteDeath → SpawnSlave）
+    died: bool,
+    /// 死亡时刻
+    die_tick: u64,
+}
 
 impl Jar2Behavior {
     pub fn new() -> Self {
-        Self
+        Self { died: false, die_tick: 0 }
     }
 }
 
@@ -32,6 +37,30 @@ impl MonsterBehavior for Jar2Behavior {
     }
 
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
+        // C# Jar1.Die（Jar2 继承）：死亡 1s 后召唤一只随机同级怪（SpawnSlave）
+        if monster.hp <= 0 {
+            if !self.died {
+                self.died = true;
+                self.die_tick = ctx.tick_count;
+            }
+            if ctx.tick_count >= self.die_tick + 10 {
+                let candidates: Vec<&(String, i32)> = ctx.monster_spawn_candidates.iter()
+                    .filter(|(_, lv)| *lv <= monster.level && *lv >= monster.level - 10)
+                    .collect();
+                if let Some((name, _)) = candidates.get(fastrand::usize(0..candidates.len())).copied() {
+                    ctx.out_summons.push(crate::actors::world::ai::BossSummon {
+                        monster_name: name.clone(),
+                        x: monster.x,
+                        y: monster.y,
+                        is_slave: false,
+                        summoner_oid: Some(monster.object_id),
+                    });
+                }
+                self.die_tick = u64::MAX;
+            }
+            return;
+        }
+
         let target = match ctx.nearest_target(monster.x, monster.y, ATTACK_RANGE, monster.map_index) {
             Some(t) => *t,
             None => return,
