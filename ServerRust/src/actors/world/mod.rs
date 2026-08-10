@@ -772,7 +772,7 @@ impl MonsterState {
         if damage <= 0 { return 0; }
         let mut behavior = std::mem::replace(&mut self.behavior,
             Box::new(crate::actors::world::ai::DefaultBehavior::new()));
-        let actual = behavior.on_attacked(damage);
+        let actual = behavior.on_attacked_with_monster(self, damage);
         self.behavior = behavior;
         self.hp = self.hp.saturating_sub(actual);
         // C# Attacked 反制：记录实际承伤，behavior 下一 tick 读取（GlacierWarrior 等换目标传送）

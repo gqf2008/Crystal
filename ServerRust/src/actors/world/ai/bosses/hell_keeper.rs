@@ -6,11 +6,11 @@
 //!   - 免疫毒（C# ApplyPoison 空实现）
 //!   - 全视野攻击（InAttackRange = ViewRange），固定方向（Up）
 //!   - 1/3 概率 MC AOE + Dazed；2/3 概率 DC 全体单体（多目激光）
-//!   - 高敏捷/护甲减伤（C# Attacked 自定义 armour 判定；on_attacked trait 无 monster/DefenceType 参数，暂未实现）
+//!   - 高敏捷/护甲减伤（C# Attacked 自定义；敏捷闪避 1/(Agility+1) 近似 + AC/MAC 均值减伤）
 //!
 //! Attack（C# HellKeeper.cs:163-171）：attacktype1 = Random(3)>0 ? 0 : 1。
 //! CompleteAttack（C# :173-201）：ViewRange 全体，Type 0=DC / Type 1=MC+Dazed。
-//! Attacked（C# :31-144）：自定义 armour 减伤 + 移除 LRParalysis（Rust 未实现，需 trait API 支持）。
+//! Attacked（C# :31-144）：自定义 armour 减伤（已实现）+ 移除 LRParalysis（未实现）。
 
 use crate::actors::world::MonsterState;
 use crate::combat::poison::Poison;
@@ -37,6 +37,22 @@ impl MonsterBehavior for HellKeeperBehavior {
 
     /// 免疫毒（C# ApplyPoison 空实现）
     fn on_poison(&mut self, _poison: Poison) -> bool { false }
+
+    /// C# Attacked 自定义（HellKeeper.cs:31-144）：敏捷闪避 + 护甲减伤
+    /// DefenceType 不可得：闪避近似 1/(Agility+1)，护甲取 AC/MAC 均值
+    fn on_attacked_with_monster(&mut self, monster: &mut MonsterState, damage: i32) -> i32 {
+        if damage <= 0 {
+            return 0;
+        }
+        // 敏捷闪避（C# Random(Agility+1) > Accuracy → 0；无攻击者 Accuracy，近似 1/(Agility+1)）
+        if monster.agility > 0 && fastrand::i32(0..=monster.agility) == 0 {
+            return 0;
+        }
+        // 护甲减伤（C# 按 DefenceType 取 AC 或 MAC 单值；无类型信息，取两者均值）
+        let armour = (monster.min_ac + monster.max_ac) / 2;
+        let mac = (monster.min_mac + monster.max_mac) / 2;
+        (damage - (armour + mac) / 2).max(0)
+    }
 
     fn process_tick(&mut self, monster: &mut MonsterState, ctx: &mut AiCtx) {
         if ctx.tick_count < monster.next_attack_tick {
