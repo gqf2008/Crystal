@@ -1107,7 +1107,7 @@ pub struct WorldActor {
     /// 矿脉储量状态（map,(x,y) -> 剩余石头/再生 tick；C# MineSpot）
     pub(crate) mine_spot_state: HashMap<(u16, i32, i32), MineSpotState>,
     /// 待处理的死亡回调（怪物 + 玩家快照；独立消息处理避免 Tick handler 栈溢出）
-    pub(crate) pending_death_callbacks: Vec<(MonsterState, Vec<(u64, i32, i32, u32, i32, i32, u16, u16)>)>,
+    pub(crate) pending_death_callbacks: Vec<(MonsterState, Vec<(u64, i32, i32, u32, i32, i32, u16, u16, i32)>)>,
     /// 怪物回血计时（oid -> 下次回血 tick；C# MonsterObject.RegenTime，RegenDelay=10s）
     pub(crate) monster_regen_ticks: HashMap<u32, u64>,
     /// 怪物巡逻计时（oid → 下次巡逻 tick；C# MonsterObject.RoamTime，ProcessRoam 用）

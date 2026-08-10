@@ -7,6 +7,12 @@ pub const RED_NAME_PK: i32 = 200;
 pub fn is_red_name(pk_points: i32) -> bool {
     pk_points >= RED_NAME_PK
 }
+/// #1828：选“最弱”玩家目标（C# DarkCaptain/SnowWolfKing 按 MinDC 选更弱目标）。
+/// 返回 MinDC 最低的玩家；空列表返回 None。
+pub fn weakest_player_by_dc(targets: &[crate::actors::world::ai::ctx::PlayerSnap]) -> Option<crate::actors::world::ai::ctx::PlayerSnap> {
+    targets.iter().min_by_key(|p| p.min_dc).copied()
+}
+
 
 /// 方向增量（8 方向，对齐 MirDirection）
 pub const DIR_DX: [i32; 8] = [0, 1, 1, 1, 0, -1, -1, -1];
@@ -99,4 +105,20 @@ mod tests {
         assert_eq!(slave_spawn_count(6, 35, 40), 5); // AncientBringer 40-35=5
         assert_eq!(slave_spawn_count(8, 25, 30), 5); // TurtleKing 30-25=5
     }
+    #[test]
+    fn test_weakest_player_by_dc() {
+        use super::weakest_player_by_dc;
+        use crate::actors::world::ai::ctx::PlayerSnap;
+        let snap = |id: u64, dc: i32| PlayerSnap {
+            session_id: id, x: 0, y: 0, hp: 100, map_index: 1, object_id: id as u32, level: 30, pk_points: 0, min_dc: dc,
+        };
+        assert!(weakest_player_by_dc(&[]).is_none());
+        let snaps = [snap(1, 50), snap(2, 20), snap(3, 80)];
+        let w = weakest_player_by_dc(&snaps).unwrap();
+        assert_eq!(w.session_id, 2, "应选 MinDC 最低（20）而非 hp/任意");
+        // 同 MinDC 时稳定选第一个
+        let snaps = [snap(1, 20), snap(2, 20)];
+        assert_eq!(weakest_player_by_dc(&snaps).unwrap().session_id, 1);
+    }
+
 }

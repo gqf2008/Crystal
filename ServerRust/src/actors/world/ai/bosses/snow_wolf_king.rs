@@ -56,11 +56,15 @@ impl MonsterBehavior for SnowWolfKingBehavior {
             self.switch_pending = false;
             let own_dmg = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, 0).max(1);
             if self.last_damage > own_dmg && fastrand::i32(0..2) == 0 {
-                // 视野内找更弱目标（C# 按 MinDC；PlayerSnap 无 DC，用 hp 近似）
+                // 视野内找更弱目标（C# FindWeakerTarget 按 MinDC）
                 let weakest_opt: Option<(u64, i32, i32)> = {
-                    let targets = ctx.find_targets_in_range(monster.x, monster.y, VIEW_RANGE, monster.map_index);
+                    let targets: Vec<_> = ctx
+                        .find_targets_in_range(monster.x, monster.y, VIEW_RANGE, monster.map_index)
+                        .into_iter()
+                        .copied()
+                        .collect();
                     if targets.len() >= 2 {
-                        targets.iter().min_by_key(|p| p.hp).map(|p| (p.session_id, p.x, p.y))
+                        weakest_player_by_dc(&targets).map(|p| (p.session_id, p.x, p.y))
                     } else {
                         None
                     }
