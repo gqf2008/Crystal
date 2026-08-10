@@ -449,7 +449,6 @@ pub(crate) fn actor_hover_tooltip_system(
         (&Camera, &GlobalTransform),
         (With<Camera2d>, Without<crate::ui::sprite_ui::UiEntity>),
     >,
-    ui_cameras: Query<(&Camera, &GlobalTransform), With<crate::ui::sprite_ui::UiEntity>>,
     mut tooltip: ResMut<crate::ui::tooltip::TooltipState>,
     actors: Query<
         (Option<&PlayerName>, Option<&MonsterName>, Option<&NpcName>, &Transform),
@@ -464,12 +463,8 @@ pub(crate) fn actor_hover_tooltip_system(
     let Some(cursor) = window.cursor_position() else { return };
     let Ok((map_cam, map_gtf)) = map_cameras.single() else { return };
     let Ok(world) = map_cam.viewport_to_world_2d(map_gtf, cursor) else { return };
-    let Ok((ui_cam, ui_gtf)) = ui_cameras.single() else { return };
-    let Ok(ui_world) = ui_cam.viewport_to_world_2d(ui_gtf, cursor) else { return };
-    // UI 逻辑坐标（tooltip 面板定位用）
-    let cursor_ui = Vec2::new(ui_world.x, -ui_world.y);
 
-    let mut hit: Option<String> = None;
+    let mut hit: Option<(String, Vec3)> = None;
     for (p, m, n, tf) in &actors {
         let (dx, dy) = (tf.translation.x - world.x, tf.translation.y - world.y);
         // 目标碰撞盒：脚点向上 ~110px（角色/怪物体型），左右 28px
@@ -479,13 +474,25 @@ pub(crate) fn actor_hover_tooltip_system(
                 .or_else(|| m.map(|x| x.0.clone()))
                 .or_else(|| n.map(|x| x.0.clone()));
             if let Some(name) = name {
-                hit = Some(name);
+                // 头顶：脚点上方约 90px（对齐 C# 名字标签位置）
+                let head = Vec3::new(tf.translation.x, tf.translation.y + 90.0, 0.0);
+                hit = Some((name, head));
                 break;
             }
         }
     }
     match hit {
-        Some(name) => tooltip.update(12, true, name.clone(), vec![name], cursor_ui.x, cursor_ui.y),
+        Some((name, head)) => {
+            // 世界坐标 → 视口(物理像素) → UI 逻辑坐标（UI 相机 Fixed 1024x768）
+            if let Ok(vp) = map_cam.world_to_viewport(map_gtf, head) {
+                let ui_x = vp.x / window.physical_width() as f32 * 1024.0;
+                let ui_y = vp.y / window.physical_height() as f32 * 768.0;
+                // tooltip_panel 在 state+(16,16)，往上多留面板高度 → 面板显示在头顶上方
+                tooltip.update(12, true, name.clone(), vec![name], ui_x - 16.0, ui_y - 70.0);
+            } else {
+                tooltip.update(12, false, String::new(), Vec::new(), 0.0, 0.0);
+            }
+        }
         None => tooltip.update(12, false, String::new(), Vec::new(), 0.0, 0.0),
     }
 }
