@@ -3665,7 +3665,7 @@ impl Message<Tick> for WorldActor {
             // 对每个怪物执行 AI
             let mut dead_monsters = Vec::new();
             let mut moved_monsters = Vec::new();
-        let mut pet_recalls: Vec<(u32, i32, i32)> = Vec::new();
+        let mut pet_recalls: Vec<(u32, i32, i32, u16)> = Vec::new();
             // 巡逻转身广播（C# ProcessRoam Turn → ObjectTurn）
             let mut monster_turns: Vec<(u32, u8, i32, i32)> = Vec::new();
             let mut moved_targets: HashSet<(i32, i32)> = HashSet::new();
@@ -4352,7 +4352,7 @@ impl Message<Tick> for WorldActor {
                             // C# MonsterObject.ProcessAI：!InRange(Master, DataRange=16) 或跨图 → PetRecall（传送回主人）
                             let dist_master = (monster.x - mx).abs().max((monster.y - my).abs());
                             if monster.map_index != master_map || dist_master > 16 {
-                                pet_recalls.push((*oid, mx, my));
+                                pet_recalls.push((*oid, mx, my, master_map));
                                 monster.ai_state = MonsterAiState::Return;
                             } else {
                                 monster.ai_state = MonsterAiState::Idle;
@@ -4933,8 +4933,10 @@ impl Message<Tick> for WorldActor {
 
 
             // 宠物 PetRecall（C# MonsterObject.ProcessAI）：主人>16 格/跨图 → 传送到主人身边
-            for (oid, tx, ty) in &pet_recalls {
+            for (oid, tx, ty, mm) in &pet_recalls {
                 if let Some(m) = self.monsters.get_mut(oid) {
+                    // #1663：C# PetRecall 同步地图（MonsterObject.cs:1053 Teleport(Owner.CurrentMap)）
+                    m.map_index = *mm;
                     m.x = *tx;
                     m.y = *ty;
                     let mut walk_body = Vec::new();
