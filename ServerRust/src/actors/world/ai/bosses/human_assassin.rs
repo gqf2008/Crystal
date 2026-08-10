@@ -108,14 +108,16 @@ impl HumanAssassinBehavior {
         let crit = fastrand::i32(0..100) <= monster.accuracy;
         let base = if crit { monster.max_dmg * 2 } else { monster.min_dmg * 2 };
         let damage = (monster.min_dmg / 5 + 4 * 1) * base / 20 + monster.max_dmg;
-        // 16 方向（2 圈）→ 以自身为中心半径 2 AOE 近似
-        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Aoe {
+        // C# ExplosionDie：16 格（8 方向 × 2 圈：i%8 方向、i/8+1 距离）
+        let cells = eight_dir_rings(monster.x, monster.y, 2);
+        ctx.out_attacks.push(crate::actors::world::ai::AttackAction::Cells {
             attacker_oid: monster.object_id,
             center_x: monster.x,
             center_y: monster.y,
-            radius: 2,
+            cells,
             damage: damage.max(1),
             spell_id: 0,
+            attack_type: 0,
         });
         monster.hp = 0;
         if self.explosion_tick == 0 {

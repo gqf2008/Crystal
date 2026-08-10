@@ -1588,6 +1588,10 @@ impl WorldActor {
                     let cells = crate::actors::world::ai::helpers::triangle_cells(*center_x, *center_y, *direction, *distance, *limit_width);
                     (*attacker_oid, *damage, *center_x, *center_y, cells)
                 }
+                // 死亡回调精确格集合：behavior 已按 C# 几何算好
+                ai::AttackAction::Cells { attacker_oid, center_x, center_y, cells, damage, .. } => {
+                    (*attacker_oid, *damage, *center_x, *center_y, cells.clone())
+                }
             };
             // 广播 ObjectAttack（死亡爆炸动画）
             let mut attack_body = Vec::new();
@@ -5504,7 +5508,8 @@ impl Message<Tick> for WorldActor {
                     | ai::AttackAction::Aoe { attacker_oid, .. }
                     | ai::AttackAction::Line { attacker_oid, .. }
                     | ai::AttackAction::Arc { attacker_oid, .. }
-                    | ai::AttackAction::Triangle { attacker_oid, .. } => *attacker_oid,
+                    | ai::AttackAction::Triangle { attacker_oid, .. }
+                    | ai::AttackAction::Cells { attacker_oid, .. } => *attacker_oid,
                 };
                 if self.monsters.get(&atk_oid).map(|m| monster_control_blocked(&m.poison_list, self.monster_infos.get(&m.monster_index).map(|i| i.light).unwrap_or(0)).1).unwrap_or(false) {
                     continue;
@@ -5516,7 +5521,8 @@ impl Message<Tick> for WorldActor {
                     | ai::AttackAction::Aoe { attacker_oid, .. }
                     | ai::AttackAction::Line { attacker_oid, .. }
                     | ai::AttackAction::Arc { attacker_oid, .. }
-                    | ai::AttackAction::Triangle { attacker_oid, .. } => {
+                    | ai::AttackAction::Triangle { attacker_oid, .. }
+                    | ai::AttackAction::Cells { attacker_oid, .. } => {
                         self.monsters.get(attacker_oid).map(|m| m.map_index).unwrap_or(0)
                     }
                 };
@@ -5558,6 +5564,15 @@ impl Message<Tick> for WorldActor {
                             .map(|(s, _, _, _, _, _, _, _, _)| *s)
                             .collect();
                         (*attacker_oid, tgts, *damage, *spell_id, *attack_type, *center_x, *center_y, *direction)
+                    }
+                    ai::AttackAction::Cells { attacker_oid, center_x, center_y, cells, damage, spell_id, attack_type } => {
+                        let tgts: Vec<u64> = player_positions.iter()
+                            .filter(|(_, px, py, _, _, _, pmap, _, _)| {
+                                *pmap == boss_map && cells.contains(&(*px, *py))
+                            })
+                            .map(|(s, _, _, _, _, _, _, _, _)| *s)
+                            .collect();
+                        (*attacker_oid, tgts, *damage, *spell_id, *attack_type, *center_x, *center_y, 0u8)
                     }
                     ai::AttackAction::Line { attacker_oid, origin_x, origin_y, direction, range, damage, .. } => {
                         let dir = (*direction as usize) % 8;
