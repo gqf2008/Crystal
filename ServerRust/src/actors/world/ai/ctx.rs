@@ -73,6 +73,18 @@ pub enum AttackAction {
         spell_id: u8,
         attack_type: u8,
     },
+    /// 锥形攻击（C# TriangleAttack：沿 direction 每行 center + Left/Right 扩展，limit_width 限制单侧格数；-1=不限）
+    Triangle {
+        attacker_oid: u32,
+        center_x: i32,
+        center_y: i32,
+        direction: u8,
+        distance: u8,
+        limit_width: i32,
+        damage: i32,
+        spell_id: u8,
+        attack_type: u8,
+    },
     /// 直线攻击（C# LineAttack(damage, range)：沿 direction 逐格命中第一个目标）
     Line {
         attacker_oid: u32,

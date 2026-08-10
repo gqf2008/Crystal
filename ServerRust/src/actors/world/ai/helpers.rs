@@ -30,6 +30,37 @@ pub fn arc_cells(center_x: i32, center_y: i32, direction: u8, count: u8) -> Vec<
     cells
 }
 
+/// C# TriangleAttack（Server/MirObjects/MonsterObject.cs:3540）：沿 direction 每行 center + Left/Right 扩展。
+/// Left(d)=(d+6)%8、Right(d)=(d+2)%8（Shared/Functions/Functions.cs:248/280）；limit_width=-1 不限单侧格数。
+pub fn triangle_cells(center_x: i32, center_y: i32, direction: u8, distance: u8, limit_width: i32) -> Vec<(i32, i32)> {
+    let mut cells = Vec::new();
+    let d = (direction as usize) % 8;
+    let (cdx, cdy) = (DIR_DX[d], DIR_DY[d]);
+    let (ldx, ldy) = (DIR_DX[(d + 6) % 8], DIR_DY[(d + 6) % 8]);
+    let (rdx, rdy) = (DIR_DX[(d + 2) % 8], DIR_DY[(d + 2) % 8]);
+    for i in 1..=distance as i32 {
+        let cx = center_x + cdx * i;
+        let cy = center_y + cdy * i;
+        cells.push((cx, cy));
+        if distance > 1 {
+            let offset = i - 1;
+            for k in 1..=offset {
+                if limit_width >= 0 && k > limit_width {
+                    break;
+                }
+                cells.push((cx + ldx * k, cy + ldy * k));
+            }
+            for k in 1..=offset {
+                if limit_width >= 0 && k > limit_width {
+                    break;
+                }
+                cells.push((cx + rdx * k, cy + rdy * k));
+            }
+        }
+    }
+    cells
+}
+
 /// 计算朝向目标的 8 方向（对齐 C# DirectionFromPoint）
 pub fn direction_towards(from_x: i32, from_y: i32, to_x: i32, to_y: i32) -> u8 {
     let dx = to_x - from_x;
@@ -104,6 +135,7 @@ pub fn slave_spawn_count(requested: usize, slave_count: usize, cap_total: i32) -
 #[cfg(test)]
 mod tests {
     use super::arc_cells;
+    use super::triangle_cells;
     use super::slave_spawn_count;
 
     #[test]
@@ -118,6 +150,46 @@ mod tests {
         assert_eq!(slave_spawn_count(6, 35, 40), 5); // AncientBringer 40-35=5
         assert_eq!(slave_spawn_count(8, 25, 30), 5); // TurtleKing 30-25=5
     }
+    #[test]
+    fn triangle_cells_matches_csharp() {
+        // C# TriangleAttack(d, 3, 1) dir=0(Up)：row1 (0,-1)；row2 (0,-2),(-1,-2),(1,-2)；row3 (0,-3),(-1,-3),(1,-3)
+        let cells = triangle_cells(0, 0, 0, 3, 1);
+        assert_eq!(cells.len(), 7);
+        for c in [(0, -1), (0, -2), (-1, -2), (1, -2), (0, -3), (-1, -3), (1, -3)] {
+            assert!(cells.contains(&c), "missing {c:?}");
+        }
+        // C# TriangleAttack(d, 3, 2)：row3 左右扩展到 k=2 → 9 格
+        let cells = triangle_cells(0, 0, 0, 3, 2);
+        assert_eq!(cells.len(), 9);
+        assert!(cells.contains(&(-2, -3)));
+        assert!(cells.contains(&(2, -3)));
+        // C# TriangleAttack(d, 2, 1)：4 格
+        let cells = triangle_cells(0, 0, 0, 2, 1);
+        assert_eq!(cells.len(), 4);
+        // dir=2（Right）：row i=(i,0)，left=(0,-1)*k、right=(0,1)*k
+        let cells = triangle_cells(0, 0, 2, 2, 1);
+        assert_eq!(cells.len(), 4);
+        for c in [(1, 0), (2, 0), (2, -1), (2, 1)] {
+            assert!(cells.contains(&c), "missing {c:?}");
+        }
+    }
+
+    #[test]
+    fn triangle_cells_width_limit_and_no_dupes() {
+        for dir in 0..8u8 {
+            let cells = triangle_cells(10, 10, dir, 3, 1);
+            assert_eq!(cells.len(), 7, "dir={dir} 宽1 应 7 格");
+            let mut sorted = cells.clone();
+            sorted.sort_unstable();
+            sorted.dedup();
+            assert_eq!(sorted.len(), cells.len(), "dir={dir} 不应重复");
+            // 对角方向左/右扩是斜向（如 UpRight 的 Left=UpLeft），最大切比雪夫距离 = distance + width
+            for &(x, y) in &cells {
+                assert!((x - 10).abs().max((y - 10).abs()) <= 4, "dir={dir} 超距 {x},{y}");
+            }
+        }
+    }
+
     #[test]
     fn arc_cells_halfmoon_matches_csharp() {
         // C# HalfmoonAttack dir=0（Up）：PreviousDir=7(UpLeft) 起 4 向 → (-1,-1),(0,-1),(1,-1),(1,0)

@@ -1583,6 +1583,11 @@ impl WorldActor {
                     let cells = crate::actors::world::ai::helpers::arc_cells(*center_x, *center_y, *direction, *count);
                     (*attacker_oid, *damage, *center_x, *center_y, cells)
                 }
+                // 死亡回调锥形：按 C# TriangleAttack 几何逐格命中
+                ai::AttackAction::Triangle { attacker_oid, center_x, center_y, direction, distance, limit_width, damage, .. } => {
+                    let cells = crate::actors::world::ai::helpers::triangle_cells(*center_x, *center_y, *direction, *distance, *limit_width);
+                    (*attacker_oid, *damage, *center_x, *center_y, cells)
+                }
             };
             // 广播 ObjectAttack（死亡爆炸动画）
             let mut attack_body = Vec::new();
@@ -5498,7 +5503,8 @@ impl Message<Tick> for WorldActor {
                     | ai::AttackAction::Range { attacker_oid, .. }
                     | ai::AttackAction::Aoe { attacker_oid, .. }
                     | ai::AttackAction::Line { attacker_oid, .. }
-                    | ai::AttackAction::Arc { attacker_oid, .. } => *attacker_oid,
+                    | ai::AttackAction::Arc { attacker_oid, .. }
+                    | ai::AttackAction::Triangle { attacker_oid, .. } => *attacker_oid,
                 };
                 if self.monsters.get(&atk_oid).map(|m| monster_control_blocked(&m.poison_list, self.monster_infos.get(&m.monster_index).map(|i| i.light).unwrap_or(0)).1).unwrap_or(false) {
                     continue;
@@ -5509,7 +5515,8 @@ impl Message<Tick> for WorldActor {
                     | ai::AttackAction::Range { attacker_oid, .. }
                     | ai::AttackAction::Aoe { attacker_oid, .. }
                     | ai::AttackAction::Line { attacker_oid, .. }
-                    | ai::AttackAction::Arc { attacker_oid, .. } => {
+                    | ai::AttackAction::Arc { attacker_oid, .. }
+                    | ai::AttackAction::Triangle { attacker_oid, .. } => {
                         self.monsters.get(attacker_oid).map(|m| m.map_index).unwrap_or(0)
                     }
                 };
@@ -5534,6 +5541,16 @@ impl Message<Tick> for WorldActor {
                     // #1020：直线攻击（C# LineAttack：沿 direction 逐格命中）
                     ai::AttackAction::Arc { attacker_oid, center_x, center_y, direction, count, damage, spell_id, attack_type } => {
                         let cells = crate::actors::world::ai::helpers::arc_cells(*center_x, *center_y, *direction, *count);
+                        let tgts: Vec<u64> = player_positions.iter()
+                            .filter(|(_, px, py, _, _, _, pmap, _, _)| {
+                                *pmap == boss_map && cells.contains(&(*px, *py))
+                            })
+                            .map(|(s, _, _, _, _, _, _, _, _)| *s)
+                            .collect();
+                        (*attacker_oid, tgts, *damage, *spell_id, *attack_type, *center_x, *center_y, *direction)
+                    }
+                    ai::AttackAction::Triangle { attacker_oid, center_x, center_y, direction, distance, limit_width, damage, spell_id, attack_type } => {
+                        let cells = crate::actors::world::ai::helpers::triangle_cells(*center_x, *center_y, *direction, *distance, *limit_width);
                         let tgts: Vec<u64> = player_positions.iter()
                             .filter(|(_, px, py, _, _, _, pmap, _, _)| {
                                 *pmap == boss_map && cells.contains(&(*px, *py))
