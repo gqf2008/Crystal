@@ -3,7 +3,7 @@
 //! C# 参考：Server/MirObjects/Monsters/FurbolgArcher.cs
 //! 机制：
 //!   - AttackRange=6；目标<6 格时远离（风筝），>=6 格时接近
-//!   - dist<=2 且 1/5 概率：JumpBack(2) 后跳（用远离 1 步近似）
+//!   - dist<=2 且 1/5 概率：JumpBack(2) 后跳（反向 2 格 ObjectBackStep）
 //!   - 80% 普通投射（DC）/ 20% Type=1 强化投射（DC*1.5）
 
 use crate::actors::world::MonsterState;
@@ -33,10 +33,10 @@ impl MonsterBehavior for FurbolgArcherBehavior {
         if dist <= ATTACK_RANGE && ctx.tick_count >= monster.next_attack_tick {
             monster.next_attack_tick = ctx.tick_count + monster.ai_profile.attack_cooldown;
             let damage = crate::combat::attack::get_attack_power(monster.min_dmg, monster.max_dmg, monster.luck).max(1);
-            // C# dist<=2 且 1/5：JumpBack(2)（用远离 1 步近似）
+            // C# dist<=2 且 1/5：JumpBack(2)（反向 2 格；out_backsteps 应用时校验 walkable + 广播 ObjectBackStep）
             if dist <= 2 && fastrand::i32(0..5) == 0 {
-                let (nx, ny, dir) = step_away(monster.x, monster.y, target.x, target.y);
-                ctx.out_moves.push((monster.object_id, nx, ny, dir));
+                let dir = (direction_towards(monster.x, monster.y, target.x, target.y) as i32 + 4).rem_euclid(8) as u8;
+                ctx.out_backsteps.push((monster.object_id, dir, 2));
                 return;
             }
             // C# 80% 普通投射 / 20% Type=1 强化投射（DC*1.5）
