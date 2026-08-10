@@ -2311,7 +2311,9 @@ impl Message<MagicRequest> for WorldActor {
                         if let Ok(Some(s)) = r.actor_ref.ask(GetPlayerState).await {
                             let friendly = *sid == msg.session_id
                                 || (s.group_id.is_some() && s.group_id == state.group_id);
+                            // #1684：MassHealing 只治疗同图友方（C# CurrentMap）
                             if friendly && !s.is_dead
+                                && s.map_index == state.map_index
                                 && (s.x - cx).abs() <= 1 && (s.y - cy).abs() <= 1
                             {
                                 let _ = r.actor_ref.ask(crate::actors::player::Heal { amount }).await;
@@ -2353,7 +2355,9 @@ impl Message<MagicRequest> for WorldActor {
                     for (sid, other) in &self.players {
                         if *sid == msg.session_id { continue; }
                         if let Ok(Some(s)) = other.actor_ref.ask(GetPlayerState).await {
+                            // #1684：MassHiding 只隐身同图队友（C# CurrentMap）
                             if s.group_id == Some(gid)
+                                && s.map_index == state.map_index
                                 && (s.x - cx).abs() <= 3 && (s.y - cy).abs() <= 3 {
                                 targets.push(*sid);
                             }
